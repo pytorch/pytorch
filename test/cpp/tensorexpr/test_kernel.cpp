@@ -138,9 +138,8 @@ TEST(Kernel, _3) {
   }
 }
 
-TEST(Kernel, _4) {
+TEST(Kernel, DISABLED_Shape_Inference) {
   // disabled: doesn't do stride propagation, and isn't being used currently
-  return;
 
   // Test TensorExpr shape inference capabilities: it should only require shapes
   // for the inputs
@@ -468,12 +467,11 @@ at::Tensor iotaTensor(IntArrayRef sizes, const at::TensorOptions& options) {
 
 } // namespace
 
-TEST(Kernel, SumAllAxes) {
+TEST(Kernel, DISABLED_SumAllAxes) {
   // [zero-dim tensors]
   // NNC does not yet handle zero-dim tensors. aten::sum with no axis
   // input returns a zero-dim tensors, so these tests must be disabled
   // until we add support for zero-dim tensors.
-  return;
 
   // Test lowering of sum on all axes.
   const auto graph_template = R"IR(
@@ -621,7 +619,6 @@ TEST(Kernel, SumMultipleAxes) {
         env.d("dim2", dim2);
         env.d("keepdim", keepdim);
         env.s("dtype", dtypeConstant(ScalarType::None));
-        
         auto o = at::empty({}, TensorOptions(kCPU));
         auto ref = a.sum(IntArrayRef{dim1, dim2}, /*keepdim=*/keepdim);
 
@@ -692,7 +689,6 @@ TEST(Kernel, Softmax2D) {
       auto other_dim = (softmax_dim + 1) % a.dim();
       auto ref =
           log_softmax ? a.log_softmax(softmax_dim) : a.softmax(softmax_dim);
-      
       KernelScope kernel_scope;
       TemplateEnv env;
       env.d("dim", softmax_dim);
@@ -723,8 +719,6 @@ TEST(Kernel, Softmax2D) {
       std::vector<IValue> stack = fmap<IValue>(inputs);
       k.run(stack);
       auto output = stack[0].toTensor();
-      // auto ref =
-      //     log_softmax ? a.log_softmax(softmax_dim) : a.softmax(softmax_dim);
       ASSERT_EQ(output.sizes(), ref.sizes());
       ASSERT_TRUE(at::allclose(output, ref));
     }
@@ -855,7 +849,7 @@ TEST(Kernel, Softmax4D) {
       env.s("strides", li_to_str(ref.strides()));
 
       const auto graph_string = format(graph_template, env);
-      
+
       auto graph = std::make_shared<Graph>();
       parseIR(graph_string, &*graph);
 
@@ -887,9 +881,8 @@ TEST(Kernel, Softmax4D) {
   }
 }
 
-TEST(Kernel, InlineProducerIntoReduction) {
+TEST(Kernel, DISABLED_InlineProducerIntoReduction) {
   // see : [zero-dim tensors]
-  return;
   KernelScope kernel_scope;
 
   // Inline producer (mul) into reduction (sum).
@@ -928,9 +921,8 @@ TEST(Kernel, InlineProducerIntoReduction) {
   ASSERT_TRUE(at::allclose(o, ref));
 }
 
-TEST(Kernel, InlineReductionIntoConsumer) {
+TEST(Kernel, DISABLED_InlineReductionIntoConsumer) {
   // see : [zero-dim tensors]
-  return;
 
   KernelScope kernel_scope;
 

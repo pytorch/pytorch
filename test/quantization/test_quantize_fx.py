@@ -1118,6 +1118,71 @@ class TestQuantizeFx(QuantizationTestCase):
             self.checkGraphModeFxOp(
                 M().eval(), (data,), quant_type, expected_node_list=node_list)
 
+    def _test_quantized_inputs_outputs(
+            self, convert_custom_config_dict, count_check):
+        """
+        Test the option to have inputs and outputs of the graph quantized
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(1, 1, 1)
+                self.conv2 = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.conv2(x)
+                return x
+
+        # quantized input, quantized output
+        m = M()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        m.eval()
+        mp = torch.quantization.quantize_fx.prepare_fx(m, qconfig_dict)
+        mp(torch.randn(1, 1, 4, 4))
+        mq = torch.quantization.quantize_fx.convert_fx(
+            mp, convert_custom_config_dict=convert_custom_config_dict)
+        self.checkGraphModuleNodes(mq, expected_node_occurrence=count_check)
+
+    def test_quantized_input_quantized_output(self):
+        convert_custom_config_dict = {
+            'input_quantized_idxs': [0], 'output_quantized_idxs': [0]}
+        count_check = {
+            ns.call_function(torch.quantize_per_tensor): 0,
+            ns.call_method('dequantize'): 0,
+        }
+        self._test_quantized_inputs_outputs(
+            convert_custom_config_dict, count_check)
+
+    def test_fp32_input_quantized_output(self):
+        convert_custom_config_dict = {
+            'output_quantized_idxs': [0]}
+        count_check = {
+            ns.call_function(torch.quantize_per_tensor): 1,
+            ns.call_method('dequantize'): 0,
+        }
+        self._test_quantized_inputs_outputs(
+            convert_custom_config_dict, count_check)
+
+    def test_quantized_input_fp32_output(self):
+        convert_custom_config_dict = {
+            'input_quantized_idxs': [0]}
+        count_check = {
+            ns.call_function(torch.quantize_per_tensor): 0,
+            ns.call_method('dequantize'): 1,
+        }
+        self._test_quantized_inputs_outputs(
+            convert_custom_config_dict, count_check)
+
+    def test_fp32_input_fp32_output(self):
+        convert_custom_config_dict = {}
+        count_check = {
+            ns.call_function(torch.quantize_per_tensor): 1,
+            ns.call_method('dequantize'): 1,
+        }
+        self._test_quantized_inputs_outputs(
+            convert_custom_config_dict, count_check)
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
