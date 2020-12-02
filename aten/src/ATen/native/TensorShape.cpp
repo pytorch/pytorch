@@ -861,23 +861,20 @@ Tensor alias_with_sizes_and_strides(
     const Tensor& self,
     const c10::IntArrayRef sizes,
     const c10::IntArrayRef strides) {
-  Tensor self_;
+  c10::intrusive_ptr<TensorImpl> impl;
   if (self.is_quantized()) {
-    auto impl = c10::make_intrusive<QTensorImpl>(
+    impl = c10::make_intrusive<QTensorImpl>(
         Storage(self.storage()),
         self.key_set(),
         self.dtype(),
         get_qtensorimpl(self)->quantizer());
-    impl->set_storage_offset(self.storage_offset());
-    impl->set_sizes_and_strides(sizes, strides);
-    self_ = Tensor(std::move(impl));
   } else {
-    auto impl = c10::make_intrusive<TensorImpl>(
+    impl = c10::make_intrusive<TensorImpl>(
         Storage(self.storage()), self.key_set(), self.dtype());
-    impl->set_storage_offset(self.storage_offset());
-    impl->set_sizes_and_strides(sizes, strides);
-    self_ = Tensor(std::move(impl));
   }
+  impl->set_storage_offset(self.storage_offset());
+  impl->set_sizes_and_strides(sizes, strides);
+  Tensor self_(std::move(impl));
   namedinference::propagate_names(self_, self);
   return self_;
 }
