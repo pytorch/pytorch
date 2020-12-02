@@ -46,7 +46,10 @@ bool canRunNatively(Node* n) {
 }
 
 REGISTER_OPERATOR_FUNCTOR(aten::add, aten_add, [](Node* n) -> SROperator {
-  return [](const ProcessedNode* p_node, std::vector<IValue>& reg) {
+  // TODO: Introduce TypedKernelFunction to make this more type safe
+  auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::add", "out");
+  const auto& kernel = c10::Dispatcher::singleton().getKernel(op, c10::DispatchKey::CPU);
+  return [op, &kernel](const ProcessedNode* p_node, std::vector<IValue>& reg) {
     auto in0_t = p_node->Input(0, reg).toTensor();
     auto in1_t = p_node->Input(1, reg).toTensor();
     auto in2_s = p_node->Input(2, reg).toScalar();
@@ -55,8 +58,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::add, aten_add, [](Node* n) -> SROperator {
     }
     auto out_t = p_node->Output(0, reg).toTensor();
     out_t.resize_({0});
-    // TODO:
-    // at::native::CPU::add_out(out_t, int0_t, in1_t, in2_s);
+    kernel.call<at::Tensor &, at::Tensor &, const at::Tensor &, const at::Tensor &, at::Scalar>(op, out_t, in0_t, in1_t, in2_s);
   };
 });
 

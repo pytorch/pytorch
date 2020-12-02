@@ -808,18 +808,22 @@ void TensorIteratorBase::select_all_keeping_dim(int start_dim, IntArrayRef indic
   }
 }
 
+TensorIteratorConfig TensorIteratorBase::binary_op_config(const Tensor& out, const Tensor& a, const Tensor& b) {
+  TensorIteratorConfig config;
+  config.set_check_mem_overlap(true)
+        .add_output(out)
+        .add_input(a)
+        .add_input(b)
+        .allow_cpu_scalars(true)
+        .promote_inputs_to_common_dtype(true)
+        .cast_common_dtype_to_outputs(true)
+        .enforce_safe_casting_to_output(true);
+  return config;
+}
+
 TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
     const Tensor& b) {
-  return TensorIteratorConfig()
-     .set_check_mem_overlap(true)
-     .add_output(out)
-     .add_input(a)
-     .add_input(b)
-     .allow_cpu_scalars(true)
-     .promote_inputs_to_common_dtype(true)
-     .cast_common_dtype_to_outputs(true)
-     .enforce_safe_casting_to_output(true)
-     .build();
+  return binary_op_config(out, a, b).build();
 }
 
 // Helper to construct a binary op that promotes integer inputs to float.
@@ -1298,8 +1302,23 @@ void TensorIteratorBase::set_output(int64_t output_idx, IntArrayRef sizes, IntAr
   if (!op.tensor.defined()) {
     op.tensor = t;
     op.current_dtype = op.target_dtype;
-  } else {
-    TORCH_INTERNAL_ASSERT(t.is_same(op.tensor));
+  } else if (op.will_resize) {
+    // NB: op.tensor is NOT necessarily t in the else case; this
+    // can happen in the event of promotion, where t will correspond
+    // to the TRUE output, but op.tensor will be the different
+    // scalar type output
+    if (op.original_tensor.defined()) {
+      // Replay on op.tensor too!
+      TORCH_INTERNAL_ASSERT(op.original_tensor.is_same(t));
+      TORCH_INTERNAL_ASSERT(!op.tensor.is_same(t));
+      at::native::resize_output(op.tensor, sizes);
+      if (!strides.empty()) {
+        TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
+        op.tensor.as_strided_(sizes, strides);
+      } else if (options.memory_format_opt().has_value()) {
+        op.tensor.unsafeGetTensorImpl()->empty_tensor_restride(*options.memory_format_opt());
+      }
+    }
   }
 }
 

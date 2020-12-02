@@ -3,7 +3,7 @@
 // ${generated_comment}
 
 #include <ATen/TensorMeta.h>
-#include <ATen/native/TensorIterator.h>
+#include <ATen/TensorIterator.h>
 
 namespace at {
 

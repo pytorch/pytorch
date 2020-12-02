@@ -303,7 +303,6 @@ if (strides.empty()) {
 } else {
     TORCH_INTERNAL_ASSERT(0, "not implemented yet");
 }
-if (!names.empty()) namedinference::propagate_names(outputs_[output_idx], names);
 """
                     else:
                         set_output_impl = """
@@ -312,7 +311,6 @@ if (strides.empty()) {
 } else {
     outputs_[output_idx] = at::empty_strided(sizes, strides, options);
 }
-if (!names.empty()) namedinference::propagate_names(outputs_[output_idx], names);
 """
                     assert len(f.func.returns) == 1, "multi-return not supported yet"
                     out_expr = "op.outputs_[0]"
@@ -323,7 +321,6 @@ if (!names.empty()) namedinference::propagate_names(outputs_[output_idx], names)
                 elif k is SchemaKind.inplace:
                     set_output_impl = """
 // TODO: consistency check?
-if (!names.empty()) namedinference::propagate_names(outputs_[output_idx], names);
 """
                     out_expr = "self"
                     ret_expr = "self"
@@ -380,6 +377,7 @@ struct {class_name} final : public {parent_class_name} {{
     void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
                     TensorOptions options, DimnameList names) override {{
         {set_output_impl}
+        if (!names.empty()) namedinference::propagate_names(outputs_[output_idx], names);
         // super must happen after, so that downstream can use maybe_get_output
         // to retrieve the output
         {set_output_super}
