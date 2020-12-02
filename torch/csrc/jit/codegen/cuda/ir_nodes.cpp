@@ -70,28 +70,51 @@ bool areEqualScalars(Val* v1, Val* v2) {
 Bool::Bool(const Bool* src, IrCloner* ir_cloner)
     : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
 
-bool Bool::sameAs(const Bool* const other) const {
-  if (isConst() && other->isConst())
-    return *value() == *(other->value());
-  return this == other;
+bool Bool::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<Bool>()) {
+    return false;
+  }
+  const auto other_bool = other->as<Bool>();
+  if (isConst() && other_bool->isConst()) {
+    return *value() == *(other_bool->value());
+  }
+  return false;
 }
 
 Double::Double(const Double* src, IrCloner* ir_cloner)
     : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
 
-bool Double::sameAs(const Double* const other) const {
-  if (isConst() && other->isConst())
-    return *value() == *(other->value());
-  return this == other;
+bool Double::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<Double>()) {
+    return false;
+  }
+  const auto other_double = other->as<Double>();
+  if (isConst() && other_double->isConst())
+    return *value() == *(other_double->value());
+  return false;
 }
 
 Int::Int(const Int* src, IrCloner* ir_cloner)
     : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
 
-bool Int::sameAs(const Int* const other) const {
-  if (isConst() && other->isConst())
-    return *value() == *(other->value());
-  return this == other;
+bool Int::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<Int>()) {
+    return false;
+  }
+  const auto other_int = other->as<Int>();
+  if (isConst() && other_int->isConst()) {
+    return *value() == *(other_int->value());
+  }
+  return false;
 }
 
 UnaryOp::UnaryOp(UnaryOpType type, Val* out, Val* in)
@@ -107,10 +130,17 @@ UnaryOp::UnaryOp(const UnaryOp* src, IrCloner* ir_cloner)
       out_(ir_cloner->clone(src->out_)),
       in_(ir_cloner->clone(src->in_)) {}
 
-bool UnaryOp::sameAs(const UnaryOp* const other) const {
-  if (type() != other->type())
+bool UnaryOp::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<UnaryOp>()) {
     return false;
-  return as<Expr>()->sameAs(other);
+  }
+  const auto other_op = other->as<UnaryOp>();
+  if (getUnaryOpType() != other_op->getUnaryOpType())
+    return false;
+  return Expr::sameAs(other);
 }
 
 BinaryOp::BinaryOp(BinaryOpType type, Val* out, Val* lhs, Val* rhs)
@@ -132,12 +162,17 @@ BinaryOp::BinaryOp(const BinaryOp* src, IrCloner* ir_cloner)
       lhs_(ir_cloner->clone(src->lhs_)),
       rhs_(ir_cloner->clone(src->rhs_)) {}
 
-bool BinaryOp::sameAs(const BinaryOp* other) const {
-  if (getBinaryOpType() != other->getBinaryOpType())
+bool BinaryOp::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<BinaryOp>()) {
     return false;
-  if (!(lhs()->sameAs(other->lhs()) && rhs()->sameAs(other->rhs())))
+  }
+  const auto other_op = other->as<BinaryOp>();
+  if (getBinaryOpType() != other_op->getBinaryOpType())
     return false;
-  return true;
+  return Expr::sameAs(other);
 }
 
 TernaryOp::TernaryOp(TernaryOpType type, Val* out, Val* in1, Val* in2, Val* in3)
@@ -162,13 +197,17 @@ TernaryOp::TernaryOp(const TernaryOp* src, IrCloner* ir_cloner)
       in2_(ir_cloner->clone(src->in2_)),
       in3_(ir_cloner->clone(src->in3_)) {}
 
-bool TernaryOp::sameAs(const TernaryOp* other) const {
-  if (getTernaryOpType() != other->getTernaryOpType())
+bool TernaryOp::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<TernaryOp>()) {
     return false;
-  if (!(in1()->sameAs(other->in1()) && in2()->sameAs(other->in2()) &&
-        in3()->sameAs(other->in3())))
+  }
+  const auto other_op = other->as<TernaryOp>();
+  if (getTernaryOpType() != other_op->getTernaryOpType())
     return false;
-  return true;
+  return Expr::sameAs(other);
 }
 
 BroadcastOp::BroadcastOp(Val* out, Val* in, std::vector<bool> is_broadcast_dims)
@@ -233,8 +272,18 @@ BroadcastOp::BroadcastOp(const BroadcastOp* src, IrCloner* ir_cloner)
       in_(ir_cloner->clone(src->in_)),
       is_broadcast_dims_(src->is_broadcast_dims_) {}
 
-bool BroadcastOp::sameAs(const BroadcastOp* const other) const {
-  return other->in() == in() && other->out() == out();
+bool BroadcastOp::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<BroadcastOp>()) {
+    return false;
+  }
+  const auto other_op = other->as<BroadcastOp>();
+  if (getBroadcastDimFlags() != other_op->getBroadcastDimFlags()) {
+    return false;
+  }
+  return Expr::sameAs(other);
 }
 
 ReductionOp::ReductionOp(
@@ -275,11 +324,19 @@ ReductionOp::ReductionOp(const ReductionOp* src, IrCloner* ir_cloner)
       out_(ir_cloner->clone(src->out_)),
       in_(ir_cloner->clone(src->in_)) {}
 
-bool ReductionOp::sameAs(const ReductionOp* other) const {
+bool ReductionOp::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<ReductionOp>()) {
+    return false;
+  }
+  const auto other_op = other->as<ReductionOp>();
+  // Note that init is not part of input vals, so it must be checked separately.
   return (
-      in()->sameAs(other->in()) &&
-      getReductionOpType() == other->getReductionOpType() &&
-      init()->sameAs(other->init()));
+      Expr::sameAs(other) &&
+      getReductionOpType() == other_op->getReductionOpType() &&
+      init()->sameAs(other_op->init()));
 }
 
 IterDomain::IterDomain(
@@ -335,14 +392,21 @@ IterDomain::IterDomain(const IterDomain* src, IrCloner* ir_cloner)
       iter_type_(src->iter_type_),
       is_rfactor_domain_(src->is_rfactor_domain_) {}
 
-bool IterDomain::sameAs(const IterDomain* const other) const {
-  if (other == this)
+bool IterDomain::sameAs(const Statement* other) const {
+  if (other == this) {
     return true;
+  }
 
-  bool is_same = isReduction() == other->isReduction() &&
-      getParallelType() == other->getParallelType();
-  is_same = is_same && ScalarCheck::sameAs(extent(), other->extent());
-  is_same = is_same && ScalarCheck::sameAs(start(), other->start());
+  if (!other->isA<IterDomain>()) {
+    return false;
+  }
+
+  const IterDomain* other_id = other->as<IterDomain>();
+
+  bool is_same = isReduction() == other_id->isReduction() &&
+      getParallelType() == other_id->getParallelType();
+  is_same = is_same && ScalarCheck::sameAs(extent(), other_id->extent());
+  is_same = is_same && ScalarCheck::sameAs(start(), other_id->start());
 
   return is_same;
 }
@@ -633,25 +697,44 @@ bool TensorDomain::operator==(const TensorDomain& other) const {
       contiguity_ == other.contiguity_;
 }
 
-bool TensorDomain::sameAs(const TensorDomain* const other) const {
-  if (nDims() != other->nDims())
-    return false;
-  if (getRootDomain().size() != other->getRootDomain().size())
-    return false;
-  if (getRFactorDomain().size() != other->getRFactorDomain().size())
-    return false;
+bool TensorDomain::sameAs(const Statement* const other) const {
+  if (this == other) {
+    return true;
+  }
 
-  for (size_t i = 0; i < nDims(); i++)
-    if (!(axis(i)->sameAs(other->axis(i))))
-      return false;
+  if (!other->isA<TensorDomain>()) {
+    return false;
+  }
 
-  for (size_t i = 0; i < getRootDomain().size(); i++)
-    if (!(getRootDomain()[i]->sameAs(other->getRootDomain()[i])))
-      return false;
+  const TensorDomain* other_td = other->as<TensorDomain>();
 
-  for (size_t i = 0; i < getRFactorDomain().size(); i++)
-    if (!(getRFactorDomain()[i]->sameAs(other->getRFactorDomain()[i])))
+  if (nDims() != other_td->nDims()) {
+    return false;
+  }
+  if (getRootDomain().size() != other_td->getRootDomain().size()) {
+    return false;
+  }
+  if (getRFactorDomain().size() != other_td->getRFactorDomain().size()) {
+    return false;
+  }
+
+  for (size_t i = 0; i < nDims(); i++) {
+    if (!(axis(i)->sameAs(other_td->axis(i)))) {
       return false;
+    }
+  }
+
+  for (size_t i = 0; i < getRootDomain().size(); i++) {
+    if (!(getRootDomain()[i]->sameAs(other_td->getRootDomain()[i]))) {
+      return false;
+    }
+  }
+
+  for (size_t i = 0; i < getRFactorDomain().size(); i++) {
+    if (!(getRFactorDomain()[i]->sameAs(other_td->getRFactorDomain()[i]))) {
+      return false;
+    }
+  }
 
   return true;
 }
@@ -1143,10 +1226,14 @@ Split::Split(const Split* src, IrCloner* ir_cloner)
       in_(ir_cloner->clone(src->in_)),
       factor_(ir_cloner->clone(src->factor_)) {}
 
-bool Split::sameAs(const Split* const other) const {
-  return (
-      outer()->sameAs(other->outer()) && inner()->sameAs(other->inner()) &&
-      in()->sameAs(other->in()) && factor()->sameAs(other->factor()));
+bool Split::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<Split>()) {
+    return false;
+  }
+  return Expr::sameAs(other) && factor()->sameAs(other->as<Split>()->factor());
 }
 
 Merge::Merge(IterDomain* out, IterDomain* outer, IterDomain* inner)
@@ -1163,14 +1250,28 @@ Merge::Merge(const Merge* src, IrCloner* ir_cloner)
       outer_(ir_cloner->clone(src->outer_)),
       inner_(ir_cloner->clone(src->inner_)) {}
 
-bool Merge::sameAs(const Merge* const other) const {
-  return (
-      out()->sameAs(other->out()) && outer()->sameAs(other->outer()) &&
-      inner()->sameAs(other->inner()));
+bool Merge::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<Merge>()) {
+    return false;
+  }
+  return Expr::sameAs(other);
 }
 
 NamedScalar::NamedScalar(const NamedScalar* src, IrCloner* ir_cloner)
     : Val(src, ir_cloner), name_(src->name_) {}
+
+bool NamedScalar::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<NamedScalar>()) {
+    return false;
+  }
+  return other->as<NamedScalar>()->name().compare(name()) == 0;
+}
 
 NamedScalar* NamedScalar::getParallelDim(ParallelType p_type) {
   std::string parallel_dim = stringifyThreadSize(p_type);

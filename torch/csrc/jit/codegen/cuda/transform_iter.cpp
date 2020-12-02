@@ -353,21 +353,8 @@ BestEffortReplay::BestEffortReplay(
 
     // If the expression is a split, make sure it's split by the same ammount.
     if (r_expr->getExprType().value() == ExprType::Split) {
-      Val* r_factor = r_expr->as<Split>()->factor();
-      Val* t_factor = t_expr->as<Split>()->factor();
-      bool same_split_factor = false;
-      // TODO: virtual invocation should simplify this conditional logic.
-      if (r_factor->isA<Int>()) {
-        TORCH_INTERNAL_ASSERT(t_factor->isA<Int>());
-        same_split_factor = r_factor->as<Int>()->sameAs(t_factor->as<Int>());
-      } else if (r_factor->isA<NamedScalar>()) {
-        TORCH_INTERNAL_ASSERT(t_factor->isA<NamedScalar>());
-        same_split_factor =
-            r_factor->as<NamedScalar>()->sameAs(t_factor->as<NamedScalar>());
-      } else {
-        same_split_factor = r_factor->sameAs(t_factor);
-      }
-      if (!same_split_factor) {
+      if (!r_expr->as<Split>()->factor()->sameAs(
+              t_expr->as<Split>()->factor())) {
         TORCH_INTERNAL_ASSERT(!has_rfactor, err_str);
         continue;
       }

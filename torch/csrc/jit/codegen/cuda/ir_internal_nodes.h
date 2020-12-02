@@ -47,7 +47,7 @@ class TORCH_CUDA_API UnaryOp : public Expr {
     return unary_op_type_;
   }
 
-  bool sameAs(const UnaryOp* const other) const;
+  bool sameAs(const Statement* other) const override;
 
  private:
   const UnaryOpType unary_op_type_;
@@ -79,7 +79,7 @@ class TORCH_CUDA_API BinaryOp : public Expr {
     return binary_op_type_;
   }
 
-  bool sameAs(const BinaryOp* other) const;
+  bool sameAs(const Statement* other) const override;
 
  private:
   const BinaryOpType binary_op_type_;
@@ -114,7 +114,7 @@ class TORCH_CUDA_API BroadcastOp : public Expr {
     return is_broadcast_dims_;
   }
 
-  bool sameAs(const BroadcastOp* const other) const;
+  bool sameAs(const Statement* other) const override;
 
  private:
   Val* const out_ = nullptr;
@@ -154,7 +154,7 @@ class TORCH_CUDA_API ReductionOp : public Expr {
     return reduction_op_type_;
   }
 
-  bool sameAs(const ReductionOp* const other) const;
+  bool sameAs(const Statement* other) const override;
 
  private:
   const BinaryOpType reduction_op_type_;
@@ -187,7 +187,7 @@ class TORCH_CUDA_API TernaryOp : public Expr {
     return ternary_op_type_;
   }
 
-  bool sameAs(const TernaryOp* other) const;
+  bool sameAs(const Statement* other) const override;
 
  private:
   const TernaryOpType ternary_op_type_;
@@ -212,7 +212,7 @@ class TORCH_CUDA_API IterDomain : public Val {
 
   IterDomain(const IterDomain* src, IrCloner* ir_cloner);
 
-  bool sameAs(const IterDomain* const other) const;
+  bool sameAs(const Statement* other) const override;
 
   // Returns a new IterDomain matching properties of this
   // TODO: parallel_method->getParallelType
@@ -367,7 +367,7 @@ class TORCH_CUDA_API TensorDomain : public Val {
     return domain_.size();
   }
 
-  bool sameAs(const TensorDomain* const other) const;
+  bool sameAs(const Statement* other) const override;
 
   static bool sameAs(
       const std::vector<IterDomain*>& lhs,
@@ -491,7 +491,7 @@ class TORCH_CUDA_API Split : public Expr {
     return factor_;
   }
 
-  bool sameAs(const Split* const other) const;
+  bool sameAs(const Statement* other) const override;
 
  private:
   IterDomain* const outer_ = nullptr;
@@ -523,7 +523,7 @@ class TORCH_CUDA_API Merge : public Expr {
     return inner_;
   }
 
-  bool sameAs(const Merge* const other) const;
+  bool sameAs(const Statement* other) const override;
 
  private:
   IterDomain* const out_ = nullptr;
@@ -550,9 +550,7 @@ class TORCH_CUDA_API NamedScalar : public Val {
     return name_;
   }
 
-  bool sameAs(const NamedScalar* const other) const {
-    return other->name().compare(name()) == 0;
-  }
+  bool sameAs(const Statement* other) const override;
 
   //! Return the named scalar extent of a parallel dimension (e.g. blockDim.x)
   static NamedScalar* getParallelDim(ParallelType p_type);

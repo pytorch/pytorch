@@ -124,7 +124,7 @@ class TORCH_CUDA_API Statement : public NonCopyable, public PolymorphicBase {
 
   // Return if this statement is the same as another statement
   // TODO: should this run through dispatch on this and other?
-  bool sameAs(const Statement* const other) const {
+  virtual bool sameAs(const Statement* other) const {
     return this == other;
   }
 
@@ -223,7 +223,7 @@ class TORCH_CUDA_API Val : public Statement {
   // TODO: Make this more sophisticated. A value being the same as another value
   // should be evaluated based on the DAG that created it, and that DAGs leaf
   // nodes
-  bool sameAs(const Val* const other) const {
+  bool sameAs(const Statement* other) const override {
     return this == other;
   }
 
@@ -295,7 +295,7 @@ class TORCH_CUDA_API Expr : public Statement {
     return type_;
   }
 
-  bool sameAs(const Expr* const other) const;
+  bool sameAs(const Statement* other) const override;
 
   // Input/output accessors
   const auto& inputs() const {
