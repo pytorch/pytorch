@@ -113,7 +113,7 @@ class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
         if self.bias:
             zero_bias = torch.zeros_like(self.bias)
         else:
-            zero_bias = torch.zeros(self.out_channels, device=scaled_weight.device())
+            zero_bias = torch.zeros(self.out_channels, device=scaled_weight.device)
         conv = self._conv_forward(input, self.weight_fake_quant(scaled_weight), zero_bias)
 
         if self.training and not self.freeze_bn:
