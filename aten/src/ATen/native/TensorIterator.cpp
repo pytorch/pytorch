@@ -168,7 +168,6 @@ void TensorIterator::reorder_dimensions(const TensorIteratorConfig& config) {
   // returns 1 if the dim0 should come after dim1, -1 if dim0 should come
   // before dim1, and 0 if the comparison is ambiguous.
   auto should_swap = [&](size_t dim0, size_t dim1) {
-    int ret = 0;
     for (int arg = 0; arg < ntensors(); arg++) {
       // ignore undefined or incorrectly sized tensors
       if (operands_[arg].stride_bytes.empty() || operands_[arg].will_resize) {
@@ -202,7 +201,7 @@ void TensorIterator::reorder_dimensions(const TensorIteratorConfig& config) {
          }
       }
     }
-    return ret;
+    return 0;
   };
 
   // insertion sort with support for ambiguous comparisons
