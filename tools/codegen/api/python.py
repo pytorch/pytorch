@@ -527,9 +527,9 @@ def signature(f: NativeFunction, *, method: bool = False) -> PythonSignature:
     # arguments are created based on different rules - see below.
     args = tuple(a for a in cpp.group_arguments(f.func, method=method) if isinstance(a, Argument))
 
-    input_arg_set = set(a.name for a in f.func.arguments)
-    kwarg_only_set = set(a.name for a in f.func.kwarg_only_arguments)
-    out_arg_set = set(a.name for a in f.func.out_arguments)
+    input_arg_set = set(a.name for a in f.func.arguments.positional)
+    kwarg_only_set = set(a.name for a in f.func.arguments.kwarg_only)
+    out_arg_set = set(a.name for a in f.func.arguments.out)
 
     input_args = tuple(map(argument, filter(lambda a: a.name in input_arg_set, args)))
     input_kwargs = tuple(map(argument, filter(lambda a: a.name in kwarg_only_set, args)))
@@ -544,7 +544,7 @@ def signature(f: NativeFunction, *, method: bool = False) -> PythonSignature:
     # source of drift between eager and JIT. Pull this logic out to a shared place.
 
     has_tensor_input_arg = any(a.type.is_tensor_like()
-                               for a in itertools.chain(f.func.arguments, f.func.kwarg_only_arguments))
+                               for a in itertools.chain(f.func.arguments.positional, f.func.arguments.kwarg_only))
     if any(a.name == 'requires_grad' for a in f.func.schema_order_arguments()):
         raise ValueError('argument named requires_grad is reserved, should not explicitly add it in the schema')
 
@@ -657,7 +657,7 @@ def dispatch_lambda_args(ps: PythonSignature, f: NativeFunction) -> Tuple[Dispat
                               ps.deprecated_args_names)
         cpp_args = list(map(lambda n: m[n], ordered_args))
 
-    out_args: Set[str] = set(a.name for a in f.func.out_arguments)
+    out_args: Set[str] = set(a.name for a in f.func.arguments.out)
 
     # Convert from cpp argument to lambda argument
     def dispatch_lambda_arg(cpp_arg: CppArgument) -> DispatchLambdaArgument:
