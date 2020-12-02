@@ -113,7 +113,7 @@ __global__ void upsample_trilinear3d_out_frame(
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void upsample_trilinear3d_backward_out_frame(
-    const size_t nc,
+    const size_t nc_,
     const int depth1,
     const int height1,
     const int width1,
@@ -126,10 +126,8 @@ __global__ void upsample_trilinear3d_backward_out_frame(
     const bool align_corners,
     scalar_t* __restrict__ idata,
     const scalar_t* __restrict__ odata) {
-  int index = threadIdx.x + blockIdx.x * blockDim.x;
-
-  const size_t i_numel = nc * depth1 * height1 * width1;
-  const size_t o_numel = nc * depth2 * height2 * width2;
+  const size_t i_numel = nc_ * depth1 * height1 * width1;
+  const size_t o_numel = nc_ * depth2 * height2 * width2;
 
   for (size_t index = blockDim.x * blockIdx.x + threadIdx.x; index < o_numel; index += blockDim.x * gridDim.x) {
     size_t index_temp = index;
@@ -138,6 +136,7 @@ __global__ void upsample_trilinear3d_backward_out_frame(
     const int h2 = index_temp % height2;  // 0:height2-1
     index_temp /= height2;
     const int t2 = index_temp % depth2;   // 0:depth2-1
+    const int nc = index_temp / depth2;
 
     const accscalar_t t1r = area_pixel_compute_source_index<accscalar_t>(
         rdepth, t2, align_corners, /*cubic=*/false);
@@ -357,6 +356,7 @@ static void upsample_trilinear3d_backward_out_cuda_template(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
+  if (num_kernels > 0) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       grad_output.scalar_type(),
       "upsample_trilinear3d_backward_out_frame",
@@ -393,6 +393,7 @@ static void upsample_trilinear3d_backward_out_cuda_template(
                 odata);
         TORCH_CUDA_KERNEL_LAUNCH_CHECK();
       });
+  }
 }
 
 } // namespace
