@@ -7,10 +7,13 @@
 
 #include <test/cpp/jit/test_utils.h>
 
+#include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/frontend/code_template.h>
+#include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/attributes.h>
@@ -39,21 +42,14 @@
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/runtime/symbolic_script.h>
 #include <torch/csrc/jit/serialization/import.h>
-
-#include <torch/csrc/autograd/engine.h>
-#include <torch/csrc/autograd/variable.h>
-
-#include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/testing/file_check.h>
-#include <torch/script.h>
-
-#include <torch/csrc/jit/api/module.h>
-#include <torch/csrc/jit/frontend/ir_emitter.h>
-#include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/jit.h>
+#include <torch/script.h>
 
 #include <onnx/onnx_pb.h>
 
