@@ -221,7 +221,7 @@ class UnaryUfuncInfo(OpInfo):
                                         requires_grad=requires_grad)),)
 
 
-def fast_growing_function_wrapper(fn):
+def np_integer_promotion_wrapper(fn):
     # NumPy promotes integer types to double while
     # PyTorch promotes integer to float.
     #
@@ -238,7 +238,7 @@ def fast_growing_function_wrapper(fn):
     # >>> x.exp()
     # tensor(3.8154e+217, dtype=torch.float64)
     def is_integral(dtype):
-        return dtype in [np.uint8, np.int8, np.int16, np.int32, np.int64]
+        return dtype in [np.bool, np.uint8, np.int8, np.int16, np.int32, np.int64]
 
     np_dtype = torch_to_numpy_dtype_dict[torch.get_default_dtype()]
 
@@ -435,7 +435,7 @@ op_db = [
                                 dtypes=[torch.float], active_if=TEST_WITH_ROCM),
                    )),
     UnaryUfuncInfo('sinh',
-                   ref=fast_growing_function_wrapper(np.sinh),
+                   ref=np_integer_promotion_wrapper(np.sinh),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
                    promotes_integers_to_float=True,
