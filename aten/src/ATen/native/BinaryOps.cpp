@@ -13,7 +13,7 @@
 namespace at {
 namespace meta {
 
-TORCH_META_FUNC(add, Tensor) (
+TORCH_META_FUNC2(add, Tensor) (
   const Tensor& self, const Tensor& other, Scalar alpha
 ) {
   build(TensorIteratorConfig()
