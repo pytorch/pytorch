@@ -7,7 +7,7 @@ import unittest
 
 import torch
 import torch.utils.benchmark as benchmark_utils
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS, slowTest
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_SANDCASTLE, IS_WINDOWS, slowTest
 from torch.testing._internal import expecttest
 import numpy as np
 
@@ -161,6 +161,17 @@ class TestBenchmarkUtils(TestCase):
                     x = x + 1.0""",
         ).timeit(5).median
         self.assertIsInstance(sample, float)
+
+    @slowTest
+    @unittest.skipIf(IS_SANDCASTLE, "C++ timing is OSS only.")
+    def test_cpp_timer(self):
+        timer = benchmark_utils.Timer(
+            "torch::Tensor y = x + 1;",
+            setup="torch::Tensor x = torch::empty({1});",
+            language=benchmark_utils.Language.CPP,
+        )
+        t = timer.timeit(10)
+        self.assertIsInstance(t.median, float)
 
     class _MockTimer:
         _seed = 0
