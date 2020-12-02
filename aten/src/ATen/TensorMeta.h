@@ -14,6 +14,11 @@ struct TensorMeta {
     : sizes(_sizes), options(_options) {}
 };
 
+inline Tensor meta_tensor_from_meta(const TensorMeta& meta) {
+  // TODO: eliminate indirection
+  return at::empty_meta(meta.sizes, meta.options);
+}
+
 inline Tensor tensor_from_meta(const TensorMeta& meta) {
   // TODO: eliminate indirection
   return at::empty(meta.sizes, meta.options);

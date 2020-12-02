@@ -244,7 +244,11 @@ class RegisterDispatchKey:
             assert_never(f)
 
     def gen_structured(self, g: StructuredNativeFunctions) -> List[str]:
-        if self.dispatch_key not in g.out.dispatch:
+        if self.dispatch_key == 'Meta':
+            assert self.dispatch_key not in g.out.dispatch, \
+                "Do not explicitly specify Meta dispatch key on structured " \
+                "functions, they will be automatically generated for you"
+        elif self.dispatch_key not in g.out.dispatch:
             return []
 
         # Inner helper function to close over g
@@ -272,14 +276,15 @@ class RegisterDispatchKey:
             sig = NativeSignature.from_schema(f.func)
 
             if self.target is Target.DEFINITION:
-                out_impl_name = f"at::native::{g.out.dispatch[self.dispatch_key]}"
-
                 # TODO: work a little harder to generate fresh names for 'result'
                 # TODO: less praying that I picked the right argument name for 'self'
 
                 if k is SchemaKind.functional:
                     out_expr = "result"
-                    prologue = "auto result = tensor_from_meta(meta_result);"
+                    if self.dispatch_key == "Meta":
+                        prologue = "auto result = meta_tensor_from_meta(meta_result);"
+                    else:
+                        prologue = "auto result = tensor_from_meta(meta_result);"
                 elif k is SchemaKind.inplace:
                     out_expr = "self"
                     prologue = "// TODO: consistency check assert"
@@ -293,6 +298,12 @@ class RegisterDispatchKey:
 // TODO: add a consistency check for meta_result
 {out_expr}.resize_(meta_result.sizes);
 """
+
+                if self.dispatch_key == "Meta":
+                    out_impl_call = "// meta function does nothing"
+                else:
+                    out_impl_name = f"at::native::{g.out.dispatch[self.dispatch_key]}"
+                    out_impl_call = f"{out_impl_name}({out_expr}, {functional_exprs});"
 
                 device_guard = ""
 
@@ -317,7 +328,7 @@ class RegisterDispatchKey:
     {device_guard}
     auto meta_result = meta::{meta_name}({functional_exprs});
     {prologue}
-    {out_impl_name}({out_expr}, {functional_exprs});
+    {out_impl_call}
     return {out_expr};
 }}
 """
@@ -1048,6 +1059,7 @@ def main() -> None:
 
     # TODO: how come ValuesView isn't a Sequence lol
     grouped_native_functions = list(concatMap(flatten_pre_group, list(pre_grouped_native_functions.values())))
+    structured_native_functions = [g for g in grouped_native_functions if isinstance(g, StructuredNativeFunctions)]
 
     template_dir = os.path.join(options.source_path, "templates")
 
@@ -1093,6 +1105,9 @@ def main() -> None:
         "QuantizedCUDA",
         "Math",
         "DefaultBackend",
+        # Meta is a magic key: it is automatically generated for structured
+        # kernels
+        "Meta",
     ]
     if options.backend_whitelist:
         dispatch_keys = [k for k in dispatch_keys if is_generic_dispatch_key(k) or k in options.backend_whitelist]
@@ -1129,9 +1144,7 @@ def main() -> None:
     })
 
     cpu_fm.write('MetaFunctions.h', lambda: {
-        'declarations':
-            list(mapMaybe(compute_meta_function_declaration,
-                          (g for g in grouped_native_functions if isinstance(g, StructuredNativeFunctions)))),
+        'declarations': list(map(compute_meta_function_declaration, structured_native_functions)),
     })
 
     schema_selector = selector
