@@ -346,12 +346,12 @@ static void upsample_trilinear3d_backward_out_cuda_template(
       {nbatch, channels, input_depth, input_height, input_width});
   // A contiguous tensor is required for the kernel launch config
   grad_input.contiguous();
-  // initialization to zero is required here. As we launch one thread per output
-  // element, and atomicAdd to input gradient. Given a sparse sampling case, our
-  // threads are not covering the whole input tensor.
+  // Numbers are added atomically to grad_input tensor from multiple threads,
+  // so it has to be initialized to zero.
   grad_input.zero_();
 
-  const size_t num_kernels = nbatch * channels * output_depth * output_height * output_width;
+  // const size_t num_kernels = nbatch * channels * output_depth * output_height * output_width;
+  const size_t num_kernels = grad_output.numel();
   const int num_threads = std::min(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
