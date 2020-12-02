@@ -5,6 +5,7 @@ from .fx import Fuser  # noqa: F401
 from .fx import Quantizer  # noqa: F401
 from .fx.utils import graph_pretty_str  # noqa: F401
 from .fx.utils import get_custom_module_class_keys  # noqa: F401
+from torch.nn.intrinsic import _FusedModule
 
 def _check_is_graph_module(model):
     if not isinstance(model, GraphModule):
@@ -47,7 +48,8 @@ class CustomTracer(Tracer):
         return (m.__module__.startswith('torch.nn') and
                 not isinstance(m, torch.nn.Sequential)) or \
             module_qualified_name in self.skipped_module_names or \
-            type(m) in self.skipped_module_classes
+            type(m) in self.skipped_module_classes or \
+            isinstance(m, _FusedModule)
 
 
 def _prepare_fx(model, qconfig_dict, prepare_custom_config_dict=None, is_standalone_module=False):
@@ -75,6 +77,9 @@ forward graph of the parent module,
         # standalone module and custom module config are applied in top level module
         standalone_module_names = prepare_custom_config_dict.get('standalone_module_name', [])
         skipped_module_names += standalone_module_names
+
+        standalone_module_classes = prepare_custom_config_dict.get('standalone_module_class', [])
+        skipped_module_classes += standalone_module_classes
         float_custom_module_classes = get_custom_module_class_keys(
             prepare_custom_config_dict, "float_to_observed_custom_module_class")
         skipped_module_classes += float_custom_module_classes
@@ -126,7 +131,7 @@ def fuse_fx(model, fuse_custom_config_dict=None):
     """
     torch._C._log_api_usage_once("quantization_api.quantize_fx.fuse_fx")
     assert not model.training, 'fuse_fx only works on models in eval mode'
-    graph_module = torch.fx.symbolic_trace(model)
+    graph_module = torch.fx.symbolic_trace(model)  # type: ignore
     return _fuse_fx(graph_module, fuse_custom_config_dict)
 
 def prepare_fx(model, qconfig_dict, prepare_custom_config_dict=None):
@@ -170,6 +175,11 @@ def prepare_fx(model, qconfig_dict, prepare_custom_config_dict=None):
         "standalone_module_name": [
            "submodule.standalone"
         ],
+
+        "standalone_module_class": [
+            StandaloneModule
+        ],
+
         # user will manually define the corresponding observed
         # module class which has a from_float class method that converts
         # float custom module to observed custom module
@@ -292,6 +302,7 @@ def convert_fx(graph_module, debug=False, convert_custom_config_dict=None):
         `debug`: flag for producing a debug friendly model (preserve weight attribute)
         `convert_custom_config_dict`: dictionary for custom configurations for convert function:
         convert_custom_config_dict = {
+
           # addtional object (module/operator) mappings that will overwrite the default
           # module mappingn
           "additional_object_mapping": {
@@ -304,6 +315,7 @@ def convert_fx(graph_module, debug=False, convert_custom_config_dict=None):
                 float_op: dynamically_quantized_op
              },
           }
+
           # user will manually define the corresponding quantized
           # module class which has a from_observed class method that converts
           # observed custom module to quantized custom module
@@ -318,6 +330,14 @@ def convert_fx(graph_module, debug=False, convert_custom_config_dict=None):
                  ObservedCustomModule: QuantizedCustomModule
              }
           }
+
+          # By default, inputs and outputs of the graph are assumed to be in
+          # fp32. Providing `input_quantized_idxs` will set the inputs with the
+          # corresponding indices to be quantized. Providing
+          # `output_quantized_idxs` will set the outputs with the corresponding
+          # indices to be quantized.
+          "input_quantized_idxs": [0],
+          "output_quantized_idxs": [0],
         }
 
     Return:

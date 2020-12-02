@@ -840,6 +840,23 @@ Tensor repeat(const Tensor& self, IntArrayRef repeats) {
   return result;
 }
 
+Tensor tile(const Tensor& self, IntArrayRef reps){
+  // If self.size() > len(reps), reps is promoted to self.size() by pre-pending
+  // 1’s to it to keep the same behaviour as `numpy.tile`.
+  // Thus for a tensor of shape (2, 3, 4, 5), a dims of (2, 2) is treated
+  // as (1, 1, 2, 2).
+  const int64_t size_diff = self.dim() - static_cast<int64_t>(reps.size());
+  if (size_diff > 0){
+    std::vector<int64_t> new_reps(size_diff, 1);
+    for(auto i = decltype(reps.size()){0}; i < reps.size(); ++i){
+      new_reps.emplace_back(reps[i]);
+    }
+    return self.repeat(IntArrayRef(new_reps));
+  }
+  // `torch.tile` is equivalent to the already implemented `torch.Tensor.repeat`
+  return self.repeat(reps);
+}
+
 Tensor alias_with_sizes_and_strides(
     const Tensor& self,
     const c10::IntArrayRef sizes,
@@ -1868,7 +1885,7 @@ Tensor diag(const Tensor& self, int64_t dimension) {
 }
 
 Tensor& diag_cpu_out(Tensor &result, const Tensor& self, int64_t dimension) {
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "diag", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Bool, self.scalar_type(), "diag", [&] {
     apply_diag<scalar_t>(result, self, dimension);
   });
   return result;
@@ -1985,29 +2002,20 @@ Tensor movedim(const Tensor& self, int64_t src, int64_t dst) {
   return at::movedim(self, IntArrayRef{src}, IntArrayRef{dst});
 }
 
-Tensor trace_cpu(const Tensor& self) {
-  Tensor result = at::empty({}, self.options());
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "trace", [&] {
-    using accscalar_t = at::acc_type<scalar_t, false>;
-    accscalar_t sum = 0;
-    const auto* t_data = self.data_ptr<scalar_t>();
+Tensor swapaxes(const Tensor& self, int64_t axis0, int64_t axis1) {
+  return self.transpose(axis0, axis1);
+}
 
-    int64_t t_stride_0, t_stride_1, t_diag_size;
+Tensor& swapaxes_(Tensor& self, int64_t axis0, int64_t axis1) {
+  return self.transpose_(axis0, axis1);
+}
 
-    TORCH_CHECK(self.dim() == 2, "trace: expected a matrix, but got tensor with dim ", self.dim());
+Tensor swapdims(const Tensor& self, int64_t dim0, int64_t dim1) {
+  return self.transpose(dim0, dim1);
+}
 
-    t_stride_0 = self.stride(0);
-    t_stride_1 = self.stride(1);
-
-    t_diag_size = std::min(self.size(0), self.size(1));
-    for (int64_t i = 0; i < t_diag_size; i++) {
-      sum += t_data[i * (t_stride_0 + t_stride_1)];
-    }
-
-    *result.data_ptr<scalar_t>() = sum;
-  });
-
-  return result;
+Tensor& swapdims_(Tensor& self, int64_t dim0, int64_t dim1) {
+  return self.transpose_(dim0, dim1);
 }
 
 }} // at::native

@@ -91,7 +91,7 @@ def test_delete_portal_tensor(train, checkpoint):
             return self.F.apply(input)
 
     model = nn.Sequential(NoPortalTensorAtBackward(), stash_, pop_)
-    model = Pipe(model, balance=[2, 1], devices=["cpu", "cpu"], chunks=2, checkpoint=checkpoint)
+    model = Pipe(model, chunks=2, checkpoint=checkpoint)
 
     input = torch.rand(10, requires_grad=True)
 

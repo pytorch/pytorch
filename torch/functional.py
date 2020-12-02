@@ -351,38 +351,37 @@ if TYPE_CHECKING:
         return _meshgrid(*tensors)
 else:
     def meshgrid(*tensors):
+        r"""Take :math:`N` tensors, each of which can be either scalar or 1-dimensional
+        vector, and create :math:`N` N-dimensional grids, where the :math:`i` :sup:`th` grid is defined by
+        expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
+
+        Args:
+            tensors (list of Tensor): list of scalars or 1 dimensional tensors. Scalars will be
+                treated as tensors of size :math:`(1,)` automatically
+
+        Returns:
+            seq (sequence of Tensors): If the input has :math:`k` tensors of size
+            :math:`(N_1,), (N_2,), \ldots , (N_k,)`, then the output would also have :math:`k` tensors,
+            where all tensors are of size :math:`(N_1, N_2, \ldots , N_k)`.
+
+        Example::
+
+            >>> x = torch.tensor([1, 2, 3])
+            >>> y = torch.tensor([4, 5, 6])
+            >>> grid_x, grid_y = torch.meshgrid(x, y)
+            >>> grid_x
+            tensor([[1, 1, 1],
+                    [2, 2, 2],
+                    [3, 3, 3]])
+            >>> grid_y
+            tensor([[4, 5, 6],
+                    [4, 5, 6],
+                    [4, 5, 6]])
+        """
         return _meshgrid(*tensors)
 
 
 def _meshgrid(*tensors):
-    r"""Take :math:`N` tensors, each of which can be either scalar or 1-dimensional
-vector, and create :math:`N` N-dimensional grids, where the :math:`i` :sup:`th` grid is defined by
-expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
-
-
-    Args:
-        tensors (list of Tensor): list of scalars or 1 dimensional tensors. Scalars will be
-        treated as tensors of size :math:`(1,)` automatically
-
-    Returns:
-        seq (sequence of Tensors): If the input has :math:`k` tensors of size
-        :math:`(N_1,), (N_2,), \ldots , (N_k,)`, then the output would also have :math:`k` tensors,
-        where all tensors are of size :math:`(N_1, N_2, \ldots , N_k)`.
-
-    Example::
-
-        >>> x = torch.tensor([1, 2, 3])
-        >>> y = torch.tensor([4, 5, 6])
-        >>> grid_x, grid_y = torch.meshgrid(x, y)
-        >>> grid_x
-        tensor([[1, 1, 1],
-                [2, 2, 2],
-                [3, 3, 3]])
-        >>> grid_y
-        tensor([[4, 5, 6],
-                [4, 5, 6],
-                [4, 5, 6]])
-    """
     if not torch.jit.is_scripting():
         if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
             return handle_torch_function(meshgrid, tensors, *tensors)

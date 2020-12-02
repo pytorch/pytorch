@@ -13,6 +13,8 @@ from functools import wraps
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _parse_arg, _unimplemented
 
+from typing import Optional
+
 import numpy
 import math
 import warnings
@@ -209,6 +211,44 @@ def matmul(g, self, other):
 
 @parse_args('v', 'v', 'v', 't', 't')
 def addmm(g, self, mat1, mat2, beta, alpha):
+    dtype = None
+    self_dtype = self.type().scalarType()
+    mat1_dtype = mat1.type().scalarType()
+    mat2_dtype = mat2.type().scalarType()
+    if self_dtype is not None:
+        dtype = self_dtype
+    elif mat1_dtype is not None:
+        dtype = mat1_dtype
+    elif mat2_dtype is not None:
+        dtype = mat2_dtype
+
+    mat1_rank = mat1.type().dim()
+    mat2_rank = mat2.type().dim()
+
+    def isNotNoneAnd(v, u):
+        return v is not None and v != u
+
+    if dtype is not None and (isNotNoneAnd(mat1_rank, 2) or isNotNoneAnd(mat2_rank, 2)):
+        dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+        dtype = sym_help.scalar_type_to_pytorch_type[dtype]
+
+        res1 = g.op("MatMul", mat1, mat2)
+        res2 = self
+
+        alpha = sym_help._scalar(alpha)
+        beta = sym_help._scalar(beta)
+
+        if alpha != 1:
+            alpha = g.op("Constant",
+                         value_t=torch.tensor(alpha, dtype=dtype))
+            res1 = g.op("Mul", res1, alpha)
+        if beta != 1:
+            beta = g.op("Constant",
+                        value_t=torch.tensor(sym_help._scalar(beta), dtype=dtype))
+            res2 = g.op("Mul", res2, beta)
+
+        return g.op("Add", res1, res2)
+
     return g.op("Gemm", mat1, mat2, self, beta_f=sym_help._scalar(beta), alpha_f=sym_help._scalar(alpha))
 
 
@@ -273,7 +313,7 @@ def _maybe_cast_reduce_op_input(g, self):
     if dtype is not None:
         # pytorch reduce-ops cast all other integral types to int64
         if not sym_help._is_fp(self) and not (dtype == 'Long'):
-            self = _cast_Long(g, self, False)
+            self = _cast_Long(g, self, False)  # type: ignore
     return self
 
 
@@ -620,7 +660,8 @@ def floor(g, input):
 
 
 def _len(g, self):
-    return g.op("Size", self)
+    sz_0 = size(g, self, g.op("Constant", value_t=torch.LongTensor([0])))
+    return g.op('Squeeze', sz_0, axes_i=[0])
 
 
 @parse_args('v', 't', 't')
@@ -1057,7 +1098,7 @@ def __rshift_(g, self, other):
     if not sym_help._is_fp(self):
         other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx['Float'])
     two_pow = g.op('Pow', two, other)
-
+    two_pow = g.op('Cast', two_pow, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
     rshift = g.op('Div', self, two_pow)
     return rshift
 
@@ -1073,7 +1114,7 @@ def __lshift_(g, self, other):
     if not sym_help._is_fp(self):
         other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx['Float'])
     two_pow = g.op('Pow', two, other)
-
+    two_pow = g.op('Cast', two_pow, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
     lshift = g.op('Mul', self, two_pow)
     return lshift
 
@@ -1110,7 +1151,8 @@ def log_softmax(g, input, dim, dtype=None):
         dim = input_dim - 1
     return_op = g.op("LogSoftmax", input, axis_i=dim)
     if dtype and dtype.node().kind() != 'prim::Constant':
-        return_op = g.op("Cast", return_op, to_i=sym_help.scalar_type_to_onnx[dtype])
+        parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
+        return_op = g.op("Cast", return_op, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
     if is_transpose_required:
         return_op = g.op("Transpose", return_op, perm_i=axes)
     return return_op
@@ -1645,10 +1687,22 @@ def new_full(g, self, size, fill_value, dtype, layout, device, pin_memory=False)
     return full(g, size, fill_value, dtype, layout, device, pin_memory)
 
 
-def eye(g, n, m, dtype=None, layout=None, device=None, pin_memory=False):
-    shape = g.op("Concat", g.op("Unsqueeze", n, axes_i=[0]), g.op("Unsqueeze", m, axes_i=[0]), axis_i=0)
-    tensor = zeros(g, shape, dtype, layout, device)
-    return g.op("EyeLike", tensor)
+def eye(g, *args):
+    if len(args) == 5:
+        # aten::eye(n, dtype, layout, device, pin_memory)
+        n, dtype, layout, device, pin_memory = args
+        dim_size = g.op("Unsqueeze", n, axes_i=[0])
+        shape = g.op("Concat", dim_size, dim_size, axis_i=0)
+        tensor = zeros(g, shape, dtype, layout, device)
+        return g.op("EyeLike", tensor)
+    elif len(args) == 6:
+        # aten::eye(n, m, dtype, layout, device, pin_memory)
+        n, m, dtype, layout, device, pin_memory = args
+        shape = g.op("Concat", g.op("Unsqueeze", n, axes_i=[0]), g.op("Unsqueeze", m, axes_i=[0]), axis_i=0)
+        tensor = zeros(g, shape, dtype, layout, device)
+        return g.op("EyeLike", tensor)
+    else:
+        raise NotImplementedError("Unknown aten::eye signature")
 
 
 def slice(g, self, *args):
@@ -2033,7 +2087,7 @@ def _pack_padded_sequence(g, input, lengths, batch_first):
     # It's really only necessary because those operators expand to something that
     # only works with int32 types in Caffe2...
     if lengths.type().scalarType() != 'Int':
-        lengths = _cast_Int(g, lengths, False)
+        lengths = _cast_Int(g, lengths, False)  # type: ignore
     return g.op("prim::PackPadded", input, lengths, outputs=2)
 
 
@@ -2122,9 +2176,15 @@ def flatten(g, input, start_dim, end_dim):
 
     return sym_help._flatten_helper(g, input, start_dim, end_dim, dim)
 
+# Emitted from `torch.nonzero(x, as_tuple=False)`
 @parse_args('v')
 def nonzero(g, input):
     return t(g, g.op('NonZero', input))
+
+
+# Emitted from `torch.nonzero(x, as_tuple=True)`
+def nonzero_numpy(g, input, _outputs=None):
+    return unbind(g, nonzero(g, input), 1, _outputs=_outputs)
 
 
 @parse_args('v')
@@ -2195,6 +2255,28 @@ def prim_shape(g, self):
 
 def prim_data(g, self):
     return self
+
+def is_floating_point(g, self):
+    if sym_help._is_fp(self):
+        return g.op("Constant", value_t=torch.BoolTensor([1]))
+    return g.op("Constant", value_t=torch.BoolTensor([0]))
+
+
+def prim_dtype(g, self):
+    dtype = sym_help._try_get_scalar_type(self)
+    dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+    return g.op("Constant", value_t=torch.IntTensor([dtype]))
+
+
+# tolist is currently supported only for 1D input tensors.
+# dim_val and elem_ty_val represent dimension and type annotations
+# that need to match dimension and type of the input tensor.
+def prim_tolist(g, input, dim_val, elem_ty_val):
+    dim = sym_help._maybe_get_const(dim_val, 'i')
+    if dim > 1:
+        return _unimplemented("prim_tolist", "dim_val > 1")
+    return input
+
 
 @parse_args('v', 'i')
 def one_hot(g, self, num_classes):
@@ -2349,7 +2431,7 @@ def arange(g, *args):
 
 
 def masked_fill(g, self, mask, value):
-    mask = _cast_Bool(g, mask, False)
+    mask = _cast_Bool(g, mask, False)  # type: ignore
     value = sym_help._maybe_get_scalar(value)
     return g.op('Where', mask, sym_help._if_scalar_type_as(g, value, self), self)
 
@@ -2508,6 +2590,11 @@ def meshgrid(g, tensor_list):
 
 
 def remainder(g, input, other):
+    # torch.remainder does not follow regular type promotion logic.
+    # Instead, it is implicitly casting `other` to the same type of `input`.
+    input_scalar_type = input.type().scalarType()
+    if input_scalar_type:
+        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[input_scalar_type])
     div = g.op("Div", input, other)
     if sym_help._is_fp(input):
         div = g.op("Floor", div)
@@ -2642,6 +2729,7 @@ def as_strided(g, self, sizes, strides, offset=None):
     sizes = sym_help._maybe_get_const(sizes, 'is')
     rank = len(strides)
     self_1d = g.op("Reshape", self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64)))
+    ind: Optional[torch.Tensor]
     if not sym_help._is_value(sizes):
         ind = torch.tensor([0], dtype=torch.long)
         for i, (size, stride) in enumerate(zip(sizes, strides)):

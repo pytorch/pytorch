@@ -101,12 +101,14 @@ TensorIteratorConfig& TensorIteratorConfig::declare_static_shape(IntArrayRef sha
   return *this;
 }
 
-TensorIteratorConfig& TensorIteratorConfig::declare_static_shape(IntArrayRef shape, const int64_t squash_dim) {
+TensorIteratorConfig& TensorIteratorConfig::declare_static_shape(IntArrayRef shape, IntArrayRef squash_dims) {
   declare_static_shape(shape);
   if (!static_shape_->size()) return *this;
-  TORCH_CHECK(squash_dim >= 0 && squash_dim < static_cast<int64_t>(static_shape_->size()),
-              "squash_dim ", squash_dim, " must be in [0, ", static_shape_->size(), ").");
-  (*static_shape_)[squash_dim] = 1;
+  for (const auto& squash_dim : squash_dims) {
+    TORCH_CHECK(squash_dim >= 0 && squash_dim < static_cast<int64_t>(static_shape_->size()),
+                "squash_dim ", squash_dim, " must be in [0, ", static_shape_->size(), ").");
+    (*static_shape_)[squash_dim] = 1;
+  }
   return *this;
 }
 
@@ -148,7 +150,7 @@ TensorIteratorConfig& TensorIteratorConfig::declare_static_shape(IntArrayRef sha
 // in the strides of trivial dimensions, so physical layout is unaffected but permutation information is lost)
 // We might change this behavior in future once performance considerations are resolved
 
-void TensorIterator::reorder_dimensions(const TensorIteratorConfig& config) {
+void TensorIterator::reorder_dimensions() {
   // Sort the dimensions based on strides in ascending order with reduced dims
   // at the front. NOTE: that this inverts the order of C-contiguous tensors.
   // strides[0] is the fastest moving dimension instead of strides[ndim - 1].
@@ -166,7 +168,6 @@ void TensorIterator::reorder_dimensions(const TensorIteratorConfig& config) {
   // returns 1 if the dim0 should come after dim1, -1 if dim0 should come
   // before dim1, and 0 if the comparison is ambiguous.
   auto should_swap = [&](size_t dim0, size_t dim1) {
-    int ret = 0;
     for (int arg = 0; arg < ntensors(); arg++) {
       // ignore undefined or incorrectly sized tensors
       if (operands_[arg].stride_bytes.empty() || operands_[arg].will_resize) {
@@ -200,7 +201,7 @@ void TensorIterator::reorder_dimensions(const TensorIteratorConfig& config) {
          }
       }
     }
-    return ret;
+    return 0;
   };
 
   // insertion sort with support for ambiguous comparisons
@@ -542,15 +543,6 @@ void TensorIterator::coalesce_dimensions() {
   auto can_coalesce = [&](int dim0, int dim1) {
     auto shape0 = shape_[dim0];
     auto shape1 = shape_[dim1];
-    if (is_reduction_) {
-      // The dimension being reduced should not be coalesced
-      for (int i = 0; i < noutputs(); i++) {
-        auto& stride = operands_[i].stride_bytes;
-        if (stride[dim0] == 0 || stride[dim1] == 0) {
-          return false;
-        }
-      }
-    }
     if (shape0 == 1 || shape1 == 1) {
       return true;
     }
@@ -811,7 +803,7 @@ void TensorIterator::narrow(int dim, int64_t start, int64_t size) {
   for (auto& op : operands_) {
     op.data = ((char*)op.data) + op.stride_bytes[dim] * start;
   }
-  if (size == 1) {
+  if (size == 1 && !is_reduction_) {
     coalesce_dimensions();
   }
 }
@@ -1293,7 +1285,7 @@ void TensorIterator::build(TensorIteratorConfig& config) {
     // compute each tensor's stride after broadcasting
     compute_strides(config);
     // re-order dimensions to improve coalescing
-    reorder_dimensions(config);
+    reorder_dimensions();
     // allocate the output tensor if it's not provided
     allocate_or_resize_outputs();
     // coalesce adjacent dimensions when possible
@@ -1404,26 +1396,6 @@ std::array<int64_t, 2> DimCounter::max_2d_step() const {
     step1 = std::min(shape[1] - values[1], (range.end - offset) / shape[0]);
   }
   return {step0, step1};
-}
-
-std::ostream& operator<<(std::ostream& os, const TensorIterator& iter) {
-  os << "TensorIterator @ " << &iter << " {" << std::endl;
-  os << "  ntensors() = " << iter.ntensors() << std::endl;
-  os << "  noutputs() = " << iter.noutputs() << std::endl;
-  os << "  shape() = " << iter.shape() << std::endl;
-  os << "  strides(*) = {" << std::endl;
-  for (int i = 0; i < iter.ntensors(); i++) {
-    os << "    (" << i << ") = " << iter.strides(i) << std::endl;
-  }
-  os << "  }" << std::endl;
-  os << "  dtype(*) = {" << std::endl;
-  for (int i = 0; i < iter.ntensors(); i++) {
-    os << "    (" << i << ") = " << iter.dtype(i) << std::endl;
-  }
-  os << "  }" << std::endl;
-  os << "  is_reduction_ = " << iter.is_reduction_ << std::endl;
-  os << "}";
-  return os;
 }
 
 }  // namespace at
