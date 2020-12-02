@@ -4,13 +4,8 @@ import numpy as np
 from pathlib import Path
 import pandas as pd
 import argparse
-import pickle
-import sys
-import time
 import torch
 import torch.utils.benchmark as benchmark_utils
-import pandas as pd
-
 
 def read_matrix_params(path):
     sys.stdin = open(path)
