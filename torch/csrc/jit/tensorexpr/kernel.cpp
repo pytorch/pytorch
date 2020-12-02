@@ -7,6 +7,9 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include "c10/core/ScalarType.h"
+#include "jit/tensorexpr/exceptions.h"
+#include "jit/tensorexpr/types.h"
 
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
@@ -444,7 +447,61 @@ ExprHandle promoteIntegerToFloat(const ExprHandle& e) {
   return Cast::make(Dtype(defaultType, e.dtype().lanes()), e);
 }
 
-void TensorExprKernel::promoteInputs(std::vector<ExprHandle>& inputs) {
+ExprHandle promoteHalfAndIntegerToFloat(const ExprHandle& e) {
+  auto scalarType = static_cast<c10::ScalarType>(e.dtype().scalar_type());
+  auto defaultType = c10::typeMetaToScalarType(c10::get_default_dtype());
+  if (c10::isIntegralType(scalarType, /*includeBool*/ true) ||
+      (c10::isFloatingType(scalarType) &&
+       c10::elementSize(scalarType) < c10::elementSize(defaultType))) {
+    return Cast::make(
+        Dtype(
+            static_cast<tensorexpr::ScalarType>(defaultType),
+            e.dtype().lanes()),
+        e);
+  } else {
+    return e;
+  }
+}
+
+ExprHandle promoteHalfToFloat(const ExprHandle& e) {
+  auto scalarType = static_cast<c10::ScalarType>(e.dtype().scalar_type());
+  auto defaultType = c10::typeMetaToScalarType(c10::get_default_dtype());
+
+  if (c10::isFloatingType(scalarType) &&
+      (c10::elementSize(scalarType) < c10::elementSize(defaultType))) {
+    return Cast::make(
+        Dtype(
+            static_cast<tensorexpr::ScalarType>(defaultType),
+            e.dtype().lanes()),
+        e);
+  } else {
+    return e;
+  }
+}
+
+bool TensorExprKernel::checkTypes(
+    const ScalarType highType,
+    const int typeConstraints) {
+  if (typeConstraints == kAllTypes) {
+    return true;
+  }
+
+  if (is_integral(highType)) {
+    return (typeConstraints & kIntegralTypes) != 0;
+  } else if (is_floating_point(highType)) {
+    return (typeConstraints & kFloatingPointTypes) != 0;
+  } else if (highType == ScalarType::Bool) {
+    return (typeConstraints & kBoolType) != 0;
+  }
+
+  // assume JIT not supporting complex and qint yet
+  TORCH_INTERNAL_ASSERT((typeConstraints & (kQintTypes | kComplexTypes)) == 0);
+  return false;
+}
+
+void TensorExprKernel::promoteInputs(
+    std::vector<ExprHandle>& inputs,
+    const int typeConstraints) {
   if (inputs.empty()) {
     return;
   }
@@ -453,6 +510,10 @@ void TensorExprKernel::promoteInputs(std::vector<ExprHandle>& inputs) {
   ScalarType highType = inputs[0].dtype().scalar_type();
   for (const auto input : inputs) {
     highType = promoteTypes(highType, input.dtype().scalar_type());
+  }
+
+  if (!checkTypes(highType, typeConstraints)) {
+    throw unsupported_dtype();
   }
 
   for (ExprHandle& e : inputs) {
@@ -561,19 +622,20 @@ std::vector<ExprHandle> TensorExprKernel::valueShape(
 Tensor* TensorExprKernel::computeOneOperand(
     const std::string& name,
     const torch::jit::Value* v,
-    const std::function<ExprHandle(const ExprHandle&)>& innerExpr) {
+    const std::function<ExprHandle(const ExprHandle&)>& innerExpr,
+    const int checkParamTypes) {
   auto const& n = v->node();
   auto const& shape = valueShape(n->inputs()[0]);
   return Compute(
       name,
       c10::fmap<DimArg>(shape),
-      [this, v, innerExpr](const std::vector<VarHandle>& axes) {
+      [this, v, innerExpr, checkParamTypes](
+          const std::vector<VarHandle>& axes) {
         auto const& n = v->node();
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
             tensorOrConstant(n->inputs()[0], indices)};
-
-        promoteInputs(inputs);
+        promoteInputs(inputs, checkParamTypes);
         ExprHandle compute = innerExpr(inputs[0]);
         return demoteOutput(compute, n->output());
       });
@@ -1184,7 +1246,12 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
 
     case aten::abs: {
       return computeOneOperand(
-          "aten_abs", v, [](const ExprHandle& a) { return fabs(a); });
+          "aten_abs",
+          v,
+          [](const ExprHandle& a) {
+            return fabs(promoteHalfAndIntegerToFloat(a));
+          },
+          kIntegralTypes | kFloatingPointTypes | kBoolType);
     } break;
 
     case aten::ceil: {
@@ -1229,7 +1296,13 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
 
     case aten::frac: {
       return computeOneOperand(
-          "aten_frac", v, [](const ExprHandle& a) { return a - floor(a); });
+          "aten_frac",
+          v,
+          [](const ExprHandle& a) {
+            auto aa = promoteHalfToFloat(a);
+            return aa - floor(aa);
+          },
+          kFloatingPointTypes);
     } break;
 
     case aten::lgamma: {

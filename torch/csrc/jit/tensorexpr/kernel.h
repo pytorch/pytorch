@@ -36,6 +36,16 @@ class TORCH_API TensorExprKernel {
   }
 
  private:
+  enum ElementType {
+    kAllTypes = 0,
+    kIntegralTypes = 0b00000001,
+    kFloatingPointTypes = 0b00000010,
+    kBoolType = 0b00000100,
+    kComplexTypes = 0b00001000,
+    kQintTypes = 0b00010000,
+    kNonComplexOrQintTypes = kIntegralTypes | kBoolType | kFloatingPointTypes,
+  };
+
   enum BackendType {
     kUninitialized,
     kSimpleIREval,
@@ -71,7 +81,11 @@ class TORCH_API TensorExprKernel {
 
   std::vector<ExprHandle> valueShape(const torch::jit::Value* v);
 
-  void promoteInputs(std::vector<ExprHandle>& inputs);
+  bool checkTypes(const ScalarType highType, const int typeConstraints);
+
+  void promoteInputs(
+      std::vector<ExprHandle>& inputs,
+      int typeConstraints = kAllTypes);
 
   ExprHandle demoteOutput(const ExprHandle& e, const torch::jit::Value* v);
 
@@ -82,7 +96,8 @@ class TORCH_API TensorExprKernel {
   Tensor* computeOneOperand(
       const std::string& name,
       const torch::jit::Value* v,
-      const std::function<ExprHandle(const ExprHandle&)>& innerExpr);
+      const std::function<ExprHandle(const ExprHandle&)>& innerExpr,
+      const int checkParamTypes = kAllTypes);
 
   Tensor* computeTwoOperand(
       const std::string& name,

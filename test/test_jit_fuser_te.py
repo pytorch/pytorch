@@ -1212,7 +1212,6 @@ class TestTEFuser(JitTestCase):
         else:
             return v.to(dtype)
 
-    @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")
     def test_unary_ops(self):
         def apply(fn):
             return lambda x: fn(x)
