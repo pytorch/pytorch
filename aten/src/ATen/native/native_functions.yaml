@@ -1693,6 +1693,7 @@
     CPU: resize_
     CUDA: resize_cuda_
     QuantizedCPU: quantized_resize_cpu_
+    Meta: resize_meta_
 
 - func: empty_quantized(int[] size, Tensor qtensor) -> Tensor
   use_c10_dispatcher: full
