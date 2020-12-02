@@ -111,8 +111,8 @@ TEST(DeviceTest, ParsesCorrectlyFromString) {
   device = Device("hip");
   ASSERT_EQ(device, Device(DeviceType::HIP));
 
-  device = Device("hip:321");
-  ASSERT_EQ(device, Device(DeviceType::HIP, 321));
+  device = Device("hip:123");
+  ASSERT_EQ(device, Device(DeviceType::HIP, 123));
 
   std::vector<std::string> badnesses = {
       "", "cud:1", "cuda:", "cpu::1", ":1", "3", "tpu:4", "??"};
