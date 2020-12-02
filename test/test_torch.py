@@ -2539,6 +2539,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             y = torch.empty_meta(2 ** 20)
             z = x + y
             self.assertEqual(z.size(), (2 ** 20, 2 ** 20))
+            self.assertRaises(RuntimeError, lambda: z[0][0].item())
 
         def test_upsample_nearest1d_meta(self):
             # TODO: this is not a sustainable way of testing meta functions,
@@ -2549,12 +2550,14 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             x = torch.empty_meta(2 * 10 ** 8, 3, 2 * 10 ** 8)
             z = torch.nn.functional.interpolate(x, scale_factor=2)
             self.assertEqual(z.size(), (2 * 10 ** 8, 3, 4 * 10 ** 8))
+            self.assertRaises(RuntimeError, lambda: z[0][0][0].item())
 
             # interpolate doesn't seem to support out=
             # (not sure why passing None here doesn't work? How strange...)
             z = torch.empty_meta(0)
             torch._C._nn.upsample_nearest1d(x, (4 * 10 ** 8,), 2, out=z)
             self.assertEqual(z.size(), (2 * 10 ** 8, 3, 4 * 10 ** 8))
+            self.assertRaises(RuntimeError, lambda: z[0][0][0].item())
 
         def test_normal_shape(self):
             warned = False

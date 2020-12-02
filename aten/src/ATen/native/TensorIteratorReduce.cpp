@@ -1,4 +1,5 @@
 #include <ATen/native/TensorIterator.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/Parallel.h>
 #include <algorithm>
 #include <memory>
