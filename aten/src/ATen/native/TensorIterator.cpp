@@ -6,6 +6,7 @@
 #include <ATen/native/TypeProperties.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/native/Resize.h>
+#include <ATen/TensorOperators.h>
 
 namespace at {
 
