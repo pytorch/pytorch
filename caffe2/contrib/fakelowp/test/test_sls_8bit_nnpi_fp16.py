@@ -26,12 +26,12 @@ GLOW_MATMUL_RTOL = 1e-3
 
 
 class SparseLengthsSum8BitFakeNNPIFp16Test(serial.SerializedTestCase):
-    def Skip_test_SLS_NonQuantized_fp16(self):
-        N = 20000
-        DIM = 64
+    def test_SLS_NonQuantized_fp16(self):
+        N = 500
+        DIM = 16
         D = (4 * np.random.random_sample((N, DIM)) + 1).astype(np.float32)
         I = (np.random.randint(0, N, size=12)).astype(np.int64)
-        L = np.asarray([4, 4, 4]).astype(np.int32)
+        L = np.asarray([20, 4, 4]).astype(np.int32)
         workspace.FeedBlob("D", D)
 
         ref_c2_net = core.Net("test_ref_c2")
@@ -39,8 +39,8 @@ class SparseLengthsSum8BitFakeNNPIFp16Test(serial.SerializedTestCase):
         ref_c2_net.Proto().external_input.extend(["D", "I", "L"])
         ref_c2_net.Proto().external_output.extend(["ref_out"])
 
-        fp16_c2_net = core.Net("test_fp16_c2")
-        fp16_c2_net.SparseLengthsSumFakeFP16AccFP16(["D", "I", "L"], "fp16_out")
+        #fp16_c2_net = core.Net("test_fp16_c2")
+        #fp16_c2_net.SparseLengthsSumFakeFP16AccFP16(["D", "I", "L"], "fp16_out")
 
         input_dict = {}
 
@@ -65,38 +65,41 @@ class SparseLengthsSum8BitFakeNNPIFp16Test(serial.SerializedTestCase):
         num_onnxified_ops = sum(
             1 if op.type == "Onnxifi" else 0 for op in onnxified_net.op
         )
-        print(onnxified_net)
+        #print(onnxified_net)
         np.testing.assert_equal(num_onnxified_ops, 1)
+
 
         workspace.FeedBlob("I", I)
         workspace.FeedBlob("L", L)
 
-        workspace.RunNetOnce(ref_c2_net)
-        ref_c2_out = workspace.FetchBlob("ref_out")
+        #workspace.RunNetOnce(ref_c2_net)
+        #ref_c2_out = workspace.FetchBlob("ref_out")
 
-        workspace.RunNetOnce(fp16_c2_net)
-        fp16_c2_out = workspace.FetchBlob("fp16_out")
+        # workspace.RunNetOnce(fp16_c2_net)
+        # fp16_c2_out = workspace.FetchBlob("fp16_out")
 
-        np.testing.assert_allclose(fp16_c2_out, ref_c2_out, atol=1e-3, rtol=1e-3)
+        #np.testing.assert_allclose(fp16_c2_out, ref_c2_out, atol=1e-3, rtol=1e-3)
 
+        print(I, L)
         workspace.RunNetOnce(onnxified_net)
-        fp16_glow_out = workspace.FetchBlob("glow_out")
+        assert(0)
+        # fp16_glow_out = workspace.FetchBlob("glow_out")
 
-        if not np.allclose(fp16_glow_out, fp16_c2_out):
-            diff = np.abs(fp16_glow_out - fp16_c2_out)
-            print_test_debug_info(
-                "sls",
-                {
-                    "indices": I,
-                    "data": D,
-                    "lengths": L,
-                    "Y_c2": fp16_c2_out,
-                    "Y_glow": fp16_glow_out,
-                    "diff": diff,
-                    "rowwise_diff": diff[:, 0],
-                },
-            )
-            assert 0
+        # if not np.allclose(fp16_glow_out, fp16_c2_out):
+        #     diff = np.abs(fp16_glow_out - fp16_c2_out)
+        #     print_test_debug_info(
+        #         "sls",
+        #         {
+        #             "indices": I,
+        #             "data": D.shape,
+        #             "lengths": L,
+        #             "Y_c2": fp16_c2_out.shape,
+        #             "Y_glow": fp16_glow_out.shape,
+        #             "diff": diff,
+        #             "rowwise_diff": diff[:, 0],
+        #         },
+        #     )
+        #     assert 0
 
     @given(seed=st.integers(0, 65535))
     @settings(deadline=None)
