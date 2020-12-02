@@ -831,18 +831,18 @@ void getrfBatched<c10::complex<float>>(
 
 template <>
 void getriBatched<double>(
-    int n, double** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize, double** dC_array) {
+    int n, double** dA_array, int ldda, int* ipiv_array, double** dC_array, int lddc, int* info_array, int batchsize) {
   auto handle = at::cuda::getCurrentCUDABlasHandle();
   TORCH_CUDABLAS_CHECK(cublasDgetriBatched(
-      handle, n, dA_array, ldda, ipiv_array, dC_array, n, info_array, batchsize));
+      handle, n, dA_array, ldda, ipiv_array, dC_array, lddc, info_array, batchsize));
 }
 
 template <>
 void getriBatched<float>(
-    int n, float** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize, float** dC_array) {
+    int n, float** dA_array, int ldda, int* ipiv_array, float** dC_array, int lddc, int* info_array, int batchsize) {
   auto handle = at::cuda::getCurrentCUDABlasHandle();
   TORCH_CUDABLAS_CHECK(cublasSgetriBatched(
-      handle, n, dA_array, ldda, ipiv_array, dC_array, n, info_array, batchsize));
+      handle, n, dA_array, ldda, ipiv_array, dC_array, lddc, info_array, batchsize));
 }
 
 template <>
@@ -851,9 +851,10 @@ void getriBatched<c10::complex<double>>(
     c10::complex<double>** dA_array,
     int ldda,
     int* ipiv_array,
+    c10::complex<double>** dC_array,
+    int lddc,
     int* info_array,
-    int batchsize,
-    c10::complex<double>** dC_array) {
+    int batchsize) {
   auto handle = at::cuda::getCurrentCUDABlasHandle();
   TORCH_CUDABLAS_CHECK(cublasZgetriBatched(
       handle,
@@ -862,7 +863,7 @@ void getriBatched<c10::complex<double>>(
       ldda,
       ipiv_array,
       reinterpret_cast<cuDoubleComplex**>(dC_array),
-      n,
+      lddc,
       info_array,
       batchsize));
 }
@@ -873,9 +874,10 @@ void getriBatched<c10::complex<float>>(
     c10::complex<float>** dA_array,
     int ldda,
     int* ipiv_array,
+    c10::complex<float>** dC_array,
+    int lddc,
     int* info_array,
-    int batchsize,
-    c10::complex<float>** dC_array) {
+    int batchsize) {
   auto handle = at::cuda::getCurrentCUDABlasHandle();
   TORCH_CUDABLAS_CHECK(cublasCgetriBatched(
       handle,
@@ -884,7 +886,7 @@ void getriBatched<c10::complex<float>>(
       ldda,
       ipiv_array,
       reinterpret_cast<cuComplex**>(dC_array),
-      n,
+      lddc,
       info_array,
       batchsize));
 }

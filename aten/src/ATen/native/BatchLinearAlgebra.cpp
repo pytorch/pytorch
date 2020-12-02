@@ -536,11 +536,8 @@ static Tensor& linalg_inv_out_info(Tensor& result, Tensor& infos_lu, Tensor& inf
 
   at::native::resize_output(infos_lu, {std::max<int64_t>(1, batchCount(input))});
   at::native::resize_output(infos_getri, {std::max<int64_t>(1, batchCount(input))});
-  // if input is empty infos might not get filled; make sure infos doesn't contain garbage then
-  if (input.numel() == 0) {
-    infos_lu.fill_(0);
-    infos_getri.fill_(0);
-  }
+  infos_lu.fill_(0);
+  infos_getri.fill_(0);
 
   result = at::_linalg_inv_out_helper_(result, infos_lu, infos_getri);
   return result;

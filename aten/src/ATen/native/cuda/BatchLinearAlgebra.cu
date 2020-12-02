@@ -1304,12 +1304,12 @@ Tensor& _linalg_inv_out_helper_cuda(Tensor &result, Tensor& infos_lu, Tensor& in
   // result should be in column major order and contain matrices to invert
 #ifdef USE_CUSOLVER
   if ((result.dim() == 2) || (/* result.dim() > 2 && */ batchCount(result) <= 2) || !use_magma_) {
-    return _inverse_out_helper_cuda_lib(result);    // cusolver or cublas
+    return _linalg_inv_out_helper_cuda_lib(result, infos_lu, infos_getri);  // cusolver or cublas
   } else {
-    return _linalg_inv_out_helper_cuda_legacy(result, infos_lu, infos_getri); // magma-cuda
+    return _linalg_inv_out_helper_cuda_legacy(result, infos_lu, infos_getri);  // magma-cuda
   }
 #else
-  return _linalg_inv_out_helper_cuda_legacy(result, infos_lu, infos_getri); // magma-cuda
+  return _linalg_inv_out_helper_cuda_legacy(result, infos_lu, infos_getri);  // magma-cuda
 #endif
   return result;
 }
