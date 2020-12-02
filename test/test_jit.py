@@ -12151,7 +12151,7 @@ dedent """
                 self.x = (0, 1, 2)
 
             def forward(self, a):
-                a =  self.x[-3:3:2]
+                a = self.x[-3:3:2]
                 b = a[::1]
                 return b
 

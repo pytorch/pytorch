@@ -3453,36 +3453,17 @@ struct to_ir {
       args.emplace_back(loc, "end", end);
     }
     if (sliceable->type()->cast<TupleType>()) {
-      if (start && end && step) {
-        return emitTupleSlice(loc, args[0], start, end, step);
-      }
+      std::vector<at::optional<NamedValue>> tuple_args;
+      tuple_args.reserve(3);
 
-      if (start && end) {
-        return emitTupleSlice(loc, args[0], start, end, c10::nullopt);
-      }
+      start ? tuple_args.emplace_back(start)
+            : tuple_args.emplace_back(c10::nullopt);
+      end ? tuple_args.emplace_back(end)
+          : tuple_args.emplace_back(c10::nullopt);
+      step ? tuple_args.emplace_back(step)
+           : tuple_args.emplace_back(c10::nullopt);
 
-      if (start && step) {
-        return emitTupleSlice(loc, args[0], start, c10::nullopt, step);
-      }
-
-      if (end && step) {
-        return emitTupleSlice(loc, args[0], c10::nullopt, end, step);
-      }
-
-      if (start) {
-        return emitTupleSlice(loc, args[0], start, c10::nullopt, c10::nullopt);
-      }
-
-      if (end) {
-        return emitTupleSlice(loc, args[0], c10::nullopt, end, c10::nullopt);
-      }
-
-      if (step) {
-        return emitTupleSlice(loc, args[0], c10::nullopt, c10::nullopt, step);
-      }
-
-      return emitTupleSlice(
-          loc, args[0], c10::nullopt, c10::nullopt, c10::nullopt);
+      return emitTupleSlice(loc, args[0], tuple_args);
     }
 
     if (!step) {
@@ -3846,20 +3827,20 @@ struct to_ir {
   Value* emitTupleSlice(
       const SourceRange& loc,
       const NamedValue& tuple_val,
-      const at::optional<NamedValue>& beg_val,
-      const at::optional<NamedValue>& end_val,
-      const at::optional<NamedValue>& step) {
+      const std::vector<at::optional<NamedValue>>& tuple_args) {
     auto tuple_type = tuple_val.value(*graph)->type()->expect<TupleType>();
     int64_t tuple_len = tuple_type->elements().size();
+    auto beg_val = tuple_args[0];
+    auto end_val = tuple_args[1];
+    auto step = tuple_args[2];
     // first figure out the step sign to know if we want to flip the start or
     // end. For example, if we have x[::-3], the start should be len(x) - 1 and
     // end should be 0
     int64_t step_size = 1;
     if (step) {
       auto val = toIValue(step->value(*graph));
-      if (val->isInt()) {
-        step_size = val->to<int64_t>();
-      }
+      TORCH_CHECK(val->isInt(), "Step size should always be a valid integer");
+      step_size = val->to<int64_t>();
     }
 
     int64_t beg = 0;
@@ -3868,7 +3849,7 @@ struct to_ir {
           loc, tuple_type, getSliceInd(beg_val->value(*graph), loc), true);
     } else {
       // we want to flip the beg if we are slicing in the opposite direction
-      beg = step_size > 0 ? (int64_t)0 : tuple_len;
+      beg = step_size > 0 ? 0 : tuple_len;
     }
 
     int64_t end = 0;
@@ -3877,7 +3858,7 @@ struct to_ir {
           loc, tuple_type, getSliceInd(end_val->value(*graph), loc), true);
     } else {
       // we want to flip the end if we are slicing in the opposite direction
-      end = step_size > 0 ? tuple_len : (int64_t)0;
+      end = step_size > 0 ? tuple_len : 0;
     }
 
     // slicing does not throw out of bounds errors
@@ -3910,19 +3891,25 @@ struct to_ir {
         auto s_tuple_val =
             sv->asTupleValue(val_range, method)->asValue(val_range, method);
         const SliceExpr& slice = SliceExpr(subscript_exprs[0]);
+        std::vector<at::optional<NamedValue>> tuple_args;
+        tuple_args.reserve(3);
         auto begin =
             NamedValue(val_range, "begin", emitExpr(Expr(slice.startOr(0))));
+        tuple_args.emplace_back(begin);
         if (slice.end().present()) {
           auto end =
               NamedValue(val_range, "end", emitExpr(Expr(slice.end().get())));
-          auto tupleSliceValue =
-              emitTupleSlice(val_range, s_tuple_val, begin, end, c10::nullopt);
-          return std::make_shared<SimpleValue>(tupleSliceValue);
+          tuple_args.emplace_back(end);
+
         } else {
-          auto tupleSliceValue = emitTupleSlice(
-              val_range, s_tuple_val, begin, c10::nullopt, c10::nullopt);
-          return std::make_shared<SimpleValue>(tupleSliceValue);
+          tuple_args.emplace_back(c10::nullopt);
         }
+        // pushing step_size to match the tuple_args
+        tuple_args.emplace_back(c10::nullopt);
+
+        auto tupleSliceValue =
+            emitTupleSlice(val_range, s_tuple_val, tuple_args);
+        return std::make_shared<SimpleValue>(tupleSliceValue);
       } else {
         return std::make_shared<SimpleValue>(emitBasicSlice(
             range, sv->asValue(val_range, method), subscript_exprs));

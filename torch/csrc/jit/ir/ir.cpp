@@ -1613,17 +1613,22 @@ Node* Graph::createTupleSlice(
     int64_t beg,
     int64_t end,
     int64_t step_size) {
-  auto unpacked_tuple = insertNode(createTupleUnpack(tup));
-  auto outputs = unpacked_tuple->outputs();
   std::vector<Value*> newValues;
+  TupleTypePtr tt = tup->type()->expect<TupleType>();
 
   if (step_size > 0) {
     for (auto i = beg; i < end; i += step_size) {
-      newValues.push_back(outputs[i]);
+      auto idx = insertConstant(IValue(static_cast<int64_t>(i)));
+      auto tupleIndex =
+          insertNode(createTupleIndex(tup, idx, tt->elements()[i]));
+      newValues.push_back(tupleIndex->output());
     }
   } else {
     for (auto i = beg; i > end; i += step_size) {
-      newValues.push_back(outputs[i]);
+      auto idx = insertConstant(IValue(static_cast<int64_t>(i)));
+      auto tupleIndex =
+          insertNode(createTupleIndex(tup, idx, tt->elements()[i]));
+      newValues.push_back(tupleIndex->output());
     }
   }
   auto n = createTuple(newValues);
