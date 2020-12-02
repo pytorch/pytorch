@@ -1148,10 +1148,10 @@ class TestReductions(TestCase):
                 torch.any(x, dim, out=out)
                 self.assertEqual(expected, out)
             else:
-                with self.assertRaisesRegex(RuntimeError, "all: provided dtype must match dtype of result."):
+                with self.assertRaisesRegex(RuntimeError, "all only supports bool tensor for result, got"):
                     torch.all(x, dim, out=out)
 
-                with self.assertRaisesRegex(RuntimeError, "any: provided dtype must match dtype of result."):
+                with self.assertRaisesRegex(RuntimeError, "any only supports bool tensor for result, got"):
                     torch.any(x, dim, out=out)
 
         def _test_all_any_with_dim_keepdim(x, dim, keepdim):
