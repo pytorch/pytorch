@@ -355,9 +355,9 @@ This function supports ``float``, ``double``, and only on CPU, ``cfloat`` and ``
           For other norms, however, :attr:`input` must be a square matrix or a batch of square matrices,
           and if this requirement is not satisfied a RuntimeError will be thrown.
 
-.. note:: If :attr:`input` is a non-invertible matrix then a tensor containing infinity will be returned.
-          If :attr:`input` is a batch of matrices and one or more of them is not invertible
-          then a RuntimeError will be thrown.
+.. note:: For ``p = {'fro', 'nuc', inf, -inf, 1, -1}`` if :attr:`input` is a non-invertible matrix then
+          a tensor containing infinity will be returned. If :attr:`input` is a batch of matrices and one
+          or more of them is not invertible then a RuntimeError will be thrown.
 
 .. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
 
