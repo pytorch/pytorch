@@ -1710,7 +1710,7 @@ class TestLinalg(TestCase):
             self.assertEqual(matrix_inverse_out, matrix_inverse, atol=0, rtol=0)
 
             # batched matrices: 3+ dimensional tensors, check matrix_inverse same as single-inverse for each matrix
-            if matrix.ndim > 2:
+            if matrix.ndim > 2 and batches[0] != 0:
                 expected_inv_list = []
                 p = int(np.prod(batches))  # use `p` instead of -1, so that the test works for empty input as well
                 for mat in matrix.contiguous().view(p, n, n):
@@ -1726,7 +1726,7 @@ class TestLinalg(TestCase):
 
         for torch_inverse in [torch.inverse, torch.linalg.inv]:
             for batches, n in itertools.product(
-                [[], [1], [4], [2, 3]],
+                [[], [0], [1], [4], [2, 3]],
                 [0, 5, 64]
             ):
                 # large batch size and large matrix size will be tested in test_inverse_many_batches (slow test)
@@ -1796,7 +1796,7 @@ class TestLinalg(TestCase):
     def test_inv_autograd(self, device, dtype):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
-        for batches, n in itertools.product([[], [4], [2, 3]], [0, 5]):
+        for batches, n in itertools.product([[], [0], [4], [2, 3]], [0, 5]):
             # using .to(device) instead of device=device because @xwang233 claims it's faster
             a = random_fullrank_matrix_distinct_singular_value(n, *batches, dtype=dtype).to(device)
             a.requires_grad_()
