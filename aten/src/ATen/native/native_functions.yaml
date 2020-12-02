@@ -2145,13 +2145,6 @@
     CPU: _inverse_helper_cpu
     CUDA: _inverse_helper_cuda
 
-- func: _inverse_out_helper_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: full
-  variants: function
-  dispatch:
-    CPU: _inverse_out_helper_cpu
-    CUDA: _inverse_out_helper_cuda
-
 - func: isclose(Tensor self, Tensor other, float rtol=1e-05, float atol=1e-08, bool equal_nan=False) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -9457,6 +9450,13 @@
   python_module: linalg
   dispatch:
     DefaultBackend: linalg_eigvalsh_out
+
+- func: _linalg_inv_out_helper_(Tensor(a!) self, Tensor(b!) infos_lu, Tensor(c!) infos_getri) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: _linalg_inv_out_helper_cpu
+    CUDA: _linalg_inv_out_helper_cuda
 
 - func: linalg_inv(Tensor self) -> Tensor
   python_module: linalg
