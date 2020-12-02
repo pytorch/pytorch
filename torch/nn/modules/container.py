@@ -228,8 +228,7 @@ class ModuleList(Module):
             self.add_module(str(offset + i), module)
         return self
 
-    def forward(self, *input, **kwargs):
-        raise NotImplementedError()
+    # remove any implementaiton of forward to fall back on Module's _forward_unimplemented
 
 
 class ModuleDict(Module):
@@ -368,8 +367,7 @@ class ModuleDict(Module):
                                      "; 2 is required")
                 self[m[0]] = m[1]
 
-    def forward(self, *input, **kwargs):
-        raise NotImplementedError()
+    # remove any implementaiton of forward to fall back on Module's _forward_unimplemented
 
 
 class ParameterList(Module):
