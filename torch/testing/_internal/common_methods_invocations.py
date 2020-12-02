@@ -21,7 +21,8 @@ from torch.testing._internal.common_utils import \
      random_symmetric_matrix, random_symmetric_psd_matrix,
      random_symmetric_pd_matrix, make_nonzero_det,
      random_fullrank_matrix_distinct_singular_value, set_rng_seed,
-     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY)
+     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
+     torch_to_numpy_dtype_dict)
 
 if TEST_SCIPY:
     import scipy.special
@@ -222,6 +223,33 @@ class UnaryUfuncInfo(OpInfo):
                                         requires_grad=requires_grad)),)
 
 
+def fast_growing_function_wrapper(fn):
+    # NumPy promotes integer types to double while
+    # PyTorch promotes integer to float.
+    #
+    # This affects operators whose outputs grow very fast
+    # eg. sinh, exp, etc.
+    # To mitigate that, we force NumPy to compute with the
+    # dtype that Pytorch uses for those computations.
+    #
+    # Code Example
+    # >>> x = torch.tensor(501.)
+    # >>> x.exp()
+    # tensor(inf)
+    # >>> x = torch.tensor(501., dtype=torch.double)
+    # >>> x.exp()
+    # tensor(3.8154e+217, dtype=torch.float64)
+    def is_integral(dtype):
+        return dtype in [np.uint8, np.int8, np.int16, np.int32, np.int64]
+
+    np_dtype = torch_to_numpy_dtype_dict[torch.float32]
+
+    def wrapped_fn(x):
+        if is_integral(x.dtype):
+            return fn(x, dtype=np_dtype)
+        return fn(x)
+
+    return wrapped_fn
 
 # Operator database (sorted alphabetically)
 op_db = [
@@ -409,7 +437,7 @@ op_db = [
                                 dtypes=[torch.float], active_if=TEST_WITH_ROCM),
                    )),
     UnaryUfuncInfo('sinh',
-                   ref=np.sinh,
+                   ref=fast_growing_function_wrapper(np.sinh),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
                    promotes_integers_to_float=True,

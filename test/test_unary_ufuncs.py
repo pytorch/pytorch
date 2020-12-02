@@ -261,10 +261,6 @@ class TestUnaryUfuncs(TestCase):
     @suppress_warnings
     @ops(unary_ufuncs)
     def test_reference_numerics(self, device, dtype, op):
-        def is_integral(dtype):
-            return dtype in torch.testing.get_all_int_dtypes()
-        default_dtype = torch.get_default_dtype()
-
         include_extremals = (op.handles_complex_extremals if
                              dtype in (torch.cfloat, torch.cdouble) else op.handles_extremals)
 
@@ -274,27 +270,9 @@ class TestUnaryUfuncs(TestCase):
                                            include_extremal_values=include_extremals)
         for t in tensors:
             if dtype is torch.bfloat16:
-                a = t.cpu().to(default_dtype).numpy()
+                a = t.cpu().to(torch.float32).numpy()
             else:
-                # NumPy promotes integer types to double while
-                # PyTorch promotes integer to float.
-                #
-                # This affects operators whose outputs grow very fast
-                # eg. sinh, exp, etc.
-                # To mitigate that, we force NumPy to compute with the
-                # dtype that Pytorch uses for those computations.
-                #
-                # Code Example
-                # >>> x = torch.tensor(501.)
-                # >>> x.exp()
-                # tensor(inf)
-                # >>> x = torch.tensor(501., dtype=torch.double)
-                # >>> x.exp()
-                # tensor(3.8154e+217, dtype=torch.float64)
-                if op.output_grows_fast and is_integral(dtype):
-                    a = t.cpu().to(default_dtype).numpy()
-                else:
-                    a = t.cpu().numpy()
+                a = t.cpu().numpy()
 
             actual = op(t)
             expected = op.ref(a)
