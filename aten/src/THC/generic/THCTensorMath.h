@@ -4,7 +4,6 @@
 
 THC_API void THCTensor_(fill)(THCState *state, THCTensor *self, scalar_t value);
 THC_API void THCTensor_(zero)(THCState *state, THCTensor *self);
-THC_API void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor, THCTensor *self);
 THC_API ptrdiff_t THCTensor_(numel)(THCState *state, THCTensor *t);
 
 

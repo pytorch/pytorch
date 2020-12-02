@@ -113,8 +113,8 @@
 #define TORCH_HIP_API C10_IMPORT
 #endif
 
-// Enums only need to be exported on windows
-#ifdef _WIN32
+// Enums only need to be exported on windows for non-CUDA files
+#if defined(_WIN32) && defined(__CUDACC__)
 #define C10_API_ENUM C10_API
 #else
 #define C10_API_ENUM

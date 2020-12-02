@@ -217,7 +217,9 @@ Library& Library::_fallback(CppFunction&& f) & {
     "this fallback function globally, please define a separate block:\n\n",
     "    TORCH_LIBRARY_IMPL(_, ", *dispatch_key, ", m) { m.fallback(...); }\n\n",
     ERROR_CONTEXT);
-  for (auto k : c10::getRuntimeDispatchKeys(*dispatch_key)) {
+  // Note if dispatch_key is DispatchKey::Undefined, it'll be ignored here since Undefined
+  // isn't a runtime key, you shouldn't register anything to it at all.
+  for (auto k : c10::getRuntimeDispatchKeySet(*dispatch_key)) {
     registrars_.emplace_back(
       c10::Dispatcher::singleton().registerFallback(
         k,

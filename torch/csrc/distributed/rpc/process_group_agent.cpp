@@ -8,12 +8,6 @@
 namespace torch {
 namespace distributed {
 namespace rpc {
-const std::string kRPCTimeoutErrorStr =
-    "RPC ran for more than {} milliseconds and timed out.";
-
-namespace {
-constexpr auto kSecToMsConversion = 1000;
-}
 
 //////////////////////////  MessageCounter  /////////////////////////////////
 
@@ -96,7 +90,7 @@ void ProcessGroupAgent::collectNames() {
 
 ProcessGroupAgent::ProcessGroupAgent(
     std::string workerName,
-    std::shared_ptr<c10d::ProcessGroup> pg,
+    c10::intrusive_ptr<::c10d::ProcessGroup> pg,
     int numSendRecvThreads,
     std::chrono::milliseconds rpcTimeout,
     std::unique_ptr<RequestCallback> cb)
@@ -159,6 +153,8 @@ const WorkerInfo& ProcessGroupAgent::getWorkerInfo(
 }
 
 const WorkerInfo& ProcessGroupAgent::getWorkerInfo(worker_id_t id) const {
+  TORCH_CHECK(
+      id >= 0 && id < allWorkerInfo_.size(), "Invalid destination: ", id);
   return allWorkerInfo_[id];
 }
 
@@ -402,7 +398,7 @@ void ProcessGroupAgent::handleSend(const SendWork& work) {
 
   // ProcessGroup is not thread-safe when sending with the same tag,
   // hence the lock
-  std::vector<std::shared_ptr<c10d::ProcessGroup::Work>> pendingSends;
+  std::vector<c10::intrusive_ptr<c10d::ProcessGroup::Work>> pendingSends;
   const auto dst = work.to_.id_;
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
@@ -802,7 +798,7 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
 
     for (const auto& timedOutFuture : timedOutFutures) {
       auto errStr =
-          fmt::format(kRPCTimeoutErrorStr, timedOutFuture.timeout_.count());
+          fmt::format(kRpcTimeoutErrorStr, timedOutFuture.timeout_.count());
       auto err = makeRPCError(errStr, RPCErrorType::TIMEOUT);
 
       if (!timedOutFuture.future_->hasError()) {

@@ -156,9 +156,11 @@ struct CAFFE2_API TensorIterator {
 
   void foreach_reduced_elt(loop_subiter_t loop, bool parallelize=true);
 
+  static TensorIterator binary_float_op(Tensor& out, const Tensor& a, const Tensor& b);
   static TensorIterator binary_op(Tensor& out, const Tensor& a, const Tensor& b);
   static TensorIterator comparison_op(Tensor& out, const Tensor& a, const Tensor& b);
   static TensorIterator unary_op(Tensor& out, const Tensor& a);
+  static TensorIterator unary_float_op(Tensor& out, const Tensor& a);
   static TensorIterator nullary_op(Tensor& out);
   static TensorIterator reduce_op(Tensor& out, const Tensor& a);
   static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
@@ -304,7 +306,7 @@ protected:
   void compute_mem_overlaps(const TensorIteratorConfig&);
   void compute_shape(const TensorIteratorConfig&);
   void compute_strides(const TensorIteratorConfig&);
-  void reorder_dimensions(const TensorIteratorConfig&);
+  void reorder_dimensions();
   void permute_dimensions(IntArrayRef perm);
   void compute_types(const TensorIteratorConfig&);
   ScalarType compute_common_dtype();
@@ -471,7 +473,7 @@ public:
   // Bypass output dtype/device computation and fix the dtype/device as specified here.
   TensorIteratorConfig& declare_static_dtype_and_device(ScalarType dtype, Device device);
   TensorIteratorConfig& declare_static_shape(IntArrayRef shape);
-  TensorIteratorConfig& declare_static_shape(IntArrayRef shape, const int64_t squash_dim);
+  TensorIteratorConfig& declare_static_shape(IntArrayRef shape, IntArrayRef squash_dims);
 
   // It would be better if this was && qualified, but this would be at the cost
   // of a lot of boilerplate above

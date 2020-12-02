@@ -3,6 +3,7 @@
 #include <limits>
 #include <ATen/ATen.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/WrapDimUtilsMulti.h>
 
 namespace at { namespace native {
 
@@ -124,15 +125,11 @@ static inline Tensor integer_upcast(const Tensor& self, optional<ScalarType> dty
 using DimMask = TensorIterator::DimMask;
 
 static DimMask make_dim_mask(IntArrayRef dims, int64_t ndim) {
-  auto mask = DimMask();
+  DimMask mask;
   if (dims.empty()) {
-    mask.flip();
+    mask = DimMask().flip();
   } else {
-    for (int64_t dim : dims) {
-      int64_t pos_dim = maybe_wrap_dim(dim, ndim);
-      TORCH_CHECK(pos_dim < 64, "PyTorch doesn't support reduction operations for dim>=64");
-      mask.set(pos_dim);
-    }
+    mask = at::dim_list_to_bitset(dims, ndim);
   }
   return mask;
 }

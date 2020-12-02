@@ -19,6 +19,14 @@ void fallthrough_kernel(OperatorKernel*, const OperatorHandle&, Stack*) {
     "let us know in the bug tracker.");
 }
 
+void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHandle& op, Stack*) {
+  TORCH_INTERNAL_ASSERT(0,
+    op.operator_name(), " has kernels registered to both Math and a backend mapped to AutogradOther. "
+    "This makes the backend kernel unreachable (see Note [Ambiguity in AutogradOther kernel]). "
+    "If it's intended to override Math kernel behavior, please open an issue to request a dedicated "
+    "Autograd dispatch key for the backend.");
+}
+
 void named_not_supported_kernel(OperatorKernel*, const OperatorHandle& op, Stack*) {
   // DO NOT LOOK AT STACK, YOU HAVE SHORT CIRCUITED BOXING
   // See Note [named_not_supported_kernel]

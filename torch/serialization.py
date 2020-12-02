@@ -481,16 +481,14 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
     for key in sorted(serialized_storages.keys()):
         name = f'data/{key}'
         storage = serialized_storages[key]
-        if storage.device.type == 'cpu':
-            # If it's on the CPU we can directly copy it into the zip file
-            num_bytes = storage.size() * storage.element_size()
-            zip_file.write_record(name, storage.data_ptr(), num_bytes)
-        else:
-            # Copy to a buffer, then serialize that
-            buf = io.BytesIO()
-            storage._write_file(buf, _should_read_directly(buf))
-            buf_value = buf.getvalue()
-            zip_file.write_record(name, buf_value, len(buf_value))
+        # given that we copy things around anyway, we might use storage.cpu()
+        # this means to that to get tensors serialized, you need to implement
+        # .cpu() on the underlying Storage
+        if storage.device.type != 'cpu':
+            storage = storage.cpu()
+        # Now that it is on the CPU we can directly copy it into the zip file
+        num_bytes = storage.size() * storage.element_size()
+        zip_file.write_record(name, storage.data_ptr(), num_bytes)
 
 
 def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
@@ -821,7 +819,7 @@ def _get_restore_location(map_location):
     return restore_location
 
 
-def _load(zip_file, map_location, pickle_module, **pickle_load_args):
+def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickle_load_args):
     restore_location = _get_restore_location(map_location)
 
     loaded_storages = {}
@@ -847,7 +845,7 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
         return storage
 
     # Load the data (which may in turn use `persistent_load` to load tensors)
-    data_file = io.BytesIO(zip_file.get_record('data.pkl'))
+    data_file = io.BytesIO(zip_file.get_record(pickle_file))
     unpickler = pickle_module.Unpickler(data_file, **pickle_load_args)
     unpickler.persistent_load = persistent_load
     result = unpickler.load()

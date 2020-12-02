@@ -1,9 +1,7 @@
 #include "torch/csrc/autograd/VariableTypeUtils.h"
 #include "torch/csrc/autograd/FunctionsManual.h"
 
-#include <ATen/TypeDefault.h>
 #include <torch/library.h>
-#include <ATen/core/op_registration/hacky_wrapper_for_legacy_signatures.h>
 
 // ${generated_comment}
 

@@ -147,32 +147,33 @@ static OpSchema::Cost CostInferenceForRowWiseSparseAdagrad(
 
   uint64_t n = nElemFromDim(indices);
   uint64_t grad_size = nElemFromDim(grad);
-  auto block_size = grad_size / n;
-
   OpSchema::Cost c;
-  if (block_size == 1) {
-    // +2: applying weight decay and add to grads
-    // +2: updading moments
-    // +5: updating params
-    c.flops = n * 9;
-    c.bytes_written =
-        n * (sizeof(param.data_type()) + sizeof(moment.data_type()));
-    c.bytes_read = c.bytes_written +
-        n *
-            (sizeof(grad.data_type()) + sizeof(indices.data_type()) +
-             sizeof(lr.data_type()));
-  } else {
-    // 5 per block (not counting index transforms)
-    // 8 for each value of a block
-    c.flops = n * (5 + (block_size * 8));
-    c.bytes_written =
-        n * sizeof(moment.data_type()) + n * block_size * (param.data_type());
 
-    c.bytes_read = c.bytes_written + n * (sizeof(lr.data_type())) +
-        2 * n * block_size *
-            (sizeof(grad.data_type()) + sizeof(param.data_type()));
+  if (n > 0) {
+    auto block_size = grad_size / n;
+    if (block_size == 1) {
+      // +2: applying weight decay and add to grads
+      // +2: updading moments
+      // +5: updating params
+      c.flops = n * 9;
+      c.bytes_written =
+          n * (sizeof(param.data_type()) + sizeof(moment.data_type()));
+      c.bytes_read = c.bytes_written +
+          n *
+              (sizeof(grad.data_type()) + sizeof(indices.data_type()) +
+               sizeof(lr.data_type()));
+    } else {
+      // 5 per block (not counting index transforms)
+      // 8 for each value of a block
+      c.flops = n * (5 + (block_size * 8));
+      c.bytes_written =
+          n * sizeof(moment.data_type()) + n * block_size * (param.data_type());
+
+      c.bytes_read = c.bytes_written + n * (sizeof(lr.data_type())) +
+          2 * n * block_size *
+              (sizeof(grad.data_type()) + sizeof(param.data_type()));
+    }
   }
-
   return c;
 }
 

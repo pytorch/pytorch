@@ -5,6 +5,7 @@ from xml.dom import minidom
 from glob import glob
 import json
 import os
+import statistics
 import time
 
 import datetime
@@ -42,21 +43,19 @@ class TestSuite:
         self.skipped_count += 1 if test_case.skipped else 0
         self.errored_count += 1 if test_case.errored else 0
 
-    def print_report(self):
+    def print_report(self, num_longest=3):
         sorted_tests = sorted(self.test_cases, key=lambda x: x.time)
         test_count = len(sorted_tests)
         print(f"class {self.name}:")
         print(f"    tests: {test_count} failed: {self.failed_count} skipped: {self.skipped_count} errored: {self.errored_count}")
         print(f"    run_time: {self.total_time:.2f} seconds")
         print(f"    avg_time: {self.total_time/test_count:.2f} seconds")
-        if test_count > 2:
-            print(f"    mean_time: {sorted_tests[test_count>>1].time:.2f} seconds")
-            print("    Three longest tests:")
-            for idx in [-1, -2, -3]:
-                print(f"        {sorted_tests[idx].name} time: {sorted_tests[idx].time:.2f} seconds")
-        elif test_count > 0:
-            print("    Longest test:")
-            print(f"        {sorted_tests[-1].name} time: {sorted_tests[-1].time:.2f} seconds")
+        if test_count >= 2:
+            print(f"    median_time: {statistics.median(x.time for x in sorted_tests):.2f} seconds")
+        sorted_tests = sorted_tests[-num_longest:]
+        print(f"    {len(sorted_tests)} longest tests:")
+        for test in reversed(sorted_tests):
+            print(f"        {test.name} time: {test.time:.2f} seconds")
         print("")
 
 
@@ -84,6 +83,8 @@ def build_message(test_case):
             "build_tag": os.environ.get("CIRCLE_TAG"),
             "build_sha1": os.environ.get("CIRCLE_SHA1"),
             "build_branch": os.environ.get("CIRCLE_BRANCH"),
+            "build_job": os.environ.get("CIRCLE_JOB"),
+            "build_workflow_id": os.environ.get("CIRCLE_WORKFLOW_ID"),
             "test_suite_name": test_case.class_name,
             "test_case_name": test_case.name,
         },
@@ -122,18 +123,57 @@ def send_report(reports):
             ),
         },
     )
-    print("Scribe report status: {}".format(r.text))
     r.raise_for_status()
 
-if __name__ == '__main__':
-    import sys
-    if len(sys.argv) == 1:
-        print("Please specify test report folder")
-        sys.exit(0)
+def positive_integer(value):
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError(f"{value} is not a natural number")
+    return parsed
 
-    reports = parse_reports(sys.argv[1])
+def positive_float(value):
+    parsed = float(value)
+    if parsed <= 0.0:
+        raise argparse.ArgumentTypeError(f"{value} is not a positive rational number")
+    return parsed
+
+if __name__ == '__main__':
+    import argparse
+    import sys
+    parser = argparse.ArgumentParser(
+        "Print statistics from test XML output.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--longest-of-class",
+        type=positive_integer,
+        default=3,
+        metavar="N",
+        help="how many longest tests to show for each class",
+    )
+    parser.add_argument(
+        "--class-print-threshold",
+        type=positive_float,
+        default=1.0,
+        metavar="N",
+        help="Minimal total time to warrant class report",
+    )
+    parser.add_argument(
+        "--longest-of-run",
+        type=positive_integer,
+        default=10,
+        metavar="N",
+        help="how many longest tests to show from the entire run",
+    )
+    parser.add_argument(
+        "folder",
+        help="test report folder",
+    )
+    args = parser.parse_args()
+
+    reports = parse_reports(args.folder)
     if len(reports) == 0:
-        print(f"No test reports found in {sys.argv[1]}")
+        print(f"No test reports found in {args.folder}")
         sys.exit(0)
 
     send_report(reports)
@@ -142,13 +182,13 @@ if __name__ == '__main__':
     total_time = 0
     for name in sorted(reports.keys()):
         test_suite = reports[name]
-        test_suite.print_report()
+        if test_suite.total_time >= args.class_print_threshold:
+            test_suite.print_report(args.longest_of_class)
         total_time += test_suite.total_time
         longest_tests.extend(test_suite.test_cases)
-        if len(longest_tests) > 10:
-            longest_tests = sorted(longest_tests, key=lambda x: x.time)[-10:]
+    longest_tests = sorted(longest_tests, key=lambda x: x.time)[-args.longest_of_run:]
 
     print(f"Total runtime is {datetime.timedelta(seconds=int(total_time))}")
-    print("Ten longest tests of entire run:")
+    print(f"{len(longest_tests)} longest tests of entire run:")
     for test_case in reversed(longest_tests):
         print(f"    {test_case.class_name}.{test_case.name}  time: {test_case.time:.2f} seconds")

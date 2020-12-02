@@ -199,7 +199,9 @@ PyObject* THCPModule_nccl_broadcast(PyObject* self, PyObject* args) {
         nullptr,
         "nccl_broadcast",
         1,
-        "(sequence[Tensor] inputs, int root)");
+        "(sequence[Tensor] inputs, int root"
+        " sequence[torch.cuda.Stream] streams,"
+        " sequence[torch.cuda.nccl.Communicator] comms)");
     return nullptr;
   }
 
@@ -228,7 +230,9 @@ PyObject* THCPModule_nccl_all_gather(PyObject* self, PyObject* args) {
         nullptr,
         "nccl_all_gather",
         1,
-        "(sequence[Tensor] inputs, sequence[Tensor] outputs");
+        "(sequence[Tensor] inputs, sequence[Tensor] outputs"
+        " sequence[torch.cuda.Stream] streams,"
+        " sequence[torch.cuda.nccl.Communicator] comms)");
     return nullptr;
   }
 
@@ -258,7 +262,9 @@ PyObject* THCPModule_nccl_reduce_scatter(PyObject* self, PyObject* args) {
         nullptr,
         "nccl_reduce_scatter",
         1,
-        "(sequence[Tensor] inputs, sequence[Tensor] outputs, int op");
+        "(sequence[Tensor] inputs, sequence[Tensor] outputs, int op"
+        " sequence[torch.cuda.Stream] streams,"
+        " sequence[torch.cuda.nccl.Communicator] comms)");
     return nullptr;
   }
 

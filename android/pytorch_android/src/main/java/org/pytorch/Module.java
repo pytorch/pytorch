@@ -11,16 +11,28 @@ public class Module {
   private INativePeer mNativePeer;
 
   /**
-   * Loads a serialized TorchScript module from the specified path on the disk.
+   * Loads a serialized TorchScript module from the specified path on the disk to run on specified
+   * device.
+   *
+   * @param modelPath path to file that contains the serialized TorchScript module.
+   * @param device {@link org.pytorch.Device} to use for running specified module.
+   * @return new {@link org.pytorch.Module} object which owns torch::jit::Module.
+   */
+  public static Module load(final String modelPath, final Device device) {
+    if (!NativeLoader.isInitialized()) {
+      NativeLoader.init(new SystemDelegate());
+    }
+    return new Module(new NativePeer(modelPath, device));
+  }
+
+  /**
+   * Loads a serialized TorchScript module from the specified path on the disk to run on CPU.
    *
    * @param modelPath path to file that contains the serialized TorchScript module.
    * @return new {@link org.pytorch.Module} object which owns torch::jit::Module.
    */
   public static Module load(final String modelPath) {
-    if (!NativeLoader.isInitialized()) {
-      NativeLoader.init(new SystemDelegate());
-    }
-    return new Module(new NativePeer(modelPath));
+    return load(modelPath, Device.CPU);
   }
 
   Module(INativePeer nativePeer) {

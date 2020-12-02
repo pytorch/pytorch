@@ -15,6 +15,8 @@ namespace at {
 namespace native {
 
 DEFINE_DISPATCH(qclamp_stub);
+DEFINE_DISPATCH(qclamp_min_stub);
+DEFINE_DISPATCH(qclamp_max_stub);
 
 namespace {
 
@@ -84,14 +86,26 @@ Tensor quantized_clamp_impl(
   Tensor qy;
   if (min && max) {
 #ifdef USE_PYTORCH_QNNPACK
-    if (at::globalContext().qEngine() == at::QEngine::QNNPACK && qx.scalar_type() == kQUInt8) {
+    if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
+        qx.scalar_type() == kQUInt8) {
       return qnnpack_clamp(qx, *min, *max);
     }
 #endif
     qclamp_stub(qx.device().type(), qx, *min, *max, qy);
   } else {
-    TORCH_CHECK(
-        false, "Both min and max should be specified for quantized clamp!");
+#ifdef USE_PYTORCH_QNNPACK
+    if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
+      TORCH_CHECK(
+          false, "Both min and max should be specified for quantized clamp!");
+    }
+#endif
+    if (max) {
+      qclamp_max_stub(qx.device().type(), qx, *max, qy);
+    } else if (min) {
+      qclamp_min_stub(qx.device().type(), qx, *min, qy);
+    } else {
+      TORCH_CHECK(false, "At least one of 'min' or 'max' must not be None");
+    }
   }
   return qy;
 }
@@ -140,7 +154,7 @@ Tensor& hardtanh_quantized_cpu_(
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("clamp", TORCH_FN(clamp_quantized_cpu));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::clamp"), TORCH_FN(clamp_quantized_cpu));
 }
 
 } // namespace native

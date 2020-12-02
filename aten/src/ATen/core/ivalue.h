@@ -17,8 +17,10 @@ struct Module;
 } // namespace jit
 } // namespace torch
 namespace c10 {
-template<class Key, class Value> class Dict;
-template<class T> class List;
+template <class Key, class Value>
+class Dict;
+template <class T>
+class List;
 struct IValue;
 struct ClassType;
 struct Type;
@@ -30,6 +32,16 @@ using ClassTypePtr = std::shared_ptr<ClassType>;
 
 TORCH_API bool _fastEqualsForContainer(const IValue& lhs, const IValue& rhs);
 
+TORCH_API torch::jit::Function* checkObjectSortSchema(
+    const c10::ClassTypePtr& t,
+    std::stringstream& why_not);
+
+// A comparator that checks ordering of two IValues of same type.
+typedef std::function<bool(const IValue& a, const IValue& b)> IValueComparator;
+
+TORCH_API IValueComparator getLessThanComparator(const IValue& v);
+TORCH_API IValueComparator getGreaterThanComparator(const IValue& v);
+
 namespace ivalue {
 struct Tuple;
 struct Future;
@@ -38,18 +50,18 @@ struct GenericDict;
 struct Object;
 struct PyObjectHolder;
 struct EnumHolder;
-}
+} // namespace ivalue
 
 // This is an owning wrapper for a c10::optional<std::vector<T>>
 // that can be implicitly converted to a (non-owning) optional<ArrayRef<T>>.
 // Its purpose is to be used in generated code to keep the vector alive
 // either until the end of a statement (as a temporary), or as a saved arg
 // in autograd.
-template<typename T>
+template <typename T>
 struct OptionalArray {
   c10::optional<std::vector<T>> list;
 
-  OptionalArray() {};
+  OptionalArray(){}
   OptionalArray(std::vector<T> val) : list(std::move(val)) {}
 
   // Used when saving an argument for the backwards pass.
@@ -68,6 +80,19 @@ struct OptionalArray {
     }
     return *list;
   }
+};
+
+// Capsule is an internal implementation detail of custom C++ classes. We
+// define it as an owning wrapper for
+// c10::intrusive_ptr<torch::CustomClassHolder> This wrapper is here to serve as
+// an abstraction of the type erased custom class object pointer. It also allow
+// pybind11 to treat this as a standalone class to register as a separate type
+// caster, instead of a custom pointer holder which the pointer holder type
+// caster try to "unwrap" it automatically.
+struct Capsule {
+  c10::intrusive_ptr<torch::CustomClassHolder> obj_ptr;
+  explicit Capsule(c10::intrusive_ptr<torch::CustomClassHolder> ptr)
+      : obj_ptr(std::move(ptr)) {}
 };
 
 // IValue is the generic tagged union used by the interpreter to hold
@@ -90,6 +115,7 @@ struct OptionalArray {
   _(GenericDict)             \
   _(Future)                  \
   _(Device)                  \
+  _(Stream)                  \
   _(Object)                  \
   _(PyObject)                \
   _(Uninitialized)           \
@@ -97,18 +123,17 @@ struct OptionalArray {
   _(RRef)                    \
   _(Quantizer)               \
   _(Generator)               \
-  _(Enum)                    \
+  _(Enum)
 
 // [doxygen private]
 // These methods are not actually private but we don't want to document them, so
 // they are marked `@private`, which hides them on the doxygen documentation for
 // this page.
 
-
 /// IValue (Interpreter Value) is a tagged union over the types supported by the
-/// TorchScript interpreter. IValues contain their values as an `IValue::Payload`,
-/// which holds primitive types (`int64_t`, `bool`, `double`, `Device`), as
-/// values and all other types as a `c10::intrusive_ptr`.
+/// TorchScript interpreter. IValues contain their values as an
+/// `IValue::Payload`, which holds primitive types (`int64_t`, `bool`, `double`,
+/// `Device`), as values and all other types as a `c10::intrusive_ptr`.
 ///
 /// IValues are used as inputs to and outputs from the TorchScript interpreter.
 /// To retrieve the value contained within an IValue, use the `.toX()` methods,
@@ -160,18 +185,20 @@ struct CAFFE2_API IValue final {
   /**
    * Equality comparison. The semantics are the same as Python's `==`:
    * 1. Numerical types are compared by value.
-   * 2. Tensors compute element-wise equality, returning a BoolTensor (see: `torch.eq()`)
+   * 2. Tensors compute element-wise equality, returning a BoolTensor (see:
+   * `torch.eq()`)
    * 3. Strings are compared by value.
    * 4. Sequence types (list, tuple) are compared lexicographically by
    *    comparing their elements. Different sequence types never compare equal.
    * 5. Mappings (dict) must have equal (key, value) pairs.
-   * 6. If not listed above, the default behavior for is to test identity equality
-   *    (e.g. pointer equality).
+   * 6. If not listed above, the default behavior for is to test identity
+   * equality (e.g. pointer equality).
    *
    * Why does this return an IValue instead of a bool? Because in PyTorch,
    * `tensor1 == tensor2` returns a `BoolTensor`, not a bool.
    *
-   * NOTE: we (like Python) assume that identity equality implies value equality for efficiency.
+   * NOTE: we (like Python) assume that identity equality implies value equality
+   * for efficiency.
    * TODO: need to support customizing equality
    */
   IValue equals(const IValue& rhs) const;
@@ -192,6 +219,24 @@ struct CAFFE2_API IValue final {
    */
   bool is(const IValue& rhs) const;
 
+   /**
+   * Hashing for IValues. Returns an IValue-boxed int.
+   *
+   * Some notes:
+   * - Like eager, Tensors are hashed by looking at the pointer. This is not
+   *   strictly correct because two value-equal tensors with different tensor
+   *   pointers will hash differently, but we choose to reproduce the eager
+   *   semantics.
+   * - Hashing is not defined on all built-in IValue types (e.g. list and
+   *   dict), following Python. Calling `hash()` on these types will throw.
+   */
+  IValue hash() const {
+    return (int64_t)IValue::hash(*this);
+  }
+  // This is defined because `c10::hash` dispatches to a function of this
+  // signature. See the member function `hash()`.
+  static size_t hash(const IValue& iv);
+
   /**
    * @private [doxygen private]
    * [container equality]
@@ -199,10 +244,13 @@ struct CAFFE2_API IValue final {
    * identity equal themselves, for efficiency reasons. We primarily have this
    * for consistency, because Python does the same thing. This actually
    * provokes user-visible changes in behavior due to quirks in torch:
-   *      [tensor1] == [tensor1] -> True (because container equality will first compare identity)
-   *      [tensor1] == [tensor1_copy] -> RuntimeError: bool value of Tensor is ambiguous
+   *      [tensor1] == [tensor1] -> True (because container equality will first
+   * compare identity) [tensor1] == [tensor1_copy] -> RuntimeError: bool value
+   * of Tensor is ambiguous
    */
-  TORCH_API friend bool _fastEqualsForContainer(const IValue& lhs, const IValue& rhs);
+  TORCH_API friend bool _fastEqualsForContainer(
+      const IValue& lhs,
+      const IValue& rhs);
 
   /// @private [doxygen private]
   bool isAliasOf(const IValue& rhs) const {
@@ -239,7 +287,7 @@ struct CAFFE2_API IValue final {
   }
 
   /// @private [doxygen private]
-  void swap(IValue & rhs) noexcept {
+  void swap(IValue& rhs) noexcept {
     std::swap(payload, rhs.payload);
     std::swap(is_intrusive_ptr, rhs.is_intrusive_ptr);
     std::swap(tag, rhs.tag);
@@ -249,8 +297,7 @@ struct CAFFE2_API IValue final {
   // While some of these accessors could be generated through templates,
   // we prefer to write them manually for clarity
 
-  IValue(at::Tensor t)
-  : tag(Tag::Tensor), is_intrusive_ptr(t.defined())  {
+  IValue(at::Tensor t) : tag(Tag::Tensor), is_intrusive_ptr(t.defined()) {
     // Note: the undefined tensor is not refcounted, so while it
     // is tagged as a tensor, is_intrusive_ptr is set to false.
     // This is not an optional optimization: our incref call
@@ -258,9 +305,11 @@ struct CAFFE2_API IValue final {
     // undefined tensor.
     payload.as_intrusive_ptr = t.unsafeReleaseTensorImpl();
   }
-  bool isTensor() const { return Tag::Tensor == tag; }
+  bool isTensor() const {
+    return Tag::Tensor == tag;
+  }
   at::Tensor toTensor() &&;
-  at::Tensor toTensor() const &;
+  at::Tensor toTensor() const&;
   at::TensorImpl* unsafeToTensorImpl() const {
     return static_cast<at::TensorImpl*>(payload.as_intrusive_ptr);
   }
@@ -274,7 +323,7 @@ struct CAFFE2_API IValue final {
 
   /// @private [doxygen private]
   IValue(intrusive_ptr<caffe2::Blob> blob)
-  : tag(Tag::Blob), is_intrusive_ptr(true) {
+      : tag(Tag::Blob), is_intrusive_ptr(true) {
     // TODO (after Tensor merge) If we pass in a Blob holding a Tensor, extract
     // and store it as a Tensor instead.
     payload.as_intrusive_ptr = blob.release();
@@ -289,26 +338,30 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<caffe2::Blob> toBlob() &&;
 
   /// @private [doxygen private]
-  c10::intrusive_ptr<caffe2::Blob> toBlob() const &;
+  c10::intrusive_ptr<caffe2::Blob> toBlob() const&;
 
-  // Capsule. Capsule is an internal implementation detail
-  // of custom C++ classes. No new callsites of these APIs should
+  // Capsule. No new callsites of these APIs should
   // be introduced.
-  static inline IValue make_capsule(intrusive_ptr<torch::CustomClassHolder> blob);
+  static inline IValue make_capsule(
+      intrusive_ptr<torch::CustomClassHolder> blob);
   bool isCapsule() const {
     return Tag::Capsule == tag;
   }
   c10::intrusive_ptr<torch::CustomClassHolder> toCapsule() &&;
-  c10::intrusive_ptr<torch::CustomClassHolder> toCapsule() const &;
+  c10::intrusive_ptr<torch::CustomClassHolder> toCapsule() const&;
 
   // Custom C++ classes
-  template <typename T, std::enable_if_t<std::is_base_of<torch::CustomClassHolder, T>::value, int> = 0>
+  template <
+      typename T,
+      std::enable_if_t<
+          std::is_base_of<torch::CustomClassHolder, T>::value,
+          int> = 0>
   IValue(intrusive_ptr<T> custom_class);
   bool isCustomClass() const;
   template <typename T>
   c10::intrusive_ptr<T> toCustomClass() &&;
   template <typename T>
-  c10::intrusive_ptr<T> toCustomClass() const &;
+  c10::intrusive_ptr<T> toCustomClass() const&;
 
   // Tuple
   IValue(c10::intrusive_ptr<ivalue::Tuple> v);
@@ -318,20 +371,22 @@ struct CAFFE2_API IValue final {
       std::enable_if_t<
           !guts::disjunction<
               std::is_lvalue_reference<Args>...,
-              guts::negation<std::is_constructible<IValue, Args>>...>::
-              value,
+              guts::negation<std::is_constructible<IValue, Args>>...>::value,
           std::nullptr_t> = nullptr>
   IValue(const std::tuple<Args...>& t);
-  bool isTuple() const { return Tag::Tuple == tag; }
+  bool isTuple() const {
+    return Tag::Tuple == tag;
+  }
   c10::intrusive_ptr<ivalue::Tuple> toTuple() &&;
-  c10::intrusive_ptr<ivalue::Tuple> toTuple() const &;
+  c10::intrusive_ptr<ivalue::Tuple> toTuple() const&;
 
   // Double
-  IValue(double d)
-  : tag(Tag::Double), is_intrusive_ptr(false) {
+  IValue(double d) : tag(Tag::Double), is_intrusive_ptr(false) {
     payload.as_double = d;
   }
-  bool isDouble() const { return Tag::Double == tag; }
+  bool isDouble() const {
+    return Tag::Double == tag;
+  }
   double toDouble() const {
     AT_ASSERT(isDouble());
     return payload.as_double;
@@ -339,33 +394,39 @@ struct CAFFE2_API IValue final {
 
   // Future
   IValue(c10::intrusive_ptr<ivalue::Future> v);
-  bool isFuture() const { return Tag::Future == tag; }
+  bool isFuture() const {
+    return Tag::Future == tag;
+  }
   c10::intrusive_ptr<ivalue::Future> toFuture() &&;
-  c10::intrusive_ptr<ivalue::Future> toFuture() const &;
+  c10::intrusive_ptr<ivalue::Future> toFuture() const&;
 
   // RRef
   IValue(c10::intrusive_ptr<c10::RRefInterface> v);
-  bool isRRef() const { return Tag::RRef == tag; }
+  bool isRRef() const {
+    return Tag::RRef == tag;
+  }
   c10::intrusive_ptr<c10::RRefInterface> toRRef() &&;
-  c10::intrusive_ptr<c10::RRefInterface> toRRef() const &;
+  c10::intrusive_ptr<c10::RRefInterface> toRRef() const&;
 
   // Quantizer
   IValue(c10::intrusive_ptr<at::Quantizer> v);
-  bool isQuantizer() const { return Tag::Quantizer == tag; }
+  bool isQuantizer() const {
+    return Tag::Quantizer == tag;
+  }
   c10::intrusive_ptr<at::Quantizer> toQuantizer() &&;
-  c10::intrusive_ptr<at::Quantizer> toQuantizer() const &;
+  c10::intrusive_ptr<at::Quantizer> toQuantizer() const&;
 
   // Int
-  IValue(int64_t i)
-  : tag(Tag::Int), is_intrusive_ptr(false) {
+  IValue(int64_t i) : tag(Tag::Int), is_intrusive_ptr(false) {
     payload.as_int = i;
   }
 
   // allow you to pass literals (3, 4) without ambiguity
-  IValue(int32_t i)
-  : IValue(static_cast<int64_t>(i)) {}
+  IValue(int32_t i) : IValue(static_cast<int64_t>(i)) {}
 
-  bool isInt() const { return Tag::Int == tag; }
+  bool isInt() const {
+    return Tag::Int == tag;
+  }
 
   int64_t toInt() const {
     AT_ASSERT(isInt());
@@ -373,8 +434,7 @@ struct CAFFE2_API IValue final {
   }
 
   // Bool
-  IValue(bool b)
-  : tag(Tag::Bool), is_intrusive_ptr(false) {
+  IValue(bool b) : tag(Tag::Bool), is_intrusive_ptr(false) {
 #if defined(__clang__) && defined(__x86_64__)
     // Initializing entire payload stops valgrind's from reporting
     // "jump or move depends on uninitialised value" in IValue copy constructor
@@ -384,8 +444,10 @@ struct CAFFE2_API IValue final {
     payload.as_bool = b;
 #endif
   }
-   bool isBool() const { return Tag::Bool == tag; }
-   bool toBool() const {
+  bool isBool() const {
+    return Tag::Bool == tag;
+  }
+  bool toBool() const {
     AT_ASSERT(isBool());
     return payload.as_bool;
   }
@@ -393,90 +455,93 @@ struct CAFFE2_API IValue final {
   // IntList
   bool isIntList() const;
   c10::List<int64_t> toIntList() &&;
-  c10::List<int64_t> toIntList() const &;
+  c10::List<int64_t> toIntList() const&;
   std::vector<int64_t> toIntVector() const;
 
   // ConstantString
   IValue(c10::intrusive_ptr<ivalue::ConstantString> v);
   IValue(std::string v);
-  IValue(const char* v): IValue(std::string(v)) {}
-  bool isString() const { return Tag::String == tag; }
+  IValue(const char* v) : IValue(std::string(v)) {}
+  bool isString() const {
+    return Tag::String == tag;
+  }
   c10::intrusive_ptr<ivalue::ConstantString> toString() &&;
-  c10::intrusive_ptr<ivalue::ConstantString> toString() const &;
+  c10::intrusive_ptr<ivalue::ConstantString> toString() const&;
   const std::string& toStringRef() const;
-  c10::optional<std::reference_wrapper<const std::string>> toOptionalStringRef() const;
+  c10::optional<std::reference_wrapper<const std::string>> toOptionalStringRef()
+      const;
 
   // DoubleList
   bool isDoubleList() const;
   c10::List<double> toDoubleList() &&;
-  c10::List<double> toDoubleList() const &;
+  c10::List<double> toDoubleList() const&;
   std::vector<double> toDoubleVector() const;
 
   // BoolList
   bool isBoolList() const;
   c10::List<bool> toBoolList() &&;
-  c10::List<bool> toBoolList() const &;
+  c10::List<bool> toBoolList() const&;
 
   // TensorList
   bool isTensorList() const;
   c10::List<at::Tensor> toTensorList() &&;
-  c10::List<at::Tensor> toTensorList() const &;
+  c10::List<at::Tensor> toTensorList() const&;
   std::vector<at::Tensor> toTensorVector() const;
 
   // GenericList
   IValue(c10::List<IValue> v);
-  bool isList() const { return Tag::GenericList == tag; }
+  bool isList() const {
+    return Tag::GenericList == tag;
+  }
   c10::List<IValue> toList() &&;
-  c10::List<IValue> toList() const &;
+  c10::List<IValue> toList() const&;
   c10::ArrayRef<IValue> toListRef() const;
 
   // Some template constructors of IValue calls another constructor recursively.
   // This SNIFAEs the called constructor exists.
-  template<class T>
+  template <class T>
   using enable_if_ivalue_constructible =
       std::enable_if_t<std::is_constructible<IValue, T>::value, std::nullptr_t>;
 
-  template <
-      class T,
-      enable_if_ivalue_constructible<T> = nullptr>
+  template <class T, enable_if_ivalue_constructible<T> = nullptr>
   IValue(c10::List<T> v);
-  template <
-      class T,
-      enable_if_ivalue_constructible<T> = nullptr>
+  template <class T, enable_if_ivalue_constructible<T> = nullptr>
   IValue(at::ArrayRef<T> v);
-  template <
-      class T,
-      enable_if_ivalue_constructible<T> = nullptr>
+  template <class T, enable_if_ivalue_constructible<T> = nullptr>
   IValue(const std::vector<T>& v);
-  template<class T, size_t N>
+  template <class T, size_t N>
   IValue(std::array<T, N> v);
 
   // GenericDict
   IValue(c10::Dict<IValue, IValue> v);
-  bool isGenericDict() const { return Tag::GenericDict == tag; }
+  bool isGenericDict() const {
+    return Tag::GenericDict == tag;
+  }
   c10::Dict<IValue, IValue> toGenericDict() &&;
-  c10::Dict<IValue, IValue> toGenericDict() const &;
+  c10::Dict<IValue, IValue> toGenericDict() const&;
 
-  template<class Key, class Value>
+  template <class Key, class Value>
   IValue(c10::Dict<Key, Value> v);
 
-  template<class Key, class Value>
-  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
-  C10_DEPRECATED_MESSAGE("IValues based on std::unordered_map<K, V> are slow and deprecated. Please use c10::Dict<K, V> instead.")
-  /// \endcond
-  IValue(std::unordered_map<Key, Value> v);
+  template <class Key, class Value>
+  /// \cond
+  /// DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
+  C10_DEPRECATED_MESSAGE(
+      "IValues based on std::unordered_map<K, V> are slow and deprecated. Please use c10::Dict<K, V> instead.")
+      /// \endcond
+      IValue(std::unordered_map<Key, Value> v);
 
-  template <
-      class T,
-      enable_if_ivalue_constructible<T> = nullptr>
+  template <class T, enable_if_ivalue_constructible<T> = nullptr>
   IValue(c10::optional<T> v);
   IValue(c10::nullopt_t);
 
   // ClassType
   IValue(c10::intrusive_ptr<ivalue::Object> v);
-  bool isObject() const { return tag == Tag::Object; }
+  bool isObject() const {
+    return tag == Tag::Object;
+  }
   c10::intrusive_ptr<ivalue::Object> toObject() &&;
-  c10::intrusive_ptr<ivalue::Object> toObject() const & ;
+  c10::intrusive_ptr<ivalue::Object> toObject() const&;
   const ivalue::Object& toObjectRef() const;
 
   torch::jit::Module toModule() const;
@@ -484,16 +549,20 @@ struct CAFFE2_API IValue final {
 
   // PyObject
   IValue(c10::intrusive_ptr<ivalue::PyObjectHolder> v);
-  bool isPyObject() const { return tag == Tag::PyObject; }
+  bool isPyObject() const {
+    return tag == Tag::PyObject;
+  }
   c10::intrusive_ptr<ivalue::PyObjectHolder> toPyObjectHolder() &&;
-  c10::intrusive_ptr<ivalue::PyObjectHolder> toPyObjectHolder() const &;
+  c10::intrusive_ptr<ivalue::PyObjectHolder> toPyObjectHolder() const&;
   PyObject* toPyObject() const;
 
   // Enum
   explicit IValue(c10::intrusive_ptr<ivalue::EnumHolder> v);
-  bool isEnum() const { return tag == Tag::Enum; }
+  bool isEnum() const {
+    return tag == Tag::Enum;
+  }
   c10::intrusive_ptr<ivalue::EnumHolder> toEnumHolder() &&;
-  c10::intrusive_ptr<ivalue::EnumHolder> toEnumHolder() const &;
+  c10::intrusive_ptr<ivalue::EnumHolder> toEnumHolder() const&;
 
   // None
   IValue() : payload{0}, tag(Tag::None), is_intrusive_ptr(false) {}
@@ -512,9 +581,8 @@ struct CAFFE2_API IValue final {
   }
 
   // Scalar, which gets encoded as either an Int or a Double
-  IValue(at::Scalar s)
-  : IValue() {
-    if(s.isFloatingPoint()) {
+  IValue(at::Scalar s) : IValue() {
+    if (s.isFloatingPoint()) {
       *this = s.toDouble();
     } else {
       *this = s.toLong();
@@ -524,49 +592,58 @@ struct CAFFE2_API IValue final {
     return isDouble() || isInt();
   }
   at::Scalar toScalar() const {
-    if(isDouble())
+    if (isDouble())
       return toDouble();
-    else if(isInt())
+    else if (isInt())
       return toInt();
     throw std::runtime_error("IValue is not a Scalar");
   }
 
   // Device
-  IValue(c10::Device d)
-  : tag(Tag::Device), is_intrusive_ptr(false) {
+  IValue(c10::Device d) : tag(Tag::Device), is_intrusive_ptr(false) {
     payload.as_device.type = d.type();
     payload.as_device.index = d.index();
   }
-  bool isDevice() const { return Tag::Device == tag; }
+  bool isDevice() const {
+    return Tag::Device == tag;
+  }
   c10::Device toDevice() const {
     AT_ASSERT(isDevice());
     return c10::Device(payload.as_device.type, payload.as_device.index);
   }
 
+  //Stream
+  IValue(c10::Stream stream)
+    : tag(Tag::Stream), is_intrusive_ptr(false) {
+    payload.as_int = stream.pack();
+  }
+  c10::Stream toStream() &&;
+  c10::Stream toStream() const &;
+  bool isStream() const { return Tag::Stream == tag; }
+
   // ScalarType
   IValue(ScalarType t)
-  : IValue(static_cast<std::underlying_type<ScalarType>::type>(t)) {}
+      : IValue(static_cast<std::underlying_type<ScalarType>::type>(t)) {}
   at::ScalarType toScalarType() const {
     return static_cast<at::ScalarType>(toInt());
   }
 
   // Layout
   IValue(Layout l)
-  : IValue(static_cast<std::underlying_type<Layout>::type>(l)) {}
+      : IValue(static_cast<std::underlying_type<Layout>::type>(l)) {}
   at::Layout toLayout() const {
     return static_cast<at::Layout>(toInt());
   }
 
   // MemoryFormat
   IValue(MemoryFormat m)
-  : IValue(static_cast<std::underlying_type<MemoryFormat>::type>(m)) {}
+      : IValue(static_cast<std::underlying_type<MemoryFormat>::type>(m)) {}
   at::MemoryFormat toMemoryFormat() const {
     return static_cast<at::MemoryFormat>(toInt());
   }
 
   // QScheme
-  IValue(at::QScheme qscheme)
-  : tag(Tag::Int), is_intrusive_ptr(false) {
+  IValue(at::QScheme qscheme) : tag(Tag::Int), is_intrusive_ptr(false) {
     payload.as_int = static_cast<int64_t>(qscheme);
   }
 
@@ -575,16 +652,14 @@ struct CAFFE2_API IValue final {
   }
 
   // Dimname
-  IValue(at::Dimname dimname)
-  : IValue(dimname.symbol().toQualString()) {}
+  IValue(at::Dimname dimname) : IValue(dimname.symbol().toQualString()) {}
 
   at::Dimname toDimname() const {
     return at::Dimname::fromSymbol(Symbol::fromQualString(toStringRef()));
   }
 
   // Generator
-  IValue(at::Generator g)
-  : tag(Tag::Generator), is_intrusive_ptr(g.defined())  {
+  IValue(at::Generator g) : tag(Tag::Generator), is_intrusive_ptr(g.defined()) {
     // Note: the undefined generator is not refcounted, so while it
     // is tagged as a generator, is_intrusive_ptr is set to false.
     // This is not an optional optimization: our incref call
@@ -592,16 +667,20 @@ struct CAFFE2_API IValue final {
     // undefined generator.
     payload.as_intrusive_ptr = g.unsafeReleaseGeneratorImpl();
   }
-  bool isGenerator() const { return Tag::Generator == tag; }
+  bool isGenerator() const {
+    return Tag::Generator == tag;
+  }
   at::Generator toGenerator() &&;
-  at::Generator toGenerator() const &;
+  at::Generator toGenerator() const&;
 
   // for debugging
   std::string tagKind() const {
-    switch(tag) {
-      #define DEFINE_CASE(x) case Tag::x: return #x;
+    switch (tag) {
+#define DEFINE_CASE(x) \
+  case Tag::x:         \
+    return #x;
       TORCH_FORALL_TAGS(DEFINE_CASE)
-      #undef DEFINE_CASE
+#undef DEFINE_CASE
     }
     return "InvalidTag(" + c10::guts::to_string(static_cast<int>(tag)) + ")";
   }
@@ -613,15 +692,17 @@ struct CAFFE2_API IValue final {
   // since they are simpler to understand
 
   // Note: if you get linker errors saying one of these is missing,
-  // change it to ... && = delete; and you will see better error messages for why
-  // However, we cannot commit this because some compiler versions barf on it.
-  template<typename T>
+  // change it to ... && = delete; and you will see better error messages for
+  // why However, we cannot commit this because some compiler versions barf on
+  // it.
+  template <typename T>
   T to() &&;
-  template<typename T>
-  T to() const &;
+  template <typename T>
+  T to() const&;
 
-  // ToOptional: convert a IValue to the Optional obj that accepts both T and None
-  template<typename T>
+  // ToOptional: convert a IValue to the Optional obj that accepts both T and
+  // None
+  template <typename T>
   optional<T> toOptional();
 
   /// @private [doxygen private]
@@ -677,7 +758,8 @@ struct CAFFE2_API IValue final {
   struct HashAliasedIValue {
     size_t operator()(const IValue& val) const {
       if (val.isTensor()) {
-        return reinterpret_cast<size_t>(val.toTensor().storage().unsafeGetStorageImpl());
+        return reinterpret_cast<size_t>(
+            val.toTensor().storage().unsafeGetStorageImpl());
       }
       // If it is not a Tensor, then two mutable IValues alias each other only
       // if they are the same pointer.
@@ -687,12 +769,14 @@ struct CAFFE2_API IValue final {
 
   struct CompAliasedIValues {
     bool operator()(const IValue& lhs, const IValue& rhs) const {
-        return lhs.isAliasOf(rhs);
+      return lhs.isAliasOf(rhs);
     }
   };
 
-  using HashAliasedIValues = std::unordered_set<IValue, HashAliasedIValue, CompAliasedIValues>;
-  using HashAliasedIValueMap = std::unordered_map<IValue, IValue, HashAliasedIValue, CompAliasedIValues>;
+  using HashAliasedIValues =
+      std::unordered_set<IValue, HashAliasedIValue, CompAliasedIValues>;
+  using HashAliasedIValueMap =
+      std::unordered_map<IValue, IValue, HashAliasedIValue, CompAliasedIValues>;
 
   // Chechs if this and rhs has a subvalues in common.
   // [t1,t2] and [t2, t3] returns true.
@@ -704,10 +788,9 @@ struct CAFFE2_API IValue final {
   // Apply visitor to every subvalue.
   // TODO: There are several places that recurse over IValue. This is fragile.
   // This visitor should be used to recurse over ivalues.
-  void visit(const std::function<bool (const IValue &)>& visitor) const;
+  void visit(const std::function<bool(const IValue&)>& visitor) const;
   IValue deepcopy() const;
-  IValue deepcopy(
-      HashAliasedIValueMap& memo) const;
+  IValue deepcopy(HashAliasedIValueMap& memo) const;
 
  private:
   static bool ptrEqual(const IValue& lhs, const IValue& rhs);
@@ -723,9 +806,13 @@ struct CAFFE2_API IValue final {
 #undef DEFINE_TAG
   };
 
-  template<class T, class NullType = c10::detail::intrusive_target_default_null_type<T>>
+  template <
+      class T,
+      class NullType = c10::detail::intrusive_target_default_null_type<T>>
   c10::intrusive_ptr<T, NullType> moveToIntrusivePtr();
-  template<typename T, class NullType = c10::detail::intrusive_target_default_null_type<T>>
+  template <
+      typename T,
+      class NullType = c10::detail::intrusive_target_default_null_type<T>>
   c10::intrusive_ptr<T, NullType> toIntrusivePtr() const;
 
   void clearToNone() {
@@ -745,8 +832,7 @@ struct CAFFE2_API IValue final {
     } as_device;
   };
 
-  IValue(Payload p, Tag t, bool i)
-  : payload(p), tag(t), is_intrusive_ptr(i) {}
+  IValue(Payload p, Tag t, bool i) : payload(p), tag(t), is_intrusive_ptr(i) {}
 
   Payload payload;
   Tag tag;
@@ -755,10 +841,7 @@ struct CAFFE2_API IValue final {
 };
 
 struct CAFFE2_API WeakIValue final {
-  WeakIValue()
-  : payload{0}
-  , tag(IValue::Tag::None)
-  , is_intrusive_ptr(false) {}
+  WeakIValue() : payload{0}, tag(IValue::Tag::None), is_intrusive_ptr(false) {}
 
   WeakIValue(const WeakIValue& rhs)
       : payload(rhs.payload),
@@ -784,15 +867,15 @@ struct CAFFE2_API WeakIValue final {
       c10::raw::weak_intrusive_ptr::decref(payload.as_intrusive_ptr);
     }
   }
-  WeakIValue & operator=(WeakIValue && rhs) & noexcept {
+  WeakIValue& operator=(WeakIValue&& rhs) & noexcept {
     WeakIValue(std::move(rhs)).swap(*this); // this also sets rhs to None
     return *this;
   }
-  WeakIValue & operator=(WeakIValue const & rhs) & {
+  WeakIValue& operator=(WeakIValue const& rhs) & {
     WeakIValue(rhs).swap(*this);
     return *this;
   }
-  void swap(WeakIValue & rhs) noexcept {
+  void swap(WeakIValue& rhs) noexcept {
     std::swap(payload, rhs.payload);
     std::swap(is_intrusive_ptr, rhs.is_intrusive_ptr);
     std::swap(tag, rhs.tag);
@@ -844,7 +927,7 @@ struct CAFFE2_API WeakIValue final {
     return payload.as_int;
   }
 
-private:
+ private:
   IValue::Payload payload;
   IValue::Tag tag;
   bool is_intrusive_ptr;
@@ -862,9 +945,10 @@ struct TORCH_API StrongTypePtr {
   std::shared_ptr<Type> type_;
 };
 
-TORCH_API ska::flat_hash_map<std::type_index, c10::ClassTypePtr>& getCustomClassTypeMap();
+TORCH_API ska::flat_hash_map<std::type_index, c10::ClassTypePtr>&
+getCustomClassTypeMap();
 
-template<typename T>
+template <typename T>
 c10::ClassTypePtr getCustomClassType() {
   auto tmap = c10::getCustomClassTypeMap();
   auto res = tmap.find(std::type_index(typeid(T)));
@@ -874,7 +958,7 @@ c10::ClassTypePtr getCustomClassType() {
   return res->second;
 }
 
-template<typename T>
+template <typename T>
 inline bool isCustomClassRegistered() {
   auto tmap = c10::getCustomClassTypeMap();
   return tmap.find(std::type_index(typeid(T))) != tmap.end();
@@ -882,6 +966,6 @@ inline bool isCustomClassRegistered() {
 
 TORCH_API std::unordered_map<std::string, std::function<PyObject*(void*)>>&
 getClassConverter();
-}
+} // namespace c10
 
 #include <ATen/core/ivalue_inl.h>

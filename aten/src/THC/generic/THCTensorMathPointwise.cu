@@ -77,38 +77,10 @@ c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensorImpl> retainTensorImpl(THC
 }
 }
 
-void THCTensor_(cadd)(THCState *state, THCTensor *self_, THCTensor* src1, scalar_t value, THCTensor *src2)
-{
-  auto out = at::Tensor(retainTensorImpl(self_));
-#ifdef THC_REAL_IS_HALF
-  auto alpha = at::Half(value);
-#else
-  auto alpha = value;
-#endif
-  at::add_out(out, at::Tensor(retainTensorImpl(src1)), at::Tensor(retainTensorImpl(src2)), alpha);
-}
-
-void THCTensor_(csub)(THCState *state, THCTensor *self_, THCTensor* src1, scalar_t value, THCTensor *src2)
-{
-  auto out = at::Tensor(retainTensorImpl(self_));
-#ifdef THC_REAL_IS_HALF
-  auto alpha = at::Half(value);
-#else
-  auto alpha = value;
-#endif
-  at::sub_out(out, at::Tensor(retainTensorImpl(src1)), at::Tensor(retainTensorImpl(src2)), alpha);
-}
-
 void THCTensor_(cmul)(THCState *state, THCTensor *self_, THCTensor *src1, THCTensor *src2)
 {
   auto out = at::Tensor(retainTensorImpl(self_));
   at::mul_out(out, at::Tensor(retainTensorImpl(src1)), at::Tensor(retainTensorImpl(src2)));
-}
-
-void THCTensor_(cdiv)(THCState* state, THCTensor *self_, THCTensor *src1, THCTensor *src2)
-{
-  auto out = at::Tensor(retainTensorImpl(self_));
-  at::div_out(out, at::Tensor(retainTensorImpl(src1)), at::Tensor(retainTensorImpl(src2)));
 }
 
 void THCTensor_(cfmod)(THCState *state, THCTensor *self, THCTensor *src1, THCTensor *src2)

@@ -7,9 +7,10 @@ static methods.
 import torch
 import random
 import os
-from collections import namedtuple
+from dataclasses import dataclass
 from torch._six import queue
 from torch._utils import ExceptionWrapper
+from typing import Union
 from . import signal_handling, MP_STATUS_CHECK_INTERVAL, IS_WINDOWS
 
 if IS_WINDOWS:
@@ -23,7 +24,8 @@ if IS_WINDOWS:
         def __init__(self):
             self.manager_pid = os.getppid()
 
-            self.kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+            # mypy cannot detect this code is windows only
+            self.kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)  # type: ignore
             self.kernel32.OpenProcess.argtypes = (DWORD, BOOL, DWORD)
             self.kernel32.OpenProcess.restype = HANDLE
             self.kernel32.WaitForSingleObject.argtypes = (HANDLE, DWORD)
@@ -34,7 +36,7 @@ if IS_WINDOWS:
             self.manager_handle = self.kernel32.OpenProcess(SYNCHRONIZE, 0, self.manager_pid)
 
             if not self.manager_handle:
-                raise ctypes.WinError(ctypes.get_last_error())
+                raise ctypes.WinError(ctypes.get_last_error())  # type: ignore
 
             self.manager_dead = False
 
@@ -108,10 +110,14 @@ def get_worker_info():
 
 
 r"""Dummy class used to signal the end of an IterableDataset"""
-_IterableDatasetStopIteration = namedtuple('_IterableDatasetStopIteration', ['worker_id'])
+@dataclass(frozen=True)
+class _IterableDatasetStopIteration(object):
+    worker_id: int
 
 r"""Dummy class used to resume the fetching when worker reuse is enabled"""
-_ResumeIteration = namedtuple('_ResumeIteration', [])
+@dataclass(frozen=True)
+class _ResumeIteration(object):
+    pass
 
 def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                  auto_collation, collate_fn, drop_last, seed, init_fn, worker_id,
@@ -187,6 +193,7 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                 # processing steps.
                 continue
             idx, index = r
+            data: Union[_IterableDatasetStopIteration, ExceptionWrapper]
             if init_exception is not None:
                 data = init_exception
                 init_exception = None

@@ -47,7 +47,7 @@ struct CAFFE2_API AutoNonVariableTypeMode {
   // NB: The enabled parameter must ALWAYS be black, as Henry Ford used to say.
   // TODO: Eliminate this parameter entirely
   AutoNonVariableTypeMode(bool enabled = true) :
-    autograd_guard_(getRuntimeDispatchKeySet(DispatchKey::Autograd)) {
+    autograd_guard_(c10::autograd_dispatch_keyset) {
 
     TORCH_INTERNAL_ASSERT(enabled);
   }

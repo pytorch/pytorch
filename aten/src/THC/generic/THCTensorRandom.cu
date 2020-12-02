@@ -39,9 +39,12 @@ void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_probs, THCud
                      THCudaLongTensor_data(state, larger_short),
                      one, inputsize
                      );
-
-  THCudaLongTensor_nonzero(state, smaller_short, smaller);
-  THCudaLongTensor_nonzero(state, larger_short, larger);
+  at::Tensor smaller_short_wrapped = THTensor_wrap(smaller_short);
+  at::Tensor smaller_wrapped = THTensor_wrap(smaller);
+  at::Tensor larger_short_wrapped = THTensor_wrap(larger_short);
+  at::Tensor larger_wrapped = THTensor_wrap(larger);
+  at::nonzero_out(smaller_short_wrapped, smaller_wrapped);
+  at::nonzero_out(larger_short_wrapped, larger_wrapped);
   int h_large_c = THCudaLongTensor_nElement(state, larger_short);
   THCudaLongTensor_resize1d(state, smaller_short, inputsize);
   THCudaLongTensor_resize1d(state, larger_short, inputsize);

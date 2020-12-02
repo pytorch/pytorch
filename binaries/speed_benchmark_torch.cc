@@ -24,7 +24,7 @@
 #include "torch/csrc/jit/serialization/import.h"
 #include "torch/script.h"
 
-#include "c10/core/CPUCachingAllocator.h"
+#include "c10/mobile/CPUCachingAllocator.h"
 
 #include <chrono>
 using namespace std::chrono;

@@ -129,6 +129,9 @@ struct C10_EXPORT PassManager {
       isRegistered(true);
     }
   }
+
+  // clang-tidy requires virtual destructor;
+  virtual ~PassManager() = default;
 };
 
 } // namespace jit

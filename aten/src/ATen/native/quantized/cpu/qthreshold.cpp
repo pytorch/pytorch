@@ -35,7 +35,7 @@ Tensor threshold_quantized_cpu(
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("threshold", TORCH_FN(threshold_quantized_cpu));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::threshold"), TORCH_FN(threshold_quantized_cpu));
 }
 
 } // namespace native

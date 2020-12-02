@@ -13,66 +13,6 @@ namespace jit {
 
 namespace {
 
-std::vector<c10::optional<const Use>> gatherLastUses(
-    at::ArrayRef<Value*> values) {
-  return fmap(values, [&](Value* v) -> c10::optional<const Use> {
-    return firstOrLastUse(v, /*find_first*/ false);
-  });
-}
-
-// When merging a node into a subgraph, we wish to preserve all of the
-// aliasing properties of the node's outputs. It is difficult to track
-// the node or its contained nodes through all of the ir manipulation
-// involved in merging; it is pretty easy to uniquely identify the value
-// based on its uses. We can identify the value by its last use in the graph.
-// Values which do not have uses or which do not have a last use
-// outside of the subgraph to be merged into we do not need to track.
-struct ValueMapper {
-  ValueMapper(Node* n, AliasDb& db, size_t subgraph_num_outputs) {
-    last_uses_ = gatherLastUses(n->outputs());
-    subgraph_num_outputs_ = subgraph_num_outputs;
-    WithInsertPoint guard(n);
-    auto g = n->owningGraph();
-    // temporary node to put the aliasing properties of the node before its
-    // merged and destroyed
-    placeholder_node_ = g->insertNode(g->create(prim::Uninitialized, 0));
-    for (size_t i = 0; i < n->outputs().size(); ++i) {
-      Value* existing = n->outputs().at(i);
-      Value* new_value =
-          placeholder_node_->insertOutput(i)->copyMetadata(n->outputs().at(i));
-      db.replaceWithNewValue(existing, new_value);
-    }
-  }
-
-  bool usesEqual(const Use& a, const Use& b) {
-    return a.user == b.user && a.offset == b.offset;
-  }
-
-  void copyAliasing(Node* merged_node, AliasDb& db) {
-    auto num_outputs = merged_node->outputs().size();
-    auto new_outputs = merged_node->outputs().slice(
-        subgraph_num_outputs_, num_outputs - subgraph_num_outputs_);
-    for (Value* v : new_outputs) {
-      auto maybe_last_use = firstOrLastUse(v, /*find_first*/ false);
-      // if it doesnt have a use it shouldnt have been added as output
-      TORCH_INTERNAL_ASSERT(maybe_last_use);
-      const Use last_use = *maybe_last_use;
-      size_t i = 0;
-      while (i < last_uses_.size() && last_uses_.at(i).has_value() &&
-             !usesEqual(*last_uses_.at(i), last_use)) {
-        ++i;
-      }
-      TORCH_INTERNAL_ASSERT(i != last_uses_.size());
-      db.replaceWithNewValue(placeholder_node_->outputs().at(i), v);
-    }
-    placeholder_node_->destroy();
-  }
-
-  std::vector<c10::optional<const Use>> last_uses_;
-  size_t subgraph_num_outputs_;
-  Node* placeholder_node_;
-};
-
 struct WorkBlock : public std::pair<Node*, Node*> {
   using pair::pair;
 
@@ -285,11 +225,8 @@ class SubgraphSlicer {
   std::pair<graph_node_list::iterator, bool> scanNode(Node* consumer) {
     if (shouldConsiderForMerge(consumer)) {
       if (consumer->kind() != prim::DifferentiableGraph) {
-        // ValueMapper preserves the aliasing information of the node's outputs
-        ValueMapper vm(consumer, aliasDb_, 0);
-        consumer = SubgraphUtils::createSingletonSubgraph(
-            consumer, prim::DifferentiableGraph);
-        vm.copyAliasing(consumer, aliasDb_);
+        consumer = SubgraphUtils::createSingletonSubgraphAndUpdateAliasing(
+            consumer, prim::DifferentiableGraph, aliasDb_);
       }
       auto inputs = sortReverseTopological(consumer->inputs());
       for (auto input : inputs) {
@@ -315,10 +252,8 @@ class SubgraphSlicer {
       return c10::nullopt;
     }
 
-    ValueMapper vm(producer, aliasDb_, consumer->outputs().size());
-    SubgraphUtils::mergeNodeIntoSubgraph(producer, consumer);
-    vm.copyAliasing(consumer, aliasDb_);
-
+    SubgraphUtils::mergeNodeIntoSubgraphAndUpdateAliasing(
+        producer, consumer, aliasDb_);
     return consumer;
   }
 
