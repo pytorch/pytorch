@@ -1579,7 +1579,6 @@ class TestTEFuser(JitTestCase):
                     " ".join(["Failed:", str(dtype), op.__name__, device])
                 )
 
-    @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")
     def test_where_ops(self):
         def apply(fn):
             return lambda cond, x, y: fn(cond, x, y)
