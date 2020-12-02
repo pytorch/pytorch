@@ -253,7 +253,7 @@ class NativeFunction:
     # Validation is for nontrivial invariants that cannot be (conveniently)
     # encoded in the type system.
     def __post_init__(self) -> None:
-        if self.func.out_arguments:
+        if self.func.arguments.out:
             assert self.variants == {Variant.function}, "Native functions with out arguments MUST " \
                 "be declared with only function variant; e.g., variants: function; " \
                 "otherwise you will tickle a Python argument binding bug " \
@@ -380,20 +380,13 @@ class FunctionSchema:
     # The name of the operator this function schema describes.
     name: 'OperatorName'
 
-    arguments: Tuple['Argument', ...]
-    kwarg_only_arguments: Tuple['Argument', ...]  # but not including out args
-    # Unlike in the previous codegen, we have factored out 'out' arguments
-    # in the canonical representation, removing them from kwarg
-    # arguments.  This choice is justified by numerous downstream
-    # transformations which treat out arguments specially; additionally,
-    # you can see that canonicity is not violated!
-    out_arguments: Tuple['Argument', ...]  # these are also kwarg-only
+    arguments: 'Arguments'
 
     # TODO: Need to handle collisions with argument names at some point
     returns: Tuple['Return', ...]
 
     def schema_order_arguments(self) -> Iterator['Argument']:
-        return itertools.chain(self.arguments, self.kwarg_only_arguments, self.out_arguments)
+        return itertools.chain(self.arguments.positional, self.arguments.kwarg_only, self.arguments.out)
 
     @staticmethod
     def parse(func: str) -> 'FunctionSchema':
@@ -404,20 +397,18 @@ class FunctionSchema:
         assert args[-1] == ")", "Expecting closing )"
         args = args[:-1]
         name = OperatorName.parse(ops)
-        arguments, kwarg_only_arguments, out_arguments = parse_arguments(args)
+        arguments = Arguments.parse(args)
         returns = parse_returns(return_decl)
         r = FunctionSchema(
             name=name,
             arguments=arguments,
-            kwarg_only_arguments=kwarg_only_arguments,
-            out_arguments=out_arguments,
             returns=returns
         )
         assert str(r) == func, f'{str(r)} != {func}'
         return r
 
     def __post_init__(self) -> None:
-        for arg, ret in zip(self.out_arguments, self.returns):
+        for arg, ret in zip(self.arguments.out, self.returns):
             assert arg.annotation == ret.annotation, \
                 "Out arguments must have matching return Tensor; furthermore, " \
                 "the ith-argument needs to correspond to the ith return"
@@ -425,14 +416,14 @@ class FunctionSchema:
         # This means that all mutable returns should be aliased to a keyword argument
         # (except for "self", which we explicitly don't treat as an out argument because of its use in methods)
         # See Note [is_out_fn]
-        out_and_self = list(self.out_arguments) + [arg for arg in self.arguments if arg.name == "self"]
+        out_and_self = list(self.arguments.out) + [arg for arg in self.arguments.positional if arg.name == "self"]
         mutable_returns = [ret for ret in self.returns if ret.annotation is not None and ret.annotation.is_write]
         for ret in mutable_returns:
             assert any([ret.annotation == arg.annotation for arg in out_and_self]), \
                 "All mutable returns must be aliased either to a keyword argument, or to \"self\". " \
                 "Did you forget to mark an out argument as keyword-only?"
-        if self.out_arguments:
-            assert len(self.out_arguments) == len(self.returns), \
+        if self.arguments.out:
+            assert len(self.arguments.out) == len(self.returns), \
                 "Must return as many arguments as there are out arguments"
         if self.name.name.inplace:
             # TODO: fixme
@@ -508,7 +499,7 @@ class FunctionSchema:
         #     but just with extra kwargs for the output elements.  This
         #     is difficult to actually check for and historically
         #     we only do this check in tools/
-        return bool(self.out_arguments)
+        return bool(self.arguments.out)
 
     def kind(self) -> SchemaKind:
         """
@@ -518,7 +509,7 @@ class FunctionSchema:
         the result into an explicitly provided out argument.
         """
         is_inplace = self.name.name.inplace
-        is_out = bool(self.out_arguments)
+        is_out = bool(self.arguments.out)
         assert not (is_inplace and is_out)
         if is_inplace:
             return SchemaKind.inplace
@@ -570,20 +561,16 @@ class FunctionSchema:
                 ),
                 overload_name="",  # stripped
             ),
-            arguments=tuple(map(strip_arg_annotation, self.arguments)),
-            kwarg_only_arguments=tuple(map(strip_arg_annotation, self.kwarg_only_arguments)),
-            out_arguments=(),  # stripped
+            arguments=Arguments(
+                positional=tuple(map(strip_arg_annotation, self.arguments.positional)),
+                kwarg_only=tuple(map(strip_arg_annotation, self.arguments.kwarg_only)),
+                out=(),  # stripped
+            ),
             returns=tuple(map(strip_ret_annotation, self.returns)),
         )
 
     def __str__(self) -> str:
-        all_arguments: List[str] = []
-        all_arguments.extend(map(str, self.arguments))
-        if self.kwarg_only_arguments or self.out_arguments:
-            all_arguments.append('*')
-        all_arguments.extend(map(str, self.kwarg_only_arguments))
-        all_arguments.extend(map(str, self.out_arguments))
-        all_arguments_str = ', '.join(all_arguments)
+        all_arguments_str = str(self.arguments)
         if len(self.returns) == 1:
             returns = str(self.returns[0])  # omit parentheses
         else:
@@ -868,6 +855,68 @@ class Return:
         else:
             return f"{type} {self.name}"
 
+@dataclass(frozen=True)
+class Arguments:
+    positional: Tuple['Argument', ...]
+    kwarg_only: Tuple['Argument', ...]  # but not including out args
+    # Unlike in the previous codegen, we have factored out 'out' arguments
+    # in the canonical representation, removing them from kwarg
+    # arguments.  This choice is justified by numerous downstream
+    # transformations which treat out arguments specially; additionally,
+    # you can see that canonicity is not violated!
+    out: Tuple['Argument', ...]  # these are also kwarg-only
+
+    @staticmethod
+    def parse(args: str) -> 'Arguments':
+        """
+        Input: 'int x, int y, int z'
+        Output: positional args, kwarg only args
+        """
+        positional: List[Argument] = []
+        kwarg_only: List[Argument] = []
+        out: List[Argument] = []
+        arguments_acc = positional
+
+        # TODO: Use a real parser here; this will get bamboozled
+        # by signatures that contain things like std::array<bool, 2> (note the space)
+        for arg in args.split(', '):
+            if not arg:
+                continue
+            if arg == '*':
+                assert arguments_acc is positional, "invalid syntax: kwarg-only specifier * can only occur once"
+                arguments_acc = kwarg_only
+                continue
+            parg = Argument.parse(arg)
+            # Currently, we rely directly on the invariant that there are NO
+            # kwarg-only mutating arguments.  If you want to relax this,
+            # we will need a more semantic way of matching that takes
+            # into account return arguments.  In that case, you will have
+            # to manage out computation a level up, in FunctionSchema.  See Note
+            # [is_out_fn]
+            if parg.annotation is not None and parg.annotation.is_write:
+                if arguments_acc is positional:
+                    pass  # do nothing
+                elif arguments_acc is kwarg_only:
+                    arguments_acc = out
+            else:
+                assert arguments_acc is not out
+            arguments_acc.append(parg)
+
+        return Arguments(
+            positional=tuple(positional),
+            kwarg_only=tuple(kwarg_only),
+            out=tuple(out),
+        )
+
+    def __str__(self) -> str:
+        all_arguments: List[str] = []
+        all_arguments.extend(map(str, self.positional))
+        if self.kwarg_only or self.out:
+            all_arguments.append('*')
+        all_arguments.extend(map(str, self.kwarg_only))
+        all_arguments.extend(map(str, self.out))
+        return ', '.join(all_arguments)
+
 
 # Names that validly are __iXXX__ indicating inplace operations.
 # Taken from https://www.python.org/dev/peps/pep-0203/#new-methods
@@ -965,40 +1014,3 @@ def parse_returns(return_decl: str) -> Tuple[Return, ...]:
     if return_decl[0] == '(' and return_decl[-1] == ')':
         return_decl = return_decl[1:-1]
     return tuple(Return.parse(arg) for arg in return_decl.split(', '))
-
-def parse_arguments(args: str) -> Tuple[Tuple[Argument, ...], Tuple[Argument, ...], Tuple[Argument, ...]]:
-    """
-    Input: 'int x, int y, int z'
-    Output: positional args, kwarg only args
-    """
-    arguments: List[Argument] = []
-    kwarg_only_arguments: List[Argument] = []
-    out_arguments: List[Argument] = []
-    arguments_acc = arguments
-
-    # TODO: Use a real parser here; this will get bamboozled
-    # by signatures that contain things like std::array<bool, 2> (note the space)
-    for arg in args.split(', '):
-        if not arg:
-            continue
-        if arg == '*':
-            assert arguments_acc is arguments, "invalid syntax: kwarg-only specifier * can only occur once"
-            arguments_acc = kwarg_only_arguments
-            continue
-        parg = Argument.parse(arg)
-        # Currently, we rely directly on the invariant that there are NO
-        # kwarg-only mutating arguments.  If you want to relax this,
-        # we will need a more semantic way of matching that takes
-        # into account return arguments.  In that case, you will have
-        # to manage out_arguments computation a level up, in
-        # FunctionSchema.  See Note [is_out_fn]
-        if parg.annotation is not None and parg.annotation.is_write:
-            if arguments_acc is arguments:
-                pass  # do nothing
-            elif arguments_acc is kwarg_only_arguments:
-                arguments_acc = out_arguments
-        else:
-            assert arguments_acc is not out_arguments
-        arguments_acc.append(parg)
-
-    return tuple(arguments), tuple(kwarg_only_arguments), tuple(out_arguments)

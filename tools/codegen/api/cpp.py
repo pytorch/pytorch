@@ -157,7 +157,7 @@ def return_names(f: NativeFunction) -> Sequence[str]:
         # corresponding output function (r.name will get recorded
         # in field_name later.)
         elif f.func.is_out_fn():
-            name = f.func.out_arguments[i].name
+            name = f.func.arguments.out[i].name
         # If the return argument is explicitly named...
         elif r.name:
             name_conflict = any(r.name == a.name for a in f.func.schema_order_arguments())
@@ -278,12 +278,12 @@ def group_arguments(
 ) -> Sequence[Union[Argument, TensorOptionsArguments, ThisArgument]]:
     args: List[Union[Argument, ThisArgument, TensorOptionsArguments]] = []
 
-    args.extend(func.out_arguments)
+    args.extend(func.arguments.out)
 
     if method:
-        args.extend(ThisArgument(a) if a.name == "self" else a for a in func.arguments)
+        args.extend(ThisArgument(a) if a.name == "self" else a for a in func.arguments.positional)
     else:
-        args.extend(func.arguments)
+        args.extend(func.arguments.positional)
 
     # group up arguments for tensor options
 
@@ -297,21 +297,21 @@ def group_arguments(
     ]
 
     i = 0
-    while i < len(func.kwarg_only_arguments):
+    while i < len(func.arguments.kwarg_only):
         # If there is enough space...
-        if i <= len(func.kwarg_only_arguments) - len(predicates):
+        if i <= len(func.arguments.kwarg_only) - len(predicates):
             # And the next len(predicates) arguments look like TensorOptions arguments
-            if all(p(a) for p, a in zip(predicates, func.kwarg_only_arguments[i : i + len(predicates)])):
+            if all(p(a) for p, a in zip(predicates, func.arguments.kwarg_only[i : i + len(predicates)])):
                 # Group them together as one argument
                 args.append(TensorOptionsArguments(
-                    dtype=func.kwarg_only_arguments[i],
-                    layout=func.kwarg_only_arguments[i + 1],
-                    device=func.kwarg_only_arguments[i + 2],
-                    pin_memory=func.kwarg_only_arguments[i + 3],
+                    dtype=func.arguments.kwarg_only[i],
+                    layout=func.arguments.kwarg_only[i + 1],
+                    device=func.arguments.kwarg_only[i + 2],
+                    pin_memory=func.arguments.kwarg_only[i + 3],
                 ))
                 i += len(predicates)
                 continue
-        args.append(func.kwarg_only_arguments[i])
+        args.append(func.arguments.kwarg_only[i])
         i += 1
 
     return args
