@@ -1,4 +1,4 @@
-from functools import reduce
+from functools import reduce, wraps
 from operator import mul, itemgetter
 import collections
 
@@ -242,6 +242,7 @@ def np_integer_promotion_wrapper(fn):
 
     np_dtype = torch_to_numpy_dtype_dict[torch.get_default_dtype()]
 
+    @wraps(fn)
     def wrapped_fn(x):
         if is_integral(x.dtype):
             return fn(x, dtype=np_dtype)
