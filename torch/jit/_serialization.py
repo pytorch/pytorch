@@ -7,6 +7,7 @@ This module contains functionality for serializing TorchScript modules, notably:
 This is not intended to be imported directly; please use the exposed
 functionalities in `torch.jit`.
 """
+import errno
 import os
 import pathlib
 
@@ -77,8 +78,13 @@ def save(m, f, _extra_files=None):
     """
     if _extra_files is None:
         _extra_files = {}
-    if isinstance(f, str) or isinstance(f, pathlib.Path):
-        m.save(f, _extra_files=_extra_files)
+    if isinstance(f, (str, pathlib.Path)):
+        basename, filename = os.path.split(f)
+        if not basename or os.access(basename, os.W_OK | os.X_OK):
+            m.save(f, _extra_files=_extra_files)
+        else:
+            raise FileNotFoundError(
+                errno.ENOENT, os.strerror(errno.ENOENT), str(f))
     else:
         ret = m.save_to_buffer(_extra_files=_extra_files)
         f.write(ret)
