@@ -13,6 +13,8 @@
 
 #ifdef USE_VULKAN_WRAPPER
   #define VMA_STATIC_VULKAN_FUNCTIONS 0
+#else
+  #define VMA_DYNAMIC_VULKAN_FUNCTIONS 0
 #endif
 
 #ifdef DEBUG
