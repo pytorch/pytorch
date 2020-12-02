@@ -262,7 +262,7 @@ def sample_inputs_addmm(self, device, dtype, requires_grad):
 
 
 # Operator database (sorted alphabetically)
-op_db = [
+op_db: List[Any] = [
     # NOTE: CPU complex acos produces incorrect outputs (https://github.com/pytorch/pytorch/issues/42952)
     UnaryUfuncInfo('acos',
                    ref=np.arccos,
