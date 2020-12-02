@@ -67,6 +67,7 @@ class OpInfo(object):
                  default_test_dtypes=None,  # dtypes to test with by default. Gets intersected
                                             # with the dtypes support on the tested device
                  test_inplace_grad=True,  # whether to gradcheck and gradgradcheck the inplace variant
+                 test_complex_grad=True,  # whether to gradcheck and gradgradcheck for complex dtypes
                  supports_tensor_out=True,  # whether the op supports the out kwarg, returning a Tensor
                  skips=tuple(),  # information about which tests to skip
                  decorators=None):  # decorators to apply to generated tests
@@ -92,6 +93,7 @@ class OpInfo(object):
         self.inplace_variant = getattr(torch.Tensor, inplace_name) if hasattr(torch.Tensor, name) else None
 
         self.test_inplace_grad = test_inplace_grad
+        self.test_complex_grad = test_complex_grad
         self.supports_tensor_out = supports_tensor_out
 
         self.skips = skips
@@ -493,7 +495,24 @@ op_db = [
 ]
 
 if TEST_SCIPY:
+    def reference_sigmoid(x):
+        # 'scipy.special.expit' not supported for the input types
+        if x.dtype in [np.complex64, np.complex128]:
+            return (1 / (1 + np.exp(-x)))
+        return scipy.special.expit(x)
+
     op_db_scipy_reference = [
+        UnaryUfuncInfo('sigmoid',
+                       ref=reference_sigmoid,
+                       decorators=(precisionOverride({torch.float16: 1e-2,
+                                                      torch.bfloat16: 1e-2}),),
+                       skips=(SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                       device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),),
+                       dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                       dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                       dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                       promotes_integers_to_float=True,
+                       test_complex_grad=False),  # Reference: https://github.com/pytorch/pytorch/issues/48552
         UnaryUfuncInfo('erf',
                        ref=scipy.special.erf,
                        decorators=(precisionOverride({torch.float16: 1e-2,
