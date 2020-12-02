@@ -1284,6 +1284,22 @@ class TestTensorExprFuser(BaseTestClass):
         self._test_softmax('cuda')
         assert cuda.elapsed_value() == 1
 
+    def test_cuda_sync_threads(self):
+        @torch.jit.script
+        def f(p, a):
+            tmp = a.sqrt()
+            return (tmp, p * tmp)
+
+        p = torch.linspace(0.1, 0.9, 4, device="cuda")
+        a = torch.ones(16, 1, device="cuda")
+
+        # Check if two calls to the function f returns the same result.
+        # In order to get deterministic results for these calls, a
+        # SyncThreads needs to be inserted between the two statements in f.
+        r1 = f(p, a)[1]
+        r2 = f(p, a)[1]
+        np.testing.assert_allclose(r1.cpu(), r2.cpu())
+
     def test_half_gelu(self):
         devices = ["cuda"] if torch.cuda.is_available() else []
 

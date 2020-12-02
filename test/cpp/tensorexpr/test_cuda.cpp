@@ -2344,6 +2344,315 @@ TEST(Cuda, MaskMultiDimMultiLevel_CUDA) {
   cudaFree(d_dev);
 }
 
+TEST(Cuda, DependencyAcrossLoops_CUDA) {
+  // for (int x = 0; x < 10; x++) {
+  //   b[x] = a[x];
+  // }
+  // for (int y = 0; y < 10; y++) {
+  //   c[y] = b[y+1];
+  // }
+  KernelScope kernel_scope;
+
+  Placeholder a("a", kInt, {50});
+  Tensor* b =
+      Compute("b", {{50, "x"}}, [&](const VarHandle& i) { return a.load(i); });
+  Tensor* c = Compute(
+      "c", {{50, "y"}}, [&](const VarHandle& i) { return b->call(i + 1); });
+  LoopNest l({b, c});
+  std::vector<For*> loops = l.getLoopStmtsFor(b);
+  l.setGPUThreadIndex(loops[0], 0);
+  loops = l.getLoopStmtsFor(c);
+  l.setGPUThreadIndex(loops[0], 0);
+
+  l.prepareForCodegen();
+  Stmt* s = l.root_stmt();
+
+  CudaCodeGen cg(s, {a, b, c});
+  std::ostringstream oss;
+  oss << *cg.stmt();
+
+  const std::string& verification_pattern =
+      R"IR(
+        # CHECK: b[threadIdx.x] =
+        # CHECK: __syncthreads();
+        # CHECK: c[threadIdx.x] =
+      )IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Cuda, DependencyInALoop_CUDA) {
+  // for (int x = 0; x < 50; x++) {
+  //   A[x] = x;
+  //   B[x] = A[x+1];
+  // }
+  KernelScope kernel_scope;
+
+  BufHandle a_buf("A", {50}, kInt);
+  BufHandle b_buf("B", {50}, kInt);
+  VarHandle x("x", kInt);
+  Stmt* s = For::make(
+      x,
+      0,
+      50,
+      Block::make({Store::make(a_buf, {x}, x, 1),
+                   Store::make(b_buf, {x}, Load::make(a_buf, {x + 1}, 1), 1)}));
+  LoopNest l(s, {a_buf.node(), b_buf.node()}, {}, {});
+  std::vector<For*> loops = l.getLoopStmtsFor(s);
+  l.setGPUThreadIndex(loops[0], 0);
+
+  l.prepareForCodegen();
+  s = l.root_stmt();
+
+  CudaCodeGen cg(s, {x, Placeholder(a_buf), Placeholder(b_buf)});
+  std::ostringstream oss;
+  oss << *cg.stmt();
+
+  const std::string& verification_pattern =
+      R"IR(
+        # CHECK: A[threadIdx.x] =
+        # CHECK: __syncthreads();
+        # CHECK: B[threadIdx.x] =
+      )IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Cuda, DependencyAcrossLoopsSameThread_CUDA) {
+  // for (int x = 0; x < 10; x++) {
+  //   b[x] = a[x];
+  // }
+  // for (int y = 0; y < 10; y++) {
+  //   c[y] = b[y]; // No need for sync here
+  // }
+  KernelScope kernel_scope;
+
+  Placeholder a("a", kInt, {50});
+  Tensor* b =
+      Compute("b", {{50, "x"}}, [&](const VarHandle& i) { return a.load(i); });
+  Tensor* c =
+      Compute("c", {{50, "y"}}, [&](const VarHandle& i) { return b->call(i); });
+  LoopNest l({b, c});
+  std::vector<For*> loops = l.getLoopStmtsFor(b);
+  l.setGPUThreadIndex(loops[0], 0);
+  loops = l.getLoopStmtsFor(c);
+  l.setGPUThreadIndex(loops[0], 0);
+
+  l.prepareForCodegen();
+  Stmt* s = l.root_stmt();
+
+  CudaCodeGen cg(s, {a, b, c});
+  std::ostringstream oss;
+  oss << *cg.stmt();
+
+  const std::string& verification_pattern =
+      R"IR(
+        # CHECK: b[threadIdx.x] =
+        # CHECK-NOT: __syncthreads();
+        # CHECK: c[threadIdx.x] =
+      )IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Cuda, DependencyInALoopSameThread_CUDA) {
+  // for (int x = 0; x < 50; x++) {
+  //   A[x] = x;
+  //   B[x] = A[x]; // No need for sync here
+  // }
+  KernelScope kernel_scope;
+
+  BufHandle a_buf("A", {50}, kInt);
+  BufHandle b_buf("B", {50}, kInt);
+  VarHandle x("x", kInt);
+  Stmt* s = For::make(
+      x,
+      0,
+      50,
+      Block::make({Store::make(a_buf, {x}, x, 1),
+                   Store::make(b_buf, {x}, Load::make(a_buf, {x}, 1), 1)}));
+  LoopNest l(s, {a_buf.node(), b_buf.node()}, {}, {});
+  std::vector<For*> loops = l.getLoopStmtsFor(s);
+  l.setGPUThreadIndex(loops[0], 0);
+
+  l.prepareForCodegen();
+  s = l.root_stmt();
+
+  CudaCodeGen cg(s, {x, Placeholder(a_buf), Placeholder(b_buf)});
+  std::ostringstream oss;
+  oss << *cg.stmt();
+
+  const std::string& verification_pattern =
+      R"IR(
+        # CHECK: A[threadIdx.x] =
+        # CHECK-NOT: __syncthreads();
+        # CHECK: B[threadIdx.x] =
+      )IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Cuda, DependencyWithMultipleReads_1_CUDA) {
+  // for (int x = 0; x < 50; x++) {
+  //   A[x] = x;
+  //   B[x] = A[x+1]; // Sync needed here
+  // }
+  // for (int y = 0; y < 50; y++) {
+  //   C[y] = A[y+1]; // Sync not needed here
+  // }
+  KernelScope kernel_scope;
+
+  BufHandle a_buf("A", {50}, kInt);
+  BufHandle b_buf("B", {50}, kInt);
+  BufHandle c_buf("C", {50}, kInt);
+  VarHandle x("x", kInt);
+  VarHandle y("y", kInt);
+  For* for1 = For::make(
+      x,
+      0,
+      50,
+      Block::make({Store::make(a_buf, {x}, x, 1),
+                   Store::make(b_buf, {x}, Load::make(a_buf, {x + 1}, 1), 1)}));
+  For* for2 = For::make(
+      y, 0, 50, Store::make(c_buf, {y}, Load::make(a_buf, {y + 1}, 1), 1));
+  Stmt* s = Block::make({for1, for2});
+
+  LoopNest l(
+      s,
+      {a_buf.node(), b_buf.node(), c_buf.node()},
+      {},
+      {});
+  std::vector<For*> loops = l.getLoopStmtsFor(for1);
+  l.setGPUThreadIndex(loops[0], 0);
+  loops = l.getLoopStmtsFor(for2);
+  l.setGPUThreadIndex(loops[0], 0);
+
+  l.prepareForCodegen();
+  s = l.root_stmt();
+
+  CudaCodeGen cg(
+      s, {x, Placeholder(a_buf), Placeholder(b_buf), Placeholder(c_buf)});
+  std::ostringstream oss;
+  oss << *cg.stmt();
+
+  const std::string& verification_pattern =
+      R"IR(
+        # CHECK: A[threadIdx.x] =
+        # CHECK: __syncthreads();
+        # CHECK: B[threadIdx.x] =
+        # CHECK-NOT: __syncthreads();
+        # CHECK: C[threadIdx.x] =
+      )IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Cuda, DependencyWithMultipleReads_2_CUDA) {
+  // for (int x = 0; x < 50; x++) {
+  //   A[x] = x;
+  //   B[x] = A[x]; // Sync not needed here
+  // }
+  // for (int y = 0; y < 50; y++) {
+  //   C[y] = A[y+1]; // Sync needed here
+  // }
+  KernelScope kernel_scope;
+
+  BufHandle a_buf("A", {50}, kInt);
+  BufHandle b_buf("B", {50}, kInt);
+  BufHandle c_buf("C", {50}, kInt);
+  VarHandle x("x", kInt);
+  VarHandle y("y", kInt);
+  For* for1 = For::make(
+      x,
+      0,
+      50,
+      Block::make({Store::make(a_buf, {x}, x, 1),
+                   Store::make(b_buf, {x}, Load::make(a_buf, {x}, 1), 1)}));
+  For* for2 = For::make(
+      y, 0, 50, Store::make(c_buf, {y}, Load::make(a_buf, {y + 1}, 1), 1));
+  Stmt* s = Block::make({for1, for2});
+
+  LoopNest l(
+      s,
+      {a_buf.node(), b_buf.node(), c_buf.node()},
+      {},
+      {});
+  std::vector<For*> loops = l.getLoopStmtsFor(for1);
+  l.setGPUThreadIndex(loops[0], 0);
+  loops = l.getLoopStmtsFor(for2);
+  l.setGPUThreadIndex(loops[0], 0);
+
+  l.prepareForCodegen();
+  s = l.root_stmt();
+
+  CudaCodeGen cg(
+      s, {x, Placeholder(a_buf), Placeholder(b_buf), Placeholder(c_buf)});
+  std::ostringstream oss;
+  oss << *cg.stmt();
+
+  const std::string& verification_pattern =
+      R"IR(
+        # CHECK: A[threadIdx.x] =
+        # CHECK-NOT: __syncthreads();
+        # CHECK: B[threadIdx.x] =
+        # CHECK: __syncthreads();
+        # CHECK: C[threadIdx.x] =
+      )IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Cuda, DependencyWithMultipleReads_3_CUDA) {
+  // for (int x = 0; x < 50; x++) {
+  //   A[x] = x;
+  //   B[x] = A[x]; // Sync not needed here
+  // }
+  // for (int y = 0; y < 50; y++) {
+  //   C[y] = A[y]; // Sync not needed here
+  // }
+  KernelScope kernel_scope;
+
+  BufHandle a_buf("A", {50}, kInt);
+  BufHandle b_buf("B", {50}, kInt);
+  BufHandle c_buf("C", {50}, kInt);
+  VarHandle x("x", kInt);
+  VarHandle y("y", kInt);
+  For* for1 = For::make(
+      x,
+      0,
+      50,
+      Block::make({Store::make(a_buf, {x}, x * x, 1),
+                   Store::make(b_buf, {x}, Load::make(a_buf, {x}, 1), 1)}));
+  For* for2 = For::make(
+      y, 0, 50, Store::make(c_buf, {y}, Load::make(a_buf, {y}, 1), 1));
+  Stmt* s = Block::make({for1, for2});
+
+  LoopNest l(
+      s,
+      {a_buf.node(), b_buf.node(), c_buf.node()},
+      {},
+      {});
+  std::vector<For*> loops = l.getLoopStmtsFor(for1);
+  l.setGPUThreadIndex(loops[0], 0);
+  loops = l.getLoopStmtsFor(for2);
+  l.setGPUThreadIndex(loops[0], 0);
+
+  l.prepareForCodegen();
+  s = l.root_stmt();
+
+  CudaCodeGen cg(
+      s, {x, Placeholder(a_buf), Placeholder(b_buf), Placeholder(c_buf)});
+  std::ostringstream oss;
+  oss << *cg.stmt();
+
+  const std::string& verification_pattern =
+      R"IR(
+        # CHECK-NOT: __syncthreads();
+      )IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
 } // namespace jit
 } // namespace torch
 

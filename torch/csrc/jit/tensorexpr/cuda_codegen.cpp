@@ -6,11 +6,13 @@
 #include <torch/csrc/jit/codegen/fuser/cuda/resource_strings.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
+#include <torch/csrc/jit/tensorexpr/bounds_inference.h>
 #include <torch/csrc/jit/tensorexpr/cuda_random.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
 #include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/mem_dependency_checker.h>
 #include <torch/csrc/jit/tensorexpr/registerizer.h>
 
 namespace torch {
@@ -661,6 +663,148 @@ class PrioritizeLoad : public IRMutator {
   std::unordered_set<const Var*> thread_local_bufs_;
 };
 
+class CudaDependencyHandler : public IRMutator {
+ public:
+  CudaDependencyHandler(analysis::MemDependencyChecker* checker)
+      : mem_dependency_checker_(checker) {}
+
+  Stmt* mutate(const Block* v) override {
+    auto stmts = v->stmts();
+    const auto& newStmts = handleDependences({stmts.begin(), stmts.end()});
+    return new Block(newStmts);
+  }
+
+ private:
+  // Check if the given statements have the same thread index.
+  bool sameThreadIdx(Stmt* s1, Stmt* s2) {
+    auto enclosing_for = [](Stmt* s) -> For* {
+      Stmt* curr = s;
+      while (curr) {
+        if (auto f = dynamic_cast<For*>(curr)) {
+          return f;
+        }
+        curr = curr->get_parent();
+      }
+      return nullptr;
+    };
+    auto for1 = enclosing_for(s1);
+    auto for2 = enclosing_for(s2);
+    if (for1 && for2) {
+      auto loopOptions1 = for1->loop_options();
+      auto loopOptions2 = for2->loop_options();
+      if (loopOptions1.is_gpu_thread_index() &&
+          loopOptions2.is_gpu_thread_index()) {
+        return loopOptions1.gpu_thread_index() ==
+            loopOptions2.gpu_thread_index();
+      }
+    }
+    return false;
+  }
+
+  // Identify the list of buffers that were written to in `s1` and read in `s2`
+  // and hence need synchronization before `s2` is executed.
+  std::unordered_set<const Buf*> buffersNeedingSync(Stmt* s1, Stmt* s2) {
+    auto s1Bounds = getInferredBounds(*mem_dependency_checker_, s1, true);
+    auto s2Bounds = getInferredBounds(*mem_dependency_checker_, s2, true);
+    std::unordered_set<const Buf*> syncBuffers;
+    for (const auto& s2Bound : s2Bounds) {
+      const Buf* buf = s2Bound.first;
+      if (s1Bounds.find(buf) == s1Bounds.end()) {
+        continue;
+      }
+
+      // We only handle RAW hazards now.
+      auto s1Writes = convertBounds(s1Bounds, buf, kStore);
+      auto s2Reads = convertBounds(s2Bound.second, kLoad);
+
+      for (auto& s1W : s1Writes) {
+        for (auto& s2R : s2Reads) {
+          if (s1W.equals(s2R) && sameThreadIdx(s1, s2)) {
+            // No need for sync if the bounds are equal and they belong
+            // to the same thread.
+            continue;
+          }
+          if (boundOverlap(s1W, s2R) != analysis::NoOverlap) {
+            syncBuffers.insert(buf);
+          }
+        }
+      }
+    }
+    return syncBuffers;
+  }
+
+  // Check if any of the buffers in the given list has been written to since
+  // the last synchronization was added.
+  bool needSync(std::unordered_set<const Buf*>& bufs) {
+    for (auto b : bufs) {
+      if (bufs_written_after_sync_.find(b) != bufs_written_after_sync_.end()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  std::vector<Stmt*> handleDependences(std::vector<Stmt*> stmts) {
+    // Iterate over the given list of statements. For every pair of these
+    // statements, identify the list of buffers that require synchronization
+    // (before the second statement in the pair is executed.)
+    //
+    // Note that the iteration below is quadratic in the number of statements in
+    // the block. This could affect the compile-time performance when the
+    // number of statements in the list is large.
+    // TODO: Improve performance of this loop.
+    std::unordered_map<Stmt*, std::unordered_set<const Buf*>> stmtsNeedingSync;
+    for (auto it1 = stmts.begin(); it1 != stmts.end(); ++it1) {
+      for (auto it2 = std::next(it1); it2 != stmts.end(); ++it2) {
+        auto bufs = buffersNeedingSync(*it1, *it2);
+        if (!bufs.empty()) {
+          stmtsNeedingSync[*it2] = std::move(bufs);
+        }
+      }
+    }
+    // Maintain a set of buffers that have been written to since the last
+    // synchronization. Whenever we add `SyncThreads`, this set it cleared
+    // to indicate that all these buffers' writes are guaranteed to complete
+    // beyond this synchronization point.
+    //
+    // This approach requires that the statements are processed in the order
+    // in which they appear in the kernel.
+    //
+    // Repeat the following for every statement in the given list:
+    //   * If the statement requires synchronization for any buffer and
+    //     that buffer hasn't been synchronized yet, then add a `SyncThreads`
+    //     before this statement.
+    //   * If a `SyncThreads` is added, add all the buffers that have been
+    //     written to and not synchronized to the list of synchronized buffers.
+    //   * Call this mutator on the current statement. This might modify the
+    //     statement by inserting more `SyncThreads` as well as add buffers
+    //     to the list of buffers that have been written to since the last
+    //     synchronization.
+    //   * If the current statement is a `Store`, add the buffer that is
+    //     written to the list of buffers yet to synchronized.
+    std::vector<Stmt*> stmtsWithSync;
+    for (auto stmt : stmts) {
+      auto it = stmtsNeedingSync.find(stmt);
+      if (it != stmtsNeedingSync.end() && needSync(it->second)) {
+        stmtsWithSync.push_back(new SyncThreads());
+        bufs_written_after_sync_.clear();
+      }
+      auto newStmt = stmt->accept_mutator(this);
+      if (newStmt == stmt) {
+        newStmt = Stmt::clone(stmt);
+      }
+      if (auto store = dynamic_cast<Store*>(newStmt)) {
+        bufs_written_after_sync_.insert(store->buf());
+      }
+      stmtsWithSync.push_back(newStmt);
+    }
+    return stmtsWithSync;
+  }
+
+  analysis::MemDependencyChecker* mem_dependency_checker_;
+  std::unordered_set<const Buf*> bufs_written_after_sync_;
+};
+
 std::string CudaCodeGen::GetUniqueFuncName(const std::string& func_prefix) {
   int64_t counter = 0;
   std::string name = func_prefix;
@@ -931,6 +1075,14 @@ void CudaCodeGen::Initialize() {
   if (halfChecker.hasHalf()) {
     os() << fuser::cuda::half_support_literal << std::endl;
   }
+
+  // Handle dependences between statements by adding necessary sync threads.
+  // Compute the dependences on the entire graph before feeding that into the
+  // dependency handler.
+  analysis::MemDependencyChecker analyzer;
+  stmt_v->accept(&analyzer);
+  CudaDependencyHandler depHandler(&analyzer);
+  stmt_v = stmt_v->accept_mutator(&depHandler);
 
   std::string func_name = GetUniqueFuncName(kernel_func_name());
   os() << "extern \"C\" __global__" << std::endl;

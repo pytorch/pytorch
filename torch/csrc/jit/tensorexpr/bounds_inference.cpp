@@ -175,11 +175,9 @@ std::vector<const Expr*> getBoundExtents(
   return extents;
 }
 
-using BoundSet = std::unordered_set<Bound, BoundHash>;
-
 BoundSet convertBounds(
     const std::vector<TensorAccessBoundsInfo>& bounds,
-    TensorAccessKind filter = kMutate) {
+    TensorAccessKind filter) {
   BoundSet ret;
   for (auto& TABI : bounds) {
     if (filter == kMutate || TABI.kind == filter) {
@@ -194,7 +192,7 @@ BoundSet convertBounds(
 BoundSet convertBounds(
     BoundsInfo& bounds,
     const Buf* buf,
-    TensorAccessKind filter = kMutate) {
+    TensorAccessKind filter) {
   auto it = bounds.find(buf);
   if (it == bounds.end()) {
     return BoundSet();
