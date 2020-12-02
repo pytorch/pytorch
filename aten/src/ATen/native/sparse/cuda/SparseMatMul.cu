@@ -826,34 +826,35 @@ Tensor sparse_matrix_mask_helper_cuda(
     t_index_set.data_ptr<int64_t>());
 
   auto new_sz = thrust::distance(t_index_set.data_ptr<int64_t>(), result_end.second);
-  Tensor mask_index_set = at::empty({max_sz}, mask_indices.options()); 
-  thrust::set_intersection_by_key(
-      policy,
-      mask_flatten_indices.data_ptr<int64_t>(), 
-      mask_flatten_indices.data_ptr<int64_t>() + r_nnz,
-      t_flatten_indices.data_ptr<int64_t>(),
-      t_flatten_indices.data_ptr<int64_t>() + t_nnz, 
-      thrust::make_counting_iterator(int64_t(0)),
-      thrust::make_discard_iterator(),
-      mask_index_set.data_ptr<int64_t>()); 
-
-  AT_DISPATCH_FLOATING_TYPES(r_values.scalar_type(), "_sparse_matrix_mask", [&] {
-    auto r_values_accessor = r_values.packed_accessor<scalar_t, 1>();
-    auto t_values = t_v.packed_accessor<scalar_t, 1>(); 
-    auto mask_index_set_ptr = mask_index_set.packed_accessor<int64_t, 1>();
-    auto t_index_set_ptr = t_index_set.packed_accessor<int64_t, 1>();
-    if (new_sz > 0) {
-      thrust::for_each(
+  
+  if (new_sz > 0) {
+    Tensor mask_index_set = at::empty({max_sz}, mask_indices.options()); 
+    thrust::set_intersection_by_key(
         policy,
+        mask_flatten_indices.data_ptr<int64_t>(), 
+        mask_flatten_indices.data_ptr<int64_t>() + r_nnz,
+        t_flatten_indices.data_ptr<int64_t>(),
+        t_flatten_indices.data_ptr<int64_t>() + t_nnz, 
         thrust::make_counting_iterator(int64_t(0)),
-        thrust::make_counting_iterator(int64_t(new_sz)),
-        [r_values_accessor, t_values, t_index_set_ptr, mask_index_set_ptr, r_nnz] __device__ (int64_t i) mutable {
-          int64_t target = mask_index_set_ptr[i];
-          int64_t origin = t_index_set_ptr[i];
-          r_values_accessor[target] = t_values[origin];
-        });
-    }
-  });
+        thrust::make_discard_iterator(),
+        mask_index_set.data_ptr<int64_t>()); 
+
+    AT_DISPATCH_FLOATING_TYPES(r_values.scalar_type(), "_sparse_matrix_mask", [&] {
+      auto r_values_accessor = r_values.packed_accessor<scalar_t, 1>();
+      auto t_values = t_v.packed_accessor<scalar_t, 1>(); 
+      auto mask_index_set_ptr = mask_index_set.packed_accessor<int64_t, 1>();
+      auto t_index_set_ptr = t_index_set.packed_accessor<int64_t, 1>();
+        thrust::for_each(
+          policy,
+          thrust::make_counting_iterator(int64_t(0)),
+          thrust::make_counting_iterator(int64_t(new_sz)),
+          [r_values_accessor, t_values, t_index_set_ptr, mask_index_set_ptr, r_nnz] __device__ (int64_t i) mutable {
+            int64_t target = mask_index_set_ptr[i];
+            int64_t origin = t_index_set_ptr[i];
+            r_values_accessor[target] = t_values[origin];
+          });
+    });
+  }
   return r_values;
 }
 
