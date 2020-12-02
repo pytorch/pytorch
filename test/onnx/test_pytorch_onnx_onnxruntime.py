@@ -3154,6 +3154,16 @@ class TestONNXRuntime(unittest.TestCase):
         ind = torch.tensor(-2, dtype=torch.long)
         self.run_test(GetItemModel(), (x, y, z, ind))
 
+    @disableScriptTest()  # torch.nonzero(x, as_tuple=True) is not scriptable.
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_nonzero(self):
+        class NonzeroModel(torch.nn.Module):
+            def forward(self, x):
+                return x.nonzero(), x.nonzero(as_tuple=True)
+
+        x = torch.randn(60).index_fill_(0, torch.randint(0, 60, (20,)), 0).view(3, 4, 5)
+        self.run_test(NonzeroModel(), (x,))
+
     def test_unbind(self):
         class UnbindModel(torch.nn.Module):
             def forward(self, input):
