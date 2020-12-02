@@ -949,8 +949,8 @@ inline Tensor _blob_to_Tensor(
   // Blob is assumed to be a 1D array, that is why
   // we also insert a fake dimension so that the result could directly
   // be used in _compute_linear_combination
-  auto tensor = at::from_blob((void*)blob.begin(), blob.size(), in.dtype())
-    .unsqueeze(0);
+  auto tensor = at::from_blob((void*)blob.begin(), blob.size(),
+    c10::toValueType(in.scalar_type())).unsqueeze(0);
   return _move_memory_if_cuda_input(tensor, in);
 }
 
@@ -1083,7 +1083,7 @@ Tensor compute_T12(const Tensor& A) {
     reinterpret_cast<void*>(&b),
     {num_prods, num_prods},
     {num_prods, 1},
-    A.dtype()
+    c10::toValueType(A.scalar_type())
   );
   bs = _move_memory_if_cuda_input(bs, A);
 
@@ -1155,7 +1155,7 @@ Tensor compute_T18(const Tensor& A) {
     reinterpret_cast<void*>(&b),
     {num_prods, num_prods},
     {num_prods, 1},
-    A.dtype()
+    c10::toValueType(A.scalar_type())
   );
   bs = _move_memory_if_cuda_input(bs, A);
 
@@ -1328,7 +1328,7 @@ Tensor backward_analytic_function_of_a_matrix(
     const Tensor& self, const Tensor& grad,
     const func_t& function_of_a_matrix
   ) {
-  auto self_transposed = self.transpose(-2, -1);
+  auto self_transposed = self.transpose(-2, -1).conj();
   auto self_transposed_sizes = self_transposed.sizes().vec();
   self_transposed_sizes[self.dim() - 2] <<= 1;
   self_transposed_sizes[self.dim() - 1] <<= 1;
