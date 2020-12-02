@@ -47,25 +47,25 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             - KEY: str, named parameter 
             - VALUE: corresponding input 
             args can be structured either as: 
-        
+
             1. ONLY A TUPLE OF ARGUMENTS or torch.Tensor:: 
-            
+
                 ‘’args = (x, y, z)’'  
-        
+
             The inputs to the model, e.g., such that ``model(*args)`` is a 	valid invocation 
             of the model. Any non-Tensor arguments will be hard-coded into the exported model;
             any Tensor arguments will become inputs of the exported model, in the order they 
             occur in args. If args is a Tensor, this is equivalent to having 
             called it with a 1-ary tuple of that Tensor. 
-            
+
             2. A TUPLE OF ARGUEMENTS WITH A DICTIONARY OF NAMED PARAMETERS:: 
-        
+
                 ‘’args = (x, 
                         { 
                         ‘y’: input_y, 
                         ‘z’: input_z 
                         }) ‘’ 
-            
+
             The inputs to the model are structured as a tuple consisting of  
             non-keyword arguments and the last value of this tuple being a dictionary 
             consisting of named parameters and the corresponding inputs as key-value pairs. 
@@ -75,13 +75,13 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             Cases in which an dictionary input is the last input of the args tuple 
             would cause a conflict when a dictionary of named parameters is used. 
             The model below provides such an example. 
- 
+
                 class Model(torch.nn.Module): 
                     def forward(self, k, x): 
                         ... 
                         ... 
                         return x 
-                  
+
                 m = Model() 
                 k = torch.randn(2, 3)   
                 x = {torch.tensor(1.): torch.randn(2, 3)} 
@@ -89,13 +89,13 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
                 In the previous iteration, the call to export API would look like
 
                     torch.onnx.export(model, (k, x), ‘test.onnx’) 
-                
+
                 This would work as intended. However, the export function 
                 would now assume that the ‘x’ input is intended to represent the optional 
                 dictionary consisting of named arguments. In order to prevent this from being 
                 an issue a constraint is placed to provide an empty dictionary as the last 
                 input in the tuple args in such cases. The new call would look like this. 
-                
+
                     torch.onnx.export(model, (k, x, {}), ‘test.onnx’) 
 
         f: a file-like object (has to implement fileno that returns a file descriptor)
@@ -118,26 +118,26 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             - KEY: str, input name in forward function 
             - VALUE: str, input name to be assigned 
             input_names can be structured as follows: 
-        
+
             1. LIST OF STRINGS:: 
-        
+
                 ‘’input_names = [‘input_1’, 
                             ‘input_2’]’’	 
-        
+
             names to assign to the input nodes of the graph in order. 
-        
+
             2. DICTIONARY WITH INPUT-INPUT NAMES PAIRS:: 
-                
+
                 ‘’input_names = { 
                             ‘y’: ‘input_y’, 
                             ‘z’: ‘input_z’ 
                                 }) 
-            
+
             Based on the changes to the format of the input args, the format 
             in which the input_names is structured will depend on the format 
             in which args are entered. The example model below is used to demonstrate 
             this constraint. 
- 
+
                 class Model(torch.nn.Module): 
                     def forward(self, x_in, y_in=None, z_in=None): 
                         if y is not None: 
@@ -145,17 +145,17 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
                         if z is not None: 
                             return x + z 
                         return x 
-                  
+
                 m = Model() 
-                  
+
                 x = torch.randn(2, 3) 
                 y = torch.randn(2, 3) 
                 z = torch.randn(2, 3) 
-                
+
                 1. INPUTS ARE ONLY A TUPLE OF ARGUMENTS (NO DICTIONARY) 
 
                 In this case, the input_names can be entered as either a list of strings in order, 
-                    
+
                     torch.onnx.export(model, (x, y, z), ‘test.onnx’,  
                                       input_names=['input_x’, ‘input_y’, ‘input_z’]) 
 
@@ -166,7 +166,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
                                                    ‘y_in’: ‘input_y’,  
                                                    ‘z_in‘: ‘input_z’]) 
 
-                
+
                 2. INPUTS CONTAIN A DICTIONARY FOR NAMED PARAMETERS 
 
                 In this case, input_names are entered as a dictionary of input to input_names 
