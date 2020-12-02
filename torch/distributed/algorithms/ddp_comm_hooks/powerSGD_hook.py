@@ -51,7 +51,7 @@ class PowerSGDState(object):
         # because PowerSGD is a biased compressor,
         # i.e., compressing and decompressing a random gradient does not yield the original in expectation.
         # This mechanism requires a temporary copy of the input gradients,
-        # so it increases the peak memory consumption.
+        # so it increases the peak memory consumption by the size of gradient tensor.
         # However, if the target matrices are known to be exactly low-ranked (instead of just low stable rank),
         # sometimes it is possible to converge to the optima without error feedback.
         # See: http://proceedings.mlr.press/v54/yurtsever17a/yurtsever17a.pdf
@@ -128,9 +128,10 @@ def powerSGD_hook(
 
     # Incorporate the error from the previous state into the gradients.
     if state.use_error_feedback:
-        if input_tensor not in state.error_dict:
+        if input_tensor in state.error_dict:
+            input_tensor.add_(state.error_dict[input_tensor])
+        else:
             state.error_dict[input_tensor] = torch.zeros(padded_total_length, device=device)
-        input_tensor.add_(state.error_dict[input_tensor])
         # Keep a copy of the input tensor,
         # so that we can compute the local error caused by compression later,
         # by comparing this copy and the input tensor updated after decompression.
