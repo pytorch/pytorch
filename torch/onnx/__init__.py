@@ -52,7 +52,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
 
                 ‘’args = (x, y, z)’'  
 
-            The inputs to the model, e.g., such that ``model(*args)`` is a 	valid invocation 
+            The inputs to the model, e.g., such that ``model(*args)`` is a valid invocation 
             of the model. Any non-Tensor arguments will be hard-coded into the exported model;
             any Tensor arguments will become inputs of the exported model, in the order they 
             occur in args. If args is a Tensor, this is equivalent to having 
@@ -122,7 +122,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             1. LIST OF STRINGS:: 
 
                 ‘’input_names = [‘input_1’, 
-                            ‘input_2’]’’	 
+                            ‘input_2’]’’     
 
             names to assign to the input nodes of the graph in order. 
 
