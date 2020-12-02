@@ -631,8 +631,8 @@ Example::
 
 .. function:: all(input, dim, keepdim=False, *, out=None) -> Tensor
 
-For each row of :attr:`input` in the given dimension :attr:`dim`
-returns True if all elements in the row evaluate to `True`, `False` otherwise.
+For each row of :attr:`input` in the given dimension :attr:`dim`,
+returns True if all elements in the row evaluate to `True` and `False` otherwise.
 
 {keepdim_details}
 
@@ -682,8 +682,8 @@ Example::
 
 .. function:: any(input, dim, keepdim=False, *, out=None) -> Tensor
 
-For each row of :attr:`input` in the given dimension :attr:`dim`
-returns True if any element in the row evaluate to `True`, `False` otherwise.
+For each row of :attr:`input` in the given dimension :attr:`dim`,
+returns True if any element in the row evaluate to `True` and `False` otherwise.
 
 {keepdim_details}
 
