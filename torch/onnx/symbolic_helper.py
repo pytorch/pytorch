@@ -365,7 +365,7 @@ def _unbind_helper(g, self, dim, _outputs):
     if _export_onnx_opset_version <= 9:
         from torch.onnx.symbolic_opset9 import unbind
     else:
-        from torch.onnx.symbolic_opset11 import unbind
+        from torch.onnx.symbolic_opset11 import unbind  # type: ignore[no-redef]
     return unbind(g, self, dim, _outputs)
 
 
