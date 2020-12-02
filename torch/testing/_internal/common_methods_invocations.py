@@ -618,12 +618,20 @@ if TEST_SCIPY:
                        ref=reference_sigmoid,
                        decorators=(precisionOverride({torch.float16: 1e-2,
                                                       torch.bfloat16: 1e-2}),),
-                       skips=(SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                       device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),),
+                       skips=(
+                           SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                    device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
+                           # RuntimeError: sigmoid does not support automatic differentiation for outputs with complex dtype.
+                           SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                    dtypes=[torch.complex64, torch.complex128]),
+                           SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                                    dtypes=[torch.complex64, torch.complex128]),),
                        dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                        dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                        dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                        promotes_integers_to_float=True,
+                       skip_bfloat16_grad=True,
+                       assert_autodiffed=True,
                        test_complex_grad=False),  # Reference: https://github.com/pytorch/pytorch/issues/48552
         UnaryUfuncInfo('erf',
                        ref=scipy.special.erf,
