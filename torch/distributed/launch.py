@@ -142,6 +142,10 @@ import subprocess
 import os
 from argparse import ArgumentParser, REMAINDER
 from typing import Optional, IO
+import urllib
+import urllib.request
+from urllib.parse import urlparse
+
 
 node_local_rank_stdout_filename = "node_{}_local_rank_{}_stdout"
 node_local_rank_stderr_filename = "node_{}_local_rank_{}_stderr"
@@ -176,6 +180,10 @@ def parse_args():
                         help="Master node (rank 0)'s free port that needs to "
                              "be used for communication during distributed "
                              "training")
+    parser.add_argument("--dist_url", type=str,
+                        help="url used to setup distributed traning"
+                             "For Filestore, it's value should be like file:///c:/tmp/ddp_filestore"
+                        )
     parser.add_argument("--use_env", default=False, action="store_true",
                         help="Use environment variable to pass "
                              "'local rank'. For legacy reasons, the default value is False. "
@@ -210,6 +218,14 @@ def parse_args():
     parser.add_argument('training_script_args', nargs=REMAINDER)
     return parser.parse_args()
 
+def check_filename(file_name):
+    """
+    check that one file can be created with the filename
+    """
+    f = open(file_name, "x")
+    f.close()
+    os.remove(file_name)
+
 def main():
     args = parse_args()
 
@@ -241,6 +257,15 @@ def main():
         else:
             # create the relative directory
             os.mkdir(os.path.join(os.getcwd(), args.logdir))
+    
+    if args.dist_url:
+        url_obj = urlparse(args.dist_url)
+        if url_obj.scheme == "file":
+            if args.nnodes > 1:
+                raise ValueError("FileStore only supports one node")
+            else:
+                check_filename(urllib.request.url2pathname(url_obj.path))
+                current_env["INIT_METHOD"] = args.dist_url
 
     subprocess_file_handles = []
 
