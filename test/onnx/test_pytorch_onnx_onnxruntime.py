@@ -588,7 +588,7 @@ class TestONNXRuntime(unittest.TestCase):
 
     def test_hardswish(self):
         model = torch.nn.Hardswish()
-        
+
         x = torch.rand(3, 3).to(dtype=torch.float32)
         self.run_test(model, x)
 
