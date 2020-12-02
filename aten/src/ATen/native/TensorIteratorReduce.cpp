@@ -1,9 +1,9 @@
 #include <ATen/native/TensorIterator.h>
-#include <ATen/TensorOperators.h>
 #include <ATen/Parallel.h>
 #include <algorithm>
 #include <memory>
 #include <ATen/Functions.h>
+#include <ATen/TensorOperators.h>
 
 /// Contains the implementation of parallel reductions in TensorIterator.
 
