@@ -72,7 +72,7 @@ class TestGradients(TestCase):
             if sample.output_process_fn_grad is not None:
                 out_fn = sample.output_process_fn_grad
 
-                def variant_out_fn(*arhs, **kwargs):
+                def variant_out_fn(*args, **kwargs):
                     return out_fn(variant(*args, **kwargs))
             else:
                 variant_out_fn = variant
