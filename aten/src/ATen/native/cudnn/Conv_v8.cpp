@@ -33,7 +33,7 @@ int64_t getAlignment(const Tensor &t) {
   int64_t alignment = 1;
   uint64_t address = reinterpret_cast<uint64_t>(t.data_ptr());
   while (address % alignment == 0) alignment *= 2;
-  return std::min<int64_t>(alignment / 2, 8);
+  return std::min<int64_t>(alignment / 2, 16);
 }
 
 cudnn_frontend::Tensor getTensorDescriptor(const Tensor &t, int64_t id) {
@@ -75,11 +75,6 @@ Tensor _cudnn_convolution_v8(
 {
   TORCH_CHECK(!benchmark, "not supported yet");
 
-  // std::cout << "input.sizes() " << input.sizes() << std::endl;
-  // std::cout << "input.strides() " << input.strides() << std::endl;
-  // std::cout << "weight.sizes() " << weight.sizes() << std::endl;
-  // std::cout << "weight.strides() " << weight.strides() << std::endl;
-
   TensorArg input_  { input,  "input",  1 },
             weight_ { weight, "weight", 2 };
 
@@ -105,6 +100,13 @@ Tensor _cudnn_convolution_v8(
     return output;
   }
 
+  // std::cout << "input.sizes() " << input.sizes() << std::endl;
+  // std::cout << "input.strides() " << input.strides() << std::endl;
+  // std::cout << "weight.sizes() " << weight.sizes() << std::endl;
+  // std::cout << "weight.strides() " << weight.strides() << std::endl;
+  // std::cout << "output.sizes() " << output.sizes() << std::endl;
+  // std::cout << "output.strides() " << output.strides() << std::endl;
+
   uint64_t convDim = input.dim() - 2;
   auto conv_descriptor = cudnn_frontend::ConvDescBuilder()
       .setDataType(getDataType(input))
@@ -116,9 +118,9 @@ Tensor _cudnn_convolution_v8(
       .setDilation(convDim, dilation.data())
       .build();
 
-  // std::cout << getTensorDescriptor(input_contig, groups, 'x').describe() << std::endl;
-  // std::cout << getTensorDescriptor(output, groups, 'y').describe() << std::endl;
-  // std::cout << getTensorDescriptor(weight_contig, groups, 'w').describe() << std::endl;
+  // std::cout << getTensorDescriptor(input_contig, 'x').describe() << std::endl;
+  // std::cout << getTensorDescriptor(output, 'y').describe() << std::endl;
+  // std::cout << getTensorDescriptor(weight_contig, 'w').describe() << std::endl;
   // std::cout << conv_descriptor.describe() << std::endl;
 
   cudnnHandle_t handle = getCudnnHandle();
