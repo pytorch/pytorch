@@ -3445,7 +3445,7 @@ struct to_ir {
 
     // Default value for start is 0.
     if (!start) {
-      start = graph->insertConstant(0, loc);
+      start = graph->insertConstant(INT64_MAX, loc);
     }
     args.emplace_back(loc, "start", start);
 
@@ -3873,7 +3873,7 @@ struct to_ir {
             sv->asTupleValue(val_range, method)->asValue(val_range, method);
         const SliceExpr& slice = SliceExpr(subscript_exprs[0]);
         auto begin =
-            NamedValue(val_range, "begin", emitExpr(Expr(slice.startOr(0))));
+            NamedValue(val_range, "begin", emitExpr(Expr(slice.startOr(INT64_MAX))));
         if (slice.end().present()) {
           auto end =
               NamedValue(val_range, "end", emitExpr(Expr(slice.end().get())));
