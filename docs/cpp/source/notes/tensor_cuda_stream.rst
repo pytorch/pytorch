@@ -82,7 +82,7 @@ CUDA Stream Usage Examples
   // `at::cuda::setCurrentCUDAStream` is used to set current CUDA stream
 
   // create a tensor on device 0
-  torch::Tensor tensor0 = torch::ones({2, 2}, torch.device(torch::kCUDA));
+  torch::Tensor tensor0 = torch::ones({2, 2}, torch::device(torch::kCUDA));
   // get a new CUDA stream from CUDA stream pool on device 0 
   at::cuda::CUDAStream myStream = at::cuda::getStreamFromPool();
   // set current CUDA stream from default stream to `myStream` on device 0
@@ -103,7 +103,7 @@ CUDA Stream Usage Examples
   // index and use CUDA stream guard to set current CUDA stream
 
   // create a tensor on device 0
-  torch::Tensor tensor0 = torch::ones({2, 2}, torch.device(torch::kCUDA));
+  torch::Tensor tensor0 = torch::ones({2, 2}, torch::device(torch::kCUDA));
   // get a new stream from CUDA stream pool on device 0
   at::cuda::CUDAStream myStream = at::cuda::getStreamFromPool(false, 0);
   // set the current CUDA stream to `myStream` within the scope using CUDA stream guard
@@ -158,7 +158,7 @@ CUDA Stream Usage Examples
   // acquire a new CUDA stream on device 1
   at::cuda::CUDAStream myStream1_1 = at::cuda::getStreamFromPool(false, 1);
   // create a new tensor on device 1
-  torch::Tensor tensor1 = torch::ones({2, 2}, torch.device({torch::kCUDA, 1}));
+  torch::Tensor tensor1 = torch::ones({2, 2}, torch::device({torch::kCUDA, 1}));
 
   // change the current device index to 1 and current CUDA stream on device 1 
   // to `myStream1_1` using CUDA stream guard within a scope
