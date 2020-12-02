@@ -93,7 +93,8 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         bias_shape = [1] * len(self.weight.shape)
         bias_shape[1] = -1
         scaled_weight = self.weight_fake_quant(self.weight * scale_factor.reshape(weight_shape))
-        # this does not include the conv bias
+        # using zero bias here since the bias for original conv
+        # will be added later
         if self.bias:
             zero_bias = torch.zeros_like(self.bias)
         else:
