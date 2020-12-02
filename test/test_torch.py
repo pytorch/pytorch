@@ -2312,6 +2312,10 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             # We can't usefully test the output; just make sure this doesn't crash
             torch.__config__.show()
 
+        @unittest.skipIf(IS_FBCODE, "CXX_FLAGS is only for OSS build.")
+        def test_cxx_flags(self):
+            torch.__config__._cxx_flags()
+
         def test_parallel_info(self):
             torch.__config__.parallel_info()
 
@@ -2535,6 +2539,22 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             y = torch.empty_meta(2 ** 20)
             z = x + y
             self.assertEqual(z.size(), (2 ** 20, 2 ** 20))
+
+        def test_upsample_nearest1d_meta(self):
+            # TODO: this is not a sustainable way of testing meta functions,
+            # but I want some quick scaffolding first before a more
+            # integrated testing strategy
+            # NB: Can't make the exponent too big, or it will overflow
+            # signed 64-bit integer
+            x = torch.empty_meta(2 * 10 ** 8, 3, 2 * 10 ** 8)
+            z = torch.nn.functional.interpolate(x, scale_factor=2)
+            self.assertEqual(z.size(), (2 * 10 ** 8, 3, 4 * 10 ** 8))
+
+            # interpolate doesn't seem to support out=
+            # (not sure why passing None here doesn't work? How strange...)
+            z = torch.empty_meta(0)
+            torch._C._nn.upsample_nearest1d(x, (4 * 10 ** 8,), 2, out=z)
+            self.assertEqual(z.size(), (2 * 10 ** 8, 3, 4 * 10 ** 8))
 
         def test_normal_shape(self):
             warned = False
@@ -6695,7 +6715,6 @@ tensor_op_tests = [
     ('log10', '', _small_3d, lambda t, d: [], 1e-2, 5e-2, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
     ('log1p', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types_no_half, [torch.bfloat16]),
     ('log2', '', _small_3d, lambda t, d: [], 1e-2, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
-    ('sigmoid', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('logit', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('sqrt', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
     ('tanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5,

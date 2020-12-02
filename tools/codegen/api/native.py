@@ -1,6 +1,6 @@
 from tools.codegen.model import *
 
-from tools.codegen.api.types import TensorOptionsArguments, NativeArgument, ThisArgument
+from tools.codegen.api.types import NativeArgument
 import tools.codegen.api.cpp as cpp
 from tools.codegen import local
 
@@ -43,7 +43,7 @@ def returns_type(rs: Sequence[Return]) -> str:
 def argument_type(a: Argument) -> str:
     return argumenttype_type(a.type, mutable=a.is_write)
 
-def argument(a: Union[Argument, ThisArgument, TensorOptionsArguments]) -> Sequence[NativeArgument]:
+def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments]) -> Sequence[NativeArgument]:
     if isinstance(a, Argument):
         return [NativeArgument(
             type=argument_type(a),
@@ -51,8 +51,8 @@ def argument(a: Union[Argument, ThisArgument, TensorOptionsArguments]) -> Sequen
             default=cpp.default_expr(a.default, a.type) if a.default is not None else None,
             argument=a,
         )]
-    elif isinstance(a, ThisArgument):
-        # Erase ThisArgument from the distinction
+    elif isinstance(a, SelfArgument):
+        # Erase SelfArgument from the distinction
         return [NativeArgument(
             type=argument_type(a.argument),
             name=a.argument.name,

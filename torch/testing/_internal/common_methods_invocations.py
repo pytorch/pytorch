@@ -68,6 +68,7 @@ class OpInfo(object):
                  default_test_dtypes=None,  # dtypes to test with by default. Gets intersected
                                             # with the dtypes support on the tested device
                  test_inplace_grad=True,  # whether to gradcheck and gradgradcheck the inplace variant
+                 test_complex_grad=True,  # whether to gradcheck and gradgradcheck for complex dtypes
                  skip_bfloat16_grad=False,  # whether to skip grad and gradgradcheck for bfloat16 dtype 
                  assert_autodiffed=False,  # if a op's aten::node is expected to be symbolically autodiffed
                  autodiff_nonfusible_nodes=None,  # a list of strings with node names that are expected to be in a 
@@ -106,6 +107,7 @@ class OpInfo(object):
         self.skip_bfloat16_grad = skip_bfloat16_grad
 
         self.test_inplace_grad = test_inplace_grad
+        self.test_complex_grad = test_complex_grad
         self.supports_tensor_out = supports_tensor_out
         self.promotes_integers_to_float = promotes_integers_to_float
 
@@ -605,7 +607,24 @@ op_db: List[Any] = [
 ]
 
 if TEST_SCIPY:
+    def reference_sigmoid(x):
+        # 'scipy.special.expit' not supported for the input types
+        if x.dtype in [np.complex64, np.complex128]:
+            return (1 / (1 + np.exp(-x)))
+        return scipy.special.expit(x)
+
     op_db_scipy_reference = [
+        UnaryUfuncInfo('sigmoid',
+                       ref=reference_sigmoid,
+                       decorators=(precisionOverride({torch.float16: 1e-2,
+                                                      torch.bfloat16: 1e-2}),),
+                       skips=(SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                       device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),),
+                       dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                       dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                       dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                       promotes_integers_to_float=True,
+                       test_complex_grad=False),  # Reference: https://github.com/pytorch/pytorch/issues/48552
         UnaryUfuncInfo('erf',
                        ref=scipy.special.erf,
                        decorators=(precisionOverride({torch.float16: 1e-2,
