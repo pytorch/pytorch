@@ -275,7 +275,7 @@ class TestFFT(TestCase):
     @onlyOnCPUAndCUDA
     @ops(spectral_funcs, dtypes=OpDTypes.unsupported,
          allowed_dtypes=[torch.half, torch.bfloat16])
-    def test_fft_half_errors(self, device, dtype, op):
+    def test_fft_half_and_bfloat16_errors(self, device, dtype, op):
         # TODO: Remove torch.half error when complex32 is fully implemented
         x = torch.randn(64, device=device).to(dtype)
         with self.assertRaisesRegex(RuntimeError, "Unsupported dtype "):
