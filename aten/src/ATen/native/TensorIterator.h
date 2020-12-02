@@ -306,7 +306,7 @@ protected:
   void compute_mem_overlaps(const TensorIteratorConfig&);
   void compute_shape(const TensorIteratorConfig&);
   void compute_strides(const TensorIteratorConfig&);
-  void reorder_dimensions(const TensorIteratorConfig&);
+  void reorder_dimensions();
   void permute_dimensions(IntArrayRef perm);
   void compute_types(const TensorIteratorConfig&);
   ScalarType compute_common_dtype();
