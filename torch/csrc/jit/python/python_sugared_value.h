@@ -178,8 +178,41 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs,
       size_t n_binders) override {
-    return attr(loc, caller, "forward")
+      std::cout << "source range: " << loc.text() << std::endl;
+
+      auto& last_arg = args.back();
+      std::cout << "node at back " << last_arg.value(*caller.graph())->debugName() << std::endl;
+
+      std::cout << "graph pre insertNode:" << std::endl;
+      caller.graph()->dump();
+      // TODO need to figure out how to change args from list of args to tuple of args
+      std::vector<Value*> vec;
+      for (const auto& sv : args) {
+        vec.push_back(sv.value(*caller.graph()));
+      }
+      Value* tupleNode = caller.graph()->insertNode(caller.graph()->createTuple(vec))->output();
+      std::vector<NamedValue> newArgs;
+      newArgs.emplace_back(NamedValue(tupleNode));
+
+      std::cout << "graph post insertNode:" << std::endl;
+      caller.graph()->dump();
+      
+      Value* output;
+      std::cout << "class name: " << concreteType_->getJitType()->annotation_str() << std::endl;
+      for (const auto& hook : concreteType_->getJitType()->expect<ClassType>()->getForwardPreHooks()){
+        std::cout << "- name of prehook about to call: " << hook->qualname().qualifiedName() << std::endl;
+        output = attr(loc, caller, hook->name())->call(loc, caller, newArgs, kwargs, n_binders)->asValue(loc, caller); 
+      }
+      caller.graph()->createTupleUnpack(output);
+      for (const auto& prehook : concreteType_->getJitType()->expect<ClassType>()->getForwardHooks()){
+        std::cout << "- name of hook: " << prehook->qualname().qualifiedName() << std::endl;
+      }
+      std::cout << "compiling forward: " << std::endl;
+  
+    auto pause = attr(loc, caller, "forward")
         ->call(loc, caller, args, kwargs, n_binders);
+    caller.graph()->dump();
+    return pause; 
   }
 
   std::shared_ptr<SugaredDict> getSugaredDict(

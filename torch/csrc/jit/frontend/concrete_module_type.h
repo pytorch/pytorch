@@ -76,6 +76,9 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
 
   void addModule(std::string name, std::shared_ptr<ConcreteModuleType> meta);
 
+  void addForwardHook(Function* hook_ptr); // TODO again pretty sure this isn't needed
+  void addForwardPreHook(Function* hook_ptr);
+
   void addOverload(
       std::string methodName,
       std::vector<std::string> overloadedMethodNames);
@@ -163,6 +166,9 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   std::unordered_map<std::string, c10::Symbol> builtinFunctions_;
   // The concrete types of any submodules
   std::vector<ModuleInfo> modules_;
+  // Hooks to be called before/after forward when the module is called directly 
+  std::vector<Function*> forward_hooks_; // TODO pretty sure this isn't needed
+  std::vector<Function*> forward_pre_hooks_;
 
   // If something is a ModuleDict/ModuleList, it means:
   //   1. The order of the submodules matters for comparing the type

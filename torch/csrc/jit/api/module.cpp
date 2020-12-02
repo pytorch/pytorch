@@ -118,6 +118,49 @@ IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs) {
   return (*function_)(std::move(stack), kwargs);
 }
 
+/*
+IValue Module::operator()(std::vector<IValue> inputs) {
+  const auto& pre_forward_hooks = type()->getForwardPreHooks(); // have return actual hooks instead of just name?
+  const auto& forward_hooks = type()->getForwardHooks();
+
+  // Let's go over each pre-forward hook and call them
+  for (const auto& hook : pre_forward_hooks) { // hook is now Function*
+    // auto fn = get_method(hook); /// TODO: replace with getting pre hooks, get_method operates on the class type currently
+    auto tuple_input = c10::ivalue::Tuple::create(inputs);
+    std::vector<IValue> hook_inputs;
+    hook_inputs.emplace_back(tuple_input);
+
+    // Make the actual call
+    // IValue result = fn(hook_inputs); is calling above function, is replaced with below three lines 
+
+     hook_inputs.insert(hook_inputs.begin(), _ivalue()); // TODO assuming owner._ivalue() can just be _ivalue()?
+     RECORD_TORCHSCRIPT_FUNCTION(name(), hook_inputs); // TODO what is this name thing?
+     IValue result = (*fn)(std::move(hook_inputs), kwargs)
+
+    // Check the result
+    if (result.isTuple()) {
+      inputs = result.toTuple()->elements();
+    }
+  }
+
+  // Now let's call forward
+  auto outputs = forward(inputs);
+  
+  /* // TODO convert like did for pre_hooks
+  // It is now time for the forward hooks
+  for (const auto& hook : forward_hooks) {
+    auto fn = get_method(hook);
+    Kwargs output_param;
+    output_param["outputs"] = outputs;
+    auto hook_result = fn(inputs, output_param);
+    if (!hook_result.isNone()) {
+      outputs = hook_result;
+    }
+  } 
+
+  return outputs;
+} */
+
 void Module::clone_method(
     const Module& orig,
     const Function& method,

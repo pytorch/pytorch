@@ -730,6 +730,7 @@ class Module:
         return result
 
     def _call_impl(self, *input, **kwargs):
+        print(f"input: {input}")
         for hook in itertools.chain(
                 _global_forward_pre_hooks.values(),
                 self._forward_pre_hooks.values()):

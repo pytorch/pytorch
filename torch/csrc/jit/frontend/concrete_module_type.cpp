@@ -39,6 +39,14 @@ ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
         /*is_parameter=*/false);
   }
 
+  //for (const auto& hook : forward_hooks_) { // TODO this might totally be not needed
+  //  cls->addForwardHook(hook);
+ // }
+
+//  for (const auto& hook : forward_pre_hooks_) {
+//    cls->addForwardPreHook(hook);
+//  }
+
   return cls;
 }
 
@@ -112,6 +120,8 @@ bool ConcreteModuleTypeBuilder::equals(
       overloads_ == other.overloads_ &&
       functionAttributes_ == other.functionAttributes_ &&
       builtinFunctions_ == other.builtinFunctions_;
+      forward_hooks_ == other.forward_hooks_ &&
+      forward_pre_hooks_ == other.forward_pre_hooks_;
   // clang-format on
   if (!equal) {
     return false;
@@ -274,6 +284,14 @@ void ConcreteModuleTypeBuilder::addModule(
       ConcreteModuleTypeBuilder::ModuleInfo{std::move(name), std::move(meta)});
 }
 
+//void ConcreteModuleTypeBuilder::addForwardHook(Function* hook_ptr) {
+//  forward_hooks_.push_back(hook_ptr);
+//} // TODO verify if this is needed? could 2000% not be 
+
+//void ConcreteModuleTypeBuilder::addForwardPreHook(Function* hook_ptr) {
+//  forward_pre_hooks_.push_back(hook_ptr);
+//}
+
 void ConcreteModuleTypeBuilder::addOverload(
     std::string methodName,
     std::vector<std::string> overloadedMethodNames) {
@@ -307,6 +325,14 @@ void ConcreteModuleType::dump() const {
     std::cout << "\t" << info.name_ << ": "
               << info.meta_->getJitType()->annotation_str() << "\n";
   }
+//  std::cout << "\nForward PreHooks: \n";
+//  for (const auto& hook : data_.forward_pre_hooks_) {
+//    std::cout << "\t" << hook->name() << "\n";
+//  }
+//  std::cout << "\nForward Hooks: \n";
+//  for (const auto& hook : data_.forward_hooks_) {
+//    std::cout << "\t" << hook->name() << "\n";
+//  } // TODO pretty sure this isn't needed
   std::cout << "\nOverloads: \n";
   for (const auto& pr : data_.overloads_) {
     std::cout << "\t" << pr.first << ": " << pr.second << "\n";
