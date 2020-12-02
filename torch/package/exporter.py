@@ -71,7 +71,7 @@ class PackageExporter:
         self.provided : Dict[str, bool] = {}
         self.verbose = verbose
         self.importers = [importlib.import_module]
-        self.patterns : List[Tuple[re.Pattern, Callable[[str], None]]] = []
+        self.patterns : List[Tuple[Any, Callable[[str], None]]] = []  # 'any' is 're.Pattern' but breaks old mypy
         self.debug_deps : List[Tuple[str, str]] = []
 
     def save_source_file(self, module_name: str, file_or_directory: str, dependencies=True):
