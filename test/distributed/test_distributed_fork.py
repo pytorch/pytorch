@@ -21,7 +21,7 @@ if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-BACKEND = os.environ["BACKEND"]
+BACKEND = os.environ["BACKEND"].lower()
 INIT_METHOD = os.getenv("INIT_METHOD", "env://")
 
 
@@ -54,7 +54,7 @@ elif BACKEND == "mpi":
     WORLD_SIZE = os.environ["WORLD_SIZE"]
     dist.init_process_group(init_method=INIT_METHOD, backend="mpi")
 
-    class TestMPI(DistributedTest._DistTestBase):
+    class TestMPI(TestCase, DistributedTest._DistTestBase):
         pass
 
 elif BACKEND == "test":
