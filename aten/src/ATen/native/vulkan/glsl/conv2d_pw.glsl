@@ -37,9 +37,9 @@ void main() {
 
     vec4 sum = uBias.data[pos.z];
 
-    for (int z = 0; z < uBlock.kernel.x; ++z) {
-      const vec4 In = texelFetch(uInput, ivec3(ipos.x, ipos.y, z), 0);
-      const ivec4 kz = block + 4 * z;
+    for (int z = 0; z < uBlock.kernel.x; z+=4) {
+      const vec4 In = texelFetch(uInput, ivec3(ipos.x, ipos.y, z/4), 0);
+      const ivec4 kz = block + z;
 
       sum = fma(In.xxxx, texelFetch(uKernel, ivec3(0, tower, kz.x), 0), sum);
       sum = fma(In.yyyy, texelFetch(uKernel, ivec3(0, tower, kz.y), 0), sum);

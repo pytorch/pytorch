@@ -42,12 +42,12 @@ void main() {
 
     vec4 sum = uBias.data[pos.z];
 
-    for (int z = 0; z < uBlock.kernel.z; ++z) {
-      const ivec4 kz = block + 4 * z;
+    for (int z = 0; z < uBlock.kernel.z; z+=4) {
+      const ivec4 kz = block + z;
 
       for (int y = start.y, ky = kstart.y; y < end.y; y += uBlock.dilate.y, ++ky) {
         for (int x = start.x, kx = kstart.x; x < end.x; x += uBlock.dilate.x, ++kx) {
-          const vec4 In = texelFetch(uInput, ivec3(x, y, z), 0);
+          const vec4 In = texelFetch(uInput, ivec3(x, y, z/4), 0);
 
           sum = fma(In.xxxx, texelFetch(uKernel, ivec3(kx, (uBlock.kernel.y*tower) + ky, kz.x), 0), sum);
           sum = fma(In.yyyy, texelFetch(uKernel, ivec3(kx, (uBlock.kernel.y*tower) + ky, kz.y), 0), sum);
