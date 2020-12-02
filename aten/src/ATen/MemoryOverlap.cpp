@@ -36,6 +36,13 @@ void assert_no_internal_overlap(TensorImpl* t) {
     "performing the operation.");
 }
 
+void assert_no_overlap(const Tensor& a, const Tensor& b) {
+  auto lap = at::get_overlap_status(a, b);
+  TORCH_CHECK(lap != at::MemOverlapStatus::PARTIAL &&
+              lap != at::MemOverlapStatus::FULL,
+              "output tensor's memory overlaps with input tensor");
+}
+
 MemOverlapStatus get_overlap_status(const Tensor& a, const Tensor& b) {
   return get_overlap_status(a.unsafeGetTensorImpl(), b.unsafeGetTensorImpl());
 }
