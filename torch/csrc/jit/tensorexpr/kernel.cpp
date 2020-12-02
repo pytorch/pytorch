@@ -7,9 +7,6 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
-#include "c10/core/ScalarType.h"
-#include "jit/tensorexpr/exceptions.h"
-#include "jit/tensorexpr/types.h"
 
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
