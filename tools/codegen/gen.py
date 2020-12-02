@@ -789,7 +789,7 @@ def compute_cpp_argument_yaml(cpp_a: CppArgument, *, schema_order: bool, kwarg_o
         if cpp_a.default is not None:
             arg['default'] = cpp_a.default
         return arg
-    elif isinstance(cpp_a.argument, ThisArgument):
+    elif isinstance(cpp_a.argument, SelfArgument):
         raise AssertionError()
     elif isinstance(cpp_a.argument, Argument):
         return compute_argument_yaml(

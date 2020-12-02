@@ -1,7 +1,7 @@
 from tools.codegen.model import *
 from tools.codegen.api.types import *
 import tools.codegen.local as local
-from typing import Optional, Sequence, Union, Callable, List
+from typing import Optional, Sequence, Union, List
 
 # This file describes the translation of JIT schema to the public C++
 # API, which is what people use when they call functions like at::add.
@@ -251,15 +251,15 @@ def argument_not_this(
         assert_never(a)
 
 def argument(
-    a: Union[Argument, TensorOptionsArguments, ThisArgument],
+    a: Union[Argument, TensorOptionsArguments, SelfArgument],
 ) -> Union[CppSingleArgumentPack, CppThisArgumentPack]:
-    if isinstance(a, ThisArgument):
+    if isinstance(a, SelfArgument):
         return CppThisArgumentPack(argument=a, type=argument_type(a.argument))
     else:
         return CppSingleArgumentPack(argument_not_this(a))
 
 def argument_faithful(
-    a: Union[Argument, TensorOptionsArguments, ThisArgument],
+    a: Union[Argument, TensorOptionsArguments, SelfArgument],
 ) -> CppArgumentPack:
     if isinstance(a, TensorOptionsArguments):
         return CppTensorOptionsArgumentPack(
@@ -272,46 +272,20 @@ def argument_faithful(
     else:
         return argument(a)
 
-# NB: this unconditionally groups arguments
 def group_arguments(
     func: FunctionSchema, *, method: bool
-) -> Sequence[Union[Argument, TensorOptionsArguments, ThisArgument]]:
-    args: List[Union[Argument, ThisArgument, TensorOptionsArguments]] = []
-
+) -> Sequence[Union[Argument, TensorOptionsArguments, SelfArgument]]:
+    args: List[Union[Argument, SelfArgument, TensorOptionsArguments]] = []
     args.extend(func.arguments.out)
-
-    if method:
-        args.extend(ThisArgument(a) if a.name == "self" else a for a in func.arguments.positional)
-    else:
-        args.extend(func.arguments.positional)
-
-    # group up arguments for tensor options
-
-    def pred(name: str, ty: Type) -> Callable[[Argument], bool]:
-        return lambda a: a.name == name and a.type in [ty, OptionalType(ty)]
-    predicates = [  # order matters
-        pred('dtype', Type.parse('ScalarType')),
-        pred('layout', Type.parse('Layout')),
-        pred('device', Type.parse('Device')),
-        pred('pin_memory', Type.parse('bool')),
-    ]
-
-    i = 0
-    while i < len(func.arguments.kwarg_only):
-        # If there is enough space...
-        if i <= len(func.arguments.kwarg_only) - len(predicates):
-            # And the next len(predicates) arguments look like TensorOptions arguments
-            if all(p(a) for p, a in zip(predicates, func.arguments.kwarg_only[i : i + len(predicates)])):
-                # Group them together as one argument
-                args.append(TensorOptionsArguments(
-                    dtype=func.arguments.kwarg_only[i],
-                    layout=func.arguments.kwarg_only[i + 1],
-                    device=func.arguments.kwarg_only[i + 2],
-                    pin_memory=func.arguments.kwarg_only[i + 3],
-                ))
-                i += len(predicates)
-                continue
-        args.append(func.arguments.kwarg_only[i])
-        i += 1
-
+    args.extend(func.arguments.pre_self_positional)
+    if func.arguments.self_arg is not None:
+        if method:
+            args.append(func.arguments.self_arg)
+        else:
+            args.append(func.arguments.self_arg.argument)
+    args.extend(func.arguments.post_self_positional)
+    args.extend(func.arguments.pre_tensor_options_kwarg_only)
+    if func.arguments.tensor_options is not None:
+        args.append(func.arguments.tensor_options)
+    args.extend(func.arguments.post_tensor_options_kwarg_only)
     return args

@@ -1,7 +1,7 @@
 import re
 
 from dataclasses import dataclass
-from typing import List, Dict, Optional, Iterator, Tuple, Set, NoReturn
+from typing import List, Dict, Optional, Iterator, Tuple, Set, NoReturn, Sequence, Callable
 from enum import Enum
 import itertools
 
@@ -535,16 +535,6 @@ class FunctionSchema:
           because you cannot overload on mutability annotation)
         """
 
-        # dataclasses.replace could be used here, but it is less
-        # type safe so for now I've opted to type everything out
-        def strip_arg_annotation(a: Argument) -> Argument:
-            return Argument(
-                name=a.name,
-                type=a.type,
-                default=a.default,  # hmmm
-                annotation=None,
-            )
-
         def strip_ret_annotation(r: Return) -> Return:
             return Return(
                 name=r.name,
@@ -561,11 +551,7 @@ class FunctionSchema:
                 ),
                 overload_name="",  # stripped
             ),
-            arguments=Arguments(
-                positional=tuple(map(strip_arg_annotation, self.arguments.positional)),
-                kwarg_only=tuple(map(strip_arg_annotation, self.arguments.kwarg_only)),
-                out=(),  # stripped
-            ),
+            arguments=self.arguments.signature(),
             returns=tuple(map(strip_ret_annotation, self.returns)),
         )
 
@@ -855,23 +841,95 @@ class Return:
         else:
             return f"{type} {self.name}"
 
+
+# Represents the self argument for functions that may be methods
+@dataclass(frozen=True)
+class SelfArgument:
+    argument: Argument
+
+# Bundle of arguments that represent a TensorOptions.  This is mostly
+# relevant for the public C++ API but we bake it into the core data
+# model because other APIs often have to interact with it
+@dataclass(frozen=True)
+class TensorOptionsArguments:
+    dtype: Argument
+    layout: Argument
+    device: Argument
+    pin_memory: Argument
+
+    def all(self) -> Sequence[Argument]:
+        return [self.dtype, self.layout, self.device, self.pin_memory]
+
 @dataclass(frozen=True)
 class Arguments:
-    positional: Tuple['Argument', ...]
-    kwarg_only: Tuple['Argument', ...]  # but not including out args
+    # pre_self_positional is usually empty, but is notably non-empty
+    # for where.self, where the condition argument comes before the
+    # self argument
+    pre_self_positional: Tuple[Argument, ...]
+    self_arg: Optional[SelfArgument]
+    post_self_positional: Tuple[Argument, ...]
+
+    pre_tensor_options_kwarg_only: Tuple[Argument, ...]
+    tensor_options: Optional[TensorOptionsArguments]
+    # post_tensor_options is typically memory format, which should be
+    # part of tensor options but isn't right now, and is usually
+    # placed after the tensor options arguments
+    post_tensor_options_kwarg_only: Tuple[Argument, ...]
+
     # Unlike in the previous codegen, we have factored out 'out' arguments
     # in the canonical representation, removing them from kwarg
     # arguments.  This choice is justified by numerous downstream
     # transformations which treat out arguments specially; additionally,
     # you can see that canonicity is not violated!
-    out: Tuple['Argument', ...]  # these are also kwarg-only
+    out: Tuple[Argument, ...]  # these are also kwarg-only
+
+    @property
+    def positional(self) -> Sequence[Argument]:
+        ret: List[Argument] = []
+        ret.extend(self.pre_self_positional)
+        if self.self_arg is not None:
+            ret.append(self.self_arg.argument)
+        ret.extend(self.post_self_positional)
+        return ret
+
+    # NB: doesn't contain out arguments
+    @property
+    def kwarg_only(self) -> Sequence[Argument]:
+        ret: List[Argument] = []
+        ret.extend(self.pre_tensor_options_kwarg_only)
+        if self.tensor_options is not None:
+            ret.extend(self.tensor_options.all())
+        ret.extend(self.post_tensor_options_kwarg_only)
+        return ret
+
+    def signature(self) -> 'Arguments':
+        # dataclasses.replace could be used here, but it is less
+        # type safe so for now I've opted to type everything out
+        def strip_arg_annotation(a: Argument) -> Argument:
+            return Argument(
+                name=a.name,
+                type=a.type,
+                default=a.default,  # hmmm
+                annotation=None,
+            )
+
+        return Arguments(
+            pre_self_positional=tuple(map(strip_arg_annotation, self.pre_self_positional)),
+            self_arg=SelfArgument(
+                strip_arg_annotation(self.self_arg.argument)
+            ) if self.self_arg is not None else None,
+            post_self_positional=tuple(map(strip_arg_annotation, self.post_self_positional)),
+            pre_tensor_options_kwarg_only=tuple(map(strip_arg_annotation, self.pre_tensor_options_kwarg_only)),
+            # NB: tensor_options guaranteed to not have any alias annotations
+            tensor_options=self.tensor_options,
+            post_tensor_options_kwarg_only=tuple(map(strip_arg_annotation, self.post_tensor_options_kwarg_only)),
+            # out arguments are dropped in signature
+            out=(),
+        )
+
 
     @staticmethod
-    def parse(args: str) -> 'Arguments':
-        """
-        Input: 'int x, int y, int z'
-        Output: positional args, kwarg only args
-        """
+    def _preparse(args: str) -> Tuple[List[Argument], List[Argument], List[Argument]]:
         positional: List[Argument] = []
         kwarg_only: List[Argument] = []
         out: List[Argument] = []
@@ -902,11 +960,84 @@ class Arguments:
                 assert arguments_acc is not out
             arguments_acc.append(parg)
 
+        return positional, kwarg_only, out
+
+    @staticmethod
+    def parse(args: str) -> 'Arguments':
+        """
+        Input: 'int x, int y, int z'
+        """
+
+        # We do this in two phases.  First we parse into three 
+        # main categories: positional, kwarg_only, out.
+        # Then, we reparse positional and kwarg_only to separate
+        # out the self argument and tensor options arguments.
+
+        positional, kwarg_only, out = Arguments._preparse(args)
+
+        # Split self argument
+        self_ix = None
+        for i, a in enumerate(positional):
+            if a.name == "self":
+                self_ix = i
+                break
+        pre_self_positional: List[Argument]
+        self_arg: Optional[SelfArgument]
+        post_self_positional: List[Argument]
+        if self_ix is not None:
+            pre_self_positional = positional[:self_ix]
+            self_arg = SelfArgument(positional[self_ix])
+            post_self_positional = positional[self_ix + 1:]
+        else:
+            pre_self_positional = []
+            self_arg = None
+            post_self_positional = positional
+
+        # Group tensor options arguments
+        pre_tensor_options_kwarg_only: List[Argument] = []
+        tensor_options: Optional[TensorOptionsArguments] = None
+        post_tensor_options_kwarg_only: List[Argument] = []
+        kwarg_only_acc = pre_tensor_options_kwarg_only
+
+        def pred(name: str, ty: Type) -> Callable[[Argument], bool]:
+            return lambda a: a.name == name and a.type in [ty, OptionalType(ty)]
+        predicates = [  # order matters
+            pred('dtype', Type.parse('ScalarType')),
+            pred('layout', Type.parse('Layout')),
+            pred('device', Type.parse('Device')),
+            pred('pin_memory', Type.parse('bool')),
+        ]
+
+        i = 0
+        while i < len(kwarg_only):
+            # If there is enough space...
+            if i <= len(kwarg_only) - len(predicates):
+                # And the next len(predicates) arguments look like TensorOptions arguments
+                if all(p(a) for p, a in zip(predicates, kwarg_only[i : i + len(predicates)])):
+                    assert kwarg_only_acc is pre_tensor_options_kwarg_only
+                    # Group them together as one argument
+                    tensor_options = TensorOptionsArguments(
+                        dtype=kwarg_only[i],
+                        layout=kwarg_only[i + 1],
+                        device=kwarg_only[i + 2],
+                        pin_memory=kwarg_only[i + 3],
+                    )
+                    i += len(predicates)
+                    kwarg_only_acc = post_tensor_options_kwarg_only
+                    continue
+            kwarg_only_acc.append(kwarg_only[i])
+            i += 1
+
         return Arguments(
-            positional=tuple(positional),
-            kwarg_only=tuple(kwarg_only),
+            pre_self_positional=tuple(pre_self_positional),
+            self_arg=self_arg,
+            post_self_positional=tuple(post_self_positional),
+            pre_tensor_options_kwarg_only=tuple(pre_tensor_options_kwarg_only),
+            tensor_options=tensor_options,
+            post_tensor_options_kwarg_only=tuple(post_tensor_options_kwarg_only),
             out=tuple(out),
         )
+
 
     def __str__(self) -> str:
         all_arguments: List[str] = []
@@ -916,6 +1047,14 @@ class Arguments:
         all_arguments.extend(map(str, self.kwarg_only))
         all_arguments.extend(map(str, self.out))
         return ', '.join(all_arguments)
+
+    def __post_init__(self) -> None:
+        # TODO: These invariants are weirdly asymmetric?
+        # TODO: Fancier types?
+        if self.self_arg is None:
+            assert not self.pre_self_positional
+        if self.tensor_options is None:
+            assert not self.post_tensor_options_kwarg_only
 
 
 # Names that validly are __iXXX__ indicating inplace operations.
