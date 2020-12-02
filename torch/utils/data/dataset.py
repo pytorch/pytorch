@@ -39,7 +39,7 @@ class Dataset(Generic[T_co]):
     # See NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
     # in pytorch/torch/utils/data/sampler.py
 
-    def on_woker_init(self) -> None:
+    def on_worker_init(self) -> None:
         pass
 
     
@@ -227,9 +227,9 @@ class ConcatDataset(Dataset[T_co]):
                       "cumulative_sizes", DeprecationWarning, stacklevel=2)
         return self.cumulative_sizes
 
-    def on_woker_init(self) -> None:
+    def on_worker_init(self) -> None:
         for d in self.datasets:
-            d.on_woker_init()
+            d.on_worker_init()
 
 
 class ChainDataset(IterableDataset):
@@ -260,9 +260,9 @@ class ChainDataset(IterableDataset):
             total += len(d)  # type: ignore
         return total
 
-    def on_woker_init(self) -> None:
+    def on_worker_init(self) -> None:
         for d in self.datasets:
-            d.on_woker_init()
+            d.on_worker_init()
 
 
 class BufferedShuffleDataset(IterableDataset[T_co]):
@@ -321,8 +321,8 @@ class BufferedShuffleDataset(IterableDataset[T_co]):
         while buf:
             yield buf.pop()
 
-    def on_woker_init(self) -> None:
-        self.dataset.on_woker_init()
+    def on_worker_init(self) -> None:
+        self.dataset.on_worker_init()
 
 class Subset(Dataset[T_co]):
     r"""
@@ -345,8 +345,8 @@ class Subset(Dataset[T_co]):
     def __len__(self):
         return len(self.indices)
 
-    def on_woker_init(self) -> None:
-        self.dataset.on_woker_init()
+    def on_worker_init(self) -> None:
+        self.dataset.on_worker_init()
 
 
 def random_split(dataset: Dataset[T], lengths: Sequence[int],
