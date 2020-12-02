@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_resource_strings.h>
+#include <torch/csrc/jit/codegen/fuser/cuda/fused_kernel.h>
 #include <torch/csrc/jit/resource_guard.h>
 
 #include <fstream>
@@ -247,18 +248,11 @@ NvrtcFunction nvrtcCompile(
   }
 
   const auto prop = at::cuda::getCurrentDeviceProperties();
-  int nvrtc_major, nvrtc_minor;
-  AT_CUDA_NVRTC_CHECK(
-      at::globalContext().getNVRTC().nvrtcVersion(&nvrtc_major, &nvrtc_minor));
 
-  // Short-circuits if NVRTC version too low
-  TORCH_INTERNAL_ASSERT(nvrtc_major >= 6);
-  // Major and minor is determined by device properties and
-  // possibly "downcompiled" to a lower (compatible) compute architecture
-  // based on the NVRTC version
-  const int major = prop->major;
-  const int minor = prop->minor;
-  nvrtcProgram program;
+  int major = 0, minor = 0;
+  getMajorMinor(prop, major, minor);
+
+  nvrtcProgram program; // NOLINT(cppcoreguidelines-init-variables)
 
   {
     FUSER_PERF_SCOPE("nvrtcCreateProgram");

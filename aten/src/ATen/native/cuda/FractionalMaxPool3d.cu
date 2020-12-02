@@ -241,7 +241,7 @@ void fractional_max_pool3d_out_cuda_template(
           randomSamples.packed_accessor64<scalar_t, 3>(),
           poolSizeT, poolSizeH, poolSizeW
         );
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     );
   }
@@ -327,7 +327,7 @@ void fractional_max_pool3d_backward_out_cuda_template(
           gradOutput_.packed_accessor64<scalar_t, 5>(),
           indices_.packed_accessor64<int64_t, 5>()
         );
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     );
   }

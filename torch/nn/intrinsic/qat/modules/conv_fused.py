@@ -43,7 +43,6 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         self.freeze_bn = freeze_bn if self.training else True
         self.bn = _BN_CLASS_MAP[dim](out_channels, eps, momentum, True, True)
         self.weight_fake_quant = self.qconfig.weight()
-        self.zero_bias = torch.zeros(out_channels)
         if bias:
             self.bias = Parameter(torch.Tensor(out_channels))
         else:
@@ -94,8 +93,13 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         bias_shape = [1] * len(self.weight.shape)
         bias_shape[1] = -1
         scaled_weight = self.weight_fake_quant(self.weight * scale_factor.reshape(weight_shape))
-        # this does not include the conv bias
-        conv = self._conv_forward(input, scaled_weight, self.zero_bias)
+        # using zero bias here since the bias for original conv
+        # will be added later
+        if self.bias is not None:
+            zero_bias = torch.zeros_like(self.bias)
+        else:
+            zero_bias = torch.zeros(self.out_channels, device=scaled_weight.device)
+        conv = self._conv_forward(input, scaled_weight, zero_bias)
         conv_orig = conv / scale_factor.reshape(bias_shape)
         if self.bias is not None:
             conv_orig = conv_orig + self.bias.reshape(bias_shape)
