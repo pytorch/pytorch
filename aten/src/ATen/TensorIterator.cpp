@@ -1134,6 +1134,9 @@ bool TensorIteratorBase::fast_set_up(const TensorIteratorConfig& config) {
       {
         for (int i = 0; i < num_outputs_; i++){
           auto& op = operands_[i];
+          if (!op.tensor.defined()) {
+            TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
+          }
           set_output(i, shape_, {}, op.options().memory_format(MemoryFormat::Contiguous), names_);
         }
         break;
@@ -1142,6 +1145,9 @@ bool TensorIteratorBase::fast_set_up(const TensorIteratorConfig& config) {
       {
         for (int i = 0; i < num_outputs_; i++){
           auto& op = operands_[i];
+          if (!op.tensor.defined()) {
+            TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
+          }
           set_output(i, shape_, {}, op.options().memory_format(MemoryFormat::ChannelsLast), names_);
         }
         break;
@@ -1156,6 +1162,9 @@ bool TensorIteratorBase::fast_set_up(const TensorIteratorConfig& config) {
         TORCH_CHECK(i_defined >= 0, "Can not find a defined tensor when fast allocating memory to outputs");
         for (int i = 0; i < num_outputs_; i++){
           auto& op = operands_[i];
+          if (!op.tensor.defined()) {
+            TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
+          }
           set_output(i, shape_, operands_[i_defined].tensor.strides(), op.options(), names_);
         }
         break;
@@ -1299,7 +1308,6 @@ void TensorIterator::set_output(int64_t output_idx, IntArrayRef sizes, IntArrayR
   auto& op = operands_[output_idx];
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(output_idx < num_outputs_);
   if (!op.tensor.defined()) {
-      TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", output_idx);
       if (strides.empty()) {
           if (is_meta_) {
             op.tensor = at::empty_meta(sizes, options);
