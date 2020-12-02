@@ -5,15 +5,26 @@
 #include <torch/csrc/jit/codegen/fuser/fallback.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 
+#include <c10/util/Flags.h>
 #include <stdexcept>
+
+C10_DEFINE_bool(torch_jit_enable_cpu_fusion, false, "enable cpu fusion");
 
 namespace torch {
 namespace jit {
 
 namespace detail {
 
+namespace {
+
+bool initCpuFuserEnabled() {
+  return FLAGS_torch_jit_enable_cpu_fusion;
+}
+
+} // namespace
+
 // Note: CPU fusion is currently disabled due to test flakiness
-bool cpu_fuser_enabled = false;
+bool cpu_fuser_enabled = initCpuFuserEnabled();
 
 bool gpu_fuser_enabled = true;
 
