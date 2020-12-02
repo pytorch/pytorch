@@ -2677,6 +2677,20 @@ pow_(exponent) -> Tensor
 In-place version of :meth:`~Tensor.pow`
 """)
 
+add_docstr_all('float_power',
+               r"""
+float_power(exponent) -> Tensor
+
+See :func:`torch.float_power`
+""")
+
+add_docstr_all('float_power_',
+               r"""
+float_power_(exponent) -> Tensor
+
+In-place version of :meth:`~Tensor.float_power`
+""")
+
 add_docstr_all('prod',
                r"""
 prod(dim=None, keepdim=False, dtype=None) -> Tensor
@@ -3619,6 +3633,13 @@ add_docstr_all('t_',
 t_() -> Tensor
 
 In-place version of :meth:`~Tensor.t`
+""")
+
+add_docstr_all('tile',
+               r"""
+tile(*reps) -> Tensor
+
+See :func:`torch.tile`
 """)
 
 add_docstr_all('to',

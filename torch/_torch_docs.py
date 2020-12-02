@@ -2665,6 +2665,9 @@ Computes the eigenvalues and eigenvectors of a real square matrix.
     Since eigenvalues and eigenvectors might be complex, backward pass is supported only
     if eigenvalues and eigenvectors are all real valued.
 
+    When :attr:`input` is on CUDA, :func:`torch.eig() <torch.eig>` causes
+    host-device synchronization.
+
 Args:
     input (Tensor): the square matrix of shape :math:`(n \times n)` for which the eigenvalues and eigenvectors
         will be computed
@@ -2689,6 +2692,32 @@ Returns:
           true eigenvectors can be computed as
           :math:`\text{true eigenvector}[j] = eigenvectors[:, j] + i \times eigenvectors[:, j + 1]`,
           :math:`\text{true eigenvector}[j + 1] = eigenvectors[:, j] - i \times eigenvectors[:, j + 1]`.
+
+Example::
+
+    Trivial example with a diagonal matrix. By default, only eigenvalues are computed:
+
+    >>> a = torch.diag(torch.tensor([1, 2, 3], dtype=torch.double))
+    >>> e, v = torch.eig(a)
+    >>> e
+    tensor([[1., 0.],
+            [2., 0.],
+            [3., 0.]], dtype=torch.float64)
+    >>> v
+    tensor([], dtype=torch.float64)
+
+    Compute also the eigenvectors:
+
+    >>> e, v = torch.eig(a, eigenvectors=True)
+    >>> e
+    tensor([[1., 0.],
+            [2., 0.],
+            [3., 0.]], dtype=torch.float64)
+    >>> v
+    tensor([[1., 0., 0.],
+            [0., 1., 0.],
+            [0., 0., 1.]], dtype=torch.float64)
+
 """)
 
 add_docstr(torch.eq, r"""
@@ -6396,6 +6425,46 @@ Example::
     tensor([  2.,   4.,   8.,  16.])
 """.format(**common_args))
 
+add_docstr(torch.float_power,
+           r"""
+float_power(input, exponent, *, out=None) -> Tensor
+
+Raises :attr:`input` to the power of :attr:`exponent`, elementwise, in double precision. 
+If neither input is complex returns a ``torch.float64`` tensor, 
+and if one or more inputs is complex returns a ``torch.complex128`` tensor.
+
+.. note:: 
+    This function always computes in double precision, unlike :func:`torch.pow`, 
+    which implements more typical :ref:`type promotion <type-promotion-doc>`.
+    This is useful when the computation needs to be performed in a wider or more precise dtype, 
+    or the results of the computation may contain fractional values not representable in the input dtypes, 
+    like when an integer base is raised to a negative integer exponent.
+
+Args:
+    input (Tensor or Number): the base value(s)
+    exponent (Tensor or Number): the exponent value(s)
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.randint(10, (4,))
+    >>> a
+    tensor([6, 4, 7, 1])
+    >>> torch.float_power(a, 2)
+    tensor([36., 16., 49.,  1.], dtype=torch.float64)
+
+    >>> a = torch.arange(1, 5)
+    >>> a
+    tensor([ 1,  2,  3,  4])
+    >>> exp = torch.tensor([2, -3, 4, -5])
+    >>> exp
+    tensor([ 2, -3,  4, -5])
+    >>> torch.float_power(a, exp)
+    tensor([1.0000e+00, 1.2500e-01, 8.1000e+01, 9.7656e-04], dtype=torch.float64)
+""".format(**common_args))
+
 add_docstr(torch.prod,
            r"""
 prod(input, *, dtype=None) -> Tensor
@@ -10028,6 +10097,45 @@ If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
 `1` appears `n2` times, `2` appears `n3` times, etc.
 """.format(**common_args))
 
+add_docstr(torch.tile, r"""
+tile(input, reps) -> Tensor
+
+Constructs a tensor by repeating the elements of :attr:`input`. 
+The :attr:`reps` argument specifies the number of repetitions
+in each dimension.
+
+If :attr:`reps` specifies fewer dimensions than :attr:`input` has, then
+ones are prepended to :attr:`reps` until all dimensions are specified.
+For example, if :attr:`input` has shape (8, 6, 4, 2) and :attr:`reps`
+is (2, 2), then :attr:`reps` is treated as (1, 1, 2, 2). 
+
+Analogously, if :attr:`input` has fewer dimensions than :attr:`reps` 
+specifies, then :attr:`input` is treated as if it were unsqueezed at 
+dimension zero until it has as many dimensions as :attr:`reps` specifies. 
+For example, if :attr:`input` has shape (4, 2) and :attr:`reps`
+is (3, 3, 2, 2), then :attr:`input` is treated as if it had the 
+shape (1, 1, 4, 2). 
+
+.. note::
+
+    This function is similar to NumPy's tile function.
+
+Args:
+    input (Tensor): the tensor whose elements to repeat.
+    reps (tuple): the number of repetitions per dimension.
+
+Example::
+
+    >>> x = torch.tensor([1, 2, 3])
+    >>> x.tile((2,))
+    tensor([1, 2, 3, 1, 2, 3])
+    >>> y = torch.tensor([[1, 2], [3, 4]])
+    >>> torch.tile(y, (2, 2))
+    tensor([[1, 2, 1, 2],
+            [3, 4, 3, 4],
+            [1, 2, 1, 2],
+            [3, 4, 3, 4]])
+""")
 
 add_docstr(torch.quantize_per_tensor,
            r"""
