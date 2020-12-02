@@ -57,9 +57,9 @@ namespace torch {
 namespace jit {
 
 TEST(FuserTest, TestSimple_CUDA) {
-#if defined(FBCODE_CAFFE2)
-  return;
-#endif
+  #if defined(FBCODE_CAFFE2)
+      return;
+  #endif
   const auto graph_string = R"IR(
       graph(%0 : Tensor,
             %1 : Tensor):
@@ -80,9 +80,9 @@ TEST(FuserTest, TestSimple_CUDA) {
 }
 
 TEST(FuserTest, TestOne_CUDA) {
-#if defined(FBCODE_CAFFE2)
-  return;
-#endif
+  #if defined(FBCODE_CAFFE2)
+      return;
+  #endif
   auto testOne = [&](int ti, int tj) {
     const auto graph_string = R"IR(
       graph(%0 : Tensor,
@@ -140,9 +140,9 @@ TEST(FuserTest, TestOne_CUDA) {
 }
 
 TEST(FuserTest, FusedConcat_CUDA) {
-#if defined(FBCODE_CAFFE2)
-  return;
-#endif
+  #if defined(FBCODE_CAFFE2)
+      return;
+  #endif
   const auto graph_string0 = R"IR(
     graph(%0 : Tensor,
           %1 : Tensor):
@@ -186,9 +186,9 @@ TEST(FuserTest, FusedConcat_CUDA) {
 }
 
 TEST(FuserTest, FusionAliasing) {
-#if defined(FBCODE_CAFFE2)
-  return;
-#endif
+  #if defined(FBCODE_CAFFE2)
+      return;
+  #endif
   const auto graph_string = R"IR(
     graph(%0 : Tensor,
           %1 : Tensor):
@@ -214,9 +214,9 @@ TEST(FuserTest, FusionAliasing) {
 }
 
 TEST(FuserTest, KernelCaching) {
-#if defined(FBCODE_CAFFE2)
-  return;
-#endif
+  #if defined(FBCODE_CAFFE2)
+      return;
+  #endif
 
   // Constructs two functionally equivalent graphs
   const auto graph0_string = R"IR(
