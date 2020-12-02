@@ -344,16 +344,16 @@ linalg.cond(input, p=None, *, out=None) -> Tensor
 
 Computes the condition number of a matrix :attr:`input`,
 or of each matrix in a batched :attr:`input`, using the matrix norm defined by :attr:`p`.
-The condition number is defined as the matrix norm of
-:attr:`input` times the matrix norm of the inverse of :attr:`input`.
+For norms ``p = {'fro', 'nuc', inf, -inf, 1, -1}`` this is defined as the matrix norm of :attr:`input`
+times the matrix norm of the inverse of :attr:`input`. And for norms ``p = {None, 2, -2}`` this is defined as
+the ratio between the largest and smallest singular values.
 
 This function supports ``float``, ``double``, and only on CPU, ``cfloat`` and ``cdouble`` dtypes for :attr:`input`.
 
-.. note:: For `p = {None, 2, -2}` there is a relation between singular value decomposition and matrix norm.
-          For this case :func:`torch.linalg.svd` is used for computing the condition number as the ratio of
-          the largest and smallest singular values. Since :func:`torch.linalg.svd` is used :attr:`input` can be non-square.
-          For other norm types :attr:`input` must be a square matrix or a batch of square matrices.
-          If :attr:`input` does not satisfy this requirement then a RuntimeError will be thrown.
+.. note:: For ``p = {None, 2, -2}`` the condition number is computed as the ratio between the largest and smallest singular values
+          computed using :func:`torch.linalg.svd`. For these norms :attr:`input` may be a non-square matrix or batch of non-square matrices.
+          For other norms, however, :attr:`input` must be a square matrix or a batch of square matrices,
+          and if this requirement is not satisfied a RuntimeError will be thrown.
 
 .. note:: If :attr:`input` is a non-invertible matrix then a tensor containing infinity will be returned.
           If :attr:`input` is a batch of matrices and one or more of them is not invertible
