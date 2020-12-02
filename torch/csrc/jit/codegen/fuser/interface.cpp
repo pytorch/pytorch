@@ -15,16 +15,8 @@ namespace jit {
 
 namespace detail {
 
-namespace {
-
-bool initCpuFuserEnabled() {
-  return FLAGS_torch_jit_enable_cpu_fusion;
-}
-
-} // namespace
-
 // Note: CPU fusion is currently disabled due to test flakiness
-bool cpu_fuser_enabled = initCpuFuserEnabled();
+bool cpu_fuser_enabled = false;
 
 bool gpu_fuser_enabled = true;
 
@@ -41,7 +33,8 @@ void runFusion(const int64_t key, Stack& stack) {
 }
 
 bool canFuseOnCPU() {
-  return fuser::hasFusionBackend(DeviceType::CPU) && detail::cpu_fuser_enabled;
+  return fuser::hasFusionBackend(DeviceType::CPU) &&
+      (detail::cpu_fuser_enabled || FLAGS_torch_jit_enable_cpu_fusion);
 }
 
 bool canFuseOnGPU() {
