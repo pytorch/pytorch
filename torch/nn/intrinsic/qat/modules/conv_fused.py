@@ -95,7 +95,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         scaled_weight = self.weight_fake_quant(self.weight * scale_factor.reshape(weight_shape))
         # using zero bias here since the bias for original conv
         # will be added later
-        if self.bias:
+        if self.bias is not None:
             zero_bias = torch.zeros_like(self.bias)
         else:
             zero_bias = torch.zeros(self.out_channels, device=scaled_weight.device)
