@@ -10,8 +10,7 @@ import functools
 from caffe2.python import context
 
 
-@context.define_context(allow_default=True)
-class TagContext(object):
+class TagContext(context.DefaultManaged):
     """
     Scope driven way to provide tags to the layers.
     """

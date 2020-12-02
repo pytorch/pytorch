@@ -53,7 +53,7 @@ class TestScriptPy3(JitTestCase):
         def fn():
             return NormalizationInfo(1, 2, 3, 4, 5)
 
-        with self.assertRaisesRegex(OSError, "NormalizationInfo"):
+        with self.assertRaisesRegex(OSError, "could not get source code"):
             torch.jit.script(fn)
 
     def test_optional_dict_construct(self):
@@ -555,7 +555,7 @@ class TestScriptPy3(JitTestCase):
             @torch.jit.script
             def foo():
                 x = 5
-                if True:
+                if 1 == 1:
                     x : Optional[int] = 7
 
     def test_module_inplace_construct(self):
@@ -796,6 +796,22 @@ class TestScriptPy3(JitTestCase):
         self.assertTrue(len(torch.jit.export_opnames(scripted_M_mod)) == 0)
         # self.assertTrue(set(['aten::add.Tensor', 'aten::mul.Scalar']).issubset(
         #     set(torch.jit.export_opnames(scripted_M_mod))))
+
+    def test_broadcasting_list(self):
+        """
+        Test BroadcastingList and torch.nn._size_N_t alias
+        """
+        from torch._jit_internal import BroadcastingList2
+        from torch.nn.common_types import _size_2_t
+
+        def sum_i(x: _size_2_t) -> int:
+            return x[0] + x[1]
+
+        def sum_f(x: BroadcastingList2[float]) -> float:
+            return x[0] + x[1]
+
+        self.assertTrue(torch.jit.script(sum_i)(4) == 8)
+        self.assertTrue(torch.jit.script(sum_f)(4.5) == 9.)
 
 
 if __name__ == '__main__':
