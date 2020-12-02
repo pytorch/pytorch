@@ -336,7 +336,65 @@ void SquashSliceAndSelect(Node* index_put_node) {
   new_index_put->copyMetadata(index_put_node->output());
   index_put_node->output()->replaceAllUsesWith(new_index_put);
 
-  orig_data->replaceAllUsesAfterNodeWith(new_index_put->node(), new_index_put);
+  auto block_node = new_index_put->node();
+  auto outer_block = block_node->owningBlock();
+  auto next_node = outer_block->owningNode();
+  if (nullptr == next_node) {
+    orig_data->replaceAllUsesAfterNodeWith(new_index_put->node(), new_index_put);
+    return;
+  }
+  for (auto block_inputs: outer_block->inputs()) {
+    if (block_inputs->debugName() == orig_data->debugName()) {
+      AT_ERROR(
+        "More than one aten::index_put in a subblock are not supported.");
+    }
+  }
+
+  // Register index_put outputs through the blocks.
+  outer_block->registerOutput(new_index_put);
+  std::vector<std::pair<Block*, Node*>> node_list = {std::make_pair(outer_block, next_node)};
+  next_node->addOutput()->copyMetadata(new_index_put);
+  auto next_block = next_node->owningBlock();
+  while (true)
+  {
+      if (nullptr == next_block->owningNode())
+          break;
+      outer_block = next_block;
+      outer_block->registerOutput(next_node->output(0));
+      next_node = outer_block->owningNode();
+      next_node->addOutput()->copyMetadata(new_index_put);
+      next_block = next_node->owningBlock();
+      node_list.push_back(std::make_pair(outer_block, next_node));
+  }
+
+  if (true) {
+    // Register index_put inputs through the blocks.
+    auto next_data = orig_data;
+    while (!node_list.empty())
+    {
+      auto cur_pair = node_list.back();
+      auto cur_node = cur_pair.second;
+      cur_node->addInput(next_data);
+      auto cur_block = cur_pair.first;
+      auto cur_input = cur_block->addInput();
+      cur_input->copyMetadata(next_data);
+      next_data = cur_input;
+      node_list.pop_back();
+    }
+    // Update index_put inputs inside the inner most block.
+    auto prev_data = block_node->input(0);
+    for (auto node : block_node->owningBlock()->nodes()) {
+      size_t idx = 0;
+      for (auto inputs_ : node->inputs()) {
+        if (inputs_ == prev_data) {
+            node->replaceInput(idx, next_data);
+            idx ++;
+            break;
+        }
+      }
+    }
+  }
+  orig_data->replaceAllUsesAfterNodeWith(next_node->output(0)->node(), next_node->output(0));
 }
 
 void PrepareCopyForONNX(Block* block) {

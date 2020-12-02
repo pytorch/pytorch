@@ -2253,6 +2253,9 @@ def log2(g, self):
 def prim_shape(g, self):
     return g.op('Shape', self)
 
+def prim_max(g, self, other):
+    return g.op('Max', self, other)
+
 def prim_data(g, self):
     return self
 
