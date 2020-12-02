@@ -21,7 +21,7 @@ using namespace vec256;
 
 // Note: Undefined behavior when performing addition is intentionally
 // ignored.
-void add_kernel(TensorIterator& iter, Scalar alpha_scalar) {
+void add_kernel(TensorIteratorBase& iter, Scalar alpha_scalar) {
   if (iter.dtype() == ScalarType::Bool) {
       using scalar_t = bool;
       auto alpha = alpha_scalar.to<scalar_t>();

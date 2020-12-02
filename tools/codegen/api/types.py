@@ -357,6 +357,10 @@ class NativeSignature:
             name = self.name()
         return f"{self._returns_type} {name}({args_str})"
 
+    def ptr_type(self) -> str:
+        args_str = ', '.join(map(str, self.arguments()))
+        return f'{self._returns_type} (*)({args_str})'
+
     def arguments(self) -> Tuple[NativeArgument, ...]:
         return self._arguments
 

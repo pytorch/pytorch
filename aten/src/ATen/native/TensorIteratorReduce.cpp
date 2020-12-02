@@ -2,6 +2,7 @@
 #include <ATen/Parallel.h>
 #include <algorithm>
 #include <memory>
+#include <ATen/Functions.h>
 
 /// Contains the implementation of parallel reductions in TensorIterator.
 

@@ -25,13 +25,15 @@ inline void sub_check(const Tensor& self, const Tensor& other) {
               "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
 }
 
+using structured_binary_fn_alpha = void(*)(TensorIteratorBase&, Scalar alpha);
+
 using binary_fn_alpha = void(*)(TensorIterator&, Scalar alpha);
 using binary_fn_beta = void(*)(TensorIterator&, double beta);
 using binary_fn = void(*)(TensorIterator&);
 using binary_clamp_fn_alpha =
     void(*)(TensorIterator&, Scalar alpha, Scalar min_val, Scalar max_val);
 
-DECLARE_DISPATCH(binary_fn_alpha, add_stub);
+DECLARE_DISPATCH(structured_binary_fn_alpha, add_stub);
 DECLARE_DISPATCH(binary_clamp_fn_alpha, add_clamp_stub);
 DECLARE_DISPATCH(binary_fn_alpha, sub_stub);
 DECLARE_DISPATCH(binary_fn, mul_stub);

@@ -55,7 +55,8 @@ REGISTER_OPERATOR_FUNCTOR(aten::add, aten_add, [](Node* n) -> SROperator {
     }
     auto out_t = p_node->Output(0, reg).toTensor();
     out_t.resize_({0});
-    at::native::add_out(out_t, in0_t, in1_t, in2_s);
+    // TODO:
+    // at::native::CPU::add_out(out_t, int0_t, in1_t, in2_s);
   };
 });
 

@@ -940,6 +940,9 @@ TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tenso
 void TensorIteratorBase::populate_operands(TensorIteratorConfig& config) {
   for (int i = 0; i < config.tensors_.size(); i++) {
     operands_.emplace_back(std::move(config.tensors_[i]));
+    if (operands_[i].tensor.is_meta()) {
+      is_meta_ = true;
+    }
   }
   num_outputs_ = config.num_outputs_;
 }
@@ -985,6 +988,10 @@ void TensorIteratorBase::mark_resize_outputs(const TensorIteratorConfig& config)
 
 void TensorIteratorBase::compute_mem_overlaps(const TensorIteratorConfig& config) {
   if (!config.check_mem_overlap_) {
+    return;
+  }
+  if (is_meta_) {
+    // We don't have pointer addresses, cannot check for overlap!
     return;
   }
   for (int i = 0; i < num_outputs_; i++) {
@@ -1255,8 +1262,10 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
     // allocate the output tensor if it's not provided
     allocate_or_resize_outputs();
     // coalesce adjacent dimensions when possible
-    coalesce_dimensions();
+    if (!is_meta_) coalesce_dimensions();
   }
+
+  if (is_meta_) return;
 
   for (auto& op : operands_) {
     TORCH_INTERNAL_ASSERT(op.tensor.defined());
@@ -1271,15 +1280,37 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
   view_offsets_ = DimVector(ndim_offsets, 0);
 }
 
+void TensorIteratorBase::set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) {
+  auto& op = operands_[output_idx];
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(output_idx < num_outputs_);
+  const auto& t = maybe_get_output(output_idx);
+  TORCH_INTERNAL_ASSERT(t.defined());
+  if (!op.tensor.defined()) {
+    op.tensor = t;
+    op.current_dtype = op.target_dtype;
+  } else {
+    TORCH_INTERNAL_ASSERT(t.is_same(op.tensor));
+  }
+}
+
 void TensorIterator::set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) {
+  // NB: intentionally no superclass call
   auto& op = operands_[output_idx];
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(output_idx < num_outputs_);
   if (!op.tensor.defined()) {
       TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", output_idx);
       if (strides.empty()) {
-          op.tensor = at::empty(sizes, options);
+          if (is_meta_) {
+            op.tensor = at::empty_meta(sizes, options);
+          } else {
+            op.tensor = at::empty(sizes, options);
+          }
       } else {
-          op.tensor = at::empty_strided(sizes, strides, options);
+          if (is_meta_) {
+            TORCH_INTERNAL_ASSERT(0, "meta strided not yet implemented");
+          } else {
+            op.tensor = at::empty_strided(sizes, strides, options);
+          }
       }
       op.current_dtype = op.target_dtype;
   } else if (op.will_resize) {
@@ -1295,6 +1326,11 @@ void TensorIterator::set_output(int64_t output_idx, IntArrayRef sizes, IntArrayR
     TORCH_INTERNAL_ASSERT(op.tensor.defined());
     namedinference::propagate_names(op.tensor, names);
   }
+}
+
+// Not actually used by anything, here for completeness
+const Tensor& TensorIterator::maybe_get_output(int64_t output_idx) {
+  return operands_[output_idx].tensor;
 }
 
 SplitUntil32Bit TensorIteratorBase::with_32bit_indexing() const {

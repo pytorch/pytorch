@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/ATen.h>
 #include <c10/util/FunctionRef.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/TypeCast.h>
@@ -290,6 +289,8 @@ struct CAFFE2_API TensorIteratorBase : public impl::MetaBase {
     return true;
   }
 
+  void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) override;
+
 protected:
   // Mutable reference as it moves tensors out of TensorIteratorConfig
   void populate_operands(TensorIteratorConfig&);
@@ -392,6 +393,9 @@ protected:
 
   // From TensorIteratorConfig
   bool is_reduction_ = false;
+
+  /// Set by populate_operands(), says if we're handling meta tensors
+  bool is_meta_ = false;
 };
 
 struct CAFFE2_API TensorIterator final : public TensorIteratorBase {
@@ -408,6 +412,7 @@ struct CAFFE2_API TensorIterator final : public TensorIteratorBase {
   static TensorIterator reduce_op(Tensor& out, const Tensor& a);
   static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
 
+  const Tensor& maybe_get_output(int64_t output_idx) override;
   void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) override;
 };
 

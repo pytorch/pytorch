@@ -188,6 +188,11 @@ def is_generic_dispatch_key(dk: str) -> bool:
 def is_cuda_dispatch_key(dk: str) -> bool:
     return 'CUDA' in dk
 
+# Structured kernel generation is only supported for certain key types;
+# otherwise use old-style
+def is_structured_dispatch_key(dk: str) -> bool:
+    return dk in {'CUDA', 'CPU'}
+
 # Generates RegisterSchema.cpp.  Depending on the selector, either
 # all schemas are registered, or only some are (in the case of
 # selective build)
@@ -250,6 +255,8 @@ class RegisterDispatchKey:
                 "functions, they will be automatically generated for you"
         elif self.dispatch_key not in g.out.dispatch:
             return []
+        elif not is_structured_dispatch_key(self.dispatch_key):
+            return list(mapMaybe(self.gen_unstructured, g.functions()))
 
         # Inner helper function to close over g
         # TODO: This function has a lot of similarity with gen_unstructured.  If
@@ -261,7 +268,6 @@ class RegisterDispatchKey:
             # TODO: put this into StructuredNativeFunctions itself
             functional_func = g.out.func.signature()
             functional_sig = DispatcherSignature.from_schema(functional_func)
-            meta_name = meta.name(functional_func)
 
             # This is a little abusive; this assumes that the functionalization
             # transformation ALWAYS refers to valid arguments in the original
@@ -276,34 +282,79 @@ class RegisterDispatchKey:
             sig = NativeSignature.from_schema(f.func)
 
             if self.target is Target.DEFINITION:
-                # TODO: work a little harder to generate fresh names for 'result'
-                # TODO: less praying that I picked the right argument name for 'self'
-
+                if self.dispatch_key == 'Meta':
+                    class_name = f"structured_{meta.name(g)}_meta_{k.name}"
+                    parent_class_name = f"at::meta::{meta.name(g)}"
+                else:
+                    class_name = f"structured_{g.out.dispatch[self.dispatch_key]}_{k.name}"
+                    parent_class_name = f"at::native::structured_{g.out.dispatch[self.dispatch_key]}"
+                if g.out.structured_inherits is not None:
+                    set_output_super = f"{g.out.structured_inherits}::set_output(output_idx, sizes, strides, options, names);"
+                else:
+                    set_output_super = ""
                 if k is SchemaKind.functional:
-                    out_expr = "result"
+                    # TODO: devirtualize these calls
                     if self.dispatch_key == "Meta":
-                        prologue = "auto result = meta_tensor_from_meta(meta_result);"
+                        # TODO: Might be good to just stick meta in options,
+                        # then don't need special case here
+                        set_output_impl = """
+if (strides.empty()) {
+    outputs_[output_idx] = at::empty_meta(sizes, options);
+} else {
+    TORCH_INTERNAL_ASSERT(0, "not implemented yet");
+}
+if (!names.empty()) namedinference::propagate_names(outputs_[output_idx], names);
+"""
                     else:
-                        prologue = "auto result = tensor_from_meta(meta_result);"
+                        set_output_impl = """
+if (strides.empty()) {
+    outputs_[output_idx] = at::empty(sizes, options);
+} else {
+    outputs_[output_idx] = at::empty_strided(sizes, strides, options);
+}
+if (!names.empty()) namedinference::propagate_names(outputs_[output_idx], names);
+"""
+                    assert len(f.func.returns) == 1, "multi-return not supported yet"
+                    out_expr = "op.outputs_[0]"
+                    ret_expr = "std::move(op.outputs_[0])"  # small optimization
+                    output_type = "Tensor"
+                    ctor = ""
+                    ctor_exprs = ""
                 elif k is SchemaKind.inplace:
+                    set_output_impl = """
+// TODO: consistency check?
+if (!names.empty()) namedinference::propagate_names(outputs_[output_idx], names);
+"""
                     out_expr = "self"
-                    prologue = "// TODO: consistency check assert"
+                    ret_expr = "self"
+                    output_type = "std::reference_wrapper<Tensor>"
+                    ctor = f"{class_name}(Tensor& self) : outputs_{{std::ref(self)}} {{}}"
+                    ctor_exprs = "(self)"
                 elif k is SchemaKind.out:
-                    # TODO: generalize this for multi-out
-                    assert len(f.func.arguments.out) == 1, "multi-out structured not supported yet"
                     # TODO: properly get the expression as it was brought into
                     # scope by sig
-                    out_expr = f.func.arguments.out[0].name
-                    prologue = f"""
-// TODO: add a consistency check for meta_result
-{out_expr}.resize_(meta_result.sizes);
+                    # TODO: devirtualize
+                    set_output_impl = """
+at::native::resize_output(outputs_[output_idx], sizes);
+if (!strides.empty()) {
+    TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
+    outputs_[output_idx].get().as_strided_(sizes, strides);
+} else if (options.memory_format_opt().has_value()) {
+    outputs_[output_idx].get().unsafeGetTensorImpl()->empty_tensor_restride(*options.memory_format_opt());
+}
 """
+                    # TODO: generalize this for multi-out
+                    assert len(f.func.arguments.out) == 1, "multi-out structured not supported yet"
+                    out_expr = f.func.arguments.out[0].name
+                    ret_expr = out_expr
+                    output_type = "std::reference_wrapper<Tensor>"
+                    ctor = f"{class_name}(Tensor& out) : outputs_{{std::ref(out)}} {{}}"
+                    ctor_exprs = f"({out_expr})"  # TODO: probably wrong
 
-                if self.dispatch_key == "Meta":
-                    out_impl_call = "// meta function does nothing"
+                if self.dispatch_key == 'Meta':
+                    impl_call = ""
                 else:
-                    out_impl_name = f"at::native::{g.out.dispatch[self.dispatch_key]}"
-                    out_impl_call = f"{out_impl_name}({out_expr}, {functional_exprs});"
+                    impl_call = f"op.impl({out_expr}, {functional_exprs});"
 
                 device_guard = ""
 
@@ -324,12 +375,27 @@ class RegisterDispatchKey:
                 # For an overview of what this template code looks like, see
                 # https://github.com/pytorch/rfcs/pull/9
                 return f"""\
+struct {class_name} final : public {parent_class_name} {{
+    {ctor}
+    void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
+                    TensorOptions options, DimnameList names) override {{
+        {set_output_impl}
+        // super must happen after, so that downstream can use maybe_get_output
+        // to retrieve the output
+        {set_output_super}
+    }}
+    const Tensor& maybe_get_output(int64_t output_idx) override {{
+        return outputs_[0];
+    }}
+    std::array<{output_type}, {len(f.func.returns)}> outputs_;
+}};
+
 {sig.defn()} {{
     {device_guard}
-    auto meta_result = meta::{meta_name}({functional_exprs});
-    {prologue}
-    {out_impl_call}
-    return {out_expr};
+    {class_name} op{ctor_exprs};
+    op.meta({functional_exprs});
+    {impl_call}
+    return {ret_expr};
 }}
 """
 
@@ -547,32 +613,73 @@ def compute_aten_op(f: NativeFunction) -> str:
 # Generates NativeFunctions.h, a list of forward declarations of all
 # actual kernel definitions we keep in aten/src/ATen/native/
 @with_native_function
-def compute_native_function_declaration(f: NativeFunction) -> List[str]:
-    ns = list(f.dispatch.values())
+def compute_native_function_declaration(g: Union[StructuredNativeFunctions, NativeFunction]) -> List[str]:
+    if isinstance(g, StructuredNativeFunctions):
+        # only out has dispatch
+        meta_name = meta.name(g)
+        rs = []
+        seen = set()
+        out_args = native.arguments(g.out.func)
+        for k, n in g.out.dispatch.items():
+            if n in seen:
+                continue
+            if not is_structured_dispatch_key(k):
+                continue
+            seen.add(n)
+            rs.append(f"""\
+struct CAFFE2_API structured_{n} : public at::meta::{meta_name} {{
+    void impl({', '.join(a.str_with_default() for a in out_args)});
+}};
+""")
 
-    rs = []
-    # Sometimes a function name shows up multiple times; only generate
-    # it once!
-    seen = set()
-    for n in ns:
-        if n in seen:
-            continue
-        if "legacy::" in n:
-            continue
-        seen.add(n)
-        returns_type = native.returns_type(f.func.returns)
-        args = native.arguments(f.func)
-        rs.append(f"CAFFE2_API {returns_type} {n}({', '.join(a.str_with_default() for a in args)});")
+        seen = set()
+        for f in g.functions():
+            returns_type = native.returns_type(f.func.returns)
+            args = native.arguments(f.func)
+            for k, n in f.dispatch.items():
+                if n in seen:
+                    continue
+                if is_structured_dispatch_key(k):
+                    continue
+                seen.add(n)
+                rs.append(f"CAFFE2_API {returns_type} {n}({', '.join(a.str_with_default() for a in args)});")
 
-    return rs
+        return rs
+
+    else:
+        f = g
+        ns = list(f.dispatch.values())
+
+        rs = []
+        # Sometimes a function name shows up multiple times; only generate
+        # it once!
+        seen = set()
+        for n in ns:
+            if n in seen:
+                continue
+            if "legacy::" in n:
+                continue
+            seen.add(n)
+            returns_type = native.returns_type(f.func.returns)
+            args = native.arguments(f.func)
+            rs.append(f"CAFFE2_API {returns_type} {n}({', '.join(a.str_with_default() for a in args)});")
+
+        return rs
 
 def compute_meta_function_declaration(g: StructuredNativeFunctions) -> str:
     with native_function_manager(g.out):
         sig = g.signature()
-        name = meta.name(sig)
-        returns_type = meta.returns_type(sig.returns)
+        name = meta.name(g)
         args = meta.arguments(sig)
-        return f"CAFFE2_API {returns_type} {name}({', '.join(map(str, args))});"
+        args_str = ', '.join(map(str, args))
+        parent_class = g.out.structured_inherits
+        if parent_class is None:
+            parent_class = "at::impl::MetaBase"
+        return f"""\
+struct CAFFE2_API {name} : public {parent_class} {{
+    void meta({args_str});
+}};
+"""
 
 # Generates RegisterBackendSelect.cpp, a series of kernels which provide
 # specialized computation of dispatch key for operator signatures which cannot
@@ -1170,7 +1277,7 @@ def main() -> None:
         'aten_ops': list(mapMaybe(compute_aten_op, native_functions)),
     })
     cpu_fm.write('NativeFunctions.h', lambda: {
-        'native_function_declarations': list(concatMap(compute_native_function_declaration, native_functions)),
+        'native_function_declarations': list(concatMap(compute_native_function_declaration, grouped_native_functions)),
     })
 
     cpu_fm.write('Declarations.yaml', lambda: format_yaml([compute_declaration_yaml(f) for f in native_functions]))
