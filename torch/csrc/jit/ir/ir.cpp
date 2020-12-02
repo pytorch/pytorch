@@ -1922,15 +1922,26 @@ std::vector<Value*> inlineCallTo(
      * the graph but primary inputs as well, and it will create duplicates when
      * the first inlined graph is input to the next one. To avoid this issue,
      * skip the old value when it is one of the
-     * callee->optimized_graph()->inputs(). Use optimized_graph() here because
-     * it was used to generate value_map.
+     * callee->optimized_graph()->inputs() or callee->graph()->inputs(), depends
+     * on if it is inlined_optimized_graph
      */
-    auto is_graph_input = std::find(
-        callee->optimized_graph()->inputs().begin(),
-        callee->optimized_graph()->inputs().end(),
-        kv.first);
-    if (is_graph_input != callee->optimized_graph()->inputs().end()) {
-      continue;
+
+    if (inline_optimized_graph) {
+      auto is_graph_input = std::find(
+          callee->optimized_graph()->inputs().begin(),
+          callee->optimized_graph()->inputs().end(),
+          kv.first);
+      if (is_graph_input != callee->optimized_graph()->inputs().end()) {
+        continue;
+      }
+    } else {
+      auto is_graph_input = std::find(
+          callee->graph()->inputs().begin(),
+          callee->graph()->inputs().end(),
+          kv.first);
+      if (is_graph_input != callee->graph()->inputs().end()) {
+        continue;
+      }
     }
 
     Node* new_node = kv.second->node();
