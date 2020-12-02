@@ -16,7 +16,8 @@ from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, ops, dtypes, onlyCPU, onlyOnCPUAndCUDA,
-    onlyCUDA, dtypesIfCUDA, precisionOverride, skipCUDAIfRocm, dtypesIfCPU)
+    onlyCUDA, dtypesIfCUDA, precisionOverride, skipCUDAIfRocm, dtypesIfCPU,
+    OpDTypes)
 from torch.testing import (
     floating_types_and, integral_types, all_types_and_complex_and, floating_types)
 
@@ -435,7 +436,7 @@ class TestUnaryUfuncs(TestCase):
             with self.assertRaises(RuntimeError):
                 op(input, out=output)
 
-    @ops(unary_ufuncs)
+    @ops(unary_ufuncs, dtypes=OpDTypes.supported)
     def test_out_arg_all_dtypes(self, device, dtype, op):
         input = make_tensor((64, 64), dtype=dtype, device=device,
                             low=op.domain[0], high=op.domain[1])
