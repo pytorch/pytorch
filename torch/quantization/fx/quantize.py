@@ -519,11 +519,8 @@ class Quantizer:
                         observed_node_names_set.add(node.name)
                 elif isinstance(quantize_handler,
                                 StandaloneModuleQuantizeHandler):
-                    assert node.op == 'call_module'
-                    output_is_observed = \
-                        self.modules[node.target]._output_is_observed
-                    if output_is_observed:
-                        observed_node_names_set.add(node.name)
+                    # output is observed in the standalone module
+                    return
                 elif (quantize_handler.all_node_args and
                       input_output_observed(quantize_handler)):
                     # observer for outputs
