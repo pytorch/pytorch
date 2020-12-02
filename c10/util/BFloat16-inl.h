@@ -7,14 +7,43 @@ namespace c10 {
 
 /// Constructors
 inline C10_HOST_DEVICE BFloat16::BFloat16(float value) {
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+  x = __bfloat16_as_ushort(__float2bfloat16(value));
+#else
   // RNE by default
   x = detail::round_to_nearest_even(value);
+#endif
 }
 
 /// Implicit conversions
 inline C10_HOST_DEVICE BFloat16::operator float() const {
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  return __bfloat162float(*reinterpret_cast<const __nv_bfloat16*>(&x));
+#else
   return detail::f32_from_bits(x);
+#endif
 }
+
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+inline C10_HOST_DEVICE BFloat16::BFloat16(const __nv_bfloat16& value) {
+  x = *reinterpret_cast<const unsigned short*>(&value);
+}
+inline C10_HOST_DEVICE BFloat16::operator __nv_bfloat16() const {
+  return *reinterpret_cast<const __nv_bfloat16*>(&x);
+}
+#endif
+
+// CUDA intrinsics
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+inline C10_DEVICE BFloat16 __ldg(const BFloat16* ptr) {
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+  return __ldg(reinterpret_cast<const __nv_bfloat16 *>(ptr));
+#else
+  return *ptr;
+#endif
+}
+#endif
 
 /// Arithmetic
 

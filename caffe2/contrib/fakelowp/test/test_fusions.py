@@ -1,4 +1,4 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 # Must happen before importing caffe2.python.*
 import caffe2.python.fakelowp.init_shared_libs  # noqa
@@ -27,8 +27,8 @@ class Fusions(serial.SerializedTestCase):
         size=st.integers(1, 100000),
         rand_seed=st.integers(0, 65534),
     )
-    @settings(deadline=None, max_examples=100)
-    def test_tanhquantize(self, scale, zp, size, rand_seed):
+    @settings(deadline=None)
+    def Skip_test_tanhquantize(self, scale, zp, size, rand_seed):
         np.random.seed(rand_seed)
 
         workspace.ResetWorkspace()

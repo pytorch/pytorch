@@ -1,5 +1,6 @@
 #include <limits>
 #include <vector>
+#include <sstream>
 #include <functional>
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
@@ -99,6 +100,10 @@ std::tuple<at::Tensor,at::Tensor> cudnn_convolution_transpose_backward(
 //     AT_CUDNN_CHECK(cudnnSetConvolutionMathType(mut_desc(), CUDNN_DEFAULT_MATH));
 //     if(dataType == CUDNN_DATA_HALF)
 //       AT_CUDNN_CHECK(cudnnSetConvolutionMathType(mut_desc(), CUDNN_TENSOR_OP_MATH));
+//
+//     Update: AT_CUDNN_CHECK is updated with AT_CUDNN_CHECK_WITH_SHAPES, which
+//        automatically prints tensor shapes and convolution parameters if there is
+//        a cuDNN exception thrown.
 //
 // When cudnnSetConvolutionMathType is called before cudnnGet/cudnnFind, it informs
 // cudnnGet/cudnnFind to iterate/take into account both tensor core and non-tensor-core algos.
@@ -220,6 +225,19 @@ struct ConvolutionParams
   // forward and backward, so you can reuse the benchmark entry,
 };
 
+std::ostream& operator<<(std::ostream & out, const ConvolutionParams& params) {
+  out << "ConvolutionParams \n"
+    << "    data_type = " << cudnnTypeToString(params.dataType) << "\n"
+    << "    padding = " << ArrayRef<int>{params.padding} << "\n"
+    << "    stride = " << ArrayRef<int>{params.stride} << "\n"
+    << "    dilation = " << ArrayRef<int>{params.dilation} << "\n"
+    << "    groups = " << params.groups << "\n"
+    << "    deterministic = " << (params.deterministic ? "true" : "false") << "\n"
+    << "    allow_tf32 = " << (params.allow_tf32 ? "true" : "false") << "\n";
+
+  return out;
+}
+
 // NB: This can't be a constructor, because then ConvolutionParams
 // would not be a POD anymore.
 // TODO: Use TensorGeometry here instead of the entire Tensor, which we
@@ -267,6 +285,61 @@ struct ConvolutionArgs {
   ConvolutionArgs(const Tensor& input, const Tensor& output, const Tensor& weight) : input(input), output(output), weight(weight) {
   }
 };
+
+std::string repro_from_args(const ConvolutionArgs& args) {
+  auto pybool = [](bool b) -> const char* { return b ? "True" : "False"; };
+  std::string partial_dtype;
+  switch (args.params.dataType) {
+    case CUDNN_DATA_FLOAT: partial_dtype = "float"; break;
+    case CUDNN_DATA_DOUBLE: partial_dtype = "double"; break;
+    case CUDNN_DATA_HALF: partial_dtype = "half"; break;
+    default: partial_dtype = "unsupported";
+  }
+  const std::string full_dtype = "torch." + partial_dtype;
+  const int out_channels = args.weight.sizes()[0];
+  const int in_channels = args.weight.sizes()[1] * args.params.groups;
+  const size_t dim = args.input.sizes().size();
+  const std::string channels_last_xd = dim == 4 ? "channels_last" : "channels_last_3d";
+  const std::string to_channels_last = args.input.suggest_memory_format() == at::MemoryFormat::ChannelsLast \
+    ? ".to(memory_format=torch." + channels_last_xd + ")" : "";
+
+  std::ostringstream ss;
+  ss << "You can try to repro this exception using the following code snippet. ";
+  ss << "If that doesn't trigger the error, please include your original repro script when reporting this issue.\n\n";
+  ss << "import torch\n";
+  ss << "torch.backends.cuda.matmul.allow_tf32 = " << pybool(at::globalContext().allowTF32CuBLAS()) << "\n";
+  ss << "torch.backends.cudnn.benchmark = " << pybool(at::globalContext().benchmarkCuDNN()) << "\n";
+  ss << "torch.backends.cudnn.deterministic = " << pybool(args.params.deterministic) << "\n";
+  ss << "torch.backends.cudnn.allow_tf32 = " << pybool(args.params.allow_tf32) << "\n";
+  ss << "data = torch.randn(" << args.input.sizes() << ", dtype=" << full_dtype << ", ";
+  ss <<   "device='cuda', requires_grad=True)" << to_channels_last << "\n";
+  ss << "net = torch.nn.Conv" << dim-2 << "d(" << in_channels << ", " << out_channels << ", ";
+  ss <<   "kernel_size=" << args.weight.sizes().slice(2) << ", ";
+  ss <<   "padding=" << ArrayRef<int>(args.params.padding, dim-2) << ", ";
+  ss <<   "stride=" << ArrayRef<int>(args.params.stride, dim-2) << ", ";
+  ss <<   "dilation=" << ArrayRef<int>(args.params.dilation, dim-2) << ", ";
+  ss <<   "groups=" << args.params.groups << ")\n";
+  ss << "net = net.cuda()." << partial_dtype << "()" << to_channels_last << "\n";
+  ss << "out = net(data)\n";
+  ss << "out.backward(torch.randn_like(out))\n";
+  ss << "torch.cuda.synchronize()\n\n";
+  
+  return ss.str();
+}
+
+std::ostream& operator<<(std::ostream & out, const ConvolutionArgs& args) {
+  out << repro_from_args(args)         // already has a trailing newline
+    << args.params                     // already has a trailing newline
+    << "input: " << args.idesc         // already has a trailing newline
+    << "output: " << args.odesc        // already has a trailing newline
+    << "weight: " << args.wdesc        // already has a trailing newline
+    << "Pointer addresses: " << "\n"
+    << "    input: " << args.input.data_ptr() << "\n"
+    << "    output: " << args.output.data_ptr() << "\n"
+    << "    weight: " << args.weight.data_ptr() << "\n";
+
+  return out;
+}
 
 // ---------------------------------------------------------------------
 //
@@ -457,7 +530,7 @@ struct algorithm_search<cudnnConvolutionFwdAlgoPerf_t> {
     int perf_count;
     std::unique_ptr<perf_t[]> perf_results(new perf_t[num_algos]);
     if (!benchmark) {
-      AT_CUDNN_CHECK(cudnnGetConvolutionForwardAlgorithm_v7(
+      AT_CUDNN_CHECK_WITH_SHAPES(cudnnGetConvolutionForwardAlgorithm_v7(
           args.handle,
           args.idesc.desc(),
           args.wdesc.desc(),
@@ -465,11 +538,11 @@ struct algorithm_search<cudnnConvolutionFwdAlgoPerf_t> {
           args.odesc.desc(),
           num_algos,
           &perf_count,
-          perf_results.get()));
+          perf_results.get()), args);
     } else {
       size_t max_ws_size = getMaxWorkspaceSize(args, algos, num_algos);
       Workspace ws(max_ws_size);
-      AT_CUDNN_CHECK(cudnnFindConvolutionForwardAlgorithmEx(
+      AT_CUDNN_CHECK_WITH_SHAPES(cudnnFindConvolutionForwardAlgorithmEx(
           args.handle,
           args.idesc.desc(), args.input.data_ptr(),
           args.wdesc.desc(), args.weight.data_ptr(),
@@ -479,7 +552,7 @@ struct algorithm_search<cudnnConvolutionFwdAlgoPerf_t> {
           &perf_count,
           perf_results.get(),
           ws.data,
-          ws.size));
+          ws.size), args);
 
       // Free the cached blocks in our caching allocator. They are
       // needed here because the above benchmarking uses a huge amount of memory,
@@ -493,14 +566,14 @@ struct algorithm_search<cudnnConvolutionFwdAlgoPerf_t> {
     const ConvolutionArgs& args,
     algo_t algo, size_t* workspaceSize)
   {
-    AT_CUDNN_CHECK(cudnnGetConvolutionForwardWorkspaceSize(
+    AT_CUDNN_CHECK_WITH_SHAPES(cudnnGetConvolutionForwardWorkspaceSize(
         args.handle,
         args.idesc.desc(),
         args.wdesc.desc(),
         args.cdesc.desc(),
         args.odesc.desc(),
         algo,
-        workspaceSize));
+        workspaceSize), args);
   }
 };
 
@@ -527,7 +600,7 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgoPerf_t> {
     int perf_count;
     std::unique_ptr<perf_t[]> perf_results(new perf_t[num_algos]);
     if (!benchmark) {
-      AT_CUDNN_CHECK(cudnnGetConvolutionBackwardDataAlgorithm_v7(
+      AT_CUDNN_CHECK_WITH_SHAPES(cudnnGetConvolutionBackwardDataAlgorithm_v7(
           args.handle,
           args.wdesc.desc(),
           args.odesc.desc(),
@@ -535,11 +608,11 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgoPerf_t> {
           args.idesc.desc(),
           num_algos,
           &perf_count,
-          perf_results.get()));
+          perf_results.get()), args);
     } else {
       size_t max_ws_size = getMaxWorkspaceSize(args, algos, num_algos);
       Workspace ws(max_ws_size);
-      AT_CUDNN_CHECK(cudnnFindConvolutionBackwardDataAlgorithmEx(
+      AT_CUDNN_CHECK_WITH_SHAPES(cudnnFindConvolutionBackwardDataAlgorithmEx(
           args.handle,
           args.wdesc.desc(), args.weight.data_ptr(),
           args.odesc.desc(), args.output.data_ptr(),
@@ -549,7 +622,7 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgoPerf_t> {
           &perf_count,
           perf_results.get(),
           ws.data,
-          ws.size));
+          ws.size), args);
 
       // Free the cached blocks in our caching allocator. They are
       // needed here because the above benchmarking uses a huge amount of memory,
@@ -563,14 +636,14 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgoPerf_t> {
     const ConvolutionArgs& args,
     cudnnConvolutionBwdDataAlgo_t algo, size_t* workspaceSize)
   {
-    AT_CUDNN_CHECK(cudnnGetConvolutionBackwardDataWorkspaceSize(
+    AT_CUDNN_CHECK_WITH_SHAPES(cudnnGetConvolutionBackwardDataWorkspaceSize(
         args.handle,
         args.wdesc.desc(),
         args.odesc.desc(),
         args.cdesc.desc(),
         args.idesc.desc(),
         algo,
-        workspaceSize));
+        workspaceSize), args);
   }
 };
 
@@ -599,7 +672,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgoPerf_t> {
     std::unique_ptr<perf_t[]> perf_results(new perf_t[num_algos]);
     int perf_count;
     if (!benchmark) {
-      AT_CUDNN_CHECK(cudnnGetConvolutionBackwardFilterAlgorithm_v7(
+      AT_CUDNN_CHECK_WITH_SHAPES(cudnnGetConvolutionBackwardFilterAlgorithm_v7(
           args.handle,
           args.idesc.desc(),
           args.odesc.desc(),
@@ -607,11 +680,11 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgoPerf_t> {
           args.wdesc.desc(),
           num_algos,
           &perf_count,
-          perf_results.get()));
+          perf_results.get()), args);
     } else {
       size_t max_ws_size = getMaxWorkspaceSize(args, algos, num_algos);
       Workspace ws(max_ws_size);
-      AT_CUDNN_CHECK(cudnnFindConvolutionBackwardFilterAlgorithmEx(
+      AT_CUDNN_CHECK_WITH_SHAPES(cudnnFindConvolutionBackwardFilterAlgorithmEx(
           args.handle,
           args.idesc.desc(), args.input.data_ptr(),
           args.odesc.desc(), args.output.data_ptr(),
@@ -621,7 +694,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgoPerf_t> {
           &perf_count,
           perf_results.get(),
           ws.data,
-          ws.size));
+          ws.size), args);
 
       // Free the cached blocks in our caching allocator. They are
       // needed here because the above benchmarking uses a huge amount of memory,
@@ -633,14 +706,14 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgoPerf_t> {
 
   static void getWorkspaceSize(const ConvolutionArgs& args, algo_t algo, size_t* workspaceSize)
   {
-    AT_CUDNN_CHECK(cudnnGetConvolutionBackwardFilterWorkspaceSize(
+    AT_CUDNN_CHECK_WITH_SHAPES(cudnnGetConvolutionBackwardFilterWorkspaceSize(
         args.handle,
         args.idesc.desc(),
         args.odesc.desc(),
         args.cdesc.desc(),
         args.wdesc.desc(),
         algo,
-        workspaceSize));
+        workspaceSize), args);
   }
 };
 
@@ -850,17 +923,18 @@ void raw_cudnn_convolution_forward_out_32bit(
       // whether to use Tensor core kernels or not
       // See Note [behavior of cudnnFind and cudnnGet]
       ASSERT_CORRECT_PRECISION(fwdAlgPerf.mathType);
-      AT_CUDNN_CHECK(cudnnSetConvolutionMathType(args.cdesc.mut_desc(), fwdAlgPerf.mathType));
+      AT_CUDNN_CHECK_WITH_SHAPES(cudnnSetConvolutionMathType(args.cdesc.mut_desc(), fwdAlgPerf.mathType), args);
 
       Constant one(dataType, 1);
       Constant zero(dataType, 0);
 
-      AT_CUDNN_CHECK(cudnnConvolutionForward(
-        args.handle,
-        &one, args.idesc.desc(), input.data_ptr(),
-        args.wdesc.desc(), weight.data_ptr(),
-        args.cdesc.desc(), fwdAlgPerf.algo, workspace.data_ptr(), fwdAlgPerf.memory,
-        &zero, args.odesc.desc(), output.data_ptr()));
+      AT_CUDNN_CHECK_WITH_SHAPES(cudnnConvolutionForward(
+          args.handle,
+          &one, args.idesc.desc(), input.data_ptr(),
+          args.wdesc.desc(), weight.data_ptr(),
+          args.cdesc.desc(), fwdAlgPerf.algo, workspace.data_ptr(), fwdAlgPerf.memory,
+          &zero, args.odesc.desc(), output.data_ptr()),
+        args, "Forward algorithm: ", static_cast<int>(fwdAlgPerf.algo), "\n");
       }
   );
 }
@@ -986,17 +1060,22 @@ void raw_cudnn_convolution_backward_input_out_32bit(
       // whether to use Tensor core kernels or not
       // See Note [behavior of cudnnFind and cudnnGet]
       ASSERT_CORRECT_PRECISION(bwdDataAlgPerf.mathType);
-      AT_CUDNN_CHECK(cudnnSetConvolutionMathType(args.cdesc.mut_desc(), bwdDataAlgPerf.mathType));
+      AT_CUDNN_CHECK_WITH_SHAPES(cudnnSetConvolutionMathType(args.cdesc.mut_desc(), bwdDataAlgPerf.mathType), args);
 
       Constant one(dataType, 1);
       Constant zero(dataType, 0);
 
-      AT_CUDNN_CHECK(cudnnConvolutionBackwardData(
+      AT_CUDNN_CHECK_WITH_SHAPES(cudnnConvolutionBackwardData(
           args.handle,
           &one, args.wdesc.desc(), weight.data_ptr(),
           args.odesc.desc(), grad_output.data_ptr(),
           args.cdesc.desc(), bwdDataAlgPerf.algo, workspace.data_ptr(), bwdDataAlgPerf.memory,
-          &zero, args.idesc.desc(), grad_input.data_ptr()));
+          &zero, args.idesc.desc(), grad_input.data_ptr()),
+        args,
+        "Additional pointer addresses: \n",
+        "    grad_output: ", grad_output.data_ptr(), "\n",
+        "    grad_input: ", grad_input.data_ptr(), "\n",
+        "Backward data algorithm: ", static_cast<int>(bwdDataAlgPerf.algo), "\n");
     }
   );
 }
@@ -1148,17 +1227,22 @@ void raw_cudnn_convolution_backward_weight_out_32bit(
       // whether to use Tensor core kernels or not
       // See Note [behavior of cudnnFind and cudnnGet]
       ASSERT_CORRECT_PRECISION(bwdFilterAlgPerf.mathType);
-      AT_CUDNN_CHECK(cudnnSetConvolutionMathType(args.cdesc.mut_desc(), bwdFilterAlgPerf.mathType));
+      AT_CUDNN_CHECK_WITH_SHAPES(cudnnSetConvolutionMathType(args.cdesc.mut_desc(), bwdFilterAlgPerf.mathType), args);
 
       Constant one(dataType, 1);
       Constant zero(dataType, 0);
 
-      AT_CUDNN_CHECK(cudnnConvolutionBackwardFilter(
+      AT_CUDNN_CHECK_WITH_SHAPES(cudnnConvolutionBackwardFilter(
           args.handle,
           &one, args.idesc.desc(), input.data_ptr(),
           args.odesc.desc(), grad_output.data_ptr(),
           args.cdesc.desc(), bwdFilterAlgPerf.algo, workspace.data_ptr(), bwdFilterAlgPerf.memory,
-          &zero, args.wdesc.desc(), grad_weight.data_ptr()));
+          &zero, args.wdesc.desc(), grad_weight.data_ptr()),
+        args,
+        "Additional pointer addresses: \n",
+        "    grad_output: ", grad_output.data_ptr(), "\n",
+        "    grad_weight: ", grad_weight.data_ptr(), "\n",
+        "Backward filter algorithm: ", static_cast<int>(bwdFilterAlgPerf.algo), "\n");
     }
   );
 }

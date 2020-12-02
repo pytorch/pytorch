@@ -383,7 +383,7 @@ The entry point from Python into C++ for tracing using `torch.jit.trace` is `_cr
 
 A thread local instance of the TracingState object maintains a mapping between actual data being computed during the trace (e.g. Tensors) stored in IValues, and the abstract `Value*` in the Graph that would compute that value. The functions `void setValueTrace(const IValue&, Value*)` and `Value* getValueTrace(const IValue&)` are used by the tracer to maintain this mapping.
 
-An initial IValue to Value mapping is setup up between the inputs to the function being traced and symbolic Value inputs to the Graph being constructed. If we are tracing a `torch.nn.Module`, the tracer also adds Parameters and sub-Modules to the Module being constructed that correspond to the Python `torch.nn.Module` being traced.  These values are also added as mapping so that uses of the Parameters in the trace will create uses of the Parameters in the Graph.
+An initial IValue to Value mapping is set up between the inputs to the function being traced and symbolic Value inputs to the Graph being constructed. If we are tracing a `torch.nn.Module`, the tracer also adds Parameters and sub-Modules to the Module being constructed that correspond to the Python `torch.nn.Module` being traced.  These values are also added as mapping so that uses of the Parameters in the trace will create uses of the Parameters in the Graph.
 
 As the trace runs, individual operators create Nodes in the Graph being traced to record what happens. This code is currently generated per operator in [tools/autograd/gen_variable_type.py](../../../tools/autograd/gen_variable_type.py). It results in code that looks like the following:
 
@@ -886,7 +886,7 @@ def LSTMCellS(x, hx, cx, w_ih, w_hh, b_ih, b_hh):
     return hy, cy
 ```
 
-After going through the the frontend, we get start with this unoptimized graph:
+After going through the the frontend, we start with this unoptimized graph:
 
 ```
 graph(%x : Tensor,

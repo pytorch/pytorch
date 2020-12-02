@@ -15,7 +15,7 @@ template<typename scalar_t>
 scalar_t vdot_impl(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy);
 
 constexpr inline bool lda_cond(int64_t m, int64_t n, int64_t lda) {
-  return n == 1 || lda > std::max<int64_t>(1L, m);
+  return n == 1 || lda >= std::max<int64_t>(1L, m);
 }
 
 Tensor &addmv_impl_cpu(Tensor& result, const Tensor &self, const Tensor &mat, const Tensor &vec, Scalar beta_, Scalar alpha_) {

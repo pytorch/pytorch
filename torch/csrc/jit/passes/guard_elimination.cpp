@@ -352,8 +352,6 @@ struct GuardElimination {
       case aten::where:
       case aten::_cast_Float:
       case aten::_cast_Long:
-      case aten::_sigmoid_backward:
-      case aten::_tanh_backward:
       case aten::__and__:
       case aten::__or__:
       case aten::__xor__:

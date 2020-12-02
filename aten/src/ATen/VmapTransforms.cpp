@@ -3,15 +3,6 @@
 
 namespace at {
 
-// Creates a bitset for all of the levels present in `bdims`.
-std::bitset<kVmapNumLevels> createLevelsBitset(BatchDimsRef bdims) {
-  std::bitset<kVmapNumLevels> result;
-  for (const auto& bdim : bdims) {
-    result.set(bdim.level());
-  }
-  return result;
-}
-
 // Checks if the batch dims in `bdims` appear at the front of the tensor.
 static bool areBdimsAtFrontInOrder(BatchDimsRef bdims) {
   for (int64_t idx = 0; idx < bdims.size(); idx++) {
@@ -52,7 +43,7 @@ VmapPhysicalView MultiBatchVmapTransform::logicalToPhysical(const Tensor& logica
   TORCH_INTERNAL_ASSERT(
       batched,
       "logicalToPhysical(tensor) should only be passed a BatchedTensor");
-  return { permuteBatchDimsToFront(batched), createLevelsBitset(batched->bdims()) };
+  return { permuteBatchDimsToFront(batched), createVmapLevelsBitset(batched->bdims()) };
 }
 
 int64_t VmapPhysicalView::numBatchDims() const {
@@ -117,7 +108,7 @@ static std::pair<Tensor,std::bitset<kVmapNumLevels>>
 getPhysicalTensorAndLevels(const Tensor& self) {
   auto* batched = maybeGetBatchedImpl(self);
   if (batched) {
-    return {permuteBatchDimsToFront(batched), createLevelsBitset(batched->bdims())};
+    return {permuteBatchDimsToFront(batched), createVmapLevelsBitset(batched->bdims())};
   }
   return {self, 0};
 }
@@ -202,7 +193,7 @@ MultiBatchVmapTransform::logicalToPhysical(TensorList logical_tensors) {
   for (const auto& logical_tensor : logical_tensors) {
     auto* batched = maybeGetBatchedImpl(logical_tensor);
     if (batched) {
-      collective_levels |= createLevelsBitset(batched->bdims());
+      collective_levels |= createVmapLevelsBitset(batched->bdims());
     }
   }
 
@@ -252,7 +243,7 @@ getLevelsAndLargestLogicalDim(TensorList logical_tensors) {
   for (const auto& tensor : logical_tensors) {
     auto* batched = maybeGetBatchedImpl(tensor);
     if (batched) {
-      levels = levels | createLevelsBitset(batched->bdims());
+      levels = levels | createVmapLevelsBitset(batched->bdims());
     }
     auto tensor_logical_dim = /*logical dim*/tensor.dim();
     if (tensor_logical_dim > largest_logical_dim) {

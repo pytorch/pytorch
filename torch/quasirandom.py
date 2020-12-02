@@ -1,4 +1,5 @@
 import torch
+from typing import Optional
 
 
 class SobolEngine(object):
@@ -57,11 +58,10 @@ class SobolEngine(object):
         torch._sobol_engine_initialize_state_(self.sobolstate, self.dimension)
 
         if self.scramble:
+            g: Optional[torch.Generator] = None
             if self.seed is not None:
                 g = torch.Generator()
                 g.manual_seed(self.seed)
-            else:
-                g = None
 
             shift_ints = torch.randint(2, (self.dimension, self.MAXBIT), device=cpu, generator=g)
             self.shift = torch.mv(shift_ints, torch.pow(2, torch.arange(0, self.MAXBIT, device=cpu)))

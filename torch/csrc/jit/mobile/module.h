@@ -34,12 +34,16 @@ class TORCH_API Module {
       std::shared_ptr<CompilationUnit> cu)
       : object_(object), metadata_(std::move(metadata)), cu_(std::move(cu)) {}
   Module() = default;
-  c10::IValue run_method(const std::string& method_name, Stack stack);
+  Method get_method(const std::string& method_name) const;
+  template <typename... Types>
+  c10::IValue run_method(const std::string& method_name, Types&&... args) {
+    return get_method(method_name)({IValue(std::forward<Types>(args))...});
+  }
   c10::IValue forward(std::vector<c10::IValue> inputs) {
-    return run_method("forward", std::move(inputs));
+    return get_method("forward")(std::move(inputs));
   }
   c10::optional<Method> find_method(const std::string& basename) const;
-  std::string name() {
+  const std::string name() const {
     return object_->name();
   }
   const std::vector<at::IValue>& slots() const {
@@ -61,6 +65,16 @@ class TORCH_API Module {
   bool is_training() const;
   const std::unordered_map<std::string, std::string> metadata() const {
     return metadata_;
+  }
+
+  c10::IValue attr(const std::string& name, c10::IValue or_else) const {
+    if (auto r = object_->type()->findAttributeSlot(name)) {
+      return object_->getSlot(*r);
+    }
+    if (auto r = object_->type()->findConstantSlot(name)) {
+      return object_->type()->getConstant(*r);
+    }
+    return or_else;
   }
 
  private:

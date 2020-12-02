@@ -5,8 +5,10 @@ namespace torch {
 namespace jit {
 namespace mobile {
 
+class Module;
+
 struct TORCH_API Method {
-  Method(c10::intrusive_ptr<c10::ivalue::Object> owner, Function* function);
+  Method(const Module* owner, Function* function);
 
   void run(Stack& stack);
   void run(Stack&& stack) {
@@ -29,8 +31,8 @@ struct TORCH_API Method {
 
  private:
   // Methods are uniquely owned by a single module.
-  // This raw pointer allows referencing the module's _ivalue()
-  c10::intrusive_ptr<c10::ivalue::Object> owner_;
+  // This raw pointer allows referencing the module
+  const Module* owner_;
 
   // Underlying unbound function
   Function* function_;

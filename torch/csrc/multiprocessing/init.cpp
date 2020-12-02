@@ -43,7 +43,7 @@ PyObject* multiprocessing_init(PyObject* _unused, PyObject *noargs) {
 static PyMethodDef methods[] = {
     {
         "_multiprocessing_init",
-        (PyCFunction)multiprocessing_init,
+        multiprocessing_init,
         METH_NOARGS,
         nullptr,
     },

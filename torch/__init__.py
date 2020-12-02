@@ -12,6 +12,7 @@ on an NVIDIA GPU with compute capability >= 3.0.
 import os
 import sys
 import platform
+import textwrap
 import ctypes
 
 if sys.version_info < (3,):
@@ -193,6 +194,31 @@ else:
 if TYPE_CHECKING:
     import torch._C as _C
 
+# Check to see if we can load C extensions, and if not provide some guidance
+# on what the problem might be.
+try:
+    # _initExtension is chosen (arbitrarily) as a sentinel.
+    from torch._C import _initExtension
+except ImportError:
+    import torch._C as _C_for_compiled_check
+
+    # The __file__ check only works for Python 3.7 and above.
+    if sys.version_info >= (3, 7) and _C_for_compiled_check.__file__ is None:
+        raise ImportError(textwrap.dedent('''
+            Failed to load PyTorch C extensions:
+                It appears that PyTorch has loaded the `torch/_C` folder
+                of the PyTorch repository rather than the C extensions which
+                are expected in the `torch._C` namespace. This can occur when
+                using the `install` workflow. e.g.
+                    $ python setup.py install && python -c "import torch"
+
+                This error can generally be solved using the `develop` workflow
+                    $ python setup.py develop && python -c "import torch"  # This should succeed
+                or by running Python from a different directory.
+            ''').strip()) from None
+    raise  # If __file__ is not None the cause is unknown, so just re-raise.
+
+
 __all__ += [name for name in dir(_C)
             if name[0] != '_' and
             not name.endswith('Base')]
@@ -300,14 +326,16 @@ def set_default_dtype(d):
     _C._set_default_dtype(d)
 
 def set_deterministic(d):
-    r""" Sets whether native PyTorch operations must use deterministic
-    algorithms. When True, operations without deterministic algorithms
-    will throw a :class:RuntimeError when called.
+    r""" Sets whether PyTorch operations must use "deterministic"
+    algorithms. That is, algorithms which, given the same input, and when
+    run on the same software and hardware, always produce the same output.
+    When True, operations will use deterministic algorithms when available,
+    and if only nondeterministic algorithms are available they will throw a
+    :class:RuntimeError when called.
 
     .. warning::
-        This feature is a beta feature, so it does not affect every
-        nondeterministic operation yet. The following operations are
-        affected by this flag.
+        This feature is in beta, and its design and implementation may change
+        in the future.
 
     The following normally-nondeterministic operations will act
     deterministically when `d=True`:
@@ -439,11 +467,13 @@ class QInt8Storage(_C.QInt8StorageBase, _StorageBase):
 class QInt32Storage(_C.QInt32StorageBase, _StorageBase):
     pass
 
+class QUInt4x2Storage(_C.QUInt4x2StorageBase, _StorageBase):
+    pass
 
 _storage_classes = {
     DoubleStorage, FloatStorage, LongStorage, IntStorage, ShortStorage,
     CharStorage, ByteStorage, HalfStorage, BoolStorage, QUInt8Storage, QInt8Storage,
-    QInt32Storage, BFloat16Storage, ComplexFloatStorage, ComplexDoubleStorage
+    QInt32Storage, BFloat16Storage, ComplexFloatStorage, ComplexDoubleStorage, QUInt4x2Storage
 }
 
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
@@ -477,9 +507,9 @@ del manager_path
 # is not a good way to fix this problem.  Perhaps, try to redesign VariableFunctions
 # so that this import is good enough
 if TYPE_CHECKING:
-    # Some type signatures pulled in from _VariableFunctions here clash with 
+    # Some type signatures pulled in from _VariableFunctions here clash with
     # signatures already imported. For now these clashes are ignored; see
-    # PR #43339 for details.  
+    # PR #43339 for details.
     from torch._C._VariableFunctions import *  # type: ignore
 
 for name in dir(_C._VariableFunctions):
@@ -512,6 +542,21 @@ del QUInt8StorageBase
 del BFloat16StorageBase
 del ComplexDoubleStorageBase
 del ComplexFloatStorageBase
+del QUInt4x2StorageBase
+
+################################################################################
+# Define _assert
+################################################################################
+
+# needs to be before the submodule imports to avoid circular dependencies
+def _assert(condition, message):
+    r"""A wrapper around Python's assert which is symbolically traceable.
+    """
+    from .overrides import has_torch_function, handle_torch_function
+
+    if type(condition) is not torch.Tensor and has_torch_function((condition,)):
+        return handle_torch_function(_assert, (condition,), condition, message)
+    assert condition, message
 
 ################################################################################
 # Import most common subpackages
@@ -526,6 +571,7 @@ import torch.nn
 import torch.nn.intrinsic
 import torch.nn.quantized
 import torch.optim
+import torch.optim._multi_tensor
 import torch.multiprocessing
 import torch.sparse
 import torch.utils.backcompat

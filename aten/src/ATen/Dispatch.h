@@ -31,7 +31,24 @@
     const auto& SCALAR_TYPE C10_UNUSED_DISPATCH_CUDA_WORKAROUND = enum_type; \
     const auto& UNDERLYING_TYPE C10_UNUSED_DISPATCH_CUDA_WORKAROUND =        \
         toUnderlying(enum_type);                                             \
+    (void)SCALAR_TYPE;  /* Suppress unused-var compiler warning */           \
+    /* TODO: Use [[maybe-unused]] when C++17 becomes the standard */         \
     return __VA_ARGS__();                                                    \
+  }
+
+#define AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                       \
+    enum_type, type, underlying_type, bitwidth, qmin, qmax, ...)                  \
+  case enum_type: {                                                               \
+    using scalar_t = type;                                                        \
+    using underlying_t C10_UNUSED_DISPATCH_CUDA_WORKAROUND =                      \
+        scalar_t::underlying;                                                     \
+    const auto& SCALAR_TYPE C10_UNUSED_DISPATCH_CUDA_WORKAROUND = enum_type;      \
+    const auto& UNDERLYING_TYPE C10_UNUSED_DISPATCH_CUDA_WORKAROUND =             \
+        toUnderlying(enum_type);                                                  \
+    int bit_width = bitwidth;                                                     \
+    int64_t quant_min = qmin;                                                     \
+    int64_t quant_max = qmax;                                                     \
+    return __VA_ARGS__();                                                         \
   }
 
 // This macro should be used to skip bfloat16 dispatch on non-ROCm platforms and
@@ -346,6 +363,25 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
     }                                                                       \
   }()
 
+#define AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(TYPE, NAME, ...)                                   \
+  [&] {                                                                                        \
+    const auto& the_type = TYPE;                                                               \
+    /* don't use TYPE again in case it is an expensive or side-effect op */                    \
+    at::ScalarType _st = ::detail::scalar_type(the_type);                                      \
+    switch (_st) {                                                                             \
+      AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                                      \
+          at::kQInt8, at::qint8, int8_t, CHAR_BIT, SCHAR_MIN, SCHAR_MAX, __VA_ARGS__)          \
+      AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                                      \
+          at::kQUInt8, at::quint8, uint8_t, CHAR_BIT, 0, UCHAR_MAX, __VA_ARGS__)               \
+      AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                                      \
+          at::kQInt32, at::qint32, int, CHAR_BIT * sizeof(int), INT_MIN, INT_MAX, __VA_ARGS__) \
+      AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                                      \
+          at::kQUInt4x2, at::quint4x2, uint8_t, 4, 0, 15, __VA_ARGS__)                         \
+      default:                                                                                 \
+        AT_ERROR(#NAME, " not implemented for '", toString(TYPE), "'");                        \
+    }                                                                                          \
+  }()
+
 #define AT_DISPATCH_ALL_TYPES_AND_COMPLEX(TYPE, NAME, ...)                  \
   [&] {                                                                     \
     const auto& the_type = TYPE;                                            \
@@ -518,6 +554,25 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
           __VA_ARGS__)                                                      \
       default:                                                              \
         AT_ERROR(#NAME, " not implemented for '", TYPE, "'");               \
+    }                                                                       \
+  }()
+
+#define AT_DISPATCH_INDEX_TYPES(TYPE, NAME, ...)                            \
+  [&] {                                                                     \
+    const auto& the_index_type = TYPE;                                      \
+    /* don't use TYPE again in case it is an expensive or side-effect op */ \
+    at::ScalarType _it = ::detail::scalar_type(the_index_type);             \
+    switch (_it) {                                                          \
+      case at::ScalarType::Int: {                                           \
+        using index_t = int32_t;                                            \
+        return __VA_ARGS__();                                               \
+      }                                                                     \
+      case at::ScalarType::Long: {                                          \
+        using index_t = int64_t;                                            \
+        return __VA_ARGS__();                                               \
+      }                                                                     \
+      default:                                                              \
+        AT_ERROR(#NAME, " not implemented for '", toString(_it), "'");      \
     }                                                                       \
   }()
 

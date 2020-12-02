@@ -25,16 +25,15 @@ namespace at { namespace cuda { namespace detail {
 constexpr int CUDA_NUM_THREADS = 1024;
 
 // CUDA: number of blocks for threads.
-inline int GET_BLOCKS(const int N)
-{
-  AT_ASSERTM(N > 0, "CUDA kernel launch blocks must be positive, but got N=", N);
-  return (N + CUDA_NUM_THREADS - 1) / CUDA_NUM_THREADS;
-}
-
 inline int GET_BLOCKS(const int64_t N) {
   AT_ASSERTM(N > 0, "CUDA kernel launch blocks must be positive, but got N=", N);
   constexpr int64_t max_int = std::numeric_limits<int>::max();
-  return GET_BLOCKS(static_cast<int>(std::min(max_int, N)));
+
+  // Round up division for positive number that cannot cause integer overflow
+  auto block_num = (N - 1) / CUDA_NUM_THREADS + 1;
+  AT_ASSERTM(block_num <= max_int, "Can't schedule too many blocks on CUDA device");
+
+  return static_cast<int>(block_num);
 }
 
 }}}  // namespace at::cuda::detail

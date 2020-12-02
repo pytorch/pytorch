@@ -64,11 +64,36 @@ void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float));
 #endif
 template <>
 void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half));
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(__HIP_PLATFORM_HCC__) || defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 template <>
 void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16));
 #endif
 
+#define CUDABLAS_BGEMM_ARGTYPES(Dtype)                                       \
+  char transa, char transb, int64_t m, int64_t n, int64_t k, Dtype alpha,   \
+      const Dtype *a, int64_t lda, int64_t stridea, \
+      const Dtype *b, int64_t ldb, int64_t strideb, \
+      Dtype beta, Dtype *c, int64_t ldc, int64_t stridec, int64_t num_batches
+
+template <typename Dtype>
+inline void bgemm(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
+  AT_ERROR("at::cuda::blas::bgemm: not implemented for ", typeid(Dtype).name());
+}
+
+template <>
+void bgemm<double>(CUDABLAS_BGEMM_ARGTYPES(double));
+template <>
+void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float));
+template <>
+void bgemm<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<double>));
+template <>
+void bgemm<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>));
+template <>
+void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half));
+#if defined(__HIP_PLATFORM_HCC__) || defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+template <>
+void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16));
+#endif
 /* LEVEL 2 BLAS FUNCTIONS */
 
 #define CUDABLAS_GEMV_ARGTYPES(Dtype)                                         \
@@ -92,22 +117,10 @@ void gemv<c10::complex<float>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<float>));
 #endif
 template <>
 void gemv<at::Half>(CUDABLAS_GEMV_ARGTYPES(at::Half));
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(__HIP_PLATFORM_HCC__) || defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 template <>
 void gemv<at::BFloat16>(CUDABLAS_GEMV_ARGTYPES(at::BFloat16));
 #endif
-
-template <typename Dtype>
-void ger(
-    int64_t m,
-    int64_t n,
-    Dtype alpha,
-    Dtype* x,
-    int64_t incx,
-    Dtype* y,
-    int64_t incy,
-    Dtype* a,
-    int64_t lda);
 
 /* LEVEL 1 BLAS FUNCTIONS */
 
@@ -140,6 +153,44 @@ template <>
 void vdot<c10::complex<float>>(CUDABLAS_DOT_ARGTYPES(c10::complex<float>));
 template <>
 void vdot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>));
+
+// This guards blocks use of getrfBatched and getriBatched on platforms other than cuda
+#ifdef CUDART_VERSION
+
+#define CUDABLAS_GETRF_ARGTYPES(Dtype)  \
+  int n, Dtype** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize
+
+template<class Dtype>
+void getrfBatched(CUDABLAS_GETRF_ARGTYPES(Dtype)) {
+  TORCH_CHECK(false, "at::cuda::blas::getrfBatched: not implemented for ", typeid(Dtype).name());
+}
+template<>
+void getrfBatched<float>(CUDABLAS_GETRF_ARGTYPES(float));
+template<>
+void getrfBatched<double>(CUDABLAS_GETRF_ARGTYPES(double));
+template<>
+void getrfBatched<c10::complex<double>>(CUDABLAS_GETRF_ARGTYPES(c10::complex<double>));
+template<>
+void getrfBatched<c10::complex<float>>(CUDABLAS_GETRF_ARGTYPES(c10::complex<float>));
+
+
+#define CUDABLAS_GETRI_ARGTYPES(Dtype)  \
+  int n, Dtype** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize, Dtype** dC_array
+
+template<class Dtype>
+void getriBatched(CUDABLAS_GETRI_ARGTYPES(Dtype)) {
+  TORCH_CHECK(false, "at::cuda::blas::getriBatched: not implemented for ", typeid(Dtype).name());
+}
+template<>
+void getriBatched<float>(CUDABLAS_GETRI_ARGTYPES(float));
+template<>
+void getriBatched<double>(CUDABLAS_GETRI_ARGTYPES(double));
+template<>
+void getriBatched<c10::complex<double>>(CUDABLAS_GETRI_ARGTYPES(c10::complex<double>));
+template<>
+void getriBatched<c10::complex<float>>(CUDABLAS_GETRI_ARGTYPES(c10::complex<float>));
+
+#endif // CUDART_VERSION
 
 } // namespace blas
 } // namespace cuda

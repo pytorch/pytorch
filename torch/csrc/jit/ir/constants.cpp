@@ -110,6 +110,10 @@ c10::optional<Value*> tryInsertConstant(
     ss << val.toDevice();
     n->s_(attr::value, ss.str());
     n->output()->setType(DeviceObjType::get());
+  } else if (val.isStream()) {
+    auto stream = val.toStream();
+    n->i_(attr::value, stream.pack());
+    n->output()->setType(StreamObjType::get());
   } else if (val.isNone()) {
     n->output()->setType(NoneType::get());
   } else if (val.isTuple()) {
@@ -120,10 +124,9 @@ c10::optional<Value*> tryInsertConstant(
       n->destroy();
       return c10::nullopt;
     };
-  } else if (val.isGenericDict() && insertableIValue(val)) {
-    n->ival_(attr::value, val);
-    n->output()->setType(val.type());
-  } else if (val.isEnum()) {
+  } else if (
+      (val.isGenericDict() && insertableIValue(val)) || (val.isEnum()) ||
+      (val.isObject() && !val.toObjectRef().type()->is_module())) {
     n->ival_(attr::value, val);
     n->output()->setType(val.type());
   } else {
@@ -179,11 +182,17 @@ c10::optional<IValue> toIValue(const Value* v) {
   } else if (type == DeviceObjType::get()) {
     auto d = c10::Device(node->s(attr::value));
     return d;
+  } else if (type == StreamObjType::get()) {
+    auto s = c10::Stream::unpack(node->i(attr::value));
+    return s;
   } else if (node->mustBeNone()) {
     return IValue();
   } else if (type->cast<EnumType>()) {
     const auto& enum_val = node->ival(attr::value);
     return enum_val;
+  } else if (type->cast<ClassType>() && !type->is_module()) {
+    const auto& class_val = node->ival(attr::value);
+    return class_val;
   } else {
     std::stringstream ss;
     ss << "constant literal not supported for: " << type->str();

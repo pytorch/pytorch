@@ -311,8 +311,14 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
       cols_w);
 
   // Allocate output Tensor and a buffer for QNNPACK to use
+  // The resulting matrix here is 2-D, let's view it with the original
+  // left hand dimensions of the input. Here are two examples:
+  // 1. If the input tensor is {M, K}, the output tensor is {M, N}.
+  // 2. If the input tensor is {b, M, K}, the output tensor is {b, M, N}.
+  std::vector<int64_t> out_sizes = input.sizes().vec();
+  out_sizes.back() = static_cast<long>(rows_w);
   at::Tensor output = at::_empty_affine_quantized(
-      {static_cast<long>(rows_input), static_cast<long>(rows_w)},
+      out_sizes,
       input.options(),
       output_scale,
       output_zero_point);
@@ -391,12 +397,12 @@ class QLinearInt8 final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("linear", TORCH_FN(QLinearInt8<false>::run));
-  m.impl("linear_relu", TORCH_FN(QLinearInt8<true>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::linear"), TORCH_FN(QLinearInt8<false>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_relu"), TORCH_FN(QLinearInt8<true>::run));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
-  m.impl("linear", TORCH_FN(QLinearInt8<false>::run));
+  m.impl(TORCH_SELECTIVE_NAME("_quantized::linear"), TORCH_FN(QLinearInt8<false>::run));
 }
 
 } // namespace

@@ -70,6 +70,7 @@ cc_library(
         ],
         exclude = [
             "gloo/cuda*.cc",
+            "gloo/common/win.cc",
             "gloo/rendezvous/redis_store.cc",
         ],
     ),
