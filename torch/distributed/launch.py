@@ -257,7 +257,7 @@ def main():
         else:
             # create the relative directory
             os.mkdir(os.path.join(os.getcwd(), args.logdir))
-    
+
     if args.dist_url:
         url_obj = urlparse(args.dist_url)
         if url_obj.scheme == "file":
