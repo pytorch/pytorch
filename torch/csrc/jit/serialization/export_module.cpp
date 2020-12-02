@@ -47,6 +47,7 @@ static IValue Tup(std::vector<IValue> ivalues) {
 static IValue Table(
     const std::vector<std::pair<std::string, IValue>>& entries) {
   std::vector<IValue> ivalue_entries;
+  ivalue_entries.reserve(entries.size());
   for (const auto& e : entries) {
     ivalue_entries.push_back(Tup({e.first, e.second}));
   }
@@ -142,7 +143,7 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
         Instruction new_instr{INTERFACE_CALL,
                               static_cast<int32_t>(method_name_idx),
                               static_cast<uint16_t>(node->inputs().size())};
-        instructions_copy[i] = std::move(new_instr);
+        instructions_copy[i] = new_instr;
       } else {
         TORCH_INTERNAL_ASSERT(
             false, "Unsupported node kind on CALL opcode for mobile");
@@ -302,12 +303,12 @@ void moduleMethodsTuple(
 }
 
 void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
-  GetExtraFilesHook() = hook;
+  GetExtraFilesHook() = std::move(hook);
 }
 
 void SetExportModuleMobileInfoConverter(
     ExportModuleMobileInfoConverter converter) {
-  GetMobileInfoConverter() = converter;
+  GetMobileInfoConverter() = std::move(converter);
 }
 
 class ScriptModuleSerializer {
@@ -504,7 +505,7 @@ class ScriptModuleSerializer {
     };
     if (!pp) {
       pp = &file_streams_.insert(
-          qualifier,
+          std::move(qualifier),
           PythonPrint(
               constant_table_,
               class_deps_,
