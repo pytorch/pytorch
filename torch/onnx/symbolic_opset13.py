@@ -2,10 +2,12 @@ from torch.onnx.symbolic_helper import _block_list_in_opset
 import torch
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
-from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
-from sys import maxsize
 
 block_listed_operators = ['embedding_bag']
+
+for block_listed_op in block_listed_operators:
+    vars()[block_listed_op] = _block_list_in_opset(block_listed_op)
+
 
 def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
     symbolic = torch.onnx.symbolic_opset9._reduce_op_symbolic(onnx_op, allow_multi_dim_support=allow_multi_dim_support)
@@ -69,8 +71,10 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
         if _outputs is None:
             return split_out
         # Convert to multiple slice nodes iff number of splits and number of outputs are statically known.
-        if sym_help._is_packed_list(split_size_or_sizes) and len(sym_help._unpack_list(split_size_or_sizes)) == _outputs:
-            split_sizes = [g.op("Unsqueeze", v, g.op("Constant", value_t=torch.tensor([0]))) for v in sym_help._unpack_list(split_size_or_sizes)]
+        if sym_help._is_packed_list(split_size_or_sizes) and \
+                len(sym_help._unpack_list(split_size_or_sizes)) == _outputs:
+            split_sizes = [g.op("Unsqueeze", v, g.op("Constant", value_t=torch.tensor([0])))
+                           for v in sym_help._unpack_list(split_size_or_sizes)]
             start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
             axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
             res = []
