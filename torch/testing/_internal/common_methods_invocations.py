@@ -246,16 +246,10 @@ class SpectralFuncInfo(OpInfo):
                  *,
                  ref=None,  # Reference implementation (probably in np.fft namespace)
                  dtypes=floating_and_complex_types(),
-                 dtypesIfCPU=None,
-                 dtypesIfCUDA=None,
-                 dtypesIfROCM=None,
                  ndimensional,
                  skips=None,
                  **kwargs):
         skips = skips if skips is not None else []
-        dtypesIfCPU = dtypesIfCPU if dtypesIfCPU is not None else dtypes
-        dtypesIfCUDA = dtypesIfCUDA if dtypesIfCUDA is not None else dtypes
-        dtypesIfROCM = dtypesIfROCM if dtypesIfROCM is not None else dtypes
 
         # gradgrad is quite slow
         if not TEST_WITH_SLOW:
@@ -269,9 +263,6 @@ class SpectralFuncInfo(OpInfo):
 
         super().__init__(name=name,
                          dtypes=dtypes,
-                         dtypesIfCPU=dtypesIfCPU,
-                         dtypesIfCUDA=dtypesIfCUDA,
-                         dtypesIfROCM=dtypesIfROCM,
                          skips=skips,
                          **kwargs)
         self.ref = ref if ref is not None else _getattr_qual(np, name)
