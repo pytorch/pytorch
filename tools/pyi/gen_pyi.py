@@ -7,8 +7,13 @@ import yaml
 import re
 import argparse
 
+from tools.codegen.model import *
+from tools.codegen.api.python import *
+from tools.codegen.gen import compute_method_of_yaml, with_native_function
+from typing import Sequence
+
 from ..autograd.utils import YamlLoader, CodeTemplate, write, group_declarations_by_op_name, is_tensor_method, is_torch_function
-from ..autograd.gen_python_functions import SKIP_PYTHON_BINDINGS, SKIP_PYTHON_BINDINGS_SIGNATURES
+from ..autograd.gen_python_functions import SKIP_PYTHON_BINDINGS, SKIP_PYTHON_BINDINGS_SIGNATURES, should_generate_py_binding, load_signatures, group_overloads, namedtuple_fieldnames
 from ..autograd.gen_autograd import load_aten_declarations
 
 """
@@ -35,46 +40,32 @@ There are a number of type hints which we've special-cased;
 read gen_pyi for the gory details.
 """
 
-# TODO: remove after migrating entire codegen to the new data model.
-def should_generate_python_binding(declaration):
-    name = declaration['name']
-    for pattern in SKIP_PYTHON_BINDINGS:
-        if re.match('^' + pattern + '$', name):
-            return False
+# TODO: consider waiting to group by base name until we actually need to (after computing type hint signatures, when adding @overload directives)
+def group_by_base_name(python_funcs: Sequence[PythonSignatureNativeFunctionPair]) -> Dict[str, Sequence[PythonSignatureGroup]]:
+    groups = group_overloads(python_funcs, sort=False)
+    d = collections.defaultdict(list)
+    for g in groups:
+        name = g.signature.name
+        d[name].append(g)
+    return d
 
-    simple_types = [arg['simple_type'] for arg in declaration['arguments']]
-    signature = '{}({})'.format(name, ', '.join(simple_types))
-    for pattern in SKIP_PYTHON_BINDINGS_SIGNATURES:
-        if pattern == signature:
-            return False
-
-    return True
-
-
-def get_py_variable_methods(declarations):
+def get_py_torch_functions(python_funcs: Sequence[PythonSignatureNativeFunctionPair], method: bool = False) -> Dict[str, Sequence[PythonSignatureGroup]]:
     """
     Get declarations (grouped by name) which should be generated
-    as methods on Tensor.
+    as either functions in the "torch" module or methods on Tensor.
     """
-    def should_bind(declaration):
-        return (should_generate_python_binding(declaration) and
-                not declaration.get('python_module') and
-                is_tensor_method(declaration))
+    def should_bind_function(python_func):
+        return (should_generate_py_binding(python_func.function) and
+                not python_func.function.python_module and
+                'namespace' in compute_method_of_yaml(python_func.function.variants))
 
-    return group_declarations_by_op_name([d for d in declarations if should_bind(d)])
+    def should_bind_method(python_func):
+        return (should_generate_py_binding(python_func.function) and
+                not python_func.function.python_module and
+                'Tensor' in compute_method_of_yaml(python_func.function.variants))
 
-
-def get_py_torch_functions(declarations):
-    """
-    Get declarations (grouped by name) which should be generated
-    as functions in the "torch" module.
-    """
-    def should_bind(declaration):
-        return (should_generate_python_binding(declaration) and
-                not declaration.get('python_module') and
-                is_torch_function(declaration))
-
-    return group_declarations_by_op_name([d for d in declarations if should_bind(d)])
+    should_bind = should_bind_method if method else should_bind_function
+    return group_by_base_name([f for f in python_funcs if should_bind(f)])
 
 
 # TODO: Consider defining some aliases for our Union[...] types, to make
@@ -144,90 +135,6 @@ blocklist = [
 ]
 
 
-def type_to_python(typename, size=None):
-    """type_to_python(typename: str, size: str) -> str
-
-    Transforms a Declarations.yaml type name into a Python type specification
-    as used for type hints.
-    """
-    typename = typename.replace(' ', '')  # normalize spaces, e.g., 'Generator *'
-
-    # Disambiguate explicitly sized int/tensor lists from implicitly
-    # sized ones.  These permit non-list inputs too.  (IntArrayRef[] and
-    # TensorList[] are not real types; this is just for convenience.)
-    if typename in {'IntArrayRef', 'TensorList'} and size is not None:
-        typename += '[]'
-
-    typename = {
-        'Device': 'Device',
-        'Generator': 'Generator',
-        'IntegerTensor': 'Tensor',
-        'Scalar': 'Number',
-        'ScalarType': '_dtype',
-        'Storage': 'Storage',
-        'BoolTensor': 'Tensor',
-        'IndexTensor': 'Tensor',
-        'Tensor': 'Tensor',
-        'MemoryFormat': 'memory_format',
-        'IntArrayRef': '_size',
-        'IntArrayRef[]': 'Union[_int, _size]',
-        'TensorList': 'Union[Tuple[Tensor, ...], List[Tensor]]',
-        'TensorList[]': 'Union[Tensor, Tuple[Tensor, ...], List[Tensor]]',
-        'bool': '_bool',
-        'double': '_float',
-        'int64_t': '_int',
-        'accreal': 'Number',
-        'real': 'Number',
-        'void*': '_int',    # data_ptr
-        'void': 'None',
-        'std::string': 'str',
-        'Dimname': 'Union[str, ellipsis, None]',
-        'DimnameList': 'Sequence[Union[str, ellipsis, None]]',
-        'QScheme': '_qscheme',
-        'ArrayRef<double>' : 'Sequence[float]',
-        'Stream': 'Stream',
-    }[typename]
-
-    return typename
-
-
-def arg_to_type_hint(arg):
-    """arg_to_type_hint(arg) -> str
-
-    This takes one argument in a Declarations and returns a string
-    representing this argument in a type hint signature.
-    """
-    name = arg['name']
-    if name == 'from':  # from is a Python keyword...
-        name += '_'
-    typename = type_to_python(arg['dynamic_type'], arg.get('size'))
-    if arg.get('is_nullable'):
-        typename = 'Optional[' + typename + ']'
-    if 'default' in arg:
-        default = arg['default']
-        if default == 'nullptr':
-            default = None
-        elif default == 'c10::nullopt':
-            default = None
-        elif isinstance(default, str) and default.startswith('{') and default.endswith('}'):
-            if arg['dynamic_type'] == 'Tensor' and default == '{}':
-                default = None
-            elif arg['dynamic_type'] == 'Generator' and default == '{}':
-                default = None
-            elif arg['dynamic_type'] == 'IntArrayRef':
-                default = '(' + default[1:-1] + ')'
-            else:
-                raise Exception("Unexpected default constructor argument of type {}".format(arg['dynamic_type']))
-        elif default == 'MemoryFormat::Contiguous':
-            default = 'contiguous_format'
-        elif default == 'QScheme::PER_TENSOR_AFFINE':
-            default = 'per_tensor_affine'
-        default = '={}'.format(default)
-    else:
-        default = ''
-    return name + ': ' + typename + default
-
-
 binary_ops = ('add', 'sub', 'mul', 'div', 'pow', 'lshift', 'rshift', 'mod', 'truediv',
               'matmul', 'floordiv',
               'radd', 'rsub', 'rmul', 'rtruediv', 'rfloordiv', 'rpow',          # reverse arithmetic
@@ -271,142 +178,61 @@ def sig_for_ops(opname):
     else:
         raise Exception("unknown op", opname)
 
-
-# Copied from 'gen_python_functions.py'
-# TODO: consolidate after migrating to the new codegen model in 'tools/codegen'.
-def namedtuple_fieldnames(declaration):
-    returns = declaration['returns']
-    if len(returns) <= 1 or all(['field_name' not in x for x in returns]):
-        return []
-    else:
-        def get_field_name(x):
-            # See Note [field_name versus name]
-            if 'field_name' not in x:
-                # When building on Windows, `PyStructSequence_UnnamedField` could not be
-                # resolved by the linker for some reason, which cause error in building:
-                #
-                # python_nn_functions.cpp.obj : error LNK2001: unresolved external symbol
-                # PyStructSequence_UnnamedField
-                #
-                # Thus, at this point in time, we do not support unnamed
-                # fields in namedtuple; you must either name all fields,
-                # or none of them.
-                raise ValueError("Unnamed field is not supported by codegen")
+def generate_named_tuples(funcs: Sequence[PythonSignatureGroup]):
+    namedtuples = {}
+    for sig_group in funcs:
+        named_tuple = sig_group.signature.returns.named_tuple()
+        if named_tuple:
+            tuple_name, tuple_def = named_tuple
+            if tuple_name in namedtuples:
+                assert namedtuples[tuple_name] == tuple_def
             else:
-                return x['field_name']
-        return [get_field_name(x) for x in returns]
+                namedtuples[tuple_name] = tuple_def
+    return namedtuples
 
+def generate_type_hints_deprecated(funcs: Sequence[PythonSignatureGroup], is_tensor=False) -> List[str]:
+    type_hints = []
+    for sig_group in funcs:
+        type_hint = sig_group.signature.signature_str(skip_outputs=True)
+        type_hints.append(type_hint)
+        if sig_group.outplace is not None:
+            type_hint_out = sig_group.signature.signature_str(skip_outputs=False)
+            type_hints.append(type_hint_out)
 
-def generate_type_hints(fname, decls, namedtuples, is_tensor=False):
-    """generate_type_hints(fname, decls, is_tensor=False)
+    return type_hints
+
+def generate_type_hints(fname: str, funcs: Sequence[PythonSignatureGroup], is_tensor=False) -> List[str]:
+    """generate_type_hints(fname, funcs, is_tensor=False)
 
     Generates type hints for the declarations pertaining to the function
-    :attr:`fname`. attr:`decls` are the declarations from the parsed
-    Declarations.yaml.
-    :attr:`namedtuples` is a dictionary for accumulating NamedTuple definitions.
+    :attr:`fname`. attr:`funcs` are the func from the parsed
+    native_functions.yaml.
     The :attr:`is_tensor` flag indicates whether we are parsing
     members of the Tensor class (true) or functions in the
     `torch` namespace (default, false).
-
-    This function currently encodes quite a bit about the semantics of
-    the translation C++ -> Python.
     """
+
     if fname in blocklist:
         return []
 
     type_hints = []
-    dnames = ([d['name'] for d in decls])
-    has_out = fname + '_out' in dnames
 
-    if has_out:
-        decls = [d for d in decls if d['name'] != fname + '_out']
-
-    for decl in decls:
-        render_kw_only_separator = True  # whether we add a '*' if we see a keyword only argument
-        python_args = []
-
-        has_tensor_options = 'TensorOptions' in (a['dynamic_type'] for a in decl['arguments'])
-
-        for a in decl['arguments']:
-            if a['dynamic_type'] != 'TensorOptions':
-                if a.get('kwarg_only', False) and render_kw_only_separator:
-                    python_args.append('*')
-                    render_kw_only_separator = False
-                try:
-                    python_args.append(arg_to_type_hint(a))
-                except Exception:
-                    print("Error while processing function {}".format(fname))
-                    raise
-
-        if 'self: Tensor' in python_args:
-            self_index = python_args.index('self: Tensor')
-            python_args.remove('self: Tensor')
-            if is_tensor:
-                python_args = ['self'] + python_args
-            else:
-                python_args.insert(self_index, 'input: Tensor')
-        else:
-            if is_tensor:
-                raise Exception("method without self is unexpected")
-
-        if has_out:
-            if render_kw_only_separator:
-                python_args.append('*')
-                render_kw_only_separator = False
-            python_args.append('out: Optional[Tensor]=None')
-
-        if has_tensor_options:
-            if render_kw_only_separator:
-                python_args.append('*')
-                render_kw_only_separator = False
-            python_args += ["dtype: _dtype=None",
-                            "layout: _layout=strided",
-                            "device: Union[_device, str, None]=None",
-                            "requires_grad:_bool=False"]
-
-        python_args_s = ', '.join(python_args)
-        python_returns = [type_to_python(r['dynamic_type']) for r in decl['returns']]
-        field_names = namedtuple_fieldnames(decl)
-
-        if field_names:
-            namedtuple_name = '_'.join(['namedtuple'] + field_names)
-            tuple_args = ['("{}", {})'.format(name, typ) for name, typ in zip(field_names, python_returns)]
-            namedtuple_def = 'NamedTuple("{}", [{}])'.format(namedtuple_name, ', '.join(tuple_args))
-            if namedtuple_name in namedtuples:
-                assert namedtuples[namedtuple_name] == namedtuple_def
-            else:
-                namedtuples[namedtuple_name] = namedtuple_def
-            python_returns_s = namedtuple_name
-        elif len(python_returns) > 1:
-            python_returns_s = 'Tuple[' + ', '.join(python_returns) + ']'
-        elif len(python_returns) == 1:
-            python_returns_s = python_returns[0]
-        else:
-            python_returns_s = 'None'
-
-        type_hint = "def {}({}) -> {}: ...".format(fname, python_args_s, python_returns_s)
-        numargs = len(decl['arguments'])
-        vararg_pos = int(is_tensor)
-        have_vararg_version = (numargs > vararg_pos and
-                               decl['arguments'][vararg_pos]['dynamic_type'] in {'IntArrayRef'} and
-                               (numargs == vararg_pos + 1 or python_args[vararg_pos + 1] == '*') and
-                               (not is_tensor or decl['arguments'][0]['name'] == 'self'))
-
+    any_out = any([g for g in funcs if g.outplace is not None])
+    for sig_group in funcs:
+        # TODO: remove HACK
+        # the pyi codegen currently adds an optional out param in cases where the current op does NOT have an out variant,
+        # but an overload of the op DOES have an out variant.
+        # TODO: After that, we should consider killing this method entirely and operating per PythonSignatureGroup
+        # rather than grouping their overloads together (since there isn't much else semantically meaningful about grouping overloads)
+        hacky_add_output = any_out and sig_group.outplace is None
+        # PythonSignatureGroups that have both a functional + out variant generate a signature, with an optional out argument
+        type_hint = sig_group.signature.signature_str(skip_outputs=sig_group.outplace is None, hacky_add_output=hacky_add_output)
         type_hints.append(type_hint)
 
-        if have_vararg_version:
-            # Two things come into play here: PyTorch has the "magic" that if the first and only positional argument
-            # is an IntArrayRef, it will be used as a vararg variant.
-            # The following outputs the vararg variant, the "pass a list variant" is output above.
-            # The other thing is that in Python, the varargs are annotated with the element type, not the list type.
-            typelist = decl['arguments'][vararg_pos]['dynamic_type']
-            vararg_type = '_int'
-            # replace first argument and eliminate '*' if present
-            python_args = ((['self'] if is_tensor else []) + ['*' + decl['arguments'][vararg_pos]['name'] +
-                                                              ': ' + vararg_type] + python_args[vararg_pos + 2:])
-            python_args_s = ', '.join(python_args)
-            type_hint = "def {}({}) -> {}: ...".format(fname, python_args_s, python_returns_s)
-            type_hints.append(type_hint)
+        # Some operators also additionally have a vararg variant of their signature
+        type_hint_vararg = sig_group.signature.signature_str(skip_outputs=sig_group.outplace is None, hacky_add_output=hacky_add_output, vararg=True)
+        if type_hint_vararg:
+            type_hints.append(type_hint_vararg)
 
     return type_hints
 
@@ -478,7 +304,7 @@ def gen_nn_functional(out):
 def gen_nn_pyi(out):
     gen_nn_functional(out)
 
-def gen_pyi(declarations_path, out):
+def gen_pyi(native_yaml_path, deprecated_yaml_path, out):
     """gen_pyi()
 
     This function generates a pyi file for torch.
@@ -490,9 +316,6 @@ def gen_pyi(declarations_path, out):
     # the other function generates are custom format for argument
     # checking.  If you are update this, consider if your change
     # also needs to update the other file.
-
-    # Load information from YAML
-    declarations = load_aten_declarations(declarations_path)
 
     # Dictionary for NamedTuple definitions
     namedtuples = {}
@@ -560,21 +383,14 @@ def gen_pyi(declarations_path, out):
             ' other: Union[Tensor, Number],'
             ' *, alpha: Optional[Number]=1, out: Optional[Tensor]=None) -> Tensor: ...'.format(binop))
 
-    function_declarations = get_py_torch_functions(declarations)
-    for name in sorted(function_declarations.keys()):
-        unsorted_function_hints[name] += generate_type_hints(name, function_declarations[name], namedtuples)
-
-    # Generate type signatures for deprecated functions
-
-    # TODO: Maybe we shouldn't generate type hints for deprecated
-    # functions :)  However, examples like those addcdiv rely on these.
-    with open('tools/autograd/deprecated.yaml', 'r') as f:
-        deprecated = yaml.load(f, Loader=YamlLoader)
-    for d in deprecated:
-        name, sig = re.match(r"^([^\(]+)\(([^\)]*)", d['name']).groups()
-        sig = ['*' if p.strip() == '*' else p.split() for p in sig.split(',')]
-        sig = ['*' if p == '*' else (p[1] + ': ' + type_to_python(p[0])) for p in sig]
-        unsorted_function_hints[name].append("def {}({}) -> Tensor: ...".format(name, ', '.join(sig)))
+    function_signatures = load_signatures(native_yaml_path, deprecated_yaml_path, method=False, pyi=True)
+    sig_groups = get_py_torch_functions(function_signatures)
+    for name in sorted(sig_groups.keys()):
+        native_groups = [g for g in sig_groups[name] if not g.signature.deprecated]
+        deprecated_groups = [g for g in sig_groups[name] if g.signature.deprecated]
+        unsorted_function_hints[name] += generate_type_hints(name, native_groups)
+        unsorted_function_hints[name] += generate_type_hints_deprecated(deprecated_groups)
+        namedtuples.update(generate_named_tuples(native_groups))
 
     function_hints = []
     for name, hints in sorted(unsorted_function_hints.items()):
@@ -591,20 +407,20 @@ def gen_pyi(declarations_path, out):
                  'def size(self, _int) -> _int: ...'],
         'stride': ['def stride(self) -> Tuple[_int]: ...',
                    'def stride(self, _int) -> _int: ...'],
-        'new_ones': ['def new_ones(self, size: {}, {}) -> Tensor: ...'.
-                     format(type_to_python('IntArrayRef'), FACTORY_PARAMS)],
+        'new_ones': ['def new_ones(self, size: _size, {}) -> Tensor: ...'.
+                     format(FACTORY_PARAMS)],
         'new_tensor': ["def new_tensor(self, data: Any, {}) -> Tensor: ...".format(FACTORY_PARAMS)],
         # new and __init__ have the same signatures differ only in return type
         # Adapted from legacy_tensor_ctor and legacy_tensor_new
         'new': ['def new(self, *args: Any, {}) ->Tensor: ...'.format(DEVICE_PARAM),
                 'def new(self, storage: Storage) -> Tensor: ...',
                 'def new(self, other: Tensor) -> Tensor: ...',
-                'def new(self, size: {}, *, {}) -> Tensor: ...'.format(type_to_python('IntArrayRef'), DEVICE_PARAM),
+                'def new(self, size: _size, *, {}) -> Tensor: ...'.format(DEVICE_PARAM),
                 ],
         '__init__': ['def __init__(self, *args: Any, {}) -> None: ...'.format(DEVICE_PARAM),
                      'def __init__(self, storage: Storage) -> None: ...',
                      'def __init__(self, other: Tensor) -> None: ...',
-                     'def __init__(self, size: {}, *, {}) -> None: ...'.format(type_to_python('IntArrayRef'), DEVICE_PARAM),
+                     'def __init__(self, size: _size, *, {}) -> None: ...'.format(DEVICE_PARAM),
                      ],
         'as_subclass': ["def as_subclass(self, cls: Tensor) -> Tensor: ..."],
         # clamp has no default values in the Declarations
@@ -679,10 +495,13 @@ def gen_pyi(declarations_path, out):
     for name in simple_conversions:
         unsorted_tensor_method_hints[name].append('def {}(self) -> Tensor: ...'.format(name))
 
-    tensor_method_declarations = get_py_variable_methods(declarations)
-    for name in sorted(tensor_method_declarations.keys()):
-        unsorted_tensor_method_hints[name] += \
-            generate_type_hints(name, tensor_method_declarations[name], namedtuples, is_tensor=True)
+    # pyi tensor methods don't currently include deprecated signatures for some reason
+    tensor_method_signatures = load_signatures(native_yaml_path, deprecated_yaml_path, method=True, skip_deprecated=True, pyi=True)
+    tensor_method_sig_groups = get_py_torch_functions(tensor_method_signatures, method=True)
+
+    for name in sorted(tensor_method_sig_groups.keys()):
+        unsorted_tensor_method_hints[name] += generate_type_hints(name, tensor_method_sig_groups[name], is_tensor=True)
+        namedtuples.update(generate_named_tuples(tensor_method_sig_groups[name]))
 
     for op in all_ops:
         name = '__{}__'.format(op)
@@ -770,11 +589,17 @@ def main():
     parser.add_argument('--declarations-path', metavar='DECL',
                         default='torch/share/ATen/Declarations.yaml',
                         help='path to Declarations.yaml')
+    parser.add_argument('--native-functions-path', metavar='NATIVE',
+                        default='aten/src/ATen/native/native_functions.yaml',
+                        help='path to native_functions.yaml')
+    parser.add_argument('--deprecated-functions-path', metavar='DEPRECATED',
+                        default='tools/autograd/deprecated.yaml',
+                        help='path to deprecated.yaml')
     parser.add_argument('--out', metavar='OUT',
                         default='.',
                         help='path to output directory')
     args = parser.parse_args()
-    gen_pyi(args.declarations_path, args.out)
+    gen_pyi(args.native_functions_path, args.deprecated_functions_path, args.out)
 
 
 if __name__ == '__main__':
