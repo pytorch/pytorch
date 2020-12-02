@@ -470,14 +470,12 @@ Tensor _inverse_helper_cpu(const Tensor& self) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "inverse_cpu", [&]{
     apply_inverse<scalar_t>(self_working_copy, infos_lu, infos_getri);
   });
-  std::vector<int64_t> infos_lu_(infos_lu.data_ptr<int>(), infos_lu.data_ptr<int>() + batchCount(self));
-  std::vector<int64_t> infos_getri_(infos_getri.data_ptr<int>(), infos_getri.data_ptr<int>() + batchCount(self));
   if (self.dim() > 2) {
-    batchCheckErrors(infos_lu_, "inverse_cpu");
-    batchCheckErrors(infos_getri_, "inverse_cpu");
+    batchCheckErrors(infos_lu, "inverse_cpu");
+    batchCheckErrors(infos_getri, "inverse_cpu");
   } else {
-    singleCheckErrors(infos_lu_[0], "inverse_cpu");
-    singleCheckErrors(infos_getri_[0], "inverse_cpu");
+    singleCheckErrors(infos_lu.item().toInt(), "inverse_cpu");
+    singleCheckErrors(infos_getri.item().toInt(), "inverse_cpu");
   }
   return self_working_copy;
 }
@@ -550,16 +548,12 @@ Tensor& linalg_inv_out(Tensor &result, const Tensor &input) {
   result = linalg_inv_out_info(result, infos_lu, infos_getri, input);
 
   // Now check LAPACK/MAGMA/cuSOLVER error codes
-  infos_lu = infos_lu.to(kCPU);
-  infos_getri = infos_getri.to(kCPU);
-  std::vector<int64_t> infos_lu_(infos_lu.data_ptr<int>(), infos_lu.data_ptr<int>() + batchCount(result));
-  std::vector<int64_t> infos_getri_(infos_getri.data_ptr<int>(), infos_getri.data_ptr<int>() + batchCount(result));
   if (result.dim() > 2) {
-    batchCheckErrors(infos_lu_, "linalg_inv_lu");
-    batchCheckErrors(infos_getri_, "linalg_inv_getri");
+    batchCheckErrors(infos_lu, "linalg_inv_lu");
+    batchCheckErrors(infos_getri, "linalg_inv_getri");
   } else {
-    singleCheckErrors(infos_lu_[0], "linalg_inv_lu");
-    singleCheckErrors(infos_getri_[0], "linalg_inv_getri");
+    singleCheckErrors(infos_lu.item().toInt(), "linalg_inv_lu");
+    singleCheckErrors(infos_getri.item().toInt(), "linalg_inv_getri");
   }
 
   return result;

@@ -1250,12 +1250,8 @@ Tensor _inverse_helper_cuda_legacy(const Tensor& self) {
       apply_batched_inverse<scalar_t>(
         self_working_copy, self_inv_working_copy, infos_lu, infos_getri);
     });
-    infos_lu = infos_lu.to(at::kCPU);
-    infos_getri = infos_getri.to(at::kCPU);
-    std::vector<int64_t> infos_lu_(infos_lu.data_ptr<int>(), infos_lu.data_ptr<int>() + batchCount(self));
-    std::vector<int64_t> infos_getri_(infos_getri.data_ptr<int>(), infos_getri.data_ptr<int>() + batchCount(self));
-    batchCheckErrors(infos_lu_, "inverse_cuda");
-    batchCheckErrors(infos_getri_, "inverse_cuda");
+    batchCheckErrors(infos_lu, "inverse_cuda");
+    batchCheckErrors(infos_getri, "inverse_cuda");
   } else {
     // magmaLu and magmaGetri requires infos tensor to live on CPU
     auto infos_lu = at::zeros({1}, self.options().dtype(kInt).device(kCPU));
