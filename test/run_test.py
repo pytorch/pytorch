@@ -22,6 +22,7 @@ from typing import Dict, Optional
 TESTS = [
     'test_autograd',
     'benchmark_utils/test_benchmark_utils',
+    'test_binary_ufuncs',
     'test_bundled_inputs',
     'test_complex',
     'test_cpp_api_parity',
@@ -63,20 +64,26 @@ TESTS = [
     'test_quantization',
     'test_spectral_ops',
     'test_serialization',
+    'test_shape_ops',
     'test_show_pickle',
+    'test_sort_and_select',
     'test_tensor_creation_ops',
+    'test_testing',
     'test_torch',
     'test_type_info',
     'test_type_hints',
     'test_unary_ufuncs',
     'test_utils',
+    'test_view_ops',
     'test_vmap',
     'test_namedtuple_return_api',
+    'test_numpy_interop',
     'test_jit_profiling',
     'test_jit_legacy',
     'test_jit_fuser_legacy',
     'test_tensorboard',
     'test_namedtensor',
+    'test_reductions',
     'test_type_promotion',
     'test_jit_disabled',
     'test_function_schema',
@@ -263,7 +270,7 @@ if dist.is_available():
             'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3',
             'TEST_REPORT_SOURCE_OVERRIDE': 'dist-nccl'
         }
-    if not TEST_WITH_ROCM and dist.is_gloo_available():
+    if dist.is_gloo_available():
         DISTRIBUTED_TESTS_CONFIG['gloo'] = {
             'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3',
             'TEST_REPORT_SOURCE_OVERRIDE': 'dist-gloo'

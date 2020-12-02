@@ -7,7 +7,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_methods_invocations import \
     (op_db)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, dtypes, onlyOnCPUAndCUDA, skipCUDAIfRocm)
+    (instantiate_device_type_tests, ops, dtypes, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
 from torch.autograd.gradcheck import gradcheck, gradgradcheck
 
 
@@ -21,7 +21,7 @@ class TestOpInfo(TestCase):
     #   throws a runtime error
     @skipCUDAIfRocm
     @onlyOnCPUAndCUDA
-    @ops(op_db, unsupported_dtypes_only=True)
+    @ops(op_db, dtypes=OpDTypes.unsupported)
     def test_unsupported_dtypes(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
         if len(samples) == 0:
@@ -37,7 +37,7 @@ class TestOpInfo(TestCase):
     #   does NOT throw a runtime error
     @skipCUDAIfRocm
     @onlyOnCPUAndCUDA
-    @ops(op_db)
+    @ops(op_db, dtypes=OpDTypes.supported)
     def test_supported_dtypes(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
         if len(samples) == 0:
@@ -88,20 +88,27 @@ class TestGradients(TestCase):
     def _gradgrad_test_helper(self, device, dtype, op, variant):
         return self._check_helper(device, dtype, op, variant, 'gradgradcheck')
 
+    def _skip_helper(self, op, dtype):
+        if not op.test_complex_grad and dtype.is_complex:
+            self.skipTest("Skipped! complex grad tests marked to skip.")
+
     # Tests that gradients are computed correctly
     @dtypes(torch.double, torch.cdouble)
     @ops(op_db)
     def test_fn_grad(self, device, dtype, op):
+        self._skip_helper(op, dtype)
         self._grad_test_helper(device, dtype, op, op.get_op())
 
     @dtypes(torch.double, torch.cdouble)
     @ops(op_db)
     def test_method_grad(self, device, dtype, op):
+        self._skip_helper(op, dtype)
         self._grad_test_helper(device, dtype, op, op.get_method())
 
     @dtypes(torch.double, torch.cdouble)
     @ops(op_db)
     def test_inplace_grad(self, device, dtype, op):
+        self._skip_helper(op, dtype)
         if not op.test_inplace_grad:
             self.skipTest("Skipped! Inplace gradcheck marked to skip.")
         self._grad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
@@ -110,16 +117,19 @@ class TestGradients(TestCase):
     @dtypes(torch.double, torch.cdouble)
     @ops(op_db)
     def test_fn_gradgrad(self, device, dtype, op):
+        self._skip_helper(op, dtype)
         self._gradgrad_test_helper(device, dtype, op, op.get_op())
 
     @dtypes(torch.double, torch.cdouble)
     @ops(op_db)
     def test_method_gradgrad(self, device, dtype, op):
+        self._skip_helper(op, dtype)
         self._gradgrad_test_helper(device, dtype, op, op.get_method())
 
     @dtypes(torch.double, torch.cdouble)
     @ops(op_db)
     def test_inplace_gradgrad(self, device, dtype, op):
+        self._skip_helper(op, dtype)
         if not op.test_inplace_grad:
             self.skipTest("Skipped! Inplace gradgradcheck marked to skip.")
         self._gradgrad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
