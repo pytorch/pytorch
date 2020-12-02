@@ -780,7 +780,7 @@ Tensor &all_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
               "all only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "all only supports strided layout, got: ", self.layout());
-  TORCH_CHECK(result.scalar_type() == ScalarType::Bool,	
+  TORCH_CHECK(result.scalar_type() == ScalarType::Bool,
               "all only supports bool tensor for result, got: ", result.scalar_type());
 
   dim = maybe_wrap_dim(dim, self.dim());
@@ -843,7 +843,7 @@ Tensor &any_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
               "any only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "any only supports strided layout, got: ", self.layout());
-  TORCH_CHECK(result.scalar_type() == ScalarType::Bool,	
+  TORCH_CHECK(result.scalar_type() == ScalarType::Bool,
               "any only supports bool tensor for result, got: ", result.scalar_type());
 
   dim = maybe_wrap_dim(dim, self.dim());
