@@ -73,7 +73,7 @@ void _fft_fill_with_conjugate_symmetry_slice(
   // We explicitly loop over one row, then use this lambda to iterate over
   // n-dimensions. This advances iter_index by one row, while updating in_ptr
   // and out_ptr to point to the new row of data.
-  auto advance_index = [&] __ubsan_ignore_undefined__ {
+  auto advance_index = [&] () __ubsan_ignore_undefined__ {
     for (size_t i = 1; i < iter_index.size(); ++i) {
       if (iter_index[i] + 1 < signal_half_sizes[i]) {
         ++iter_index[i];
