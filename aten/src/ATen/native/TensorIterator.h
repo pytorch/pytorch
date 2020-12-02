@@ -6,7 +6,6 @@
 #include <ATen/core/Range.h>
 #include <bitset>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/Parallel.h>
 #include <ATen/TensorMeta.h>
 
 // TensorIterator is a helper class for element-wise operations, such as
@@ -48,6 +47,15 @@
 // Note that the outputs are not considered when computing a common dtype.
 
 namespace at {
+
+namespace internal {
+// This parameter is heuristically chosen to determine the minimum number of
+// work that warrants parallelism. For example, when summing an array, it is
+// deemed inefficient to parallelise over arrays shorter than 32768. Further,
+// no parallel algorithm (such as parallel_reduce) should split work into
+// smaller than GRAIN_SIZE chunks.
+constexpr int64_t GRAIN_SIZE = 32768;
+} // namespace internal
 
 struct DimCounter {
   DimCounter(IntArrayRef shape, Range range);
