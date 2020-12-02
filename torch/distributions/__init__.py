@@ -91,6 +91,7 @@ from .half_cauchy import HalfCauchy
 from .half_normal import HalfNormal
 from .independent import Independent
 from .kl import kl_divergence, register_kl
+from .kumaraswamy import Kumaraswamy
 from .laplace import Laplace
 from .log_normal import LogNormal
 from .logistic_normal import LogisticNormal
@@ -132,6 +133,7 @@ __all__ = [
     'HalfCauchy',
     'HalfNormal',
     'Independent',
+    'Kumaraswamy',
     'Laplace',
     'LogNormal',
     'LogisticNormal',

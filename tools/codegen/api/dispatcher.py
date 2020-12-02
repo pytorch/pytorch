@@ -68,7 +68,7 @@ def name(func: FunctionSchema) -> str:
 
 def arguments(func: FunctionSchema) -> Tuple[DispatcherArgument, ...]:
     if local.use_c10_dispatcher().dispatcher_uses_new_style():
-        return tuple(map(argument, itertools.chain(func.out_arguments, func.arguments, func.kwarg_only_arguments)))
+        return tuple(map(argument, itertools.chain(func.arguments.out, func.arguments.positional, func.arguments.kwarg_only)))
     else:
         return tuple(
             DispatcherArgument(type=la.type, name=la.name, argument=la.argument)

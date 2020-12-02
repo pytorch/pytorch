@@ -86,6 +86,22 @@ TypePtr ScriptTypeParser::subscriptToType(
 
 c10::optional<std::pair<TypePtr, int32_t>> ScriptTypeParser::parseBroadcastList(
     const Expr& expr) const {
+  // Alias torch.nn._common_types._size_?_t to BroadcastingList?[int]
+  if (expr.kind() == TK_VAR) {
+    auto var = Var(expr);
+    auto& name = var.name().name();
+    constexpr auto _size_prefix = "_size_";
+    constexpr auto _size_suffix = "_t";
+    constexpr auto _size_n_len = 9; // strlen("_size_X_t")
+    constexpr auto _size_prefix_len = 6; // strlen("_size_");
+    if (name.find(_size_prefix) == 0 && name.length() == _size_n_len &&
+        name.find(_size_suffix) == _size_prefix_len + 1 &&
+        ::isdigit(name[_size_prefix_len])) {
+      int n = name[_size_prefix_len] - '0';
+      return std::pair<TypePtr, int32_t>(ListType::create(IntType::get()), n);
+    }
+  }
+
   if (expr.kind() != TK_SUBSCRIPT)
     return c10::nullopt;
   auto subscript = Subscript(expr);

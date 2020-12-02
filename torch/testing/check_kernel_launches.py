@@ -5,7 +5,7 @@ import sys
 
 # Regular expression identifies a kernel launch indicator by
 # finding something approximating the pattern ">>>(arguments);"
-# It then requires that `TORCH_CUDA_KERNEL_LAUNCH_CHECK` be
+# It then requires that `C10_CUDA_KERNEL_LAUNCH_CHECK` be
 # the next command.
 # It allows a single backslash `\` between the end of the launch
 # command and the beginning of the kernel check. This handles
@@ -26,7 +26,7 @@ kernel_launch_regex = re.compile(r"""
         \\?                                  # 0 or 1 backslashes (for launches in preprocessor macros)
         (?:[0-9]+: )?                        # Detects and ignores a line numbering, if present
         \s*                                  # Maybe some whitespace (includes newlines)
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK\(\);  # Kernel launch guard!
+        C10_CUDA_KERNEL_LAUNCH_CHECK\(\);  # Kernel launch guard!
     )             # End negative lookahead
 """, flags=re.MULTILINE | re.VERBOSE)
 
@@ -53,7 +53,7 @@ def check_code_for_cuda_kernel_launches(code, filename=None):
 
     results = kernel_launch_regex.findall(code)               # Search for bad launches
     for r in results:
-        print(f"Missing TORCH_CUDA_KERNEL_LAUNCH_CHECK in '{filename}'. Context:\n{r}", file=sys.stderr)
+        print(f"Missing C10_CUDA_KERNEL_LAUNCH_CHECK in '{filename}'. Context:\n{r}", file=sys.stderr)
     return len(results)
 
 
