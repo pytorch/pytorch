@@ -240,7 +240,7 @@ def fast_growing_function_wrapper(fn):
     def is_integral(dtype):
         return dtype in [np.uint8, np.int8, np.int16, np.int32, np.int64]
 
-    np_dtype = torch_to_numpy_dtype_dict[torch.float32]
+    np_dtype = torch_to_numpy_dtype_dict[torch.get_default_dtype()]
 
     def wrapped_fn(x):
         if is_integral(x.dtype):
