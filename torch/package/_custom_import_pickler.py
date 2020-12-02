@@ -1,5 +1,6 @@
 from pickle import Pickler, _Pickler, _getattribute, whichmodule, _extension_registry, _compat_pickle  # type: ignore
-from pickle import GLOBAL, STACK_GLOBAL, EXT1, EXT2, EXT4, PicklingError, FunctionType
+from pickle import GLOBAL, STACK_GLOBAL, EXT1, EXT2, EXT4, PicklingError
+from types import FunctionType
 from struct import pack
 import importlib
 
