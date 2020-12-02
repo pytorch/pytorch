@@ -71,6 +71,11 @@ class _Column(object):
             f" (! {spread * 100:.0f}%)" if self._highlight_warnings and spread is not None else "")
 
 
+def optional_min(seq):
+    l = list(seq)
+    return None if len(l) == 0 else min(l)
+
+
 class _Row(object):
     def __init__(self, results, row_group, render_env, env_str_len,
                  row_name_str_len, time_scale, colorize, num_threads=None):
@@ -130,14 +135,14 @@ class _Row(object):
             best_values = [row_min for _ in column_strings]
         elif self._colorize == Colorize.COLUMNWISE:
             best_values = [
-                min(r.median for r in column.get_results_for(self._row_group) if r is not None)
+                optional_min(r.median for r in column.get_results_for(self._row_group) if r is not None)
                 for column in (self._columns or ())
             ]
 
         row_contents = [column_strings[0].ljust(col_widths[0])]
         for col_str, width, result, best_value in zip(column_strings[1:], col_widths[1:], self._results, best_values):
             col_str = col_str.center(width)
-            if self._colorize != Colorize.NONE and result is not None:
+            if self._colorize != Colorize.NONE and result is not None and best_value is not None:
                 col_str = self.color_segment(col_str, result.median, best_value)
             row_contents.append(col_str)
         return row_contents
