@@ -1288,7 +1288,6 @@ class TestTEFuser(JitTestCase):
             return lambda x, y: fn(x, y)
 
         dtypes = [
-            # FIXME: Fails in IR Eval: torch.int8 and_ cpu
             torch.int8,
             torch.uint8,
             torch.int16,
@@ -1316,14 +1315,16 @@ class TestTEFuser(JitTestCase):
             torch.ge,
             torch.gt,
             torch.lt,
-
-            # FIXME: fails on CPU backend with int8
-            # torch.fmod,
-            # torch.remainder,
+            torch.fmod,
+            torch.remainder,
 
             # FIXME: segfaults on CPU backend
             # operator.__rshift__,
             # operator.__lshift__,
+        ]
+        fp_only = [
+            torch.fmod,
+            torch.remainder,
         ]
         devices = self.devices
         for dtype, op, device in product(dtypes, binary_ops, devices):
@@ -1340,8 +1341,10 @@ class TestTEFuser(JitTestCase):
             try:
                 t = torch.jit.trace(fn, (x, y))
                 self.assertEqual(ref, t(x, y))
-                self.assertAllFused(t.graph_for(x, y))
+                if op not in fp_only or dtype.is_floating_point:
+                    self.assertAllFused(t.graph_for(x, y))
             except Exception as e:
+                raise e
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), op.__name__, device])
                 )
