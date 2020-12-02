@@ -91,11 +91,29 @@ void quick_select_template(
   } while (true);
 }
 
+void quantile_ranks_for_interpolation(Tensor& ranks, const std::string interpolation) {
+  if (interpolation == "linear") {
+    return;
+  } else if (interpolation == "lower") {
+    ranks.floor_();
+  } else if (interpolation == "higher") {
+    ranks.ceil_();
+  } else if (interpolation == "midpoint") {
+    ranks = at::add(ranks.floor(), ranks.ceil()).mul(0.5);
+  } else if (interpolation == "nearest") {
+    ranks.round_();
+  } else {
+    TORCH_CHECK(false, "quantile() interpolation should only be 'linear', 'lower' 'higher', "
+                       "'midpoint', or 'nearest'");
+  };
+}
+
 void quantile_impl(
     Tensor& out,
     const Tensor& self,
     const Tensor& q,
     optional<int64_t> _dim,
+    const std::string interpolation,
     bool keepdim,
     bool ignore_nan) {
   int64_t dim = at::maybe_wrap_dim(_dim.value_or(0), self.dim(), true);
@@ -186,6 +204,10 @@ void quantile_impl(
         at::broadcast_tensors({q * last_index, sorted.isnan().any(-1, true)});
     ranks = at::masked_fill(tl[0], tl[1], last_index);
   }
+
+  // adjust ranks based on the interpolation mode
+  quantile_ranks_for_interpolation(ranks, interpolation);
+
   Tensor ranks_below = ranks.toType(kLong);
   Tensor weights = ranks - ranks_below;
   Tensor ranks_above = ranks.ceil_().toType(kLong);
@@ -413,8 +435,9 @@ Tensor& quantile_out(
     const Tensor& self,
     const Tensor& q,
     optional<int64_t> _dim,
+    const std::string interpolation,
     bool keepdim) {
-  quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/false);
+  quantile_impl(out, self, q, std::move(_dim), interpolation, keepdim, /*ignore_nan=*/false);
   return out;
 }
 
@@ -423,6 +446,7 @@ Tensor& quantile_out(
     const Tensor& self,
     double q,
     optional<int64_t> _dim,
+    const std::string interpolation,
     bool keepdim) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
@@ -431,6 +455,7 @@ Tensor& quantile_out(
       self,
       at::scalar_tensor(q, self.options()),
       std::move(_dim),
+      interpolation,
       keepdim);
 }
 
@@ -438,9 +463,10 @@ Tensor quantile(
     const Tensor& self,
     const Tensor& q,
     optional<int64_t> _dim,
+    const std::string interpolation,
     bool keepdim) {
   Tensor out = at::empty({0}, self.options());
-  quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/false);
+  quantile_impl(out, self, q, std::move(_dim), interpolation, keepdim, /*ignore_nan=*/false);
   return out;
 }
 
@@ -448,11 +474,12 @@ Tensor quantile(
     const Tensor& self,
     double q,
     optional<int64_t> _dim,
+    const std::string interpolation,
     bool keepdim) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::quantile(
-      self, at::scalar_tensor(q, self.options()), std::move(_dim), keepdim);
+      self, at::scalar_tensor(q, self.options()), std::move(_dim), interpolation, keepdim);
 }
 
 Tensor& nanquantile_out(
@@ -460,8 +487,9 @@ Tensor& nanquantile_out(
     const Tensor& self,
     const Tensor& q,
     optional<int64_t> _dim,
+    const std::string interpolation,
     bool keepdim) {
-  quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/true);
+  quantile_impl(out, self, q, std::move(_dim), interpolation, keepdim, /*ignore_nan=*/true);
   return out;
 }
 
@@ -470,6 +498,7 @@ Tensor& nanquantile_out(
     const Tensor& self,
     double q,
     optional<int64_t> _dim,
+    const std::string interpolation,
     bool keepdim) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
@@ -478,6 +507,7 @@ Tensor& nanquantile_out(
       self,
       at::scalar_tensor(q, self.options()),
       std::move(_dim),
+      interpolation,
       keepdim);
 }
 
@@ -485,9 +515,10 @@ Tensor nanquantile(
     const Tensor& self,
     const Tensor& q,
     optional<int64_t> _dim,
+    const std::string interpolation,
     bool keepdim) {
   Tensor out = at::empty({0}, self.options());
-  quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/true);
+  quantile_impl(out, self, q, std::move(_dim), interpolation, keepdim, /*ignore_nan=*/true);
   return out;
 }
 
@@ -495,11 +526,12 @@ Tensor nanquantile(
     const Tensor& self,
     double q,
     optional<int64_t> _dim,
+    const std::string interpolation,
     bool keepdim) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::nanquantile(
-      self, at::scalar_tensor(q, self.options()), std::move(_dim), keepdim);
+      self, at::scalar_tensor(q, self.options()), std::move(_dim), interpolation, keepdim);
 }
 
 std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(

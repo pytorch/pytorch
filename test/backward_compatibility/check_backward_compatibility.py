@@ -183,6 +183,8 @@ allow_list = [
     ("__caffe2::BBoxTransform", datetime.date(2020, 11, 30)),
     ("__caffe2::GenerateProposals", datetime.date(2020, 11, 30)),
     ("__caffe2::RoIAlignRotated", datetime.date(2020, 11, 30)),
+    ("aten::quantile", datetime.date(2021, 1, 31)),
+    ("aten::nanquantile", datetime.date(2021, 1, 31)),
 ]
 
 def allow_listed(schema, allow_list):
