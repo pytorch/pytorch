@@ -12,10 +12,21 @@ class Distribution(object):
 
     has_rsample = False
     has_enumerate_support = False
-    _validate_args = False
+    _validate_args = __debug__
 
     @staticmethod
     def set_default_validate_args(value):
+        """
+        Sets whether validation is enabled or disabled.
+
+        The default behavior mimics Python's ``assert`` statement: validation
+        is on by default, but is disabled if Python is run in optimized mode
+        (via ``python -O``). Validation may be expensive, so you may want to
+        disable it once a model is working.
+
+        Args:
+            value (bool): Whether to enable validation.
+        """
         if value not in [True, False]:
             raise ValueError
         Distribution._validate_args = value
