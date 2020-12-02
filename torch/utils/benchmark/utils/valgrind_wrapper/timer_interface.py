@@ -11,13 +11,13 @@ import subprocess
 import sys
 import tempfile
 import textwrap
-from types import ModuleType
 from typing import (
     cast, Any, Callable, DefaultDict, Dict, Generator, List, NamedTuple,
     Optional, Tuple, Union, TYPE_CHECKING)
 
 import torch
-from torch.utils.benchmark.utils import common
+from torch.utils.benchmark.utils import common, cpp_jit
+from torch.utils.benchmark.utils._stubs import CallgrindModuleType
 
 
 __all__ = ["FunctionCount", "FunctionCounts", "CallgrindStats", "CopyIfCallgrind"]
@@ -444,17 +444,14 @@ class GlobalsBridge:
 
 class _ValgrindWrapper(object):
     def __init__(self) -> None:
-        self._bindings_module: Optional[ModuleType] = None
+        self._bindings_module: Optional[CallgrindModuleType] = None
         if hasattr(torch._C, "_valgrind_supported_platform"):
             self._supported_platform: bool = torch._C._valgrind_supported_platform()
 
         else:
             print("Callgrind bindings are not present in `torch._C`. JIT-ing bindings.")
-            # This import will JIT the Callgrind control bindings, so don't
-            # invoke unless we know we'll need it.
-            from torch.utils.benchmark.utils.valgrind_wrapper.compat_bindings import bindings
-            self._bindings_module = bindings
-            self._supported_platform = bindings._valgrind_supported_platform()
+            self._bindings_module = cpp_jit.get_compat_bindings()
+            self._supported_platform = self._bindings_module._valgrind_supported_platform()
 
         self._commands_available: Dict[str, bool] = {}
         if self._supported_platform:
@@ -643,7 +640,7 @@ class _ValgrindWrapper(object):
         number: int,
         error_log: str,
         stat_log: str,
-        bindings: Optional[ModuleType],
+        bindings: Optional[CallgrindModuleType],
     ) -> str:
         # The naive template looks something like:
         #   "for _ in range({number}): {stmt}"
