@@ -7,7 +7,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_methods_invocations import \
     (op_db)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, dtypes, onlyOnCPUAndCUDA, skipCUDAIfRocm)
+    (instantiate_device_type_tests, ops, dtypes, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
 from torch.autograd.gradcheck import gradcheck, gradgradcheck
 
 
@@ -21,7 +21,7 @@ class TestOpInfo(TestCase):
     #   throws a runtime error
     @skipCUDAIfRocm
     @onlyOnCPUAndCUDA
-    @ops(op_db, unsupported_dtypes_only=True)
+    @ops(op_db, dtypes=OpDTypes.unsupported)
     def test_unsupported_dtypes(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
         if len(samples) == 0:
@@ -37,7 +37,7 @@ class TestOpInfo(TestCase):
     #   does NOT throw a runtime error
     @skipCUDAIfRocm
     @onlyOnCPUAndCUDA
-    @ops(op_db)
+    @ops(op_db, dtypes=OpDTypes.supported)
     def test_supported_dtypes(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
         if len(samples) == 0:

@@ -1251,6 +1251,7 @@ class TestTEFuser(JitTestCase):
             torch.tanh,
             torch.sqrt,
             torch.rsqrt,
+            # FIXME: Fails in IR Eval: torch.int8 abs cpu (1,)
             torch.abs,
             torch.ceil,
             torch.floor,
@@ -1287,6 +1288,7 @@ class TestTEFuser(JitTestCase):
             return lambda x, y: fn(x, y)
 
         dtypes = [
+            # FIXME: Fails in IR Eval: torch.int8 and_ cpu
             torch.int8,
             torch.uint8,
             torch.int16,
@@ -1309,13 +1311,11 @@ class TestTEFuser(JitTestCase):
             lambda x, y: torch.lerp(x, y, 0.5),
             torch.atan2,
             torch.div,
-
-            # FIXME: comparison ops yield different results when fused
-            # torch.eq,
-            # torch.ne,
-            # torch.ge,
-            # torch.gt,
-            # torch.lt,
+            torch.eq,
+            torch.ne,
+            torch.ge,
+            torch.gt,
+            torch.lt,
 
             # FIXME: fails on CPU backend with int8
             # torch.fmod,
@@ -1356,6 +1356,7 @@ class TestTEFuser(JitTestCase):
             torch.uint8,
             torch.int16,
             torch.int32,
+            # FIXME: Fails in IR Eval: torch.int64 and_ cpu
             torch.int64,
             torch.float16,
             torch.float32,
@@ -1414,8 +1415,7 @@ class TestTEFuser(JitTestCase):
             torch.int16,
             torch.int32,
             torch.int64,
-            # FIXME: breaks in IR eval
-            # torch.float16,
+            torch.float16,
             torch.float32,
             torch.float64,
             torch.bool

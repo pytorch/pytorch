@@ -239,6 +239,10 @@ class Linear final : public Resource::Pool::Policy {
       VmaAllocationCreateInfo& allocation_create_info) override;
 
  private:
+  struct Configuration final {
+    static constexpr uint32_t kReserve = 16u;
+  };
+
   struct Entry final {
     class Deleter final {
      public:
@@ -253,7 +257,7 @@ class Linear final : public Resource::Pool::Policy {
     Handle<VmaPool, Deleter> handle;
   };
 
-  c10::SmallVector<Entry, 4u> pools_;
+  std::vector<Entry> pools_;
 
   struct {
     VkDeviceSize size;
@@ -279,6 +283,7 @@ Linear::Linear(
       min_block_count,
       max_block_count,
     } {
+  pools_.reserve(Configuration::kReserve);
 }
 
 void Linear::enact(
@@ -443,16 +448,16 @@ Resource::Buffer Resource::Pool::buffer(
       buffer,
       "Invalid Vulkan buffer!");
 
+  VkMemoryRequirements memory_requirements{};
+  vkGetBufferMemoryRequirements(
+      device_,
+      buffer,
+      &memory_requirements);
+
   VmaAllocationCreateInfo allocation_create_info =
       create_allocation_create_info(descriptor.usage.memory);
 
   if (memory_.policy) {
-    VkMemoryRequirements memory_requirements{};
-    vkGetBufferMemoryRequirements(
-        device_,
-        buffer,
-        &memory_requirements);
-
     memory_.policy->enact(
         allocator_.get(),
         memory_requirements,
@@ -460,9 +465,9 @@ Resource::Buffer Resource::Pool::buffer(
   }
 
   VmaAllocation allocation{};
-  VK_CHECK(vmaAllocateMemoryForBuffer(
+  VK_CHECK(vmaAllocateMemory(
       allocator_.get(),
-      buffer,
+      &memory_requirements,
       &allocation_create_info,
       &allocation,
       nullptr));
@@ -529,16 +534,16 @@ Resource::Image Resource::Pool::image(
       image,
       "Invalid Vulkan image!");
 
+  VkMemoryRequirements memory_requirements{};
+  vkGetImageMemoryRequirements(
+      device_,
+      image,
+      &memory_requirements);
+
   VmaAllocationCreateInfo allocation_create_info =
       create_allocation_create_info(descriptor.usage.memory);
 
   if (memory_.policy) {
-    VkMemoryRequirements memory_requirements{};
-    vkGetImageMemoryRequirements(
-        device_,
-        image,
-        &memory_requirements);
-
     memory_.policy->enact(
         allocator_.get(),
         memory_requirements,
@@ -546,9 +551,9 @@ Resource::Image Resource::Pool::image(
   }
 
   VmaAllocation allocation{};
-  VK_CHECK(vmaAllocateMemoryForImage(
+  VK_CHECK(vmaAllocateMemory(
       allocator_.get(),
-      image,
+      &memory_requirements,
       &allocation_create_info,
       &allocation,
       nullptr));

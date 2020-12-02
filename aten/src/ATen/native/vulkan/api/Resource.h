@@ -268,8 +268,8 @@ struct Resource final {
 
       static std::unique_ptr<Policy> linear(
           VkDeviceSize block_size = VMA_DEFAULT_LARGE_HEAP_BLOCK_SIZE,
-          uint32_t min_block_count = 0u /* automatic */,
-          uint32_t max_block_count = 0u /* automatic */);
+          uint32_t min_block_count = 1u,
+          uint32_t max_block_count = UINT32_MAX);
 
       virtual void enact(
           VmaAllocator allocator,
