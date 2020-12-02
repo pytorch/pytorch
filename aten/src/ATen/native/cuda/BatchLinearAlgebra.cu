@@ -1025,6 +1025,23 @@ void magmaLuSolve<float>(
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
+template<>
+void magmaLuSolve<c10::complex<double>>(
+    magma_int_t n, magma_int_t nrhs, c10::complex<double>* dA, magma_int_t ldda, magma_int_t* ipiv,
+    c10::complex<double>* dB, magma_int_t lddb, magma_int_t* info) {
+  MagmaStreamSyncGuard guard;
+  magma_zgetrs_gpu(MagmaNoTrans, n, nrhs, reinterpret_cast<magmaDoubleComplex*>(dA), ldda, ipiv, reinterpret_cast<magmaDoubleComplex*>(dB), lddb, info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaLuSolve<c10::complex<float>>(
+    magma_int_t n, magma_int_t nrhs, c10::complex<float>* dA, magma_int_t ldda, magma_int_t* ipiv,
+    c10::complex<float>* dB, magma_int_t lddb, magma_int_t* info) {
+  MagmaStreamSyncGuard guard;
+  magma_cgetrs_gpu(MagmaNoTrans, n, nrhs, reinterpret_cast<magmaFloatComplex*>(dA), ldda, ipiv, reinterpret_cast<magmaFloatComplex*>(dB), lddb, info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
 
 template<>
 void magmaLuSolveBatched<double>(
@@ -1041,6 +1058,24 @@ void magmaLuSolveBatched<float>(
     float** dB_array, magma_int_t lddb, magma_int_t& info,
     magma_int_t batchsize, const MAGMAQueue& magma_queue) {
  info = magma_sgetrs_batched(MagmaNoTrans, n, nrhs, dA_array, ldda, dipiv_array, dB_array, lddb, batchsize, magma_queue.get_queue());
+ AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaLuSolveBatched<c10::complex<double>>(
+    magma_int_t n, magma_int_t nrhs, c10::complex<double>** dA_array, magma_int_t ldda, magma_int_t** dipiv_array,
+    c10::complex<double>** dB_array, magma_int_t lddb, magma_int_t& info,
+    magma_int_t batchsize, const MAGMAQueue& magma_queue) {
+  info = magma_zgetrs_batched(MagmaNoTrans, n, nrhs, reinterpret_cast<magmaDoubleComplex**>(dA_array), ldda, dipiv_array, reinterpret_cast<magmaDoubleComplex**>(dB_array), lddb, batchsize, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaLuSolveBatched<c10::complex<float>>(
+    magma_int_t n, magma_int_t nrhs, c10::complex<float>** dA_array, magma_int_t ldda, magma_int_t** dipiv_array,
+    c10::complex<float>** dB_array, magma_int_t lddb, magma_int_t& info,
+    magma_int_t batchsize, const MAGMAQueue& magma_queue) {
+ info = magma_cgetrs_batched(MagmaNoTrans, n, nrhs, reinterpret_cast<magmaFloatComplex**>(dA_array), ldda, dipiv_array, reinterpret_cast<magmaFloatComplex**>(dB_array), lddb, batchsize, magma_queue.get_queue());
  AT_CUDA_CHECK(cudaGetLastError());
 }
 #endif
@@ -1889,6 +1924,9 @@ static std::tuple<Tensor,Tensor> eig_cuda_helper(const Tensor& self, int64_t n, 
 
 std::tuple<Tensor&, Tensor&> eig_cuda_out(Tensor& e, Tensor& v, const Tensor& self, bool eigenvectors) {
   TORCH_CHECK(self.dim() == 2, "Expected a two-dimensional input but got ", self.dim(), " dimensions");
+  TORCH_CHECK(e.dtype() == self.dtype(), "Expected 'e' to have dtype ", self.dtype(), " but got ", e.dtype());
+  if (eigenvectors)
+      TORCH_CHECK(v.dtype() == self.dtype(), "Expected 'v' to have dtype ", self.dtype(), " but got ", v.dtype());
   squareCheckInputs(self);
   int64_t n = self.size(-1);
 
@@ -1927,8 +1965,21 @@ std::tuple<Tensor,Tensor> eig_cuda(const Tensor& self, bool eigenvectors) {
   return std::tuple<Tensor, Tensor>(e, v);
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ syevd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-
+// This function computes eigenvalues 'w' and eigenvectors 'v' of the tensor 'self'
+// compute_eigenvectors controls whether eigenvectors should be computed
+// uplo controls the portion of input matrix to consider in computations, allowed values are "u", "U", "l", "L"
+// '_symeig_helper_cuda' prepares correct input for 'apply_symeig' and checks for possible errors using 'infos'
+// See also CPU implementation in aten/src/ATen/native/BatchLinearAlgebra.cpp
+std::tuple<Tensor, Tensor> _syevd_helper_cuda(const Tensor& self, bool compute_eigenvectors, std::string uplo_str) {
+  // NumPy allows lowercase input for UPLO argument
+  // It is assumed that uplo_str is either "U" or "L"
+  char uplo = std::toupper(uplo_str[0]);
+  bool upper = uplo == 'U' ? true : false;
+  return _symeig_helper_cuda(self, compute_eigenvectors, upper);
+}
+    
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ svd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<typename scalar_t>
@@ -2133,7 +2184,7 @@ Tensor _lu_solve_helper_cuda(const Tensor& self, const Tensor& LU_data, const Te
   if (self.numel() == 0 || LU_data.numel() == 0) {
     return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lu_solve_cuda", [&]{
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "lu_solve_cuda", [&]{
     apply_lu_solve<scalar_t>(self_working_copy, LU_data_working_copy, LU_pivots_working_copy, info);
   });
   TORCH_CHECK(info == 0, "MAGMA lu_solve : invalid argument: ", -info);
