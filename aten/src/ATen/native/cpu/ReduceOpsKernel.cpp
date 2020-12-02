@@ -248,8 +248,7 @@ static void and_kernel_impl(TensorIterator& iter) {
         // true/false.
         Vec256<bool> c = Vec256<bool>();
 
-        using size_t = decltype(c.size());
-        for (size_t i = 0; i != Vec256<bool>::size(); i++) {
+        for (decltype(c.size()) i = 0; i != Vec256<bool>::size(); i++) {
           c[i] = a[i] && b[i];
         }
         return c;
@@ -264,8 +263,7 @@ static void or_kernel_impl(TensorIterator& iter) {
       [=](Vec256<bool> a, Vec256<bool> b) {
         Vec256<bool> c = Vec256<bool>();
 
-        using size_t = decltype(c.size());
-        for (size_t i = 0; i != Vec256<bool>::size(); i++) {
+        for (decltype(c.size()) i = 0; i != Vec256<bool>::size(); i++) {
           c[i] = a[i] || b[i];
         }
         return c;
