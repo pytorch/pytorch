@@ -155,6 +155,11 @@ def is_submodule_of_fake_quant(name, module, named_modules):
     parent_name, _ = _parent_name(name)
     return is_activation_post_process(named_modules[parent_name])
 
+def is_observed_standalone_module_node(node, modules):
+    return node.op == 'call_module' and \
+        is_observed_standalone_module(modules[node.target])
+
+
 def get_flattened_qconfig_dict(qconfig_dict):
     """ flatten the global, object_type and module_name qconfig
     to the same qconfig_dict so that it can be used by
@@ -457,8 +462,7 @@ class Quantizer:
         def insert_observer_for_output_of_the_node(
                 node,
                 quantize_handler,
-                qconfig,
-                standalone_module_input_idxs):
+                qconfig):
             """ Insert observer/fake_quantize module for output of the observed
             module if needed
             """
@@ -526,13 +530,6 @@ class Quantizer:
                     new_observer = qconfig.activation()
                     insert_observer(node, new_observer)
 
-            # insert observer for input of standalone module
-            if standalone_module_input_idxs is not None:
-                for idx in standalone_module_input_idxs:
-                    if node.args[idx].name not in observed_node_names_set:
-                        new_observer = qconfig.activation()
-                        insert_observer(node.args[idx], new_observer)
-
         def insert_observer_for_input_arg_of_observed_node(arg):
             """
                Input:
@@ -563,6 +560,8 @@ class Quantizer:
                 # parent
                 if qconfig is not None:
                     insert_observer_for_special_module(obj)
+                    insert_observer_for_output_of_the_node(
+                        node, obj, qconfig)
             else:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
             insert_observer_for_input_arg_of_observed_node(node)
@@ -735,11 +734,8 @@ class Quantizer:
         def is_output_quantized(node) -> bool:
             """ Check if output node is quantized or not """
             assert self.modules is not None
-            if node.op == 'call_module' and \
-                    is_observed_standalone_module(self.modules[node.target]):
-                quantized = False
-            else:
-                quantized = True
+            # by default the output is expected to be quantized
+            quantized = True
 
             # Need to get correct quantized/non-quantized state for the output
             # of CopyNode
@@ -816,10 +812,15 @@ class Quantizer:
                     quantized = False
                 else:
                     assert obj is not None
-                    quantized = is_output_quantized(node)
+                    is_standalone_module_node = is_observed_standalone_module_node(
+                        node, self.modules)
                     result = obj.convert(
                         self, node, load_arg, debug=debug,
                         convert_custom_config_dict=convert_custom_config_dict)
+                    if is_standalone_module_node:
+                        quantized = False
+                    else:
+                        quantized = is_output_quantized(node)
 
                 if quantized:
                     quant_env[node.name] = result
