@@ -241,7 +241,7 @@ inline void launcher(
                       nelem,
                       pa,
                       rng_engine_inputs);
-              TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
               break;
             case 2:
               fused_dropout_kernel_vec<
@@ -257,7 +257,7 @@ inline void launcher(
                       nelem,
                       pa,
                       rng_engine_inputs);
-              TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
               break;
           }
         } else {
@@ -271,7 +271,7 @@ inline void launcher(
                       nelem,
                       pa,
                       rng_engine_inputs);
-              TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
               break;
             default:
               if (!self.is_contiguous() && ret.is_contiguous() &&
@@ -287,7 +287,7 @@ inline void launcher(
                         nelem,
                         pa,
                         rng_engine_inputs);
-                TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
               } else {
                 fused_dropout_kernel<scalar_t, accscalar_t, index_type, -1>
                     <<<grid,
@@ -300,7 +300,7 @@ inline void launcher(
                         nelem,
                         pa,
                         rng_engine_inputs);
-                TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
               }
           }
         }
