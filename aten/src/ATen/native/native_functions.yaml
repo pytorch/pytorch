@@ -3056,6 +3056,7 @@
   use_c10_dispatcher: full
   variants: function, method
 
+# moveaxis, alias for movedim
 - func: moveaxis.intlist(Tensor(a) self, int[] source, int[] destination) -> Tensor(a)
   use_c10_dispatcher: full
   variants: function, method
