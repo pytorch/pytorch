@@ -487,7 +487,35 @@ class Graph:
                     type_repr(sub_type)
             return typename
 
-        for node in self.nodes:
+
+        # Run through reverse nodes and record the first instance of a use
+        # of a given node. This represents the *last* use of the node in the
+        # execution order of the program, which we will use to free unused
+        # values
+        node_to_last_use : Dict[Node, Node] = {}
+        user_to_last_uses : Dict[Node, List[Node]] = {}
+
+        def register_last_uses(n : Node, user : Node):
+            if n not in node_to_last_use:
+                node_to_last_use[n] = user
+                user_to_last_uses.setdefault(user, []).append(n)
+
+        for node in reversed(self.nodes):
+            map_arg(node.args, lambda n: register_last_uses(n, node))
+            map_arg(node.kwargs, lambda n: register_last_uses(n, node))
+
+        def delete_unused_values(user : Node):
+            """
+            Delete values after their last use. This ensures that values that are
+            not used in the remainder of the code are freed and the memory usage
+            of the code is optimal.
+            """
+            nodes_to_delete = user_to_last_uses.get(user, [])
+            if len(nodes_to_delete):
+                to_delete_str = ' = '.join([n.name for n in nodes_to_delete] + ['None'])
+                body.append(f'{to_delete_str}\n')
+
+        def emit_node(node : Node):
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
                 maybe_type_annotation = '' if node.type is None else f' : {type_repr(node.type)}'
@@ -496,20 +524,20 @@ class Graph:
                 raw_name = node.target.replace('*', '')
                 if raw_name != node.name:
                     body.append(f'{node.name} = {raw_name}\n')
-                continue
+                return
             elif node.op == 'call_method':
                 assert isinstance(node.target, str)
                 body.append(
                     f'{node.name} = {_format_target(repr(node.args[0]), node.target)}'
                     f'({_format_args(node.args[1:], node.kwargs)})\n')
-                continue
+                return
             elif node.op == 'call_function':
                 assert callable(node.target)
                 # pretty print operators
                 if node.target.__module__ == '_operator' and node.target.__name__ in magic_methods:
                     assert isinstance(node.args, tuple)
                     body.append(f'{node.name} = {magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}\n')
-                    continue
+                    return
                 qualified_name = get_qualified_name(node.target)
                 register_modules_used(qualified_name)
                 if qualified_name == 'getattr' and \
@@ -518,23 +546,27 @@ class Graph:
                    node.args[1].isidentifier():
                     # pretty print attribute access
                     body.append(f'{node.name} = {_format_target(repr(node.args[0]), node.args[1])}\n')
-                    continue
+                    return
                 body.append(f'{node.name} = {qualified_name}({_format_args(node.args, node.kwargs)})\n')
-                continue
+                return
             elif node.op == 'call_module':
                 assert isinstance(node.target, str)
                 body.append(f'{node.name} = {_format_target(root_module, node.target)}({_format_args(node.args, node.kwargs)})\n')
-                continue
+                return
             elif node.op == 'get_attr':
                 assert isinstance(node.target, str)
                 body.append(f'{node.name} = {_format_target(root_module, node.target)}\n')
-                continue
+                return
             elif node.op == 'output':
                 if node.type is not None:
                     maybe_return_annotation = f" -> {type_repr(node.type)}"
-                body.append(f'return {repr(node.args[0])}')
-                continue
+                body.append(f'return {repr(node.args[0])}\n')
+                return
             raise NotImplementedError(f'node: {node.op} {node.target}')
+
+        for node in self.nodes:
+            emit_node(node)
+            delete_unused_values(node)
 
         # repr() for inf and nan floating point values aren't parseable by
         # python as literals. Explicitly import the names from the `math` module.
