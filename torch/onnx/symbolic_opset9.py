@@ -1342,6 +1342,9 @@ def index_select(g, self, dim, index):
         if index_dim == 0:
             # Index is a scalar. Reshape it to a size 1 tensor.
             index = g.op("Reshape", index, g.op("Constant", value_t=torch.LongTensor([1])))
+    index_scalar_type = index.type().scalarType()
+    if index_scalar_type is None or index_scalar_type not in ['Long', 'Int']:
+        index = g.op("Cast", index, to_i=sym_help.cast_pytorch_to_onnx["Long"])
     return g.op("Gather", self, index, axis_i=dim)
 
 
@@ -2174,9 +2177,15 @@ def flatten(g, input, start_dim, end_dim):
 
     return sym_help._flatten_helper(g, input, start_dim, end_dim, dim)
 
+# Emitted from `torch.nonzero(x, as_tuple=False)`
 @parse_args('v')
 def nonzero(g, input):
     return t(g, g.op('NonZero', input))
+
+
+# Emitted from `torch.nonzero(x, as_tuple=True)`
+def nonzero_numpy(g, input, _outputs=None):
+    return unbind(g, nonzero(g, input), 1, _outputs=_outputs)
 
 
 @parse_args('v')
