@@ -483,13 +483,10 @@ class _ValgrindWrapper(object):
         task_spec: common.TaskSpec,
         globals: Dict[str, Any],
         number: int,
-        collect_baseline: bool,
-        is_python: bool,
+        collect_baseline: bool
     ) -> CallgrindStats:
         """Collect stats, and attach a reference run which can be used to filter interpreter overhead."""
         self._validate()
-        assert is_python or not collect_baseline
-
         baseline_inclusive_stats = FunctionCounts((), inclusive=True)
         baseline_exclusive_stats = FunctionCounts((), inclusive=False)
         if collect_baseline:
@@ -499,17 +496,15 @@ class _ValgrindWrapper(object):
                     common.TaskSpec(
                         stmt="pass",
                         setup="pass",
-                        num_threads=task_spec.num_threads,
+                        num_threads=task_spec.num_threads
                     ),
                     globals={},
                     number=number,
-                    is_python=True,
                 )
             baseline_inclusive_stats, baseline_exclusive_stats = \
                 self._baseline_cache[cache_key]
 
-        stmt_inclusive_stats, stmt_exclusive_stats = self._invoke(
-            task_spec, globals, number, is_python)
+        stmt_inclusive_stats, stmt_exclusive_stats = self._invoke(task_spec, globals, number)
         return CallgrindStats(
             task_spec=task_spec,
             number_per_run=number,
@@ -525,7 +520,6 @@ class _ValgrindWrapper(object):
         task_spec: common.TaskSpec,
         globals: Dict[str, Any],
         number: int,
-        is_python: bool,
     ) -> Tuple[FunctionCounts, FunctionCounts]:
         """Core invocation method for Callgrind collection.
 
@@ -571,34 +565,20 @@ class _ValgrindWrapper(object):
                 f_stdout_stderr.close()
 
         try:
-            if is_python:
-                if self._bindings_module is not None:
-                    shutil.copy(
-                        self._bindings_module.__file__,
-                        os.path.join(working_dir, os.path.split(self._bindings_module.__file__)[1])
-                    )
-
-                script_file = os.path.join(working_dir, "timer_callgrind.py")
-                with open(script_file, "wt") as f:
-                    f.write(self._construct_script(
-                        task_spec,
-                        globals=GlobalsBridge(globals, data_dir),
-                        number=number,
-                        error_log=error_log,
-                        stat_log=stat_log,
-                        bindings=self._bindings_module))
-                run_loop_cmd = ["python", script_file]
-            else:
-                run_loop_exec = cpp_jit.compile_callgrind_template(
-                    task_spec.stmt,
-                    task_spec.setup,
+            if self._bindings_module is not None:
+                shutil.copy(
+                    self._bindings_module.__file__,
+                    os.path.join(working_dir, os.path.split(self._bindings_module.__file__)[1])
                 )
-                run_loop_cmd = [
-                    run_loop_exec,
-                    "--number", str(number),
-                    "--number_warmup", str(min(number, 10)),
-                    "--number_threads", str(task_spec.num_threads),
-                ]
+
+            with open(script_file, "wt") as f:
+                f.write(self._construct_script(
+                    task_spec,
+                    globals=GlobalsBridge(globals, data_dir),
+                    number=number,
+                    error_log=error_log,
+                    stat_log=stat_log,
+                    bindings=self._bindings_module))
 
             valgrind_invocation, valgrind_invocation_output = run([
                 "valgrind",
@@ -608,7 +588,9 @@ class _ValgrindWrapper(object):
                 "--dump-instr=yes",
                 "--instr-atstart=yes",
                 "--collect-atstart=no",
-            ] + run_loop_cmd)
+                "python",
+                script_file,
+            ])
 
             if valgrind_invocation.returncode:
                 error_report = ""
