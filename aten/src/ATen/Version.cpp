@@ -185,4 +185,15 @@ std::string show_config() {
   return ss.str();
 }
 
+std::string get_cxx_flags() {
+  #if defined(FBCODE_CAFFE2)
+  TORCH_CHECK(
+    false,
+    "Buck does not populate the `CXX_FLAGS` field of Caffe2 build options. "
+    "As a result, `get_cxx_flags` is OSS only."
+  );
+  #endif
+  return caffe2::GetBuildOptions().at("CXX_FLAGS");
+}
+
 }
