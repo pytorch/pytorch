@@ -1078,6 +1078,37 @@ class TestBinaryUfuncs(TestCase):
                 torch_op(torch.ones(1, device=device, dtype=dtypes[1]),
                          torch.ones(1, device=device, dtype=dtypes[0]))
 
+    @onlyCUDA
+    def test_maximum_minimum_cross_device(self, device):
+        a = torch.tensor((1, 2, -1))
+        b = torch.tensor((3, 0, 4), device=device)
+        ops = (torch.maximum, torch.minimum)
+
+        for torch_op in ops:
+            with self.assertRaisesRegex(RuntimeError, 
+                                        "Expected all tensors to be on the same device"):
+                torch_op(a, b)
+
+            with self.assertRaisesRegex(RuntimeError, 
+                                        "Expected all tensors to be on the same device"):
+                torch_op(b, a) 
+
+        # test cuda tensor and cpu scalar
+        ops = ((torch.maximum, np.maximum), (torch.minimum, np.minimum))
+        a_np = np.array(1)
+        b_np = np.array([3, 0, 4])
+
+        for torch_op, numpy_op in ops:
+            a_tensor = torch.from_numpy(a_np)
+            b_tensor = torch.from_numpy(b_np).to(device=device)
+            tensor_result_1 = torch_op(a_tensor, b_tensor)
+            numpy_result_1 = numpy_op(a_np, b_np)
+            tensor_result_2 = torch_op(b_tensor, a_tensor)
+            numpy_result_2 = numpy_op(b_np, a_np)
+
+            self.assertEqual(tensor_result_1, numpy_result_1)
+            self.assertEqual(tensor_result_2, numpy_result_2)
+
     # TODO: tests like this should be generic
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)

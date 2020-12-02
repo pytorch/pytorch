@@ -3104,6 +3104,16 @@ class TestONNXRuntime(unittest.TestCase):
         ind = torch.tensor(-2, dtype=torch.long)
         self.run_test(GetItemModel(), (x, y, z, ind))
 
+    @disableScriptTest()  # torch.nonzero(x, as_tuple=True) is not scriptable.
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_nonzero(self):
+        class NonzeroModel(torch.nn.Module):
+            def forward(self, x):
+                return x.nonzero(), x.nonzero(as_tuple=True)
+
+        x = torch.randn(60).index_fill_(0, torch.randint(0, 60, (20,)), 0).view(3, 4, 5)
+        self.run_test(NonzeroModel(), (x,))
+
     def test_unbind(self):
         class UnbindModel(torch.nn.Module):
             def forward(self, input):
@@ -3793,13 +3803,19 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(1, 2, 1)
         self.run_test(RemainderModel(), (x, y))
 
+    # Note: Integral Tensor remainder to floating-point scalar (not Tensor)
+    # can not be exported, since its type promotion logic is dependent
+    # on knowing the scalar types.
     def test_remainder_scalar(self):
         class RemainderModel(torch.nn.Module):
-            def forward(self, input):
-                return torch.remainder(input, 2.55)
+            def forward(self, input, mod):
+                return torch.remainder(input, mod)
 
-        x = torch.randint(10, (2, 3))
-        self.run_test(RemainderModel(), x)
+        # x = torch.randint(10, (2, 3))
+        x = torch.randn(2, 3)
+        y = torch.tensor(2.55)
+
+        self.run_test(RemainderModel(), (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_fmod(self):
@@ -3811,14 +3827,19 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(1, 2, 1)
         self.run_test(FModModel(), (x, y))
 
+    # Note: Integral Tensor fmod to floating-point scalar (not Tensor)
+    # can not be exported, since its type promotion logic is dependent
+    # on knowing the scalar types.
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_fmod_scalar(self):
         class FModModel(torch.nn.Module):
-            def forward(self, input):
-                return torch.fmod(input, 2.55)
+            def forward(self, input, mod):
+                return torch.fmod(input, mod)
 
         x = torch.randint(10, (2, 3))
-        self.run_test(FModModel(), x)
+        y = torch.tensor(2.55)
+
+        self.run_test(FModModel(), (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_gelu(self):
