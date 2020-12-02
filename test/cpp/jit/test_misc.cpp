@@ -787,6 +787,12 @@ void checkScopeCallbacks() {
   TORCH_CHECK(found_user_scope);
 }
 
+static bool should_run = false;
+
+static bool shouldRunCallback(const RecordFunctionCallback&) {
+  return should_run;
+}
+
 TEST(RecordFunctionTest, Basic) {
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
@@ -1066,14 +1072,11 @@ TEST(RecordFunctionTest, Basic) {
   // test should_run
 
   bool ran = false;
-  bool should_run = false;
-  addGlobalCallback(
-      RecordFunctionCallback(
-          [&ran](const RecordFunction& fn) { ran = true; },
-          [](const RecordFunction&) {})
-          .setShouldRun([&should_run](const RecordFunctionCallback&) {
-            return should_run;
-          }));
+  should_run = false;
+  addGlobalCallback(RecordFunctionCallback(
+                        [&ran](const RecordFunction& fn) { ran = true; },
+                        [](const RecordFunction&) {})
+                        .setShouldRun(shouldRunCallback));
 
   { RECORD_USER_SCOPE("test"); }
 
@@ -1130,17 +1133,16 @@ TEST(RecordFunctionTest, Basic) {
 TEST(RecordFunctionTest, OperatorNameOverload) {
   std::set<std::string> operator_names;
 
-  at::addGlobalCallback(at::RecordFunctionCallback(
-                            [&operator_names](const at::RecordFunction& fn) {
-                              c10::optional<c10::OperatorName> op_name =
-                                  fn.operator_name();
-                              if (op_name.has_value()) {
-                                operator_names.insert(c10::toString(*op_name));
-                              } else {
-                                operator_names.insert("No Operator Name");
-                              }
-                            })
-                            .scopes({at::RecordScope::FUNCTION}));
+  at::addGlobalCallback(
+      at::RecordFunctionCallback([&operator_names](
+                                     const at::RecordFunction& fn) {
+        c10::optional<c10::OperatorName> op_name = fn.operator_name();
+        if (op_name.has_value()) {
+          operator_names.insert(c10::toString(*op_name));
+        } else {
+          operator_names.insert("No Operator Name");
+        }
+      }).scopes({at::RecordScope::FUNCTION}));
   auto t = torch::randn({1, 2, 3}, at::kCPU);
   t.set_requires_grad(false);
   auto t2 = t.pow(2);
@@ -1173,8 +1175,7 @@ class TestThreadLocalDebugInfo : public c10::DebugInfoBase {
 void checkDebugInfo(c10::DebugInfoKind kind, int model_id) {
   auto* debug_info = c10::ThreadLocalDebugInfo::get(kind);
   TORCH_CHECK(debug_info != nullptr);
-  auto* test_debug_info =
-      dynamic_cast<TestThreadLocalDebugInfo*>(debug_info);
+  auto* test_debug_info = dynamic_cast<TestThreadLocalDebugInfo*>(debug_info);
   TORCH_CHECK(test_debug_info != nullptr);
   TORCH_CHECK(test_debug_info->getModelId() == model_id);
 }

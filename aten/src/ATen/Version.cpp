@@ -114,7 +114,7 @@ std::string used_cpu_capability() {
 
 std::string show_config() {
   std::ostringstream ss;
-  ss << "PyTorch built with:\n"; // TODO add the version of PyTorch
+  ss << "PyTorch built with:\n";
 
   // Reference:
   // https://blog.kowalczyk.info/article/j/guide-to-predefined-macros-in-c-compilers-gcc-clang-msvc-etc..html
