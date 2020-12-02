@@ -35,6 +35,17 @@ struct prod_functor {
   }
 };
 
+// Workaround for the error: '*' in boolean context, suggest '&&' instead [-Werror=int-in-bool-context]
+template <>
+struct prod_functor<bool> {
+  void operator()(TensorIterator& iter) {
+    gpu_reduce_kernel<bool, bool>(
+        iter, func_wrapper<bool>([] GPU_LAMBDA(bool a, bool b) -> bool {
+          return a && b;
+        }), 1);
+  }
+};
+
 // The function `reduce_dispatch` below dispatches to the kernel based
 // on the type of `iter`. It takes care of the common logic
 // for handling Half-Precision floating types.
