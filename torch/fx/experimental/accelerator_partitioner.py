@@ -266,7 +266,12 @@ class Partitioner:
                 break
             total_size_of_graph += node.size_bytes.total_size
         device_with_max_mem = max(self.devices, key=lambda d: d.available_mem_bytes)
-        if total_size_of_graph <= device_with_max_mem.available_mem_bytes:
+        if partitioner_config.mode == PartitionMode.aot_based:
+            self.aot_based_partition(
+                partitioner_config.node_to_partition_mapping,
+                partitioner_config.partition_to_logical_device_mapping
+            )
+        elif total_size_of_graph <= device_with_max_mem.available_mem_bytes:
             self.find_single_partition(total_size_of_graph)
         elif total_size_of_graph > sum([d.available_mem_bytes for d in self.devices]):
             raise RuntimeError('Devices have no enough memory for the module')
@@ -837,3 +842,22 @@ class Partitioner:
         # Mapping the device to the partition
         get_device_to_partitions_mapping(self.partitions, self.devices)
         return
+
+    def aot_based_partition(self, node_to_partition_mapping, partition_to_logical_device_mapping):
+        """This function helps to rebuild the partitions given the nodes and its
+           corresponding partition id
+        """
+        partition_id_to_partition_mapping: Dict[int, Partition] = {}
+        self.node_to_partition = node_to_partition_mapping
+        for node in self.node_to_partition:
+            partition_id = self.node_to_partition[node]
+            # If the requested partition has not been created, create the partition
+            if partition_id not in partition_id_to_partition_mapping:
+                partition = Partition(partition_id)
+                self.partitions.append(partition)
+                partition_id_to_partition_mapping[partition_id] = partition
+                partition.logical_device_ids = partition_to_logical_device_mapping[partition_id]
+            else:
+                partition = partition_id_to_partition_mapping[self.node_to_partition[node]]
+            # Add the current node into the partition
+            partition.add_node(node)

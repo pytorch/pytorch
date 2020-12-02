@@ -150,7 +150,7 @@ TensorIteratorConfig& TensorIteratorConfig::declare_static_shape(IntArrayRef sha
 // in the strides of trivial dimensions, so physical layout is unaffected but permutation information is lost)
 // We might change this behavior in future once performance considerations are resolved
 
-void TensorIterator::reorder_dimensions(const TensorIteratorConfig& config) {
+void TensorIterator::reorder_dimensions() {
   // Sort the dimensions based on strides in ascending order with reduced dims
   // at the front. NOTE: that this inverts the order of C-contiguous tensors.
   // strides[0] is the fastest moving dimension instead of strides[ndim - 1].
@@ -168,7 +168,6 @@ void TensorIterator::reorder_dimensions(const TensorIteratorConfig& config) {
   // returns 1 if the dim0 should come after dim1, -1 if dim0 should come
   // before dim1, and 0 if the comparison is ambiguous.
   auto should_swap = [&](size_t dim0, size_t dim1) {
-    int ret = 0;
     for (int arg = 0; arg < ntensors(); arg++) {
       // ignore undefined or incorrectly sized tensors
       if (operands_[arg].stride_bytes.empty() || operands_[arg].will_resize) {
@@ -202,7 +201,7 @@ void TensorIterator::reorder_dimensions(const TensorIteratorConfig& config) {
          }
       }
     }
-    return ret;
+    return 0;
   };
 
   // insertion sort with support for ambiguous comparisons
@@ -1286,7 +1285,7 @@ void TensorIterator::build(TensorIteratorConfig& config) {
     // compute each tensor's stride after broadcasting
     compute_strides(config);
     // re-order dimensions to improve coalescing
-    reorder_dimensions(config);
+    reorder_dimensions();
     // allocate the output tensor if it's not provided
     allocate_or_resize_outputs();
     // coalesce adjacent dimensions when possible

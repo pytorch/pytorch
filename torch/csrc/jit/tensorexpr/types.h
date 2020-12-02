@@ -128,10 +128,6 @@ inline Dtype BinaryOpDtype(
     Dtype op1_dtype,
     Dtype op2_dtype,
     ScalarType ret_type = ScalarType::None) {
-  if (op1_dtype.scalar_type() == ScalarType::Bool ||
-      op2_dtype.scalar_type() == ScalarType::Bool) {
-    throw malformed_input("arithmetic binary operations on Bool not supported");
-  }
   if (op1_dtype == op2_dtype) {
     if (ret_type == ScalarType::None) {
       return op1_dtype;
