@@ -1,7 +1,7 @@
 import re
 
 from dataclasses import dataclass
-from typing import List, Dict, Optional, Iterator, Tuple, Set, NoReturn
+from typing import List, Dict, Optional, Iterator, Tuple, Set, NoReturn, Sequence, Callable
 from enum import Enum
 import itertools
 
@@ -253,7 +253,7 @@ class NativeFunction:
     # Validation is for nontrivial invariants that cannot be (conveniently)
     # encoded in the type system.
     def __post_init__(self) -> None:
-        if self.func.out_arguments:
+        if self.func.arguments.out:
             assert self.variants == {Variant.function}, "Native functions with out arguments MUST " \
                 "be declared with only function variant; e.g., variants: function; " \
                 "otherwise you will tickle a Python argument binding bug " \
@@ -380,20 +380,13 @@ class FunctionSchema:
     # The name of the operator this function schema describes.
     name: 'OperatorName'
 
-    arguments: Tuple['Argument', ...]
-    kwarg_only_arguments: Tuple['Argument', ...]  # but not including out args
-    # Unlike in the previous codegen, we have factored out 'out' arguments
-    # in the canonical representation, removing them from kwarg
-    # arguments.  This choice is justified by numerous downstream
-    # transformations which treat out arguments specially; additionally,
-    # you can see that canonicity is not violated!
-    out_arguments: Tuple['Argument', ...]  # these are also kwarg-only
+    arguments: 'Arguments'
 
     # TODO: Need to handle collisions with argument names at some point
     returns: Tuple['Return', ...]
 
     def schema_order_arguments(self) -> Iterator['Argument']:
-        return itertools.chain(self.arguments, self.kwarg_only_arguments, self.out_arguments)
+        return itertools.chain(self.arguments.positional, self.arguments.kwarg_only, self.arguments.out)
 
     @staticmethod
     def parse(func: str) -> 'FunctionSchema':
@@ -404,20 +397,18 @@ class FunctionSchema:
         assert args[-1] == ")", "Expecting closing )"
         args = args[:-1]
         name = OperatorName.parse(ops)
-        arguments, kwarg_only_arguments, out_arguments = parse_arguments(args)
+        arguments = Arguments.parse(args)
         returns = parse_returns(return_decl)
         r = FunctionSchema(
             name=name,
             arguments=arguments,
-            kwarg_only_arguments=kwarg_only_arguments,
-            out_arguments=out_arguments,
             returns=returns
         )
         assert str(r) == func, f'{str(r)} != {func}'
         return r
 
     def __post_init__(self) -> None:
-        for arg, ret in zip(self.out_arguments, self.returns):
+        for arg, ret in zip(self.arguments.out, self.returns):
             assert arg.annotation == ret.annotation, \
                 "Out arguments must have matching return Tensor; furthermore, " \
                 "the ith-argument needs to correspond to the ith return"
@@ -425,14 +416,14 @@ class FunctionSchema:
         # This means that all mutable returns should be aliased to a keyword argument
         # (except for "self", which we explicitly don't treat as an out argument because of its use in methods)
         # See Note [is_out_fn]
-        out_and_self = list(self.out_arguments) + [arg for arg in self.arguments if arg.name == "self"]
+        out_and_self = list(self.arguments.out) + [arg for arg in self.arguments.positional if arg.name == "self"]
         mutable_returns = [ret for ret in self.returns if ret.annotation is not None and ret.annotation.is_write]
         for ret in mutable_returns:
             assert any([ret.annotation == arg.annotation for arg in out_and_self]), \
                 "All mutable returns must be aliased either to a keyword argument, or to \"self\". " \
                 "Did you forget to mark an out argument as keyword-only?"
-        if self.out_arguments:
-            assert len(self.out_arguments) == len(self.returns), \
+        if self.arguments.out:
+            assert len(self.arguments.out) == len(self.returns), \
                 "Must return as many arguments as there are out arguments"
         if self.name.name.inplace:
             # TODO: fixme
@@ -508,7 +499,7 @@ class FunctionSchema:
         #     but just with extra kwargs for the output elements.  This
         #     is difficult to actually check for and historically
         #     we only do this check in tools/
-        return bool(self.out_arguments)
+        return bool(self.arguments.out)
 
     def kind(self) -> SchemaKind:
         """
@@ -518,7 +509,7 @@ class FunctionSchema:
         the result into an explicitly provided out argument.
         """
         is_inplace = self.name.name.inplace
-        is_out = bool(self.out_arguments)
+        is_out = bool(self.arguments.out)
         assert not (is_inplace and is_out)
         if is_inplace:
             return SchemaKind.inplace
@@ -544,16 +535,6 @@ class FunctionSchema:
           because you cannot overload on mutability annotation)
         """
 
-        # dataclasses.replace could be used here, but it is less
-        # type safe so for now I've opted to type everything out
-        def strip_arg_annotation(a: Argument) -> Argument:
-            return Argument(
-                name=a.name,
-                type=a.type,
-                default=a.default,  # hmmm
-                annotation=None,
-            )
-
         def strip_ret_annotation(r: Return) -> Return:
             return Return(
                 name=r.name,
@@ -570,20 +551,12 @@ class FunctionSchema:
                 ),
                 overload_name="",  # stripped
             ),
-            arguments=tuple(map(strip_arg_annotation, self.arguments)),
-            kwarg_only_arguments=tuple(map(strip_arg_annotation, self.kwarg_only_arguments)),
-            out_arguments=(),  # stripped
+            arguments=self.arguments.signature(),
             returns=tuple(map(strip_ret_annotation, self.returns)),
         )
 
     def __str__(self) -> str:
-        all_arguments: List[str] = []
-        all_arguments.extend(map(str, self.arguments))
-        if self.kwarg_only_arguments or self.out_arguments:
-            all_arguments.append('*')
-        all_arguments.extend(map(str, self.kwarg_only_arguments))
-        all_arguments.extend(map(str, self.out_arguments))
-        all_arguments_str = ', '.join(all_arguments)
+        all_arguments_str = str(self.arguments)
         if len(self.returns) == 1:
             returns = str(self.returns[0])  # omit parentheses
         else:
@@ -869,6 +842,221 @@ class Return:
             return f"{type} {self.name}"
 
 
+# Represents the self argument for functions that may be methods
+@dataclass(frozen=True)
+class SelfArgument:
+    argument: Argument
+
+# Bundle of arguments that represent a TensorOptions.  This is mostly
+# relevant for the public C++ API but we bake it into the core data
+# model because other APIs often have to interact with it
+@dataclass(frozen=True)
+class TensorOptionsArguments:
+    dtype: Argument
+    layout: Argument
+    device: Argument
+    pin_memory: Argument
+
+    def all(self) -> Sequence[Argument]:
+        return [self.dtype, self.layout, self.device, self.pin_memory]
+
+@dataclass(frozen=True)
+class Arguments:
+    # pre_self_positional is usually empty, but is notably non-empty
+    # for where.self, where the condition argument comes before the
+    # self argument
+    pre_self_positional: Tuple[Argument, ...]
+    self_arg: Optional[SelfArgument]
+    post_self_positional: Tuple[Argument, ...]
+
+    pre_tensor_options_kwarg_only: Tuple[Argument, ...]
+    tensor_options: Optional[TensorOptionsArguments]
+    # post_tensor_options is typically memory format, which should be
+    # part of tensor options but isn't right now, and is usually
+    # placed after the tensor options arguments
+    post_tensor_options_kwarg_only: Tuple[Argument, ...]
+
+    # Unlike in the previous codegen, we have factored out 'out' arguments
+    # in the canonical representation, removing them from kwarg
+    # arguments.  This choice is justified by numerous downstream
+    # transformations which treat out arguments specially; additionally,
+    # you can see that canonicity is not violated!
+    out: Tuple[Argument, ...]  # these are also kwarg-only
+
+    @property
+    def positional(self) -> Sequence[Argument]:
+        ret: List[Argument] = []
+        ret.extend(self.pre_self_positional)
+        if self.self_arg is not None:
+            ret.append(self.self_arg.argument)
+        ret.extend(self.post_self_positional)
+        return ret
+
+    # NB: doesn't contain out arguments
+    @property
+    def kwarg_only(self) -> Sequence[Argument]:
+        ret: List[Argument] = []
+        ret.extend(self.pre_tensor_options_kwarg_only)
+        if self.tensor_options is not None:
+            ret.extend(self.tensor_options.all())
+        ret.extend(self.post_tensor_options_kwarg_only)
+        return ret
+
+    def signature(self) -> 'Arguments':
+        # dataclasses.replace could be used here, but it is less
+        # type safe so for now I've opted to type everything out
+        def strip_arg_annotation(a: Argument) -> Argument:
+            return Argument(
+                name=a.name,
+                type=a.type,
+                default=a.default,  # hmmm
+                annotation=None,
+            )
+
+        return Arguments(
+            pre_self_positional=tuple(map(strip_arg_annotation, self.pre_self_positional)),
+            self_arg=SelfArgument(
+                strip_arg_annotation(self.self_arg.argument)
+            ) if self.self_arg is not None else None,
+            post_self_positional=tuple(map(strip_arg_annotation, self.post_self_positional)),
+            pre_tensor_options_kwarg_only=tuple(map(strip_arg_annotation, self.pre_tensor_options_kwarg_only)),
+            # NB: tensor_options guaranteed to not have any alias annotations
+            tensor_options=self.tensor_options,
+            post_tensor_options_kwarg_only=tuple(map(strip_arg_annotation, self.post_tensor_options_kwarg_only)),
+            # out arguments are dropped in signature
+            out=(),
+        )
+
+
+    @staticmethod
+    def _preparse(args: str) -> Tuple[List[Argument], List[Argument], List[Argument]]:
+        positional: List[Argument] = []
+        kwarg_only: List[Argument] = []
+        out: List[Argument] = []
+        arguments_acc = positional
+
+        # TODO: Use a real parser here; this will get bamboozled
+        # by signatures that contain things like std::array<bool, 2> (note the space)
+        for arg in args.split(', '):
+            if not arg:
+                continue
+            if arg == '*':
+                assert arguments_acc is positional, "invalid syntax: kwarg-only specifier * can only occur once"
+                arguments_acc = kwarg_only
+                continue
+            parg = Argument.parse(arg)
+            # Currently, we rely directly on the invariant that there are NO
+            # kwarg-only mutating arguments.  If you want to relax this,
+            # we will need a more semantic way of matching that takes
+            # into account return arguments.  In that case, you will have
+            # to manage out computation a level up, in FunctionSchema.  See Note
+            # [is_out_fn]
+            if parg.annotation is not None and parg.annotation.is_write:
+                if arguments_acc is positional:
+                    pass  # do nothing
+                elif arguments_acc is kwarg_only:
+                    arguments_acc = out
+            else:
+                assert arguments_acc is not out
+            arguments_acc.append(parg)
+
+        return positional, kwarg_only, out
+
+    @staticmethod
+    def parse(args: str) -> 'Arguments':
+        """
+        Input: 'int x, int y, int z'
+        """
+
+        # We do this in two phases.  First we parse into three 
+        # main categories: positional, kwarg_only, out.
+        # Then, we reparse positional and kwarg_only to separate
+        # out the self argument and tensor options arguments.
+
+        positional, kwarg_only, out = Arguments._preparse(args)
+
+        # Split self argument
+        self_ix = None
+        for i, a in enumerate(positional):
+            if a.name == "self":
+                self_ix = i
+                break
+        pre_self_positional: List[Argument]
+        self_arg: Optional[SelfArgument]
+        post_self_positional: List[Argument]
+        if self_ix is not None:
+            pre_self_positional = positional[:self_ix]
+            self_arg = SelfArgument(positional[self_ix])
+            post_self_positional = positional[self_ix + 1:]
+        else:
+            pre_self_positional = []
+            self_arg = None
+            post_self_positional = positional
+
+        # Group tensor options arguments
+        pre_tensor_options_kwarg_only: List[Argument] = []
+        tensor_options: Optional[TensorOptionsArguments] = None
+        post_tensor_options_kwarg_only: List[Argument] = []
+        kwarg_only_acc = pre_tensor_options_kwarg_only
+
+        def pred(name: str, ty: Type) -> Callable[[Argument], bool]:
+            return lambda a: a.name == name and a.type in [ty, OptionalType(ty)]
+        predicates = [  # order matters
+            pred('dtype', Type.parse('ScalarType')),
+            pred('layout', Type.parse('Layout')),
+            pred('device', Type.parse('Device')),
+            pred('pin_memory', Type.parse('bool')),
+        ]
+
+        i = 0
+        while i < len(kwarg_only):
+            # If there is enough space...
+            if i <= len(kwarg_only) - len(predicates):
+                # And the next len(predicates) arguments look like TensorOptions arguments
+                if all(p(a) for p, a in zip(predicates, kwarg_only[i : i + len(predicates)])):
+                    assert kwarg_only_acc is pre_tensor_options_kwarg_only
+                    # Group them together as one argument
+                    tensor_options = TensorOptionsArguments(
+                        dtype=kwarg_only[i],
+                        layout=kwarg_only[i + 1],
+                        device=kwarg_only[i + 2],
+                        pin_memory=kwarg_only[i + 3],
+                    )
+                    i += len(predicates)
+                    kwarg_only_acc = post_tensor_options_kwarg_only
+                    continue
+            kwarg_only_acc.append(kwarg_only[i])
+            i += 1
+
+        return Arguments(
+            pre_self_positional=tuple(pre_self_positional),
+            self_arg=self_arg,
+            post_self_positional=tuple(post_self_positional),
+            pre_tensor_options_kwarg_only=tuple(pre_tensor_options_kwarg_only),
+            tensor_options=tensor_options,
+            post_tensor_options_kwarg_only=tuple(post_tensor_options_kwarg_only),
+            out=tuple(out),
+        )
+
+
+    def __str__(self) -> str:
+        all_arguments: List[str] = []
+        all_arguments.extend(map(str, self.positional))
+        if self.kwarg_only or self.out:
+            all_arguments.append('*')
+        all_arguments.extend(map(str, self.kwarg_only))
+        all_arguments.extend(map(str, self.out))
+        return ', '.join(all_arguments)
+
+    def __post_init__(self) -> None:
+        # TODO: These invariants are weirdly asymmetric?
+        # TODO: Fancier types?
+        if self.self_arg is None:
+            assert not self.pre_self_positional
+        if self.tensor_options is None:
+            assert not self.post_tensor_options_kwarg_only
+
+
 # Names that validly are __iXXX__ indicating inplace operations.
 # Taken from https://www.python.org/dev/peps/pep-0203/#new-methods
 # NB: PyTorch hasn't actually implemented all of these
@@ -965,40 +1153,3 @@ def parse_returns(return_decl: str) -> Tuple[Return, ...]:
     if return_decl[0] == '(' and return_decl[-1] == ')':
         return_decl = return_decl[1:-1]
     return tuple(Return.parse(arg) for arg in return_decl.split(', '))
-
-def parse_arguments(args: str) -> Tuple[Tuple[Argument, ...], Tuple[Argument, ...], Tuple[Argument, ...]]:
-    """
-    Input: 'int x, int y, int z'
-    Output: positional args, kwarg only args
-    """
-    arguments: List[Argument] = []
-    kwarg_only_arguments: List[Argument] = []
-    out_arguments: List[Argument] = []
-    arguments_acc = arguments
-
-    # TODO: Use a real parser here; this will get bamboozled
-    # by signatures that contain things like std::array<bool, 2> (note the space)
-    for arg in args.split(', '):
-        if not arg:
-            continue
-        if arg == '*':
-            assert arguments_acc is arguments, "invalid syntax: kwarg-only specifier * can only occur once"
-            arguments_acc = kwarg_only_arguments
-            continue
-        parg = Argument.parse(arg)
-        # Currently, we rely directly on the invariant that there are NO
-        # kwarg-only mutating arguments.  If you want to relax this,
-        # we will need a more semantic way of matching that takes
-        # into account return arguments.  In that case, you will have
-        # to manage out_arguments computation a level up, in
-        # FunctionSchema.  See Note [is_out_fn]
-        if parg.annotation is not None and parg.annotation.is_write:
-            if arguments_acc is arguments:
-                pass  # do nothing
-            elif arguments_acc is kwarg_only_arguments:
-                arguments_acc = out_arguments
-        else:
-            assert arguments_acc is not out_arguments
-        arguments_acc.append(parg)
-
-    return tuple(arguments), tuple(kwarg_only_arguments), tuple(out_arguments)
