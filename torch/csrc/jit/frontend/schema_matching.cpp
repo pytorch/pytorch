@@ -519,7 +519,7 @@ std::pair<size_t, MatchedSchema> matchSchemas(
           render_errors ? &failure_messages : nullptr,
           allow_conversions);
       if (matched_schema) {
-        return std::make_pair(i, std::move(*matched_schema));
+        return std::make_pair(i, *matched_schema);
       }
     }
   }
@@ -551,8 +551,8 @@ static Value* packOutputs(
   TupleTypePtr named_tuple = nullptr;
   if (field_names) {
     auto types = fmap(values, [](Value* v) { return v->type(); });
-    named_tuple = TupleType::createNamed(
-        c10::nullopt, field_names.value(), std::move(types));
+    named_tuple =
+        TupleType::createNamed(c10::nullopt, field_names.value(), types);
   }
   return g.insertNode(g.createTuple(values, named_tuple))->output();
 }
@@ -592,6 +592,7 @@ Value* emitBuiltinCall(
 
   std::stringstream failure_messages;
   std::vector<const FunctionSchema*> schemas;
+  schemas.reserve(variants.size());
   for (const std::shared_ptr<Operator>& op : variants) {
     schemas.push_back(&op->schema());
   }

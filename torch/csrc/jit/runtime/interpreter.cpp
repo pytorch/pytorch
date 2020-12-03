@@ -706,7 +706,7 @@ struct CodeImpl {
   void emitCall(Function* func, at::ArrayRef<Value*> inputs) {
     emitLoadInputs(inputs);
     insertInstruction(CALL, function_table_.size());
-    function_table_.emplace_back(std::move(func));
+    function_table_.emplace_back(func);
   }
 
   void emitNodeAtBlockLevel(Node* node) {
@@ -1612,7 +1612,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       auto rec_fn = std::make_unique<at::RecordFunction>(
           at::RecordScope::TORCHSCRIPT_FUNCTION);
       if (rec_fn->isActive()) {
-        if (rec_fn->needs_inputs) {
+        if (rec_fn->needsInputs()) {
           rec_fn->before(
               frame.function->function_name_,
               last(stack, frame.function->n_inputs));
