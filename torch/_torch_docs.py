@@ -3225,6 +3225,8 @@ A, in order as a namedtuple `solution, LU`.
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `solution, LU`.
 
+Supports real-valued and complex-valued inputs.
+
 .. note::
 
     Irrespective of the original strides, the returned matrices
@@ -3427,7 +3429,7 @@ If both are zero or either is negative then :math:`\text{out}_i=\text{nan}`.
 .. math::
     \Gamma(\text{input}_i) = \int_0^\infty t^{(\text{input}_i-1)} e^{-t} dt.
 
-See :func:`torch.lgamma` for a related function.
+See :func:`torch.igammac` and :func:`torch.lgamma` for related functions.
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
 and float inputs.
@@ -3446,8 +3448,58 @@ Keyword args:
 
 Example::
 
-    >>> a = torch.igamma(torch.tensor([4.0]), torch.tensor([3.0, 4.0, 5.0]))
+    >>> a1 = torch.tensor([4.0])
+    >>> a2 = torch.tensor([3.0, 4.0, 5.0])
+    >>> a = torch.igammac(a1, a2)
     tensor([0.3528, 0.5665, 0.7350])
+    tensor([0.3528, 0.5665, 0.7350])
+    >>> b = torch.igamma(a1, a2) + torch.igammac(a1, a2)
+    tensor([1., 1., 1.])
+
+""".format(**common_args))
+
+add_docstr(torch.igammac,
+           r"""
+igammac(input, other, *, out=None) -> Tensor
+
+Computes the regularized upper incomplete gamma function:
+
+.. math::
+    \text{out}_{i} = \frac{1}{\Gamma(\text{input}_i)} \int_{\text{other}_i}^{\infty} t^{\text{input}_i-1} e^{-t} dt
+
+where both :math:`\text{input}_i` and :math:`\text{other}_i` are weakly positive
+and at least one is strictly positive.
+If both are zero or either is negative then :math:`\text{out}_i=\text{nan}`.
+:math:`\Gamma(\cdot)` in the equation above is the gamma function,
+
+.. math::
+    \Gamma(\text{input}_i) = \int_0^\infty t^{(\text{input}_i-1)} e^{-t} dt.
+
+See :func:`torch.igamma` and :func:`torch.lgamma` for related functions.
+
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
+and float inputs.
+
+.. note::
+    The backward pass with respect to :attr:`input` is not yet supported.
+    Please open an issue on PyTorch's Github to request it.
+
+""" + r"""
+Args:
+    input (Tensor): the first non-negative input tensor
+    other (Tensor): the second non-negative input tensor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a1 = torch.tensor([4.0])
+    >>> a2 = torch.tensor([3.0, 4.0, 5.0])
+    >>> a = torch.igammac(a1, a2)
+    tensor([0.6472, 0.4335, 0.2650])
+    >>> b = torch.igamma(a1, a2) + torch.igammac(a1, a2)
+    tensor([1., 1., 1.])
 
 """.format(**common_args))
 
@@ -3500,6 +3552,8 @@ Takes the inverse of the square matrix :attr:`input`. :attr:`input` can be batch
 of 2D square tensors, in which case this function would return a tensor composed of
 individual inverses.
 
+Supports real and complex input.
+
 .. note::
 
     Irrespective of the original strides, the returned tensors will be
@@ -3512,7 +3566,7 @@ Args:
 Keyword args:
     {out}
 
-Example::
+Examples::
 
     >>> x = torch.rand(4, 4)
     >>> y = torch.inverse(x)
@@ -3524,12 +3578,29 @@ Example::
             [ 0.0000, -0.0000, -0.0000,  1.0000]])
     >>> torch.max(torch.abs(z - torch.eye(4))) # Max non-zero
     tensor(1.1921e-07)
+
     >>> # Batched inverse example
     >>> x = torch.randn(2, 3, 4, 4)
     >>> y = torch.inverse(x)
     >>> z = torch.matmul(x, y)
     >>> torch.max(torch.abs(z - torch.eye(4).expand_as(x))) # Max non-zero
     tensor(1.9073e-06)
+
+    >>> x = torch.rand(4, 4, dtype=torch.cdouble)
+    >>> y = torch.inverse(x)
+    >>> z = torch.mm(x, y)
+    >>> z
+    tensor([[ 1.0000e+00+0.0000e+00j, -1.3878e-16+3.4694e-16j,
+            5.5511e-17-1.1102e-16j,  0.0000e+00-1.6653e-16j],
+            [ 5.5511e-16-1.6653e-16j,  1.0000e+00+6.9389e-17j,
+            2.2204e-16-1.1102e-16j, -2.2204e-16+1.1102e-16j],
+            [ 3.8858e-16-1.2490e-16j,  2.7756e-17+3.4694e-17j,
+            1.0000e+00+0.0000e+00j, -4.4409e-16+5.5511e-17j],
+            [ 4.4409e-16+5.5511e-16j, -3.8858e-16+1.8041e-16j,
+            2.2204e-16+0.0000e+00j,  1.0000e+00-3.4694e-16j]],
+        dtype=torch.complex128)
+    >>> torch.max(torch.abs(z - torch.eye(4, dtype=torch.cdouble))) # Max non-zero
+    tensor(7.5107e-16, dtype=torch.float64)
 """.format(**common_args))
 
 add_docstr(torch.isinf, r"""
@@ -5627,6 +5698,66 @@ Examples::
             [[-0.8437,  0.1727, -0.1398]]])
 """.format(**common_args))
 
+add_docstr(torch.swapdims, r"""
+swapdims(input, dim0, dim1) -> Tensor
+
+Alias for :func:`torch.transpose`.
+
+This function is equivalent to NumPy's swapaxes function.
+
+Examples::
+
+    >>> x = torch.tensor([[[0,1],[2,3]],[[4,5],[6,7]]])
+    >>> x
+    tensor([[[0, 1],
+            [2, 3]],
+
+            [[4, 5],
+            [6, 7]]])
+    >>> torch.swapdims(x, 0, 1)
+    tensor([[[0, 1],
+            [4, 5]],
+
+            [[2, 3],
+            [6, 7]]])
+    >>> torch.swapdims(x, 0, 2)
+    tensor([[[0, 4],
+            [2, 6]],
+
+            [[1, 5],
+            [3, 7]]])    
+""".format(**common_args))
+
+add_docstr(torch.swapaxes, r"""
+swapaxes(input, axis0, axis1) -> Tensor
+
+Alias for :func:`torch.transpose`.
+
+This function is equivalent to NumPy's swapaxes function.
+
+Examples::
+
+    >>> x = torch.tensor([[[0,1],[2,3]],[[4,5],[6,7]]])
+    >>> x
+    tensor([[[0, 1],
+            [2, 3]],
+
+            [[4, 5],
+            [6, 7]]])
+    >>> torch.swapaxes(x, 0, 1)
+    tensor([[[0, 1],
+            [4, 5]],
+
+            [[2, 3],
+            [6, 7]]])
+    >>> torch.swapaxes(x, 0, 2)
+    tensor([[[0, 4],
+            [2, 6]],
+
+            [[1, 5],
+            [3, 7]]])    
+""".format(**common_args))
+
 add_docstr(torch.narrow,
            r"""
 narrow(input, dim, start, length) -> Tensor
@@ -6766,6 +6897,10 @@ numbers. The remainder has the same sign as the divisor :attr:`other`.
 
 When :attr:`other` is a tensor, the shapes of :attr:`input` and
 :attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`.
+
+Note:
+    Complex inputs are not supported. In some cases, it is not mathematically
+    possible to satisfy the definition of a modulo operation with complex numbers.
 
 Args:
     input (Tensor): the dividend
@@ -8118,7 +8253,7 @@ transpose(input, dim0, dim1) -> Tensor
 Returns a tensor that is a transposed version of :attr:`input`.
 The given dimensions :attr:`dim0` and :attr:`dim1` are swapped.
 
-The resulting :attr:`out` tensor shares it's underlying storage with the
+The resulting :attr:`out` tensor shares its underlying storage with the
 :attr:`input` tensor, so changing the content of one would change the content
 of the other.
 
@@ -8152,6 +8287,8 @@ with the default keyword arguments.
 `torch.triangular_solve(b, A)` can take in 2D inputs `b, A` or inputs that are
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `X`
+
+Supports real-valued and complex-valued inputs.
 
 Args:
     input (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where

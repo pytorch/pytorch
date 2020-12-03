@@ -26,7 +26,7 @@ class TestQuantizedFunctional(QuantizationTestCase):
         zero_point = 1
         qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point, dtype=torch.quint8)
         qY = torch.relu(qX)
-        qY_hat = qF.relu(qX)
+        qY_hat = F.relu(qX)
         self.assertEqual(qY, qY_hat)
 
     def _test_conv_api_impl(

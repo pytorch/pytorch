@@ -175,7 +175,7 @@ void ProfilingRecord::insertShapeProfile(Node* n, size_t offset) {
         } else {
           auto type = profiled_types.at(pno);
           GRAPH_DEBUG("Existing type for %", pno->debugName(), " ", *type);
-          pttp = type->merge(pttp);
+          pttp = type->merge(*pttp);
           GRAPH_DEBUG("Result for %", pno->debugName(), " ", *pttp);
           profiled_types[pno] = pttp;
         }
@@ -343,7 +343,7 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
             merged_profiled_types[val_type_pair.first] = val_type_pair.second;
           } else {
             auto type = merged_profiled_types[val_type_pair.first];
-            auto merged_type = type->merge(val_type_pair.second);
+            auto merged_type = type->merge(*val_type_pair.second);
             if (merged_type->sizes().size().has_value()) {
               auto new_shape = raw_pr->mergeSymbolicShapes(
                   val_type_pair.second->symbolic_sizes(),
@@ -361,7 +361,7 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
               merged_profiled_types[val_type_pair.first] = merged_type;
             } else {
               // reset symbolic shapes when ranks are different
-              type = type->merge(val_type_pair.second);
+              type = type->merge(*val_type_pair.second);
               merged_profiled_types[val_type_pair.first] = type;
             }
           }
