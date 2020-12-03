@@ -47,7 +47,8 @@ class SampleInput(object):
     __slots__ = ['input', 'args', 'kwargs']
 
     def __init__(self, input, *, args=tuple(), kwargs=None):
-        self.input = input
+        # test_ops.py expects input to be a tuple
+        self.input = input if isinstance(input, tuple) else (input,)
         self.args = args
         self.kwargs = kwargs if kwargs is not None else {}
 
@@ -80,7 +81,9 @@ class OpInfo(object):
                  output_func=lambda x: x,  # fn mapping output to part that should be gradcheck'ed 
                  supports_tensor_out=True,  # whether the op supports the out kwarg, returning a Tensor
                  skips=tuple(),  # information about which tests to skip
-                 decorators=None):  # decorators to apply to generated tests
+                 decorators=None,  # decorators to apply to generated tests
+                 promotes_integers_to_float=False,  # whether op promotes unary output to float or not
+                 sample_inputs_func=None):  # function to generate sample inputs
 
         # Validates the dtypes are generated from the dispatch-related functions
         for dtype_list in (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM):
@@ -106,10 +109,12 @@ class OpInfo(object):
         self.test_inplace_grad = test_inplace_grad
         self.test_complex_grad = test_complex_grad
         self.supports_tensor_out = supports_tensor_out
+        self.promotes_integers_to_float = promotes_integers_to_float
 
         self.skips = skips
         self.decorators = decorators
         self.output_func = output_func
+        self.sample_inputs_func = sample_inputs_func
 
         self.assert_autodiffed = assert_autodiffed
         self.autodiff_fusible_nodes = autodiff_fusible_nodes if autodiff_fusible_nodes else []
@@ -142,7 +147,10 @@ class OpInfo(object):
 
     def sample_inputs(self, device, dtype, requires_grad=False):
         """Returns an iterable of SampleInputs."""
-        return tuple()
+        if self.sample_inputs:
+            return self.sample_inputs_func(self, device, dtype, requires_grad)
+        else:
+            return tuple()
 
     # Returns True if the test should be skipped and False otherwise
     def should_skip(self, cls_name, test_name, device_type, dtype):
@@ -187,6 +195,15 @@ M = 10
 S = 5
 
 
+def sample_inputs_unary(self, device, dtype, requires_grad):
+    low, high = self.domain
+    low = low if low is None else low + self._domain_eps
+    high = high if high is None else high - self._domain_eps
+
+    return (SampleInput(make_tensor((L,), device, dtype,
+                                    low=low, high=high,
+                                    requires_grad=requires_grad)),)
+
 # Metadata class for unary "universal functions (ufuncs)" that accept a single
 # tensor and have common properties like:
 class UnaryUfuncInfo(OpInfo):
@@ -214,38 +231,40 @@ class UnaryUfuncInfo(OpInfo):
                  handles_large_floats=True,  # whether the op correctly handles large float values (like 1e20)
                  handles_extremals=True,  # whether the op correctly handles extremal values (like inf)
                  handles_complex_extremals=True,  # whether the op correct handles complex extremals (like inf -infj)
-                 promotes_integers_to_float=False,  # whether op promotes unary output to float or not
+                 sample_inputs_func=sample_inputs_unary,
                  **kwargs):
         super(UnaryUfuncInfo, self).__init__(name,
                                              dtypes=dtypes,
                                              dtypesIfCPU=dtypesIfCPU,
                                              dtypesIfCUDA=dtypesIfCUDA,
                                              dtypesIfROCM=dtypesIfROCM,
+                                             sample_inputs_func=sample_inputs_func,
                                              **kwargs)
         self.ref = ref
         self.domain = domain
         self.handles_large_floats = handles_large_floats
         self.handles_extremals = handles_extremals
         self.handles_complex_extremals = handles_complex_extremals
-        self.promotes_integers_to_float = promotes_integers_to_float
 
         # Epsilon to ensure grad and gradgrad checks don't test values
         #   outside a function's domain.
         self._domain_eps = 1e-5
 
-    def sample_inputs(self, device, dtype, requires_grad=False):
-        low, high = self.domain
-        low = low if low is None else low + self._domain_eps
-        high = high if high is None else high - self._domain_eps
 
-        return (SampleInput(make_tensor((L,), device, dtype,
-                                        low=low, high=high,
-                                        requires_grad=requires_grad)),)
-
+def sample_inputs_addmm(self, device, dtype, requires_grad):
+    return (SampleInput((make_tensor((S, S), device, dtype,
+                                     low=None, high=None, 
+                                     requires_grad=requires_grad), 
+                        make_tensor((S, S), device, dtype, 
+                                    low=None, high=None, 
+                                    requires_grad=requires_grad), 
+                        make_tensor((S, S), device, dtype, 
+                                    low=None, high=None, 
+                                    requires_grad=False))),) 
 
 
 # Operator database (sorted alphabetically)
-op_db = [
+op_db: List[Any] = [
     # NOTE: CPU complex acos produces incorrect outputs (https://github.com/pytorch/pytorch/issues/42952)
     UnaryUfuncInfo('acos',
                    ref=np.arccos,
@@ -291,6 +310,27 @@ op_db = [
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 device_type='cuda', dtypes=[torch.bfloat16]),
                    )),
+    OpInfo('addmm',
+           dtypes=floating_types(),
+           dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128),
+           dtypesIfROCM=floating_types_and(torch.half),
+           assert_autodiffed=True,
+           autodiff_nonfusible_nodes=['aten::add', 'aten::mm'],
+           skips=(
+               SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                        dtypes=[torch.cfloat, torch.cdouble]),
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=[torch.cfloat, torch.cdouble, torch.bfloat16, torch.float16]),
+               SkipInfo('TestGradients', 'test_method_gradgrad',
+                        dtypes=[torch.cdouble]),
+               SkipInfo('TestGradients', 'test_method_grad',
+                        dtypes=[torch.cdouble]),
+               SkipInfo('TestGradients', 'test_fn_gradgrad',
+                        dtypes=[torch.cdouble]),
+               SkipInfo('TestGradients', 'test_fn_grad',
+                        dtypes=[torch.cdouble]),),
+           sample_inputs_func=sample_inputs_addmm),
     UnaryUfuncInfo('asin',
                    ref=np.arcsin,
                    domain=(-1, 1),
