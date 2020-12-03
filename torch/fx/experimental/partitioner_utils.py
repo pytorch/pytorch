@@ -73,12 +73,15 @@ class PartitionMode(Enum):
     sparse_nn = 1
     cost_aware = 2
     kl_based = 3
+    aot_based = 4
 
 class PartitionerConfig(NamedTuple):
     devices: List[Device]
     mode: PartitionMode = PartitionMode.size_based
     transfer_rate_bytes_per_sec: float = 0.
     node_to_latency_mapping: Dict[Node, NodeLatency] = {}
+    node_to_partition_mapping: Dict[Node, int] = {}
+    partition_to_logical_device_mapping: Dict[int, List[int]] = {}
 
 def get_extra_size_of(node: Node, nodes: Set[Node]) -> int:
     """Given a node and a set of nodes,
