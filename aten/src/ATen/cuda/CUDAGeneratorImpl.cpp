@@ -4,6 +4,7 @@
 #include <c10/core/StreamGuard.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <ATen/Utils.h>
+#include <cuda.h>
 
 namespace at {
 namespace cuda {
@@ -84,7 +85,7 @@ Generator createCUDAGenerator(DeviceIndex device_index) {
  */
 CUDAGeneratorImpl::CUDAGeneratorImpl(DeviceIndex device_index)
   : c10::GeneratorImpl{Device(DeviceType::CUDA, device_index),
-              DispatchKeySet(c10::DispatchKey::CUDA)} { 
+              DispatchKeySet(c10::DispatchKey::CUDA)} {
   at::cuda::assertNotCapturing("Cannot construct a new CUDAGeneratorImpl");
 }
 
@@ -101,20 +102,18 @@ void CUDAGeneratorImpl::set_current_seed(uint64_t seed) {
 }
 
 #define CAPTURE_DEFAULT_GENS_MSG \
-"Non-default (user-constructed) CUDA RNG generators cannot be used " \
-"in regions captured by CUDA graphs. " \
-"If you need a non-default CUDA generator in a captured region, " \
-"please file an issue."
+"In regions captured by CUDA graphs, you may only use the default CUDA RNG " \
+"generator on the device that's current when capture begins. " \
+"If you need a non-default (user-supplied) generator, or a generator on another " \
+"device, please file an issue."
 
 /**
  * Gets the current seed of CUDAGeneratorImpl.
  */
 uint64_t CUDAGeneratorImpl::current_seed() const {
-  TORCH_CHECK((at::cuda::currentStreamCaptureStatus() ==
-               at::cuda::CaptureStatus::None) ||
-              ((void*)this ==
-               (void*)&at::cuda::detail::getDefaultCUDAGenerator(device_.index())),
-              CAPTURE_DEFAULT_GENS_MSG);
+  // Debatable if current_seed() should be allowed in captured regions.
+  // Conservatively disallow it for now.
+  at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::set_current_seed");
   return seed_;
 }
 
@@ -156,20 +155,16 @@ uint64_t CUDAGeneratorImpl::philox_offset_per_thread() {
  * offset_intragraph tracks the offset in the graphed region.
  */
 void CUDAGeneratorImpl::capture_prologue(int64_t* offset_extragraph) {
-  TORCH_CHECK((void*)this ==
-              (void*)&at::cuda::detail::getDefaultCUDAGenerator(device_.index()),
-              CAPTURE_DEFAULT_GENS_MSG);
   offset_extragraph_ = offset_extragraph;
   offset_intragraph_ = 0;
+  graph_expects_this_gen_ = true;
 }
 
 /**
  * Called by CUDAGraph to finalize a graph capture region for this instance.
  */
 uint64_t CUDAGeneratorImpl::capture_epilogue() {
-  TORCH_CHECK((void*)this ==
-              (void*)&at::cuda::detail::getDefaultCUDAGenerator(device_.index()),
-              CAPTURE_DEFAULT_GENS_MSG);
+  graph_expects_this_gen_ = false;
   return offset_intragraph_;
 }
 
@@ -197,19 +192,19 @@ uint64_t CUDAGeneratorImpl::capture_epilogue() {
 PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
   if (at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None) {
     TORCH_CHECK(graph_expects_this_gen_,
-                "Unexpected CUDA generator used during capture. "
-                "This may)
-    TORCH_CHECK((void*)this ==
-                (void*)&at::cuda::detail::getDefaultCUDAGenerator(device_.index()),
+                "philox_cuda_state for an unexpected CUDA generator used during capture. "
                 CAPTURE_DEFAULT_GENS_MSG);
     uint32_t offset = this->offset_intragraph_;
     TORCH_INTERNAL_ASSERT(this->offset_intragraph_ <=
-                          std::numeric_limits<uint32_t>::max() - increment); 
+                          std::numeric_limits<uint32_t>::max() - increment);
     this->offset_intragraph_ += increment;
     return PhiloxCudaState(this->seed_,
                            this->offset_extragraph_,
                            offset);
   } else {
+    TORCH_CHECK(!graph_expects_this_gen_,
+                "CUDA generator expects graph capture to be underway, "
+                "but the current stream is not capturing.");
     uint64_t offset = this->philox_offset_per_thread_;
     this->philox_offset_per_thread_ += increment;
     return PhiloxCudaState(this->seed_, offset);

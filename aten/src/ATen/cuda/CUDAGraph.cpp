@@ -1,14 +1,10 @@
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAGraph.h>
+#include <ATen/Functions.h>
 #include <c10/cuda/CUDAFunctions.h>
 
 namespace at {
-
-// forward-declares empty
-namespace native {
-  Tensor empty(IntArrayRef size, const TensorOptions& options);
-}
 
 namespace cuda {
 
@@ -31,12 +27,13 @@ void CUDAGraph::capture_begin() {
   // or a generator on another device, the offending generator will throw an error.
   // These restrictions simplify CUDAGraph, but could be relaxed in the future:
   // in principle, the underlying Cuda calls do permit cross-device ops to be captured.
-  const auto& gen = at::cuda::detail::getDefaultCUDAGenerator(c10::cuda::current_device());
+  auto* gen = get_generator_or_default<CUDAGeneratorImpl>(
+      c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
 
   auto options = TensorOptions().device(at::kCUDA).dtype(at::kLong);
-  offset_extragraph_ = at::native::empty({1}, options);
+  offset_extragraph_ = at::empty({1}, options);
 
-  gen.capture_prologue(offset_extragraph_.data_ptr<int64_t>());
+  gen->capture_prologue(offset_extragraph_.data_ptr<int64_t>());
 
   auto stream = at::cuda::getCurrentCUDAStream();
 
@@ -77,8 +74,9 @@ void CUDAGraph::capture_end() {
   AT_CUDA_CHECK(cudaGraphInstantiate(&graph_exec_, graph_, NULL, NULL, 0));
   has_graph_exec_ = true;
 
-  const auto& gen = at::cuda::detail::getDefaultCUDAGenerator(c10::cuda::current_device());
-  wholegraph_increment_ = gen.capture_epilogue();
+  auto* gen = get_generator_or_default<CUDAGeneratorImpl>(
+      c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
+  wholegraph_increment_ = gen->capture_epilogue();
 
   // Now that we've instantiated graph_ into graph_exec_,
   // we don't need graph_ anymore.
@@ -96,14 +94,16 @@ void CUDAGraph::replay() {
 
   {
     c10::OptionalDeviceGuard device_guard{capture_stream_.device()};
-    const auto& gen = at::cuda::detail::getDefaultCUDAGenerator(c10::cuda::current_device());
+
     // Just like any RNG consumer kernel!
+    auto* gen = get_generator_or_default<CUDAGeneratorImpl>(
+        c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
     PhiloxCudaState rng_engine_inputs;
     {
-      std::lock_guard<std::mutex> lock(gen.mutex_);
-      rng_engine_inputs = gen.philox_cuda_state(wholegraph_increment_);
+      std::lock_guard<std::mutex> lock(gen->mutex_);
+      rng_engine_inputs = gen->philox_cuda_state(wholegraph_increment_);
     }
-    offset_extragraph_.fill_(rng_engine_inputs.offset_.val);
+    offset_extragraph_.fill_(int64_t(rng_engine_inputs.offset_.val));
 
     // graph_exec_ may be replayed in any stream.
     AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, at::cuda::getCurrentCUDAStream()));

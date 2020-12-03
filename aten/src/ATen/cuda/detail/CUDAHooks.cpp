@@ -163,7 +163,9 @@ bool CUDAHooks::hasPrimaryContext(int64_t device_index) const {
   TORCH_CHECK(device_index >= 0 && device_index < at::cuda::device_count(),
               "hasPrimaryContext expects a valid device index, but got device_index=", device_index);
   unsigned int ctx_flags;
-  int ctx_is_active;
+  // In standalone tests of cuDevicePrimaryCtxGetState, I've seen the "active" argument end up with weird
+  // (garbage-looking nonzero) values when the context is not active, unless I initialize it to zero.
+  int ctx_is_active = 0;
   AT_CUDA_DRIVER_CHECK(CUDAHooks::nvrtc().cuDevicePrimaryCtxGetState(device_index, &ctx_flags, &ctx_is_active));
   return ctx_is_active == 1;
 }
