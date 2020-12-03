@@ -88,7 +88,9 @@ class Optimizer(object):
                     return func(*args, **kwargs)
             return wrapper
 
-        self.step = profile_hook_step(self.step)
+        # _LRScheduler.__init__ also hook 'step', so keep it still a bounded method after this hook.
+        hooked_step = profile_hook_step(self.__class__.step)
+        self.step = hooked_step.__get__(self, self.__class__)
 
     def state_dict(self):
         r"""Returns the state of the optimizer as a :class:`dict`.
