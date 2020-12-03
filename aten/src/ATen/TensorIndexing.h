@@ -6,6 +6,10 @@
 #include <ATen/Functions.h>
 #include <ATen/ScalarOps.h>
 
+// TODO: try to remove this
+// There is some back story, see https://github.com/pytorch/pytorch/issues/48684
+#include <ATen/NativeFunctions.h>
+
 namespace at {
 namespace indexing {
 
@@ -247,7 +251,7 @@ static inline Tensor boolToIndexingTensor(const Tensor& self, bool value, const 
 }
 
 static inline Tensor scalarToTensorCPU(Scalar v, const TensorOptions& options) {
-  return at::detail::scalar_tensor_static(v, v.type(), options.layout_opt(), options.device_opt(), options.pinned_memory_opt(), options.memory_format_opt());
+  return at::detail::scalar_tensor_static(v, v.type(), options.device_opt());
 }
 
 static inline Tensor scalarToTensorNonNativeDeviceType(Scalar v, const TensorOptions& options) {
