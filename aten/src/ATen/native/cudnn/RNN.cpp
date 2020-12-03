@@ -622,10 +622,10 @@ namespace {
         return false;
       } else if (rnn.mode == CUDNN_LSTM) {
         // Persistent LSTMs are comparable to or better than non-persistent for bsize <= 128.
-        return bsize <= 128;
+        return (bsize % 8 == 0) && (bsize <= 128);
       } else {
         // Persistent RNN_RELU and TANH show poor performance when bsize >= 96 AND hidden size >= 896.
-        return (bsize <= 128) && (bsize < 96 || rnn.hidden_size < 896);
+        return (bsize % 8 == 0) && (bsize <= 128) && (bsize < 96 || rnn.hidden_size < 896);
       }
     } else {
       return false;
