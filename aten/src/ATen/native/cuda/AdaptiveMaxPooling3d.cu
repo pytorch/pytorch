@@ -131,7 +131,7 @@ void adaptivemaxpool_loop(
     adaptivemaxpool<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
       input_data, output_data, indices_data, isizeT, isizeH, isizeW,
       osizeT, osizeH, osizeW, istrideD, istrideT, istrideH, istrideW, offsetZ);
-    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     totalZ -= 65535;
     offsetZ += 65535;
@@ -209,7 +209,7 @@ void adaptivemaxgradinput_loop(
     adaptivemaxgradinput<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
       gradInput_data, gradOutput_data, indices_data,
       isizeT, isizeH, isizeW, osizeT, osizeH, osizeW, offsetZ);
-    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
     totalZ -= 65535;
     offsetZ += 65535;
   }
@@ -285,7 +285,7 @@ void atomicadaptivemaxgradinput_loop(
     atomicadaptivemaxgradinput<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
       gradInput_data, gradOutput_data, indices_data,
       isizeT, isizeH, isizeW, osizeT, osizeH, osizeW, offsetZ);
-    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
     totalZ -= 65535;
     offsetZ += 65535;
   }

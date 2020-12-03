@@ -495,7 +495,11 @@ void LLVMCodeGenImpl::emitKernel(
   irb_.SetInsertPoint(bb_);
 
   // Maybe expand some of the intrinsics.
+#ifdef USE_FAST_CPU_INTRINSICS
   LLVMIntrinsicsExpander intrinsics_expander;
+#else
+  GenericIntrinsicsExpander intrinsics_expander;
+#endif
   stmt = stmt->accept_mutator(&intrinsics_expander);
 
   // Compile the kernel.
