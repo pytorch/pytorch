@@ -224,7 +224,8 @@ class ProcessGroupNCCL : public ProcessGroup {
         cudaEvents->size() == uniqueDeviceIndices.size(),
         "Got ", cudaEvents->size(), " events, but only ",
         uniqueDeviceIndices.size(), " distinct devices");
-      for (const at::DataPtr& data_ptr : extractDataPtrs(value)) {
+      auto dataPtrs = extractDataPtrs(value);
+      for (const at::DataPtr& data_ptr : dataPtrs) {
         TORCH_INTERNAL_ASSERT(
             std::find_if(
                 cudaEvents->begin(),
@@ -234,6 +235,7 @@ class ProcessGroupNCCL : public ProcessGroup {
                 }) != cudaEvents->end());
       }
       cudaEvents_ = std::move(cudaEvents);
+      dataPtrs_ = std::move(dataPtrs);
       markCompleted(std::move(value));
     }
 

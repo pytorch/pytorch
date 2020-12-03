@@ -44,8 +44,11 @@ struct TORCH_CUDA_API CUDAFuture : at::ivalue::Future {
   }
 
   void postMarkCompletedHook(const at::IValue& value) override {
+    // Extract them once and cache them for later uses.
+    dataPtrs_ = extractDataPtrs(value);
+
     std::vector<bool> isCudaDeviceUsed(c10::cuda::device_count(), false);
-    for (const at::DataPtr& data_ptr : extractDataPtrs(value)) {
+    for (const at::DataPtr& data_ptr : dataPtrs_) {
       if (data_ptr.device().is_cuda()) {
         isCudaDeviceUsed[data_ptr.device().index()] = true;
       }
@@ -88,7 +91,7 @@ struct TORCH_CUDA_API CUDAFuture : at::ivalue::Future {
 
       // Do not free the underlying data storage of value_ before its
       // usage on the stream finishes.
-      for (const at::DataPtr& data_ptr : extractDataPtrs(constValue())) {
+      for (const at::DataPtr& data_ptr : dataPtrs_) {
         if (data_ptr.device().is_cuda()) {
           c10::cuda::CUDACachingAllocator::recordStream(
               data_ptr, at::cuda::getCurrentCUDAStream(data_ptr.device().index()));
@@ -105,7 +108,7 @@ struct TORCH_CUDA_API CUDAFuture : at::ivalue::Future {
           at::cuda::getCurrentCUDAStream(cudaEvent.device_index()));
     }
 
-    for (const at::DataPtr& data_ptr : extractDataPtrs(value)) {
+    for (const at::DataPtr& data_ptr : dataPtrs_) {
       if (data_ptr.device().is_cuda()) {
         c10::cuda::CUDACachingAllocator::recordStream(
             data_ptr, at::cuda::getCurrentCUDAStream(data_ptr.device().index()));
@@ -120,6 +123,7 @@ struct TORCH_CUDA_API CUDAFuture : at::ivalue::Future {
   // fixed.
  protected:
   std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents_;
+  std::vector<std::reference_wrapper<const at::DataPtr>> dataPtrs_;
 
  private:
   DataPtrExtractor dataPtrExtractor_;
