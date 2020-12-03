@@ -70,23 +70,23 @@ Tensor values_sparse(const Tensor& self) {
 
 /*** Helper methods ***/
 
-SparseTensor new_sparse(const TensorOptions& options) {
-  TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
-  AT_ASSERT(options.layout() == kSparse);
+SparseTensor new_sparse(c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
+  AT_ASSERT(layout.has_value() && *layout == kSparse);
   DispatchKey dispatch_key;
-  if (options.device().is_cuda()) {
+  if (device_or_default(device).is_cuda()) {
     dispatch_key = DispatchKey::SparseCUDA;
   } else {
     dispatch_key = DispatchKey::SparseCPU;
   }
   return detail::make_tensor<SparseTensorImpl>(
-      DispatchKeySet(dispatch_key), options.dtype());
+      DispatchKeySet(dispatch_key), scalarTypeToTypeMeta(dtype_or_default(dtype)));
 }
 
 /** Actual dispatched creation methods ***/
 
-SparseTensor new_with_dims_sparse(int64_t sparse_dim, int64_t dense_dim, ArrayRef<int64_t> size, const TensorOptions& options) {
-  SparseTensor self = new_sparse(options);
+SparseTensor new_with_dims_sparse(int64_t sparse_dim, int64_t dense_dim, ArrayRef<int64_t> size, c10::optional<ScalarType> dtype,
+                                  c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
+  SparseTensor self = new_sparse(dtype, layout, device, pin_memory);
   get_sparse_impl(self)->resize_and_clear_(sparse_dim, dense_dim, size);
   return self;
 }
@@ -97,8 +97,11 @@ SparseTensor new_with_dims_and_tensor_sparse(
     ArrayRef<int64_t> size,
     const LongTensor& indices,
     const Tensor& values,
-    const TensorOptions& options) {
-  SparseTensor self = new_sparse(options);
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  SparseTensor self = new_sparse(dtype, layout, device, pin_memory);
   get_sparse_impl(self)->resize_(sparse_dim, dense_dim, size);
   // NOTE: There is no guarantee that `indices` and `values` don't contain AutogradMeta. However,
   // we want to maintain the invariant that `indices_` and `values_` of a sparse tensor don't
@@ -116,9 +119,9 @@ SparseTensor new_with_dims_and_tensor_sparse(
 /** Public creation API that dispatch to methods above **/
 
 /** Empty init **/
-Tensor empty_sparse(IntArrayRef size, const TensorOptions& options, c10::optional<MemoryFormat> optional_memory_format) {
-  TORCH_CHECK(!options.pinned_memory(), "Only dense CPU tensors can be pinned");
-  return new_with_dims_sparse(size.size(), 0, size, options);
+Tensor empty_sparse(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(!pin_memory.has_value() || !*pin_memory, "Only dense CPU tensors can be pinned");
+  return new_with_dims_sparse(size.size(), 0, size, dtype, layout, device, pin_memory);
 }
 
 /* Shape init */
@@ -261,7 +264,9 @@ SparseTensor clone_sparse(const SparseTensor& self, c10::optional<c10::MemoryFor
       !optional_memory_format.has_value(),
       "unsupported memory format option ",
       optional_memory_format.value());
-  SparseTensor other = new_with_dims_sparse(self.sparse_dim(), self.dense_dim(), self.sizes(), self.options());
+  SparseTensor other = new_with_dims_sparse(self.sparse_dim(), self.dense_dim(), self.sizes(),
+                                            optTypeMetaToScalarType(self.options().dtype_opt()), self.options().layout_opt(),
+                                            self.options().device_opt(), self.options().pinned_memory_opt());
   copy_into_sparse(other, self._indices(), self._values(), true);
   return other._coalesced_(self.is_coalesced());
 }
@@ -310,7 +315,7 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim){
 
   Tensor nz = self.nonzero().transpose(0, 1);
   if (nz.size(1) == 0) {
-    return new_with_dims_sparse(sparse_dim, dims - sparse_dim, sizes, sparse_options);
+    return new_with_dims_sparse(sparse_dim, dims - sparse_dim, sizes, optTypeMetaToScalarType(sparse_options.dtype_opt()), sparse_options.layout_opt(), sparse_options.device_opt(), sparse_options.pinned_memory_opt());
   }
   LongTensor indices;
   if (sparse_dim == dims) {
@@ -377,7 +382,7 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
 
   LongTensor indices_scalar = flatten_indices(indices, self.sizes());
 
-  SparseTensor dst = new_sparse(self.options());
+  SparseTensor dst = new_sparse(optTypeMetaToScalarType(self.options().dtype_opt()), self.options().layout_opt(), self.options().device_opt(), self.options().pinned_memory_opt());
   get_sparse_impl(dst)->resize_(sparse_dim, dense_dim, self.sizes());
   // TODO: is there a more idiomatic way to do this?
   LongTensor newIndices = at::empty(indices.sizes(), indices.options());

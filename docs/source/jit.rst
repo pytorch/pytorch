@@ -45,15 +45,18 @@ Creating TorchScript Code
 
     script
     trace
+    script_if_tracing
     trace_module
     fork
     wait
     ScriptModule
     ScriptFunction
+    freeze
     save
     load
     ignore
     unused
+    isinstance
 
 Mixing Tracing and Scripting
 ----------------------------

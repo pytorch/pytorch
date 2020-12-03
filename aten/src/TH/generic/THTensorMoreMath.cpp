@@ -252,27 +252,6 @@ void THTensor_(preserveReduceDimSemantics)(
 
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 
-accreal THTensor_(trace)(THTensor *t)
-{
-  scalar_t *t_data = t->data<scalar_t>();
-  accreal sum = 0;
-  int64_t i = 0;
-  int64_t t_stride_0, t_stride_1, t_diag_size;
-
-  THArgCheck(THTensor_(nDimensionLegacyAll)(t) == 2, 1, "expected a matrix");
-
-  t_stride_0 = THTensor_(stride)(t, 0);
-  t_stride_1 = THTensor_(stride)(t, 1);
-  t_diag_size = THMin(THTensor_(size)(t, 0), THTensor_(size)(t, 1));
-  while(i < t_diag_size)
-  {
-    sum += t_data[i*(t_stride_0+t_stride_1)];
-    i++;
-  }
-
-  return sum;
-}
-
 /* Implementation of the Quickselect algorithm, based on Nicolas Devillard's
 public domain implementation at http://ndevilla.free.fr/median/median/
 Adapted similarly to the above Quicksort algorithm. */

@@ -71,9 +71,11 @@ void replication_pad1d_out_cpu_template(
   int pad_l = paddingSize[0];
   int pad_r = paddingSize[1];
 
-  TORCH_CHECK(input_.numel() > 0
-      && (input_.ndimension() == 2 || input_.ndimension() == 3),
-      "non-empty 2D or 3D (batch mode) tensor expected for input");
+  // allow empty batch size but not other dimensions.
+  TORCH_CHECK((input_.dim() == 2 && input_.size(0) != 0 && input_.size(1) != 0) ||
+              (input_.dim() == 3 && input_.size(1) != 0 && input_.size(2) != 0),
+              "Expected 2D or 3D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
+              input_.sizes());
 
   if (input_.ndimension() == 3)
   {
@@ -90,7 +92,6 @@ void replication_pad1d_out_cpu_template(
   TORCH_CHECK(owidth >= 1,
       "input (W: ", iwidth, ") is too small."
       " Calculated output W: ", owidth);
-
 
   /* get contiguous input */
   auto input = input_.contiguous();
@@ -216,6 +217,9 @@ Tensor& replication_pad1d_backward_out_cpu_template(
   /* get contiguous gradOutput */
   auto gradOutput = gradOutput_.contiguous();
   gradInput.resize_as_(input);
+  if (gradInput.numel() == 0) {
+    return gradInput;
+  }           
   gradInput.zero_();
 
   /* backprop */
@@ -339,8 +343,13 @@ void replication_pad2d_out_cpu_template(Tensor& output,
   int dimslices = 0;
   int64_t nbatch = 1;
 
-  TORCH_CHECK(input_.numel() > 0 && (input_.dim() == 3 || input_.dim() == 4),
-      "3D or 4D (batch mode) tensor expected for input, but got: ", input_);
+  // allow 0 dim batch size and nothing else.
+  bool valid_dims = input_.size(1) != 0 && input_.size(2) != 0;
+  TORCH_CHECK(
+      (input_.dim() == 3 && input_.size(0) != 0 && valid_dims) ||
+      (input_.dim() == 4 && valid_dims && input_.size(3) != 0),
+      "Expected 3D or 4D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
+      input_.sizes());
 
   if (input_.dim() == 4)
   {
@@ -510,6 +519,10 @@ Tensor& replication_pad2d_backward_out_cpu_template(
 
   /* resize */
   gradInput.resize_as_(input);
+  if (gradInput.numel() == 0) {
+    return gradInput;
+  }
+  
   gradInput.zero_();
 
   /* backprop */
@@ -557,8 +570,13 @@ static inline void shapeCheck3d(
   int dimd = 1;
   int dimslices = 0;
 
-  TORCH_CHECK(input.numel() > 0 && (input.dim() == 4 || input.dim() == 5),
-      "non-empty 4D or 5D (batch mode) tensor expected for input, but got: ", input);
+  // allow batch size of 0-dim.
+  bool valid_dims = input.size(1) != 0 && input.size(2) != 0 && input.size(3) != 0;
+  TORCH_CHECK(
+      (input.dim() == 4 && input.size(0) != 0 && valid_dims) ||
+      (input.dim() == 5 && valid_dims && input.size(4) != 0),
+      "Expected 4D or 5D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
+      input.sizes());
 
   if (input.dim() == 5)
   {
@@ -872,6 +890,9 @@ Tensor& replication_pad3d_backward_out_cpu_template(
 
   /* resize */
   gradInput.resize_as_(input);
+  if (gradInput.numel() == 0) {
+    return gradInput;
+  }
   gradInput.zero_();
 
   /* backprop */

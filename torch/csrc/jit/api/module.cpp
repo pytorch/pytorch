@@ -75,7 +75,7 @@ void Module::to(at::Device device, bool non_blocking) {
 }
 
 void module_state_to(
-    autograd::Variable variable,
+    const autograd::Variable& variable,
     const c10::optional<at::Device>& device,
     const c10::optional<at::ScalarType>& dtype,
     bool non_blocking) {
@@ -242,6 +242,14 @@ Module Module::clone_impl(
     // clone methods, remapping the types to the cloned ones.
     for (auto& fn : type()->methods()) {
       r.clone_method(*this, *fn, type_remap);
+    }
+
+    // Execute __setstate__(__getstate__()) to initialize custom class members.
+    if (auto setstate_method = r.find_method("__setstate__")) {
+      auto getstate_method = r.find_method("__getstate__");
+      TORCH_INTERNAL_ASSERT(getstate_method, "expect __getstate__");
+      auto state = (*getstate_method)(Stack{});
+      (*setstate_method)(Stack{state});
     }
   }
   return r;

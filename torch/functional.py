@@ -9,6 +9,7 @@ from ._lowrank import svd_lowrank, pca_lowrank
 from .overrides import has_torch_function, handle_torch_function
 from ._jit_internal import boolean_dispatch, List
 from ._jit_internal import _overload as overload
+from torch._autograd_functions import _LU
 
 Tensor = torch.Tensor
 from torch import _VF
@@ -18,6 +19,7 @@ __all__ = [
     'atleast_2d',
     'atleast_3d',
     'align_tensors',
+    'broadcast_shapes',
     'broadcast_tensors',
     'cartesian_prod',
     'block_diag',
@@ -69,6 +71,39 @@ def broadcast_tensors(*tensors):
         if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
             return handle_torch_function(broadcast_tensors, tensors, *tensors)
     return _VF.broadcast_tensors(tensors)  # type: ignore
+
+
+def broadcast_shapes(*shapes):
+    r"""broadcast_shapes(*shapes) -> Size
+
+    Similar to :func:`broadcast_tensors` but for shapes.
+
+    This is equivalent to
+    ``torch.broadcast_tensors(*map(torch.empty, shapes))[0].shape``
+    but avoids the need create to intermediate tensors. This is useful for
+    broadcasting tensors of common batch shape but different rightmost shape,
+    e.g. to broadcast mean vectors with covariance matrices.
+
+    Example::
+
+        >>> torch.broadcast_shapes((2,), (3, 1), (1, 1, 1))
+        torch.Size([1, 3, 2])
+
+    Args:
+        \*shapes (torch.Size): Shapes of tensors.
+
+    Returns:
+        shape (torch.Size): A shape compatible with all input shapes.
+
+    Raises:
+        RuntimeError: If shapes are incompatible.
+    """
+    # TODO Movie this to C++ once the jit has better support for torch.Size.
+    with torch.no_grad():
+        scalar = torch.zeros((), device="cpu")
+        tensors = [scalar.expand(shape) for shape in shapes]
+        tensors = broadcast_tensors(*tensors)
+        return tensors[0].shape
 
 
 def split(tensor, split_size_or_sections, dim=0):
@@ -240,7 +275,7 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
             # product(*map(lambda x: list(range(x)), shape[:-2])) when issue 33781 is fixed
             indices = _indices_product(shape[:-2])
             for idx in indices:
-                final_order = [i for i in range(m)]  # noqa: C416 TODO: rewrite as list(range(m))
+                final_order = list(range(m))
                 for k, j in enumerate(_index_tensor_with_indices_list(LU_pivots_zero_idx, idx)):
                     final_order[k], final_order[j] = final_order[j], final_order[k]
                 # TODO: remove _index_tensor_with_indices_list when TorchScript supports indexing Tensor with list
@@ -248,7 +283,7 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
                 p_idx.copy_(p_idx.index_select(1, torch.as_tensor(final_order, device=LU_pivots.device)))
         else:
             P = torch.eye(m, device=LU_data.device, dtype=LU_data.dtype)
-            final_order = [i for i in range(m)]  # noqa: C416 TODO: rewrite as list(range(m))
+            final_order = list(range(m))
             for k, j, in enumerate(LU_pivots_zero_idx):
                 final_order[k], final_order[j] = final_order[j], final_order[k]
             P = P.index_select(1, torch.as_tensor(final_order, device=LU_pivots.device))
@@ -350,38 +385,37 @@ if TYPE_CHECKING:
         return _meshgrid(*tensors)
 else:
     def meshgrid(*tensors):
+        r"""Take :math:`N` tensors, each of which can be either scalar or 1-dimensional
+        vector, and create :math:`N` N-dimensional grids, where the :math:`i` :sup:`th` grid is defined by
+        expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
+
+        Args:
+            tensors (list of Tensor): list of scalars or 1 dimensional tensors. Scalars will be
+                treated as tensors of size :math:`(1,)` automatically
+
+        Returns:
+            seq (sequence of Tensors): If the input has :math:`k` tensors of size
+            :math:`(N_1,), (N_2,), \ldots , (N_k,)`, then the output would also have :math:`k` tensors,
+            where all tensors are of size :math:`(N_1, N_2, \ldots , N_k)`.
+
+        Example::
+
+            >>> x = torch.tensor([1, 2, 3])
+            >>> y = torch.tensor([4, 5, 6])
+            >>> grid_x, grid_y = torch.meshgrid(x, y)
+            >>> grid_x
+            tensor([[1, 1, 1],
+                    [2, 2, 2],
+                    [3, 3, 3]])
+            >>> grid_y
+            tensor([[4, 5, 6],
+                    [4, 5, 6],
+                    [4, 5, 6]])
+        """
         return _meshgrid(*tensors)
 
 
 def _meshgrid(*tensors):
-    r"""Take :math:`N` tensors, each of which can be either scalar or 1-dimensional
-vector, and create :math:`N` N-dimensional grids, where the :math:`i` :sup:`th` grid is defined by
-expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
-
-
-    Args:
-        tensors (list of Tensor): list of scalars or 1 dimensional tensors. Scalars will be
-        treated as tensors of size :math:`(1,)` automatically
-
-    Returns:
-        seq (sequence of Tensors): If the input has :math:`k` tensors of size
-        :math:`(N_1,), (N_2,), \ldots , (N_k,)`, then the output would also have :math:`k` tensors,
-        where all tensors are of size :math:`(N_1, N_2, \ldots , N_k)`.
-
-    Example::
-
-        >>> x = torch.tensor([1, 2, 3])
-        >>> y = torch.tensor([4, 5, 6])
-        >>> grid_x, grid_y = torch.meshgrid(x, y)
-        >>> grid_x
-        tensor([[1, 1, 1],
-                [2, 2, 2],
-                [3, 3, 3]])
-        >>> grid_y
-        tensor([[4, 5, 6],
-                [4, 5, 6],
-                [4, 5, 6]])
-    """
     if not torch.jit.is_scripting():
         if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
             return handle_torch_function(meshgrid, tensors, *tensors)
@@ -510,7 +544,7 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
         signal_dim = input.dim()
         extended_shape = [1] * (3 - signal_dim) + list(input.size())
         pad = int(n_fft // 2)
-        input = F.pad(input.view(extended_shape), (pad, pad), pad_mode)
+        input = F.pad(input.view(extended_shape), [pad, pad], pad_mode)
         input = input.view(input.shape[-signal_dim:])
     return _VF.stft(input, n_fft, hop_length, win_length, window,  # type: ignore
                     normalized, onesided, return_complex)
@@ -876,7 +910,7 @@ unique_consecutive = boolean_dispatch(
 unique_consecutive.__doc__ = _unique_consecutive_impl.__doc__
 
 
-def tensordot(a, b, dims=2):
+def tensordot(a, b, dims=2, out=None):
     r"""Returns a contraction of a and b over multiple dimensions.
 
     :attr:`tensordot` implements a generalized matrix product.
@@ -884,7 +918,7 @@ def tensordot(a, b, dims=2):
     Args:
       a (Tensor): Left tensor to contract
       b (Tensor): Right tensor to contract
-      dims (int or tuple of two lists of integers): number of dimensions to
+      dims (int or Tuple[List[int]] containing two lists): number of dimensions to
          contract or explicit lists of dimensions for :attr:`a` and
          :attr:`b` respectively
 
@@ -919,6 +953,12 @@ def tensordot(a, b, dims=2):
                 [ 3.3161,  0.0704,  5.0187, -0.4079, -4.3126,  4.8744],
                 [ 0.8223,  3.9445,  3.2168, -0.2400,  3.4117,  1.7780]])
 
+        >>> a = torch.randn(3, 5, 4, 6)
+        >>> b = torch.randn(6, 4, 5, 3)
+        >>> torch.tensordot(a, b, dims=([2, 1, 3], [1, 2, 0]))
+        tensor([[  7.7193,  -2.4867, -10.3204],
+                [  1.5513, -14.4737,  -6.5113],
+                [ -0.2850,   4.2573,  -3.5997]])
     """
     if not torch.jit.is_scripting():
         if (type(a) is not Tensor or type(b) is not Tensor) and has_torch_function((a, b)):
@@ -933,7 +973,10 @@ def tensordot(a, b, dims=2):
             raise RuntimeError(f"tensordot expects dims >= 0, but got dims={dims}")
         dims_a = list(range(-dims, 0))
         dims_b = list(range(dims))
-    return _VF.tensordot(a, b, dims_a, dims_b)  # type: ignore
+    if out is None:
+        return _VF.tensordot(a, b, dims_a, dims_b)  # type: ignore
+    else:
+        return _VF.tensordot(a, b, dims_a, dims_b, out=out)  # type: ignore
 
 def cartesian_prod(*tensors):
     """Do cartesian product of the given sequence of tensors. The behavior is similar to
@@ -1223,22 +1266,31 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         p (int, float, inf, -inf, 'fro', 'nuc', optional): the order of norm. Default: ``'fro'``
             The following norms can be calculated:
 
-            =====  ============================  ==========================
-            ord    matrix norm                   vector norm
-            =====  ============================  ==========================
-            None   Frobenius norm                2-norm
-            'fro'  Frobenius norm                --
-            'nuc'  nuclear norm                  --
-            Other  as vec norm when dim is None  sum(abs(x)**ord)**(1./ord)
-            =====  ============================  ==========================
+            ======  ==============  ==========================
+            ord     matrix norm     vector norm
+            ======  ==============  ==========================
+            'fro'   Frobenius norm  --
+            'nuc'   nuclear norm    --
+            Number  --              sum(abs(x)**ord)**(1./ord)
+            ======  ==============  ==========================
 
-        dim (int, 2-tuple of ints, 2-list of ints, optional): If it is an int,
-            vector norm will be calculated, if it is 2-tuple of ints, matrix norm
-            will be calculated. If the value is None, matrix norm will be calculated
-            when the input tensor only has two dimensions, vector norm will be
-            calculated when the input tensor only has one dimension. If the input
-            tensor has more than two dimensions, the vector norm will be applied to
-            last dimension.
+            The vector norm can be calculated across any number of dimensions.
+            The corresponding dimensions of :attr:`input` are flattened into
+            one dimension, and the norm is calculated on the flattened
+            dimension.
+
+            Frobenius norm produces the same result as ``p=2`` in all cases
+            except when :attr:`dim` is a list of three or more dims, in which
+            case Frobenius norm throws an error.
+
+            Nuclear norm can only be calculated across exactly two dimensions.
+
+        dim (int, tuple of ints, list of ints, optional):
+            Specifies which dimension or dimensions of :attr:`input` to
+            calculate the norm across. If :attr:`dim` is ``None``, the norm will
+            be calculated across all dimensions of :attr:`input`. If the norm
+            type indicated by :attr:`p` does not support the specified number of
+            dimensions, an error will occur.
         keepdim (bool, optional): whether the output tensors have :attr:`dim`
             retained or not. Ignored if :attr:`dim` = ``None`` and
             :attr:`out` = ``None``. Default: ``False``
@@ -1248,6 +1300,12 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
             returned tensor. If specified, the input tensor is casted to
             :attr:'dtype' while performing the operation. Default: None.
 
+    .. note::
+        Even though ``p='fro'`` supports any number of dimensions, the true
+        mathematical definition of Frobenius norm only applies to tensors with
+        exactly two dimensions. :func:`torch.linalg.norm` with ``ord='fro'`` aligns
+        with the mathematical definition, since it can only be applied across
+        exactly two dimensions.
 
     Example::
 
@@ -1309,7 +1367,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
                 raise ValueError("dtype argument is not supported in frobenius norm")
 
             if _dim is None:
-                _dim = [i for i in range(ndim)]  # noqa: C416 TODO: rewrite as list(range(m))
+                _dim = list(range(ndim))
             if out is None:
                 return _VF.frobenius_norm(input, _dim, keepdim=keepdim)  # type: ignore
             else:
@@ -1330,7 +1388,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         raise RuntimeError(f"only valid string values are 'fro' and 'nuc', found {p}")
     else:
         if _dim is None:
-            _dim = [i for i in range(ndim)]  # noqa: C416 TODO: rewrite as list(range(m))
+            _dim = list(range(ndim))
 
         if out is None:
             if dtype is None:
@@ -1408,6 +1466,10 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
     .. note::
        ``L``, ``U``, and ``P`` can be derived using :func:`torch.lu_unpack`.
 
+    .. warning::
+        The LU factorization does have backward support,
+        but only for square inputs of full rank.
+
     Arguments:
         A (Tensor): the tensor to factor of size :math:`(*, m, n)`
         pivot (bool, optional): controls whether pivoting is done. Default: ``True``
@@ -1423,7 +1485,12 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
 
             - **factorization** (*Tensor*): the factorization of size :math:`(*, m, n)`
 
-            - **pivots** (*IntTensor*): the pivots of size :math:`(*, m)`
+            - **pivots** (*IntTensor*): the pivots of size :math:`(*, \text{min}(m, n))`.
+              ``pivots`` stores all the intermediate transpositions of rows.
+              The final permutation ``perm`` could be reconstructed by
+              applying ``swap(perm[i], perm[pivots[i] - 1])`` for ``i = 0, ..., pivots.size(-1) - 1``,
+              where ``perm`` is initially the identity permutation of :math:`m` elements
+              (essentially this is what :func:`torch.lu_unpack` is doing).
 
             - **infos** (*IntTensor*, *optional*): if :attr:`get_infos` is ``True``, this is a tensor of
               size :math:`(*)` where non-zero values indicate whether factorization for the matrix or
@@ -1449,9 +1516,25 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
         ...   print('LU factorization succeeded for all samples!')
         LU factorization succeeded for all samples!
     """
+    if not torch._jit_internal.is_scripting():
+        if A.requires_grad:
+            if not (A.size(-2) == A.size(-1) and A.dtype.is_floating_point):
+                raise ValueError(
+                    'lu.backward works only with batches of squared full-rank matrices'
+                    ' of floating types.'
+                )
+
+            return _LU.apply(A, pivot, get_infos)
+    else:
+        if A.requires_grad:
+            raise RuntimeError(
+                'Script and require gradients is not supported at the moment.'
+                'If you just want to do the forward, use .detach()'
+                'on the input before calling the function.'
+            )
+
     # If get_infos is True, then we don't need to check for errors and vice versa
     return torch._lu_with_info(A, pivot=pivot, check_errors=(not get_infos))
-
 
 if TYPE_CHECKING:
     _ListOrSeq = Sequence[Tensor]

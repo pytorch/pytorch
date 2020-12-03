@@ -58,7 +58,7 @@ class TestNativeFunctions(TestCase):
         self.do_test_optional_floatlist_with_module(fake_module)
 
     def test_optional_floatlist_invalid(self):
-        with self.assertRaisesRegex(TypeError, "must be .* but found"):
+        with self.assertRaisesRegex(TypeError, "must be tuple of floats, not list"):
             FloatListWrapperModule()(torch.zeros(1), ["hi"])
 
         with self.assertRaisesRegex(RuntimeError, "value of type .* instead found type"):
@@ -191,32 +191,6 @@ class TestNativeFunctions(TestCase):
             torch._C._nn._test_string_default(x)
         scripted_fn = torch.jit.script(f)
         scripted_fn(dummy)
-
-    def test_ambiguous_defaults(self):
-        def _do_test(x):
-            fn = torch._C._nn._test_ambiguous_defaults
-            return [
-                fn(x),
-                fn(x, -1),
-                fn(x, -1, "a"),
-                fn(x, -1, "a", "a"),
-                fn(x, b="a"),
-
-                fn(x, -2, "b", -2),
-                fn(x, c=-2),
-
-                fn(x, "c"),
-
-                fn(x, -4, "d", "d", "d"),
-                fn(x, d="d"),
-            ]
-
-        dummy = torch.rand(1)
-        expect = [1] * 5 + [2] * 2 + [3] + [4] * 2
-        self.assertEqual(expect, _do_test(dummy))
-
-        scripted_test = torch.jit.script(_do_test)
-        self.assertEqual(expect, scripted_test(dummy))
 
 
 if __name__ == '__main__':

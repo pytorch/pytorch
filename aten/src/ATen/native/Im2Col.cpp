@@ -10,7 +10,7 @@
 namespace at {
 namespace native {
 namespace {
-
+  
 static void im2col_out_cpu_template(
     Tensor& output,
     const Tensor& input_,

@@ -120,14 +120,10 @@ public:
   }
 
   int priority() const {
-    #ifndef __HIP_PLATFORM_HCC__
       DeviceGuard guard{stream_.device()};
       int priority = 0;
       C10_CUDA_CHECK(cudaStreamGetPriority(stream(), &priority));
       return priority;
-    #else
-      AT_ERROR("cuStreamGetPriority with HIP is not supported");
-    #endif
   }
 
   /// Explicit conversion to cudaStream_t.
@@ -154,7 +150,6 @@ public:
   }
 
   static std::tuple<int, int> priority_range() {
-    #ifndef __HIP_PLATFORM_HCC__
       // Note: this returns the range of priority **supported by PyTorch**, not
       // the range of priority **supported by CUDA**. The former is a subset of
       // the latter. Curently PyTorch only supports 0 and -1, which are "low" and
@@ -165,9 +160,6 @@ public:
       TORCH_INTERNAL_ASSERT(least_priority >= 0, "Unexpected CUDA stream priority range");
       TORCH_INTERNAL_ASSERT(greatest_priority <= -1, "Unexpected CUDA stream priority range");
       return std::make_tuple(0, -1);
-    #else
-      AT_ERROR("cuDeviceGetStreamPriorityRange with HIP is not supported");
-    #endif
   }
 
   // Deleted for now; use CUDAEvent::block instead

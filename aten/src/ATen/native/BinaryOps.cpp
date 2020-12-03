@@ -40,14 +40,16 @@ DEFINE_DISPATCH(tanh_backward_stub);
 DEFINE_DISPATCH(maximum_stub);
 DEFINE_DISPATCH(minimum_stub);
 DEFINE_DISPATCH(fmod_stub);
-DEFINE_DISPATCH(fmod_scalar_stub);
 DEFINE_DISPATCH(logaddexp_stub);
 DEFINE_DISPATCH(logaddexp2_stub);
 DEFINE_DISPATCH(gcd_stub);
 DEFINE_DISPATCH(lcm_stub);
 DEFINE_DISPATCH(hypot_stub);
+DEFINE_DISPATCH(igamma_stub);
+DEFINE_DISPATCH(igammac_stub);
 DEFINE_DISPATCH(nextafter_stub);
 DEFINE_DISPATCH(heaviside_stub);
+DEFINE_DISPATCH(copysign_stub);
 
 static Tensor wrapped_scalar_tensor(Scalar scalar) {
   auto tensor = scalar_to_tensor(scalar);
@@ -119,6 +121,31 @@ Tensor add_relu(const Tensor& self, const Tensor& other, Scalar alpha) {
 
 Tensor& add_relu_(Tensor& self, const Tensor& other, Scalar alpha) {
   return add_relu_impl(self, self, other, alpha);
+}
+
+Tensor& copysign_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_float_op(result, self, other);
+  copysign_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor copysign(const Tensor& self, const Tensor& other) {
+  Tensor result;
+  auto iter = TensorIterator::binary_float_op(result, self, other);
+  copysign_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& copysign_(Tensor& self, const Tensor& other) {
+  return native::copysign_out(self, self, other);
+}
+
+Tensor copysign(const Tensor& self, Scalar other) {
+  return native::copysign(self, wrapped_scalar_tensor(other));
+}
+
+Tensor& copysign_(Tensor& self, Scalar other) {
+  return native::copysign_(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
@@ -869,34 +896,42 @@ Tensor& floor_divide_(Tensor& self, Scalar other) {
 
 Tensor& fmod_out(Tensor & result, const Tensor& self, const Tensor& other) {
   auto iter = TensorIterator::binary_op(result, self, other);
-  TORCH_CHECK(iter.device_type() == at::kCPU, "Native fmod only supports CPU");
   fmod_stub(iter.device_type(), iter);
   return result;
 }
 
 Tensor& fmod_out(Tensor & result, const Tensor& self, Scalar other) {
-  auto iter = TensorIterator::unary_op(result, self);
-  TORCH_CHECK(iter.device_type() == at::kCPU, "Native fmod only supports CPU");
-  fmod_scalar_stub(iter.device_type(), iter, other);
+  Tensor other_tensor = wrapped_scalar_tensor(other);
+  // FIXME: 'other' is converted to match the dtype of 'self' to retain
+  //   BC with TH, but in the future, we should use normal type promotion,
+  //   like in numpy
+  // Issue #47779: https://github.com/pytorch/pytorch/issues/47779
+  at::fmod_out(result, self, other_tensor.to(self.dtype()));
   return result;
 }
 
 Tensor fmod(const Tensor& self, const Tensor & other) {
-  Tensor result = at::empty({0}, self.options());
-  return at::fmod_out(result, self, other);
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  fmod_stub(iter.device_type(), iter);
+  return iter.output();
 }
 
 Tensor fmod(const Tensor& self, Scalar other) {
-  Tensor result = at::empty({0}, self.options());
-  return at::fmod_out(result, self, other);
+  Tensor other_tensor = wrapped_scalar_tensor(other);
+  // FIXME: 'other' is converted to match the dtype of 'self' to retain
+  //   BC with TH, but in the future, we should use normal type promotion,
+  //   like in numpy
+  // Issue #47779: https://github.com/pytorch/pytorch/issues/47779
+  return native::fmod(self, other_tensor.to(self.dtype()));
 }
 
 Tensor& fmod_(Tensor& self, const Tensor& other) {
-  return at::fmod_out(self, self, other);
+  return native::fmod_out(self, self, other);
 }
 
 Tensor& fmod_(Tensor& self, Scalar other) {
-  return at::fmod_out(self, self, other);
+  return native::fmod_out(self, self, other);
 }
 
 Tensor& logaddexp_out(Tensor& result, const Tensor& self, const Tensor& other) {
@@ -968,6 +1003,40 @@ Tensor& hypot_(Tensor& self, const Tensor& other) {
   return at::hypot_out(self, self, other);
 }
 
+Tensor& igamma_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other);
+  igamma_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor igamma(const Tensor& self, const Tensor& other) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  igamma_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& igamma_(Tensor& self, const Tensor& other) {
+  return at::igamma_out(self, self, other);
+}
+
+Tensor& igammac_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other);
+  igammac_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor igammac(const Tensor& self, const Tensor& other) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  igammac_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& igammac_(Tensor& self, const Tensor& other) {
+  return at::igammac_out(self, self, other);
+}
+
 Tensor& nextafter_out(Tensor& result, const Tensor& self, const Tensor& other) {
   auto iter = TensorIterator::binary_op(result, self, other);
   nextafter_stub(iter.device_type(), iter);
@@ -1016,6 +1085,18 @@ Tensor heaviside(const Tensor& self, const Tensor& values) {
 
 Tensor& heaviside_(Tensor& self, const Tensor& values) {
   return at::heaviside_out(self, self, values);
+}
+
+Tensor& ldexp_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  return at::mul_out(result, self, at::pow(2.0, other));
+}
+
+Tensor ldexp(const Tensor& self, const Tensor& other) {
+  return at::mul(self, at::pow(2.0, other));
+}
+
+Tensor& ldexp_(Tensor& self, const Tensor& other) {
+  return at::ldexp_out(self, self, other);
 }
 
 // TODO: Deduplicate this with the TensorIterator logic.  This would

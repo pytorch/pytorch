@@ -1,4 +1,3 @@
-
 #include <torch/csrc/jit/codegen/cuda/predicate_compute.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
@@ -14,6 +13,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 std::vector<kir::Bool*> PredicateCompute::computePredicates(
     const TensorView* tv,
@@ -287,6 +287,7 @@ UnrollPredicate::UnrollPredicate(
   openLoop(unrolled_loop);
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

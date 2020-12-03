@@ -1,7 +1,8 @@
 from .module import Module
-from .linear import Identity, Linear, Bilinear
+from .linear import Identity, Linear, Bilinear, LazyLinear
 from .conv import Conv1d, Conv2d, Conv3d, \
-    ConvTranspose1d, ConvTranspose2d, ConvTranspose3d
+    ConvTranspose1d, ConvTranspose2d, ConvTranspose3d, \
+    LazyConv1d, LazyConv2d, LazyConv3d, LazyConvTranspose1d, LazyConvTranspose2d, LazyConvTranspose3d
 from .activation import Threshold, ReLU, Hardtanh, ReLU6, Sigmoid, Tanh, \
     Softmax, Softmax2d, LogSoftmax, ELU, SELU, CELU, GELU, Hardshrink, LeakyReLU, LogSigmoid, \
     Softplus, Softshrink, MultiheadAttention, PReLU, Softsign, Softmin, Tanhshrink, RReLU, GLU, \
@@ -31,6 +32,7 @@ from .adaptive import AdaptiveLogSoftmaxWithLoss
 from .transformer import TransformerEncoder, TransformerDecoder, \
     TransformerEncoderLayer, TransformerDecoderLayer, Transformer
 from .flatten import Flatten, Unflatten
+from .channelshuffle import ChannelShuffle
 
 __all__ = [
     'Module', 'Identity', 'Linear', 'Conv1d', 'Conv2d', 'Conv3d', 'ConvTranspose1d',
@@ -54,5 +56,7 @@ __all__ = [
     'ConstantPad3d', 'Bilinear', 'CosineSimilarity', 'Unfold', 'Fold',
     'AdaptiveLogSoftmaxWithLoss', 'TransformerEncoder', 'TransformerDecoder',
     'TransformerEncoderLayer', 'TransformerDecoderLayer', 'Transformer',
-    'Flatten', 'Unflatten', 'Hardsigmoid', 'Hardswish', 'SiLU', 'TripletMarginWithDistanceLoss'
+    'LazyLinear', 'LazyConv1d', 'LazyConv2d', 'LazyConv3d',
+    'LazyConvTranspose1d', 'LazyConvTranspose2d', 'LazyConvTranspose3d',
+    'Flatten', 'Unflatten', 'Hardsigmoid', 'Hardswish', 'SiLU', 'TripletMarginWithDistanceLoss', 'ChannelShuffle'
 ]

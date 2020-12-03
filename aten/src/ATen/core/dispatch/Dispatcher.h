@@ -211,6 +211,28 @@ public:
     return dispatch_key != DispatchKey::BackendSelect;
   }
 
+  //
+  // ------------------------------------------------------------------------
+  //
+  // Assertions
+  //
+  // ------------------------------------------------------------------------
+
+  /**
+   * For testing purposes.
+   * Returns a list of all operators that were created through calls to registerImpl(),
+   * without any corresponding calls to registerDef(). After static initialization
+   * is done this is almost certainly a bug, as the created OperatorHandle won't have
+   * any schema associated with it and users calling the op through the dispatcher
+   * won't be able to access it
+   *
+   * Note that we cannot enforce this invariant "as we go" during static initialization,
+   * due to undefined static initialization order- we have no guarantees over the order
+   * in which .def() and .impl() calls are registered in the dispatcher at static
+   * initialization time. So this function should only be called after static initialization.
+   */
+  std::vector<OperatorHandle> findDanglingImpls() const;
+
 private:
   Dispatcher();
 
@@ -356,7 +378,7 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
   // Note: for perf reasons we wouldn't want to pass arguments into
   // the function call or prematurely box them
   at::RecordFunction guard(at::RecordScope::FUNCTION);
-  if (C10_UNLIKELY(guard.active)) {
+  if (C10_UNLIKELY(guard.isActive())) {
     if (shouldRecord(dispatchKey) && op.operatorIterator_->op.isObserved()) {
       int64_t seq_num = -1;
       // Setting sequence number in the Autograd case to associate
@@ -364,11 +386,11 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
       if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
         seq_num = at::sequence_number::peek();
       }
-      if (guard.needs_inputs) {
-        torch::jit::Stack stack = impl::BoxedKernelWrapper<Return(Args...)>::boxArgs(args...);
-        guard.before(op.schema().name(), stack, seq_num);
+      if (guard.needsInputs()) {
+        torch::jit::Stack stack = impl::boxArgs(args...);
+        guard.before(op, stack, seq_num);
       } else {
-        guard.before(op.schema().name(), seq_num);
+        guard.before(op, seq_num);
       }
     }
   }
@@ -409,16 +431,16 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   // using already existing stack to record function execution in observers
   at::RecordFunction guard(at::RecordScope::FUNCTION);
-  if (C10_UNLIKELY(guard.active)) {
+  if (C10_UNLIKELY(guard.isActive())) {
     if (shouldRecord(dispatchKey) && entry.isObserved()) {
       int64_t seq_num = -1;
       if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
         seq_num = at::sequence_number::peek();
       }
-      if (guard.needs_inputs) {
-        guard.before(op.schema().name(), *stack, seq_num);
+      if (guard.needsInputs()) {
+        guard.before(op, *stack, seq_num);
       } else {
-        guard.before(op.schema().name(), seq_num);
+        guard.before(op, seq_num);
       }
     }
   }

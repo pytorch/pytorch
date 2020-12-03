@@ -79,12 +79,34 @@ graph():
   ConstantPooling(graph);
   testing::FileCheck()
       .check_count(
-          "Float(2:1, requires_grad=0, device=cpu) = prim::Constant",
+          "Float(2, strides=[1], requires_grad=0, device=cpu) = prim::Constant",
           1,
           /*exactly*/ true)
       ->check_count(
-          "Long(2:1, requires_grad=0, device=cpu) = prim::Constant",
+          "Long(2, strides=[1], requires_grad=0, device=cpu) = prim::Constant",
           1,
+          /*exactly*/ true)
+      ->run(*graph);
+}
+
+TEST(ConstantPoolingTest, DictConstantPooling) {
+  auto graph = std::make_shared<Graph>();
+  parseIR(
+      R"IR(
+graph():
+  %0 : int = prim::Constant[value=1]() # test/elias.py:6:9
+  %1 : int = prim::Constant[value=2]() # test/elias.py:6:12
+  %a.1 : Dict(int, int) = prim::DictConstruct(%0, %1)
+  %b.1 : Dict(int, int) = prim::DictConstruct(%1, %1)
+  return (%a.1, %b.1)
+  )IR",
+      &*graph);
+  ConstantPropagation(graph);
+  ConstantPooling(graph);
+  testing::FileCheck()
+      .check_count(
+          "Dict(int, int) = prim::Constant",
+          2,
           /*exactly*/ true)
       ->run(*graph);
 }

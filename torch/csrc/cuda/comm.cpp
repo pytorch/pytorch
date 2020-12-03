@@ -130,7 +130,7 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
 // When splitting, the view operations will make all Variables broadcast
 // together to share a single version counter, because they are all views of the
 // large Variable. However, that large Variable is immediately discarded and all
-// these Varaibles do not share storage at all.
+// these Variables do not share storage at all.
 //
 // For example, when two buffers are broadcast together in `DataParallel` and
 // one of them is modified in-place during `forward` but the other is needed in
