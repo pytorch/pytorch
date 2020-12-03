@@ -263,7 +263,7 @@ def sample_inputs_addmm(self, device, dtype, requires_grad):
                                     low=None, high=None, 
                                     requires_grad=False))),) 
 
-def np_integer_unary_ufunc_promotion_wrapper(fn):
+def np_unary_ufunc_integer_promotion_wrapper(fn):
     # Wrapper that passes the PyTorch's default scalar
     #   type as an argument to the wrapped NumPy
     #   unary ufunc when given an integer input.
@@ -532,7 +532,7 @@ op_db: List[Any] = [
                                 dtypes=[torch.float], active_if=TEST_WITH_ROCM),
                    )),
     UnaryUfuncInfo('sinh',
-                   ref=np_integer_unary_ufunc_promotion_wrapper(np.sinh),
+                   ref=np_unary_ufunc_integer_promotion_wrapper(np.sinh),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
                    promotes_integers_to_float=True,
