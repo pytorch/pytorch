@@ -2281,10 +2281,10 @@ class TestDistributions(TestCase):
                                         'Gumbel(loc={}, scale={})'.format(loc, scale))
 
     def test_kumaraswamy_shape(self):
-        concentration1 = torch.tensor(torch.randn(2, 3).abs(), requires_grad=True)
-        concentration0 = torch.tensor(torch.randn(2, 3).abs(), requires_grad=True)
-        concentration1_1d = torch.tensor(torch.randn(1).abs(), requires_grad=True)
-        concentration0_1d = torch.tensor(torch.randn(1).abs(), requires_grad=True)
+        concentration1 = torch.randn(2, 3).abs().requires_grad_()
+        concentration0 = torch.randn(2, 3).abs().requires_grad_()
+        concentration1_1d = torch.randn(1).abs().requires_grad_()
+        concentration0_1d = torch.randn(1).abs().requires_grad_()
         self.assertEqual(Kumaraswamy(concentration1, concentration0).sample().size(), (2, 3))
         self.assertEqual(Kumaraswamy(concentration1, concentration0).sample((5,)).size(), (5, 2, 3))
         self.assertEqual(Kumaraswamy(concentration1_1d, concentration0_1d).sample().size(), (1,))
@@ -2295,10 +2295,10 @@ class TestDistributions(TestCase):
     # Kumaraswamy distribution is not implemented in SciPy
     # Hence these tests are explicit
     def test_kumaraswamy_mean_variance(self):
-        c1_1 = torch.tensor(torch.randn(2, 3).abs(), requires_grad=True)
-        c0_1 = torch.tensor(torch.randn(2, 3).abs(), requires_grad=True)
-        c1_2 = torch.tensor(torch.randn(4).abs(), requires_grad=True)
-        c0_2 = torch.tensor(torch.randn(4).abs(), requires_grad=True)
+        c1_1 = torch.randn(2, 3).abs().requires_grad_()
+        c0_1 = torch.randn(2, 3).abs().requires_grad_()
+        c1_2 = torch.randn(4).abs().requires_grad_()
+        c0_2 = torch.randn(4).abs().requires_grad_()
         cases = [(c1_1, c0_1), (c1_2, c0_2)]
         for i, (a, b) in enumerate(cases):
             m = Kumaraswamy(a, b)
