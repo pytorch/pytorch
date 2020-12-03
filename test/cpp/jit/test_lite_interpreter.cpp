@@ -440,7 +440,7 @@ TEST(LiteInterpreterTest, OneSubmoduleModuleInfo) {
   }
 
   std::unordered_set<std::string> expected_result(
-      {"top(B).forward", "top(B).A0(A).forward"});
+      {"top(B).forward{}", "top(B).A0(A).forward{self.A0.forward:}"});
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
@@ -482,7 +482,7 @@ TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
   }
 
   std::unordered_set<std::string> expected_result(
-      {"top(C).forward", "top(C).A0(A).forward", "top(C).B0(B).forward"});
+      {"top(C).forward{}", "top(C).A0(A).forward{self.A0.forward:}", "top(C).B0(B).forward{self.B0.forward:}"});
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
@@ -547,7 +547,7 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
   //     return self.A0.forward(self.B0.forward(x))
 
   std::unordered_set<std::string> expected_result(
-      {"top(C).A0(A).forward", "top(C).B0(B).forward"});
+      {"top(C).A0(A).forward{}", "top(C).B0(B).forward{self.B0.forward:}"});
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
@@ -593,9 +593,9 @@ TEST(LiteInterpreterTest, HierarchyModuleInfo) {
   // "top(C).B0(B).forward": for the add operator in B0.
   // "top(C).B0(B).forward.A0(A).forward": for the add operator in A0.
   std::unordered_set<std::string> expected_result(
-      {"top(C).forward",
-       "top(C).B0(B).forward",
-       "top(C).B0(B).forward.A0(A).forward"});
+      {"top(C).forward{}",
+       "top(C).B0(B).forward{self.B0.forward:}",
+       "top(C).B0(B).forward.A0(A).forward{self.B0.forward:self.A0.forward:}"});
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 

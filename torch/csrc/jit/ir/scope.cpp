@@ -132,6 +132,20 @@ std::vector<InlinedCallStackEntry> InlinedCallStack::vec() {
   return r;
 }
 
+SourceRange InlinedCallStack::source_range() const {
+  return source_range_;
+}
+
+std::string InlinedCallStack::source_range_trace() {
+  std::string source_range_trace;
+  c10::optional<InlinedCallStackPtr> current = intrusive_from_this();
+  while (current) {
+    source_range_trace.append((*current)->source_range_.text()).append(":");
+    current = (*current)->callee_;
+  }
+  return source_range_trace;
+}
+
 ModuleInstanceInfo::ModuleInstanceInfo(
     c10::ClassTypePtr module_type,
     std::string instance_name)

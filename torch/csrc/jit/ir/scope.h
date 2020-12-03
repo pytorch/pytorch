@@ -143,6 +143,12 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
   // Return next element in the callstack list.
   c10::optional<InlinedCallStackPtr> callee() const;
 
+  // Return next element in the callstack list.
+  SourceRange source_range() const;
+
+  // Return next element in the callstack list.
+  std::string source_range_trace();
+
   // Return callstack as a vector of [Function, SourceRange] pairs.
   std::vector<InlinedCallStackEntry> vec();
 };
