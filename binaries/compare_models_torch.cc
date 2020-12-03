@@ -29,8 +29,14 @@
 #include <chrono>
 using namespace std::chrono;
 
-C10_DEFINE_string(refmodel, "", "The reference torch script model to compare against.");
-C10_DEFINE_string(model, "", "The torch script model to compare to the reference model.");
+C10_DEFINE_string(
+    refmodel,
+    "",
+    "The reference torch script model to compare against.");
+C10_DEFINE_string(
+    model,
+    "",
+    "The torch script model to compare to the reference model.");
 C10_DEFINE_string(
     input_dims,
     "",
@@ -45,45 +51,55 @@ C10_DEFINE_string(
     "contiguous_format",
     "Input memory format (contiguous_format/channels_last)");
 C10_DEFINE_bool(
-  no_inputs,
-  false,
-  "Whether the model has any input. Will ignore other input arugments if true");
+    no_inputs,
+    false,
+    "Whether the model has any input. Will ignore other input arugments if true");
 C10_DEFINE_bool(
-  use_caching_allocator,
-  false,
-  "Whether to cache allocations between inference iterations");
+    use_caching_allocator,
+    false,
+    "Whether to cache allocations between inference iterations");
 C10_DEFINE_bool(
-  print_output,
-  false,
-  "Whether to print output with all one input tensor.");
+    print_output,
+    false,
+    "Whether to print output with all one input tensor.");
 C10_DEFINE_int(iter, 10, "The number of iterations to run.");
 C10_DEFINE_bool(
-  report_pep,
-  false,
-  "Whether to print performance stats for AI-PEP.");
-
+    report_pep,
+    false,
+    "Whether to print performance stats for AI-PEP.");
 C10_DEFINE_int(pytext_len, 0, "Length of input sequence.");
-C10_DEFINE_string(backend, "cpu", "what backend to use for model (vulkan, cpu, metal) (default=cpu)");
-C10_DEFINE_string(refbackend, "cpu", "what backend to use for model (vulkan, cpu, metal) (default=cpu)");
+C10_DEFINE_string(
+    backend,
+    "cpu",
+    "what backend to use for model (vulkan, cpu, metal) (default=cpu)");
+C10_DEFINE_string(
+    refbackend,
+    "cpu",
+    "what backend to use for model (vulkan, cpu, metal) (default=cpu)");
+C10_DEFINE_string(tolerance, "1e-5", "tolerance to use for comparison")
 
-bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor>& inputs) {
+    bool checkRtol(
+        const at::Tensor& diff,
+        const std::vector<at::Tensor>& inputs,
+        float tolerance) {
   float maxValue = 0.0f;
-  float tolerance = 1e-5;
 
   for (const auto& tensor : inputs) {
     maxValue = fmax(tensor.abs().max().item<float>(), maxValue);
   }
   float maxDiff = diff.abs().max().item<float>();
 
-  return maxDiff < (tolerance*maxValue);
+  return maxDiff < (tolerance * maxValue);
 }
 
-bool almostEqual(const at::Tensor& a, const at::Tensor& b) {
-  return checkRtol(a - b, {a, b});
+bool almostEqual(const at::Tensor& a, const at::Tensor& b, float tolerance) {
+  return checkRtol(a - b, {a, b}, tolerance);
 }
 
-std::vector<std::string>
-split(char separator, const std::string& string, bool ignore_empty = true) {
+std::vector<std::string> split(
+    char separator,
+    const std::string& string,
+    bool ignore_empty = true) {
   std::vector<std::string> pieces;
   std::stringstream ss(string);
   std::string item;
@@ -174,15 +190,13 @@ std::vector<c10::IValue> create_inputs(
     auto stensor = FLAGS_pytext_len * at::ones({1}, torch::kI64);
     if (refbackend == "vulkan") {
       refinputs.push_back(stensor.vulkan());
-    }
-    else{
+    } else {
       refinputs.push_back(stensor);
     }
 
     if (backend == "vulkan") {
       inputs.push_back(stensor.vulkan());
-    }
-    else{
+    } else {
       inputs.push_back(stensor);
     }
   }
@@ -192,16 +206,20 @@ std::vector<c10::IValue> create_inputs(
 
 int main(int argc, char** argv) {
   c10::SetUsageMessage(
-    "Run accuracy comparison to a reference model for a pytorch model.\n"
-    "Example usage:\n"
-    "./model_compare"
-    " --refmodel=<ref_model_file>"
-    " --model=<model_file>"
-    " --iter=20");
+      "Run accuracy comparison to a reference model for a pytorch model.\n"
+      "Example usage:\n"
+      "./model_compare"
+      " --refmodel=<ref_model_file>"
+      " --model=<model_file>"
+      " --iter=20");
   if (!c10::ParseCommandLineFlags(&argc, &argv)) {
     std::cerr << "Failed to parse command line flags!" << std::endl;
     return 1;
   }
+
+  std::stringstream ss(FLAGS_tolerance);
+  float tolerance = 0;
+  ss >> tolerance;
 
   torch::autograd::AutoGradMode guard(false);
   torch::jit::GraphOptimizerEnabledGuard no_optimizer_guard(false);
@@ -218,7 +236,8 @@ int main(int argc, char** argv) {
   }
   std::cout << "Running modules." << std::endl;
 
-  for(int i=0; i < FLAGS_iter; ++i) {
+  int passed = 0;
+  for (int i = 0; i < FLAGS_iter; ++i) {
     std::vector<c10::IValue> refinputs;
     std::vector<c10::IValue> inputs;
     create_inputs(refinputs, inputs, FLAGS_refbackend, FLAGS_backend);
@@ -226,15 +245,15 @@ int main(int argc, char** argv) {
     const auto refoutput = refmodule.forward(refinputs).toTensor().cpu();
     const auto output = module.forward(inputs).toTensor().cpu();
 
-    std::cout << "Run " << i << " ";
-    bool check = almostEqual(refoutput, output);
+    bool check = almostEqual(refoutput, output, tolerance);
     if (check) {
-      std::cout << "Passed!" << std::endl;
-    }
-    else {
-      std::cout << "Failed!" << std::endl;
+      passed += 1;
     }
   }
+  std::cout << "Output was equal within tolerance " << passed << "/"
+            << FLAGS_iter
+            << " times. Pass rate: " << (float)passed / (float)FLAGS_iter * 100
+            << std::setprecision(2) << "%" << std::endl;
 
   return 0;
 }

@@ -631,6 +631,14 @@ RegisterOperators reg(
          listEq<int64_t>,
          aliasAnalysisFromSchema()),
      OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::eq.device(Device a, Device b) -> bool"),
+         [](Stack* stack) {
+           auto a = pop(stack).toDevice();
+           auto b = pop(stack).toDevice();
+           push(stack, a == b);
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("prim::Uninitialized() -> Any"),
          [](Stack* stack) { push(stack, IValue::uninitialized()); },
          aliasAnalysisSpecialCase()),
@@ -698,6 +706,7 @@ RegisterOperators reg(
      DEFINE_BOOL_OP(aten::__and__, a&& b),
      DEFINE_BOOL_OP(aten::__or__, a || b),
      DEFINE_BOOL_OP(aten::__xor__, a != b),
+     DEFINE_UNARY_OP(aten::round, round_to_even(a), float, float),
      DEFINE_UNARY_OP(aten::floor, floor(a), int, int),
      DEFINE_UNARY_OP(aten::ceil, ceil(a), int, int),
      DEFINE_UNARY_OP(aten::neg, -a, int, float),
@@ -1338,7 +1347,7 @@ int64_t normalizeIndex(int64_t idx, int64_t list_size) {
 
 int64_t stringFindImpl(
     std::string string,
-    std::string substr,
+    const std::string& substr,
     int64_t start,
     int64_t end,
     bool reverse = false) {

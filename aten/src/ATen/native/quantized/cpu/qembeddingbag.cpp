@@ -31,10 +31,18 @@ at::Tensor embedding_bag_4bit_impl(
   // Get compressed indices for pruned_weights op.
   int32_t* compressed_indices_mapping_data = nullptr;
   int compressed_index_size = 0;
+  bool fallback_to_no_sparse = false;
   if (pruned_weights) {
     compressed_index_size = compressed_indices_mapping.value().numel();
     compressed_indices_mapping_data =
         compressed_indices_mapping.value().data_ptr<int32_t>();
+
+    // if compressed_indices_mapping is [0], it is a indicator that
+    // we should fallback to non sparse embedding look up kernel.
+    if ((compressed_index_size == 1 &&
+         compressed_indices_mapping_data[0] == 0)) {
+      fallback_to_no_sparse = true;
+    }
   }
 
   const int64_t N = weight.size(0);
@@ -69,7 +77,7 @@ at::Tensor embedding_bag_4bit_impl(
   constexpr int prefetch_distance = 16;
 
 #ifdef USE_FBGEMM
-  if (!pruned_weights) {
+  if (!pruned_weights || fallback_to_no_sparse) {
     // Generate the fbgemm kernel
     auto kernel = fbgemm::GenerateEmbeddingSpMDMNBit<IndexType, OffsetType>(
         /*bit rate=*/4,
@@ -209,10 +217,18 @@ at::Tensor embedding_bag_byte_impl(
   // Get compressed indices for pruned_weights.
   int32_t* compressed_indices_mapping_data = nullptr;
   int compressed_index_size = 0;
+  bool fallback_to_no_sparse = false;
   if (pruned_weights) {
     compressed_index_size = compressed_indices_mapping.value().numel();
     compressed_indices_mapping_data =
         compressed_indices_mapping.value().data_ptr<int32_t>();
+
+    // if compressed_indices_mapping is [0], it is a indicator that
+    // we should fallback to non sparse embedding look up kernel.
+    if ((compressed_index_size == 1 &&
+         compressed_indices_mapping_data[0] == 0)) {
+      fallback_to_no_sparse = true;
+    }
   }
 
   const int64_t N = weight.size(0);
@@ -247,7 +263,7 @@ at::Tensor embedding_bag_byte_impl(
 
   const int index_size = indices.numel();
 #ifdef USE_FBGEMM
-  if (!pruned_weights) {
+  if (!pruned_weights || fallback_to_no_sparse) {
     auto kernel_i8 =
         fbgemm::GenerateEmbeddingSpMDM<uint8_t, IndexType, OffsetType>(
             /*block_size=*/D,
@@ -305,9 +321,12 @@ at::Tensor embedding_bag_byte_impl(
         success,
         "FBGEMM GenerateEmbeddingSpMDMRowWiseSparse kernel failed for 8-bit input");
   }
+  return output;
 #endif
   // TODO add default (non-FBGEMM) implementation.
-  return output;
+  TORCH_CHECK(
+      false,
+      "embedding_bag_byte expects FBGEMM support. This PyTorch installation was not built with FBGEMM operators");
 }
 
 at::Tensor embedding_bag_byte_helper(
@@ -509,12 +528,23 @@ at::Tensor PackedEmbeddingBagWeight::embeddingbag_4bit(
     const c10::optional<at::Tensor>& per_sample_weights_,
     const c10::optional<at::Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
+  if (per_sample_weights_.has_value()) {
+    TORCH_CHECK(
+        (per_sample_weights_.value().scalar_type() == at::kFloat ||
+         per_sample_weights_.value().scalar_type() == at::kHalf),
+        "Expect fp32 or fp16 weights, but found",
+        per_sample_weights_.value().scalar_type(),
+        " instead")
+  }
+
   return embedding_bag_4bit_helper(
       packed_w.contiguous(),
       indices,
       offsets_in,
       pruned_weights,
-      per_sample_weights_,
+      per_sample_weights_.has_value()
+          ? per_sample_weights_.value().to(at::kFloat)
+          : per_sample_weights_,
       compressed_indices_mapping,
       include_last_offset);
 }
@@ -554,12 +584,23 @@ Tensor embedding_bag_4bit_rowwise_offsets(
     const c10::optional<Tensor>& per_sample_weights_,
     const c10::optional<Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
+  if (per_sample_weights_.has_value()) {
+    TORCH_CHECK(
+        (per_sample_weights_.value().scalar_type() == at::kFloat ||
+         per_sample_weights_.value().scalar_type() == at::kHalf),
+        "Expect fp32 or fp16 weights, but found",
+        per_sample_weights_.value().scalar_type(),
+        " instead")
+  }
+
   return embedding_bag_4bit_helper(
       weight.contiguous(),
       indices,
       offsets_in,
       pruned_weights,
-      per_sample_weights_,
+      per_sample_weights_.has_value()
+          ? per_sample_weights_.value().to(at::kFloat)
+          : per_sample_weights_,
       compressed_indices_mapping,
       include_last_offset);
 }

@@ -153,7 +153,8 @@ class Graph:
     The Node semantics are as follows:
 
     - `placeholder` represents a function input. The `name` attribute specifies the name this value will take on.
-    `target` is similarly the name of the argument. `args` and `kwargs` are don't-care. Placeholders correspond to
+    `target` is similarly the name of the argument. `args` holds either: 1) nothing, or 2) a single argument
+    denoting the default parameter of the function input. `kwargs` is don't-care. Placeholders correspond to
     the function parameters (e.g. `x`) in the graph printout.
     - `get_attr` retrieves a parameter from the module hierarchy. `name` is similarly the name the result of the
     fetch is assigned to. `target` is the fully-qualified name of the parameter's position in the module hierarchy.
@@ -242,8 +243,8 @@ class Graph:
         assert op in ('call_function', 'call_method', 'get_attr', 'call_module', 'placeholder', 'output')
         args = () if args is None else args
         kwargs = {} if kwargs is None else kwargs
-        sanitized_name = self._register_name_used(name) if name is not None else self._name(target)
-        n = Node(self, sanitized_name, op, target, args, kwargs, type_expr)
+        unique_name = self._create_unique_name(name if name is not None else self._target_to_str(target))
+        n = Node(self, unique_name, op, target, args, kwargs, type_expr)
         self._insert(n)
         self._len += 1
         return n
@@ -413,21 +414,7 @@ class Graph:
         kwargs = map_arg(node.kwargs, arg_transform)
         assert isinstance(args, tuple)
         assert isinstance(kwargs, dict)
-        if node.op == "placeholder":
-            # Placeholder names are user-visible, so they should be copied as-is without normalizing them.
-            name = node.name
-        else:
-            sanitized_name = node.name
-            if '_' in node.name:
-                base, maybe_idx = node.name.rsplit('_', 1)
-                if base != '':
-                    try:
-                        int(maybe_idx)
-                        sanitized_name = base
-                    except ValueError:
-                        pass
-            name = self._name(sanitized_name)
-        return self.create_node(node.op, node.target, args, kwargs, name, node.type)
+        return self.create_node(node.op, node.target, args, kwargs, node.name, node.type)
 
     def output(self, result: Argument, type_expr: Optional[Any] = None):
         """
@@ -440,7 +427,7 @@ class Graph:
         """
         return self.create_node(op='output', target='output', args=(result,), type_expr=type_expr)
 
-    def _name(self, target: Target) -> str:
+    def _target_to_str(self, target : Target) -> str:
         if callable(target):
             op = target.__name__
         else:
@@ -448,31 +435,31 @@ class Graph:
             op = target
             if _is_magic(op):
                 op = op[2:-2]
-        op = op.replace('.', '_')
-        # delete all characters that are illegal in a Python identifier
-        op = re.sub('[^0-9a-zA-Z_]+', '_', op)
         op = _snake_case(op)
-        if op[0].isdigit():
-            op = f'_{op}'
+        return op
 
-        return self._register_name_used(op)
+    def _create_unique_name(self, candidate : str) -> str:
+        # delete all characters that are illegal in a Python identifier
+        candidate = re.sub('[^0-9a-zA-Z_]+', '_', candidate)
+        if candidate[0].isdigit():
+            candidate = f'_{candidate}'
 
-    def _register_name_used(self, op : str) -> str:
-        """
-        Even if a user provides us with a name, we must register that that
-        name is used to prevent duplication of names from further nodes as
-        well as ensure that the name provided does not shadow a builtin.
-        """
-        if op not in self._used_names:
-            self._used_names[op] = 0
-            # Avoid shadowing PyTorch and Python builtins.
-            if not hasattr(torch, op) and \
-               not hasattr(torch.nn.functional, op) and \
-               not hasattr(torch.nn, op) and \
-               not _shadows_builtin_name(op):
-                return op
-        i = self._used_names[op] = self._used_names[op] + 1
-        return f'{op}_{i}'
+        def illegal_shadowing_name(name : str) -> bool:
+            return hasattr(torch, name) or \
+                hasattr(torch.nn.functional, name) or \
+                hasattr(torch.nn, name) or \
+                _shadows_builtin_name(name)
+
+        while candidate in self._used_names or illegal_shadowing_name(candidate):
+            match = re.match(r"(.*)_(\d+)", candidate)
+            if match is None:
+                candidate = candidate + '_1'
+            else:
+                base, num = match.group(1, 2)
+                candidate = f'{base}_{int(num) + 1}'
+
+        self._used_names.setdefault(candidate)
+        return candidate
 
     def python_code(self, root_module: str) -> str:
         """
@@ -500,7 +487,35 @@ class Graph:
                     type_repr(sub_type)
             return typename
 
-        for node in self.nodes:
+
+        # Run through reverse nodes and record the first instance of a use
+        # of a given node. This represents the *last* use of the node in the
+        # execution order of the program, which we will use to free unused
+        # values
+        node_to_last_use : Dict[Node, Node] = {}
+        user_to_last_uses : Dict[Node, List[Node]] = {}
+
+        def register_last_uses(n : Node, user : Node):
+            if n not in node_to_last_use:
+                node_to_last_use[n] = user
+                user_to_last_uses.setdefault(user, []).append(n)
+
+        for node in reversed(self.nodes):
+            map_arg(node.args, lambda n: register_last_uses(n, node))
+            map_arg(node.kwargs, lambda n: register_last_uses(n, node))
+
+        def delete_unused_values(user : Node):
+            """
+            Delete values after their last use. This ensures that values that are
+            not used in the remainder of the code are freed and the memory usage
+            of the code is optimal.
+            """
+            nodes_to_delete = user_to_last_uses.get(user, [])
+            if len(nodes_to_delete):
+                to_delete_str = ' = '.join([n.name for n in nodes_to_delete] + ['None'])
+                body.append(f'{to_delete_str}\n')
+
+        def emit_node(node : Node):
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
                 maybe_type_annotation = '' if node.type is None else f' : {type_repr(node.type)}'
@@ -509,20 +524,20 @@ class Graph:
                 raw_name = node.target.replace('*', '')
                 if raw_name != node.name:
                     body.append(f'{node.name} = {raw_name}\n')
-                continue
+                return
             elif node.op == 'call_method':
                 assert isinstance(node.target, str)
                 body.append(
                     f'{node.name} = {_format_target(repr(node.args[0]), node.target)}'
                     f'({_format_args(node.args[1:], node.kwargs)})\n')
-                continue
+                return
             elif node.op == 'call_function':
                 assert callable(node.target)
                 # pretty print operators
                 if node.target.__module__ == '_operator' and node.target.__name__ in magic_methods:
                     assert isinstance(node.args, tuple)
                     body.append(f'{node.name} = {magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}\n')
-                    continue
+                    return
                 qualified_name = get_qualified_name(node.target)
                 register_modules_used(qualified_name)
                 if qualified_name == 'getattr' and \
@@ -531,23 +546,27 @@ class Graph:
                    node.args[1].isidentifier():
                     # pretty print attribute access
                     body.append(f'{node.name} = {_format_target(repr(node.args[0]), node.args[1])}\n')
-                    continue
+                    return
                 body.append(f'{node.name} = {qualified_name}({_format_args(node.args, node.kwargs)})\n')
-                continue
+                return
             elif node.op == 'call_module':
                 assert isinstance(node.target, str)
                 body.append(f'{node.name} = {_format_target(root_module, node.target)}({_format_args(node.args, node.kwargs)})\n')
-                continue
+                return
             elif node.op == 'get_attr':
                 assert isinstance(node.target, str)
                 body.append(f'{node.name} = {_format_target(root_module, node.target)}\n')
-                continue
+                return
             elif node.op == 'output':
                 if node.type is not None:
                     maybe_return_annotation = f" -> {type_repr(node.type)}"
-                body.append(f'return {repr(node.args[0])}')
-                continue
+                body.append(f'return {repr(node.args[0])}\n')
+                return
             raise NotImplementedError(f'node: {node.op} {node.target}')
+
+        for node in self.nodes:
+            emit_node(node)
+            delete_unused_values(node)
 
         # repr() for inf and nan floating point values aren't parseable by
         # python as literals. Explicitly import the names from the `math` module.

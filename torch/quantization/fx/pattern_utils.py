@@ -1,6 +1,11 @@
 import torch
 import sys
 from collections import OrderedDict
+from typing import Dict, Any, Union, Tuple, Callable
+
+# TODO(future PR): fix the typing on QuantizeHandler (currently a circular dependency)
+QuantizeHandler = Any
+Pattern = Union[Callable, Tuple[Callable, Callable], Tuple[Callable, Callable, Callable]]
 
 # pattern for conv bn fusion
 DEFAULT_FUSION_PATTERNS = OrderedDict()
@@ -10,7 +15,7 @@ def register_fusion_pattern(pattern):
         return fn
     return insert
 
-def get_default_fusion_patterns():
+def get_default_fusion_patterns() -> Dict[Pattern, QuantizeHandler]:
     return DEFAULT_FUSION_PATTERNS
 
 DEFAULT_QUANTIZATION_PATTERNS = OrderedDict()
@@ -29,14 +34,26 @@ def register_quant_pattern(pattern, output_activation_post_process=None):
     return insert
 
 # Get patterns for both static quantization and qat
-def get_default_quant_patterns():
+def get_default_quant_patterns() -> Dict[Pattern, QuantizeHandler]:
     return DEFAULT_QUANTIZATION_PATTERNS
 
 # a map from pattern to output activation post process constructor
 # e.g. torch.sigmoid -> default_affine_fixed_qparam_fake_quant
-def get_default_output_activation_post_process_map():
+def get_default_output_activation_post_process_map() -> Dict[Pattern, torch.quantization.observer.ObserverBase]:
     return DEFAULT_OUTPUT_ACTIVATION_POST_PROCESS_MAP
 
+# a set of QuantizeHandler classes that are not observed
+# we'll skip inserting observers for input and output for these QuantizeHandlers
+# used for ops that only supports dynamic/weight only quantization
+DEFAULT_NOT_OBSERVED_QUANTIZE_HANDLER = set()
+def mark_input_output_not_observed():
+    def insert(fn):
+        DEFAULT_NOT_OBSERVED_QUANTIZE_HANDLER.add(fn)
+        return fn
+    return insert
+
+def input_output_observed(qh):
+    return type(qh) not in DEFAULT_NOT_OBSERVED_QUANTIZE_HANDLER
 
 # Example use of register pattern function:
 # @register_fusion_pattern(torch.nn.ReLU, (torch.nn.BatchNorm2d, torch.nn.Conv2d)))
