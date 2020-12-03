@@ -35,7 +35,7 @@ class Optimizer(object):
         torch._C._log_api_usage_once("python.optimizer")
         self.defaults = defaults
 
-        self.hook_for_profile()
+        self._hook_for_profile()
 
         if isinstance(params, torch.Tensor):
             raise TypeError("params argument given to the optimizer should be "
@@ -63,7 +63,7 @@ class Optimizer(object):
 
     def __setstate__(self, state):
         self.__dict__.update(state)
-        self.hook_for_profile()  # To support multiprocessing pickle/unpickle.
+        self._hook_for_profile()  # To support multiprocessing pickle/unpickle.
 
     def __repr__(self):
         format_string = self.__class__.__name__ + ' ('
@@ -76,7 +76,7 @@ class Optimizer(object):
         format_string += ')'
         return format_string
 
-    def hook_for_profile(self):
+    def _hook_for_profile(self):
         self._zero_grad_profile_name = "Optimizer.zero_grad#{}.zero_grad".format(self.__class__.__name__)
 
         def profile_hook_step(func):
