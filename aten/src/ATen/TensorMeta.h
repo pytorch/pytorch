@@ -10,25 +10,21 @@ class Tensor;
 
 namespace impl {
 
-// From https://stackoverflow.com/questions/11761703/overloading-macro-on-number-of-arguments
-#define TORCH_META_FUNC1(name) void name::meta
-#define TORCH_META_FUNC2(name, overload) void name##_##overload::meta
-#define GET_MACRO(_1,_2,NAME,...) NAME
-
-// Use this to define the prototype for a meta function.  This takes one
-// argument (just the operator name), or two arguments (operator name and
-// overload name).
+// Use this to define the prototype for a meta function.  There are two
+// versions; one that takes one argument (just the operator name), or FUNC2
+// variant that takes two arguments (operator name and overload name).
 //
 // Example usage:
 //
-//    TORCH_META_FUNC(add, Tensor) (
+//    TORCH_META_FUNC2(add, Tensor) (
 //      const Tensor& self, const Tensor& other
 //    ) {
 //      ... compute sizes and options ...
 //      set_output(sizes, options);
 //    }
 //
-#define TORCH_META_FUNC(...) GET_MACRO(__VA_ARGS__, TORCH_META_FUNC2, TORCH_META_FUNC1)(__VA_ARGS__)
+#define TORCH_META_FUNC(name) void name::meta
+#define TORCH_META_FUNC2(name, overload) void name##_##overload::meta
 
 // Use this to define the prototype for an implementation.  This takes only
 // one argument, which is the name of the dispatch key entry you're
@@ -36,7 +32,7 @@ namespace impl {
 //
 // Example usage:
 //
-//    TORCH_META_FUNC(add_cpu) (
+//    TORCH_IMPL_FUNC(add_cpu) (
 //      Tensor& result, const Tensor& self, const Tensor& other
 //    ) {
 //      ... do the actual implementation ...
@@ -49,7 +45,7 @@ namespace impl {
 // functional/out/inplace, and could also be specialized for CPU/CUDA/etc
 // (although presently it isn't).
 //
-// A notable subclass of this interface is TensorIterator(Base).
+// A notable subclass of this interface is TensorIteratorBase.
 struct CAFFE2_API MetaBase {
   virtual void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) = 0;
   virtual const Tensor& maybe_get_output(int64_t output_idx) = 0;

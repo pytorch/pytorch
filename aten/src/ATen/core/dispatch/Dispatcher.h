@@ -137,10 +137,6 @@ public:
   // Invoke an operator via the boxed calling convention using an IValue stack
   void callBoxed(const OperatorHandle& op, Stack* stack) const;
 
-  // Retrieve a reference to the function for an operator.  This remains
-  // valid for as long as the underlying function si valid.
-  const KernelFunction& getKernel(const OperatorHandle& op, DispatchKey dispatchKey) const;
-
   // ------------------------------------------------------------------------
   //
   // Performing registrations (NON user public; use op_registration)
@@ -367,16 +363,12 @@ namespace detail {
 template<class... Args> inline void unused_arg_(const Args&...) {}
 }
 
-inline const KernelFunction& Dispatcher::getKernel(const OperatorHandle& op, DispatchKey dispatchKey) const {
-  // No alias dispatch key is allowed at runtime.
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::isAliasDispatchKey(dispatchKey));
-  return op.operatorIterator_->op.lookup(dispatchKey);
-}
-
 template<class Return, class... Args>
 inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(Args...)>& op, DispatchKey dispatchKey, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
-  const KernelFunction& kernel = getKernel(op, dispatchKey);
+  // No alias dispatch key is allowed at runtime.
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::isAliasDispatchKey(dispatchKey));
+  const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKey);
 
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   // Check if we need to run callbacks registered with RecordFunction

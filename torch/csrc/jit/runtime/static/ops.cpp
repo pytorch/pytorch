@@ -49,8 +49,12 @@ bool canRunNatively(Node* n) {
 // generated code to unblock, need to make this nicer
 struct static_add final : public at::native::structured_add_out {
   static_add(at::Tensor& output) : output_(output) {}
-  void set_output(int64_t output_idx, at::IntArrayRef sizes, at::IntArrayRef strides,
-                  at::TensorOptions options, at::DimnameList names) override {
+  void set_output(
+      int64_t output_idx,
+      at::IntArrayRef sizes,
+      at::IntArrayRef strides,
+      at::TensorOptions options,
+      at::DimnameList names) override {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(output_idx == 0);
     // NB: do NOT use resize_output as it will complain if not zero sized.
     at::native::resize_(output_, sizes);
@@ -58,7 +62,8 @@ struct static_add final : public at::native::structured_add_out {
       TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
       output_.as_strided_(sizes, strides);
     } else if (options.memory_format_opt().has_value()) {
-      output_.unsafeGetTensorImpl()->empty_tensor_restride(*options.memory_format_opt());
+      output_.unsafeGetTensorImpl()->empty_tensor_restride(
+          *options.memory_format_opt());
     }
   }
   const at::Tensor& maybe_get_output(int64_t output_idx) override {
