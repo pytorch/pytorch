@@ -61,17 +61,9 @@ torch::Tensor custom_op_with_autograd(
   return CustomOpAutogradFunction::apply(var1, mul, var2, var3);
 }
 
-static auto registry =
-    torch::RegisterOperators()
-        // We parse the schema for the user.
-        .op("custom::op", &custom_op)
-        .op("custom::op2", &custom_op2)
-
-        // User provided schema. Among other things, allows defaulting values,
-        // because we cannot infer default values from the signature. It also
-        // gives arguments meaningful names.
-        .op("custom::op_with_defaults(Tensor tensor, float scalar = 1, int repeat = 1) -> Tensor[]",
-            &custom_op)
-
-        .op("custom::op_with_autograd(Tensor var1, int mul, Tensor var2, Tensor? var3=None) -> Tensor",
-            &custom_op_with_autograd);
+TORCH_LIBRARY_FRAGMENT(custom, m) {
+    m.def("op", custom_op);
+    m.def("op2", custom_op2);
+    m.def("op_with_defaults(Tensor tensor, float scalar = 1, int repeat = 1) -> Tensor[]", custom_op);
+    m.def("op_with_autograd(Tensor var1, int mul, Tensor var2, Tensor? var3=None) -> Tensor", custom_op_with_autograd);
+}

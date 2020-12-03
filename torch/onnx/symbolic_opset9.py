@@ -2174,9 +2174,15 @@ def flatten(g, input, start_dim, end_dim):
 
     return sym_help._flatten_helper(g, input, start_dim, end_dim, dim)
 
+# Emitted from `torch.nonzero(x, as_tuple=False)`
 @parse_args('v')
 def nonzero(g, input):
     return t(g, g.op('NonZero', input))
+
+
+# Emitted from `torch.nonzero(x, as_tuple=True)`
+def nonzero_numpy(g, input, _outputs=None):
+    return unbind(g, nonzero(g, input), 1, _outputs=_outputs)
 
 
 @parse_args('v')
