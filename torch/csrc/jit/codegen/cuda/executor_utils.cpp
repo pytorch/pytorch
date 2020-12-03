@@ -7,9 +7,16 @@
 #include <torch/csrc/jit/codegen/cuda/executor_utils.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_resource_strings.h>
 #include <torch/csrc/jit/codegen/fuser/cuda/fused_kernel.h>
 #include <torch/csrc/jit/resource_guard.h>
+
+#include <nvfuser_resources/block_reduction.h>
+#include <nvfuser_resources/broadcast.h>
+#include <nvfuser_resources/fp16_support.h>
+#include <nvfuser_resources/grid_reduction.h>
+#include <nvfuser_resources/helpers.h>
+#include <nvfuser_resources/random_numbers.h>
+#include <nvfuser_resources/tensor.h>
 
 #include <fstream>
 
@@ -21,13 +28,18 @@ namespace executor_utils {
 
 std::string kernelPreamble() {
   std::stringstream ss;
-  ss << code_template_tensor_struct << "\n"
-     << code_fp16_support << "\n"
-     << code_random_number_gen << "\n"
-     << code_helper_funcs << "\n"
-     << code_template_block_reduction << "\n"
-     << code_template_grid_reduction << "\n"
-     << code_template_block_broadcast << "\n";
+
+#ifndef __HIP_PLATFORM_HCC__
+  ss << nvfuser_resources::fp16_support_cu;
+#endif
+
+  ss << nvfuser_resources::tensor_cu;
+  ss << nvfuser_resources::random_numbers_cu;
+  ss << nvfuser_resources::helpers_cu;
+  ss << nvfuser_resources::block_reduction_cu;
+  ss << nvfuser_resources::grid_reduction_cu;
+  ss << nvfuser_resources::broadcast_cu;
+
   return ss.str();
 }
 
