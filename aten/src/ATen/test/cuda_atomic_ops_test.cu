@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <THC/THCAtomics.cuh>
 #include <cmath>
+#include <c10/test/util/Macros.h>
 
 const int blocksize = 256;
 const int factor = 4;
@@ -113,7 +114,7 @@ TEST(TestAtomicOps, TestAtomicAdd) {
   test_atomic_add<c10::complex<double> >();
 }
 
-TEST(TestAtomicOps, TestAtomicMul) {
+TEST(TestAtomicOps, DISABLED_ON_WINDOWS(TestAtomicMul)) {
   test_atomic_mul<at::BFloat16>();
   test_atomic_mul<at::Half>();
   test_atomic_mul<float>();

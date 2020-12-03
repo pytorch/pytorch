@@ -11,6 +11,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 /*
  * Loop nest generator pass will get IR that looks something like:
@@ -53,7 +54,7 @@ class TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {
   // Tracks if shared memory is modified
   std::unordered_map<Val*, bool> smem_;
 
-  // Track dynamic shared memory buffer
+  // Track dynamic shared memory buffers
   // Insert allocation at the beginning of the kernel
   std::deque<kir::Allocate*> dynamic_smem_;
 
@@ -90,6 +91,10 @@ class TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {
   void generate(const std::vector<Expr*>& exprs);
 
  private:
+  // Track number of allocations in each for loop. It is used to insert
+  // allocations in the correct order, which is necessary for memory aliasing
+  std::unordered_map<kir::ForLoop*, size_t> for_loop_allocations_;
+
   // Lowered exprs to return
   std::vector<Expr*> lowered_exprs;
 
@@ -111,6 +116,7 @@ class TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {
   kir::IrBuilder ir_builder_;
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

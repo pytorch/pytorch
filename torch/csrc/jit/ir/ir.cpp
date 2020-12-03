@@ -133,6 +133,9 @@ static void printAttribute(std::ostream& out, const IValue& ival) {
     } else if (input.isTensorList()) {
       ss << "[<Tensors>]";
       return true;
+    } else if (input.isObject() && !input.type()->is_module()) {
+      ss << "object(" << &input.toObjectRef() << ")";
+      return true;
     }
     return false;
   };
@@ -1111,9 +1114,7 @@ bool Node::hasSideEffects() const {
 
   switch (op->aliasAnalysisKind()) {
     case AliasAnalysisKind::PURE_FUNCTION:
-      return false;
     case AliasAnalysisKind::FROM_SCHEMA:
-      return false;
     case AliasAnalysisKind::INTERNAL_SPECIAL_CASE:
       return false;
     case AliasAnalysisKind::CONSERVATIVE:
@@ -1897,10 +1898,50 @@ std::vector<Value*> inlineCallTo(
   std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>
       new_callstack_entries;
 
+  c10::optional<ModuleInstanceInfo> module_instance_info = c10::nullopt;
+  if (to_replace->kind() == prim::CallMethod) {
+    auto class_type_ptr = to_replace->input(0)->type()->cast<c10::ClassType>();
+    if (to_replace->input(0)->node()->kind() == prim::GetAttr) {
+      module_instance_info = c10::make_optional(ModuleInstanceInfo(
+          class_type_ptr, to_replace->input(0)->node()->s(attr::name)));
+    } else {
+      std::string instance_name_unknown("INSTANCE_NAME_UNKNOWN");
+      module_instance_info = c10::make_optional(
+          ModuleInstanceInfo(class_type_ptr, instance_name_unknown));
+    }
+  }
+
   // TODO: We might need to use nodes_map instead of value_map. Otherwise, we
   // are missing nodes without outputs (e.g. prim::Print).
   std::unordered_set<Node*> updated_nodes;
   for (const auto& kv : value_map) {
+    /* Skip the old value if it is the graph input.
+     * The reason is that, value_map contains values not all for the nodes of
+     * the graph but primary inputs as well, and it will create duplicates when
+     * the first inlined graph is input to the next one. To avoid this issue,
+     * skip the old value when it is one of the
+     * callee->optimized_graph()->inputs() or callee->graph()->inputs(), depends
+     * on if it is inlined_optimized_graph
+     */
+
+    if (inline_optimized_graph) {
+      auto is_graph_input = std::find(
+          callee->optimized_graph()->inputs().begin(),
+          callee->optimized_graph()->inputs().end(),
+          kv.first);
+      if (is_graph_input != callee->optimized_graph()->inputs().end()) {
+        continue;
+      }
+    } else {
+      auto is_graph_input = std::find(
+          callee->graph()->inputs().begin(),
+          callee->graph()->inputs().end(),
+          kv.first);
+      if (is_graph_input != callee->graph()->inputs().end()) {
+        continue;
+      }
+    }
+
     Node* new_node = kv.second->node();
     if (!updated_nodes.insert(new_node).second) {
       continue;
@@ -1915,16 +1956,18 @@ std::vector<Value*> inlineCallTo(
       if (new_node_cs) {
         new_callstack_entries[raw_callstack_ptr] =
             c10::make_intrusive<InlinedCallStack>(
-                *new_node_cs, callee, to_replace->sourceRange());
+                *new_node_cs,
+                callee,
+                to_replace->sourceRange(),
+                module_instance_info);
       } else {
         new_callstack_entries[raw_callstack_ptr] =
             c10::make_intrusive<InlinedCallStack>(
-                callee, to_replace->sourceRange());
+                callee, to_replace->sourceRange(), module_instance_info);
       }
     }
     new_node->setCallStack(new_callstack_entries.at(raw_callstack_ptr));
   }
-
   const auto& old_outputs = to_replace->outputs();
 
   AT_ASSERT(new_outputs.size() == old_outputs.size());

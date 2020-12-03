@@ -433,7 +433,9 @@ Ttarget safe_narrow_cast(Tsource v) {
   Ttarget res = static_cast<Ttarget>(v);
   // Casting it back to check whether it overflew.
   if (static_cast<Tsource>(res) != v) {
-    throw std::runtime_error("safe_narrow_cast<>() failed due to overflow");
+    TORCH_WARN(
+        "ATTENTION: your model computation is overflowing, safe_narrow_cast<>() failed");
+    return v;
   }
   return res;
 }
@@ -548,7 +550,7 @@ struct CodeImpl {
     instructions_.emplace_back(
         op,
         safe_narrow_cast<int32_t, int64_t>(X),
-        safe_narrow_cast<int16_t, int64_t>(N));
+        safe_narrow_cast<uint16_t, uint64_t>(N));
     instructions_source_.emplace_back(current_node_);
 
     // check that we didn't accidentally emit nodes out of topological order
@@ -704,7 +706,7 @@ struct CodeImpl {
   void emitCall(Function* func, at::ArrayRef<Value*> inputs) {
     emitLoadInputs(inputs);
     insertInstruction(CALL, function_table_.size());
-    function_table_.emplace_back(std::move(func));
+    function_table_.emplace_back(func);
   }
 
   void emitNodeAtBlockLevel(Node* node) {
@@ -1029,7 +1031,8 @@ struct CodeImpl {
 
 // InterpreterState state that and used to compute a Code
 struct InterpreterStateImpl : c10::intrusive_ptr_target {
-  InterpreterStateImpl(const Code& code) {
+  InterpreterStateImpl(const Code& code, TaskLauncher taskLauncher)
+      : taskLauncher_(std::move(taskLauncher)) {
     enterFrame(code, 0);
   }
 
@@ -1055,6 +1058,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   // including any inputs to this function
   int64_t stack_start_ = -1;
   c10::intrusive_ptr<Future> future_;
+  TaskLauncher taskLauncher_;
 
   // this holds all the tensors for this interpreter run
   // we don't bother minimizing the size of this vector, since the extra
@@ -1333,11 +1337,14 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 Callback(
                     c10::intrusive_ptr<InterpreterStateImpl> state,
                     Stack stack)
-                    : state_(std::move(state)), stack_(std::move(stack)) {
+                    : stateImpl_(std::move(state)),
+                      state_(stateImpl_),
+                      stack_(std::move(stack)) {
                   dist_autograd_context_id_ = getDistAutogradContextId();
+                  state_ = InterpreterState(stateImpl_);
                 }
                 void operator()() {
-                  at::launch(InterpreterContinuation(
+                  stateImpl_->taskLauncher_(InterpreterContinuation(
                       state_,
                       std::move(stack_),
                       dist_autograd_context_id_,
@@ -1345,6 +1352,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 }
 
                private:
+                c10::intrusive_ptr<InterpreterStateImpl> stateImpl_;
                 InterpreterState state_;
                 Stack stack_;
                 int64_t dist_autograd_context_id_;
@@ -1509,14 +1517,15 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             InterpreterState forked_interpreter(
                 forked_fn->get_executor()
                     .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
-                    .code);
+                    .code,
+                taskLauncher_);
             InterpreterContinuation continuation(
                 forked_interpreter,
                 Stack(stack.end() - inst.N, stack.end()),
                 getDistAutogradContextId());
             drop(stack, inst.N);
             push(stack, forked_interpreter.getFuture());
-            at::launch(std::move(continuation));
+            taskLauncher_(std::move(continuation));
             ++frame.pc;
           } break;
           case WARN: {
@@ -1602,8 +1611,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         at::isRecordFunctionEnabled()) {
       auto rec_fn = std::make_unique<at::RecordFunction>(
           at::RecordScope::TORCHSCRIPT_FUNCTION);
-      if (rec_fn->active) {
-        if (rec_fn->needs_inputs) {
+      if (rec_fn->isActive()) {
+        if (rec_fn->needsInputs()) {
           rec_fn->before(
               frame.function->function_name_,
               last(stack, frame.function->n_inputs));
@@ -1631,8 +1640,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       Node* node = frame.function->instructions_source_[pc];
       if (node->callstack()) {
         for (const auto& p : (*node->callstack())->vec()) {
-          entries.emplace_back(StackEntry{previous_fn_name, p.second});
-          previous_fn_name = p.first->name();
+          entries.emplace_back(StackEntry{previous_fn_name, std::get<1>(p)});
+          previous_fn_name = std::get<0>(p)->name();
         }
       }
       entries.emplace_back(StackEntry{previous_fn_name, node->sourceRange()});
@@ -1738,8 +1747,10 @@ size_t Code::register_size() const {
   return pImpl->register_size_;
 }
 
-InterpreterState::InterpreterState(const Code& code)
-    : pImpl(c10::make_intrusive<InterpreterStateImpl>(code)) {}
+InterpreterState::InterpreterState(const Code& code, TaskLauncher taskLauncher)
+    : pImpl(c10::make_intrusive<InterpreterStateImpl>(
+          code,
+          std::move(taskLauncher))) {}
 InterpreterState::~InterpreterState() = default;
 
 void InterpreterState::run(Stack& stack) {

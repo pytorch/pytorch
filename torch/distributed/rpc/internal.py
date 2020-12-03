@@ -2,6 +2,7 @@ import collections
 import copyreg
 import io
 import pickle
+import sys
 import threading
 import traceback
 from enum import Enum
@@ -9,7 +10,7 @@ from enum import Enum
 import torch
 import torch.distributed as dist
 
-from . import _get_current_rpc_agent
+from torch._C._distributed_rpc import _get_current_rpc_agent
 
 
 # Thread local tensor tables to store tensors while pickling torch.Tensor
@@ -36,7 +37,8 @@ class _InternalRPCPickler:
     """
 
     def __init__(self):
-        self._dispatch_table = copyreg.dispatch_table.copy()
+        # Ignore type error because dispatch_table is defined in third-party package
+        self._dispatch_table = copyreg.dispatch_table.copy()  # type: ignore[attr-defined]
         self._dispatch_table[torch.Tensor] = self._tensor_reducer
 
     @classmethod
@@ -61,6 +63,24 @@ class _InternalRPCPickler:
     def _rref_reducer(self, rref):
         return self._py_rref_reducer(rref)
 
+    @classmethod
+    def _script_module_receiver(cls, script_module_serialized):
+        """
+        Given a serialized representation of a ScriptModule created with torch.jit.save,
+        loads and returns the ScriptModule.
+        """
+        f = io.BytesIO(script_module_serialized)
+        m = torch.jit.load(f)
+        return m
+
+    def _script_module_reducer(self, script_module):
+        """
+        Serializes a ScriptModule.
+        """
+        f = io.BytesIO()
+        torch.jit.save(script_module, f)
+        return (_InternalRPCPickler._script_module_receiver, (f.getvalue(),))
+
     def serialize(self, obj):
         r"""
         Serialize non tensor data into binary string, tensor data into
@@ -79,9 +99,15 @@ class _InternalRPCPickler:
         #
         # The return value of a `rpc.remote(..)` call is type of `rpc.PyRRef`.
         # The deserialized RRef object on an RPC receiver side is type of `rpc.PyRRef`.
-        p.dispatch_table[dist.rpc.PyRRef] = self._py_rref_reducer
+        # Ignore type error because dispatch_table is defined in third-party package
+        p.dispatch_table[dist.rpc.PyRRef] = self._py_rref_reducer  # type: ignore[index]
         # An RRef created locally by RRef Python constructor is type of `rpc.RRef`.
-        p.dispatch_table[dist.rpc.RRef] = self._rref_reducer
+        # Ignore type error because dispatch_table is defined in third-party package
+        p.dispatch_table[dist.rpc.RRef] = self._rref_reducer  # type: ignore[index]
+        # Add dispatch pickling for ScriptModule if needed.
+        if isinstance(obj, torch.jit.ScriptModule):
+            # Ignore type error because dispatch_table is defined in third-party package
+            p.dispatch_table[obj.__class__] = self._script_module_reducer  # type: ignore[index]
 
         # save _thread_local_tensor_tables.send_tables if it is in nested call
         global _thread_local_tensor_tables
@@ -168,6 +194,7 @@ def _run_function(python_udf):
             f"On {_get_current_rpc_agent().get_worker_info()}:\n"
             f"{repr(e)}\n{traceback.format_exc()}"
         )
+        print(except_str, file=sys.stderr)
         result = RemoteException(except_str, type(e))
     return result
 
@@ -222,8 +249,8 @@ def _start_record_function(exec_type, func_name, current_worker_name, dest_worke
     profile_key = "rpc_{}#{}({} -> {})".format(
         exec_type.value, str(func_name), current_worker_name, dest_worker_name
     )
-    rf = torch.autograd._RecordFunction()
-    torch.autograd._run_before_callbacks(rf, profile_key)
+    rf = torch.autograd._RecordFunction()  # type: ignore[attr-defined]
+    torch.autograd._run_before_callbacks(rf, profile_key)  # type: ignore[attr-defined]
     return rf
 
 

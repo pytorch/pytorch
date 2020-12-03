@@ -127,12 +127,12 @@ class Adam(Optimizer):
                 # Use the max. for normalizing running avg. of gradient
                 max_exp_avg_sq_sqrt = torch._foreach_sqrt(max_exp_avg_sq)
                 bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]
-                torch._foreach_div_scalar_list_(max_exp_avg_sq_sqrt, bias_correction_sqrt)
+                torch._foreach_div_(max_exp_avg_sq_sqrt, bias_correction_sqrt)
                 denom = torch._foreach_add(max_exp_avg_sq_sqrt, group['eps'])
             else:
                 exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_sq)
                 bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]
-                torch._foreach_div_scalar_list_(exp_avg_sq_sqrt, bias_correction_sqrt)
+                torch._foreach_div_(exp_avg_sq_sqrt, bias_correction_sqrt)
                 denom = torch._foreach_add(exp_avg_sq_sqrt, group['eps'])
 
             step_size = [(group['lr'] / bc) * -1 for bc in bias_correction1]

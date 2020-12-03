@@ -72,6 +72,8 @@ class TORCH_CUDA_API LaunchParams {
         class_val == UNINITIALIZED_VAL || incoming_val == class_val,
         "Tried to set ",
         val,
+        " from ",
+        class_val,
         " to ",
         incoming_val,
         ", but it was already set and new value does not match.",

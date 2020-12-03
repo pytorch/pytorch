@@ -10,7 +10,8 @@ using namespace at;
 
 static int test_int;
 
-Tensor empty_override(IntArrayRef size, const TensorOptions & options, c10::optional<MemoryFormat> optional_memory_format) {
+Tensor empty_override(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout,
+                      c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> optional_memory_format) {
   test_int = 1;
   auto tensor_impl = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
       Storage(
@@ -29,9 +30,21 @@ Tensor add_override(const Tensor & a, const Tensor & b , Scalar c) {
   return a;
 }
 
+Tensor empty_strided_override(
+  IntArrayRef size,
+  IntArrayRef stride,
+  c10::optional<c10::ScalarType> dtype,
+  c10::optional<c10::Layout> layout,
+  c10::optional<c10::Device> device,
+  c10::optional<bool> pin_memory) {
+
+  return empty_override(size, dtype, layout, device, pin_memory, c10::nullopt);
+}
+
 TORCH_LIBRARY_IMPL(aten, MSNPU, m) {
-  m.impl_UNBOXED("aten::empty.memory_format",  empty_override);
-  m.impl_UNBOXED("aten::add.Tensor",           add_override);
+  m.impl("aten::empty.memory_format",  empty_override);
+  m.impl("aten::empty_strided",        empty_strided_override);
+  m.impl("aten::add.Tensor",           add_override);
 }
 
 TEST(BackendExtensionTest, TestRegisterOp) {

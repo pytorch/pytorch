@@ -17,15 +17,15 @@ bool DropoutOp<float, CPUContext>::RunOnDevice() {
     float scale = 1. / (1. - ratio_);
     // mask=true means keep, and mask=false means not keep, so we will
     // generate probability depending on 1-ratio.
-    std::bernoulli_distribution dist(1. - ratio_);
+    at::bernoulli_distribution<double> dist(1. - ratio_);
     const float* Xdata = X.data<float>();
     float* Ydata = Y->template mutable_data<float>();
 
     auto mask = Output(1, X.sizes(), at::dtype<bool>());
     bool* mask_data = mask->template mutable_data<bool>();
-    auto& gen = context_.RandGenerator();
+    auto* gen = context_.RandGenerator();
     for (int i = 0; i < X.numel(); ++i) {
-      mask_data[i] = dist(gen);
+      mask_data[i] = dist(gen) > 0.5;
       Ydata[i] = Xdata[i] * scale * mask_data[i];
     }
     return true;

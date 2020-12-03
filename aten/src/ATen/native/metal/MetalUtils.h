@@ -12,11 +12,7 @@ std::vector<float> NCHW_to_NC4(
 std::vector<float> NC4_to_NCHW(
     const float* src,
     const std::vector<int64_t>& sizes);
-// The MPSCNNConvolution class takes weights in the order
-// [outputChannels][kernelHeight][kernelWidth][inputChannels/groups].
-std::vector<float> permuteWeights(
-    const float* src,
-    const std::vector<int64_t>& sizes);
+
 
 } // namespace metal
 } // namespace native

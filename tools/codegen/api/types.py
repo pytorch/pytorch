@@ -6,28 +6,6 @@ _T = TypeVar('_T')
 
 # ------------------------------------------------------------------- #
 
-#                       Grouping arguments
-
-# ------------------------------------------------------------------- #
-
-# Represents the implicit *this argument for method calls in C++ API
-@dataclass(frozen=True)
-class ThisArgument:
-    argument: Argument
-
-# Bundle of arguments that represent a TensorOptions in the C++ API.
-@dataclass(frozen=True)
-class TensorOptionsArguments:
-    dtype: Argument
-    layout: Argument
-    device: Argument
-    pin_memory: Argument
-
-    def all(self) -> Sequence[Argument]:
-        return [self.dtype, self.layout, self.device, self.pin_memory]
-
-# ------------------------------------------------------------------- #
-
 #                           cpp types
 
 # ------------------------------------------------------------------- #
@@ -105,7 +83,7 @@ class CppSingleArgumentPack(CppArgumentPackIface):
 @dataclass(frozen=True)
 class CppThisArgumentPack(CppArgumentPackIface):
     # The grouped JIT argument this formal was derived from
-    argument: ThisArgument
+    argument: SelfArgument
 
     # C++ type, e.g., Tensor&
     type: str
@@ -210,7 +188,7 @@ class CppSignature:
     @staticmethod
     def _from_grouped_arguments(
         func: FunctionSchema,
-        arguments: Sequence[Union[Argument, TensorOptionsArguments, ThisArgument]],
+        arguments: Sequence[Union[Argument, TensorOptionsArguments, SelfArgument]],
         *,
         faithful: bool
     ) -> 'CppSignature':
@@ -298,10 +276,13 @@ class DispatcherSignature:
     def arguments(self) -> Tuple[DispatcherArgument, ...]:
         return self._arguments
 
+    def name(self) -> str:
+        return dispatcher.name(self.func)
+
     def defn(self, name: Optional[str] = None) -> str:
         args_str = ', '.join(map(str, self.arguments()))
         if name is None:
-            name = native.name(self.func)
+            name = self.name()
         return f"{self._returns_type} {name}({args_str})"
 
     def exprs(self) -> Sequence[DispatcherExpr]:
@@ -309,7 +290,7 @@ class DispatcherSignature:
 
     # Return the C++ function type, e.g., something like int(bool)
     def type(self) -> str:
-        dispatcher_args_types_str = ', '.join(map(lambda a: a.type, self._arguments))
+        dispatcher_args_types_str = ', '.join(a.type for a in self._arguments)
         return f'{self._returns_type} ({dispatcher_args_types_str})'
 
     @staticmethod
@@ -341,12 +322,8 @@ class NativeExpr:
 class NativeArgument:
     type: str
     name: str
-    # Native function arguments have defaults for some reasons (e.g.,
-    # the function prototypes in CPUType.h are defaulted).  There isn't
-    # really any good reason to do this, as these functions are only
-    # ever called from a context where all defaulted arguments are
-    # guaranteed to be given explicitly.
-    # TODO: Remove this
+    # Native function arguments have defaults to make it a little
+    # easier to call them directly to bypass dispatch.
     default: Optional[str]
     argument: Union[Argument, TensorOptionsArguments]
 
@@ -371,10 +348,13 @@ class NativeSignature:
     _arguments: Tuple[NativeArgument, ...]
     _returns_type: str
 
+    def name(self) -> str:
+        return native.name(self.func)
+
     def defn(self, name: Optional[str] = None) -> str:
         args_str = ', '.join(map(str, self.arguments()))
         if name is None:
-            name = dispatcher.name(self.func)
+            name = self.name()
         return f"{self._returns_type} {name}({args_str})"
 
     def arguments(self) -> Tuple[NativeArgument, ...]:
@@ -393,6 +373,25 @@ class NativeSignature:
             _arguments=arguments,
             _returns_type=returns_type,
         )
+
+# ------------------------------------------------------------------- #
+
+#                           meta api
+
+# ------------------------------------------------------------------- #
+
+@dataclass(frozen=True)
+class MetaArgument:
+    type: str
+    name: str
+    # structured kernels (for which MetaArgument matters) always will
+    # be use_c10_dispatcher full.  That means JIT arguments and 
+    # meta arguments are always in 1:1 correspondence.  If this is ever not true
+    # we will have to do something more fancy here.
+    argument: Argument
+
+    def __str__(self) -> str:
+        return f"{self.type} {self.name}"
 
 # Functions only, no types
 from tools.codegen.api import cpp, dispatcher, native

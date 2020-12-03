@@ -58,7 +58,7 @@ class TestNativeFunctions(TestCase):
         self.do_test_optional_floatlist_with_module(fake_module)
 
     def test_optional_floatlist_invalid(self):
-        with self.assertRaisesRegex(TypeError, "must be .* but found"):
+        with self.assertRaisesRegex(TypeError, "must be tuple of floats, not list"):
             FloatListWrapperModule()(torch.zeros(1), ["hi"])
 
         with self.assertRaisesRegex(RuntimeError, "value of type .* instead found type"):

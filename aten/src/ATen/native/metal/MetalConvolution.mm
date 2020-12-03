@@ -60,10 +60,6 @@ NeuronType neuronType(const Conv2dOpContext& context) {
   }
 }
 
-Tensor conv2d_prepack_run_impl(Conv2dOpContext& context, const Tensor& input) {
-  return mpscnn::conv2d(input, context);
-}
-
 } // namespace metal
 } // namespace native
 } // namespace at

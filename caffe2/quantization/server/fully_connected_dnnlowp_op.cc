@@ -190,6 +190,9 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
 
     if (!dequantize_output_) {
       Y_int32_.resize(Y->size());
+      if (Y_int32_.size() < Y_int32_.capacity() / 2) {
+        Y_int32_.shrink_to_fit();
+      }
       DoNothing<> doNothingObj{};
 
       if (quantize_channelwise_ || filter_qparams_[0].zero_point) {
@@ -443,6 +446,9 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
 #endif
 
     Y_int32_.resize(Y->size());
+    if (Y_int32_.size() < Y_int32_.capacity() / 2) {
+      Y_int32_.shrink_to_fit();
+    }
     for (int i = 0; i < M; ++i) {
       for (int j = 0; j < N; ++j) {
         int32_t sum = 0;
