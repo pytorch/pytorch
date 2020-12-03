@@ -2399,6 +2399,24 @@
   dispatch:
     DefaultBackend: logaddexp2
 
+- func: xlogy.Tensor(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    DefaultBackend: xlogy
+
+- func: xlogy.Scalar_Self(Scalar self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    DefaultBackend: xlogy
+
+- func: xlogy.Scalar_Other(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    DefaultBackend: xlogy
+
 - func: logdet(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method

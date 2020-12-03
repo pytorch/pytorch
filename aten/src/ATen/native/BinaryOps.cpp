@@ -50,6 +50,7 @@ DEFINE_DISPATCH(igammac_stub);
 DEFINE_DISPATCH(nextafter_stub);
 DEFINE_DISPATCH(heaviside_stub);
 DEFINE_DISPATCH(copysign_stub);
+DEFINE_DISPATCH(xlogy_stub);
 
 static Tensor wrapped_scalar_tensor(Scalar scalar) {
   auto tensor = scalar_to_tensor(scalar);
@@ -1097,6 +1098,21 @@ Tensor ldexp(const Tensor& self, const Tensor& other) {
 
 Tensor& ldexp_(Tensor& self, const Tensor& other) {
   return at::ldexp_out(self, self, other);
+}
+
+Tensor xlogy(const Tensor& x, const Tensor& y) {
+  Tensor result;
+  auto iter = TensorIterator::binary_float_op(result, x, y);
+  xlogy_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor xlogy(Scalar x, const Tensor& y) {
+  return at::xlogy(c10::scalar_to_tensor(x, y.device()), y);
+}
+
+Tensor xlogy(const Tensor& x, Scalar y) {
+  return at::xlogy(x, c10::scalar_to_tensor(y, x.device()));
 }
 
 // TODO: Deduplicate this with the TensorIterator logic.  This would
