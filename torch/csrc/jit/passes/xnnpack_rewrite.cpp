@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
@@ -334,6 +335,9 @@ void fusePrePackedLinearConvWithClamp(script::Module& module) {
   auto graph = module.get_method("forward").graph();
   fuseReluWithPackedOps(graph);
   fuseHardtanhWithPackedOps(graph);
+
+  // Ignore user defined classes for later passes
+  ConstantPropagation(graph, true);
 }
 
 void FoldPrePackingOps(script::Module& m) {
@@ -348,6 +352,9 @@ void FoldPrePackingOps(script::Module& m) {
                 "prepacked::conv2d_transpose_clamp_prepack"));
   };
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
+  auto graph = m.get_method("forward").graph();
+  // Folding requires a const propagation through user defined classes
+  ConstantPropagation(graph, false);
 }
 
 script::Module optimizeForMobile(
