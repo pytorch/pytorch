@@ -80,11 +80,14 @@ int64_t HashStore::add(const std::string& key, int64_t i) {
 }
 
 int64_t HashStore::getNumKeys() {
-  TORCH_CHECK(false, "getNumKeys not implemented for HashStore");
+  std::unique_lock<std::mutex> lock(m_);
+  return map_.size();
 }
 
-bool HashStore::deleteKey(const std::string& /* unused */) {
-  TORCH_CHECK(false, "deleteKey not implemented for HashStore");
+bool HashStore::deleteKey(const std::string& key) {
+  std::unique_lock<std::mutex> lock(m_);
+  auto numDeleted = map_.erase(key);
+  return (numDeleted == 1);
 }
 
 bool HashStore::check(const std::vector<std::string>& keys) {

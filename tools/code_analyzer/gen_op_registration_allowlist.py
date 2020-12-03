@@ -38,7 +38,7 @@ def load_root_ops(fname):
     return result
 
 
-def gen_transitive_closure(dep_graph, root_ops):
+def gen_transitive_closure(dep_graph, root_ops, train=False):
     result = set(root_ops)
     queue = root_ops[:]
 
@@ -50,7 +50,10 @@ def gen_transitive_closure(dep_graph, root_ops):
     # and value = (set of ops reachable from C++ functions). Insert the special
     # `__ROOT__` key to include ops which can be called from C++ code directly,
     # in addition to ops that are called from TorchScript model.
-    queue.append('__ROOT__')
+    # '__ROOT__' is only needed for full-jit. Keep it only for training.
+    # TODO: when FL is migrated from full-jit to lite trainer, remove '__ROOT__'
+    if train:
+        queue.append('__ROOT__')
 
     while queue:
         cur = queue.pop()
@@ -59,7 +62,10 @@ def gen_transitive_closure(dep_graph, root_ops):
                 result.add(dep)
                 queue.append(dep)
 
-    return ' '.join(sorted(result))
+    return sorted(result)
+
+def gen_transitive_closure_str(dep_graph, root_ops):
+    return ' '.join(gen_transitive_closure(dep_graph, root_ops))
 
 
 if __name__ == "__main__":
@@ -77,4 +83,4 @@ if __name__ == "__main__":
 
     deps = load_op_dep_graph(args.op_dependency) if args.op_dependency else {}
     root_ops = load_root_ops(args.root_ops)
-    print(gen_transitive_closure(deps, root_ops))
+    print(gen_transitive_closure_str(deps, root_ops))

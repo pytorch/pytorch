@@ -1,10 +1,11 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
-#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 
 #include <c10/core/DeviceType.h>
 #include <c10/util/Exception.h>
+
+#include <cuda.h>
 
 #include <torch/csrc/jit/ir/ir.h>
 
@@ -12,6 +13,9 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
+
+#include <string>
+#include <vector>
 
 namespace torch {
 namespace jit {

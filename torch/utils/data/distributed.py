@@ -24,7 +24,7 @@ class DistributedSampler(Sampler[T_co]):
     Arguments:
         dataset: Dataset used for sampling.
         num_replicas (int, optional): Number of processes participating in
-            distributed training. By default, :attr:`rank` is retrieved from the
+            distributed training. By default, :attr:`world_size` is retrieved from the
             current distributed group.
         rank (int, optional): Rank of the current process within :attr:`num_replicas`.
             By default, :attr:`rank` is retrieved from the current distributed
@@ -100,7 +100,11 @@ class DistributedSampler(Sampler[T_co]):
 
         if not self.drop_last:
             # add extra samples to make it evenly divisible
-            indices += indices[:(self.total_size - len(indices))]
+            padding_size = self.total_size - len(indices)
+            if padding_size <= len(indices):
+                indices += indices[:padding_size]
+            else:
+                indices += (indices * math.ceil(padding_size / len(indices)))[:padding_size]
         else:
             # remove tail of data to make it evenly divisible.
             indices = indices[:self.total_size]

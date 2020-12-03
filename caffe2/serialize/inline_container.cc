@@ -306,6 +306,7 @@ void PyTorchStreamWriter::setup(const string& file_name) {
         file_name,
         std::ofstream::out | std::ofstream::trunc | std::ofstream::binary);
     valid("opening archive ", file_name.c_str());
+    TORCH_CHECK(file_stream_, "File ", file_name, " cannot be opened.");
     writer_func_ = [this](const void* buf, size_t nbytes) -> size_t {
       file_stream_.write(static_cast<const char*>(buf), nbytes);
       return !file_stream_ ? 0 : nbytes;

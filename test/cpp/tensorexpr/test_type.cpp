@@ -1,4 +1,5 @@
-#include "test/cpp/tensorexpr/test_base.h"
+#include <gtest/gtest.h>
+
 #include "torch/csrc/jit/tensorexpr/ir.h"
 #include "torch/csrc/jit/tensorexpr/tensor.h"
 
@@ -6,7 +7,7 @@ namespace torch {
 namespace jit {
 using namespace torch::jit::tensorexpr;
 
-void testTypeTest01() {
+TEST(Type, Test01) {
   KernelScope kernel_scope;
   {
     Dtype dt1 = kInt;
@@ -41,7 +42,7 @@ void testTypeTest01() {
   }
 }
 
-void testTypePropagation() {
+TEST(Type, Propagation) {
   // Same types:
   {
     KernelScope kernel_scope;

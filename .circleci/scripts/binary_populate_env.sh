@@ -100,8 +100,14 @@ if [[ "$PACKAGE_TYPE" == libtorch ]]; then
   POSSIBLE_JAVA_HOMES+=(/usr/local)
   POSSIBLE_JAVA_HOMES+=(/usr/lib/jvm/java-8-openjdk-amd64)
   POSSIBLE_JAVA_HOMES+=(/Library/Java/JavaVirtualMachines/*.jdk/Contents/Home)
+  # Add the Windows-specific JNI path
+  POSSIBLE_JAVA_HOMES+=("$PWD/.circleci/windows-jni/")
   for JH in "${POSSIBLE_JAVA_HOMES[@]}" ; do
     if [[ -e "$JH/include/jni.h" ]] ; then
+      # Skip if we're not on Windows but haven't found a JAVA_HOME
+      if [[ "$JH" == "$PWD/.circleci/windows-jni/" && "$OSTYPE" != "msys" ]] ; then
+        break
+      fi
       echo "Found jni.h under $JH"
       JAVA_HOME="$JH"
       BUILD_JNI=ON
@@ -161,6 +167,7 @@ export CIRCLE_TAG="${CIRCLE_TAG:-}"
 export CIRCLE_SHA1="$CIRCLE_SHA1"
 export CIRCLE_PR_NUMBER="${CIRCLE_PR_NUMBER:-}"
 export CIRCLE_BRANCH="$CIRCLE_BRANCH"
+export CIRCLE_WORKFLOW_ID="$CIRCLE_WORKFLOW_ID"
 # =================== The above code will be executed inside Docker container ===================
 EOL
 

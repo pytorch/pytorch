@@ -125,20 +125,19 @@ genrule(
     ] + glob(["aten/src/ATen/templates/**"]),
     outs = [
         "aten/src/ATen/Declarations.yaml",
-        "aten/src/ATen/BackendSelectRegister.cpp",
-        "aten/src/ATen/CPUType.h",
-        "aten/src/ATen/CPUType.cpp",
+        "aten/src/ATen/RegisterBackendSelect.cpp",
+        "aten/src/ATen/RegisterCPU.cpp",
+        "aten/src/ATen/RegisterMkldnnCPU.cpp",
+        "aten/src/ATen/RegisterQuantizedCPU.cpp",
+        "aten/src/ATen/RegisterSparseCPU.cpp",
+        "aten/src/ATen/RegisterMath.cpp",
+        "aten/src/ATen/RegisterMeta.cpp",
+        "aten/src/ATen/RegisterDefaultBackend.cpp",
+        "aten/src/ATen/RegisterSchema.cpp",
         "aten/src/ATen/Functions.h",
         "aten/src/ATen/Functions.cpp",
         "aten/src/ATen/NativeFunctions.h",
-        "aten/src/ATen/MkldnnCPUType.h",
-        "aten/src/ATen/MkldnnCPUType.cpp",
-        "aten/src/ATen/QuantizedCPUType.h",
-        "aten/src/ATen/QuantizedCPUType.cpp",
-        "aten/src/ATen/SparseCPUType.h",
-        "aten/src/ATen/SparseCPUType.cpp",
-        "aten/src/ATen/TypeDefault.h",
-        "aten/src/ATen/TypeDefault.cpp",
+        "aten/src/ATen/MetaFunctions.h",
         "aten/src/ATen/core/TensorBody.h",
         "aten/src/ATen/core/TensorMethods.cpp",
         "aten/src/ATen/core/ATenOpList.cpp",
@@ -191,7 +190,6 @@ libtorch_cpp_generated_sources = [
         "torch/csrc/autograd/generated/TraceType_3.cpp",
         "torch/csrc/autograd/generated/TraceType_4.cpp",
         # "torch/csrc/autograd/generated/TraceTypeEverything.cpp",
-        "torch/csrc/autograd/generated/RegistrationDeclarations.h",
         "torch/csrc/autograd/generated/Functions.h",
         "torch/csrc/autograd/generated/Functions.cpp",
         "torch/csrc/autograd/generated/variable_factories.h",
@@ -214,9 +212,10 @@ genrule(
     name = "all_generated_code",
     srcs = [
         "aten/src/ATen/Declarations.yaml",
+        "aten/src/ATen/native/native_functions.yaml",
     ],
     outs = libtorch_cpp_generated_sources + libtorch_python_generated_sources,
-    cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --declarations-path $(location aten/src/ATen/Declarations.yaml) --nn-path aten/src",
+    cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --declarations-path $(location aten/src/ATen/Declarations.yaml) --native-functions-path $(location aten/src/ATen/native/native_functions.yaml) --nn-path aten/src",
     tools = [":generate_code"],
 )
 
@@ -299,6 +298,11 @@ filegroup(
 )
 
 filegroup(
+    name = "aten_base_metal",
+    srcs = glob(["aten/src/ATen/metal/*.cpp"]),
+)
+
+filegroup(
     name = "ATen_QUANTIZED_SRCS",
     srcs = glob(
         [
@@ -378,7 +382,6 @@ filegroup(
         "aten/src/THC/THCTensorCopy.cu.cc",
         "aten/src/THC/THCTensorIndex.cu.cc",
         "aten/src/THC/THCTensorMath.cu.cc",
-        "aten/src/THC/THCTensorMathBlas.cu.cc",
         "aten/src/THC/THCTensorMathMagma.cu.cc",
         "aten/src/THC/THCTensorMathPairwise.cu.cc",
         "aten/src/THC/THCTensorMathReduce.cu.cc",
@@ -595,7 +598,10 @@ cc_library(
         "aten/src/THC/generic/*.cu.cc",
         "aten/src/THCUNN/*.cuh",
         "aten/src/THCUNN/generic/*.cu.cc",
-    ]) + [
+    ],
+    exclude = [
+        "aten/src/ATen/Config.h",
+    ],) + [
         ":generated_cpp",
         ":aten_src_ATen_config",
     ],
@@ -650,6 +656,7 @@ cc_library(
         ":ATen_CORE_SRCS",
         ":ATen_QUANTIZED_SRCS",
         ":aten_base_cpp",
+        ":aten_base_metal",
         ":aten_base_vulkan",
         ":aten_native_cpp",
         ":aten_native_mkl_cpp",
@@ -1876,6 +1883,10 @@ cc_library(
         exclude = [
             "torch/lib/c10d/ProcessGroupMPI.hpp",
             "torch/lib/c10d/ProcessGroupNCCL.hpp",
+            "torch/csrc/autograd/generated/VariableType.h",
+            "torch/csrc/autograd/generated/RegistrationDeclarations.h",
+            "torch/csrc/autograd/generated/variable_factories.h",
+            "torch/csrc/autograd/generated/Functions.h",
         ] + torch_cuda_headers,
     ) + [":cpp_generated_code"],
     includes = [

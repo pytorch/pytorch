@@ -270,7 +270,7 @@ Tensor internal_new_from_data(
 
   if (PyArray_Check(data)) {
     TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from numpy");
-    auto tensor = tensor_from_numpy(data);
+    auto tensor = tensor_from_numpy(data, /*warn_if_not_writeable=*/!copy_numpy);
     const auto& inferred_scalar_type = type_inference ? tensor.scalar_type() : scalar_type;
     auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(dispatch_key));
     pybind11::gil_scoped_release no_gil;
@@ -360,9 +360,8 @@ void check_base_legacy_new(c10::DispatchKey dispatch_key, at::Layout expected_la
 void check_legacy_ctor_device(c10::DispatchKey dispatch_key, c10::optional<Device> device) {
   if (device.has_value()) {
     TORCH_CHECK(computeDeviceType(dispatch_key) == device.value().type(),
-             "legacy constructor for device type: ", computeDeviceType(dispatch_key),
-             " was passed device type: ", device.value().type(),
-             ", but device type must be: ", computeDeviceType(dispatch_key));
+             "legacy constructor expects device type: ", computeDeviceType(dispatch_key),
+             "but device type: ", device.value().type(), " was passed");
   }
 }
 

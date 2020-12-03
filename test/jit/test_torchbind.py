@@ -24,10 +24,14 @@ if __name__ == "__main__":
 
 class TestTorchbind(JitTestCase):
     def setUp(self):
-        if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE:
+        if IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE:
             raise unittest.SkipTest("non-portable load_library call used in test")
-        torch_root = Path(__file__).resolve().parent.parent.parent
-        p = torch_root / 'build' / 'lib' / 'libtorchbind_test.so'
+        if TEST_WITH_ROCM:
+            torch_root = Path(torch.__file__).resolve().parent
+            p = torch_root / 'lib' / 'libtorchbind_test.so'
+        else:
+            torch_root = Path(__file__).resolve().parent.parent.parent
+            p = torch_root / 'build' / 'lib' / 'libtorchbind_test.so'
         torch.ops.load_library(str(p))
 
     def test_torchbind(self):
@@ -138,6 +142,23 @@ class TestTorchbind(JitTestCase):
 
         scripted = torch.jit.script(foo)
         self.assertEqual(scripted(), "mom")
+
+    def test_torchbind_class_attr_recursive(self):
+        class FooBar(torch.nn.Module):
+            def __init__(self, foo_model):
+                super(FooBar, self).__init__()
+                self.foo_mod = foo_model
+
+            def forward(self) -> int:
+                return self.foo_mod.info()
+
+            def to_ivalue(self):
+                torchbind_model = torch.classes._TorchScriptTesting._Foo(self.foo_mod.info(), 1)
+                return FooBar(torchbind_model)
+
+        inst = FooBar(torch.classes._TorchScriptTesting._Foo(2, 3))
+        scripted = torch.jit.script(inst.to_ivalue())
+        self.assertEqual(scripted(), 6)
 
     def test_torchbind_class_attribute(self):
         class FooBar1234(torch.nn.Module):
@@ -282,3 +303,19 @@ class TestTorchbind(JitTestCase):
             if e.name == '_TorchScriptTesting::take_an_instance':
                 found_event = True
         self.assertTrue(found_event)
+
+    def test_torchbind_getattr(self):
+        foo = torch.classes._TorchScriptTesting._StackString(["test"])
+        self.assertEqual(None, getattr(foo, 'bar', None))
+
+    def test_torchbind_attr_exception(self):
+        foo = torch.classes._TorchScriptTesting._StackString(["test"])
+        with self.assertRaisesRegex(AttributeError, 'does not have a field'):
+            foo.bar
+
+    def test_lambda_as_constructor(self):
+        obj_no_swap = torch.classes._TorchScriptTesting._LambdaInit(4, 3, False)
+        self.assertEqual(obj_no_swap.diff(), 1)
+
+        obj_swap = torch.classes._TorchScriptTesting._LambdaInit(4, 3, True)
+        self.assertEqual(obj_swap.diff(), -1)

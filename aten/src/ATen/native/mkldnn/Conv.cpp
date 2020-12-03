@@ -139,7 +139,10 @@ Tensor mkldnn_convolution(
       dilation,
       groups);
 
-  auto ret = new_with_itensor_mkldnn(std::move(mkldnn_output), input.options());
+  auto ret = new_with_itensor_mkldnn(
+      std::move(mkldnn_output),
+      optTypeMetaToScalarType(input.options().dtype_opt()),
+      input.options().device_opt());
   return input.is_mkldnn() ? ret : mkldnn_to_dense(ret);
 }
 
@@ -175,7 +178,10 @@ static Tensor mkldnn_convolution_backward_input(
       padding_r.vec(),
       groups);
 
-  auto ret = new_with_itensor_mkldnn(std::move(mkldnn_grad_input), grad_output.options());
+  auto ret = new_with_itensor_mkldnn(
+      std::move(mkldnn_grad_input),
+      optTypeMetaToScalarType(grad_output.options().dtype_opt()),
+      grad_output.options().device_opt());
   return grad_output.is_mkldnn() ? ret : mkldnn_to_dense(ret);
 }
 
@@ -213,8 +219,12 @@ static std::tuple<Tensor, Tensor> mkldnn_convolution_backward_weights(
         groups);
   }
 
-  auto grad_weight = new_with_itensor_mkldnn(std::move(mkldnn_grad_weight), grad_output.options());
-  auto grad_bias = new_with_itensor_mkldnn(std::move(mkldnn_grad_bias), grad_output.options());
+  auto scalar_type = optTypeMetaToScalarType(grad_output.options().dtype_opt());
+  auto device_opt = grad_output.options().device_opt();
+  auto grad_weight = new_with_itensor_mkldnn(
+      std::move(mkldnn_grad_weight), scalar_type, device_opt);
+  auto grad_bias = new_with_itensor_mkldnn(
+      std::move(mkldnn_grad_bias), scalar_type, device_opt);
   return std::make_tuple(grad_weight, grad_bias);
 }
 

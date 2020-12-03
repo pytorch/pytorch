@@ -328,7 +328,9 @@ namespace detail {
           const uint32_t exp_bits = (bits >> 13) & UINT32_C(0x00007C00);
           const uint32_t mantissa_bits = bits & UINT32_C(0x00000FFF);
           const uint32_t nonsign = exp_bits + mantissa_bits;
-          return (sign >> 16) | (shl1_w > UINT32_C(0xFF000000) ? UINT16_C(0x7E00) : nonsign);
+          return static_cast<uint16_t>(
+            (sign >> 16) | (shl1_w > UINT32_C(0xFF000000) ? UINT16_C(0x7E00) : nonsign)
+          );
   }
 
 } // namespace detail
@@ -372,10 +374,11 @@ struct alignas(4) complex<Half> {
   Half imag() const {
     return imag_;
   }
-  inline complex(c10::complex<float> value)
+  explicit inline complex(c10::complex<float> value)
       : real_(value.real()), imag_(value.imag()) {}
-  inline complex(c10::complex<double> value)
-      : real_(value.real()), imag_(value.imag()) {}
+  explicit inline complex(c10::complex<double> value)
+      : real_(static_cast<float>(value.real())),
+        imag_(static_cast<float>(value.imag())) {}
   inline operator c10::complex<float>() const {
     return {real_, imag_};
   }

@@ -15,8 +15,8 @@ TEST(VmapTest, TestBatchedTensor) {
     ASSERT_EQ(x.sizes(), expected_size);
     ASSERT_EQ(x.dim(), 2);
     ASSERT_EQ(x.numel(), 8);
+    ASSERT_EQ(x.is_contiguous(), false);
     ASSERT_THROW(x.strides(), c10::Error);
-    ASSERT_THROW(x.is_contiguous(), c10::Error);
     ASSERT_THROW(x.storage(), c10::Error);
     ASSERT_THROW(x.storage_offset(), c10::Error);
   }
