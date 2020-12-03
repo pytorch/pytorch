@@ -43,7 +43,7 @@ using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
 struct Refinement {
   Refinement(std::string identifier, TypePtr type)
-      : identifier_(std::move(identifier)), type_(type) {}
+      : identifier_(std::move(identifier)), type_(std::move(type)) {}
   const std::string& identifier() const {
     return identifier_;
   }
@@ -71,7 +71,7 @@ struct RefinementSet {
       : RefinementSet(
             Refinements({std::move(single_true)}),
             Refinements({std::move(single_false)})) {}
-  RefinementSet() {} // empty
+  RefinementSet() = default; // empty
   RefinementSet And(const RefinementSet& rhs) const {
     // if the result of an AND is true, both a & b had to be true,
     // so we take the union of a.true_refinements and b.true_refinements.
@@ -245,7 +245,7 @@ struct Environment {
     while (runner->next) {
       runner = runner->next.get();
     }
-    runner->error_messages[name] = msg;
+    runner->error_messages[name] = std::move(msg);
   }
 
   // see if type error has been set for a variable
@@ -281,7 +281,7 @@ struct Environment {
       TypePtr type) {
     auto g = b->owningGraph();
     g->insertNode(g->createStore(name, v))->setSourceRange(loc);
-    type_table[name] = type;
+    type_table[name] = std::move(type);
   }
 
   SugaredValuePtr findInThisFrame(const std::string& name) {
@@ -404,7 +404,7 @@ struct Environment {
             << " but is being assigned to a value of type "
             << as_simple_value->type()->repr_str();
       }
-      insertStore(name, loc, std::move(as_simple_value), annotated_type);
+      insertStore(name, loc, as_simple_value, annotated_type);
     } else {
       value_table[name] = std::move(value);
     }
@@ -1105,9 +1105,9 @@ struct to_ir {
   }
 
   RefinementSet findIsNoneRefinements(
-      Expr lhs,
+      const Expr& lhs,
       Value* lhs_value,
-      Expr rhs,
+      const Expr& rhs,
       Value* rhs_value,
       int tok) {
     if (rhs.kind() != TK_NONE && lhs.kind() == TK_NONE) {
@@ -1361,8 +1361,8 @@ struct to_ir {
   Value* emitIfExpr(
       const SourceRange& range,
       const CondValue& cond_value,
-      std::function<Value*()> true_expr,
-      std::function<Value*()> false_expr) {
+      const std::function<Value*()>& true_expr,
+      const std::function<Value*()>& false_expr) {
     Node* n = graph->insertNode(create(prim::If, range, 0));
     n->addInput(cond_value.value());
     auto* true_block = n->addBlock();
@@ -1371,7 +1371,7 @@ struct to_ir {
     auto emit_if_expr = [this, &range](
                             Block* b,
                             const RefinementSet& refinements,
-                            std::function<Value*()> expr_value) {
+                            const std::function<Value*()>& expr_value) {
       pushFrame(b);
       WithInsertPoint guard(b);
       insertRefinements(range, refinements);
@@ -1380,9 +1380,8 @@ struct to_ir {
       popFrame();
     };
 
-    emit_if_expr(true_block, cond_value.refinements(), std::move(true_expr));
-    emit_if_expr(
-        false_block, cond_value.refinements().Not(), std::move(false_expr));
+    emit_if_expr(true_block, cond_value.refinements(), true_expr);
+    emit_if_expr(false_block, cond_value.refinements().Not(), false_expr);
 
     auto true_type = true_block->outputs().at(0)->type();
     auto false_type = false_block->outputs().at(0)->type();
@@ -1602,7 +1601,7 @@ struct to_ir {
     // category checks: tuple_check = true, types = {float, int}
     struct GatheredTypes {
       GatheredTypes(ScriptTypeParser parser) : typeParser_(std::move(parser)) {}
-      void gather(Expr classinfo) {
+      void gather(const Expr& classinfo) {
         if (classinfo.kind() == TK_TUPLE_LITERAL) {
           for (Expr e : TupleLiteral(classinfo).inputs()) {
             gather(e);
@@ -1695,7 +1694,7 @@ struct to_ir {
   // semantics specified at
   // https://github.com/onnx/onnx/blob/master/docs/Operators.md#Loop
   void emitLoopCommon(
-      SourceRange range,
+      const SourceRange& range,
       const std::function<void()>& emit_body,
       const SugaredValuePtr& iter_val,
       c10::optional<List<Expr>> targets,
@@ -1760,7 +1759,7 @@ struct to_ir {
   void emitUnrolledLoop(
       const SourceRange& loc,
       const std::function<void()>& emit_body,
-      SugaredValuePtr iterable,
+      const SugaredValuePtr& iterable,
       const List<Expr>& targets) {
     auto static_len = iterable->staticLen();
     TORCH_INTERNAL_ASSERT(
@@ -3073,8 +3072,8 @@ struct to_ir {
     // through RPC in TorchScript,
     // Ideally, function value in JIT IR is first-class citizen and
     // The RPC C++ entry API can take c10::Function directly.
-    auto rpcMinInputs = 2;
-    auto rpcMaxInputs = 5; // NOLINT
+    size_t rpcMinInputs = 2;
+    size_t rpcMaxInputs = 5; // NOLINT
     std::string op_name = rpc_op.toUnqualString();
     if (apply.inputs().size() < rpcMinInputs ||
         apply.inputs().size() > rpcMaxInputs) {

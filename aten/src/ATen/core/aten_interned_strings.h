@@ -531,6 +531,7 @@ _(aten, nll_loss2d_forward) \
 _(aten, nll_loss_backward) \
 _(aten, nll_loss_forward) \
 _(aten, nonzero) \
+_(aten, nonzero_numpy) \
 _(aten, norm) \
 _(aten, norm_except_dim) \
 _(aten, normal) \
@@ -552,6 +553,7 @@ _(aten, pixel_shuffle) \
 _(aten, poisson) \
 _(aten, polygamma) \
 _(aten, pow) \
+_(aten, float_power) \
 _(aten, prelu) \
 _(aten, prelu_backward) \
 _(aten, prod) \

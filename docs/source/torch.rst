@@ -296,6 +296,7 @@ Pointwise Ops
     exp2
     expm1
     fix
+    float_power
     floor
     floor_divide
     fmod
@@ -446,6 +447,7 @@ Other Operations
     bincount
     block_diag
     broadcast_tensors
+    broadcast_shapes
     bucketize
     cartesian_prod
     cdist

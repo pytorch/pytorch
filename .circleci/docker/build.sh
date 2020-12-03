@@ -274,13 +274,6 @@ case "$image" in
     VISION=yes
     KATEX=yes
     ;;
-  pytorch-linux-bionic-rocm3.7-py3.6)
-    ANACONDA_PYTHON_VERSION=3.6
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ROCM_VERSION=3.7
-    ;;
   pytorch-linux-bionic-rocm3.8-py3.6)
     ANACONDA_PYTHON_VERSION=3.6
     PROTOBUF=yes
