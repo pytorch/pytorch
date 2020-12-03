@@ -44,6 +44,8 @@ struct TORCH_CUDA_API CUDAFuture : at::ivalue::Future {
   }
 
   void postMarkCompletedHook(const at::IValue& value) override {
+    currentDevice_ = c10::cuda::current_device();
+
     // Extract them once and cache them for later uses.
     dataPtrs_ = extractDataPtrs(value);
 
@@ -98,6 +100,8 @@ struct TORCH_CUDA_API CUDAFuture : at::ivalue::Future {
         }
       }
 
+      c10::cuda::CUDAGuard deviceGuard(currentDevice_);
+
       callback();
     };
   }
@@ -122,6 +126,10 @@ struct TORCH_CUDA_API CUDAFuture : at::ivalue::Future {
   // Once WorkNCCL is gone (as part of the Future and Work merge) this should be
   // fixed.
  protected:
+  // The device that was current when markCompleted was called, which we'll
+  // restore when invoking callbacks.
+  c10::DeviceIndex currentDevice_;
+
   std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents_;
   std::vector<std::reference_wrapper<const at::DataPtr>> dataPtrs_;
 
