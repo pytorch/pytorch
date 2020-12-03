@@ -76,43 +76,12 @@ std::tuple<Tensor, Tensor> _histogram_cpu_template_uniform_bins(
     const Tensor& weights /* optional */,
     c10::optional<ArrayRef<double>> range,
     bool density) {
-  // If range is not defined, compute min and max from the values in the Tensor.
-  input_t min;
-  input_t max;
-  if (range.has_value()) {
-    // If range is defined, max must be larger than min.
-    TORCH_CHECK(
-        range.value()[0] < range.value()[1], "max must be larger than min");
-    min = static_cast<input_t>(range.value()[0]);
-    max = static_cast<input_t>(range.value()[1]);
-    // If the values in range cannot be represented by input dtype, we avoid promoting the tensor
-    // and instead output a warning. 
-    if (static_cast<double>(min) != range.value()[0] ||
-        static_cast<double>(max) != range.value()[1]) {
-      TORCH_WARN_ONCE("Value in range cannot be represented by tensor's scalar type, casting to ", self.scalar_type());
-    }
-  } else {
-    min = *self.min().data_ptr<input_t>();
-    max = *self.max().data_ptr<input_t>();
-    // This is done to avoid divide by zero if input min is equal to input max.
-    // In this case computing the histogram can also be skipped altogether, as
-    // it's equal to the sum of weights in the middle bin, and zero everywhere
-    // else.
-    if (min == max) {
-      min -= 1;
-      max += 1;
-    }
-  }
+
+  auto computed_range = _histogram_maybe_compute_range<input_t>(self, range);
+  input_t minvalue = computed_range.first;
+  input_t maxvalue = computed_range.second;
 
   TORCH_CHECK(nbins > 0, "bins must be > 0");
-  TORCH_CHECK(
-      !(std::isinf(static_cast<double>(min)) ||
-        std::isinf(static_cast<double>(max)) || _isnan(min) || _isnan(max)),
-      "range of [",
-      min,
-      ", ",
-      max,
-      "] is not finite");
 
   bool has_weights = weights.defined();
 
@@ -129,26 +98,26 @@ std::tuple<Tensor, Tensor> _histogram_cpu_template_uniform_bins(
     // in PyTorch today, and a multi-threaded one would be tricky to implement.
     // TODO: Implement a multithreaded version.
     for (int64_t i = 0; i < self_size; i++) {
-      if (self_p[i] >= min && self_p[i] <= max) {
-        output_p[getbin(self_p[i], min, max, nbins)] += weights_p[i];
+      if (self_p[i] >= minvalue && self_p[i] <= maxvalue) {
+        output_p[getbin(self_p[i], minvalue, maxvalue, nbins)] += weights_p[i];
       }
     }
   } else {
     hist = native::zeros({nbins}, kLong);
     int64_t* output_p = hist.data_ptr<int64_t>();
     for (int64_t i = 0; i < self_size; i++) {
-      if (self_p[i] >= min && self_p[i] <= max) {
-        output_p[getbin(self_p[i], min, max, nbins)] += static_cast<int64_t>(1);
+      if (self_p[i] >= minvalue && self_p[i] <= maxvalue) {
+        output_p[getbin(self_p[i], minvalue, maxvalue, nbins)] += static_cast<int64_t>(1);
       }
     }
   }
 
   Tensor edges;
   if (c10::isFloatingType(self.scalar_type())) {
-    edges = at::linspace(min, max, nbins + 1, self.options());
+    edges = at::linspace(minvalue, maxvalue, nbins + 1, self.options());
   } else {
     edges = at::linspace(
-        min, max, nbins + 1, self.options().dtype(c10::get_default_dtype()));
+        minvalue, maxvalue, nbins + 1, self.options().dtype(c10::get_default_dtype()));
   }
   
   if (density) { // Compute the density
@@ -189,6 +158,7 @@ std::tuple<Tensor,Tensor> _histogram_cpu_uniform_bins(
     flattened_weights = weights.flatten(0).contiguous();
   }
 
+  // There might be a better way for dispatching over pairs of dtypes.
   return AT_DISPATCH_ALL_TYPES(
       self.scalar_type(), "histogram_cpu_uniform_bins", [&] {
     const auto scalar = weights.scalar_type();
@@ -279,7 +249,7 @@ std::tuple<Tensor, Tensor> histogram(
         weights.sizes() == self.sizes(),
         "histogram only supports input and weights of the same shape");
     // Throw an error if weights scalar type is complex, as bincount casts them
-    // to double.
+    // to double. TO DO: Add a workaround for that.
     TORCH_CHECK(
         !isComplexType(weights.scalar_type()),
         "Scalar type ",

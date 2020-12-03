@@ -368,35 +368,9 @@ std::tuple<Tensor,Tensor> _histogram_cuda_template_uniform_bins(
     const Tensor& weights,
     c10::optional<ArrayRef<double>> range,
     bool density) {
-  input_t minvalue;
-  input_t maxvalue;
-  if (range.has_value()) {
-    // If range is defined, max must be larger than min.
-    TORCH_CHECK(
-        range.value()[0] < range.value()[1], "max must be larger than min");
-    minvalue = static_cast<input_t>(range.value()[0]);
-    maxvalue = static_cast<input_t>(range.value()[1]);
-    // If the values in range cannot be represented by input dtype, we avoid
-    // promoting the tensor
-    // and instead output a warning.
-    if (static_cast<double>(minvalue) != range.value()[0] ||
-        static_cast<double>(maxvalue) != range.value()[1]) {
-      TORCH_WARN_ONCE(
-          "Value in range cannot be represented by tensor's scalar type, casting to ",
-          self.scalar_type());
-    }
-  } else {
-    minvalue = *self.min().cpu().data_ptr<input_t>();
-    maxvalue = *self.max().cpu().data_ptr<input_t>();
-    // This is done to avoid divide by zero if input min is equal to input max.
-    // In this case computing the histogram can also be skipped altogether, as
-    // it's equal to the sum of weights in the middle bin, and zero everywhere
-    // else.
-    if (minvalue == maxvalue) {
-      minvalue -= 1;
-      maxvalue += 1;
-    }
-  }
+  auto computed_range = at::native::_histogram_maybe_compute_range<input_t>(self, range);
+  input_t minvalue = computed_range.first;
+  input_t maxvalue = computed_range.second;
 
   TORCH_CHECK(nbins > 0, "bins must be > 0");
 #ifndef __HIP_PLATFORM_HCC__
@@ -511,6 +485,7 @@ std::tuple<Tensor,Tensor> _histogram_cuda_uniform_bins(
     TORCH_CHECK(
         weights.sizes() == self.sizes(),
         "histogram only supports input and weights of the same shape"); 
+    // This is a hacky workaround for CUDA_tensor_histogram indexing being broken with multidim weights
     flattened_weights = weights.flatten(0);
   }
   // See Note [Writing Nondeterministic Operations]
