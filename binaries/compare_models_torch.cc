@@ -17,17 +17,14 @@
 #include <string>
 #include <vector>
 
-#include "ATen/ATen.h"
-#include "caffe2/core/timer.h"
-#include "caffe2/utils/string_utils.h"
-#include "torch/csrc/autograd/grad_mode.h"
-#include "torch/csrc/jit/serialization/import.h"
-#include "torch/script.h"
+#include <ATen/ATen.h>
+#include <caffe2/core/timer.h>
+#include <caffe2/utils/string_utils.h>
+#include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/jit/serialization/import.h>
+#include <torch/script.h>
 
-#include "c10/mobile/CPUCachingAllocator.h"
-
-#include <chrono>
-using namespace std::chrono;
+#include <c10/mobile/CPUCachingAllocator.h>
 
 C10_DEFINE_string(
     refmodel,
