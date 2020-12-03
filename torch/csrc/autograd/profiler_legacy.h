@@ -11,6 +11,7 @@
 #include <tuple>
 #include <ATen/ATen.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/autograd/profiler_utils.h>
 #ifndef _WIN32
 #include <ctime>
 #endif
@@ -291,6 +292,18 @@ struct TORCH_API LegacyEvent {
     scope_ = scope;
   }
 
+  const std::unordered_map<std::string, c10::IValue>& extraArgs() const {
+    return extra_args_;
+  }
+
+  void setExtra(const at::RecordFunction& fn) {
+    saveExtraArgs(extra_args_, fn);
+  }
+
+  uint64_t flops(void) {
+    return computeFlops(name_, extra_args_);
+  }
+
  private:
   // signed to allow for negative intervals, initialized for safety.
   int64_t cpu_ns_ = 0;
@@ -312,6 +325,8 @@ struct TORCH_API LegacyEvent {
   std::vector<std::string> stack_;
   uint8_t scope_;
   uint64_t correlation_id_;
+  // Extra arguments for computing op flops
+  std::unordered_map<std::string, c10::IValue> extra_args_;
 };
 
 // a linked-list of fixed sized vectors, to avoid

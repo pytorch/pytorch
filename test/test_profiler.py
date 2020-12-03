@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, TEST_WITH_ASAN, IS_WINDOWS)
+import torch.autograd.profiler as profiler
 from torch.autograd.profiler import profile
 from torch.autograd import kineto_available
 
@@ -128,6 +129,23 @@ class TestProfiler(TestCase):
         self.assertTrue(found_gemm)
         self.assertTrue(found_memcpy)
         # p.export_chrome_trace("/tmp/test_trace.json")
+
+
+class TestProfilerFlops(TestCase):
+    def test_function(self):
+        model = torch.nn.Sequential(
+            nn.Conv2d(1, 20, 5),
+            nn.ReLU(),
+            nn.Linear(1, 40),
+            nn.ReLU(),
+        )
+        inputs = torch.randn(20, 1, 5, 5)
+        with profiler.profile(record_shapes=True, with_flops=True) as prof:
+            model(inputs)
+        profiler_output = prof.key_averages(group_by_input_shape=True).table(sort_by="cpu_time_total", row_limit=10)
+        print(profiler_output)
+        self.assertIn("GFLOPs", profiler_output)
+
 
 if __name__ == '__main__':
     run_tests()

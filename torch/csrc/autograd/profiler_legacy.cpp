@@ -226,6 +226,7 @@ void ProfilerThreadLocalState::pushRange(
     evt.setSequenceNr(fn.seqNr());
     evt.setFwdThreadId(fn.forwardThreadId());
     evt.setScope((uint8_t)fn.scope());
+    evt.setExtra(fn);
 #ifndef C10_MOBILE
     // backward nodes source range corresponds to the forward node
     // TODO: consider using C++ stack trace

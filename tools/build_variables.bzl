@@ -76,6 +76,7 @@ jit_core_headers = [
 jit_core_sources = [
     "torch/csrc/jit/frontend/error_report.cpp",
     "torch/csrc/jit/frontend/function_schema_parser.cpp",
+    "torch/csrc/autograd/profiler_utils.cpp",
     "torch/csrc/jit/frontend/lexer.cpp",
     "torch/csrc/jit/frontend/schema_type_parser.cpp",
     "torch/csrc/jit/frontend/strtod.cpp",
