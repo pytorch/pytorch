@@ -215,9 +215,16 @@ class ProcessGroupNCCL : public ProcessGroup {
         : at::ivalue::Future(c10::ListType::create(c10::TensorType::get())),
           value_(std::move(value)),
           cudaEvents_(std::move(cudaEvents)) {
+      // Check that the device indices are distinct
+      std::unordered_set<c10::DeviceIndex> uniqueDeviceIndices;
       for (const at::cuda::CUDAEvent& event : *cudaEvents_) {
         TORCH_INTERNAL_ASSERT(event.isCreated());
+        uniqueDeviceIndices.insert(event.device_index());
       }
+      TORCH_INTERNAL_ASSERT(
+        cudaEvents_->size() == uniqueDeviceIndices.size(),
+        "Got ", cudaEvents_->size(), " events, but only ",
+        uniqueDeviceIndices.size(), " distinct devices");
       for (const at::DataPtr& data_ptr : extractDataPtrs(value_)) {
         TORCH_INTERNAL_ASSERT(
             std::find_if(
@@ -324,12 +331,9 @@ class ProcessGroupNCCL : public ProcessGroup {
       return !value_.isNone();
     }
 
-    void setDataPtrExtractor(DataPtrExtractor data_ptr_extractor) override {
-      // To avoid races with other threads that may be using the extractor, we
-      // won't modify it after it's first set.
-      if (dataPtrExtractor_ == nullptr) {
-        dataPtrExtractor_ = std::move(data_ptr_extractor);
-      }
+    void setDataPtrExtractor(DataPtrExtractor dataPtrExtractor) override {
+      std::unique_lock<std::mutex> lock(dataPtrExtractorMutex_);
+      dataPtrExtractor_ = std::move(dataPtrExtractor);
     }
 
    protected:
@@ -407,10 +411,12 @@ class ProcessGroupNCCL : public ProcessGroup {
     at::IValue value_;
     std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents_;
     DataPtrExtractor dataPtrExtractor_;
+    std::mutex dataPtrExtractorMutex_;
     c10::optional<FutureError> error_;
 
     std::vector<std::reference_wrapper<const at::DataPtr>> extractDataPtrs(
         const at::IValue& value) {
+      std::unique_lock<std::mutex> lock(dataPtrExtractorMutex_);
       std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
       if (dataPtrExtractor_ != nullptr) {
         // If a Python communication hook is used, dataPtrExtractor_ will be

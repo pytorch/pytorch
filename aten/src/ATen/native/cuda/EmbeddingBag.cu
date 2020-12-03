@@ -244,7 +244,7 @@ Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
               scalar_t, index_t><<<grid, block, 0, stream>>>(
               max_indices.data_ptr<index_t>(), grad.data_ptr<scalar_t>(),
               grad_weight.data_ptr<scalar_t>(), stride, numBags);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
         });
       });
 
@@ -335,7 +335,7 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
             mode == MODE_MAX ? max_indices.data_ptr<index_t>() : NULL,
             per_sample_weights.defined() ? per_sample_weights.data_ptr<scalar_t>() : NULL,
             per_sample_weights.defined() ? per_sample_weights.stride(0) : 0);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
     });
   });
@@ -475,7 +475,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
             num_samples,
             embedding_features,
             output.data_ptr<scalar_t>());
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
     }
   );

@@ -114,7 +114,7 @@ std::string used_cpu_capability() {
 
 std::string show_config() {
   std::ostringstream ss;
-  ss << "PyTorch built with:\n"; // TODO add the version of PyTorch
+  ss << "PyTorch built with:\n";
 
   // Reference:
   // https://blog.kowalczyk.info/article/j/guide-to-predefined-macros-in-c-compilers-gcc-clang-msvc-etc..html
@@ -183,6 +183,17 @@ std::string show_config() {
   // TODO: do XLA
 
   return ss.str();
+}
+
+std::string get_cxx_flags() {
+  #if defined(FBCODE_CAFFE2)
+  TORCH_CHECK(
+    false,
+    "Buck does not populate the `CXX_FLAGS` field of Caffe2 build options. "
+    "As a result, `get_cxx_flags` is OSS only."
+  );
+  #endif
+  return caffe2::GetBuildOptions().at("CXX_FLAGS");
 }
 
 }

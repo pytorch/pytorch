@@ -402,6 +402,11 @@ class ParameterList(Module):
         if parameters is not None:
             self += parameters
 
+    def __setstate__(self, state):
+        state['_initialized'] = False
+        super(ParameterList, self).__setstate__(state)
+        self._initialized = True
+
     def _get_abs_string_index(self, idx):
         """Get the absolute index for the list of modules"""
         idx = operator.index(idx)
@@ -431,8 +436,9 @@ class ParameterList(Module):
         return self.register_parameter(str(idx), param)
 
     def __setattr__(self, key: Any, value: Any) -> None:
-        if getattr(self, "_initialized", False) and not isinstance(value, torch.nn.Parameter):
-            warnings.warn("Setting attributes on ParameterList is not supported.")
+        if getattr(self, "_initialized", False):
+            if not hasattr(self, key) and not isinstance(value, torch.nn.Parameter):
+                warnings.warn("Setting attributes on ParameterList is not supported.")
         super(ParameterList, self).__setattr__(key, value)
 
     def __len__(self) -> int:
@@ -538,6 +544,11 @@ class ParameterDict(Module):
         if parameters is not None:
             self.update(parameters)
 
+    def __setstate__(self, state):
+        state['_initialized'] = False
+        super(ParameterDict, self).__setstate__(state)
+        self._initialized = True
+
     def __getitem__(self, key: str) -> 'Parameter':
         return self._parameters[key]
 
@@ -548,8 +559,9 @@ class ParameterDict(Module):
         del self._parameters[key]
 
     def __setattr__(self, key: Any, value: Any) -> None:
-        if getattr(self, "_initialized", False) and not isinstance(value, torch.nn.Parameter):
-            warnings.warn("Setting attributes on ParameterDict is not supported.")
+        if getattr(self, "_initialized", False):
+            if not hasattr(self, key) and not isinstance(value, torch.nn.Parameter):
+                warnings.warn("Setting attributes on ParameterDict is not supported.")
         super(ParameterDict, self).__setattr__(key, value)
 
     def __len__(self) -> int:
