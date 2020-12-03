@@ -50,7 +50,7 @@ def deserialize_graphmodule(body : dict) -> torch.nn.Module:
             super().__init__()
             self.__dict__ = body
 
-    CodeOnlyModule.forward = _forward_from_src(body['code'])
+    CodeOnlyModule.forward = _forward_from_src(body['_code'])
 
     from .symbolic_trace import Tracer
 

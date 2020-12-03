@@ -15,6 +15,7 @@ vTensor pack_weights(
   if (weight_arg.is_vulkan()) {
     return convert(weight_arg);
   }
+
   const Tensor weight = weight_arg.contiguous();
   const IntArrayRef w_sizes = weight.sizes();
   const float* const src_weight_ptr = weight.data_ptr<float>();
@@ -26,14 +27,16 @@ vTensor pack_weights(
       weight.options(),
   };
 
-  using Future = vTensor::Future<void, vTensor::Access::Write>;
-  Future v_weight_future = v_weight.host<void, vTensor::Access::Write>();
-  Future::Payload v_weight_payload = v_weight_future.wait();
+  {
+    using Future = vTensor::Future<void, vTensor::Access::Write>;
+    Future v_weight_future = v_weight.host<void, vTensor::Access::Write>();
+    Future::Payload v_weight_payload = v_weight_future.wait();
 
-  memcpy(
-      v_weight_payload.get(),
-      src_weight_ptr,
-      std::min(weight.nbytes(), v_weight.nbytes()));
+    memcpy(
+        v_weight_payload.get(),
+        src_weight_ptr,
+        std::min(weight.nbytes(), v_weight.nbytes()));
+  }
 
   return v_weight;
 }
