@@ -577,6 +577,23 @@ static PyObject * THPModule_vmapmode_decrement_nesting(PyObject* _unused, PyObje
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPModule_is_tensor(PyObject*, PyObject *arg) {
+  if (THPVariable_CheckExact(arg)) Py_RETURN_TRUE;
+  Py_RETURN_FALSE;
+}
+
+PyObject *THPModule_all_tensors(PyObject*, PyObject *arg) {
+  PyObject* args(PySequence_Fast(arg, "expected a sequence"));
+  if (!args) Py_RETURN_FALSE;
+
+  auto n = PySequence_Fast_GET_SIZE(args);
+  for (Py_ssize_t i = 0; i < n; i++) {
+    PyObject* obj = PySequence_Fast_GET_ITEM(args, i);
+    if (!THPVariable_CheckExact(obj)) Py_RETURN_FALSE;
+  }
+  Py_RETURN_TRUE;
+}
+
 //NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  THPModule_initExtension,   METH_O,       nullptr},
@@ -628,6 +645,8 @@ static PyMethodDef TorchMethods[] = {
   {"_is_xnnpack_enabled", THPModule_isEnabledXNNPACK, METH_NOARGS, nullptr},
   {"_is_torch_function_enabled", THPModule_isEnabledTorchFunction, METH_NOARGS, nullptr},
   {"_disabled_torch_function_impl", THPModule_disable_torch_function, METH_VARARGS, nullptr},
+  {"_is_tensor", THPModule_is_tensor, METH_O, nullptr},
+  {"_all_tensors", THPModule_all_tensors, METH_O, nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 

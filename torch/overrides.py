@@ -28,7 +28,7 @@ import types
 from typing import Dict, Set, List, Any, Callable, Iterable
 
 import torch
-from torch._C import _is_torch_function_enabled, _disabled_torch_function_impl
+from torch._C import _is_torch_function_enabled, _disabled_torch_function_impl, _all_tensors
 
 __all__ = [
     "get_ignored_functions",
@@ -1183,12 +1183,24 @@ def has_torch_function(relevant_args: Iterable[Any]) -> bool:
     torch.is_tensor_like
         Checks if something is a Tensor-like, including an exact ``Tensor``.
     """
-    return _is_torch_function_enabled() and any(
-        type(a) is not torch.Tensor and
-        getattr(a, '__torch_function__', _disabled_torch_function_impl)
-        is not _disabled_torch_function_impl
-        for a in relevant_args
+    return (
+        # For normal use, we want to return False as quickly as possible.
+        #  1) The `_all_tensors()` call is very cheap (~50 ns) and will be enough
+        #     to reject all Tensor args.
+        #  2) `_is_torch_function_enabled` is reasonably cheap (~100 ns), but
+        #     is True by default so we evaluate it second.
+        #  3) Finally, we only do the very expensive (hundreds of ns per arg)
+        #     Python check if the other checks pass.
+        not _all_tensors(relevant_args)
+        and _is_torch_function_enabled()
+        and any(
+            type(a) is not torch.Tensor and
+            getattr(a, '__torch_function__', _disabled_torch_function_impl)
+            is not _disabled_torch_function_impl
+            for a in relevant_args
+        )
     )
+
 
 @functools.lru_cache(None)
 def get_overridable_functions() -> Dict[Any, List[Callable]]:
