@@ -370,7 +370,7 @@ bool is_tensor_list_and_append_overloaded(PyObject* obj, std::vector<py::handle>
     return false;
   }
   auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
-  for (size_t idx = 0; idx < size; idx++) {
+  for (long idx = 0; idx < size; idx++) {
     PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
     if (!is_tensor_and_append_overloaded(iobj, overloaded_args)) {
       if (throw_error) {

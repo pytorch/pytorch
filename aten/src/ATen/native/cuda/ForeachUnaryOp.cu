@@ -560,7 +560,7 @@ void foreach_tensor_reciprocal_cuda_(TensorList tensors) {
 
 template<typename T>
 struct Truncf {
-    __device__ T operator()(T t) const { return std::truncf(t); }
+    __device__ T operator()(T t) const { return std::trunc(t); }
 };
 
 std::vector<Tensor> foreach_tensor_trunc_cuda(TensorList tensors) {
