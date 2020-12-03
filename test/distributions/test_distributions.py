@@ -2569,7 +2569,7 @@ class TestDistributions(TestCase):
             # for concentration=1., the density is uniform over the space of all
             # correlation matrices.
             if dim == 2:
-                # for dim=2, log_prob = 0.5 (jacobian adjustment factor is 0.)
+                # for dim=2, pdf = 0.5 (jacobian adjustment factor is 0.)
                 self.assertTrue(all([x == torch.tensor(0.5).log() for x in log_probs]))
             self.assertEqual(log_probs[0], log_probs[1])
 
