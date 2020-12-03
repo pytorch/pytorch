@@ -61,8 +61,9 @@ namespace {
                 valid_inputs,
                 "Expected non-empty vector or matrix with optional 0-dim batch size, but got: ",
                 input.sizes());
+    std::cout << "vi: " << valid_inputs << " t.dim: " << target.dim() << " t.n: " << target.numel() << " nfr: " << nframe << std::endl;
     TORCH_CHECK(
-                target.numel() > 0 && target.dim() <= 1 && target.numel() == nframe,
+                valid_inputs && target.dim() <= 1 && target.numel() == nframe,
                 "inconsistent target size, got: ",
                 target.sizes());
   }
