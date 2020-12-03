@@ -316,7 +316,7 @@ def _decide_external_data_format(use_external_data_format, operator_export_type,
     model_file_location = f if val_use_external_data_format and isinstance(f, str) else str()
     return val_use_external_data_format, model_file_location
 
-def _decide_input_and_input_names_format(model, args, input_names):
+def _decide_input_format(model, args):
     import inspect
     try:
         sig = inspect.signature(model.forward)
@@ -328,15 +328,15 @@ def _decide_input_and_input_names_format(model, args, input_names):
                 if optional_arg in args_dict:
                     args.append(args_dict[optional_arg])
             args = tuple(args)
-        return args, input_names
-    # TODO - cases of models without forward functions and dict inputs
+        return args
+    # Cases of models without forward functions and dict inputs
     except AttributeError:
         warnings.warn("Model has no forward function")
-        return args, input_names
-    # TODO - cases with no inputs
+        return args
+    # Cases of models with no input args
     except IndexError:
         warnings.warn("No input args")
-        return args, input_names
+        return args
 
 def _trace(func, args, operator_export_type, return_outs=False):
     # Special case for common case of passing a single Tensor
@@ -533,7 +533,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                                                          opset_version)
         val_add_node_names = _decide_add_node_names(add_node_names, operator_export_type)
         val_do_constant_folding = _decide_constant_folding(do_constant_folding, operator_export_type, training)
-        args, input_names = _decide_input_and_input_names_format(model, args, input_names)
+        args = _decide_input_format(model, args)
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose, input_names,
                                                         output_names, operator_export_type,
                                                         example_outputs, _retain_param_name,
@@ -584,7 +584,7 @@ def _find_missing_ops_onnx_export(model, args, f, verbose=False, training=Traini
     # in ONNX, fall through will occur and export the operator as is, as a custom ONNX op.
     operator_export_type = OperatorExportTypes.ONNX_FALLTHROUGH
     with select_model_mode_for_export(model, training):
-        args, input_names = _decide_input_and_input_names_format(model, args, input_names)
+        args = _decide_input_format(model, args)
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose, input_names,
                                                         output_names, operator_export_type)
     # The output 'unsupported_ops' will contain the names of all the ops that are not supported in ONNX
@@ -650,7 +650,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             val_use_external_data_format, model_file_location = _decide_external_data_format(use_external_data_format,
                                                                                              operator_export_type,
                                                                                              f)
-            args, input_names = _decide_input_and_input_names_format(model, args, input_names)
+            args = _decide_input_format(model, args)
             if dynamic_axes is None:
                 dynamic_axes = {}
             _validate_dynamic_axes(dynamic_axes, model, input_names, output_names)

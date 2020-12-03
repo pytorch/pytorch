@@ -112,87 +112,8 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             TrainingMode.PRESERVE: export the model in inference mode if model.training is
             False and to a training friendly mode if model.training is True.
             TrainingMode.TRAINING: export the model in a training friendly mode.
-        input_names(list of strings or dict<string, string>, default empty list): names 
-        to assign to the input nodes of the graph 
-            the dictionary specify the input names for inputs 
-            - KEY: str, input name in forward function 
-            - VALUE: str, input name to be assigned 
-            input_names can be structured as follows: 
-
-            1. LIST OF STRINGS:: 
-
-                ‘’input_names = [‘input_1’, 
-                            ‘input_2’]’’     
-
-            names to assign to the input nodes of the graph in order. 
-
-            2. DICTIONARY WITH INPUT-INPUT NAMES PAIRS:: 
-
-                ‘’input_names = { 
-                            ‘y’: ‘input_y’, 
-                            ‘z’: ‘input_z’ 
-                                }) 
-
-            Based on the changes to the format of the input args, the format 
-            in which the input_names is structured will depend on the format 
-            in which args are entered. The example model below is used to demonstrate 
-            this constraint. 
-
-                class Model(torch.nn.Module): 
-                    def forward(self, x_in, y_in=None, z_in=None): 
-                        if y is not None: 
-                            return x + y 
-                        if z is not None: 
-                            return x + z 
-                        return x 
-
-                m = Model() 
-
-                x = torch.randn(2, 3) 
-                y = torch.randn(2, 3) 
-                z = torch.randn(2, 3) 
-
-                1. INPUTS ARE ONLY A TUPLE OF ARGUMENTS (NO DICTIONARY) 
-
-                In this case, the input_names can be entered as either a list of strings in order, 
-
-                    torch.onnx.export(model, (x, y, z), ‘test.onnx’,  
-                                      input_names=['input_x’, ‘input_y’, ‘input_z’]) 
-
-                Or a dictionary of input to input_names key value pairs 
-
-                    torch.onnx.export(model, (x, y, z), ‘test.onnx’,  
-                                      input_names={‘x_in’: 'input_x’,  
-                                                   ‘y_in’: ‘input_y’,  
-                                                   ‘z_in‘: ‘input_z’]) 
-
-
-                2. INPUTS CONTAIN A DICTIONARY FOR NAMED PARAMETERS 
-
-                In this case, input_names are entered as a dictionary of input to input_names 
-                key value pairs. 
-
-                    torch.onnx.export(model, (x, {‘y_in’: y, ‘z_in’: z}), ‘test.onnx’,  
-                                      input_names={‘x_in’: 'input_x’,  
-                                                   ‘y_in’: ‘input_y’,  
-                                                   ‘z_in‘: ‘input_z’]) 
-
-                This allows not including input names for optional inputs that 
-                have been skipped. For example, if y did not have an input value, 
-
-                    torch.onnx.export(model, (x, {‘z_in’: z}), ‘test.onnx’,  
-                                      input_names={‘x_in’: 'input_x’,  
-                                                   ‘z_in‘: ‘input_z’]) 
-
-                If we use a list of strings to represent input_names, we will have to 
-                specify input_names even for inputs that have been skipped. For example, 
-                if y is an optional argument that has been skipped, making the call: 
-
-                    torch.onnx.export(model, (x, {‘z_in’: z}), ‘test.onnx’,  
-                                      input_names=['input_x’, ‘input_z’]) 
-
-                will result in the input_name of z corresponding to the y input argument
-                (which has been assigned a None value) causing a mismatch of input arguments. 
+        input_names(list of strings, default empty list): names to assign to the
+            input nodes of the graph, in order
         output_names(list of strings, default empty list): names to assign to the
             output nodes of the graph, in order
         aten (bool, default False): [DEPRECATED. use operator_export_type] export the

@@ -522,6 +522,53 @@ class TestONNXRuntime(unittest.TestCase):
         # With optional arguments dictionary
         self.run_test(AllOptionalModel(), {'y': y, 'z': None})
 
+    def test_input_names_with_optional_args(self):
+        class NoOptionalModel(torch.nn.Module):
+            def forward(self, input):
+                return input
+
+        # Without empty optional arguments dictionary
+        x = torch.randn(2, 3)
+        self.run_test(NoOptionalModel(), (x,), input_names=['input_x'])      
+        # With empty optional arguments dictionary
+        y = torch.randn(2, 3)
+        self.run_test(NoOptionalModel(), (y, {}))
+
+        class MixedModel(torch.nn.Module):
+            def forward(self, x, y=None, z=None):
+                if y is not None:
+                    return x + y
+                if z is not None:
+                    return x + z
+                return x
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+        z = torch.randn(2, 3)
+        # Without optional arguments dictionary
+        self.run_test(MixedModel(), (x, y, None), input_names=['input_x', 'input_y'])
+        self.run_test(MixedModel(), (x, None, z), input_names=['input_x', 'input_z'])
+
+        # With optional arguments dictionary
+        self.run_test(MixedModel(), (x, {'y': y, 'z': None}), input_names=['input_x', 'input_y'])
+        self.run_test(MixedModel(), (x, {'y': None, 'z': z}), input_names=['input_x', 'input_z'])
+
+        class AllOptionalModel(torch.nn.Module):
+            def forward(self, y=None, z=None):
+                if y is not None:
+                    return y
+                if z is not None:
+                    return z
+
+        y = torch.randn(2, 3)
+        z = torch.randn(2, 3)
+        # Without optional arguments dictionary
+        self.run_test(AllOptionalModel(), (y, None), input_names=['input_y'])
+        self.run_test(AllOptionalModel(), (None, z), input_names=['input_z'])
+        # With optional arguments dictionary
+        self.run_test(AllOptionalModel(), {'y': y, 'z': None}, input_names=['input_y'])
+        self.run_test(AllOptionalModel(), {'y': None, 'z': z}, input_names=['input_z'])
+
     def test_none_as_input(self):
         class Model(torch.nn.Module):
             def forward(self, x, y):
