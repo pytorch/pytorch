@@ -2706,6 +2706,22 @@ t2.start()
                 for grad, grad_control in zip(grads, grads_control):
                     self.assertEqual(grad.half(), grad_control)
 
+    def test_autocast_cache_leak(self):
+        # Reported at https://github.com/pytorch/pytorch/issues/48049
+        # Test is used to check, if autocast recaches the same parameters
+        # when executed in a `torch.no_grad()` block.
+
+        linear = torch.nn.Linear(10, 10).to('cuda')
+        data = torch.randn(1, 10, device='cuda')
+
+        with torch.cuda.amp.autocast():
+            with torch.no_grad():
+                out = linear(data)
+                first_iter_mem = torch.cuda.memory_allocated()
+                for _ in range(3):
+                    out = linear(data)
+                self.assertTrue(first_iter_mem == torch.cuda.memory_allocated())
+
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     def test_max_large_axis(self):
