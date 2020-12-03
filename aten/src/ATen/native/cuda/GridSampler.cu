@@ -708,7 +708,7 @@ Tensor grid_sampler_2d_cuda(const Tensor& input, const Tensor& grid,
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
             align_corners);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         grid_sampler_2d_kernel<scalar_t>
           <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -719,7 +719,7 @@ Tensor grid_sampler_2d_cuda(const Tensor& input, const Tensor& grid,
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
             align_corners);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     });
   }
@@ -749,7 +749,7 @@ Tensor grid_sampler_3d_cuda(const Tensor& input, const Tensor& grid,
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
             align_corners);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         grid_sampler_3d_kernel<scalar_t>
           <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -760,7 +760,7 @@ Tensor grid_sampler_3d_cuda(const Tensor& input, const Tensor& grid,
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
             align_corners);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     });
   }
@@ -796,7 +796,7 @@ grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input,
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
             align_corners);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         grid_sampler_2d_backward_kernel<scalar_t>
           <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -809,7 +809,7 @@ grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input,
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
             align_corners);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     });
   }
@@ -846,7 +846,7 @@ grid_sampler_3d_backward_cuda(const Tensor& grad_output, const Tensor& input,
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
             align_corners);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         grid_sampler_3d_backward_kernel<scalar_t>
           <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -859,7 +859,7 @@ grid_sampler_3d_backward_cuda(const Tensor& grad_output, const Tensor& input,
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
             align_corners);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     });
   }

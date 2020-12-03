@@ -1809,26 +1809,26 @@ Example::
 
 add_docstr_all('index_put_',
                r"""
-index_put_(indices, value, accumulate=False) -> Tensor
+index_put_(indices, values, accumulate=False) -> Tensor
 
-Puts values from the tensor :attr:`value` into the tensor :attr:`self` using
+Puts values from the tensor :attr:`values` into the tensor :attr:`self` using
 the indices specified in :attr:`indices` (which is a tuple of Tensors). The
-expression ``tensor.index_put_(indices, value)`` is equivalent to
-``tensor[indices] = value``. Returns :attr:`self`.
+expression ``tensor.index_put_(indices, values)`` is equivalent to
+``tensor[indices] = values``. Returns :attr:`self`.
 
-If :attr:`accumulate` is ``True``, the elements in :attr:`value` are added to
+If :attr:`accumulate` is ``True``, the elements in :attr:`values` are added to
 :attr:`self`. If accumulate is ``False``, the behavior is undefined if indices
 contain duplicate elements.
 
 Args:
     indices (tuple of LongTensor): tensors used to index into `self`.
-    value (Tensor): tensor of same dtype as `self`.
+    values (Tensor): tensor of same dtype as `self`.
     accumulate (bool): whether to accumulate into self
 """)
 
 add_docstr_all('index_put',
                r"""
-index_put(tensor1, indices, value, accumulate=False) -> Tensor
+index_put(tensor1, indices, values, accumulate=False) -> Tensor
 
 Out-place version of :meth:`~Tensor.index_put_`.
 `tensor1` corresponds to `self` in :meth:`torch.Tensor.index_put_`.
@@ -2029,6 +2029,20 @@ add_docstr_all('kthvalue',
 kthvalue(k, dim=None, keepdim=False) -> (Tensor, LongTensor)
 
 See :func:`torch.kthvalue`
+""")
+
+add_docstr_all('ldexp',
+               r"""
+ldexp(other) -> Tensor
+
+See :func:`torch.ldexp`
+""")
+
+add_docstr_all('ldexp_',
+               r"""
+ldexp_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.ldexp`
 """)
 
 add_docstr_all('lcm',
@@ -2655,6 +2669,20 @@ add_docstr_all('pow_',
 pow_(exponent) -> Tensor
 
 In-place version of :meth:`~Tensor.pow`
+""")
+
+add_docstr_all('float_power',
+               r"""
+float_power(exponent) -> Tensor
+
+See :func:`torch.float_power`
+""")
+
+add_docstr_all('float_power_',
+               r"""
+float_power_(exponent) -> Tensor
+
+In-place version of :meth:`~Tensor.float_power`
 """)
 
 add_docstr_all('prod',
@@ -3599,6 +3627,13 @@ add_docstr_all('t_',
 t_() -> Tensor
 
 In-place version of :meth:`~Tensor.t`
+""")
+
+add_docstr_all('tile',
+               r"""
+tile(*reps) -> Tensor
+
+See :func:`torch.tile`
 """)
 
 add_docstr_all('to',
