@@ -63,11 +63,6 @@ C10_DEFINE_bool(
     false,
     "Whether to print output with all one input tensor.");
 C10_DEFINE_int(iter, 10, "The number of iterations to run.");
-C10_DEFINE_bool(
-    report_pep,
-    false,
-    "Whether to print performance stats for AI-PEP.");
-C10_DEFINE_int(pytext_len, 0, "Length of input sequence.");
 C10_DEFINE_string(
     backend,
     "cpu",
