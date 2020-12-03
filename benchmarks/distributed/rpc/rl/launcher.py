@@ -71,7 +71,7 @@ def run_worker(rank, world_size, master_addr, master_port, batch, state_size, nl
 
 
 def main():
-    GRAPH_VARIABLES = {'world_size':[7,12]} #[12,22,42,62,122,242]
+    GRAPH_VARIABLES = {'world_size':[7]} #[12,22,42,62,122,242]
     if args['graph_variable'] in GRAPH_VARIABLES.keys():
         graph_variables = GRAPH_VARIABLES[args['graph_variable']]
         ctx = mp.get_context('spawn')
