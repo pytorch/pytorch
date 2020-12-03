@@ -1291,6 +1291,8 @@ def method_tests():
         ('bmm', (M, S, M), ((M, M, S),), '', (True,)),
         ('mv', (S, M), ((M,),), '', (True,)),
         ('ger', (S,), ((M,),)),
+        ('inner', (S,), ((S,),), "1d_1d", (False,)),
+        ('inner', (), ((S, S),), "scalar_2d", (False,)),
         ('matmul', (L,), ((L,),), '', (True,)),
         ('matmul', (S, M), ((M,),), "2d_1d", (True,)),
         ('matmul', (M,), ((M, S),), "1d_2d", (True,)),
