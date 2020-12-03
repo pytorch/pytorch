@@ -150,7 +150,7 @@ class AgentBase:
         rewards = torch.stack([ret[0] for ret in rets]).t()
         # ep_rewards = sum([ret[1] for ret in rets]) / len(rets)
 
-        """
+
         if self.batch:
             probs = torch.stack(self.saved_log_probs)
         else:
@@ -168,7 +168,7 @@ class AgentBase:
         self.saved_log_probs = [] if self.batch else {
             k: [] for k in range(self.batch_size)}
         self.states = torch.zeros(self.batch_size, *self.state_size)
-        """
+
 
         return self.agent_latency, self.agent_throughput
 
