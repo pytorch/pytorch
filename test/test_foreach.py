@@ -1030,16 +1030,20 @@ class TestForeach(TestCase):
 
                 # Integer division not supported
                 if dtype in torch.testing.integral_types_and(torch.bool):
-                    with self.assertRaisesRegex(RuntimeError, "Integer division with addcdiv is no longer supported, and in a future"):
+                    with self.assertRaisesRegex(RuntimeError, "Integer division with addcdiv is no longer supported"):
                         if not isinstance(vals, list):
-                            expected = [torch.addcdiv(tensors[i], tensors1[i], tensors2[i], value=values[0]) for i in range(N)]
+                            expected = [torch.addcdiv(tensors[i], 
+                                                      tensors1[i], 
+                                                      tensors2[i], value=values[0]) for i in range(N)]
                         else:
-                            expected = [torch.addcdiv(tensors[i], tensors1[i], tensors2[i], value=values[i]) for i in range(N)]
+                            expected = [torch.addcdiv(tensors[i], 
+                                                      tensors1[i], 
+                                                      tensors2[i], value=values[i]) for i in range(N)]
 
-                    with self.assertRaisesRegex(RuntimeError, "Integer division with addcdiv is no longer supported, and in a future"):
+                    with self.assertRaisesRegex(RuntimeError, "Integer division with addcdiv is no longer supported"):
                         torch._foreach_addcdiv(tensors, tensors1, tensors2, vals)
 
-                    with self.assertRaisesRegex(RuntimeError, "Integer division with addcdiv is no longer supported, and in a future"):
+                    with self.assertRaisesRegex(RuntimeError, "Integer division with addcdiv is no longer supported"):
                         torch._foreach_addcdiv_(tensors, tensors1, tensors2, vals)
                     continue
 
@@ -1100,18 +1104,22 @@ class TestForeach(TestCase):
                     tensors1 = self._get_test_data(device, dtype, N)
                     tensors2 = self._get_test_data(device, dtype, N)
 
-                    with self.assertRaisesRegex(RuntimeError, "Tensor list must have same number of elements as scalar list."):
+                    with self.assertRaisesRegex(RuntimeError, 
+                                                "Tensor list must have same number of elements as scalar list."):
                         op(tensors, tensors1, tensors2, [2 for _ in range(N + 1)])
 
-                    with self.assertRaisesRegex(RuntimeError, "Tensor list must have same number of elements as scalar list."):
+                    with self.assertRaisesRegex(RuntimeError,
+                                                "Tensor list must have same number of elements as scalar list."):
                         op(tensors, tensors1, tensors2, [2 for _ in range(N - 1)])
 
                     tensors = self._get_test_data(device, dtype, N + 1)
-                    with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got 21 and 20"):
+                    with self.assertRaisesRegex(RuntimeError, 
+                                                "Tensor lists must have the same number of tensors, got 21 and 20"):
                         op(tensors, tensors1, tensors2, [2 for _ in range(N)])
 
                     tensors1 = self._get_test_data(device, dtype, N + 1)
-                    with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got 21 and 20"):
+                    with self.assertRaisesRegex(RuntimeError, 
+                                                "Tensor lists must have the same number of tensors, got 21 and 20"):
                         op(tensors, tensors1, tensors2, [2 for _ in range(N)])
 
     @dtypes(*torch.testing.get_all_dtypes())
@@ -1272,16 +1280,16 @@ class TestForeach(TestCase):
                 if dtype == torch.bool:
                     # out of place
                     if foreach_bin_op == torch._foreach_sub:
-                        with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor is not supported."): 
+                        with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool"): 
                             expected = [torch_bin_op(t, s) for t, s in zip(tensors, scalars)]
 
-                        with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor is not supported."): 
+                        with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool"): 
                             res = foreach_bin_op(tensors, scalars)
 
-                        with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor is not supported."): 
+                        with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool"): 
                             [t.sub_(scalar) for t, scalar in zip(tensors, scalars)]
 
-                        with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor is not supported."): 
+                        with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool"): 
                             foreach_bin_op_(tensors, scalars)
                         continue
                     else:
@@ -1368,16 +1376,16 @@ class TestForeach(TestCase):
                 # Bool case
                 if dtype == torch.bool:
                     if foreach_bin_op == torch._foreach_sub:
-                        with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor is not supported."): 
+                        with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor"): 
                             expected = [torch_bin_op(t, s) for t, s in zip(tensors, scalars)]
 
-                        with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor is not supported."): 
+                        with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor"): 
                             res = foreach_bin_op(tensors, scalars)
 
-                        with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor is not supported."): 
+                        with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor"): 
                             [t.sub_(scalar) for t, scalar in zip(tensors, scalars)]
 
-                        with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor is not supported."): 
+                        with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor"): 
                             foreach_bin_op_(tensors, scalars)
                         continue
 

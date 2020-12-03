@@ -3,17 +3,6 @@
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 
 namespace at { namespace native {
-
-bool has_bool_tensor(TensorList tensors) {
-    bool has_integral = false;
-    for (auto t : tensors) {
-        if (at::isIntegralType(t.scalar_type(), /*includeBool=*/true)) {
-            has_integral = true;
-        }
-    }
-    return has_integral;
-}
-
 template <template<class> class Op>
 std::vector<Tensor> floating_complex_half(TensorList tensors) {
     std::vector<std::vector<at::Tensor>> tensor_lists;
