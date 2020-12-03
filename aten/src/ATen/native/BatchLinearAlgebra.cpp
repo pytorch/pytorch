@@ -469,10 +469,9 @@ static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor
       "result shape ", result.sizes(), " does not match broadcasted other shape ", other_broadcasted.sizes());
   }
 
-  // How to check efficiently that the individual matrices in the batch (last two dimensions) are in the column major order?
   TORCH_CHECK(result.transpose(-2, -1).is_contiguous(), "result tensor must be in batched column major order (Fortran contiguous).");
-
   result.copy_(other_broadcasted);
+
   auto input_working_copy = cloneBatchedColumnMajor(input_broadcasted);
   at::native::resize_output(infos, {std::max<int64_t>(1, batchCount(input_broadcasted))});
   // if input is empty infos might not get filled; make sure infos doesn't contain garbage then
