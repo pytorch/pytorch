@@ -383,6 +383,7 @@ _(aten, index_fill) \
 _(aten, index_put) \
 _(aten, index_select) \
 _(aten, indices) \
+_(aten, inner) \
 _(aten, instance_norm) \
 _(aten, inverse) \
 _(aten, irfft) \
