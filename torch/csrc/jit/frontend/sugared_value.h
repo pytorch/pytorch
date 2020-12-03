@@ -2,6 +2,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <utility>
 
 #include <ATen/core/interned_strings.h>
 #include <torch/csrc/jit/api/module.h>
@@ -233,7 +234,7 @@ struct TORCH_API BuiltinFunction : public SugaredValue {
 
 struct TORCH_API SugaredTupleValue : public SugaredValue {
   explicit SugaredTupleValue(std::vector<std::shared_ptr<SugaredValue>> tup)
-      : tup_(tup){};
+      : tup_(std::move(tup)){};
 
   std::vector<std::shared_ptr<SugaredValue>> asTuple(
       const SourceRange& loc,
@@ -296,7 +297,7 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
 
 struct TORCH_API BuiltinModule : public SugaredValue {
   BuiltinModule(std::string name, c10::optional<int64_t> version = at::nullopt)
-      : name(std::move(name)), version(std::move(version)) {}
+      : name(std::move(name)), version(version) {}
 
   std::string kind() const override {
     return "builtin module";
@@ -373,7 +374,7 @@ struct TORCH_API NamedTupleConstructor : public SugaredValue {
 };
 
 struct FunctionValue : public SugaredValue {
-  FunctionValue(Function* callee) : callees_({std::move(callee)}) {}
+  FunctionValue(Function* callee) : callees_({callee}) {}
   FunctionValue(const StrongFunctionPtr& p)
       : callees_({p.function_}), cu_(p.cu_) {}
   FunctionValue(const std::vector<StrongFunctionPtr>& callees) {
@@ -438,9 +439,9 @@ struct TORCH_API ClosureValue : public SugaredValue {
 // defines how a method obtained from a module/class/interface behaves in script
 struct MethodValue : public SugaredValue {
   MethodValue(Value* self, std::vector<std::string> method_names)
-      : self_(std::move(self)), method_names_(std::move(method_names)) {}
+      : self_(self), method_names_(std::move(method_names)) {}
   MethodValue(Value* self, std::string method_name)
-      : MethodValue(self, std::vector<std::string>({method_name})) {}
+      : MethodValue(self, std::vector<std::string>({std::move(method_name)})) {}
 
   std::string kind() const override {
     return "method";
@@ -670,7 +671,7 @@ struct TORCH_API IterableTree : SugaredValue {
   void addChild(
       const SourceRange& range,
       Function& m,
-      const SugaredValuePtr iter_value);
+      const SugaredValuePtr& iter_value);
 
   std::vector<SugaredValuePtr> get_children() {
     return children_;
@@ -738,7 +739,7 @@ struct TORCH_API ExceptionMessageValue : public SugaredValue {
 };
 
 struct TORCH_API ExceptionValue : public SugaredValue {
-  explicit ExceptionValue(const std::string& message) : message_(message) {}
+  explicit ExceptionValue(std::string message) : message_(std::move(message)) {}
 
   std::string kind() const override {
     return "exception";

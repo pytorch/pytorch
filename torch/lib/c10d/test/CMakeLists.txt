@@ -17,9 +17,9 @@ function(c10d_add_test test_src)
 endfunction()
 
 c10d_add_test(FileStoreTest.cpp c10d gtest_main)
+c10d_add_test(TCPStoreTest.cpp c10d gtest_main)
 if(NOT WIN32)
   c10d_add_test(HashStoreTest.cpp c10d gtest_main)
-  c10d_add_test(TCPStoreTest.cpp c10d gtest_main)
 endif()
 
 if(USE_CUDA)
