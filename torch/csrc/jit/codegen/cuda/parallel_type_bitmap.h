@@ -5,6 +5,7 @@
 
 #include <bitset>
 #include <map>
+#include <unordered_map>
 
 namespace torch {
 namespace jit {

@@ -1,5 +1,8 @@
 #include <torch/csrc/distributed/rpc/py_rref.h>
 
+#include <torch/csrc/autograd/autograd.h>
+#include <torch/csrc/distributed/autograd/autograd.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rref_backward_req.h>
 #include <torch/csrc/distributed/rpc/python_functions.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
@@ -281,6 +284,59 @@ c10::IValue PyRRef::toIValue() const {
   // cast to RRefInterface to hold it into IValue
   auto rrefPtr = c10::static_intrusive_pointer_cast<c10::RRefInterface>(rref_);
   return IValue(rrefPtr);
+}
+
+void PyRRef::backward(int64_t autogradContextId, bool retainGraph) {
+  backward(autogradContextId, retainGraph, rref_);
+}
+
+void PyRRef::backward(
+    int64_t autogradContextId,
+    bool retainGraph,
+    const c10::intrusive_ptr<RRef>& rref) {
+  if (rref->isOwner()) {
+    auto value =
+        c10::static_intrusive_pointer_cast<const OwnerRRef>(rref)->getValue();
+
+    // If we have a PyObj, retrieve the underlying tensor.
+    if (rref->isPyObj()) {
+      py::gil_scoped_acquire gil;
+      py::object obj = torch::jit::toPyObject(value);
+      try {
+        value = torch::jit::toIValue(obj, c10::TensorType::get());
+      } catch (py::cast_error& e) {
+        throw std::runtime_error(
+            "RRef should contain a tensor for .backward()");
+      }
+    }
+
+    TORCH_CHECK(
+        value.isTensor(), "RRef should contain a tensor for .backward()");
+    auto root = value.toTensor();
+
+    if (autogradContextId == -1) {
+      torch::autograd::backward({root});
+    } else {
+      torch::distributed::autograd::backward(
+          autogradContextId, {root}, retainGraph);
+    }
+
+  } else {
+    TORCH_CHECK(
+        autogradContextId != -1,
+        "User RRefs require 'dist_autograd_ctx_id' to be specified");
+
+    autograd::RRefBackwardReq rrefBackwardReq(
+        rref->rrefId(), autogradContextId, retainGraph);
+
+    // Invoke distributed backward remotely.
+    auto rpcAgent = rpc::RpcAgent::getCurrentRpcAgent();
+    rpcAgent
+        ->send(
+            rpcAgent->getWorkerInfo(rref->owner()),
+            std::move(rrefBackwardReq).toMessage())
+        ->wait();
+  }
 }
 
 } // namespace rpc

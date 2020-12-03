@@ -57,7 +57,7 @@ namespace c10 {
   _(prim, ReturnStmt)                \
   _(prim, BreakStmt)                 \
   _(prim, ContinueStmt)              \
-  _(prim, LocalVariableScope)        \
+  _(prim, ListComprehensionScope)    \
   _(prim, Store)                     \
   _(prim, AutogradZero)              \
   _(prim, AutogradAnyNonZero)        \
@@ -71,6 +71,7 @@ namespace c10 {
   _(prim, ListConstruct)             \
   _(prim, ListUnpack)                \
   _(prim, DictConstruct)             \
+  _(prim, ModuleDictIndex)           \
   _(prim, EnumName)                  \
   _(prim, EnumValue)                 \
   _(prim, StringIndex)               \
@@ -105,6 +106,7 @@ namespace c10 {
   _(prim, ConstantChunk)             \
   _(prim, MMTreeReduce)              \
   _(prim, MMBatchSide)               \
+  _(prim, list)                      \
   _(prim, min)                       \
   _(prim, max)                       \
   _(prim, abs)                       \
@@ -130,7 +132,7 @@ namespace c10 {
   _(prim, fork)                      \
   _(prim, forkClosure)               \
   _(prim, RaiseException)            \
-  _(prim, Function)                  \
+  _(prim, Closure)                   \
   _(prim, CreateObject)              \
   _(prim, SetAttr)                   \
   _(prim, GetAttr)                   \
@@ -187,6 +189,7 @@ namespace c10 {
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
+  _(aten, percentFormat)             \
   _(aten, __not__)                   \
   _(aten, __is__)                    \
   _(aten, __isnot__)                 \
@@ -233,6 +236,7 @@ namespace c10 {
   _(aten, _ger)                      \
   _(aten, ger)                       \
   _(aten, outer)                     \
+  _(aten, transpose)                 \
   _(aten, transpose_)                \
   _(aten, unsqueeze_)                \
   _(aten, __getitem__)               \
@@ -268,6 +272,8 @@ namespace c10 {
   _(aten, bin)                       \
   _(aten, pop)                       \
   _(aten, insert)                    \
+  _(aten, vstack)                    \
+  _(aten, row_stack)                 \
   _(prim, unchecked_unwrap_optional) \
   _(aten, __contains__)              \
   _(prim, BailoutTemplate)           \
@@ -275,6 +281,12 @@ namespace c10 {
   _(aten, zero_)                     \
   _(aten, fill_)                     \
   _(aten, masked_fill_)              \
+  _(aten, swapaxes)                  \
+  _(aten, swapaxes_)                 \
+  _(aten, swapdims)                  \
+  _(aten, swapdims_)                 \
+  _(aten, movedim)                   \
+  _(aten, moveaxis)                  \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \

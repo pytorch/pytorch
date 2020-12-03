@@ -60,6 +60,7 @@ if sys.platform == 'win32':
 
 IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
 IS_FBCODE = os.getenv('PYTORCH_TEST_FBCODE') == '1'
+IS_REMOTE_GPU = os.getenv('PYTORCH_TEST_REMOTE_GPU') == '1'
 
 class ProfilingMode(Enum):
     LEGACY = 1
@@ -152,7 +153,7 @@ parser.add_argument('--repeat', type=int, default=1)
 parser.add_argument('--test_bailouts', action='store_true')
 parser.add_argument('--save-xml', nargs='?', type=str,
                     const=_get_test_report_path(),
-                    default=_get_test_report_path() if bool(os.environ.get('IN_CIRCLECI')) else None)
+                    default=_get_test_report_path() if bool(os.environ.get('IN_CI')) else None)
 parser.add_argument('--discover-tests', action='store_true')
 parser.add_argument('--log-suffix', type=str, default="")
 parser.add_argument('--run-parallel', type=int, default=1)
@@ -397,43 +398,73 @@ def skipIfRocm(fn):
             fn(*args, **kwargs)
     return wrapper
 
+# Context manager for setting deterministic flag and automatically
+# resetting it to its original value
+class DeterministicGuard:
+    def __init__(self, deterministic):
+        self.deterministic = deterministic
+
+    def __enter__(self):
+        self.deterministic_restore = torch.is_deterministic()
+        torch.set_deterministic(self.deterministic)
+
+    def __exit__(self, exception_type, exception_value, traceback):
+        torch.set_deterministic(self.deterministic_restore)
+
 # This decorator can be used for API tests that call torch.set_deterministic().
 # When the test is finished, it will restore the previous deterministic flag
-# setting. Also, if CUDA >= 10.2, this will set the environment variable
-# CUBLAS_WORKSPACE_CONFIG=:4096:8 so that the error associated with that setting
-# is not thrown during the test unless the test changes that variable on purpose.
-# The previous CUBLAS_WORKSPACE_CONFIG setting will also be restored once the
-# test is finished.
+# setting.
+#
+# If CUDA >= 10.2, this will set the environment variable
+# CUBLAS_WORKSPACE_CONFIG=:4096:8 so that the error associated with that
+# setting is not thrown during the test unless the test changes that variable
+# on purpose. The previous CUBLAS_WORKSPACE_CONFIG setting will also be
+# restored once the test is finished.
+#
+# Note that if a test requires CUDA to actually register the changed
+# CUBLAS_WORKSPACE_CONFIG variable, a new subprocess must be created, because
+# CUDA only checks the variable when the runtime initializes. Tests can be
+# run inside a subprocess like so:
+#
+#   import subprocess, sys, os
+#   script = '''
+#   # Test code should go here
+#   '''
+#   try:
+#       subprocess.check_output(
+#           [sys.executable, '-c', script],
+#           stderr=subprocess.STDOUT,
+#           cwd=os.path.dirname(os.path.realpath(__file__)),
+#           env=os.environ.copy())
+#   except subprocess.CalledProcessError as e:
+#       error_message = e.output.decode('utf-8')
+#       # Handle exceptions raised by the subprocess here
+#
 def wrapDeterministicFlagAPITest(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        deterministic_restore = torch.is_deterministic()
+        with DeterministicGuard(torch.is_deterministic()):
+            class CuBLASConfigGuard:
+                cublas_var_name = 'CUBLAS_WORKSPACE_CONFIG'
 
-        is_cuda10_2_or_higher = (
-            (torch.version.cuda is not None)
-            and ([int(x) for x in torch.version.cuda.split(".")] >= [10, 2]))
+                def __enter__(self):
+                    self.is_cuda10_2_or_higher = (
+                        (torch.version.cuda is not None)
+                        and ([int(x) for x in torch.version.cuda.split(".")] >= [10, 2]))
+                    if self.is_cuda10_2_or_higher:
+                        self.cublas_config_restore = os.environ.get(self.cublas_var_name)
+                        os.environ[self.cublas_var_name] = ':4096:8'
 
-        if is_cuda10_2_or_higher:
-            cublas_var_name = 'CUBLAS_WORKSPACE_CONFIG'
-            cublas_config_restore = os.environ.get(cublas_var_name)
-            os.environ[cublas_var_name] = ':4096:8'
-
-        def restore():
-            torch.set_deterministic(deterministic_restore)
-            if is_cuda10_2_or_higher:
-                cur_cublas_config = os.environ.get(cublas_var_name)
-                if cublas_config_restore is None:
-                    if cur_cublas_config is not None:
-                        del os.environ[cublas_var_name]
-                else:
-                    os.environ[cublas_var_name] = cublas_config_restore
-        try:
-            fn(*args, **kwargs)
-        except RuntimeError:
-            restore()
-            raise
-        else:
-            restore()
+                def __exit__(self, exception_type, exception_value, traceback):
+                    if self.is_cuda10_2_or_higher:
+                        cur_cublas_config = os.environ.get(self.cublas_var_name)
+                        if self.cublas_config_restore is None:
+                            if cur_cublas_config is not None:
+                                del os.environ[self.cublas_var_name]
+                        else:
+                            os.environ[self.cublas_var_name] = self.cublas_config_restore
+            with CuBLASConfigGuard():
+                fn(*args, **kwargs)
     return wrapper
 
 def skipIfCompiledWithoutNumpy(fn):
@@ -860,7 +891,6 @@ class TestCase(expecttest.TestCase):
         if is_uncoalesced:
             v = torch.cat([v, torch.randn_like(v)], 0)
             i = torch.cat([i, i], 1)
-
         x = torch.sparse_coo_tensor(i, v, torch.Size(size))
 
         if not is_uncoalesced:
@@ -876,47 +906,7 @@ class TestCase(expecttest.TestCase):
         return x, x._indices().clone(), x._values().clone()
 
     def safeToDense(self, t):
-        r = self.safeCoalesce(t)
-        return r.to_dense()
-
-    def safeCoalesce(self, t):
-        tc = t.coalesce()
-        self.assertEqual(tc.to_dense(), t.to_dense())
-        self.assertTrue(tc.is_coalesced())
-
-        # Our code below doesn't work when nnz is 0, because
-        # then it's a 0D tensor, not a 2D tensor.
-        if t._nnz() == 0:
-            self.assertEqual(t._indices(), tc._indices())
-            self.assertEqual(t._values(), tc._values())
-            return tc
-
-        value_map: Dict[Any, Any] = {}
-        for idx, val in zip(t._indices().t(), t._values()):
-            idx_tup = tuple(idx.tolist())
-            if idx_tup in value_map:
-                value_map[idx_tup] += val
-            else:
-                value_map[idx_tup] = val.clone() if isinstance(val, torch.Tensor) else val
-
-        new_indices = sorted(list(value_map.keys()))
-        _new_values = [value_map[idx] for idx in new_indices]
-        if t._values().ndimension() < 2:
-            new_values = t._values().new(_new_values)
-        else:
-            new_values = torch.stack(_new_values)
-
-        new_indices = t._indices().new(new_indices).t()
-        tg = t.new(new_indices, new_values, t.size())
-
-        self.assertEqual(tc._indices(), tg._indices())
-        self.assertEqual(tc._values(), tg._values())
-
-        if t.is_coalesced():
-            self.assertEqual(tc._indices(), t._indices())
-            self.assertEqual(tc._values(), t._values())
-
-        return tg
+        return t.coalesce().to_dense()
 
     # Compares the given Torch and NumPy functions on the given tensor-like object.
     # NOTE: both torch_fn and np_fn should be functions that take a single
@@ -1044,6 +1034,7 @@ class TestCase(expecttest.TestCase):
                 rtol, atol = 0, 0
         rtol = cast(float, rtol)
         atol = cast(float, atol)
+        assert atol is not None
         atol = max(atol, self.precision)
 
         return _compare_scalars_internal(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan)
@@ -1079,8 +1070,15 @@ class TestCase(expecttest.TestCase):
             super().assertEqual(x.is_sparse, y.is_sparse, msg=msg)
             super().assertEqual(x.is_quantized, y.is_quantized, msg=msg)
             if x.is_sparse:
-                x = self.safeCoalesce(x)
-                y = self.safeCoalesce(y)
+                if x.size() != y.size():
+                    debug_msg_sparse = ("Attempted to compare equality of tensors with different sizes. "
+                                        f"Got sizes {x.size()} and {y.size()}.")
+                    if msg is None:
+                        msg = debug_msg_sparse
+                    self.assertTrue(False, msg=msg)
+
+                x = x.coalesce()
+                y = y.coalesce()
                 indices_result, debug_msg = self._compareTensors(x._indices(), y._indices(),
                                                                  rtol=rtol, atol=atol,
                                                                  equal_nan=equal_nan, exact_dtype=exact_dtype,
@@ -1138,9 +1136,10 @@ class TestCase(expecttest.TestCase):
                                                          equal_nan=equal_nan, exact_dtype=exact_dtype,
                                                          exact_device=exact_device)
 
-                if not result and msg is None:
+                if not result:
                     assert debug_msg is not None
-                    msg = "Tensors failed to compare as equal! " + debug_msg
+                    msg = msg or "Tensors failed to compare as equal!"
+                    msg = f'{msg}\n{debug_msg}'
                 self.assertTrue(result, msg=msg)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
             super().assertEqual(x, y, msg=msg)
@@ -1179,6 +1178,18 @@ class TestCase(expecttest.TestCase):
                 assert debug_msg is not None
                 msg = "Scalars failed to compare as equal! " + debug_msg
             self.assertTrue(result, msg=msg)
+        # Tensor x Numpy array
+        elif isinstance(x, torch.Tensor) and isinstance(y, np.ndarray):
+            self.assertEqual(x, torch.from_numpy(y), atol=atol, rtol=rtol, msg=msg,
+                             exact_dtype=exact_dtype, exact_device=exact_device)
+        # Numpy array x Tensor
+        elif isinstance(x, np.ndarray) and isinstance(y, torch.Tensor):
+            self.assertEqual(torch.from_numpy(x), y, atol=atol, rtol=rtol, msg=msg,
+                             exact_dtype=exact_dtype, exact_device=exact_device)
+        # Numpy array x Numpy array
+        elif isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
+            self.assertEqual(torch.from_numpy(x), torch.from_numpy(y), atol=atol, rtol=rtol, msg=msg,
+                             exact_dtype=exact_dtype, exact_device=exact_device)
         else:
             super().assertEqual(x, y, msg=msg)
 
@@ -1343,16 +1354,6 @@ class TestCase(expecttest.TestCase):
             stderr=subprocess.PIPE,
             env=env)
         return pipes.communicate()[1].decode('ascii')
-
-    if sys.version_info < (3, 2):
-        # assertRegexpMatches renamed to assertRegex in 3.2
-        assertRegex = unittest.TestCase.assertRegexpMatches
-        # assertRaisesRegexp renamed to assertRaisesRegex in 3.2
-        assertRaisesRegex = unittest.TestCase.assertRaisesRegexp
-
-    if sys.version_info < (3, 5):
-        # assertNotRegexpMatches renamed to assertNotRegex in 3.5
-        assertNotRegex = unittest.TestCase.assertNotRegexpMatches
 
 
 def download_file(url, binary=True):
@@ -1533,6 +1534,19 @@ def random_symmetric_pd_matrix(matrix_size, *batch_dims, **kwargs):
                     dtype=dtype, device=device)
     return torch.matmul(A, A.transpose(-2, -1)) \
         + torch.eye(matrix_size, dtype=dtype, device=device) * 1e-5
+
+
+def random_hermitian_pd_matrix(matrix_size, *batch_dims, dtype, device):
+    """
+    Returns a batch of random Hermitian positive-definite matrices.
+    The shape of the result is batch_dims + (matrix_size, matrix_size)
+
+    The following example creates a tensor of size 2 x 4 x 3 x 3
+    >>> matrices = random_hermitian_pd_matrix(3, 2, 4, dtype=dtype, device=device)
+    """
+    A = torch.randn(*(batch_dims + (matrix_size, matrix_size)),
+                    dtype=dtype, device=device)
+    return torch.matmul(A, A.transpose(-2, -1).conj())
 
 
 def make_nonzero_det(A, sign=None, min_singular_value=0.1):

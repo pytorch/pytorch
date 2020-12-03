@@ -2,6 +2,7 @@
 
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
@@ -19,6 +20,7 @@ static int te_cuda_pointwise_block_count = -1;
 static int te_cuda_pointwise_block_size = -1;
 static bool fallback_allowed = false;
 static bool te_generate_block_code = false;
+static bool te_must_use_llvm_on_cpu = false;
 
 bool setFallbackAllowed(bool value) {
   bool old_value = fallback_allowed;
@@ -48,6 +50,15 @@ bool fallbackEnforced() {
   return false;
 }
 
+bool dontUseLLVMFlag() {
+  static const char* enable_c_str =
+      std::getenv("PYTORCH_TENSOREXPR_DONT_USE_LLVM");
+  if (!enable_c_str) {
+    return false;
+  }
+  return std::string(enable_c_str) == "1";
+}
+
 int& getTECudaPointwiseLoopLevels() {
   return te_cuda_pointwise_loop_levels;
 }
@@ -65,6 +76,10 @@ int& getTECudaPointwiseBlockSize() {
 // based on device type in tensor.
 bool& getTEGenerateBlockCode() {
   return te_generate_block_code;
+}
+
+bool& getTEMustUseLLVMOnCPU() {
+  return te_must_use_llvm_on_cpu;
 }
 
 c10::optional<at::Device> pickDeviceType(
@@ -85,6 +100,18 @@ c10::optional<at::Device> pickDeviceType(
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
+
+size_t normalizeAndCheckIndex(int64_t idx, int64_t list_size) {
+  if (idx < 0) {
+    // Handle negative indexing
+    idx = list_size + idx;
+  }
+
+  if (idx < 0 || idx >= list_size) {
+    AT_ERROR("Invalid index ", idx, " for list_size", list_size);
+  }
+  return static_cast<size_t>(idx);
+}
 
 static at::ScalarType tensorType(Tensor* t) {
   return static_cast<at::ScalarType>(t->body()->dtype().scalar_type());
@@ -123,15 +150,16 @@ ExprHandle TensorExprKernel::broadcast(
 ExprHandle TensorExprKernel::chunk(
     Tensor* t,
     size_t chunkIdx,
-    size_t dim,
-    size_t chunks,
+    int64_t dim,
+    int64_t chunks,
     const std::vector<ExprHandle>& axes) {
+  auto norm_dim = normalizeAndCheckIndex(dim, axes.size());
   auto sizes = bufferSizes(t);
-  size_t step = sizes[dim] / chunks;
+  size_t step = sizes[norm_dim] / chunks;
 
   std::vector<ExprHandle> indices;
   for (size_t i = 0; i < axes.size(); ++i) {
-    if (i == dim) {
+    if (i == norm_dim) {
       indices.push_back(axes[i] + IntImm::make((int)chunkIdx * (int)step));
     } else {
       indices.push_back(axes[i]);
@@ -250,7 +278,8 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::trunc:
     case aten::frac:
     case aten::lgamma:
-      return sizesForValue(v->node()->input());
+    case aten::type_as:
+      return sizesForValue(v->node()->input(0));
 
     case aten::sub:
     case aten::add:
@@ -269,7 +298,6 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::lt:
     case aten::min:
     case aten::max:
-    case aten::type_as:
     case aten::pow:
     case aten::fmod:
     case aten::remainder:
@@ -353,24 +381,19 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
       TORCH_INTERNAL_ASSERT(n->input(1)->node()->kind() == prim::Constant);
       int64_t dim = n->input(1)->node()->i(attr::value);
       auto shape = sizesForValue(inputs[0]);
-      if (dim < 0) {
-        dim += shape.size();
-      }
-      if (dim < 0 || dim > shape.size()) {
-        throw std::runtime_error("Invalid 'dim' input in aten::cat");
-      }
-
+      size_t norm_dim = normalizeAndCheckIndex(dim, shape.size());
       ExprHandle concat_dim_size = 0;
       for (auto input : inputs) {
-        concat_dim_size = concat_dim_size + sizesForValue(input)[dim];
+        concat_dim_size = concat_dim_size + sizesForValue(input)[norm_dim];
       }
       concat_dim_size = IRSimplifier::simplify(concat_dim_size);
-      shape[dim] = concat_dim_size;
+      shape[norm_dim] = concat_dim_size;
       return shape;
     }
 
     case aten::softmax:
-      // Output of Softmax has the same shape as input 0.
+    case aten::log_softmax:
+      // Output of softmax / log_softmax has the same shape as input 0.
       return sizesForValue(v->node()->input(0));
 
     case aten::slice:
@@ -409,6 +432,16 @@ ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
   }
 
   return scalars_.at(v->unique());
+}
+
+ExprHandle promoteIntegerToFloat(const ExprHandle& e) {
+  auto scalarType = static_cast<c10::ScalarType>(e.dtype().scalar_type());
+  if (!c10::isIntegralType(scalarType, /*includeBool*/ true)) {
+    return e;
+  }
+  auto defaultType = static_cast<tensorexpr::ScalarType>(
+      c10::typeMetaToScalarType(c10::get_default_dtype()));
+  return Cast::make(Dtype(defaultType, e.dtype().lanes()), e);
 }
 
 void TensorExprKernel::promoteInputs(std::vector<ExprHandle>& inputs) {
@@ -480,6 +513,7 @@ std::vector<ExprHandle> TensorExprKernel::broadcastShapes(
   auto res2 = broadcastShapes(shapes);
   return res2;
 }
+
 std::vector<ExprHandle> TensorExprKernel::broadcastShapes(
     const std::vector<ExprHandle>& a,
     const std::vector<ExprHandle>& b) {
@@ -755,7 +789,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::div: {
       return computeTwoOperand(
           "aten_div", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return boolToInteger(lhs) / boolToInteger(rhs);
+            return promoteIntegerToFloat(lhs) / promoteIntegerToFloat(rhs);
           });
     } break;
 
@@ -901,8 +935,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::sigmoid: {
-      return computeOneOperand(
-          "aten_sigmoid", v, [](const ExprHandle& a) { return sigmoid(a); });
+      return computeOneOperand("aten_sigmoid", v, [](const ExprHandle& a) {
+        return sigmoid(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::reciprocal: {
@@ -925,23 +960,27 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::log: {
-      return computeOneOperand(
-          "aten_log", v, [](const ExprHandle& a) { return log(a); });
+      return computeOneOperand("aten_log", v, [](const ExprHandle& a) {
+        return log(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::log10: {
-      return computeOneOperand(
-          "aten_log10", v, [](const ExprHandle& a) { return log10(a); });
+      return computeOneOperand("aten_log10", v, [](const ExprHandle& a) {
+        return log10(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::log1p: {
-      return computeOneOperand(
-          "aten_log1p", v, [](const ExprHandle& a) { return log1p(a); });
+      return computeOneOperand("aten_log1p", v, [](const ExprHandle& a) {
+        return log1p(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::log2: {
-      return computeOneOperand(
-          "aten_log2", v, [](const ExprHandle& a) { return log2(a); });
+      return computeOneOperand("aten_log2", v, [](const ExprHandle& a) {
+        return log2(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::exp: {
@@ -955,34 +994,42 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::erf: {
-      return computeOneOperand(
-          "aten_erf", v, [](const ExprHandle& a) { return erf(a); });
+      return computeOneOperand("aten_erf", v, [](const ExprHandle& a) {
+        return erf(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::erfc: {
-      return computeOneOperand(
-          "aten_erfc", v, [](const ExprHandle& a) { return erfc(a); });
+      return computeOneOperand("aten_erfc", v, [](const ExprHandle& a) {
+        return erfc(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::cos: {
-      return computeOneOperand(
-          "aten_cos", v, [](const ExprHandle& a) { return cos(a); });
+      return computeOneOperand("aten_cos", v, [](const ExprHandle& a) {
+        return cos(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::sin: {
-      return computeOneOperand(
-          "aten_sin", v, [](const ExprHandle& a) { return sin(a); });
+      return computeOneOperand("aten_sin", v, [](const ExprHandle& a) {
+        return sin(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::tan: {
-      return computeOneOperand(
-          "aten_tan", v, [](const ExprHandle& a) { return tan(a); });
+      return computeOneOperand("aten_tan", v, [](const ExprHandle& a) {
+        return tan(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::type_as: {
-      return computeTwoOperand(
-          "aten_type_as", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return Cast::make(rhs.dtype(), lhs);
+      auto const& n = v->node();
+      Tensor* rhs = tensors_.at(n->inputs()[1]->unique());
+      auto dtype = rhs->body()->dtype();
+      return computeOneOperand(
+          "aten_type_as", v, [dtype](const ExprHandle& lhs) {
+            return Cast::make(dtype, lhs);
           });
     } break;
 
@@ -996,54 +1043,31 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::pow: {
       return computeTwoOperand(
           "aten_pow", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            const FloatImm* floatImm = rhs.AsNode<FloatImm>();
-            if (floatImm) {
-              float imm = floatImm->value();
-              if (imm == 1.0f) {
-                return lhs;
-              } else if (imm == 2.0f) { // NOLINT
-                return lhs * lhs;
-              } else if (imm == 3.0f) { // NOLINT
-                return (lhs * lhs) * lhs;
-              } else if (imm == 4.0f) { // NOLINT
-                ExprHandle tmp = lhs * lhs;
-                return tmp * tmp;
-              } else if (imm == 0.5f) { // NOLINT
-                return sqrt(lhs);
-              } else if (imm == 0.0f) {
-                return ExprHandle(1.0f);
-              } else if (imm == -0.5f) { // NOLINT
-                return rsqrt(lhs);
-              } else if (imm == -1.0f) {
-                return ExprHandle(1.0f) / lhs;
-              } else if (imm == -2.0f) { // NOLINT
-                return ExprHandle(1.0f) / (lhs * lhs);
-              }
+            if (!rhs.node()->isConstant()) {
+              return pow(lhs, rhs);
             }
+            double val =
+                immediateAs<double>(IRSimplifier::simplify(rhs.node()));
 
-            const Cast* floatCast = rhs.AsNode<Cast>();
-            if (floatCast) {
-              const IntImm* intImm =
-                  dynamic_cast<const IntImm*>(floatCast->src_value());
-              if (intImm) {
-                float imm = static_cast<float>(intImm->value());
-                if (imm == 1) {
-                  return lhs;
-                } else if (imm == 2) {
-                  return lhs * lhs;
-                } else if (imm == 3) {
-                  return (lhs * lhs) * lhs;
-                } else if (imm == 4) {
-                  ExprHandle tmp = lhs * lhs;
-                  return tmp * tmp;
-                } else if (imm == 0) {
-                  return ExprHandle(1.0f);
-                } else if (imm == -1) {
-                  return ExprHandle(1.0f) / lhs;
-                } else if (imm == -2) {
-                  return ExprHandle(1.0f) / (lhs * lhs);
-                }
-              }
+            if (val == 1.0f) {
+              return lhs;
+            } else if (val == 2.0f) { // NOLINT
+              return lhs * lhs;
+            } else if (val == 3.0f) { // NOLINT
+              return (lhs * lhs) * lhs;
+            } else if (val == 4.0f) { // NOLINT
+              ExprHandle tmp = lhs * lhs;
+              return tmp * tmp;
+            } else if (val == 0.5f) { // NOLINT
+              return sqrt(lhs);
+            } else if (val == 0.0f) {
+              return ExprHandle(1.0f);
+            } else if (val == -0.5f) { // NOLINT
+              return rsqrt(lhs);
+            } else if (val == -1.0f) {
+              return ExprHandle(1.0f) / lhs;
+            } else if (val == -2.0f) { // NOLINT
+              return ExprHandle(1.0f) / (lhs * lhs);
             }
             return pow(lhs, rhs);
           });
@@ -1065,23 +1089,57 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
              const ExprHandle& weight) { return a + weight * (end - a); });
     } break;
     case aten::remainder: {
-      return computeTwoOperand(
-          "aten_remainder",
-          v,
-          [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return fmod((rhs + fmod(lhs, rhs)), rhs);
-          });
+      auto imodImpl = [](const ExprHandle& lhs, const ExprHandle& rhs) {
+        return Mod::make(lhs, rhs);
+      };
+      auto fmodImpl = [](const ExprHandle& lhs, const ExprHandle& rhs) {
+        return fmod((rhs + fmod(lhs, rhs)), rhs);
+      };
+      {
+        auto const& n = v->node();
+        auto const& shape = broadcastShapes(
+            valueShape(n->inputs()[0]), valueShape(n->inputs()[1]));
+        return Compute(
+            "aten_remainder",
+            c10::fmap<DimArg>(shape),
+            [&](const std::vector<VarHandle>& axes) {
+              auto const& n = v->node();
+              std::vector<ExprHandle> indices(axes.begin(), axes.end());
+              std::vector<ExprHandle> inputs = {
+                  tensorOrConstant(n->inputs()[0], indices),
+                  tensorOrConstant(n->inputs()[1], indices),
+              };
+
+              promoteInputs(inputs);
+              bool allInt = true;
+              for (auto& e : inputs) {
+                if (e.dtype().is_floating_point()) {
+                  allInt = false;
+                  break;
+                }
+              }
+              if (allInt) {
+                return demoteOutput(
+                    imodImpl(inputs[0], inputs[1]), n->output());
+              } else {
+                return demoteOutput(
+                    fmodImpl(inputs[0], inputs[1]), n->output());
+              }
+            });
+      }
 
     } break;
 
     case aten::acos: {
-      return computeOneOperand(
-          "aten_acos", v, [](const ExprHandle& a) { return acos(a); });
+      return computeOneOperand("aten_acos", v, [](const ExprHandle& a) {
+        return acos(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::asin: {
-      return computeOneOperand(
-          "aten_asin", v, [](const ExprHandle& a) { return asin(a); });
+      return computeOneOperand("aten_asin", v, [](const ExprHandle& a) {
+        return asin(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::cosh: {
@@ -1095,25 +1153,29 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::atan: {
-      return computeOneOperand(
-          "aten_atan", v, [](const ExprHandle& a) { return atan(a); });
+      return computeOneOperand("aten_atan", v, [](const ExprHandle& a) {
+        return atan(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::atan2: {
       return computeTwoOperand(
           "aten_atan2", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return atan2(lhs, rhs);
+            return atan2(
+                promoteIntegerToFloat(lhs), promoteIntegerToFloat(rhs));
           });
     } break;
 
     case aten::tanh: {
-      return computeOneOperand(
-          "aten_tanh", v, [](const ExprHandle& a) { return tanh(a); });
+      return computeOneOperand("aten_tanh", v, [](const ExprHandle& a) {
+        return tanh(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::sqrt: {
-      return computeOneOperand(
-          "aten_sqrt", v, [](const ExprHandle& a) { return sqrt(a); });
+      return computeOneOperand("aten_sqrt", v, [](const ExprHandle& a) {
+        return sqrt(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::rsqrt: {
@@ -1227,15 +1289,8 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
               return ExprHandle(0);
             }
 
-            int64_t dim = n->inputs()[1]->node()->i(attr::value);
-            if (dim < 0) {
-              dim += axes.size();
-            }
-
-            if (dim < 0 || dim >= axes.size()) {
-              throw std::runtime_error("invalid 'dim' value in aten::cat");
-            }
-
+            int64_t dim_ = n->inputs()[1]->node()->i(attr::value);
+            size_t dim = normalizeAndCheckIndex(dim_, axes.size());
             // Promote input types.
             // Note that we need to consider all inputs, including empty - they
             // also affect the resultant dtype.
@@ -1333,7 +1388,11 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     }
 
     case aten::softmax: {
-      return computeSoftmax(v);
+      return computeSoftmax(v, false);
+    }
+
+    case aten::log_softmax: {
+      return computeSoftmax(v, true);
     }
 
     default: {
@@ -1342,74 +1401,21 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
   }
 }
 
-void TensorExprKernel::flattenTensors(BackendType backendType) {
-  if (backendType != BackendType::kCudaCodeGen &&
-      backendType != BackendType::kBlockCodeGen) {
-    // We only need to flatten for GPU, for other backends just use the same
-    // tensors.
-    flatTensorOutputs_ = tensorOutputs_;
-    return;
-  }
-
-  flatTensorOutputs_.resize(tensorOutputs_.size());
-  for (size_t tensorIdx = 0; tensorIdx < tensorOutputs_.size(); tensorIdx++) {
-    Tensor* tensor = tensorOutputs_[tensorIdx];
-    ExprHandle totalCount = ExprHandle(tensor->dim(0));
-    for (int i = 1; i < tensor->ndim(); i++) {
-      const IntImm* totalCountImm = totalCount.AsNode<IntImm>();
-      const IntImm* tensorDimImm = dynamic_cast<const IntImm*>(tensor->dim(i));
-      if (totalCountImm && tensorDimImm) {
-        // TODO: switch to real constant folding when it is available.
-        totalCount = ExprHandle(totalCountImm->value() * tensorDimImm->value());
-      } else {
-        totalCount = totalCount * ExprHandle(tensor->dim(i));
-      }
-    }
-    // Flatten the index for GPU kernels.
-    // TODO: move this to fusing axis when it is ready.
-    Tensor* newOut = Compute(
-        tensor->buf()->name_hint() + "_flat",
-        {totalCount},
-        [tensor](const VarHandle& index) -> ExprHandle {
-          std::vector<ExprHandle> dims;
-          ExprHandle value = index;
-          for (int i = tensor->ndim() - 1; i >= 0; i--) {
-            ExprHandle idx = value;
-            if (i > 0) {
-              idx = Mod::make(value, ExprHandle(tensor->dim(i)));
-            }
-            dims.push_back(idx);
-            value = value / ExprHandle(tensor->dim(i));
-          }
-          std::reverse(dims.begin(), dims.end());
-          return tensor->call(dims);
-        });
-    flatTensorOutputs_[tensorIdx] = newOut;
-  }
-}
-
 Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
-  flattenTensors(backendType);
-
-  torch::jit::tensorexpr::LoopNest l(flatTensorOutputs_);
+  torch::jit::tensorexpr::LoopNest l(tensorOutputs_);
   GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
 
   bool hasReduction = NodeFinder<ReduceOp>::find(l.root_stmt()).size() != 0;
 
-  // Compute non-output tensors_ inline
-  for (auto& p : tensors_) {
-    if (!l.hasLoopBodyFor(p.second) || hasReduction) {
-      continue;
-    }
-    l.computeInline(p.second->buf());
-  }
-  if (backendType == kCudaCodeGen) {
-    for (size_t i = 0; i < flatTensorOutputs_.size(); i++) {
-      Tensor* tensor = flatTensorOutputs_[i];
+  l.inlineIntermediateBufs();
 
-      // For every output tensor we've created a flattened 1D tensor - let's
-      // mark the original output tensor with computeInline
-      l.computeInline(tensorOutputs_[i]->buf());
+  if (backendType == kCudaCodeGen) {
+    for (auto tensor : tensorOutputs_) {
+      std::vector<For*> loops = l.getLoopStmtsFor(tensor);
+      TORCH_INTERNAL_ASSERT(!loops.empty(), "loops should not be empty");
+      For* flattened = nullptr;
+      LoopNest::flatten(loops, &flattened);
+      assert(flattened);
 
       int loopLevels = getTECudaPointwiseLoopLevels();
       const int kDefaultLoopLevels = 2;
@@ -1424,8 +1430,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
         if (blockSize < 0) {
           blockSize = kDefaultBlockSize;
         }
-        std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-        l.splitWithMask(loops[0], blockSize, &outer, &inner);
+        l.splitWithMask(flattened, blockSize, &outer, &inner);
         l.setGPUBlockIndex(outer, 0);
         l.setGPUThreadIndex(inner, 0);
       } else if (loopLevels == 3) {
@@ -1438,8 +1443,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
         const int kDefaultBlockSize = 256;
         blockCount = (blockCount > 0) ? blockCount : kDefaultBlockCount;
         blockSize = (blockSize > 0) ? blockSize : kDefaultBlockSize;
-        std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-        l.splitWithMask(loops[0], blockCount * blockSize, &outer, &inner);
+        l.splitWithMask(flattened, blockCount * blockSize, &outer, &inner);
         l.splitWithMask(inner, blockSize, &inner1, &inner2);
         l.setGPUBlockIndex(inner1, 0);
         l.setGPUThreadIndex(inner2, 0);
@@ -1452,12 +1456,11 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
 
   if (backendType == kBlockCodeGen) {
     auto block_analysis = std::make_unique<CreateBufferMap>();
-    for (size_t i = 0; i < flatTensorOutputs_.size(); i++) {
+    for (auto tensor : tensorOutputs_) {
       const int default_fp16_blocksize = 16;
       const int default_uint8_blocksize = 32;
       int blockSize = default_fp16_blocksize;
       // We only handle looplevels == 2 for now
-      Tensor* tensor = flatTensorOutputs_[i];
       // Run Block analysis to get multi dim buffer info
       auto root_stmt = l.root_stmt();
       root_stmt->accept(block_analysis.get());
@@ -1465,12 +1468,16 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
       if (tensor->buf()->dtype().scalar_type() == ScalarType::Byte) {
         blockSize = default_uint8_blocksize;
       }
-      l.computeInline(l.getLoopBodyFor(tensorOutputs_[i]));
-      For* outer;
-      For* inner;
+
       std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-      TORCH_INTERNAL_ASSERT(loops.size() > 0, "loops should not be empty");
-      l.splitWithMask(loops[0], blockSize, &outer, &inner);
+      TORCH_INTERNAL_ASSERT(!loops.empty(), "loops should not be empty");
+      For* flattened = nullptr;
+      LoopNest::flatten(loops, &flattened);
+      assert(flattened);
+
+      For* outer = nullptr;
+      For* inner = nullptr;
+      l.splitWithMask(flattened, blockSize, &outer, &inner);
       l.setGPUBlockIndex(outer, 0);
       l.setGPUThreadIndex(inner, 0);
       l.setBufferMap(outer, block_analysis->getBufferMap());
@@ -1518,7 +1525,7 @@ std::vector<CodeGen::BufferArg> TensorExprKernel::prepareBufferArgs() {
       params.emplace_back(stride.var);
     }
   }
-  for (auto& o : flatTensorOutputs_) {
+  for (auto& o : tensorOutputs_) {
     params.emplace_back(o);
   }
   return params;
@@ -1538,10 +1545,13 @@ TensorExprKernel::BackendType TensorExprKernel::inferBackendTypeFromDevice(
     backendType = kBlockCodeGen;
   } else if (device.type() == at::kCPU) {
 #ifdef TORCH_ENABLE_LLVM
-    backendType = kLLVMCodeGen;
+    backendType = dontUseLLVMFlag() ? kSimpleIREval : kLLVMCodeGen;
 #else
     backendType = kSimpleIREval;
 #endif
+    if (getTEMustUseLLVMOnCPU() && backendType == kSimpleIREval) {
+      throw std::runtime_error("LLVM Backend not found");
+    }
   } else {
     throw std::runtime_error("Invalid device type");
   }
@@ -1658,7 +1668,9 @@ Tensor* TensorExprKernel::computeSum(const torch::jit::Value* v) {
       reduction_info.reductionDims);
 }
 
-Tensor* TensorExprKernel::computeSoftmax(const torch::jit::Value* v) {
+Tensor* TensorExprKernel::computeSoftmax(
+    const torch::jit::Value* v,
+    bool log_softmax) {
   // Softmax is computed as follows:
   //    softmax(vi) = exp(vi) / sum(exp(vi))
   //
@@ -1673,15 +1685,31 @@ Tensor* TensorExprKernel::computeSoftmax(const torch::jit::Value* v) {
   //   - Third loop computes the sum over the softmax dim.
   //   - Final loop computes softmax for every element in v.
 
+  // LogSoftmax is computed as follows:
+  //    log_softmax(vi) = log(softmax(vi))
+  //                    = vi - log(sum(exp(vi)))
+  //
+  // Using the same max trick as above:
+  //    log_softmax(vi) = vi - max(vi) - log(sum(exp(vi - max(vi))))
+  //
+  // This is implemented as 5 loopnests:
+  //   - First loop computes the max over the softmax dim.
+  //   - Second loop computes exp for every element in v after subtracting
+  //     the max of the softmax dim it belongs to.
+  //   - Third loop computes the sum over the softmax dim.
+  //   - Fourth loop computes log for every element in the sum.
+  //   - Final loop computes the log_softmax for every element in v.
+
   TORCH_INTERNAL_ASSERT(v->node()->inputs().size() == 3);
   auto output_dims = dimsFromSizes(sizesForValue(v));
 
   // We do not handle None for dims (input 1) because that is supposed to
   // be deprecated.
   TORCH_INTERNAL_ASSERT(v->node()->input(1)->node()->kind() == prim::Constant);
-  size_t softmax_dim = v->node()->input(1)->node()->i(attr::value);
-  TORCH_INTERNAL_ASSERT(softmax_dim < output_dims.size());
-
+  int64_t rank =
+      *v->node()->input(0)->type()->cast<TensorType>()->sizes().size();
+  size_t softmax_dim =
+      normalizeAndCheckIndex(v->node()->input(1)->node()->i(attr::value), rank);
   std::vector<DimArg> non_softmax_dims;
   for (size_t i = 0; i < output_dims.size(); ++i) {
     if (i != softmax_dim) {
@@ -1756,10 +1784,23 @@ Tensor* TensorExprKernel::computeSoftmax(const torch::jit::Value* v) {
         return e->call(move_softmax_dim_index_to_pos(indices));
       },
       {output_dims[softmax_dim]});
-  auto res = Compute("aten_softmax", output_dims, [&](ParameterList& indices) {
-    return e->call(indices) / sum->call(remove_softmax_dim_index(indices));
+  if (!log_softmax) {
+    return Compute("aten_softmax", output_dims, [&](ParameterList& indices) {
+      return e->call(indices) / sum->call(remove_softmax_dim_index(indices));
+    });
+  }
+
+  auto log_sum = Compute(
+      "aten_softmax_log_sum", non_softmax_dims, [&](ParameterList& indices) {
+        return log(sum->call(indices));
+      });
+  return Compute("aten_log_softmax", output_dims, [&](ParameterList& indices) {
+    auto inp = tensorOrConstant(
+        v->node()->inputs()[0], convert_indices_to_expr_handle(indices));
+    auto non_softmax_indices = remove_softmax_dim_index(indices);
+    return inp - max->call(non_softmax_indices) -
+        log_sum->call(non_softmax_indices);
   });
-  return res;
 }
 
 TensorExprKernel::ReductionInfo TensorExprKernel::getReductionInfo(
@@ -1875,7 +1916,12 @@ void TensorExprKernel::compile() {
   std::vector<CodeGen::BufferArg> params = prepareBufferArgs();
 
   // Generate code.
-  codegen_ = CreateCodeGen(getCodeGenName(backendType), stmt, params, device_);
+  codegen_ = CreateCodeGen(
+      getCodeGenName(backendType),
+      stmt,
+      params,
+      device_,
+      SubgraphUtils::generateNameForGraph(graph_));
 }
 
 TensorExprKernel::TensorExprKernel(const std::shared_ptr<Graph>& subgraph)

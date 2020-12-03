@@ -1,7 +1,10 @@
 #pragma once
 
+#ifdef USE_VULKAN_API
+
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Resource.h>
+#include <ATen/native/vulkan/api/Shader.h>
 
 namespace at {
 namespace native {
@@ -57,23 +60,16 @@ struct Descriptor final {
    public:
     Set(
         VkDevice device,
-        VkDescriptorPool descriptor_pool,
-        VkDescriptorSetLayout descriptor_set_layout);
+        VkDescriptorSet descriptor_set,
+        const Shader::Layout::Signature& shader_layout_signature);
     Set(const Set&) = delete;
     Set& operator=(const Set&) = delete;
     Set(Set&&);
     Set& operator=(Set&&);
     ~Set() = default;
 
-    Set& bind(
-        uint32_t binding,
-        VkDescriptorType type,
-        const Resource::Buffer::Object& buffer);
-
-    Set& bind(
-        uint32_t binding,
-        VkDescriptorType type,
-        const Resource::Image::Object& image);
+    Set& bind(uint32_t binding, const Resource::Buffer::Object& buffer);
+    Set& bind(uint32_t binding, const Resource::Image::Object& image);
 
     VkDescriptorSet handle() const;
 
@@ -81,6 +77,7 @@ struct Descriptor final {
     struct Item final {
       uint32_t binding;
       VkDescriptorType type;
+
       union {
         VkDescriptorBufferInfo buffer;
         VkDescriptorImageInfo image;
@@ -92,9 +89,10 @@ struct Descriptor final {
    private:
     VkDevice device_;
     VkDescriptorSet descriptor_set_;
+    Shader::Layout::Signature shader_layout_signature_;
 
     struct {
-      c10::SmallVector<Item, 8u> items;
+      c10::SmallVector<Item, 6u> items;
       mutable bool dirty;
     } bindings_;
   };
@@ -110,14 +108,28 @@ struct Descriptor final {
     Pool& operator=(const Pool&) = delete;
     Pool(Pool&&);
     Pool& operator=(Pool&&);
-    ~Pool() = default;
+    ~Pool();
 
-    Set allocate(VkDescriptorSetLayout descriptor_set_layout);
+    Set allocate(const Shader::Layout::Object& shader_layout);
     void purge();
 
    private:
+    struct Configuration final {
+      static constexpr uint32_t kQuantum = 16u;
+      static constexpr uint32_t kReserve = 64u;
+    };
+
     VkDevice device_;
     Handle<VkDescriptorPool, VK_DELETER(DescriptorPool)> descriptor_pool_;
+
+    struct {
+      struct Layout final {
+        std::vector<VkDescriptorSet> pool;
+        size_t in_use;
+      };
+
+      ska::flat_hash_map<VkDescriptorSetLayout, Layout> layouts;
+    } set_;
   } pool /* [thread_count] */;
 
   explicit Descriptor(const GPU& gpu)
@@ -130,9 +142,10 @@ struct Descriptor final {
 //
 
 inline Descriptor::Set::Set(Set&& set)
-  : device_(set.device_),
-    descriptor_set_(set.descriptor_set_),
-    bindings_(set.bindings_) {
+  : device_(std::move(set.device_)),
+    descriptor_set_(std::move(set.descriptor_set_)),
+    shader_layout_signature_(std::move(set.shader_layout_signature_)),
+    bindings_(std::move(set.bindings_)) {
   set.device_ = VK_NULL_HANDLE;
   set.descriptor_set_ = VK_NULL_HANDLE;
 }
@@ -141,6 +154,7 @@ inline Descriptor::Set& Descriptor::Set::operator=(Set&& set) {
   if (&set != this) {
     device_ = std::move(set.device_);
     descriptor_set_ = std::move(set.descriptor_set_);
+    shader_layout_signature_ = std::move(set.shader_layout_signature_);
     bindings_ = std::move(set.bindings_);
 
     set.device_ = VK_NULL_HANDLE;
@@ -154,3 +168,5 @@ inline Descriptor::Set& Descriptor::Set::operator=(Set&& set) {
 } // namespace vulkan
 } // namespace native
 } // namespace at
+
+#endif /* USE_VULKAN_API */

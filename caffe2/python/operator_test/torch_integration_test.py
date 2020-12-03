@@ -180,6 +180,7 @@ class TorchIntegration(hu.HypothesisTestCase):
         rotated=st.booleans(),
         angle_bound_on=st.booleans(),
         clip_angle_thresh=st.sampled_from([-1.0, 1.0]),
+        batch_splits_dtype=st.sampled_from([torch.float32, torch.int32]),
         **hu.gcs_cpu_only
     )
     def test_box_with_nms_limits(
@@ -189,6 +190,7 @@ class TorchIntegration(hu.HypothesisTestCase):
         rotated,
         angle_bound_on,
         clip_angle_thresh,
+        batch_splits_dtype,
         gc,
         dc,
     ):
@@ -250,7 +252,7 @@ class TorchIntegration(hu.HypothesisTestCase):
         outputs = torch.ops._caffe2.BoxWithNMSLimit(
             torch.tensor(class_prob),
             torch.tensor(pred_bbox),
-            torch.tensor(batch_splits),
+            torch.tensor(batch_splits, dtype=batch_splits_dtype),
             score_thresh=float(score_thresh),
             nms=float(nms_thresh),
             detections_per_im=int(topk_per_image),

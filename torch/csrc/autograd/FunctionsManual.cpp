@@ -9,6 +9,7 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/Reduction.h>
+#include <ATen/BatchedTensorImpl.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ScalarOps.h>
 
@@ -47,6 +48,12 @@ void copy_range(variable_list& out, IndexRange range, at::ArrayRef<Tensor> t) {
   AT_ASSERT(range.second <= out.size());
   AT_ASSERTM(range.second - range.first == t.size(), "inconsistent range for TensorList output");
   std::copy(t.begin(), t.end(), out.begin() + range.first);
+}
+
+Tensor copysign_tensor_self_backward(const Tensor & grad, const Tensor & self, const Tensor & result) {
+  auto ratio = result / self;
+  ratio.masked_fill_(self == 0, 0);
+  return grad * ratio;
 }
 
 Tensor not_implemented(const char* name) {
@@ -89,6 +96,14 @@ static Tensor wrapped_scalar_tensor(Scalar scalar) {
 
 Tensor handle_r_to_c(ScalarType self_st, Tensor gradient_result) {
   if (!at::isComplexType(self_st) && gradient_result.is_complex()) {
+    // R -> C
+    return at::real(gradient_result);
+  }
+  return gradient_result;
+}
+
+Tensor handle_r_to_c(Tensor self, Tensor gradient_result) {
+  if (!self.is_complex() && gradient_result.is_complex()) {
     // R -> C
     return at::real(gradient_result);
   }
@@ -177,16 +192,18 @@ Tensor norm_backward(Tensor grad, const Tensor & self, const optional<Scalar> & 
 }
 
 Tensor pow_backward(Tensor grad, const Tensor & self, const Scalar & exponent_) {
-  double exponent = exponent_.toDouble();
+  auto exponent = (exponent_.isComplex()) ? exponent_.toComplexDouble() : exponent_.toDouble();
   if (exponent == 0.0) {
     return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
-    return grad * exponent * self.pow(exponent - 1);
+    auto out = grad * (exponent * self.pow(exponent - 1)).conj();
+    return handle_r_to_c(self, out);
   }
 }
 
 Tensor pow_backward_self(Tensor grad, const Tensor & self, const Tensor & exponent) {
-  return at::where(exponent == 0.0, at::zeros({}, grad.options()), grad * exponent * self.pow(exponent - 1));
+  auto out = at::where(exponent == 0.0, at::zeros({}, grad.options()), grad * (exponent * self.pow(exponent - 1)).conj());
+  return handle_r_to_c(self, out);
 }
 
 // Caveats:
@@ -198,18 +215,46 @@ Tensor pow_backward_self(Tensor grad, const Tensor & self, const Tensor & expone
 // d(a^b)/db = 0 for a > 0 and b -> +0.
 // Currently, tensorflow agrees with us.
 Tensor pow_backward_exponent(Tensor grad, const Tensor& self, const Tensor& exponent, Tensor result) {
-  return grad * at::where(at::logical_and(self == 0, exponent >= 0),
+  Tensor cond;
+  if (exponent.is_complex()) {
+    auto is_real_exp = at::logical_and(at::imag(exponent) == 0, at::real(exponent) >= 0);
+    cond = at::logical_and(self == 0, is_real_exp);
+  } else {
+    cond = at::logical_and(self == 0, exponent >= 0);
+  }
+  auto out = grad * at::where(cond,
                           at::zeros({}, grad.options()),
-                          result * self.log());
+                          (result * self.log()).conj());
+  return handle_r_to_c(exponent, out);
 }
 
 Tensor pow_backward_exponent(Tensor grad, const Scalar & base, const Tensor& exponent, Tensor result) {
-  if (base.toDouble() == 0) {
-    return grad * at::where(exponent >= 0,
+  auto base_ = base.isComplex() ? base.toComplexDouble() : base.toDouble();
+  auto grad_lambda = [](auto a, auto b) { return (a * std::log(b)).conj(); };
+  if (base_ == 0.0) {
+    auto cond = [](auto exp) {
+      if (exp.is_complex()) {
+        return at::logical_and(at::imag(exp) == 0, at::real(exp) >= 0);
+      } else {
+        return exp >=0;
+      }
+    };
+    auto out = grad * at::where(cond(exponent),
                             at::zeros({}, grad.options()),
-                            result * std::log(base.toDouble()));
+                            grad_lambda(result, base_));
+    return handle_r_to_c(exponent, out);
   } else {
-    return grad * result * std::log(base.toDouble());
+    auto out = grad * grad_lambda(result, base_);
+    return handle_r_to_c(exponent, out);
+  }
+}
+
+Tensor angle_backward(Tensor grad, const Tensor& self) {
+  if (self.is_complex()) {
+    return at::where(self == 0.0, at::zeros({}, self.options()),
+                     grad * self / self.abs().pow(2) * Scalar(c10::complex<double>{0.0, 1.0}));
+  } else {
+    return at::zeros_like(self, at::MemoryFormat::Preserve);
   }
 }
 
@@ -226,35 +271,23 @@ Tensor sgn_backward(Tensor result, Tensor grad, Tensor self) {
     // https://arxiv.org/pdf/1701.00392.pdf Section 4.20
     return at::where(abs == 0.0, at::zeros({}, grad.options()), (grad/abs - (at::real(grad/self) * result)));
   } else {
-    return at::zeros_like(grad, at::MemoryFormat::Preserve);
+    return at::zeros_like(self, at::MemoryFormat::Preserve);
   }
 }
 
 Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st) {
-  auto result = grad * other.conj();
-  if (!at::isComplexType(self_st) && result.is_complex()) {
-    // R -> C
-    result = at::real(result);
-  }
-  return result;
+  auto out = grad * other.conj();
+  return handle_r_to_c(self_st, out);
 }
 
 Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st) {
   auto result = grad / other.conj();
-  if (!at::isComplexType(self_st) && result.is_complex()) {
-    // R -> C
-    result = at::real(result);
-  }
-  return result;
+  return handle_r_to_c(self_st, result);
 }
 
 Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other) {
   auto result = -grad * ((self / other) / other).conj();
-  if (!other.is_complex() && result.is_complex()) {
-    // R -> C
-    result = at::real(result);
-  }
-  return result;
+  return handle_r_to_c(other, result);
 }
 
 Tensor permute_backwards(const Tensor & grad, IntArrayRef fwd_dims) {
@@ -389,15 +422,15 @@ Tensor prod_backward(Tensor grad, const Tensor& input, Tensor result, int64_t di
 }
 
 Tensor solve_backward_self(const Tensor & grad, const Tensor & self, const Tensor & A) {
-  return std::get<0>(at::solve(grad, A.transpose(-2, -1)));
+  return std::get<0>(at::solve(grad, A.conj().transpose(-2, -1)));
 }
 
 Tensor solve_backward_A(const Tensor & grad, const Tensor & self, const Tensor & A, const Tensor & solution) {
   Tensor grad_self = solve_backward_self(grad, self, A);
   if (self.ndimension() == 2 && A.ndimension() == 2) {
-    return -at::mm(grad_self, solution.transpose(-2, -1));
+    return -at::mm(grad_self, solution.conj().transpose(-2, -1));
   }
-  return -at::matmul(grad_self, solution.transpose(-2, -1));
+  return -at::matmul(grad_self, solution.conj().transpose(-2, -1));
 }
 
 Tensor cumsum_backward(const Tensor & x, int64_t dim) {
@@ -615,17 +648,6 @@ Tensor renorm_backward(const Tensor & grad, const Tensor & self, Scalar p, int64
   return at::where(mask, grad, grad_norm);
 }
 
-Tensor sum_tensorlist(TensorList tl) {
-  if (tl.size() == 0) {
-    throw std::runtime_error("Can't sum tensorlist of size 0");
-  }
-  Tensor sum = tl[0];
-  for(size_t i = 1; i < tl.size(); ++i) {
-    sum = sum + tl[i];
-  }
-  return sum;
-}
-
 Tensor repeat_backward(Tensor grad, IntArrayRef repeats, IntArrayRef input_shape) {
   auto find_iter = std::find(repeats.cbegin(), repeats.cend(), 0);
   if (find_iter != repeats.cend()) {
@@ -636,13 +658,69 @@ Tensor repeat_backward(Tensor grad, IntArrayRef repeats, IntArrayRef input_shape
   for (int64_t i = 0; i < num_unsqueezed; ++i) {
     grad = grad.sum(0, false);
   }
-  for (size_t j = num_unsqueezed; j < repeats.size(); ++j) {
-    int64_t repeat = repeats[j];
-    if (repeat == 1) {
-      continue;
+
+  at::DimVector grad_size, sum_dims;
+  for (size_t dim = 0; dim < input_dims; ++dim) {
+    int64_t repeat = repeats[dim + num_unsqueezed];
+    // Reshape gradient (repeat > 1)
+    // Index:      [..., dim    , ...]    [..., dim   ,  dim+1        , ...]
+    // Shape: From [..., dimsize, ...] to [..., repeat, dimsize/repeat, ...]
+    // The gradient tensor at 'dim' is reshaped to 'repeat' times of input tensor.
+    // Then, sum up gradients over repeated tensors along 'dim', and reduce shape
+    // from 'repeat * dimsize/repeat' to 'dimsize/repeat' ('input_dimsize').
+    // Example:
+    //        Size(3, 2)                                             Size(6, 2)
+    //                                                             [[v1_0, v1_1],
+    //                                                              [v1_2, v1_3],
+    //        [[v0, v1],                   repeat(2, 1)             [v1_4, v1_5],
+    //         [v2, v3],                  ------------->            [v2_0, v2_1],
+    //         [v4, v5]]                                            [v2_2, v2_3],
+    //                                                              [v2_4, v2_5]]
+    //
+    //    input grad (3, 2)            reshape (2, 3, 2)         output grad (6, 2)
+    //                                  [[[g1_0, g1_1],            [[g1_0, g1_1],
+    //                                    [g1_2, g1_3],             [g1_2, g1_3],
+    // [[g1_0+g2_0, g1_1+g2_1],           [g1_4, g1_5]],            [g1_4, g1_5],
+    //  [g1_0+g2_0, g1_1+g2_1],                                     [g2_0, g2_1],
+    //  [g1_0+g2_0, g1_1+g2_1]]          [[g2_0, g2_1],             [g2_2, g2_3],
+    //                                    [g2_2, g2_3],             [g2_4, g2_5]]
+    //                                    [g2_4, g2_5]]]
+    // If gradient tensor is reshaped to [..., dimsize/repeat, repeat, ...] and then
+    // sum over 'dim+1'. The gradient for input is not correctly aligned with input.
+    // Example:
+    //     input grad (3, 2)            reshape (3, 2, 2)        output grad (6, 2)
+    //                                  [[[g1_0, g1_1],
+    //                                    [g1_2, g1_3]],           [[g1_0, g1_1],
+    //                                                              [g1_2, g1_3],
+    // [[g1_0+g1_2, g1_1+g1_3],          [[g1_4, g1_5],             [g1_4, g1_5],
+    //  [g1_4+g2_0, g1_5+g2_1],           [g2_0, g2_1]],            [g2_0, g2_1],
+    //  [g2_2+g2_4, g2_3+g2_5]]                                     [g2_2, g2_3],
+    //                                   [[g2_2, g2_3],             [g2_4, g2_5]]
+    //                                    [g2_4, g2_5]]]
+    if (repeat != 1) {
+      grad_size.push_back(repeat);
+      sum_dims.push_back(grad_size.size() - 1);
     }
-    int64_t dim = j - num_unsqueezed;
-    grad = sum_tensorlist(grad.chunk(repeat, dim));
+    // Don't need to reshape gradient into (repeat, input_shape[dim]) (repeat == 1)
+    grad_size.push_back(input_shape[dim]);
+  }
+  // One-time Reshape & Sum
+  // Reshape gradient to grad_size:
+  //   1. If repeat equals to 1, append input size at that dimension,
+  //   2. If repeat is larger than 1, append both repeat and input size at that dimension.
+  // Sum over all "repeat" dimensions from sum_dims:
+  // Example:
+  // Input Size         (2,    3,    4,    5)
+  // repeat             [4,    1,    9,    3]
+  // output/grad Size   (8,    3,    36,   15)
+  // grad_size          [4, 2,    3, 9, 4, 3, 5]
+  // sum_dims           [0,          3,    5]
+
+  // When repeat 1 time over all original dimensions, the empty sum_dims will reduce
+  // the whole grad tensor into a scalar rather than keeping original dimensions.
+  if (!sum_dims.empty()) {
+    grad = grad.reshape(grad_size);
+    grad = grad.sum(sum_dims);
   }
   return grad;
 }
@@ -663,7 +741,7 @@ Tensor evenly_distribute_backward(Tensor grad, const Tensor & input, const Tenso
     return mask * (grad / mask.sum());
   } else {
     auto mask = value.isnan().item<bool>() ? input.isnan() : input == value;
-    return at::zeros_like(input).masked_fill_(mask, grad / mask.sum());
+    return grad.new_zeros(input.sizes(), input.options()).masked_fill_(mask, grad / mask.sum());
   }
 }
 
@@ -944,13 +1022,58 @@ Tensor log_softmax_double_backward(const Tensor & grad, const Tensor & grad_outp
   return z * grad_output.sum(dim, true) * ((grad * z).sum(dim, true) - grad);
 }
 
+// See NOTE: [vmap-incompatible in-place operations] for what it means for an
+// in-place operation to be incompatible with vmap.
+//
+// If an in-place operation used in a backward formula is vmap-incompatible,
+// then as developers we have the following options:
+//
+// - If the in-place operation directly followed the creation of a tensor with
+//   a factory function like at::zeros(...), we should replace the factory with a
+//   corresponding grad.new_zeros(...) call. The grad.new_zeros(...) call
+//   propagates the batch dims to the resulting tensor.
+//   For example:
+//     Before: at::zeros(input.sizes(), grad.options()).copy_(grad)
+//     After:  grad.new_zeros(input.sizes()).copy_(grad)
+//
+// - If the in-place operation followed some sequence of operations, if the
+//   we want to be able to vmap over the backward formula as-is (this is
+//   usually the case for simple (<15loc) backward formulas), then use
+//   inplace_is_vmap_compatible to guard the operation. For example:
+//             c = a * b
+//     Before: c.mul_(grad)
+//     After:  c = inplace_is_vmap_compatible(c, grad) ? c.mul_(grad) : c * grad
+//
+// - If we don't want to vmap directly over the backward formula (e.g., if the
+//   backward formula is too complicated or has a lot of vmap-incompatible
+//   operations, then register the backward formula as an operator and eventually
+//   write a batching rule for it.
+static bool inplace_is_vmap_compatible(const Tensor& self, const Tensor& other) {
+  const auto* other_batched = at::maybeGetBatchedImpl(other);
+  if (!other_batched) {
+    return true;
+  }
+  const auto* self_batched = at::maybeGetBatchedImpl(self);
+  if (!self_batched) {
+    // self is not batched but other is batched
+    return false;
+  }
+  auto self_levels = at::createVmapLevelsBitset(self_batched->bdims());
+  auto other_levels = at::createVmapLevelsBitset(other_batched->bdims());
+  return self_levels == (self_levels | other_levels);
+}
+
 Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Tensor & grad, const Tensor & input, const Tensor & target, const c10::optional<Tensor>& weight, int64_t reduction) {
   auto eps = 1e-12;
   auto inp_pl_eps = input + eps;
   auto one_m_inp_pl_eps = 1 - input + eps;
   // gradient wrt input
   auto gI = (input * input - 2 * input * target + target) / (inp_pl_eps.pow(2) * one_m_inp_pl_eps.pow(2));
-  gI *= (grad * grad_output);
+  if (inplace_is_vmap_compatible(gI, grad)) {
+    gI *= (grad * grad_output);
+  } else {
+    gI = gI * (grad * grad_output);
+  }
 
   if (isDefined(weight)) {
     gI *= *weight;
@@ -967,7 +1090,11 @@ Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad, con
   auto eps = 1e-12;
   // gradient wrt grad_output
   auto ggO = (input - target) / ((input + eps) * (1 - input + eps));
-  ggO *= grad;
+  if (inplace_is_vmap_compatible(ggO, grad)) {
+    ggO *= grad;
+  } else {
+    ggO = ggO * grad;
+  }
 
   if (isDefined(weight)) {
     ggO *= *weight;
@@ -1568,7 +1695,7 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntArrayR
     _min_storage_size(inp_sizes_, inp_strides_, inp_effective_offset),
     _min_storage_size(out_sizes_, out_strides_, out_effective_offset)
   );
-  auto storage = at::zeros({base_size}, grad.options());
+  auto storage = grad.new_zeros({base_size});
 
   // prepare indices tensor if we will do index_add_ later
   c10::optional<at::Tensor> flatten_full_indices;
@@ -1847,23 +1974,29 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
   auto glambda = grads[0];
   auto gv = grads[1];
 
-  auto vt = v.transpose(-2, -1);
+  auto vh = v.conj().transpose(-2, -1);
 
   Tensor result;
   if (gv.defined()) {
       Tensor F = lambda.unsqueeze(-2) - lambda.unsqueeze(-1);
       F.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(INFINITY);
       F.pow_(-1);
-      F.mul_(at::matmul(vt, gv));
-      result = at::matmul(v, at::matmul(F, vt));
+      result = at::matmul(v, at::matmul(F * at::matmul(vh, gv), vh));
   } else {
       result = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   if (glambda.defined()) {
-      result.add_(at::matmul(at::matmul(v, at::diag_embed(glambda, /*offset=*/0, /*dim1=*/-2, /*dim2=*/-1)), vt));
+    glambda = glambda.to(self.dtype());
+    // computes v @ diag(glambda) @ vh
+    Tensor glambda_term = at::matmul(v * glambda.unsqueeze(-2), vh);
+    if (inplace_is_vmap_compatible(result, glambda_term)) {
+      result.add_(glambda_term);
+    } else {
+      result = result + glambda_term;
+    }
   }
-  return result.add(result.transpose(-2, -1)).mul_(0.5);
+  return result.add(result.conj().transpose(-2, -1)).mul_(0.5);
 }
 
 Tensor qr_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
@@ -2647,7 +2780,7 @@ Tensor log1p_backward(const Tensor& grad, const Tensor& self) {
       "Use a different mathematical operation which preserves sparsity of gradients, ",
       "or report a bug if you think this is an error.");
   }
-  return grad / (self + 1);
+  return grad / (self + 1).conj();
 }
 
 Tensor sparse_constructor_values_backward(const Tensor& sparse_grad_out, const Tensor& indices, IntArrayRef values_shape) {
@@ -2668,16 +2801,18 @@ Tensor constant_pad_nd_backward(const Tensor& grad, IntArrayRef pad) {
   return at::constant_pad_nd(grad, negated_pad, 0);
 }
 
-Tensor embedding_dense_double_backward(const Tensor & grad, const Tensor & indices) {
-  // since first backward takes care of padding_idx
-  // and scaling by frequency, we don't need to worry
-  // about it here.
+Tensor embedding_dense_double_backward(const Tensor & grad, const Tensor & indices, int64_t padding_idx) {
+  // since first backward takes care of scaling by frequency, 
+  // we don't need to worry about it here.
   auto gg_weight = grad.index_select(0, indices.reshape(-1));
 
   // reshape gradient as per the shape of indices
   auto size = indices.sizes().vec();
   size.push_back(-1);
 
+  if (padding_idx >= 0) {
+    gg_weight.masked_fill_((indices == padding_idx).reshape({-1, 1}), 0);
+  }
   return gg_weight.view(size);
 }
 

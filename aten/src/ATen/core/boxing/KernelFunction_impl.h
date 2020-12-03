@@ -187,7 +187,24 @@ inline KernelFunction KernelFunction::makeFromUnboxedOnlyRuntimeFunction(FuncTyp
 }
 
 template<bool AllowLegacyTypes, class Lambda>
-inline KernelFunction KernelFunction::makeFromUnboxedLambda(Lambda&& lambda) {
+inline std::enable_if_t<guts::is_stateless_lambda<std::decay_t<Lambda>>::value, KernelFunction> KernelFunction::makeFromUnboxedLambda(Lambda&& lambda) {
+    static_assert(guts::is_functor<std::decay_t<Lambda>>::value, "Tried to call KernelFunction::makeFromUnboxedLambda with a non-lambda type.");
+
+#if !defined(C10_MOBILE)
+    return makeFromUnboxedFunctor<AllowLegacyTypes, impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>(
+        guts::make_unique_base<OperatorKernel, impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>(std::forward<Lambda>(lambda))
+    );
+#else
+    // On mobile, we rather want to optimize for binary size than for performance,
+    // so let's not inline the kernel into the wrapper but use makeFromUnboxedRuntimeFunction
+    // instead.
+    using FuncType = typename guts::infer_function_traits_t<std::decay_t<Lambda>>::func_type;
+    return makeFromUnboxedRuntimeFunction<AllowLegacyTypes, FuncType>(lambda);
+#endif
+}
+
+template<bool AllowLegacyTypes, class Lambda>
+inline std::enable_if_t<!guts::is_stateless_lambda<std::decay_t<Lambda>>::value, KernelFunction> KernelFunction::makeFromUnboxedLambda(Lambda&& lambda) {
     static_assert(guts::is_functor<std::decay_t<Lambda>>::value, "Tried to call KernelFunction::makeFromUnboxedLambda with a non-lambda type.");
 
     return makeFromUnboxedFunctor<AllowLegacyTypes, impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>(

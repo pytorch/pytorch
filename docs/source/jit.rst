@@ -51,10 +51,12 @@ Creating TorchScript Code
     wait
     ScriptModule
     ScriptFunction
+    freeze
     save
     load
     ignore
     unused
+    isinstance
 
 Mixing Tracing and Scripting
 ----------------------------

@@ -209,6 +209,44 @@ def matmul(g, self, other):
 
 @parse_args('v', 'v', 'v', 't', 't')
 def addmm(g, self, mat1, mat2, beta, alpha):
+    dtype = None
+    self_dtype = self.type().scalarType()
+    mat1_dtype = mat1.type().scalarType()
+    mat2_dtype = mat2.type().scalarType()
+    if self_dtype is not None:
+        dtype = self_dtype
+    elif mat1_dtype is not None:
+        dtype = mat1_dtype
+    elif mat2_dtype is not None:
+        dtype = mat2_dtype
+
+    mat1_rank = mat1.type().dim()
+    mat2_rank = mat2.type().dim()
+
+    def isNotNoneAnd(v, u):
+        return v is not None and v != u
+
+    if dtype is not None and (isNotNoneAnd(mat1_rank, 2) or isNotNoneAnd(mat2_rank, 2)):
+        dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+        dtype = sym_help.scalar_type_to_pytorch_type[dtype]
+
+        res1 = g.op("MatMul", mat1, mat2)
+        res2 = self
+
+        alpha = sym_help._scalar(alpha)
+        beta = sym_help._scalar(beta)
+
+        if alpha != 1:
+            alpha = g.op("Constant",
+                         value_t=torch.tensor(alpha, dtype=dtype))
+            res1 = g.op("Mul", res1, alpha)
+        if beta != 1:
+            beta = g.op("Constant",
+                        value_t=torch.tensor(sym_help._scalar(beta), dtype=dtype))
+            res2 = g.op("Mul", res2, beta)
+
+        return g.op("Add", res1, res2)
+
     return g.op("Gemm", mat1, mat2, self, beta_f=sym_help._scalar(beta), alpha_f=sym_help._scalar(alpha))
 
 
@@ -620,7 +658,8 @@ def floor(g, input):
 
 
 def _len(g, self):
-    return g.op("Size", self)
+    sz_0 = size(g, self, g.op("Constant", value_t=torch.LongTensor([0])))
+    return g.op('Squeeze', sz_0, axes_i=[0])
 
 
 @parse_args('v', 't', 't')
@@ -1057,7 +1096,7 @@ def __rshift_(g, self, other):
     if not sym_help._is_fp(self):
         other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx['Float'])
     two_pow = g.op('Pow', two, other)
-
+    two_pow = g.op('Cast', two_pow, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
     rshift = g.op('Div', self, two_pow)
     return rshift
 
@@ -1073,7 +1112,7 @@ def __lshift_(g, self, other):
     if not sym_help._is_fp(self):
         other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx['Float'])
     two_pow = g.op('Pow', two, other)
-
+    two_pow = g.op('Cast', two_pow, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
     lshift = g.op('Mul', self, two_pow)
     return lshift
 
@@ -1085,7 +1124,7 @@ def where(g, condition, self=None, other=None, _outputs=None):
         condition = g.op("Cast", condition, to_i=sym_help.cast_pytorch_to_onnx['Bool'])
     if self is None:
         condition = torch.onnx.symbolic_opset9.nonzero(g, condition)
-        return unbind(g, condition, g.op("Constant", value_t=torch.tensor(1)), _outputs)
+        return sym_help._unbind_helper(g, condition, g.op("Constant", value_t=torch.tensor(1)), _outputs)
     return g.op("Where", condition, self, other)
 
 
@@ -1110,7 +1149,8 @@ def log_softmax(g, input, dim, dtype=None):
         dim = input_dim - 1
     return_op = g.op("LogSoftmax", input, axis_i=dim)
     if dtype and dtype.node().kind() != 'prim::Constant':
-        return_op = g.op("Cast", return_op, to_i=sym_help.scalar_type_to_onnx[dtype])
+        parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
+        return_op = g.op("Cast", return_op, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
     if is_transpose_required:
         return_op = g.op("Transpose", return_op, perm_i=axes)
     return return_op
@@ -1292,17 +1332,7 @@ def index_select(g, self, dim, index):
     # In case of a scalar index, index_select returns a tensor with the same rank as the input.
     # To match this behavior in ONNX, we make index a 1D tensor so that the following gather
     # also produces a tensor with the same rank as the input.
-
-    index_const = sym_help._maybe_get_scalar(index)
-    index_dim = index.type().dim()
-    if not sym_help._is_value(index_const):
-        # Index is a constant scalar. Make it a size 1 constant tensor.
-        index = g.op("Constant", value_t=torch.LongTensor([index_const]))
-    elif index_dim is not None:
-        if index_dim == 0:
-            # Index is a scalar. Reshape it to a size 1 tensor.
-            index = g.op("Reshape", index, g.op("Constant", value_t=torch.LongTensor([1])))
-    return g.op("Gather", self, index, axis_i=dim)
+    return sym_help._select_helper(g, self, dim, index)
 
 
 def index_put(g, self, indices_list_value, values, accumulate):
@@ -1645,10 +1675,22 @@ def new_full(g, self, size, fill_value, dtype, layout, device, pin_memory=False)
     return full(g, size, fill_value, dtype, layout, device, pin_memory)
 
 
-def eye(g, n, m, dtype=None, layout=None, device=None, pin_memory=False):
-    shape = g.op("Concat", g.op("Unsqueeze", n, axes_i=[0]), g.op("Unsqueeze", m, axes_i=[0]), axis_i=0)
-    tensor = zeros(g, shape, dtype, layout, device)
-    return g.op("EyeLike", tensor)
+def eye(g, *args):
+    if len(args) == 5:
+        # aten::eye(n, dtype, layout, device, pin_memory)
+        n, dtype, layout, device, pin_memory = args
+        dim_size = g.op("Unsqueeze", n, axes_i=[0])
+        shape = g.op("Concat", dim_size, dim_size, axis_i=0)
+        tensor = zeros(g, shape, dtype, layout, device)
+        return g.op("EyeLike", tensor)
+    elif len(args) == 6:
+        # aten::eye(n, m, dtype, layout, device, pin_memory)
+        n, m, dtype, layout, device, pin_memory = args
+        shape = g.op("Concat", g.op("Unsqueeze", n, axes_i=[0]), g.op("Unsqueeze", m, axes_i=[0]), axis_i=0)
+        tensor = zeros(g, shape, dtype, layout, device)
+        return g.op("EyeLike", tensor)
+    else:
+        raise NotImplementedError("Unknown aten::eye signature")
 
 
 def slice(g, self, *args):
@@ -2052,11 +2094,11 @@ def randn(g, shapes, dtype, *options):
     dtype = sym_help._get_const(dtype, 'i', 'dtype')
     if dtype is None:
         dtype = 6  # float
-    if sym_help._is_packed_list(shapes):
+    shape = sym_help._maybe_get_const(shapes, "is")
+    if sym_help._is_value(shape):
         shape_const = g.op("ConstantOfShape", shapes,
                            value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[6]))
         return g.op('RandomNormalLike', shape_const, dtype_i=sym_help.scalar_type_to_onnx[dtype])
-    shape = sym_help._get_const(shapes, "is", "randn")
     return g.op('RandomNormal', shape_i=shape)
 
 
@@ -2064,11 +2106,11 @@ def rand(g, shapes, dtype, *options):
     dtype = sym_help._get_const(dtype, 'i', 'dtype')
     if dtype is None:
         dtype = 6  # float
-    if sym_help._is_packed_list(shapes):
+    shape = sym_help._maybe_get_const(shapes, "is")
+    if sym_help._is_value(shape):
         shape_const = g.op("ConstantOfShape", shapes,
                            value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[6]))
         return g.op('RandomUniformLike', shape_const, dtype_i=sym_help.scalar_type_to_onnx[dtype])
-    shape = sym_help._get_const(shapes, "is", "rand")
     return g.op('RandomUniform', shape_i=shape)
 
 
@@ -2122,9 +2164,15 @@ def flatten(g, input, start_dim, end_dim):
 
     return sym_help._flatten_helper(g, input, start_dim, end_dim, dim)
 
+# Emitted from `torch.nonzero(x, as_tuple=False)`
 @parse_args('v')
 def nonzero(g, input):
     return t(g, g.op('NonZero', input))
+
+
+# Emitted from `torch.nonzero(x, as_tuple=True)`
+def nonzero_numpy(g, input, _outputs=None):
+    return unbind(g, nonzero(g, input), 1, _outputs=_outputs)
 
 
 @parse_args('v')
@@ -2193,6 +2241,30 @@ def log2(g, self):
 def prim_shape(g, self):
     return g.op('Shape', self)
 
+def prim_data(g, self):
+    return self
+
+def is_floating_point(g, self):
+    if sym_help._is_fp(self):
+        return g.op("Constant", value_t=torch.BoolTensor([1]))
+    return g.op("Constant", value_t=torch.BoolTensor([0]))
+
+
+def prim_dtype(g, self):
+    dtype = sym_help._try_get_scalar_type(self)
+    dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+    return g.op("Constant", value_t=torch.IntTensor([dtype]))
+
+
+# tolist is currently supported only for 1D input tensors.
+# dim_val and elem_ty_val represent dimension and type annotations
+# that need to match dimension and type of the input tensor.
+def prim_tolist(g, input, dim_val, elem_ty_val):
+    dim = sym_help._maybe_get_const(dim_val, 'i')
+    if dim > 1:
+        return _unimplemented("prim_tolist", "dim_val > 1")
+    return input
+
 
 @parse_args('v', 'i')
 def one_hot(g, self, num_classes):
@@ -2216,39 +2288,75 @@ def gather(g, self, dim, index, sparse_grad=False):
 
 
 @parse_args('v', 'is', 'b', 'i')
-def _std(g, input, dim, unbiased, keepdim):
-    if input.isCompleteTensor():
-        sqrd = g.op("Mul", input, input)
-        if dim is None:
-            sqrdmean = g.op("ReduceMean", sqrd, keepdims_i=0)
-            mean = g.op("ReduceMean", input, keepdims_i=0)
-            redudced_dims = input.type().sizes()
-        else:
-            sqrdmean = g.op("ReduceMean", sqrd, axes_i=dim, keepdims_i=keepdim)
-            mean = g.op("ReduceMean", input, axes_i=dim, keepdims_i=keepdim)
-            redudced_dims = [input.type().sizes()[i] for i in dim]
-        meansqrd = g.op("Mul", mean, mean)
-        var = g.op("Abs", g.op("Sub", sqrdmean, meansqrd))
-        # This is to correct bias in calculating variance, by dividing it over (N - 1) instead on N
-        if unbiased:
-            count = numpy.prod(redudced_dims)
-            mul = g.op("Mul", var, g.op("Constant", value_t=torch.tensor(count, dtype=torch.float)))
-            var = g.op("Div", mul, g.op("Constant", value_t=torch.tensor(count - 1, dtype=torch.float)))
-        std = g.op("Sqrt", var)
-        return std
+def _var_mean(g, input, dim, unbiased, keepdim):
+    if dim is None:
+        mean = g.op("ReduceMean", input, keepdims_i=0)
+        num_elements = numel(g, input)
     else:
-        _unimplemented("std", "Unknown input rank. Cannot compute std along dimensions.")
+        mean = g.op("ReduceMean", input, axes_i=dim, keepdims_i=keepdim)
+        redudced_dims = g.op("Shape", input)
+        # dim could contain one or multiple dimensions
+        redudced_dims = g.op("Gather", redudced_dims, g.op("Constant", value_t=torch.tensor(dim)), axis_i=0)
+        num_elements = g.op("ReduceProd", redudced_dims, keepdims_i=0)
+    sub_v = g.op("Sub", input, mean)
+    sqr_sub = g.op("Mul", sub_v, sub_v)
+    keepdim_mean = 0 if dim is None else keepdim
+    var = g.op("ReduceMean", sqr_sub, axes_i=dim, keepdims_i=keepdim_mean)
+    # Correct bias in calculating variance, by dividing it over (N - 1) instead on N
+    if unbiased:
+        num_elements = g.op("Cast", num_elements, to_i=sym_help.cast_pytorch_to_onnx['Float'])
+        one = g.op("Constant", value_t=torch.tensor(1, dtype=torch.float))
+        mul = g.op("Mul", var, num_elements)
+        var = g.op("Div", mul, g.op("Sub", num_elements, one))
+    return var, mean
 
 
 # Since position of optional arguments can change for std, this is a hack to find if first argument
 # is 'dim' or 'unbiased'. As shown below, 'dim' argument could be listed before 'unbiased' :
-# torch.std(input, unbiased=True)
-# torch.std(input, dim, keepdim=False, unbiased=True)
+# at::std(input, unbiased)
+# at::std(input, dim, unbiased, keepdim)
 def std(g, input, *args):
     if len(args) == 3:
-        return _std(g, input, *args)
+        var, _ = _var_mean(g, input, *args)
     else:
-        return _std(g, input, None, args[0], None)
+        var, _ = _var_mean(g, input, None, args[0], None)
+    return g.op("Sqrt", var)
+
+
+# Since position of optional arguments can change for var, this is a hack to find if first argument
+# is 'dim' or 'unbiased'. As shown below, 'dim' argument could be listed before 'unbiased' :
+# at::var(input, unbiased)
+# at::var(input, dim, unbiased, keepdim)
+def var(g, input, *args):
+    if len(args) == 3:
+        var, _ = _var_mean(g, input, *args)
+    else:
+        var, _ = _var_mean(g, input, None, args[0], None)
+    return var
+
+
+# Since position of optional arguments can change for var_mean, this is a hack to find if first argument
+# is 'dim' or 'unbiased'. As shown below, 'dim' argument could be listed before 'unbiased' :
+# at::var_mean(input, unbiased)
+# at::var_mean(input, dim, unbiased, keepdim)
+def var_mean(g, input, *args):
+    if len(args) == 3:
+        var, mean = _var_mean(g, input, *args)
+    else:
+        var, mean = _var_mean(g, input, None, args[0], None)
+    return var, mean
+
+
+# Since position of optional arguments can change for std_mean, this is a hack to find if first argument
+# is 'dim' or 'unbiased'. As shown below, 'dim' argument could be listed before 'unbiased' :
+# at::std_mean(input, unbiased)
+# at::std_mean(input, dim, unbiased, keepdim)
+def std_mean(g, input, *args):
+    if len(args) == 3:
+        var, mean = _var_mean(g, input, *args)
+    else:
+        var, mean = _var_mean(g, input, None, args[0], None)
+    return g.op("Sqrt", var), mean
 
 
 @parse_args('v', 'is', 'i')
@@ -2337,7 +2445,7 @@ def index(g, self, index):
 
     indices = [try_mask_to_index(idx) for idx in indices]
     if len(indices) == 1:
-        return index_select(g, self, 0, indices[0])
+        return sym_help._select_helper(g, self, 0, indices[0], apply_reshape=False)
     else:
         # Multiple tensors as indices. Each tensor could either be
         #   1. prim::Constant()
@@ -2470,6 +2578,11 @@ def meshgrid(g, tensor_list):
 
 
 def remainder(g, input, other):
+    # torch.remainder does not follow regular type promotion logic.
+    # Instead, it is implicitly casting `other` to the same type of `input`.
+    input_scalar_type = input.type().scalarType()
+    if input_scalar_type:
+        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[input_scalar_type])
     div = g.op("Div", input, other)
     if sym_help._is_fp(input):
         div = g.op("Floor", div)

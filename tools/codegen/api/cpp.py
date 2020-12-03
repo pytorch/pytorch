@@ -1,7 +1,7 @@
 from tools.codegen.model import *
 from tools.codegen.api.types import *
 import tools.codegen.local as local
-from typing import Optional, Sequence, Union, Callable, List
+from typing import Optional, Sequence, Union, List
 
 # This file describes the translation of JIT schema to the public C++
 # API, which is what people use when they call functions like at::add.
@@ -30,7 +30,7 @@ def name(func: FunctionSchema) -> str:
     return name
 
 # Translation of "value types" in JIT schema to C++ API type.  Value
-# types look the same no matter if they are argument types are return
+# types look the same no matter if they are argument types or return
 # types.  Returns None if the type in question is not a value type.
 def valuetype_type(t: Type) -> Optional[str]:
     if isinstance(t, BaseType):
@@ -144,6 +144,35 @@ def returns_type(rs: Sequence[Return]) -> str:
         args = ','.join(map(return_type, rs))
         return f'std::tuple<{args}>'
 
+def return_names(f: NativeFunction) -> Sequence[str]:
+    returns: List[str] = []
+    for i, r in enumerate(f.func.returns):
+        # If we have an inplace function, the return argument is
+        # implicitly named self.
+        # TODO: Consider incorporating this into the data model
+        if f.func.name.name.inplace:
+            assert i == 0, "illegal inplace function with multiple returns"
+            name = 'self'
+        # If we are out function, the name is the name of the
+        # corresponding output function (r.name will get recorded
+        # in field_name later.)
+        elif f.func.is_out_fn():
+            name = f.func.arguments.out[i].name
+        # If the return argument is explicitly named...
+        elif r.name:
+            name_conflict = any(r.name == a.name for a in f.func.schema_order_arguments())
+            if name_conflict and not f.func.is_out_fn():
+                name = f'{r.name}_return'
+            else:
+                name = r.name
+        # If there is no explicit name, we just name the output result,
+        # unless it's a multi-return, in which case it's result0,
+        # result1, etc (zero-indexed)
+        else:
+            name = 'result' if len(f.func.returns) == 1 else f'result{i}'
+        returns.append(name)
+    return returns
+
 JIT_TO_CPP_DEFAULT = {
     'False': 'false',
     'True': 'true',
@@ -222,15 +251,15 @@ def argument_not_this(
         assert_never(a)
 
 def argument(
-    a: Union[Argument, TensorOptionsArguments, ThisArgument],
+    a: Union[Argument, TensorOptionsArguments, SelfArgument],
 ) -> Union[CppSingleArgumentPack, CppThisArgumentPack]:
-    if isinstance(a, ThisArgument):
+    if isinstance(a, SelfArgument):
         return CppThisArgumentPack(argument=a, type=argument_type(a.argument))
     else:
         return CppSingleArgumentPack(argument_not_this(a))
 
 def argument_faithful(
-    a: Union[Argument, TensorOptionsArguments, ThisArgument],
+    a: Union[Argument, TensorOptionsArguments, SelfArgument],
 ) -> CppArgumentPack:
     if isinstance(a, TensorOptionsArguments):
         return CppTensorOptionsArgumentPack(
@@ -243,46 +272,20 @@ def argument_faithful(
     else:
         return argument(a)
 
-# NB: this unconditionally groups arguments
 def group_arguments(
     func: FunctionSchema, *, method: bool
-) -> Sequence[Union[Argument, TensorOptionsArguments, ThisArgument]]:
-    args: List[Union[Argument, ThisArgument, TensorOptionsArguments]] = []
-
-    args.extend(func.out_arguments)
-
-    if method:
-        args.extend(ThisArgument(a) if a.name == "self" else a for a in func.arguments)
-    else:
-        args.extend(func.arguments)
-
-    # group up arguments for tensor options
-
-    def pred(name: str, ty: Type) -> Callable[[Argument], bool]:
-        return lambda a: a.name == name and a.type in [ty, OptionalType(ty)]
-    predicates = [  # order matters
-        pred('dtype', Type.parse('ScalarType')),
-        pred('layout', Type.parse('Layout')),
-        pred('device', Type.parse('Device')),
-        pred('pin_memory', Type.parse('bool')),
-    ]
-
-    i = 0
-    while i < len(func.kwarg_only_arguments):
-        # If there is enough space...
-        if i <= len(func.kwarg_only_arguments) - len(predicates):
-            # And the next len(predicates) arguments look like TensorOptions arguments
-            if all(p(a) for p, a in zip(predicates, func.kwarg_only_arguments[i : i + len(predicates)])):
-                # Group them together as one argument
-                args.append(TensorOptionsArguments(
-                    dtype=func.kwarg_only_arguments[i],
-                    layout=func.kwarg_only_arguments[i + 1],
-                    device=func.kwarg_only_arguments[i + 2],
-                    pin_memory=func.kwarg_only_arguments[i + 3],
-                ))
-                i += len(predicates)
-                continue
-        args.append(func.kwarg_only_arguments[i])
-        i += 1
-
+) -> Sequence[Union[Argument, TensorOptionsArguments, SelfArgument]]:
+    args: List[Union[Argument, SelfArgument, TensorOptionsArguments]] = []
+    args.extend(func.arguments.out)
+    args.extend(func.arguments.pre_self_positional)
+    if func.arguments.self_arg is not None:
+        if method:
+            args.append(func.arguments.self_arg)
+        else:
+            args.append(func.arguments.self_arg.argument)
+    args.extend(func.arguments.post_self_positional)
+    args.extend(func.arguments.pre_tensor_options_kwarg_only)
+    if func.arguments.tensor_options is not None:
+        args.append(func.arguments.tensor_options)
+    args.extend(func.arguments.post_tensor_options_kwarg_only)
     return args

@@ -2,6 +2,7 @@ import concurrent.futures
 import contextlib
 import json
 import logging
+import os
 import sys
 from threading import Lock
 import time
@@ -15,14 +16,14 @@ import torch.distributed as dist
 import torch.distributed.rpc as rpc
 import torch.distributed.autograd as dist_autograd
 from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
-from torch.distributed.rpc.api import _delete_all_user_and_unforked_owner_rrefs, _use_rpc_pickler
+from torch.distributed.rpc.api import _delete_all_user_and_unforked_owner_rrefs, _use_rpc_pickler, _thread_local_var, _wait_all
 from torch.distributed.rpc.internal import (
     PythonUDF,
     RPCExecMode,
     _internal_rpc_pickler,
     _build_rpc_profiling_key,
 )
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu, captured_output
 from torch.testing._internal.common_utils import IS_MACOS, load_tests
 from torch.testing._internal.dist_utils import (
     dist_init,
@@ -66,7 +67,6 @@ EXPECTED_REMOTE_EVENTS = [
     "aten::mul",
     "aten::relu",
     "aten::threshold",
-    "aten::sigmoid",
     "aten::sigmoid",
 ]
 
@@ -313,8 +313,9 @@ def my_script_func(tensor):
     return torch.add(tensor, tensor)
 
 
+expected_err = "Expected error"
 def raise_func():
-    raise ValueError("Expected error")
+    raise ValueError(expected_err)
 
 
 global_rref = None
@@ -781,11 +782,19 @@ class RpcTest(RpcAgentTestFixture):
             rpc_backend_options=self.rpc_backend_options,
         )
 
-        initialize_pg(self.init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
         # Wait for all init to complete.
         dist.barrier()
 
-        with self.assertRaisesRegex(RuntimeError, "is already initialized"):
+        # TODO: with TCP init, rank 0 raises Address already in use because
+        # rank 0 is the start daemon and the store is created before checking if
+        # RPC is already initialized in init_rpc.
+        if os.environ.get("RPC_INIT_WITH_TCP", None) == "1" and self.rank == 0:
+            expected_reinit_err = "Address already in use"
+        else:
+            expected_reinit_err = "is already initialized"
+
+        with self.assertRaisesRegex(RuntimeError, expected_reinit_err):
             rpc.init_rpc(
                 name=worker_name(self.rank),
                 backend=self.rpc_backend,
@@ -1390,7 +1399,7 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_rpc_profiling_async_function(self):
-        initialize_pg(self.init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
         self._run_rpc_profiling_async_function()
         if torch.cuda.is_available():
             dist.barrier()
@@ -1399,7 +1408,7 @@ class RpcTest(RpcAgentTestFixture):
     @single_threaded_process_group_agent
     @dist_init
     def test_rpc_profiling_async_function_single_threaded(self):
-        initialize_pg(self.init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
         self._run_rpc_profiling_async_function()
         if torch.cuda.is_available():
             dist.barrier()
@@ -1566,8 +1575,8 @@ class RpcTest(RpcAgentTestFixture):
                 scope_event = get_function_event(events, "foo")
                 # Since RPC call is within the scope, its CPU interval should be
                 # contained within foo's interval.
-                self.assertTrue(scope_event.cpu_interval.start < rpc_event.cpu_interval.start)
-                self.assertTrue(scope_event.cpu_interval.end > rpc_event.cpu_interval.end)
+                self.assertTrue(scope_event.time_range.start < rpc_event.time_range.start)
+                self.assertTrue(scope_event.time_range.end > rpc_event.time_range.end)
             # the sender, dest worker, function run, and type of RPC should all
             # be recorded.
             self_worker_name = worker_name(self.rank)
@@ -1759,10 +1768,10 @@ class RpcTest(RpcAgentTestFixture):
             last_end_time = 0
             for event in thread_local_events:
                 event_name = event.name
-                cpu_interval = event.cpu_interval
-                if cpu_interval.start > last_end_time:
+                time_range = event.time_range
+                if time_range.start > last_end_time:
                     top_level_event_names.append(event_name)
-                    last_end_time = cpu_interval.end
+                    last_end_time = time_range.end
         self.assertEqual(sorted(top_level_event_names), sorted(expected_top_level_event_names))
 
     @dist_init
@@ -1955,11 +1964,23 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_py_raise_in_user_func(self):
-        n = self.rank + 1
-        dst_rank = n % self.world_size
-        fut = rpc.rpc_async(worker_name(dst_rank), raise_func)
-        with self.assertRaises(ValueError):
-            fut.wait()
+        with captured_output() as (_, err):
+            # This barrier prevents a race condition where the main thread has
+            # not entered the context manager when the remote function runs.
+            initialize_pg(self.file_init_method, self.rank, self.world_size)
+            dist.barrier()
+            n = self.rank + 1
+            dst_rank = n % self.world_size
+            fut = rpc.rpc_async(worker_name(dst_rank), raise_func)
+            with self.assertRaisesRegex(ValueError, expected_err):
+                fut.wait()
+            # This barrier prevents a race condition where the main thread exits
+            # context manager before the remote function has ran.
+            dist.barrier()
+
+        # Validate that trainers log errors when running functions.
+        stderr_lines = err.getvalue()
+        self.assertTrue(expected_err in stderr_lines)
 
     @dist_init
     def test_nested_rpc(self):
@@ -2446,7 +2467,7 @@ class RpcTest(RpcAgentTestFixture):
             rpc_backend_options=self.rpc_backend_options,
         )
 
-        initialize_pg(self.init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
         # Wait for all init to complete.
         dist.barrier()
 
@@ -2524,7 +2545,7 @@ class RpcTest(RpcAgentTestFixture):
         # The barrier before the check makes sure that all previous states are
         # cleared globally, the barrier after ensures that no following states
         # change gets into the current check.
-        initialize_pg(self.init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
 
         # Check 1: local RRef does not update owners_ map or add a pending user.
         #################################################
@@ -2588,7 +2609,7 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_disable_gil_profiling(self):
-        # test that rpc.enable_gil_profilig(false) will result in
+        # test that rpc.enable_gil_profiling(false) will result in
         # GIL wait time not being recorded.
 
         # GIL profiling should be disabled by default.
@@ -2661,7 +2682,7 @@ class RpcTest(RpcAgentTestFixture):
         rpc._set_rpc_timeout(10)
         # This barrier is needed to ensure that some workers do not exit before
         # others have been brought up, for non ProcessGroupAgent backends.
-        initialize_pg(self.init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
         dist.barrier()
         if self.rank == 1:
             dst_rank = (self.rank + 1) % self.world_size
@@ -2690,7 +2711,7 @@ class RpcTest(RpcAgentTestFixture):
         if not dist_initialized:
             dist.init_process_group(
                 backend="gloo",
-                init_method=self.init_method,
+                init_method=self.file_init_method,
                 rank=self.rank,
                 world_size=self.world_size,
             )
@@ -2715,7 +2736,7 @@ class RpcTest(RpcAgentTestFixture):
         # A barrier is needed to ensure that all RPCs are processed.
         # Otherwise, some RPCs can timeout since the receiving end
         # has terminated.
-        initialize_pg(self.init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
         dist.barrier()
         # pass in graceful=False to ensure that we don't wait for other workers.
         rpc.shutdown(graceful=False)
@@ -2842,6 +2863,58 @@ class RpcTest(RpcAgentTestFixture):
         self.assertTrue(
             torch.distributed.rpc.api._default_pickler is _internal_rpc_pickler
         )
+
+    @dist_init
+    def test_wait_all(self):
+        with _wait_all():
+            self.assertTrue(_thread_local_var.future_list == [])
+            dst = worker_name((self.rank + 1) % self.world_size)
+            fut = rpc.rpc_async(dst, torch.add, (torch.ones(2, 2), 1))
+            self.assertTrue(len(_thread_local_var.future_list) == 1)
+            self.assertTrue(isinstance(_thread_local_var.future_list[0], torch._C.Future))
+        self.assertTrue(fut.done())
+        self.assertEqual(fut.wait(), torch.ones(2, 2) + 1)
+        self.assertFalse(hasattr(_thread_local_var, "future_list"))
+
+    @dist_init
+    def test_wait_all_multiple_call(self):
+        with _wait_all():
+            self.assertTrue(_thread_local_var.future_list == [])
+            dst = worker_name((self.rank + 1) % self.world_size)
+            for i in range(20):
+                fut = rpc.rpc_async(dst, torch.add, (torch.ones(i, i), 1))
+                res = rpc.rpc_sync(dst, torch.add, (torch.ones(i, i), 1))
+                self.assertEqual(res, torch.ones(i, i) + 1)
+                self.assertEqual(fut.wait(), torch.ones(i, i) + 1)
+            self.assertTrue(len(_thread_local_var.future_list) == 20)
+        self.assertFalse(hasattr(_thread_local_var, "future_list"))
+
+    @dist_init
+    def test_wait_all_timeout(self):
+        expected_error = self.get_timeout_error_regex()
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            with _wait_all():
+                self.assertTrue(_thread_local_var.future_list == [])
+                dst = worker_name((self.rank + 1) % self.world_size)
+                timeout = 0.1  # 100 ms
+                fut = rpc.rpc_async(dst, my_sleep_func, args=(1,), timeout=timeout)
+        self.assertFalse(hasattr(_thread_local_var, "future_list"))
+
+    @dist_init
+    def test_wait_all_raise_in_user_func(self):
+        with self.assertRaises(ValueError):
+            with _wait_all():
+                self.assertTrue(_thread_local_var.future_list == [])
+                dst = worker_name((self.rank + 1) % self.world_size)
+                fut = rpc.rpc_async(dst, raise_func)
+        self.assertFalse(hasattr(_thread_local_var, "future_list"))
+
+    @dist_init
+    def test_wait_all_raise_in_body(self):
+        with self.assertRaises(ValueError):
+            with _wait_all():
+                raise_func()
+        self.assertFalse(hasattr(_thread_local_var, "future_list"))
 
     @dist_init
     def test_function_not_on_callee(self):
@@ -3489,6 +3562,10 @@ class RpcTest(RpcAgentTestFixture):
         wait_until_owners_and_forks_on_rank(1, 1, rank=1)
 
     @dist_init(setup_rpc=False)
+    @unittest.skipIf(
+        os.environ.get("RPC_INIT_WITH_TCP", None) == "1",
+        "init_pg_then_rpc does not work with TCP init, see https://github.com/pytorch/pytorch/issues/41614."
+    )
     def test_init_pg_then_rpc(self):
         dist.init_process_group(
             backend="gloo",
@@ -3516,6 +3593,10 @@ class RpcTest(RpcAgentTestFixture):
         rpc.shutdown()
 
     @dist_init(setup_rpc=False)
+    @unittest.skipIf(
+        os.environ.get("RPC_INIT_WITH_TCP", None) == "1",
+        "init_rpc_then_pg does not work with TCP init, see https://github.com/pytorch/pytorch/issues/41614."
+    )
     def test_init_rpc_then_pg(self):
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -3565,8 +3646,12 @@ class RpcTest(RpcAgentTestFixture):
             ret = torch.futures.wait_all(futs)
 
     @dist_init(setup_rpc=False)
+    @unittest.skipIf(
+        os.environ.get("RPC_INIT_WITH_TCP", None) == "1",
+        "Test does not work with TCP init, see https://github.com/pytorch/pytorch/issues/46491",
+    )
     def test_init_rpc_twice(self):
-        initialize_pg(self.init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
 
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -3635,6 +3720,67 @@ class RpcTest(RpcAgentTestFixture):
                 rpc_backend_options=rpc_backend_options,
             )
 
+    @dist_init
+    def test_owner_rref_backward(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        t1 = torch.rand(10, 10, requires_grad=True)
+        rref = rpc.RRef(t1.sum() + t1.sum())
+        rref.backward()
+        expected_grad = torch.ones_like(t1) * 2
+        self.assertEqual(expected_grad, t1.grad)
+
+        with dist_autograd.context() as context_id:
+            t2 = rpc.rpc_sync(dst, torch.add, args=(t1, t1))
+            rref = rpc.RRef(t2.sum())
+            rref.backward(context_id)
+            self.assertEqual(expected_grad, dist_autograd.get_gradients(context_id)[t1])
+
+        # Double backward.
+        with dist_autograd.context() as context_id:
+            t2 = rpc.rpc_sync(dst, torch.add, args=(t1, t1))
+            rref = rpc.RRef(t2.sum())
+            rref.backward(context_id, retain_graph=True)
+            rref.backward(context_id)
+            self.assertEqual(expected_grad * 2, dist_autograd.get_gradients(context_id)[t1])
+
+        # Test errors.
+        with self.assertRaisesRegex(RuntimeError, "tensors does not require grad and does not have a grad_fn"):
+            rpc.RRef(torch.rand(10)).backward()
+
+        with self.assertRaisesRegex(RuntimeError, "grad can be implicitly created only for scalar outputs"):
+            rpc.RRef(torch.rand(10, requires_grad=True)).backward()
+
+        with self.assertRaisesRegex(RuntimeError, "Could not find autograd context with id: 100"):
+            rpc.RRef(torch.rand(10, requires_grad=True).sum()).backward(100)
+
+        with self.assertRaisesRegex(RuntimeError, "RRef should contain a tensor for .backward()"):
+            rpc.RRef("foo").backward()
+
+    @staticmethod
+    def _sum(x):
+        return x.sum()
+
+    @staticmethod
+    def _identity(x):
+        return x
+
+    @dist_init
+    def test_user_rref_backward(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        t = torch.rand(10, requires_grad=True)
+        with dist_autograd.context() as context_id:
+            rref = rpc.remote(dst, RpcTest._sum, args=(t,))
+            rref.backward(context_id, retain_graph=True)
+            rref.backward(context_id)
+            self.assertEqual(torch.ones_like(t) * 2, dist_autograd.get_gradients(context_id)[t])
+
+        with dist_autograd.context() as context_id:
+            rref = rpc.remote(dst, RpcTest._identity, args=("foo",))
+            with self.assertRaisesRegex(RuntimeError, "RRef should contain a tensor for .backward()"):
+                rref.backward(context_id)
+
+            with self.assertRaisesRegex(RuntimeError, "User RRefs require 'dist_autograd_ctx_id' to be specified"):
+                rref.backward()
 
 class ProcessGroupAgentRpcTest(RpcAgentTestFixture):
 
@@ -3723,12 +3869,7 @@ class ProcessGroupAgentRpcTest(RpcAgentTestFixture):
 
     def test_single_threaded_rref_owner(self):
         # We need a process group in order to perform a barrier at the end.
-        dist.init_process_group(
-            backend="gloo",
-            init_method=self.init_method,
-            rank=self.rank,
-            world_size=self.world_size,
-        )
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
 
         # This test aims to verify if the server can handle all internal RPC
         # messages using just one thread.
@@ -3794,12 +3935,7 @@ class ProcessGroupAgentRpcTest(RpcAgentTestFixture):
 
     def test_single_threaded_rref_to_here(self):
         # We need a process group in order to perform a barrier at the end.
-        dist.init_process_group(
-            backend="gloo",
-            init_method=self.init_method,
-            rank=self.rank,
-            world_size=self.world_size,
-        )
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
 
         # This test aims to verify if the server can handle all internal RPC
         # messages using just one thread.
@@ -3858,7 +3994,7 @@ class ProcessGroupAgentRpcTest(RpcAgentTestFixture):
     @dist_init
     def test_process_group_debug_info(self):
         rpc.enable_gil_profiling(True)
-        initialize_pg(self.init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
         NUM_THREAD = self.rpc_backend_options.num_send_recv_threads
 
         info = rpc.api._get_current_rpc_agent().get_debug_info()

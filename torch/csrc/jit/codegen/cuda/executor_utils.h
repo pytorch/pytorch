@@ -16,6 +16,9 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 
+#include <string>
+#include <vector>
+
 namespace torch {
 namespace jit {
 namespace fuser {

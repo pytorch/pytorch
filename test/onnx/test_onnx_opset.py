@@ -333,45 +333,6 @@ class TestONNXOpset(TestCase):
         x = torch.randn(20, 16, 50)
         check_onnx_opsets_operator(MyDynamicModel(), x, ops, opset_versions=[9, 10])
 
-    def test_std(self):
-        class MyModule(Module):
-            def forward(self, input):
-                return torch.std(input, unbiased=False)
-
-        ops = [{"op_name": "Mul"},
-               {"op_name": "ReduceMean", "attributes": [{"name": "keepdims", "i": 0, "type": 2}]},
-               {"op_name": "ReduceMean", "attributes": [{"name": "keepdims", "i": 0, "type": 2}]},
-               {"op_name": "Mul"},
-               {"op_name": "Sub"},
-               {"op_name": "Abs"},
-               {"op_name": "Sqrt"}]
-        ops = {9: ops, 10: ops}
-        x = torch.randn(2, 3, 4)
-        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
-
-    def test_std_along_dims(self):
-        class MyModule(Module):
-            def forward(self, input):
-                return torch.std(input, dim=(0, 1), unbiased=True, keepdim=True)
-
-        ops = [{"op_name": "Mul"},
-               {"op_name": "ReduceMean",
-                "attributes": [{"name": "axes", "ints": [0, 1], "type": 7}, {"name": "keepdims", "i": 1, "type": 2}]},
-               {"op_name": "ReduceMean",
-                "attributes": [{"name": "axes", "ints": [0, 1], "type": 7}, {"name": "keepdims", "i": 1, "type": 2}]},
-               {"op_name": "Mul"},
-               {"op_name": "Sub"},
-               {"op_name": "Abs"},
-               {"op_name": "Constant"},
-               {"op_name": "Mul"},
-               {"op_name": "Constant"},
-               {"op_name": "Div"},
-               {"op_name": "Sqrt"}
-               ]
-        ops = {9: ops, 10: ops}
-        x = torch.randn(2, 3, 4)
-        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
-
 
 if __name__ == '__main__':
     run_tests()

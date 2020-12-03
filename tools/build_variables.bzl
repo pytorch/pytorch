@@ -23,6 +23,19 @@ GENERATED_CPP = [
     "autograd/generated/python_variable_methods.cpp",
 ]
 
+# NVFuser runtime library
+libtorch_nvfuser_runtime_sources = [
+    "torch/csrc/jit/codegen/cuda/runtime/block_reduction.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/broadcast.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/fp16_support.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/grid_reduction.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/helpers.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/random_numbers.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/tensor.cu",
+]
+
+libtorch_nvfuser_generated_headers = ["{}.h".format(name[36:-3]) for name in libtorch_nvfuser_runtime_sources]
+
 def libtorch_generated_sources(gencode_pattern):
     return [gencode_pattern.format(name) for name in [
         "autograd/generated/Functions.cpp",
@@ -41,7 +54,7 @@ def libtorch_generated_sources(gencode_pattern):
         "autograd/generated/TraceType_4.cpp",
     ]]
 
-# copied from https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/core/CMakeLists.txt
+# copied from https://github.com/pytorch/pytorch/blob/f99a693cd9ff7a9b5fdc71357dac66b8192786d3/aten/src/ATen/core/CMakeLists.txt
 jit_core_headers = [
     "torch/csrc/utils/memory.h",
     "torch/csrc/WindowsTorchApiMacro.h",
@@ -69,12 +82,13 @@ jit_core_sources = [
     "torch/csrc/jit/frontend/source_range.cpp",
 ]
 
-# copied from https://github.com/pytorch/pytorch/blob/master/tools/cpp_build/torch/CMakeLists.txt
+# copied from https://github.com/pytorch/pytorch/blob/0bde610c14b92d351b968a0228df29e92442b1cc/torch/CMakeLists.txt
 # There are some common files used in both internal lite-interpreter and full-jit. Making a separate
 # list for the shared files.
 
 core_sources_common = [
-    "torch/csrc/autograd/profiler.cpp",
+    "torch/csrc/autograd/profiler_legacy.cpp",
+    "torch/csrc/autograd/profiler_kineto.cpp",
     "torch/csrc/jit/frontend/edit_distance.cpp",
     "torch/csrc/jit/frontend/string_to_type.cpp",
     "torch/csrc/jit/mobile/type_parser.cpp",
@@ -111,7 +125,7 @@ core_trainer_sources = [
     "torch/csrc/jit/serialization/type_name_uniquer.cpp",
 ]
 
-core_sources_full = [
+core_sources_full_mobile = [
     "torch/csrc/jit/api/function_impl.cpp",
     "torch/csrc/jit/api/module.cpp",
     "torch/csrc/jit/api/object.cpp",
@@ -216,8 +230,6 @@ core_sources_full = [
     "torch/csrc/jit/runtime/profiling_graph_executor_impl.cpp",
     "torch/csrc/jit/runtime/profiling_record.cpp",
     "torch/csrc/jit/runtime/symbolic_script.cpp",
-    "torch/csrc/jit/runtime/static/impl.cpp",
-    "torch/csrc/jit/runtime/static/ops.cpp",
     "torch/csrc/jit/serialization/import.cpp",
     "torch/csrc/jit/serialization/import_export_helpers.cpp",
     "torch/csrc/jit/serialization/import_source.cpp",
@@ -225,6 +237,8 @@ core_sources_full = [
     "torch/csrc/jit/serialization/python_print.cpp",
     "torch/csrc/jit/serialization/source_range_serialization.cpp",
     "torch/csrc/jit/tensorexpr/bounds_inference.cpp",
+    "torch/csrc/jit/tensorexpr/bounds_overlap.cpp",
+    "torch/csrc/jit/tensorexpr/mem_dependency_checker.cpp",
     "torch/csrc/jit/tensorexpr/codegen.cpp",
     "torch/csrc/jit/tensorexpr/eval.cpp",
     "torch/csrc/jit/tensorexpr/expr.cpp",
@@ -240,6 +254,7 @@ core_sources_full = [
     "torch/csrc/jit/tensorexpr/block_codegen.cpp",
     "torch/csrc/jit/tensorexpr/loopnest.cpp",
     "torch/csrc/jit/tensorexpr/mem_arena.cpp",
+    "torch/csrc/jit/tensorexpr/reduction.cpp",
     "torch/csrc/jit/tensorexpr/registerizer.cpp",
     "torch/csrc/jit/tensorexpr/tensor.cpp",
     "torch/csrc/jit/tensorexpr/types.cpp",
@@ -248,6 +263,11 @@ core_sources_full = [
     "torch/csrc/jit/testing/hooks_for_testing.cpp",
     "torch/csrc/utils/tensor_flatten.cpp",
     "torch/csrc/utils/variadic.cpp",
+]
+
+core_sources_full = core_sources_full_mobile + [
+    "torch/csrc/jit/runtime/static/impl.cpp",
+    "torch/csrc/jit/runtime/static/ops.cpp",
 ]
 
 libtorch_core_sources = sorted(core_sources_common + core_sources_full + core_trainer_sources)
@@ -268,6 +288,8 @@ libtorch_distributed_sources = [
     "torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.cpp",
     "torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_req.cpp",
     "torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_resp.cpp",
+    "torch/csrc/distributed/autograd/rpc_messages/rref_backward_req.cpp",
+    "torch/csrc/distributed/autograd/rpc_messages/rref_backward_resp.cpp",
     "torch/csrc/distributed/rpc/message.cpp",
     "torch/csrc/distributed/rpc/profiler/remote_profiler_manager.cpp",
     "torch/csrc/distributed/rpc/profiler/server_process_global_profiler.cpp",
@@ -278,8 +300,8 @@ libtorch_distributed_sources = [
     "torch/csrc/distributed/rpc/request_callback_no_python.cpp",
     "torch/csrc/distributed/rpc/rpc_agent.cpp",
     "torch/csrc/distributed/rpc/rref_context.cpp",
-    "torch/csrc/distributed/rpc/rref_proto.cpp",
     "torch/csrc/distributed/rpc/rref_impl.cpp",
+    "torch/csrc/distributed/rpc/rref_proto.cpp",
     "torch/csrc/distributed/rpc/script_call.cpp",
     "torch/csrc/distributed/rpc/script_remote_call.cpp",
     "torch/csrc/distributed/rpc/script_resp.cpp",
@@ -547,9 +569,12 @@ libtorch_python_core_sources = [
 ]
 
 libtorch_python_distributed_core_sources = [
-    "torch/csrc/distributed/c10d/comm.cpp",
+    "torch/lib/c10d/comm.cpp",
+    "torch/lib/c10d/default_comm_hooks.cpp",
+    "torch/lib/c10d/frontend.cpp",
+    "torch/lib/c10d/reducer.cpp",
+    "torch/csrc/distributed/c10d/python_comm_hook.cpp",
     "torch/csrc/distributed/c10d/init.cpp",
-    "torch/csrc/distributed/c10d/reducer.cpp",
 ]
 
 libtorch_python_distributed_sources = libtorch_python_distributed_core_sources + [

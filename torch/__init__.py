@@ -374,10 +374,13 @@ def set_deterministic(d):
         * :class:`torch.nn.EmbeddingBag` when called on a CUDA tensor that requires grad
         * :func:`torch.scatter_add_` when called on a CUDA tensor
         * :func:`torch.index_add_` when called on a CUDA tensor
+        * :func:`torch.index_copy`
         * :func:`torch.index_select` when called on a CUDA tensor that requires grad
         * :func:`torch.repeat_interleave` when called on a CUDA tensor that requires grad
         * :func:`torch.histc` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor
+        * :func:`torch.kthvalue` with called on a CUDA tensor
+        * :func:`torch.median` with indices output when called on a CUDA tensor
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
     10.2 or greater, unless the environment variable `CUBLAS_WORKSPACE_CONFIG=:4096:8`
@@ -545,6 +548,20 @@ del ComplexFloatStorageBase
 del QUInt4x2StorageBase
 
 ################################################################################
+# Define _assert
+################################################################################
+
+# needs to be before the submodule imports to avoid circular dependencies
+def _assert(condition, message):
+    r"""A wrapper around Python's assert which is symbolically traceable.
+    """
+    from .overrides import has_torch_function, handle_torch_function
+
+    if type(condition) is not torch.Tensor and has_torch_function((condition,)):
+        return handle_torch_function(_assert, (condition,), condition, message)
+    assert condition, message
+
+################################################################################
 # Import most common subpackages
 ################################################################################
 
@@ -618,12 +635,3 @@ from ._vmap_internals import vmap
 # class usage. We add these lines here to preserve backward compatbility.
 quantized_lstm = torch.ops.aten.quantized_lstm
 quantized_gru = torch.ops.aten.quantized_gru
-
-from .overrides import has_torch_function, handle_torch_function
-
-def Assert(condition, message):
-    r"""A wrapper around Python's assert which is symbolically traceable.
-    """
-    if type(condition) is not torch.Tensor and has_torch_function((condition,)):
-        return handle_torch_function(Assert, (condition,), condition, message)
-    assert condition, message

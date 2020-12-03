@@ -213,6 +213,23 @@ def _try_get_scalar_type(*args):
     return None
 
 
+def _select_helper(g, self, dim, index, apply_reshape=True):
+    index_const = _maybe_get_scalar(index)
+    index_dim = index.type().dim()
+    if not _is_value(index_const):
+        # Index is a constant scalar. Make it a size 1 constant tensor.
+        index = g.op("Constant", value_t=torch.LongTensor([index_const]))
+    elif index_dim is not None and apply_reshape:
+        if index_dim == 0:
+            # Index is a scalar. Reshape it to a size 1 tensor.
+            index = g.op("Reshape", index, g.op("Constant", value_t=torch.LongTensor([1])))
+
+    index_scalar_type = index.type().scalarType()
+    if index_scalar_type is None or index_scalar_type not in ['Long', 'Int']:
+        index = g.op("Cast", index, to_i=cast_pytorch_to_onnx["Long"])
+    return g.op("Gather", self, index, axis_i=dim)
+
+
 def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     if _export_onnx_opset_version <= 9:
         from torch.onnx.symbolic_opset9 import _slice
@@ -229,6 +246,8 @@ def _is_fp(value):
             return (type == 'torch.float32') or (type == 'torch.float64') or (type == 'torch.float16')
         else:
             type = value.type().scalarType()
+            if type is None:
+                warnings.warn("Type cannot be inferred, which might cause exported graph to produce incorrect results.")
             return (type == 'Float') or (type == 'Double') or (type == 'Half')
     return False
 
@@ -356,6 +375,14 @@ def _interpolate_get_scales_and_mode(g, input, size, scale_factor, mode , align_
     else:
         return _unimplemented("Both size and scales are None in __interpolate")
     return scale_factor, mode
+
+
+def _unbind_helper(g, self, dim, _outputs):
+    if _export_onnx_opset_version <= 9:
+        from torch.onnx.symbolic_opset9 import unbind
+    else:
+        from torch.onnx.symbolic_opset11 import unbind
+    return unbind(g, self, dim, _outputs)
 
 
 def _scatter_helper(g, self, dim, index, src):
