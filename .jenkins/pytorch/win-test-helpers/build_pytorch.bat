@@ -58,8 +58,8 @@ goto cuda_build_common
 
 :cuda_build_11
 
-set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.0
-set CUDA_PATH_V11_0=%CUDA_PATH%
+set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.1
+set CUDA_PATH_V11_1=%CUDA_PATH%
 
 goto cuda_build_common
 
@@ -95,7 +95,7 @@ if "%USE_CUDA%"=="1" (
   copy %TMP_DIR_WIN%\bin\sccache.exe %TMP_DIR_WIN%\bin\nvcc.exe
 
   :: randomtemp is used to resolve the intermittent build error related to CUDA.
-  :: code: https://github.com/peterjc123/randomtemp
+  :: code: https://github.com/peterjc123/randomtemp-rust
   :: issue: https://github.com/pytorch/pytorch/issues/25393
   ::
   :: Previously, CMake uses CUDA_NVCC_EXECUTABLE for finding nvcc and then
@@ -103,7 +103,7 @@ if "%USE_CUDA%"=="1" (
   :: in PATH, and then pass the arguments to it.
   :: Currently, randomtemp is placed before sccache (%TMP_DIR_WIN%\bin\nvcc)
   :: so we are actually pretending sccache instead of nvcc itself.
-  curl -kL https://github.com/peterjc123/randomtemp/releases/download/v0.3/randomtemp.exe --output %TMP_DIR_WIN%\bin\randomtemp.exe
+  curl -kL https://github.com/peterjc123/randomtemp-rust/releases/download/v0.3/randomtemp.exe --output %TMP_DIR_WIN%\bin\randomtemp.exe
   set RANDOMTEMP_EXECUTABLE=%TMP_DIR_WIN%\bin\nvcc.exe
   set CUDA_NVCC_EXECUTABLE=%TMP_DIR_WIN%\bin\randomtemp.exe
   set RANDOMTEMP_BASEDIR=%TMP_DIR_WIN%\bin

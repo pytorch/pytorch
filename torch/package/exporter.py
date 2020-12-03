@@ -1,10 +1,9 @@
 import torch
 from torch.serialization import normalize_storage_type, location_tag, _should_read_directly
 import io
-import pickle
 import pickletools
 from .find_file_dependencies import find_files_source_depends_on
-from ._custom_import_pickler import CustomImportPickler
+from ._custom_import_pickler import create_custom_import_pickler, import_module_from_importers
 from ._importlib import _normalize_path
 import types
 import importlib
@@ -13,7 +12,8 @@ from distutils.sysconfig import get_python_lib
 from pathlib import Path
 import linecache
 import sys
-from tempfile import NamedTemporaryFile
+from urllib.parse import quote
+import re
 
 class PackageExporter:
     """ Exporters allow you to write packages of code, pickled python data, and
@@ -71,6 +71,7 @@ class PackageExporter:
         self.provided : Dict[str, bool] = {}
         self.verbose = verbose
         self.importers = [importlib.import_module]
+        self.patterns : List[Tuple[Any, Callable[[str], None]]] = []  # 'any' is 're.Pattern' but breaks old mypy
         self.debug_deps : List[Tuple[str, str]] = []
 
     def save_source_file(self, module_name: str, file_or_directory: str, dependencies=True):
@@ -161,6 +162,9 @@ class PackageExporter:
             for dep in dep_list.keys():
                 self.require_module_if_not_provided(dep)
 
+    def _import_module(self, module_name):
+        return import_module_from_importers(module_name, self.importers)
+
     def _module_exists(self, module_name: str) -> bool:
         try:
             self._import_module(module_name)
@@ -168,83 +172,19 @@ class PackageExporter:
         except Exception:
             return False
 
-    def _write_dep_graph(self, failing_module=None, output_file=None):
-        depended_on : Dict[str, List[str]] = {}
-        for f, t in self.debug_deps:
-            if t not in depended_on:
-                depended_on[t] = []
-            if f not in depended_on:
-                depended_on[f] = []
-            depended_on[t].append(f)
-
-        level : Dict[str, int] = {}
-
-        def visit(x: str):
-            if x in level:
-                return level[x]
-            level[x] = 0
-            for e in depended_on[x]:
-                level[x] = max(level[x], visit(e) + 1)
-            return level[x]
-
-        for x in depended_on.keys():
-            visit(x)
-
-        nodes = []
-        node_to_id = {}
-        n = 0
-        for ft in self.debug_deps:
-            for e in ft:
-                if e not in node_to_id:
-                    node_to_id[e] = n
-                    extra = ''
-                    if e == failing_module:
-                        extra = ", color: 'red'"
-                    nodes.append(f"        {{id: {n}, label: '{e}', level: {level[e]}, shape: 'box'{extra}}},\n")
-                    n += 1
-        edges = []
-        for f, t in self.debug_deps:
-            fn, tn = node_to_id[f], node_to_id[t]
-            edges.append(f"            {{from: {fn}, to: {tn}, arrows: 'to'}},\n")
-        nodes_s, edges_s = ''.join(nodes), ''.join(edges)
+    def _write_dep_graph(self, failing_module=None):
+        edges = '\n'.join(f'"{f}" -> "{t}";' for f, t in self.debug_deps)
+        failing = '' if failing_module is None else f'"{failing_module}" [color=red];'
         template = f"""\
-<html>
-<head>
-    <script type="text/javascript" src="https://almende.github.io/vis/dist/vis.js"></script>
-    <link href="https://almende.github.io/vis/dist/vis.css" rel="stylesheet" type="text/css" />
-</head>
-<body>
-<div id="mynetwork"></div>
-
-<script type="text/javascript">
-    var nodes = new vis.DataSet([
-{nodes_s}
-    ]);
-    var edges = new vis.DataSet([
-{edges_s}
-    ]);
-    var options = {{
-        layout: {{
-            hierarchical: {{
-                direction: "LR",
-                levelSeparation: 400,
-            }},
-        }},
-    }};
-    // create a network
-    var container = document.getElementById('mynetwork');
-    var network = new vis.Network(container, {{nodes: nodes, edges: edges}}, options);
-</script>
-</body>
-</html>
+digraph G {{
+rankdir = LR;
+node [shape=box];
+{failing}
+{edges}
+}}
 """
-        if output_file:
-            output_file.write(template)
-            return None
-
-        with NamedTemporaryFile(mode='w', suffix='.html', delete=False) as tf:
-            tf.write(template)
-            return tf.name
+        arg = quote(template, safe='')
+        return f'https://dreampuf.github.io/GraphvizOnline/#{arg}'
 
     def _get_source_of_module(self, module: types.ModuleType) -> str:
         filename = getattr(module, '__file__', None)
@@ -270,6 +210,11 @@ class PackageExporter:
         and override this method to provide other behavior, such as automatically mocking out a whole class
         of modules"""
 
+        for pattern, action in self.patterns:
+            if pattern.fullmatch(module_name):
+                action(module_name)
+                return
+
         root_name = module_name.split('.', maxsplit=1)[0]
         if self._can_implicitly_extern(root_name):
             if self.verbose:
@@ -291,28 +236,6 @@ class PackageExporter:
         source = self._get_source_of_module(module)
         self.save_source_string(module_name, source, hasattr(module, '__path__'), dependencies, module.__file__)
 
-
-    def _import_module(self, module_name):
-        last_err = None
-        for import_module in self.importers:
-            try:
-                return import_module(module_name)
-            except ModuleNotFoundError as err:
-                last_err = err
-
-        if last_err is not None:
-            raise last_err
-        else:
-            raise ModuleNotFoundError(module_name)
-
-    def _create_pickler(self, data_buf):
-        if self.importers == [importlib.import_module]:
-            # if we are using the normal import library system, then
-            # we can use the C implementation of pickle which is faster
-            return pickle.Pickler(data_buf, protocol=3)
-        else:
-            return CustomImportPickler(self._import_module, data_buf, protocol=3)
-
     def save_pickle(self, package: str, resource: str, obj: Any, dependencies: bool = True):
         """Save a python object to the archive using pickle. Equivalent to :func:`torch.save` but saving into
         the archive rather than a stand-alone file. Stanard pickle does not save the code, only the objects.
@@ -333,7 +256,7 @@ class PackageExporter:
         filename = self._filename(package, resource)
         # Write the pickle data for `obj`
         data_buf = io.BytesIO()
-        pickler = self._create_pickler(data_buf)
+        pickler = create_custom_import_pickler(data_buf, self.importers)
         pickler.persistent_id = self._persistent_id
         pickler.dump(obj)
         data_value = data_buf.getvalue()
@@ -387,8 +310,12 @@ class PackageExporter:
         Code for extern modules must also exist in the process loading the package.
 
         Args:
-            module_name (str): e.g. "my_package.my_subpackage" the name of the external module
+            module_name (str): e.g. "my_package.my_subpackage" the name of the external module.
+                This can also be a glob-style pattern, as described in :meth:`mock_module`
         """
+        if self._add_if_pattern(module_name, self.extern_module):
+            return
+
         if module_name not in self.external:
             self.external.append(module_name)
 
@@ -410,7 +337,15 @@ class PackageExporter:
 
         Args:
             module_name (str): e.g. "my_package.my_subpackage" the name of the module to be mocked out.
+                The module_name can also be a glob-style pattern string that may match multiple modules.
+                Any required dependencies that match this pattern string will be mocked out automatically.
+                Examples:
+                  'torch.**' -- matches all submodules of torch, e.g. 'torch.nn' and torch.nn.functional'
+                  'torch.*' -- matches 'torch.nn' or 'torch.functional', but not 'torch.nn.functional'
         """
+        if self._add_if_pattern(module_name, self.mock_module):
+            return
+
         if '_mock' not in self.provided:
             self.save_source_file('_mock', str(Path(__file__).parent / '_mock.py'), dependencies=False)
         is_package = hasattr(self._import_module(module_name), '__path__')
@@ -425,6 +360,12 @@ class PackageExporter:
         """
         for module_name in module_names:
             self.mock_module(module_name)
+
+    def _add_if_pattern(self, potential_pattern: str, action: Callable[[str], None]):
+        if '*' in potential_pattern or '?' in potential_pattern:
+            self.patterns.append((_module_glob_to_re(potential_pattern), action))
+            return True
+        return False
 
     def _module_is_already_provided(self, qualified_name: str) -> bool:
         for mod in self.external:
@@ -529,3 +470,9 @@ def _read_file(filename: str) -> str:
     with open(filename, 'rb') as f:
         b = f.read()
         return b.decode('utf-8')
+
+_glob_re_filter = {'**': '.*', '*': '[^.]*', '?': '.', '.': '\\.'}
+_glob_split = re.compile(f'({"|".join(re.escape(x) for x in _glob_re_filter.keys())})')
+def _module_glob_to_re(module_name):
+    pattern = ''.join(_glob_re_filter.get(x, x) for x in _glob_split.split(module_name))
+    return re.compile(pattern)

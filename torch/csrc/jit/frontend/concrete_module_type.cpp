@@ -106,6 +106,7 @@ bool ConcreteModuleTypeBuilder::equals(
     bool equal =
       pyClass_.is(other.pyClass_) &&
       iterableModuleKind_ == other.iterableModuleKind_ &&
+      ignoredAttributes_ == other.ignoredAttributes_ &&
       constants_ == other.constants_ &&
       attributes_ == other.attributes_ &&
       overloads_ == other.overloads_ &&
@@ -186,6 +187,10 @@ c10::optional<std::string> ConcreteModuleType::findFailedAttribute(
   return c10::nullopt;
 }
 
+bool ConcreteModuleType::isIgnoredAttribute(const std::string& name) const {
+  return data_.ignoredAttributes_.count(name) > 0;
+}
+
 std::shared_ptr<ConcreteModuleType> ConcreteModuleType::
     findSubmoduleConcreteType(const std::string& name) const {
   const auto it = std::find_if(
@@ -223,7 +228,7 @@ void ConcreteModuleTypeBuilder::addConstant(
         "\n:",
         match.reason());
   }
-  constants_.emplace(std::move(name), toIValue(value, match.type()));
+  constants_.emplace(std::move(name), toIValue(std::move(value), match.type()));
 }
 
 void ConcreteModuleTypeBuilder::addConstant(std::string name, IValue value) {
@@ -232,7 +237,7 @@ void ConcreteModuleTypeBuilder::addConstant(std::string name, IValue value) {
 
 void ConcreteModuleTypeBuilder::addAttribute(
     std::string name,
-    TypePtr type,
+    const TypePtr& type,
     bool isParameter,
     bool isBuffer) {
   TORCH_INTERNAL_ASSERT(type);
@@ -257,7 +262,7 @@ void ConcreteModuleTypeBuilder::addFunctionAttribute(
 
 void ConcreteModuleTypeBuilder::addBuiltinFunction(
     std::string name,
-    std::string symbol_name) {
+    const std::string& symbol_name) {
   builtinFunctions_.emplace(
       std::move(name), c10::Symbol::fromQualString(symbol_name));
 }
@@ -279,6 +284,10 @@ void ConcreteModuleTypeBuilder::addFailedAttribute(
     std::string name,
     std::string failureReason) {
   failedAttributes_.emplace(std::move(name), std::move(failureReason));
+}
+
+void ConcreteModuleTypeBuilder::addIgnoredAttribute(std::string name) {
+  ignoredAttributes_.emplace(std::move(name));
 }
 
 void ConcreteModuleType::dump() const {

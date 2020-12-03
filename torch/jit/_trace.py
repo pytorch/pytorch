@@ -1010,7 +1010,6 @@ class TracedModule(ScriptModule):
                     "TracedModules don't support parameter sharing between modules"
                 )
             id_set.add(param)
-
         tmp_module.training = orig.training
 
         for name, param in orig._parameters.items():
@@ -1046,7 +1045,7 @@ class TracedModule(ScriptModule):
 
         self.__dict__["_name"] = type(orig).__name__
         self.__dict__["_actual_script_module"] = script_module
-        for name in ("_parameters", "_buffers", "_modules"):
+        for name in ("_parameters", "_buffers", "_modules", "training"):
             delattr(self, name)
 
     def forward(self, *args, **kwargs):
@@ -1083,16 +1082,6 @@ class TopLevelTracedModule(TracedModule):
 
 
 def _script_if_tracing(fn):
-    """
-    Compiles ``fn`` when it is first called during tracing. ``torch.jit.script``
-    has a non-negligible start up time when it is first called due to
-    lazy-initializations of many compiler builtins. Therefore you should not use
-    it in library code. However, you may want to have parts of your library work
-    in tracing even if they use control flow. In these cases, you should use
-    ``@torch.jit._script_if_tracing`` to substitute for
-    ``torch.jit.script``.
-    """
-
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         if not is_tracing():

@@ -252,6 +252,12 @@ public:
   Vec256<c10::complex<double>> hypot(const Vec256<c10::complex<double>> &b) const {
     AT_ERROR("not supported for complex numbers");
   }
+  Vec256<c10::complex<double>> igamma(const Vec256<c10::complex<double>> &x) const {
+    AT_ERROR("not supported for complex numbers");
+  }
+  Vec256<c10::complex<double>> igammac(const Vec256<c10::complex<double>> &x) const {
+    AT_ERROR("not supported for complex numbers");
+  }
   Vec256<c10::complex<double>> neg() const {
     auto zero = _mm256_setzero_pd();
     return _mm256_sub_pd(zero, values);
@@ -272,18 +278,7 @@ public:
     return _mm256_round_pd(values, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
   }
   Vec256<c10::complex<double>> sqrt() const {
-    //   sqrt(a + bi)
-    // = sqrt(2)/2 * [sqrt(sqrt(a**2 + b**2) + a) + sgn(b)*sqrt(sqrt(a**2 + b**2) - a)i]
-    // = sqrt(2)/2 * [sqrt(abs() + a) + sgn(b)*sqrt(abs() - a)i]
-
-    const __m256d scalar = _mm256_set1_pd(std::sqrt(2)/2);             //sqrt(2)/2      sqrt(2)/2
-    const __m256d sign_mask = _mm256_setr_pd(0.0, -0.0, 0.0, -0.0);
-    auto sign = _mm256_and_pd(values, sign_mask);
-    auto factor = _mm256_or_pd(scalar, sign);
-
-    auto a_a = _mm256_xor_pd(_mm256_movedup_pd(values), sign_mask);    // a             -a
-    auto res_re_im = _mm256_sqrt_pd(_mm256_add_pd(abs_(), a_a));       // sqrt(abs + a) sqrt(abs - a)
-    return _mm256_mul_pd(factor, res_re_im);
+    return map(std::sqrt);
   }
   Vec256<c10::complex<double>> reciprocal() const;
   Vec256<c10::complex<double>> rsqrt() const {
@@ -306,7 +301,7 @@ public:
     return _mm256_cmp_pd(values, other.values, _CMP_EQ_OQ);
   }
   Vec256<c10::complex<double>> operator!=(const Vec256<c10::complex<double>>& other) const {
-    return _mm256_cmp_pd(values, other.values, _CMP_NEQ_OQ);
+    return _mm256_cmp_pd(values, other.values, _CMP_NEQ_UQ);
   }
   Vec256<c10::complex<double>> operator<(const Vec256<c10::complex<double>>& other) const {
     TORCH_CHECK(false, "not supported for complex numbers");
@@ -414,32 +409,6 @@ Vec256<c10::complex<double>> inline minimum(const Vec256<c10::complex<double>>& 
   // Exploit the fact that all-ones is a NaN.
   auto isnan = _mm256_cmp_pd(abs_a, abs_b, _CMP_UNORD_Q);
   return _mm256_or_pd(min, isnan);
-}
-
-template <>
-Vec256<c10::complex<double>> inline clamp(const Vec256<c10::complex<double>>& a, const Vec256<c10::complex<double>>& min, const Vec256<c10::complex<double>>& max) {
-  auto abs_a = a.abs_2_();
-  auto abs_min = min.abs_2_();
-  auto max_mask = _mm256_cmp_pd(abs_a, abs_min, _CMP_LT_OQ);
-  auto abs_max = max.abs_2_();
-  auto min_mask = _mm256_cmp_pd(abs_a, abs_max, _CMP_GT_OQ);
-  return _mm256_blendv_pd(_mm256_blendv_pd(a, min, max_mask), max, min_mask);
-}
-
-template <>
-Vec256<c10::complex<double>> inline clamp_min(const Vec256<c10::complex<double>>& a, const Vec256<c10::complex<double>>& min) {
-  auto abs_a = a.abs_2_();
-  auto abs_min = min.abs_2_();
-  auto max_mask = _mm256_cmp_pd(abs_a, abs_min, _CMP_LT_OQ);
-  return _mm256_blendv_pd(a, min, max_mask);
-}
-
-template <>
-Vec256<c10::complex<double>> inline clamp_max(const Vec256<c10::complex<double>>& a, const Vec256<c10::complex<double>>& max) {
-  auto abs_a = a.abs_2_();
-  auto abs_max = max.abs_2_();
-  auto min_mask = _mm256_cmp_pd(abs_a, abs_max, _CMP_GT_OQ);
-  return _mm256_blendv_pd(a, max, min_mask);
 }
 
 template <>

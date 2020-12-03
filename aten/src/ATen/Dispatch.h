@@ -31,6 +31,8 @@
     const auto& SCALAR_TYPE C10_UNUSED_DISPATCH_CUDA_WORKAROUND = enum_type; \
     const auto& UNDERLYING_TYPE C10_UNUSED_DISPATCH_CUDA_WORKAROUND =        \
         toUnderlying(enum_type);                                             \
+    (void)SCALAR_TYPE;  /* Suppress unused-var compiler warning */           \
+    /* TODO: Use [[maybe-unused]] when C++17 becomes the standard */         \
     return __VA_ARGS__();                                                    \
   }
 
@@ -552,6 +554,25 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
           __VA_ARGS__)                                                      \
       default:                                                              \
         AT_ERROR(#NAME, " not implemented for '", TYPE, "'");               \
+    }                                                                       \
+  }()
+
+#define AT_DISPATCH_INDEX_TYPES(TYPE, NAME, ...)                            \
+  [&] {                                                                     \
+    const auto& the_index_type = TYPE;                                      \
+    /* don't use TYPE again in case it is an expensive or side-effect op */ \
+    at::ScalarType _it = ::detail::scalar_type(the_index_type);             \
+    switch (_it) {                                                          \
+      case at::ScalarType::Int: {                                           \
+        using index_t = int32_t;                                            \
+        return __VA_ARGS__();                                               \
+      }                                                                     \
+      case at::ScalarType::Long: {                                          \
+        using index_t = int64_t;                                            \
+        return __VA_ARGS__();                                               \
+      }                                                                     \
+      default:                                                              \
+        AT_ERROR(#NAME, " not implemented for '", toString(_it), "'");      \
     }                                                                       \
   }()
 

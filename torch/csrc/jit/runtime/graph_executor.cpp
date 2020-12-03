@@ -85,6 +85,17 @@ bool getAutodiffSubgraphInlining() {
   return autodiff_subgraph_inlining;
 }
 
+// for debugging it is helpful to be able to force fusion groups
+// to be created
+static std::atomic<bool> fusion_group_inlining(true);
+void debugSetFusionGroupInlining(bool state) {
+  fusion_group_inlining = state;
+}
+
+bool getFusionGroupInlining() {
+  return fusion_group_inlining;
+}
+
 thread_local std::weak_ptr<Graph> last_executed_optimized_graph;
 std::shared_ptr<Graph> lastExecutedOptimizedGraph() {
   return last_executed_optimized_graph.lock();
@@ -120,7 +131,7 @@ struct CaptureList {
       auto tensors = val.toTensorList();
       sizes_.push_back(tensors.size());
 
-      for (const at::Tensor& tensor : tensors) {
+      for (const at::Tensor tensor : tensors) {
         captureTensor(tensor, is_output);
       }
     } else {
@@ -258,7 +269,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
     size_t output_index = 0;
     for (IValue& v : stack) {
       if (v.isTensorList()) {
-        for (const at::Tensor& tensor : v.toTensorList()) {
+        for (at::Tensor tensor : v.toTensorList()) {
           produceOutput(output_index++, std::move(tensor), outputs);
         }
       } else if (v.isTensor()) {
@@ -284,7 +295,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
   }
   void addOutputForIValue(const IValue& value) {
     if (value.isTensorList()) {
-      for (const at::Tensor& tensor : value.toTensorList()) {
+      for (const at::Tensor tensor : value.toTensorList()) {
         addOutputForTensor(tensor);
       }
     } else {
@@ -308,7 +319,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
     if (v.isTensorList()) {
       auto tensors = v.toTensorList();
       input_instructions_.pushTensorList(tensors.size());
-      for (const at::Tensor& tensor : tensors) {
+      for (const at::Tensor tensor : tensors) {
         addInputVariable(tensor);
       }
     } else if (v.isTensor()) {
@@ -499,13 +510,15 @@ void GraphExecutorImplBase::run(Stack& stack) {
   logging::getLogger()->addStatValue(
       logging::runtime_counters::GRAPH_EXECUTOR_INVOCATIONS, 1.0);
 
-  ExecutionPlan plan =
+  const ExecutionPlan& plan =
       getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts());
   InterpreterState(plan.code).run(stack);
   last_executed_optimized_graph = plan.graph;
 }
 
-c10::intrusive_ptr<Future> GraphExecutorImplBase::runAsync(Stack& stack) {
+c10::intrusive_ptr<Future> GraphExecutorImplBase::runAsync(
+    Stack& stack,
+    TaskLauncher taskLauncher) {
   TORCH_CHECK(
       stack.size() >= num_inputs,
       "expected ",
@@ -518,13 +531,14 @@ c10::intrusive_ptr<Future> GraphExecutorImplBase::runAsync(Stack& stack) {
       logging::runtime_counters::GRAPH_EXECUTOR_INVOCATIONS, 1.0);
 
   struct Frame {
-    explicit Frame(ExecutionPlan eplan)
-        : plan(std::move(eplan)), state(plan.code) {}
+    explicit Frame(ExecutionPlan eplan, TaskLauncher taskLauncher)
+        : plan(std::move(eplan)), state(plan.code, std::move(taskLauncher)) {}
     ExecutionPlan plan;
     InterpreterState state;
   };
   auto frame = std::make_shared<Frame>(
-      getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts()));
+      getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts()),
+      std::move(taskLauncher));
   auto res = frame->state.runAsync(stack);
   last_executed_optimized_graph = frame->plan.graph;
   if (!res->completed()) {
@@ -549,7 +563,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
         logging::runtime_counters::GRAPH_EXECUTORS_CONSTRUCTED, 1.0);
   }
 
-  ExecutionPlan getPlanFor(Stack& stack, size_t remaining_bailout_depth)
+  const ExecutionPlan& getPlanFor(Stack& stack, size_t remaining_bailout_depth)
       override {
     return getGraphExecutorOptimize() ? getOrCompile(stack)
                                       : getOrCompileFallback();
@@ -705,7 +719,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
 };
 
 GraphExecutor::GraphExecutor(
-    std::shared_ptr<Graph> graph,
+    const std::shared_ptr<Graph>& graph,
     std::string function_name)
     : pImpl(
           IsNewExecutorEnabled()
@@ -720,15 +734,17 @@ void GraphExecutor::run(Stack& inputs) {
   return pImpl->run(inputs);
 }
 
-c10::intrusive_ptr<Future> GraphExecutor::runAsync(Stack& stack) {
-  return pImpl->runAsync(stack);
+c10::intrusive_ptr<Future> GraphExecutor::runAsync(
+    Stack& stack,
+    TaskLauncher taskLauncher) {
+  return pImpl->runAsync(stack, std::move(taskLauncher));
 }
 
 size_t GraphExecutor::getDefaultNumBailOuts() {
   return getProfilingMode() ? getBailoutDepth().load() : 0;
 }
 
-ExecutionPlan GraphExecutor::getPlanFor(
+const ExecutionPlan& GraphExecutor::getPlanFor(
     Stack& inputs,
     size_t remaining_bailout_depth) {
   return pImpl->getPlanFor(inputs, remaining_bailout_depth);
@@ -849,7 +865,10 @@ void runNondiffOptimization(
       "After customPostPassses (end of runNondiffOptimization)\n", *graph);
 }
 
-void runOptimization(std::shared_ptr<Graph>& graph, bool unroll) {
+void runOptimization(
+    std::shared_ptr<Graph>& graph,
+    bool unroll,
+    bool const_prop_user_classes) {
   // Basic graph preprocessing to eliminate noise.
   GRAPH_DEBUG(
       "Before EliminateDeadCode (beginning of runOptimization)\n", *graph);
@@ -862,8 +881,14 @@ void runOptimization(std::shared_ptr<Graph>& graph, bool unroll) {
 
   PeepholeOptimize(graph);
   GRAPH_DEBUG("After PeepholeOptimize, before ConstantPropagation\n", *graph);
-  ConstantPropagation(graph);
+
+  if (const_prop_user_classes) {
+    ConstantPropagation(graph);
+  } else {
+    ConstantPropagation(graph, true);
+  }
   GRAPH_DEBUG("After ConstantPropagation, before ConstantPooling\n", *graph);
+
   ConstantPooling(graph);
   GRAPH_DEBUG("After ConstantPooling\n", *graph);
 

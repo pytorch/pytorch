@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_VULKAN_API
+
 #include <ATen/native/vulkan/api/Common.h>
 
 namespace at {
@@ -26,8 +28,8 @@ class Runtime final {
 
   explicit Runtime(Type type);
   Runtime(const Runtime&) = delete;
-  Runtime(Runtime&&) = default;
   Runtime& operator=(const Runtime&) = delete;
+  Runtime(Runtime&&) = default;
   Runtime& operator=(Runtime&&) = default;
   ~Runtime() = default;
 
@@ -42,8 +44,8 @@ class Runtime final {
  private:
   class Debug final {
    public:
-    explicit Debug(VkInstance instance);
-    void operator()(VkDebugReportCallbackEXT debug_report_callback) const;
+    explicit Debug(VkInstance);
+    void operator()(VkDebugReportCallbackEXT) const;
 
    private:
     VkInstance instance_;
@@ -55,10 +57,11 @@ class Runtime final {
   Handle<VkDebugReportCallbackEXT, Debug> debug_report_callback_;
 };
 
-bool available();
 Runtime* runtime();
 
 } // namespace api
 } // namespace vulkan
 } // namespace native
 } // namespace at
+
+#endif /* USE_VULKAN_API */

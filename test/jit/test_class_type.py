@@ -6,6 +6,7 @@ import unittest
 import torch
 import torch.nn as nn
 from torch.testing import FileCheck
+from typing import Any
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -143,7 +144,7 @@ class TestClassType(JitTestCase):
             @torch.jit.script
             class FooTest(object):
                 def __init__(self, x):
-                    if True:
+                    if 1 == 1:
                         self.attr = x
 
     def test_class_type_as_param(self):
@@ -444,6 +445,39 @@ class TestClassType(JitTestCase):
             class Derived(Base):
                 def two(self, x):
                     return x + self.b + 2
+
+
+    def test_class_inheritance_implicit(self):
+        """
+        Test that inheritance is detected in
+        implicit scripting codepaths (e.g. try_ann_to_type).
+        """
+        class A:
+            def __init__(self, t):
+                self.t = t
+
+            @staticmethod
+            def f(a: torch.Tensor):
+                return A(a + 1)
+
+        class B(A):
+            def __init__(self, t):
+                self.t = t + 10
+
+            @staticmethod
+            def f(a: torch.Tensor):
+                return A(a + 1)
+
+        x = A(torch.tensor([3]))
+
+        def fun(x: Any):
+            if isinstance(x, A):
+                return A.f(x.t)
+            else:
+                return B.f(x.t)
+
+        with self.assertRaisesRegex(RuntimeError, "Tried to access nonexistent attribute or method"):
+            sc = torch.jit.script(fun)
 
     @unittest.skipIf(IS_SANDCASTLE, "Importing like this doesn't work in fbcode")
     def test_imported_classes(self):
@@ -1274,3 +1308,53 @@ class TestClassType(JitTestCase):
 
         with self.assertRaisesRegexWithHighlight(RuntimeError, r"Class does not define __delitem__", "example[key]"):
             self.checkScript(fn, ())
+
+    def test_recursive_script_builtin_type_resolution(self):
+        """
+        Test resolution of built-in torch types(e.g. torch.Tensor, torch.device) when a class is recursively compiled.
+        """
+        # A will be implicitly compiled because it is not annotated with @torch.jit.script
+        # but is used in g() below.
+        tensor_t = torch.Tensor
+        device_t = torch.device
+        device_ty = torch.device
+
+        class A(object):
+            def __init__(self):
+                pass
+
+            def f(self, x: tensor_t, y: torch.device) -> tensor_t:
+                return x.to(device=y)
+
+            def g(self, x: device_t) -> device_ty:
+                return x
+
+            def h(self, a: 'A') -> 'A':
+                return A()
+
+            def i(self, a: List[int]) -> int:
+                return a[0]
+
+            def j(self, l: List[device_t]) -> device_ty:
+                return l[0]
+
+        def call_f():
+            a = A()
+            return a.f(torch.tensor([1]), torch.device("cpu"))
+
+        def call_g():
+            a = A()
+            return a.g(torch.device("cpu"))
+
+        def call_i():
+            a = A()
+            return a.i([3])
+
+        def call_o():
+            a = A()
+            return a.j([torch.device("cpu"), torch.device("cpu")])
+
+        for fn in [call_f, call_g, call_i, call_o]:
+            self.checkScript(fn, ())
+            s = self.getExportImportCopy(torch.jit.script(fn))
+            self.assertEqual(s(), fn())

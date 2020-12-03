@@ -1,4 +1,3 @@
-
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
@@ -8,6 +7,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 namespace kir {
 
 NamedScalar* NamedScalar::getParallelDim(ParallelType p_type) {
@@ -61,7 +61,7 @@ IterDomain::IterDomain(Passkey, Val* start, Val* extent)
       start_(start),
       extent_(extent) {}
 
-IterDomain::IterDomain(Passkey, const fuser::IterDomain* iter_domain)
+IterDomain::IterDomain(Passkey, const fuser::cuda::IterDomain* iter_domain)
     : Val(iter_domain),
       start_(GpuLower::lowerValue(iter_domain->start())),
       extent_(GpuLower::lowerValue(iter_domain->rawExtent())),
@@ -88,10 +88,12 @@ TensorDomain::TensorDomain(Passkey, std::vector<IterDomain*> domain)
   resetDomains();
 }
 
-TensorDomain::TensorDomain(Passkey, const fuser::TensorDomain* tensor_domain)
+TensorDomain::TensorDomain(
+    Passkey,
+    const fuser::cuda::TensorDomain* tensor_domain)
     : Val(tensor_domain), contiguity_(tensor_domain->contiguity()) {
   const auto lowerIterDomains =
-      [](const std::vector<fuser::IterDomain*>& domains) {
+      [](const std::vector<fuser::cuda::IterDomain*>& domains) {
         std::vector<IterDomain*> lowered_domains;
         lowered_domains.reserve(domains.size());
         for (const auto iter_domain : domains) {
@@ -165,7 +167,7 @@ std::vector<IterDomain*> TensorDomain::noBroadcasts(
   return no_broadcast_domains;
 }
 
-TensorView::TensorView(Passkey, const fuser::TensorView* tv)
+TensorView::TensorView(Passkey, const fuser::cuda::TensorView* tv)
     : Val(tv), fuser_tv_(tv) {
   domain_ = GpuLower::lowerValue(tv->domain())->as<TensorDomain>();
   memory_type_ = tv->getMemoryType();
@@ -265,7 +267,7 @@ BroadcastOp::BroadcastOp(Passkey, Val* out, Val* in)
 
 TensorIndex::TensorIndex(
     Passkey,
-    const fuser::TensorView* view,
+    const fuser::cuda::TensorView* view,
     std::vector<Val*> indices)
     : Val(ValType::TensorIndex, view->getDataType().value(), true, true),
       view_(GpuLower::lowerValue(view)->as<TensorView>()),
@@ -446,13 +448,15 @@ std::string GridReduction::getPredicateFlagName(const TensorView* val) {
 }
 
 // TODO(kir): remove this
-std::string GridReduction::getPredicateFlagName(const fuser::TensorView* val) {
+std::string GridReduction::getPredicateFlagName(
+    const fuser::cuda::TensorView* val) {
   std::stringstream ss;
   ss << "T" << val->name() << "_pred";
   return ss.str();
 }
 
 } // namespace kir
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

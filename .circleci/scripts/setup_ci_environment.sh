@@ -54,7 +54,7 @@ add_to_env_file() {
   echo "${content}" >> "${BASH_ENV:-/tmp/env}"
 }
 
-add_to_env_file "IN_CIRCLECI=1"
+add_to_env_file "IN_CI=1"
 add_to_env_file "COMMIT_SOURCE=${CIRCLE_BRANCH:-}"
 add_to_env_file "BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}"
 add_to_env_file "CIRCLE_PULL_REQUEST=${CIRCLE_PULL_REQUEST}"

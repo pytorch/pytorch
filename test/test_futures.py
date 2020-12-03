@@ -92,7 +92,7 @@ class TestFuture(TestCase):
         for i in range(len(futs)):
             self.assertEqual(futs[i].wait(), torch.ones(2, 2) + i + 1)
 
-    def _test_error(self, cb, errMsg):
+    def _test_then_error(self, cb, errMsg):
         fut = Future[int]()
         then_fut = fut.then(cb)
 
@@ -106,21 +106,127 @@ class TestFuture(TestCase):
         def wrong_arg(tensor):
             return tensor + 1
 
-        self._test_error(wrong_arg, "unsupported operand type.*Future.*int")
+        self._test_then_error(wrong_arg, "unsupported operand type.*Future.*int")
 
     def test_then_no_arg(self):
 
         def no_arg():
             return True
 
-        self._test_error(no_arg, "takes 0 positional arguments but 1 was given")
+        self._test_then_error(no_arg, "takes 0 positional arguments but 1 was given")
 
     def test_then_raise(self):
 
         def raise_value_error(fut):
             raise ValueError("Expected error")
 
-        self._test_error(raise_value_error, "Expected error")
+        self._test_then_error(raise_value_error, "Expected error")
+
+    def test_add_done_callback_simple(self):
+        callback_result = False
+
+        def callback(fut):
+            nonlocal callback_result
+            fut.wait()
+            callback_result = True
+
+        fut = Future[torch.Tensor]()
+        fut.add_done_callback(callback)
+
+        self.assertFalse(callback_result)
+        fut.set_result(torch.ones(2, 2))
+        self.assertEqual(fut.wait(), torch.ones(2, 2))
+        self.assertTrue(callback_result)
+
+    def test_add_done_callback_maintains_callback_order(self):
+        callback_result = 0
+
+        def callback_set1(fut):
+            nonlocal callback_result
+            fut.wait()
+            callback_result = 1
+
+        def callback_set2(fut):
+            nonlocal callback_result
+            fut.wait()
+            callback_result = 2
+
+        fut = Future[torch.Tensor]()
+        fut.add_done_callback(callback_set1)
+        fut.add_done_callback(callback_set2)
+
+        fut.set_result(torch.ones(2, 2))
+        self.assertEqual(fut.wait(), torch.ones(2, 2))
+        # set2 called last, callback_result = 2
+        self.assertEqual(callback_result, 2)
+
+    def _test_add_done_callback_error_ignored(self, cb):
+        fut = Future[int]()
+        fut.add_done_callback(cb)
+
+        fut.set_result(5)
+        # error msg logged to stdout
+        self.assertEqual(5, fut.wait())
+
+    def test_add_done_callback_error_is_ignored(self):
+
+        def raise_value_error(fut):
+            raise ValueError("Expected error")
+
+        self._test_add_done_callback_error_ignored(raise_value_error)
+
+    def test_add_done_callback_no_arg_error_is_ignored(self):
+
+        def no_arg():
+            return True
+
+        # Adding another level of function indirection here on purpose.
+        # Otherwise mypy will pick up on no_arg having an incompatible type and fail CI
+        self._test_add_done_callback_error_ignored(no_arg)
+
+    def test_interleaving_then_and_add_done_callback_maintains_callback_order(self):
+        callback_result = 0
+
+        def callback_set1(fut):
+            nonlocal callback_result
+            fut.wait()
+            callback_result = 1
+
+        def callback_set2(fut):
+            nonlocal callback_result
+            fut.wait()
+            callback_result = 2
+
+        def callback_then(fut):
+            nonlocal callback_result
+            return fut.wait() + callback_result
+
+        fut = Future[torch.Tensor]()
+        fut.add_done_callback(callback_set1)
+        then_fut = fut.then(callback_then)
+        fut.add_done_callback(callback_set2)
+
+        fut.set_result(torch.ones(2, 2))
+        self.assertEqual(fut.wait(), torch.ones(2, 2))
+        # then_fut's callback is called with callback_result = 1
+        self.assertEqual(then_fut.wait(), torch.ones(2, 2) + 1)
+        # set2 called last, callback_result = 2
+        self.assertEqual(callback_result, 2)
+
+    def test_interleaving_then_and_add_done_callback_propagates_error(self):
+        def raise_value_error(fut):
+            raise ValueError("Expected error")
+
+        fut = Future[torch.Tensor]()
+        then_fut = fut.then(raise_value_error)
+        fut.add_done_callback(raise_value_error)
+        fut.set_result(torch.ones(2, 2))
+
+        # error from add_done_callback's callback is swallowed
+        # error from then's callback is not
+        self.assertEqual(fut.wait(), torch.ones(2, 2))
+        with self.assertRaisesRegex(RuntimeError, "Expected error"):
+            then_fut.wait()
 
     def test_collect_all(self):
         fut1 = Future[int]()

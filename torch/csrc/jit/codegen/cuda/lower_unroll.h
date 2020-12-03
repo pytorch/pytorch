@@ -10,6 +10,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 /*
  * A bit deceptively: UnrollPass adds all predicates, so it needs to be run even
@@ -107,6 +108,7 @@ class TORCH_CUDA_API UnrollPass : public OptOutDispatch {
       const ThreadPredicateMap& thread_predicates);
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

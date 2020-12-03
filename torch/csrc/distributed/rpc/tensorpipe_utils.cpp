@@ -88,8 +88,7 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
       buffers.pickle.data(), buffers.pickle.size()});
   const auto& tensorDataVec = pickler.tensorData();
   for (size_t i = 0; i < tensorDataVec.size(); ++i) {
-    const auto& tensorData =
-        jit::getWriteableTensorData(tensorDataVec[i]);
+    const auto& tensorData = jit::getWriteableTensorData(tensorDataVec[i]);
     // Enforce memory copy if tensor is created from torch::from_blob, means
     // that the tensor doesn't own the memory.
     std::string metadata =

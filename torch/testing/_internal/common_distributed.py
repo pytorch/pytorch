@@ -1,5 +1,7 @@
 
 from multiprocessing import Manager
+from contextlib import contextmanager
+from io import StringIO
 import os
 import sys
 import tempfile
@@ -130,6 +132,17 @@ def requires_mpi():
         "c10d was not compiled with the MPI backend",
     )
 
+def skip_if_rocm_single_process(func):
+    """Skips a test for ROCm in a single process environment"""
+    func.skip_if_rocm = True
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if not TEST_WITH_ROCM:
+            return func(*args, **kwargs)
+        raise unittest.SkipTest("Test skipped for ROCm")
+
+    return wrapper
 
 def skip_if_rocm(func):
     """Skips a test for ROCm"""
@@ -163,6 +176,15 @@ def create_device(interface=None):
 def get_timeout(test_id):
     return TIMEOUT_OVERRIDE.get(test_id.split('.')[-1], TIMEOUT_DEFAULT)
 
+@contextmanager
+def captured_output():
+    new_out, new_err = StringIO(), StringIO()
+    old_out, old_err = sys.stdout, sys.stderr
+    try:
+        sys.stdout, sys.stderr = new_out, new_err
+        yield sys.stdout, sys.stderr
+    finally:
+        sys.stdout, sys.stderr = old_out, old_err
 
 def simple_sparse_reduce_tests(rank, world_size, num_inputs=1):
     """

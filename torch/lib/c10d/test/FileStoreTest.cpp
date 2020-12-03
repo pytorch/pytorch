@@ -41,7 +41,7 @@ std::string tmppath() {
 void testGetSet(std::string path, std::string prefix = "") {
   // Basic Set/Get on File Store
   {
-    auto fileStore = std::make_shared<c10d::FileStore>(path, 2);
+    auto fileStore = c10::make_intrusive<c10d::FileStore>(path, 2);
     c10d::PrefixStore store(prefix, fileStore);
     c10d::test::set(store, "key0", "value0");
     c10d::test::set(store, "key1", "value1");
@@ -53,7 +53,7 @@ void testGetSet(std::string path, std::string prefix = "") {
 
   // Perform get on new instance
   {
-    auto fileStore = std::make_shared<c10d::FileStore>(path, 2);
+    auto fileStore = c10::make_intrusive<c10d::FileStore>(path, 2);
     c10d::PrefixStore store(prefix, fileStore);
     c10d::test::check(store, "key0", "value0");
   }
@@ -69,7 +69,8 @@ void stressTestStore(std::string path, std::string prefix = "") {
 
   for (auto i = 0; i < numThreads; i++) {
     threads.push_back(std::thread([&] {
-      auto fileStore = std::make_shared<c10d::FileStore>(path, numThreads + 1);
+      auto fileStore =
+          c10::make_intrusive<c10d::FileStore>(path, numThreads + 1);
       c10d::PrefixStore store(prefix, fileStore);
       sem1.post();
       sem2.wait();
@@ -87,7 +88,7 @@ void stressTestStore(std::string path, std::string prefix = "") {
 
   // Check that the counter has the expected value
   {
-    auto fileStore = std::make_shared<c10d::FileStore>(path, numThreads + 1);
+    auto fileStore = c10::make_intrusive<c10d::FileStore>(path, numThreads + 1);
     c10d::PrefixStore store(prefix, fileStore);
     std::string expected = std::to_string(numThreads * numIterations);
     c10d::test::check(store, "counter", expected);

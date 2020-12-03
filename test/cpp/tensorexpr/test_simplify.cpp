@@ -1,3 +1,4 @@
+#include <gtest/gtest.h>
 #include "test/cpp/tensorexpr/test_base.h"
 
 #include "test/cpp/tensorexpr/test_utils.h"
@@ -71,7 +72,7 @@ using SimpleIRExprEval = ExprEval<SimpleIREvaluator>;
     ASSERT_EQ(node_->op_type(), kRand);                  \
   }
 
-void testConstantFoldSimple() {
+TEST(Simplify, ConstantFoldSimple) {
   KernelScope kernel_scope;
   ExprHandle a(2.0f);
   ExprHandle b(3.0f);
@@ -85,7 +86,7 @@ void testConstantFoldSimple() {
   ASSERT_EQ(eval.value<float>(), 5.f);
 }
 
-void testConstantFoldTwoLayer() {
+TEST(Simplify, ConstantFoldTwoLayer) {
   KernelScope kernel_scope;
   ExprHandle a(2.0f);
   ExprHandle b(3.0f);
@@ -101,7 +102,7 @@ void testConstantFoldTwoLayer() {
   ASSERT_EQ(eval.value<float>(), -4.f);
 }
 
-void testConstantFoldShifts() {
+TEST(Simplify, ConstantFoldShifts) {
   KernelScope kernel_scope;
   ExprHandle a(7);
   ExprHandle b(2);
@@ -116,7 +117,7 @@ void testConstantFoldShifts() {
   ASSERT_EQ(eval.value<int>(), 7 << (4 - 3));
 }
 
-void testConstantFoldBitwise() {
+TEST(Simplify, ConstantFoldBitwise) {
   KernelScope kernel_scope;
   ExprHandle a(59);
   ExprHandle b(22);
@@ -131,7 +132,7 @@ void testConstantFoldBitwise() {
   ASSERT_EQ(eval.value<int>(), (59 ^ 22) & 101);
 }
 
-void testConstantFoldMultiOp() {
+TEST(Simplify, ConstantFoldMultiOp) {
   KernelScope kernel_scope;
   ExprHandle a(2.0f);
   ExprHandle b(3.0f);
@@ -150,7 +151,7 @@ void testConstantFoldMultiOp() {
   ASSERT_EQ(eval.value<float>(), ref.value<float>());
 }
 
-void testConstantFoldMinMax() {
+TEST(Simplify, ConstantFoldMinMax) {
   KernelScope kernel_scope;
   ExprHandle a(12.0f);
   ExprHandle b(15.0f);
@@ -169,7 +170,7 @@ void testConstantFoldMinMax() {
   ASSERT_EQ(eval.value<float>(), 15.f);
 }
 
-void testConstantFoldIntrinsics() {
+TEST(Simplify, ConstantFoldIntrinsics) {
   KernelScope kernel_scope;
   ExprHandle a(2.0f);
   ExprHandle b(3.0f);
@@ -191,7 +192,7 @@ void testConstantFoldIntrinsics() {
   ASSERT_EQ(eval.value<float>(), ref.value<float>());
 }
 
-void testConstantFoldCastToBool() {
+TEST(Simplify, ConstantFoldCastToBool) {
   KernelScope kernel_scope;
   ExprHandle f = Cast::make(kBool, IntImm::make(0));
   ExprHandle newF = IRSimplifier::simplify(f);
@@ -199,7 +200,7 @@ void testConstantFoldCastToBool() {
   ASSERT_EQ(eval.value<bool>(), false);
 }
 
-void testConstantFoldWithVar() {
+TEST(Simplify, ConstantFoldWithVar) {
   KernelScope kernel_scope;
   {
     VarHandle x("x", kInt);
@@ -230,7 +231,7 @@ void testConstantFoldWithVar() {
   }
 }
 
-void testConditionalSelectFoldSimple() {
+TEST(Simplify, ConditionalSelectFoldSimple) {
   KernelScope kernel_scope;
   ExprHandle a(3.0f);
   ExprHandle b(4.0f);
@@ -277,7 +278,7 @@ void testConditionalSelectFoldSimple() {
   }
 }
 
-void testConditionalSelectFoldTwoLayer() {
+TEST(Simplify, ConditionalSelectFoldTwoLayer) {
   KernelScope kernel_scope;
   ExprHandle a(3.0f);
   ExprHandle b(2.0f);
@@ -325,7 +326,7 @@ void testConditionalSelectFoldTwoLayer() {
   }
 }
 
-void testConditionalSelectFoldWithVar() {
+TEST(Simplify, ConditionalSelectFoldWithVar) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   ExprHandle f = x < 4.f;
@@ -346,7 +347,7 @@ void testConditionalSelectFoldWithVar() {
   }
 }
 
-void testUnFoldableExpr() {
+TEST(Simplify, UnFoldableExpr) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   VarHandle y("y", kFloat);
@@ -364,7 +365,7 @@ void testUnFoldableExpr() {
   ASSERT_EQ(eval.value<float>(), 9 + 10);
 }
 
-void testHashSimple() {
+TEST(Simplify, HashSimple) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   ExprHandle a(2.0f);
@@ -385,7 +386,7 @@ void testHashSimple() {
   ASSERT_NE(hash_a, hash_f);
 }
 
-void testHashEquivalence() {
+TEST(Simplify, HashEquivalence) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   VarHandle y("y", kFloat);
@@ -422,7 +423,7 @@ void testHashEquivalence() {
   ASSERT_NE(hasher.hash(f5.node()), (size_t)0);
 }
 
-void testHashEquivalenceRand() {
+TEST(Simplify, HashEquivalenceRand) {
   KernelScope kernel_scope;
   ExprHandle f =
       Intrinsics::make(kRand, kFloat) + Intrinsics::make(kRand, kInt);
@@ -442,7 +443,7 @@ void testHashEquivalenceRand() {
   ASSERT_NE(hash_l, hash_r);
 }
 
-void testHashEquivalenceAfterFolding() {
+TEST(Simplify, HashEquivalenceAfterFolding) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   ExprHandle a(2.0f);
@@ -468,7 +469,7 @@ void testHashEquivalenceAfterFolding() {
   ASSERT_EQ(hash_l_n, hash_r_n);
 }
 
-void testHashDifferenceTypes() {
+TEST(Simplify, HashDifferenceTypes) {
   KernelScope kernel_scope;
 
   HashProvider hasher;
@@ -501,7 +502,7 @@ void testHashDifferenceTypes() {
   ASSERT_EQ(hasher.hash(ff1.node()), hasher.hash(ff2.node()));
 }
 
-void testHashLargeExpression() {
+TEST(Simplify, HashLargeExpression) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
   BufHandle a("A", {N}, kInt);
@@ -552,7 +553,7 @@ void testHashLargeExpression() {
   ASSERT_NE(hash_t, hash_f);
 }
 
-void testHashForLoopOptions() {
+TEST(Simplify, HashForLoopOptions) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
   BufHandle a("A", {N}, kInt);
@@ -596,7 +597,7 @@ void testHashForLoopOptions() {
 }
 
 /// (2 + x) + 4 => x + 6
-void testSimplifyAdd() {
+TEST(Simplify, SimplifyAdd) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -618,7 +619,7 @@ void testSimplifyAdd() {
 }
 
 /// (2 - x) - 4 => -2 - x
-void testSimplifySub() {
+TEST(Simplify, SimplifySub) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   ExprHandle body = (ExprHandle(2) - x) - ExprHandle(4);
@@ -635,7 +636,7 @@ void testSimplifySub() {
 }
 
 /// 2 * (1 - x) - 4 => -2 * (x + 3)
-void testSimplifyMultiLayer() {
+TEST(Simplify, SimplifyMultiLayer) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   ExprHandle body = ExprHandle(2) * ((ExprHandle(1) - x) - ExprHandle(4));
@@ -648,7 +649,7 @@ void testSimplifyMultiLayer() {
 }
 
 /// 2 * (3 * x) - (x * 4) => 2 * x
-void testSimplifyMultiTerm() {
+TEST(Simplify, SimplifyMultiTerm) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   ExprHandle body =
@@ -666,7 +667,7 @@ void testSimplifyMultiTerm() {
 }
 
 /// 2 * (3 * (long)x) - (x * 4) => 2 * x
-void testSimplifyCasts() {
+TEST(Simplify, SimplifyCasts) {
   KernelScope kernel_scope;
   VarHandle x("x", kLong);
   ExprHandle body =
@@ -684,7 +685,7 @@ void testSimplifyCasts() {
 }
 
 /// (x + 0) * 1 => x
-void testSimplifyEliminatesNoOps() {
+TEST(Simplify, SimplifyEliminatesNoOps) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   ExprHandle body = (x + ExprHandle(0)) * 1;
@@ -696,7 +697,7 @@ void testSimplifyEliminatesNoOps() {
 }
 
 /// Cannot simplify this.
-void testSimplifyMultiVar() {
+TEST(Simplify, SimplifyMultiVar) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -719,7 +720,7 @@ void testSimplifyMultiVar() {
 }
 
 // x + 2 + y => x + y + 2
-void testSimplifyReorderings() {
+TEST(Simplify, DISABLED_SimplifyReorderings) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -736,7 +737,7 @@ void testSimplifyReorderings() {
 }
 
 /// y + x * 0 => y
-void testSimplifyEliminatesVar() {
+TEST(Simplify, SimplifyEliminatesVar) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -746,7 +747,7 @@ void testSimplifyEliminatesVar() {
   IS_VAR_WITH_NAME(simplified.node(), "y");
 }
 
-void testSimplifyAdds() {
+TEST(Simplify, SimplifyAdds) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -817,7 +818,7 @@ void testSimplifyAdds() {
   }
 }
 
-void testSimplifyMuls() {
+TEST(Simplify, SimplifyMuls) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -937,7 +938,7 @@ void testSimplifyMuls() {
 }
 
 // Sub an expr from itself will result in zero.
-void testSimplifySubs() {
+TEST(Simplify, SimplifySubs) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -1060,9 +1061,50 @@ void testSimplifySubs() {
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_IMM_WITH_VAL(Int, simplified.node(), 2);
   }
+
+  {
+    // Sub where result is negative.
+    ExprHandle body = x - (x + 1);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), -1);
+  }
+
+  {
+    // Sub where result is positive due to negative scalar on RHS.
+    ExprHandle body = x - (x - 1);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 1);
+  }
+
+  {
+    // Term - Polynomial sub where RHS must be negated.
+    ExprHandle body = (x * 2) - (x * 2 + 1);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), -1);
+  }
+
+  {
+    // Term - Polynomial sub where the result is a Term.
+    ExprHandle body = (y * x * 2) - (x * y);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+
+    IS_VAR_WITH_NAME(mul->lhs(), "x");
+    IS_VAR_WITH_NAME(mul->rhs(), "y");
+  }
+
+  {
+    // Term - Polynomial sub where the result is a Polynomial.
+    ExprHandle body = (x * 2) - (x + 1);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Sub, simplified.node(), sub);
+
+    IS_VAR_WITH_NAME(sub->lhs(), "x");
+    IS_IMM_WITH_VAL(Int, sub->rhs(), 1);
+  }
 }
 
-void testSimplifyDiv() {
+TEST(Simplify, SimplifyDiv) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
 
@@ -1079,17 +1121,135 @@ void testSimplifyDiv() {
 
     IS_VAR_WITH_NAME(simplified.node(), "x");
   }
+}
+
+TEST(Simplify, SimplifyMod) {
+  KernelScope kernel_scope;
+  VarHandle x("x", kInt);
+  VarHandle y("y", kInt);
+  VarHandle z("z", kInt);
 
   {
-    ExprHandle body = x / x;
+    // Constant folding works.
+    ExprHandle body = ExprHandle(10) % 8;
     ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 2);
+  }
 
-    IS_IMM_WITH_VAL(Int, simplified.node(), 1);
+  {
+    // x % x => 0
+    ExprHandle body = x % x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    // 0 % x => 0
+    ExprHandle body = ExprHandle(0) % x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    // x % 1 => 0
+    ExprHandle body = x % 1;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    // Doesn't change unknown mods.
+    // x % y => x % y
+    ExprHandle body = x % y;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
+    IS_VAR_WITH_NAME(mod->lhs(), "x");
+    IS_VAR_WITH_NAME(mod->rhs(), "y");
+  }
+
+  {
+    // don't touch if RHS is unknown.
+    // 4 % x => 4 % x
+    ExprHandle body = ExprHandle(4) % x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
+    IS_IMM_WITH_VAL(Int, mod->lhs(), 4);
+    IS_VAR_WITH_NAME(mod->rhs(), "x");
+  }
+
+  {
+    // don't touch if LHS is unknown.
+    // x % 4 => x % 4
+    ExprHandle body = x % 4;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
+    IS_VAR_WITH_NAME(mod->lhs(), "x");
+    IS_IMM_WITH_VAL(Int, mod->rhs(), 4);
+  }
+
+  {
+    // if LHS is a multiple of RHS, mod is zero.
+    // 2 * x % x => 0
+    ExprHandle body = (x * 2) % x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    // true even if the multiple is not constant.
+    // x * y % x => 0
+    ExprHandle body = (x * y) % x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    // true with multiple unknown values in LHS.
+    // x * y * z % x => 0
+    ExprHandle body = (x * y * z) % x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    // true if the denom is compound.
+    // x * y * z % y * z => 0
+    ExprHandle body = (x * y * z) % (y * z);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    // Sanity check true with scalars that are multiples.
+    // 12 * x % 4 => 0
+    ExprHandle body = (x * 12) % 4;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    // Sanity check not true if the smaller scalar is on LHS.
+    // 4 * x % 12 => 4 * x % 12
+    ExprHandle body = (x * 4) % 12;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
+    IS_NODE_WITH_NAME(Mul, mod->lhs(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 4);
+    IS_VAR_WITH_NAME(mul->rhs(), "x");
+    IS_IMM_WITH_VAL(Int, mod->rhs(), 12);
+  }
+
+  {
+    // Both scalar and symbolic in multiple.
+    // (6 * x * y) % (3 * x * y) => 0
+    ExprHandle body = (ExprHandle(6) * x * y) % (x * y * 3);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
   }
 }
 
 // Test that mixing ops together simplifies as expected.
-void testSimplifyMultiOp() {
+TEST(Simplify, SimplifyMultiOp) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -1158,7 +1318,7 @@ void testSimplifyMultiOp() {
 }
 
 // Test that chaining many ops together works as expected.
-void testSimplifyManyOps() {
+TEST(Simplify, SimplifyManyOps) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -1206,7 +1366,7 @@ void testSimplifyManyOps() {
   }
 }
 
-void testSimplifyFactorization() {
+TEST(Simplify, SimplifyFactorization) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -1290,7 +1450,7 @@ void testSimplifyFactorization() {
 }
 
 // (4 * x + y + z * 2) + (4 * x + y + z * 4) => 2 * (y + 3 * z + 4 * x)
-void testSimplifyFactorizeUneven() {
+TEST(Simplify, SimplifyFactorizeUneven) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -1317,7 +1477,7 @@ void testSimplifyFactorizeUneven() {
 
 // (x * y) + (2 * x) * (x + y) => 3 * (x * y) + 2 * (x * x)
 // This is kind of a placeholder test for variable factorization.
-void testSimplifyDeeperTerms() {
+TEST(Simplify, SimplifyDeeperTerms) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -1341,7 +1501,7 @@ void testSimplifyDeeperTerms() {
 
 // Tests the difference between two less trivial expressions.
 // (m * (1 * n_1) + (n  + 1)) - (m *  (1 * n_1) + n) => 1
-void testSimplifyDeeperDifference() {
+TEST(Simplify, SimplifyDeeperDifference) {
   KernelScope kernel_scope;
   VarHandle n("n", kInt);
   VarHandle n_1("n_1", kInt);
@@ -1355,7 +1515,7 @@ void testSimplifyDeeperDifference() {
 
 // Test constant folding into the difference between expressions.
 // 2 + char((m * (1 * n_1) + (n  + 1)) - (m *  (1 * n_1) + n)) => 3
-void testSimplifyFoldComplexDifference() {
+TEST(Simplify, SimplifyFoldComplexDifference) {
   KernelScope kernel_scope;
   VarHandle n("n", kInt);
   VarHandle n_1("n_1", kInt);
@@ -1370,7 +1530,7 @@ void testSimplifyFoldComplexDifference() {
   IS_IMM_WITH_VAL(Int, simplified.node(), 3);
 }
 
-void testSimplifyIfComponents() {
+TEST(Simplify, SimplifyIfComponents) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -1392,7 +1552,7 @@ void testSimplifyIfComponents() {
   IS_VAR_WITH_NAME(ifexpr->false_value(), "y");
 }
 
-void testSimplifyOpaqueTerms() {
+TEST(Simplify, SimplifyOpaqueTerms) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -1418,7 +1578,7 @@ void testSimplifyOpaqueTerms() {
   }
 }
 
-void testSimplifySymbolicMinMax() {
+TEST(Simplify, SimplifySymbolicMinMax) {
   KernelScope kernel_scope;
 
   {
@@ -1454,7 +1614,7 @@ void testSimplifySymbolicMinMax() {
   }
 }
 
-void testSimplifyNestedMax() {
+TEST(Simplify, SimplifyNestedMax) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -1757,7 +1917,7 @@ void testSimplifyNestedMax() {
   }
 }
 
-void testSimplifyNestedMin() {
+TEST(Simplify, SimplifyNestedMin) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -2060,7 +2220,7 @@ void testSimplifyNestedMin() {
   }
 }
 
-void testSimplifyWontReorderFloat() {
+TEST(Simplify, SimplifyWontReorderFloat) {
   KernelScope kernel_scope;
 
   {
@@ -2172,7 +2332,7 @@ void testSimplifyWontReorderFloat() {
   }
 }
 
-void testSimplifyRoundModPattern() {
+TEST(Simplify, SimplifyRoundModPattern) {
   KernelScope kernel_scope;
 
   {
@@ -2380,7 +2540,7 @@ void testSimplifyRoundModPattern() {
   }
 }
 
-void testSimplifyRoundModPatternFactorization() {
+TEST(Simplify, SimplifyRoundModPatternFactorization) {
   KernelScope kernel_scope;
 
   {
@@ -2439,7 +2599,7 @@ void testSimplifyRoundModPatternFactorization() {
   }
 }
 
-void testSimplifyRoundModPatternMultivar() {
+TEST(Simplify, SimplifyRoundModPatternMultivar) {
   KernelScope kernel_scope;
 
   {
@@ -2496,7 +2656,7 @@ void testSimplifyRoundModPatternMultivar() {
   }
 }
 
-void testSimplifyDivisionScalarFactorization() {
+TEST(Simplify, SimplifyDivisionScalarFactorization) {
   KernelScope kernel_scope;
 
   {
@@ -2568,7 +2728,7 @@ void testSimplifyDivisionScalarFactorization() {
   }
 }
 
-void testSimplifyConstantBranches() {
+TEST(Simplify, SimplifyConstantBranches) {
   KernelScope kernel_scope;
 
   {
@@ -2626,7 +2786,7 @@ void testSimplifyConstantBranches() {
   }
 }
 
-void testSimplifyConstantCond() {
+TEST(Simplify, SimplifyConstantCond) {
   KernelScope kernel_scope;
 
   {
@@ -2738,7 +2898,7 @@ void testSimplifyConstantCond() {
   }
 }
 
-void testSimplifyEliminateEmptyCond() {
+TEST(Simplify, SimplifyEliminateEmptyCond) {
   KernelScope kernel_scope;
   // If the branches are empty in different ways, eliminate.
   {
@@ -2766,7 +2926,190 @@ void testSimplifyEliminateEmptyCond() {
   }
 }
 
-void testSimplifyEliminateZeroLengthFor() {
+TEST(Simplify, SimplifyConstantComparisons) {
+  KernelScope kernel_scope;
+
+  auto ComparisonTest =
+      [](ExprHandle a, ExprHandle b, CompareSelectOperation op, int result) {
+        ExprHandle body = CompareSelect::make(a, b, op);
+        ExprHandle simplified = IRSimplifier::simplify(body);
+        IS_IMM_WITH_VAL(Int, simplified.node(), result);
+      };
+
+  // Equals.
+  ComparisonTest(2, 2, kEQ, 1);
+  ComparisonTest(1, 2, kEQ, 0);
+  ComparisonTest(2, 1, kEQ, 0);
+
+  // Greater than.
+  ComparisonTest(2, 2, kGT, 0);
+  ComparisonTest(1, 2, kGT, 0);
+  ComparisonTest(2, 1, kGT, 1);
+
+  // Greater or Equal.
+  ComparisonTest(2, 2, kGE, 1);
+  ComparisonTest(1, 2, kGE, 0);
+  ComparisonTest(2, 1, kGE, 1);
+
+  // Less Than.
+  ComparisonTest(2, 2, kLT, 0);
+  ComparisonTest(1, 2, kLT, 1);
+  ComparisonTest(2, 1, kLT, 0);
+
+  // Less or Equal.
+  ComparisonTest(2, 2, kLE, 1);
+  ComparisonTest(1, 2, kLE, 1);
+  ComparisonTest(2, 1, kLE, 0);
+
+  // Not equal.
+  ComparisonTest(2, 2, kNE, 0);
+  ComparisonTest(1, 2, kNE, 1);
+  ComparisonTest(2, 1, kNE, 1);
+
+  // With specified results:
+  ExprHandle body = CompareSelect::make(2, 2, 5, 42, kNE);
+  ExprHandle simplified = IRSimplifier::simplify(body);
+  IS_IMM_WITH_VAL(Int, simplified.node(), 42);
+}
+
+TEST(Simplify, SimplifySymbolicComparisons) {
+  KernelScope kernel_scope;
+  VarHandle x("x", kInt);
+  VarHandle y("y", kInt);
+
+  auto TookTrueBranch = [](ExprHandle a) { IS_IMM_WITH_VAL(Int, a.node(), 1); };
+  auto TookFalseBranch = [](ExprHandle a) {
+    IS_IMM_WITH_VAL(Int, a.node(), 0);
+  };
+
+  // EQ
+
+  // x == x => 1
+  ExprHandle body = CompareSelect::make(x, x, kEQ);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // x == x+1 => 0
+  body = CompareSelect::make(x, x + 1, kEQ);
+  TookFalseBranch(IRSimplifier::simplify(body));
+
+  // x == x * 2 cannot simplify since we don't know x is nonzero.
+  body = CompareSelect::make(x, x * 2, kEQ);
+  IS_NODE(CompareSelect, IRSimplifier::simplify(body).node());
+
+  // x == x * 1 => 1
+  body = CompareSelect::make(x, x * 1, kEQ);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  {
+    // x == y => x == y
+    body = CompareSelect::make(x, y, kEQ);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(CompareSelect, simplified.node(), cmp);
+    ASSERT_EQ(cmp->compare_select_op(), kEQ);
+    IS_VAR_WITH_NAME(cmp->lhs(), "x");
+    IS_VAR_WITH_NAME(cmp->rhs(), "y");
+  }
+
+  {
+    // x == 5 => x == 5
+    body = CompareSelect::make(x, 5, kEQ);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(CompareSelect, simplified.node(), cmp);
+    ASSERT_EQ(cmp->compare_select_op(), kEQ);
+    IS_VAR_WITH_NAME(cmp->lhs(), "x");
+    IS_IMM_WITH_VAL(Int, cmp->rhs(), 5);
+  }
+
+  // GT
+
+  // x+1 > x => 1
+  body = CompareSelect::make(x + 1, x, kGT);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // x > x + 1 => 0
+  body = CompareSelect::make(x, x + 1, kGT);
+  TookFalseBranch(IRSimplifier::simplify(body));
+
+  // x > x - 1 => 1
+  body = CompareSelect::make(x, x - 1, kGT);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // x - 1 > x => 0
+  body = CompareSelect::make(x - 1, x, kGT);
+  TookFalseBranch(IRSimplifier::simplify(body));
+
+  // x > x => 0
+  body = CompareSelect::make(x, x, kGT);
+  TookFalseBranch(IRSimplifier::simplify(body));
+
+  // x * 2 > x => x * 2 > x
+  // since we don't know the sign of x.
+  body = CompareSelect::make(x * 2, x, kGT);
+  IS_NODE(CompareSelect, IRSimplifier::simplify(body).node());
+
+  // GE
+
+  // x+1 >= x => 1
+  body = CompareSelect::make(x + 1, x, kGE);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // x >= x + 1 => 0
+  body = CompareSelect::make(x, x + 1, kGE);
+  TookFalseBranch(IRSimplifier::simplify(body));
+
+  // x >= x => 1
+  body = CompareSelect::make(x, x, kGE);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // x * 2 >= x => x * 2 >= x
+  // since we don't know the sign of x.
+  body = CompareSelect::make(x * 2, x, kGE);
+  IS_NODE(CompareSelect, IRSimplifier::simplify(body).node());
+
+  // LT
+
+  // x+1 < x => 0
+  body = CompareSelect::make(x + 1, x, kLT);
+  TookFalseBranch(IRSimplifier::simplify(body));
+
+  // x < x + 1 => 1
+  body = CompareSelect::make(x, x + 1, kLT);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // x < x => 0
+  body = CompareSelect::make(x, x, kLT);
+  TookFalseBranch(IRSimplifier::simplify(body));
+
+  // LE
+
+  // x+1 <= x => 0
+  body = CompareSelect::make(x + 1, x, kLE);
+  TookFalseBranch(IRSimplifier::simplify(body));
+
+  // x <= x + 1 => 1
+  body = CompareSelect::make(x, x + 1, kLE);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // x <= x => 1
+  body = CompareSelect::make(x, x, kLE);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // NE
+
+  // x+1 != x => 1
+  body = CompareSelect::make(x + 1, x, kNE);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // x != x + 1 => 1
+  body = CompareSelect::make(x, x + 1, kNE);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // x != x => 0
+  body = CompareSelect::make(x, x, kNE);
+  TookFalseBranch(IRSimplifier::simplify(body));
+}
+
+TEST(Simplify, SimplifyEliminateZeroLengthFor) {
   KernelScope kernel_scope;
 
   {
@@ -2836,7 +3179,7 @@ void testSimplifyEliminateZeroLengthFor() {
   }
 }
 
-void testSimplifyOneLoopFor() {
+TEST(Simplify, SimplifyOneLoopFor) {
   KernelScope kernel_scope;
 
   {
@@ -2914,7 +3257,7 @@ void testSimplifyOneLoopFor() {
   }
 }
 
-void testSimplifyForWontLoseLoopOptions() {
+TEST(Simplify, SimplifyForWontLoseLoopOptions) {
   KernelScope kernel_scope;
 
   {
@@ -2934,7 +3277,7 @@ void testSimplifyForWontLoseLoopOptions() {
   }
 }
 
-void testSimplifyMultilevelFor() {
+TEST(Simplify, SimplifyMultilevelFor) {
   KernelScope kernel_scope;
 
   {
@@ -2999,7 +3342,7 @@ void testSimplifyMultilevelFor() {
   }
 }
 
-void testSimplifyForCleansUp() {
+TEST(Simplify, SimplifyForCleansUp) {
   KernelScope kernel_scope;
 
   {
@@ -3028,7 +3371,7 @@ void testSimplifyForCleansUp() {
   }
 }
 
-void testSimplifyEliminateEmptyFor() {
+TEST(Simplify, SimplifyEliminateEmptyFor) {
   KernelScope kernel_scope;
 
   {
@@ -3045,7 +3388,7 @@ void testSimplifyEliminateEmptyFor() {
   }
 }
 
-void testSimplifyFlattenBlock() {
+TEST(Simplify, SimplifyFlattenBlock) {
   KernelScope kernel_scope;
 
   {
@@ -3130,7 +3473,7 @@ void testSimplifyFlattenBlock() {
   }
 }
 
-void testSimplifyEliminateZeroLengthAlloc() {
+TEST(Simplify, SimplifyEliminateZeroLengthAlloc) {
   KernelScope kernel_scope;
 
   {
@@ -3204,7 +3547,7 @@ void testSimplifyEliminateZeroLengthAlloc() {
   }
 }
 
-void testDontSimplifyRand() {
+TEST(Simplify, DontSimplifyRand) {
   KernelScope kernel_scope;
 
   {
@@ -3238,7 +3581,7 @@ void testDontSimplifyRand() {
   }
 }
 
-void testSimplifyReorderForCond() {
+TEST(Simplify, SimplifyReorderForCond) {
   KernelScope kernel_scope;
   BufHandle a("A", {4}, kInt);
   BufHandle b("B", {1}, kInt);
@@ -3438,7 +3781,7 @@ void testSimplifyReorderForCond() {
   }
 }
 
-void testSimplifyFuseConditions() {
+TEST(Simplify, SimplifyFuseConditions) {
   KernelScope kernel_scope;
   BufHandle a("A", {2}, kInt);
   BufHandle b("B", {2}, kInt);
@@ -3856,7 +4199,7 @@ void testSimplifyFuseConditions() {
   }
 }
 
-void testSimplifySyncThreads() {
+TEST(Simplify, SimplifySyncThreads) {
   KernelScope kernel_scope;
   BufHandle a("A", {4}, kInt);
   auto mask = IntImm::make(1);
@@ -3950,7 +4293,7 @@ void testSimplifySyncThreads() {
   }
 }
 
-void testSimplifyRampSubBroadcast() {
+TEST(Simplify, SimplifyRampSubBroadcast) {
   KernelScope kernel_scope;
   int num_lanes = 4;
   ExprHandle ramp = Ramp::make(ExprHandle(0), ExprHandle(6), num_lanes);
@@ -3964,7 +4307,7 @@ void testSimplifyRampSubBroadcast() {
   ASSERT_EQ(newRamp->lanes(), num_lanes);
 }
 
-void testSimplifyBroadcastTermExpander() {
+TEST(Simplify, SimplifyBroadcastTermExpander) {
   KernelScope kernel_scope;
   int num_lanes = 8;
   ExprHandle bc0 = Broadcast::make(ExprHandle(0), num_lanes);

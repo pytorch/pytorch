@@ -137,7 +137,8 @@ cmake_dependent_option(
     "NOT BUILD_SHARED_LIBS" OFF)
 option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" OFF)
 option(BUILD_STATIC_RUNTIME_BENCHMARK "Build C++ binaries for static runtime benchmarks (need gbenchmark)" OFF)
-option(BUILD_MOBILE_BENCHMARKS "Build C++ test binaries for mobile (ARM) targets(need gtest and gbenchmark)" OFF)
+option(BUILD_TENSOREXPR_BENCHMARK "Build C++ binaries for tensorexpr benchmarks (need gbenchmark)" OFF)
+option(BUILD_MOBILE_BENCHMARK "Build C++ test binaries for mobile (ARM) targets(need gtest and gbenchmark)" OFF)
 option(BUILD_MOBILE_TEST "Build C++ test binaries for mobile (ARM) targets(need gtest and gbenchmark)" OFF)
 option(BUILD_JNI "Build JNI bindings" OFF)
 option(BUILD_MOBILE_AUTOGRAD "Build autograd function in mobile build (in development)" OFF)
@@ -158,6 +159,7 @@ cmake_dependent_option(
     USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
     "USE_CUDNN" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
+option(USE_KINETO "Use Kineto profiling library" OFF)
 option(USE_FAKELOWP "Use FakeLowp operators" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
 option(USE_GFLAGS "Use GFLAGS" OFF)
@@ -165,7 +167,8 @@ option(USE_GLOG "Use GLOG" OFF)
 option(USE_LEVELDB "Use LEVELDB" OFF)
 option(USE_LITE_PROTO "Use lite protobuf instead of full." OFF)
 option(USE_LMDB "Use LMDB" OFF)
-option(USE_METAL "Use Metal for iOS build" ON)
+option(USE_METAL "Use Metal for Caffe2 iOS build" ON)
+option(USE_PYTORCH_METAL "Use Metal for PyTorch iOS build" OFF)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 cmake_dependent_option(
     USE_NCCL "Use NCCL" ON
@@ -198,10 +201,14 @@ option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
 option(USE_SYSTEM_EIGEN_INSTALL
     "Use system Eigen instead of the one under third_party" OFF)
 option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
+cmake_dependent_option(
+    USE_VALGRIND "Use Valgrind. Only available on Linux." ON
+    "LINUX" OFF)
 option(USE_VULKAN "Use Vulkan GPU backend" OFF)
-option(USE_VULKAN_WRAPPER "Use Vulkan wrapper" ON)
-option(USE_VULKAN_SHADERC_RUNTIME "Use Vulkan Shader compilation runtime(Needs shaderc lib)" OFF)
-option(USE_VULKAN_RELAXED_PRECISION "Use Vulkan relaxed precision(mediump)" OFF)
+option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference even on fp32 tensors" ON)
+option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
+option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation (needs libshaderc)" OFF)
+option(USE_VULKAN_WRAPPER "Vulkan - Dynamically load Vulkan functions" ON)
 option(USE_XNNPACK "Use XNNPACK" ON)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
@@ -237,17 +244,17 @@ if(WIN32)
     find_library(
       libuv_tmp_LIBRARY
       NAMES uv libuv
-      HINTS $ENV{CONDA_PREFIX}\\Library
+      HINTS $ENV{CONDA_PREFIX}\\Library $ENV{PREFIX}\\Library
       PATH_SUFFIXES lib
-      REQUIRED
       NO_DEFAULT_PATH)
-    if(NOT EXISTS ${libuv_tmp_LIBRARY})
+    if(NOT libuv_tmp_LIBRARY)
       set(USE_DISTRIBUTED OFF)
       set(USE_GLOO OFF)
       message(
-        WARNING "Libuv is not installed in current conda env. Set USE_DISTRIBUTED to OFF.")
+        WARNING "Libuv is not installed in current conda env. Set USE_DISTRIBUTED to OFF. "
+        "Please run command 'conda install -c conda-forge libuv=1.39' to install libuv.")
     else()
-      set(ENV{libuv_ROOT} $ENV{CONDA_PREFIX}\\Library)
+      set(ENV{libuv_ROOT} ${libuv_tmp_LIBRARY}/../../)
     endif()
   endif()
 endif()
@@ -450,8 +457,6 @@ if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
 endif()
 
 # ---[ Utils
-# TODO: merge the following 3 files into cmake/public/utils.cmake.
-include(cmake/Utils.cmake)
 include(cmake/public/utils.cmake)
 
 # ---[ Version numbers for generated libraries
@@ -510,10 +515,29 @@ if(USE_FBGEMM AND ((CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND CMAKE_SIZEOF_VO
   set(USE_FBGEMM OFF)
 endif()
 
+if(USE_KINETO AND INTERN_BUILD_MOBILE)
+  message(STATUS "Not using libkineto in a mobile build.")
+  set(USE_KINETO OFF)
+endif()
+
+if(USE_KINETO AND (NOT USE_CUDA))
+  message(STATUS "Not using libkineto in a non-CUDA build.")
+  set(USE_KINETO OFF)
+endif()
+
+if(USE_KINETO AND MSVC)
+  message(STATUS "Not using libkineto in a Windows build.")
+  set(USE_KINETO OFF)
+endif()
+
 include(cmake/Dependencies.cmake)
 
 if(USE_FBGEMM)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_FBGEMM")
+endif()
+
+if(USE_KINETO)
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_KINETO")
 endif()
 
 if(USE_QNNPACK)
@@ -530,18 +554,27 @@ endif()
 
 if(USE_VULKAN)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN")
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_API")
+
+  if(USE_VULKAN_FP16_INFERENCE)
+    string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_FP16_INFERENCE")
+  endif()
+
+  if(USE_VULKAN_RELAXED_PRECISION)
+    string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_RELAXED_PRECISION")
+  endif()
+
+  if(USE_VULKAN_SHADERC_RUNTIME)
+    string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_SHADERC_RUNTIME")
+  endif()
+
+  if(USE_VULKAN_WRAPPER)
+    string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_WRAPPER")
+  endif()
 endif()
 
-if(USE_VULKAN_WRAPPER)
-  string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_WRAPPER")
-endif()
-
-if(USE_VULKAN_SHADERC_RUNTIME)
-  string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_SHADERC_RUNTIME")
-endif()
-
-if(USE_VULKAN_RELAXED_PRECISION)
-  string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_RELAXED_PRECISION")
+if(USE_PYTORCH_METAL)
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_PYTORCH_METAL")
 endif()
 
 # ---[ Allowlist file if allowlist is specified
@@ -634,6 +667,10 @@ if(NOT MSVC)
   if(HAS_WERROR_FORMAT)
     string(APPEND CMAKE_CXX_FLAGS " -Werror=format")
   endif()
+  check_cxx_compiler_flag("-Werror=cast-function-type" HAS_WERROR_CAST_FUNCTION_TYPE)
+  if(HAS_WERROR_CAST_FUNCTION_TYPE)
+    string(APPEND CMAKE_CXX_FLAGS " -Werror=cast-function-type")
+  endif()
 endif()
 
 if(USE_ASAN)
@@ -705,6 +742,8 @@ endif()
 if(ANDROID AND (NOT ANDROID_DEBUG_SYMBOLS))
   if(CMAKE_COMPILER_IS_GNUCXX)
     string(APPEND CMAKE_CXX_FLAGS " -s")
+  elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+    string(APPEND CMAKE_CXX_FLAGS " -g0")
   else()
     string(APPEND CMAKE_EXE_LINKER_FLAGS " -s")
   endif()

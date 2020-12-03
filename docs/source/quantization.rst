@@ -45,8 +45,8 @@ The corresponding implementation is chosen automatically based on the PyTorch bu
 
 .. note::
 
-  PyTorch 1.3 doesn't provide quantized operator implementations on CUDA yet -
-  this is direction of future work.  Move the model to CPU in order to test the
+  At the moment PyTorch doesn't provide quantized operator implementations on CUDA -
+  this is the direction for future work. Move the model to CPU in order to test the
   quantized functionality.
 
   Quantization-aware training (through :class:`~torch.quantization.FakeQuantize`)
@@ -76,6 +76,261 @@ The corresponding implementation is chosen automatically based on the PyTorch bu
     qnnpack as follows
 
     ``torch.backends.quantized.engine = 'qnnpack'``
+
+Quantization API Summary
+---------------------------------------
+
+There are three types of quantization supported in PyTorch:
+
+1. dynamic quantization (weights quantized with activations read/stored in
+   floating point and quantized for compute.)
+2. static quantization (weights quantized, activations quantized, calibration
+   required post training)
+3. quantization aware training (weights quantized, activations quantized,
+   quantization numerics modeled during training)
+
+Please see our `Introduction to Quantization on Pytorch
+<https://pytorch.org/blog/introduction-to-quantization-on-pytorch/>`_ blog post
+for a more comprehensive overview of the tradeoffs between these quantization
+types.
+
+Dynamic Quantization
+^^^^^^^^^^^^^^^^^^^^
+
+This is the simplest to apply form of quantization where the weights are
+quantized ahead of time but the activations are dynamically quantized
+during inference. This is used for situations where the model execution time
+is dominated by loading weights from memory rather than computing the matrix
+multiplications. This is true for for LSTM and Transformer type models with
+small batch size.
+
+Diagram::
+
+  # original model
+  # all tensors and computations are in floating point
+  previous_layer_fp32 -- linear_fp32 -- activation_fp32 -- next_layer_fp32
+                   /
+  linear_weight_fp32
+
+  # dynamically quantized model
+  # linear and conv weights are in int8
+  previous_layer_fp32 -- linear_int8_w_fp32_inp -- activation_fp32 -- next_layer_fp32
+                       /
+     linear_weight_int8
+
+API example::
+
+    import torch
+
+    # define a floating point model
+    class M(torch.nn.Module):
+        def __init__(self):
+            super(M, self).__init__()
+            self.fc = torch.nn.Linear(4, 4)
+
+        def forward(self, x):
+            x = self.fc(x)
+            return x
+
+    # create a model instance
+    model_fp32 = M()
+    # create a quantized model instance
+    model_int8 = torch.quantization.quantize_dynamic(
+        model_fp32,  # the original model
+        {torch.nn.Linear},  # a set of layers to dynamically quantize
+        dtype=torch.qint8)  # the target dtype for quantized weights
+
+    # run the model
+    input_fp32 = torch.randn(4, 4, 4, 4)
+    res = model_int8(input_fp32)
+
+To learn more about dynamic quantization please see our `dynamic quantization tutorial
+<https://pytorch.org/tutorials/recipes/recipes/dynamic_quantization.html>`_.
+
+Static Quantization
+^^^^^^^^^^^^^^^^^^^^
+
+Static quantization quantizes the weights and activations of the model.  It
+fuses activations into preceding layers where possible.  It requires
+calibration with a representative dataset to determine optimal quantization
+parameters for activations. Post Training Quantization is typically used when
+both memory bandwidth and compute savings are important with CNNs being a
+typical use case.  Static quantization is also known as Post Training
+Quantization or PTQ.
+
+Diagram::
+
+    # original model
+    # all tensors and computations are in floating point
+    previous_layer_fp32 -- linear_fp32 -- activation_fp32 -- next_layer_fp32
+                        /
+        linear_weight_fp32
+
+    # statically quantized model
+    # weights and activations are in int8
+    previous_layer_int8 -- linear_with_activation_int8 -- next_layer_int8
+                        /
+      linear_weight_int8
+
+API Example::
+
+  import torch
+
+  # define a floating point model where some layers could be statically quantized
+  class M(torch.nn.Module):
+      def __init__(self):
+          super(M, self).__init__()
+          # QuantStub converts tensors from floating point to quantized
+          self.quant = torch.quantization.QuantStub()
+          self.conv = torch.nn.Conv2d(1, 1, 1)
+          self.relu = torch.nn.ReLU()
+          # DeQuantStub converts tensors from quantized to floating point
+          self.dequant = torch.quantization.DeQuantStub()
+
+      def forward(self, x):
+          # manually specify where tensors will be converted from floating
+          # point to quantized in the quantized model
+          x = self.quant(x)
+          x = self.conv(x)
+          x = self.relu(x)
+          # manually specify where tensors will be converted from quantized
+          # to floating point in the quantized model
+          x = self.dequant(x)
+          return x
+
+  # create a model instance
+  model_fp32 = M()
+
+  # model must be set to eval mode for static quantization logic to work
+  model_fp32.eval()
+
+  # attach a global qconfig, which contains information about what kind
+  # of observers to attach. Use 'fbgemm' for server inference and
+  # 'qnnpack' for mobile inference. Other quantization configurations such
+  # as selecting symmetric or assymetric quantization and MinMax or L2Norm
+  # calibration techniques can be specified here.
+  model_fp32.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+
+  # Fuse the activations to preceding layers, where applicable.
+  # This needs to be done manually depending on the model architecture.
+  # Common fusions include `conv + relu` and `conv + batchnorm + relu`
+  model_fp32_fused = torch.quantization.fuse_modules(model_fp32, [['conv', 'relu']])
+
+  # Prepare the model for static quantization. This inserts observers in
+  # the model that will observe activation tensors during calibration.
+  model_fp32_prepared = torch.quantization.prepare(model_fp32_fused)
+
+  # calibrate the prepared model to determine quantization parameters for activations
+  # in a real world setting, the calibration would be done with a representative dataset
+  input_fp32 = torch.randn(4, 1, 4, 4)
+  model_fp32_prepared(input_fp32)
+
+  # Convert the observed model to a quantized model. This does several things:
+  # quantizes the weights, computes and stores the scale and bias value to be
+  # used with each activation tensor, and replaces key operators with quantized
+  # implementations.
+  model_int8 = torch.quantization.convert(model_fp32_prepared)
+
+  # run the model, relevant calculations will happen in int8
+  res = model_int8(input_fp32)
+
+To learn more about static quantization, please see the `static quantization tutorial
+<https://pytorch.org/tutorials/advanced/static_quantization_tutorial.html>`_.
+
+Quantization Aware Training
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Quantization Aware Training models the effects of quantization during training
+allowing for higher accuracy compared to other quantization methods.  During
+training, all calculations are done in floating point, with fake_quant modules
+modeling the effects of quantization by clamping and rounding to simulate the
+effects of INT8.  After model conversion, weights and
+activations are quantized, and activations are fused into the preceding layer
+where possible.  It is commonly used with CNNs and yields a higher accuracy
+compared to static quantization.  Quantization Aware Training is also known as
+QAT.
+
+Diagram::
+
+  # original model
+  # all tensors and computations are in floating point
+  previous_layer_fp32 -- linear_fp32 -- activation_fp32 -- next_layer_fp32
+                        /
+      linear_weight_fp32
+
+  # model with fake_quants for modeling quantization numerics during training
+  previous_layer_fp32 -- fq -- linear_fp32 -- activation_fp32 -- fq -- next_layer_fp32
+                             /
+     linear_weight_fp32 -- fq
+
+  # quantized model
+  # weights and activations are in int8
+  previous_layer_int8 -- linear_with_activation_int8 -- next_layer_int8
+                       /
+     linear_weight_int8
+
+API Example::
+
+  import torch
+
+  # define a floating point model where some layers could benefit from QAT
+  class M(torch.nn.Module):
+      def __init__(self):
+          super(M, self).__init__()
+          # QuantStub converts tensors from floating point to quantized
+          self.quant = torch.quantization.QuantStub()
+          self.conv = torch.nn.Conv2d(1, 1, 1)
+          self.bn = torch.nn.BatchNorm2d(1)
+          self.relu = torch.nn.ReLU()
+          # DeQuantStub converts tensors from quantized to floating point
+          self.dequant = torch.quantization.DeQuantStub()
+
+      def forward(self, x):
+          x = self.quant(x)
+          x = self.conv(x)
+          x = self.bn(x)
+          x = self.relu(x)
+          x = self.dequant(x)
+          return x
+
+  # create a model instance
+  model_fp32 = M()
+
+  # model must be set to train mode for QAT logic to work
+  model_fp32.train()
+
+  # attach a global qconfig, which contains information about what kind
+  # of observers to attach. Use 'fbgemm' for server inference and
+  # 'qnnpack' for mobile inference. Other quantization configurations such
+  # as selecting symmetric or assymetric quantization and MinMax or L2Norm
+  # calibration techniques can be specified here.
+  model_fp32.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+
+  # fuse the activations to preceding layers, where applicable
+  # this needs to be done manually depending on the model architecture
+  model_fp32_fused = torch.quantization.fuse_modules(model_fp32,
+      [['conv', 'bn', 'relu']])
+
+  # Prepare the model for QAT. This inserts observers and fake_quants in
+  # the model that will observe weight and activation tensors during calibration.
+  model_fp32_prepared = torch.quantization.prepare_qat(model_fp32_fused)
+
+  # run the training loop (not shown)
+  training_loop(model_fp32_prepared)
+
+  # Convert the observed model to a quantized model. This does several things:
+  # quantizes the weights, computes and stores the scale and bias value to be
+  # used with each activation tensor, fuses modules where appropriate,
+  # and replaces key operators with quantized implementations.
+  model_fp32_prepared.eval()
+  model_int8 = torch.quantization.convert(model_fp32_prepared)
+
+  # run the model, relevant calculations will happen in int8
+  res = model_int8(input_fp32)
+
+To learn more about quantization aware training, please see the `QAT
+tutorial
+<https://pytorch.org/tutorials/advanced/static_quantization_tutorial.html>`_.
 
 Quantized Tensors
 ---------------------------------------
@@ -121,79 +376,8 @@ cover typical CNN and RNN models
     torch.nn.quantized
     torch.nn.quantized.dynamic
 
-Quantization Workflows
-----------------------
-
-PyTorch provides three approaches to quantize models.
-
-.. _quantization tutorials:
-   https://pytorch.org/tutorials/#quantization-experimental
-
-1. Post Training Dynamic Quantization: This is the simplest to apply form of
-   quantization where the weights are quantized ahead of time but the
-   activations are dynamically quantized  during inference. This is used
-   for situations where the model execution time is dominated by loading
-   weights from memory rather than computing the matrix multiplications.
-   This is true for for LSTM and Transformer type models with small
-   batch size. Applying dynamic quantization to a whole model can be
-   done with a single call to :func:`torch.quantization.quantize_dynamic()`.
-   See the `quantization tutorials`_
-2. Post Training Static Quantization: This is the most commonly used form of
-   quantization where the weights are quantized ahead of time and the
-   scale factor and bias for the activation tensors is pre-computed
-   based on observing the behavior of the model during a calibration
-   process. Post Training Quantization is typically when both memory bandwidth
-   and compute savings are important with CNNs being a typical use case.
-   The general process for doing post training quantization is:
-
-
-
-   1. Prepare the model:
-
-      a. Specify where the activations are quantized and dequantized explicitly
-         by adding QuantStub and DeQuantStub modules.
-      b. Ensure that modules are not reused.
-      c. Convert any operations that require requantization into modules
-
-   2. Fuse operations like conv + relu or conv+batchnorm + relu together to
-      improve both model accuracy and performance.
-
-   3. Specify the configuration of the quantization methods \'97 such as
-      selecting symmetric or asymmetric quantization and MinMax or
-      L2Norm calibration techniques.
-   4. Use the :func:`torch.quantization.prepare` to insert modules
-      that will observe activation tensors during calibration
-   5. Calibrate the model by running inference against a calibration
-      dataset
-   6. Finally, convert the model itself with the
-      torch.quantization.convert() method. This does several things: it
-      quantizes the weights, computes and stores the scale and bias
-      value to be used each activation tensor, and replaces key
-      operators quantized implementations.
-
-   See the `quantization tutorials`_
-
-
-3. Quantization Aware Training: In the rare cases where post training
-   quantization does not provide adequate accuracy training can be done
-   with simulated quantization using the
-   :class:`torch.quantization.FakeQuantize`. Computations will take place in
-   FP32 but with values clamped and rounded to simulate the effects of INT8
-   quantization. The sequence of steps is very similar.
-
-
-   1. Steps (1) and (2) are identical.
-
-   3. Specify the configuration of the fake quantization methods \'97 such as
-      selecting symmetric or asymmetric quantization and MinMax or Moving Average
-      or L2Norm calibration techniques.
-   4. Use the :func:`torch.quantization.prepare_qat` to insert modules
-      that will simulate quantization during training.
-   5. Train or fine tune the model.
-   6. Identical to step (6) for post training quantization
-
-   See the `quantization tutorials`_
-
+Quantization Customizations
+---------------------------
 
 While default implementations of observers to select the scale factor and bias
 based on observed tensor data are provided, developers can provide their own
@@ -218,9 +402,15 @@ prior to quantization. This is because currently quantization works on a module
 by module basis. Specifically, for all quantization techniques, the user needs to:
 
 1. Convert any operations that require output requantization (and thus have
-   additional parameters) from functionals to module form.
+   additional parameters) from functionals to module form (for example,
+   using ``torch.nn.ReLU`` instead of ``torch.nn.functional.relu``).
 2. Specify which parts of the model need to be quantized either by assigning
-   ```.qconfig`` attributes on submodules or by specifying ``qconfig_dict``
+   ``.qconfig`` attributes on submodules or by specifying ``qconfig_dict``.
+   For example, setting ``model.conv1.qconfig = None`` means that the
+   ``model.conv`` layer will not be quantized, and setting
+   ``model.linear1.qconfig = custom_qconfig`` means that the quantization
+   settings for ``model.linear1`` will be using ``custom_qconfig`` instead
+   of the global qconfig.
 
 For static quantization techniques which quantize activations, the user needs
 to do the following in addition:
@@ -237,6 +427,13 @@ to do the following in addition:
    :func:`torch.quantization.fuse_modules` API, which takes in lists of modules
    to be fused. We currently support the following fusions:
    [Conv, Relu], [Conv, BatchNorm], [Conv, BatchNorm, Relu], [Linear, Relu]
+
+Best Practices
+--------------
+
+1. Set the ``reduce_range`` argument on observers to `True` if you are using the
+   ``fbgemm`` backend.  This argument prevents overflow on some int8 instructions
+   by reducing the range of quantized data type by 1 bit.
 
 
 Modules that provide quantization functions and classes

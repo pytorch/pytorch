@@ -1,9 +1,7 @@
 from tools.codegen.model import *
-from tools.codegen.api.types import TensorOptionsArguments, CppArgument, ThisArgument
+from tools.codegen.api.types import *
 import tools.codegen.local as local
-from typing import Optional, Sequence, Union, Callable, List, Tuple
-import copy
-from dataclasses import dataclass
+from typing import Optional, Sequence, Union, List
 
 # This file describes the translation of JIT schema to the public C++
 # API, which is what people use when they call functions like at::add.
@@ -11,7 +9,7 @@ from dataclasses import dataclass
 # Prominent characteristics of the C++ API:
 #
 #   - dtype, layout, device and pin_memory are collected into
-#     a single C++ type TensorOptions  (the legacy dispatcher API
+#     a single C++ type TensorOptions  (the native functions API
 #     also has this, but tensor options is really most relevant
 #     for the C++ API; it makes calling kwarg factory functions
 #     pleasant)
@@ -32,7 +30,7 @@ def name(func: FunctionSchema) -> str:
     return name
 
 # Translation of "value types" in JIT schema to C++ API type.  Value
-# types look the same no matter if they are argument types are return
+# types look the same no matter if they are argument types or return
 # types.  Returns None if the type in question is not a value type.
 def valuetype_type(t: Type) -> Optional[str]:
     if isinstance(t, BaseType):
@@ -47,7 +45,7 @@ def valuetype_type(t: Type) -> Optional[str]:
         elif t.name in [BaseTy.bool, BaseTy.QScheme, BaseTy.Scalar,
                         BaseTy.ScalarType, BaseTy.Generator, BaseTy.Storage,
                         BaseTy.Layout, BaseTy.Device, BaseTy.MemoryFormat,
-                        BaseTy.Dimname, BaseTy.ConstQuantizerPtr]:
+                        BaseTy.Dimname, BaseTy.Stream, BaseTy.ConstQuantizerPtr]:
             # These C++ names line up with their schema names
             return t.name.name
         else:
@@ -86,7 +84,7 @@ def argumenttype_type(t: Type, *, mutable: bool) -> str:
             if mutable:
                 return 'Tensor &'  # TODO: fix this discrepancy
             else:
-                if local.use_c10_dispatcher() is UseC10Dispatcher.full:
+                if local.use_c10_dispatcher().dispatcher_uses_new_style():
                     return 'const c10::optional<Tensor>&'
                 else:
                     return 'const Tensor &'
@@ -101,7 +99,7 @@ def argumenttype_type(t: Type, *, mutable: bool) -> str:
         elif str(t.elem) == 'Dimname':
             return "DimnameList"
         # TODO: do something reasonable about lists of optional tensors
-        elif not local.use_c10_dispatcher() is UseC10Dispatcher.full and str(t.elem) == 'Tensor?':
+        elif (not local.use_c10_dispatcher().dispatcher_uses_new_style()) and str(t.elem) == 'Tensor?':
             return "TensorList"
         elem = argumenttype_type(t.elem, mutable=mutable)
         # TODO: explicitly qualify namespace here
@@ -146,13 +144,41 @@ def returns_type(rs: Sequence[Return]) -> str:
         args = ','.join(map(return_type, rs))
         return f'std::tuple<{args}>'
 
+def return_names(f: NativeFunction) -> Sequence[str]:
+    returns: List[str] = []
+    for i, r in enumerate(f.func.returns):
+        # If we have an inplace function, the return argument is
+        # implicitly named self.
+        # TODO: Consider incorporating this into the data model
+        if f.func.name.name.inplace:
+            assert i == 0, "illegal inplace function with multiple returns"
+            name = 'self'
+        # If we are out function, the name is the name of the
+        # corresponding output function (r.name will get recorded
+        # in field_name later.)
+        elif f.func.is_out_fn():
+            name = f.func.arguments.out[i].name
+        # If the return argument is explicitly named...
+        elif r.name:
+            name_conflict = any(r.name == a.name for a in f.func.schema_order_arguments())
+            if name_conflict and not f.func.is_out_fn():
+                name = f'{r.name}_return'
+            else:
+                name = r.name
+        # If there is no explicit name, we just name the output result,
+        # unless it's a multi-return, in which case it's result0,
+        # result1, etc (zero-indexed)
+        else:
+            name = 'result' if len(f.func.returns) == 1 else f'result{i}'
+        returns.append(name)
+    return returns
+
 JIT_TO_CPP_DEFAULT = {
     'False': 'false',
     'True': 'true',
     'None': 'c10::nullopt',  # UGH this one is type directed
     'Mean': 'at::Reduction::Mean',
     '[]': '{}',
-    '[0,1]': '{0,1}',  # TODO: stop special casing
     'contiguous_format': 'MemoryFormat::Contiguous',
     'long': 'at::kLong',
 }
@@ -181,22 +207,32 @@ def default_expr(d: str, t: Type) -> str:
                     i += 2
 
             return f'"{s}"'
+
+    if isinstance(t, OptionalType):
+        if d == 'None':
+            return 'c10::nullopt'
+
+        return default_expr(d, t.elem)
+
+    if isinstance(t, ListType):
+        if (d.startswith('[') and d.endswith(']')):
+            return '{' + d[1:-1] + '}'
+        elif t.size is None:
+            # NOTE: Sized lists can have scalar defaults
+            raise ValueError(f"Expected a list default '[...]' but found: '{d}'")
+
     return JIT_TO_CPP_DEFAULT.get(d, d)
 
 # Convert an argument into its C++ API form
-def argument(a: Union[Argument, TensorOptionsArguments, ThisArgument]) -> CppArgument:
+
+def argument_not_this(
+    a: Union[Argument, TensorOptionsArguments],
+) -> CppArgument:
     if isinstance(a, Argument):
         return CppArgument(
             type=argument_type(a),
             name=a.name,
             default=default_expr(a.default, a.type) if a.default is not None else None,
-            argument=a,
-        )
-    elif isinstance(a, ThisArgument):
-        return CppArgument(
-            type=argument_type(a.argument),
-            name="const_cast<Tensor&>(*this)",  # this is an abuse but it's convenient
-            default=None,
             argument=a,
         )
     elif isinstance(a, TensorOptionsArguments):
@@ -214,100 +250,42 @@ def argument(a: Union[Argument, TensorOptionsArguments, ThisArgument]) -> CppArg
     else:
         assert_never(a)
 
-@dataclass(frozen=True)
-class CppSignature:
-    returns: Tuple[Return, ...]
-    arguments: Tuple[Union[Argument, TensorOptionsArguments, ThisArgument], ...]
-
-    def cpp_arguments(self) -> Sequence[CppArgument]:
-        return list(map(argument, self.arguments))
-
-    # Return arguments as a comma separated list, i.e. like they would be in a C++
-    # function signature. Include default values for arguments.
-    def cpp_arguments_str(self, with_defaults: bool) -> str:
-        args_without_this = [argument(a) for a in self.arguments if not isinstance(a, ThisArgument)]
-        if with_defaults:
-            return ', '.join(map(str, args_without_this))
-        else:
-            return ', '.join(map(lambda s: s.str_no_default(), args_without_this))
-
-
-@dataclass(frozen=True)
-class CppSignatureGroup:
-    # arguments contains the arguments for the C++ signature as it is represented
-    # in the JIT schema.
-    signature: CppSignature
-
-    # gathered_signature is an alternative C++ signature in which TensorOptions are
-    # gathered into one TensorOptions object instead of being scattered into
-    # ScalarType, Layout, Device. This is only present for factory operators,
-    # other operators have this set to None. This can be used to generate a
-    # convenience API in the C++ frontend so users can call using TensorOptions objects.
-    gathered_signature: Optional[CppSignature]
-
-    # If it is a factory op, this returns the arguments for the convenience API
-    # that takes TensorOptions. If it is not a factory op and doesn't have
-    # a gathered signature, then this returns the regular signature instead.
-    def signature_prefer_gathered(self) -> CppSignature:
-        if self.gathered_signature is not None:
-            return self.gathered_signature
-        else:
-            return self.signature
-
-
-def signature_group(
-    func: FunctionSchema, *, method: bool = False,
-) -> CppSignatureGroup:
-    args: List[Union[Argument, ThisArgument, TensorOptionsArguments]] = []
-    args.extend(func.out_arguments)
-
-    if method:
-        args.extend(ThisArgument(a) if a.name == "self" else a for a in func.arguments)
+def argument(
+    a: Union[Argument, TensorOptionsArguments, SelfArgument],
+) -> Union[CppSingleArgumentPack, CppThisArgumentPack]:
+    if isinstance(a, SelfArgument):
+        return CppThisArgumentPack(argument=a, type=argument_type(a.argument))
     else:
-        args.extend(func.arguments)
+        return CppSingleArgumentPack(argument_not_this(a))
 
-    gathered_args = copy.deepcopy(args)
-
-    # group up arguments for tensor options
-    def pred(name: str, ty: Type) -> Callable[[Argument], bool]:
-        return lambda a: a.name == name and a.type in [ty, OptionalType(ty)]
-    predicates = [  # order matters
-        pred('dtype', Type.parse('ScalarType')),
-        pred('layout', Type.parse('Layout')),
-        pred('device', Type.parse('Device')),
-        pred('pin_memory', Type.parse('bool')),
-    ]
-
-    has_tensoroptions_argument = False
-    i = 0
-    while i < len(func.kwarg_only_arguments):
-        # If there is enough space...
-        if i <= len(func.kwarg_only_arguments) - len(predicates):
-            # And the next len(predicates) arguments look like TensorOptions arguments
-            if all(p(a) for p, a in zip(predicates, func.kwarg_only_arguments[i : i + len(predicates)])):
-                has_tensoroptions_argument = True
-                # Group them together as one argument
-                gathered_args.append(TensorOptionsArguments(
-                    dtype=func.kwarg_only_arguments[i],
-                    layout=func.kwarg_only_arguments[i + 1],
-                    device=func.kwarg_only_arguments[i + 2],
-                    pin_memory=func.kwarg_only_arguments[i + 3],
-                ))
-                i += len(predicates)
-                continue
-        gathered_args.append(func.kwarg_only_arguments[i])
-        i += 1
-
-    args.extend(func.kwarg_only_arguments)
-
-    if has_tensoroptions_argument:
-        return CppSignatureGroup(
-            signature=CppSignature(arguments=tuple(args), returns=tuple(func.returns)),
-            gathered_signature=CppSignature(arguments=tuple(gathered_args), returns=tuple(func.returns)),
+def argument_faithful(
+    a: Union[Argument, TensorOptionsArguments, SelfArgument],
+) -> CppArgumentPack:
+    if isinstance(a, TensorOptionsArguments):
+        return CppTensorOptionsArgumentPack(
+            argument=a,
+            dtype=argument_not_this(a.dtype),
+            layout=argument_not_this(a.layout),
+            device=argument_not_this(a.device),
+            pin_memory=argument_not_this(a.pin_memory),
         )
     else:
-        assert gathered_args == args
-        return CppSignatureGroup(
-            signature=CppSignature(arguments=tuple(args), returns=tuple(func.returns)),
-            gathered_signature=None,
-        )
+        return argument(a)
+
+def group_arguments(
+    func: FunctionSchema, *, method: bool
+) -> Sequence[Union[Argument, TensorOptionsArguments, SelfArgument]]:
+    args: List[Union[Argument, SelfArgument, TensorOptionsArguments]] = []
+    args.extend(func.arguments.out)
+    args.extend(func.arguments.pre_self_positional)
+    if func.arguments.self_arg is not None:
+        if method:
+            args.append(func.arguments.self_arg)
+        else:
+            args.append(func.arguments.self_arg.argument)
+    args.extend(func.arguments.post_self_positional)
+    args.extend(func.arguments.pre_tensor_options_kwarg_only)
+    if func.arguments.tensor_options is not None:
+        args.append(func.arguments.tensor_options)
+    args.extend(func.arguments.post_tensor_options_kwarg_only)
+    return args

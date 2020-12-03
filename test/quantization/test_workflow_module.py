@@ -13,6 +13,7 @@ from torch.quantization import (
     default_debug_qconfig,
     default_observer,
     default_per_channel_weight_observer,
+    default_affine_fixed_qparams_fake_quant,
     get_observer_dict,
     prepare,
     QConfig,
@@ -481,6 +482,29 @@ class TestObserver(QuantizationTestCase):
             # Verify that state_dict matches exactly with original one.
             self.assertEqual(scripted.state_dict(), scripted_2.state_dict())
 
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_observer_qparams_respects_device_affinity(self):
+        """
+        Ensure that the scale and zero_point returned by the observer
+        are on the same device as the input tensor.
+        """
+        observerList = [MinMaxObserver(),
+                        MovingAverageMinMaxObserver(),
+                        PerChannelMinMaxObserver(),
+                        MovingAveragePerChannelMinMaxObserver()]
+        for obs in observerList:
+            device = torch.device('cuda:1')
+            x = torch.randn(1, 2, device=device)
+            obs.to(device)
+            result = obs(x)
+            scale, zero_point = obs.calculate_qparams()
+
+            self.assertEqual(x.device, scale.device)
+            self.assertEqual(x.device, zero_point.device)
+
+
 # HistogramObserver that works like it does on master
 class _ReferenceHistogramObserver(HistogramObserver):
     def __init__(self, *args, **kwargs):
@@ -735,7 +759,7 @@ class TestRecordHistogramObserver(QuantizationTestCase):
         self.assertEqual(myobs.max_val, 8.0)
         self.assertEqual(myobs.histogram, [2., 3., 3.])
 
-    @given(N=st.sampled_from([10, 1000, 10**6]),
+    @given(N=st.sampled_from([10, 1000]),
            bins=st.sampled_from([256, 512, 1024, 2048]),
            dtype=st.sampled_from([torch.qint8, torch.quint8]),
            qscheme=st.sampled_from([torch.per_tensor_affine, torch.per_tensor_symmetric]),
@@ -756,7 +780,7 @@ class TestRecordHistogramObserver(QuantizationTestCase):
         self.assertEqual(ref_qparams, my_qparams)
 
 
-class TestFakeQuantizePerTensor(TestCase):
+class TestFakeQuantize(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=torch.quint8)))
@@ -995,7 +1019,7 @@ class TestFakeQuantizePerTensor(TestCase):
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=[torch.quint8])),
            )
-    def test_fq_module(self, device, X):
+    def test_fq_module_per_tensor(self, device, X):
         np.random.seed(NP_RANDOM_SEED)
         X, (scale, zero_point, torch_type) = X
         quant_min = torch.iinfo(torch_type).min
@@ -1016,7 +1040,22 @@ class TestFakeQuantizePerTensor(TestCase):
         dX = _fake_quantize_per_tensor_affine_grad_reference(dout, X, fq_module.scale, fq_module.zero_point, quant_min, quant_max)
         np.testing.assert_allclose(dX.cpu().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
-    def test_fq_serializable(self):
+    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
+           X=hu.tensor(shapes=hu.array_shapes(1, 5,),
+                       qparams=hu.qparams(dtypes=torch.quint8)))
+    def test_fixed_qparams_fq_module(self, device, X):
+        X, (scale, zero_point, torch_type) = X
+        X = to_tensor(X, device)
+        fq_module = default_affine_fixed_qparams_fake_quant()
+        fixed_scale = fq_module.scale.clone()
+        fixed_zero_point = fq_module.zero_point.clone()
+        # run fq module and make sure the quantization parameters does not change
+        torch.quantization.enable_observer(fq_module)
+        fq_module(X)
+        self.assertEqual(fixed_scale, fq_module.scale)
+        self.assertEqual(fixed_zero_point, fq_module.zero_point)
+
+    def test_fq_serializable_per_tensor(self):
         observer = default_observer
         quant_min = 0
         quant_max = 255
@@ -1120,8 +1159,6 @@ class TestFakeQuantizePerTensor(TestCase):
         self.assertEqual(fq_module.calculate_qparams(),
                          loaded_module.calculate_qparams())
 
-
-class TestFakeQuantizePerChannel(TestCase):
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
@@ -1367,7 +1404,7 @@ class TestFakeQuantizePerChannel(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
            qparams=hu.qparams(dtypes=torch.qint8)))
-    def test_fq_module(self, device, X):
+    def test_fq_module_per_channel(self, device, X):
         np.random.seed(NP_RANDOM_SEED)
         X, (scale, zero_point, axis, torch_type) = X
         quant_min = torch.iinfo(torch_type).min
@@ -1390,7 +1427,7 @@ class TestFakeQuantizePerChannel(TestCase):
                                                               fq_module.zero_point, axis, quant_min, quant_max)
         np.testing.assert_allclose(dX.cpu().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
-    def test_fq_serializable(self):
+    def test_fq_serializable_per_channel(self):
         observer = default_per_channel_weight_observer
         quant_min = -128
         quant_max = 127

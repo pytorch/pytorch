@@ -47,13 +47,13 @@ const at::Tensor& TensorImpl::grad() const {
 TensorImpl::TensorImpl(
     Storage&& storage,
     DispatchKeySet key_set,
-    const caffe2::TypeMeta& data_type)
+    const caffe2::TypeMeta data_type)
     : TensorImpl(std::move(storage), key_set, data_type, storage.device()) {}
 
-TensorImpl::TensorImpl(DispatchKeySet key_set, const caffe2::TypeMeta& data_type, c10::optional<c10::Device> device_opt)
+TensorImpl::TensorImpl(DispatchKeySet key_set, const caffe2::TypeMeta data_type, c10::optional<c10::Device> device_opt)
     : TensorImpl({}, key_set, data_type, std::move(device_opt)) {}
 
-TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::TypeMeta& data_type,
+TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::TypeMeta data_type,
                        c10::optional<c10::Device> device_opt)
     : storage_(std::move(storage)),
       sizes_{0},
@@ -61,9 +61,11 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
       numel_(0),
       data_type_(data_type),
       device_opt_(device_opt) {
+
+  init_bitfields();
+
   if (!key_set.empty()) {
-    AT_ASSERT(data_type.id() ==  caffe2::TypeIdentifier::uninitialized() ||
-              device_opt_.has_value());
+    TORCH_INTERNAL_ASSERT(data_type == ScalarType::Undefined || device_opt_.has_value());
     // UndefinedTensorImpl is a singleton, so we skip logging it
     C10_LOG_API_USAGE_ONCE("tensor.create");
   }

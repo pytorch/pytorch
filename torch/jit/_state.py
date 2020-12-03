@@ -61,7 +61,6 @@ _python_cu = torch._C.CompilationUnit()
 _script_classes = {}
 
 def _add_script_class(cls, name):
-    cls.__torch_script_class__ = True
     global _script_classes
     _script_classes[name] = cls
 

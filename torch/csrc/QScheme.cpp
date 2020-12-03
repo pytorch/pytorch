@@ -22,12 +22,13 @@ PyObject *THPQScheme_New(at::QScheme qscheme, const std::string& name)
   return self.release();
 }
 
-PyObject *THPQScheme_reduce(THPQScheme *self, PyObject *noargs) {
+PyObject *THPQScheme_reduce(PyObject *_self, PyObject *noargs) {
+  auto self = (THPQScheme*)_self;
   return THPUtils_packString(self->name);
 }
 
 static PyMethodDef THPQScheme_methods[] = {
-  {"__reduce__", (PyCFunction)THPQScheme_reduce, METH_NOARGS, nullptr},
+  {"__reduce__", THPQScheme_reduce, METH_NOARGS, nullptr},
   {nullptr}  /* Sentinel */
 };
 
