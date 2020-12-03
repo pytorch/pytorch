@@ -160,10 +160,10 @@ bool InterpreterState::run(Stack& stack) {
         tupleConstruct(stack, inst.X);
         ++pc;
       } break;
-      // case TUPLE_SLICE: {
-      //   tupleSlice(stack, inst.X, inst.X + inst.N);
-      //   ++pc;
-      // } break;
+      case TUPLE_SLICE: {
+        tupleSlice(stack, inst.X, inst.X + inst.N);
+        ++pc;
+      } break;
       case DICT_CONSTRUCT: {
         auto type = code_->types_[inst.X]->expect<at::DictType>();
         dictConstruct(stack, type, inst.N);
