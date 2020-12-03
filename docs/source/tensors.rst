@@ -461,6 +461,7 @@ view of a storage and defines numeric operations on it.
       :noindex:
    .. automethod:: mode
    .. automethod:: movedim
+   .. automethod:: moveaxis
    .. automethod:: mul
    .. automethod:: mul_
    .. automethod:: multiply
