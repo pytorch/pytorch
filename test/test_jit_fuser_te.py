@@ -1288,6 +1288,7 @@ class TestTEFuser(JitTestCase):
             return lambda x, y: fn(x, y)
 
         dtypes = [
+            # FIXME: Fails in IR Eval: torch.int8 and_ cpu
             torch.int8,
             torch.uint8,
             torch.int16,
@@ -1344,7 +1345,6 @@ class TestTEFuser(JitTestCase):
                 if op not in fp_only or dtype.is_floating_point:
                     self.assertAllFused(t.graph_for(x, y))
             except Exception as e:
-                raise e
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), op.__name__, device])
                 )
