@@ -1206,6 +1206,18 @@ class TestNN(NNTestCase):
         module_list.extend(s.modules())
         check()
 
+        # verify the correct exception is thrown when calling ModuleList
+        try:
+            module_list()
+        except Exception as e:
+            self.assertIsInstance(e, NotImplementedError)
+        
+        try:
+            module_list(torch.rand(1,3))
+        except Exception as e:
+            self.assertIsInstance(e, NotImplementedError)
+
+
     def test_ModuleDict(self):
         modules = OrderedDict([
             ('act', nn.ReLU()),
@@ -1298,6 +1310,17 @@ class TestNN(NNTestCase):
         self.assertEqual(len(module_dict), 0)
         modules.clear()
         check()
+
+        # verify the correct exception is thrown when calling ModuleDict
+        try:
+            module_dict()
+        except Exception as e:
+            self.assertIsInstance(e, NotImplementedError)
+        
+        try:
+            module_dict(torch.rand(1,3))
+        except Exception as e:
+            self.assertIsInstance(e, NotImplementedError)
 
     def test_ParameterList(self):
         def make_param():
