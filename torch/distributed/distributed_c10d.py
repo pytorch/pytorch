@@ -147,7 +147,7 @@ reduce_op = _reduce_op()
 
 
 class group(object):
-    WORLD = object()
+    WORLD: Optional[ProcessGroup] = None
 
 
 class GroupMember(object):
@@ -166,7 +166,6 @@ _pg_names: Dict[ProcessGroup, str] = {}
 _pg_group_ranks: Dict[ProcessGroup, Dict[int, int]] = {}
 
 # Default process group state
-_default_pg: Optional[ProcessGroup] = None
 _default_pg_init_method = None
 
 # Process group count for default naming
@@ -219,8 +218,8 @@ def _check_default_pg() -> ProcessGroup:
     Helper that checks if the default ProcessGroup has been initialized, with
     assertion.
     """
-    if _default_pg is not None:
-        return _default_pg
+    if group.WORLD is not None:
+        return group.WORLD
     else:
         raise RuntimeError("Default process group is not initialized")
 
@@ -306,7 +305,7 @@ def is_initialized():
     """
     Checking if the default process group has been initialized
     """
-    return _default_pg is not None
+    return group.WORLD is not None
 
 
 def _get_default_group():
@@ -316,7 +315,7 @@ def _get_default_group():
     if not is_initialized():
         raise RuntimeError("Default process group has not been initialized, "
                            "please make sure to call init_process_group.")
-    return _default_pg
+    return group.WORLD
 
 
 def _get_default_store():
@@ -421,14 +420,13 @@ def init_process_group(backend,
     """
     global _pg_group_ranks
     global _backend
-    global _default_pg
     global _default_pg_init_method
 
     if not isinstance(timeout, timedelta):
         raise RuntimeError("Expected timeout argument to be of type"
                            "datetime.timedelta")
 
-    if _default_pg is not None:
+    if group.WORLD is not None:
         raise RuntimeError("trying to initialize the default process group "
                            "twice!")
 
@@ -450,7 +448,7 @@ def init_process_group(backend,
                 "are ignored since they are assigned by the "
                 "MPI runtime.".format(world_size, rank))
 
-        _default_pg = _new_process_group_helper(
+        group.WORLD = _new_process_group_helper(
             -1,
             -1,
             [],
@@ -467,7 +465,7 @@ def init_process_group(backend,
             store, rank, world_size = next(rendezvous_iterator)
             store.set_timeout(timeout)
 
-        _default_pg = _new_process_group_helper(
+        group.WORLD = _new_process_group_helper(
             world_size,
             rank,
             [],
@@ -476,8 +474,8 @@ def init_process_group(backend,
             group_name=group_name,
             timeout=timeout)
 
-    _pg_group_ranks[_default_pg] = {i: i for i in range(_default_pg.size())}
-    _backend = _pg_map[_default_pg][0]
+    _pg_group_ranks[group.WORLD] = {i: i for i in range(group.WORLD.size())}
+    _backend = _pg_map[group.WORLD][0]
     _default_pg_init_method = init_method
 
     # barrier at the end to ensure that once we return from this method, all
@@ -589,7 +587,6 @@ def destroy_process_group(group=group.WORLD):
     global _pg_map
     global _pg_names
     global _pg_group_ranks
-    global _default_pg
     global _default_pg_init_method
     global _group_count
 
@@ -597,7 +594,7 @@ def destroy_process_group(group=group.WORLD):
         return
 
     if group == GroupMember.WORLD:
-        pg = _default_pg
+        pg = group.WORLD
     else:
         pg = group
 
@@ -606,7 +603,7 @@ def destroy_process_group(group=group.WORLD):
         raise RuntimeError("Invalid process group specified")
 
     if group == GroupMember.WORLD:
-        _default_pg = None
+        group.WORLD = None
         _default_pg_init_method = None
         _pg_map.clear()
         _pg_names.clear()
@@ -636,7 +633,8 @@ def get_rank(group=group.WORLD):
     ``world_size``.
 
     Arguments:
-        group (ProcessGroup, optional): The process group to work on
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
 
     Returns:
         The rank of the process group
@@ -658,7 +656,8 @@ def get_world_size(group=group.WORLD):
     Returns the number of processes in the current process group
 
     Arguments:
-        group (ProcessGroup, optional): The process group to work on
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
 
     Returns:
         The world size of the process group
@@ -681,7 +680,8 @@ def isend(tensor,
     Arguments:
         tensor (Tensor): Tensor to send.
         dst (int): Destination rank.
-        group (ProcessGroup, optional): The process group to work on
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
         tag (int, optional): Tag to match send with remote recv
 
     Returns:
@@ -711,7 +711,8 @@ def irecv(tensor,
     Arguments:
         tensor (Tensor): Tensor to fill with received data.
         src (int): Source rank.
-        group (ProcessGroup, optional): The process group to work on
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
         tag (int, optional): Tag to match recv with remote send
 
     Returns:
@@ -741,7 +742,8 @@ def send(tensor,
     Arguments:
         tensor (Tensor): Tensor to send.
         dst (int): Destination rank.
-        group (ProcessGroup, optional): The process group to work on
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
         tag (int, optional): Tag to match send with remote recv
 
     """
@@ -768,7 +770,8 @@ def recv(tensor,
         tensor (Tensor): Tensor to fill with received data.
         src (int, optional): Source rank. Will receive from any
             process if unspecified.
-        group (ProcessGroup, optional): The process group to work on
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
         tag (int, optional): Tag to match recv with remote send
 
     Returns:
@@ -816,7 +819,8 @@ class P2POp(object):
             ``torch.distributed.irecv``.
         tensor (Tensor): Tensor to send or receive.
         peer (int): Destination or source rank.
-        group (ProcessGroup, optional): The process group to work on.
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
         tag (int, optional): Tag to match send with recv.
     """
     def __init__(self, op, tensor, peer, group=group.WORLD, tag=0):
@@ -920,7 +924,8 @@ def broadcast_multigpu(tensor_list,
             for all the distributed processes calling this function.
 
         src (int): Source rank.
-        group (ProcessGroup, optional): The process group to work on
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
         src_tensor (int, optional): Source tensor rank within ``tensor_list``
 
@@ -963,7 +968,8 @@ def broadcast(tensor,
         tensor (Tensor): Data to be sent if ``src`` is the rank of current
             process, and tensor to be used to save received data otherwise.
         src (int): Source rank.
-        group (ProcessGroup, optional): The process group to work on
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
 
     Returns:
@@ -1020,7 +1026,8 @@ def all_reduce_multigpu(tensor_list,
         op (optional): One of the values from
             ``torch.distributed.ReduceOp``
             enum.  Specifies an operation used for element-wise reductions.
-        group (ProcessGroup, optional): The process group to work on
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
 
     Returns:
@@ -1065,7 +1072,8 @@ def all_reduce(tensor,
         op (optional): One of the values from
             ``torch.distributed.ReduceOp``
             enum.  Specifies an operation used for element-wise reductions.
-        group (ProcessGroup, optional): The process group to work on
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
 
     Returns:
@@ -1146,7 +1154,8 @@ def all_reduce_coalesced(tensors,
         op (Optional[ReduceOp]): One of the values from
             ``torch.distributed.ReduceOp`` enum. Specifies an operation used for
             element-wise reductions.
-        group (Optional[ProcessGroup]): The process group to work on.
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
         async_op (Optional[bool]): Whether this op should be an async op.
 
     Returns:
@@ -1202,7 +1211,8 @@ def reduce_multigpu(tensor_list,
         op (optional): One of the values from
             ``torch.distributed.ReduceOp``
             enum.  Specifies an operation used for element-wise reductions.
-        group (ProcessGroup, optional): The process group to work on
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
         dst_tensor (int, optional): Destination tensor rank within
                                     ``tensor_list``
@@ -1251,7 +1261,8 @@ def reduce(tensor,
         op (optional): One of the values from
             ``torch.distributed.ReduceOp``
             enum.  Specifies an operation used for element-wise reductions.
-        group (ProcessGroup, optional): The process group to work on
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
 
     Returns:
@@ -1318,7 +1329,8 @@ def all_gather_multigpu(output_tensor_lists,
             Note that ``len(input_tensor_list)`` needs to be the same for
             all the distributed processes calling this function.
 
-        group (ProcessGroup, optional): The process group to work on
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
 
     Returns:
@@ -1614,7 +1626,8 @@ def all_gather(tensor_list,
         tensor_list (list[Tensor]): Output list. It should contain
             correctly-sized tensors to be used for output of the collective.
         tensor (Tensor): Tensor to be broadcast from current process.
-        group (ProcessGroup, optional): The process group to work on
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
 
     Returns:
@@ -1684,7 +1697,8 @@ def all_gather_coalesced(output_tensor_lists,
             correctly-sized tensors to be used for output of the collective.
         input_tensor_list (list[Tensor]): Tensors to be broadcast from
             current process. At least one tensor has to be non empty.
-        group (ProcessGroup, optional): The process group to work on
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op.
 
     Returns:
@@ -1769,7 +1783,8 @@ def gather(tensor,
             tensors to use for gathered data (default is None, must be specified
             on the destination rank)
         dst (int, optional): Destination rank (default is 0)
-        group (ProcessGroup, optional): The process group to work on
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
 
     Returns:
@@ -1826,7 +1841,8 @@ def scatter(tensor,
         scatter_list (list[Tensor]): List of tensors to scatter (default is
             None, must be specified on the source rank)
         src (int): Source rank (default is 0)
-        group (ProcessGroup, optional): The process group to work on
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
 
     Returns:
@@ -1913,7 +1929,8 @@ def reduce_scatter_multigpu(output_tensor_list,
             therefore ``len(input_tensor_lists[i])``) need to be the same for
             all the distributed processes calling this function.
 
-        group (ProcessGroup, optional): The process group to work on.
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op.
 
     Returns:
@@ -1958,7 +1975,8 @@ def reduce_scatter(output,
     Arguments:
         output (Tensor): Output tensor.
         input_list (list[Tensor]): List of tensors to reduce and scatter.
-        group (ProcessGroup, optional): The process group to work on.
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op.
 
     Returns:
@@ -2006,7 +2024,8 @@ def all_to_all_single(output,
         input_split_sizes: (list[Int], optional): Input split sizes for dim 0
             if specified None or empty, dim 0 of ``input`` tensor must divide
             equally by ``world_size``.
-        group (ProcessGroup, optional): The process group to work on.
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op.
 
     Returns:
@@ -2093,7 +2112,8 @@ def all_to_all(output_tensor_list,
         output_tensor_list (list[Tensor]): List of tensors to be gathered one
             per rank.
         input_tensor_list (list[Tensor]): List of tensors to scatter one per rank.
-        group (ProcessGroup, optional): The process group to work on.
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op.
 
     Returns:
@@ -2182,7 +2202,8 @@ def barrier(group=group.WORLD,
     if async_op is False, or if async work handle is called on wait().
 
     Arguments:
-        group (ProcessGroup, optional): The process group to work on
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
 
     Returns:
