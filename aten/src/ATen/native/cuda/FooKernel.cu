@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/resource_guard.h>
 #include <sstream>
 #include <torch/csrc/jit/frontend/code_template.h>
+#include <torch/csrc/jit/codegen/fuser/cuda/fused_kernel.h>
 #include <algorithm>
 #include <cctype>
 #include <unordered_map>
@@ -40,45 +41,6 @@ c10::optional<CUfunction> get_jitted_function(const JiteratorCache& cache, Jiter
     return c10::nullopt;
   }
   return it->second;
-}
-
-// TODO: update this
-static void getMajorMinor(
-    const cudaDeviceProp* const prop,
-    int& major,
-    int& minor) {
-  int nvrtc_major, nvrtc_minor;
-
-  AT_CUDA_NVRTC_CHECK(at::globalContext().getNVRTC().nvrtcVersion(&nvrtc_major, &nvrtc_minor));
-
-  // Short-circuits if NVRTC version too low
-  AT_ASSERT(nvrtc_major >= 6);
-
-  // Major and minor is determined by device properties and
-  // possibly "downcompiled" to a lower (compatible) compute architecture
-  // based on the NVRTC version
-  major = prop->major;
-  minor = prop->minor;
-  if (nvrtc_major <= 7 && prop->major > 5) { // 7 supports 2-5.x
-    major = 5;
-    minor = 0;
-  } else if (nvrtc_major <= 8 && prop->major > 6) { // 8 supports 2-6.x
-    major = 6;
-    minor = 0;
-  } else if (nvrtc_major <= 9 && prop->major >= 7) { // 9 supports 3-7.2
-    major = 7;
-    if (prop->major == 7 && prop->minor <= 2)
-      minor = prop->minor;
-    else
-      minor = 0;
-  } else if (nvrtc_major <= 10 && prop->major >= 7) { // 10 supports 3-7.5
-    major = 7;
-    if (prop->major == 7 && prop->minor <= 5) {
-      minor = prop->minor;
-    } else {
-      minor = 0;
-    }
-  }
 }
 
 static inline std::string string_repr(ScalarType t) {
@@ -193,7 +155,7 @@ CUfunction jit_pwise_function(
   // Acquires device and NVRTC properties (for compile arch and occupancy calculations)
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   int major, minor;
-  getMajorMinor(prop, major, minor);
+  torch::jit::fuser::cuda::getMajorMinor(prop, major, minor);
 
   // Creates the NVRTC program
   nvrtcProgram program;
@@ -255,7 +217,6 @@ void launch_jitted_pwise_function(
   // Acquires device and NVRTC properties (for compile arch and occupancy calculations)
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   int major, minor;
-  getMajorMinor(prop, major, minor);
 
 
   // Launches kernel on current stream
