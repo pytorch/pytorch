@@ -509,7 +509,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
         size_t reserver_size;
         MIOPEN_CHECK(miopenGetRNNTrainingReserveSize(handle, descs.rnn_desc.desc(), fn.tensors.seq_length, x_descs_arr.data(), &reserver_size));
         reserve = at::empty(reserver_size, input.options().dtype(kByte));
-        setMIOpenStreamToCurrent();
         MIOPEN_CHECK(miopenRNNForwardTraining(handle, descs.rnn_desc.desc(), fn.tensors.seq_length,
                 x_descs_arr.data(), x.data_ptr(),
                 descs.hx_desc.desc(), hx.data_ptr(),
@@ -521,7 +520,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
                 workspace.data_ptr(), workspace_size, reserve.data_ptr(), reserver_size ));
     } else { //Inference.
         reserve = at::empty({0}, input.options().dtype(kByte));
-        setMIOpenStreamToCurrent();
         MIOPEN_CHECK(miopenRNNForwardInference(handle, descs.rnn_desc.desc(), fn.tensors.seq_length,
                 x_descs_arr.data(), x.data_ptr(),
                 descs.hx_desc.desc(), hx.data_ptr(),
@@ -630,7 +628,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> miopen_rnn_backward_input(
         ));
     auto workspace = at::empty(workspace_size, input.options().dtype(kByte));
 
-    setMIOpenStreamToCurrent();
     MIOPEN_CHECK(miopenRNNBackwardData(
         handle,
         descs.rnn_desc.desc(),
@@ -715,7 +712,6 @@ std::vector<Tensor> miopen_rnn_backward_weight(
     auto x_descs_arr = descs.get_x_descs();
     auto y_descs_arr = descs.get_y_descs();
 
-    setMIOpenStreamToCurrent();
     MIOPEN_CHECK(miopenRNNBackwardWeights(
         handle,
         descs.rnn_desc.desc(),

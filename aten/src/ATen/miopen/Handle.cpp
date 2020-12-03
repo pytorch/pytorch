@@ -1,3 +1,5 @@
+#include <ATen/ATen.h>
+#include <aten/src/THH/THH.h>
 #include <ATen/miopen/Handle.h>
 
 #include <ATen/miopen/Exceptions.h>
@@ -33,7 +35,9 @@ miopenHandle_t getMiopenHandle()
   HIP_CHECK(hipGetDevice(&device));
 
   std::lock_guard<std::mutex> guard(mutex);
-  return handles[device].handle;
+  auto handle = handles[device].handle;
+  MIOPEN_CHECK(miopenSetStream(handle, at::hip::getCurrentHIPStream()));
+  return handle;
 }
 
 }} // namespace at::native
