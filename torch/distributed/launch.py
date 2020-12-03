@@ -180,7 +180,7 @@ def parse_args():
                         help="Master node (rank 0)'s free port that needs to "
                              "be used for communication during distributed "
                              "training")
-    parser.add_argument("--dist_url", type=str,
+    parser.add_argument("--init_method", type=str,
                         help="url used to setup distributed traning"
                              "For Filestore, it's value should be like file:///c:/tmp/ddp_filestore"
                         )
@@ -258,14 +258,13 @@ def main():
             # create the relative directory
             os.mkdir(os.path.join(os.getcwd(), args.logdir))
 
-    if args.dist_url:
-        url_obj = urlparse(args.dist_url)
+    if args.init_method:
+        url_obj = urlparse(args.init_method)
         if url_obj.scheme == "file":
             if args.nnodes > 1:
-                raise ValueError("FileStore only supports one node")
-            else:
-                check_filename(urllib.request.url2pathname(url_obj.path))
-                current_env["INIT_METHOD"] = args.dist_url
+                print("You're using FileStore on {} nodes, please make sure it's a shared network path".format(args.nnodes))
+            check_filename(urllib.request.url2pathname(url_obj.path))
+            current_env["INIT_METHOD"] = args.init_method
 
     subprocess_file_handles = []
 
