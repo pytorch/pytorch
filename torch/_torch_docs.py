@@ -3894,6 +3894,11 @@ they are of size 1. Otherwise, :attr:`dim` is squeezed
 (see :func:`torch.squeeze`), resulting in both the :attr:`values` and
 :attr:`indices` tensors having 1 fewer dimension than the :attr:`input` tensor.
 
+.. note::
+    When :attr:`input` is a CUDA tensor and there are multiple valid
+    :attr:`k` th values, this function may nondeterministically return
+    :attr:`indices` for any of them.
+
 Args:
     {input}
     k (int): k for the k-th smallest element
