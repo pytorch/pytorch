@@ -297,7 +297,7 @@ def gradcheck(
         if is_tensor_like(inp) and inp.requires_grad:
             if not (inp.dtype == torch.float64 or inp.dtype == torch.complex128):
                 warnings.warn(
-                    'The {}th input requires gradient and '
+                    f'Input #{idx} requires gradient and '
                     'is not a double precision floating point or complex. '
                     'This check will likely fail if all the inputs are '
                     'not of double precision floating point or complex. ')
