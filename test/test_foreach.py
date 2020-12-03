@@ -29,7 +29,7 @@ class TestForeach(TestCase):
     #
     # Unary ops
     #
-    @dtypes((*torch.testing.get_all_dtypes()))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_neg(self, device, dtype):
         for N in N_values:
             tensors = self._get_test_data(device, dtype, N)
@@ -53,7 +53,7 @@ class TestForeach(TestCase):
             self.assertEqual(res, expected)
             self.assertEqual(tensors, expected)
 
-    @dtypes((*torch.testing.get_all_dtypes()))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_sqrt(self, device, dtype):
         for N in N_values:
             tensors = self._get_test_data(device, dtype, N)
@@ -83,7 +83,7 @@ class TestForeach(TestCase):
                 torch._foreach_sqrt_(tensors)
                 self.assertEqual(tensors, expected)
 
-    @dtypes((*torch.testing.get_all_dtypes()))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_exp(self, device, dtype):
         for N in N_values:
             tensors = self._get_test_data(device, dtype, N)
@@ -106,7 +106,7 @@ class TestForeach(TestCase):
             self.assertEqual(res, expected)
             self.assertEqual(tensors, expected)
 
-    @dtypes((*torch.testing.get_all_dtypes()))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_acos(self, device, dtype):
         for N in N_values:
             tensors = self._get_test_data(device, dtype, N)
@@ -139,13 +139,13 @@ class TestForeach(TestCase):
                 torch._foreach_acos_(tensors)
                 self.assertEqual(tensors, expected)
 
-    @dtypes((*torch.testing.get_all_dtypes()))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_asin(self, device, dtype):
         for N in N_values:
             tensors = self._get_test_data(device, dtype, N)
 
-            if dtype in torch.testing.integral_types_and(torch.bool) or \
-               dtype in [torch.half] and self.device_type == 'cpu' or \
+            # if dtype in torch.testing.integral_types_and(torch.bool) or \
+            if dtype in [torch.half] and self.device_type == 'cpu' or \
                dtype in [torch.bfloat16] and self.device_type == 'cuda':
                 with self.assertRaisesRegex(RuntimeError, "not implemented"):
                     expected = [torch.asin(tensors[i]) for i in range(N)]
@@ -173,7 +173,7 @@ class TestForeach(TestCase):
                 torch._foreach_asin_(tensors)
                 self.assertEqual(tensors, expected)
 
-    @dtypes((*torch.testing.get_all_dtypes()))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_atan(self, device, dtype):
         for N in N_values:
             tensors = self._get_test_data(device, dtype, N)
@@ -206,7 +206,7 @@ class TestForeach(TestCase):
                 torch._foreach_atan_(tensors)
                 self.assertEqual(tensors, expected)
 
-    @dtypes((*torch.testing.get_all_dtypes()))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_cosh(self, device, dtype):
         for N in N_values:
             tensors = self._get_test_data(device, dtype, N)
@@ -240,7 +240,7 @@ class TestForeach(TestCase):
                 torch._foreach_cosh_(tensors)
                 self.assertEqual(tensors, expected)
 
-    @dtypes((*torch.testing.get_all_dtypes()))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_sin(self, device, dtype):
         for N in N_values:
             tensors = self._get_test_data(device, dtype, N)
@@ -273,7 +273,7 @@ class TestForeach(TestCase):
                 torch._foreach_sin_(tensors)
                 self.assertEqual(tensors, expected)
 
-    @dtypes((*torch.testing.get_all_dtypes()))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_sinh(self, device, dtype):
         for N in N_values:
             tensors = self._get_test_data(device, dtype, N)
@@ -307,7 +307,7 @@ class TestForeach(TestCase):
                 torch._foreach_sinh_(tensors)
                 self.assertEqual(tensors, expected)
 
-    @dtypes((*torch.testing.get_all_dtypes()))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_tan(self, device, dtype):
         for N in N_values:
             tensors = self._get_test_data(device, dtype, N)
@@ -340,7 +340,7 @@ class TestForeach(TestCase):
                 torch._foreach_tan_(tensors)
                 self.assertEqual(tensors, expected)
 
-    @dtypes((*torch.testing.get_all_dtypes()))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_cos(self, device, dtype):
         for N in N_values:
             tensors = self._get_test_data(device, dtype, N)
@@ -372,7 +372,7 @@ class TestForeach(TestCase):
                 torch._foreach_cos_(tensors)
                 self.assertEqual(tensors, expected)
 
-    @dtypes((*torch.testing.get_all_dtypes()))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_log(self, device, dtype):
         for N in N_values:
             tensors = self._get_test_data(device, dtype, N)
@@ -404,7 +404,7 @@ class TestForeach(TestCase):
                 torch._foreach_log_(tensors)
                 self.assertEqual(tensors, expected)
 
-    @dtypes((*torch.testing.get_all_dtypes()))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_log10(self, device, dtype):
         for N in N_values:
             tensors = self._get_test_data(device, dtype, N)
@@ -436,7 +436,7 @@ class TestForeach(TestCase):
                 torch._foreach_log10_(tensors)
                 self.assertEqual(tensors, expected)
 
-    @dtypes((*torch.testing.get_all_dtypes()))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_log2(self, device, dtype):
         for N in N_values:
             tensors = self._get_test_data(device, dtype, N)
@@ -468,7 +468,7 @@ class TestForeach(TestCase):
                 torch._foreach_log2_(tensors)
                 self.assertEqual(tensors, expected)
 
-    @dtypes((*torch.testing.get_all_dtypes()))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_tanh(self, device, dtype):
         for N in N_values:
             tensors = self._get_test_data(device, dtype, N)
@@ -500,7 +500,7 @@ class TestForeach(TestCase):
                 torch._foreach_tanh_(tensors)
                 self.assertEqual(tensors, expected)
 
-    @dtypes((*torch.testing.get_all_dtypes()))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_ceil(self, device, dtype):
         for N in N_values:
             tensors = self._get_test_data(device, dtype, N)
@@ -510,10 +510,10 @@ class TestForeach(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "ceil is not supported for complex inputs"):
                     expected = [torch.ceil(tensors[i]) for i in range(N)]
 
-                with self.assertRaisesRegex(RuntimeError, "ceil is not supported for complex inputs"):
+                with self.assertRaisesRegex(RuntimeError, "supported for complex inputs"):
                     torch._foreach_ceil(tensors)
 
-                with self.assertRaisesRegex(RuntimeError, "ceil is not supported for complex inputs"):
+                with self.assertRaisesRegex(RuntimeError, "supported for complex inputs"):
                     torch._foreach_ceil_(tensors)
                 continue
 
@@ -558,14 +558,13 @@ class TestForeach(TestCase):
                 torch._foreach_ceil_(tensors)
                 self.assertEqual(tensors, expected)
 
-    @dtypes((*torch.testing.get_all_dtypes()))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_erf(self, device, dtype):
         for N in N_values:
             tensors = self._get_test_data(device, dtype, N)
 
             if dtype in [torch.half] and self.device_type == 'cpu' or \
-               dtype in [torch.complex64, torch.complex128] or \
-               dtype in torch.testing.integral_types_and(torch.bool):
+               dtype in [torch.complex64, torch.complex128]:
                 with self.assertRaisesRegex(RuntimeError, "not implemented"):
                     expected = [torch.erf(tensors[i]) for i in range(N)]
 
@@ -592,15 +591,14 @@ class TestForeach(TestCase):
                 torch._foreach_erf_(tensors)
                 self.assertEqual(tensors, expected)
 
-    @dtypes((*torch.testing.get_all_dtypes()))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_erfc(self, device, dtype):
         for N in N_values:
             tensors = self._get_test_data(device, dtype, N)
 
             if dtype in [torch.half] and self.device_type == 'cpu' or \
                dtype in [torch.complex64, torch.complex128] or \
-               dtype in [torch.bfloat16] and self.device_type == 'cuda' or \
-               dtype in torch.testing.integral_types_and(torch.bool):
+               dtype in [torch.bfloat16] and self.device_type == 'cuda':
                 with self.assertRaisesRegex(RuntimeError, "not implemented"):
                     expected = [torch.erfc(tensors[i]) for i in range(N)]
 
@@ -627,7 +625,7 @@ class TestForeach(TestCase):
                 torch._foreach_erfc_(tensors)
                 self.assertEqual(tensors, expected)
 
-    @dtypes((*torch.testing.get_all_dtypes()))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_expm1(self, device, dtype):
         for N in N_values:
             tensors = self._get_test_data(device, dtype, N)
@@ -662,7 +660,7 @@ class TestForeach(TestCase):
                 torch._foreach_expm1_(tensors)
                 self.assertEqual(tensors, expected)
 
-    @dtypes((*torch.testing.get_all_dtypes()))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_floor(self, device, dtype):
         for N in N_values:
             tensors = self._get_test_data(device, dtype, N)
@@ -672,10 +670,10 @@ class TestForeach(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "floor is not supported for complex inputs"):
                     expected = [torch.floor(tensors[i]) for i in range(N)]
 
-                with self.assertRaisesRegex(RuntimeError, "floor is not supported for complex inputs"):
+                with self.assertRaisesRegex(RuntimeError, "supported for complex inputs"):
                     torch._foreach_floor(tensors)
 
-                with self.assertRaisesRegex(RuntimeError, "floor is not supported for complex inputs"):
+                with self.assertRaisesRegex(RuntimeError, "supported for complex inputs"):
                     torch._foreach_floor_(tensors)
                 continue
 
@@ -709,14 +707,13 @@ class TestForeach(TestCase):
                 torch._foreach_floor_(tensors)
                 self.assertEqual(tensors, expected)
 
-    @dtypes((*torch.testing.get_all_dtypes()))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_log1p(self, device, dtype):
         for N in N_values:
             tensors = self._get_test_data(device, dtype, N)
 
             if dtype in [torch.half] and self.device_type == 'cpu' or \
-               dtype in [torch.complex64, torch.complex128] or \
-               dtype in torch.testing.integral_types_and(torch.bool):
+               dtype in [torch.complex64, torch.complex128]:
                 with self.assertRaisesRegex(RuntimeError, "not implemented"):
                     expected = [torch.log1p(tensors[i]) for i in range(N)]
 
@@ -743,7 +740,7 @@ class TestForeach(TestCase):
                 torch._foreach_log1p_(tensors)
                 self.assertEqual(tensors, expected)
 
-    @dtypes((*torch.testing.get_all_dtypes()))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_round(self, device, dtype):
         for N in N_values:
             tensors = self._get_test_data(device, dtype, N)
@@ -778,7 +775,7 @@ class TestForeach(TestCase):
                 torch._foreach_round_(tensors)
                 self.assertEqual(tensors, expected)
 
-    @dtypes((*torch.testing.get_all_dtypes()))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_frac(self, device, dtype):
         for N in N_values:
             tensors = self._get_test_data(device, dtype, N)
@@ -812,7 +809,7 @@ class TestForeach(TestCase):
                 torch._foreach_frac_(tensors)
                 self.assertEqual(tensors, expected)
 
-    @dtypes((*torch.testing.get_all_dtypes()))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_reciprocal(self, device, dtype):
         for N in N_values:
             tensors = self._get_test_data(device, dtype, N)
@@ -844,14 +841,13 @@ class TestForeach(TestCase):
                 torch._foreach_reciprocal_(tensors)
                 self.assertEqual(tensors, expected)
 
-    @dtypes((*torch.testing.get_all_dtypes()))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_sigmoid(self, device, dtype):
         for N in N_values:
             tensors = self._get_test_data(device, dtype, N)
 
             if dtype in [torch.half] and self.device_type == 'cpu' or \
-               dtype in [torch.complex64, torch.complex128] and self.device_type == 'cuda' or \
-               dtype in torch.testing.integral_types_and(torch.bool):
+               dtype in [torch.complex64, torch.complex128] and self.device_type == 'cuda':
                 with self.assertRaisesRegex(RuntimeError, "not implemented"):
                     expected = [torch.sigmoid(tensors[i]) for i in range(N)]
 
@@ -878,7 +874,7 @@ class TestForeach(TestCase):
                 torch._foreach_sigmoid_(tensors)
                 self.assertEqual(tensors, expected)
 
-    @dtypes((*torch.testing.get_all_dtypes()))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_trunc(self, device, dtype):
         for N in N_values:
             tensors = self._get_test_data(device, dtype, N)
@@ -888,10 +884,10 @@ class TestForeach(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "trunc is not supported for complex inputs"):
                     expected = [torch.trunc(tensors[i]) for i in range(N)]
 
-                with self.assertRaisesRegex(RuntimeError, "trunc is not supported for complex inputs"):
+                with self.assertRaisesRegex(RuntimeError, "supported for complex inputs"):
                     torch._foreach_trunc(tensors)
 
-                with self.assertRaisesRegex(RuntimeError, "trunc is not supported for complex inputs"):
+                with self.assertRaisesRegex(RuntimeError, "supported for complex inputs"):
                     torch._foreach_trunc_(tensors)
                 continue
 
@@ -925,7 +921,7 @@ class TestForeach(TestCase):
                 torch._foreach_trunc_(tensors)
                 self.assertEqual(tensors, expected)
 
-    @dtypes((*torch.testing.get_all_dtypes()))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_abs(self, device, dtype):
         for N in N_values:
             tensors1 = self._get_test_data(device, dtype, N)
