@@ -7,7 +7,7 @@ import torch
 from itertools import product as product
 from torch import Tensor
 from torch.testing._internal.common_utils import TemporaryFileName
-from typing import NamedTuple
+from typing import NamedTuple, Optional
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -947,3 +947,39 @@ class TestSaveLoad(JitTestCase):
         script_module = torch.jit.script(Foo())
         with self.assertRaises(RuntimeError):
             script_module.save("NonExist/path/test.pt")
+
+    def test_save_namedtuple_input_only(self):
+        """
+        Even if a NamedTuple is only used as an input argument, saving and
+        loading should work correctly.
+        """
+        global FooTuple  # see [local resolution in python]
+
+        class FooTuple(NamedTuple):
+            a: int
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x: FooTuple) -> torch.Tensor:
+                return torch.tensor(3)
+
+        m_loaded = self.getExportImportCopy(torch.jit.script(MyModule()))
+        output = m_loaded(FooTuple(a=5))
+        self.assertEqual(output, torch.tensor(3))
+
+    def test_save_namedtuple_output_only(self):
+        """
+        Even if a NamedTuple is only used as an output argument, saving and
+        loading should work correctly.
+        """
+        global FooTuple  # see [local resolution in python]
+
+        class FooTuple(NamedTuple):
+            a: int
+
+        class MyModule(torch.nn.Module):
+            def forward(self) -> Optional[FooTuple]:
+                return None
+
+        m_loaded = self.getExportImportCopy(torch.jit.script(MyModule()))
+        output = m_loaded()
+        self.assertEqual(output, None)
