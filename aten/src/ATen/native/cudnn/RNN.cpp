@@ -600,6 +600,9 @@ namespace {
                                             const TensorDescriptorListParams& tensors) {
     auto bsize = tensors.mini_batch;
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+    if (rnn.hidden_size == 1024 && prop->multiProcessorCount < 80) {
+      return false;
+    }
     if (prop->major == 7) {
       if (prop->minor == 5) {
         // Excludes Turing from using persistent rnn.
