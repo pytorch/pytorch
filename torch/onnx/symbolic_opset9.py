@@ -1366,17 +1366,7 @@ def index_select(g, self, dim, index):
     # In case of a scalar index, index_select returns a tensor with the same rank as the input.
     # To match this behavior in ONNX, we make index a 1D tensor so that the following gather
     # also produces a tensor with the same rank as the input.
-
-    index_const = sym_help._maybe_get_scalar(index)
-    index_dim = sym_help._get_tensor_rank(index)
-    if not sym_help._is_value(index_const):
-        # Index is a constant scalar. Make it a size 1 constant tensor.
-        index = g.op("Constant", value_t=torch.LongTensor([index_const]))
-    elif index_dim is not None:
-        if index_dim == 0:
-            # Index is a scalar. Reshape it to a size 1 tensor.
-            index = g.op("Reshape", index, g.op("Constant", value_t=torch.LongTensor([1])))
-    return g.op("Gather", self, index, axis_i=dim)
+    return sym_help._select_helper(g, self, dim, index)
 
 
 def index_put(g, self, indices_list_value, values, accumulate):
@@ -2222,9 +2212,15 @@ def flatten(g, input, start_dim, end_dim):
 
     return sym_help._flatten_helper(g, input, start_dim, end_dim, dim)
 
+# Emitted from `torch.nonzero(x, as_tuple=False)`
 @parse_args('v')
 def nonzero(g, input):
     return t(g, g.op('NonZero', input))
+
+
+# Emitted from `torch.nonzero(x, as_tuple=True)`
+def nonzero_numpy(g, input, _outputs=None):
+    return unbind(g, nonzero(g, input), 1, _outputs=_outputs)
 
 
 @parse_args('v')
@@ -2500,7 +2496,7 @@ def index(g, self, index):
 
     indices = [try_mask_to_index(idx) for idx in indices]
     if len(indices) == 1:
-        return index_select(g, self, 0, indices[0])
+        return sym_help._select_helper(g, self, 0, indices[0], apply_reshape=False)
     else:
         # Multiple tensors as indices. Each tensor could either be
         #   1. prim::Constant()
