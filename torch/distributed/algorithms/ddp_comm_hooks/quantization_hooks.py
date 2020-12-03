@@ -84,7 +84,7 @@ def quantization_pertensor_hook(
 
     def quantize_and_allgather(fut):
         # Store scale and zeros accross all workers.
-        all_ranks_s_and_z = fut.wait()[0]
+        all_ranks_s_and_z = fut.value()[0]
         # All workers quantize their own ``GradBucket`` tensors.
         quantized_tensor = _quantize_per_tensor_cuda(
             tensor, all_ranks_s_and_z[rank][0], all_ranks_s_and_z[rank][1]
@@ -97,10 +97,10 @@ def quantization_pertensor_hook(
             async_op=True,
         ).get_future()
 
-        return fut.wait()
+        return fut
 
     def dequantize_and_aggregate(fut):
-        all_ranks_quantized_tensor = fut.wait()[0]
+        all_ranks_quantized_tensor = fut.value()[0]
 
         aggregated_dequantized_tensor = torch.zeros_like(
             all_ranks_quantized_tensor[0], device=tensor.device, dtype=torch.float32
@@ -177,7 +177,7 @@ def quantization_perchannel_hook(
 
     def quantize_and_allgather(fut):
         # Store scale and zeros accross all workers.
-        all_ranks_s_and_z = fut.wait()[0]
+        all_ranks_s_and_z = fut.value()[0]
         # All workers quantize their corresponding ``GradBucket`` tensors.
         quantized_tensor = _quantize_per_channel_cuda(
             tensor_in_channels,
@@ -192,10 +192,10 @@ def quantization_perchannel_hook(
             async_op=True,
         ).get_future()
 
-        return fut.wait()
+        return fut
 
     def dequantize_and_aggregate(fut):
-        all_ranks_quantized_tensor = fut.wait()[0]
+        all_ranks_quantized_tensor = fut.value()[0]
 
         aggregated_dequantized_tensor = torch.zeros_like(
             all_ranks_quantized_tensor[0], device=tensor.device, dtype=torch.float32

@@ -169,11 +169,9 @@ def powerSGD_hook(
 
         torch.matmul(matrix.t(), p, out=q)
 
-        return [
-            dist.all_reduce(q, group=group_to_use, async_op=True)
-            .get_future()
-            .wait()[0]
-        ]
+        allreduce_q_fut = dist.all_reduce(q, group=group_to_use, async_op=True).get_future()
+
+        return allreduce_q_fut
 
     def decompress(fut):
         q = fut.value()[0].div_(world_size)
