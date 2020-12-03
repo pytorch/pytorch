@@ -447,6 +447,7 @@ Other Operations
     bincount
     block_diag
     broadcast_tensors
+    broadcast_shapes
     bucketize
     cartesian_prod
     cdist
