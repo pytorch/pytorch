@@ -214,9 +214,16 @@ class ProcessGroupNCCL : public ProcessGroup {
         at::IValue value,
         std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents)
         : at::cuda::CUDAFuture(c10::ListType::create(c10::TensorType::get())){
+      // Check that the device indices are distinct
+      std::unordered_set<c10::DeviceIndex> uniqueDeviceIndices;
       for (const at::cuda::CUDAEvent& event : *cudaEvents) {
         TORCH_INTERNAL_ASSERT(event.isCreated());
+        uniqueDeviceIndices.insert(event.device_index());
       }
+      TORCH_INTERNAL_ASSERT(
+        cudaEvents->size() == uniqueDeviceIndices.size(),
+        "Got ", cudaEvents->size(), " events, but only ",
+        uniqueDeviceIndices.size(), " distinct devices");
       for (const at::DataPtr& data_ptr : extractDataPtrs(value)) {
         TORCH_INTERNAL_ASSERT(
             std::find_if(

@@ -44,11 +44,12 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Distribution, Exponential, ExponentialFamily,
                                  FisherSnedecor, Gamma, Geometric, Gumbel,
                                  HalfCauchy, HalfNormal,
-                                 Independent, Laplace, LogisticNormal,
+                                 Independent, Kumaraswamy, Laplace, LogisticNormal,
                                  LogNormal, LowRankMultivariateNormal,
                                  MixtureSameFamily, Multinomial, MultivariateNormal,
-                                 NegativeBinomial, Normal, OneHotCategorical, Pareto,
-                                 Poisson, RelaxedBernoulli, RelaxedOneHotCategorical,
+                                 NegativeBinomial, Normal,
+                                 OneHotCategorical, OneHotCategoricalStraightThrough,
+                                 Pareto, Poisson, RelaxedBernoulli, RelaxedOneHotCategorical,
                                  StudentT, TransformedDistribution, Uniform,
                                  VonMises, Weibull, constraints, kl_divergence)
 from torch.distributions.constraint_registry import transform_to
@@ -240,6 +241,16 @@ EXAMPLES = [
             'reinterpreted_batch_ndims': 3,
         },
     ]),
+    Example(Kumaraswamy, [
+        {
+            'concentration1': torch.empty(2, 3).uniform_(1, 2).requires_grad_(),
+            'concentration0': torch.empty(2, 3).uniform_(1, 2).requires_grad_(),
+        },
+        {
+            'concentration1': torch.rand(4).uniform_(1, 2).requires_grad_(),
+            'concentration0': torch.rand(4).uniform_(1, 2).requires_grad_(),
+        },
+    ]),
     Example(Laplace, [
         {
             'loc': torch.randn(5, 5, requires_grad=True),
@@ -331,6 +342,11 @@ EXAMPLES = [
         },
     ]),
     Example(OneHotCategorical, [
+        {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True)},
+        {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True)},
+        {'logits': torch.tensor([[0.0, 0.0], [0.0, 0.0]], requires_grad=True)},
+    ]),
+    Example(OneHotCategoricalStraightThrough, [
         {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True)},
         {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True)},
         {'logits': torch.tensor([[0.0, 0.0], [0.0, 0.0]], requires_grad=True)},
@@ -601,6 +617,10 @@ BAD_EXAMPLES = [
         },
     ]),
     Example(OneHotCategorical, [
+        {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.1, -10.0, 0.2]], requires_grad=True)},
+        {'probs': torch.tensor([[0.0, 0.0], [0.0, 0.0]], requires_grad=True)},
+    ]),
+    Example(OneHotCategoricalStraightThrough, [
         {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.1, -10.0, 0.2]], requires_grad=True)},
         {'probs': torch.tensor([[0.0, 0.0], [0.0, 0.0]], requires_grad=True)},
     ]),
@@ -2249,6 +2269,42 @@ class TestDistributions(TestCase):
                                         scipy.stats.gumbel_r(loc=loc, scale=scale),
                                         'Gumbel(loc={}, scale={})'.format(loc, scale))
 
+    def test_kumaraswamy_shape(self):
+        concentration1 = torch.tensor(torch.randn(2, 3).abs(), requires_grad=True)
+        concentration0 = torch.tensor(torch.randn(2, 3).abs(), requires_grad=True)
+        concentration1_1d = torch.tensor(torch.randn(1).abs(), requires_grad=True)
+        concentration0_1d = torch.tensor(torch.randn(1).abs(), requires_grad=True)
+        self.assertEqual(Kumaraswamy(concentration1, concentration0).sample().size(), (2, 3))
+        self.assertEqual(Kumaraswamy(concentration1, concentration0).sample((5,)).size(), (5, 2, 3))
+        self.assertEqual(Kumaraswamy(concentration1_1d, concentration0_1d).sample().size(), (1,))
+        self.assertEqual(Kumaraswamy(concentration1_1d, concentration0_1d).sample((1,)).size(), (1, 1))
+        self.assertEqual(Kumaraswamy(1.0, 1.0).sample().size(), ())
+        self.assertEqual(Kumaraswamy(1.0, 1.0).sample((1,)).size(), (1,))
+
+    # Kumaraswamy distribution is not implemented in SciPy
+    # Hence these tests are explicit
+    def test_kumaraswamy_mean_variance(self):
+        c1_1 = torch.tensor(torch.randn(2, 3).abs(), requires_grad=True)
+        c0_1 = torch.tensor(torch.randn(2, 3).abs(), requires_grad=True)
+        c1_2 = torch.tensor(torch.randn(4).abs(), requires_grad=True)
+        c0_2 = torch.tensor(torch.randn(4).abs(), requires_grad=True)
+        cases = [(c1_1, c0_1), (c1_2, c0_2)]
+        for i, (a, b) in enumerate(cases):
+            m = Kumaraswamy(a, b)
+            samples = m.sample((60000, ))
+            expected = samples.mean(0)
+            actual = m.mean
+            error = (expected - actual).abs()
+            max_error = max(error[error == error])
+            self.assertLess(max_error, 0.01,
+                            "Kumaraswamy example {}/{}, incorrect .mean".format(i + 1, len(cases)))
+            expected = samples.var(0)
+            actual = m.variance
+            error = (expected - actual).abs()
+            max_error = max(error[error == error])
+            self.assertLess(max_error, 0.01,
+                            "Kumaraswamy example {}/{}, incorrect .variance".format(i + 1, len(cases)))
+
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_fishersnedecor(self):
         df1 = torch.randn(2, 3).abs().requires_grad_()
@@ -2622,6 +2678,18 @@ class TestDistributions(TestCase):
              (1, 2)),
             (Gumbel(loc=torch.tensor([0.]), scale=torch.tensor([[1.]])),
              (1, 1)),
+            (Kumaraswamy(concentration1=torch.tensor([1., 1.]), concentration0=1.),
+             (2,)),
+            (Kumaraswamy(concentration1=1, concentration0=torch.tensor([1., 1.])),
+             (2, )),
+            (Kumaraswamy(concentration1=torch.tensor([1., 1.]), concentration0=torch.tensor([1.])),
+             (2,)),
+            (Kumaraswamy(concentration1=torch.tensor([1., 1.]), concentration0=torch.tensor([[1.], [1.]])),
+             (2, 2)),
+            (Kumaraswamy(concentration1=torch.tensor([1., 1.]), concentration0=torch.tensor([[1.]])),
+             (1, 2)),
+            (Kumaraswamy(concentration1=torch.tensor([1.]), concentration0=torch.tensor([[1.]])),
+             (1, 1)),
             (Laplace(loc=torch.tensor([0., 0.]), scale=1),
              (2,)),
             (Laplace(loc=0, scale=torch.tensor([1., 1.])),
@@ -2700,6 +2768,14 @@ class TestDistributions(TestCase):
             (Gamma, {
                 'concentration': torch.tensor([0, 0]),
                 'rate': torch.tensor([1, 1, 1])
+            }),
+            (Kumaraswamy, {
+                'concentration1': torch.tensor([[1, 1]]),
+                'concentration0': torch.tensor([1, 1, 1, 1])
+            }),
+            (Kumaraswamy, {
+                'concentration1': torch.tensor([[[1, 1, 1], [1, 1, 1]]]),
+                'concentration0': torch.tensor([1, 1])
             }),
             (Laplace, {
                 'loc': torch.tensor([0, 0]),
@@ -3242,6 +3318,15 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(gumbel.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertEqual(gumbel.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
 
+    def test_kumaraswamy_shape_scalar_params(self):
+        kumaraswamy = Kumaraswamy(1, 1)
+        self.assertEqual(kumaraswamy._batch_shape, torch.Size())
+        self.assertEqual(kumaraswamy._event_shape, torch.Size())
+        self.assertEqual(kumaraswamy.sample().size(), torch.Size())
+        self.assertEqual(kumaraswamy.sample((3, 2)).size(), torch.Size((3, 2)))
+        self.assertEqual(kumaraswamy.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertEqual(kumaraswamy.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
+
     def test_vonmises_shape_tensor_params(self):
         von_mises = VonMises(torch.tensor([0., 0.]), torch.tensor([1., 1.]))
         self.assertEqual(von_mises._batch_shape, torch.Size((2,)))
@@ -3755,13 +3840,21 @@ class TestKL(TestCase):
 
 class TestConstraints(TestCase):
     def test_params_constraints(self):
+        normalize_probs_dists = (
+            Categorical,
+            Multinomial,
+            OneHotCategorical,
+            OneHotCategoricalStraightThrough,
+            RelaxedOneHotCategorical
+        )
+
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 dist = Dist(**param)
                 for name, value in param.items():
                     if isinstance(value, numbers.Number):
                         value = torch.tensor([value])
-                    if Dist in (Categorical, OneHotCategorical, Multinomial) and name == 'probs':
+                    if Dist in normalize_probs_dists and name == 'probs':
                         # These distributions accept positive probs, but elsewhere we
                         # use a stricter constraint to the simplex.
                         value = value / value.sum(-1, True)

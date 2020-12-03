@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <ATen/core/interned_strings.h>
+#include <c10/core/CPUAllocator.h>
 #include <caffe2/core/scope_guard.h>
 #include <caffe2/core/timer.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
@@ -643,7 +644,7 @@ size_t MemoryPlanner::compute_aligned_tensor_size(size_t nbytes) {
 }
 
 at::DataPtr MemoryPlanner::allocate_buffer(size_t size) {
-  at::Allocator* allocator = c10::GetCPUAllocator();
+  at::Allocator* allocator = c10::GetCPUCachingAllocator();
   return allocator->allocate(size);
 }
 

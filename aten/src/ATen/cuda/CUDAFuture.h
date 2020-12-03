@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -24,12 +25,9 @@ struct TORCH_CUDA_API CUDAFuture : at::ivalue::Future {
  public:
   using at::ivalue::Future::Future;
 
-  void setDataPtrExtractor(DataPtrExtractor data_ptr_extractor) override {
-    // To avoid races with other threads that may be using the extractor, we
-    // won't modify it after it's first set.
-    if (dataPtrExtractor_ == nullptr) {
-      dataPtrExtractor_ = std::move(data_ptr_extractor);
-    }
+  void setDataPtrExtractor(DataPtrExtractor dataPtrExtractor) override {
+    std::unique_lock<std::mutex> lock(dataPtrExtractorMutex_);
+    dataPtrExtractor_ = std::move(dataPtrExtractor);
   }
 
  protected:
@@ -125,12 +123,14 @@ struct TORCH_CUDA_API CUDAFuture : at::ivalue::Future {
 
  private:
   DataPtrExtractor dataPtrExtractor_;
+  std::mutex dataPtrExtractorMutex_;
 
   // FIXME This too is protected so that it can be used by FutureNCCL. Please
   // undo that once FutureNCCL is dropped in favor of a "vanilla" CUDAFuture.
  protected:
   std::vector<std::reference_wrapper<const at::DataPtr>> extractDataPtrs(
       const at::IValue& value) {
+    std::unique_lock<std::mutex> lock(dataPtrExtractorMutex_);
     std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
     if (dataPtrExtractor_ != nullptr) {
       // If a Python communication hook is used, dataPtrExtractor_ will be

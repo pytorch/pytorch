@@ -7,7 +7,6 @@ THC_API int THCTensor_(equal)(THCState *state, THCTensor *self, THCTensor *src);
 #if !defined(THC_REAL_IS_BOOL)
 
 THC_API void THCTensor_(mul)(THCState *state, THCTensor *self, THCTensor *src, scalar_t value);
-THC_API void THCTensor_(fmod)(THCState *state, THCTensor *self, THCTensor *src, scalar_t value);
 
 #endif
 
