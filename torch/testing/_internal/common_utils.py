@@ -13,6 +13,7 @@ import gc
 import types
 import math
 from functools import partial
+import locale
 import inspect
 import io
 import operator
@@ -333,7 +334,8 @@ else:
         with tempfile.TemporaryDirectory(suffix=suffix) as d:
             yield d
 
-IS_STDIN_UTF8_ENCODING = sys.stdin.encoding.lower() == 'utf-8'
+IS_STDIN_UTF8_ENCODING = sys.stdin.encoding.lower() == 'utf-8' and
+    (locale.getpreferredencoding().lower() in ['utf-8', 'cp65001'])
 
 def _check_module_exists(name):
     r"""Returns if a top-level module with :attr:`name` exists *without**
