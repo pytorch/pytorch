@@ -24,6 +24,7 @@ from caffe2.python.helpers.fc import *
 from caffe2.python.helpers.nonlinearity import *
 from caffe2.python.helpers.normalization import *
 from caffe2.python.helpers.pooling import *
+from caffe2.python.helpers.quantization import *
 from caffe2.python.helpers.tools import *
 from caffe2.python.helpers.train import *
 
@@ -52,6 +53,8 @@ class HelperWrapper(object):
         'concat': concat,
         'depth_concat': depth_concat,
         'sum': sum,
+        'reduce_sum': reduce_sum,
+        'sub': sub,
         'transpose': transpose,
         'iter': iter,
         'accuracy': accuracy,
@@ -65,10 +68,12 @@ class HelperWrapper(object):
         'add_weight_decay': add_weight_decay,
         'elementwise_linear': elementwise_linear,
         'layer_norm': layer_norm,
+        'mat_mul' : mat_mul,
         'batch_mat_mul' : batch_mat_mul,
         'cond' : cond,
         'loop' : loop,
         'db_input' : db_input,
+        'fused_8bit_rowwise_quantized_to_float' : fused_8bit_rowwise_quantized_to_float,
     }
 
     def __init__(self, wrapped):
