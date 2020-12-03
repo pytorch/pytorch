@@ -367,6 +367,17 @@ class AbstractTestCases:
                 device_hash_set.add(hash(torch.device(device)))
             self.assertEqual(len(device_set), len(device_hash_set))
 
+            def get_expected_device_repr(device):
+                if device.index is not None:
+                    return "device(type='{type}', index={index})".format(
+                        type=device.type, index=device.index)
+
+                return "device(type='{type}')".format(type=device.type)
+
+            for device in device_set:
+                dev = torch.device(device)
+                self.assertEqual(repr(dev), get_expected_device_repr(dev))
+
         def test_to(self):
             def test_copy_behavior(t, non_blocking=False):
                 self.assertIs(t, t.to(t, non_blocking=non_blocking))
@@ -2539,6 +2550,25 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             y = torch.empty_meta(2 ** 20)
             z = x + y
             self.assertEqual(z.size(), (2 ** 20, 2 ** 20))
+            self.assertRaises(RuntimeError, lambda: z[0][0].item())
+
+        def test_upsample_nearest1d_meta(self):
+            # TODO: this is not a sustainable way of testing meta functions,
+            # but I want some quick scaffolding first before a more
+            # integrated testing strategy
+            # NB: Can't make the exponent too big, or it will overflow
+            # signed 64-bit integer
+            x = torch.empty_meta(2 * 10 ** 8, 3, 2 * 10 ** 8)
+            z = torch.nn.functional.interpolate(x, scale_factor=2)
+            self.assertEqual(z.size(), (2 * 10 ** 8, 3, 4 * 10 ** 8))
+            self.assertRaises(RuntimeError, lambda: z[0][0][0].item())
+
+            # interpolate doesn't seem to support out=
+            # (not sure why passing None here doesn't work? How strange...)
+            z = torch.empty_meta(0)
+            torch._C._nn.upsample_nearest1d(x, (4 * 10 ** 8,), 2, out=z)
+            self.assertEqual(z.size(), (2 * 10 ** 8, 3, 4 * 10 ** 8))
+            self.assertRaises(RuntimeError, lambda: z[0][0][0].item())
 
         def test_normal_shape(self):
             warned = False
@@ -5305,7 +5335,7 @@ class TestTorchDeviceType(TestCase):
                 lambda x, y: x.expm1_(),
                 lambda x, y: x.floor(),
                 lambda x, y: x.floor_(),
-                # lambda x, y: x.fmod(2), # https://github.com/pytorch/pytorch/issues/24565
+                lambda x, y: x.fmod(2),
                 lambda x, y: x.frac(),
                 lambda x, y: x.hypot(y),
                 lambda x, y: x.hypot_(y),
@@ -6699,7 +6729,6 @@ tensor_op_tests = [
     ('log10', '', _small_3d, lambda t, d: [], 1e-2, 5e-2, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
     ('log1p', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types_no_half, [torch.bfloat16]),
     ('log2', '', _small_3d, lambda t, d: [], 1e-2, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
-    ('sigmoid', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('logit', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('sqrt', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
     ('tanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5,

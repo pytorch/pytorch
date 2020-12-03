@@ -857,18 +857,6 @@ class TestUnaryUfuncs(TestCase):
         torch.nn.functional.hardswish(inputTensorCpy, inplace=True)
         self.assertEqual(inputTensorCpy, expectedOutputTensor)
 
-    @onlyCPU
-    @dtypes(torch.float, torch.double)
-    def test_sigmoid(self, device, dtype):
-        # TODO: why not simulate math.sigmoid like with rsqrt?
-        inputValues = [-1000, -1, 0, 0.5, 1, 2, 1000]
-        expectedOutput = [0.0000, 0.2689, 0.5, 0.6225, 0.7311, 0.8808, 1.000]
-        precision_4dps = 0.0002
-
-        self.assertEqual(torch.tensor(inputValues, dtype=dtype, device=device).sigmoid(),
-                         torch.tensor(expectedOutput, dtype=dtype, device=device),
-                         atol=precision_4dps, rtol=0)
-
     @precisionOverride({torch.bfloat16: 1e-2, torch.float: 0.0002, torch.double: 0.0002})
     @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16)
     @dtypes(torch.float, torch.double)
