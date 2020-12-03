@@ -8,6 +8,7 @@
 #include <bitset>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorMeta.h>
 
 // TensorIterator is a helper class for element-wise operations, such as
 // arithmetic, comparisons, and trigonometric functions. It handles
@@ -131,13 +132,15 @@ enum class FastSetupType : uint8_t {
 };
 
 class TensorIteratorConfig;
+struct TensorIterator;
 
-struct CAFFE2_API TensorIterator {
+struct CAFFE2_API TensorIteratorBase : public impl::MetaBase {
   using DimMask = std::bitset<64>;
   using PtrVector = SmallVector<char*, 4>;
   using StrideVector = SmallVector<int64_t, 6>;
 
-  TensorIterator(TensorIteratorConfig&);
+  TensorIteratorBase();
+  void build(TensorIteratorConfig&);
 
   // The inner-loop function operates on the fastest moving dimension. It
   // implements element-wise operations in terms of 1-d strided tensors.
@@ -152,18 +155,9 @@ struct CAFFE2_API TensorIterator {
   using loop_t = c10::function_ref<void(char** data, const int64_t* strides, int64_t size)>;
   using loop2d_t = c10::function_ref<void(char** data, const int64_t* strides, int64_t size0, int64_t size1)>;
 
-  using loop_subiter_t = c10::function_ref<void(TensorIterator& subiter)>;
+  using loop_subiter_t = c10::function_ref<void(TensorIteratorBase& subiter)>;
 
   void foreach_reduced_elt(loop_subiter_t loop, bool parallelize=true);
-
-  static TensorIterator binary_float_op(Tensor& out, const Tensor& a, const Tensor& b);
-  static TensorIterator binary_op(Tensor& out, const Tensor& a, const Tensor& b);
-  static TensorIterator comparison_op(Tensor& out, const Tensor& a, const Tensor& b);
-  static TensorIterator unary_op(Tensor& out, const Tensor& a);
-  static TensorIterator unary_float_op(Tensor& out, const Tensor& a);
-  static TensorIterator nullary_op(Tensor& out);
-  static TensorIterator reduce_op(Tensor& out, const Tensor& a);
-  static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
 
   int ndim() const { return shape_.size(); }
   IntArrayRef shape() const { return shape_; }
@@ -297,8 +291,6 @@ struct CAFFE2_API TensorIterator {
   }
 
 protected:
-  void build(TensorIteratorConfig&);
-
   // Mutable reference as it moves tensors out of TensorIteratorConfig
   void populate_operands(TensorIteratorConfig&);
   void mark_outputs();
@@ -402,8 +394,26 @@ protected:
   bool is_reduction_ = false;
 };
 
+struct CAFFE2_API TensorIterator final : public TensorIteratorBase {
+  TensorIterator() : TensorIteratorBase() {}
+  // Slicing is OK, TensorIterator guaranteed NOT to have any fields
+  TensorIterator(const TensorIteratorBase& iter) : TensorIteratorBase(iter) {}
+
+  static TensorIterator binary_float_op(Tensor& out, const Tensor& a, const Tensor& b);
+  static TensorIterator binary_op(Tensor& out, const Tensor& a, const Tensor& b);
+  static TensorIterator comparison_op(Tensor& out, const Tensor& a, const Tensor& b);
+  static TensorIterator unary_op(Tensor& out, const Tensor& a);
+  static TensorIterator unary_float_op(Tensor& out, const Tensor& a);
+  static TensorIterator nullary_op(Tensor& out);
+  static TensorIterator reduce_op(Tensor& out, const Tensor& a);
+  static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
+
+  void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) override;
+};
+
 class CAFFE2_API TensorIteratorConfig final {
 public:
+  friend struct TensorIteratorBase;
   friend struct TensorIterator;
 
   TensorIteratorConfig() {}
@@ -478,7 +488,9 @@ public:
   // It would be better if this was && qualified, but this would be at the cost
   // of a lot of boilerplate above
   TensorIterator build() {
-    return TensorIterator(*this);
+    TensorIterator iter;
+    iter.build(*this);
+    return iter;
   }
 
 private:
@@ -508,9 +520,10 @@ private:
 struct CAFFE2_API SplitUntil32Bit {
   struct CAFFE2_API iterator {
     iterator() {};
-    iterator(const TensorIterator& iter);
+    iterator(const TensorIteratorBase& iter);
     iterator(iterator&&) = default;
 
+    // Guaranteed to be a TensorIterator proper!
     TensorIterator& operator*() const;
     iterator& operator++();
     bool operator==(const iterator& other) const {
@@ -524,13 +537,13 @@ struct CAFFE2_API SplitUntil32Bit {
     std::vector<std::unique_ptr<TensorIterator>> vec;
   };
 
-  SplitUntil32Bit(const TensorIterator& iter) : iter(iter) {}
+  SplitUntil32Bit(const TensorIteratorBase& iter) : iter(iter) {}
 
   iterator begin() const;
   iterator end() const;
 
 private:
-  const TensorIterator& iter;
+  const TensorIteratorBase& iter;
 };
 
 }  // namespace at
