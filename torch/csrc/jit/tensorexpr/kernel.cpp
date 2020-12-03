@@ -1902,7 +1902,7 @@ Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
   }
   auto dims = dimsFromSizes(sizesForValue(v));
   // We need to convert the output tensor so that its values are layed
-  // so that we viewed from the output strides the values are correct.
+  // so that whene viewed from the output strides the values are correct.
   // A contiguous Tensor of size(2, 3) with values 0-5 is layed out as:
   // [0] [1] [2] [3] [4] [5]
   // The same valued tensor with strides (2, 1) would be layed out like
@@ -1913,8 +1913,8 @@ Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
   // `val` we want here is equal to the indices for the output
   // tensor that would have given the same position as the output
   // The position is equal to the sum of stride[i] * index[i],
-  // and we can can calculate what the equivalent indices in the
-  // output tensor strides by iteratively compute the index of
+  // and we can can calculate the equivalent indices in the
+  // output tensor strides by iteratively computing the index of
   // the biggest stride:
   // absolute = ...
   // for stride in strides_from_largest_to_smallest:
