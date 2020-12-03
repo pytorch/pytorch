@@ -78,21 +78,17 @@ class Optimizer(object):
 
     def hook_for_profile(self):
         self._zero_grad_profile_name = "Optimizer.zero_grad#{}.zero_grad".format(self.__class__.__name__)
+        profile_name = "Optimizer.step#{}.step".format(self.__class__.__name__)
 
         def profile_hook_step(func):
 
             @functools.wraps(func)
             def wrapper(*args, **kwargs):
-                obj, *_ = args
-                profile_name = "Optimizer.step#{}.step".format(obj.__class__.__name__)
                 with torch.autograd.profiler.record_function(profile_name):
                     return func(*args, **kwargs)
             return wrapper
 
-        hooked = getattr(self.__class__.step, "hooked", None)
-        if not hooked:
-            self.__class__.step = profile_hook_step(self.__class__.step)
-            self.__class__.step.hooked = True
+        self.step = profile_hook_step(self.step)
 
     def state_dict(self):
         r"""Returns the state of the optimizer as a :class:`dict`.
