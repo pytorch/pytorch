@@ -54,7 +54,9 @@ static IValue Table(
   return Tup(std::move(ivalue_entries));
 }
 
-std::string getSourceRangeTrace(Node* node, const std::string& root_scope_string) {
+std::string getSourceRangeTrace(
+    Node* node,
+    const std::string& root_scope_string) {
   std::string source_range_trace;
   if (node->callstack()) {
     auto callstack_ptr = *(node->callstack());
@@ -103,8 +105,9 @@ std::string getModulePath(Node* node, const std::string& root_scope_string) {
   }
 }
 
-std::string getDebugInfo(Node* node, const std::string& root_scope_string){
-    return getModulePath(node, root_scope_string) + "{" + getSourceRangeTrace(node, root_scope_string) + "}";
+std::string getDebugInfo(Node* node, const std::string& root_scope_string) {
+  return getModulePath(node, root_scope_string) + "{" +
+      getSourceRangeTrace(node, root_scope_string) + "}";
 }
 
 std::string getModuleTypeName(const Module& module, const std::string& prefix) {
@@ -138,7 +141,8 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
       opnames.emplace_back(node->schema().operator_name());
       if (save_mobile_debug_info) {
         std::string root_scope_string = getModuleTypeName(module, "top");
-//        op_module_paths.emplace_back(getModulePath(node, root_scope_string));
+        //        op_module_paths.emplace_back(getModulePath(node,
+        //        root_scope_string));
         op_module_paths.emplace_back(getDebugInfo(node, root_scope_string));
       }
     }

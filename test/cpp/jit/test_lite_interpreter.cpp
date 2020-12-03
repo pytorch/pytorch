@@ -482,7 +482,9 @@ TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
   }
 
   std::unordered_set<std::string> expected_result(
-      {"top(C).forward{}", "top(C).A0(A).forward{self.A0.forward:}", "top(C).B0(B).forward{self.B0.forward:}"});
+      {"top(C).forward{}",
+       "top(C).A0(A).forward{self.A0.forward:}",
+       "top(C).B0(B).forward{self.B0.forward:}"});
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
