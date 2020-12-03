@@ -6,6 +6,8 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/LinearAlgebra.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/LegacyTHFunctionsCPU.h>
@@ -18,6 +20,8 @@
 
 namespace at {
 namespace native {
+
+DEFINE_DISPATCH(addr_stub);
 
 // Helper function for det methods.
 // For pivoted LU factorization A = P * L * U. Since we always have det(L) = 1,
@@ -107,62 +111,183 @@ Tensor pinverse(const Tensor& self, double rcond) {
   return at::matmul(V.conj() * S_pseudoinv.unsqueeze(-2), U.transpose(-2, -1).conj());
 }
 
-static inline Tensor _matrix_rank_helper(const Tensor& self, bool symmetric) {
+Tensor& linalg_matrix_rank_out(Tensor& result, const Tensor& self, optional<double> tol, bool hermitian) {
+  TORCH_CHECK(result.scalar_type() == ScalarType::Long,
+    "result dtype ", result.scalar_type(), " does not match the expected dtype ", ScalarType::Long);
+
+  // Matrices or batch of matrices are allowed
+  TORCH_CHECK(self.dim() >= 2, "linalg_matrix_rank: Expected as input a matrix or a batch of matrices, but got a tensor of size: ", self.sizes());
+
+  // matrix_rank assigns a scalar value for each matrix in the batch so
+  // result's shape is equal to self.shape[0:self.ndim-2]
+  // for single matrix result_shape = {}
+  auto result_shape = IntArrayRef(self.sizes().cbegin(), self.sizes().cend()-2);
+  at::native::resize_output(result, result_shape);
+
+  // NumPy doesn't take into account possible input with no elements and it errors on max not defined for this case
+  // Let's output 0 for this case, since that kind of matrices have zero number of non-zero rows, hence rank is 0.
+  if (self.numel() == 0) {
+    result.fill_(0);
+    return result;
+  }
+
+  // We compute matrix rank as the number of singular or absolute eigen values above 'tol' threshold
   Tensor S;
-  if (!symmetric) {
+  if (!hermitian) {
     Tensor U, V;
+    // TODO: replace self.svd with linalg_svd
     std::tie(U, S, V) = self.svd(/*some=*/true, /*compute_uv=*/false);
   } else {
-    Tensor eigvecs;
-    std::tie(S, eigvecs) = self.symeig(/*eigenvectors=*/false);
+    S = at::linalg_eigvalsh(self);
     S = S.abs();
   }
-  return S;
+
+  if (tol.has_value()) {
+    double tol_value = tol.value();
+    at::sum_out(result, S > tol_value, /*dim=*/-1);
+  } else {
+    ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
+    double tol_value = _get_epsilon(real_dtype) * std::max(self.size(-1), self.size(-2));
+    Tensor max_S = S.amax(/*dim=*/-1);
+    at::sum_out(result, S > max_S.mul_(tol_value).unsqueeze_(-1), /*dim=*/-1);
+  }
+  return result;
+}
+
+Tensor linalg_matrix_rank(const Tensor& self, optional<double> tol, bool hermitian) {
+  Tensor result = at::empty({0}, self.options().dtype(ScalarType::Long));
+  result = at::linalg_matrix_rank_out(result, self, tol, hermitian);
+  return result;
 }
 
 Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
-  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())) && self.dim() == 2,
-              "matrix_rank(", self.scalar_type(), "{", self.sizes(), "}): expected a 2D tensor "
-              "of floating types");
-
-  Tensor S = _matrix_rank_helper(self, symmetric);
-  return (S > tol).sum();
+  return at::linalg_matrix_rank(self, optional<double>(tol), symmetric);
 }
 
 Tensor matrix_rank(const Tensor& self, bool symmetric) {
-  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())) && self.dim() == 2,
-              "matrix_rank(", self.scalar_type(), "{", self.sizes(), "}): expected a 2D tensor "
-              "of floating types");
-
-  Tensor S = _matrix_rank_helper(self, symmetric);
-  double tol = _get_epsilon(self.scalar_type()) * std::max(self.size(0), self.size(1));
-  return (S > S.max().mul_(tol)).sum();
+  return at::linalg_matrix_rank(self, c10::nullopt, symmetric);
 }
 
 static void check_1d(const Tensor& t, const char* arg, const char* fn) {
  TORCH_CHECK(t.dim() == 1, fn, ": Expected 1-D argument ", arg, ", but got ", t.dim(), "-D");
 }
 
-Tensor addr(const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
-  TORCH_WARN(
-    "torch.addr is deprecated and may be removed in a future PyTorch release. "
-    "This function can be implemented using torch.outer as "
-    "alpha * torch.outer(vec1, vec2) + beta * input when beta is not zero, "
-    "alpha * torch.outer(vec1, vec2) when beta is zero.");
-
-  Tensor outer_result = at::outer(vec1, vec2) * alpha;
-  if (beta.to<double>() == 0.0) {
-    return outer_result;
-  }
-  return outer_result + (self * beta);
+static void check_addr_scalar(const ScalarType dtype,
+                              const Scalar scalar,
+                              const std::string& scalar_name) {
+  TORCH_CHECK(
+    !scalar.isBoolean() || dtype == ScalarType::Bool,
+    "Boolean ", scalar_name, " only supported for Boolean results.");
+  TORCH_CHECK(
+    isFloatingType(dtype) || isComplexType(dtype) || scalar.isIntegral(true),
+    "For integral input tensors, "
+    "argument ", scalar_name ," must not be a floating point number.");
 }
 
-Tensor& addr_(Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
+static TensorIterator build_addr_iter(Tensor& result,
+                                      const Tensor& self,
+                                      const Tensor& vec1,
+                                      const Tensor& vec2) {
+  check_1d(vec1, "vec1", "addr");
+  check_1d(vec2, "vec2", "addr");
+
+  Tensor self_;
+  if (&result != &self) {
+    std::tie(self_) = expand_size(self, {vec1.size(0), vec2.size(0)}, "addr");
+  } else {
+    self_ = self;
+  }
+  TORCH_CHECK(
+    self_.dim() == 2,
+    "2D tensor expected, got ", self_.dim(), "D tensor for input"
+  );
+  TORCH_CHECK(
+    self_.size(0) == vec1.size(0) && self_.size(1) == vec2.size(0),
+    "size mismatch, input: ", self_.sizes(),
+    ", v1: ", vec1.sizes(),
+    ", v2: ", vec2.sizes()
+  );
+
+  auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(true)
+    .add_output(result)
+    .add_input(self_)
+    .add_input(vec1.reshape({vec1.size(0), 1}))
+    .add_input(vec2)
+    .allow_cpu_scalars(true)
+    .promote_inputs_to_common_dtype(true)
+    .cast_common_dtype_to_outputs(true)
+    .enforce_safe_casting_to_output(true)
+    .build();
+  return iter;
+}
+
+Tensor addr(const Tensor& self,
+            const Tensor& vec1, const Tensor& vec2,
+            Scalar beta, Scalar alpha) {
+  Tensor result;
+  auto iter = build_addr_iter(result, self, vec1, vec2);
+
+  check_addr_scalar(iter.dtype(), beta, "beta");
+  check_addr_scalar(iter.dtype(), alpha, "alpha");
+
+  addr_stub(iter.device_type(), iter, beta, alpha);
+  return iter.output();
+}
+
+Tensor& addr_(Tensor& self,
+              const Tensor& vec1, const Tensor& vec2,
+              Scalar beta, Scalar alpha) {
   return at::addr_out(self, self, vec1, vec2, beta, alpha);
 }
 
-Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
+Tensor& addr_out(Tensor &result,
+                 const Tensor& self,
+                 const Tensor& vec1, const Tensor& vec2,
+                 Scalar beta, Scalar alpha) {
+  auto iter = build_addr_iter(result, self, vec1, vec2);
+
+  check_addr_scalar(iter.dtype(), beta, "beta");
+  check_addr_scalar(iter.dtype(), alpha, "alpha");
+
+  addr_stub(iter.device_type(), iter, beta, alpha);
+  return result;
+}
+
+// The math_addr and math_addr_out functions support backends
+// other than CPU and CUDA, such as XLA.
+// They are implemented using the composition of existing ops
+Tensor math_addr(const Tensor& self,
+                 const Tensor& vec1, const Tensor& vec2,
+                 Scalar beta, Scalar alpha) {
+  // when beta==0, values in self should be ignored,
+  // nans and infs in self should not propagate.
+  if (beta.toComplexDouble() == 0.0) {
+    if (alpha.toComplexDouble() == 1.0) {
+      return at::outer(vec1, vec2);
+    }
+    return alpha * at::outer(vec1, vec2);
+  }
+
+  if (beta.toComplexDouble() == 1.0) {
+    if (alpha.toComplexDouble() == 1.0) {
+      return self + at::outer(vec1, vec2);
+    }
+    return self + alpha * at::outer(vec1, vec2);
+  }
+
+  if (alpha.toComplexDouble() == 1.0) {
+    return beta * self + at::outer(vec1, vec2);
+  }
+  return beta * self + alpha * at::outer(vec1, vec2);
+}
+
+Tensor& math_addr_out(Tensor &result,
+                      const Tensor& self,
+                      const Tensor& vec1, const Tensor& vec2,
+                      Scalar beta, Scalar alpha) {
   auto addr_result = at::addr(self, vec1, vec2, beta, alpha);
+
   // Validates safe casting
   const auto result_dtype = addr_result.scalar_type();
   TORCH_CHECK(canCast(result_dtype, result.scalar_type()),
@@ -183,6 +308,46 @@ Tensor& ger_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
 
 Tensor ger(const Tensor& self, const Tensor& vec2) {
   return self.outer(vec2);
+}
+
+Tensor& inner_out(Tensor& out, const Tensor& self, const Tensor& other) {
+  checkDeviceType("inner()", {out, self, other}, self.device().type());
+
+  // If either self or other is a scalar just multiply them
+  if (self.dim() == 0 || other.dim() == 0) {
+    at::mul_out(out, self, other);
+    return out;
+  }
+
+  // Last dimension should match (tensordot does not enforce this)
+  TORCH_CHECK(
+      self.size(-1) == other.size(-1),
+      "inner() the last dimension must match on both input tensors but got shapes ",
+      self.sizes(),
+      " and ",
+      other.sizes());
+  
+  at::tensordot_out(out, self, other, -1, -1);
+  return out;
+}
+
+Tensor inner(const Tensor& self, const Tensor& other) {
+  checkDeviceType("inner()", {self, other}, self.device().type());
+
+  // If either self or other is a scalar just multiply them
+  if (self.dim() == 0 || other.dim() == 0) {
+    return self * other;
+  }
+
+  // Last dimension should match (tensordot does not enforce this)
+  TORCH_CHECK(
+      self.size(-1) == other.size(-1),
+      "inner() the last dimension must match on both input tensors but got shapes ",
+      self.sizes(),
+      " and ",
+      other.sizes());
+
+  return at::tensordot(self, other, -1, -1);
 }
 
 Tensor& outer_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
@@ -824,8 +989,8 @@ inline Tensor _blob_to_Tensor(
   // Blob is assumed to be a 1D array, that is why
   // we also insert a fake dimension so that the result could directly
   // be used in _compute_linear_combination
-  auto tensor = at::from_blob((void*)blob.begin(), blob.size(), in.dtype())
-    .unsqueeze(0);
+  auto tensor = at::from_blob((void*)blob.begin(), blob.size(),
+    c10::toValueType(in.scalar_type())).unsqueeze(0);
   return _move_memory_if_cuda_input(tensor, in);
 }
 
@@ -958,7 +1123,7 @@ Tensor compute_T12(const Tensor& A) {
     reinterpret_cast<void*>(&b),
     {num_prods, num_prods},
     {num_prods, 1},
-    A.dtype()
+    c10::toValueType(A.scalar_type())
   );
   bs = _move_memory_if_cuda_input(bs, A);
 
@@ -1030,7 +1195,7 @@ Tensor compute_T18(const Tensor& A) {
     reinterpret_cast<void*>(&b),
     {num_prods, num_prods},
     {num_prods, 1},
-    A.dtype()
+    c10::toValueType(A.scalar_type())
   );
   bs = _move_memory_if_cuda_input(bs, A);
 
@@ -1203,7 +1368,7 @@ Tensor backward_analytic_function_of_a_matrix(
     const Tensor& self, const Tensor& grad,
     const func_t& function_of_a_matrix
   ) {
-  auto self_transposed = self.transpose(-2, -1);
+  auto self_transposed = self.transpose(-2, -1).conj();
   auto self_transposed_sizes = self_transposed.sizes().vec();
   self_transposed_sizes[self.dim() - 2] <<= 1;
   self_transposed_sizes[self.dim() - 1] <<= 1;

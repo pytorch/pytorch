@@ -286,6 +286,8 @@ namespace c10 {
   _(aten, swapaxes_)                 \
   _(aten, swapdims)                  \
   _(aten, swapdims_)                 \
+  _(aten, movedim)                   \
+  _(aten, moveaxis)                  \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \
