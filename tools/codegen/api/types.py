@@ -6,28 +6,6 @@ _T = TypeVar('_T')
 
 # ------------------------------------------------------------------- #
 
-#                       Grouping arguments
-
-# ------------------------------------------------------------------- #
-
-# Represents the implicit *this argument for method calls in C++ API
-@dataclass(frozen=True)
-class ThisArgument:
-    argument: Argument
-
-# Bundle of arguments that represent a TensorOptions in the C++ API.
-@dataclass(frozen=True)
-class TensorOptionsArguments:
-    dtype: Argument
-    layout: Argument
-    device: Argument
-    pin_memory: Argument
-
-    def all(self) -> Sequence[Argument]:
-        return [self.dtype, self.layout, self.device, self.pin_memory]
-
-# ------------------------------------------------------------------- #
-
 #                           cpp types
 
 # ------------------------------------------------------------------- #
@@ -105,7 +83,7 @@ class CppSingleArgumentPack(CppArgumentPackIface):
 @dataclass(frozen=True)
 class CppThisArgumentPack(CppArgumentPackIface):
     # The grouped JIT argument this formal was derived from
-    argument: ThisArgument
+    argument: SelfArgument
 
     # C++ type, e.g., Tensor&
     type: str
@@ -210,7 +188,7 @@ class CppSignature:
     @staticmethod
     def _from_grouped_arguments(
         func: FunctionSchema,
-        arguments: Sequence[Union[Argument, TensorOptionsArguments, ThisArgument]],
+        arguments: Sequence[Union[Argument, TensorOptionsArguments, SelfArgument]],
         *,
         faithful: bool
     ) -> 'CppSignature':
