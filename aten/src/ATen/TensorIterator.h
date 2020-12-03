@@ -299,7 +299,7 @@ struct CAFFE2_API TensorIteratorBase : public impl::MetaBase {
 
   void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) override;
 
-  static TensorIteratorConfig binary_op_config(const Tensor& out, const Tensor& a, const Tensor& b);
+  void build_binary_op(const Tensor& out, const Tensor& a, const Tensor& b);
 
 protected:
   // Mutable reference as it moves tensors out of TensorIteratorConfig
@@ -432,6 +432,8 @@ public:
   friend struct TensorIterator;
 
   TensorIteratorConfig() {}
+
+  C10_DISABLE_COPY_AND_ASSIGN(TensorIteratorConfig);
 
   /// Construction
   TensorIteratorConfig& add_output(const Tensor& output);

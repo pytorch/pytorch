@@ -16,15 +16,7 @@ namespace meta {
 TORCH_META_FUNC2(add, Tensor) (
   const Tensor& self, const Tensor& other, Scalar alpha
 ) {
-  build(TensorIteratorConfig()
-     .set_check_mem_overlap(true)
-     .add_output(maybe_get_output())
-     .add_input(self)
-     .add_input(other)
-     .allow_cpu_scalars(true)
-     .promote_inputs_to_common_dtype(true)
-     .cast_common_dtype_to_outputs(true)
-     .enforce_safe_casting_to_output(true));
+  build_binary_op(maybe_get_output(), self, other);
   native::alpha_check(dtype(), alpha);
 }
 

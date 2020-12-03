@@ -808,22 +808,22 @@ void TensorIteratorBase::select_all_keeping_dim(int start_dim, IntArrayRef indic
   }
 }
 
-TensorIteratorConfig TensorIteratorBase::binary_op_config(const Tensor& out, const Tensor& a, const Tensor& b) {
-  TensorIteratorConfig config;
-  config.set_check_mem_overlap(true)
-        .add_output(out)
-        .add_input(a)
-        .add_input(b)
-        .allow_cpu_scalars(true)
-        .promote_inputs_to_common_dtype(true)
-        .cast_common_dtype_to_outputs(true)
-        .enforce_safe_casting_to_output(true);
-  return config;
+void TensorIteratorBase::build_binary_op(const Tensor& out, const Tensor& a, const Tensor& b) {
+  build(TensorIteratorConfig()
+    .set_check_mem_overlap(true)
+    .add_output(out)
+    .add_input(a)
+    .add_input(b)
+    .allow_cpu_scalars(true)
+    .promote_inputs_to_common_dtype(true)
+    .cast_common_dtype_to_outputs(true)
+    .enforce_safe_casting_to_output(true));
 }
 
-TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
-    const Tensor& b) {
-  return binary_op_config(out, a, b).build();
+TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a, const Tensor& b) {
+  TensorIterator iter;
+  iter.build_binary_op(out, a, b);
+  return iter;
 }
 
 // Helper to construct a binary op that promotes integer inputs to float.

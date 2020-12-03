@@ -383,7 +383,7 @@ struct {class_name} final : public {parent_class_name} {{
         {set_output_super}
     }}
     const Tensor& maybe_get_output(int64_t output_idx) override {{
-        return outputs_[0];
+        return outputs_[output_idx];
     }}
     std::array<{output_type}, {len(f.func.returns)}> outputs_;
 }};
