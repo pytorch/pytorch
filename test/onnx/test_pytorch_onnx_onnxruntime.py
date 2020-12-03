@@ -507,6 +507,8 @@ class TestONNXRuntime(unittest.TestCase):
         # With optional arguments dictionary
         self.run_test(MixedModel(), (x, {'y': y, 'z': None}))
         self.run_test(MixedModel(), (x, {'y': None, 'z': z}))
+        self.run_test(MixedModel(), (x, {'z': z}))
+        self.run_test(MixedModel(), (x, {'y': y}))
 
     def test_optional_inputs_with_all_optionals(self):
         class AllOptionalModel(torch.nn.Module):
