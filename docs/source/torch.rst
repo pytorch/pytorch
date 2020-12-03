@@ -339,6 +339,7 @@ Pointwise Ops
     sign
     signbit
     sin
+    sinc
     sinh
     sqrt
     square
