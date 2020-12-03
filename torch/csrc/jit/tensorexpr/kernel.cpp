@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <ATen/ExpandUtils.h>
 
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
@@ -1886,25 +1887,11 @@ std::vector<size_t> reverse_sort_indices(const std::vector<T>& v) {
   return idx;
 }
 
-bool contiguousSizesAndStrides(at::ArrayRef<int64_t> sizes, at::ArrayRef<int64_t> strides) {
-  if (sizes.size() == 0) {
-    return false;
-  }
-  size_t strided_size = 1;
-  for(size_t i = 0; i < sizes.size(); i++) {
-    if(sizes[i] == 0) {
-      return false;
-    }
-    strided_size += strides[i]*(sizes[i]-1);
-  }
-  size_t size = sizes[0] ;
-  for (size_t i = 1; i < sizes.size(); ++i) {
-    size *= sizes[i];
-  }
-  // the strided total element size must be equal to element size as computed by sizes
-  return strided_size == size;
+bool denseAndNonOverlapping(
+    at::ArrayRef<int64_t> sizes,
+    at::ArrayRef<int64_t> strides) {
+  return (strides == at::infer_dense_strides(sizes, strides));
 }
-
 
 Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
   const TensorTypePtr& tt = v->type()->expect<TensorType>();
@@ -1921,9 +1908,9 @@ Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
   if (strides == default_strides) {
     return tensor;
   }
-  // If the tensor is profiled as being non-contiguous, we have
+  // If the tensor is not dense or overlaps, we have
   // no way of matching the profiled striding
-  if (!contiguousSizesAndStrides(sizes, strides)) {
+  if (!denseAndNonOverlapping(sizes, strides)) {
     return tensor;
   }
 
@@ -2014,9 +2001,9 @@ void TensorExprKernel::compile() {
     tensorOutputSizes_.push_back(sizes);
     auto strides = *tt->strides().concrete_sizes();
 
-    // If the tensor is profiled as being non-contiguous, we have
+    // If the tensor is not dense or overlaps, we have
     // no way of matching the profiled striding
-    if (contiguousSizesAndStrides(sizes, strides)) {
+    if (denseAndNonOverlapping(sizes, strides)) {
       tensorOutputStrides_.push_back(*tt->strides().concrete_sizes());
     } else {
       tensorOutputStrides_.push_back(TensorType::contiguousStridesOf(sizes));
