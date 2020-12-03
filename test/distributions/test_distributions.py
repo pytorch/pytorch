@@ -727,7 +727,7 @@ class TestDistributions(TestCase):
         # performs gradient checks on log_prob
         distribution = dist_ctor(*ctor_params)
         s = distribution.sample()
-        if s.is_floating_point():
+        if not distribution.support.is_discrete:
             s = s.detach().requires_grad_()
 
         expected_shape = distribution.batch_shape + distribution.event_shape
@@ -1422,7 +1422,7 @@ class TestDistributions(TestCase):
         self.assertEqual(Uniform(0.0, 1.0).sample((1,)).size(), (1,))
 
         # Check log_prob computation when value outside range
-        uniform = Uniform(low_1d, high_1d)
+        uniform = Uniform(low_1d, high_1d, validate_args=False)
         above_high = torch.tensor([4.0])
         below_low = torch.tensor([-1.0])
         self.assertEqual(uniform.log_prob(above_high).item(), -inf)
@@ -1517,7 +1517,7 @@ class TestDistributions(TestCase):
 
     def test_halfnormal(self):
         std = torch.randn(5, 5).abs().requires_grad_()
-        std_1d = torch.randn(1, requires_grad=True)
+        std_1d = torch.randn(1).abs().requires_grad_()
         std_delta = torch.tensor([1e-5, 1e-5])
         self.assertEqual(HalfNormal(std).sample().size(), (5, 5))
         self.assertEqual(HalfNormal(std).sample((7,)).size(), (7, 5, 5))
@@ -1978,6 +1978,8 @@ class TestDistributions(TestCase):
                     sigma = 0.5 * (sigma + sigma.transpose(-1, -2))  # Ensure symmetry of covariance
                 if prec is not None:
                     prec = 0.5 * (prec + prec.transpose(-1, -2))  # Ensure symmetry of precision
+                if scale_tril is not None:
+                    scale_tril = scale_tril.tril()
                 return MultivariateNormal(mu, sigma, prec, scale_tril).log_prob(samples)
             gradcheck(gradcheck_func, (mvn_samples, mean, covariance, precision, scale_tril), raise_exception=True)
 
@@ -2643,7 +2645,7 @@ class TestDistributions(TestCase):
             for i, param in enumerate(params):
                 dist = Dist(**param)
                 samples = dist.sample()
-                if samples.dtype.is_floating_point:
+                if not dist.support.is_discrete:
                     samples.requires_grad_()
                 try:
                     cdfs = dist.cdf(samples)
@@ -3186,23 +3188,23 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(dist.sample().size(), torch.Size((3,)))
         self.assertEqual(dist.sample((3, 2)).size(), torch.Size((3, 2, 3)))
         self.assertRaises(ValueError, dist.log_prob, self.tensor_sample_1)
-        simplex_sample = self.tensor_sample_2 / self.tensor_sample_2.sum(-1, keepdim=True)
-        self.assertEqual(dist.log_prob(simplex_sample).size(), torch.Size((3, 2,)))
+        sample = torch.tensor([0., 1., 0.]).expand(3, 2, 3)
+        self.assertEqual(dist.log_prob(sample).size(), torch.Size((3, 2,)))
         self.assertEqual(dist.log_prob(dist.enumerate_support()).size(), torch.Size((3,)))
-        simplex_sample = torch.ones(3, 3) / 3
-        self.assertEqual(dist.log_prob(simplex_sample).size(), torch.Size((3,)))
+        sample = torch.eye(3)
+        self.assertEqual(dist.log_prob(sample).size(), torch.Size((3,)))
         # batched
         dist = OneHotCategorical(torch.tensor([[0.6, 0.3], [0.6, 0.3], [0.6, 0.3]]))
         self.assertEqual(dist._batch_shape, torch.Size((3,)))
         self.assertEqual(dist._event_shape, torch.Size((2,)))
         self.assertEqual(dist.sample().size(), torch.Size((3, 2)))
         self.assertEqual(dist.sample((3, 2)).size(), torch.Size((3, 2, 3, 2)))
-        simplex_sample = self.tensor_sample_1 / self.tensor_sample_1.sum(-1, keepdim=True)
-        self.assertEqual(dist.log_prob(simplex_sample).size(), torch.Size((3,)))
+        sample = torch.tensor([0., 1.])
+        self.assertEqual(dist.log_prob(sample).size(), torch.Size((3,)))
         self.assertRaises(ValueError, dist.log_prob, self.tensor_sample_2)
         self.assertEqual(dist.log_prob(dist.enumerate_support()).size(), torch.Size((2, 3)))
-        simplex_sample = torch.ones(3, 1, 2) / 2
-        self.assertEqual(dist.log_prob(simplex_sample).size(), torch.Size((3, 3)))
+        sample = torch.tensor([0., 1.]).expand(3, 1, 2)
+        self.assertEqual(dist.log_prob(sample).size(), torch.Size((3, 3)))
 
     def test_cauchy_shape_scalar_params(self):
         cauchy = Cauchy(0, 1)
