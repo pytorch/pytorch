@@ -39,7 +39,8 @@ class CoordinatorBase:
         self.agent_rref.rpc_sync().set_world(
             batch_size, state_size, nlayers, out_features, self.batch)
 
-    def run_coordinator(self, episodes, episode_steps):
+    def run_coordinator(self, episodes, episode_steps, queue):
+
         agent_latency_final = []
         agent_throughput_final = []
 
@@ -79,40 +80,35 @@ class CoordinatorBase:
         observer_throughput_final = [
             t for s in observer_throughput_final for t in s]
 
+        benchmark_metrics = {'agent latency': {}, 'agent throughput': {}, 'observer latency': {}, 'observer throughput': {}}
+
         print("\nAgent Latency - ", len(agent_latency_final))
         agent_latency_final = sorted(agent_latency_final)
         for p in [50, 75, 90, 95]:
             v = np.percentile(agent_latency_final, p)
             print("p" + str(p) + ":", round(v, 3))
+            benchmark_metrics['agent latency'][p] = round(v, 3)
 
         print("\nAgent Throughput - ", len(agent_throughput_final))
         agent_throughput_final = sorted(agent_throughput_final)
         for p in [50, 75, 90, 95]:
             v = np.percentile(agent_throughput_final, p)
             print("p" + str(p) + ":", int(v))
+            benchmark_metrics['agent throughput'][p] = int(v)
 
         print("\nObserver Latency - ", len(observer_latency_final))
         observer_latency_final = sorted(observer_latency_final)
         for p in [50, 75, 90, 95]:
             v = np.percentile(observer_latency_final, p)
             print("p" + str(p) + ":", round(v, 3))
+            benchmark_metrics['observer latency'][p] = round(v, 3)
 
         print("\nObserver Throughput - ", len(observer_throughput_final))
         observer_throughput_final = sorted(observer_throughput_final)
         for p in [50, 75, 90, 95]:
             v = np.percentile(observer_throughput_final, p)
             print("p" + str(p) + ":", int(v))
+            benchmark_metrics['observer throughput'][p] = int(v)
 
-        #plot1 1. (with fixed state size and fixed batch num) x-axis: number of observers; left-y-axis: observer latency; right-y-axis: agent throughput
-        #for observ in number of observers, get observer latency and throughput across different percentiles? 
-        #plot data here
-        # width = 0.35  # the width of the bars
-        # fig, ax = plt.subplots()
-        # rects1 = ax.bar(x - width/2, batch_execution_time, width, label='Observer Latency')
-        # rects2 = ax.bar(x + width/2, non_batch_execution_time,
-        #         width, label='Agent Throughput')
-        # ax.set_ylabel('Observer Latency')
-        # #set ylabel right agent throughput
-        # ax.set_xlabel('Number of Observers')
-        # ax.set_title('RPC Benchmarks')
-
+        print("benchmark_metrics in coordinator.py is {0}".format(benchmark_metrics))
+        queue.put(benchmark_metrics)
