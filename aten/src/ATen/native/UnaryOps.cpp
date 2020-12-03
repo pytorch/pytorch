@@ -643,7 +643,6 @@ Tensor& sinc_out(Tensor& result, const Tensor& self) {
   result = at::sin(product) / product;
   return result;
 }
-
 Tensor sinc(const Tensor& self) { return unary_op_impl(self, at::sinc_out); }
 Tensor& sinc_(Tensor& self) { return unary_op_impl_(self, at::sinc_out); }
 

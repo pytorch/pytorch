@@ -7362,7 +7362,6 @@ Returns a new tensor with the normalized sinc of the elements of :attr:`input`.
       1, & \text{if}\ \text{out}_{i}=0 \\
       \sin(\pi \text{input}_{i}) / (\pi \text{input}_{i}), & \text{otherwise}
     \end{cases}
-
 """ + r"""
 Args:
     {input}
@@ -7378,7 +7377,6 @@ Example::
     >>> torch.sinc(a)
     tensor([ 0.9186,  0.8631, -0.0259, -0.1300])
 """.format(**common_args))
-
 
 add_docstr(torch.sinh,
            r"""

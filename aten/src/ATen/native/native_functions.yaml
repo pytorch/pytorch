@@ -3500,22 +3500,6 @@
   dispatch:
     CPU, CUDA: sin_out
 
-- func: sinh(Tensor self) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-  dispatch:
-    DefaultBackend: sinh
-
-- func: sinh_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: full
-  variants: function, method
-  dispatch:
-    DefaultBackend: sinh_
-
-- func: sinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: sinh_out
-
 - func: sinc(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -3531,6 +3515,22 @@
 - func: sinc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     Math: sinc_out
+
+- func: sinh(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    DefaultBackend: sinh
+
+- func: sinh_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    DefaultBackend: sinh_
+
+- func: sinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: sinh_out
 
 # Returns a copy of this `Variable` that is detached from its autograd graph.
 # This method is OK to call if the `Variable` is a view.
