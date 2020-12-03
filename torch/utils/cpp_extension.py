@@ -32,6 +32,19 @@ _TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
 TORCH_LIB_PATH = os.path.join(_TORCH_PATH, 'lib')
 
 
+# Taken directly from python stdlib < 3.9
+# See https://github.com/pytorch/pytorch/issues/48617
+def _nt_quote_args(args: Optional[List[str]]) -> List[str]:
+    """Quote command-line arguments for DOS/Windows conventions.
+
+    Just wraps every argument which contains blanks in double quotes, and
+    returns a new argument list.
+    """
+    # Cover None-type
+    if not args:
+        return []
+    return [f'"{arg}"' if ' ' in arg else arg for arg in args]
+
 def _find_cuda_home() -> Optional[str]:
     r'''Finds the CUDA install path.'''
     # Guess #1
@@ -654,7 +667,6 @@ class BuildExtension(build_ext, object):
                     cuda_post_cflags = list(extra_postargs)
                 cuda_post_cflags = win_cuda_flags(cuda_post_cflags)
 
-            from distutils.spawn import _nt_quote_args  # type: ignore
             cflags = _nt_quote_args(cflags)
             post_cflags = _nt_quote_args(post_cflags)
             if with_cuda:
@@ -838,6 +850,27 @@ def CUDAExtension(name, sources, *args, **kwargs):
     kwargs['libraries'] = libraries
 
     include_dirs = kwargs.get('include_dirs', [])
+
+    if IS_HIP_EXTENSION:
+        build_dir = os.getcwd()
+        if not include_dirs:
+            include_dirs = ['*']
+        hipify_result = hipify_python.hipify(
+            project_directory=build_dir,
+            output_directory=build_dir,
+            includes=[os.path.join(os.path.relpath(include_dir, build_dir), '*') for include_dir in include_dirs],
+            extra_files=[os.path.abspath(s) for s in sources],
+            show_detailed=True,
+            is_pytorch_extension=True,
+        )
+
+        hipified_sources = set()
+        for source in sources:
+            s_abs = os.path.abspath(source)
+            hipified_sources.add(hipify_result[s_abs]["hipified_path"] if s_abs in hipify_result else s_abs)
+
+        sources = list(hipified_sources)
+
     include_dirs += include_paths(cuda=True)
     kwargs['include_dirs'] = include_dirs
 
@@ -1393,6 +1426,9 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
         if not is_standalone:
             extra_ldflags.append('-ltorch_python')
 
+        if is_standalone and "TBB" in torch.__config__.parallel_info():
+            extra_ldflags.append('-ltbb')
+
         if is_standalone:
             extra_ldflags.append(f"-Wl,-rpath,{TORCH_LIB_PATH}")
 
@@ -1673,7 +1709,6 @@ def _write_ninja_file_to_build_library(path,
 
     if IS_WINDOWS:
         cflags = common_cflags + COMMON_MSVC_FLAGS + extra_cflags
-        from distutils.spawn import _nt_quote_args  # type: ignore
         cflags = _nt_quote_args(cflags)
     else:
         cflags = common_cflags + ['-fPIC', '-std=c++14'] + extra_cflags
@@ -1684,7 +1719,7 @@ def _write_ninja_file_to_build_library(path,
         cuda_flags += _get_rocm_arch_flags(cuda_flags)
         sources = [s if not _is_cuda_file(s) else
                    os.path.abspath(os.path.join(
-                       path, get_hip_file_path(os.path.relpath(s, path))))
+                       path, get_hip_file_path(os.path.relpath(s, path), is_pytorch_extension=True)))
                    for s in sources]
     elif with_cuda:
         cuda_flags = common_cflags + COMMON_NVCC_FLAGS + _get_cuda_arch_flags()

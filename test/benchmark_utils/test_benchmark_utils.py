@@ -2,6 +2,7 @@ import json
 import os
 import re
 import textwrap
+import timeit
 from typing import Any, List, Tuple
 import unittest
 
@@ -168,6 +169,7 @@ class TestBenchmarkUtils(TestCase):
         timer = benchmark_utils.Timer(
             "torch::Tensor y = x + 1;",
             setup="torch::Tensor x = torch::empty({1});",
+            timer=timeit.default_timer,
             language=benchmark_utils.Language.CPP,
         )
         t = timer.timeit(10)
@@ -513,6 +515,7 @@ class TestBenchmarkUtils(TestCase):
         timer = benchmark_utils.Timer(
             "x += 1;",
             setup="torch::Tensor x = torch::ones({1});",
+            timer=timeit.default_timer,
             language="c++",
         )
         stats = [
