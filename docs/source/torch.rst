@@ -92,6 +92,7 @@ Indexing, Slicing, Joining, Mutating Ops
     index_select
     masked_select
     movedim
+    moveaxis
     narrow
     nonzero
     reshape
@@ -447,6 +448,7 @@ Other Operations
     bincount
     block_diag
     broadcast_tensors
+    broadcast_shapes
     bucketize
     cartesian_prod
     cdist
@@ -509,6 +511,7 @@ BLAS and LAPACK Operations
     eig
     geqrf
     ger
+    inner
     inverse
     det
     logdet
