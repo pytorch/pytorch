@@ -135,11 +135,11 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   variable_list operator()(variable_list&& inputs) {
     // Using RecordFunction to trogger observers in the backward pass
     at::RecordFunction guard(at::RecordScope::BACKWARD_FUNCTION);
-    if (guard.active) {
+    if (guard.isActive()) {
       // Using sequence number and thread id to correlate with
       // the forward pass function
       guard.setForwardThreadId(thread_id_);
-      if (guard.needs_inputs) {
+      if (guard.needsInputs()) {
         guard.before(
           name(),
           std::vector<c10::IValue>(inputs.begin(), inputs.end()),

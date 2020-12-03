@@ -112,6 +112,28 @@ Example::
 
 """.format(**new_common_args))
 
+add_docstr_all('new_empty_strided',
+               r"""
+new_empty_strided(size, stride, dtype=None, device=None, requires_grad=False) -> Tensor
+
+Returns a Tensor of size :attr:`size` and strides :attr:`stride` filled with
+uninitialized data. By default, the returned Tensor has the same
+:class:`torch.dtype` and :class:`torch.device` as this tensor.
+
+Args:
+    {dtype}
+    {device}
+    {requires_grad}
+
+Example::
+
+    >>> tensor = torch.ones(())
+    >>> tensor.new_empty_strided((2, 3), (3, 1))
+    tensor([[ 5.8182e-18,  4.5765e-41, -1.0545e+30],
+            [ 3.0949e-41,  4.4842e-44,  0.0000e+00]])
+
+""".format(**new_common_args))
+
 add_docstr_all('new_ones',
                r"""
 new_ones(size, dtype=None, device=None, requires_grad=False) -> Tensor
@@ -939,6 +961,19 @@ conj() -> Tensor
 See :func:`torch.conj`
 """)
 
+add_docstr_all('copysign',
+               r"""
+copysign(other) -> Tensor
+
+See :func:`torch.copysign`
+""")
+
+add_docstr_all('copysign_', r"""
+copysign_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.copysign`
+""")
+
 add_docstr_all('cos',
                r"""
 cos() -> Tensor
@@ -1041,11 +1076,25 @@ cumprod(dim, dtype=None) -> Tensor
 See :func:`torch.cumprod`
 """)
 
+add_docstr_all('cumprod_',
+               r"""
+cumprod_(dim, dtype=None) -> Tensor
+
+In-place version of :meth:`~Tensor.cumprod`
+""")
+
 add_docstr_all('cumsum',
                r"""
 cumsum(dim, dtype=None) -> Tensor
 
 See :func:`torch.cumsum`
+""")
+
+add_docstr_all('cumsum_',
+               r"""
+cumsum_(dim, dtype=None) -> Tensor
+
+In-place version of :meth:`~Tensor.cumsum`
 """)
 
 add_docstr_all('data_ptr',
@@ -1210,7 +1259,7 @@ In-place version of :meth:`~Tensor.divide`
 
 add_docstr_all('dot',
                r"""
-dot(tensor2) -> Tensor
+dot(other) -> Tensor
 
 See :func:`torch.dot`
 """)
@@ -1542,6 +1591,32 @@ i0_() -> Tensor
 In-place version of :meth:`~Tensor.i0`
 """)
 
+add_docstr_all('igamma',
+               r"""
+igamma(other) -> Tensor
+
+See :func:`torch.igamma`
+""")
+
+add_docstr_all('igamma_',
+               r"""
+igamma_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.igamma`
+""")
+
+add_docstr_all('igammac',
+               r"""
+igammac(other) -> Tensor
+See :func:`torch.igammac`
+""")
+
+add_docstr_all('igammac_',
+               r"""
+igammac_(other) -> Tensor
+In-place version of :meth:`~Tensor.igammac`
+""")
+
 add_docstr_all('indices',
                r"""
 indices() -> Tensor
@@ -1664,7 +1739,7 @@ Note:
 
 Args:
     dim (int): dimension along which to index
-    index (LongTensor): indices of :attr:`tensor` to select from
+    index (IntTensor or LongTensor): indices of :attr:`tensor` to select from
     tensor (Tensor): the tensor containing values to add
 
 Example::
@@ -1734,26 +1809,26 @@ Example::
 
 add_docstr_all('index_put_',
                r"""
-index_put_(indices, value, accumulate=False) -> Tensor
+index_put_(indices, values, accumulate=False) -> Tensor
 
-Puts values from the tensor :attr:`value` into the tensor :attr:`self` using
+Puts values from the tensor :attr:`values` into the tensor :attr:`self` using
 the indices specified in :attr:`indices` (which is a tuple of Tensors). The
-expression ``tensor.index_put_(indices, value)`` is equivalent to
-``tensor[indices] = value``. Returns :attr:`self`.
+expression ``tensor.index_put_(indices, values)`` is equivalent to
+``tensor[indices] = values``. Returns :attr:`self`.
 
-If :attr:`accumulate` is ``True``, the elements in :attr:`value` are added to
+If :attr:`accumulate` is ``True``, the elements in :attr:`values` are added to
 :attr:`self`. If accumulate is ``False``, the behavior is undefined if indices
 contain duplicate elements.
 
 Args:
     indices (tuple of LongTensor): tensors used to index into `self`.
-    value (Tensor): tensor of same dtype as `self`.
+    values (Tensor): tensor of same dtype as `self`.
     accumulate (bool): whether to accumulate into self
 """)
 
 add_docstr_all('index_put',
                r"""
-index_put(tensor1, indices, value, accumulate=False) -> Tensor
+index_put(tensor1, indices, values, accumulate=False) -> Tensor
 
 Out-place version of :meth:`~Tensor.index_put_`.
 `tensor1` corresponds to `self` in :meth:`torch.Tensor.index_put_`.
@@ -1942,11 +2017,32 @@ Example::
 
 """)
 
+add_docstr_all('kron',
+               r"""
+kron(other) -> Tensor
+
+See :func:`torch.kron`
+""")
+
 add_docstr_all('kthvalue',
                r"""
 kthvalue(k, dim=None, keepdim=False) -> (Tensor, LongTensor)
 
 See :func:`torch.kthvalue`
+""")
+
+add_docstr_all('ldexp',
+               r"""
+ldexp(other) -> Tensor
+
+See :func:`torch.ldexp`
+""")
+
+add_docstr_all('ldexp_',
+               r"""
+ldexp_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.ldexp`
 """)
 
 add_docstr_all('lcm',
@@ -2573,6 +2669,20 @@ add_docstr_all('pow_',
 pow_(exponent) -> Tensor
 
 In-place version of :meth:`~Tensor.pow`
+""")
+
+add_docstr_all('float_power',
+               r"""
+float_power(exponent) -> Tensor
+
+See :func:`torch.float_power`
+""")
+
+add_docstr_all('float_power_',
+               r"""
+float_power_(exponent) -> Tensor
+
+In-place version of :meth:`~Tensor.float_power`
 """)
 
 add_docstr_all('prod',
@@ -3480,6 +3590,31 @@ symeig(eigenvectors=False, upper=True) -> (Tensor, Tensor)
 See :func:`torch.symeig`
 """)
 
+add_docstr_all('swapdims', r"""
+swapdims(dim0, dim1) -> Tensor
+
+See :func:`torch.swapdims`
+""")
+
+add_docstr_all('swapdims_',
+               r"""
+swapdims_(dim0, dim1) -> Tensor
+
+In-place version of :meth:`~Tensor.swapdims`
+""")
+
+add_docstr_all('swapaxes', r"""
+swapaxes(axis0, axis1) -> Tensor
+
+See :func:`torch.swapaxes`
+""")
+
+add_docstr_all('swapaxes_', r"""
+swapaxes_(axis0, axis1) -> Tensor
+
+In-place version of :meth:`~Tensor.swapaxes`
+""")
+
 add_docstr_all('t',
                r"""
 t() -> Tensor
@@ -3492,6 +3627,13 @@ add_docstr_all('t_',
 t_() -> Tensor
 
 In-place version of :meth:`~Tensor.t`
+""")
+
+add_docstr_all('tile',
+               r"""
+tile(*reps) -> Tensor
+
+See :func:`torch.tile`
 """)
 
 add_docstr_all('to',
@@ -3990,7 +4132,7 @@ See :func:`torch.var`
 
 add_docstr_all('vdot',
                r"""
-dot(other) -> Tensor
+vdot(other) -> Tensor
 
 See :func:`torch.vdot`
 """)

@@ -47,6 +47,7 @@ static IValue Tup(std::vector<IValue> ivalues) {
 static IValue Table(
     const std::vector<std::pair<std::string, IValue>>& entries) {
   std::vector<IValue> ivalue_entries;
+  ivalue_entries.reserve(entries.size());
   for (const auto& e : entries) {
     ivalue_entries.push_back(Tup({e.first, e.second}));
   }
@@ -112,7 +113,7 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
         Instruction new_instr{INTERFACE_CALL,
                               static_cast<int32_t>(method_name_idx),
                               static_cast<uint16_t>(node->inputs().size())};
-        instructions_copy[i] = std::move(new_instr);
+        instructions_copy[i] = new_instr;
       } else {
         TORCH_INTERNAL_ASSERT(
             false, "Unsupported node kind on CALL opcode for mobile");
@@ -130,6 +131,18 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
                 "Workaround: instead of using a named tuple type's fields, ",
                 "use a dictionary type's key-value pair itmes or ",
                 "a pytorch class (class Foo(torch.nn.Module))'s attributes.'");
+          }
+        } else if (
+            input_type->kind() == TypeKind::ListType ||
+            input_type->kind() == TypeKind::DictType) {
+          for (const TypePtr& element_type : input_type->containedTypes()) {
+            TORCH_CHECK(
+                element_type->kind() != TypeKind::ClassType,
+                "Returining a list or dictionary with pytorch class type ",
+                "is not supported in mobile module "
+                "(List[Foo] or Dict[int, Foo] for class Foo(torch.nn.Module)). "
+                "Workaround: instead of using pytorch class as their element type, ",
+                "use a combination of list, dictionary, and single types.");
           }
         }
       }
@@ -260,12 +273,12 @@ void moduleMethodsTuple(
 }
 
 void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
-  GetExtraFilesHook() = hook;
+  GetExtraFilesHook() = std::move(hook);
 }
 
 void SetExportModuleMobileInfoConverter(
     ExportModuleMobileInfoConverter converter) {
-  GetMobileInfoConverter() = converter;
+  GetMobileInfoConverter() = std::move(converter);
 }
 
 class ScriptModuleSerializer {
@@ -462,7 +475,7 @@ class ScriptModuleSerializer {
     };
     if (!pp) {
       pp = &file_streams_.insert(
-          qualifier,
+          std::move(qualifier),
           PythonPrint(
               constant_table_,
               class_deps_,

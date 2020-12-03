@@ -314,10 +314,12 @@ static inline void manual_seed(uint64_t seed) {
   }
   // NB: Sometimes we build with CUDA, but we don't have any GPUs
   // available. In that case, we must not seed CUDA; it will fail!
-  int num_gpus = detail::getCUDAHooks().getNumGPUs();
+  const auto num_gpus = detail::getCUDAHooks().getNumGPUs();
   if (hasCUDA() && num_gpus > 0) {
     for (int i = 0; i < num_gpus; i++) {
-      auto cuda_gen = globalContext().defaultGenerator(Device(at::kCUDA, i));
+      auto cuda_gen = globalContext().defaultGenerator(
+        Device(at::kCUDA, static_cast<c10::DeviceIndex>(i))
+      );
       {
         // See Note [Acquire lock when using random generators]
         std::lock_guard<std::mutex> lock(cuda_gen.mutex());
