@@ -4272,6 +4272,59 @@ Keyword arguments:
     {out}
 """.format(**common_args))
 
+add_docstr(torch.xlogy,
+           r"""
+xlogy(x, y) -> Tensor
+
+Compute x*log(y) so that the result is 0 if x = 0.
+Similar to SciPy's `scipy.special.xlogy`.
+
+.. math::
+    \text{out}_i = x_i * \log{{y_i}}
+
+Args:
+    x (tensor): Multiplier
+    y (float or tensor): Argument
+
+.. note::
+    NaN in :attr:`y` is propagated even if value of :attr:`x` is 0.
+
+Example::
+
+    >>> x = torch.zeros(3,)
+    >>> y = torch.tensor([1, float('inf'), float('nan')])
+    >>> torch.xlogy(x, y)
+    tensor([0., 0., nan])
+    >>> x = torch.tensor([1, 2, 3])
+    >>> y = torch.tensor([3, 2, 1])
+    >>> torch.xlogy(x, y)
+    tensor([1.0986, 1.3863, 0.0000])
+    >>> torch.xlogy(x, 4)
+    tensor([1.3863, 2.7726, 4.1589])
+
+
+.. function:: xlogy(x, y) -> Tensor
+
+Compute x*log(y) so that the result is 0 if x = 0.
+Similar to SciPy's `scipy.special.xlogy`.
+
+.. math::
+    \text{out}_i = x_i * \log{{y_i}}
+
+Args:
+    x (float or tensor): Multiplier
+    y (tensor): Argument
+
+.. note::
+    NaN in :attr:`y` is propagated even if value of :attr:`x` is 0.
+
+Example::
+
+    >>> y = torch.tensor([3, 2, 1])
+    >>> torch.xlogy(2, y)
+    tensor([2.1972, 1.3863, 0.0000])
+""")
+
 add_docstr(torch.logical_and,
            r"""
 logical_and(input, other, *, out=None) -> Tensor
