@@ -160,7 +160,7 @@ static void upsample_linear1d_out_cuda_template(
                num_threads,
                0,
                stream>>>(num_kernels, rwidth, align_corners, idata, odata);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 }
 
@@ -220,7 +220,7 @@ static void upsample_linear1d_backward_out_cuda_template(
                num_threads,
                0,
                stream>>>(num_kernels, rwidth, align_corners, idata, odata);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 }
 
