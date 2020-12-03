@@ -4269,30 +4269,30 @@ class DistributedTest:
                     loss = model(random_input).sum()
                     loss.backward()
 
-    @require_backend({"gloo"})
-    @unittest.skipIf(BACKEND == "nccl", "NCCL does not support scatter")
-    def test_scatter_object_list(self):
-        src_rank = 0
-        scatter_list = (
-            collectives_object_test_list
-            if self.rank == src_rank
-            else [None for _ in collectives_object_test_list]
-        )
-        scatter_list = scatter_list[: int(os.environ["WORLD_SIZE"])]
-        i = 0
-        while len(scatter_list) < int(os.environ["WORLD_SIZE"]):
-            scatter_list.append(scatter_list[i])
-            i += 1
+        @require_backend({"gloo"})
+        @unittest.skipIf(BACKEND == "nccl", "NCCL does not support scatter")
+        def test_scatter_object_list(self):
+            src_rank = 0
+            scatter_list = (
+                collectives_object_test_list
+                if self.rank == src_rank
+                else [None for _ in collectives_object_test_list]
+            )
+            scatter_list = scatter_list[: int(os.environ["WORLD_SIZE"])]
+            i = 0
+            while len(scatter_list) < int(os.environ["WORLD_SIZE"]):
+                scatter_list.append(scatter_list[i])
+                i += 1
 
-        output_obj_list = [None]
-        dist.scatter_object_list(output_obj_list, scatter_list, src=src_rank)
-        self.assertEqual(
-            output_obj_list[0],
-            collectives_object_test_list[self.rank % len(collectives_object_test_list)],
-        )
-        # Ensure errors are raised upon incorrect arguments.
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Expected argument scatter_object_output_list to be a list of size at least 1.",
-        ):
-            dist.scatter_object_list([], scatter_list, src=src_rank)
+            output_obj_list = [None]
+            dist.scatter_object_list(output_obj_list, scatter_list, src=src_rank)
+            self.assertEqual(
+                output_obj_list[0],
+                collectives_object_test_list[self.rank % len(collectives_object_test_list)],
+            )
+            # Ensure errors are raised upon incorrect arguments.
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Expected argument scatter_object_output_list to be a list of size at least 1.",
+            ):
+                dist.scatter_object_list([], scatter_list, src=src_rank)
