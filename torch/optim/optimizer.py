@@ -63,7 +63,7 @@ class Optimizer(object):
 
     def __setstate__(self, state):
         self.__dict__.update(state)
-        self.hook_for_profile() # To support multiprocessing pickle/unpickle.
+        self.hook_for_profile()  # To support multiprocessing pickle/unpickle.
 
     def __repr__(self):
         format_string = self.__class__.__name__ + ' ('
