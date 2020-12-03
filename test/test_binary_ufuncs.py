@@ -8,15 +8,19 @@ import random
 import unittest
 import warnings
 import operator
+from functools import partial
 
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
     TestCase, iter_indices, TEST_WITH_ASAN, run_tests,
-    torch_to_numpy_dtype_dict, make_tensor)
+    torch_to_numpy_dtype_dict, make_tensor, TEST_SCIPY)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, onlyCPU, dtypes, dtypesIfCUDA,
     dtypesIfCPU, deviceCountAtLeast, precisionOverride, onlyOnCPUAndCUDA,
-    skipCUDAIfRocm)
+    skipCUDAIfRocm, skipIf)
+
+if TEST_SCIPY:
+    import scipy.special
 
 # TODO: remove this
 def _generate_input(shape, dtype, device, with_extremal):
@@ -2495,6 +2499,55 @@ class TestBinaryUfuncs(TestCase):
                     with self.assertRaisesRegex(RuntimeError, "is not the desired type"):
                         torch.Tensor.float_power_(base.clone(), exp)
 
+    @skipIf(not TEST_SCIPY, "Scipy required for the test.")
+    @dtypes(*product(torch.testing.get_all_dtypes(include_complex=False, include_bfloat16=False),
+                     torch.testing.get_all_dtypes(include_complex=False, include_bfloat16=False)))
+    def test_xlogy(self, device, dtypes):
+        x_dtype, y_dtype = dtypes
+
+        # Tensor-Tensor Test (tensor of same and different shape)
+        x = make_tensor((3, 2, 4, 5), device, x_dtype, low=0.5, high=1000)
+        y = make_tensor((3, 2, 4, 5), device, y_dtype, low=0.5, high=1000)
+        z = make_tensor((4, 5), device, y_dtype, low=0.5, high=1000)
+
+        torch_fn = partial(torch.xlogy, x)
+        reference_fn = partial(scipy.special.xlogy, x.cpu().numpy())
+
+        self.compare_with_numpy(torch_fn, reference_fn, x, exact_dtype=False)
+        self.compare_with_numpy(torch_fn, reference_fn, y, exact_dtype=False)
+        self.compare_with_numpy(torch_fn, reference_fn, z, exact_dtype=False)
+
+        # Scalar-Tensor Test
+        torch_fn = partial(torch.xlogy, 3.14)
+        reference_fn = partial(scipy.special.xlogy, 3.14)
+
+        self.compare_with_numpy(torch_fn, reference_fn, x, exact_dtype=False)
+        self.compare_with_numpy(torch_fn, reference_fn, y, exact_dtype=False)
+        self.compare_with_numpy(torch_fn, reference_fn, z, exact_dtype=False)
+
+        # Special Values Tensor-Tensor
+        t = torch.tensor([1., 2., float('inf'), -float('inf'), float('nan')], device=device)
+        zeros = torch.tensor(5, dtype=y_dtype, device=device)
+
+        torch_fn = partial(torch.xlogy, zeros)
+        reference_fn = partial(scipy.special.xlogy, zeros.cpu().numpy())
+        self.compare_with_numpy(torch_fn, reference_fn, t, exact_dtype=False)
+
+        # Special Values Scalar-Tensor
+        torch_fn = partial(torch.xlogy, 0)
+        reference_fn = partial(scipy.special.xlogy, 0)
+        self.compare_with_numpy(torch_fn, reference_fn, t, exact_dtype=False)
+
+    def test_xlogy_exceptions(self, device):
+        for dtype in torch.testing.get_all_complex_dtypes():
+            x = torch.tensor([1 + 1j], device=device, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, "not implemented for"):
+                torch.xlogy(x, x)
+
+        x = torch.ones(3, 2, device=device)
+        y = torch.ones(2, 4, device=device)
+        with self.assertRaisesRegex(RuntimeError, "must match the size of tensor b"):
+            torch.xlogy(x, y)
 
 tensor_binary_ops = [
     '__lt__', '__le__',
