@@ -248,6 +248,102 @@ class RegisterDispatchKey:
         else:
             assert_never(f)
 
+    def gen_structured_class_set_output(self, k: SchemaKind, parent_class: str, generate_super: bool) -> str:
+        if generate_super:
+            set_output_super = f"{parent_class}::set_output(output_idx, sizes, strides, options, names);"
+        else:
+            set_output_super = ""
+        return f"""
+void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
+                TensorOptions options, DimnameList names) override {{
+    {self.gen_structured_class_set_output_body(k)}
+    if (!names.empty()) namedinference::propagate_names(outputs_[output_idx], names);
+    // super must happen after, so that downstream can use maybe_get_output
+    // to retrieve the output
+    {set_output_super}
+}}
+"""
+
+    def gen_structured_class_set_output_body(self, k: SchemaKind) -> str:
+        if k is SchemaKind.functional:
+            if self.dispatch_key == "Meta":
+                return """
+if (strides.empty()) {
+    outputs_[output_idx] = at::empty_meta(sizes, options);
+} else {
+    TORCH_INTERNAL_ASSERT(0, "not implemented yet");
+}
+"""
+            else:
+                expanded_topts = "optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), " \
+                    "options.device_opt(), options.pinned_memory_opt()"
+                if self.dispatch_key == "CPU":
+                    empty_impl = "at::native::empty_cpu"
+                    empty_strided_impl = "at::native::empty_strided_cpu"
+                elif self.dispatch_key == "CUDA":
+                    empty_impl = "at::native::empty_cuda"
+                    empty_strided_impl = "at::native::empty_strided_cuda"
+                else:
+                    raise AssertionError("unsupported dispatch key")
+                return f"""
+if (strides.empty()) {{
+    outputs_[output_idx] = {empty_impl}(sizes, {expanded_topts});
+}} else {{
+    outputs_[output_idx] = {empty_strided_impl}(sizes, strides, {expanded_topts});
+}}
+"""
+        elif k is SchemaKind.inplace:
+            return "// TODO: consistency check?"
+        elif k is SchemaKind.out:
+            return """
+at::native::resize_output(outputs_[output_idx], sizes);
+if (!strides.empty()) {
+    TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
+    at::native::as_strided_(outputs_[output_idx], sizes, strides);
+} else if (options.memory_format_opt().has_value()) {
+    outputs_[output_idx].get().unsafeGetTensorImpl()->empty_tensor_restride(*options.memory_format_opt());
+}
+"""
+        else:
+            assert_never(k)
+
+    # returns the definition of a ctor, as well as how to construct
+    # this class to a variable named op
+    def gen_structured_class_ctor(self, k: SchemaKind, class_name: str) -> str:
+        if k is SchemaKind.functional:
+            return ""
+        elif k is SchemaKind.inplace:
+            # TODO: Make sure out argument is guaranteed to be self
+            return f"{class_name}(Tensor& self) : outputs_{{std::ref(self)}} {{}}"
+        elif k is SchemaKind.out:
+            # TODO: Stop hardcoding out here
+            return f"{class_name}(Tensor& out) : outputs_{{std::ref(out)}} {{}}"
+        else:
+            assert_never(k)
+
+    def gen_structured_class(
+        self, f: NativeFunction, k: SchemaKind, *, class_name: str, parent_class: str, generate_super: bool
+    ) -> str:
+        if k is SchemaKind.functional:
+            assert len(f.func.returns) == 1, "multi-return not supported yet"
+            output_type = "Tensor"
+        elif k is SchemaKind.inplace:
+            output_type = "std::reference_wrapper<Tensor>"
+        elif k is SchemaKind.out:
+            assert len(f.func.arguments.out) == 1, "multi-out structured not supported yet"
+            output_type = "std::reference_wrapper<Tensor>"
+
+        return f"""
+struct {class_name} final : public {parent_class} {{
+    {self.gen_structured_class_ctor(k, class_name)}
+    {self.gen_structured_class_set_output(k, parent_class, generate_super)}
+    const Tensor& maybe_get_output(int64_t output_idx) override {{
+        return outputs_[output_idx];
+    }}
+    std::array<{output_type}, {len(f.func.returns)}> outputs_;
+}};
+"""
+
     def gen_structured(self, g: StructuredNativeFunctions) -> List[str]:
         if self.dispatch_key == 'Meta':
             assert self.dispatch_key not in g.out.dispatch, \
@@ -284,78 +380,25 @@ class RegisterDispatchKey:
             if self.target is Target.DEFINITION:
                 if self.dispatch_key == 'Meta':
                     class_name = f"structured_{meta.name(g)}_meta_{k.name}"
-                    parent_class_name = f"at::meta::{meta.name(g)}"
+                    parent_class = f"at::meta::{meta.name(g)}"
                 else:
                     class_name = f"structured_{g.out.dispatch[self.dispatch_key]}_{k.name}"
-                    parent_class_name = f"at::native::structured_{g.out.dispatch[self.dispatch_key]}"
-                if g.out.structured_inherits is not None:
-                    set_output_super = f"{g.out.structured_inherits}::set_output(output_idx, sizes, strides, options, names);"
-                else:
-                    set_output_super = ""
+                    parent_class = f"at::native::structured_{g.out.dispatch[self.dispatch_key]}"
+
                 if k is SchemaKind.functional:
-                    # TODO: devirtualize these calls
-                    if self.dispatch_key == "Meta":
-                        # TODO: Might be good to just stick meta in options,
-                        # then don't need special case here
-                        set_output_impl = """
-if (strides.empty()) {
-    outputs_[output_idx] = at::empty_meta(sizes, options);
-} else {
-    TORCH_INTERNAL_ASSERT(0, "not implemented yet");
-}
-"""
-                    else:
-                        expanded_topts = "optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt()"
-                        if self.dispatch_key == "CPU":
-                            empty_impl = "at::native::empty_cpu"
-                            empty_strided_impl = "at::native::empty_strided_cpu"
-                        elif self.dispatch_key == "CUDA":
-                            empty_impl = "at::native::empty_cuda"
-                            empty_strided_impl = "at::native::empty_strided_cuda"
-                        else:
-                            raise AssertionError("unsupported dispatch key")
-                        set_output_impl = f"""
-if (strides.empty()) {{
-    outputs_[output_idx] = {empty_impl}(sizes, {expanded_topts});
-}} else {{
-    outputs_[output_idx] = {empty_strided_impl}(sizes, strides, {expanded_topts});
-}}
-"""
                     assert len(f.func.returns) == 1, "multi-return not supported yet"
                     out_expr = "op.outputs_[0]"
                     ret_expr = "std::move(op.outputs_[0])"  # small optimization
-                    output_type = "Tensor"
-                    ctor = ""
-                    ctor_exprs = ""
+                    op_init = f"{class_name} op;"
                 elif k is SchemaKind.inplace:
-                    set_output_impl = """
-// TODO: consistency check?
-"""
                     out_expr = "self"
                     ret_expr = "self"
-                    output_type = "std::reference_wrapper<Tensor>"
-                    ctor = f"{class_name}(Tensor& self) : outputs_{{std::ref(self)}} {{}}"
-                    ctor_exprs = "(self)"
+                    op_init = f"{class_name} op(self);"
                 elif k is SchemaKind.out:
-                    # TODO: properly get the expression as it was brought into
-                    # scope by sig
-                    # TODO: devirtualize
-                    set_output_impl = """
-at::native::resize_output(outputs_[output_idx], sizes);
-if (!strides.empty()) {
-    TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
-    at::native::as_strided_(outputs_[output_idx], sizes, strides);
-} else if (options.memory_format_opt().has_value()) {
-    outputs_[output_idx].get().unsafeGetTensorImpl()->empty_tensor_restride(*options.memory_format_opt());
-}
-"""
-                    # TODO: generalize this for multi-out
                     assert len(f.func.arguments.out) == 1, "multi-out structured not supported yet"
                     out_expr = f.func.arguments.out[0].name
                     ret_expr = out_expr
-                    output_type = "std::reference_wrapper<Tensor>"
-                    ctor = f"{class_name}(Tensor& out) : outputs_{{std::ref(out)}} {{}}"
-                    ctor_exprs = f"({out_expr})"  # TODO: probably wrong
+                    op_init = f"{class_name} op({out_expr});"
 
                 if self.dispatch_key == 'Meta':
                     impl_call = ""
@@ -363,7 +406,6 @@ if (!strides.empty()) {
                     impl_call = f"op.impl({out_expr}, {functional_exprs});"
 
                 device_guard = ""
-
                 if is_generic_dispatch_key(self.dispatch_key) or is_cuda_dispatch_key(self.dispatch_key):
                     # TODO: avoid copypasting the computation of self_args,
                     # candidate_args and device_of
@@ -381,25 +423,16 @@ if (!strides.empty()) {
                 # For an overview of what this template code looks like, see
                 # https://github.com/pytorch/rfcs/pull/9
                 return f"""\
-struct {class_name} final : public {parent_class_name} {{
-    {ctor}
-    void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
-                    TensorOptions options, DimnameList names) override {{
-        {set_output_impl}
-        if (!names.empty()) namedinference::propagate_names(outputs_[output_idx], names);
-        // super must happen after, so that downstream can use maybe_get_output
-        // to retrieve the output
-        {set_output_super}
-    }}
-    const Tensor& maybe_get_output(int64_t output_idx) override {{
-        return outputs_[output_idx];
-    }}
-    std::array<{output_type}, {len(f.func.returns)}> outputs_;
-}};
+{self.gen_structured_class(
+    f, k,
+    class_name=class_name,
+    parent_class=parent_class,
+    generate_super=g.out.structured_inherits is not None
+)}
 
 {sig.defn()} {{
     {device_guard}
-    {class_name} op{ctor_exprs};
+    {op_init}
     op.meta({functional_exprs});
     {impl_call}
     return {ret_expr};
