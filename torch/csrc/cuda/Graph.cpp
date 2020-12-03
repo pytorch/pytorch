@@ -18,7 +18,9 @@ template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
 void THCPGraph_init(PyObject *module) {
-  auto torch_C_m = py::handle(module).cast<py::module>();
+  // Some places in pytorch use "py::module". Pybind11 patch notes
+  // say "module_" is more up-to-date syntax.
+  auto torch_C_m = py::handle(module).cast<py::module_>();
 
   shared_ptr_class_<::at::cuda::CUDAGraph>(module, "_CUDAGraphBase")
       .def(py::init<>())
@@ -36,10 +38,14 @@ void THCPGraph_init(PyObject *module) {
            py::call_guard<py::gil_scoped_release>(),
            R"(``replay`` replays the Cuda graph captured by this instance.)");
       // As a possible alternative to the throwing destructor
-      // CUDAGraph::~CUDAGraph () {
-      //   AT_CUDA_CHECK(cudaGraphExecDestroy(graph_exec_);
-      // }
-      // I could call the following method in __del__ on the Python side.
+      //
+      //   CUDAGraph::~CUDAGraph () {
+      //     ...
+      //     AT_CUDA_CHECK(cudaGraphExecDestroy(graph_exec_);
+      //   }
+      //
+      // I could call the following method in __del__ on the Python side:
+      //
       // .def("drop_graph",
       //      &::at::cuda::CUDAGraph::drop_graph,
       //      py::call_guard<py::gil_scoped_release>(),

@@ -3252,55 +3252,73 @@ class TestCudaComm(TestCase):
 
         self.assertTrue(a.sum().item() == 3000.)
 
-    # TODO:  Uncomment when the caching allocator is capturable.
-    # There's no way to safely test these ops without changes to make the caching allocator graph-safe.
-    # Stashing references to inputs and outputs isn't enough: ops may also use internal temporaries.
     def test_graph_rng_functional(self):
+        # The caching allocator isn't yet graph-safe.
+        # In this test, graphed regions try to ensure allocator safety by
+        # stashing references to all temporaries.  This is why we use _fused_dropout
+        # instead of a public dropout API:  _fused_dropout returns the mask temporary
+        # as well as the output, so we can stash references to both.
+        #
+        # TODO:
+        # Switch to public dropout API when the allocator is made graph-safe.
+        ops_with_kwargs = ((torch._fused_dropout, {"p": 0.1}),
+                           (torch.nn.functional.rrelu, {"training": True}),)
         size = 10000
-        a = torch.randn((size,), device="cuda", dtype=torch.float)
-
-        ops_with_kwargs = (("dropout", {"p": 0.1}),
-                           ("rrelu", {"training": True}),)
 
         def run(op, kwargs):
-            def op_4x(input):
-                x = getattr(torch.nn.functional, op)(input, **kwargs)
-                x = getattr(torch.nn.functional, op)(x, **kwargs)
-                x = getattr(torch.nn.functional, op)(x, **kwargs)
-                return getattr(torch.nn.functional, op)(x, **kwargs)
+            a = torch.randn((size,), device="cuda", dtype=torch.float)
 
             torch.cuda.manual_seed(5)
 
             # Control
-            out_hoststate = op_4x(a)
+            eager_out = a
+            for _ in range(6):
+                out = op(eager_out, **kwargs)
+                # _fused_dropout returns a tuple, rrelu returns a bare tensor.
+                eager_out = out[0] if isinstance(out, tuple) else out
 
+            graph_in = a.clone()
             stream = torch.cuda.Stream()
             stream.wait_stream(torch.cuda.current_stream())
             with torch.cuda.stream(stream):
                 # warms up allocator so no mallocs occur in capture
-                _ = op_4x(a)
-                del _
+                refs = ()
+                graph_out = graph_in
+                for _ in range(3):
+                    out = op(graph_out, **kwargs)
+                    refs += tuple(out)
+                    graph_out = out[0] if isinstance(out, tuple) else out
+                del out, refs, graph_out
 
                 torch.cuda.manual_seed(5)
 
+                refs = ()
                 g = torch.cuda.Graph()
                 g.capture_begin()
-                out_devstate = op_4x(a)
+                graph_out = graph_in
+                for _ in range(2):
+                    out = op(graph_out, **kwargs)
+                    refs += tuple(out)
+                    graph_out = out[0] if isinstance(out, tuple) else out
                 g.capture_end()
             torch.cuda.current_stream().wait_stream(stream)
 
-            try:
-                self.assertNotEqual(out_hoststate, out_devstate)
-            except Exception as e:
-                raise RuntimeError("Failed on torch.nn.functional." + op) from e
-
-            # Replays graph on default stream
+            # Runs a graphed->eager->graphed sequence of RNG ops.
+            # replay() plays 2 invocations of the op, so the sequence has 6
+            # invocations total, matching Control.
+            # replay() reads from graph_in and writes to graph_out.
+            g.replay()
+            out = op(graph_out, **kwargs)
+            out = op(out[0], **kwargs)[0] if isinstance(out, tuple) else op(out, **kwargs)
+            graph_in.copy_(out)
             g.replay()
 
+            # If replay() updated RNG state correctly, graph_out
+            # should now hold data equal to eager_out.
             try:
-                self.assertEqual(out_hoststate, out_devstate)
+                self.assertEqual(eager_out, graph_out)
             except Exception as e:
-                raise RuntimeError("Failed on torch.nn.functional." + op) from e
+                raise RuntimeError("Failed on ", op) from e
 
         for op, kwargs in ops_with_kwargs:
             run(op, kwargs)
