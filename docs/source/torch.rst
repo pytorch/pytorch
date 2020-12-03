@@ -296,6 +296,7 @@ Pointwise Ops
     exp2
     expm1
     fix
+    float_power
     floor
     floor_divide
     fmod
