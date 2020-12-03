@@ -393,11 +393,10 @@ std::tuple<Tensor, Tensor> _solve_helper_cpu(const Tensor& self, const Tensor& A
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "solve_cpu", [&]{
     apply_solve<scalar_t>(self_working_copy, A_working_copy, infos);
   });
-  std::vector<int64_t> infos_(infos.data_ptr<int>(), infos.data_ptr<int>() + batchCount(self));
   if (self.dim() > 2) {
-    batchCheckErrors(infos_, "solve_cpu");
+    batchCheckErrors(infos, "solve_cpu");
   } else {
-    singleCheckErrors(infos_[0], "solve_cpu");
+    singleCheckErrors(infos.item().toInt(), "solve_cpu");
   }
   return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
 }
@@ -496,12 +495,11 @@ Tensor& linalg_solve_out(Tensor& result, const Tensor& input, const Tensor& othe
   result = linalg_solve_out_info(result, infos, input, other);
 
   // Now check LAPACK/MAGMA error codes
-  infos = infos.to(kCPU);
-  std::vector<int64_t> infos_(infos.data_ptr<int>(), infos.data_ptr<int>() + batchCount(result));
+  // batchCheckErrors(Tensor, char*) calls 'infos = infos.to(kCPU)'
   if (result.dim() > 2) {
-    batchCheckErrors(infos_, "linalg_solve");
+    batchCheckErrors(infos, "linalg_solve");
   } else {
-    singleCheckErrors(infos_[0], "linalg_solve");
+    singleCheckErrors(infos.item().toInt(), "linalg_solve");
   }
 
   return result;
