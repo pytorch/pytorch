@@ -4750,9 +4750,6 @@ a")
             numel = torch.tensor(size).prod().item()
             return torch.arange(numel).view(size)
 
-        def consec_list(size):
-            return list(range(size))
-
         def check_indexing(indexing, tensor):
             template = dedent("""
             def func(x):
@@ -4760,17 +4757,6 @@ a")
             """)
 
             self._check_code(template.format(indexing), "func", [tensor])
-
-        # Torchscript assumes type Tensor by default, so we need this explicit
-        # declaration.
-        def check_indexing_list_int(indexing, list):
-            template = dedent("""
-            def func(x):
-                # type: (List[int]) -> Any
-                return x{}
-            """)
-
-            self._check_code(template.format(indexing), "func", [list])
 
         def check_dynamic_indexing(indexing, tensor, value1, value2):
             value1 = torch.tensor(value1)
@@ -4836,48 +4822,6 @@ a")
         # dynamic expression usage
         check_dynamic_indexing("[i + j]", consec((3, 3)), 0, 1)
         check_dynamic_indexing("[i:j, i]", consec((3, 3, 2)), 0, 2)
-
-        # positive striding
-        check_indexing_list_int('[0]', consec_list(6))
-        check_indexing_list_int('[1]', consec_list(7))
-        check_indexing_list_int('[2]', consec_list(8))
-        check_indexing_list_int('[2]', consec_list(9))
-        check_indexing_list_int('[-1]', consec_list(10))
-        check_indexing_list_int('[0:2]', consec_list(11))
-        check_indexing_list_int('[1:-1]', consec_list(12))
-        check_indexing_list_int('[-3:-1]', consec_list(13))
-        check_indexing_list_int('[1:]', consec_list(15))
-        check_indexing_list_int('[:1]', consec_list(16))
-        check_indexing_list_int('[:]', consec_list(17))
-        check_indexing_list_int('[::]', consec_list(0))
-        check_indexing_list_int('[1000::]', consec_list(0))
-        check_indexing_list_int('[:1000:]', consec_list(0))
-
-        # negative striding
-        check_indexing_list_int('[::-1]', consec_list(7))
-        check_indexing_list_int('[:3:-1]', consec_list(7))
-        check_indexing_list_int('[3::-1]', consec_list(7))
-        check_indexing_list_int('[1000::-1]', consec_list(7))
-        check_indexing_list_int('[3:0:-1]', consec_list(7))
-        check_indexing_list_int('[3:-1000:-1]', consec_list(7))
-        check_indexing_list_int('[0:0:-1]', consec_list(7))
-        check_indexing_list_int('[0:-1000:-1]', consec_list(7))
-
-        # only step is specified
-        check_indexing_list_int('[::-1]', consec_list(0))
-        check_indexing_list_int('[::-1]', consec_list(7))
-        check_indexing_list_int('[::-2]', consec_list(7))
-        check_indexing_list_int('[::2]', consec_list(7))
-        check_indexing_list_int('[::42]', consec_list(7))
-        check_indexing_list_int('[::-42]', consec_list(7))
-        check_indexing_list_int('[::42]', consec_list(0))
-        check_indexing_list_int('[::-42]', consec_list(0))
-        check_indexing_list_int('[::9223372036854775807]', consec_list(42))
-        check_indexing_list_int('[::-9223372036854775807]', consec_list(42))
-        with self.assertRaisesRegex(RuntimeError, "out of bounds"):
-            check_indexing_list_int('[::-9223372036854775808]', consec_list(42))
-        with self.assertRaisesRegex(RuntimeError, "should have non-zero step"):
-            check_indexing_list_int('[::0]', consec_list(42))
 
     def test_index_ellipses(self):
         vals = [":", 1, None]

@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cstdint>
 #include <vector>
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
@@ -1070,7 +1071,7 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
   }
 }
 
-Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_t step) {
+Tensor slice(const Tensor& self, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, c10::optional<int64_t> step) {
   int64_t ndim = self.dim();
   if (ndim == 0) {
     TORCH_CHECK_INDEX(false, "slice() cannot be applied to a 0-dim tensor.");
@@ -1078,33 +1079,39 @@ Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_
   dim = maybe_wrap_dim(dim, ndim);
   auto sizes = self.sizes().vec();
   auto strides = self.strides().vec();
+
+  // handle optinal parameters
+  int64_t start_val = start.has_value() ? start.value() : INT64_MAX;
+  int64_t end_val = end.has_value() ? end.value() : INT64_MAX;
+  int64_t step_val = step.has_value() ? step.value() : INT64_MAX;
+
   // TODO: support negative strides
-  TORCH_CHECK(step > 0, "slice step must be positive");
+  TORCH_CHECK(step_val > 0, "slice step must be positive");
 
   // INT64_MAX stands for default value.
-  if (start == INT64_MAX) {
-    start = 0;
+  if (start_val == INT64_MAX) {
+    start_val = 0;
   }
-  if (start < 0) {
-    start += sizes[dim];
+  if (start_val < 0) {
+    start_val += sizes[dim];
   }
-  if (end < 0) {
-    end += sizes[dim];
+  if (end_val < 0) {
+    end_val += sizes[dim];
   }
-  if (start < 0) {
-    start = 0;
-  } else if (start >= sizes[dim]) {
-    start = sizes[dim];
+  if (start_val < 0) {
+    start_val = 0;
+  } else if (start_val >= sizes[dim]) {
+    start_val = sizes[dim];
   }
-  if (end < start) {
-    end = start;
-  } else if (end >= sizes[dim]) {
-    end = sizes[dim];
+  if (end_val < start_val) {
+    end_val = start_val;
+  } else if (end_val >= sizes[dim]) {
+    end_val = sizes[dim];
   }
-  auto storage_offset = self.storage_offset() + start * strides[dim];
-  auto len = end - start;
-  sizes[dim] = (len + step - 1) / step;  // round-up
-  strides[dim] *= step;
+  auto storage_offset = self.storage_offset() + start_val * strides[dim];
+  auto len = end_val - start_val;
+  sizes[dim] = (len + step_val - 1) / step_val;  // round-up
+  strides[dim] *= step_val;
   auto result = self.as_strided(sizes, strides, storage_offset);
   namedinference::propagate_names(result, self);
   return result;
