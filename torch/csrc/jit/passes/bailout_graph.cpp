@@ -120,7 +120,6 @@ struct BailOutGraphBuilderForNode {
     auto old_max_count = getOrAddInputForValue(lv.maxTripCount());
     auto cur_iter = getInputForValue(lv.currentTripCount());
     auto block_outputs = lv.bodyBlock()->outputs();
-    auto carried_deps = lv.carriedInputsWithCond();
 
     auto* block = copy_graph_->block();
     // subtract the number of iterations
