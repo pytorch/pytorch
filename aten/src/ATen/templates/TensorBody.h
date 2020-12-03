@@ -382,7 +382,7 @@ class CAFFE2_API Tensor {
   template<typename T, size_t N>
   TensorAccessor<T,N> accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
-    TORCH_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
+    TORCH_CHECK(dim() == N, "TensorAccessor expected ", N, " dims but tensor has ", dim());
     return TensorAccessor<T,N>(data_ptr<T>(),sizes().data(),strides().data());
   }
   template<typename T, size_t N>
@@ -396,7 +396,7 @@ class CAFFE2_API Tensor {
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
   GenericPackedTensorAccessor<T,N,PtrTraits,index_t> generic_packed_accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
-    TORCH_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
+    TORCH_CHECK(dim() == N, "TensorAccessor expected ", N, " dims but tensor has ", dim());
     return GenericPackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(data_ptr<T>()),sizes().data(),strides().data());
   }
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
