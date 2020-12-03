@@ -2,7 +2,7 @@
 import os
 import ctypes
 import torch
-from typing import Tuple
+from typing import Tuple, List
 from torch.backends._nnapi.prepare import convert_model_to_nnapi
 from torch.testing._internal.common_utils import TestCase, run_tests
 
@@ -94,6 +94,21 @@ class TestNNAPI(TestCase):
             torch.nn.quantized.DeQuantize(),
             nhwc(qpt([[[[1.0]], [[2.0]]]], 0.25, 2)))
 
+    def test_unsqueeze(self):
+        class UnsqueezeModule(torch.nn.Module):
+            def __init__(self, dim):
+                super().__init__()
+                self.dim = dim
+
+            def forward(self, arg):
+                return arg.unsqueeze(self.dim)
+
+        self.check(UnsqueezeModule(-2), torch.randn(4, 2, 2))
+        self.check(UnsqueezeModule(-1), torch.randn(4, 2, 2))
+        self.check(UnsqueezeModule(0), torch.randn(4, 2, 2))
+        self.check(UnsqueezeModule(1), torch.randn(4, 2, 2))
+        self.check(UnsqueezeModule(2), torch.randn(4, 2, 2))
+
     def test_reshape(self):
         class ReshapeModule(torch.nn.Module):
             def __init__(self, shape):
@@ -115,6 +130,36 @@ class TestNNAPI(TestCase):
             self.check(
                 ReshapeModule((2, 4)),
                 nhwc(torch.randn(4, 2, 1, 1)))
+
+    def test_cat(self):
+        class CatModule(torch.nn.Module):
+            def __init__(self, dim):
+                super().__init__()
+                self.dim = dim
+
+            def forward(self, t1, t2):
+                return torch.cat([t1, t2], self.dim)
+
+        self.check(
+            CatModule(0),
+            [
+                torch.randn(1, 2, 3, 3),
+                torch.randn(2, 2, 3, 3),
+            ])
+
+        self.check(
+            CatModule(1),
+            [
+                torch.randn(1, 2, 3, 3),
+                torch.randn(1, 4, 3, 3),
+            ])
+
+        self.check(
+            CatModule(1),
+            [
+                nhwc(torch.randn(1, 2, 3, 3)),
+                nhwc(torch.randn(1, 4, 3, 3)),
+            ])
 
     def test_pointwise_unary(self):
         for op in ["relu", "sigmoid"]:
@@ -169,6 +214,23 @@ class TestNNAPI(TestCase):
         self.check(torch.nn.Hardtanh(0.0, 6.0), inp)
         with self.assertRaisesRegex(Exception, "hardtanh with args"):
             self.check(torch.nn.Hardtanh(0.0, 5.0), inp)
+
+    def test_mean(self):
+        class MeanModule(torch.nn.Module):
+            def __init__(self, dim, keep=False):
+                super().__init__()
+                self.dim = dim
+                self.keep = keep
+
+            def forward(self, t):
+                return torch.mean(t, dim=self.dim, keepdim=self.keep)
+
+        self.check(MeanModule(0), torch.randn(2, 3))
+        self.check(MeanModule(1), torch.randn(2, 3))
+        self.check(MeanModule([2, 3]), torch.randn(2, 3, 6, 6))
+        self.check(MeanModule([2, 3]), nhwc(torch.randn(2, 3, 6, 6)))
+        self.check(MeanModule([-1, -2]), nhwc(torch.randn(2, 3, 6, 6)))
+        self.check(MeanModule([-1, -2], keep=True), nhwc(torch.randn(2, 3, 6, 6)))
 
     def test_max_pool2d(self):
         for (name, inp) in self.float_and_quant_and_nhwc(torch.randn(2, 3, 12, 16), 0.3, 128):
