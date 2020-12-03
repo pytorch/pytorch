@@ -1886,6 +1886,26 @@ std::vector<size_t> reverse_sort_indices(const std::vector<T>& v) {
   return idx;
 }
 
+bool contiguousSizesAndStrides(at::ArrayRef<int64_t> sizes, at::ArrayRef<int64_t> strides) {
+  if (sizes.size() == 0) {
+    return false;
+  }
+  size_t strided_size = 1;
+  for(size_t i = 0; i < sizes.size(); i++) {
+    if(sizes[i] == 0) {
+      return false;
+    }
+    strided_size += strides[i]*(sizes[i]-1);
+  }
+  size_t size = sizes[0] ;
+  for (size_t i = 1; i < sizes.size(); ++i) {
+    size *= sizes[i];
+  }
+  // the strided total element size must be equal to element size as computed by sizes
+  return strided_size == size;
+}
+
+
 Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
   const TensorTypePtr& tt = v->type()->expect<TensorType>();
   TORCH_INTERNAL_ASSERT(tensors_.count(v->unique()));
@@ -1903,7 +1923,7 @@ Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
   }
   // If the tensor is profiled as being non-contiguous, we have
   // no way of matching the profiled striding
-  if (!at::geometry_is_contiguous(sizes, strides)) {
+  if (!contiguousSizesAndStrides(sizes, strides)) {
     return tensor;
   }
 
@@ -1996,7 +2016,7 @@ void TensorExprKernel::compile() {
 
     // If the tensor is profiled as being non-contiguous, we have
     // no way of matching the profiled striding
-    if (at::geometry_is_contiguous(sizes, strides)) {
+    if (contiguousSizesAndStrides(sizes, strides)) {
       tensorOutputStrides_.push_back(*tt->strides().concrete_sizes());
     } else {
       tensorOutputStrides_.push_back(TensorType::contiguousStridesOf(sizes));
