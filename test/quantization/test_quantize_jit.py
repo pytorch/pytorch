@@ -2674,6 +2674,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
         num_quantize_per_tensor = 1  # for output
         for num_quant, num_op in num_op_by_num_quant.items():
             num_quantize_per_tensor += num_op * num_quant
+        num_quantize_per_tensor -= 4  # constant propagation removes some prepacks
         FileCheck().check_count("aten::quantize_per_tensor(", num_quantize_per_tensor, exactly=True) \
                    .run(m1.graph)
 
@@ -2997,8 +2998,7 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
         m = torch.jit.script(M())
         m = quantize_dynamic_jit(m, {'': float16_dynamic_qconfig})
 
-        FileCheck().check("quantized::linear_prepack_fp16") \
-                   .check_next("quantized::linear_dynamic_fp16") \
+        FileCheck().check("quantized::linear_dynamic_fp16") \
                    .check_not("aten::linear") \
                    .check_not("aten::dequantize") \
                    .check_not("aten::quantize") \
@@ -3032,6 +3032,7 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
                 FunctionalLinear(weight, bias), x,
                 "quantized::linear_dynamic", tracing=tracing, dynamic=True)
 
+    @skipIfNoFBGEMM
     def test_embedding_bag(self):
         class M(torch.nn.Module):
             def __init__(self, weights):
@@ -3075,7 +3076,7 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
             m = prepare_jit(m, {'embedding1' : int4_qconfig, 'embedding2' : int8_qconfig})
             m = convert_jit(m)
             FileCheck().check("quantized::embedding_bag_4bit_rowwise_offsets") \
-                       .check_next("quantized::embedding_bag_byte_rowwise_offsets") \
+                       .check("quantized::embedding_bag_byte_rowwise_offsets") \
                        .run(m.graph)
             m(*dummy_inputs)
 
@@ -3094,7 +3095,7 @@ class TestQuantizeJit(QuantizationTestCase):
         # compare the result of the two quantized models later
         linear_model.fc1.weight = torch.nn.Parameter(annotated_linear_model.fc1.module.weight.detach())
         linear_model.fc1.bias = torch.nn.Parameter(annotated_linear_model.fc1.module.bias.detach())
-        model_eager = quantize(annotated_linear_model, test_only_eval_fn, self.calib_data)
+        model_eager = quantize(annotated_linear_model, test_only_eval_fn, [self.calib_data])
 
         qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
         model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
@@ -3134,7 +3135,7 @@ class TestQuantizeJit(QuantizationTestCase):
             linear_model.fc1.weight = torch.nn.Parameter(annotated_linear_model.fc1.module.weight.detach())
             linear_model.fc1.bias = torch.nn.Parameter(annotated_linear_model.fc1.module.bias.detach())
             model_eager = quantize(annotated_linear_model, test_only_eval_fn,
-                                   self.calib_data)
+                                   [self.calib_data])
 
             qconfig_dict = {'': qconfig}
             model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
@@ -3160,7 +3161,7 @@ class TestQuantizeJit(QuantizationTestCase):
         # copy the weight from eager mode so that we can
         # compare the result of the two quantized models later
         conv_model.conv.weight = torch.nn.Parameter(annotated_conv_model.conv.weight.detach())
-        model_eager = quantize(annotated_conv_model, test_only_eval_fn, self.img_data_2d)
+        model_eager = quantize(annotated_conv_model, test_only_eval_fn, [self.img_data_2d])
         qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
         model_traced = torch.jit.trace(conv_model, self.img_data_2d[0][0])
         model_script = torch.jit.script(conv_model)
@@ -3188,7 +3189,7 @@ class TestQuantizeJit(QuantizationTestCase):
         # copy the weight from eager mode so that we can
         # compare the result of the two quantized models later
         conv_model.conv.weight = torch.nn.Parameter(annotated_conv_model.conv.weight.detach())
-        model_eager = quantize(annotated_conv_model, test_only_eval_fn, self.img_data_2d)
+        model_eager = quantize(annotated_conv_model, test_only_eval_fn, [self.img_data_2d])
         qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
         model_traced = torch.jit.trace(conv_model, self.img_data_2d[0][0])
         model_script = torch.jit.script(conv_model)
@@ -3216,7 +3217,7 @@ class TestQuantizeJit(QuantizationTestCase):
         conv_model_to_script.conv.weight = torch.nn.Parameter(conv_model.conv.weight.detach())
         fuse_modules(conv_model, ['conv', 'bn'], inplace=True)
         model_eager = quantize(conv_model, test_only_eval_fn,
-                               self.img_data_2d)
+                               [self.img_data_2d])
         qconfig_dict = {
             '': default_qconfig
         }
@@ -3247,7 +3248,7 @@ class TestQuantizeJit(QuantizationTestCase):
         script_model.fc3.weight = torch.nn.Parameter(eager_model.fc3.module.weight.detach())
         script_model.fc3.bias = torch.nn.Parameter(eager_model.fc3.module.bias.detach())
 
-        model_eager = quantize(eager_model, test_only_eval_fn, self.calib_data)
+        model_eager = quantize(eager_model, test_only_eval_fn, [self.calib_data])
         qconfig_dict = {
             'sub2.fc1': default_per_channel_qconfig if qengine_is_fbgemm() else default_qconfig,
             'fc3': default_qconfig
@@ -3283,7 +3284,7 @@ class TestQuantizeJit(QuantizationTestCase):
 
         eager_model.fuse_modules()
 
-        model_eager = quantize(eager_model, test_only_eval_fn, self.calib_data)
+        model_eager = quantize(eager_model, test_only_eval_fn, [self.calib_data])
         qconfig_dict = {
             '': get_default_qconfig(torch.backends.quantized.engine),
             'fc': None
