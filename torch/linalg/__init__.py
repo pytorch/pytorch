@@ -350,8 +350,9 @@ the ratio between the largest and smallest singular values.
 
 This function supports ``float``, ``double``, and only on CPU, ``cfloat`` and ``cdouble`` dtypes for :attr:`input`.
 
-.. note:: For ``p = {None, 2, -2}`` the condition number is computed as the ratio between the largest and smallest singular values
-          computed using :func:`torch.linalg.svd`. For these norms :attr:`input` may be a non-square matrix or batch of non-square matrices.
+.. note:: For ``p = {None, 2, -2}`` the condition number is computed as the ratio between the largest
+          and smallest singular values computed using :func:`torch.linalg.svd`.
+          For these norms :attr:`input` may be a non-square matrix or batch of non-square matrices.
           For other norms, however, :attr:`input` must be a square matrix or a batch of square matrices,
           and if this requirement is not satisfied a RuntimeError will be thrown.
 
