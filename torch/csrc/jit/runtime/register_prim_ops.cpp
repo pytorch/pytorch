@@ -1312,6 +1312,12 @@ void dictConstructFromList(Stack* stack) {
           aliasAnalysisFromSchema()),                                          \
       OperatorGenerator(                                                       \
           TORCH_SELECTIVE_SCHEMA("aten::_set_item." key_type "(Dict(" key_type \
+                                 ", t)(a!) l, " key_type                       \
+                                 "(b -> *) idx, t(c -> *) v) -> ()"),          \
+          dictSetItem,                                                         \
+          aliasAnalysisFromSchema()),                                          \
+      OperatorGenerator(                                                       \
+          TORCH_SELECTIVE_SCHEMA("aten::_set_item." key_type "(Dict(" key_type \
                                  ", t)(a!) self, " key_type                    \
                                  "(b -> *) idx, t(c -> *) v) -> ()"),          \
           dictSetItem,                                                         \
