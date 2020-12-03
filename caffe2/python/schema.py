@@ -30,7 +30,6 @@ from itertools import islice
 from six import StringIO
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 FIELD_SEPARATOR = ':'
 
