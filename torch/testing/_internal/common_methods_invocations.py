@@ -251,24 +251,6 @@ class UnaryUfuncInfo(OpInfo):
         #   outside a function's domain.
         self._domain_eps = 1e-5
 
-class LinalgSolveInfo(OpInfo):
-    """Operator information for 'torch.linalg.solve'
-    """
-
-    def sample_inputs(self, device, dtype, requires_grad=False):
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
-
-        batches = [(), (0, ), (2, )]
-        ns = [0, 5]
-        nrhs = [(), (1, ), (3, )]
-        out = []
-        for n, batch, rhs in product(ns, batches, nrhs):
-            a = random_fullrank_matrix_distinct_singular_value(n, *batch, dtype=dtype).to(device)
-            a.requires_grad = requires_grad
-            b = torch.randn(*batch, n, *rhs, dtype=dtype, device=device)
-            out.append(SampleInput(a, args=(b,)))
-        return out
-
 def sample_inputs_addmm(self, device, dtype, requires_grad):
     return (SampleInput((make_tensor((S, S), device, dtype,
                                      low=None, high=None, 
@@ -279,6 +261,20 @@ def sample_inputs_addmm(self, device, dtype, requires_grad):
                         make_tensor((S, S), device, dtype, 
                                     low=None, high=None, 
                                     requires_grad=False))),) 
+
+def sample_inputs_linalg_solve(self, device, dtype, requires_grad=False):
+    from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+
+    batches = [(), (0, ), (2, )]
+    ns = [0, 5]
+    nrhs = [(), (1, ), (3, )]
+    out = []
+    for n, batch, rhs in product(ns, batches, nrhs):
+        a = random_fullrank_matrix_distinct_singular_value(n, *batch, dtype=dtype).to(device)
+        a.requires_grad = requires_grad
+        b = torch.randn(*batch, n, *rhs, dtype=dtype, device=device)
+        out.append(SampleInput(a, args=(b,)))
+    return out
 
 # Operator database (sorted alphabetically)
 op_db: List[Any] = [
@@ -621,12 +617,13 @@ op_db: List[Any] = [
                                 dtypes=[torch.cfloat, torch.cdouble])), 
                    promotes_integers_to_float=True,
                    handles_complex_extremals=False),
-    LinalgSolveInfo('linalg.solve',
-                    op=torch.linalg.solve,
-                    dtypes=floating_and_complex_types(),
-                    test_inplace_grad=False,
-                    supports_tensor_out=True,
-                    decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
+    OpInfo('linalg.solve',
+           op=torch.linalg.solve,
+           dtypes=floating_and_complex_types(),
+           test_inplace_grad=False,
+           supports_tensor_out=True,
+           sample_inputs_func=sample_inputs_linalg_solve,
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
 ]
 
 if TEST_SCIPY:
