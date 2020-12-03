@@ -438,25 +438,12 @@ class PythonSignature:
     # For a translation to mypy-valid type signatures, see
     # tools/gen_pyi.py.  If you change any logic here, please
     # check that file too.
-    def signature_str(self, *, skip_outputs: bool = False, hacky_add_output: bool = False, vararg: bool = False) -> str:
+    def signature_str(self, *, skip_outputs: bool = False, hacky_add_output: bool = False) -> str:
         if self.pyi:
             args = self.arguments(skip_outputs=skip_outputs, hacky_add_output=hacky_add_output)
             schema_formals: List[str] = list(map(lambda a: a.argument_str_pyi(method=self.method), args))
-            if vararg:
-                # vararg only applies to pyi signatures. vararg variants are not generated for all signatures
-                num_args = self.arguments_count()
-                vararg_pos = 1 if self.method else 0
-                num_positionalargs = len(self.input_args)
-                have_vararg_version = (num_args > vararg_pos and
-                                       isinstance(args[vararg_pos].type, ListType) and str(args[vararg_pos].type.elem) == 'int' and
-                                       vararg_pos + 1 == num_positionalargs)
-                if not have_vararg_version:
-                    return ''
-                # Below are the major changes in vararg vs. regular pyi signatures
-                schema_formals[vararg_pos] = '*' + args[vararg_pos].name + ': _int'
             positional_argc = len(self.input_args)
-            # vararg signatures also omit the asterix
-            if len(schema_formals) > positional_argc and not vararg:
+            if len(schema_formals) > positional_argc:
                 schema_formals.insert(positional_argc, '*')
             returns_str = self.returns.returns_str()
             return f'def {self.name}({", ".join(schema_formals)}) -> {returns_str}: ...'
@@ -469,6 +456,29 @@ class PythonSignature:
             schema_formals.insert(positional_argc, '*')
 
         return f'{self.name}({", ".join(schema_formals)})'
+
+    def signature_str_vararg(self, *, skip_outputs: bool = False, hacky_add_output: bool = False) -> str:
+        # only pyi uses vararg signatures
+        if not self.pyi:
+            return None
+
+        args = self.arguments(skip_outputs=skip_outputs, hacky_add_output=hacky_add_output)
+        schema_formals: List[str] = list(map(lambda a: a.argument_str_pyi(method=self.method), args))
+        # vararg only applies to pyi signatures. vararg variants are not generated for all signatures
+        num_args = self.arguments_count()
+        vararg_pos = 1 if self.method else 0
+        num_positionalargs = len(self.input_args)
+        have_vararg_version = (num_args > vararg_pos and
+                                isinstance(args[vararg_pos].type, ListType) and str(args[vararg_pos].type.elem) == 'int' and
+                                vararg_pos + 1 == num_positionalargs)
+        if not have_vararg_version:
+            return None
+        # Below are the major changes in vararg vs. regular pyi signatures
+        # vararg signatures also omit the asterix
+        schema_formals[vararg_pos] = '*' + args[vararg_pos].name + ': _int'
+
+        returns_str = self.returns.returns_str()
+        return f'def {self.name}({", ".join(schema_formals)}) -> {returns_str}: ...'
 
 # The deprecated python signature involves some special logic, so create a
 # dedicated data model to store these extra properties.
@@ -494,7 +504,7 @@ class PythonSignatureDeprecated(PythonSignature):
     def deprecated(self) -> bool:
         return True
 
-    def signature_str(self, *, skip_outputs: bool = False, hacky_add_output: bool = False, vararg: bool = False) -> str:
+    def signature_str(self, *, skip_outputs: bool = False, hacky_add_output: bool = False) -> str:
         if self.pyi:
             # TODO: this code is pretty much repeated from the non-deprecated version of signature_str()
             # I could just call out to it directly, but that would require passing in the deprecated flag
@@ -506,7 +516,11 @@ class PythonSignatureDeprecated(PythonSignature):
 
             returns_str = self.returns.returns_str()
             return f'def {self.name}({", ".join(schema_formals)}) -> {returns_str}: ...'
-        return PythonSignature.signature_str(self, skip_outputs=skip_outputs, hacky_add_output=hacky_add_output, vararg=vararg) + '|deprecated'
+        return PythonSignature.signature_str(self, skip_outputs=skip_outputs, hacky_add_output=hacky_add_output) + '|deprecated'
+
+    def signature_str_vararg(self, *, skip_outputs: bool = False, hacky_add_output: bool = False) -> str:
+        # the codegen doesn't include vararg variants for deprecated signatures
+        return None
 
 # This struct is used to hold the PythonSignature and its corresponding
 # NativeFunction BEFORE grouping base and out-variant functions.

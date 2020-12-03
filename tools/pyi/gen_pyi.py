@@ -227,7 +227,7 @@ def generate_type_hints(fname: str, funcs: Sequence[PythonSignatureGroup], is_te
         type_hints.append(type_hint)
 
         # Some operators also additionally have a vararg variant of their signature
-        type_hint_vararg = sig_group.signature.signature_str(skip_outputs=sig_group.outplace is None, hacky_add_output=hacky_add_output, vararg=True)
+        type_hint_vararg = sig_group.signature.signature_str_vararg(skip_outputs=sig_group.outplace is None, hacky_add_output=hacky_add_output)
         if type_hint_vararg:
             type_hints.append(type_hint_vararg)
 

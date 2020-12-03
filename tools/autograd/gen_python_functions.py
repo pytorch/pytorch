@@ -300,7 +300,8 @@ def load_deprecated_signatures(
                     continue
 
                 if not kwarg_only:
-                    input_args.append(src_args[param_name])
+                    if not method or param_name != 'self':
+                        input_args.append(src_args[param_name])
                 else:
                     input_kwargs.append(src_args[param_name])
 
