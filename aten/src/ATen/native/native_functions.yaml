@@ -1693,6 +1693,7 @@
     CPU: resize_
     CUDA: resize_cuda_
     QuantizedCPU: quantized_resize_cpu_
+    Meta: resize_meta_
 
 - func: empty_quantized(int[] size, Tensor qtensor) -> Tensor
   use_c10_dispatcher: full
@@ -5587,15 +5588,13 @@
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    CPU: fmod_
-    CUDA: fmod_cuda_
+    CPU, CUDA: fmod_
 
 - func: fmod_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    CPU: fmod_
-    CUDA: fmod_cuda_
+    CPU, CUDA: fmod_
 
 - func: remainder_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   use_c10_dispatcher: full
@@ -6581,27 +6580,23 @@
 
 - func: fmod.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: fmod_out
-    CUDA: fmod_cuda_out
+    CPU, CUDA: fmod_out
 
 - func: fmod.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: fmod
-    CUDA: fmod_cuda
+    CPU, CUDA: fmod
 
 - func: fmod.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: fmod_out
-    CUDA: fmod_cuda_out
+    CPU, CUDA: fmod_out
 
 - func: fmod.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: fmod
-    CUDA: fmod_cuda
+    CPU, CUDA: fmod
 
 - func: hypot.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -9526,6 +9521,18 @@
   variants: function
   dispatch:
     Math: linalg_tensorsolve_out
+
+- func: linalg_matrix_rank(Tensor self, float? tol=None, bool hermitian=False) -> Tensor
+  python_module: linalg
+  variants: function
+  dispatch:
+    Math: linalg_matrix_rank
+
+- func: linalg_matrix_rank.out(Tensor self, float? tol=None, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+  dispatch:
+    Math: linalg_matrix_rank_out
 
 ## Functions that are only for testing
 # It is undocumented and should not be used outside of tests.

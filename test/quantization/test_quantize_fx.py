@@ -550,9 +550,9 @@ class TestQuantizeFx(QuantizationTestCase):
                 ns.call_module(torch.quantization.MinMaxObserver): 2
             }
             self.checkGraphModuleNodes(m, expected_node_occurrence=count_check)
-            # for output of conv in the standalone module
+            # for input and output of conv in the standalone module
             count_check = {
-                ns.call_module(torch.quantization.MinMaxObserver): 1
+                ns.call_module(torch.quantization.MinMaxObserver): 2
             }
             self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=count_check)
 
@@ -565,11 +565,11 @@ class TestQuantizeFx(QuantizationTestCase):
             }
             self.checkGraphModuleNodes(m, expected_node_occurrence=count_check)
             count_check = {
-                # quantization of input happens in parent module
-                # quantization of output happens in the quantized conv module
-                ns.call_function(torch.quantize_per_tensor) : 0,
-                # dequantization for output happens in parent module
-                ns.call_method('dequantize') : 0,
+                # standalone module will take float as input and output
+                # so we'll see quantize and dequantize in the modoule
+                ns.call_function(torch.quantize_per_tensor) : 1,
+                ns.call_module(nnq.Conv2d): 1,
+                ns.call_method('dequantize') : 1,
             }
             self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=count_check)
             res = m(data)
