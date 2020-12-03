@@ -340,7 +340,7 @@ class PythonOutArgument(PythonArgument):
                 default_init=None,
                 outputs=outputs,
             )
-        if size == 1 or pyi:
+        if size == 1:
             return PythonOutArgument(
                 name=outputs[0].name,
                 type=outputs[0].type,
@@ -353,6 +353,7 @@ class PythonOutArgument(PythonArgument):
                 raise RuntimeError(f'Unsupported output type: {outputs}')
             return PythonOutArgument(
                 name='out',
+                # TODO: shouldn't this be OptionalType[ListType[...]]?
                 type=ListType(BaseType(BaseTy.Tensor), size),
                 default='None',
                 default_init=None,
@@ -737,14 +738,14 @@ def argument_type_str_pyi(t: Type) -> str:
 # Generates a PythonSignature that can be used for either .pyi or PythonArgParser codegen
 def signature(f: NativeFunction, *, method: bool = False, pyi: bool = False) -> PythonSignature:
     # Use cpp api to gather TensorOptions fields from kwargs.
-    # Skip ThisArgument if this is method, non-pyi signature.
+    # Skip SelfArgument if this is method, non-pyi signature.
     # Skip TensorOptionsArguments in C++ signature. Python side TensorOptions
     # arguments are created based on different rules - see below.
     cpp_args = cpp.group_arguments(f.func, method=method)
     args = tuple(a for a in cpp_args if isinstance(a, Argument))
 
-    # pyi method signatures have a ThisArgument, but they reorder it so that it's always the first argument
-    this_args = [a.argument for a in cpp_args if isinstance(a, ThisArgument)]
+    # pyi method signatures have a SelfArgument, but they reorder it so that it's always the first argument
+    this_args = [a.argument for a in cpp_args if isinstance(a, SelfArgument)]
     if len(this_args) > 0 and pyi:
         args = (this_args[0],) + args
 
