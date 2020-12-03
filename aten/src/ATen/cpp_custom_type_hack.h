@@ -55,6 +55,8 @@ namespace at {
 namespace cpp_custom_type_hack {
 
 template <typename T>
+[[deprecated("Use custom classes instead: "
+  "https://pytorch.org/tutorials/advanced/torch_script_custom_classes.html")]]
 bool isa(const Tensor& packed) {
   return (packed.scalar_type() == kByte) &&
       (packed.storage().data_ptr().get_deleter() ==
@@ -62,6 +64,8 @@ bool isa(const Tensor& packed) {
 }
 
 template <typename T>
+[[deprecated("Use custom classes instead: "
+  "https://pytorch.org/tutorials/advanced/torch_script_custom_classes.html")]]
 T& cast(const Tensor& packed) {
   TORCH_CHECK(
       packed.scalar_type() == kByte, "Expected temporary cpp type wrapper");
@@ -74,6 +78,8 @@ T& cast(const Tensor& packed) {
 }
 
 template <typename T>
+[[deprecated("Use custom classes instead: "
+  "https://pytorch.org/tutorials/advanced/torch_script_custom_classes.html")]]
 Tensor create(std::unique_ptr<T> ptr, TensorOptions options) {
   // None of this should trace, so turn off Tracer dispatching
   at::AutoNonVariableTypeMode guard;  // TODO: remove

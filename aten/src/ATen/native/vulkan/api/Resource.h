@@ -262,7 +262,22 @@ struct Resource final {
 
   class Pool final {
    public:
-    explicit Pool(const GPU& gpu);
+    class Policy {
+     public:
+      virtual ~Policy() = default;
+
+      static std::unique_ptr<Policy> linear(
+          VkDeviceSize block_size = VMA_DEFAULT_LARGE_HEAP_BLOCK_SIZE,
+          uint32_t min_block_count = 1u,
+          uint32_t max_block_count = UINT32_MAX);
+
+      virtual void enact(
+          VmaAllocator allocator,
+          const VkMemoryRequirements& memory_requirements,
+          VmaAllocationCreateInfo& allocation_create_info) = 0;
+    };
+
+    explicit Pool(const GPU& gpu, std::unique_ptr<Policy> = {});
     Pool(const Pool&) = delete;
     Pool& operator=(const Pool&) = delete;
     Pool(Pool&&);
@@ -293,6 +308,10 @@ struct Resource final {
     Handle<VmaAllocator, void(*)(VmaAllocator)> allocator_;
 
     struct {
+      std::unique_ptr<Policy> policy;
+    } memory_;
+
+    struct {
       std::vector<Handle<Buffer, void(*)(const Buffer&)>> pool;
     } buffer_;
 
@@ -309,7 +328,7 @@ struct Resource final {
   } pool;
 
   explicit Resource(const GPU& gpu)
-    : pool(gpu) {
+    : pool(gpu, Pool::Policy::linear()) {
   }
 };
 
