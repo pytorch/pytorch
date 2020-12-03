@@ -1,7 +1,7 @@
 import argparse
 import sys
 import torch
-from .utils import gen_sparse_gcs, gen_sparse_coo, Event
+from .utils import gen_sparse_gcs, gen_sparse_coo, gen_sparse_coo_and_gcs, Event
 
 def test_sparse_gcs(m, nnz, test_count):
     start_timer = Event(enable_timing=True)
@@ -33,7 +33,35 @@ def test_sparse_coo(m, nnz, test_count):
         stop_timer.record()
         times.append(start_timer.elapsed_time(stop_timer))
 
-    return sum(times) / len(times)    
+    return sum(times) / len(times)
+
+def test_sparse_coo_and_gcs(m, nnz, test_count):
+    start = Event(enable_timing=True)
+    stop = Event(enable_timing=True)
+
+    coo, gcs = gen_sparse_coo_and_gcs((m, m), nnz)
+    vector = torch.randn(m, dtype=torch.double)
+
+    times = []
+    for _ in range(test_count):
+        start.record()
+        coo.matmul(vector)
+        stop.record()
+
+        times.append(start.elapsed_time(stop))
+
+    coo_mean_time = sum(times) / len(times)
+
+    times = []
+    for _ in range(test_count):
+        start.record()
+        gcs.matmul(vector)
+        stop.record()
+        times.append(start.elapsed_time(stop))
+
+    gcs_mean_time = sum(times) / len(times)
+
+    return coo_mean_time, gcs_mean_time
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SpMV")
@@ -62,6 +90,14 @@ if __name__ == "__main__":
         time = test_sparse_gcs(m, nnz, test_count)
     elif args.format == 'coo':
         time = test_sparse_coo(m, nnz, test_count)
+    elif args.format == 'both':
+        time_coo, time_gcs = test_sparse_coo_and_gcs(m, nnz, test_count)
 
-    print("format=", args.format, " nnz_ratio=", nnz_ratio, " m=", m,
-          " time=", time, file=outfile)
+    if args.format == 'both':
+        print("format=", args.format, " nnz_ratio=", nnz_ratio, " m=", m,
+            " time=", time, file=outfile)
+    else:
+        print("format=coo",  " nnz_ratio=", nnz_ratio, " m=", m,
+            " time=", time_coo, file=outfile)
+        print("format=gcs",  " nnz_ratio=", nnz_ratio, " m=", m,
+            " time=", time_gcs, file=outfile)

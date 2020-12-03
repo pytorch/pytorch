@@ -80,18 +80,6 @@ class TestSparseGCS(TestCase):
         expected = gcs.to_dense().matmul(vec)
 
         self.assertEqual(res, expected)
-
-    def test_gcs_segfault(self):
-        side1 = 100
-        side2 = 120
-        nnz = 200
-        k = 5
-        
-        gcs = self.gen_sparse_gcs((side1, k), nnz)
-        mat = torch.randn((k, side2), dtype=torch.double)
-        res = gcs.matmul(mat)
-        
-        gcs.to_dense().matmul(mat)
         
     def test_gcs_matmul(self):
         side1 = 100
@@ -105,43 +93,6 @@ class TestSparseGCS(TestCase):
             expected = gcs.to_dense().matmul(mat)
 
             self.assertEqual(res, expected)
-
-    # def test_basic_elementwise_ops(self):
-    #     # sparse-sparse addition
-    #     x1 = self.gen_sparse_gcs((10, 3, 40, 5, 2), 100)
-    #     x2 = self.gen_sparse_gcs((10, 3, 40, 5, 2), 140)
-    #     y1 = x1 + x2
-    #     expected = x1.to_dense() + x2.to_dense()
-    #     self.assertEqual(y1.to_dense(), expected)
-
-    #     # sparse-dense addition
-    #     x1 = self.gen_sparse_gcs((10, 3, 40, 5, 2), 100)
-    #     x2 = torch.ones((10, 3, 40, 5, 2))
-    #     y1 = x1 + x2
-        
-    #     expected = x1.to_dense() + x2.to_dense()
-    #     self.assertEqual(y1.to_dense(), expected)
-
-    #     # sparse-scalar addition
-    #     x1 = self.gen_sparse_gcs((10, 3, 40, 5, 2), 100)
-    #     y1 = x1 + 18.3
-    #     expected = x1.to_dense() + 18.3
-    #     self.assertEqual(y1.to_dense(), expected)
-        
-    #     # sparse-sparse multiplication
-    #     x1 = self.gen_sparse_gcs((10, 3, 40, 5, 2), 100)
-    #     x2 = self.gen_sparse_gcs((10, 3, 40, 5, 2), 140)
-    #     y1 = x1 * x2
-    #     expected = x1.to_dense() * x2.to_dense()
-
-    #     self.assertEqual(y1.to_dense(), expected)
-
-    #     # sparse-scalar multiplication
-    #     x1 = self.gen_sparse_gcs((10, 3, 40, 5, 2), 100)
-    #     y1 = x1 * 18.3
-    #     expected = x1.to_dense() * 18.3
-
-    #     self.assertEqual(y1.to_dense(), expected)
 
 if __name__ == '__main__':
     run_tests()

@@ -167,7 +167,7 @@ SparseTensor new_gcs_tensor(const TensorOptions& options) {
 // TODO: This constructor should probably use an ATen abstract method in order to make
 // autograd dispatch available for the GCS constructor. See the relevant note in native_functions.yaml. 
 Tensor sparse_gcs_tensor(const Tensor& pointers, const Tensor& indices, const Tensor& values,
-                         const Tensor& reduction, ArrayRef<int64_t> size,
+                         const Tensor& reduction, IntArrayRef size,
                          const TensorOptions& options) {
   TORCH_CHECK(!options.has_layout() || options.layout() == kSparseGCS, "expected sparse GCS layout, but got layout ", options.layout());
   
@@ -175,6 +175,7 @@ Tensor sparse_gcs_tensor(const Tensor& pointers, const Tensor& indices, const Te
   int64_t nnz_size = values.numel();
   int64_t ptr_size = pointers.numel();
   int64_t redux_size = reduction.numel();
+  std::cout << "BEGIN reduction tyep: " << reduction.dtype() << std::endl;
   
   get_sparse_impl<SparseGCSTensorImpl>(self)->resize_and_clear_(nnz_size, ptr_size, redux_size, size);
   get_sparse_impl<SparseGCSTensorImpl>(self)->set_member_tensors_unsafe(pointers,

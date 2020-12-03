@@ -949,7 +949,7 @@ class Tensor(torch._C._TensorBase):
         # See Note [rename_ / rename API]
         return update_names(self, names, rename_map, inplace=False)
 
-    def to_sparse_gcs(self, reduction=None, fill_value=float('NaN')):
+    def to_sparse_gcs(self, reduction=None, fill_value=0):
         """ Convert a dense, strided tensor to GCS format. The tensor can be of 
         any dimension.
 
@@ -1005,7 +1005,7 @@ class Tensor(torch._C._TensorBase):
             v = self
             for i in index:
                 v = v[i]
-            if (v == fill_value) or math.isnan(v):
+            if (math.isnan(v) if math.isnan(fill_value) else v == fill_value):
                 continue
 
             num += 1
@@ -1025,10 +1025,11 @@ class Tensor(torch._C._TensorBase):
                 co.extend(c)
                 vals.extend(v)
 
+        reduction = torch.IntTensor(reduction)
         return torch.sparse_gcs_tensor(torch.tensor(ro, dtype=torch.int32),
                                        torch.tensor(co, dtype=torch.int32),
-                                       torch.tensor(vals, dtype=torch.double),
-                                       torch.tensor(reduction), shape)
+                                       torch.tensor(vals, dtype=self.dtype),
+                                       reduction, shape)
 
 
     def _update_names(self, names, inplace):

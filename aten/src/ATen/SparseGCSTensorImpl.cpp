@@ -21,11 +21,11 @@ namespace {
 SparseGCSTensorImpl::SparseGCSTensorImpl(at::DispatchKeySet key_set,
                                          const caffe2::TypeMeta& data_type)
   :   SparseGCSTensorImpl(key_set, data_type
-      , at::empty({0}, at::initialTensorOptions().device(sparseGCSTensorSetToDeviceType(key_set)).dtype(ScalarType::Long))
+      , at::empty({0}, at::initialTensorOptions().device(sparseGCSTensorSetToDeviceType(key_set)).dtype(ScalarType::Int)) // pointers
       // indices in case of GCS tensor is always a 1D array so need to init size as {1,0}.
-      , at::empty({0}, at::initialTensorOptions().device(sparseGCSTensorSetToDeviceType(key_set)).dtype(ScalarType::Long))
-      , at::empty({0}, at::initialTensorOptions().device(sparseGCSTensorSetToDeviceType(key_set)).dtype(data_type))
-      , at::empty({0}, at::initialTensorOptions().device(sparseGCSTensorSetToDeviceType(key_set)).dtype(ScalarType::Long))
+      , at::empty({0}, at::initialTensorOptions().device(sparseGCSTensorSetToDeviceType(key_set)).dtype(ScalarType::Int)) // indices
+      , at::empty({0}, at::initialTensorOptions().device(sparseGCSTensorSetToDeviceType(key_set)).dtype(data_type)) // values
+      , at::empty({0}, at::initialTensorOptions().device(sparseGCSTensorSetToDeviceType(key_set)).dtype(ScalarType::Int)) // reduction
 ) {}
 
 SparseGCSTensorImpl::SparseGCSTensorImpl(at::DispatchKeySet key_set,
@@ -52,11 +52,16 @@ void SparseGCSTensorImpl::resize_and_clear_(int64_t nnz_size, int64_t ptr_size, 
   auto empty_values = at::empty(nnz_size, values().options());
   auto empty_reduction = at::empty(redux_size, reduction().options());
 
+  std::cout << "MUST ASSING\n";
+  std::cout << "empyt reduction: " << empty_reduction.dtype() << std::endl;
+
   // directly set to the member variables. there should be lots of error checking here.
   pointers_ = empty_pointers;
   indices_ = empty_indices;
   values_ = empty_values;
   reduction_ = empty_reduction;
+  
+  std::cout << "ASSIGNED ALL reduction_type: " << reduction_.dtype() << std::endl; 
   sizes_ = size.vec();
 }
 
@@ -77,6 +82,7 @@ void SparseGCSTensorImpl::set_member_tensors_unsafe(const Tensor& pointers, cons
   TORCH_CHECK(!values.is_sparse(), "expected values to be a dense tensor, but got values of layout ", values.layout());
   TORCH_CHECK(!reduction.is_sparse(), "expected reduction to be a dense tensor, but got reduction of layout ", reduction.layout());
 
+  std::cout << "TORCH CHECK reduction type: " << reduction.dtype() << " reduction_ type: " << reduction_.dtype() <<std::endl;
   TORCH_CHECK(values.device().type() == device().type(), "device type of values (", values.device().type(),
               ") must match device type of device().type()", device().type(), ")");
   TORCH_CHECK(!indices.is_cuda() || indices.get_device() == values.get_device(), "device of indices (", indices.get_device(),
@@ -96,11 +102,16 @@ void SparseGCSTensorImpl::set_member_tensors_unsafe(const Tensor& pointers, cons
   values_ = values;
   reduction_ = reduction;
 
+  std::cout << "DONE ASSIGN 1: reduction_ -> " << reduction_.dtype() << " reduction -> " << reduction.dtype() << std::endl;
+
   AT_ASSERT(device() == values_.device());    
   AT_ASSERT(indices_.device() == values_.device());
   AT_ASSERT(reduction_.device() == values_.device());
 
-  auto reduction_accessor = reduction_.accessor<int64_t, 1>();
+
+  auto reduction_accessor = reduction_.accessor<int32_t, 1>();
+
+    std::cout << "POST ACCESSOR\n";  
 
   rsplit_dim_ = reduction_accessor[reduction_.size(0)-1];
     
@@ -110,6 +121,7 @@ void SparseGCSTensorImpl::set_member_tensors_unsafe(const Tensor& pointers, cons
   dims1_.resize(sizes_.size() - rsplit_dim_);
   strides1_.resize(1);
   
+  std::cout << "RESIZE THIS SHIW\n";
   for (int i = 0; i < rsplit_dim_; ++i) { dims0_[i] = i; }
   for (int i = 0; i < sizes_.size() - rsplit_dim_; ++i) { dims1_[i] = i + rsplit_dim_; }
 

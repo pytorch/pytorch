@@ -35,6 +35,33 @@ def test_sparse_coo(m, n, k, nnz, test_count):
 
     return sum(times) / len(times)    
 
+def test_sparse_coo_and_gcs(m, n, k, nnz, test_count):
+    start = Event(enable_timing=True)
+    stop = Event(enable_timing=True)
+
+    coo, gcs = gen_sparse_coo_and_gcs((m, k), nnz)
+    mat = torch.randn((k, n) dtype=torch.double)
+
+    times = []
+    for _ in range(test_count):
+        start.record()
+        coo.matmul(mat)
+        stop.record()
+
+        times.append(start.elapsed_time(stop))
+
+    coo_mean_time = sum(times) / len(times)
+
+    times = []
+    for _ in range(test_count):
+        start.record()
+        gcs.matmul(mat)
+        stop.record()
+        times.append(start.elapsed_time(stop))
+
+    gcs_mean_time = sum(times) / len(times)
+
+    return coo_mean_time, gcs_mean_time
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SpMM")
@@ -67,6 +94,15 @@ if __name__ == "__main__":
         time = test_sparse_gcs(m, n, k, nnz, test_count)
     elif args.format == 'coo':
         time = test_sparse_coo(m, n, k, nnz, test_count)
+    elif args.format == 'both':
+        time_coo, time_gcs = test_sparse_coo_and_gcs(m, nnz, test_count)
 
-    print("format=", args.format, " nnz_ratio=", nnz_ratio, " m=", m,
-          " n=", n, " k=", k, " time=", time, file=outfile)
+
+    if args.format == 'both':
+        print("format=coo", " nnz_ratio=", nnz_ratio, " m=", m,
+            " n=", n, " k=", k, " time=", time_coo, file=outfile)
+        print("format=gcs", " nnz_ratio=", nnz_ratio, " m=", m,
+            " n=", n, " k=", k, " time=", time_gcs, file=outfile)
+    else:
+        print("format=", args.format, " nnz_ratio=", nnz_ratio, " m=", m,
+            " n=", n, " k=", k, " time=", time, file=outfile)
