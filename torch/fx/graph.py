@@ -144,8 +144,8 @@ class Graph:
             %add_1 : [#users=1] = call_function[target=<built-in function add>](args = (%x, %linear_weight), kwargs = {})
             %linear_1 : [#users=1] = call_module[target=linear](args = (%add_1,), kwargs = {})
             %relu_1 : [#users=1] = call_method[target=relu](args = (%linear_1,), kwargs = {})
-            %sum_1 : [#users=1] = call_function[target=<built-in method sum of type object at 0x7ff2da9dc300>](args = (%relu_1,), kwargs = {dim: -1})
-            %topk_1 : [#users=1] = call_function[target=<built-in method topk of type object at 0x7ff2da9dc300>](args = (%sum_1, 3), kwargs = {})
+            %sum_1 : [#users=1] = call_function[target=<built-in method sum of type object at 0x7ff2da9dc300>](args = (%relu_1,), kwargs = {dim: -1}) # noqa: B950
+            %topk_1 : [#users=1] = call_function[target=<built-in method topk of type object at 0x7ff2da9dc300>](args = (%sum_1, 3), kwargs = {}) # noqa: B950
             return topk_1
 
     The Node semantics are as follows:
