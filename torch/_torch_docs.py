@@ -3481,7 +3481,8 @@ Args:
         bin, and whose integral over the whole range is equal to 1. For example,
         in an unweighted histogram with 10 elements, if a bin contains 5 elements
         and has edges (1, 3), then if attr:`density` is True, it is normalized
-        to math:`5 / (10 * (3 - 1)) = .25`.
+        to math:`5 / (10 * (3 - 1)) = .25`. Promotes integral types into the
+        default scalar type.
 
 Returns:
     A (Tensor, Tensor) tuple of the histogram represented as a Tensor and the bin edges.
@@ -3499,11 +3500,11 @@ Example::
     >>> hist, edges = a.histogram(density=True)
     >>> hist
     tensor([0.5000, 0.0000, 0.5000, 0.0000, 0.0000, 0.5000, 0.0000, 0.5000, 0.0000,
-        0.5000], dtype=torch.float64)
+        0.5000])
     >>> hist.sum()
-    tensor(2.5000, dtype=torch.float64)
+    tensor(2.5000)
     >>> (hist*(edges[1:]-edges[:-1])).sum()
-    tensor(1., dtype=torch.float64)
+    tensor(1.0000)
 
 
 """.format(**common_args))
