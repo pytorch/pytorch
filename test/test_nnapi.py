@@ -331,6 +331,18 @@ class TestNNAPI(TestCase):
         inp = qpt(torch.randn(2, 32), 0.05, 130, torch.quint8)
         self.check(mod, inp)
 
+    def test_seblock_mul(self):
+        class MulModel(torch.nn.Module):
+            def forward(self, lhs, rhs):
+                return lhs * rhs
+
+        self.check(
+            MulModel(),
+            [
+                nhwc(torch.randn(2, 3, 4, 4)),
+                torch.randn(1, 3, 1, 1),
+            ])
+
     def test_multi_output(self):
         class MultiModel(torch.nn.Module):
             def forward(self, lhs, rhs) -> Tuple[torch.Tensor, torch.Tensor]:
