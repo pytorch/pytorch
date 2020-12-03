@@ -67,8 +67,9 @@ bool containsTensorType(const TypePtr& t) {
 
 class ShapePropagator {
  public:
-  explicit ShapePropagator(std::shared_ptr<Graph> graph) : aliasDb_(graph) {
-    collectResizeSet(std::move(graph)->block());
+  explicit ShapePropagator(const std::shared_ptr<Graph>& graph)
+      : aliasDb_(graph) {
+    collectResizeSet(graph->block());
   }
 
   void PropagateShapeOnBlock(Block* block, bool insert_expands = true) {

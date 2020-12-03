@@ -55,17 +55,20 @@ VulkanTensor& vtensor_from_vulkan(Tensor& tensor) {
 
 Tensor empty(
     IntArrayRef size,
-    const TensorOptions& options,
+    optional<ScalarType> dtype,
+    optional<Layout> layout,
+    optional<Device> device,
+    optional<bool> pin_memory,
     const optional<MemoryFormat> memory_format) {
   TORCH_CHECK(
-      !options.has_pinned_memory(),
+      !pin_memory.has_value(),
       "'pin_memory' argument is incompatible with Vulkan tensor");
   TORCH_CHECK(
-      !options.has_memory_format() && !memory_format,
+      !memory_format.has_value(),
       "'memory_format' argument is incompatible with Vulkan tensor");
   VulkanTensor vt{size.vec()};
   return new_with_vtensor_vulkan(
-      std::move(vt), at::device(at::kVulkan).dtype(options.dtype()));
+      std::move(vt), at::device(at::kVulkan).dtype(dtype));
 }
 
 Tensor empty_strided(
@@ -76,7 +79,7 @@ Tensor empty_strided(
     optional<Device> device,
     optional<bool> pin_memory) {
   return vulkan::aten::empty(
-      size, TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory), c10::nullopt);
+      size, dtype, layout, device, pin_memory, c10::nullopt);
 }
 
 Tensor upsample_nearest2d(
@@ -519,6 +522,7 @@ Tensor mean(
     const IntArrayRef dim,
     const bool keepdim,
     const optional<ScalarType> dtype) {
+  TORCH_INTERNAL_ASSERT(!keepdim, "keepdim not implemented for Vulkan mean");
   TORCH_INTERNAL_ASSERT(self.is_vulkan(), "mean expects Vulkan tensor input");
 
   // Mean is implemented only for HW dimensions of 4-d tensor
@@ -541,13 +545,13 @@ Tensor mean(
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("slice.Tensor", TORCH_FN(at::native::vulkan::aten::slice));
-  m.impl("reshape", TORCH_FN(at::native::vulkan::aten::reshape));
+  m.impl("view", TORCH_FN(at::native::vulkan::aten::reshape));
   m.impl("select.int", TORCH_FN(at::native::vulkan::aten::select));
   m.impl("transpose.int", TORCH_FN(at::native::vulkan::aten::transpose));
   m.impl_UNBOXED("transpose_", at::native::vulkan::aten::transpose_);
   m.impl("view", TORCH_FN(at::native::vulkan::aten::view));
   m.impl("unsqueeze", TORCH_FN(at::native::vulkan::aten::unsqueeze));
-  m.impl_UNBOXED("empty.memory_format", at::native::vulkan::aten::empty);
+  m.impl("empty.memory_format", at::native::vulkan::aten::empty);
   m.impl("empty_strided", TORCH_FN(at::native::vulkan::aten::empty_strided));
   m.impl("add.Tensor", TORCH_FN(at::native::vulkan::aten::add));
   m.impl("clamp", TORCH_FN(at::native::vulkan::aten::clamp));
@@ -567,8 +571,8 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("add.Scalar", TORCH_FN(at::native::vulkan::aten::add_scalar));
   m.impl_UNBOXED(
       "convolution_overrideable", at::native::vulkan::aten::convolution);
-  m.impl_UNBOXED("hardtanh_", at::native::vulkan::aten::hardtanh_);
-  m.impl_UNBOXED("relu_", at::native::vulkan::aten::relu_);
+  m.impl("hardtanh_", at::native::vulkan::aten::hardtanh_);
+  m.impl("relu_", at::native::vulkan::aten::relu_);
   m.impl_UNBOXED("add_.Tensor", at::native::vulkan::aten::add_);
 }
 
