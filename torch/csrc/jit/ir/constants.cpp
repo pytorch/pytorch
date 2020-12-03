@@ -124,10 +124,9 @@ c10::optional<Value*> tryInsertConstant(
       n->destroy();
       return c10::nullopt;
     };
-  } else if (val.isGenericDict() && insertableIValue(val)) {
-    n->ival_(attr::value, val);
-    n->output()->setType(val.type());
-  } else if (val.isEnum()) {
+  } else if (
+      (val.isGenericDict() && insertableIValue(val)) || (val.isEnum()) ||
+      (val.isObject() && !val.toObjectRef().type()->is_module())) {
     n->ival_(attr::value, val);
     n->output()->setType(val.type());
   } else {
@@ -191,6 +190,9 @@ c10::optional<IValue> toIValue(const Value* v) {
   } else if (type->cast<EnumType>()) {
     const auto& enum_val = node->ival(attr::value);
     return enum_val;
+  } else if (type->cast<ClassType>() && !type->is_module()) {
+    const auto& class_val = node->ival(attr::value);
+    return class_val;
   } else {
     std::stringstream ss;
     ss << "constant literal not supported for: " << type->str();

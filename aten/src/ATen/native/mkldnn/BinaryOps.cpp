@@ -68,7 +68,8 @@ Tensor mkldnn_add(const Tensor& self, const Tensor& other, Scalar alpha) {
   const std::vector<float> scales{1.0, alpha.to<float>()};
   ideep::sum::compute(scales, {x, y}, z);
 
-  return new_with_itensor_mkldnn(std::move(z), self.options());
+  return new_with_itensor_mkldnn(std::move(z), optTypeMetaToScalarType(self.options().dtype_opt()),
+                                 self.options().device_opt());
 }
 
 Tensor& mkldnn_add_(Tensor& self, const Tensor& other, Scalar alpha) {
@@ -99,7 +100,9 @@ Tensor& mkldnn_mul_out(Tensor& result, const Tensor& self, const Tensor& other) 
 }
 
 Tensor mkldnn_mul(const Tensor& self, const Tensor& other) {
-  Tensor result = empty_mkldnn(self.sizes(), self.options());
+  Tensor result = empty_mkldnn(self.sizes(), optTypeMetaToScalarType(self.options().dtype_opt()),
+                               self.options().layout_opt(), self.options().device_opt(),
+                               self.options().pinned_memory_opt());
   return native::mkldnn_mul_out(result, self, other);
 }
 

@@ -1985,29 +1985,20 @@ Tensor movedim(const Tensor& self, int64_t src, int64_t dst) {
   return at::movedim(self, IntArrayRef{src}, IntArrayRef{dst});
 }
 
-Tensor trace_cpu(const Tensor& self) {
-  Tensor result = at::empty({}, self.options());
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "trace", [&] {
-    using accscalar_t = at::acc_type<scalar_t, false>;
-    accscalar_t sum = 0;
-    const auto* t_data = self.data_ptr<scalar_t>();
+Tensor swapaxes(const Tensor& self, int64_t axis0, int64_t axis1) {
+  return self.transpose(axis0, axis1);
+}
 
-    int64_t t_stride_0, t_stride_1, t_diag_size;
+Tensor& swapaxes_(Tensor& self, int64_t axis0, int64_t axis1) {
+  return self.transpose_(axis0, axis1);
+}
 
-    TORCH_CHECK(self.dim() == 2, "trace: expected a matrix, but got tensor with dim ", self.dim());
+Tensor swapdims(const Tensor& self, int64_t dim0, int64_t dim1) {
+  return self.transpose(dim0, dim1);
+}
 
-    t_stride_0 = self.stride(0);
-    t_stride_1 = self.stride(1);
-
-    t_diag_size = std::min(self.size(0), self.size(1));
-    for (int64_t i = 0; i < t_diag_size; i++) {
-      sum += t_data[i * (t_stride_0 + t_stride_1)];
-    }
-
-    *result.data_ptr<scalar_t>() = sum;
-  });
-
-  return result;
+Tensor& swapdims_(Tensor& self, int64_t dim0, int64_t dim1) {
+  return self.transpose_(dim0, dim1);
 }
 
 }} // at::native

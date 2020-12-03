@@ -16,7 +16,9 @@
 namespace torch {
 namespace jit {
 
-c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(const Node* n) {
+c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
+    const Node* n,
+    bool ignore_custom_classes) {
   Stack stack;
   for (auto input : n->inputs()) {
     if (auto ival = toIValue(input)) {
@@ -25,6 +27,7 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(const Node* n) {
       return c10::nullopt;
     }
   }
+
   switch (n->kind()) {
     case prim::ListUnpack: {
       if (stack.back().toList().size() != n->outputs().size()) {
@@ -80,6 +83,12 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(const Node* n) {
         return c10::nullopt;
       }
     }
+    // Weak form of const propagation
+    if (ignore_custom_classes) {
+      if (v.isCustomClass()) {
+        return c10::nullopt;
+      }
+    }
   }
   return stack;
 }
@@ -104,14 +113,16 @@ std::unordered_set<Symbol> skip_list = {
 struct ConstantPropagator {
   // Runs constant propagation with an aliasing db and checks if inputs or
   // outputs might be mutated in the graph
-  static ConstantPropagator WithAliasDb(std::shared_ptr<Graph> graph) {
-    return ConstantPropagator(graph, true);
+  static ConstantPropagator WithAliasDb(
+      std::shared_ptr<Graph> graph,
+      bool ignore_custom_classes) {
+    return ConstantPropagator(std::move(graph), true, ignore_custom_classes);
   }
 
   // Runs constant propagation only on ops that clearly do not have aliased
   // inputs or outputs without computing aliasing information
   static ConstantPropagator NoAliasDb(std::shared_ptr<Graph> graph) {
-    return ConstantPropagator(graph, false);
+    return ConstantPropagator(std::move(graph), false, false);
   }
 
   void run() {
@@ -119,18 +130,23 @@ struct ConstantPropagator {
   }
 
  private:
-  ConstantPropagator(std::shared_ptr<Graph> graph, bool aliasing_types)
+  ConstantPropagator(
+      std::shared_ptr<Graph> graph,
+      bool aliasing_types,
+      bool ignore_custom_classes)
       : graph_(std::move(graph)) {
     if (aliasing_types) {
       aliasDb_ = torch::make_unique<AliasDb>(graph_);
     } else {
       aliasDb_ = nullptr;
     }
+    ignore_custom_classes_ = ignore_custom_classes;
   }
 
   void propagateNode(Node* n) {
     std::vector<IValue> outputs;
-    if (auto outputs_opt = runNodeIfInputsAreConstant(n)) {
+    if (auto outputs_opt =
+            runNodeIfInputsAreConstant(n, ignore_custom_classes_)) {
       outputs = std::move(outputs_opt.value());
     } else {
       // The op failed to run, so we cannot continue constant-prop for it.
@@ -353,11 +369,15 @@ struct ConstantPropagator {
 
   std::shared_ptr<Graph> graph_;
   std::unique_ptr<AliasDb> aliasDb_;
+  bool ignore_custom_classes_;
 };
 } // anonymous namespace
 
-void ConstantPropagation(std::shared_ptr<Graph>& graph) {
-  ConstantPropagator cp = ConstantPropagator::WithAliasDb(graph);
+void ConstantPropagation(
+    std::shared_ptr<Graph>& graph,
+    bool ignore_custom_classes) {
+  ConstantPropagator cp =
+      ConstantPropagator::WithAliasDb(graph, ignore_custom_classes);
   cp.run();
   EliminateDeadCode(graph);
   GRAPH_DUMP("After ConstantPropagation: ", graph);

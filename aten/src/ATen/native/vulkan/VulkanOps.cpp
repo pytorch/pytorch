@@ -29,7 +29,6 @@ void upsample_nearest2d(
     float scaleH,
     float scaleW) {
   auto device = context().device();
-  auto physicalDevice = context().physicalDevice();
   int64_t C = IN * IC;
   struct ConstBlock {
     float scaleX;
@@ -477,7 +476,6 @@ void add(
   auto W = os4[3];
 
   auto device = context().device();
-  auto physicalDevice = context().physicalDevice();
   struct ConstBlock {
     float alpha;
   };
@@ -1115,10 +1113,8 @@ void clamp(
   auto C = sizes[0] * sizes[1];
   auto H = sizes[2];
   auto W = sizes[3];
-  auto C_4 = UP_DIV(C, 4);
 
   auto device = context().device();
-  auto physicalDevice = context().physicalDevice();
   struct ConstBlock {
     float min;
     float max;
@@ -1170,14 +1166,10 @@ void addmm(
   const auto m2Sizes = m2.sizes();
   TORCH_INTERNAL_ASSERT(m1Sizes.size() == 2);
   TORCH_INTERNAL_ASSERT(m2Sizes.size() == 2);
-  const auto m1H = m1Sizes[0];
   const auto m1W = m1Sizes[1];
   const auto m1C = 1;
-  const auto m1C_4 = UP_DIV(m1C, 4);
   const auto m2H = m2Sizes[0];
-  const auto m2W = m2Sizes[1];
   const auto m2C = 1;
-  const auto m2C_4 = UP_DIV(m2C, 4);
   const auto OH = m1Sizes[0];
   const auto OW = m2Sizes[1];
 
@@ -1186,7 +1178,6 @@ void addmm(
 
   const auto C = m1C;
   const auto C_4 = UP_DIV(C, 4);
-  const auto K = m1W;
 
   auto device = context().device();
 
@@ -1206,15 +1197,14 @@ void addmm(
         VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
     };
   } else {
     descriptorTypes = {
         VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
     };
   }
 
@@ -1228,9 +1218,9 @@ void addmm(
   output.image()->bindStorageImage(descriptorSet, 0);
   m1.image()->bindShaderRead(descriptorSet, 1);
   m2.image()->bindShaderRead(descriptorSet, 2);
-  constBuffer.bind(descriptorSet, 3);
   if (hasT) {
-    (*t).image()->bindShaderRead(descriptorSet, 4);
+    (*t).image()->bindShaderRead(descriptorSet, 3);
+    constBuffer.bind(descriptorSet, 4);
   }
 
   WorkGroupSize workGroupSize{8, 8, 1};
@@ -1268,17 +1258,13 @@ void mean(VulkanTensor& output, const VulkanTensor& input) {
   int32_t C = safe_downcast<int32_t>(isizes[1]);
   int32_t H = safe_downcast<int32_t>(isizes[2]);
   int32_t W = safe_downcast<int32_t>(isizes[3]);
-  int32_t C_4 = UP_DIV(N * C, 4);
 
   auto device = context().device();
-  auto physicalDevice = context().physicalDevice();
   struct ConstBlock {
     int32_t W;
     int32_t H;
-    int32_t OW;
-    int32_t OH;
   };
-  ConstBlock cb{W, H, C, N};
+  ConstBlock cb{W, H};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
   VkDescriptorSetLayout descriptorSetLayout{};
@@ -1301,12 +1287,12 @@ void mean(VulkanTensor& output, const VulkanTensor& input) {
 
   WorkGroupSize workGroupSize{1, 1, 1};
   auto& computeUnit = context().computeUnitFactory().get(
-      GLSL_SPV(mean), descriptorSetLayout, workGroupSize);
+      GLSL_SPV(mean2d), descriptorSetLayout, workGroupSize);
   computeUnit.createCommandBuffer(descriptorSet);
   auto commandBuffer = computeUnit.commandBuffer();
   output.image()->addImageMemoryBarrierToGeneral(commandBuffer);
   input.image()->addImageMemoryBarrierToShaderRead(commandBuffer);
-  computeUnit.dispatchCommandBuffer(1, 1, C_4, workGroupSize);
+  computeUnit.dispatchCommandBuffer(C, N, 1, workGroupSize);
   computeUnit.endCommandBuffer();
   computeUnit.submitAndWaitCommandBuffer();
   vkDestroyDescriptorPool(device, descriptorPool, nullptr);
