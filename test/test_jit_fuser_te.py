@@ -1425,10 +1425,8 @@ class TestTEFuser(JitTestCase):
         ]
         binary_ops = [
             torch.div,
-
-            # FIXME: wrong results with int8 on cpu
-            # torch.remainder,
-            # torch.fmod,
+            torch.remainder,
+            torch.fmod,
         ]
         devices = self.devices
         # Maybe we should split this into separate tests to speed it up by
@@ -1447,10 +1445,9 @@ class TestTEFuser(JitTestCase):
             try:
                 t = torch.jit.trace(fn, (x))
                 self.assertEqual(ref, t(x))
-                self.assertAllFused(t.graph_for(x))
             except Exception as e:
                 raise RuntimeError(
-                    " ".join(["Failed:", str(dtype), op.__name__, device])
+                    "Failed: {} {} {} {}".format(dtype, op.__name__, device, scalar)
                 )
 
     def test_binary_cuda_only_ops(self):
