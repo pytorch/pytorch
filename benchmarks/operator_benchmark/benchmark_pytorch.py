@@ -1,7 +1,7 @@
 import time
 import json
 import torch
-import torch.utils.cpp_extension as cpp_extension # noqa
+import cpp_extension # noqa
 
 
 """PyTorch performance microbenchmarks.
@@ -10,7 +10,7 @@ This module contains PyTorch-specific functionalities for performance
 microbenchmarks.
 """
 
-class TorchBenchmarkBase(object):
+class TorchBenchmarkBase(torch.nn.Module):
     """ This is a base class used to create Pytorch operator benchmark.
         module_name is the name of the operator being benchmarked.
         test_name is the name (it's created by concatenating all the
@@ -18,8 +18,8 @@ class TorchBenchmarkBase(object):
     """
 
     def __init__(self):
+        super(TorchBenchmarkBase, self).__init__()
         self.user_given_name = None
-        self._jit_forward = None
         self._pass_count = 0
         self._num_inputs_require_grads = 0
 
@@ -49,32 +49,26 @@ class TorchBenchmarkBase(object):
             self._auto_set_counter += 1
             return (self._pass_count == self._auto_set_counter)
 
-    def forward(self):
-        pass
+    def extract_inputs_tuple(self):
+        self.inputs_tuple = tuple(self.inputs.values())
 
-    def _wrap_forward(self, foo):
-        """ The function passed to JIT trace must have at least one argument,
-            this function is to wrap the forward method to meet that requirement.
-            _consume op is used to avoid the dead-code-elimination optimization
-            in JIT.
-        """
-        return torch.ops.operator_benchmark._consume(self.forward())
+    @torch.jit.export
+    def get_inputs(self):
+        # Need to convert the inputs to tuple outside of JIT so that
+        # JIT can infer the size of the inputs.
+        return self.inputs_tuple
 
-    def _generate_jit_forward_graph(self):
-        """ generate a graph for the forward function via tracing
-        """
+    @torch.jit.export
+    def forward_impl(self):
+        # This is to supply the inputs to the forward function which
+        # will be called in both the eager and JIT mode of local runs
+        return self.forward(*self.get_inputs())
 
-        func = torch.jit.trace(self._wrap_forward, torch.rand(1))
-        place_holder = torch.rand(1) # noqa
-
-        @torch.jit.script
-        def _jit_forward_graph(iters, place_holder):
-            # type: (int, Tensor)
-            result = torch.jit.annotate(torch.Tensor, place_holder)
-            for _ in range(iters):
-                result = func(place_holder)
-            return result
-        return _jit_forward_graph
+    @torch.jit.export
+    def forward_consume(self, iters: int):
+        #  _consume is used to avoid the dead-code-elimination optimization
+        for _ in range(iters):
+            torch.ops.operator_benchmark._consume(self.forward_impl())
 
     def module_name(self):
         """ this is used to label the operator being benchmarked
@@ -121,13 +115,20 @@ class PyTorchOperatorTestCase(object):
         self.place_holder_tensor = torch.ones(1)
         self.framework = "PyTorch"
         self.time_series = []
+        self._jit_forward_graph = None
+
+    def _generate_jit_forward_graph(self):
+        """ generate a graph for the forward function via scripting
+        """
+        scripted_op_bench = torch.jit.script(self.op_bench)
+        return scripted_op_bench.forward_consume
 
     def run_jit_forward(self, num_runs, print_per_iter=False, cuda_sync=False):
         """ Run the forward path of an op with JIT mode
         """
-        if self.op_bench._jit_forward is None:
-            self.op_bench._jit_forward = self.op_bench._generate_jit_forward_graph()
-        self.op_bench._jit_forward(num_runs, self.place_holder_tensor)
+        if self._jit_forward_graph is None:
+            self._jit_forward_graph = self._generate_jit_forward_graph()
+        self._jit_forward_graph(num_runs)
 
     def _print_per_iter(self):
         # print last 50 values
@@ -148,15 +149,15 @@ class PyTorchOperatorTestCase(object):
         if print_per_iter:
             for _ in range(num_runs):
                 start_time = time.time()
-                self.output = self.op_bench.forward()
-                if cuda_sync: 
+                self.output = self.op_bench.forward_impl()
+                if cuda_sync:
                     torch.cuda.synchronize(torch.cuda.current_device())
                 end_time = time.time()
                 self.time_series.append((end_time - start_time) * 1e3)
         else:
             for _ in range(num_runs):
-                self.output = self.op_bench.forward()
-            if cuda_sync: 
+                self.output = self.op_bench.forward_impl()
+            if cuda_sync:
                 torch.cuda.synchronize(torch.cuda.current_device())
 
     def _output_mean(self):

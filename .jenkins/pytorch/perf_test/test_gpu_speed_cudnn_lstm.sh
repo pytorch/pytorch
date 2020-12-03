@@ -22,7 +22,7 @@ test_gpu_speed_cudnn_lstm () {
   for (( i=1; i<=NUM_RUNS; i++ )) do
     runtime=$(get_runtime_of_command python cudnn_lstm.py --skip-cpu-governor-check)
     echo $runtime
-    SAMPLE_ARRAY+=(${runtime})
+    SAMPLE_ARRAY+=("${runtime}")
   done
 
   cd ../..

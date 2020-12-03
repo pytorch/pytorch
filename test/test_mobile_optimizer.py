@@ -95,7 +95,7 @@ class TestOptimizer(unittest.TestCase):
                    .check_count("prepacked::linear_clamp_run", 1, exactly=True) \
                    .check_not("aten::add(") \
                    .check_not("aten::relu(") \
-                   .check_count("aten::add_relu(", 1, exactly=True) \
+                   .check_count("aten::_add_relu(", 1, exactly=True) \
                    .run(optimized_scripted_model.graph)
         torch.testing.assert_allclose(initial_result, optimized_result, rtol=1e-2, atol=1e-3)
 
@@ -340,7 +340,7 @@ class TestOptimizer(unittest.TestCase):
 
             m, m_optim = _quant_script_and_optimize(Standalone())
             FileCheck().check_not("Conv2d = prim::GetAttr[name=\"conv1\"]") \
-                       .check_count("_jit_pass_hoist_conv_packed_params", 2, exactly=True) \
+                       .check_count("__torch__.torch.classes.quantized.Conv2dPackedParamsBase = prim::Constant", 2, exactly=True) \
                        .run(m_optim.graph)
             self.assertFalse(hasattr(m_optim, "conv1"))
             self.assertFalse(hasattr(m_optim, "conv2"))
@@ -354,7 +354,7 @@ class TestOptimizer(unittest.TestCase):
 
             m, m_optim = _quant_script_and_optimize(Parent())
             FileCheck().check_not("Conv2d = prim::GetAttr[name=\"conv1\"]") \
-                       .check_count("_jit_pass_hoist_conv_packed_params", 2, exactly=True) \
+                       .check_count("__torch__.torch.classes.quantized.Conv2dPackedParamsBase = prim::Constant", 2, exactly=True) \
                        .run(m_optim.graph)
             self.assertFalse(hasattr(m_optim, "conv1"))
             self.assertFalse(hasattr(m_optim, "child"))

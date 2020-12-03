@@ -33,6 +33,7 @@ c10::optional<c10::DispatchKey> parseDispatchKey(const std::string& k) {
     {"QuantizedCPU", c10::DispatchKey::QuantizedCPU},
     {"Math", c10::DispatchKey::Math},
     {"Autograd", c10::DispatchKey::Autograd},
+    {"DefaultBackend", c10::DispatchKey::DefaultBackend},
     {"AutogradCPU", c10::DispatchKey::AutogradCPU},
     {"", c10::DispatchKey::Undefined},
   };

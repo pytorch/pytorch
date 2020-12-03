@@ -11,6 +11,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/SpectralOpsUtils.h>
+#include <ATen/native/TensorIterator.h>
 
 #include <algorithm>
 #include <vector>
@@ -408,6 +409,90 @@ Tensor fft_irfftn(const Tensor& self, c10::optional<IntArrayRef> s,
   // Then 1d irfft on last dim to get real output
   return native::fft_irfft(x, last_shape, last_dim, norm);
 }
+
+Tensor fft_fft2(const Tensor& self, c10::optional<IntArrayRef> s,
+                IntArrayRef dim, c10::optional<std::string> norm) {
+  return native::fft_fftn(self, s, dim, std::move(norm));
+}
+
+Tensor fft_ifft2(const Tensor& self, c10::optional<IntArrayRef> s,
+                IntArrayRef dim, c10::optional<std::string> norm) {
+  return native::fft_ifftn(self, s, dim, std::move(norm));
+}
+
+Tensor fft_rfft2(const Tensor& self, c10::optional<IntArrayRef> s,
+                IntArrayRef dim, c10::optional<std::string> norm) {
+  return native::fft_rfftn(self, s, dim, std::move(norm));
+}
+
+Tensor fft_irfft2(const Tensor& self, c10::optional<IntArrayRef> s,
+                  IntArrayRef dim, c10::optional<std::string> norm) {
+  return native::fft_irfftn(self, s, dim, std::move(norm));
+}
+
+Tensor fft_fftfreq(int64_t n, double d, const TensorOptions& options) {
+  ScalarType dtype = typeMetaToScalarType(options.dtype());
+  TORCH_CHECK(at::isFloatingType(dtype) || at::isComplexType(dtype),
+              "fftfreq requires a floating point or complex dtype");
+  // TODO: arange doesn't have complex support
+  Tensor result = native::arange(n, options);
+  auto right_slice = result.slice(0, (n + 1) / 2, 0);
+  at::arange_out(right_slice, -(n/2), 0, 1);
+  result.mul_(1.0 / (n * d));  // Slightly faster than div_(n*d)
+  return result;
+}
+
+Tensor fft_rfftfreq(int64_t n, double d, const TensorOptions& options) {
+  ScalarType dtype = typeMetaToScalarType(options.dtype());
+  TORCH_CHECK(at::isFloatingType(dtype) || at::isComplexType(dtype),
+              "rfftfreq requires a floating point or complex dtype");
+  // TODO: arange doesn't have complex support
+  Tensor result = native::arange(n/2 + 1, options);
+  result.mul_(1.0 / (n * d));  // Slightly faster than div_(n*d)
+  return result;
+}
+
+// If an array dim is specified, wraps them according to self.dim().
+// Otherwise returns a vector of all dims.
+DimVector default_alldims(const Tensor& self, c10::optional<IntArrayRef> dim_opt) {
+  DimVector dim;
+  if (dim_opt) {
+    IntArrayRef dim_unwrapped = *dim_opt;
+    dim.resize(dim_unwrapped.size());
+    for (int64_t i = 0; i < dim.size(); ++i) {
+      dim[i] = maybe_wrap_dim(dim_unwrapped[i], self.dim());
+    }
+  } else {
+    dim.resize(self.dim());
+    std::iota(dim.begin(), dim.end(), 0);
+  }
+  return dim;
+}
+
+Tensor fft_fftshift(const Tensor& x, c10::optional<IntArrayRef> dim_opt) {
+  auto dim = default_alldims(x, dim_opt);
+
+  IntArrayRef x_sizes = x.sizes();
+  DimVector shift(dim.size());
+  for (int64_t i = 0; i < dim.size(); ++i) {
+    shift[i] = x_sizes[dim[i]] / 2;
+  }
+
+  return at::roll(x, shift, dim);
+}
+
+Tensor fft_ifftshift(const Tensor& x, c10::optional<IntArrayRef> dim_opt) {
+  auto dim = default_alldims(x, dim_opt);
+
+  IntArrayRef x_sizes = x.sizes();
+  DimVector shift(dim.size());
+  for (int64_t i = 0; i < dim.size(); ++i) {
+    shift[i] = (x_sizes[dim[i]] + 1) / 2;
+  }
+
+  return at::roll(x, shift, dim);
+}
+
 
 // This is a pass-through wrapper function that does the size check and
 // inferences. The actual forward implementation function is called
@@ -908,5 +993,98 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
       self, n_fft, hop_lengthOpt, win_lengthOpt, window, center, normalized,
       onesidedOpt, lengthOpt, /*return_complex=*/false);
 }
+
+void _fft_fill_with_conjugate_symmetry_(const Tensor& input, IntArrayRef dim_) {
+  const auto input_sizes = input.sizes();
+  const auto input_strides = input.strides();
+  TORCH_CHECK(dim_.size() > 0);
+  DimVector dim(dim_.begin(), dim_.end());
+  at::maybe_wrap_dims(dim, input_strides.size());
+
+  if (input.numel() == 0 || input_sizes[dim.back()] <= 2) {
+    return;  // No elements need writing
+  }
+
+  // Small dimensions may be treated as batch dims since they don't get mirrored
+  dim.erase(
+      std::remove_if(dim.begin(), dim.end(), [&](int64_t dim) {
+        return (input_sizes[dim] <= 2);
+      }),
+      dim.end());
+
+  // Use TensorIterator to coalesce batch dimensions
+  // NOTE: Can't use TensorIterator loops because we need negative strides
+  auto iter = TensorIteratorConfig()
+      .add_output(input)
+      .add_input(input)
+      .resize_outputs(false)
+      .declare_static_shape(input_sizes, dim)
+      .build();
+
+  const auto iter_strides = iter.strides(0);
+  const auto iter_sizes = iter.shape();
+  const auto ndim = iter_strides.size() + dim.size();
+  DimVector in_strides(ndim), signal_half_sizes(ndim);
+  // Take coalesced batch dimensions from TensorIterator
+  std::copy(iter_strides.begin(), iter_strides.end(), in_strides.begin());
+  std::copy(iter_sizes.begin(), iter_sizes.end(), signal_half_sizes.begin());
+
+  // Take transformed dimensions directly from the input
+  const auto element_size = iter.element_size(0);
+  for (int64_t i = 0; i < dim.size(); ++i) {
+    // Convert to byte strides to match TensorIterator
+    in_strides[iter_strides.size() + i] = input_strides[dim[i]] * element_size;
+    signal_half_sizes[iter_strides.size() + i] = input_sizes[dim[i]];
+  }
+
+  // For the last dimension, use negative strides to perform the mirroring
+  signal_half_sizes.back() = (input_sizes[dim.back()] - 1) / 2;
+  auto out_strides = in_strides;
+  out_strides.back() *= -1;
+
+  auto* data_ptr = static_cast<char*>(input.data_ptr());
+  const auto* in_data = data_ptr + input_strides[dim.back()] * element_size;
+  auto* out_data = data_ptr + (
+      input_strides[dim.back()] * (input_sizes[dim.back()] - 1) * element_size);
+
+  // Reorder dimensions by stride to maximize data locality
+  DimVector dim_permute(ndim);
+  std::iota(dim_permute.begin(), dim_permute.end(), 0);
+  std::sort(dim_permute.begin(), dim_permute.end(),
+      [&](auto dim1, auto dim2) {
+        return in_strides[dim1] < in_strides[dim2];
+      });
+
+  DimVector temp(ndim);
+  auto apply_permutation = [&] (DimVector & vec) {
+    // Do permuted index copy into a temporary, then copy back
+    for (int64_t i = 0; i < ndim; ++i) {
+      temp[i] = vec[dim_permute[i]];
+    }
+    vec = temp;
+  };
+  apply_permutation(in_strides);
+  apply_permutation(out_strides);
+  apply_permutation(signal_half_sizes);
+
+  // Find dims.slice(dims.size() - 1) in the new permuted order.
+  // These are the dimensions that need explicit Hermitian mirroring
+  DimVector mirror_dims;
+  mirror_dims.reserve(dim.size() - 1);
+  for (int64_t i = 0; i < ndim; ++i) {
+    if (dim_permute[i] >= iter_strides.size() &&  // Not a batch dimension
+        dim_permute[i] != ndim - 1) {  // Not the last dim, which is mirrored separately with negative strides
+      mirror_dims.push_back(i);
+    }
+  }
+  TORCH_INTERNAL_ASSERT(mirror_dims.size() == dim.size() - 1);
+
+  // Dispatch to CPU or CUDA kernel to do the actual conjugate mirroring
+  fft_fill_with_conjugate_symmetry_stub(
+      input.device().type(), input.scalar_type(),
+      mirror_dims, signal_half_sizes, in_strides, in_data, out_strides, out_data);
+}
+
+DEFINE_DISPATCH(fft_fill_with_conjugate_symmetry_stub);
 
 }} // at::native

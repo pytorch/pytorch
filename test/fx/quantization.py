@@ -164,7 +164,7 @@ def matches(modules, node, pattern, max_uses=sys.maxsize):
         self_match = pattern
         arg_matches = None
 
-    if node.uses > max_uses:
+    if len(node.users) > max_uses:
         return False
 
     if isinstance(self_match, type) and issubclass(self_match, torch.nn.Module):

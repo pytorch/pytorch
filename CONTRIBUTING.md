@@ -118,10 +118,36 @@ For example:
 - modify your Python file `torch/__init__.py`
 - test functionality
 
-You do not need to repeatedly install after modifying Python files.
+You do not need to repeatedly install after modifying Python files (`.py`). However, you would need to reinstall
+if you modify Python interface (`.pyi`, `.pyi.in`) or non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
 
 In case you want to reinstall, make sure that you uninstall PyTorch first by running `pip uninstall torch`
 and `python setup.py clean`. Then you can install in `develop` mode again.
+
+### Tips and Debugging
+* A prerequisite to installing PyTorch is CMake. We recommend installing it with [Homebrew](https://brew.sh/)
+with `brew install cmake` if you are developing on MacOS or Linux system.
+* Our `setup.py` requires Python >= 3.6
+* If you run into errors when running `python setup.py develop`, here are some debugging steps:
+  1. Run `printf '#include <stdio.h>\nint main() { printf("Hello World");}'|clang -x c -; ./a.out` to make sure
+  your CMake works and can compile this simple Hello World program without errors.
+  2. Nuke your `build` directory. The `setup.py` script compiles binaries into the `build` folder and caches many
+  details along the way, which saves time the next time you build. If you're running into issues, you can always
+  `rm -rf build` from the toplevel `pytorch` directory and start over.
+  3. If you have made edits to the PyTorch repo, commit any change you'd like to keep and clean the repo with the
+  following commands (note that clean _really_ removes all untracked files and changes.):
+  ```bash
+  git submodule deinit -f .
+  git clean -xdf
+  python setup.py clean
+  git submodule update --init --recursive # very important to sync the submodules
+  python setup.py develop                 # then try running the command again
+  ```
+  4. The main step within `python setup.py develop` is running `make` from the `build` directory. If you want to
+  experiment with some environment variables, you can pass them into the command:
+  ```bash
+  ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* python setup.py develop
+  ```
 
 ## Nightly Checkout & Pull
 
@@ -287,6 +313,8 @@ pip install -r requirements.txt
 # npm install -g katex
 # Or if you prefer an uncontaminated global executable environment or do not want to go through the node configuration:
 # npm install katex && export PATH="$PATH:$(pwd)/node_modules/.bin"
+# If you're a Facebook employee using a devserver, yarn may be more convenient:
+# yarn global add katex
 ```
 
 3. Generate the documentation HTML files. The generated files will be in `docs/build/html`.
@@ -327,7 +355,7 @@ information on the documentation syntax.
 
 We run Doxygen in CI (Travis) to verify that you do not use invalid Doxygen
 commands. To run this check locally, run `./check-doxygen.sh` from inside
-`docs/cpp`.
+`docs/cpp/source`.
 
 To build the documentation, follow the same steps as above, but run them from
 `docs/cpp` instead of `docs`.
@@ -351,6 +379,14 @@ et my_machine -t="8000:8000"
 ```
 
 Then navigate to `localhost:8000` in your web browser.
+
+Alternatively, you can run `rsync` on your local machine to copy the files from
+your remote machine:
+```bash
+mkdir -p build cpp/build
+rsync -az me@my_machine:/path/to/pytorch/docs/build/html build
+rsync -az me@my_machine:/path/to/pytorch/docs/cpp/build/html cpp/build
+```
 
 #### Submitting changes for review
 

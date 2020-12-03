@@ -15,6 +15,8 @@ C10_DEFINE_int(caffe2_threadpool_android_cap, true, "");
 // Whether or not threadpool caps apply to iOS
 C10_DEFINE_int(caffe2_threadpool_ios_cap, true, "");
 
+C10_DEFINE_int(pthreadpool_size, 0, "Override the default thread pool size.");
+
 namespace caffe2 {
 
 size_t getDefaultNumThreads() {
@@ -68,6 +70,11 @@ size_t getDefaultNumThreads() {
         }
         break;
     }
+  }
+
+  if (FLAGS_pthreadpool_size) {
+    // Always give precedence to explicit setting.
+    numThreads = FLAGS_pthreadpool_size;
   }
   return numThreads;
 }

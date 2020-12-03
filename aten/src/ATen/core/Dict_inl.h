@@ -38,7 +38,7 @@ namespace detail {
 
 inline size_t DictKeyHash::operator()(const IValue& ivalue) const {
   if (ivalue.isInt()) {
-    return std::hash<int>()(ivalue.toInt());
+    return std::hash<int64_t>()(ivalue.toInt());
   } else if (ivalue.isString()) {
     return std::hash<std::string>()(ivalue.toStringRef());
   } else if (ivalue.isDouble()) {

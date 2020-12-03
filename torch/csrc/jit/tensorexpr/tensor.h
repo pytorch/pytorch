@@ -12,129 +12,80 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-class Function : public KernelScopedObject {
+class Tensor : KernelScopedObject {
  public:
-  Function(
-      const std::string& func_name,
+  Tensor(
+      const std::string& name,
       const std::vector<const Expr*>& dims,
       const std::vector<const Var*>& args,
       const Expr* body)
       // TODO: Function should not create buffers, they should be created
       // manually before constructing a function.
-      : func_vars_({new Buf(func_name, dims, body->dtype())}),
-        dims_(dims),
-        args_(args),
-        bodies_({body}) {}
-  Function(
-      const std::vector<std::string>& func_names,
-      const std::vector<const Expr*>& dims,
+      : buf_(new Buf(name, dims, body->dtype())), args_(args), body_(body) {}
+
+  Tensor(Buf* buf, const std::vector<const Var*>& args, const Expr* body)
+      : buf_(buf), args_(args), body_(body) {}
+
+  Tensor(
+      Buf* buf,
       const std::vector<const Var*>& args,
-      const std::vector<const Expr*>& bodies)
-      : func_vars_(func_names.size()),
-        dims_(dims),
-        args_(args),
-        bodies_(bodies) {
-    for (size_t i = 0; i < func_names.size(); i++) {
-      func_vars_[i] = new Buf(func_names[i], dims, bodies[i]->dtype());
-    }
-  }
-  Function(
-      const std::string& func_name,
-      Buf* func_var,
-      const std::vector<const Expr*>& dims,
-      const std::vector<const Var*>& args,
+      const std::vector<const Expr*>& reduce_dims,
+      const std::vector<const Var*>& reduce_args,
       const Expr* body)
-      : func_vars_({func_var}), dims_(dims), args_(args), bodies_({body}) {}
-
-  size_t ndim() const {
-    return dims_.size();
-  }
-
-  const Expr* dim(size_t index) const {
-    if (index < 0 || index >= dims_.size()) {
-      throw out_of_range_index();
-    }
-
-    return dims_[index];
-  }
-  const std::vector<const Expr*>& dims() const {
-    return dims_;
-  }
-
-  const Var* arg(size_t index) const {
-    if (index < 0 || index >= args_.size()) {
-      throw out_of_range_index();
-    }
-
-    return args_[index];
-  }
-  const std::vector<const Var*>& args() const {
-    return args_;
-  }
-
-  std::vector<const Expr*> bodies() const {
-    return bodies_;
-  }
-  const Expr* body(size_t index) const {
-    if (index >= bodies_.size()) {
-      throw out_of_range_index();
-    }
-
-    return bodies_[index];
-  }
-
-  std::vector<const Buf*> func_vars() const {
-    return func_vars_;
-  }
-  const Buf* func_var(size_t index) const {
-    if (index >= func_vars_.size()) {
-      throw out_of_range_index();
-    }
-    return func_vars_[index];
-  }
-
-  Stmt* ElementStmt(size_t index);
-
- private:
-  std::vector<const Buf*> func_vars_;
-  std::vector<const Expr*> dims_;
-  std::vector<const Var*> args_;
-  std::vector<const Expr*> bodies_;
-};
-
-class Tensor : KernelScopedObject {
- public:
-  Tensor(Function* function, int output_index)
-      : function_(function), output_index_(output_index) {}
-
-  Function* function() const {
-    return function_;
-  }
-  int output_index() const {
-    return output_index_;
-  }
+      : buf_(buf),
+        args_(args),
+        body_(body),
+        reduce_dims_(reduce_dims),
+        reduce_args_(reduce_args) {}
 
   // Wrappers over accessors to fields of the underlying function
   const Expr* body() const {
-    return function()->body(output_index());
+    return body_;
   }
   const Buf* buf() const {
-    return function()->func_var(output_index());
+    return buf_;
   }
-  int ndim() const {
-    return buf()->dims().size();
+  size_t ndim() const {
+    return buf()->ndim();
   }
-  const Expr* dim(int index) const {
+  const Expr* dim(size_t index) const {
+    if (index >= ndim()) {
+      throw out_of_range_index();
+    }
     return buf()->dim(index);
   }
   std::vector<const Expr*> dims() const {
     return buf()->dims();
   }
-  const Var* arg(int index) const {
-    return function()->arg(index);
+  const Var* arg(size_t index) const {
+    if (index >= ndim()) {
+      throw out_of_range_index();
+    }
+    return args_[index];
   }
   const std::vector<const Var*>& args() const {
-    return function()->args();
+    return args_;
+  }
+  size_t reduce_ndim() const {
+    return reduce_dims_.size();
+  }
+  std::vector<const Expr*> reduce_dims() const {
+    return reduce_dims_;
+  }
+  std::vector<const Var*> reduce_args() const {
+    return reduce_args_;
+  }
+  const Expr* reduce_dim(size_t index) const {
+    if (index >= reduce_ndim()) {
+      throw out_of_range_index();
+    }
+    return reduce_dims_[index];
+  }
+  const Var* reduce_arg(size_t index) const {
+    if (index >= reduce_ndim()) {
+      throw out_of_range_index();
+    }
+    return reduce_args_[index];
   }
 
   void initializeTo(const Expr* initializer) {
@@ -143,6 +94,7 @@ class Tensor : KernelScopedObject {
   const Expr* initializer() const {
     return initializer_;
   }
+  Stmt* ElementStmt();
 
   template <typename... Ts>
   inline ExprHandle operator()(const Ts&... ts);
@@ -152,8 +104,12 @@ class Tensor : KernelScopedObject {
   inline ExprHandle call(const Ts&... ts);
 
  private:
-  Function* function_;
-  int output_index_;
+  const Buf* buf_;
+  std::vector<const Var*> args_;
+  const Expr* body_;
+  std::vector<const Expr*> reduce_dims_;
+  std::vector<const Var*> reduce_args_;
+
   const Expr* initializer_{nullptr};
 };
 
@@ -295,10 +251,8 @@ Tensor* Reduce(
   Buf* func_result = new Buf(func_name, dims, body.dtype());
   const ReduceOp* reduce_op =
       reducer(func_result, body, output_args, reduce_vars);
-  dims.insert(dims.end(), reduce_dims.begin(), reduce_dims.end());
-  Function* func =
-      new Function(func_name, func_result, dims, all_vars, reduce_op);
-  Tensor* t = new Tensor(func, 0);
+  Tensor* t =
+      new Tensor(func_result, vars, reduce_dims, reduce_vars, reduce_op);
   t->initializeTo(new Cast(body.dtype(), reducer.initializer()));
   return t;
 }
@@ -352,10 +306,7 @@ class FunctionCall : public CallNode<FunctionCall> {
   }
 
   FunctionCall(Tensor* tensor, const std::vector<const Expr*>& params)
-      : BaseClass(
-            tensor->function()->body(tensor->output_index())->dtype(),
-            kFunctionCall,
-            params),
+      : BaseClass(tensor->body()->dtype(), kFunctionCall, params),
         tensor_(tensor) {}
 
  private:

@@ -158,7 +158,7 @@ def load(f, map_location=None, _extra_files=None):
 
     cu = torch._C.CompilationUnit()
     if isinstance(f, str) or isinstance(f, pathlib.Path):
-        cpp_module = torch._C.import_ir_module(cu, f, map_location, _extra_files)
+        cpp_module = torch._C.import_ir_module(cu, str(f), map_location, _extra_files)
     else:
         cpp_module = torch._C.import_ir_module_from_buffer(
             cu, f.read(), map_location, _extra_files

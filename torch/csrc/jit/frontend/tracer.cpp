@@ -614,6 +614,9 @@ void addInputs(
 void addInputs(Node* n, const char* name, at::Device value) {
   detail::genericAddInput(n, value);
 }
+void addInputs(Node* n, const char* name, c10::Stream stream) {
+  detail::genericAddInput(n, static_cast<int64_t>(stream.pack()));
+}
 void addInputs(Node* n, const char* name, at::Layout value) {
   detail::genericAddInput(n, static_cast<int64_t>(value));
 }

@@ -112,9 +112,7 @@ bool scheduleFusion(Fusion* fusion, const at::ArrayRef<c10::IValue> inputs) {
     out_tv->split(0, kPwThreadX);
     // Split by another 4 which will be our unroll factor
     auto ur_factor = disable_unroll ? 1 : kUnrollFactor;
-    if (!disable_unroll) {
-      out_tv->split(0, ur_factor);
-    }
+    out_tv->split(0, ur_factor);
   }
 
   for (auto output : fusion->outputs()) {

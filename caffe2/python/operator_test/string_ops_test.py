@@ -119,6 +119,33 @@ class TestStringOps(serial.SerializedTestCase):
             [strings],
             string_ends_with_ref)
 
+    @given(strings=st.text(alphabet=['a', 'b']))
+    @settings(deadline=1000)
+    def test_string_equals(self, strings):
+        text = ""
+        if strings:
+            text = strings[0]
+
+        strings = np.array(
+            [str(a) for a in strings], dtype=np.object
+        )
+
+        def string_equals_ref(strings):
+            return (
+                np.array([a == text for a in strings], dtype=bool),
+            )
+
+        op = core.CreateOperator(
+            'StringEquals',
+            ['strings'],
+            ['bools'],
+            text=text)
+        self.assertReferenceChecks(
+            hu.cpu_do,
+            op,
+            [strings],
+            string_equals_ref)
+
 if __name__ == "__main__":
     import unittest
     unittest.main()

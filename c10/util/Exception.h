@@ -181,6 +181,12 @@ class C10_API EnforceFiniteError : public Error {
   using Error::Error;
 };
 
+// Used in Onnxifi backend lowering.  These turn into
+// ExitException when they cross to Python.
+class C10_API OnnxfiBackendSystemError : public Error {
+  using Error::Error;
+};
+
 // A utility function to return an exception std::string by prepending its
 // exception type before its what() content
 C10_API std::string GetExceptionString(const std::exception& e);
@@ -340,7 +346,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
 #endif
 #define TORCH_CHECK(cond, ...) TORCH_CHECK_WITH(Error, cond, __VA_ARGS__)
 
-// An utility macro that does what `TORCH_CHECK` does if compiled in the host code, 
+// An utility macro that does what `TORCH_CHECK` does if compiled in the host code,
 // otherwise does nothing. Supposed to be used in the code shared between host and
 // device code as an alternative for `TORCH_CHECK`.
 #if defined(__CUDACC__) || defined(__HIPCC__)
@@ -381,18 +387,30 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // Report a warning to the user.  Accepts an arbitrary number of extra
 // arguments which are concatenated into the warning message using operator<<
 //
+#ifdef STRIP_ERROR_MESSAGES
+#define TORCH_WARN(...) \
+  ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, {}, false)
+#else
 #define TORCH_WARN(...) \
   ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, ::c10::str(__VA_ARGS__), false)
+#endif
 
 // Report a warning to the user only once.  Accepts an arbitrary number of extra
 // arguments which are concatenated into the warning message using operator<<
 //
+#ifdef STRIP_ERROR_MESSAGES
+#define TORCH_WARN_ONCE(...) \
+  C10_UNUSED static const auto C10_ANONYMOUS_VARIABLE(torch_warn_once_) = [&] { \
+    ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, {}, false); \
+    return true; \
+  }()
+#else
 #define TORCH_WARN_ONCE(...) \
   C10_UNUSED static const auto C10_ANONYMOUS_VARIABLE(torch_warn_once_) = [&] { \
     ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, ::c10::str(__VA_ARGS__), false); \
     return true; \
   }()
-
+#endif
 
 // ----------------------------------------------------------------------------
 // Deprecated macros

@@ -1,4 +1,3 @@
-
 #include <torch/csrc/jit/codegen/cuda/lower_loops.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
@@ -14,6 +13,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 LoopNestGenerator::LoopNestGenerator(
     Fusion* fusion,
@@ -75,7 +75,7 @@ Expr* LoopNestGenerator::pushAlloc(TensorView* tv) {
   const auto alloc = ir_builder_.create<kir::Allocate>(
       lowered_tv, lowered_tv->memoryType(), size);
 
-  // Track Shared Memory Allocation Nodes
+  // Track Dynamic Shared Memory Allocation Nodes
   if (tv->getMemoryType() == MemoryType::Shared) {
     if (!size->isConstScalar()) {
       dynamic_smem_.push_front(alloc);
@@ -85,7 +85,8 @@ Expr* LoopNestGenerator::pushAlloc(TensorView* tv) {
 
   // Place the allocation
   if (alloc_loop != nullptr) {
-    alloc_loop->body().insert(0, alloc);
+    alloc_loop->body().insert(for_loop_allocations_[alloc_loop], alloc);
+    ++for_loop_allocations_[alloc_loop];
   } else {
     lowered_exprs.insert(lowered_exprs.begin(), alloc);
   }
@@ -98,6 +99,7 @@ void LoopNestGenerator::openFor(std::pair<IterDomain*, TensorView*> id_pair) {
   IterDomain* id = id_pair.first;
   if (for_loops.size() > 0) {
     kir::ForLoop* new_scope = scope_utils::openFor(for_loops.back(), id);
+    for_loop_allocations_.insert({new_scope, 0});
     for_loops.push_back(new_scope);
   } else {
     for_loops.push_back(scope_utils::openFor(nullptr, id));
@@ -180,6 +182,7 @@ void LoopNestGenerator::initReduction(
       new_fl = ir_builder_.create<kir::ForLoop>(
           ir_builder_.create<kir::Int>(c10::nullopt), id, inner_fl);
     }
+    for_loop_allocations_.insert({new_fl, 0});
 
     if (init_loop_nest == nullptr) {
       // If this is our first generated loop, then it will be our outer most
@@ -203,7 +206,7 @@ void LoopNestGenerator::initReduction(
   }
 
   // If we don't have an alloc_loop defined it means it needs to go in
-  // lowered_exprs Make sure to place after the allocation of what we're
+  // lowered_exprs. Make sure to place after the allocation of what we're
   // initializing if there is one.
   if (alloc_loop == nullptr) {
     if (alloc_expr != nullptr) {
@@ -219,9 +222,10 @@ void LoopNestGenerator::initReduction(
     }
   } else {
     if (alloc_expr != nullptr) {
-      // If there is an allocation for this tensor view place this loop nest
-      // after it
+      // If there is an allocation for this TensorView
+      // place this loop nest after it
       alloc_loop->body().insert_after(alloc_expr, init_loop_nest);
+      ++for_loop_allocations_[alloc_loop];
     } else {
       // Otherwise we're allocating a global value
       alloc_loop->body().insert(0, init_loop_nest);
@@ -256,6 +260,7 @@ void LoopNestGenerator::handle(Expr* expr) {
     shared_memory_sync |= isModifiedSharedMemory(in);
   }
   if (shared_memory_sync) {
+    TORCH_INTERNAL_ASSERT(!for_loops.empty(), "Attempted to add SyncThreads");
     // push Sync to the back of the last for loop
     scope_utils::pushBack(for_loops.back(), ir_builder_.create<kir::Sync>());
     cleanSharedMemory();
@@ -488,13 +493,68 @@ void groupExpressions(
 }
 
 // Sort each loop-nest group based on axis (i.e., score)
-void sortGroup(TensorView* target, ExprListT& exprs, ExprScoreMapT& scores) {
+void sortGroup(ExprListT& exprs, ExprScoreMapT& scores) {
   std::stable_sort(
       exprs.begin(),
       exprs.end(),
       [&scores](const Expr* expr1, const Expr* expr2) {
         return scores[expr1] < scores[expr2];
       });
+}
+
+// If an expression is missing from expr_status, search for all ancestors
+// that are necessary for the expression
+void mapMissingInputsToAncestors(
+    const TensorView* tv,
+    const std::unordered_map<const Expr*, bool>& expr_status,
+    std::vector<const TensorView*>& ancestors) {
+  const Expr* expr = tv->getOrigin();
+  const auto& expr_inputs = ir_utils::filterByType<TensorView>(expr->inputs());
+  for (auto input : expr_inputs) {
+    const Expr* input_origin = input->getOrigin();
+    if (input_origin != nullptr) {
+      if (expr_status.find(input_origin) == expr_status.end()) {
+        mapMissingInputsToAncestors(input, expr_status, ancestors);
+      } else {
+        ancestors.push_back(input);
+      }
+    }
+  }
+}
+
+// For each expression, find all TensorView inputs.
+// If an input TensorView is missing from expr_status,
+// find that input's ancestors that are present in expr_status.
+std::unordered_map<const Expr*, std::vector<const TensorView*>> findExprTvInputs(
+    const std::unordered_map<const Expr*, bool>& expr_status) {
+  std::unordered_map<const Expr*, std::vector<const TensorView*>>
+      map_expr_to_tv_inputs;
+
+  // Iterate over all exprs and filter missing expr
+  for (auto item : expr_status) {
+    const auto expr = item.first;
+    const auto& expr_inputs =
+        ir_utils::filterByType<TensorView>(expr->inputs());
+
+    map_expr_to_tv_inputs.insert({expr, std::vector<const TensorView*>()});
+    auto& tv_inputs = map_expr_to_tv_inputs[expr];
+
+    for (auto input : expr_inputs) {
+      const Expr* input_origin = input->getOrigin();
+      bool missing_input = input_origin != nullptr &&
+          expr_status.find(input_origin) == expr_status.end();
+
+      if (missing_input) {
+        // Map missing input to ancestor that is present in exprs_status
+        std::vector<const TensorView*> ancestors;
+        mapMissingInputsToAncestors(input, expr_status, ancestors);
+        tv_inputs.insert(tv_inputs.begin(), ancestors.begin(), ancestors.end());
+      } else {
+        tv_inputs.push_back(input);
+      }
+    }
+  }
+  return map_expr_to_tv_inputs;
 }
 
 // Reorder expressions that are computed at the same position in a
@@ -509,23 +569,25 @@ void reorderSegmentBreadthFirst(
     expr_status.insert({*it, false});
   }
 
+  // Holds all input TVs necessary for every expression.
+  const auto map_expr_to_tv_inputs = findExprTvInputs(expr_status);
+
   while (seg_begin != seg_end) {
     std::vector<const Expr*> visited_exprs;
     for (auto it = seg_begin; it != seg_end; ++it) {
       const auto expr = *it;
-      const auto& expr_inputs =
-          ir_utils::filterByType<TensorView>(expr->inputs());
-      // expr can be visited if all input expressions are already
-      // visited. If an input expression is not found in expr_status,
-      // that should be safe to ignore.
+      const auto& expr_inputs = map_expr_to_tv_inputs.at(expr);
+
+      // if all input expressions are visited
+      // then expr can be visited
       const bool ready_to_visit = std::all_of(
           expr_inputs.begin(),
           expr_inputs.end(),
           [&expr_status](const TensorView* input) {
             const Expr* input_origin = input->getOrigin();
             return input_origin == nullptr ||
-                expr_status.find(input_origin) == expr_status.end() ||
-                expr_status.at(input_origin);
+                (expr_status.find(input_origin) != expr_status.end() &&
+                 expr_status.at(input_origin));
           });
       if (ready_to_visit) {
         std::iter_swap(seg_begin, it);
@@ -561,7 +623,7 @@ void reorderGroupBreadthFirst(ExprListT& exprs, const ExprScoreMapT& scores) {
       seg_begin = seg_end;
       seg_score = cur_score;
     } else {
-      // expre list is assumed to be sorted in the order of scores, so
+      // exprs list is assumed to be sorted in the order of scores, so
       // this should never be reachable
       TORCH_INTERNAL_ASSERT(
           false, "Unexpected expression: ", expr, ", score: ", cur_score);
@@ -583,7 +645,7 @@ void mergeNonRootGroupsIntoRootGroups(
           std::find(target_group.begin(), target_group.end(), target_expr);
       TORCH_INTERNAL_ASSERT(pos != target_group.end());
       target_group.insert(pos, it->second.begin(), it->second.end());
-      // Upate the target map
+      // Update the target map
       for (auto& inserted_expr : it->second) {
         TORCH_INTERNAL_ASSERT(target_map.at(inserted_expr) == target);
         target_map.at(inserted_expr) = target_of_target;
@@ -626,10 +688,13 @@ void mergeGroupsIntoSortedList(
 // outer loops need to be located earlier.
 void reorderExprsForComputeAt(std::vector<Expr*>& exprs) {
   ExprListT reordered_exprs;
+
   // expr -> target
   ExprTargetMapT target_map;
+
   // target -> [computed at expressions]
   TargetGroupMapT computed_at_exprs;
+
   // score of each expression that is calculated based on the
   // computeAt axis. A lower score of an expression means it should be
   // placed earlier in the expression list. This is a requirement for
@@ -652,7 +717,8 @@ void reorderExprsForComputeAt(std::vector<Expr*>& exprs) {
 
   // 2. Sort each loop-nest group based on axis (i.e., score)
   for (auto& group : computed_at_exprs) {
-    sortGroup(group.first, group.second, scores);
+    sortGroup(group.second, scores);
+
     // Reorder expressions in a breadth-first order
     reorderGroupBreadthFirst(group.second, scores);
   }
@@ -663,7 +729,7 @@ void reorderExprsForComputeAt(std::vector<Expr*>& exprs) {
   // At this point, only root loop-nests (i.e., no computeAt'ed)
   // should exist.
   for (auto& group : computed_at_exprs) {
-    // Make usre only root loop-nests exist.
+    // Guarantee only root loop-nests exist.
     TensorView* target = group.first;
     TORCH_INTERNAL_ASSERT(!target->hasComputeAt());
   }
@@ -731,6 +797,7 @@ bool LoopNestGenerator::isModifiedSharedMemory(Val* key) const {
   return false;
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

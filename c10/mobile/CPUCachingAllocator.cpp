@@ -95,8 +95,8 @@ CPUCachingAllocator* GetThreadLocalCachingAllocator() {
 
 WithCPUCachingAllocatorGuard::WithCPUCachingAllocatorGuard(
     CPUCachingAllocator* allocator) {
-  caching_allocator_ptr = allocator;
   prev_caching_allocator_ptr_ = GetThreadLocalCachingAllocator();
+  caching_allocator_ptr = allocator;
 }
 
 WithCPUCachingAllocatorGuard::~WithCPUCachingAllocatorGuard() {

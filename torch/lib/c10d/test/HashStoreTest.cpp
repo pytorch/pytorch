@@ -11,7 +11,7 @@
 void testGetSet(std::string prefix = "") {
   // Basic set/get
   {
-    auto hashStore = std::make_shared<c10d::HashStore>();
+    auto hashStore = c10::make_intrusive<c10d::HashStore>();
     c10d::PrefixStore store(prefix, hashStore);
     c10d::test::set(store, "key0", "value0");
     c10d::test::set(store, "key1", "value1");
@@ -19,11 +19,20 @@ void testGetSet(std::string prefix = "") {
     c10d::test::check(store, "key0", "value0");
     c10d::test::check(store, "key1", "value1");
     c10d::test::check(store, "key2", "value2");
+    auto numKeys = store.getNumKeys();
+    EXPECT_EQ(numKeys, 3);
+    auto delSuccess = store.deleteKey("key0");
+    EXPECT_TRUE(delSuccess);
+    numKeys = store.getNumKeys();
+    EXPECT_EQ(numKeys, 2);
+    auto delFailure = store.deleteKey("badKeyName");
+    EXPECT_FALSE(delFailure);
+    EXPECT_THROW(store.get("key0"), std::runtime_error);
   }
 
   // get() waits up to timeout_.
   {
-    auto hashStore = std::make_shared<c10d::HashStore>();
+    auto hashStore = c10::make_intrusive<c10d::HashStore>();
     c10d::PrefixStore store(prefix, hashStore);
     std::thread th([&]() { c10d::test::set(store, "key0", "value0"); });
     c10d::test::check(store, "key0", "value0");
@@ -38,7 +47,7 @@ void stressTestStore(std::string prefix = "") {
 
   std::vector<std::thread> threads;
   c10d::test::Semaphore sem1, sem2;
-  auto hashStore = std::make_shared<c10d::HashStore>();
+  auto hashStore = c10::make_intrusive<c10d::HashStore>();
   c10d::PrefixStore store(prefix, hashStore);
 
   for (auto i = 0; i < numThreads; i++) {

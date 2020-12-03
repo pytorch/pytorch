@@ -9,6 +9,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 ComputeAtData::ComputeAtData(TensorView* tv)
     : tv_ref_(tv),
@@ -477,6 +478,7 @@ ComputeAt::ComputeAt(
   setCommonConsumer();
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

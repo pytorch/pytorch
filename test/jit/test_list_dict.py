@@ -46,21 +46,21 @@ class TestList(JitTestCase):
     def test_list_literal(self):
         def reassign():
             x = [1]
-            if True:
+            if 1 == 1:
                 x = [2, 3]
             return
         self.checkScript(reassign, (), optimize=False)
 
         def reassign_arity_change():
             x = [1]
-            if True:
+            if 1 == 1:
                 x = [1, 2, 3]
             return
         self.checkScript(reassign_arity_change, (), optimize=False)
 
         def reassign_from_empty_literal():
             x = []
-            if True:
+            if 1 == 1:
                 x = [1, 2, 3]
             return
         with self.assertRaisesRegex(RuntimeError, r"previously has type List\[Tensor\]"):
@@ -68,20 +68,20 @@ class TestList(JitTestCase):
 
         def reassign_from_empty_builtin():
             x = torch.jit.annotate(List[int], [])
-            if True:
+            if 1 == 1:
                 x = [1, 2, 3]
             y = torch.jit.annotate(List[float], [])
-            if True:
+            if 1 == 1:
                 y = [1.0, 2.0, 3.0]
             z = []
-            if True:
+            if 1 == 1:
                 z = [torch.randn([1])]
             return
         self.checkScript(reassign_from_empty_builtin, (), optimize=False)
 
         def reassign_bad_type():
             x = [1]
-            if True:
+            if 1 == 1:
                 x = [1.0]
             return
         with self.assertRaisesRegex(RuntimeError, "previously has type"):
@@ -89,9 +89,9 @@ class TestList(JitTestCase):
 
         def reassign_nested():
             x = torch.jit.annotate(List[int], [])
-            if True:
+            if 1 == 1:
                 x = [1, 2, 3]
-                if True:
+                if 1 == 1:
                     x = [1.0]
             return
         with self.assertRaisesRegex(RuntimeError, "previously has type"):
@@ -129,6 +129,25 @@ class TestList(JitTestCase):
                 # type: (List[int]) -> List[int]
                 del x[1:3]
                 return x
+
+    def test_list_keyword(self):
+        def foo():
+            return list([1, 2, 3]), list(("a", "b")), list(range(5)), list("abcdefg")  # noqa: C410
+
+        self.checkScript(foo, ())
+
+        def foo2():
+            x: List[int] = list()
+            x.append(1)
+            return x,
+
+        self.checkScript(foo2, ())
+
+        def foo3():
+            return list(list("abc"))
+
+        self.checkScript(foo3, ())
+        FileCheck().check_count("aten::list", 2, exactly=True).run(torch.jit.script(foo3).graph)
 
     def test_min_bool_list(self):
         def jit_min_list(a, b):
@@ -408,6 +427,43 @@ class TestList(JitTestCase):
             return a[3:10] == [3, 4]
         self.checkScript(test_backward_slice, ())
 
+    def test_slice_index(self):
+        a = torch.tensor(
+            [
+                [[1, 11], [2, 22]],
+                [[3, 33], [4, 44]],
+                [[5, 55], [6, 66]],
+            ]
+        )
+
+        def test_index_slice1(x):
+            x = x[:, :, [0, 1]]
+            return x
+        self.checkScript(test_index_slice1, (a,))
+
+        def test_index_slice2(x):
+            x = x[[2, 1, 0], :, :]
+            return x
+        self.checkScript(test_index_slice2, (a,))
+
+        def test_index_slice3(x):
+            x = x[[0, 1], :, [1]]
+            return x
+        self.checkScript(test_index_slice3, (a,))
+
+        def test_index_slice_empty_list(x):
+            empty_list: List[int] = []
+            x = x[empty_list, :, :]
+            return x
+        self.checkScript(test_index_slice_empty_list, (a,))
+
+        def test_index_slice_out_of_bounds_index(x):
+            x = x[[4], :, :]
+            return x
+        with self.assertRaisesRegex(RuntimeError, "index 4 is out of bounds for dimension 0 with size 3"):
+            self.checkScript(test_index_slice_out_of_bounds_index, (a,))
+
+
     def test_mutable_list_append(self):
         def test_append():
             a = [0, 1]
@@ -498,7 +554,7 @@ class TestList(JitTestCase):
     def test_mutable_list_append_if(self):
         def test_append_if():
             a = [1]
-            if True:
+            if 1 == 1:
                 a.append(4)
             return a == [1, 4]
         self.checkScript(test_append_if, ())
@@ -506,7 +562,7 @@ class TestList(JitTestCase):
     def test_mutable_list_append_if_else(self):
         def test_append_if_else():
             a = [1]
-            if False:
+            if 1 == 2:
                 a.append(4)
             else:
                 a.append(10)
@@ -911,11 +967,11 @@ class TestList(JitTestCase):
             check_list(min_intlist, int_list)
             check_list(max_intlist, int_list)
 
-            bool_li = list(map(lambda x: bool(x), int_list))
+            bool_li = [bool(x) for x in int_list]
             check_list(min_boollist, bool_li)
             check_list(max_boollist, bool_li)
 
-            float_li = list(map(lambda x: float(x), int_list))
+            float_li = [float(x) for x in int_list]
             check_list(min_floatlist, float_li)
             check_list(max_floatlist, float_li)
 
@@ -1287,6 +1343,15 @@ class TestDict(JitTestCase):
 
         self.checkScript(update, (self.dict(), self.dict()))
         self.checkScript(update, (self.dict(), self.dict2()))
+
+    def test_update_existing_key(self):
+        def foo() -> Dict[str, int]:
+            a: Dict[str, int] = {}
+            for i in range(3):
+                a.update({'a': i})
+            return a
+
+        self.checkScript(foo, ())
 
     def test_aug_assign(self):
         def aug_assign_dict_tensor(a):

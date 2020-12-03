@@ -15,7 +15,7 @@ class ShapeProp:
         env : Dict[str, Node] = {}
 
         def load_arg(a):
-            return torch.fx.graph.map_arg(a, lambda n: env[n.name])
+            return torch.fx.node.map_arg(a, lambda n: env[n.name])
 
         def fetch_attr(target : str):
             target_atoms = target.split('.')
