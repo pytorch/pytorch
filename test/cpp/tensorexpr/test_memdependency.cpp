@@ -1,3 +1,4 @@
+#include <gtest/gtest.h>
 #include <test/cpp/tensorexpr/test_base.h>
 
 #include <torch/csrc/jit/tensorexpr/bounds_overlap.h>
@@ -17,7 +18,7 @@ using namespace torch::jit::tensorexpr;
 // overlap. No Overlap & partial overlap is obvious. Contains means A is
 // larger and fully encloses B, while ContainedOrEqual is the reverse. Equal
 // ranges are ContainedOrEqual.
-void testBoundOverlap() {
+TEST(MemDependency, BoundOverlap) {
   KernelScope kernel_scope;
 
   using namespace analysis;
@@ -75,7 +76,7 @@ void testBoundOverlap() {
   ASSERT_EQ(ContainedOrEqual, boundOverlap(CB(15, 15), CB(2, 15)));
 }
 
-void testBoundOverlapSymbolic() {
+TEST(MemDependency, BoundOverlapSymbolic) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -111,7 +112,7 @@ void testBoundOverlapSymbolic() {
 // Tests the helper function for overlap of multi dimensional indices bounds.
 // This uses boundOverlap on each dimension and return the "lowest" kind of
 // overlap.
-void testBoundOverlapMultiDim() {
+TEST(MemDependency, BoundOverlapMultiDim) {
   KernelScope kernel_scope;
 
   using namespace analysis;
@@ -182,7 +183,7 @@ void testBoundOverlapMultiDim() {
 
 // Test the helper we use to subtract bounds: returns the regions(s) of A which
 // remain after removing the region of B.
-void testBoundSubtract() {
+TEST(MemDependency, BoundSubtract) {
   KernelScope kernel_scope;
 
   using namespace analysis;
@@ -215,7 +216,7 @@ void testBoundSubtract() {
   ASSERT_TRUE(EQ(subtractBound(CB(0, 5), CB(2, 4)), {CB(0, 1), CB(5, 5)}));
 }
 
-void testBoundSubtractSymbolic() {
+TEST(MemDependency, BoundSubtractSymbolic) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -263,7 +264,7 @@ void testBoundSubtractSymbolic() {
 
 // Tests the helper function that does subtraction, but for multi dimensional
 // indices bounds.
-void testBoundSubtractMultiDim() {
+TEST(MemDependency, BoundSubtractMultiDim) {
   KernelScope kernel_scope;
 
   using namespace analysis;
@@ -323,7 +324,7 @@ void testBoundSubtractMultiDim() {
 
 // Tests the multi dimensional subtraction code for bounds that cannot be fully
 // materialized.
-void testBoundSubtractMultiDimSymbolic() {
+TEST(MemDependency, BoundSubtractMultiDimSymbolic) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
@@ -390,7 +391,7 @@ void testBoundSubtractMultiDimSymbolic() {
 }
 
 // Simple check that the analyzer does anything at all...
-void testMemDependencyCheckerSimple() {
+TEST(MemDependency, MemDependencyCheckerSimple) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   BufHandle b("B", {1}, kInt);
@@ -416,7 +417,7 @@ void testMemDependencyCheckerSimple() {
 }
 
 // Check that there is a difference between direct and indirect dependence.
-void testMemDependencyCheckerMultiStmt() {
+TEST(MemDependency, MemDependencyCheckerMultiStmt) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   BufHandle b("B", {1}, kInt);
@@ -453,7 +454,7 @@ void testMemDependencyCheckerMultiStmt() {
 }
 
 // Verify that we do filter writes that are totally overlapped by later writes.
-void testMemDependencyCheckerOverlap() {
+TEST(MemDependency, MemDependencyCheckerOverlap) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   BufHandle b("B", {1}, kInt);
@@ -486,7 +487,7 @@ void testMemDependencyCheckerOverlap() {
 
 // Verify that bounds match loop iterations, and that dependencies progress
 // across loop scopes.
-void testMemDependencyCheckerLoop() {
+TEST(MemDependency, MemDependencyCheckerLoop) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   BufHandle b("B", {1}, kInt);
@@ -528,7 +529,7 @@ void testMemDependencyCheckerLoop() {
 }
 
 // Reductions should promote dependencies as well.
-void testMemDependencyCheckerLoopReduce() {
+TEST(MemDependency, MemDependencyCheckerLoopReduce) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
@@ -587,7 +588,7 @@ void testMemDependencyCheckerLoopReduce() {
 }
 
 // Lowering a reduction doesn't affect dependency analysis.
-void testMemDependencyCheckerLoopReduceExpanded() {
+TEST(MemDependency, MemDependencyCheckerLoopReduceExpanded) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
@@ -641,7 +642,7 @@ void testMemDependencyCheckerLoopReduceExpanded() {
 }
 
 // Can determine dependencies of outputs, through to inputs.
-void testMemDependencyCheckerInputsOutputs() {
+TEST(MemDependency, MemDependencyCheckerInputsOutputs) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
@@ -694,7 +695,7 @@ void testMemDependencyCheckerInputsOutputs() {
 }
 
 // Can tell if an output does not depend on an input.
-void testMemDependencyCheckerOutputDoesntDepend() {
+TEST(MemDependency, MemDependencyCheckerOutputDoesntDepend) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
@@ -733,7 +734,7 @@ void testMemDependencyCheckerOutputDoesntDepend() {
 
 // Verify different loop extents produce accesses with different bounds, and
 // that later accesses find dependencies that overlap their entire bound range.
-void testMemDependencyCheckerLoopBounds() {
+TEST(MemDependency, MemDependencyCheckerLoopBounds) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
@@ -916,7 +917,7 @@ void testMemDependencyCheckerLoopBounds() {
 }
 
 // Verify that we can still infer bounds when the loop var is offset.
-void testMemDependencyCheckerLoopBoundsIndexShift() {
+TEST(MemDependency, MemDependencyCheckerLoopBoundsIndexShift) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
@@ -1103,7 +1104,7 @@ void testMemDependencyCheckerLoopBoundsIndexShift() {
 // loop is dependent on a Store later in the same loop but in different
 // iteration. This is affected by whether or not we can trust the execution
 // order of the loop.
-void testMemDependencyCheckerLoopSelfDependency() {
+TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
@@ -1749,7 +1750,7 @@ void testMemDependencyCheckerLoopSelfDependency() {
 // Verify that a strided access still works.
 // TODO: actually this only works because of the size of the ranges, revist this
 // test after strided overlap is implemented.
-void testMemDependencyCheckerLoopDistinctStrides() {
+TEST(MemDependency, MemDependencyCheckerLoopDistinctStrides) {
   KernelScope kernel_scope;
   BufHandle a("A", {20}, kInt);
   BufHandle b("B", {20}, kInt);
@@ -1779,7 +1780,7 @@ void testMemDependencyCheckerLoopDistinctStrides() {
 }
 
 /* TODO(nickg) - this test will fail due to the lack of stride math in Bound
-void testMemDependencyCheckerLoopDistinctStrides() {
+TEST(MemDependency, MemDependencyCheckerLoopDistinctStrides) {
   KernelScope kernel_scope;
   BufHandle a("A", {20}, kInt);
   BufHandle b("B", {20}, kInt);
@@ -1810,7 +1811,7 @@ void testMemDependencyCheckerLoopDistinctStrides() {
 }*/
 
 // analysis on Stmts using Cond.
-void testMemDependencyCheckerLoopBoundsCond() {
+TEST(MemDependency, MemDependencyCheckerLoopBoundsCond) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
@@ -2008,7 +2009,7 @@ void testMemDependencyCheckerLoopBoundsCond() {
 }
 
 // Stmts using IfThenElse.
-void testMemDependencyCheckerIfThenElse() {
+TEST(MemDependency, MemDependencyCheckerIfThenElse) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
@@ -2121,7 +2122,7 @@ void testMemDependencyCheckerIfThenElse() {
 }
 
 // Cutting a loop with single elem writes
-void testMemDependencyCheckerCutLoop() {
+TEST(MemDependency, MemDependencyCheckerCutLoop) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
@@ -2202,7 +2203,7 @@ void testMemDependencyCheckerCutLoop() {
 }
 
 // Dynamic shapes (load in indices).
-void testMemDependencyCheckerDynamicShapes() {
+TEST(MemDependency, MemDependencyCheckerDynamicShapes) {
   KernelScope kernel_scope;
   BufHandle a("A", {100}, kInt);
   BufHandle b("B", {100}, kInt);
@@ -2456,7 +2457,7 @@ void testMemDependencyCheckerDynamicShapes() {
 }
 
 // Verify multi dimensional bounds work.
-void testMemDependencyCheckerMultiDim() {
+TEST(MemDependency, MemDependencyCheckerMultiDim) {
   KernelScope kernel_scope;
   int M = 10, N = 9, K = 12;
   BufHandle a("A", {M, N, K}, kInt);
@@ -2728,7 +2729,7 @@ void testMemDependencyCheckerMultiDim() {
 }
 
 // Various tests using the external Compute/Reduce API.
-void testMemDependencyCheckerComputeAPI() {
+TEST(MemDependency, MemDependencyCheckerComputeAPI) {
   KernelScope kernel_scope;
 
   using namespace analysis;
@@ -2781,7 +2782,7 @@ void testMemDependencyCheckerComputeAPI() {
   ASSERT_TRUE(analyzer.dependsDirectly(d_loop, c_loop));
 }
 
-void testMemDependencyCheckerComputeInline() {
+TEST(MemDependency, MemDependencyCheckerComputeInline) {
   KernelScope kernel_scope;
 
   using namespace analysis;
@@ -2828,7 +2829,7 @@ void testMemDependencyCheckerComputeInline() {
   }
 }
 
-void testMemDependencyCheckerComputeSplit() {
+TEST(MemDependency, MemDependencyCheckerComputeSplit) {
   KernelScope kernel_scope;
 
   using namespace analysis;
@@ -2878,7 +2879,7 @@ void testMemDependencyCheckerComputeSplit() {
   }
 }
 
-void testMemDependencyCheckerComputeReorder() {
+TEST(MemDependency, MemDependencyCheckerComputeReorder) {
   KernelScope kernel_scope;
 
   using namespace analysis;
@@ -2928,7 +2929,7 @@ void testMemDependencyCheckerComputeReorder() {
   }
 }
 
-void testMemDependencyCheckerComputeReduce() {
+TEST(MemDependency, MemDependencyCheckerComputeReduce) {
   KernelScope kernel_scope;
 
   using namespace analysis;
@@ -2983,7 +2984,7 @@ void testMemDependencyCheckerComputeReduce() {
   ASSERT_TRUE(analyzer.dependsIndirectly(reduces[0], b.data()));
 }
 
-void testMemDependencyCheckerComputeGEMM() {
+TEST(MemDependency, MemDependencyCheckerComputeGEMM) {
   KernelScope kernel_scope;
   int M = 1024;
   int N = 1024;
