@@ -263,25 +263,20 @@ def sample_inputs_addmm(self, device, dtype, requires_grad):
                                     low=None, high=None, 
                                     requires_grad=False))),) 
 
-def np_integer_promotion_wrapper(fn):
-    # NumPy promotes integer types to double while
-    # PyTorch promotes integer to float.
+def np_integer_unary_ufunc_promotion_wrapper(fn):
+    # Wrapper that passes the PyTorch's default scalar
+    #   type as an argument to the wrapped NumPy
+    #   unary ufunc when given an integer input.
     #
-    # This affects operators whose outputs grow very fast
-    # eg. sinh, exp, etc.
-    # To mitigate that, we force NumPy to compute with the
-    # dtype that Pytorch uses for those computations.
-    #
-    # Code Example
-    # >>> x = torch.tensor(501.)
-    # >>> x.exp()
-    # tensor(inf)
-    # >>> x = torch.tensor(501., dtype=torch.double)
-    # >>> x.exp()
-    # tensor(3.8154e+217, dtype=torch.float64)
+    # This is necessary when NumPy promotes
+    #   integer types to double while PyTorch promotes
+    #   integer types to float.
+    
+    # Helper to determine if promotion is needed
     def is_integral(dtype):
         return dtype in [np.bool, np.uint8, np.int8, np.int16, np.int32, np.int64]
 
+    # NOTE: Promotion in PyTorch is from integer types to the default dtype
     np_dtype = torch_to_numpy_dtype_dict[torch.get_default_dtype()]
 
     @wraps(fn)
@@ -537,7 +532,7 @@ op_db: List[Any] = [
                                 dtypes=[torch.float], active_if=TEST_WITH_ROCM),
                    )),
     UnaryUfuncInfo('sinh',
-                   ref=np_integer_promotion_wrapper(np.sinh),
+                   ref=np_integer_unary_ufunc_promotion_wrapper(np.sinh),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
                    promotes_integers_to_float=True,
