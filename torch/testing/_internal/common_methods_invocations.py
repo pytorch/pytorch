@@ -273,7 +273,7 @@ def np_unary_ufunc_integer_promotion_wrapper(fn):
     # This is necessary when NumPy promotes
     #   integer types to double, since PyTorch promotes
     #   integer types to the default scalar type.
-    
+
     # Helper to determine if promotion is needed
     def is_integral(dtype):
         return dtype in [np.bool, np.uint8, np.int8, np.int16, np.int32, np.int64]
