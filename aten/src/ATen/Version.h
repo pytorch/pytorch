@@ -11,4 +11,6 @@ CAFFE2_API std::string get_mkldnn_version();
 
 CAFFE2_API std::string get_openmp_version();
 
+CAFFE2_API std::string get_cxx_flags();
+
 }  // namespace at

@@ -31,7 +31,8 @@ class PackageImporter:
     local to this importer.
     """
 
-    def __init__(self, filename: str, module_allowed: Callable[[str], bool] = lambda module_name: True):
+    def __init__(self, filename: Union[str, torch._C.PyTorchFileReader],
+                 module_allowed: Callable[[str], bool] = lambda module_name: True):
         """Open `filename` for importing. This checks that the imported package only requires modules
         allowed by `module_allowed`
 
@@ -45,12 +46,16 @@ class PackageImporter:
         Raises:
             ImportError: If the package will use a disallowed module.
         """
-        self.filename = filename
         self.zip_reader : Any
-        if not os.path.isdir(self.filename):
-            self.zip_reader = torch._C.PyTorchFileReader(self.filename)
+        if isinstance(filename, torch._C.PyTorchFileReader):
+            self.filename = '<pytorch_file_reader>'
+            self.zip_reader = filename
         else:
-            self.zip_reader = MockZipReader(self.filename)
+            self.filename = filename
+            if not os.path.isdir(self.filename):
+                self.zip_reader = torch._C.PyTorchFileReader(self.filename)
+            else:
+                self.zip_reader = MockZipReader(self.filename)
 
         self.root = _PackageNode(None)
         self.modules = {}
@@ -62,8 +67,8 @@ class PackageImporter:
                                   f"but that module has been disallowed")
             self._add_extern(extern_module)
 
-        for filename in self.zip_reader.get_all_records():
-            self._add_file(filename)
+        for fname in self.zip_reader.get_all_records():
+            self._add_file(fname)
 
         self.patched_builtins = builtins.__dict__.copy()
         self.patched_builtins['__import__'] = self.__import__

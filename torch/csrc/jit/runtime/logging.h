@@ -16,7 +16,7 @@ class LoggerBase {
   TORCH_API virtual void addStatValue(
       const std::string& stat_name,
       int64_t val) = 0;
-  virtual ~LoggerBase() {}
+  virtual ~LoggerBase() = default;
 };
 
 TORCH_API LoggerBase* getLogger();
@@ -28,7 +28,7 @@ TORCH_API LoggerBase* setLogger(LoggerBase* logger);
 class NoopLogger : public LoggerBase {
  public:
   void addStatValue(const std::string& stat_name, int64_t val) override {}
-  ~NoopLogger() {}
+  ~NoopLogger() = default;
 };
 
 // Trivial locking logger. Pass in an instance of this to setLogger() to use it.
@@ -42,7 +42,7 @@ class TORCH_API LockingLogger : public LoggerBase {
   virtual int64_t getCounterValue(const std::string& name) const;
   enum class AggregationType { SUM = 0, AVG = 1 };
   void setAggregationType(const std::string& stat_name, AggregationType type);
-  ~LockingLogger() {}
+  ~LockingLogger() = default;
 
  private:
   mutable std::mutex m;
