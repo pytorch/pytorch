@@ -195,9 +195,9 @@ std::vector<c10::IValue> create_inputs(
   if (FLAGS_pytext_len > 0) {
     auto stensor = FLAGS_pytext_len * at::ones({1}, torch::kI64);
     if (refbackend == "vulkan") {
-      refinputs.push_back(stensor.vulkan());
+      refinputs.emplace_back(stensor.vulkan());
     } else {
-      refinputs.push_back(stensor);
+      refinputs.emplace_back(stensor);
     }
 
     if (backend == "vulkan") {
