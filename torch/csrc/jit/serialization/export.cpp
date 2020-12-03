@@ -324,7 +324,7 @@ void EncoderBase::EncodeValueInfo(
   v->set_name(name);
 
   auto tensorTypeToONNXType = [&dynamic_axes, &name, n, this](
-                                  const TensorTypePtr t,
+                                  const TensorTypePtr& t,
                                   onnx::TypeProto_Tensor* tensor_type) {
     if (t->dim()) {
       onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
