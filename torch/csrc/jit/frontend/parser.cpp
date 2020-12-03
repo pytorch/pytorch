@@ -163,11 +163,8 @@ struct ParserImpl {
       case TK_STRINGLITERAL: {
         prefix = parseConcatenatedStringLiterals();
       } break;
+      case TK_ELLIPSIS:
       case TK_DOTS: {
-        prefix = Dots::create(L.cur().range);
-        L.next();
-      } break;
-      case TK_ELLIPSIS: {
         prefix = Dots::create(L.cur().range);
         L.next();
       } break;

@@ -6,7 +6,6 @@
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/LaunchUtils.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/cuda/CUDAGraphsUtils.cuh>
 
 #include <THC/THCReduceApplyUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
@@ -114,7 +113,7 @@ __device__ int binarySearchForMultinomial(scalar_t* cumdist,
 
 template <typename scalar_t>
 __global__ void
-sampleMultinomialWithReplacement(PhiloxCudaState philox_args,
+sampleMultinomialWithReplacement(std::pair<uint64_t, uint64_t> seeds,
                                  int totalSamples,
                                  int64_t* dest,
                                  int64_t distributions,
@@ -125,16 +124,11 @@ sampleMultinomialWithReplacement(PhiloxCudaState philox_args,
   // search due to divergence. It seems possible to compute multiple
   // values and limit divergence though later on.
 
-  auto seeds = at::cuda::philox::unpack(philox_args);
-
   // global index formula for 2D grid of 1D blocks
   int idx = blockIdx.y * gridDim.x * blockDim.x + blockIdx.x * blockDim.x + threadIdx.x;
 
   curandStatePhilox4_32_10_t state;
-  curand_init(std::get<0>(seeds),
-              idx,
-              std::get<1>(seeds),
-              &state);
+  curand_init(seeds.first, idx, seeds.second, &state);
 
   // The block determines the distribution for which we generate a point
   for (int64_t curDist = blockIdx.y;
@@ -367,7 +361,7 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
       // Prefix sum along rows
       at::_cumsum_out(prefixSum, normDist, 1);
 
-      PhiloxCudaState rng_engine_inputs;
+      std::pair<uint64_t, uint64_t> rng_engine_inputs;
 
       if (with_replacement) {
         // Binary search is warp divergent (so effectively we're running
@@ -387,13 +381,13 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
           // curand_uniform4 (See Note [Register spilling in curand call for CUDA < 10]),
           // offset is 4 times that.
           auto offset = ((numDist-1)/grid.y+1)*4;
-          rng_engine_inputs = gen->philox_cuda_state(offset);
+          rng_engine_inputs = gen->philox_engine_inputs(offset);
         }
         // Sample with replacement
 
         sampleMultinomialWithReplacement
             <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-                rng_engine_inputs,
+            rng_engine_inputs,
                 n_sample,
                 result.data_ptr<int64_t>(),
                 numDist, numCategories,

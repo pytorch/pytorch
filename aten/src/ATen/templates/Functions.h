@@ -7,7 +7,6 @@
 #include <c10/core/Storage.h>
 #include <ATen/core/Generator.h>
 #include <c10/util/Deprecated.h>
-#include <ATen/NativeFunctions.h> // TODO: try to delete this
 #include <ATen/DeviceGuard.h>
 #include <c10/core/TensorOptions.h>
 #include <ATen/core/Reduction.h>
@@ -19,26 +18,38 @@
 
 namespace at {
 
+// These functions are defined in ATen/Utils.cpp.
+#define TENSOR(T, S)                                                          \
+  CAFFE2_API Tensor tensor(ArrayRef<T> values, const TensorOptions& options); \
+  inline Tensor tensor(                                                       \
+      std::initializer_list<T> values, const TensorOptions& options) {        \
+    return at::tensor(ArrayRef<T>(values), options);                          \
+  }                                                                           \
+  inline Tensor tensor(T value, const TensorOptions& options) {               \
+    return at::tensor(ArrayRef<T>(value), options);                           \
+  }                                                                           \
+  inline Tensor tensor(ArrayRef<T> values) {                                  \
+    return at::tensor(std::move(values), at::dtype(k##S));                    \
+  }                                                                           \
+  inline Tensor tensor(std::initializer_list<T> values) {                     \
+    return at::tensor(ArrayRef<T>(values));                                   \
+  }                                                                           \
+  inline Tensor tensor(T value) {                                             \
+    return at::tensor(ArrayRef<T>(value));                                    \
+  }
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
+AT_FORALL_COMPLEX_TYPES(TENSOR)
+#undef TENSOR
+
 ${function_declarations}
 
 // Special C++ only overloads for std()-like functions (See gh-40287)
 // These are needed because int -> bool conversion takes precedence over int -> IntArrayRef
 // So, for example std(0) would select the std(unbiased=False) overload
-inline Tensor var(const Tensor& self, int dim) {
-  return at::native::var(self, IntArrayRef{dim});
-}
-
-inline std::tuple<Tensor,Tensor> var_mean(const Tensor& self, int dim) {
-  return at::native::var_mean(self, IntArrayRef{dim});
-}
-
-inline Tensor std(const Tensor& self, int dim) {
-  return at::native::std(self, IntArrayRef{dim});
-}
-
-inline std::tuple<Tensor,Tensor> std_mean(const Tensor& self, int dim) {
-  return at::native::std_mean(self, IntArrayRef{dim});
-}
+CAFFE2_API Tensor var(const Tensor& self, int dim);
+CAFFE2_API std::tuple<Tensor,Tensor> var_mean(const Tensor& self, int dim);
+CAFFE2_API Tensor std(const Tensor& self, int dim);
+CAFFE2_API std::tuple<Tensor,Tensor> std_mean(const Tensor& self, int dim);
 
 namespace {
   inline std::vector<int64_t> zero_sizes(const TensorOptions& options) {
