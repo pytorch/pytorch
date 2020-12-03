@@ -2403,6 +2403,12 @@ movedim(source, destination) -> Tensor
 See :func:`torch.movedim`
 """)
 
+add_docstr_all('moveaxis', r"""
+moveaxis(source, destination) -> Tensor
+
+See :func:`torch.moveaxis`
+""")
+
 add_docstr_all('mul', r"""
 mul(value) -> Tensor
 
