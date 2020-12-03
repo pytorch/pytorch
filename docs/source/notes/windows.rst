@@ -20,14 +20,15 @@ MKL and MAGMA. Here are the steps to build with them.
 
     REM Download MAGMA files
     REM version available:
+    REM 2.5.4 (CUDA 10.1 10.2 11.0 11.1) x (Debug Release)
     REM 2.5.3 (CUDA 10.1 10.2 11.0) x (Debug Release)
     REM 2.5.2 (CUDA 9.2 10.0 10.1 10.2) x (Debug Release)
     REM 2.5.1 (CUDA 9.2 10.0 10.1 10.2) x (Debug Release)
     REM 2.5.0 (CUDA 9.0 9.2 10.0 10.1) x (Debug Release)
     REM 2.4.0 (CUDA 8.0 9.2) x (Release)
-    set CUDA_PREFIX=cuda92
+    set CUDA_PREFIX=cuda101
     set CONFIG=release
-    curl -k https://s3.amazonaws.com/ossci-windows/magma_2.5.1_%CUDA_PREFIX%_%CONFIG%.7z -o magma.7z
+    curl -k https://s3.amazonaws.com/ossci-windows/magma_2.5.4_%CUDA_PREFIX%_%CONFIG%.7z -o magma.7z
     7z x -aoa magma.7z -omagma
     
     REM Setting essential environment variables
