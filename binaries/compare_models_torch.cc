@@ -203,7 +203,7 @@ int main(int argc, char** argv) {
   c10::SetUsageMessage(
       "Run accuracy comparison to a reference model for a pytorch model.\n"
       "Example usage:\n"
-      "./model_compare"
+      "./compare_models_torch"
       " --refmodel=<ref_model_file>"
       " --model=<model_file>"
       " --iter=20");
