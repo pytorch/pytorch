@@ -21,16 +21,16 @@ from torch.quantization import (
     quant_type_to_str,
     default_qconfig,
     default_dynamic_qconfig,
-    default_dynamic_quant_observer,
     default_qat_qconfig,
     float16_dynamic_qconfig,
-    float_qparams_dynamic_qconfig,
+    float_qparams_weight_only_qconfig,
     get_default_qconfig,
     get_default_qat_qconfig,
     fuse_modules,
     prepare,
     prepare_qat,
     convert,
+    default_placeholder_observer,
     PerChannelMinMaxObserver,
     QConfigDynamic,
     FixedQParamsFakeQuantize,
@@ -350,7 +350,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 x = self.dequant(x)
                 return x
 
-        options = itertools.product([2], [True, False], self.static_quant_types)
+        options = itertools.product([1, 2], [True, False], self.static_quant_types)
         for dim, has_relu, quant_type in options:
             expected_node = ns.call_module(
                 quantized_conv_relus[dim] if has_relu
@@ -1117,6 +1117,71 @@ class TestQuantizeFx(QuantizationTestCase):
             ]
             self.checkGraphModeFxOp(
                 M().eval(), (data,), quant_type, expected_node_list=node_list)
+
+    def _test_quantized_inputs_outputs(
+            self, convert_custom_config_dict, count_check):
+        """
+        Test the option to have inputs and outputs of the graph quantized
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(1, 1, 1)
+                self.conv2 = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.conv2(x)
+                return x
+
+        # quantized input, quantized output
+        m = M()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        m.eval()
+        mp = torch.quantization.quantize_fx.prepare_fx(m, qconfig_dict)
+        mp(torch.randn(1, 1, 4, 4))
+        mq = torch.quantization.quantize_fx.convert_fx(
+            mp, convert_custom_config_dict=convert_custom_config_dict)
+        self.checkGraphModuleNodes(mq, expected_node_occurrence=count_check)
+
+    def test_quantized_input_quantized_output(self):
+        convert_custom_config_dict = {
+            'input_quantized_idxs': [0], 'output_quantized_idxs': [0]}
+        count_check = {
+            ns.call_function(torch.quantize_per_tensor): 0,
+            ns.call_method('dequantize'): 0,
+        }
+        self._test_quantized_inputs_outputs(
+            convert_custom_config_dict, count_check)
+
+    def test_fp32_input_quantized_output(self):
+        convert_custom_config_dict = {
+            'output_quantized_idxs': [0]}
+        count_check = {
+            ns.call_function(torch.quantize_per_tensor): 1,
+            ns.call_method('dequantize'): 0,
+        }
+        self._test_quantized_inputs_outputs(
+            convert_custom_config_dict, count_check)
+
+    def test_quantized_input_fp32_output(self):
+        convert_custom_config_dict = {
+            'input_quantized_idxs': [0]}
+        count_check = {
+            ns.call_function(torch.quantize_per_tensor): 0,
+            ns.call_method('dequantize'): 1,
+        }
+        self._test_quantized_inputs_outputs(
+            convert_custom_config_dict, count_check)
+
+    def test_fp32_input_fp32_output(self):
+        convert_custom_config_dict = {}
+        count_check = {
+            ns.call_function(torch.quantize_per_tensor): 1,
+            ns.call_method('dequantize'): 1,
+        }
+        self._test_quantized_inputs_outputs(
+            convert_custom_config_dict, count_check)
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
@@ -1947,7 +2012,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
         quantized_node = ns.call_module(nnq.Embedding)
         configs = [
-            (float_qparams_dynamic_qconfig, ns.call_module(nnq.Embedding)),
+            (float_qparams_weight_only_qconfig, ns.call_module(nnq.Embedding)),
             (None, ns.call_module(nn.Embedding)),
             (default_qconfig, ns.call_module(nn.Embedding)),
         ]
@@ -1982,7 +2047,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             float_qparams_observer = PerChannelMinMaxObserver.with_args(dtype=dtype,
                                                                         qscheme=torch.per_channel_affine_float_qparams,
                                                                         ch_axis=0)
-            float_qparams_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
+            float_qparams_qconfig = QConfigDynamic(activation=default_placeholder_observer,
                                                    weight=float_qparams_observer)
             self.checkGraphModeFxOp(
                 model,
