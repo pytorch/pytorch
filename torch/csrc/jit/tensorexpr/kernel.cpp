@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
+#include <ATen/TensorGeometry.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
@@ -1900,6 +1901,12 @@ Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
   if (strides == default_strides) {
     return tensor;
   }
+  // If the tensor is profiled as being non-contiguous, we have
+  // no way of matching the profiled striding
+  if (!at::geometry_is_contiguous(sizes, strides)) {
+    return tensor;
+  }
+
   auto dims = dimsFromSizes(sizesForValue(v));
   // We need to convert the output tensor so that its values are layed
   // so that whene viewed from the output strides the values are correct.
@@ -1983,8 +1990,17 @@ void TensorExprKernel::compile() {
     Tensor* properly_strided_output = convertOutputToCorrectStrides(output);
     tensors_[output->unique()] = properly_strided_output;
     const auto& tt = output->type()->expect<TensorType>();
-    tensorOutputSizes_.push_back(*tt->sizes().concrete_sizes());
-    tensorOutputStrides_.push_back(*tt->strides().concrete_sizes());
+    auto sizes = *tt->sizes().concrete_sizes();
+    tensorOutputSizes_.push_back(sizes);
+    auto strides = *tt->strides().concrete_sizes();
+
+    // If the tensor is profiled as being non-contiguous, we have
+    // no way of matching the profiled striding
+    if (at::geometry_is_contiguous(sizes, strides)) {
+      tensorOutputStrides_.push_back(*tt->strides().concrete_sizes());
+    } else {
+      tensorOutputStrides_.push_back(TensorType::contiguousStridesOf(sizes));
+    }
 
     tensorOutputs_.emplace_back(tensors_.at(output->unique()));
     tensorOutputTensorOptions_.push_back(
