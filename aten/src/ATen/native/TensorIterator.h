@@ -1,6 +1,5 @@
 #pragma once
 
-#include <iostream>
 #include <ATen/ATen.h>
 #include <c10/util/FunctionRef.h>
 #include <c10/util/SmallVector.h>
@@ -297,8 +296,6 @@ struct CAFFE2_API TensorIterator {
     return true;
   }
 
-  friend CAFFE2_API std::ostream& operator<<(std::ostream& os, const TensorIterator& iter);
-
 protected:
   void build(TensorIteratorConfig&);
 
@@ -476,7 +473,7 @@ public:
   // Bypass output dtype/device computation and fix the dtype/device as specified here.
   TensorIteratorConfig& declare_static_dtype_and_device(ScalarType dtype, Device device);
   TensorIteratorConfig& declare_static_shape(IntArrayRef shape);
-  TensorIteratorConfig& declare_static_shape(IntArrayRef shape, const int64_t squash_dim);
+  TensorIteratorConfig& declare_static_shape(IntArrayRef shape, IntArrayRef squash_dims);
 
   // It would be better if this was && qualified, but this would be at the cost
   // of a lot of boilerplate above
@@ -535,7 +532,5 @@ struct CAFFE2_API SplitUntil32Bit {
 private:
   const TensorIterator& iter;
 };
-
-CAFFE2_API std::ostream& operator<<(std::ostream& os, const TensorIterator& iter);
 
 }  // namespace at
