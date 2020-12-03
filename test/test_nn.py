@@ -10351,6 +10351,33 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.randn(3, 0, 10, 10, device=device)
             mod(inp)
 
+
+    @onlyOnCPUAndCUDA
+    def test_MultiMarginLoss_empty(self, device):
+        mod = torch.nn.MultiMarginLoss()
+        x = torch.randn(0, 10, requires_grad=True)
+        y = torch.ones(0, 10).type(torch.long)
+
+        out = mod(x, y)
+        out.sum().backward()
+
+        self.assertEqual(x, torch.zeros_like(x))
+
+        for p in mod.parameters():
+            if p.requires_grad:
+                self.assertEqual(p.grad, torch.zeros_like(p.grad))
+        self.assertEqual(x.grad, torch.zeros_like(x))
+
+        with self.assertRaisesRegex(RuntimeError, 'Expected'):
+            x = torch.randn(0, requires_grad=True)
+            y = torch.ones(10).type(torch.long)
+            mod(x, y)
+
+        with self.assertRaisesRegex(RuntimeError, 'Expected'):
+            x = torch.randn(10, 0, requires_grad=True)
+            y = torch.ones(10, 0).type(torch.long)
+            mod(x, y)
+
     @onlyOnCPUAndCUDA
     def test_MultiLabelMarginLoss_empty(self, device):
         mod = torch.nn.MultiLabelMarginLoss()
