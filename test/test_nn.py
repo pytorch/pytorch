@@ -2659,13 +2659,17 @@ class TestNN(NNTestCase):
             m = torch.nn.utils.weight_norm(m)
 
     def test_parameterlistdict_setting_attributes(self):
-        mod = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
+        with warnings.catch_warnings(record=True) as w:
+            mod = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
+        self.assertTrue(len(w) == 0)
 
         with self.assertWarnsRegex(UserWarning,
                                    r"Setting attributes on ParameterList is not supported"):
             torch.nn.utils.weight_norm(mod, "0")
 
-        mod = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
+        with warnings.catch_warnings(record=True) as w:
+            mod = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
+        self.assertTrue(len(w) == 0)
 
         with self.assertWarnsRegex(UserWarning,
                                    r"Setting attributes on ParameterDict is not supported"):
@@ -9721,6 +9725,46 @@ class TestNNDeviceType(NNTestCase):
         module.__repr__()
         str(module)
 
+    def _test_dropout_discontiguous(self, cls, device, memory_format=torch.contiguous_format):
+        # In this test, we verify that dropout preserves the layout and data for different memory formats.
+        # We check whether, we get same values for the output of dropout, when the probability
+        # of dropout is 0 or very close to 0.
+        # Reference: https://github.com/pytorch/pytorch/issues/47176
+        close_to_zero_p = 1e-10  # Should be almost zero but not zero, as for p=0 different path is taken
+        for p in [0, close_to_zero_p]:
+            inp = torch.ones(2, 3, 3, 3, device=device)
+            inp_discontiguous = torch.empty(2, 3, 3, 6, device=device, memory_format=memory_format)[..., ::2]
+            inp_discontiguous.copy_(inp)
+            mod = cls(p=p)
+            out = mod(inp_discontiguous)
+            if p != 0:  # Zero will keep strides as is based on input.
+                # When prob == 0, input stride (54, 18, 6, 2) -> output stride (54, 18, 6, 2)
+                # When prob != 0, input stride (54, 18, 6, 2) -> output stride (27, 9, 3, 1)
+                self.assertTrue(out.is_contiguous(memory_format=memory_format))
+            self.assertEqual(inp_discontiguous, out)
+
+    def _test_dropout_stride_mean_preserve(self, cls, device):
+        def invert_perm(p):
+            d = {x: i for i, x in enumerate(p)}
+            return (d[0], d[1], d[2], d[3])
+
+        inp = torch.ones(2, 3, 4, 5, device=device)
+        shifts = [(0, 0), (1, 0), (0, 1), (1, 1)]
+        for perm in itertools.permutations((0, 1, 2, 3), r=4):
+            for shift in shifts:
+                for p in [1e-10, 0.3, 0.5, 0.7]:
+                    mod = cls(p=p)
+                    permuted_inp = inp.permute(perm).contiguous().permute(invert_perm(perm))
+                    permuted_inp = permuted_inp[shift[0]:, shift[1]:, :, :]
+                    out = mod(permuted_inp)
+
+                    self.assertTrue(out.permute(perm).is_contiguous())
+                    self.assertEqual(inp.mean(), out.mean(), rtol=0.5, atol=0.5)
+                    if p == 1e-10:
+                        self.assertEqual(permuted_inp, out)
+                    else:
+                        self.assertNotEqual(permuted_inp, out)
+
     def _test_InstanceNorm_general(self, cls, input, device, dtype=torch.float):
         # default case track_running_stats=False
         b, c = input.size(0), input.size(1)
@@ -10156,10 +10200,15 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(scipy_ary, gridsample_ary.reshape_as(scipy_ary))
 
     def test_Dropout(self, device):
-        input = torch.Tensor(1000)
+        input = torch.empty(1000)
         self._test_dropout(nn.Dropout, device, input)
 
-        if self.device_type == 'cuda' and TEST_WITH_ROCM:
+        self._test_dropout_discontiguous(nn.Dropout, device)
+        self._test_dropout_discontiguous(nn.Dropout, device, memory_format=torch.channels_last)
+
+        self._test_dropout_stride_mean_preserve(nn.Dropout, device)
+
+        if self.device_type == 'cuda':
             input = input.bfloat16()
             self._test_dropout(nn.Dropout, device, input)
 
@@ -10168,9 +10217,12 @@ class TestNNDeviceType(NNTestCase):
         w = random.randint(1, 5)
         h = random.randint(1, 5)
         num_features = 1000
-        input = torch.Tensor(num_features, b, w, h)
+        input = torch.empty(num_features, b, w, h)
         self._test_dropout(nn.Dropout2d, device, input)
         self._test_dropout(nn.Dropout2d, device, input, memory_format=torch.channels_last)
+
+        self._test_dropout_discontiguous(nn.Dropout2d, device)
+        self._test_dropout_discontiguous(nn.Dropout2d, device, memory_format=torch.channels_last)
 
     def test_Dropout3d(self, device):
         b = random.randint(1, 5)
@@ -10178,8 +10230,11 @@ class TestNNDeviceType(NNTestCase):
         h = random.randint(1, 5)
         d = random.randint(1, 2)
         num_features = 1000
-        input = torch.Tensor(num_features, b, d, w, h)
+        input = torch.empty(num_features, b, d, w, h)
         self._test_dropout(nn.Dropout3d, device, input)
+
+        self._test_dropout_discontiguous(nn.Dropout3d, device)
+        self._test_dropout_discontiguous(nn.Dropout3d, device, memory_format=torch.channels_last)
 
     def test_InstanceNorm1d_general(self, device):
         b = random.randint(3, 5)
@@ -12524,6 +12579,7 @@ class TestNNDeviceType(NNTestCase):
 
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
+    @tf32_on_and_off(0.005)
     def test_variable_sequence(self, device, dtype):
         def pad(var, length):
             if var.size(0) == length:
