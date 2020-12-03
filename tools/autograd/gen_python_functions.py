@@ -300,9 +300,7 @@ def load_deprecated_signatures(
                     continue
 
                 if not kwarg_only:
-                    # only pyi method signatures include self. python arg parser method signatures do not.
-                    if not method or param_name != 'self' or pyi:
-                        input_args.append(src_args[param_name])
+                    input_args.append(src_args[param_name])
                 else:
                     input_kwargs.append(src_args[param_name])
 
@@ -312,7 +310,8 @@ def load_deprecated_signatures(
                     input_args=tuple(input_args),
                     input_kwargs=tuple(input_kwargs),
                     # TODO: when we remove the difference for deprecated output_args, this should be a pass through
-                    output_args=None if not python_sig.output_args else PythonOutArgument.from_outputs(python_sig.output_args.outputs, pyi=pyi, deprecated=True),
+                    output_args=None if not python_sig.output_args else
+                    PythonOutArgument.from_outputs(python_sig.output_args.outputs, pyi=pyi, deprecated=True),
                     tensor_options_args=python_sig.tensor_options_args,
                     method=python_sig.method,
                     deprecated_args_names=tuple(args),

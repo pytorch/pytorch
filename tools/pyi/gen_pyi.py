@@ -3,18 +3,15 @@ import os
 import collections
 from pprint import pformat
 
-import yaml
-import re
 import argparse
 
 from tools.codegen.model import *
 from tools.codegen.api.python import *
-from tools.codegen.gen import compute_method_of_yaml, with_native_function
+from tools.codegen.gen import compute_method_of_yaml
 from typing import Sequence
 
-from ..autograd.utils import YamlLoader, CodeTemplate, write, group_declarations_by_op_name, is_tensor_method, is_torch_function
-from ..autograd.gen_python_functions import SKIP_PYTHON_BINDINGS, SKIP_PYTHON_BINDINGS_SIGNATURES, should_generate_py_binding, load_signatures, group_overloads, namedtuple_fieldnames
-from ..autograd.gen_autograd import load_aten_declarations
+from ..autograd.utils import CodeTemplate, write
+from ..autograd.gen_python_functions import should_generate_py_binding, load_signatures, group_overloads
 
 """
 This module implements generation of type stubs for PyTorch,

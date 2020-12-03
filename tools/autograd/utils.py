@@ -69,12 +69,6 @@ def write(dirname, name, template, env):
     else:
         print("Skipped writing {}".format(path))
 
-def is_tensor_method(declaration):
-    return 'Tensor' in declaration['method_of']
-
-def is_torch_function(declaration):
-    return 'namespace' in declaration['method_of']
-
 def is_out_variant(decl):
     return decl['name'].endswith('_out')
 
@@ -91,12 +85,6 @@ def load_op_list_and_strip_overload(op_list, op_list_path):
             op_list += yaml.load(f, Loader=YamlLoader)
     # strip out the overload part
     return {opname.split('.', 1)[0] for opname in op_list}
-
-def group_declarations_by_op_name(declarations):
-    groups = defaultdict(list)
-    for d in declarations:
-        groups[op_name(d)].append(d)
-    return groups
 
 def is_output(arg):
     return arg.get('output', False)
