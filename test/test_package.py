@@ -133,12 +133,54 @@ b = resources.load_binary('main', 'main_binary')
         self.assertIsNot(package_a, package_a_im)
         self.assertIs(package_a.subpackage, package_a_im.subpackage)
 
+    def test_extern_glob(self):
+        filename = self.temp()
+        with PackageExporter(filename, verbose=False) as he:
+            he.extern_modules(['package_a.*', 'module_*'])
+            he.save_module('package_a')
+            he.save_source_string('test_module', """\
+import package_a.subpackage
+import module_a
+""")
+        hi = PackageImporter(filename)
+        import package_a.subpackage
+        import module_a
+
+        module_a_im = hi.import_module('module_a')
+        hi.import_module('package_a.subpackage')
+        package_a_im = hi.import_module('package_a')
+
+        self.assertIs(module_a, module_a_im)
+        self.assertIsNot(package_a, package_a_im)
+        self.assertIs(package_a.subpackage, package_a_im.subpackage)
+
     @skipIf(version_info < (3, 7), 'mock uses __getattr__ a 3.7 feature')
     def test_mock(self):
         filename = self.temp()
         with PackageExporter(filename, verbose=False) as he:
             he.mock_modules(['package_a.subpackage', 'module_a'])
             he.save_module('package_a')
+        hi = PackageImporter(filename)
+        import package_a.subpackage
+        _ = package_a.subpackage
+        import module_a
+        _ = module_a
+
+        m = hi.import_module('package_a.subpackage')
+        r = m.result
+        with self.assertRaisesRegex(NotImplementedError, 'was mocked out'):
+            r()
+
+    @skipIf(version_info < (3, 7), 'mock uses __getattr__ a 3.7 feature')
+    def test_mock_glob(self):
+        filename = self.temp()
+        with PackageExporter(filename, verbose=False) as he:
+            he.mock_modules(['package_a.*', 'module*'])
+            he.save_module('package_a')
+            he.save_source_string('test_module', """\
+import package_a.subpackage
+import module_a
+""")
         hi = PackageImporter(filename)
         import package_a.subpackage
         _ = package_a.subpackage
@@ -310,6 +352,21 @@ def load():
             results.append(r)
 
         self.assertTrue(torch.allclose(*results))
+
+    def test_module_glob(self):
+        from torch.package.exporter import _module_glob_to_re
+
+        def check(pattern, should_match, should_not_match):
+            x = _module_glob_to_re(pattern)
+            for e in should_match:
+                self.assertTrue(x.fullmatch(e))
+            for e in should_not_match:
+                self.assertFalse(x.fullmatch(e))
+
+        check('torch.*', ['torch.foo', 'torch.bar'], ['tor.foo', 'torch.foo.bar', 'torch'])
+        check('torch.**', ['torch.foo', 'torch.bar', 'torch.foo.bar'], ['tor.foo', 'torch'])
+        check('torch.*.foo', ['torch.w.foo'], ['torch.hi.bar.baz'])
+        check('torch.**.foo', ['torch.w.foo', 'torch.hi.bar.foo'], ['torch.f.foo.z'])
 
 if __name__ == '__main__':
     main()
