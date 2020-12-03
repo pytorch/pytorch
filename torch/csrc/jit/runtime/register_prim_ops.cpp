@@ -1347,7 +1347,7 @@ int64_t normalizeIndex(int64_t idx, int64_t list_size) {
 
 int64_t stringFindImpl(
     std::string string,
-    std::string substr,
+    const std::string& substr,
     int64_t start,
     int64_t end,
     bool reverse = false) {

@@ -217,6 +217,15 @@ class ProcessGroupNCCL : public ProcessGroup {
           value_(std::move(value)),
           deviceIndices_(std::move(deviceIndices)),
           cudaEvents_(std::move(cudaEvents)) {
+      // Check that the device indices are distinct
+      std::unordered_set<c10::DeviceIndex> uniqueDeviceIndices;
+      for (const auto& deviceIndex : deviceIndices_) {
+        uniqueDeviceIndices.insert(deviceIndex);
+      }
+      TORCH_INTERNAL_ASSERT(
+        deviceIndices_.size() == uniqueDeviceIndices.size(),
+        "Got ", deviceIndices_.size(), " devices, but only ",
+        uniqueDeviceIndices.size(), " distinct ones");
       TORCH_INTERNAL_ASSERT(
         cudaEvents_->size() == deviceIndices_.size(),
         "The device indices and the events must be paired up. Got ",
@@ -390,12 +399,9 @@ class ProcessGroupNCCL : public ProcessGroup {
       return !value_.isNone();
     }
 
-    void setDataPtrExtractor(DataPtrExtractor data_ptr_extractor) override {
-      // To avoid races with other threads that may be using the extractor, we
-      // won't modify it after it's first set.
-      if (dataPtrExtractor_ == nullptr) {
-        dataPtrExtractor_ = std::move(data_ptr_extractor);
-      }
+    void setDataPtrExtractor(DataPtrExtractor dataPtrExtractor) override {
+      std::unique_lock<std::mutex> lock(dataPtrExtractorMutex_);
+      dataPtrExtractor_ = std::move(dataPtrExtractor);
     }
 
    private:
@@ -403,10 +409,12 @@ class ProcessGroupNCCL : public ProcessGroup {
     std::vector<c10::DeviceIndex> deviceIndices_;
     std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents_;
     DataPtrExtractor dataPtrExtractor_;
+    std::mutex dataPtrExtractorMutex_;
     c10::optional<FutureError> error_;
 
     std::vector<std::reference_wrapper<const at::DataPtr>> extractDataPtrs(
         const at::IValue& value) {
+      std::unique_lock<std::mutex> lock(dataPtrExtractorMutex_);
       std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
       if (dataPtrExtractor_ != nullptr) {
         // If a Python communication hook is used, dataPtrExtractor_ will be
