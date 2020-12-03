@@ -6819,7 +6819,7 @@ Example::
             [6, 7]])
 
 
-""".format(**factory_common_args))
+""".format(**merge_dicts(common_args, factory_like_common_args)))
 
 add_docstr(torch.randint_like,
            """
