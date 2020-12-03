@@ -175,6 +175,17 @@ Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& 
     }
   }
 
+  // handle pathological cases that blas may not like
+  if (result.numel() == 0) {
+    return result;
+  } else if (batch1_sizes[2] == 0) {
+    if (beta.to<c10::complex<double>>() == 0.0) {
+      return result.zero_();
+    } else {
+      return result.mul_(beta);
+    }
+  }
+
   bool transpose_result = false;
   Tensor result_;
   IntArrayRef result_strides = result.strides();
