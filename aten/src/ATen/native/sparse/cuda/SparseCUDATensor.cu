@@ -96,18 +96,16 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
     dim3 block(C10_WARP_SIZE, SZ);
     AT_DISPATCH_ALL_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16, values.scalar_type(), "coalesce_sparse_cuda", [&] {
-        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "coalesce_sparse_cuda", [&] {
-          using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
-          apply::coalesceValuesKernel<scalar_t, cuda_accscalar_t><<<grid, block, 0, stream>>>(
-            uniqueOffsets.data_ptr<int64_t>(),
-            origIndices.data_ptr<int64_t>(),
-            values.data_ptr<scalar_t>(),
-            newValues.data_ptr<scalar_t>(),
-            nnz,
-            newNnz,
-            stride
-          );
-        });
+        using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
+        apply::coalesceValuesKernel<scalar_t, cuda_accscalar_t><<<grid, block, 0, stream>>>(
+          uniqueOffsets.data_ptr<int64_t>(),
+          origIndices.data_ptr<int64_t>(),
+          values.data_ptr<scalar_t>(),
+          newValues.data_ptr<scalar_t>(),
+          nnz,
+          newNnz,
+          stride
+        );
       });
   }
 
