@@ -264,13 +264,15 @@ def sample_inputs_addmm(self, device, dtype, requires_grad):
                                     requires_grad=False))),) 
 
 def np_unary_ufunc_integer_promotion_wrapper(fn):
-    # Wrapper that passes the PyTorch's default scalar
+    # Wrapper that passes PyTorch's default scalar
     #   type as an argument to the wrapped NumPy
     #   unary ufunc when given an integer input.
+    #   This mimicks PyTorch's integer->floating point
+    #   type promotion.
     #
     # This is necessary when NumPy promotes
-    #   integer types to double while PyTorch promotes
-    #   integer types to float.
+    #   integer types to double, since PyTorch promotes
+    #   integer types to the default scalar type.
     
     # Helper to determine if promotion is needed
     def is_integral(dtype):
