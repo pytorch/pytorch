@@ -3569,6 +3569,22 @@ def foo(x):
                     'parameters_r': ['P']}
         self.assertEqual(expected, result)
 
+    def test_module_register_optional_buffer(self):
+        class Net(torch.nn.Module):
+            buffer_0: Optional[torch.Tensor]
+
+            def __init__(self):
+                super(Net, self).__init__()
+                self.register_buffer("buffer_0", torch.zeros(1))
+
+            def forward(self, x):
+                return x
+
+        scripted_mod = torch.jit.script(Net())
+        for name, buffer in scripted_mod.named_buffers():
+            self.assertEqual(name, "buffer_0")
+            self.assertEqual(buffer, torch.zeros(1))
+
     def test_parameter_order(self):
         m = nn.Module()
         for i, name in enumerate(string.ascii_letters):

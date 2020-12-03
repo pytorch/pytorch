@@ -494,7 +494,8 @@ struct TORCH_API ParameterPolicy {
     return std::move(v).toTensor();
   }
   static bool valid(const ClassTypePtr& typ, size_t i, const IValue& v) {
-    return typ->is_parameter(i) && v.isTensor();
+    bool is_optional_tensor = v.isTensor() || v.isNone();
+    return typ->is_parameter(i) && is_optional_tensor;
   }
   static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = false;
 };
@@ -507,8 +508,8 @@ struct TORCH_API BufferPolicy {
     return std::move(v).toTensor();
   }
   static bool valid(const ClassTypePtr& typ, size_t i, const IValue& v) {
-    return typ->getAttribute(i)->isSubtypeOf(TensorType::get()) &&
-        !typ->is_parameter(i);
+    bool is_optional_tensor = v.isTensor() || v.isNone();
+    return typ->is_buffer(i) && !typ->is_parameter(i) && is_optional_tensor;
   }
   static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = false;
 };
