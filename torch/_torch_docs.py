@@ -3897,6 +3897,11 @@ they are of size 1. Otherwise, :attr:`dim` is squeezed
 (see :func:`torch.squeeze`), resulting in both the :attr:`values` and
 :attr:`indices` tensors having 1 fewer dimension than the :attr:`input` tensor.
 
+.. note::
+    When :attr:`input` is a CUDA tensor and there are multiple valid
+    :attr:`k` th values, this function may nondeterministically return
+    :attr:`indices` for any of them.
+
 Args:
     {input}
     k (int): k for the k-th smallest element
@@ -4579,6 +4584,8 @@ lu_solve(input, LU_data, LU_pivots, *, out=None) -> Tensor
 
 Returns the LU solve of the linear system :math:`Ax = b` using the partially pivoted
 LU factorization of A from :meth:`torch.lu`.
+
+This function supports ``float``, ``double``, ``cfloat`` and ``cdouble`` dtypes for :attr:`input`.
 
 Arguments:
     b (Tensor): the RHS tensor of size :math:`(*, m, k)`, where :math:`*`
@@ -5745,6 +5752,43 @@ Examples::
     >>> torch.movedim(t, (1, 2), (0, 1)).shape
     torch.Size([2, 1, 3])
     >>> torch.movedim(t, (1, 2), (0, 1))
+    tensor([[[-0.3362, -0.9627,  0.5173]],
+
+            [[-0.8437,  0.1727, -0.1398]]])
+""".format(**common_args))
+
+add_docstr(torch.moveaxis, r"""
+moveaxis(input, source, destination) -> Tensor
+
+Alias for :func:`torch.movedim`.
+
+This function is equivalent to NumPy's moveaxis function.
+
+Examples::
+
+    >>> t = torch.randn(3,2,1)
+    >>> t
+    tensor([[[-0.3362],
+            [-0.8437]],
+
+            [[-0.9627],
+            [ 0.1727]],
+
+            [[ 0.5173],
+            [-0.1398]]])
+    >>> torch.moveaxis(t, 1, 0).shape
+    torch.Size([2, 3, 1])
+    >>> torch.moveaxis(t, 1, 0)
+    tensor([[[-0.3362],
+            [-0.9627],
+            [ 0.5173]],
+
+            [[-0.8437],
+            [ 0.1727],
+            [-0.1398]]])
+    >>> torch.moveaxis(t, (1, 2), (0, 1)).shape
+    torch.Size([2, 1, 3])
+    >>> torch.moveaxis(t, (1, 2), (0, 1))
     tensor([[[-0.3362, -0.9627,  0.5173]],
 
             [[-0.8437,  0.1727, -0.1398]]])
