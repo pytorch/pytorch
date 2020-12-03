@@ -63,6 +63,7 @@ C10_DEFINE_bool(
     false,
     "Whether to print output with all one input tensor.");
 C10_DEFINE_int(iter, 10, "The number of iterations to run.");
+C10_DEFINE_int(pytext_len, 0, "Length of input sequence.");
 C10_DEFINE_string(
     backend,
     "cpu",
@@ -71,12 +72,12 @@ C10_DEFINE_string(
     refbackend,
     "cpu",
     "what backend to use for model (vulkan, cpu, metal) (default=cpu)");
-C10_DEFINE_string(tolerance, "1e-5", "tolerance to use for comparison")
+C10_DEFINE_string(tolerance, "1e-5", "tolerance to use for comparison");
 
-    bool checkRtol(
-        const at::Tensor& diff,
-        const std::vector<at::Tensor>& inputs,
-        float tolerance) {
+bool checkRtol(
+    const at::Tensor& diff,
+    const std::vector<at::Tensor>& inputs,
+    float tolerance) {
   float maxValue = 0.0f;
 
   for (const auto& tensor : inputs) {
@@ -109,8 +110,8 @@ std::vector<std::string> split(
 std::vector<c10::IValue> create_inputs(
     std::vector<c10::IValue>& refinputs,
     std::vector<c10::IValue>& inputs,
-    std::string refbackend,
-    std::string backend) {
+    std::string& refbackend,
+    std::string& backend) {
   if (FLAGS_no_inputs) {
     return {};
   }
@@ -122,6 +123,15 @@ std::vector<c10::IValue> create_inputs(
   std::vector<std::string> input_type_list = split(';', FLAGS_input_type);
   std::vector<std::string> input_memory_format_list =
       split(';', FLAGS_input_memory_format);
+
+  CAFFE_ENFORCE_GE(
+      input_dims_list.size(), 0, "Input dims not specified correctly.");
+  CAFFE_ENFORCE_GE(
+      input_type_list.size(), 0, "Input type not specified correctly.");
+  CAFFE_ENFORCE_GE(
+      input_memory_format_list.size(),
+      0,
+      "Input format list not specified correctly.");
 
   CAFFE_ENFORCE_EQ(
       input_dims_list.size(),
@@ -135,6 +145,7 @@ std::vector<c10::IValue> create_inputs(
   for (size_t i = 0; i < input_dims_list.size(); ++i) {
     auto input_dims_str = split(',', input_dims_list[i]);
     std::vector<int64_t> input_dims;
+    input_dims.reserve(input_dims_str.size());
     for (const auto& s : input_dims_str) {
       input_dims.push_back(c10::stoi(s));
     }
@@ -169,15 +180,15 @@ std::vector<c10::IValue> create_inputs(
         at::TensorOptions(input_type).memory_format(input_memory_format));
 
     if (refbackend == "vulkan") {
-      refinputs.push_back(input_tensor.vulkan());
+      refinputs.emplace_back(input_tensor.vulkan());
     } else {
-      refinputs.push_back(input_tensor);
+      refinputs.emplace_back(input_tensor);
     }
 
     if (backend == "vulkan") {
-      inputs.push_back(input_tensor.vulkan());
+      inputs.emplace_back(input_tensor.vulkan());
     } else {
-      inputs.push_back(input_tensor);
+      inputs.emplace_back(input_tensor);
     }
   }
 
@@ -190,9 +201,9 @@ std::vector<c10::IValue> create_inputs(
     }
 
     if (backend == "vulkan") {
-      inputs.push_back(stensor.vulkan());
+      inputs.emplace_back(stensor.vulkan());
     } else {
-      inputs.push_back(stensor);
+      inputs.emplace_back(stensor);
     }
   }
 
