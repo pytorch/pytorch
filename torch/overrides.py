@@ -119,6 +119,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.as_strided,
         torch.bartlett_window,
         torch.blackman_window,
+        torch.broadcast_shapes,
         torch.can_cast,
         torch.cudnn_affine_grid_generator,
         torch.cudnn_batch_norm,
