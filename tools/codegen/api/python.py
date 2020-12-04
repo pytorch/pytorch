@@ -237,7 +237,8 @@ class PythonArgument:
     # Compute argument formal for python argument parsing.
     # Needs to be consistent with torch/csrc/utils/python_arg_parser.h.
     def argument_str(self, *, method: bool = False, pyi: bool = False, deprecated: bool = False) -> str:
-        type_str = argument_type_str_pyi(self.type, pyi_out_arg=pyi and isinstance(self, PythonOutArgument)) if pyi else argument_type_str(self.type)
+        type_str = argument_type_str_pyi(self.type, pyi_out_arg=pyi and isinstance(self, PythonOutArgument)) \
+            if pyi else argument_type_str(self.type)
 
         name = self.name
         # s/self/input/ outside method bindings
