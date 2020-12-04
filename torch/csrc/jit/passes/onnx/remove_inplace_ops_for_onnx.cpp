@@ -364,7 +364,7 @@ void SquashSliceAndSelect(Node* index_put_node) {
       next_node = outer_block->owningNode();
       next_node->addOutput()->copyMetadata(new_index_put);
       next_block = next_node->owningBlock();
-      node_list.push_back(std::make_pair(outer_block, next_node));
+      node_list.emplace_back(std::make_pair(outer_block, next_node));
   }
 
   if (true) {

@@ -1447,6 +1447,35 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(IndexPutModel2(), (x, update))
 
     @skipIfUnsupportedMinOpsetVersion(11)
+    def test_index_put_loop(self):
+        @torch.jit.script
+        def ngram_attention_bias(sequence_length: int, ngram: int, device: torch.device, dtype: torch.dtype):
+            bias = torch.ones((ngram, sequence_length), device=device, dtype=dtype) * float("-inf")
+            for stream_idx in range(ngram):
+                for i in range(sequence_length):
+                    bias[stream_idx, i] = 5
+            return bias
+
+        class ScriptModel(torch.nn.Module):
+            def __init__(self):
+                super(ScriptModel, self).__init__()
+                self.ngram = 2
+                self.max_target_positions = 512
+
+            def forward(self, hidden_states):
+                seq_length, batch_size = hidden_states.shape[:2]
+                predict_causal_mask = ngram_attention_bias(
+                    self.max_target_positions, self.ngram, hidden_states.device, hidden_states.dtype
+                )
+                predict_causal_mask = predict_causal_mask[:, :seq_length]
+                return predict_causal_mask
+
+        x = torch.randn(6, 2)
+        y = torch.randn(4, 1)
+        self.run_test(ScriptModel(), x, input_names=['x'],
+                      dynamic_axes={'x': {0: 'seq_length', 1: 'batch_size'}}, test_with_inputs=[y])
+
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_copy_(self):
         class CopyModel(torch.nn.Module):
             def forward(self, x, data):
@@ -2243,6 +2272,14 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(10, 10, 128)
         self.run_test(model, x)
 
+    def test_batchnorm1d_norunningstats(self):
+        x = torch.randn(10, 10)
+        model = torch.nn.BatchNorm1d(10, track_running_stats=False)
+        self.run_test(model, x)
+
+        x = torch.randn(10, 10, 128)
+        self.run_test(model, x)  
+
     def test_batchnorm2d(self):
         x = torch.randn(10, 3, 128, 128)
         model = torch.nn.BatchNorm2d(3, affine=True)
@@ -2251,6 +2288,11 @@ class TestONNXRuntime(unittest.TestCase):
     def test_batchnorm2d_noaffine(self):
         x = torch.randn(10, 3, 128, 128)
         model = torch.nn.BatchNorm2d(3, affine=False)
+        self.run_test(model, x)
+
+    def test_batchnorm2d_norunningstats(self):
+        x = torch.randn(10, 3, 128, 128)
+        model = torch.nn.BatchNorm2d(3, track_running_stats=False)
         self.run_test(model, x)
 
     def test_batchnorm3d(self):
@@ -3249,6 +3291,25 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(5, 4, 3)
         self.run_test(SplitModel2(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_chunk(self):
+        class ChunkModel(torch.nn.Module):
+            def __init__(self):
+                super(ChunkModel, self).__init__()
+
+            def forward(self, x):
+                return torch.chunk(x, 3, dim=1)
+
+        model = ChunkModel()
+        model.eval()
+        x = torch.randn(1, 18)
+
+        for dim_size_ in range(13, 16):
+            y = torch.randn(1, dim_size_)
+            self.run_test(model, x, test_with_inputs=[y],
+                          input_names=['x'],
+                          dynamic_axes={'x': {0: 'batch_size', 1: 'dims'}})
 
     def test_concat(self):
         class ConcatModel(torch.nn.Module):
