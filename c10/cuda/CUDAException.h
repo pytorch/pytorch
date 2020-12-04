@@ -33,4 +33,4 @@
 // This should be used directly after every kernel launch to ensure
 // the launch happened correctly and provide an early, close-to-source
 // diagnostic if it didn't.
-#define TORCH_CUDA_KERNEL_LAUNCH_CHECK() C10_CUDA_CHECK(cudaGetLastError())
+#define C10_CUDA_KERNEL_LAUNCH_CHECK() C10_CUDA_CHECK(cudaGetLastError())

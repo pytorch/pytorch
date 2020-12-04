@@ -3193,6 +3193,64 @@ Keyword args:
 
 """)
 
+add_docstr(torch.inner, r"""
+inner(input, other, *, out=None) -> Tensor
+
+Computes the dot product for 1D tensors. For higher dimensions, sums the product
+of elements from :attr:`input` and :attr:`other` along their last dimension.
+
+.. note::
+
+    If either :attr:`input` or :attr:`other` is a scalar, the result is equivalent
+    to `torch.mul(input, other)`.
+
+    If both :attr:`input` and :attr:`other` are non-scalars, the size of their last
+    dimension must match and the result is equivalent to `torch.tensordot(input,
+    other, dims=([-1], [-1]))`
+
+Args:
+    input (Tensor): First input tensor
+    other (Tensor): Second input tensor
+
+Keyword args:
+    out (Tensor, optional): Optional output tensor to write result into. The output
+                            shape is `input.shape[:-1] + other.shape[:-1]`.
+
+Example::
+
+    # Dot product
+    >>> torch.inner(torch.tensor([1, 2, 3]), torch.tensor([0, 2, 1]))
+    tensor(7)
+
+    # Multidimensional input tensors
+    >>> a = torch.randn(2, 3)
+    >>> a
+    tensor([[0.8173, 1.0874, 1.1784],
+            [0.3279, 0.1234, 2.7894]])
+    >>> b = torch.randn(2, 4, 3)
+    >>> b
+    tensor([[[-0.4682, -0.7159,  0.1506],
+            [ 0.4034, -0.3657,  1.0387],
+            [ 0.9892, -0.6684,  0.1774],
+            [ 0.9482,  1.3261,  0.3917]],
+
+            [[ 0.4537,  0.7493,  1.1724],
+            [ 0.2291,  0.5749, -0.2267],
+            [-0.7920,  0.3607, -0.3701],
+            [ 1.3666, -0.5850, -1.7242]]])
+    >>> torch.inner(a, b)
+    tensor([[[-0.9837,  1.1560,  0.2907,  2.6785],
+            [ 2.5671,  0.5452, -0.6912, -1.5509]],
+
+            [[ 0.1782,  2.9843,  0.7366,  1.5672],
+            [ 3.5115, -0.4864, -1.2476, -4.4337]]])
+
+    # Scalar input
+    >>> torch.inner(a, torch.tensor(2))
+    tensor([[1.6347, 2.1748, 2.3567],
+            [0.6558, 0.2469, 5.5787]])
+""")
+
 add_docstr(torch.outer, r"""
 outer(input, vec2, *, out=None) -> Tensor
 
@@ -3894,6 +3952,11 @@ they are of size 1. Otherwise, :attr:`dim` is squeezed
 (see :func:`torch.squeeze`), resulting in both the :attr:`values` and
 :attr:`indices` tensors having 1 fewer dimension than the :attr:`input` tensor.
 
+.. note::
+    When :attr:`input` is a CUDA tensor and there are multiple valid
+    :attr:`k` th values, this function may nondeterministically return
+    :attr:`indices` for any of them.
+
 Args:
     {input}
     k (int): k for the k-th smallest element
@@ -4576,6 +4639,8 @@ lu_solve(input, LU_data, LU_pivots, *, out=None) -> Tensor
 
 Returns the LU solve of the linear system :math:`Ax = b` using the partially pivoted
 LU factorization of A from :meth:`torch.lu`.
+
+This function supports ``float``, ``double``, ``cfloat`` and ``cdouble`` dtypes for :attr:`input`.
 
 Arguments:
     b (Tensor): the RHS tensor of size :math:`(*, m, k)`, where :math:`*`
@@ -5742,6 +5807,43 @@ Examples::
     >>> torch.movedim(t, (1, 2), (0, 1)).shape
     torch.Size([2, 1, 3])
     >>> torch.movedim(t, (1, 2), (0, 1))
+    tensor([[[-0.3362, -0.9627,  0.5173]],
+
+            [[-0.8437,  0.1727, -0.1398]]])
+""".format(**common_args))
+
+add_docstr(torch.moveaxis, r"""
+moveaxis(input, source, destination) -> Tensor
+
+Alias for :func:`torch.movedim`.
+
+This function is equivalent to NumPy's moveaxis function.
+
+Examples::
+
+    >>> t = torch.randn(3,2,1)
+    >>> t
+    tensor([[[-0.3362],
+            [-0.8437]],
+
+            [[-0.9627],
+            [ 0.1727]],
+
+            [[ 0.5173],
+            [-0.1398]]])
+    >>> torch.moveaxis(t, 1, 0).shape
+    torch.Size([2, 3, 1])
+    >>> torch.moveaxis(t, 1, 0)
+    tensor([[[-0.3362],
+            [-0.9627],
+            [ 0.5173]],
+
+            [[-0.8437],
+            [ 0.1727],
+            [-0.1398]]])
+    >>> torch.moveaxis(t, (1, 2), (0, 1)).shape
+    torch.Size([2, 1, 3])
+    >>> torch.moveaxis(t, (1, 2), (0, 1))
     tensor([[[-0.3362, -0.9627,  0.5173]],
 
             [[-0.8437,  0.1727, -0.1398]]])

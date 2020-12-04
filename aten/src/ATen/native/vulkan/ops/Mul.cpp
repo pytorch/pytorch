@@ -7,6 +7,8 @@ namespace vulkan {
 namespace ops {
 namespace {
 
+using namespace api::utils;
+
 Tensor mul_scalar(
     const Tensor& self_arg,
     const Scalar other) {
@@ -17,8 +19,8 @@ Tensor mul_scalar(
 
   vTensor v_output{
     context,
-    self.sizes(),
-    self.options(),
+    v_self.sizes(),
+    v_self.options(),
   };
 
   api::Command::Buffer command_buffer = context->command().pool.allocate();
@@ -26,8 +28,10 @@ Tensor mul_scalar(
   {
     if (v_output.has_image() && v_self.has_image()) {
       const struct {
+        uvec3 extents;
         float other;
       } block {
+        v_output.extents(),
         other.to<float>(),
       };
 
@@ -42,10 +46,15 @@ Tensor mul_scalar(
           v_output.extents(),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
-          v_output.image(command_buffer, vTensor::Access::Write),
+          v_output.image(
+              command_buffer,
+              vTensor::Stage::Compute,
+              vTensor::Access::Write),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          v_self.image(command_buffer),
+          v_self.image(
+              command_buffer,
+              vTensor::Stage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);
@@ -61,23 +70,25 @@ Tensor mul_scalar(
 }
 
 Tensor& mul_scalar_(
-    Tensor& self_arg,
+    Tensor& self,
     const Scalar other) {
   api::Context* const context = api::context();
 
   TORCH_CHECK(
-      self_arg.is_vulkan(),
+      self.is_vulkan(),
       "Vulkan: In-place mul_scalar is only supported on Vulkan tensors.");
 
-  vTensor& v_self = convert(self_arg);
+  vTensor& v_self = convert(self);
 
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
     if (v_self.has_image()) {
       const struct {
+        uvec3 extents;
         float other;
       } block {
+        v_self.extents(),
         other.to<float>(),
       };
 
@@ -91,7 +102,10 @@ Tensor& mul_scalar_(
           v_self.extents(),
           // Read-Write access triggers an async synchronization if necessory
           // and inserts appropriate barriers if hazards are detected.
-          v_self.image(command_buffer, vTensor::Access::Read | vTensor::Access::Write),
+          v_self.image(
+              command_buffer,
+              vTensor::Stage::Compute,
+              vTensor::Access::Read | vTensor::Access::Write),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);
@@ -103,7 +117,7 @@ Tensor& mul_scalar_(
   command_buffer.end();
   command_buffer.submit(context->gpu().queue);
 
-  return self_arg;
+  return self;
 }
 
 #ifdef USE_VULKAN_API
