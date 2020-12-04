@@ -463,6 +463,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: mode
    .. automethod:: movedim
    .. automethod:: moveaxis
+   .. automethod:: msort
    .. automethod:: mul
    .. automethod:: mul_
    .. automethod:: multiply
