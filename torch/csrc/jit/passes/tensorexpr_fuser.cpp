@@ -157,12 +157,6 @@ bool isSupported(Node* node) {
       "aten::softmax.int(Tensor self, int dim , ScalarType? dtype=None) -> Tensor",
       "aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
   };
-  static const OperatorSet float_only_operator_set{
-      "aten::fmod.Scalar(Tensor self, Scalar other) -> Tensor",
-      "aten::fmod.Tensor(Tensor self, Tensor other) -> Tensor",
-      "aten::remainder.Scalar(Tensor self, Scalar other) -> Tensor",
-      "aten::remainder.Tensor(Tensor self, Tensor other) -> Tensor",
-  };
   // clang-format on
 
   if (node->isMemberOf(supported_operator_set) ||
@@ -194,20 +188,6 @@ bool isSupported(Node* node) {
     for (auto arg_name : {"dtype", "device"}) {
       if (auto index = node->schema().argumentIndexWithName(arg_name)) {
         if (!toIValue(node->input(*index))) {
-          return false;
-        }
-      }
-    }
-
-    // Value is only supported if operands are floats.
-    if (node->isMemberOf(float_only_operator_set)) {
-      for (const Value* v : node->inputs()) {
-        if (auto const& tt = v->type()->cast<TensorType>()) {
-          auto const& st = tt->scalarType();
-          if (!st || !isFloatingType(*st)) {
-            return false;
-          }
-        } else if (!v->type()->cast<FloatType>()) {
           return false;
         }
       }
@@ -749,6 +729,34 @@ class TensorExprFuser {
     return true;
   }
 
+  bool typesAreSupported(const Node* node) {
+    // clang-format off
+    // breaks up the schema strings so they are no longer discoverable with ctrl-F
+    static const OperatorSet float_only_operator_set{
+      "aten::fmod.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::fmod.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::remainder.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::remainder.Tensor(Tensor self, Tensor other) -> Tensor",
+    };
+    // clang-format on
+
+    // Value is only supported if operands are floats.
+    if (node->isMemberOf(float_only_operator_set)) {
+      for (const Value* v : node->inputs()) {
+        if (auto const& tt = v->type()->cast<TensorType>()) {
+          auto const& st = tt->scalarType();
+          if (!st || !isFloatingType(*st)) {
+            return false;
+          }
+        } else if (!v->type()->cast<FloatType>()) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
 #define REQ(cond)                           \
   if (!(cond)) {                            \
     GRAPH_DEBUG("Failed cond " #cond "\n"); \
@@ -790,6 +798,7 @@ class TensorExprFuser {
     }
 
     REQ(tensorexpr::isSupported(node));
+    REQ(typesAreSupported(node));
     return true;
   }
 
