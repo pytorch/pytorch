@@ -310,6 +310,46 @@ Tensor ger(const Tensor& self, const Tensor& vec2) {
   return self.outer(vec2);
 }
 
+Tensor& inner_out(Tensor& out, const Tensor& self, const Tensor& other) {
+  checkDeviceType("inner()", {out, self, other}, self.device().type());
+
+  // If either self or other is a scalar just multiply them
+  if (self.dim() == 0 || other.dim() == 0) {
+    at::mul_out(out, self, other);
+    return out;
+  }
+
+  // Last dimension should match (tensordot does not enforce this)
+  TORCH_CHECK(
+      self.size(-1) == other.size(-1),
+      "inner() the last dimension must match on both input tensors but got shapes ",
+      self.sizes(),
+      " and ",
+      other.sizes());
+  
+  at::tensordot_out(out, self, other, -1, -1);
+  return out;
+}
+
+Tensor inner(const Tensor& self, const Tensor& other) {
+  checkDeviceType("inner()", {self, other}, self.device().type());
+
+  // If either self or other is a scalar just multiply them
+  if (self.dim() == 0 || other.dim() == 0) {
+    return self * other;
+  }
+
+  // Last dimension should match (tensordot does not enforce this)
+  TORCH_CHECK(
+      self.size(-1) == other.size(-1),
+      "inner() the last dimension must match on both input tensors but got shapes ",
+      self.sizes(),
+      " and ",
+      other.sizes());
+
+  return at::tensordot(self, other, -1, -1);
+}
+
 Tensor& outer_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
   check_1d(self, "self", "outer");
   check_1d(vec2, "vec2", "outer");
@@ -442,7 +482,7 @@ static void addmm_impl_cpu_(
   }
 }
 
-static void addbmm_impl_(
+static void addbmm_impl_cpu_(
     Tensor &result, const Tensor &self, const Tensor &batch1, const Tensor &batch2, Scalar beta, Scalar alpha) {
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
@@ -467,38 +507,29 @@ static void addbmm_impl_(
 
   const int64_t num_batches = batch1.size(0);
 
-  if (num_batches == 0) {
-    if (beta.to<c10::complex<double>>() != 0.0) {
-      result.mul_(beta);
-    } else {
-      result.zero_();
-    }
-    return;
-  }
-
   for (int64_t batch = 0; batch < num_batches; ++batch) {
-    result.addmm_(batch1[batch], batch2[batch], beta, alpha);
+    addmm_impl_cpu_(result, result, batch1[batch], batch2[batch], beta, alpha);
     beta = 1; // accumulate output once
   }
 }
 
-Tensor& addbmm_out(Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+Tensor& addbmm_cpu_out(Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
   Tensor b_self = std::get<0>(expand_size(self, {batch1.size(1), batch2.size(2)}, "addbmm_out"));
   {
     at::NoNamesGuard guard;
-    addbmm_impl_(result, b_self, batch1, batch2, beta, alpha);
+    addbmm_impl_cpu_(result, b_self, batch1, batch2, beta, alpha);
   }
   at::namedinference::propagate_names_for_addmm(result, batch1, batch2, self);
   return result;
 }
 
-Tensor &addbmm_(Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
-  return native::addbmm_out(self, self, batch1, batch2, beta, alpha);
+Tensor &addbmm_cpu_(Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+  return addbmm_cpu_out(self, self, batch1, batch2, beta, alpha);
 }
 
-Tensor addbmm(const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+Tensor addbmm_cpu(const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
   Tensor result = at::empty({0}, self.options());
-  return native::addbmm_out(result, self, batch1, batch2, beta, alpha);
+  return addbmm_cpu_out(result, self, batch1, batch2, beta, alpha);
 }
 
 Tensor& addmm_cpu_out(Tensor &result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
@@ -617,7 +648,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
   if (self_or_result.numel() == 0) {
     return self_or_result;
   } else if (contraction_size == 0) {
-    if (is_bmm_out || (beta.to<c10::complex<double>>() == 0.0)) {
+    if (is_bmm_out) {
       return self_or_result.zero_();
     } else {
       return self_or_result.mul_(beta);

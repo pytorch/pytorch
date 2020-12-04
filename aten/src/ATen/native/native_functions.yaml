@@ -3057,6 +3057,15 @@
   use_c10_dispatcher: full
   variants: function, method
 
+# moveaxis, alias for movedim
+- func: moveaxis.intlist(Tensor(a) self, int[] source, int[] destination) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: moveaxis.int(Tensor(a) self, int source, int destination) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: function, method
+
 # Only exposed from C++ -- in Python,
 # we expose it as an attribute `T`, not a function.
 #
@@ -5612,17 +5621,20 @@
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    CPU, CUDA: addbmm_
+    CPU: addbmm_cpu_
+    CUDA: addbmm__cuda
 
 - func: addbmm.out(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: addbmm_out
+    CPU: addbmm_cpu_out
+    CUDA: addbmm_out_cuda
 
 - func: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU, CUDA: addbmm
+    CPU: addbmm_cpu
+    CUDA: addbmm_cuda
 
 - func: addcdiv_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
   use_c10_dispatcher: full
@@ -9442,6 +9454,12 @@
   python_module: linalg
   dispatch:
     DefaultBackend: linalg_eigvalsh_out
+
+- func: inner(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: inner.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
 
 # torch.outer, alias for torch.ger
 - func: outer(Tensor self, Tensor vec2) -> Tensor
