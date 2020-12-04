@@ -77,8 +77,10 @@
  * str and ending with a number that varies with the line.
  */
 #ifdef __COUNTER__
+#define C10_UID __COUNTER__
 #define C10_ANONYMOUS_VARIABLE(str) C10_CONCATENATE(str, __COUNTER__)
 #else
+#define C10_UID __LINE__
 #define C10_ANONYMOUS_VARIABLE(str) C10_CONCATENATE(str, __LINE__)
 #endif
 

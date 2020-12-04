@@ -275,7 +275,6 @@ def create_tcp_store(addr):
     raise RuntimeError("Unable to find free port (tried %s)" % ", ".join(ports))
 
 
-@skip_if_win32()
 class TCPStoreTest(TestCase, StoreTestBase):
     def _create_store(self):
         store = create_tcp_store("localhost")
@@ -283,7 +282,11 @@ class TCPStoreTest(TestCase, StoreTestBase):
         return store
 
     def test_address_already_in_use(self):
-        with self.assertRaisesRegex(RuntimeError, "^Address already in use$"):
+        if sys.platform == 'win32':
+            err_msg_reg = "Only one usage of each socket address*"
+        else:
+            err_msg_reg = "^Address already in use$"
+        with self.assertRaisesRegex(RuntimeError, err_msg_reg):
             addr = "localhost"
             port = common.find_free_port()
 
@@ -321,8 +324,6 @@ class TCPStoreTest(TestCase, StoreTestBase):
     def test_numkeys_delkeys(self):
         self._test_numkeys_delkeys(self._create_store())
 
-
-@skip_if_win32()
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
         super(PrefixTCPStoreTest, self).setUp()
@@ -379,7 +380,6 @@ class RendezvousTest(TestCase):
             c10d.rendezvous("invalid://")
 
 
-@skip_if_win32()
 class RendezvousEnvTest(TestCase):
     @retry_on_connect_failures
     @requires_nccl()
