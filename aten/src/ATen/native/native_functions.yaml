@@ -3057,6 +3057,15 @@
   use_c10_dispatcher: full
   variants: function, method
 
+# moveaxis, alias for movedim
+- func: moveaxis.intlist(Tensor(a) self, int[] source, int[] destination) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: moveaxis.int(Tensor(a) self, int source, int destination) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: function, method
+
 # Only exposed from C++ -- in Python,
 # we expose it as an attribute `T`, not a function.
 #
@@ -6770,6 +6779,16 @@
 - func: sort.dimname(Tensor self, Dimname dim, bool descending=False) -> (Tensor values, Tensor indices)
   variants: method, function
 
+- func: msort.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    Math: msort_out
+
+- func: msort(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: method, function
+  dispatch:
+    Math: msort
+
 - func: argsort(Tensor self, int dim=-1, bool descending=False) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
@@ -9446,6 +9465,12 @@
   dispatch:
     DefaultBackend: linalg_eigvalsh_out
 
+- func: inner(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: inner.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+
 # torch.outer, alias for torch.ger
 - func: outer(Tensor self, Tensor vec2) -> Tensor
   use_c10_dispatcher: full
@@ -9478,6 +9503,30 @@
 - func: linalg_norm.ord_str_out(Tensor self, str ord, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
+
+- func: linalg_cond(Tensor self, Scalar? p=None) -> Tensor
+  python_module: linalg
+  variants: function
+  dispatch:
+    Math: linalg_cond
+
+- func: linalg_cond.out(Tensor self, Scalar? p=None, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+  dispatch:
+    Math: linalg_cond_out
+
+- func: linalg_cond.p_str(Tensor self, str p) -> Tensor
+  python_module: linalg
+  variants: function
+  dispatch:
+    Math: linalg_cond
+
+- func: linalg_cond.p_str_out(Tensor self, str p, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+  dispatch:
+    Math: linalg_cond_out
 
 - func: linalg_tensorinv(Tensor self, int ind=2) -> Tensor
   python_module: linalg

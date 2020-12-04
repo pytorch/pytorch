@@ -2,10 +2,10 @@
 
 #include <c10/util/intrusive_ptr.h>
 #include <c10d/FileStore.hpp>
+#include <c10d/TCPStore.hpp>
 #ifndef _WIN32
 #include <c10d/HashStore.hpp>
 #include <c10d/ProcessGroupRoundRobin.hpp>
-#include <c10d/TCPStore.hpp>
 #endif
 #include <c10d/ProcessGroup.hpp>
 
@@ -597,6 +597,7 @@ Example::
     >>> store.set("first_key", "first_value")
       )")
       .def(py::init<>());
+#endif
 
   intrusive_ptr_class_<::c10d::TCPStore>(
       module,
@@ -636,7 +637,6 @@ Example::
           py::arg("is_master"),
           py::arg("timeout") =
               std::chrono::milliseconds(::c10d::Store::kDefaultTimeout));
-#endif
 
   intrusive_ptr_class_<::c10d::PrefixStore>(
       module,
@@ -1243,7 +1243,6 @@ Arguments:
 static const auto StoreTorchBind =
     torch::class_<::c10d::Store>("dist_c10d", "Store");
 
-#ifndef _WIN32
 static const auto TCPStoreTorchBind =
     torch::class_<::c10d::TCPStore>("dist_c10d", "TCPStore")
         .def(torch::init([](const std::string& host_name,
@@ -1253,7 +1252,6 @@ static const auto TCPStoreTorchBind =
           return c10::make_intrusive<::c10d::TCPStore>(
               host_name, port, world_size, is_master);
         }));
-#endif
 
 // Torchbind the ProcessGroup to make it available in TorchScript
 static const auto ProcessGroupWorkTorchBind =
