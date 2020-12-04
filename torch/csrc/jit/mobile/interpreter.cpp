@@ -50,7 +50,7 @@ bool InterpreterState::run(Stack& stack) {
           // enable only for the RecordFunction
           enableRecordFunction(true);
         }
-        RECORD_FUNCTION(code_->op_names_[inst.X].name, stack);
+        RECORD_USER_SCOPE_WITH_INPUTS(code_->op_names_[inst.X].name, stack);
         if (!prev_value) {
           enableRecordFunction(false);
         }

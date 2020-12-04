@@ -1466,7 +1466,7 @@ struct PythonPrintImpl {
     }
   }
 
-  ~PythonPrintImpl() {}
+  ~PythonPrintImpl() = default;
 
   TaggedStringStream body_;
   // When printing this node, is it safe to write it inline (i.e. without
