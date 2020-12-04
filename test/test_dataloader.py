@@ -1460,6 +1460,9 @@ except RuntimeError as e:
         with self.assertRaisesRegex(ValueError, "Invalid rank"):
             sampler = DistributedSampler(dataset, 3, 3)
 
+        with self.assertRaisesRegex(ValueError, "Invalid rank"):
+            sampler = DistributedSampler(dataset, 3, -1)
+
     def test_duplicating_data_with_drop_last(self):
 
         from torch.utils.data.distributed import DistributedSampler
