@@ -40,7 +40,6 @@ DEFINE_DISPATCH(tanh_backward_stub);
 DEFINE_DISPATCH(maximum_stub);
 DEFINE_DISPATCH(minimum_stub);
 DEFINE_DISPATCH(fmod_stub);
-DEFINE_DISPATCH(fmod_scalar_stub);
 DEFINE_DISPATCH(logaddexp_stub);
 DEFINE_DISPATCH(logaddexp2_stub);
 DEFINE_DISPATCH(gcd_stub);
@@ -897,34 +896,42 @@ Tensor& floor_divide_(Tensor& self, Scalar other) {
 
 Tensor& fmod_out(Tensor & result, const Tensor& self, const Tensor& other) {
   auto iter = TensorIterator::binary_op(result, self, other);
-  TORCH_CHECK(iter.device_type() == at::kCPU, "Native fmod only supports CPU");
   fmod_stub(iter.device_type(), iter);
   return result;
 }
 
 Tensor& fmod_out(Tensor & result, const Tensor& self, Scalar other) {
-  auto iter = TensorIterator::unary_op(result, self);
-  TORCH_CHECK(iter.device_type() == at::kCPU, "Native fmod only supports CPU");
-  fmod_scalar_stub(iter.device_type(), iter, other);
+  Tensor other_tensor = wrapped_scalar_tensor(other);
+  // FIXME: 'other' is converted to match the dtype of 'self' to retain
+  //   BC with TH, but in the future, we should use normal type promotion,
+  //   like in numpy
+  // Issue #47779: https://github.com/pytorch/pytorch/issues/47779
+  at::fmod_out(result, self, other_tensor.to(self.dtype()));
   return result;
 }
 
 Tensor fmod(const Tensor& self, const Tensor & other) {
-  Tensor result = at::empty({0}, self.options());
-  return at::fmod_out(result, self, other);
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  fmod_stub(iter.device_type(), iter);
+  return iter.output();
 }
 
 Tensor fmod(const Tensor& self, Scalar other) {
-  Tensor result = at::empty({0}, self.options());
-  return at::fmod_out(result, self, other);
+  Tensor other_tensor = wrapped_scalar_tensor(other);
+  // FIXME: 'other' is converted to match the dtype of 'self' to retain
+  //   BC with TH, but in the future, we should use normal type promotion,
+  //   like in numpy
+  // Issue #47779: https://github.com/pytorch/pytorch/issues/47779
+  return native::fmod(self, other_tensor.to(self.dtype()));
 }
 
 Tensor& fmod_(Tensor& self, const Tensor& other) {
-  return at::fmod_out(self, self, other);
+  return native::fmod_out(self, self, other);
 }
 
 Tensor& fmod_(Tensor& self, Scalar other) {
-  return at::fmod_out(self, self, other);
+  return native::fmod_out(self, self, other);
 }
 
 Tensor& logaddexp_out(Tensor& result, const Tensor& self, const Tensor& other) {

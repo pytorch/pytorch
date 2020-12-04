@@ -175,6 +175,7 @@ jobs:
             -g"-torch/csrc/cuda/python_nccl.cpp"                   \
             -g"-torch/csrc/autograd/FunctionsManual.cpp"           \
             -g"-torch/csrc/generic/*.cpp"                          \
+            -g"-torch/csrc/jit/codegen/cuda/runtime/*"             \
             "$@" > ${GITHUB_WORKSPACE}/clang-tidy-output.txt
 
           cat ${GITHUB_WORKSPACE}/clang-tidy-output.txt
