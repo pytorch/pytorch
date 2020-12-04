@@ -296,12 +296,14 @@ if (strides.empty()) {{
             return "// TODO: consistency check?"
         elif k is SchemaKind.out:
             return """
-at::native::resize_output(outputs_[output_idx], sizes);
-if (!strides.empty()) {
-    TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
-    at::native::as_strided_(outputs_[output_idx], sizes, strides);
-} else if (options.memory_format_opt().has_value()) {
-    outputs_[output_idx].get().unsafeGetTensorImpl()->empty_tensor_restride(*options.memory_format_opt());
+bool resized = at::native::resize_output(outputs_[output_idx], sizes);
+if (resized) {
+    if (!strides.empty()) {
+        TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
+        at::native::as_strided_(outputs_[output_idx], sizes, strides);
+    } else if (options.memory_format_opt().has_value()) {
+        outputs_[output_idx].get().unsafeGetTensorImpl()->empty_tensor_restride(*options.memory_format_opt());
+    }
 }
 """
         else:

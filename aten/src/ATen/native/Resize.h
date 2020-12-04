@@ -14,7 +14,8 @@ namespace at { namespace native {
 // Issues a warning if the output tensor has one or more elements and
 //   needs resizing
 // NOTE: In the future the warning will become an error
-CAFFE2_API void resize_output(Tensor& output, IntArrayRef shape);
+// Returns true if a resize actually happened
+CAFFE2_API bool resize_output(Tensor& output, IntArrayRef shape);
 
 // These functions are called by native::resize_ as well as (legacy) TH resize.
 // They are not in TH/THTensor.cpp because the at namespace is easier
