@@ -7,4 +7,4 @@ if "%REBUILD%"=="" (
   7z x -aoa %TMP_DIR_WIN%\mkl.7z -o%TMP_DIR_WIN%\mkl
 )
 set CMAKE_INCLUDE_PATH=%TMP_DIR_WIN%\mkl\include
-set LIB=%TMP_DIR_WIN%\mkl\lib;%LIB
+set LIB=%TMP_DIR_WIN%\mkl\lib;%LIB%
