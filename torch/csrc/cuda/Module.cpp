@@ -263,6 +263,28 @@ PyObject * THCPModule_hasPrimaryContext(PyObject *_unused, PyObject *arg)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THCPModule_setMemoryFraction(PyObject *_unused, PyObject *args)
+{
+  HANDLE_TH_ERRORS
+  PyObject* fraction_o = nullptr;
+  PyObject* device_o = nullptr;
+  if(!PyArg_ParseTuple(args, "OO", &fraction_o, &device_o)) {
+    THPUtils_invalidArguments(
+        args,
+        nullptr,
+        "set_memory_fraction",
+        1,
+        "(double fraction, int device);");
+    return nullptr;
+  }
+  double fraction = PyFloat_AsDouble(fraction_o);
+  int64_t device = PyLong_AsLongLong(device_o);
+
+  c10::cuda::CUDACachingAllocator::setMemoryFraction(fraction, device);
+  END_HANDLE_TH_ERRORS
+  Py_RETURN_NONE;
+}
+
 PyObject * THCPModule_emptyCache(PyObject *_unused, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
@@ -498,6 +520,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_setStream",    THCPModule_setStream_wrap,  METH_O, nullptr},
   {"_cuda_getCompiledVersion", THCPModule_getCompiledVersion, METH_NOARGS, nullptr},
   {"_cuda_hasPrimaryContext", THCPModule_hasPrimaryContext,  METH_O,  nullptr},
+  {"_cuda_setMemoryFraction", THCPModule_setMemoryFraction, METH_VARARGS,  nullptr},
   {"_cuda_emptyCache", THCPModule_emptyCache, METH_NOARGS, nullptr},
   {"_cuda_memoryStats", THCPModule_memoryStats, METH_O, nullptr},
   {"_cuda_resetAccumulatedMemoryStats", THCPModule_resetAccumulatedMemoryStats, METH_O, nullptr},
