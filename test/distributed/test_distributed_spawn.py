@@ -4,7 +4,7 @@ import sys
 import unittest
 
 import torch.distributed as dist
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_ASAN, NO_MULTIPROCESSING_SPAWN
+from torch.testing._internal.common_utils import run_tests, TestCase, TEST_WITH_ASAN, NO_MULTIPROCESSING_SPAWN
 from torch.testing._internal.distributed.distributed_test import (
     DistributedTest, TestDistBackend
 )
@@ -29,6 +29,19 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             super().setUp()
             self._spawn_processes()
 
+elif BACKEND == "mpi":
+    WORLD_SIZE = os.environ["WORLD_SIZE"]
+
+    @unittest.skipIf(
+        TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
+    )
+    @unittest.skipIf(
+        NO_MULTIPROCESSING_SPAWN, "Spawn not available, skipping tests."
+    )
+    class TestMPIWithSpawn(TestDistBackend, DistributedTest._DistTestBase):
+        def setUp(self):
+            super().setUp()
+            self._spawn_processes()
 
 if __name__ == "__main__":
     run_tests()
