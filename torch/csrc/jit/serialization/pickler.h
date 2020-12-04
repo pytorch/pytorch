@@ -2,6 +2,7 @@
 
 #include <ATen/core/qualified_name.h>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <ATen/core/ivalue.h>
@@ -120,16 +121,16 @@ class TORCH_API Pickler {
 
  public:
   Pickler(std::function<void(const char*, size_t)> writer)
-      : Pickler(writer, nullptr, nullptr, nullptr) {}
+      : Pickler(std::move(writer), nullptr, nullptr, nullptr) {}
 
   Pickler(
       std::function<void(const char*, size_t)> writer,
       std::vector<at::Tensor>* tensor_table,
       std::function<c10::QualifiedName(const c10::ClassTypePtr&)> type_renamer,
       std::vector<c10::ClassTypePtr>* memorized_class_types)
-      : writer_(writer),
+      : writer_(std::move(writer)),
         tensor_table_(tensor_table),
-        type_renamer_(type_renamer),
+        type_renamer_(std::move(type_renamer)),
         memorized_class_types_(memorized_class_types) {}
   ~Pickler();
 
