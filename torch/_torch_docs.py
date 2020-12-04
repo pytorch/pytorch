@@ -6786,7 +6786,7 @@ between :attr:`low` (inclusive) and :attr:`high` (exclusive).
 
 The shape of the tensor is defined by the variable argument :attr:`size`.
 
-.. note:
+.. note::
     With the global dtype default (``torch.float32``), this function returns
     a tensor with dtype ``torch.int64``.
 
@@ -6819,7 +6819,7 @@ Example::
             [6, 7]])
 
 
-""".format(**merge_dicts(common_args, factory_like_common_args)))
+""".format(**factory_common_args))
 
 add_docstr(torch.randint_like,
            """
