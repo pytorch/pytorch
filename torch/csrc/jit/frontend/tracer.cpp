@@ -134,7 +134,7 @@ Value* TracingState::getValue(const IValue& var) {
     return graph->insertNode(dict_node)->output();
   }
   if (var.isTensor()) {
-    auto ten = var.toTensor();
+    auto& ten = var.toTensor();
     if (!ten.defined()) {
       Node* n = graph->createNone();
       return graph->insertNode(n)->output();
@@ -234,7 +234,7 @@ bool TracingState::hasValue(const IValue& var) const {
 Value* TracingState::getOutput(const IValue& iv, size_t i) {
   bool tracing_mode_strict = getTracingState()->strict;
   if (iv.isTensor()) {
-    at::Tensor var = iv.toTensor();
+    const at::Tensor& var = iv.toTensor();
     if (!var.defined()) {
       Node* n = graph->createNone();
       return graph->insertNode(n)->output();
@@ -491,7 +491,7 @@ void setValueTrace(const IValue& v, Value* value) {
 }
 void TracingState::setValue(const IValue& v, Value* value) {
   if (v.isTensor()) {
-    auto var = v.toTensor();
+    auto& var = v.toTensor();
     AT_ASSERT(var.defined());
     env_stack.back()[v] = value;
   } else if (v.isTensorList()) {

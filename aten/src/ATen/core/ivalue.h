@@ -279,8 +279,8 @@ struct CAFFE2_API IValue final {
 
     // Tensors should be compared based on internal storage
     if (this->isTensor()) {
-      const auto thisTensor = this->toTensor();
-      const auto rhsTensor = rhs.toTensor();
+      const auto& thisTensor = this->toTensor();
+      const auto& rhsTensor = rhs.toTensor();
       return thisTensor.is_alias_of(rhsTensor);
     }
 
@@ -335,7 +335,8 @@ struct CAFFE2_API IValue final {
     return Tag::Tensor == tag;
   }
   at::Tensor toTensor() &&;
-  at::Tensor toTensor() const&;
+  at::Tensor& toTensor() &;
+  const at::Tensor& toTensor() const&;
   at::TensorImpl* unsafeToTensorImpl() const {
     return payload.as_tensor.unsafeGetTensorImpl();
   }

@@ -289,11 +289,11 @@ class AttributePropagator {
 
   IValue overrideGradient(IValue attr) {
     if (attr.isTensor()) {
-      auto t = attr.toTensor();
+      auto& t = attr.toTensor();
       if (t.requires_grad()) {
-        t = t.detach();
-        t.set_requires_grad(false);
-        attr = IValue(t);
+        auto detached = t.detach();
+        detached.set_requires_grad(false);
+        attr = IValue(std::move(detached));
       }
     } else if (attr.isTuple()) {
       auto tuple = std::move(attr).toTuple();

@@ -165,7 +165,7 @@ void ProfilingRecord::insertShapeProfile(Node* n, size_t offset) {
     if (v.isTensor()) {
       std::lock_guard<std::mutex> lock(this->mutex_);
       auto& profiled_types = profiled_types_per_frame_[frame_id];
-      auto t = v.toTensor();
+      auto& t = v.toTensor();
       if (t.defined()) {
         auto pttp = tensorTypeInCurrentExecutionContext(t);
         GRAPH_DEBUG(
