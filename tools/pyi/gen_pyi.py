@@ -179,7 +179,7 @@ def generate_named_tuples(funcs: Sequence[PythonSignatureGroup]):
     namedtuples = {}
     for sig_group in funcs:
         named_tuple = sig_group.signature.returns.named_tuple()
-        if named_tuple:
+        if named_tuple is not None:
             tuple_name, tuple_def = named_tuple
             if tuple_name in namedtuples:
                 assert namedtuples[tuple_name] == tuple_def

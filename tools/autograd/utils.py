@@ -1,7 +1,6 @@
 import re
 import os
 import yaml
-from collections import defaultdict
 from .nested_dict import nested_dict
 
 
