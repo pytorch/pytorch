@@ -1235,7 +1235,15 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         bias_value = torch.tensor([0.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
         bias = g.op("Constant", value_t=bias_value)
-
+    # If track_running_stats is set to False batch statistics are instead used during evaluation time    
+    if running_mean is None or sym_help._is_none(running_mean) or running_var is None or sym_help._is_none(running_var):
+        assert len(input_sizes) > 1
+        reshape_in = g.op("Reshape", input, 
+                          g.op("Constant", value_t=torch.tensor([input_sizes[0], input_sizes[1], -1], dtype=torch.int64)))
+        trans_in = g.op('Transpose', reshape_in, perm_i=[0, 2, 1])
+        running_var, running_mean = _var_mean(g, trans_in, 
+                                              g.op("Constant", value_t=torch.tensor([0, 1], dtype=torch.int64)), 
+                                              False, False)
     out = g.op("BatchNormalization", input, weight, bias, running_mean, running_var,
                epsilon_f=eps,
                momentum_f=1 - momentum,
@@ -1731,6 +1739,15 @@ def slice(g, self, *args):
 def hardtanh(g, self, min_val, max_val):
     return g.op("Clip", self, min_f=min_val, max_f=max_val)
 
+
+@parse_args('v')
+def hardswish(g, self):
+    input = g.op("Add", self, g.op('Constant', value_t=torch.tensor(3, dtype=torch.float)))
+    hardtanh_ = sym_help._hardtanh_helper(g, input, 
+                                          g.op('Constant', value_t=torch.tensor(0, dtype=torch.float)), 
+                                          g.op('Constant', value_t=torch.tensor(6, dtype=torch.float)))
+    hardtanh_ = g.op("Div", hardtanh_, g.op('Constant', value_t=torch.tensor(6, dtype=torch.float)))
+    return g.op("Mul", self, hardtanh_)
 
 def alias(g, self):
     return self

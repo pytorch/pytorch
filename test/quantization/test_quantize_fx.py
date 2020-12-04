@@ -2103,15 +2103,14 @@ class TestQuantizeFxModels(QuantizationTestCase):
         original_out = model(input_value)
         is_not_tuple_out = not isinstance(original_out, tuple)
         script_out = script(input_value)
-        self.assertEqual(
-            (original_out - script_out).abs().max(), 0,
-            'Reslut of original graph module and script module does not match')
 
         # set to train just before quantization
+        prepare_fx_fn = prepare_fx
         if mode != 'static':
             model.train()
+            prepare_fx_fn = prepare_qat_fx
 
-        prepared = prepare_fx(model, qconfig_dict)
+        prepared = prepare_fx_fn(model, qconfig_dict)
 
         if mode == 'ddp':
             mp.spawn(run_ddp,
@@ -2207,15 +2206,11 @@ class TestQuantizeFxModels(QuantizationTestCase):
         quantized_model_list = set(quantized_model_list) - no_pretrained_model
         # test eager and graph consistency
         model_list = quantized_model_list
-        # slice need to be fixed in symbolic tracing(https://github.com/pytorch/pytorch/issues/43511)
-        model_list = set(model_list) - {'googlenet', 'inception_v3'}
-        # getattr should not be used as node name(https://github.com/pytorch/pytorch/issues/43522)
-        model_list -= {'shufflenet_v2_x1_0', 'mobilenet_v2'}
-
+        # inception_v3 is not symbolically traceable: https://github.com/pytorch/pytorch/issues/48813
+        model_list = set(model_list) - {'inception_v3'}
         # mobilenet: dropout error RuntimeError: "bernoulli_scalar_cpu_" not implemented for 'QUInt8'
         # incpetion_v3: looks like there is some problem with AuxLogits
-        quantized_not_working = [('qat', 'mobilenet_v2'),
-                                 ('qat', 'inception_v3'),
+        quantized_not_working = [('qat', 'inception_v3'),
                                  ('static', 'inception_v3')]
 
         fx_eager_not_matching = ['googlenet',  # because _transform_input is not quantized in eager
@@ -2257,7 +2252,6 @@ class TestQuantizeFxModels(QuantizationTestCase):
     @skip_if_no_torchvision
     @skip_if_not_multigpu
     @skipIfNoFBGEMM
-    @unittest.skip('TODO: not working yet due to https://github.com/pytorch/pytorch/issues/43513')
     def test_resnet18_ddp(self):
         from torchvision import models
         from torchvision.models import quantization as quantized_models
