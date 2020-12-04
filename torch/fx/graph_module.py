@@ -50,7 +50,12 @@ def deserialize_graphmodule(body : dict) -> torch.nn.Module:
             super().__init__()
             self.__dict__ = body
 
-    CodeOnlyModule.forward = _forward_from_src(body['_code'])
+    try:
+        CodeOnlyModule.forward = _forward_from_src(body['_code'])
+    except KeyError:
+        # BC: attribute name was changed from `code` to `_code` to facilitate
+        # making `code` into a property and adding a docstring to it
+        CodeOnlyModule.forward = _forward_from_src(body['code'])
 
     from .symbolic_trace import Tracer
 
