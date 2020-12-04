@@ -152,6 +152,86 @@ SparseTensor& neg_sparse_(SparseTensor& t) {
 }
 
 // --------------------------------------------------------------------
+// round(SparseTensor)
+// --------------------------------------------------------------------
+
+SparseTensor& round_out_sparse(SparseTensor& r, const SparseTensor& t) {
+  TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
+  TORCH_CHECK(t.is_sparse(), "Tensor should be sparse");
+
+  // copy_sparse_ does not perform the copy if it is the same tensor
+  copy_sparse_to_sparse_(r, t);
+  r._values().round_();
+  return r;
+}
+
+SparseTensor& round_sparse_(SparseTensor& t) {
+  return round_out_sparse(t, t);
+}
+
+// --------------------------------------------------------------------
+// ceil(SparseTensor)
+// --------------------------------------------------------------------
+
+SparseTensor& ceil_out_sparse(SparseTensor& r, const SparseTensor& t) {
+  TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
+  TORCH_CHECK(t.is_sparse(), "Tensor should be sparse");
+
+  // copy_sparse_ does not perform the copy if it is the same tensor
+  copy_sparse_to_sparse_(r, t);
+  r._values().ceil_();
+  return r;
+}
+
+SparseTensor& ceil_sparse_(SparseTensor& t) {
+  return ceil_out_sparse(t, t);
+}
+
+// --------------------------------------------------------------------
+// floor(SparseTensor)
+// --------------------------------------------------------------------
+
+SparseTensor& floor_out_sparse(SparseTensor& r, const SparseTensor& t) {
+  TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
+  TORCH_CHECK(t.is_sparse(), "Tensor should be sparse");
+
+  // copy_sparse_ does not perform the copy if it is the same tensor
+  copy_sparse_to_sparse_(r, t);
+  r._values().floor_();
+  return r;
+}
+
+SparseTensor& floor_sparse_(SparseTensor& t) {
+  return floor_out_sparse(t, t);
+}
+
+
+// --------------------------------------------------------------------
+// trunc(SparseTensor)
+// --------------------------------------------------------------------
+
+SparseTensor& trunc_out_sparse(SparseTensor& r, const SparseTensor& t) {
+  TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
+  TORCH_CHECK(t.is_sparse(), "Tensor should be sparse");
+  Tensor t_tmp = t;
+  if (!t.is_coalesced()) {
+    t_tmp = t.coalesce();
+    copy_sparse_to_sparse_(r, t_tmp);
+  }
+  else {
+    // copy_sparse_ does not perform the copy if it is the same tensor
+    copy_sparse_to_sparse_(r, t);
+  }
+  r._values().trunc_();
+  return r;
+}
+
+SparseTensor& trunc_sparse_(SparseTensor& t) {
+  return trunc_out_sparse(t, t);
+}
+
+
+// --------------------------------------------------------------------
 // asin(SparseTensor)
 // --------------------------------------------------------------------
 

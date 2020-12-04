@@ -995,11 +995,13 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: ceil_
+    CPU, CUDA: ceil_
+    SparseCPU, SparseCUDA: ceil_sparse_
 
 - func: ceil.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: ceil_out
+    SparseCPU, SparseCUDA: ceil_out_sparse
 
 - func: chain_matmul(Tensor[] matrices) -> Tensor
   use_c10_dispatcher: full
@@ -1863,11 +1865,13 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: floor_
+    CPU, CUDA: floor_
+    SparseCPU, SparseCUDA: floor_sparse_
 
 - func: floor.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: floor_out
+    SparseCPU, SparseCUDA: floor_out_sparse
 
 - func: floor_divide(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
@@ -3307,12 +3311,13 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: round_
+    CPU, CUDA: round_
+    SparseCPU, SparseCUDA: round_sparse_
 
 - func: round.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: round_out
-    CUDA: round_out
+    CPU, CUDA: round_out
+    SparseCPU, SparseCUDA: round_out_sparse
 
 - func: rrelu(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
 
@@ -4014,11 +4019,13 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: trunc_
+    CPU, CUDA: trunc_
+    SparseCPU, SparseCUDA: trunc_sparse_
 
 - func: trunc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: trunc_out
+    SparseCPU, SparseCUDA: trunc_out_sparse
 
 # Alias for trunc
 - func: fix(Tensor self) -> Tensor
