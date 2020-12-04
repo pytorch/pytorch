@@ -2002,6 +2002,14 @@ Tensor movedim(const Tensor& self, int64_t src, int64_t dst) {
   return at::movedim(self, IntArrayRef{src}, IntArrayRef{dst});
 }
 
+Tensor moveaxis(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
+  return at::movedim(self, src, dst);
+}
+
+Tensor moveaxis(const Tensor& self, int64_t src, int64_t dst) {
+  return at::movedim(self, IntArrayRef{src}, IntArrayRef{dst});
+}
+
 Tensor swapaxes(const Tensor& self, int64_t axis0, int64_t axis1) {
   return self.transpose(axis0, axis1);
 }

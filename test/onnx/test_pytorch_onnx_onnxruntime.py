@@ -2243,6 +2243,14 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(10, 10, 128)
         self.run_test(model, x)
 
+    def test_batchnorm1d_norunningstats(self):
+        x = torch.randn(10, 10)
+        model = torch.nn.BatchNorm1d(10, track_running_stats=False)
+        self.run_test(model, x)
+
+        x = torch.randn(10, 10, 128)
+        self.run_test(model, x)  
+
     def test_batchnorm2d(self):
         x = torch.randn(10, 3, 128, 128)
         model = torch.nn.BatchNorm2d(3, affine=True)
@@ -2251,6 +2259,11 @@ class TestONNXRuntime(unittest.TestCase):
     def test_batchnorm2d_noaffine(self):
         x = torch.randn(10, 3, 128, 128)
         model = torch.nn.BatchNorm2d(3, affine=False)
+        self.run_test(model, x)
+
+    def test_batchnorm2d_norunningstats(self):
+        x = torch.randn(10, 3, 128, 128)
+        model = torch.nn.BatchNorm2d(3, track_running_stats=False)
         self.run_test(model, x)
 
     def test_batchnorm3d(self):
@@ -3103,6 +3116,16 @@ class TestONNXRuntime(unittest.TestCase):
 
         ind = torch.tensor(-2, dtype=torch.long)
         self.run_test(GetItemModel(), (x, y, z, ind))
+
+    @disableScriptTest()  # torch.nonzero(x, as_tuple=True) is not scriptable.
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_nonzero(self):
+        class NonzeroModel(torch.nn.Module):
+            def forward(self, x):
+                return x.nonzero(), x.nonzero(as_tuple=True)
+
+        x = torch.randn(60).index_fill_(0, torch.randint(0, 60, (20,)), 0).view(3, 4, 5)
+        self.run_test(NonzeroModel(), (x,))
 
     def test_unbind(self):
         class UnbindModel(torch.nn.Module):

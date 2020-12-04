@@ -75,7 +75,7 @@ std::vector<char> pickle_save(const at::IValue& ivalue) {
 #ifndef C10_MOBILE
 class VectorReader : public caffe2::serialize::ReadAdapterInterface {
  public:
-  VectorReader(const std::vector<char>& data) : data_(std::move(data)) {}
+  VectorReader(std::vector<char> data) : data_(std::move(data)) {}
 
   size_t size() const override {
     return data_.size();
@@ -103,7 +103,7 @@ IValue pickle_load(const std::vector<char>& data) {
 
   return readArchiveAndTensors(
       "data",
-      /*class_resolver=*/c10::nullopt,
+      /*type_resolver=*/c10::nullopt,
       /*obj_loader=*/c10::nullopt,
       /*device=*/c10::nullopt,
       reader);
