@@ -40,10 +40,10 @@ void main() {
     vec4 sum = uBias.data[pos.z];
 
     for (int y = start.y, ky = kstart.y; y < end.y; y += uBlock.dilate.y, ++ky) {
-      for (int x = start.x, kx = kstart.x; x < end.x; x += uBlock.dilate.x, ++kx) {
+      for (int x = start.x, kx = kstart.x + ky*uBlock.src_kernel.x; x < end.x; x += uBlock.dilate.x, ++kx) {
         sum = fma(
             texelFetch(uInput, ivec3(x, y, pos.z), 0),
-            texelFetch(uKernel, ivec3(kx + ky * uBlock.src_kernel.x, pos.z, 0), 0),
+            texelFetch(uKernel, ivec3(kx, pos.z, 0), 0),
             sum);
       }
     }

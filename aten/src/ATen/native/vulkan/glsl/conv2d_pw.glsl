@@ -27,7 +27,6 @@ void main() {
   /* Dynamically Uniform */
   const ivec3 size = imageSize(uOutput);
   const ivec3 isize = textureSize(uInput, 0);
-  const ivec3 ksize = textureSize(uKernel, 0);
 
   if (all(lessThan(pos, size))) {
     const ivec2 ipos = pos.xy * uBlock.stride - uBlock.padding;
