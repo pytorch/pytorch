@@ -1263,8 +1263,8 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
 
     Args:
         input (Tensor): The input tensor. Its data type must be either a floating
-            point or complex type. For complex inputs, the norm is calculated on the
-            absolute values of each element. If the input is complex and neither
+            point or complex type. For complex inputs, the norm is calculated using the
+            absolute value of each element. If the input is complex and neither
             :attr:`dtype` nor :attr:`out` is specified, the result's data type will
             be the corresponding floating point type (e.g. float if :attr:`input` is
             complexfloat).

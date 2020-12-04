@@ -1047,11 +1047,6 @@ class TestLinalg(TestCase):
         for input_size in input_sizes:
             input = torch.randn(*input_size, dtype=dtype, device=device)
             for p in norm_types:
-                # frobenius norm not supported for complex tensors
-                if dtype.is_complex and p == 'fro':
-                    with self.assertRaisesRegex(RuntimeError, "frobenius norm not supported for complex tensors"):
-                        torch.linalg.cond(input, p)
-                    continue
                 run_test_case(input, p)
 
         # test empty batch sizes
@@ -1079,7 +1074,7 @@ class TestLinalg(TestCase):
         for input_size in input_sizes:
             input = torch.randn(*input_size, dtype=dtype, device=device)
             for p in ['fro', 2]:
-                expected_dtype = a.real.dtype if dtype.is_complex and p == 2 else dtype
+                expected_dtype = a.real.dtype if dtype.is_complex else dtype
                 expected = torch.zeros(input_size[:-2], dtype=expected_dtype, device=device)
                 actual = torch.linalg.cond(input, p)
                 self.assertEqual(actual, expected)
@@ -1107,7 +1102,7 @@ class TestLinalg(TestCase):
         # if non-empty out tensor with wrong shape is passed a warning is given
         a = torch.ones((2, 2), dtype=dtype, device=device)
         for p in ['fro', 2]:
-            real_dtype = a.real.dtype if dtype.is_complex and p == 2 else dtype
+            real_dtype = a.real.dtype if dtype.is_complex else dtype
             out = torch.empty(a.shape, dtype=real_dtype, device=device)
             with warnings.catch_warnings(record=True) as w:
                 # Trigger warning

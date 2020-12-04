@@ -1779,7 +1779,8 @@ Tensor _linalg_cond_exception_helper(const Tensor& self) {
       "linalg_cond does not support yet this case.");
   }
   auto result_shape = IntArrayRef(self.sizes().cbegin(), self.sizes().cend()-2);
-  Tensor result = at::full(result_shape, INFINITY, self.options());
+  TensorOptions options = self.options().dtype(toValueType(self.scalar_type()));
+  Tensor result = at::full(result_shape, INFINITY, options);
   return result;
 }
 
@@ -1814,7 +1815,8 @@ Tensor _linalg_cond_helper(const Tensor& self, c10::variant<Scalar, std::string>
 // Return zero for each matrix in the batch
 Tensor _linalg_cond_empty_matrix(const Tensor& self, c10::ScalarType dtype) {
   auto result_shape = IntArrayRef(self.sizes().cbegin(), self.sizes().cend()-2);
-  return at::zeros(result_shape, self.options().dtype(dtype));
+  TensorOptions options = self.options().dtype(toValueType(self.scalar_type()));
+  return at::zeros(result_shape, options);
 }
 
 void _linalg_cond_check_ord(c10::variant<Scalar, std::string> ord_variant) {
@@ -1847,8 +1849,7 @@ Tensor linalg_cond(const Tensor& self, optional<Scalar> opt_ord) {
   // NumPy doesn't define the condition number for 0x0 matrices, we return 0.0 for such input
   if (self.numel() == 0) {
     auto real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
-    auto expected_dtype = std::abs(ord.toDouble()) == 2.0 ? real_dtype : self.scalar_type();
-    return _linalg_cond_empty_matrix(self, expected_dtype);
+    return _linalg_cond_empty_matrix(self, real_dtype);
   }
 
   // If ord == None or ord == ±2
@@ -1881,10 +1882,9 @@ Tensor& linalg_cond_out(Tensor& result, const Tensor& self, optional<Scalar> opt
   // the result is always real-valued, for other cases it is complex-valued for the complex-valued input.
   ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
   Scalar ord = opt_ord.has_value() ? opt_ord.value() : 2;
-  auto expected_dtype = std::abs(ord.toDouble()) == 2.0 ? real_dtype : self.scalar_type();
 
-  TORCH_CHECK(result.scalar_type() == expected_dtype,
-    "result dtype ", result.scalar_type(), " does not match the expected dtype ", expected_dtype);
+  TORCH_CHECK(result.scalar_type() == real_dtype,
+    "result dtype ", result.scalar_type(), " does not match the expected dtype ", real_dtype);
 
   Tensor result_tmp = at::linalg_cond(self, opt_ord);
   at::native::resize_output(result, result_tmp.sizes());
@@ -1914,8 +1914,9 @@ Tensor linalg_cond(const Tensor& self, std::string ord) {
 
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
 Tensor& linalg_cond_out(Tensor& result, const Tensor& self, std::string ord) {
-  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
-    "result dtype ", result.scalar_type(), " does not match the expected dtype ", self.scalar_type());
+  ScalarType real_type = toValueType(self.scalar_type());
+  TORCH_CHECK(result.scalar_type() == real_type,
+    "result dtype ", result.scalar_type(), " does not match the expected dtype ", real_type);
 
   Tensor result_tmp = at::linalg_cond(self, ord);
   at::native::resize_output(result, result_tmp.sizes());

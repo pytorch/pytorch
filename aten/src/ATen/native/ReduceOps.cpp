@@ -669,7 +669,7 @@ static Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> opt
   ScalarType in_dtype = opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
   TORCH_CHECK(
       at::isFloatingType(in_dtype) || at::isComplexType(in_dtype),
-      "Can only calculate the mean of floating types. Got ",
+      "Can only calculate the norm of floating point and complex dtypes. Got ",
       toString(in_dtype),
       " instead.");
 
