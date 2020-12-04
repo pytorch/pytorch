@@ -51,6 +51,72 @@ TEST(IValueTest, Basic) {
   ASSERT_EQ(tv.use_count(), 2);
 }
 
+TEST(IValueTest, Swap) {
+  at::Tensor tv1 = at::rand({3, 4});
+  IValue tensor(tv1), scalar(42);
+  // swap() has special cases depending on which side is tensor or
+  // not. Exercise all 4 combinations.
+  tensor.swap(scalar);
+  tensor.swap(scalar);
+  tensor.swap(tensor);
+  scalar.swap(scalar);
+}
+
+TEST(IValueTest, MoveConstruct) {
+  at::Tensor t1 = at::rand({3, 4});
+
+  {
+    IValue sourceTensor(t1);
+    IValue target(std::move(sourceTensor));
+    EXPECT_TRUE(target.toTensor().equal(t1));
+    EXPECT_TRUE(sourceTensor.isNone());
+  }
+
+  {
+    IValue sourceScalar(42);
+    IValue target(std::move(sourceScalar));
+    EXPECT_EQ(target, IValue(42));
+    EXPECT_TRUE(sourceScalar.isNone());
+  }
+}
+
+TEST(IValueTest, MoveAssign) {
+  at::Tensor tv1 = at::rand({3, 4});
+  at::Tensor tv2 = at::rand({3, 4});
+
+  // 1: tensor to tensor
+  {
+    IValue targetTensor(tv1), sourceTensor(tv2);
+    targetTensor = std::move(sourceTensor);
+    EXPECT_TRUE(targetTensor.toTensor().equal(tv2));
+    EXPECT_TRUE(sourceTensor.isNone());
+  }
+
+  // 2: tensor to scalar
+  {
+    IValue targetScalar(42), sourceTensor(tv1);
+    targetScalar = std::move(sourceTensor);
+    EXPECT_TRUE(targetScalar.toTensor().equal(tv1));
+    EXPECT_TRUE(sourceTensor.isNone());
+  }
+
+  // 3: scalar to tensor
+  {
+    IValue targetTensor(tv1), sourceScalar(42);
+    targetTensor = std::move(sourceScalar);
+    EXPECT_EQ(targetTensor, 42);
+    EXPECT_TRUE(sourceScalar.isNone());
+  }
+
+  // 4: scalar to scalar
+  {
+    IValue targetScalar(42), sourceScalar(43);
+    targetScalar = std::move(sourceScalar);
+    EXPECT_EQ(targetScalar, 43);
+    EXPECT_TRUE(sourceScalar.isNone());
+  }
+}
+
 TEST(IValueTest, Tuple) {
   std::tuple<int64_t, at::Tensor> t = std::make_tuple(123, at::randn({1}));
   auto iv = IValue(t);

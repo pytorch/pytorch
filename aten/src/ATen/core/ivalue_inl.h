@@ -130,12 +130,20 @@ inline c10::intrusive_ptr<ivalue::EnumHolder> IValue::toEnumHolder() const& {
 }
 inline at::Tensor IValue::toTensor() && {
   AT_ASSERT(isTensor(), "Expected Tensor but got ", tagKind());
-  return at::Tensor(
-      moveToIntrusivePtr<at::TensorImpl, at::UndefinedTensorImpl>());
+  auto result = std::move(payload.as_tensor);
+  // As far as I can tell, omitting the usual explicit destructor call
+  // is not UB in and of itself, and it's a slight perf win. The
+  // destructor is a no-op, because the moved-from Tensor is
+  // effectively an intrusive_ptr in the null state, so we don't need
+  // the behavior for correctness reasons either. Leaving this
+  // explanatory comment, including commented-out destructor call, to
+  // make this abundantly clear.  payload.as_tensor.~Tensor();
+  clearToNone();
+  return result;
 }
 inline at::Tensor IValue::toTensor() const& {
   AT_ASSERT(isTensor(), "Expected Tensor but got ", tagKind());
-  return at::Tensor(toIntrusivePtr<at::TensorImpl, at::UndefinedTensorImpl>());
+  return payload.as_tensor;
 }
 inline c10::Stream IValue::toStream() && {
   return c10::Stream::unpack(payload.as_int);
