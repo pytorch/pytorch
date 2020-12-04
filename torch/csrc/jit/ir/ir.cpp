@@ -1114,9 +1114,7 @@ bool Node::hasSideEffects() const {
 
   switch (op->aliasAnalysisKind()) {
     case AliasAnalysisKind::PURE_FUNCTION:
-      return false;
     case AliasAnalysisKind::FROM_SCHEMA:
-      return false;
     case AliasAnalysisKind::INTERNAL_SPECIAL_CASE:
       return false;
     case AliasAnalysisKind::CONSERVATIVE:
@@ -1917,6 +1915,33 @@ std::vector<Value*> inlineCallTo(
   // are missing nodes without outputs (e.g. prim::Print).
   std::unordered_set<Node*> updated_nodes;
   for (const auto& kv : value_map) {
+    /* Skip the old value if it is the graph input.
+     * The reason is that, value_map contains values not all for the nodes of
+     * the graph but primary inputs as well, and it will create duplicates when
+     * the first inlined graph is input to the next one. To avoid this issue,
+     * skip the old value when it is one of the
+     * callee->optimized_graph()->inputs() or callee->graph()->inputs(), depends
+     * on if it is inlined_optimized_graph
+     */
+
+    if (inline_optimized_graph) {
+      auto is_graph_input = std::find(
+          callee->optimized_graph()->inputs().begin(),
+          callee->optimized_graph()->inputs().end(),
+          kv.first);
+      if (is_graph_input != callee->optimized_graph()->inputs().end()) {
+        continue;
+      }
+    } else {
+      auto is_graph_input = std::find(
+          callee->graph()->inputs().begin(),
+          callee->graph()->inputs().end(),
+          kv.first);
+      if (is_graph_input != callee->graph()->inputs().end()) {
+        continue;
+      }
+    }
+
     Node* new_node = kv.second->node();
     if (!updated_nodes.insert(new_node).second) {
       continue;
@@ -1943,7 +1968,6 @@ std::vector<Value*> inlineCallTo(
     }
     new_node->setCallStack(new_callstack_entries.at(raw_callstack_ptr));
   }
-
   const auto& old_outputs = to_replace->outputs();
 
   AT_ASSERT(new_outputs.size() == old_outputs.size());
