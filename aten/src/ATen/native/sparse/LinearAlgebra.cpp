@@ -31,7 +31,8 @@ namespace at { namespace native {
     TORCH_CHECK(sparse_.dim() == 2, "sparse_gcs_mm_cpu: sparse matrix dimensionality must be 2, got ",
                 sparse_.dim());
     TORCH_CHECK(sparse_.size(1) == dense.size(0),
-                "sparse_gcs_mm_cpu: Expected dim1 of sparse matrix to be same as dim0 of dense.");
+                "sparse_gcs_mm_cpu: ncols of sparse matrix must be equal to nrows of dense matrix,\
+                but got sparse dims: ", sparse_.sizes(), " and dense dims: ", dense.sizes());
  
     auto indices = sparse_.indices();
     auto pointers = sparse_.pointers();

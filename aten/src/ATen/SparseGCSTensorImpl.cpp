@@ -75,8 +75,6 @@ void SparseGCSTensorImpl::resize_as_(const Tensor& src) {
   
 void SparseGCSTensorImpl::set_member_tensors_unsafe(const Tensor& pointers, const Tensor& indices,
                                                       const Tensor& values, const Tensor& reduction) {
-  // TODO: perform lots of error checking to check correct type and sizes of inputs. Check
-  // SparseTensorImpl::set_indices_and_values_unsafe() for details
   TORCH_CHECK(!indices.is_sparse(), "expected indices to be a dense tensor, but got indices of layout ", indices.layout());
   TORCH_CHECK(!pointers.is_sparse(), "expected pointers to be a dense tensor, but got pointers of layout ", pointers.layout());
   TORCH_CHECK(!values.is_sparse(), "expected values to be a dense tensor, but got values of layout ", values.layout());
@@ -111,10 +109,10 @@ void SparseGCSTensorImpl::set_member_tensors_unsafe(const Tensor& pointers, cons
   AT_ASSERT(indices_.device() == values_.device());
   AT_ASSERT(reduction_.device() == values_.device());
 
-
   auto reduction_accessor = reduction_.accessor<int32_t, 1>();
 
   rsplit_dim_ = reduction_accessor[reduction_.size(0)-1];
+  TORCH_CHECK(rsplit_dim_ <= sizes_.size(), "Dimensions can only be split between 0 and ", sizes_.size(), ", but got split dimension as: ", rsplit_dim_);
     
   dims0_.resize(rsplit_dim_);
   strides0_.resize(1);

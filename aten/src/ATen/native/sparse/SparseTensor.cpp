@@ -351,7 +351,7 @@ namespace {
   }
 
   bool _is_same_size_as_sparse_gcs(const SparseTensor& self, const SparseTensor& src) {
-    return self.dim() == src.dim() && self.sizes().equals(src.sizes());
+    return self.dim().size() == src.dim().size() && self.sizes().equals(src.sizes());
   }
 }
 
