@@ -4,7 +4,7 @@ import sys
 import unittest
 
 import torch.distributed as dist
-from torch.testing._internal.common_utils import run_tests, TestCase, TEST_WITH_ASAN, NO_MULTIPROCESSING_SPAWN
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_ASAN, NO_MULTIPROCESSING_SPAWN
 from torch.testing._internal.distributed.distributed_test import (
     DistributedTest, TestDistBackend
 )
