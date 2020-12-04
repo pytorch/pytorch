@@ -103,7 +103,7 @@ class OpInfo(object):
                  decorators=None,  # decorators to apply to generated tests
                  promotes_integers_to_float=False,  # whether op promotes unary output to float or not
                  sample_inputs_func=None,  # function to generate sample inputs
-                 aten_name=None, # name of the corresponding aten:: operator
+                 aten_name=None,  # name of the corresponding aten:: operator
                  ):
 
         # Validates the dtypes are generated from the dispatch-related functions
