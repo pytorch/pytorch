@@ -1,3 +1,12 @@
+"""
+This closely follows the implementation in NumPyro (https://github.com/pyro-ppl/numpyro).
+
+Original copyright notice:
+
+# Copyright: Contributors to the Pyro project.
+# SPDX-License-Identifier: Apache-2.0
+"""
+
 import math
 
 import torch
