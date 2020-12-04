@@ -780,6 +780,29 @@ class TestCudaFuser(JitTestCase):
         repro_jit = torch.jit.script(repro)
         self._run_helper(repro_jit, repro, x, 0.6)
 
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_reduction_sizes_op(self):
+        dtype = torch.float
+        device = "cuda"
+        x = torch.randn(2, 3, 4, 5, dtype=dtype, device=device)
+        y = torch.randn(2, 3, 4, 5, dtype=dtype, device=device)
+
+        def t(x: torch.Tensor, y: torch.Tensor):
+            o = x + y
+            o = torch.relu(o)
+            o = o.sum((1, 3))
+            return o.size()
+        t_jit = torch.jit.script(t)
+        jit_o = t_jit(x, y)
+        jit_o = t_jit(x, y)
+        o = t(x, y)
+        self.assertEqual(o, jit_o)
+        # since the output value is not used at all, the fusion operator should
+        # have been optimized away
+        self.assertGraphContainsExactly(t_jit.graph_for(x, y), FUSION_GUARD, 0)
+
 class TestPassManagerCudaFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
