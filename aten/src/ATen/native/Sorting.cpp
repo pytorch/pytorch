@@ -91,21 +91,17 @@ void quick_select_template(
   } while (true);
 }
 
-void quantile_ranks_for_interpolation(Tensor& ranks, const std::string interpolation) {
-  if (interpolation == "linear") {
-    return;
-  } else if (interpolation == "lower") {
-    ranks.floor_();
-  } else if (interpolation == "higher") {
-    ranks.ceil_();
-  } else if (interpolation == "midpoint") {
-    ranks = at::add(ranks.floor(), ranks.ceil()).mul(0.5);
-  } else if (interpolation == "nearest") {
-    ranks.round_();
+void copy_quantile_result(Tensor &out,
+                          const Tensor &result,
+                          const Tensor &q) {
+  if (q.dim() == 0) {
+    // If q is scalar, remove last dim to match out shape
+    result.squeeze_(-1);
   } else {
-    TORCH_CHECK(false, "quantile() interpolation should only be 'linear', 'lower' 'higher', "
-                       "'midpoint', or 'nearest'");
-  };
+    // Move quantiles to first dim to match out shape
+    result.unsqueeze_(0).transpose_(0, -1).squeeze_(-1);
+  }
+  out.copy_(result);
 }
 
 void quantile_impl(
@@ -135,6 +131,12 @@ void quantile_impl(
   TORCH_CHECK(
       self.device() == out.device(),
       "quantile() out tensor must be on the same device as the input tensor");
+  std::vector <string> interpolations{
+      "linear", "lower", "higher", "midpoint", "nearest"};
+  TORCH_CHECK(
+      std::find(interpolations.begin(), interpolations.end(), interpolation) != interpolations.end(),
+      "quantile() interpolation should only be ",
+      c10::Join(", ", interpolations), ".");
 
   // Compute output shape: q_size + reduced_size
   std::vector<int64_t> out_shape;
@@ -206,25 +208,30 @@ void quantile_impl(
   }
 
   // adjust ranks based on the interpolation mode
-  quantile_ranks_for_interpolation(ranks, interpolation);
+  if (interpolation == "lower") {
+    ranks.floor_();
+  } else if (interpolation == "higher") {
+    ranks.ceil_();
+  } else if (interpolation == "nearest") {
+    ranks.round_();
+  }
 
   Tensor ranks_below = ranks.toType(kLong);
-  Tensor weights = ranks - ranks_below;
-  Tensor ranks_above = ranks.ceil_().toType(kLong);
-
   Tensor values_below = sorted.gather(-1, ranks_below);
+  if (interpolation != "linear" && interpolation != "midpoint") {
+    copy_quantile_result(out, values_below, q);
+    return;
+  }
+
+  // calculate weights for linear and midpoint
+  Tensor weights = interpolation == "midpoint" ? at::full_like(ranks, 0.5) : ranks - ranks_below;
+
+  Tensor ranks_above = ranks.ceil_().toType(kLong);
   Tensor values_above = sorted.gather(-1, ranks_above);
 
   // Interpolate to compute quantiles and copy to out tensor
   values_below.lerp_(values_above, weights);
-  if (q.dim() == 0) {
-    // If q is scalar, remove last dim to match out shape
-    values_below.squeeze_(-1);
-  } else {
-    // Move quantiles to first dim to match out shape
-    values_below.unsqueeze_(0).transpose_(0, -1).squeeze_(-1);
-  }
-  out.copy_(values_below);
+  copy_quantile_result(out, values_below, q);
 }
 
 std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(

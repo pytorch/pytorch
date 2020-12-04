@@ -5118,17 +5118,21 @@ Example::
 
 .. function:: quantile(input, q, dim=None, interpolation='linear', keepdim=False, *, out=None) -> Tensor
 
-Returns the q-th quantiles of each row of the :attr:`input` tensor along the dimension
-:attr:`dim` based on :attr:`interpolation`. By default, :attr:`dim` is ``None`` resulting in the :attr:`input` tensor
+Returns the q-th quantiles of each row of the :attr:`input` tensor
+along the dimension :attr:`dim` based on :attr:`interpolation`.
+When the desired quantile lies between two data points ``i < j``,
+the result is computed based on the :attr:`interpolation` value as described below.
+By default, :attr:`interpolation` is ``linear`` and :attr:`dim` is ``None`` resulting in the :attr:`input` tensor
 being flattened before computation.
 
-The behaviors of :attr:`interpolation` are as follow:
+When the quantile value lies between two data points ``i < j``,
+the result is computed according to the given :attr:`interpolation` method as follows:
 
-- ``linear``: default value, return the linear interpolation when the q-th quantile lies between two data points.
-- ``lower``: return the lower data point.
-- ``higher``: return the higher data point.
-- ``nearest``: return the nearest data point.
-- ``midpoint``: return median value of the two data points.
+- ``linear``: ``i + (j - i) * fraction``, where ``fraction`` is the fractional part of the index surrounded by ``i`` and ``j``.
+- ``lower``: ``i``.
+- ``higher``: ``j``.
+- ``nearest``: ``i`` or ``j``, whichever is nearest.
+- ``midpoint``: ``(i + j) / 2``.
 
 If :attr:`keepdim` is ``True``, the output dimensions are of the same size as :attr:`input`
 except in the dimensions being reduced (:attr:`dim` or all if :attr:`dim` is ``None``) where they
@@ -5141,7 +5145,7 @@ Args:
     q (float or Tensor): a scalar or 1D tensor of quantile values in the range [0, 1]
     {dim}
     interpolation (string): interpolation method to use when the desired quantile lies between two data points,
-      can be ``linear``, ``lower``, ``higher``, ``midpoint`` and ``nearest``.
+      can be ``linear``, ``lower``, ``higher``, ``midpoint`` and ``nearest``. Default is ``linear``.
     {keepdim}
 
 Keyword arguments:
@@ -5165,16 +5169,18 @@ Example::
             [ 0.9206]]])
     >>> torch.quantile(a, q, dim=1, keepdim=True).shape
     torch.Size([3, 2, 1])
-    >>> a = torch.arange(6.)
+    >>> a = torch.arange(4.)
     >>> a
-    tensor([0., 1., 2., 3., 4., 5.])
-    >>> torch.quantile(a, 0.5, interpolation='lower')
+    tensor([0., 1., 2., 3.])
+    >>> torch.quantile(a, 0.6, interpolation='linear')
+    tensor(1.8000)
+    >>> torch.quantile(a, 0.6, interpolation='lower')
+    tensor(1.)
+    >>> torch.quantile(a, 0.6, interpolation='higher')
     tensor(2.)
-    >>> torch.quantile(a, 0.5, interpolation='higher')
-    tensor(3.)
-    >>> torch.quantile(a, 0.5, interpolation='midpoint')
-    tensor(2.5000)
-    >>> torch.quantile(a, 0.5, interpolation='nearest')
+    >>> torch.quantile(a, 0.6, interpolation='midpoint')
+    tensor(1.5000)
+    >>> torch.quantile(a, 0.6, interpolation='nearest')
     tensor(2.)
 """.format(**single_dim_common))
 
@@ -5192,7 +5198,7 @@ Args:
     q (float or Tensor): a scalar or 1D tensor of quantile values in the range [0, 1]
     {dim}
     interpolation (string): interpolation method to use when the desired quantile lies between two data points,
-      can be ``linear``, ``lower``, ``higher``, ``midpoint`` and ``nearest``.
+      can be ``linear``, ``lower``, ``higher``, ``midpoint`` and ``nearest``. Default is ``linear``.
     {keepdim}
 
 Keyword arguments:
