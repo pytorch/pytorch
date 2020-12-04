@@ -7,12 +7,21 @@ namespace torch {
 namespace jit {
 
 class CUDAEvent;
+/*
+* The CUDAStream is a custom class designed to add support for CUDAStreams in JIT
+* The class wraps all the CUDA Stream operations of c10::cuda::CUDAStream
+* For more details , please refer c10/cuda/CUDAStream.h
+*/
 class CUDAStream final : public CustomClassHolder {
  public:
   CUDAStream(int64_t device = -1, int64_t priority = 0) {
     constexpr int64_t PRIORITY_INDEX = 50;
     stream_ = std::make_unique<c10::cuda::CUDAStream>(
         c10::cuda::getStreamFromPool(priority > PRIORITY_INDEX, device));
+  }
+
+  CUDAStream(c10::cuda::CUDAStream s) {
+      stream_ = std::make_unique<c10::cuda::CUDAStream>(s);
   }
 
   bool query() {
@@ -46,21 +55,11 @@ class CUDAStream final : public CustomClassHolder {
     return stream_->id();
   }
 
+  /// Pack a CUDAStream to uint64_t representation.
+  /// The CUDAStream can be unpacked using unpack().  The format of
+  /// the uint64_t is unspecified and may be changed.
   int64_t pack() const noexcept {
     return stream_->pack();
-  }
-
-  /// Set the current or the default stream for the given device
-  /// depending on the bool value is_current. This is a wrapper function
-  /// which sets the stream for torch.jit.CUDStreams.
-  void setStream(int64_t idx = -1, bool is_current = false) {
-    if (is_current) {
-      auto s = c10::cuda::getCurrentCUDAStream(idx);
-      stream_ = std::make_unique<c10::cuda::CUDAStream>(s);
-    } else {
-      auto s = c10::cuda::getDefaultCUDAStream(idx);
-      stream_ = std::make_unique<c10::cuda::CUDAStream>(s);
-    }
   }
 
  private:
@@ -68,6 +67,11 @@ class CUDAStream final : public CustomClassHolder {
   friend class CUDAEvent;
 };
 
+/*
+* The CUDAEvent class is a custom class designed to add support for CUDA Events in JIT
+* The class wraps all the CUDA Event operations of c10::cuda::CUDAEvent.
+* For more details , please refer aten/src/ATen/cuda/CUDAEvent.h
+*/
 class CUDAEvent final : public CustomClassHolder {
  public:
   CUDAEvent(
@@ -161,14 +165,12 @@ TORCH_LIBRARY(cuda, m) {
       .def("synchronize", &CUDAStream::synchronize)
       .def("wait_event", &CUDAStream::waitEvent)
       .def("wait_stream", &CUDAStream::waitStream)
-      .def("set_stream", &CUDAStream::setStream)
       .def("device_index", &CUDAStream::device_index)
       .def("device", &CUDAStream::device)
       .def("pack", &CUDAStream::pack)
       .def("id", &CUDAStream::id);
 
   event_class.def("elapsed_time", &CUDAEvent::elapsedTime)
-      .def("ipc_handle", &CUDAEvent::ipcHandle)
       .def("query", &CUDAEvent::query)
       .def("record", &CUDAEvent::record)
       .def("synchronize", &CUDAEvent::synchronize)

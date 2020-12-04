@@ -51,7 +51,6 @@ from torch.jit.cuda import stream
 _fork = fork
 _wait = wait
 
-
 def export_opnames(m):
     r"""
         Returns a list of operator names of a script module and its submodules

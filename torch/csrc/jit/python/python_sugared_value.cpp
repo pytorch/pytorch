@@ -217,6 +217,7 @@ std::shared_ptr<SugaredValue> PythonModuleValue::attr(
   return toSugaredValue(member, m, loc, /*is_constant=*/true);
 }
 
+
 std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
     const SourceRange& loc,
     Function& m,
@@ -225,20 +226,15 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
   // List of all the cuda operators which are supported in JIT
   const std::unordered_set<std::string> cuda_ops = {"current_stream",
                                              "default_stream",
-                                             "_cuda_setDevice",
-                                             "_cuda_getDeviceIndex",
-                                             "_cuda_getDeviceCount",
-                                             "_cuda_setStream"};
-  if (field == "current_device") {
-      return std::make_shared<BuiltinFunction>(
-          Symbol::aten(field), c10::nullopt);
-    }
+                                             "_current_device",
+                                             "_set_device",
+                                             "_getDeviceIndex",
+                                             "_getDeviceCount",
+                                             "set_stream"};
 
-  for (const auto& op : cuda_ops) {
-    if (op == field) {
+  if (cuda_ops.find(field) != cuda_ops.end()) {
       return std::make_shared<BuiltinFunction>(
           Symbol::cuda(field), c10::nullopt);
-    }
   }
 
   py::object member = getattr(loc, field);

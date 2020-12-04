@@ -195,7 +195,9 @@ TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
       }
     }
 
-    if (type_name == "torch.classes.cuda.Stream") {
+    // Check if the type is a custom class. This is done by checking
+    // if type_name starts with "torch.classes."
+    if (type_name.find("torch.classes.") == 0) {
       auto custom_class_type = getCustomClass("__torch__." + type_name);
       return custom_class_type;
     }

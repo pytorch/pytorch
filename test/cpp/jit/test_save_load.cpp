@@ -145,6 +145,9 @@ TEST(SerializationTest, TestJitStream_CUDA) {
   ASSERT_TRUE(is_stream_s);
   // Check if the sizes of the outputs (op and c) is same on the GPU and CPU
   ASSERT_EQ(op.sizes(), c.sizes());
+  // Check if both the output tensors are equal
+  ASSERT_TRUE(op.equal(c));
+
 }
 } // namespace jit
 } // namespace torch
