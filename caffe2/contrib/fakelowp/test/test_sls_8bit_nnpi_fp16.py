@@ -199,6 +199,103 @@ class SparseLengthsSum8BitFakeNNPIFp16Test(serial.SerializedTestCase):
             )
             assert 0
 
+
+    @given(seed=st.integers(0, 65535))
+    @settings(deadline=None)
+    def test_slws_fused_8bit_out_of_bounds(self, seed):
+        np.random.seed(seed)
+        workspace.ResetWorkspace()
+        n = 1
+        m = 2
+        data = np.ones((n, m)).astype(np.float32)
+
+        max_segments = 5
+        max_segment_length = 200
+        num_lengths = np.random.randint(1, max_segments + 1)
+        # number of segments to run
+        lengths = np.random.randint(0, max_segment_length + 1, size=num_lengths).astype(
+            np.int32
+        )
+        num_indices = np.sum(lengths)
+        indices = np.zeros(num_indices, dtype=np.int64)
+        weights = np.ones(len(indices)).astype(
+            np.float32
+        )
+
+        lengths += 2000000
+
+        pred_net = caffe2_pb2.NetDef()
+        pred_net.name = "pred"
+        pred_net.external_input.extend(
+            ["quantized_data", "weights", "indices", "lengths"]
+        )
+        pred_net.external_output.append("Y")
+        pred_net.op.add().CopyFrom(
+            core.CreateOperator(
+                "SparseLengthsWeightedSumFused8BitRowwise",
+                ["quantized_data", "weights", "indices", "lengths"],
+                ["Y"],
+            )
+        )
+
+        ref_net = caffe2_pb2.NetDef()
+        ref_net.name = "ref"
+        ref_net.external_input.extend(
+            ["quantized_data", "weights", "indices", "lengths"]
+        )
+        ref_net.external_output.append("Y")
+        ref_net.op.add().CopyFrom(
+            core.CreateOperator(
+                "SparseLengthsWeightedSumFused8BitRowwiseFakeFP16NNPI",
+                ["quantized_data", "weights", "indices", "lengths"],
+                ["Y"],
+            )
+        )
+
+        workspace.FeedBlob("data", data)
+        workspace.RunOperatorOnce(
+            core.CreateOperator(
+                "FloatToFused8BitRowwiseQuantized", ["data"], ["quantized_data"]
+            )
+        )
+        pred_net_onnxified = onnxifi_caffe2_net(
+            pred_net,
+            {},
+            max_batch_size=max_segments,
+            max_seq_size=max_segment_length,
+            debug=True,
+            adjust_batch=True,
+            use_onnx=False,
+        )
+
+        num_onnxified_ops = sum(
+            1 if o.type == "Onnxifi" else 0 for o in pred_net_onnxified.op
+        )
+        np.testing.assert_equal(num_onnxified_ops, 1)
+
+        workspace.FeedBlob("indices", indices)
+        workspace.FeedBlob("lengths", lengths)
+        workspace.FeedBlob("weights", weights)
+
+        workspace.CreateNet(pred_net_onnxified)
+        workspace.CreateNet(ref_net)
+
+        workspace.RunNet(pred_net_onnxified.name)
+        Y_glow = workspace.FetchBlob("Y")
+
+        print_test_debug_info(
+            "slws_fused_8bit_oob",
+            {
+                "seed": seed,
+                "indices": indices.shape,
+                "data": data.shape,
+                "lengths": lengths,
+                "weights": weights.shape,
+                "Y_glow": Y_glow,
+            },
+        )
+        assert 0
+
     @given(
         seed=st.integers(0, 65535),
         num_rows=st.integers(2, 20),
