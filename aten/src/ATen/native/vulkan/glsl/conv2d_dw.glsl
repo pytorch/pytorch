@@ -29,7 +29,6 @@ void main() {
   /* Dynamically Uniform */
   const ivec3 size = imageSize(uOutput);
   const ivec3 isize = textureSize(uInput, 0);
-  const int y_offset = pos.z * uBlock.src_kernel.y;
 
   if (all(lessThan(pos, size))) {
     const ivec2 ipos = pos.xy * uBlock.stride - uBlock.padding;
@@ -44,7 +43,7 @@ void main() {
       for (int x = start.x, kx = kstart.x; x < end.x; x += uBlock.dilate.x, ++kx) {
         sum = fma(
             texelFetch(uInput, ivec3(x, y, pos.z), 0),
-            texelFetch(uKernel, ivec3(kx, ky + y_offset, 0), 0),
+            texelFetch(uKernel, ivec3(kx + ky * uBlock.src_kernel.x, pos.z, 0), 0),
             sum);
       }
     }

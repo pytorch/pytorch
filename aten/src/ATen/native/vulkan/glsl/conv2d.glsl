@@ -18,7 +18,7 @@ layout(set = 0, binding = 4)          uniform PRECISION restrict           Block
   ivec2 padding;
   ivec2 dilate;
   vec2 clamp;
-  ivec2 src_kernel;
+  ivec3 src_kernel;
 } uBlock;
 
 layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
@@ -30,7 +30,6 @@ void main() {
   const ivec3 size = imageSize(uOutput);
   const ivec3 isize = textureSize(uInput, 0);
   const ivec3 ksize = textureSize(uKernel, 0);
-  const int y_offset = pos.z * uBlock.src_kernel.y;
 
   if (all(lessThan(pos, size))) {
     const ivec2 ipos = pos.xy * uBlock.stride - uBlock.padding;
@@ -42,16 +41,15 @@ void main() {
     vec4 sum = uBias.data[pos.z];
 
     for (int z = 0; z < uBlock.kernel.z; z+=4) {
-      const ivec4 x_offset = (z + ivec4(0,1,2,3))*uBlock.src_kernel.x;
+      const int z4 = z/4;
+      for (int y = start.y, ky = kstart.y + pos.z * uBlock.src_kernel.y; y < end.y; y += uBlock.dilate.y, ++ky) {
+        for (int x = start.x, kx = kstart.x + z4*uBlock.src_kernel.z; x < end.x; x += uBlock.dilate.x, kx+=4) {
+          const vec4 In = texelFetch(uInput, ivec3(x, y, z4), 0);
 
-      for (int y = start.y, ky = kstart.y; y < end.y; y += uBlock.dilate.y, ++ky) {
-        for (int x = start.x, kx = kstart.x; x < end.x; x += uBlock.dilate.x, ++kx) {
-          const vec4 In = texelFetch(uInput, ivec3(x, y, z/4), 0);
-
-          sum = fma(In.xxxx, texelFetch(uKernel, ivec3(x_offset.x + kx, ky + y_offset, 0), 0), sum);
-          sum = fma(In.yyyy, texelFetch(uKernel, ivec3(x_offset.y + kx, ky + y_offset, 0), 0), sum);
-          sum = fma(In.zzzz, texelFetch(uKernel, ivec3(x_offset.z + kx, ky + y_offset, 0), 0), sum);
-          sum = fma(In.wwww, texelFetch(uKernel, ivec3(x_offset.w + kx, ky + y_offset, 0), 0), sum);
+          sum = fma(In.xxxx, texelFetch(uKernel, ivec3(0 + kx, ky, 0), 0), sum);
+          sum = fma(In.yyyy, texelFetch(uKernel, ivec3(1 + kx, ky, 0), 0), sum);
+          sum = fma(In.zzzz, texelFetch(uKernel, ivec3(2 + kx, ky, 0), 0), sum);
+          sum = fma(In.wwww, texelFetch(uKernel, ivec3(3 + kx, ky, 0), 0), sum);
         }
       }
     }

@@ -25,7 +25,7 @@ inline bool is_pointwise(const IntArrayRef filter) {
          (1 == filter[Layout::Filter::width]);
 }
 
-vTensor pack_weights(
+vTensor pack_weights_dw(
     api::Resource::Pool& pool,
     const Tensor& weight_arg,
     const int64_t groups) {
@@ -39,35 +39,70 @@ vTensor pack_weights(
   const IntArrayRef src_filter = weight.sizes();
   const float* const src_weight_ptr = weight.data_ptr<float>();
 
-  //
-  // Depthwise
-  //
+  const int64_t src_kw_sz = src_filter[Layout::Filter::width];
+  const int64_t src_kh_sz = src_filter[Layout::Filter::height];
+  const int64_t num_stacks = div_up(src_filter[Layout::Filter::output], INT64_C(4));
+  vTensor v_weight{
+      api::context(),
+      &pool,
+      {
+          1,
+          4,
+          num_stacks,
+          src_kw_sz * src_kh_sz,
+      },
+      weight.options(),
+  };
 
-  /*
-  if (is_depthwise(src_filter, groups)) {
-    vTensor v_weight{
-        api::context(),
-        &pool,
-        src_filter,
-        weight.options(),
-    };
+  using Future = vTensor::Future<float, vTensor::Access::Write>;
+  Future v_weight_future = v_weight.host<float, vTensor::Access::Write>();
+  Future::Payload v_weight_payload = v_weight_future.wait();
 
-    using Future = vTensor::Future<void, vTensor::Access::Write>;
-    Future v_weight_future = v_weight.host<void, vTensor::Access::Write>();
-    Future::Payload v_weight_payload = v_weight_future.wait();
+  /* Source */
+  const int64_t src_kernel_sz = src_kw_sz * src_kh_sz;
+  const int64_t src_block_sz =
+      src_kernel_sz * src_filter[Layout::Filter::input];
 
-    memcpy(
-        v_weight_payload.get(),
-        src_weight_ptr,
-        std::min(weight.nbytes(), v_weight.nbytes()));
+  /* Destination */
+  const int64_t dst_kw_sz = src_kw_sz * src_kh_sz;
+  const int64_t dst_kh_sz = num_stacks;
+  const int64_t dst_kernel_sz = dst_kw_sz * dst_kh_sz;
 
-    return v_weight;
+  float* const dst_weight_ptr = v_weight_payload.get();
+  memset(dst_weight_ptr, 0, v_weight.nbytes());
+
+  for (int64_t src_oc = 0; src_oc < src_filter[Layout::Filter::output]; ++src_oc) {
+    /* Source */
+    const float* const src_weight_oc_ptr = src_weight_ptr + src_oc * src_block_sz;
+
+    /* Destination */
+    const int64_t dst_oh = src_oc / 4;
+    const int64_t dst_c = src_oc % 4;
+
+    float* const dst_weight_c_ptr = dst_weight_ptr + dst_c * dst_kernel_sz;
+
+    for (int64_t src_ih = 0; src_ih < src_filter[Layout::Filter::height]; ++src_ih) {
+      memcpy(
+          dst_weight_c_ptr + dst_oh * dst_kw_sz + src_ih * src_kw_sz,
+          src_weight_oc_ptr + src_ih * src_kw_sz,
+          sizeof(float) * src_kw_sz);
+    }
   }
-  */
 
-  //
-  // General
-  //
+  return v_weight;
+}
+
+vTensor pack_weights(
+    api::Resource::Pool& pool,
+    const Tensor& weight_arg,
+    const int64_t groups) {
+  if (weight_arg.is_vulkan()) {
+    return convert(weight_arg);
+  }
+
+  const Tensor weight = weight_arg.contiguous();
+  const IntArrayRef src_filter = weight.sizes();
+  const float* const src_weight_ptr = weight.data_ptr<float>();
 
   if (Experimentation::kUseConv2dOldApi) {
     const uint32_t OC = src_filter[Layout::Filter::output];
@@ -155,6 +190,8 @@ vTensor pack_weights(
     return v_weight;
   }
 
+  const int64_t src_kw_sz = src_filter[Layout::Filter::width];
+  const int64_t src_kh_sz = src_filter[Layout::Filter::height];
   const int64_t num_stacks = div_up(src_filter[Layout::Filter::output], INT64_C(4));
   const int64_t stack_depth = api::utils::align_up(src_filter[Layout::Filter::input], INT64_C(4));
   vTensor v_weight{
@@ -163,8 +200,8 @@ vTensor pack_weights(
       {
           1,
           4,
-          src_filter[Layout::Filter::height] * num_stacks,
-          src_filter[Layout::Filter::width] * stack_depth,
+          src_kh_sz * num_stacks,
+          src_kw_sz * stack_depth,
       },
       weight.options(),
   };
@@ -174,16 +211,13 @@ vTensor pack_weights(
   Future::Payload v_weight_payload = v_weight_future.wait();
 
   /* Source */
-  const int64_t src_kw_sz = src_filter[Layout::Filter::width];
-  const int64_t src_kh_sz = src_filter[Layout::Filter::height];
   const int64_t src_kernel_sz = src_kw_sz * src_kh_sz;
   const int64_t src_block_sz =
       src_kernel_sz * src_filter[Layout::Filter::input];
 
   /* Destination */
-  const IntArrayRef dst_filter = v_weight.sizes();
-  const int64_t dst_kw_sz = src_filter[Layout::Filter::width] * stack_depth;
-  const int64_t dst_kh_sz = src_filter[Layout::Filter::height] * num_stacks;
+  const int64_t dst_kw_sz = src_kw_sz * stack_depth;
+  const int64_t dst_kh_sz = src_kh_sz * num_stacks;
   const int64_t dst_kernel_sz = dst_kw_sz * dst_kh_sz;
 
   float* const dst_weight_ptr = v_weight_payload.get();
@@ -200,24 +234,14 @@ vTensor pack_weights(
     float* const dst_weight_c_ptr = dst_weight_ptr + dst_c * dst_kernel_sz;
 
     for (int64_t src_ic = 0; src_ic < src_filter[Layout::Filter::input]; ++src_ic) {
-      if (is_depthwise(src_filter, groups) || is_pointwise(src_filter)) {
-        const int64_t dst_ow = src_ic;
-        for (int64_t src_ih = 0; src_ih < src_filter[Layout::Filter::height]; ++src_ih) {
+      for (int64_t src_ih = 0; src_ih < src_kh_sz; ++src_ih) {
+        for (int64_t src_iw = 0; src_iw < src_kw_sz; ++src_iw) {
+          const int64_t dst_ic4 = src_ic/4;
           memcpy(
-              dst_weight_c_ptr + (dst_oh * src_kh_sz + src_ih) * dst_kw_sz + dst_ow * src_kw_sz,
-              src_weight_oc_ptr + src_ic * src_kernel_sz + src_ih * src_kw_sz,
-              sizeof(float) * src_kw_sz);
-        }
-      }
-      else {
-        const int64_t dst_ow = src_ic;
-        for (int64_t src_ih = 0; src_ih < src_filter[Layout::Filter::height]; ++src_ih) {
-          for (int64_t src_iw = 0; src_iw < src_filter[Layout::Filter::width]; ++src_iw) {
-            memcpy(
-                dst_weight_c_ptr + (dst_oh * src_kh_sz + src_ih) * dst_kw_sz + dst_ow * src_kw_sz + src_iw,
-                src_weight_oc_ptr + src_ic * src_kernel_sz + src_ih * src_kw_sz + src_iw,
-                sizeof(float));
-          }
+              dst_weight_c_ptr + (dst_oh * src_kh_sz + src_ih) * dst_kw_sz +
+                dst_ic4 * src_kw_sz * 4 + src_iw * 4 + src_ic % 4,
+              src_weight_oc_ptr + src_ic * src_kernel_sz + src_ih * src_kw_sz + src_iw,
+              sizeof(float));
         }
       }
     }
@@ -532,7 +556,7 @@ void conv2d(
       int32_t padding_x, padding_y;
       int32_t dilate_x, dilate_y;
       float clamp_x, clamp_y;
-      int32_t src_filter_w, src_filter_h;
+      int32_t src_filter_w, src_filter_h, src_filter_w4;
     } block {
       safe_downcast<int32_t>(filter[Layout::Filter::width]),
       safe_downcast<int32_t>(filter[Layout::Filter::height]),
@@ -548,6 +572,7 @@ void conv2d(
       output_max,
       safe_downcast<int32_t>(src_filter[Layout::Filter::width]),
       safe_downcast<int32_t>(src_filter[Layout::Filter::height]),
+      safe_downcast<int32_t>(src_filter[Layout::Filter::width]*4),
     };
 
     context->dispatch(
@@ -637,7 +662,7 @@ Conv2dOpContext::Conv2dOpContext(
     const c10::optional<Scalar> output_min,
     const c10::optional<Scalar> output_max)
   : packed_{
-      pack_weights(pool, weight, groups),
+      is_depthwise(weight.sizes(), groups) ? pack_weights_dw(pool, weight, groups) : pack_weights(pool, weight, groups),
       pack_biases(pool, bias, weight),
       pack_filter(weight, expand_param_if_needed(dilation, "dilation", 2)),
       pack_params(expand_param_if_needed(stride, "stride", 2)),
