@@ -491,17 +491,19 @@ void findTargetTensor(Expr* expr, TensorView*& target, unsigned& score) {
     return;
   }
 
-  auto axis = out_tv->getRelativeComputeAtAxis();
+  // Note this returns the computeAt position
+  int pos = (int)out_tv->getRelativeComputeAtAxis();
   target = out_tv->getComputeAtView();
   while (target->hasComputeAt()) {
-    if (target->getThisComputeAtAxis() < axis) {
+    if ((int)target->getThisComputeAtAxis() < pos) {
       break;
     }
-    axis = target->getComputeAtRelPos(axis);
+    // getComputeAtRelPos accepts an axis index.
+    pos = pos == 0 ? 0 : target->getComputeAtRelPos(pos - 1) + 1;
     target = target->getComputeAtView();
   }
 
-  score = axis;
+  score = pos;
 }
 
 // Type definitions for brevity
@@ -541,7 +543,7 @@ void groupExpressions(
     TargetGroupMapT& computed_at_exprs,
     ExprScoreMapT& scores) {
   TensorView* target_tensor = nullptr;
-  ScoreT score;
+  ScoreT score = 0;
   findTargetTensor(expr, target_tensor, score);
   scores.emplace(expr, score);
   if (target_tensor == nullptr) {

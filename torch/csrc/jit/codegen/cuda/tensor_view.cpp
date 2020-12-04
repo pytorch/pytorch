@@ -225,44 +225,95 @@ void TensorView::setComputeAt(
   this_compute_at_axis_ = thisPos;
 }
 
+namespace {
+
+std::set<int> getDimsToSkip(
+    const TensorView* tv,
+    const TensorView* ca_tv,
+    size_t pos) {
+  std::set<int> dims_to_skip;
+  if (tv->isConsumerOf(ca_tv)) {
+    if (BroadcastOp* bop = dynamic_cast<BroadcastOp*>(ca_tv->getOrigin())) {
+      const auto& bcast_flags = bop->getBroadcastDimFlags();
+      std::unordered_set<IterDomain*> root_dims_to_skip;
+      for (size_t i = 0; i < ca_tv->getRootDomain().size(); ++i) {
+        if (bcast_flags[i]) {
+          root_dims_to_skip.insert(ca_tv->getRootDomain()[i]);
+        }
+      }
+      for (size_t i = 0; i < ca_tv->domain()->domain().size(); ++i) {
+        IterDomain* id = ca_tv->domain()->domain()[i];
+        std::vector<Val*> id_vec({id});
+        std::unordered_set<Val*> root_vals = IterVisitor::getInputsTo(id_vec);
+        if (std::all_of(
+                ir_utils::filterByType<IterDomain>(root_vals).begin(),
+                ir_utils::filterByType<IterDomain>(root_vals).end(),
+                [&root_dims_to_skip](IterDomain* root_id) {
+                  return root_dims_to_skip.find(root_id) !=
+                      root_dims_to_skip.end();
+                })) {
+          dims_to_skip.insert(i);
+        }
+      }
+    }
+  } else {
+    // tv and ca_tv are both output tensors.
+    size_t pos_cav = 0, pos_this = 0;
+
+    while (pos_this <= pos) {
+      TORCH_INTERNAL_ASSERT(
+          pos_cav < ca_tv->nDims(),
+          "Error computing relative position in computeAt.");
+
+      if (ca_tv->axis(pos_cav)->isBroadcast() &&
+          !(tv->axis(pos_this)->isBroadcast())) {
+        dims_to_skip.insert(pos_cav);
+        pos_cav++;
+      } else if (pos_this == pos) {
+        break;
+      } else {
+        pos_cav++;
+        pos_this++;
+      }
+    }
+  }
+
+  return dims_to_skip;
+}
+
+} // namespace
+
 // Where in compute_at_view does this->axis(pos) match up?
 // TODO: This doesn't seem like the safest function as a fusion output can ref
 // another fusion output,  we may want to check that there is a direct
 // consumer/producer relationship between this and compute_at view before using
 // this function, and creating another pass to handle relative outputs.
 int TensorView::getComputeAtRelPos(int pos) const {
-  if (!hasComputeAt()) {
-    return pos;
-  }
+  TORCH_INTERNAL_ASSERT(
+      hasComputeAt(), "Tensor does not have a computeAt tensor.");
+  // Note: pos is actually an axis index.
+  TORCH_INTERNAL_ASSERT(
+      pos < (int)getThisComputeAtAxis(), "Not a computeAt axis: ", pos);
 
   if (!compute_at_view_->hasBroadcast()) {
     return pos;
   }
 
-  size_t pos_cav = 0, pos_this = 0;
+  auto dims_to_skip = getDimsToSkip(this, compute_at_view_, pos);
 
-  // We could be in an instance where pos == 0, but consumer[0] is bcast and
-  // this[0] is not
-
-  while (compute_at_view_->axis(pos_cav)->isBroadcast() &&
-         !(axis(pos_this)->isBroadcast())) {
-    pos_cav++;
-  }
-
-  while ((int)pos_this < pos) {
-    TORCH_INTERNAL_ASSERT(
-        pos_cav < compute_at_view_->nDims(),
-        "Error computing relative position in computeAt.");
-
-    if (compute_at_view_->axis(pos_cav)->isBroadcast() &&
-        !(axis(pos_this)->isBroadcast())) {
-      pos_cav++;
-    } else {
-      pos_cav++;
-      pos_this++;
+  int pos_cav = 0;
+  for (int i = 0; i <= pos; ++i) {
+    while (dims_to_skip.find(pos_cav) != dims_to_skip.end()) {
+      ++pos_cav;
+    }
+    if (i < pos) {
+      ++pos_cav;
     }
   }
 
+  TORCH_INTERNAL_ASSERT(
+      pos_cav < (int)compute_at_view_->nDims(),
+      "Error computing relative position in computeAt.");
   return pos_cav;
 }
 

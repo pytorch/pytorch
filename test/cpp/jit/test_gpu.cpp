@@ -9891,6 +9891,154 @@ TEST(NVFuserTest, FusionLoopUnswitch_CUDA) {
       &fusion, outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionIssue549_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeSymbolicTensor(2); // M, K
+  TensorView* tv1 = makeSymbolicTensor(2); // K, N
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = add(tv0, new Double(1));
+
+  TensorView* tv3 = broadcast(tv2, {false, false, true});
+  // tv3[I0, I1, B] = tv0[I0, I1]
+
+  TensorView* tv4 = broadcast(tv1, {true, false, false});
+  // tv4[B, I1, I2] = tv1[I1, I2]
+
+  // tv5[I0, I1, I2] = tv3[I0, I1, B] * tv4[B, I1, I2]
+  TensorView* tv5 = mul(tv3, tv4);
+  // tv6[I0, R1, I2] = tv5[I0, I1, I2]
+  TensorView* tv6 = sum(tv5, {1});
+  fusion.addOutput(tv6);
+
+  tv6->split(1, 32);
+  // tv6[I0, R1o, R1i{32}, I2]
+
+  auto tv7 = tv6->rFactor({1});
+  // tv7[I0, R1o, I1i{32}, I2] = tv5[I0, I1, I2]
+  // tv6[I0,    , R1i{32}, I2] = tv7[I0, R1o, I1i{32}, I2]
+
+  tv6->split(0, 4);
+  tv6->split(-1, 4);
+  // tv6[I0o, I0i{4}, R1i{32}, I2o, I2i{4}]
+  // tv6[I0o, I0i{4}, R1i{32}, I2o, I2i{4}]
+
+  tv0->computeAt(tv6, -1);
+  tv1->computeAt(tv6, -1);
+
+  // tv7[I0o, I0i{4}, R1o, I1i{32}, I2o, I2i{4}]
+  // tv6[I0o, I0i{4},    , R1i{32}, I2o, I2i{4}]
+  //--> (line symbolizes compute at location)
+  // tv5[I0o, I0i{4}, I1i{32}, I2o, I2i{4}|, I1o]
+  // tv7[I0o, I0i{4}, I1i{32}, I2o, I2i{4}|, R1o]
+  // tv6[I0o, I0i{4}, R1i{32}, I2o, I2i{4}|]
+
+  tv0->computeAt(tv7, -1);
+  tv1->computeAt(tv7, -1);
+  // tv5[I0o, I0i{4}, I1i{32}, I2o, I2i{4}, I1o |]
+  // tv7[I0o, I0i{4}, I1i{32}, I2o, I2i{4}, R1o |]
+  // tv6[I0o, I0i{4}, R1i{32}, I2o, I2i{4}|]
+
+  tv6->axis(0)->parallelize(ParallelType::BIDz);
+  tv6->axis(1)->parallelize(ParallelType::TIDz);
+
+  tv6->axis(-2)->parallelize(ParallelType::BIDy);
+  tv6->axis(-1)->parallelize(ParallelType::TIDy);
+
+  tv6->axis(2)->parallelize(ParallelType::TIDx);
+  tv7->axis(2)->parallelize(ParallelType::TIDx);
+
+  constexpr int M = 65, K = 33, N = 17;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor t0 = at::randn({M, K}, options);
+  at::Tensor t1 = at::randn({K, N}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  // Lets specify a few bounds in launch params to make sure it works
+  fe.runFusion({t0, t1}, LaunchParams(1, -1, -1, 32, 4, 4));
+
+  // Make sure bad launch params throws
+  ASSERT_ANY_THROW(fe.runFusion({t0, t1}, LaunchParams(1, 2, 3, 4, 5, 6)));
+
+  // Don't specify any launch params
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  auto aten_output = (t0 + 1).to(at::kDouble).matmul(t1.to(at::kDouble));
+
+  testValidate(
+      &fusion, cg_outputs, {t0, t1}, {aten_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionGetComputeAtRelPos_CUDA) {
+  {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+
+    auto tv0 = makeSymbolicTensor(1);
+    auto tv1 = broadcast(tv0, {false, true});
+    auto tv2 = broadcast(tv1, {false, true, false});
+    fusion.addInput(tv0);
+    fusion.addOutput(tv2);
+
+    tv1->computeAt(tv2, -1);
+
+    TORCH_CHECK(tv1->getComputeAtRelPos(1) == 2);
+  }
+  {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+
+    auto tv0 = makeSymbolicTensor(1);
+    auto tv1 = broadcast(tv0, {false, true});
+    auto tv2 = broadcast(tv1, {false, true, false});
+    fusion.addInput(tv0);
+    fusion.addOutput(tv2);
+
+    tv2->merge(1, 2);
+    tv1->computeAt(tv2, -1);
+
+    TORCH_CHECK(tv1->getComputeAtRelPos(1) == 1);
+  }
+  {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+
+    auto tv0 = makeSymbolicTensor(1);
+    auto tv1 = broadcast(tv0, {false, true});
+    auto tv2 = broadcast(tv1, {false, true, false});
+    fusion.addInput(tv0);
+    fusion.addOutput(tv2);
+
+    tv2->merge(1, 2);
+    tv1->computeAt(tv2, -1);
+
+    TORCH_CHECK(tv1->getComputeAtRelPos(1) == 1);
+  }
+  {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+
+    auto tv0 = makeSymbolicTensor(1);
+    auto tv1 = add(tv0, new Double(1));
+    auto tv2 = broadcast(tv1, {false, true});
+    auto tv3 = broadcast(tv1, {false, true});
+    fusion.addInput(tv0);
+    fusion.addOutput(tv2);
+    fusion.addOutput(tv3);
+
+    tv0->computeAt(tv3, -1);
+
+    TORCH_CHECK(tv1->getComputeAtRelPos(0) == 0);
+  }
+}
+
 } // namespace jit
 } // namespace torch
 

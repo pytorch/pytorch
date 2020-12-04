@@ -110,7 +110,7 @@ class TORCH_CUDA_API BroadcastOp : public Expr {
     return is_broadcast_dims_.at(dim);
   }
 
-  const std::vector<bool> getBroadcastDimFlags() const {
+  const std::vector<bool>& getBroadcastDimFlags() const {
     return is_broadcast_dims_;
   }
 

@@ -48,9 +48,11 @@ void ComputeAtData::setPassPosition(unsigned int pos) {
         ". This tensor would have to be recomputed to satsify the selected computeAt position.");
   }
 
-  current_traversal_position = pos;
-  touched_ = true;
-  current_traversal_position_set = true;
+  if (pos > original_compute_at_position) {
+    current_traversal_position = pos;
+    touched_ = true;
+    current_traversal_position_set = true;
+  }
 }
 
 unsigned int ComputeAtData::getNewPosition() const {
@@ -68,7 +70,7 @@ void ComputeAtData::validateNewComputeAt() const {
   FUSER_PERF_SCOPE("validateNewComputeAt");
 
   TORCH_INTERNAL_ASSERT(
-      getNewPosition() >= original_compute_at_position,
+      !touched() || getNewPosition() >= original_compute_at_position,
       "Invalid computeAt detected. This computeAt would invalidate the set computeAt on ",
       tv_ref_,
       " as the new computeAt position was found to be ",
