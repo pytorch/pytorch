@@ -318,6 +318,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.complex: lambda real, imag: -1,
         torch.copysign: lambda input, other, out=None: -1,
         torch.polar: lambda abs, ang: -1,
+        torch.linalg.cond: lambda input, ord=None: -1,
         torch.conj: lambda input, out=None: -1,
         torch.constant_pad_nd: lambda input, pad, value=0: -1,
         torch.conv1d: lambda input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1: -1,
