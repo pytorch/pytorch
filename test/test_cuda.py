@@ -3320,85 +3320,114 @@ class TestCudaComm(TestCase):
             except Exception as e:
                 raise RuntimeError("Failed on ", op) from e
 
+            # We hold references to all tensors used across streams up til this sync,
+            # so no need to call record_stream on those tensors.
+            torch.cuda.synchronize()
+
         for op, kwargs in ops_with_kwargs:
             run(op, kwargs)
 
-    # def test_graph_rng_distributions(self):
-    #     size = 10000
-    #     input = torch.rand((size,), device="cuda", dtype=torch.float)
-    #     alloc = torch.empty((size,), device="cuda", dtype=torch.float)
+    def test_graph_rng_distributions(self):
+        # The caching allocator isn't yet graph-safe.
+        # In this test, all ops maintain static references to inputs and outputs
+        # that persist across replay(), so they should be safe to test with graphs,
+        # EXCEPT for multinomial which is a complicated compound op.
+        #
+        # TODO:
+        # Uncomment multinomial when the allocator is made graph-safe.
+        size = 10000
+        input = torch.rand((size,), device="cuda", dtype=torch.float)
+        alloc = torch.empty((size,), device="cuda", dtype=torch.float)
 
-    #     # Torch ops to test with sample args (tuple) and kwargs (dict)
-    #     torch_with_args = (("bernoulli", (input.clone(),), {}),
-    #                        ("multinomial", (input.clone(), size, True), {}),
-    #                        ("multinomial", (input.clone(), size // 2, False), {}),
-    #                        ("normal", (input.clone() + 1, input.clone()), {}),
-    #                        ("poisson", (input.clone(),), {}),
-    #                        ("rand", (size,), {"device": "cuda", "dtype": torch.float}),
-    #                        ("randint", (0, 3, (size,)), {"device": "cuda", "dtype": torch.float}),
-    #                        ("randn", (size,), {"device": "cuda", "dtype": torch.float}),)
+        # Torch ops to test with sample args (tuple) and kwargs (dict)
+        torch_with_args = (("bernoulli", (input.clone(),), {}),
+                           # ("multinomial", (input.clone(), size, True), {}),
+                           # ("multinomial", (input.clone(), size // 2, False), {}),
+                           ("normal", (input.clone() + 1, input.clone()), {}),
+                           ("poisson", (input.clone(),), {}),
+                           ("rand", (size,), {"device": "cuda", "dtype": torch.float}),
+                           ("randint", (0, 3, (size,)), {"device": "cuda", "dtype": torch.float}),
+                           ("randn", (size,), {"device": "cuda", "dtype": torch.float}),)
 
-    #     # Tensor methods to test with sample args (tuple)
-    #     tensor_with_args = (("bernoulli_", (input.clone(),)),
-    #                         ("cauchy_", ()),
-    #                         ("exponential_", ()),
-    #                         ("geometric_", (0.3,)),
-    #                         ("log_normal_", ()),
-    #                         ("normal_", ()),
-    #                         ("random_", ()),
-    #                         ("uniform_", ()),)
+        # Tensor methods to test with sample args (tuple)
+        tensor_with_args = (("bernoulli_", (input.clone(),)),
+                            ("cauchy_", ()),
+                            ("exponential_", ()),
+                            ("geometric_", (0.3,)),
+                            ("log_normal_", ()),
+                            ("normal_", ()),
+                            ("random_", ()),
+                            ("uniform_", ()),)
 
-    #     def run(module, op, args, kwargs):
-    #         stream = torch.cuda.Stream()
+        def run(module, op, args, kwargs):
+            torch.cuda.manual_seed(5)
 
-    #         if (module == "torch"):
-    #             control1 = getattr(torch, op)(*args, **kwargs)
-    #             control2 = getattr(torch, op)(*args, **kwargs)
-    #         else:
-    #             control1 = alloc.clone()
-    #             control2 = alloc.clone()
-    #             getattr(control1, op)(*args)
-    #             getattr(control2, op)(*args)
+            # Each path runs a dummy op to increment the state a bit before creating controls.
+            if (module == "torch"):
+                dummy = getattr(torch, op)(*args, **kwargs)
+                control1 = getattr(torch, op)(*args, **kwargs)
+                control2 = getattr(torch, op)(*args, **kwargs)
+            else:
+                dummy = alloc.clone()
+                control1 = alloc.clone()
+                control2 = alloc.clone()
+                getattr(dummy, op)(*args)
+                getattr(control1, op)(*args)
+                getattr(control2, op)(*args)
 
-    #         stream.wait_stream(torch.cuda.current_stream())
-    #         with torch.cuda.stream(stream):
-    #             g = torch.cuda.Graph()
-    #             if (module == "torch"):
-    #                 g.capture_begin()
-    #                 t1 = getattr(torch, op)(*args, **kwargs)
-    #                 t2 = getattr(torch, op)(*args, **kwargs)
-    #                 g.capture_end()
-    #             else:
-    #                 t1 = alloc.clone()
-    #                 t2 = alloc.clone()
-    #                 g.capture_begin()
-    #                 getattr(t1, op)(*args)
-    #                 getattr(t2, op)(*args)
-    #                 g.capture_end()
-    #         torch.cuda.current_stream().wait_stream(stream)
+            stream = torch.cuda.Stream()
+            stream.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(stream):
+                torch.cuda.manual_seed(5)
 
-    #         try:
-    #             self.assertNotEqual(control1, t1)
-    #             self.assertNotEqual(control2, t2)
-    #         except Exception as e:
-    #             raise RuntimeError("Failed on " + module + "." + op) from e
+                g = torch.cuda.Graph()
+                if (module == "torch"):
+                    g.capture_begin()
+                    t1 = getattr(torch, op)(*args, **kwargs)
+                    t2 = getattr(torch, op)(*args, **kwargs)
+                    g.capture_end()
+                else:
+                    t1 = alloc.clone()
+                    t2 = alloc.clone()
+                    g.capture_begin()
+                    getattr(t1, op)(*args)
+                    getattr(t2, op)(*args)
+                    g.capture_end()
+            torch.cuda.current_stream().wait_stream(stream)
 
-    #         g.replay()
+            try:
+                self.assertNotEqual(control1, t1)
+                self.assertNotEqual(control2, t2)
+            except Exception as e:
+                raise RuntimeError("Failed on " + module + "." + op) from e
 
-    #         try:
-    #             self.assertEqual(control1, t1)
-    #             self.assertEqual(control2, t2)
-    #         except Exception as e:
-    #             raise RuntimeError("Failed on " + module + "." + op) from e
+            # Runs a dummy op prelude, as for controls, to make sure replay()
+            # picks up the dummy op's state increment.
+            if module == "torch":
+                dummy = getattr(torch, op)(*args, **kwargs)
+            else:
+                dummy = alloc.clone()
+                getattr(dummy, op)(*args)
 
-    #         torch.cuda.synchronize()
+            # Runs RNG ops that fill t1 and t2.
+            g.replay()
 
-    #     for op_with_args in torch_with_args:
-    #         run("torch", *op_with_args)
+            try:
+                self.assertEqual(control1, t1)
+                self.assertEqual(control2, t2)
+            except Exception as e:
+                raise RuntimeError("Failed on " + module + "." + op) from e
 
-    #     # Adds an empty dict for kwargs, which none of the Tensor methods use
-    #     for meth_with_args in tensor_with_args:
-    #         run("Tensor", *(meth_with_args + {}))
+            # We hold references to all tensors used across streams up til this sync,
+            # so no need to call record_stream on those tensors.
+            torch.cuda.synchronize()
+
+        for op_with_args in torch_with_args:
+            run("torch", *op_with_args)
+
+        for meth_with_args in tensor_with_args:
+            # Adds an empty dict for kwargs, which none of the Tensor methods use
+            run("Tensor", *(meth_with_args + ({},)))
 
 
 if __name__ == '__main__':
