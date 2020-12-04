@@ -306,7 +306,7 @@ static void launch_kernel(int64_t N, const func_t& f, array_t data) {}
 
 
 template <typename func_t>
-void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
+void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
   using traits = function_traits<func_t>;
   using arg0_t = typename traits::result_type;
   constexpr int ntensors = traits::arity + 1;
