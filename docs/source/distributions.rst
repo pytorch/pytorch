@@ -167,6 +167,15 @@ Probability distributions - torch.distributions
     :undoc-members:
     :show-inheritance:
 
+:hidden:`Kumaraswamy`
+~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.kumaraswamy
+.. autoclass:: Kumaraswamy
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 :hidden:`Laplace`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
