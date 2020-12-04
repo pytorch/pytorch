@@ -334,7 +334,8 @@ else:
         with tempfile.TemporaryDirectory(suffix=suffix) as d:
             yield d
 
-IS_STDIN_UTF8_ENCODING = sys.stdin.encoding.lower() == 'utf-8' and
+IS_STDIN_UTF8_ENCODING = sys.stdin.encoding.lower(
+) == 'utf-8' and (IS_WINDOWS or locale.getpreferredencoding().lower() == 'utf-8')
     (locale.getpreferredencoding().lower() in ['utf-8', 'cp65001'])
 
 def _check_module_exists(name):
