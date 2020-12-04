@@ -287,7 +287,7 @@ if (strides.empty()) {
                     raise AssertionError("unsupported dispatch key")
                 return f"""
 if (strides.empty()) {{
-    outputs_[output_idx] = {empty_impl}(sizes, {expanded_topts});
+    outputs_[output_idx] = {empty_impl}(sizes, {expanded_topts}, options.memory_format_opt());
 }} else {{
     outputs_[output_idx] = {empty_strided_impl}(sizes, strides, {expanded_topts});
 }}
