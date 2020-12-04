@@ -42,7 +42,7 @@ def gen_sparse_coo(shape, nnz):
         indices[1].append(col)
         values.append(dense[row, col])
 
-    return torch.sparse_coo_tensor(indices, values, [shape[0], shape[1]])
+    return torch.sparse_coo_tensor(indices, values, *shape)
 
 def gen_sparse_coo_and_gcs(shape, nnz):
     total_values = functools.reduce(operator.mul, shape, 1)
