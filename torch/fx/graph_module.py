@@ -201,9 +201,8 @@ class GraphModule(torch.nn.Module):
 
 
     def to_folder(self, folder: Union[str, os.PathLike], module_name="FxModule"):
-        """
-        Dumps out module to `folder` with `module_name` so that it can be
-        imported with `from <folder> import <module_name>`
+        """Dumps out module to ``folder`` with ``module_name`` so that it can be
+        imported with ``from <folder> import <module_name>``
         """
         folder = Path(folder)
         Path(folder).mkdir(exist_ok=True)
