@@ -61,7 +61,6 @@ Features described in this documentation are classified by release status:
    torch.distributions <distributions>
    torch.fft <fft>
    futures
-   fx
    torch.hub <hub>
    torch.jit <jit>
    torch.linalg <linalg>
