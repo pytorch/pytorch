@@ -642,7 +642,8 @@ def method_def(
 
 def group_overloads(
     overloads: Sequence[PythonSignatureNativeFunctionPair],
-    sort: bool = True
+    *,
+    sort: bool = True,
 ) -> Sequence[PythonSignatureGroup]:
     bases: Dict[str, PythonSignatureNativeFunctionPair] = {}
     outplaces: Dict[str, PythonSignatureNativeFunctionPair] = {}

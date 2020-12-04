@@ -174,7 +174,7 @@ from tools.codegen.model import *
 #
 
 # TODO: stick this more firmly in the data model somewhere?
-def namedtuple_fieldnames(returns: Tuple[Return]) -> List[str]:
+def namedtuple_fieldnames(returns: Tuple[Return, ...]) -> List[str]:
     if len(returns) <= 1 or all(map(lambda r: r.name is None, returns)):
         return []
     else:
@@ -194,20 +194,20 @@ def namedtuple_fieldnames(returns: Tuple[Return]) -> List[str]:
 
 @dataclass(frozen=True)
 class PythonReturns:
-    returns: Tuple[Return]
+    returns: Tuple[Return, ...]
 
-    def named_tuple(self) -> Optional[Tuple[str]]:
+    def named_tuple_pyi(self) -> Optional[Tuple[str, str]]:
         python_returns = [argument_type_str_pyi(r.type) for r in self.returns]
         field_names = namedtuple_fieldnames(self.returns)
         if field_names:
             namedtuple_name = '_'.join(['namedtuple'] + field_names)
-            tuple_args = ['("{}", {})'.format(name, typ) for name, typ in zip(field_names, python_returns)]
-            namedtuple_def = 'NamedTuple("{}", [{}])'.format(namedtuple_name, ', '.join(tuple_args))
+            tuple_args = [f'("{name}", {typ})' for name, typ in zip(field_names, python_returns)]
+            namedtuple_def = f'NamedTuple("{namedtuple_name}", [{", ".join(tuple_args)}])'
             return namedtuple_name, namedtuple_def
         return None
 
-    def returns_str(self) -> str:
-        named_tuple = self.named_tuple()
+    def returns_str_pyi(self) -> str:
+        named_tuple = self.named_tuple_pyi()
         if named_tuple is not None:
             namedtuple_name, _ = named_tuple
             return namedtuple_name
@@ -259,7 +259,8 @@ class PythonArgument:
         # add default
         if self.default is not None:
             if pyi:
-                if isinstance(self.type, ListType) and self.type.elem == BaseType(BaseTy.int) and self.default.startswith('{') and self.default.endswith('}'):
+                if isinstance(self.type, ListType) and self.type.elem == BaseType(BaseTy.int) and \
+                   self.default.startswith('{') and self.default.endswith('}'):
                     default = '(' + self.default[1:-1] + ')'
                 else:
                     default = {
@@ -284,74 +285,6 @@ class PythonArgument:
                 return f'{name}:{type_str}' if name == 'requires_grad' else f'{name}: {type_str}'
             else:
                 return f'{type_str} {name}'
-
-    def argument_str_pyi(self, *, method: bool = False, deprecated: bool = False) -> str:
-        typename = argument_type_str_pyi(self.type)
-
-        name = self.name
-        if name == 'from':  # from is a Python keyword...
-            name += '_'
-        # s/self/input/ outside method bindings
-        # [old codegen] TODO: remove this? doesn't rename in codegen, it's just
-        # for the parse string
-        # this also doesn't apply to deprecated functions for some reason
-        if name == 'self' and typename == 'Tensor' and not method and not deprecated:
-            name = 'input'
-
-        if self.type.is_nullable():
-            typename = 'Optional[' + typename + ']'
-
-        # add default
-        if self.default is not None:
-            if isinstance(self.type, ListType) and self.type.elem == BaseType(BaseTy.int) and self.default.startswith('{') and self.default.endswith('}'):
-                default = '(' + self.default[1:-1] + ')'
-            else:
-                default = {
-                    'nullptr': 'None',
-                    'c10::nullopt': 'None',
-                    '{}': 'None',
-                    'MemoryFormat::Contiguous': 'contiguous_format',
-                    'QScheme::PER_TENSOR_AFFINE': 'per_tensor_affine',
-                }.get(self.default, self.default)
-            # default = self.default
-            # if default == 'nullptr':
-                # default = None
-            # elif default == 'c10::nullopt':
-                # default = None
-            # elif default.startswith('{') and default.endswith('}'):
-                # # vestige from 'dynamic_type': remove optional-ness
-                # t = self.type
-                # if isinstance(t, OptionalType):
-                    # t = t.elem
-                # if t == BaseType(BaseTy.Tensor) and default == '{}':
-                    # default = None
-                # elif t == BaseType(BaseTy.Generator) and default == '{}':
-                    # default = None
-                # elif isinstance(t, ListType) and t.elem == BaseType(BaseTy.int):
-                    # default = '(' + default[1:-1] + ')'
-                # else:
-                    # raise Exception("Unexpected default constructor argument of type {}.", format(t))
-            # elif default == 'MemoryFormat::Contiguous':
-                # default = 'contiguous_format'
-            # elif default == 'QScheme::PER_TENSOR_AFFINE':
-                # default = 'per_tensor_affine'
-            default = '={}'.format(default)
-        else:
-            default = ''
-        # TODO: remove after migration (byte-for-byte compatibility)
-        if name == 'requires_grad':
-            colon = ':'
-        else:
-            colon = ': '
-
-        # pyi merges the _out and functional variants into the same signature, with an optional out arg
-        if name == 'out' and typename == 'Tensor' and not deprecated:
-            typename = 'Optional[' + typename + ']'
-
-        # self argument is not typed
-        if name == 'self' and method:
-            return name
-        return name + colon + typename + default
 
 @dataclass(frozen=True)
 class PythonOutArgument(PythonArgument):
@@ -456,7 +389,7 @@ class PythonSignature:
                 type=OptionalType(BaseType(BaseTy.Tensor)),
                 default='None',
                 default_init=None,
-                outputs=None)])
+                outputs=())])
         if not skip_tensor_options:
             result.extend(self.tensor_options_args)
         return tuple(result)
@@ -486,7 +419,7 @@ class PythonSignature:
 
         if self.pyi:
             # only pyi signatures include returns
-            returns_str = self.returns.returns_str()
+            returns_str = self.returns.returns_str_pyi()
             return f'def {self.name}({", ".join(schema_formals)}) -> {returns_str}: ...'
         return f'{self.name}({", ".join(schema_formals)})'
 
@@ -501,16 +434,20 @@ class PythonSignature:
         num_args = self.arguments_count()
         vararg_pos = 1 if self.method else 0
         num_positionalargs = len(self.input_args)
-        have_vararg_version = (num_args > vararg_pos and
-                               isinstance(args[vararg_pos].type, ListType) and str(args[vararg_pos].type.elem) == 'int' and
-                               vararg_pos + 1 == num_positionalargs)
+
+        have_vararg_version = False
+        if num_args > vararg_pos:
+            vararg_type = args[vararg_pos].type
+            if isinstance(vararg_type, ListType) and str(vararg_type.elem) == 'int' and vararg_pos + 1 == num_positionalargs:
+                have_vararg_version = True
+
         if not have_vararg_version:
             return None
         # Below are the major changes in vararg vs. regular pyi signatures
         # vararg signatures also omit the asterix
         schema_formals[vararg_pos] = '*' + args[vararg_pos].name + ': _int'
 
-        returns_str = self.returns.returns_str()
+        returns_str = self.returns.returns_str_pyi()
         return f'def {self.name}({", ".join(schema_formals)}) -> {returns_str}: ...'
 
 # The deprecated python signature involves some special logic, so create a
@@ -547,11 +484,11 @@ class PythonSignatureDeprecated(PythonSignature):
             if len(schema_formals) > positional_argc:
                 schema_formals.insert(positional_argc, '*')
 
-            returns_str = self.returns.returns_str()
+            returns_str = self.returns.returns_str_pyi()
             return f'def {self.name}({", ".join(schema_formals)}) -> {returns_str}: ...'
         return PythonSignature.signature_str(self, skip_outputs=skip_outputs, hacky_add_output=hacky_add_output) + '|deprecated'
 
-    def signature_str_vararg(self, *, skip_outputs: bool = False, hacky_add_output: bool = False) -> str:
+    def signature_str_vararg(self, *, skip_outputs: bool = False, hacky_add_output: bool = False) -> Optional[str]:
         # the codegen doesn't include vararg variants for deprecated signatures
         return None
 

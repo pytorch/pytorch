@@ -2,6 +2,7 @@ import re
 import os
 import yaml
 from .nested_dict import nested_dict
+from typing import Dict, List
 
 
 __all__ = [
@@ -51,7 +52,7 @@ def uninplace_api_name(api_name):
     return api_name
 
 
-def write(dirname, name, template, env):
+def write(dirname: str, name: str, template: CodeTemplate, env: Dict[str, List[str]]) -> None:
     env['generated_comment'] = GENERATED_COMMENT.substitute(filename=template.filename)
     path = os.path.join(dirname, name)
     # See Note [Unchanging results for ninja]

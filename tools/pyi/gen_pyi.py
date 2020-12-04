@@ -7,8 +7,7 @@ import argparse
 
 from tools.codegen.model import *
 from tools.codegen.api.python import *
-from tools.codegen.gen import compute_method_of_yaml
-from typing import Sequence
+from typing import Sequence, List, Mapping, Dict
 
 from ..autograd.utils import CodeTemplate, write
 from ..autograd.gen_python_functions import should_generate_py_binding, load_signatures, group_overloads
@@ -30,7 +29,7 @@ Here's our general strategy:
   (the latter case should be pretty rare).
 
 - We go through automatically bound functions based on the
-  type information recorded in Declarations.yaml and
+  type information recorded in native_functions.yaml and
   generate type hints for them (generate_type_hints)
 
 There are a number of type hints which we've special-cased;
@@ -38,7 +37,7 @@ read gen_pyi for the gory details.
 """
 
 # TODO: consider waiting to group by base name until we actually need to (after computing type hint signatures, when adding @overload directives)
-def group_by_base_name(python_funcs: Sequence[PythonSignatureNativeFunctionPair]) -> Dict[str, Sequence[PythonSignatureGroup]]:
+def group_by_base_name(python_funcs: Sequence[PythonSignatureNativeFunctionPair]) -> Mapping[str, List[PythonSignatureGroup]]:
     groups = group_overloads(python_funcs, sort=False)
     d = collections.defaultdict(list)
     for g in groups:
@@ -46,20 +45,23 @@ def group_by_base_name(python_funcs: Sequence[PythonSignatureNativeFunctionPair]
         d[name].append(g)
     return d
 
-def get_py_torch_functions(python_funcs: Sequence[PythonSignatureNativeFunctionPair], method: bool = False) -> Dict[str, Sequence[PythonSignatureGroup]]:
+def get_py_torch_functions(
+        python_funcs: Sequence[PythonSignatureNativeFunctionPair],
+        method: bool = False,
+) -> Mapping[str, Sequence[PythonSignatureGroup]]:
     """
     Get declarations (grouped by name) which should be generated
     as either functions in the "torch" module or methods on Tensor.
     """
-    def should_bind_function(python_func):
+    def should_bind_function(python_func: PythonSignatureNativeFunctionPair) -> bool:
         return (should_generate_py_binding(python_func.function) and
                 not python_func.function.python_module and
-                'namespace' in compute_method_of_yaml(python_func.function.variants))
+                Variant.function in python_func.function.variants)
 
-    def should_bind_method(python_func):
+    def should_bind_method(python_func: PythonSignatureNativeFunctionPair) -> bool:
         return (should_generate_py_binding(python_func.function) and
                 not python_func.function.python_module and
-                'Tensor' in compute_method_of_yaml(python_func.function.variants))
+                Variant.method in python_func.function.variants)
 
     should_bind = should_bind_method if method else should_bind_function
     return group_by_base_name([f for f in python_funcs if should_bind(f)])
@@ -67,8 +69,6 @@ def get_py_torch_functions(python_funcs: Sequence[PythonSignatureNativeFunctionP
 
 # TODO: Consider defining some aliases for our Union[...] types, to make
 # the stubs to read on the human eye.
-
-needed_modules = set()
 
 DEVICE_PARAM = "device: Union[_device, str, None]=None"
 FACTORY_PARAMS = f"dtype: Optional[_dtype]=None, {DEVICE_PARAM}, requires_grad: _bool=False"
@@ -145,7 +145,7 @@ to_py_type_ops = ('bool', 'float', 'complex', 'long', 'index', 'int', 'nonzero')
 all_ops = binary_ops + comparison_ops + unary_ops + to_py_type_ops
 
 
-def sig_for_ops(opname):
+def sig_for_ops(opname: str) -> List[str]:
     """sig_for_ops(opname : str) -> List[str]
 
     Returns signatures for operator special functions (__add__ etc.)"""
@@ -175,10 +175,10 @@ def sig_for_ops(opname):
     else:
         raise Exception("unknown op", opname)
 
-def generate_named_tuples(funcs: Sequence[PythonSignatureGroup]):
-    namedtuples = {}
+def generate_named_tuples(funcs: Sequence[PythonSignatureGroup]) -> Dict[str, str]:
+    namedtuples: Dict[str, str] = {}
     for sig_group in funcs:
-        named_tuple = sig_group.signature.returns.named_tuple()
+        named_tuple = sig_group.signature.returns.named_tuple_pyi()
         if named_tuple is not None:
             tuple_name, tuple_def = named_tuple
             if tuple_name in namedtuples:
@@ -187,7 +187,7 @@ def generate_named_tuples(funcs: Sequence[PythonSignatureGroup]):
                 namedtuples[tuple_name] = tuple_def
     return namedtuples
 
-def generate_type_hints(funcs: Sequence[PythonSignatureGroup], is_tensor=False) -> List[str]:
+def generate_type_hints(funcs: Sequence[PythonSignatureGroup], is_tensor: bool =False) -> List[str]:
     """generate_type_hints(funcs, is_tensor=False)
 
     Generates type hints for the declarations pertaining to the function
@@ -216,7 +216,8 @@ def generate_type_hints(funcs: Sequence[PythonSignatureGroup], is_tensor=False) 
         # the pyi codegen currently adds an optional out param in cases where the current op does NOT have an out variant,
         # but an overload of the op DOES have an out variant.
         # TODO: After that, we should consider killing this method entirely and operating per PythonSignatureGroup
-        # rather than grouping their overloads together (since there isn't much else semantically meaningful about grouping overloads)
+        # rather than grouping their overloads together
+        # (since there isn't much else semantically meaningful about grouping overloads)
         # this hack also doesn't apply to deprecated ops
         hacky_add_output = any_out and sig_group.outplace is None and not sig_group.signature.deprecated
         # PythonSignatureGroups that have both a functional + out variant get a single signature, with an optional out argument
@@ -225,13 +226,14 @@ def generate_type_hints(funcs: Sequence[PythonSignatureGroup], is_tensor=False) 
         type_hints.append(type_hint)
 
         # Some operators also additionally have a vararg variant of their signature
-        type_hint_vararg = sig_group.signature.signature_str_vararg(skip_outputs=sig_group.outplace is None, hacky_add_output=hacky_add_output)
+        type_hint_vararg = sig_group.signature.signature_str_vararg(
+            skip_outputs=sig_group.outplace is None, hacky_add_output=hacky_add_output)
         if type_hint_vararg:
             type_hints.append(type_hint_vararg)
 
     return type_hints
 
-def gen_nn_functional(out):
+def gen_nn_functional(out: str) -> None:
     # Functions imported into `torch.nn.functional` from `torch`, perhaps being filtered
     # through an `_add_docstr` call
     imports = [
@@ -296,10 +298,10 @@ def gen_nn_functional(out):
     stubs = CodeTemplate.from_file(os.path.join('torch', '_C', '_nn.pyi.in'))
     write(out, 'torch/_C/_nn.pyi', stubs, env)
 
-def gen_nn_pyi(out):
+def gen_nn_pyi(out: str) -> None:
     gen_nn_functional(out)
 
-def gen_pyi(native_yaml_path, deprecated_yaml_path, out):
+def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, out: str) -> None:
     """gen_pyi()
 
     This function generates a pyi file for torch.
@@ -313,12 +315,12 @@ def gen_pyi(native_yaml_path, deprecated_yaml_path, out):
     # also needs to update the other file.
 
     # Dictionary for NamedTuple definitions
-    namedtuples = {}
+    namedtuples: Dict[str, str] = {}
 
     # Generate type signatures for top-level functions
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    unsorted_function_hints = collections.defaultdict(list)
+    unsorted_function_hints: Dict[str, List[str]] = collections.defaultdict(list)
     unsorted_function_hints.update({
         'set_flush_denormal': ['def set_flush_denormal(mode: _bool) -> _bool: ...'],
         'get_default_dtype': ['def get_default_dtype() -> _dtype: ...'],
@@ -395,7 +397,7 @@ def gen_pyi(native_yaml_path, deprecated_yaml_path, out):
     # Generate type signatures for Tensor methods
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    unsorted_tensor_method_hints = collections.defaultdict(list)
+    unsorted_tensor_method_hints: Dict[str, List[str]] = collections.defaultdict(list)
     unsorted_tensor_method_hints.update({
         'size': ['def size(self) -> Size: ...',
                  'def size(self, _int) -> _int: ...'],
@@ -490,6 +492,7 @@ def gen_pyi(native_yaml_path, deprecated_yaml_path, out):
         unsorted_tensor_method_hints[name].append('def {}(self) -> Tensor: ...'.format(name))
 
     # pyi tensor methods don't currently include deprecated signatures for some reason
+    # TODO: we should probably add them in
     tensor_method_signatures = load_signatures(native_yaml_path, deprecated_yaml_path, method=True, skip_deprecated=True, pyi=True)
     tensor_method_sig_groups = get_py_torch_functions(tensor_method_signatures, method=True)
 
@@ -577,7 +580,7 @@ def gen_pyi(native_yaml_path, deprecated_yaml_path, out):
     gen_nn_pyi(out)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description='Generate type stubs for PyTorch')
     parser.add_argument('--declarations-path', metavar='DECL',
