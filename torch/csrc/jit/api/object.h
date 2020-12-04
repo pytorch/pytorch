@@ -20,7 +20,7 @@ class ObjectAttributeError : public std::runtime_error {
 };
 
 struct TORCH_API Object {
-  Object() {}
+  Object() = default;
   Object(ObjectPtr _ivalue) : _ivalue_(std::move(_ivalue)) {}
   Object(std::shared_ptr<CompilationUnit> cu, const c10::ClassTypePtr& type);
   Object(
