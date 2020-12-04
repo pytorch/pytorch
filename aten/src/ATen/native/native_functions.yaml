@@ -2807,12 +2807,6 @@
     SparseCPU, SparseCUDA: _sparse_mm_out
     SparseGCS_CPU: _sparse_gcs_mm_out
 
-- func: _sparse_gcs_mm(Tensor(a!) self, Tensor sparse_, Tensor t, Tensor dense, Scalar alpha, Scalar beta) -> Tensor
-  use_c10_dispatcher: full
-  variants: function
-  dispatch:
-    SparseGCS_CPU: _sparse_gcs_mm_cpu
-
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
   use_c10_dispatcher: full
 

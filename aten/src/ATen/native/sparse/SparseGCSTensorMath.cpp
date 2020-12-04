@@ -37,23 +37,71 @@ Tensor& addmm_out_sparse_gcs_dense_cpu(
   TORCH_CHECK(op1.dim() == 2, "addmm: 2-D matrices expected, got ", op1.dim(), "D tensor");
   TORCH_CHECK(op2.dim() == 2, "addmm: 2-D matrices expected, got ", op2.dim(), "D tensor");
 
-  // ixj * jxk = ixk
+  // ixk * kxj = ixj
   int64_t dim_i = op1.size(0);
-  int64_t dim_j = op1.size(1);
-  int64_t dim_k = op2.size(1);
+  int64_t dim_j = op2.size(1);
+  int64_t dim_k = op1.size(1);
 
-  TORCH_CHECK(op2.size(0) == dim_j,
-              "addmm: Argument #3 (op2): Expected dim 0 size ", dim_j, ", got ", op2.size(0));
-  TORCH_CHECK(expand_self.size(0) == dim_i,
-              "addmm: Argument #1 (t): Expected dim 0 size ", dim_i, ", got ", expand_self.size(0));
-  TORCH_CHECK(expand_self.size(1) == dim_k,
-              "addmm: Argument #1 (t): Expected dim 1 size ", dim_k, ", got ", expand_self.size(1));
-  out.resize_({dim_i, dim_k});
+  TORCH_CHECK(op2.size(0) == dim_k,
+              "addmm: Expected dense matrix (op2) size(0)=", dim_k, ", got ", op2.size(0));
+  TORCH_CHECK(op1.size(1) == dim_k,
+              "addmm: Expected result dense matrix (self) size(1)=", dim_k, ", got ", op1.size(1));
+  out.resize_({dim_i, dim_j});
 
   // TODO: why does that nnz == 0 condition exist in the COO code?
 
-  at::_sparse_gcs_mm(out, op1, expand_self, op2, alpha, beta);
+  auto indices = op1.indices();
+  auto pointers = op1.pointers();
+  auto values   = op1.values();
+    
+  AT_DISPATCH_FLOATING_TYPES(
+    values.scalar_type(), "addmm_sparse_gcs_dense", [&] {
+      scalar_t cast_beta = beta.to<scalar_t>();
+        if (!is_same_tensor(out, expand_self)) {
+          out.copy_(expand_self);
+        }
+      if (cast_beta == 0) {
+        out.zero_();
+      } else {
+        at::mul_out(out, expand_self, scalar_to_tensor(beta));
+      }
+  });
 
+  if (at::hasMKL()) {
+    at::_sparse_mm_mkl_(out, op1, op2, expand_self, alpha, beta);
+  }
+  else {
+    int64_t dense_stride0 = op1.stride(0);
+    int64_t dense_stride1 = op1.stride(1);
+    int64_t out_stride0 = out.stride(0);
+    int64_t out_stride1 = out.stride(1);
+    
+    AT_DISPATCH_FLOATING_TYPES(
+      values.scalar_type(), "sparse_gcs_mm_cpu", [&] {
+        scalar_t cast_alpha = alpha.to<scalar_t>();
+        scalar_t cast_beta = beta.to<scalar_t>();
+        scalar_t* dense_ptr = op1.data_ptr<scalar_t>();
+        scalar_t* out_ptr = out.data_ptr<scalar_t>();
+
+        auto indices_accessor = indices.accessor<int32_t, 1>();
+        auto pointers_accessor = pointers.accessor<int32_t, 1>();
+        auto values_accessor = values.accessor<scalar_t, 1>();
+
+        for (int iptr = 0; iptr < pointers.size(0)-1; ++iptr) {
+          int start_index = pointers_accessor[iptr];
+          int end_index = pointers_accessor[iptr+1];
+
+          for (int i = start_index; i < end_index; ++i) {
+            auto val = values_accessor[i];
+            auto icol = indices_accessor[i];
+
+            THBlas_axpy<scalar_t>(dim_k,
+              cast_alpha * val, dense_ptr + icol * dense_stride0, dense_stride1,
+              out_ptr + iptr * out_stride0, out_stride1);
+          }
+        }
+    });
+  }
   return out;
 }
 
