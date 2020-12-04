@@ -119,6 +119,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.as_strided,
         torch.bartlett_window,
         torch.blackman_window,
+        torch.broadcast_shapes,
         torch.can_cast,
         torch.cudnn_affine_grid_generator,
         torch.cudnn_batch_norm,
@@ -407,6 +408,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.greater_equal: lambda input, other, out=None: -1,
         torch.geqrf: lambda input, out=None: -1,
         torch.i0: lambda input, out=None: -1,
+        torch.inner: lambda input, other, out=None: -1,
         torch.outer: lambda input, vec2, out=None: -1,  # alias for torch.ger
         torch.ger: lambda input, vec2, out=None: -1,
         torch.grid_sampler: lambda input, grid, interpolation_mode, padding_mode, align_corners: -1,
@@ -521,6 +523,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.mm: lambda input, mat2, out=None: -1,
         torch.mode: lambda input, dim=-1, keepdim=False, out=None: -1,
         torch.movedim: lambda input, source, destination: -1,
+        torch.moveaxis: lambda input, source, destination: -1,
         torch.mul: lambda input, other, out=None: -1,
         torch.multiply: lambda input, other, out=None: -1,
         torch.multinomial: lambda input, num_samples, replacement=False, out=None: -1,
