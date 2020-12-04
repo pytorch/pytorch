@@ -8,7 +8,12 @@ from hypothesis import given, strategies as st, settings
 from caffe2.python.fakelowp.test_utils import print_test_debug_info
 import caffe2.python.serialized_test.serialized_test_util as serial
 
-core.GlobalInit(["caffe2", "--caffe2_log_level=-3", "--glow_global_fp16=1"])
+core.GlobalInit(["caffe2",
+                 "--caffe2_log_level=-3",
+                 "--glow_global_fp16=1",
+                 "--glow_clip_quant_range_to_fp16=1",
+                 "--glow_global_fp16_constants=1"
+                 ])
 
 
 class Int8OpsTest(serial.SerializedTestCase):
