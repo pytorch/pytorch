@@ -3120,18 +3120,19 @@ class TestSparse(TestCase):
             r2 = torch.sparse.mm(a, b)
             self.assertEqual(r1, r2)
 
-            # with cuda only can be computed backward for nnz > 0. 
-            # Note: There is a CUDA runtime error: No valid pointers for nnz == 0 
-            if nnz > 0:
-                a.requires_grad_(True)
-                b.requires_grad_(True)
+            a.requires_grad_(True)
+            b.requires_grad_(True)
 
-                # check autograd support on sparse matmul
-                def fn(D1, D2):
-                    return torch.sparse.mm(D1, D2).to_dense()
-                # for cuda `nondet_tol=1e-5` because cuSparse returns sometimes values like 3.4585e-323 which is zero 
-                gradcheck(fn, (a, b), check_sparse_nnz=True, nondet_tol=1e-5)
-                grad_with_custom_sparsity_pattern_test_helper(sparse_dims, nnz, shape_a, shape_b)
+            # check autograd support on sparse matmul
+            def fn(D1, D2):
+                return torch.sparse.mm(D1, D2).to_dense()
+
+            # For cuda, `nondet_tol` is set with `1e-5` 
+            # This is because cuSparse sometimes returns approximate zero values like `~e-323`
+            # TODO: Check this cuSparse issue. 
+            # This happens when you do chain multiplication `torch.sparse.mm` operations 
+            gradcheck(fn, (a, b), check_sparse_nnz=True, nondet_tol=1e-5)
+            grad_with_custom_sparsity_pattern_test_helper(sparse_dims, nnz, shape_a, shape_b)
 
         def test_error_cases():
             def fn(sparse_dims, nnz, shape_a, shape_b):

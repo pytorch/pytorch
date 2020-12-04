@@ -48,9 +48,9 @@ namespace {
 
 using namespace at::sparse;
 
-IntTensor _to_csr_int(const LongTensor& rowIndices, int64_t dim, int64_t nnz) {
-  IntTensor csr = at::empty({dim + 1}, CUDA(kInt));
-  IntTensor rowIndicesInt = at::empty({rowIndices.size(0)}, CUDA(kInt));
+Tensor _to_csr_int(const Tensor& rowIndices, int64_t dim, int64_t nnz) {
+  Tensor csr = at::empty({dim + 1}, CUDA(kInt));
+  Tensor rowIndicesInt = at::empty({rowIndices.size(0)}, CUDA(kInt));
   rowIndicesInt.copy_(rowIndices);
   sparse::cuda::Xcoo2csr(
       rowIndicesInt.data_ptr<int32_t>(), nnz, dim, csr.data_ptr<int32_t>());
@@ -156,8 +156,8 @@ struct csrMatrixRef {
 // of this was to have a materialized  version of a CSR matrix.
 // Moreover this implements a RAII guard for a cusparse descriptor  
 struct csrOutput {
-  IntTensor csr_indices_{};
-  IntTensor csr_pointers_{};
+  Tensor csr_indices_{};
+  Tensor csr_pointers_{};
   at::Tensor csr_values_{};
   int nnz_{0};
   std::vector<int> size_;
@@ -202,7 +202,7 @@ struct CusparseMatrixMultiplyOp {
       const csrMatrixRef<scalar_t>& A,
       const csrMatrixRef<scalar_t>& B,
       Tensor& output_values,
-      IntTensor& output_indices) {
+      Tensor& output_indices) {
     const int A_num_rows = A.size(0);
     const int A_num_cols = A.size(1);
     const int A_num_nnz = A.nnz_;
@@ -382,7 +382,7 @@ struct CusparseMatrixMultiplyOp {
       const csrMatrixRef<scalar_t>& lhs,
       const csrMatrixRef<scalar_t>& rhs,
       Tensor &output_values, 
-      IntTensor &output_indices)
+      Tensor &output_indices)
   {
     TORCH_INTERNAL_ASSERT(false, "cusparse csr sparse-sparse MM only supports data type of float and double.");
   }
@@ -390,14 +390,10 @@ struct CusparseMatrixMultiplyOp {
 
 // Specializacion for `A @ B` operation for double values with cuSparse
 template<> struct CusparseMatrixMultiplyOp<double> {
-  cusparseHandle_t cusparseHandle_;
   csrgemm2Info_t gemm2Info_;
 
   CusparseMatrixMultiplyOp() {
     TORCH_CUDASPARSE_CHECK(cusparseCreateCsrgemm2Info(&gemm2Info_));
-    cusparseHandle_ = at::cuda::getCurrentCUDASparseHandle();
-    TORCH_CUDASPARSE_CHECK(cusparseSetPointerMode(cusparseHandle_, CUSPARSE_POINTER_MODE_HOST));
-
   }
   ~CusparseMatrixMultiplyOp() {
     cusparseDestroyCsrgemm2Info(gemm2Info_);
@@ -407,7 +403,7 @@ template<> struct CusparseMatrixMultiplyOp<double> {
       const DcsrMatrixRef& lhs,
       const DcsrMatrixRef& rhs,
       Tensor &output_values, 
-      IntTensor &output_indices) {
+      Tensor &output_indices) {
     double alpha = 1.0;
     DcsrMatrixRef empty;
     return Dgemm2(lhs, rhs, empty, &alpha, nullptr, output_values, output_indices);
@@ -420,13 +416,10 @@ template<> struct CusparseMatrixMultiplyOp<double> {
       const double* alpha,
       const double* beta,
       Tensor &output_values, 
-      IntTensor &output_indices) {
-    csrgemm2Info_t gemm2Info_;
+      Tensor &output_indices) {
     void* buffer_{nullptr};
-
     cusparseHandle_t cusparseHandle_ = at::cuda::getCurrentCUDASparseHandle();
     TORCH_CUDASPARSE_CHECK(cusparseSetPointerMode(cusparseHandle_, CUSPARSE_POINTER_MODE_HOST));
-    TORCH_CUDASPARSE_CHECK(cusparseCreateCsrgemm2Info(&gemm2Info_));
 
     csrOutput out({A.size(0), B.size(1)});
     int innerSize = confirm_mult_size(A.size_, B.size_);
@@ -518,21 +511,16 @@ template<> struct CusparseMatrixMultiplyOp<double> {
         out.csr_indices_.data_ptr<int>(),
         gemm2Info_,
         buffer_));
-
-    TORCH_CUDASPARSE_CHECK(cusparseDestroyCsrgemm2Info(gemm2Info_));
     return out;
   }
 };
 
 // Specializacion for `A @ B` operation for float values with cuSparse
 template<> struct CusparseMatrixMultiplyOp<float> {
-  cusparseHandle_t cusparseHandle_;
   csrgemm2Info_t gemm2Info_;
 
   CusparseMatrixMultiplyOp() {
     TORCH_CUDASPARSE_CHECK(cusparseCreateCsrgemm2Info(&gemm2Info_));
-    cusparseHandle_ = at::cuda::getCurrentCUDASparseHandle();
-    TORCH_CUDASPARSE_CHECK(cusparseSetPointerMode(cusparseHandle_, CUSPARSE_POINTER_MODE_HOST));
 
   }
   ~CusparseMatrixMultiplyOp() {
@@ -542,7 +530,7 @@ template<> struct CusparseMatrixMultiplyOp<float> {
       const ScsrMatrixRef& lhs,
       const ScsrMatrixRef& rhs,
       Tensor &output_values, 
-      IntTensor &output_indices) {
+      Tensor &output_indices) {
     float alpha = 1.0;
     ScsrMatrixRef empty;
     return Sgemm2(lhs, rhs, empty, &alpha, nullptr, output_values, output_indices);
@@ -555,8 +543,10 @@ template<> struct CusparseMatrixMultiplyOp<float> {
       const float* alpha,
       const float* beta,
       Tensor &output_values, 
-      IntTensor &output_indices) {
+      Tensor &output_indices) {
     void* buffer_{nullptr};
+    cusparseHandle_t cusparseHandle_ = at::cuda::getCurrentCUDASparseHandle();
+    TORCH_CUDASPARSE_CHECK(cusparseSetPointerMode(cusparseHandle_, CUSPARSE_POINTER_MODE_HOST));
 
     csrOutput out({A.size(0), B.size(1)});
 
@@ -666,26 +656,26 @@ void sparse_sparse_matmul_cuda_kernel(
   static_assert(std::is_same<float, scalar_t>::value || std::is_same<double, scalar_t>::value, 
     "sparse_sparse_matmul_cuda_kernel only supports float and double value types");
   
-  LongTensor mat1_indices_ = mat1._indices().contiguous();
+  Tensor mat1_indices_ = mat1._indices().contiguous();
   Tensor mat1_values = mat1._values().contiguous();
 
-  LongTensor mat1_row_indices = mat1_indices_.select(0, 0);
-  LongTensor mat1_col_indices = mat1_indices_.select(0, 1);
+  Tensor mat1_row_indices = mat1_indices_.select(0, 0);
+  Tensor mat1_col_indices = mat1_indices_.select(0, 1);
 
-  IntTensor mat1_indptr = _to_csr_int(mat1_row_indices, mat1.size(0), mat1._nnz());
+  Tensor mat1_indptr = _to_csr_int(mat1_row_indices, mat1.size(0), mat1._nnz());
   
-  IntTensor mat1_indices = at::empty(
+  Tensor mat1_indices = at::empty(
       {mat1_col_indices.size(0)}, mat1_col_indices.options().dtype(kInt));
   
   mat1_indices.copy_(mat1_col_indices);
 
-  LongTensor mat2_indices_ = mat2._indices().contiguous();
+  Tensor mat2_indices_ = mat2._indices().contiguous();
   Tensor mat2_values = mat2._values().contiguous();
-  LongTensor mat2_row_indices = mat2_indices_.select(0, 0);
-  LongTensor mat2_col_indices = mat2_indices_.select(0, 1);
+  Tensor mat2_row_indices = mat2_indices_.select(0, 0);
+  Tensor mat2_col_indices = mat2_indices_.select(0, 1);
 
-  IntTensor mat2_indptr = _to_csr_int(mat2_row_indices, mat2.size(0), mat2._nnz());
-  IntTensor mat2_indices = at::empty({mat2_col_indices.size(0)}, mat2_col_indices.options().dtype(kInt));
+  Tensor mat2_indptr = _to_csr_int(mat2_row_indices, mat2.size(0), mat2._nnz());
+  Tensor mat2_indices = at::empty({mat2_col_indices.size(0)}, mat2_col_indices.options().dtype(kInt));
   mat2_indices.copy_(mat2_col_indices);
 
   auto m = mat1.size(0);
@@ -693,11 +683,18 @@ void sparse_sparse_matmul_cuda_kernel(
 
   auto k2 = mat2.size(0);
   auto n = mat2.size(1);
-
   TORCH_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (k1 <= INT_MAX),
     "At the moment, cusparseDcsrgemm2 only supports m, n, k, nnz with the bound [val] <= ", INT_MAX, ".",
     "If you need this, please file an issue on GitHub."
   );
+  auto output_indices = result._indices();
+  auto output_values = result._values();
+
+  if ((k1 == 0 && k2 == 0) || (n == 0 && m == 0)) {
+    output_indices.zero_();
+    output_values.zero_();
+    return;
+  }
 
   csrMatrixRef<scalar_t> csr_mat1(
       mat1_indices.data_ptr<int>(),
@@ -712,9 +709,6 @@ void sparse_sparse_matmul_cuda_kernel(
       mat2_values.data_ptr<scalar_t>(),
       (int)mat2._nnz(),
       {(int)mat2.size(0), (int)mat2.size(1)});
-
-  auto output_indices = result._indices();
-  auto output_values = result._values();
 
   // Sparse matrix multiplication
   CusparseMatrixMultiplyOp<scalar_t> op;
@@ -771,13 +765,22 @@ void sparse_sparse_matmul_cuda_kernel(
 } // end anonymous namespace
 
 Tensor sparse_matrix_mask_helper_cuda(
-  int64_t r_nnz,
   const SparseTensor& t,
-  const LongTensor& mask_indices
+  const Tensor& mask_indices
 ) {
+  /*
+    This is a helper function which filter values from `t._values()` using the `mask_indices`.
+    This CUDA implementation uses `thrust::set_intersection_by_key` operation to find the intersection 
+    of the `mask_indices` and the `t._indices()` to then filter the values.  
+
+    Inputs:
+      `t`             - tensor input 
+      `mask_indices`  - mask indices tensor
+  */
+  int64_t r_nnz = mask_indices.size(1); 
   auto t_v = t._values().contiguous();
 
-  Tensor r_values = at::empty({r_nnz}, t_v.options());
+  Tensor r_values = at::zeros({r_nnz}, t_v.options());
 
   auto t_i = t._indices().contiguous();
   auto t_indices_accessor = t_i.packed_accessor<int64_t, 2>();
@@ -791,6 +794,7 @@ Tensor sparse_matrix_mask_helper_cuda(
   auto t_flatten_indices_accessor = t_flatten_indices.packed_accessor<int64_t, 1>();
   auto t_n_cols = t.size(1);
 
+  // Step 1: flatten the sparse indices `t._indices()` tensor into a 1D indices tensor `t_flatten_indices`.  
   thrust::for_each(
     policy,
     thrust::make_counting_iterator(int64_t(0)),
@@ -804,6 +808,7 @@ Tensor sparse_matrix_mask_helper_cuda(
   auto mask_flatten_indices_accessor = mask_flatten_indices.packed_accessor<int64_t, 1>();
   auto mask_indices_accessor = mask_indices.packed_accessor<int64_t, 2>();
 
+  // Step 2: flatten the sparse indices `mask_indices` tensor into a 1D indices tensor `mask_flatten_indices`.  
   thrust::for_each(
     policy,
     thrust::make_counting_iterator(int64_t(0)),
@@ -815,6 +820,8 @@ Tensor sparse_matrix_mask_helper_cuda(
   auto max_sz = std::max(r_nnz, t_nnz);
   Tensor t_index_set = at::empty({max_sz}, mask_indices.options()); 
 
+  // Step 3: find the intersection between `t_flatten_indices` and `mask_flatten_indices` indices.
+  // Note: the original positions from `t_flatten_indices` are stored in `t_index_set`   
   auto result_end = thrust::set_intersection_by_key(
     policy,
     t_flatten_indices.data_ptr<int64_t>(),
@@ -825,36 +832,39 @@ Tensor sparse_matrix_mask_helper_cuda(
     thrust::make_discard_iterator(),
     t_index_set.data_ptr<int64_t>());
 
+  // new_sz is the size of the intersection of the `mask_indices` and the `t._indices()`
   auto new_sz = thrust::distance(t_index_set.data_ptr<int64_t>(), result_end.second);
   
-  if (new_sz > 0) {
-    Tensor mask_index_set = at::empty({max_sz}, mask_indices.options()); 
-    thrust::set_intersection_by_key(
-        policy,
-        mask_flatten_indices.data_ptr<int64_t>(), 
-        mask_flatten_indices.data_ptr<int64_t>() + r_nnz,
-        t_flatten_indices.data_ptr<int64_t>(),
-        t_flatten_indices.data_ptr<int64_t>() + t_nnz, 
-        thrust::make_counting_iterator(int64_t(0)),
-        thrust::make_discard_iterator(),
-        mask_index_set.data_ptr<int64_t>()); 
+  Tensor mask_index_set = at::empty({max_sz}, mask_indices.options()); 
 
-    AT_DISPATCH_FLOATING_TYPES(r_values.scalar_type(), "_sparse_matrix_mask", [&] {
-      auto r_values_accessor = r_values.packed_accessor<scalar_t, 1>();
-      auto t_values = t_v.packed_accessor<scalar_t, 1>(); 
-      auto mask_index_set_ptr = mask_index_set.packed_accessor<int64_t, 1>();
-      auto t_index_set_ptr = t_index_set.packed_accessor<int64_t, 1>();
-        thrust::for_each(
-          policy,
-          thrust::make_counting_iterator(int64_t(0)),
-          thrust::make_counting_iterator(int64_t(new_sz)),
-          [r_values_accessor, t_values, t_index_set_ptr, mask_index_set_ptr, r_nnz] __device__ (int64_t i) mutable {
-            int64_t target = mask_index_set_ptr[i];
-            int64_t origin = t_index_set_ptr[i];
-            r_values_accessor[target] = t_values[origin];
-          });
-    });
-  }
+  // Step 4: Repeat the intersection operation between `mask_flatten_indices` and `t_flatten_indices` indices.
+  // But now store the positions from `mask_flatten_indices` in `mask_index_set`   
+  thrust::set_intersection_by_key(
+      policy,
+      mask_flatten_indices.data_ptr<int64_t>(), 
+      mask_flatten_indices.data_ptr<int64_t>() + r_nnz,
+      t_flatten_indices.data_ptr<int64_t>(),
+      t_flatten_indices.data_ptr<int64_t>() + t_nnz, 
+      thrust::make_counting_iterator(int64_t(0)),
+      thrust::make_discard_iterator(),
+      mask_index_set.data_ptr<int64_t>()); 
+
+  // Step 5: Filter `t._values()` values by using  `mask_index_set` and `t_index_set`
+  AT_DISPATCH_FLOATING_TYPES(r_values.scalar_type(), "_sparse_matrix_mask", [&] {
+    auto r_values_accessor = r_values.packed_accessor<scalar_t, 1>();
+    auto t_values = t_v.packed_accessor<scalar_t, 1>(); 
+    auto mask_index_set_ptr = mask_index_set.packed_accessor<int64_t, 1>();
+    auto t_index_set_ptr = t_index_set.packed_accessor<int64_t, 1>();
+      thrust::for_each(
+        policy,
+        thrust::make_counting_iterator(int64_t(0)),
+        thrust::make_counting_iterator(int64_t(new_sz)),
+        [r_values_accessor, t_values, t_index_set_ptr, mask_index_set_ptr, r_nnz] __device__ (int64_t i) mutable {
+          int64_t target = mask_index_set_ptr[i];
+          int64_t origin = t_index_set_ptr[i];
+          r_values_accessor[target] = t_values[origin];
+        });
+  });
   return r_values;
 }
 

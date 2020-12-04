@@ -2975,7 +2975,7 @@
     SparseCPU: sparse_sparse_matmul_cpu
     SparseCUDA: sparse_sparse_matmul_cuda
 
-- func: _sparse_matrix_mask_helper(int nnz, Tensor t, Tensor mask_indices) -> Tensor
+- func: _sparse_matrix_mask_helper(Tensor t, Tensor mask_indices) -> Tensor
   dispatch:
     SparseCPU: sparse_matrix_mask_helper_cpu
     SparseCUDA: sparse_matrix_mask_helper_cuda

@@ -8,8 +8,6 @@ namespace at { namespace sparse {
 
 // Just for documentary purposes
 using SparseTensor = Tensor;
-using IntTensor = Tensor;
-using LongTensor = Tensor;
 using SparseType = Type;
 
 

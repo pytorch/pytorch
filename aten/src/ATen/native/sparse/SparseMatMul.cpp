@@ -171,15 +171,15 @@ void sparse_matmul_kernel(
 
   auto mat1_indices_ = mat1._indices().contiguous();
   auto mat1_values = mat1._values().contiguous();
-  LongTensor mat1_row_indices = mat1_indices_.select(0, 0);
-  LongTensor mat1_col_indices = mat1_indices_.select(0, 1);
+  Tensor mat1_row_indices = mat1_indices_.select(0, 0);
+  Tensor mat1_col_indices = mat1_indices_.select(0, 1);
 
   Tensor mat1_indptr = coo_to_csr(mat1_row_indices.data_ptr<int64_t>(), M, mat1._nnz());
 
   auto mat2_indices_ = mat2._indices().contiguous();
   auto mat2_values = mat2._values().contiguous();
-  LongTensor mat2_row_indices = mat2_indices_.select(0, 0);
-  LongTensor mat2_col_indices = mat2_indices_.select(0, 1);
+  Tensor mat2_row_indices = mat2_indices_.select(0, 0);
+  Tensor mat2_col_indices = mat2_indices_.select(0, 1);
 
   Tensor mat2_indptr = coo_to_csr(mat2_row_indices.data_ptr<int64_t>(), K, mat2._nnz()); 
 
@@ -193,8 +193,8 @@ void sparse_matmul_kernel(
   at::native::resize_output(output_indices, {2, nnz});
   at::native::resize_output(output_values, nnz);
   
-  LongTensor output_row_indices = output_indices.select(0, 0);
-  LongTensor output_col_indices = output_indices.select(0, 1);
+  Tensor output_row_indices = output_indices.select(0, 0);
+  Tensor output_col_indices = output_indices.select(0, 1);
 
   _csr_matmult(M, N, mat1_indptr.data_ptr<int64_t>(), mat1_col_indices.data_ptr<int64_t>(), mat1_values.data_ptr<scalar_t>(), 
   mat2_indptr.data_ptr<int64_t>(), mat2_col_indices.data_ptr<int64_t>(), mat2_values.data_ptr<scalar_t>(), 
@@ -206,10 +206,19 @@ void sparse_matmul_kernel(
 } // end anonymous namespace
 
 Tensor sparse_matrix_mask_helper_cpu(
-  int64_t r_nnz,
   const SparseTensor& t,
-  const LongTensor& mask_indices
+  const Tensor& mask_indices
 ) {
+  /*
+    This is a helper function which filter values from `t._values()` using the `mask_indices`.
+    This CPU implementation uses a simple hash_map to filter values by matching the `mask_indices` 
+    with the indices at tensor input `t`. 
+
+    Inputs:
+      `t`             - tensor input 
+      `mask_indices`  - mask indices tensor
+  */
+  int64_t r_nnz = mask_indices.size(1); 
   auto t_v = t._values();
   Tensor r_values = at::zeros({r_nnz}, t_v.options());  
   auto t_i = t._indices();
@@ -217,12 +226,15 @@ Tensor sparse_matrix_mask_helper_cpu(
 
   std::unordered_map<int64_t, int64_t> t_flatten_indices = {};
 
+  // Step 1: flatten the sparse indices `t._indices()` tensor and then  map this flatten value `index` to the original position `i` 
   auto t_indices_accessor = t_i.accessor<int64_t, 2>();
   for(int64_t i = 0; i < t_nnz; i++) {
     int64_t index = t_indices_accessor[0][i] * t.size(1) + t_indices_accessor[1][i];
     t_flatten_indices[index] = i;
   }
 
+  // Step 2: Filter `t._values()` values by matching the flatten `mask_indices` with the flatten `t._indices()` using the 
+  // hash_map `t_flatten_indices` 
   AT_DISPATCH_FLOATING_TYPES(r_values.scalar_type(), "_sparse_matrix_mask", [&] {
     auto r_values_accessor = r_values.accessor<scalar_t, 1>();
     auto t_values = t_v.accessor<scalar_t, 1>(); 

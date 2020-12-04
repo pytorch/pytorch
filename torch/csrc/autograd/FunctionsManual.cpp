@@ -623,14 +623,21 @@ Tensor _sparse_addmm_sparse_backward(const Tensor& grad, const Tensor& sparse_, 
   return grad_sparse.sparse_mask(sparse);
 }
 
-Tensor _sparse_matrix_mask(const Tensor& grad, const Tensor& mask){
+// This function return a new SparseTensor with values from Tensor `input` filtered by indices of `mask`
+// and values are ignored. `input` and `mask` are sparse matrices, a sparse tensor with sparse_dim=2 and  dense_dim=2,  
+// and they must have the same shape.
+// Note that the `output` must have the same `indices` as the `mask` so we are using just a clone. 
+// However, to get `values` we have to use specific helper function for CPU/CUDA and use the `mask` data to filter `values`
+// That's why we created this `_sparse_matrix_mask_helper` function. 
+Tensor _sparse_matrix_mask(const Tensor& input, const Tensor& mask){
   Tensor output = at::native::empty_like(mask);
+  Tensor mask_indices = mask._indices().clone();
+  Tensor r_values;
   if (mask._nnz() == 0) {
-    return output.zero_();
+    r_values = at::native::zeros_like(mask._values());
+  } else {
+    r_values = _sparse_matrix_mask_helper(input, mask_indices.contiguous());
   }
-  Tensor mask_indices = at::empty_like(mask._indices());
-  mask_indices.copy_(mask._indices());
-  auto r_values = _sparse_matrix_mask_helper(mask._nnz(), grad, mask_indices.contiguous());
   at::sparse::get_sparse_impl(output)->set_indices_and_values_unsafe(mask_indices, r_values);
   return output;
 }
@@ -640,6 +647,22 @@ Tensor sparse_sparse_matmul_backward(
     const Tensor& a,
     const Tensor& b,
     int64_t grad_order) {
+  /*
+  To implement the backward algorithm for sparse matrix-matrix matmul (SPMM) we can start from the following definition 
+  for dense tensors:
+  
+  c = a @ b 
+      then 
+  a_grad = c_grad @ b^T
+  b_grad = a^T @ c_grad
+
+  So for sparse matrices we can use the following definition:
+  
+  if grad_order == 0:
+      a_grad = sparse_matrix_mask(c_grad @ b^T, mask=a) 
+  else:
+      b_grad = sparse_matrix_mask(a^T @ c_grad, mask=b) 
+  */
   TORCH_CHECK(
       grad_order == 0 || grad_order == 1,
       ": grad_order not in [0, 1] at sparse_sparse_matmul_backward function");
