@@ -10403,11 +10403,11 @@ class TestNNDeviceType(NNTestCase):
     def test_MarginLoss_empty(self, device):
         for mod, x, y in [
                 (torch.nn.MultiMarginLoss().to(device),
-                torch.randn(0, 10, requires_grad=True, device=device),
-                torch.ones(0, device=device).type(torch.long)),
+                 torch.randn(0, 10, requires_grad=True, device=device),
+                 torch.ones(0, device=device).type(torch.long)),
                 (torch.nn.MultiLabelMarginLoss().to(device),
-                torch.randn(0, 10, requires_grad=True, device=device),
-                torch.ones(0, 10, device=device).type(torch.long))]:
+                 torch.randn(0, 10, requires_grad=True, device=device),
+                 torch.ones(0, 10, device=device).type(torch.long))]:
 
             out = mod(x, y)
             out.sum().backward()
