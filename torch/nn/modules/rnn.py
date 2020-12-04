@@ -34,7 +34,7 @@ class RNNBase(Module):
     batch_first: bool
     dropout: float
     bidirectional: bool
-    proj_size: bool
+    proj_size: int
 
     def __init__(self, mode: str, input_size: int, hidden_size: int,
                  num_layers: int = 1, bias: bool = True, batch_first: bool = False,
@@ -90,6 +90,7 @@ class RNNBase(Module):
                 # Second bias vector included for CuDNN compatibility. Only one
                 # bias vector is needed in standard definition.
                 b_hh = Parameter(torch.Tensor(gate_size))
+                layer_params: Tuple[Tensor, ...] = ()
                 if self.proj_size == 0:
                     if bias:
                         layer_params = (w_ih, w_hh, b_ih, b_hh)
@@ -590,8 +591,7 @@ class LSTM(RNNBase):
 
     def get_expected_cell_size(self, input: Tensor, batch_sizes: Optional[Tensor]) -> Tuple[int, int, int]:
         if batch_sizes is not None:
-            mini_batch = batch_sizes[0]
-            mini_batch = int(mini_batch)
+            mini_batch = int(batch_sizes[0])
         else:
             mini_batch = input.size(0) if self.batch_first else input.size(1)
         num_directions = 2 if self.bidirectional else 1
