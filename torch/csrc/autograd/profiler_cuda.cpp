@@ -37,7 +37,7 @@ struct CUDAMethods : public CUDAStubs {
     TORCH_CUDA_CHECK(cudaGetDevice(device));
     // Hack: setting device
     at::cuda::OptionalCUDAGuard device_guard;
-    device_guard.set_index(i);
+    device_guard.set_index(device);
     LOG(INFO) << "Done setting device";
     CUevent_st* cuda_event_ptr;
     TORCH_CUDA_CHECK(cudaEventCreate(&cuda_event_ptr));
