@@ -16,56 +16,48 @@
 
 namespace at { namespace native {
 
+// Functions for matrix multiplication.
 using namespace at::sparse;
-Tensor& s_addmm_out_sparse_gcs_dense_cpu(
-    Tensor& r,
-    const Tensor& t,
-    const SparseTensor& sparse_,
-    const Tensor& dense,
+
+Tensor& addmm_out_sparse_gcs_dense_cpu(
+    Tensor& out,
+    const Tensor& self,
+    const SparseTensor& op1,
+    const Tensor& op2,
     Scalar beta,
     Scalar alpha) {
-  // TODO: This error message seems awfully opaque
-  AT_ASSERT(t.device().type() == kCPU);
-  TORCH_CHECK(r.device().type() == kCPU, "addmm: expected 'out' to be CPU tensor, but got CUDA tensor");
-  TORCH_CHECK(sparse_.device().type() == kCPU, "addmm: expected 'mat1' to be a CPU tensor, but got a CUDA tensor");
-  TORCH_CHECK(dense.device().type() == kCPU, "addmm: expected 'mat2' to be a CPU tensor, but got a CUDA tensor");
+  Tensor expand_self;
+  std::tie(expand_self) = expand_size(self, {op1.size(0), op2.size(1)}, "addmm_out_sparse_gcs");
 
-  TORCH_CHECK(sparse_.dim() == 2, "addmm: matrices expected, got ", sparse_.dim(), "D tensor");
-  TORCH_CHECK(dense.dim() == 2, "addmm: matrices expected, got ", dense.dim(), "D tensor");
+  AT_ASSERT(expand_self.device().type() == kCPU);
+  TORCH_CHECK(out.device().type() == kCPU, "addmm: expected 'out' to be CPU tensor, but got CUDA tensor");
+  TORCH_CHECK(op1.device().type() == kCPU, "addmm: expected 'mat1' to be a CPU tensor, but got a CUDA tensor");
+  TORCH_CHECK(op2.device().type() == kCPU, "addmm: expected 'mat2' to be a CPU tensor, but got a CUDA tensor");
+
+  TORCH_CHECK(op1.dim() == 2, "addmm: 2-D matrices expected, got ", op1.dim(), "D tensor");
+  TORCH_CHECK(op2.dim() == 2, "addmm: 2-D matrices expected, got ", op2.dim(), "D tensor");
 
   // ixj * jxk = ixk
-  int64_t dim_i = sparse_.size(0);
-  int64_t dim_j = sparse_.size(1);
-  int64_t dim_k = dense.size(1);
+  int64_t dim_i = op1.size(0);
+  int64_t dim_j = op1.size(1);
+  int64_t dim_k = op2.size(1);
 
-  TORCH_CHECK(dense.size(0) == dim_j,
-              "addmm: Argument #3 (dense): Expected dim 0 size ", dim_j, ", got ", dense.size(0));
-  TORCH_CHECK(t.size(0) == dim_i,
-              "addmm: Argument #1 (t): Expected dim 0 size ", dim_i, ", got ", t.size(0));
-  TORCH_CHECK(t.size(1) == dim_k,
-              "addmm: Argument #1 (t): Expected dim 1 size ", dim_k, ", got ", t.size(1));
-  r.resize_({dim_i, dim_k});
+  TORCH_CHECK(op2.size(0) == dim_j,
+              "addmm: Argument #3 (op2): Expected dim 0 size ", dim_j, ", got ", op2.size(0));
+  TORCH_CHECK(expand_self.size(0) == dim_i,
+              "addmm: Argument #1 (t): Expected dim 0 size ", dim_i, ", got ", expand_self.size(0));
+  TORCH_CHECK(expand_self.size(1) == dim_k,
+              "addmm: Argument #1 (t): Expected dim 1 size ", dim_k, ", got ", expand_self.size(1));
+  out.resize_({dim_i, dim_k});
 
   // TODO: why does that nnz == 0 condition exist in the COO code?
 
-  at::_sparse_gcs_mm(r, sparse_, t, dense, alpha, beta);
+  at::_sparse_gcs_mm(out, op1, expand_self, op2, alpha, beta);
 
-  return r;
-}
-    
-Tensor& addmm_out_sparse_gcs_dense_cpu(
-    Tensor& result,
-    const Tensor& self,
-    const SparseTensor& mat1,
-    const Tensor& mat2,
-    Scalar beta,
-    Scalar alpha) {
-  Tensor b_self;
-  std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out_sparse_gcs");
-  return s_addmm_out_sparse_gcs_dense_cpu(result, b_self, mat1, mat2, beta, alpha);
+  return out;
 }
 
- Tensor addmm_sparse_gcs_dense_cpu(
+Tensor addmm_sparse_gcs_dense_cpu(
     const Tensor& self,
     const SparseTensor& sparse,
     const Tensor& dense,
@@ -74,6 +66,15 @@ Tensor& addmm_out_sparse_gcs_dense_cpu(
    Tensor r = at::empty({0}, self.options());
    at::addmm_out(r, self, sparse, dense, beta, alpha);
    return r;
+}
+
+SparseTensor& _sparse_gcs_mm_out(
+  SparseTensor& result,
+  const SparseTensor& sparse,
+  const Tensor& dense
+) {
+  Tensor t = at::zeros({}, dense.options());
+  return at::addmm_out(result, t, sparse, dense, 0.0, 1.0);  // redispatch!
 }
 
 Tensor _sparse_gcs_addmm(
@@ -89,16 +90,7 @@ Tensor _sparse_gcs_addmm(
   return at::addmm(t, sparse, dense, beta, alpha);
 }
 
-
-SparseTensor& _sparse_gcs_mm_out(
-  SparseTensor& result,
-  const SparseTensor& sparse,
-  const Tensor& dense
-) {
-  Tensor t = at::zeros({}, dense.options());
-  return at::addmm_out(result, t, sparse, dense, 0.0, 1.0);  // redispatch!
-}
-
+// Functions for element-wise addition.
 Tensor add_sparse_gcs(const Tensor& self, const Tensor& other, Scalar alpha) {
   auto commonDtype = at::result_type(self, other);
   alpha_check(commonDtype, alpha);
@@ -113,7 +105,6 @@ Tensor& add_sparse_gcs_(Tensor& self, const Tensor& other, Scalar alpha) {
 int32_t gcs_to_dense_convert(int32_t iptr, int32_t icol, Tensor& out,
                              const SparseTensor& src) {
   int32_t drow, dcol;
-  std::vector<int32_t> dense_indices;
   int32_t index = out.storage_offset();
   auto src_impl = get_sparse_impl<SparseGCSTensorImpl>(src);
   
@@ -145,16 +136,16 @@ Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense,
   TORCH_CHECK(!src.is_cuda(), "add: expected 'other' to be a CPU tensor, but got a CUDA tensor");
 
   TORCH_CHECK(dense.sizes().equals(src.sizes()), "add: expected 'self' and 'other' to have same size, but self has size ",
-    dense.sizes(), " while other has size ", src.sizes(), " (FYI: dense-sparse addition does not currently support broadcasting)");
+    dense.sizes(), " while other has size ", src.sizes(), " (FYI: op2-sparse addition does not currently support broadcasting)");
 
   auto commonDtype = promoteTypes(dense.scalar_type(), src.scalar_type());
 
   TORCH_CHECK(canCast(commonDtype, out.scalar_type()), "Can't convert result type ",
               commonDtype, " to output ", out.scalar_type(), " in add operation");
 
-  Tensor src_values = src.values().to(commonDtype);
-  Tensor src_pointers = src.pointers();
-  Tensor src_indices = src.indices();
+  auto src_values = src.values().to(commonDtype);
+  auto src_pointers = src.pointers();
+  auto src_indices = src.indices();
 
   out.resize_as_(dense);
   Tensor resultBuffer = out;
@@ -166,7 +157,7 @@ Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense,
     resultBuffer.copy_(dense);
   }
 
-  AT_DISPATCH_ALL_TYPES(commonDtype, "add_out_dense_sparse_gcs", [&] {
+  AT_DISPATCH_ALL_TYPES(commonDtype, "add_out_op2_sparse_gcs", [&] {
     auto values_accessor = src_values.accessor<scalar_t, 1>();
     auto pointers_accessor = src_pointers.accessor<int32_t, 1>();
     auto indices_accessor = src_indices.accessor<int32_t, 1>();
@@ -178,12 +169,10 @@ Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense,
       int32_t start_index = pointers_accessor[iptr];
       int32_t end_index = pointers_accessor[iptr + 1];
       int32_t nindices = end_index - start_index;
-      int32_t icol;
-      int32_t index;
 
       for (int i = start_index; i < end_index; ++i) {
-        icol = indices_accessor[i];
-        index = gcs_to_dense_convert(iptr, icol, out, src);
+        auto icol = indices_accessor[i];
+        auto index = gcs_to_dense_convert(iptr, icol, out, src);
         out_ptr[index] += cast_value * values_accessor[i];
       }
     }
@@ -196,42 +185,10 @@ SparseTensor& add_out_sparse_gcs_cpu(SparseTensor& out, const SparseTensor& self
   if (!self.is_sparse()) {
     return add_out_dense_sparse_gcs_cpu(out, self, src, alpha);
   }
-
-  AT_ASSERT(!self.is_cuda());  // the dispatch argument
-  TORCH_CHECK(!out.is_cuda(), "add: expected 'out' to be CPU tensor, but got CUDA tensor");
-  TORCH_CHECK(!src.is_cuda(), "add: expected 'other' to be a CPU tensor, but got a CUDA tensor");
-
-  TORCH_CHECK(self.sizes().equals(src.sizes()), "add: expected sizes of 'self' and 'other' to match, but ",
-              self.sizes(), " != ", src.sizes());
-
-  auto commonDtype = promoteTypes(self.scalar_type(), src.scalar_type());
-  TORCH_CHECK(canCast(commonDtype, out.scalar_type()), "Can't convert result type ", commonDtype,
-              " to output ", out.scalar_type(), " in add operation");
-
-
-  int64_t self_nnz = self._nnz(), src_nnz = src._nnz(), max_nnz = self_nnz + src_nnz;
-
-  out.resize_as_(src);
-  
-  Tensor self_values = self.values().to(commonDtype);
-  Tensor src_values = src.values().to(commonDtype);
-  Tensor out_values = new_values_with_size_of(self_values, max_nnz).zero_();
-
-  // auto self_indices_accessor = self_indices.accessor<int64_t, 1>();
-  // auto out_indices_accessor = out_indices.accessor<int64_t, 1>();
-  // auto src_indices_accessor = src_indices.accessor<int64_t, 1>();
-
-  AT_DISPATCH_ALL_TYPES(
-    commonDtype, "cadd_sparse_gcs", [&] {
-                                      
-    }
-  );
-
-  if (out.scalar_type() != commonDtype) {
-    out_values = out_values.to(out.scalar_type());
-  }
-  
+  else {
+    TORCH_CHECK(false, "NotImplementedError: Addition of sparse GCS tensors is not yet implemented.")
+  }  
   return out;
 }
 
-}}
+}} // namespace at::sparse
