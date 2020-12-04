@@ -43,27 +43,23 @@ def returns_type(rs: Sequence[Return]) -> str:
 def argument_type(a: Argument) -> str:
     return argumenttype_type(a.type, mutable=a.is_write)
 
-def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments], is_out_argument: bool) -> Sequence[NativeArgument]:
+def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments]) -> Sequence[NativeArgument]:
     if isinstance(a, Argument):
         return [NativeArgument(
             type=argument_type(a),
             name=a.name,
             default=cpp.default_expr(a.default, a.type) if a.default is not None else None,
             argument=a,
-            is_out_argument=is_out_argument,
         )]
     elif isinstance(a, SelfArgument):
-        assert not is_out_argument
         # Erase SelfArgument from the distinction
         return [NativeArgument(
             type=argument_type(a.argument),
             name=a.argument.name,
             default=None,
             argument=a.argument,
-            is_out_argument=is_out_argument,
         )]
     elif isinstance(a, TensorOptionsArguments):
-        assert not is_out_argument
         if local.use_c10_dispatcher() in [UseC10Dispatcher.hacky_wrapper_for_legacy_signatures,
                                           UseC10Dispatcher.with_codegenerated_unboxing_wrapper]:
             # TODO: expunge this logic entirely
@@ -77,7 +73,6 @@ def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments], is_out_ar
                 name='options',
                 default=default,
                 argument=a,
-                is_out_argument=is_out_argument,
             )]
         else:
             assert local.use_c10_dispatcher() == UseC10Dispatcher.full
@@ -87,37 +82,28 @@ def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments], is_out_ar
                     name='dtype',
                     default='{}',
                     argument=a,
-                    is_out_argument=is_out_argument,
                 ),
                 NativeArgument(
                     type='c10::optional<Layout>',
                     name='layout',
                     default='{}',
                     argument=a,
-                    is_out_argument=is_out_argument,
                 ),
                 NativeArgument(
                     type='c10::optional<Device>',
                     name='device',
                     default='{}',
                     argument=a,
-                    is_out_argument=is_out_argument,
                 ),
                 NativeArgument(
                     type='c10::optional<bool>',
                     name='pin_memory',
                     default='{}',
                     argument=a,
-                    is_out_argument=is_out_argument,
                 )]
     else:
         assert_never(a)
 
 def arguments(func: FunctionSchema) -> Tuple[NativeArgument, ...]:
-    (args, out_args) = cpp.group_arguments(func, method=False)
-    native_args = tuple(i for arg in args for i in argument(arg, is_out_argument=False))
-    native_out_args = tuple(i for arg in out_args for i in argument(arg, is_out_argument=True))
-    if local.use_c10_dispatcher() is UseC10Dispatcher.full:
-        return native_args + native_out_args
-    else:
-        return native_out_args + native_args
+    args = cpp.group_arguments(func, method=False, faithful=local.use_c10_dispatcher() is UseC10Dispatcher.full)
+    return tuple(i for arg in args for i in argument(arg))
