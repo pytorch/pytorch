@@ -676,4 +676,5 @@ class StandaloneModuleQuantizeHandler(QuantizeHandler):
         # update the modules dict
         setattr(quantizer.modules[parent_name], name, quantized_standalone_module)
         quantizer.modules[node.target] = quantized_standalone_module
-        return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
+        # standalone module takes float input
+        return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
