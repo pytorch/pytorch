@@ -1194,7 +1194,7 @@ class TestLinalg(TestCase):
 
     # Test that linal.norm gives the same result as numpy when inputs
     # contain extreme values (inf, -inf, nan)
-    @unittest.skip('Test is blocking https://github.com/pytorch/pytorch/pull/48436')
+    @onlyCPU # GPU Test is blocking https://github.com/pytorch/pytorch/pull/48436
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_MACOS, "Skipped on MacOS!")
     @skipCUDAIfNoMagma
