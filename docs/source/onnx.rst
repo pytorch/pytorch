@@ -574,6 +574,7 @@ The following operators are supported:
 * glu
 * group_norm
 * gt
+* hardswish
 * hardtanh
 * im2col
 * index_copy
