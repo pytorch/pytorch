@@ -339,6 +339,11 @@ class TestTensorCreation(TestCase):
         expected = torch.eye(4, dtype=torch.complex128)
         self.assertEqual(result, expected)
 
+        # Complex support for torch.diag
+        result = torch.diag(torch.ones(4, dtype=torch.complex128))
+        expected = torch.eye(4, dtype=torch.complex128)
+        self.assertEqual(result, expected)
+
     def test_block_diag(self, device):
         def block_diag_workaround(*arrs):
             arrs_expanded = []
