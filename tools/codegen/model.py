@@ -160,6 +160,11 @@ class NativeFunction:
         assert isinstance(funcs, str), f'not a str: {funcs}'
         func = FunctionSchema.parse(funcs, cpp_no_default_args)
 
+        defaulted_arguments = {a.name for a in func.schema_order_arguments()
+                               if a.default is not None}
+        invalid_args = set(cpp_no_default_args).difference(defaulted_arguments)
+        assert len(invalid_args) == 0, f'Invalid cpp_no_default_args: {invalid_args}'
+
         use_c10_dispatcher_s = e.pop('use_c10_dispatcher', None)
         if use_c10_dispatcher_s is None:
             use_c10_dispatcher = UseC10Dispatcher.with_codegenerated_unboxing_wrapper
