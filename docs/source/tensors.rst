@@ -371,6 +371,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: index_select
    .. automethod:: indices
       :noindex:
+   .. automethod:: inner
    .. automethod:: int
    .. automethod:: int_repr
    .. automethod:: inverse
@@ -461,6 +462,7 @@ view of a storage and defines numeric operations on it.
       :noindex:
    .. automethod:: mode
    .. automethod:: movedim
+   .. automethod:: moveaxis
    .. automethod:: mul
    .. automethod:: mul_
    .. automethod:: multiply
