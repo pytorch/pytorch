@@ -1350,11 +1350,31 @@ class TestClassType(JitTestCase):
             a = A()
             return a.i([3])
 
-        def call_o():
+        def call_j():
             a = A()
             return a.j([torch.device("cpu"), torch.device("cpu")])
 
-        for fn in [call_f, call_g, call_i, call_o]:
+        for fn in [call_f, call_g, call_i, call_j]:
             self.checkScript(fn, ())
             s = self.getExportImportCopy(torch.jit.script(fn))
             self.assertEqual(s(), fn())
+
+    def test_recursive_script_module_builtin_type_resolution(self):
+        """
+        Test resolution of built-in torch types(e.g. torch.Tensor, torch.device) when a class is recursively compiled
+        when compiling a module.
+        """
+        class Wrapper():
+            def __init__(self, t):
+                self.t = t
+
+            def to(self, l: List[torch.device], device: Optional[torch.device] = None):
+                return self.t.to(device=device)
+
+
+        class A(nn.Module):
+            def forward(self):
+                return Wrapper(torch.rand(4, 4))
+
+        scripted = torch.jit.script(A())
+        self.getExportImportCopy(scripted)
