@@ -416,6 +416,11 @@ class TORCH_API RecordFunctionCallback {
   RECORD_FUNCTION_WITH_SCOPE( \
     at::RecordScope::USER_SCOPE, fn, {})
 
+// RECORD_USER_SCOPE with inputs
+#define RECORD_USER_SCOPE_WITH_INPUTS(fn, inputs) \
+  RECORD_FUNCTION_WITH_SCOPE( \
+    at::RecordScope::USER_SCOPE, fn, inputs)
+
 // Notes:
 //  - two types of callbacks are provided: thread local and global
 //     - thread local callbacks are added/removed only for the given thread
