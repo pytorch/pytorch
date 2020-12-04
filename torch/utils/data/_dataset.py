@@ -1,4 +1,6 @@
 # Note: The entire file is in testing phase. Please do not import!
+import warnings
+
 from .dataset import Dataset as MapDataset
 from .dataset import IterableDataset as IterDataset
 
@@ -10,6 +12,11 @@ from .decoder import imagehandler as decoder_imagehandler
 
 from typing import List, Iterable, Union
 
+try:
+    import braceexpand
+    IMPORTED_BRACEEXPAND = True
+except Exception as e:
+    IMPORTED_BRACEEXPAND = False
 
 class ListDirFilesMapDataset(MapDataset):
     def __init__(self, root: str = '.', masks: Union[str, List[str]] = '*.tar'):
@@ -168,3 +175,42 @@ class RoutedDecoderIterDataset(IterDataset):
             pathname = data[0]
             result = self.decoder(data)
             yield (pathname, result[pathname])
+
+    def __len__(self):
+        return self.length
+
+# Dataset for expanding input url macro(s) which can be regular url(s) or braced url(s) into regular urls,
+# if the url macro is braced url, it will be expanded into regular url(s) only when module `braceexpand`
+# is imported, otherwise, the expanding operation will not be performed, braced url itself will be yield back.
+# This dataset yield url back in string type
+# args:
+#    urls_marco - input url strings which can be regular urls or braced urls
+#    length     - a nominal length of the dataset
+#
+# eg. https://www.xyz.com/training-data-{000...045}.tar will be converted to a list of urls
+#     from https://www.xyz.com/training-data-000.tar to https://www.xyz.com/training-data-045.tar,
+#     yield one url per iteration.
+#
+# note: This dataset class need python module `braceexpand`
+class ExpandUrlMacroIterDataset(IterDataset):
+    def __init__(
+            self,
+            urls_macro : Union[str, List[str]],
+            length : int = -1):
+        super().__init__()
+        self.urls_macro : Union[str, List[str]] = urls_macro if isinstance(urls_macro, list) else [urls_macro]
+        self.length : int = length
+
+    def __iter__(self):
+        if not IMPORTED_BRACEEXPAND:
+            warnings.warn("module `braceexpand` is not imported, url expanding will not happen")
+
+        for url in self.urls_macro:
+            if url:
+                if IMPORTED_BRACEEXPAND:
+                    yield from braceexpand.braceexpand(url)
+                else:
+                    yield url
+
+    def __len__(self):
+        return self.length
