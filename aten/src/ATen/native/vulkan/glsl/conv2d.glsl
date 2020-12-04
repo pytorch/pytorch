@@ -42,7 +42,7 @@ void main() {
     for (int z = 0; z < uBlock.kernel.z; z+=4) {
       const int z4 = z/4;
       for (int y = start.y, ky = kstart.y + pos.z * uBlock.src_kernel.y; y < end.y; y += uBlock.dilate.y, ++ky) {
-        for (int x = start.x, kx = kstart.x + z4*uBlock.src_kernel.z; x < end.x; x += uBlock.dilate.x, kx+=4) {
+        for (int x = start.x, kx = 4*kstart.x + z4*uBlock.src_kernel.z; x < end.x; x += uBlock.dilate.x, kx+=4) {
           const vec4 In = texelFetch(uInput, ivec3(x, y, z4), 0);
 
           sum = fma(In.xxxx, texelFetch(uKernel, ivec3(0 + kx, ky, 0), 0), sum);
