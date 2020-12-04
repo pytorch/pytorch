@@ -212,7 +212,8 @@ def assert_allclose(actual, expected, rtol=None, atol=None, equal_nan=True, msg=
     if not isinstance(expected, torch.Tensor):
         expected = torch.tensor(expected, dtype=actual.dtype)
     if expected.shape != actual.shape:
-        expected = expected.expand_as(actual)
+        raise AssertionError("expected tensor shape {0} doesn't match with actual tensor "
+                             "shape {1}!".format(expected.shape, actual.shape))
     if rtol is None or atol is None:
         if rtol is not None or atol is not None:
             raise ValueError("rtol and atol must both be specified or both be unspecified")

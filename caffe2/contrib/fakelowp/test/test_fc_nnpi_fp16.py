@@ -48,7 +48,7 @@ class FCTest(serial.SerializedTestCase):
         )
         workspace.GlobalInit(
             ['caffe2', '--caffe2_log_level=0', '--glow_global_fp16=1',
-             '--glow_clip_fp16'])
+             '--glow_clip_fp16', '--glow_global_fp16_constants=1'])
         workspace.SwitchWorkspace("glow_test_ws", True)
         workspace.ResetWorkspace()
         W0 = np.full((n, k), 65536.0, dtype)

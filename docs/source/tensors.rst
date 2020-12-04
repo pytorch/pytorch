@@ -267,7 +267,9 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cummax
    .. automethod:: cummin
    .. automethod:: cumprod
+   .. automethod:: cumprod_
    .. automethod:: cumsum
+   .. automethod:: cumsum_
    .. automethod:: data_ptr
    .. automethod:: deg2rad
    .. automethod:: dequantize
@@ -320,6 +322,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: fliplr
    .. automethod:: flipud
    .. automethod:: float
+   .. automethod:: float_power
+   .. automethod:: float_power_
    .. automethod:: floor
    .. automethod:: floor_
    .. automethod:: floor_divide
@@ -353,6 +357,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: i0_
    .. automethod:: igamma
    .. automethod:: igamma_
+   .. automethod:: igammac
+   .. automethod:: igammac_
    .. automethod:: ifft
    .. automethod:: index_add_
    .. automethod:: index_add
@@ -365,6 +371,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: index_select
    .. automethod:: indices
       :noindex:
+   .. automethod:: inner
    .. automethod:: int
    .. automethod:: int_repr
    .. automethod:: inverse
@@ -392,6 +399,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: kthvalue
    .. automethod:: lcm
    .. automethod:: lcm_
+   .. automethod:: ldexp
+   .. automethod:: ldexp_
    .. automethod:: le
    .. automethod:: le_
    .. automethod:: less_equal
@@ -453,6 +462,7 @@ view of a storage and defines numeric operations on it.
       :noindex:
    .. automethod:: mode
    .. automethod:: movedim
+   .. automethod:: moveaxis
    .. automethod:: mul
    .. automethod:: mul_
    .. automethod:: multiply
@@ -585,10 +595,13 @@ view of a storage and defines numeric operations on it.
    .. automethod:: sum
    .. automethod:: sum_to_size
    .. automethod:: svd
+   .. automethod:: swapaxes
+   .. automethod:: swapdims
    .. automethod:: symeig
    .. automethod:: t
    .. automethod:: t_
    .. automethod:: tensor_split
+   .. automethod:: tile
    .. automethod:: to
    .. automethod:: to_mkldnn
    .. automethod:: take

@@ -1,19 +1,32 @@
 import torch
+import unittest
 from typing import Dict
 from torch.fx.symbolic_trace import symbolic_trace
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
-from torch.fx.experimental import GraphManipulation
-from torch.fx.experimental.Partitioner import Partitioner, Device, PartitionerConfig
+from torch.fx.experimental import graph_manipulation
+from torch.fx.experimental.accelerator_partitioner import Partitioner
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
+from torch.fx.experimental.subgraph_creation_example import split_module
 from torch.fx.experimental.partitioner_utils import (
     NodeLatency,
     get_partition_to_latency_mapping,
     get_latency_of_partitioned_graph,
+    Device,
+    PartitionerConfig,
+    PartitionMode
 )
+from torch.fx.experimental.fuser import fuse
 from typing import Union, Callable
+
+try:
+    from torchvision.models import resnet18
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 
 def symbolic_trace_with_rewrite(root: Union[torch.nn.Module, Callable]) -> GraphModule:
@@ -30,10 +43,12 @@ class TestFXExperimental(JitTestCase):
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
                 self.e = torch.rand(4)
+                self.conv = torch.nn.Conv2d(3, 3, 2, bias=False)
 
-            def forward(self, a, b):
+            def forward(self, a, b, c):
                 add_1 = a + b
-                linear = self.linear(add_1)
+                conv1 = self.conv(c)
+                linear = self.linear(add_1 + conv1)
                 add_2 = linear + self.e
                 return add_2
 
@@ -41,11 +56,12 @@ class TestFXExperimental(JitTestCase):
         traced = symbolic_trace(m)
         a = torch.rand(4)
         b = torch.rand(4)
-        GraphManipulation.get_size_of_all_nodes(traced, [a, b])
+        c = torch.rand(3, 3, 2, 2)
+        graph_manipulation.get_size_of_all_nodes(traced, [a, b, c])
 
         partitioner = Partitioner()
         devices = [Device("dev_0", 5000, 0), Device("dev_1", 125, 1)]
-        partitioner_config = PartitionerConfig(devices, is_sparse_nn=True)
+        partitioner_config = PartitionerConfig(devices, PartitionMode.sparse_nn)
         ret = partitioner.partition_graph(traced, m, partitioner_config)
         module_with_submodules = ret.module_with_submodules
         # Fix for now to add type/shape to output
@@ -62,15 +78,15 @@ class TestFXExperimental(JitTestCase):
             node.shape = a.shape
             node.dtype = a.dtype
 
-        agm1 = GraphManipulation.AcceleratedGraphModule(traced)
-        agm2 = GraphManipulation.AcceleratedGraphModule(module_with_submodules)
-        assert len(agm1.weights) == 3
-        assert len(agm2.weights) == 3
-        assert len(agm1.serialized_graph["nodes"]) == 7
-        assert len(agm1.serialized_graph["weights"]) == 3
+        agm1 = graph_manipulation.AcceleratedGraphModule(traced)
+        agm2 = graph_manipulation.AcceleratedGraphModule(module_with_submodules)
+        assert len(agm1.weights) == 4
+        assert len(agm2.weights) == 4
+        assert len(agm1.serialized_graph["nodes"]) == 10
+        assert len(agm1.serialized_graph["weights"]) == 4
         assert len(agm1.serialized_graph["modules"]) == 0
-        assert len(agm2.serialized_graph["nodes"]) == 5
-        assert len(agm2.serialized_graph["weights"]) == 3
+        assert len(agm2.serialized_graph["nodes"]) == 6
+        assert len(agm2.serialized_graph["weights"]) == 4
         assert len(agm2.serialized_graph["modules"]) == 1
         assert agm1.serialized_graph["weights"]["linear.weight"]["shape"] == "[4, 4]"
         assert (
@@ -85,8 +101,8 @@ class TestFXExperimental(JitTestCase):
         assert agm1.serialized_graph["nodes"][0]["target"] == "a"
         assert agm1.serialized_graph["nodes"][0]["op_code"] == "placeholder"
         assert agm1.serialized_graph["nodes"][0]["name"] == "a"
-        assert agm1.serialized_graph["nodes"][2]["args"][0]["name"] == "a"
-        assert agm1.serialized_graph["nodes"][2]["args"][0]["is_node"] is True
+        assert agm1.serialized_graph["nodes"][6]["args"][0]["name"] == "add_2"
+        assert agm1.serialized_graph["nodes"][6]["args"][0]["is_node"] is True
 
         # Test quantization info serialization.
         x = torch.tensor([[-1.0, 0.0], [1.0, 2.0]])
@@ -94,8 +110,8 @@ class TestFXExperimental(JitTestCase):
         q_tensor_channel = torch.quantize_per_channel(
             x, torch.tensor([0.1, 0.01]), torch.tensor([10, 0]), 0, torch.quint8
         )
-        result = GraphManipulation.serialize_tensor_quantization(q_tensor)
-        result2 = GraphManipulation.serialize_tensor_quantization(q_tensor_channel)
+        result = graph_manipulation.serialize_tensor_quantization(q_tensor)
+        result2 = graph_manipulation.serialize_tensor_quantization(q_tensor_channel)
         assert result["q_scheme"] == "torch.per_tensor_affine"
         assert result["q_scale"] == 1.0
         assert result2["q_scheme"] == "torch.per_channel_affine"
@@ -110,7 +126,7 @@ class TestFXExperimental(JitTestCase):
         traced = symbolic_trace(m)
         a = torch.rand(1)
         b = torch.rand(1)
-        GraphManipulation.get_size_of_all_nodes(traced, [a, b])
+        graph_manipulation.get_size_of_all_nodes(traced, [a, b])
         partitioner = Partitioner()
         devices = [
             Device("dev_0", 125, 0),
@@ -123,6 +139,33 @@ class TestFXExperimental(JitTestCase):
         dag = ret.dag
         self.assertEqual(traced(a, b), module_with_submodules(a, b))
         assert dag.nodes[0].logical_device_ids == [0]
+
+    def test_partition_node_manipulation(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, a, b):
+                add_1 = a + b
+                add_2 = add_1 + torch.rand(4)
+                add_3 = add_2 + torch.rand(4)
+                return add_3
+
+        m = TestModule()
+        traced = symbolic_trace(m)
+        a, b = torch.rand(4), torch.rand(4)
+        graph_manipulation.get_size_of_all_nodes(traced, [a, b])
+        partitioner = Partitioner()
+        devices = [Device('dev_0', 1000, 0)]
+        partitioner_config = PartitionerConfig(devices)
+        ret = partitioner.partition_graph(traced, m, partitioner_config)
+        partition = partitioner.partitions[0]
+        assert partition.used_mem_bytes == 112
+        # Select add_3 node to remove
+        selected_node = None
+        for node in partition.nodes:
+            if node.name == 'add_3':
+                selected_node = node
+        partition.remove_node(selected_node)
+        assert(partition.used_mem_bytes == 80)
+
 
     def test_size_based_partition(self):
         class TestModule(torch.nn.Module):
@@ -141,7 +184,7 @@ class TestFXExperimental(JitTestCase):
         traced = symbolic_trace(m)
         a = torch.rand(4)
         b = torch.rand(4)
-        GraphManipulation.get_size_of_all_nodes(traced, [a, b])
+        graph_manipulation.get_size_of_all_nodes(traced, [a, b])
         partitioner = Partitioner()
         devices = [
             Device("dev_0", 125, 0),
@@ -173,10 +216,10 @@ class TestFXExperimental(JitTestCase):
         m = TestModule()
         traced = symbolic_trace(m)
         a = torch.rand(4)
-        GraphManipulation.get_size_of_all_nodes(traced, [a])
+        graph_manipulation.get_size_of_all_nodes(traced, [a])
         partitioner = Partitioner()
         devices = [Device("dev_0", 120, 0), Device("dev_1", 160, 1)]
-        partitioner_config = PartitionerConfig(devices, is_sparse_nn=False)
+        partitioner_config = PartitionerConfig(devices)
         ret = partitioner.partition_graph(traced, m, partitioner_config)
         module_with_submodules = ret.module_with_submodules
         dag = ret.dag
@@ -235,13 +278,13 @@ class TestFXExperimental(JitTestCase):
         b = torch.randint(10, (8,))
         offset = torch.randint(1, (2,))
         traced = symbolic_trace(m)
-        GraphManipulation.get_size_of_all_nodes(traced, [a, b, offset])
+        graph_manipulation.get_size_of_all_nodes(traced, [a, b, offset])
         devices = [
             Device("dev_0", 33000000, 0),
             Device("dev_1", 33000000, 1),
             Device("dev_2", 33000000, 2),
         ]
-        partitioner_config = PartitionerConfig(devices, is_sparse_nn=True)
+        partitioner_config = PartitionerConfig(devices, PartitionMode.sparse_nn)
         partitioner = Partitioner()
         ret = partitioner.partition_graph(traced, m, partitioner_config)
         module_with_submodules = ret.module_with_submodules
@@ -283,11 +326,11 @@ class TestFXExperimental(JitTestCase):
         m = TestModule()
         traced = symbolic_trace(m)
         a = torch.rand(4)
-        GraphManipulation.get_size_of_all_nodes(traced, [a])
+        graph_manipulation.get_size_of_all_nodes(traced, [a])
         node_to_latency_mapping = get_node_to_latency_mapping(traced)
         devices = [Device("dev_0", 200, 0), Device("dev_1", 200, 1)]
         partitioner = Partitioner()
-        partitioner_config = PartitionerConfig(devices, False)
+        partitioner_config = PartitionerConfig(devices)
         ret = partitioner.partition_graph(traced, m, partitioner_config)
         module_with_submodules = ret.module_with_submodules
         self.assertEqual(traced(a), module_with_submodules(a))
@@ -300,11 +343,190 @@ class TestFXExperimental(JitTestCase):
                 assert partition_to_latency_mapping[p] == (128.0, 80.0, 160.0)
             else:
                 assert partition_to_latency_mapping[p] == (16.0, 32.0, 32.0)
-        transfer_rate_bytes_per_sec = 0.5
+        transfer_rate_bytes_per_sec = 2
         critical_path_latency_sec = get_latency_of_partitioned_graph(
             partitions, partition_to_latency_mapping, transfer_rate_bytes_per_sec
         )
         assert critical_path_latency_sec == 208.0
+
+    def test_cost_aware_partition(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, a):
+                add_1 = a + torch.rand(4)
+                add_2 = add_1 + torch.rand(4)
+                linear_1 = self.linear(add_1)
+                add_3 = add_2 + torch.rand(4)
+                add_4 = add_2 + linear_1
+                add_5 = add_3 + add_4
+                return add_5
+
+        def get_node_to_latency_mapping(fx_module: GraphModule):
+            node_to_latency_mapping: Dict[Node, Nodelatency] = {}
+            for node in fx_module.graph.nodes:
+                if node.op not in {'output', 'placeholder', 'get_attr'}:
+                    if node.size_bytes.total_size == node.size_bytes.output_size:
+                        node_to_latency_mapping[node] = NodeLatency(node.size_bytes.total_size, 1)
+                    else:
+                        node_to_latency_mapping[node] = NodeLatency(node.size_bytes.total_size, node.size_bytes.output_size)
+            return node_to_latency_mapping
+
+        m = MyModule()
+        traced = symbolic_trace(m)
+        a = torch.rand(4)
+        graph_manipulation.get_size_of_all_nodes(traced, [a])
+        devices = [
+            Device('dev_0', 125, 0),
+            Device('dev_1', 125, 1),
+            Device('dev_2', 125, 2),
+            Device('dev_3', 125, 3)
+        ]
+        node_to_latency_mapping = get_node_to_latency_mapping(traced)
+        partitioner_config = PartitionerConfig(
+            devices,
+            mode=PartitionMode.cost_aware,
+            transfer_rate_bytes_per_sec=2,
+            node_to_latency_mapping=node_to_latency_mapping
+        )
+        partitioner = Partitioner()
+        ret = partitioner.partition_graph(traced, m, partitioner_config)
+        module_with_submodules = ret.module_with_submodules
+        dag = ret.dag
+        self.assertEqual(traced(a), module_with_submodules(a))
+        partitions = partitioner.partitions
+        partition_to_latency_mapping = get_partition_to_latency_mapping(partitions, node_to_latency_mapping)
+        critical_path_latency_sec = get_latency_of_partitioned_graph(
+            partitions,
+            partition_to_latency_mapping,
+            partitioner_config.transfer_rate_bytes_per_sec
+        )
+        assert critical_path_latency_sec == 160.
+
+        def test_kl_based_partition(self):
+            class TestModule(torch.nn.Module):
+                def __init__(self):
+                    super(TestModule, self).__init__()
+                    self.linear = torch.nn.Linear(4, 4)
+                    self.b = torch.rand(4)
+                    self.c = torch.rand(4)
+                    self.d = torch.rand(4)
+
+                def forward(self, a):
+                    add_1 = a + self.b
+                    add_2 = add_1 + self.c
+                    linear_1 = self.linear(add_1)
+                    add_3 = add_2 + linear_1
+                    add_4 = add_2 + self.d
+                    add_5 = add_3 + add_4
+                    return add_4
+            m = TestModule()
+            traced = symbolic_trace(m)
+            a = torch.rand(4)
+            graph_manipulation.get_size_of_all_nodes(traced, [a])
+            node_to_latency_mapping = get_node_to_latency_mapping(traced)
+            transfer_rate_bytes_per_sec = 2
+            devices = [
+                Device('dev_0', 200, 0),
+                Device('dev_1', 200, 1),
+                Device('dev_2', 200, 2),
+                Device('dev_3', 200, 3)
+            ]
+            partitioner = Partitioner()
+            partitioner_config = PartitionerConfig(
+                devices,
+                mode=PartitionMode.kl_based,
+                transfer_rate_bytes_per_sec=transfer_rate_bytes_per_sec,
+                node_to_latency_mapping=node_to_latency_mapping
+            )
+            ret = partitioner.partition_graph(traced, m, partitioner_config)
+            module_with_submodules = ret.module_with_submodules
+            self.assertEqual(traced(a), module_with_submodules(a))
+            dag = ret.dag
+            assert dag.nodes[0] == 176
+            assert dag.nodes[1] == 112
+            partition_to_latency_mapping = get_partition_to_latency_mapping(
+                partitioner.partitions,
+                node_to_latency_mapping
+            )
+            cost = get_latency_of_partitioned_graph(
+                partitioner.partitions,
+                partition_to_latency_mapping,
+                transfer_rate_bytes_per_sec
+            )
+            assert cost == 208.
+
+        def test_aot_based_partition(self):
+            class TestModule(torch.nn.Module):
+                def __init__(self):
+                    super(TestModule, self).__init__()
+                    self.b = torch.rand(4)
+                    self.c = torch.rand(4)
+
+                def forward(self, a):
+                    add_1 = a + self.b
+                    add_2 = self.c + add_1
+                    return add_2
+            m = TestModule()
+            traced = symbolic_trace(m)
+            a = torch.rand(4)
+            node_to_partition_id = {}
+            partition_to_logical_devices = {}
+            count = 0
+            GraphManipulation.get_size_of_all_nodes(traced, [a])
+            for node in traced.graph.nodes:
+                if node.op not in {'placeholder', 'get_attr', 'output'}:
+                    node_to_partition_id[node] = count
+                    partition_to_logical_devices[count] = [0]
+                    count += 1
+            devices = [Device('dev_0', 200, 0)]
+            partitioner_config = PartitionerConfig(
+                devices=devices,
+                mode=PartitionMode.aot_based,
+                node_to_partition_mapping=node_to_partition_id,
+                partition_to_logical_device_mapping=partition_to_logical_devices
+            )
+            partitioner = Partitioner()
+            ret = partitioner.partition_graph(traced, m, partitioner_config)
+            module_with_submodules = ret.module_with_submodules
+            dag = ret.dag
+            self.assertEqual(module_with_submodules(a), traced(a))
+            for node in dag.nodes:
+                assert node.size_bytes == 48
+                assert node.logical_device_ids == [0]
+
+        def test_replace_target_nodes_with(self):
+            class testModule(torch.nn.Module):
+                def forward(self, a, b):
+                    return a + b
+            m = testModule()
+            traced = symbolic_trace(m)
+            input1 = torch.randn(1)
+            input2 = torch.randn(1)
+            assert (input1 + input2) == traced(input1, input2)
+            graph_manipulation.replace_target_nodes_with(
+                fx_module=traced,
+                old_op="call_function",
+                old_target=operator.add,
+                new_op="call_function",
+                new_target=operator.mul,
+            )
+            assert (input1 * input2) == traced(input1, input2)
+
+    @skipIfNoTorchVision
+    def test_conv_bn_fusion(self):
+        rn18 = resnet18().eval()
+        traced = symbolic_trace(rn18)
+        fused = fuse(traced)
+
+        self.assertTrue(all(not isinstance(m, torch.nn.BatchNorm2d) for m in fused.modules()))
+
+        N, C, H, W = 20, 3, 224, 224
+        inp = torch.randn(N, C, H, W)
+
+        self.assertEqual(fused(inp), rn18(inp))
 
     def test_call_to_assert_no_msg(self):
         class M(torch.nn.Module):
@@ -321,7 +543,7 @@ class TestFXExperimental(JitTestCase):
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
             any(
-                node.op == "call_function" and node.target == torch.Assert
+                node.op == "call_function" and node.target == torch._assert
                 for node in traced.graph.nodes
             )
         )
@@ -349,7 +571,7 @@ class TestFXExperimental(JitTestCase):
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
             any(
-                node.op == "call_function" and node.target == torch.Assert
+                node.op == "call_function" and node.target == torch._assert
                 for node in traced.graph.nodes
             )
         )
@@ -377,7 +599,7 @@ class TestFXExperimental(JitTestCase):
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
             any(
-                node.op == "call_function" and node.target == torch.Assert
+                node.op == "call_function" and node.target == torch._assert
                 for node in traced.graph.nodes
             )
         )
@@ -409,7 +631,7 @@ terrible spacing
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
             any(
-                node.op == "call_function" and node.target == torch.Assert
+                node.op == "call_function" and node.target == torch._assert
                 for node in traced.graph.nodes
             )
         )
@@ -425,6 +647,80 @@ terrible spacing
 
         # Confirm that the output is correct
         self.assertEqual(traced(3, 3), m(3, 3))
+
+    def test_subgraph_creation(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(3, 4))
+                self.linear = torch.nn.Linear(4, 5)
+
+            def forward(self, x, y):
+                z = self.linear(x + self.param).clamp(min=0.0, max=1.0)
+                w = self.linear(y).clamp(min=0.0, max=1.0)
+                return z + w
+
+        # symbolically trace model
+        my_module = MyModule()
+        my_module_traced = symbolic_trace(my_module)
+
+        # random mod partitioning
+        partition_counter = 0
+        NPARTITIONS = 3
+
+        def mod_partition(node: Node):
+            nonlocal partition_counter
+            partition = partition_counter % NPARTITIONS
+            partition_counter = (partition_counter + 1) % NPARTITIONS
+            return partition
+
+        # split module in module with submodules
+        module_with_submodules = split_module(my_module_traced, my_module, mod_partition)
+
+        x = torch.rand(3, 4)
+        y = torch.rand(3, 4)
+
+        orig_out = my_module_traced(x, y)
+        submodules_out = module_with_submodules(x, y)
+
+        self.assertEqual(orig_out, submodules_out)
+
+    @skipIfNoTorchVision
+    def test_subgraph_trivial_resnet(self):
+        # Smoke test trivially splitting resnet into 1 partition works
+        # There was an issue before causing submodule names to be aliased
+        m = resnet18()
+        traced = symbolic_trace(m)
+        a = torch.rand(64, 3, 7, 7)
+        module_with_submodules = split_module(traced, m, lambda node: 0)
+        module_with_submodules(a)
+
+    def test_subgraph_uniquename(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, a, b, c, d):
+                add_1 = a + b
+                add_2 = add_1 + c
+                linear_1 = self.linear(add_1)
+                add_3 = add_2 + d
+                add_4 = add_2 + linear_1
+                add_5 = add_3 + add_4
+                return add_5
+
+        a, b, c, d = torch.ones(4), torch.ones(4), torch.ones(4), torch.ones(4)
+        mm = MyModule()
+        traced = symbolic_trace(mm)
+
+        def split_cb(node : torch.fx.Node):
+            if node.name == 'a' or node.name == 'b' or node.name == 'add':
+                return 0
+            else:
+                return 1
+        module_with_submodule = split_module(traced, mm, split_cb)
+        self.assertEqual(module_with_submodule(a, b, c, d), traced(a, b, c, d))
 
     def test_traceable_function_with_nonstandard_name(self):
         def foo(x):
