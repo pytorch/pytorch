@@ -6,7 +6,8 @@ import torch
 import torch.nn.functional as F
 from torch.distributions import constraints
 from torch.distributions.utils import (_sum_rightmost, broadcast_all,
-                                       lazy_property)
+                                       lazy_property, tril_matrix_to_vec,
+                                       vec_to_tril_matrix)
 from torch.nn.functional import pad
 from torch.nn.functional import softplus
 from typing import List
@@ -16,6 +17,7 @@ __all__ = [
     'AffineTransform',
     'CatTransform',
     'ComposeTransform',
+    'CorrCholeskyTransform',
     'ExpTransform',
     'LowerCholeskyTransform',
     'PowerTransform',
@@ -91,6 +93,14 @@ class Transform(object):
         else:
             raise ValueError('cache_size must be 0 or 1')
         super(Transform, self).__init__()
+
+    @property
+    def input_event_dim(self):
+        return self.event_dim
+
+    @property
+    def output_event_dim(self):
+        return self.event_dim
 
     @property
     def inv(self):
@@ -194,6 +204,16 @@ class _InverseTransform(Transform):
     def codomain(self):
         assert self._inv is not None
         return self._inv.domain
+
+    @property
+    def input_event_dim(self):
+        assert self._inv is not None
+        return self._inv.output_event_dim
+
+    @property
+    def output_event_dim(self):
+        assert self._inv is not None
+        return self._inv.input_event_dim
 
     @property
     def bijective(self):
@@ -533,6 +553,74 @@ class AffineTransform(Transform):
             result = result.view(result_size).sum(-1)
             shape = shape[:-self.event_dim]
         return result.expand(shape)
+
+
+class CorrCholeskyTransform(Transform):
+    r"""
+    Transforms an uncontrained real vector :math:`x` with length :math:`D*(D-1)/2` into the
+    Cholesky factor of a D-dimension correlation matrix. This Cholesky factor is a lower
+    triangular matrix with positive diagonals and unit Euclidean norm for each row.
+    The transform is processed as follows:
+
+        1. First we convert x into a lower triangular matrix in row order.
+        2. For each row :math:`X_i` of the lower triangular part, we apply a *signed* version of
+           class :class:`StickBreakingTransform` to transform :math:`X_i` into a
+           unit Euclidean length vector using the following steps:
+           - Scales into the interval :math:`(-1, 1)` domain: :math:`r_i = \tanh(X_i)`.
+           - Transforms into an unsigned domain: :math:`z_i = r_i^2`.
+           - Applies :math:`s_i = StickBreakingTransform(z_i)`.
+           - Transforms back into signed domain: :math:`y_i = sign(r_i) * \sqrt{s_i}`.
+    """
+    domain = constraints.real_vector
+    codomain = constraints.corr_cholesky
+    input_event_dim = 1
+    output_event_dim = 2
+    bijective = True
+
+    @property
+    def event_dim(self):
+        raise ValueError("Please use `.input_event_dim` or `.output_event_dim` instead.")
+
+    def _call(self, x):
+        x = torch.tanh(x)
+        eps = torch.finfo(x.dtype).eps
+        x = x.clamp(min=-1 + eps, max=1 - eps)
+        r = vec_to_tril_matrix(x, diag=-1)
+        # apply stick-breaking on the squared values
+        # Note that y = sign(r) * sqrt(z * z1m_cumprod)
+        #             = (sign(r) * sqrt(z)) * sqrt(z1m_cumprod) = r * sqrt(z1m_cumprod)
+        z = r ** 2
+        z1m_cumprod_sqrt = (1 - z).sqrt().cumprod(-1)
+        # Diagonal elements must be 1.
+        r = r + torch.eye(r.shape[-1], dtype=r.dtype, device=r.device)
+        y = r * pad(z1m_cumprod_sqrt[..., :-1], [1, 0], value=1)
+        return y
+
+    def _inverse(self, y):
+        # inverse stick-breaking
+        # See: https://mc-stan.org/docs/2_18/reference-manual/cholesky-factors-of-correlation-matrices-1.html
+        y_cumsum = 1 - torch.cumsum(y * y, dim=-1)
+        y_cumsum_shifted = pad(y_cumsum[..., :-1], [1, 0], value=1)
+        y_vec = tril_matrix_to_vec(y, diag=-1)
+        y_cumsum_vec = tril_matrix_to_vec(y_cumsum_shifted, diag=-1)
+        t = y_vec / (y_cumsum_vec).sqrt()
+        # inverse of tanh
+        x = ((1 + t) / (1 - t)).log() / 2
+        return x
+
+    def log_abs_det_jacobian(self, x, y, intermediates=None):
+        # Because domain and codomain are two spaces with different dimensions, determinant of
+        # Jacobian is not well-defined. We return `log_abs_det_jacobian` of `x` and the
+        # flattened lower triangular part of `y`.
+
+        # See: https://mc-stan.org/docs/2_18/reference-manual/cholesky-factors-of-correlation-matrices-1.html
+        y1m_cumsum = 1 - (y * y).cumsum(dim=-1)
+        # by taking diagonal=-2, we don't need to shift z_cumprod to the right
+        # also works for 2 x 2 matrix
+        y1m_cumsum_tril = tril_matrix_to_vec(y1m_cumsum, diag=-2)
+        stick_breaking_logdet = 0.5 * (y1m_cumsum_tril).log().sum(-1)
+        tanh_logdet = -2 * (x + softplus(-2 * x) - math.log(2.)).sum(dim=-1)
+        return stick_breaking_logdet + tanh_logdet
 
 
 class SoftmaxTransform(Transform):

@@ -2243,6 +2243,14 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(10, 10, 128)
         self.run_test(model, x)
 
+    def test_batchnorm1d_norunningstats(self):
+        x = torch.randn(10, 10)
+        model = torch.nn.BatchNorm1d(10, track_running_stats=False)
+        self.run_test(model, x)
+
+        x = torch.randn(10, 10, 128)
+        self.run_test(model, x)  
+
     def test_batchnorm2d(self):
         x = torch.randn(10, 3, 128, 128)
         model = torch.nn.BatchNorm2d(3, affine=True)
@@ -2251,6 +2259,11 @@ class TestONNXRuntime(unittest.TestCase):
     def test_batchnorm2d_noaffine(self):
         x = torch.randn(10, 3, 128, 128)
         model = torch.nn.BatchNorm2d(3, affine=False)
+        self.run_test(model, x)
+
+    def test_batchnorm2d_norunningstats(self):
+        x = torch.randn(10, 3, 128, 128)
+        model = torch.nn.BatchNorm2d(3, track_running_stats=False)
         self.run_test(model, x)
 
     def test_batchnorm3d(self):
@@ -3104,6 +3117,16 @@ class TestONNXRuntime(unittest.TestCase):
         ind = torch.tensor(-2, dtype=torch.long)
         self.run_test(GetItemModel(), (x, y, z, ind))
 
+    @disableScriptTest()  # torch.nonzero(x, as_tuple=True) is not scriptable.
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_nonzero(self):
+        class NonzeroModel(torch.nn.Module):
+            def forward(self, x):
+                return x.nonzero(), x.nonzero(as_tuple=True)
+
+        x = torch.randn(60).index_fill_(0, torch.randint(0, 60, (20,)), 0).view(3, 4, 5)
+        self.run_test(NonzeroModel(), (x,))
+
     def test_unbind(self):
         class UnbindModel(torch.nn.Module):
             def forward(self, input):
@@ -3239,6 +3262,25 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(5, 4, 3)
         self.run_test(SplitModel2(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_chunk(self):
+        class ChunkModel(torch.nn.Module):
+            def __init__(self):
+                super(ChunkModel, self).__init__()
+
+            def forward(self, x):
+                return torch.chunk(x, 3, dim=1)
+
+        model = ChunkModel()
+        model.eval()
+        x = torch.randn(1, 18)
+
+        for dim_size_ in range(13, 16):
+            y = torch.randn(1, dim_size_)
+            self.run_test(model, x, test_with_inputs=[y],
+                          input_names=['x'],
+                          dynamic_axes={'x': {0: 'batch_size', 1: 'dims'}})
 
     def test_concat(self):
         class ConcatModel(torch.nn.Module):
