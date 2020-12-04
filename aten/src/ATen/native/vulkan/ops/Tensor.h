@@ -85,6 +85,7 @@ class vTensor final {
     Types
   */
 
+  typedef api::Pipeline::Stage Stage;
   typedef api::Resource::Memory::Access Access;
   typedef api::Resource::Buffer Buffer;
   typedef api::Resource::Fence Fence;
@@ -132,16 +133,15 @@ class vTensor final {
     Payload wait() const &;
 
    private:
+    template<typename, Access::Flags>
+    friend class Future;
+
     // Intentionally disabed to enforce a usage pattern wherein the Future's
     // lifetime exceeds that of the Payload as we use the Future's destructor
     // to eagerly (as opposed to lazily and upon first use) upload the
     // modifications back onto the GPU in an effort to hide the upload latency.
 
     Payload wait() const && = delete;
-
-   private:
-    template<typename, Access::Flags>
-    friend class Future;
 
    private:
     const vTensor* tensor_;
@@ -178,22 +178,22 @@ class vTensor final {
     predictability of usage and efficiency.
   */
 
-  Buffer::Object buffer() const &;
-  Buffer::Object buffer(Access::Flags access) &;
-  Buffer::Object buffer(api::Command::Buffer&) const &;
-  Buffer::Object buffer(api::Command::Buffer&, Access::Flags) &;
+  Buffer::Object buffer(Stage::Flags) const &;
+  Buffer::Object buffer(Stage::Flags, Access::Flags) &;
+  Buffer::Object buffer(api::Command::Buffer&, Stage::Flags) const &;
+  Buffer::Object buffer(api::Command::Buffer&, Stage::Flags, Access::Flags) &;
 
   bool has_image() const;
-  Image::Object image() const &;
-  Image::Object image(Access::Flags access) &;
-  Image::Object image(api::Command::Buffer&) const &;
-  Image::Object image(api::Command::Buffer&, Access::Flags) &;
+  Image::Object image(Stage::Flags) const &;
+  Image::Object image(Stage::Flags, Access::Flags) &;
+  Image::Object image(api::Command::Buffer&, Stage::Flags) const &;
+  Image::Object image(api::Command::Buffer&, Stage::Flags, Access::Flags) &;
 
   /*
     Metadata
   */
 
-  const VkExtent3D& extents() const;
+  const api::utils::uvec3& extents() const;
   const TensorOptions& options() const;
   IntArrayRef sizes() const;
   IntArrayRef strides() const;
@@ -223,15 +223,15 @@ class vTensor final {
     Device
   */
 
-  Buffer::Object buffer() const && = delete;
-  Buffer::Object buffer(Access::Flags) && = delete;
-  Buffer::Object buffer(api::Command::Buffer&) const && = delete;
-  Buffer::Object buffer(api::Command::Buffer&, Access::Flags) && = delete;
+  Buffer::Object buffer(Stage::Flags) const && = delete;
+  Buffer::Object buffer(Stage::Flags, Access::Flags) && = delete;
+  Buffer::Object buffer(api::Command::Buffer&, Stage::Flags) const && = delete;
+  Buffer::Object buffer(api::Command::Buffer&, Stage::Flags, Access::Flags) && = delete;
 
-  Image::Object image() const && = delete;
-  Image::Object image(Access::Flags) && = delete;
-  Image::Object image(api::Command::Buffer&) const && = delete;
-  Image::Object image(api::Command::Buffer&, Access::Flags) && = delete;
+  Image::Object image(Stage::Flags) const && = delete;
+  Image::Object image(Stage::Flags, Access::Flags) && = delete;
+  Image::Object image(api::Command::Buffer&, Stage::Flags) const && = delete;
+  Image::Object image(api::Command::Buffer&, Stage::Flags, Access::Flags) && = delete;
 
  private:
   class View final {
@@ -248,18 +248,30 @@ class vTensor final {
     View operator=(View&&) = delete;
     ~View() = default;
 
-    Buffer& buffer(Access::Flags) const;
-    Buffer& buffer(api::Command::Buffer&, Access::Flags) const;
+    /*
+      Device
+    */
+
+    Buffer& buffer(Stage::Flags, Access::Flags) const;
+    Buffer& buffer(api::Command::Buffer&, Stage::Flags, Access::Flags) const;
 
     bool has_image() const;
-    Image& image(Access::Flags) const;
-    Image& image(api::Command::Buffer&, Access::Flags) const;
+    Image& image(Stage::Flags, Access::Flags) const;
+    Image& image(api::Command::Buffer&, Stage::Flags, Access::Flags) const;
 
-    Buffer& staging(Access::Flags) const;
-    Buffer& staging(api::Command::Buffer&, Access::Flags) const;
+    /*
+      Host
+    */
+
+    Buffer& staging(Stage::Flags, Access::Flags) const;
+    Buffer& staging(api::Command::Buffer&, Stage::Flags, Access::Flags) const;
     vTensor::Memory& wait() const;
 
-    const VkExtent3D& extents() const;
+    /*
+      Metadata
+    */
+
+    const api::utils::uvec3& extents() const;
     const TensorOptions& options() const;
     IntArrayRef sizes() const;
     IntArrayRef strides() const;
@@ -326,11 +338,11 @@ class vTensor final {
    private:
     // Accessors / Lazy Allocation
     Buffer& buffer() const;
-    Buffer& buffer(CMD&, Access::Flags) const;
+    Buffer& buffer(CMD&, Stage::Flags, Access::Flags) const;
     Image& image() const;
-    Image& image(CMD&, Access::Flags) const;
+    Image& image(CMD&, Stage::Flags, Access::Flags) const;
     Buffer& staging() const;
-    Buffer& staging(CMD&, Access::Flags) const;
+    Buffer& staging(CMD&, Stage::Flags, Access::Flags) const;
     Fence& fence() const;
 
     // Validation
@@ -351,7 +363,7 @@ class vTensor final {
     mutable State state_;
 
     // Metadata
-    VkExtent3D extents_;
+    api::utils::uvec3 extents_;
     TensorOptions options_;
     c10::SmallVector<int64_t, 6u> sizes_;
     c10::SmallVector<int64_t, 6u> strides_;
@@ -486,7 +498,7 @@ inline bool vTensor::has_image() const {
   return view_->has_image();
 }
 
-inline const VkExtent3D& vTensor::extents() const {
+inline const api::utils::uvec3& vTensor::extents() const {
   return view_->extents();
 }
 
@@ -511,7 +523,7 @@ inline bool vTensor::View::has_image() const {
   return state_.is_available(View::Component::Image);
 }
 
-inline const VkExtent3D& vTensor::View::extents() const {
+inline const api::utils::uvec3& vTensor::View::extents() const {
   return extents_;
 }
 
