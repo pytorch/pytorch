@@ -485,14 +485,40 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   }
 
  protected:
+  // This hook is called by this class's then() method when it prepares the
+  // instance it returns to the caller. It should be overridden by subclasses so
+  // that they can produce an instace of their own type.
   virtual c10::intrusive_ptr<Future> createInstance(at::TypePtr type) {
     return c10::make_intrusive<Future>(type);
   }
 
+  // This hook will be called by this class (the superclass) when the future is
+  // marked completed _with a value_ (hence not in case of error). This is done
+  // right away, while the mutex is still held, before any callbacks are run.
+  // It allows subclasses to further update their state if they so need. For
+  // example the CUDAFuture subclass uses it to determine what devices the value
+  // resides on and record an event in those devices' current streams.
   virtual void postMarkCompletedHook(const at::IValue& value) {}
 
-  virtual std::function<void(void)> wrapCallback(std::function<void(void)> callback) { return callback; }
+  // This hook will be called by the addCallback() and the then() methods before
+  // storing the callback for later execution (or before running it inline if
+  // the future is already complete). Note that this method could thus be called
+  // while the future is _not_ yet complete. By default this method does nothing
+  // but subclasses can override this method to add functionality. For example
+  // the CUDAFuture subclass ensures the callback runs with CUDA streams which
+  // are synchronized with the events recorded in the I/O streams.
+  virtual std::function<void(void)> wrapCallback(
+      std::function<void(void)> callback) {
+    return callback;
+  }
 
+  // This hook will be called by this class after a user thread has completed
+  // waiting on a successful future. It will thus not be called if the future
+  // completes with an error. It will also not be called if the user accesses
+  // the future's value without synchronization. Subclasses can override this
+  // to add some synchronization to the wait. For example, the CUDAFuture
+  // subclass ensures the user's current CUDA streams synchronize with the I/O
+  // events stored by the future.
   virtual void postWaitHook(const at::IValue& value) {}
 
  private:
