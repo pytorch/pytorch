@@ -968,7 +968,7 @@ struct CAFFE2_API WeakIValue final {
       if (!ip) {
         return IValue();
       } else {
-        return IValue(std::move(ip));
+        return IValue(ip);
       }
     } else {
       IValue::Payload pl;
