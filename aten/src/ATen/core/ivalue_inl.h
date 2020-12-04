@@ -422,33 +422,6 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     return fut;
   }
 
-  // Some subclasses deal with CUDA tensors and must inform the CUDA caching
-  // allocator of which CUDA streams each DataPtr is used in. If the value held
-  // by the future is a Python object we need to acquire the GIL when extracting
-  // these DataPtrs. Since this file cannot depend on Python, we allow users to
-  // provide a "custom" extractor. Look for example at the PythonFutureWrapper.
-  using DataPtrExtractor =
-      std::function<std::vector<std::reference_wrapper<const at::DataPtr>>(
-          const at::IValue&)>;
-  virtual void setDataPtrExtractor(DataPtrExtractor data_ptr_extractor) {}
-
-  // Expose the default implementation so that external ones can defer to it.
-  static std::vector<std::reference_wrapper<const at::DataPtr>>
-  defaultDataPtrExtractor(const at::IValue& value) {
-    at::IValue::HashAliasedIValues sub_values;
-    // Prefer getSubValues() over visit() as the latter is a silent no-op for
-    // some unsupported types, whereas the former at least fails loudly.
-    value.getSubValues(sub_values);
-
-    std::vector<std::reference_wrapper<const at::DataPtr>> res;
-    for (const at::IValue& sub_value : sub_values) {
-      if (sub_value.isTensor()) {
-        res.emplace_back(sub_value.toTensor().storage().data_ptr());
-      }
-    }
-    return res;
-  };
-
   // Tries to retrieve the error message from std::exception_ptr.
   std::string tryRetrieveErrorMessage() {
     TORCH_CHECK(hasError(), "No error present on the future.");
@@ -485,14 +458,40 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   }
 
  protected:
+  // This hook is called by this class's then() method when it prepares the
+  // instance it returns to the caller. It should be overridden by subclasses so
+  // that they can produce an instace of their own type.
   virtual c10::intrusive_ptr<Future> createInstance(at::TypePtr type) {
     return c10::make_intrusive<Future>(type);
   }
 
+  // This hook will be called by this class (the superclass) when the future is
+  // marked completed _with a value_ (hence not in case of error). This is done
+  // right away, while the mutex is still held, before any callbacks are run.
+  // It allows subclasses to further update their state if they so need. For
+  // example the CUDAFuture subclass uses it to determine what devices the value
+  // resides on and record an event in those devices' current streams.
   virtual void postMarkCompletedHook(const at::IValue& value) {}
 
-  virtual std::function<void(void)> wrapCallback(std::function<void(void)> callback) { return callback; }
+  // This hook will be called by the addCallback() and the then() methods before
+  // storing the callback for later execution (or before running it inline if
+  // the future is already complete). Note that this method could thus be called
+  // while the future is _not_ yet complete. By default this method does nothing
+  // but subclasses can override this method to add functionality. For example
+  // the CUDAFuture subclass ensures the callback runs with CUDA streams which
+  // are synchronized with the events recorded in the I/O streams.
+  virtual std::function<void(void)> wrapCallback(
+      std::function<void(void)> callback) {
+    return callback;
+  }
 
+  // This hook will be called by this class after a user thread has completed
+  // waiting on a successful future. It will thus not be called if the future
+  // completes with an error. It will also not be called if the user accesses
+  // the future's value without synchronization. Subclasses can override this
+  // to add some synchronization to the wait. For example, the CUDAFuture
+  // subclass ensures the user's current CUDA streams synchronize with the I/O
+  // events stored by the future.
   virtual void postWaitHook(const at::IValue& value) {}
 
  private:
@@ -639,6 +638,7 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
 struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
  public:
   virtual PyObject* getPyObject() = 0;
+  virtual IValue toIValue() = 0;
   virtual ~PyObjectHolder(){};
 };
 
