@@ -7,6 +7,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace torch {
@@ -110,8 +111,8 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
 };
 
 struct VISIBILITY_HIDDEN ModuleDictMethod : public SugaredValue {
-  explicit ModuleDictMethod(SugaredValuePtr iterable, const std::string& name)
-      : iterable_(iterable), name_(name){};
+  explicit ModuleDictMethod(SugaredValuePtr iterable, std::string name)
+      : iterable_(std::move(iterable)), name_(std::move(name)){};
 
   std::string kind() const override {
     return name_;
@@ -217,7 +218,7 @@ void recurseThroughNestedModules(
     Function& m,
     std::vector<SugaredValuePtr>& keys,
     std::vector<SugaredValuePtr>& values,
-    std::shared_ptr<ModuleValue> self,
+    std::shared_ptr<ModuleValue>& self,
     const std::string& prefix,
     const std::string& field);
 
@@ -249,7 +250,7 @@ struct VISIBILITY_HIDDEN SugaredDict : public SugaredValue {
       Function& m,
       const std::string& field) override;
 
-  SugaredValuePtr iter(const SourceRange& loc, Function& m) {
+  SugaredValuePtr iter(const SourceRange& loc, Function& m) override {
     return keys_;
   };
 
@@ -316,7 +317,7 @@ struct VISIBILITY_HIDDEN PythonExceptionValue : public ExceptionValue {
 
 // Python Slice class.
 struct VISIBILITY_HIDDEN PythonSliceClass : public SugaredValue {
-  explicit PythonSliceClass() {}
+  explicit PythonSliceClass() = default;
 
   std::string kind() const override {
     return "Python slice class";

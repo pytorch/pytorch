@@ -137,12 +137,13 @@ std::string GetFileRootPath(const std::string& rootPath) {
   return folder;
 }
 
-std::string GetExternalFileName(const c10::optional<std::string> external_ref) {
+std::string GetExternalFileName(
+    const c10::optional<std::string>& external_ref) {
   auto tensorName = external_ref.value();
   const std::string illegalChars = "\\/:?\"<>|";
-  for (int i = 0; i < tensorName.size(); i++) {
-    if (illegalChars.find(tensorName[i]) != std::string::npos) {
-      tensorName[i] = '_';
+  for (char& i : tensorName) {
+    if (illegalChars.find(i) != std::string::npos) {
+      i = '_';
     }
   }
   return tensorName;
@@ -160,7 +161,7 @@ void CreateExternalFile(
   std::string fullFilePath = folder + "/" + tensorName;
   std::unique_ptr<FILE, decltype(&CloseFile)> fp(
       fopen(fullFilePath.c_str(), "wb"), &CloseFile);
-  if (fp == NULL) {
+  if (fp == nullptr) {
     throw std::runtime_error(
         std::string("ONNX export failed. Could not open file or directory: ") +
         fullFilePath);
@@ -322,7 +323,7 @@ void EncoderBase::EncodeValueInfo(
   std::string name = n->debugName();
   v->set_name(name);
   auto tensorTypeToONNXType = [&dynamic_axes, &name, this](
-                                  TensorTypePtr t,
+                                  const TensorTypePtr& t,
                                   onnx::TypeProto_Tensor* tensor_type) {
     if (t->dim()) {
       onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
