@@ -137,7 +137,9 @@ inline at::Tensor IValue::toTensor() && {
   // effectively an intrusive_ptr in the null state, so we don't need
   // the behavior for correctness reasons either. Leaving this
   // explanatory comment, including commented-out destructor call, to
-  // make this abundantly clear.  payload.as_tensor.~Tensor();
+  // make this abundantly clear.
+  //
+  // payload.as_tensor.~Tensor();
   clearToNone();
   return result;
 }

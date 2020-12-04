@@ -92,6 +92,7 @@ Indexing, Slicing, Joining, Mutating Ops
     index_select
     masked_select
     movedim
+    moveaxis
     narrow
     nonzero
     reshape
@@ -413,6 +414,7 @@ Comparison Ops
     not_equal
     sort
     topk
+    msort
 
 
 Spectral Ops
@@ -510,6 +512,7 @@ BLAS and LAPACK Operations
     eig
     geqrf
     ger
+    inner
     inverse
     det
     logdet

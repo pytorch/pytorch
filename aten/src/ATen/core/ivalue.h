@@ -164,23 +164,14 @@ struct CAFFE2_API IValue final {
     }
   }
   IValue(IValue&& rhs) noexcept : tag(rhs.tag), is_intrusive_ptr(rhs.is_intrusive_ptr) {
-    if (isTensor()) {
-      new (&payload.as_tensor) at::Tensor(std::move(rhs.payload.as_tensor));
-      rhs.payload.as_tensor.~Tensor();
-    } else {
-      memcpy(&payload, &rhs.payload, sizeof(payload));
-    }
+    moveFrom(std::move(rhs));
     rhs.tag = Tag::None;
     rhs.is_intrusive_ptr = false;
   }
 
   /// @private [doxygen private]
   ~IValue() {
-    if (is_intrusive_ptr) {
-      c10::raw::intrusive_ptr::decref(payload.as_intrusive_ptr);
-    } else if (isTensor()) {
-      payload.as_tensor.~Tensor();
-    }
+    destroy();
   }
 
   // Always-inline for performance -- this gets called frequently
@@ -190,26 +181,8 @@ struct CAFFE2_API IValue final {
       return *this;
     }
 
-    // Tear down our state.
-    if (isTensor()) {
-      payload.as_tensor.~Tensor();
-    } else if (is_intrusive_ptr) {
-      c10::raw::intrusive_ptr::decref(payload.as_intrusive_ptr);
-    }
-
-    if (rhs.isTensor()) {
-      new (&payload.as_tensor) at::Tensor(std::move(rhs.payload.as_tensor));
-      rhs.payload.as_tensor.~Tensor();
-    } else {
-      // No need to specially handle rhs being an intrusive_ptr -- we
-      // steal the reference.
-      memcpy(&payload, &rhs.payload, sizeof(payload));
-    }
-
-    tag = rhs.tag;
-    is_intrusive_ptr = rhs.is_intrusive_ptr;
-    rhs.tag = Tag::None;
-    rhs.is_intrusive_ptr = false;
+    destroy();
+    moveFrom(std::move(rhs));
     return *this;
   }
 
@@ -330,7 +303,15 @@ struct CAFFE2_API IValue final {
       std::swap(payload.as_tensor, rhs.payload.as_tensor);
     } else if (isTensor()) {
       at::Tensor t = std::move(payload.as_tensor);
-      payload.as_tensor.~Tensor();
+      // As far as I can tell, omitting the usual explicit destructor call
+      // is not UB in and of itself, and it's a slight perf win. The
+      // destructor is a no-op, because the moved-from Tensor is
+      // effectively an intrusive_ptr in the null state, so we don't need
+      // the behavior for correctness reasons either. Leaving this
+      // explanatory comment, including commented-out destructor call, to
+      // make this abundantly clear.
+      //
+      // payload.as_tensor.~Tensor();
       memcpy(&payload, &rhs.payload, sizeof(payload));
       new (&rhs.payload.as_tensor) at::Tensor(std::move(t));
     } else if (rhs.isTensor()) {
@@ -860,7 +841,35 @@ struct CAFFE2_API IValue final {
       class NullType = c10::detail::intrusive_target_default_null_type<T>>
   c10::intrusive_ptr<T, NullType> toIntrusivePtr() const;
 
-  void clearToNone() {
+  void destroy() {
+    if (isTensor()) {
+      payload.as_tensor.~Tensor();
+    } else if (is_intrusive_ptr) {
+      c10::raw::intrusive_ptr::decref(payload.as_intrusive_ptr);
+    }
+  }
+
+  C10_ALWAYS_INLINE void moveFrom(IValue&& rhs) noexcept {
+    if (rhs.isTensor()) {
+      new (&payload.as_tensor) at::Tensor(std::move(rhs.payload.as_tensor));
+      // As far as I can tell, omitting the usual explicit destructor call
+      // is not UB in and of itself, and it's a slight perf win. The
+      // destructor is a no-op, because the moved-from Tensor is
+      // effectively an intrusive_ptr in the null state, so we don't need
+      // the behavior for correctness reasons either. Leaving this
+      // explanatory comment, including commented-out destructor call, to
+      // make this abundantly clear.
+      //
+      // rhs.payload.as_tensor.~Tensor();
+    } else {
+      memcpy(&payload, &rhs.payload, sizeof(payload));
+    }
+    tag = rhs.tag;
+    is_intrusive_ptr = rhs.is_intrusive_ptr;
+    rhs.clearToNone();
+  }
+
+  void clearToNone() noexcept {
     payload.as_int = 0;
     tag = Tag::None;
     is_intrusive_ptr = false;
