@@ -33,7 +33,12 @@ static inline void cudaCheck(cudaError_t result, const char * file, int line) {
 
 struct CUDAMethods : public CUDAStubs {
   void record(int* device, CUDAEventStub* event, int64_t* cpu_ns) const override {
+      LOG(INFO) << "Start record";
     TORCH_CUDA_CHECK(cudaGetDevice(device));
+    // Hack: setting device
+    at::cuda::OptionalCUDAGuard device_guard;
+    device_guard.set_index(i);
+    LOG(INFO) << "Done setting device";
     CUevent_st* cuda_event_ptr;
     TORCH_CUDA_CHECK(cudaEventCreate(&cuda_event_ptr));
     *event = std::shared_ptr<CUevent_st>(cuda_event_ptr, [](CUevent_st* ptr) {
@@ -42,11 +47,14 @@ struct CUDAMethods : public CUDAStubs {
     auto stream = at::cuda::getCurrentCUDAStream();
     *cpu_ns = getTime();
     TORCH_CUDA_CHECK(cudaEventRecord(cuda_event_ptr, stream));
+    LOG(INFO) << "Done with record";
   }
 
   float elapsed(const CUDAEventStub* event, const CUDAEventStub* event2) const override{
+      LOG(INFO) << "Calling cudaEventSynchronize";
     TORCH_CUDA_CHECK(cudaEventSynchronize(event->get()));
     TORCH_CUDA_CHECK(cudaEventSynchronize(event2->get()));
+    LOG(INFO) << "Synchronized event and event2";
     float ms;
     TORCH_CUDA_CHECK(cudaEventElapsedTime(&ms, event->get(), event2->get()));
     return ms*1000.0;
@@ -65,16 +73,20 @@ struct CUDAMethods : public CUDAStubs {
   }
 
   void onEachDevice(std::function<void(int)> op) const override {
+      LOG(INFO) << "start on each device";
     at::cuda::OptionalCUDAGuard device_guard;
     int count = at::cuda::device_count();
     for(int i = 0; i < count; i++) {
       device_guard.set_index(i);
       op(i);
     }
+    LOG(INFO) << "Done with onEachDevice";
   }
 
   void synchronize() const override {
+      LOG(INFO) << "Calling cudaDeviceSynchronize";
     cudaDeviceSynchronize();
+    LOG(INFO) << "Done with cudaDeviceSynchronize";
   }
 
   bool enabled() const override {
