@@ -3442,18 +3442,12 @@ struct to_ir {
     } else {
       AT_ASSERT(!sliceable->type()->isSubtypeOf(TensorType::get()));
     }
-
-    // Default value for start is 0.
-    if (!start) {
-      start = graph->insertConstant(0, loc);
-    }
-    args.emplace_back(loc, "start", start);
-
-    if (end) {
-      args.emplace_back(loc, "end", end);
-    }
+    // TODO for now let's deal with TupleType first. Ideally all list, tensor,
+    // string, and tuple slicing should be same (tugsbayasgalan)
     if (sliceable->type()->cast<TupleType>()) {
       std::vector<at::optional<NamedValue>> tuple_args;
+      // since we are only dealing with tuple slicing for now, we try to keep
+      // tuple args seperate for now
       tuple_args.reserve(3);
 
       start ? tuple_args.emplace_back(start)
@@ -3464,6 +3458,17 @@ struct to_ir {
            : tuple_args.emplace_back(c10::nullopt);
 
       return emitTupleSlice(loc, args[0], tuple_args);
+    }
+
+    // TODO this needs to be cleaned for list slicing
+    // Default value for start is 0.
+    if (!start) {
+      start = graph->insertConstant(0, loc);
+    }
+    args.emplace_back(loc, "start", start);
+
+    if (end) {
+      args.emplace_back(loc, "end", end);
     }
 
     if (!step) {
@@ -3815,6 +3820,61 @@ struct to_ir {
         ->output();
   }
 
+  // "Copyright (c) 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010,
+  // 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020 Python Software
+  // Foundation; All Rights Reserved" Stolen (with appropriate modifications)
+  // from cpython repo Objects/sliceobject.c with comment: this is harder to get
+  // right than you might think
+  //
+  // This adjusts indexes according to python list semantics and returns number
+  // of elements in the resulting list.
+  int64_t PySlice_AdjustIndices(
+      int64_t length,
+      int64_t* start,
+      int64_t* stop,
+      int64_t step) {
+    TORCH_CHECK(step != 0, "List slice should have non-zero step")
+    TORCH_CHECK(step >= -INT64_MAX, "List slice step is out of bounds")
+
+    // Comes from PySlice_Unpack.
+    if (*start == INT64_MAX) {
+      *start = (step < 0) ? INT64_MAX : 0;
+    }
+    if (*stop == INT64_MAX) {
+      *stop = (step < 0) ? INT64_MIN : INT64_MAX;
+    }
+
+    // Comes from PySlice_AdjustIndices.
+    if (*start < 0) {
+      *start += length;
+      if (*start < 0) {
+        *start = (step < 0) ? -1 : 0;
+      }
+    } else if (*start >= length) {
+      *start = (step < 0) ? length - 1 : length;
+    }
+
+    if (*stop < 0) {
+      *stop += length;
+      if (*stop < 0) {
+        *stop = (step < 0) ? -1 : 0;
+      }
+    } else if (*stop >= length) {
+      *stop = (step < 0) ? length - 1 : length;
+    }
+
+    if (step < 0) {
+      if (*stop < *start) {
+        return (*start - *stop - 1) / (-step) + 1;
+      }
+    } else {
+      if (*start < *stop) {
+        return (*stop - *start - 1) / step + 1;
+      }
+    }
+    return 0;
+  }
+
   int64_t getSliceInd(Value* idx_val, const SourceRange& loc) {
     auto ivalue = toIValue(idx_val);
     if (ivalue && ivalue->isInt()) {
@@ -3833,9 +3893,7 @@ struct to_ir {
     auto beg_val = tuple_args[0];
     auto end_val = tuple_args[1];
     auto step = tuple_args[2];
-    // first figure out the step sign to know if we want to flip the start or
-    // end. For example, if we have x[::-3], the start should be len(x) - 1 and
-    // end should be 0
+
     int64_t step_size = 1;
     if (step) {
       auto val = toIValue(step->value(*graph));
@@ -3843,31 +3901,24 @@ struct to_ir {
       step_size = val->to<int64_t>();
     }
 
-    int64_t beg = 0;
+    int64_t beg = INT64_MAX;
     if (beg_val) {
       beg = getAdjTupleIndex(
           loc, tuple_type, getSliceInd(beg_val->value(*graph), loc), true);
-    } else {
-      // we want to flip the beg if we are slicing in the opposite direction
-      beg = step_size > 0 ? 0 : tuple_len;
     }
 
-    int64_t end = 0;
+    int64_t end = INT64_MAX;
     if (end_val) {
       end = getAdjTupleIndex(
           loc, tuple_type, getSliceInd(end_val->value(*graph), loc), true);
-    } else {
-      // we want to flip the end if we are slicing in the opposite direction
-      end = step_size > 0 ? tuple_len : 0;
     }
 
-    // slicing does not throw out of bounds errors
-    end = std::min(std::max((int64_t)0, end), tuple_len);
-    beg = std::min(std::max((int64_t)0, beg), tuple_len);
+    int64_t num_values =
+        PySlice_AdjustIndices(tuple_len, &beg, &end, step_size);
 
     return graph
         ->insertNode(graph->createTupleSlice(
-            tuple_val.value(*graph), beg, end, step_size))
+            tuple_val.value(*graph), beg, step_size, num_values))
         ->output();
   }
 

@@ -12143,89 +12143,23 @@ dedent """
 
     def test_stepped_tuple_slicing(self):
 
-        inp = torch.ones(1)
+        def check_slicing_tuple(slicing, tuple_type, tuple):
+            template = dedent("""
+            def func(x):
+                # type: ({}) -> Any
+                return x{}
+            """)
+            self._check_code(template.format(tuple_type, slicing), "func", [tuple])
 
-        class A(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.x = (0, 1, 2)
-
-            def forward(self, a):
-                a = self.x[-3:3:2]
-                b = a[::1]
-                return b
-
-        self.checkModule(A(), inp)
-
-        class B(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.x = (0, 1, 2, 3, 4)
-
-            def forward(self, a):
-                return self.x[::1]
-
-        self.checkModule(B(), inp)
-
-        class C(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.x = (0, 1, 2, 3, 4)
-
-            def forward(self, a):
-                return self.x[::55]
-
-        self.checkModule(C(), inp)
-
-        class D(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.x = (0, 1, 2, 3, 4)
-
-            def forward(self, a):
-                return self.x[1:4:2]
-
-        self.checkModule(D(), inp)
-
-        class E(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.x = (0, 1, 2, 3, 4)
-
-            def forward(self, a):
-                return self.x[1:4]
-
-        self.checkModule(E(), inp)
-
-        class F(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.x = (0, 1, 2, 3, 4, 5, 6)
-
-            def forward(self, a):
-                return self.x[5::-2]
-
-        self.checkModule(F(), inp)
-
-        class G(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.x = (0, 1, 2, 3, 4, 5, 6, 7)
-
-            def forward(self, a):
-                return self.x[7:5:2]
-
-        self.checkModule(G(), inp)
-
-        class H(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.x = (0, 1, 2, 3, 4, 5, 6, 7)
-
-            def forward(self, a):
-                return self.x[5:7:-2]
-
-        self.checkModule(H(), inp)
+        check_slicing_tuple("[-3:3:2]", "Tuple[int, int, int]", (0, 1, 2))
+        check_slicing_tuple("[::55]", "Tuple[int, int, int, int, int]", (0, 1, 2, 3, 4))
+        check_slicing_tuple("[:4:4]", "Tuple[int, int, int, int, int]", (0, 1, 2, 3, 4))
+        check_slicing_tuple("[::-1]", "Tuple[int, int, int, int, int, int, int]", (0, 1, 2, 3, 4, 5, 6))
+        check_slicing_tuple("[7:5:2]", "Tuple[int, int, int, int, int, int, int]", (0, 1, 2, 3, 4, 5, 6))
+        check_slicing_tuple("[5:7:-2]", "Tuple[int, int, int, int, int, int, int]", (0, 1, 2, 3, 4, 5, 6))
+        check_slicing_tuple("[::-2]", "Tuple[int, int, int, int, int]", (0, 1, 2, 3, 4))
+        check_slicing_tuple("[:4:-3]", "Tuple[int, int, int, int, int, int]", (0, 1, 2, 3, 4, 5))
+        check_slicing_tuple("[3::-2]", "Tuple[int, int, int, int, int]", (0, 1, 2, 3, 4))
 
     def test_lower_nested_tuples(self):
         @torch.jit.script

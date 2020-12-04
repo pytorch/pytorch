@@ -1611,27 +1611,22 @@ Node* Graph::createTupleIndex(
 Node* Graph::createTupleSlice(
     Value* tup,
     int64_t beg,
-    int64_t end,
-    int64_t step_size) {
-  std::vector<Value*> newValues;
+    int64_t step_size,
+    int64_t num_values) {
+  std::vector<Value*> new_vals;
   TupleTypePtr tt = tup->type()->expect<TupleType>();
+  new_vals.reserve(num_values);
 
-  if (step_size > 0) {
-    for (auto i = beg; i < end; i += step_size) {
-      auto idx = insertConstant(IValue(static_cast<int64_t>(i)));
-      auto tupleIndex =
-          insertNode(createTupleIndex(tup, idx, tt->elements()[i]));
-      newValues.push_back(tupleIndex->output());
-    }
-  } else {
-    for (auto i = beg; i > end; i += step_size) {
-      auto idx = insertConstant(IValue(static_cast<int64_t>(i)));
-      auto tupleIndex =
-          insertNode(createTupleIndex(tup, idx, tt->elements()[i]));
-      newValues.push_back(tupleIndex->output());
-    }
+  int64_t i = beg;
+  for (int64_t j = 0; j < num_values; ++j) {
+    auto idx = insertConstant(IValue(static_cast<int64_t>(i)));
+    auto tupleIndex = insertNode(createTupleIndex(tup, idx, tt->elements()[i]));
+
+    new_vals.push_back(tupleIndex->output());
+    i += step_size;
   }
-  auto n = createTuple(newValues);
+
+  auto n = createTuple(new_vals);
   return n;
 }
 
