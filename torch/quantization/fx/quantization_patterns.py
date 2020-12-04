@@ -247,7 +247,8 @@ class ConvRelu(QuantizeHandler):
                 self.conv_node.target,
                 (load_arg(quantized=True)(self.conv_node.args[0]),),
                 {})
-        elif self.conv_node.op == 'call_function':
+        else:  # call_function
+            assert self.conv_node.op == 'call_function'
             if self.relu_node is not None:
                 raise Exception("functional conv + relu is not supported yet")
             if debug:
@@ -277,8 +278,6 @@ class ConvRelu(QuantizeHandler):
                 kwargs = load_arg(quantized=False)(self.conv_node.kwargs)
                 return quantizer.quantized_graph.create_node(
                     'call_function', torch.ops.quantized.conv2d, qconv_args, kwargs)
-        # TODO(before land): debug this (missing return statement)
-        raise NotImplementedError
 
 # handle linear, maybe followed by relu
 @register_quant_pattern(torch.nn.Linear)
@@ -359,7 +358,8 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 'call_module',
                 self.linear_node.target,
                 (load_arg(quantized=activation_statically_quantized)(self.linear_node.args[0]),), {})
-        elif self.linear_node.op == 'call_function':
+        else:  # call_function
+            assert self.linear_node.op == 'call_function'
             if debug:
                 quantized_input_idxs = []
                 if activation_statically_quantized:
@@ -420,8 +420,6 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     qlinear_args = (linear_input, packed_weight)  # type: ignore
                     return quantizer.quantized_graph.create_node(
                         'call_function', torch.ops.quantized.linear_dynamic, qlinear_args, kwargs)
-        # TODO(before land): debug this
-        raise NotImplementedError
 
 @register_quant_pattern(torch.nn.BatchNorm2d)
 @register_quant_pattern(torch.nn.BatchNorm3d)
