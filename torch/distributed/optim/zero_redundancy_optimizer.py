@@ -81,12 +81,85 @@ def _get_global_rank(group: Any, rank: int) -> int:
     return rank if group is dist.group.WORLD else dist.distributed_c10d._get_global_rank(group, rank)  # type: ignore
 
 
-class ZeROptimizer(Optimizer):
+class _Workhandle:
+    def __init__(self, handle: Any, callback: Optional[Callable]) -> None:
+        self.handle = handle
+        self.callback = callback
+
+
+class _FlatParam:
+    def __init__(self, tensor: torch.Tensor, start: int, stop: int) -> None:
+        self.param = tensor
+        self.start = start
+        self.stop = stop
+
+
+class _Bucket:
+    """
+    Helper class to simplify the handling of broadcast or reduce buckets
+    """
+
+    def __init__(self, buffer: torch.Tensor) -> None:
+        # The actual flat tensor
+        self.buffer = buffer
+        self.max_size = buffer.numel()
+
+        # Handles to the params and their position in this tensor, can be useful for a callback
+        self.params: List[FlatParam] = []
+
+        # Optional callback, possibly to unwrap the bucket
+        self.callback: Optional[Callable] = None
+
+        # Current status for this buffer
+        self.current_offset = 0
+        self.max_offset = 0
+        self.global_ref_rank = -1  # Either the destination or the src rank, if reducing or broadcasting for instance
+        self.global_rank = -1
+
+    def unroll(self) -> None:
+        """
+        Dsitribute the contents of the flat buffer back to the attached parameters
+        """
+
+        for flat in self.params:
+            if self.global_ref_rank != self.global_rank and self.gradients_based:
+                # this rank is not the owner, release the grad
+                flat.param.grad = None
+            else:
+                flat.param.data.copy_(self.buffer[flat.start : flat.stop].view_as(flat.param.data), non_blocking=True)
+
+        self.reset()
+
+    def reset(self) -> None:
+        """ empty the bucket """
+        self.current_offset = 0
+        self.params.clear()
+
+    def append(self, tensor: torch.Tensor) -> bool:
+        """ add a tensor to the bucket """
+
+        end = self.current_offset + tensor.numel()
+
+        if end > self.max_size:
+            return False
+
+        data_source = tensor.grad.data if use_gradient else tensor.data  # type: ignore    # mypy is drunk
+        self.buffer[self.current_offset : end].copy_(data_source.view(-1))
+        self.params.append(FlatParam(tensor=tensor, start=self.current_offset, stop=end))
+        self.current_offset = end
+        return True
+
+    def full(self) -> bool:
+        """ is the bucket full ? """
+        return self.current_offset == self.max_offset
+
+
+class ZeroRedundancyOptimizer(Optimizer):
     """Wraps an arbitrary :class:`optim.Optimizer <torch.optim.Optimizer>`
     optimizer and shards its state as described by ZeRO_.
     ::
 
-        opt = ZeROptimizer(params, optim=torch.optim.Adam, lr=0.01)
+        opt = ZeroRedundancyOptimizer(params, optim=torch.optim.Adam, lr=0.01)
 
     .. _ZeRO: https://arxiv.org/abs/1910.02054
 
@@ -115,7 +188,7 @@ class ZeROptimizer(Optimizer):
         params: _params_t,
         optim: Type[Optimizer],
         group: Optional[Any] = None,
-        bucket_cap_kb: int = 2 ** 7,
+        bucket_cap_kb: int = 2 ** 17,
         **default: Any,
     ):
         # Hold all the model params in the root .param_groups
@@ -149,11 +222,11 @@ class ZeROptimizer(Optimizer):
 
         # Current default device is set by the parameters allocated to this rank
         self._device = self.partition_parameters()[self.rank][0]["params"][0].device
-        self._broadcast_buffers: Dict[torch.device, List[torch.Tensor]] = {}
+        self._buckets: Dict[torch.device, List[Bucket]] = {}
         for device, per_device in self.per_device_params.items():
             # Allocate one buffer per rank and per device to group the small parameters
-            self._broadcast_buffers[device] = [
-                torch.zeros(bucket_cap_kb * (2 ** 10), dtype=per_device[0][0].dtype, device=device)
+            self._buckets[device] = [
+                Bucket(buffer=torch.zeros(broadcast_buffer_size, dtype=per_device[0][0].dtype, device=device))
                 for _ in range(len(per_device))
             ]
 
@@ -189,8 +262,7 @@ class ZeROptimizer(Optimizer):
             ]
         )
 
-        # Compute the norm on this grad set,
-        # then sync all the norms from all ranks
+        # Compute the norm on this grad set, then sync all the norms from all ranks
         if norm_type == inf:
             total_norm = max(p.grad.detach().abs().max().to(self._device) for p in local_params)
             dist.all_reduce(total_norm, op=torch.distributed.ReduceOp.MAX, group=self.group)
@@ -215,7 +287,6 @@ class ZeROptimizer(Optimizer):
 
         return total_norm
 
-    # Partition helpers
     def partition_parameters(self) -> List[List[Dict]]:
         """Partitions parameters across distributed data parallel ranks.
 
@@ -268,7 +339,7 @@ class ZeROptimizer(Optimizer):
 
     @property
     def param_to_rank(self) -> Dict[torch.Tensor, int]:
-        """param to data parallel rank"""
+        """Look up table to match a given param with a data parallel rank"""
         if len(self._param_rank) == 0:
             for rank, param_groups in enumerate(self.partition_parameters()):
                 for param_group in param_groups:
@@ -297,20 +368,11 @@ class ZeROptimizer(Optimizer):
             loss = self.optim.step(**kwargs)
 
         # Free the other grads
-        # ideally this would not be needed, handled in the reduce step by a zero-matching DDP engin
-        for rank, partition in enumerate(self.partition_parameters()):
-            if rank != self.rank:
-                for p in partition:
-                    for t in p["params"]:
-                        t.grad = None
+        # ideally this would not be needed, handled in the reduce step by a zero-matching DDP engine
+        self._free_other_grads()
 
         # Sync all the updated shards in between the ranks
-        with torch.no_grad():
-            for (
-                device,
-                device_params,
-            ) in self.per_device_params.items():  # all the params on this device (inc all ranks)
-                self._broadcast_params(self._broadcast_buffers[device], device_params)
+        self._broadcast_params()
 
         # Sync hypothethical new results from the wrapped optimizer to the exposed param_groups
         self._sync_param_groups(local_to_global=True)
@@ -455,19 +517,73 @@ class ZeROptimizer(Optimizer):
             if len(param_groups) == len(self.optim.param_groups) + 1:
                 self.optim.add_param_group(param_groups[-1])
 
-    def _sync_param_groups(self, local_to_global: bool = False) -> None:
-        """Sync learning rate and other optimizer attributes (needed to support schedulers).
-        If the global param groups have been altered, and we want to make sure that the
-        wrapped optimizer uses the up to date version.
-        Conversely if the wrapped optimizer has new keys, we expose them through the global param groups"""
+    ##########################
+    # Private helper functions
+    ##########################
 
-        for global_group, local_group in zip(self.param_groups, self.optim.param_groups):
-            # Sync everything but the parameters
-            for k in filter(lambda x: x != "params", local_group.keys()):
-                if local_to_global:
-                    global_group[k] = local_group[k]
-                elif k in global_group.keys():
-                    local_group[k] = global_group[k]
+    def _broadcast_params(self) -> None:
+        """Helper function to broadcast all the parameters from a given device"""
+
+        with torch.no_grad():
+            # All the params on this device (inc all ranks)
+            for (
+                device,
+                device_params,
+            ), bucket_list in zip(self.per_device_params.items(), self._buckets.values()):
+
+                # Go through all the ranks and broadcast the new parameters, bucket the smallest ones
+                for (src_rank, params), bucket in zip(enumerate(device_params), bucket_list):
+
+                    global_src_rank = self.get_global_rank(self.group, src_rank)
+
+                    for param in params:
+                        # Bucket broadcast
+                        if self.should_bucket_param[param]:
+                            assert bucket.append(param), "Bucket overflow: max %s - current %s - adding %s" % (
+                                bucket.max_size,
+                                bucket.current_offset,
+                                param.numel(),
+                            )
+
+                            if bucket.full():
+                                self.work_handles.append(
+                                    _Workhandle(
+                                        handle=dist.broadcast(
+                                            tensor=bucket.buffer, src=global_src_rank, group=self.group, async_op=True
+                                        ),
+                                        callback=bucket.unroll,
+                                    )
+                                )
+
+                        # Direct
+                        else:
+                            self.work_handles.append(
+                                _Workhandle(
+                                    handle=dist.broadcast(
+                                        tensor=param.data, src=global_src_rank, group=self.group, async_op=True
+                                    ),
+                                    callback=None,
+                                )
+                            )
+
+    def _broadcast_state_dict(self) -> None:
+        """Broadcast this rank's state shard, discard others"""
+        empty_buffer = torch.tensor([0], dtype=torch.uint8, device=self._device)
+
+        for rank in range(self.world_size):
+            if rank == self.rank:
+                # Send the state to the reference replica
+                logging.debug(
+                    "Sending the sharded optimizer state to the reference replica from rank %s",
+                    rank,
+                )
+                _broadcast_object(
+                    self.local_state_dict(), src_rank=self.global_rank, group=self.group, dist_device=self._device
+                )
+            else:
+                global_rank = _get_global_rank(self.group, rank)
+                # Discard this tensor/rank, broadcast necessary for syncing
+                _broadcast_object(empty_buffer, src_rank=global_rank, group=self.group, dist_device=self._device)
 
     def _collect_sharded_states(self) -> List[Dict[str, Any]]:
         """Collect all the state shards, in CPU memory."""
@@ -498,80 +614,25 @@ class ZeROptimizer(Optimizer):
 
         return all_states
 
-    def _broadcast_state_dict(self) -> None:
-        """Broadcast this rank's state shard, discard others"""
-        empty_buffer = torch.tensor([0], dtype=torch.uint8, device=self._device)
+    def _free_other_grads(self):
+        """Release gradients which are not being used in this rank"""
 
-        for rank in range(self.world_size):
-            if rank == self.rank:
-                # Send the state to the reference replica
-                logging.debug(
-                    "Sending the sharded optimizer state to the reference replica from rank %s",
-                    rank,
-                )
-                _broadcast_object(
-                    self.local_state_dict(), src_rank=self.global_rank, group=self.group, dist_device=self._device
-                )
-            else:
-                global_rank = _get_global_rank(self.group, rank)
-                # Discard this tensor/rank, broadcast necessary for syncing
-                _broadcast_object(empty_buffer, src_rank=global_rank, group=self.group, dist_device=self._device)
+        for rank, partition in enumerate(self.partition_parameters()):
+            if rank != self.rank:
+                for p in partition:
+                    for t in p["params"]:
+                        t.grad = None
 
-    def _broadcast_params(self, buffers: List[torch.Tensor], per_rank_params: List[List[Parameter]]) -> None:
-        """Helper function to broadcast all the parameters from a given device"""
-        buffer_size = buffers[0].numel()
-        bucket_requests = []
-        direct_requests = []
+    def _sync_param_groups(self, local_to_global: bool = False) -> None:
+        """Sync learning rate and other optimizer attributes (needed to support schedulers).
+        If the global param groups have been altered, and we want to make sure that the
+        wrapped optimizer uses the up to date version.
+        Conversely if the wrapped optimizer has new keys, we expose them through the global param groups"""
 
-        # Bucket and issue all the async calls
-        for (src_rank, params), buffer in zip(enumerate(per_rank_params), buffers):
-            global_src_rank = _get_global_rank(self.group, src_rank)
-
-            # Copy small gradients into per-GPU buffers and then async broadcast
-            offset = 0
-            bucket_sent = False
-            bucket_params = []
-
-            # All the params are sorted per rank and per increasing size
-            for p in params:
-                # Since all the parameters are already sorted per increasing size, we only need to consider the first ones.
-                if not bucket_sent and offset + p.numel() < buffer_size:
-                    end = offset + p.numel()
-                    buffer[offset:end].copy_(p.data.view(-1))  # type: ignore
-                    bucket_params.append((p, offset, end))
-                    offset = end
-                else:
-                    if offset > 0 and not bucket_sent:
-                        bucket_requests.append(
-                            (
-                                dist.broadcast(tensor=buffer, src=global_src_rank, group=self.group, async_op=True),  # type: ignore
-                                src_rank,
-                                bucket_params,
-                            )
-                        )
-
-                        bucket_sent = True
-
-                    direct_requests.append(
-                        dist.broadcast(tensor=p.data, src=global_src_rank, group=self.group, async_op=True)
-                    )
-
-            # Catch a trailing bucket
-            if offset > 0 and not bucket_sent:
-                bucket_requests.append(
-                    (
-                        dist.broadcast(tensor=buffer, src=global_src_rank, group=self.group, async_op=True),
-                        src_rank,
-                        bucket_params,
-                    )
-                )
-
-        # Unroll the initial packed small parameters
-        for work_handle, src_rank, bucket_params in bucket_requests:
-            work_handle.wait()
-            if src_rank != self.rank:
-                for p, offset, end in bucket_params:
-                    p.data.copy_(buffers[src_rank][offset:end].view_as(p.data))  # type: ignore
-
-        # Unroll all the async work items, just in case
-        _ = list(map(lambda x: x.wait(), direct_requests))
+        for global_group, local_group in zip(self.param_groups, self.optim.param_groups):
+            # Sync everything but the parameters
+            for k in filter(lambda x: x != "params", local_group.keys()):
+                if local_to_global:
+                    global_group[k] = local_group[k]
+                elif k in global_group.keys():
+                    local_group[k] = global_group[k]

@@ -12,7 +12,7 @@ import torch
 import torch.distributed as dist
 from typing import List, Any
 import io
-from torch.distributed.optim import ZeROptimizer
+from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.optim import SGD
 from torch.testing._internal.common_distributed import skip_if_no_gpu, MultiProcessTestCase
 from math import inf
@@ -51,9 +51,9 @@ def _broadcast_object(
     return obj
 
 
-class TestZeROptimizer(MultiProcessTestCase):
+class TestZeroRedundancyOptimizer(MultiProcessTestCase):
     def setUp(self):
-        super(TestZeROptimizer, self).setUp()
+        super(TestZeroRedundancyOptimizer, self).setUp()
         self._fork_processes()
 
     def tearDown(self):
@@ -74,7 +74,7 @@ class TestZeROptimizer(MultiProcessTestCase):
         m.weight.data = torch.tensor([[1.0]])
         m.bias.data = torch.tensor([2.0])
         m.to(self.rank)
-        o = ZeROptimizer(m.parameters(), optim=SGD, lr=0.1)
+        o = ZeroRedundancyOptimizer(m.parameters(), optim=SGD, lr=0.1)
         y = m(x)
         y.backward(x)
         for p in m.parameters():
@@ -101,7 +101,7 @@ class TestZeROptimizer(MultiProcessTestCase):
         m.bias.data = torch.tensor([bias])
         m.to(self.rank)
 
-        o = ZeROptimizer(m.parameters(), optim=SGD, lr=0.1)
+        o = ZeroRedundancyOptimizer(m.parameters(), optim=SGD, lr=0.1)
 
         y = m(x)
         y.backward(x)
@@ -123,7 +123,7 @@ class TestZeROptimizer(MultiProcessTestCase):
         self.assertEqual(m.bias, torch.tensor([2.1], device=torch.device(self.rank)))
 
 
-class TestZeROptimizerSingleRank(TestZeROptimizer):
+class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
     @property
     def world_size(self):
         return 1
@@ -131,12 +131,12 @@ class TestZeROptimizerSingleRank(TestZeROptimizer):
     def test_create(self):
         self.dist_init(self.rank)
         params = [torch.rand(1)]
-        o = ZeROptimizer(params, optim=SGD, lr=0.01)
+        o = ZeroRedundancyOptimizer(params, optim=SGD, lr=0.01)
 
     def test_state_dict(self):
         self.dist_init(self.rank)
         x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
-        o = ZeROptimizer([x], optim=SGD, lr=0.1, momentum=0.9)
+        o = ZeroRedundancyOptimizer([x], optim=SGD, lr=0.1, momentum=0.9)
         x.backward()
         o.step()
         self.assertEqual(x, torch.tensor([0.9], device=DEVICE))
@@ -163,7 +163,7 @@ class TestZeROptimizerSingleRank(TestZeROptimizer):
                 self.assertEqual(state_dict["param_groups"][0][k], o.param_groups[0][k])
 
         # Check that it's correctly loaded
-        o = ZeROptimizer([x], optim=SGD, lr=0.01)
+        o = ZeroRedundancyOptimizer([x], optim=SGD, lr=0.01)
         o.load_state_dict(state_dict)
         # Check that state is correct and on proper device
         self.assertEqual(o.optim.state[x]["momentum_buffer"], torch.tensor([1.0], device=DEVICE))
@@ -183,7 +183,7 @@ class TestZeROptimizerSingleRank(TestZeROptimizer):
         self.dist_init(self.rank)
         x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
         x2 = torch.tensor([1.0], device=DEVICE, requires_grad=True)
-        o = ZeROptimizer([x], optim=SGD, lr=0.01)
+        o = ZeroRedundancyOptimizer([x], optim=SGD, lr=0.01)
         o2 = torch.optim.SGD([x2], lr=0.01)
         s = torch.optim.lr_scheduler.StepLR(o, 1)
         s2 = torch.optim.lr_scheduler.StepLR(o2, 1)
@@ -208,7 +208,7 @@ class TestZeROptimizerSingleRank(TestZeROptimizer):
 
         kwarg: List[Any] = []
         x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
-        o = ZeROptimizer([x], optim=SGDWithStepKWArg, lr=0.1)
+        o = ZeroRedundancyOptimizer([x], optim=SGDWithStepKWArg, lr=0.1)
         x.backward()
         o.step(0, kwarg=kwarg)
         self.assertEqual(kwarg, [5])
@@ -224,7 +224,7 @@ class TestZeROptimizerSingleRank(TestZeROptimizer):
                 self.param_groups[0]["new_key"] = 0.1
 
         x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
-        o = ZeROptimizer([x], optim=SGDWithNewKey, lr=0.1)
+        o = ZeroRedundancyOptimizer([x], optim=SGDWithNewKey, lr=0.1)
         x.backward()
         o.step()
         self.assertEqual(o.param_groups[0]["new_key"], 0.1)
@@ -238,7 +238,7 @@ class TestZeROptimizerSingleRank(TestZeROptimizer):
                 return super().step()
 
         x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
-        o = ZeROptimizer([x], optim=SGDWithoutClosure, lr=0.1)
+        o = ZeroRedundancyOptimizer([x], optim=SGDWithoutClosure, lr=0.1)
         x.backward()
         o.step()
         self.assertEqual(x, torch.tensor([0.9], device=DEVICE))
@@ -247,9 +247,9 @@ class TestZeROptimizerSingleRank(TestZeROptimizer):
         self.dist_init(self.rank)
 
         x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
-        o = ZeROptimizer([x], optim=SGD, lr=0.1)
+        o = ZeroRedundancyOptimizer([x], optim=SGD, lr=0.1)
         local_state_dict = o.local_state_dict()
-        o = ZeROptimizer([x], optim=SGD, lr=0.01)
+        o = ZeroRedundancyOptimizer([x], optim=SGD, lr=0.01)
         o.load_local_state_dict(local_state_dict)
         # We should now be using a lr of 0.1.
         self.assertEqual(o.optim.param_groups[0]["lr"], 0.1)
@@ -262,9 +262,9 @@ class TestZeROptimizerSingleRank(TestZeROptimizer):
         self.dist_init(self.rank)
 
         x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
-        o = ZeROptimizer([x], optim=SGD, lr=0.1)
+        o = ZeroRedundancyOptimizer([x], optim=SGD, lr=0.1)
         local_state_dict = o.state_dict()
-        o = ZeROptimizer([x], optim=SGD, lr=0.01)
+        o = ZeroRedundancyOptimizer([x], optim=SGD, lr=0.01)
         o.load_state_dict(local_state_dict)
         # We should now be using a lr of 0.1.
         self.assertEqual(o.optim.param_groups[0]["lr"], 0.1)
@@ -274,7 +274,7 @@ class TestZeROptimizerSingleRank(TestZeROptimizer):
         self.assertEqual(x, torch.tensor([0.9], device=DEVICE))
 
 
-class TestZeROptimizerTwoRanks(TestZeROptimizer):
+class TestZeroRedundancyOptimizerTwoRanks(TestZeroRedundancyOptimizer):
     @property
     def world_size(self):
         return 2
@@ -283,7 +283,7 @@ class TestZeROptimizerTwoRanks(TestZeROptimizer):
         self.dist_init(self.rank)
         x = torch.rand(1)
         m = torch.nn.Linear(1, 1)
-        o = ZeROptimizer(m.parameters(), optim=SGD, lr=0.1)
+        o = ZeroRedundancyOptimizer(m.parameters(), optim=SGD, lr=0.1)
         y = m(x)
         y.backward(x)
         self.assertNotEqual(m.weight.grad, torch.zeros_like(m.weight))
@@ -293,7 +293,7 @@ class TestZeROptimizerTwoRanks(TestZeROptimizer):
         self.assertFalse(m.bias.grad)
 
 
-class TestZeROptimizerThreeRanks(TestZeROptimizer):
+class TestZeroRedundancyOptimizerThreeRanks(TestZeroRedundancyOptimizer):
     @property
     def world_size(self):
         return 3
@@ -304,7 +304,7 @@ class TestZeROptimizerThreeRanks(TestZeROptimizer):
         params = []
         for size in [4, 5, 2, 6, 4]:
             params.append(torch.rand(size, 1))
-        o = ZeROptimizer(params, optim=SGD, lr=0.1)
+        o = ZeroRedundancyOptimizer(params, optim=SGD, lr=0.1)
         self.assertEqual(len(o.param_groups), 1)
         o.add_param_group({"params": [torch.rand(3, 1)]})
         self.assertEqual(len(o.param_groups), 2)
@@ -318,7 +318,7 @@ class TestZeROptimizerThreeRanks(TestZeROptimizer):
         params = []
         for size in [5, 4, 2, 6, 4, 3]:
             params.append(torch.rand(size, 1))
-        o = ZeROptimizer(params, optim=SGD, lr=0.1)
+        o = ZeroRedundancyOptimizer(params, optim=SGD, lr=0.1)
         self.assertEqual(sum([x.numel() for x in o.optim.param_groups[0]["params"]]), 8)
 
     def test_collect_shards(self):
@@ -338,7 +338,7 @@ class TestZeROptimizerThreeRanks(TestZeROptimizer):
         loss_fn.to(device)
 
         # With SGD, Momentum is required to get a state to shard
-        optimizer = ZeROptimizer(model.parameters(), optim=SGD, lr=0.1, momentum=0.99)
+        optimizer = ZeroRedundancyOptimizer(model.parameters(), optim=SGD, lr=0.1, momentum=0.99)
 
         def closure():
             optimizer.zero_grad()
@@ -369,7 +369,7 @@ class TestZeROptimizerThreeRanks(TestZeROptimizer):
         optimizer.load_state_dict(optimizer_state_dict)
 
 
-class TestZeROptimizerSixRanks(TestZeROptimizer):
+class TestZeroRedundancyOptimizerSixRanks(TestZeroRedundancyOptimizer):
     @property
     def world_size(self):
         return 6
@@ -426,7 +426,7 @@ class TestZeROptimizerSixRanks(TestZeROptimizer):
             )
 
             # With SGD, Momentum is required to get a state to shard
-            optimizer = ZeROptimizer(
+            optimizer = ZeroRedundancyOptimizer(
                 model.parameters(), optim=SGD, lr=0.1, momentum=0.99, group=process_group, bucket_cap_kb=2 ** 10
             )
             check(optimizer)
@@ -437,7 +437,7 @@ class TestZeROptimizerSixRanks(TestZeROptimizer):
             )
 
             # With SGD, Momentum is required to get a state to shard
-            optimizer = ZeROptimizer(
+            optimizer = ZeroRedundancyOptimizer(
                 model.parameters(), optim=SGD, lr=0.1, momentum=0.99, group=process_group, bucket_cap_kb=0
             )
             check(optimizer)
@@ -470,7 +470,7 @@ class TestZeROptimizerSixRanks(TestZeROptimizer):
                 module=model_base,
                 device_ids=[self.rank],
             )
-            sharded_optimizer = ZeROptimizer(model_oss.parameters(), lr=0.1, momentum=0.99)
+            sharded_optimizer = ZeroRedundancyOptimizer(model_oss.parameters(), lr=0.1, momentum=0.99)
 
             model_ddp = DDP(
                 model,

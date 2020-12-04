@@ -144,7 +144,7 @@ USE_PYTEST_LIST = [
     "distributed/_pipeline/sync/test_stream",
     "distributed/_pipeline/sync/test_transparency",
     "distributed/_pipeline/sync/test_worker",
-    "distributed/optim/test_zeroptimizer",
+    "distributed/optim/test_zero_redundancy_optimizer",
 ]
 
 WINDOWS_BLOCKLIST = [
