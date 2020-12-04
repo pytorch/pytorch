@@ -200,41 +200,40 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
     int nframe = gradInput->size(0);
     THArgCheck((input->size(1) != 0) && (THTensor_nDimensionLegacyNoScalars(target) == 1) && (THTensor_sizeLegacyNoScalars(target, 0) == nframe), 3,
                "inconsistent target size");
-    if (input->numel() == 0) {
-      return;
-    }
-    dim3 blocks(gradInput->size(0));
-    dim3 threads(MULTIMARGIN_THREADS);
+    if (input->numel() != 0) {
+      dim3 blocks(gradInput->size(0));
+      dim3 threads(MULTIMARGIN_THREADS);
 
-    if (p == 1)
-    {
-      cunn_MultiMarginCriterion_updateGradInput_kernel<1, scalar_t, accreal> <<<blocks,threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
-        THCTensor_(data)(state, gradInput),
-        THCTensor_(data)(state, gradOutput),
-        THCTensor_(data)(state, input),
-        THCIndexTensor_(data)(state, target),
-        weights ? THCTensor_(data)(state, weights) : NULL,
-        nframe, gradInput->size(1),
-        reduction == at::Reduction::Mean,
-        margin,
-        reduction != at::Reduction::None
-      );
+      if (p == 1)
+      {
+        cunn_MultiMarginCriterion_updateGradInput_kernel<1, scalar_t, accreal> <<<blocks,threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
+          THCTensor_(data)(state, gradInput),
+          THCTensor_(data)(state, gradOutput),
+          THCTensor_(data)(state, input),
+          THCIndexTensor_(data)(state, target),
+          weights ? THCTensor_(data)(state, weights) : NULL,
+          nframe, gradInput->size(1),
+          reduction == at::Reduction::Mean,
+          margin,
+          reduction != at::Reduction::None
+        );
+      }
+      else if (p == 2)
+      {
+        cunn_MultiMarginCriterion_updateGradInput_kernel<2, scalar_t, accreal> <<<blocks,threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
+          THCTensor_(data)(state, gradInput),
+          THCTensor_(data)(state, gradOutput),
+          THCTensor_(data)(state, input),
+          THCIndexTensor_(data)(state, target),
+          weights ? THCTensor_(data)(state, weights) : NULL,
+          nframe, gradInput->size(1),
+          reduction == at::Reduction::Mean,
+          margin,
+          reduction != at::Reduction::None
+        );
+      }
+      THCudaCheck(cudaGetLastError());
     }
-    else if (p == 2)
-    {
-      cunn_MultiMarginCriterion_updateGradInput_kernel<2, scalar_t, accreal> <<<blocks,threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
-        THCTensor_(data)(state, gradInput),
-        THCTensor_(data)(state, gradOutput),
-        THCTensor_(data)(state, input),
-        THCIndexTensor_(data)(state, target),
-        weights ? THCTensor_(data)(state, weights) : NULL,
-        nframe, gradInput->size(1),
-        reduction == at::Reduction::Mean,
-        margin,
-        reduction != at::Reduction::None
-      );
-    }
-    THCudaCheck(cudaGetLastError());
   }
   else
   {
