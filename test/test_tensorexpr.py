@@ -3,7 +3,6 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 import unittest
-import itertools
 
 from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs
 
