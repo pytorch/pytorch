@@ -38,11 +38,11 @@ class TORCH_API TensorExprKernel {
  private:
   enum ElementType {
     kAllTypes = 0,
-    kIntegralTypes = 0b00000001,
-    kFloatingPointTypes = 0b00000010,
-    kBoolType = 0b00000100,
-    kComplexTypes = 0b00001000,
-    kQintTypes = 0b00010000,
+    kIntegralTypes = 1 << 0,
+    kFloatingPointTypes = 1 << 1,
+    kBoolType = 1 << 2,
+    kComplexTypes = 1 << 3,
+    kQintTypes = 1 << 4,
     kNonComplexOrQintTypes = kIntegralTypes | kBoolType | kFloatingPointTypes,
   };
 
