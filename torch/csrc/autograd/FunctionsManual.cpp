@@ -723,13 +723,13 @@ Tensor _fused_dropout_backward(Tensor grad, Tensor mask, double p1m) {
 }
 
 Tensor evenly_distribute_backward(Tensor grad, const Tensor & input, const Tensor & value) {
-  if (input.is_cuda()) {
+  // if (input.is_cuda()) {
     auto mask = (input == value).logical_or_(input.isnan().logical_and_(value.isnan()));
     return mask * (grad / mask.sum());
-  } else {
-    auto mask = value.isnan().item<bool>() ? input.isnan() : input == value;
-    return grad.new_zeros(input.sizes(), input.options()).masked_fill_(mask, grad / mask.sum());
-  }
+  // } else {
+  //   auto mask = value.isnan().item<bool>() ? input.isnan() : input == value;
+  //   return grad.new_zeros(input.sizes(), input.options()).masked_fill_(mask, grad / mask.sum());
+  // }
 }
 
 Tensor std_backward(const Tensor & result, const Tensor & grad, const Tensor & self, bool unbiased) {
