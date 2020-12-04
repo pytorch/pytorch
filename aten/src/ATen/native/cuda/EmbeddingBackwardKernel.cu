@@ -235,7 +235,7 @@ Tensor embedding_backward_cuda_kernel(
               segment_offsets.data_ptr<index_t>(),
               num_of_segments,
               numel);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
 
     // In order to compute `partial_segment_offset`, which is the start index
@@ -263,7 +263,7 @@ Tensor embedding_backward_cuda_kernel(
               partials_per_segment_offset.data_ptr<index_t>(),
               segment_offsets.data_ptr<index_t>(),
               num_of_segments);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
 
     const int stride_warped = ceil_div(stride, C10_WARP_SIZE)*C10_WARP_SIZE;
@@ -296,7 +296,7 @@ Tensor embedding_backward_cuda_kernel(
                   partial_segment_offset.data_ptr<index_t>(),
                   num_of_partial_segments, grad_weight_per_segment.data_ptr<partial_weight_t>(),
                   stride_warped);
-                TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
           } else {
                 compute_grad_weight<scalar_t><<<grid, block, 0, stream>>>(
                   orig_indices.data_ptr<index_t>(),
@@ -307,7 +307,7 @@ Tensor embedding_backward_cuda_kernel(
                   num_of_partial_segments,
                   grad_weight_per_segment.data_ptr<partial_weight_t>(),
                   stride_warped);
-                TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
           }
 
           // Finally, we sum all the partial-sums and scatter them
@@ -323,7 +323,7 @@ Tensor embedding_backward_cuda_kernel(
                 num_of_partial_segments,
                 padding_idx,
                 stride_warped);
-          TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
     });
   });
