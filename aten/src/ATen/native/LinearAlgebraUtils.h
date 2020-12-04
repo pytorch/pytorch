@@ -241,11 +241,12 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
   strides[input.dim() - 2] = 1;
 
   Tensor U_empty = at::empty_strided(sizes, strides, input.options().device(usvt_device));
+  U_empty.zero_();
 
   sizes[input.dim() - 2] = n;
   sizes[input.dim() - 1] = n;
   // VT should be a row-major or a batch of row-major matrices
-  Tensor VT_empty = at::empty(sizes, input.options().device(usvt_device));
+  Tensor VT_empty = at::zeros(sizes, input.options().device(usvt_device));
 
   sizes.pop_back();
   sizes[input.dim() - 2] = std::min(m, n);

@@ -60,6 +60,23 @@ template<>
 void gesvd<c10::complex<double>>(CUDASOLVER_GESVD_ARGTYPES(c10::complex<double>, double));
 
 
+#define CUDASOLVER_GESVDJ_ARGTYPES(Dtype, Vtype)  \
+    cusolverDnHandle_t handle, cusolverEigMode_t jobz, int econ, int m, int n, Dtype* A, int lda, Vtype* S, Dtype* U, \
+    int ldu, Dtype *V, int ldv, int *info, gesvdjInfo_t params
+
+template<class Dtype, class Vtype>
+void gesvdj(CUDASOLVER_GESVDJ_ARGTYPES(Dtype, Vtype)) {
+  TORCH_CHECK(false, "at::cuda::solver::gesvdj: not implemented for ", typeid(Dtype).name());
+}
+template<>
+void gesvdj<float>(CUDASOLVER_GESVDJ_ARGTYPES(float, float));
+template<>
+void gesvdj<double>(CUDASOLVER_GESVDJ_ARGTYPES(double, double));
+template<>
+void gesvdj<c10::complex<float>>(CUDASOLVER_GESVDJ_ARGTYPES(c10::complex<float>, float));
+template<>
+void gesvdj<c10::complex<double>>(CUDASOLVER_GESVDJ_ARGTYPES(c10::complex<double>, double));
+
 } // namespace solver
 } // namespace cuda
 } // namespace at
