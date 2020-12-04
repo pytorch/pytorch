@@ -525,6 +525,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.mode: lambda input, dim=-1, keepdim=False, out=None: -1,
         torch.movedim: lambda input, source, destination: -1,
         torch.moveaxis: lambda input, source, destination: -1,
+        torch.msort: lambda input, descending=False, out=None: -1,
         torch.mul: lambda input, other, out=None: -1,
         torch.multiply: lambda input, other, out=None: -1,
         torch.multinomial: lambda input, num_samples, replacement=False, out=None: -1,
