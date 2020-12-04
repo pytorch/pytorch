@@ -36,7 +36,8 @@ There are a number of type hints which we've special-cased;
 read gen_pyi for the gory details.
 """
 
-# TODO: consider waiting to group by base name until we actually need to (after computing type hint signatures, when adding @overload directives)
+# TODO: consider waiting to group by base name until we actually need to
+# (after computing type hint signatures, when adding @overload directives)
 def group_by_base_name(python_funcs: Sequence[PythonSignatureNativeFunctionPair]) -> Mapping[str, List[PythonSignatureGroup]]:
     groups = group_overloads(python_funcs, sort=False)
     d = collections.defaultdict(list)
@@ -187,7 +188,7 @@ def generate_named_tuples(funcs: Sequence[PythonSignatureGroup]) -> Dict[str, st
                 namedtuples[tuple_name] = tuple_def
     return namedtuples
 
-def generate_type_hints(funcs: Sequence[PythonSignatureGroup], is_tensor: bool =False) -> List[str]:
+def generate_type_hints(funcs: Sequence[PythonSignatureGroup], is_tensor: bool = False) -> List[str]:
     """generate_type_hints(funcs, is_tensor=False)
 
     Generates type hints for the declarations pertaining to the function
@@ -222,7 +223,8 @@ def generate_type_hints(funcs: Sequence[PythonSignatureGroup], is_tensor: bool =
         hacky_add_output = any_out and sig_group.outplace is None and not sig_group.signature.deprecated
         # PythonSignatureGroups that have both a functional + out variant get a single signature, with an optional out argument
         # Generates the out variant if one exists. Otherwise, generate the functional variant
-        type_hint = sig_group.signature.signature_str_pyi(skip_outputs=sig_group.outplace is None, hacky_add_output=hacky_add_output)
+        type_hint = sig_group.signature.signature_str_pyi(
+            skip_outputs=sig_group.outplace is None, hacky_add_output=hacky_add_output)
         type_hints.append(type_hint)
 
         # Some operators also additionally have a vararg variant of their signature
