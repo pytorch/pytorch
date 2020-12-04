@@ -1,8 +1,19 @@
 #pragma once
+#include <ATen/core/ivalue.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/python_headers.h>
 
 namespace py = pybind11;
+
+// Forward-declare to avoid circular dependency with pybind_utils.h.
+
+namespace torch {
+namespace jit {
+
+at::IValue toTypeInferredIValue(py::handle input);
+
+} // namespace jit
+} // namespace torch
 
 namespace c10 {
 namespace ivalue {
@@ -22,6 +33,11 @@ struct C10_EXPORT ConcretePyObjectHolder final : PyObjectHolder {
 
   PyObject* getPyObject() override {
     return py_obj_.ptr();
+  }
+
+  IValue toIValue() override {
+    pybind11::gil_scoped_acquire ag;
+    return torch::jit::toTypeInferredIValue(py_obj_);
   }
 
   // Note [Destructing py::object]

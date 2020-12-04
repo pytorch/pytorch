@@ -422,33 +422,6 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     return fut;
   }
 
-  // Some subclasses deal with CUDA tensors and must inform the CUDA caching
-  // allocator of which CUDA streams each DataPtr is used in. If the value held
-  // by the future is a Python object we need to acquire the GIL when extracting
-  // these DataPtrs. Since this file cannot depend on Python, we allow users to
-  // provide a "custom" extractor. Look for example at the PythonFutureWrapper.
-  using DataPtrExtractor =
-      std::function<std::vector<std::reference_wrapper<const at::DataPtr>>(
-          const at::IValue&)>;
-  virtual void setDataPtrExtractor(DataPtrExtractor data_ptr_extractor) {}
-
-  // Expose the default implementation so that external ones can defer to it.
-  static std::vector<std::reference_wrapper<const at::DataPtr>>
-  defaultDataPtrExtractor(const at::IValue& value) {
-    at::IValue::HashAliasedIValues sub_values;
-    // Prefer getSubValues() over visit() as the latter is a silent no-op for
-    // some unsupported types, whereas the former at least fails loudly.
-    value.getSubValues(sub_values);
-
-    std::vector<std::reference_wrapper<const at::DataPtr>> res;
-    for (const at::IValue& sub_value : sub_values) {
-      if (sub_value.isTensor()) {
-        res.emplace_back(sub_value.toTensor().storage().data_ptr());
-      }
-    }
-    return res;
-  };
-
   // Tries to retrieve the error message from std::exception_ptr.
   std::string tryRetrieveErrorMessage() {
     TORCH_CHECK(hasError(), "No error present on the future.");
@@ -665,6 +638,7 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
 struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
  public:
   virtual PyObject* getPyObject() = 0;
+  virtual IValue toIValue() = 0;
   virtual ~PyObjectHolder(){};
 };
 

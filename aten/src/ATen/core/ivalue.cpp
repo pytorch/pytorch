@@ -156,6 +156,11 @@ void IValue::visit(const std::function<bool (const IValue &)>& visitor) const {
       }
       break;
     }
+    case Tag::PyObject: {
+      IValue contained_value = toPyObjectHolder()->toIValue();
+      contained_value.visit(visitor);
+      break;
+    }
     default:
       break;
  }
@@ -199,9 +204,14 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
       }
       break;
     }
+    case Tag::PyObject: {
+      subValues.insert(*this);
+      IValue contained_value = toPyObjectHolder()->toIValue();
+      contained_value.getSubValues(subValues);
+      break;
+    }
     case Tag::Future:
     case Tag::Device:
-    case Tag::PyObject:
     case Tag::Uninitialized:
     case Tag::Capsule:
       TORCH_INTERNAL_ASSERT(
