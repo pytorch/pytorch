@@ -265,7 +265,7 @@ fi
 ###############################################################################
 
 # Install ONNX into a local directory
-pip install --user -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
+pip install --user "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
 
 report_compile_cache_stats
 

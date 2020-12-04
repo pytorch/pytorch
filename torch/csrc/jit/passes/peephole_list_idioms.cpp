@@ -25,8 +25,9 @@ c10::optional<size_t> normalizeIndex(int64_t index, size_t len) {
 // so we first use the Alias Db to collect the set of list values
 // which we shouldn't optimize.
 struct PeepholeOptimizeListIdiomsImpl {
-  PeepholeOptimizeListIdiomsImpl(const std::shared_ptr<Graph>& graph)
-      : graph_(graph), aliasDb_(torch::make_unique<AliasDb>(graph_)) {
+  PeepholeOptimizeListIdiomsImpl(std::shared_ptr<Graph> graph)
+      : graph_(std::move(graph)),
+        aliasDb_(torch::make_unique<AliasDb>(graph_)) {
     collectMutatedLists(graph_->block());
     run(graph_->block());
   }
