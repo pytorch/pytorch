@@ -102,13 +102,16 @@ class OpInfo(object):
                  skips=tuple(),  # information about which tests to skip
                  decorators=None,  # decorators to apply to generated tests
                  promotes_integers_to_float=False,  # whether op promotes unary output to float or not
-                 sample_inputs_func=None):  # function to generate sample inputs
+                 sample_inputs_func=None,  # function to generate sample inputs
+                 aten_name=None, # name of the corresponding aten:: operator
+                 ):
 
         # Validates the dtypes are generated from the dispatch-related functions
         for dtype_list in (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM):
             assert isinstance(dtype_list, (_dispatch_dtypes, type(None)))
 
         self.name = name
+        self.aten_name = aten_name if aten_name is not None else name
 
         self.dtypes = set(dtypes)
         self.dtypesIfCPU = set(dtypesIfCPU) if dtypesIfCPU is not None else self.dtypes
@@ -502,6 +505,7 @@ op_db: List[OpInfo] = [
                                 device_type='cuda', dtypes=[torch.float16]),
                    )),
     SpectralFuncInfo('fft.fft',
+                     aten_name='fft_fft',
                      ref=np.fft.fft,
                      ndimensional=False,
                      dtypes=all_types_and_complex_and(torch.bool),
@@ -509,6 +513,7 @@ op_db: List[OpInfo] = [
                      supports_tensor_out=False,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.fftn',
+                     aten_name='fft_fftn',
                      ref=np.fft.fftn,
                      ndimensional=True,
                      dtypes=all_types_and_complex_and(torch.bool),
@@ -518,6 +523,7 @@ op_db: List[OpInfo] = [
                      decorators=[precisionOverride(
                          {torch.float: 1e-4, torch.cfloat: 1e-4})],),
     SpectralFuncInfo('fft.hfft',
+                     aten_name='fft_hfft',
                      ref=np.fft.hfft,
                      ndimensional=False,
                      dtypes=all_types_and_complex_and(torch.bool),
@@ -525,6 +531,7 @@ op_db: List[OpInfo] = [
                      supports_tensor_out=False,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.rfft',
+                     aten_name='fft_rfft',
                      ref=np.fft.rfft,
                      ndimensional=False,
                      dtypes=all_types_and(torch.bool),
@@ -532,6 +539,7 @@ op_db: List[OpInfo] = [
                      supports_tensor_out=False,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.rfftn',
+                     aten_name='fft_rfftn',
                      ref=np.fft.rfftn,
                      ndimensional=True,
                      dtypes=all_types_and(torch.bool),
@@ -540,6 +548,7 @@ op_db: List[OpInfo] = [
                      test_inplace_grad=False,
                      decorators=[precisionOverride({torch.float: 1e-4})],),
     SpectralFuncInfo('fft.ifft',
+                     aten_name='fft_ifft',
                      ref=np.fft.ifft,
                      ndimensional=False,
                      dtypes=all_types_and_complex_and(torch.bool),
@@ -547,6 +556,7 @@ op_db: List[OpInfo] = [
                      supports_tensor_out=False,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.ifftn',
+                     aten_name='fft_ifftn',
                      ref=np.fft.ifftn,
                      ndimensional=True,
                      dtypes=all_types_and_complex_and(torch.bool),
@@ -554,6 +564,7 @@ op_db: List[OpInfo] = [
                      supports_tensor_out=False,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.ihfft',
+                     aten_name='fft_ihfft',
                      ref=np.fft.ihfft,
                      ndimensional=False,
                      dtypes=all_types_and(torch.bool),
@@ -561,6 +572,7 @@ op_db: List[OpInfo] = [
                      supports_tensor_out=False,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.irfft',
+                     aten_name='fft_irfft',
                      ref=np.fft.irfft,
                      ndimensional=False,
                      dtypes=all_types_and_complex_and(torch.bool),
@@ -568,6 +580,7 @@ op_db: List[OpInfo] = [
                      supports_tensor_out=False,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.irfftn',
+                     aten_name='fft_irfftn',
                      ref=np.fft.irfftn,
                      ndimensional=True,
                      dtypes=all_types_and_complex_and(torch.bool),
