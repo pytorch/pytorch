@@ -1386,6 +1386,10 @@ class TestVmapOperators(Namespace.TestVmapBase):
             test(vmap(op, in_dims=2), [TensorFactory.randn([2, 5, B0, B1, 3])],
                  in_dims=2, out_dims=2)
 
+        # test when value is a batched tensor for fill_ operator
+        B0, B1 = 3, 5
+        test(Tensor.fill_, [TensorFactory.randn([B0, B1]), TensorFactory.randn(B0)])
+
     def _test_complex_views(self, op, dtypes):
         test = self._vmap_view_test
 

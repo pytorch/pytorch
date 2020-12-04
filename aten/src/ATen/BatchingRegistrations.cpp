@@ -240,8 +240,16 @@ Tensor& fill_inplace_scalar_batching_rule(Tensor& self, Scalar value) {
 }
 
 Tensor& fill_inplace_tensor_batching_rule(Tensor& self, const Tensor& value) {
-  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
-  self_physical.tensor().fill_(value);
+  auto value_batched = isBatchedTensor(value);
+
+  if (value_batched) {
+    auto physical_args =
+      BroadcastingVmapTransform::logicalToPhysical({self, value});
+    physical_args[0].tensor().copy_(physical_args[1].tensor());
+  } else {
+    auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+    self_physical.tensor().fill_(value);
+  }
   return self;
 }
 
