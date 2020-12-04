@@ -847,6 +847,19 @@ Tensor max(const Tensor& self, const Tensor& other) {
   return at::maximum(self, other);
 }
 
+Tensor& fmax_out(Tensor& result, const Tensor& self, const Tensor& other) {
+    auto both_nan = self.isnan().logical_and_(other.isnan());
+    return at::maximum_out(result,
+                           at::where(self.isnan()  == both_nan, self, other.to(self.dtype())),
+                           at::where(other.isnan() == both_nan, other, self.to(other.dtype())));
+}
+
+Tensor fmax(const Tensor& self, const Tensor& other) {
+    auto both_nan = self.isnan().logical_and_(other.isnan());
+    return at::maximum(at::where(self.isnan()  == both_nan, self, other.to(self.dtype())),
+                       at::where(other.isnan() == both_nan, other, self.to(other.dtype())));
+}
+
 Tensor& minimum_out(Tensor& result, const Tensor& self, const Tensor& other) {
   auto iter = TensorIterator::binary_op(result, self, other);
   minimum_stub(iter.device_type(), iter);
@@ -862,11 +875,24 @@ Tensor minimum(const Tensor& self, const Tensor& other) {
 
 // binary min, alias for minimum
 Tensor& min_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  return at::minimum_out(result, self, other);
+    return at::minimum_out(result, self, other);
 }
 
 Tensor min(const Tensor& self, const Tensor& other) {
-  return at::minimum(self, other);
+    return at::minimum(self, other);
+}
+
+Tensor& fmin_out(Tensor& result, const Tensor& self, const Tensor& other) {
+    auto both_nan = self.isnan().logical_and_(other.isnan());
+    return at::minimum_out(result,
+                           at::where(self.isnan()  == both_nan, self, other.to(self.dtype())),
+                           at::where(other.isnan() == both_nan, other, self.to(other.dtype())));
+}
+
+Tensor fmin(const Tensor& self, const Tensor& other) {
+    auto both_nan = self.isnan().logical_and_(other.isnan());
+    return at::minimum(at::where(self.isnan()  == both_nan, self, other.to(self.dtype())),
+                       at::where(other.isnan() == both_nan, other, self.to(other.dtype())));
 }
 
 Tensor floor_divide(const Tensor& self, Scalar other) {
