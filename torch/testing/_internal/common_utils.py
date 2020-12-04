@@ -336,7 +336,6 @@ else:
 
 IS_STDIN_UTF8_ENCODING = sys.stdin.encoding.lower(
 ) == 'utf-8' and (IS_WINDOWS or locale.getpreferredencoding().lower() == 'utf-8')
-    (locale.getpreferredencoding().lower() in ['utf-8', 'cp65001'])
 
 def _check_module_exists(name):
     r"""Returns if a top-level module with :attr:`name` exists *without**
