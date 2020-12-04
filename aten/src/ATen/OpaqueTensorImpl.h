@@ -86,8 +86,8 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
     auto impl = c10::make_intrusive<OpaqueTensorImpl<OpaqueHandle>>(
         key_set(), dtype(), device(), opaque_handle_, sizes_);
     copy_tensor_metadata(
-        /*src_impl=*/this,
-        /*dest_impl=*/impl.get(),
+        /*src_opaque_impl=*/this,
+        /*dest_opaque_impl=*/impl.get(),
         /*version_counter=*/version_counter,
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
     impl->refresh_numel();
@@ -106,8 +106,8 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
     auto impl = c10::make_intrusive<OpaqueTensorImpl<OpaqueHandle>>(
         key_set(), dtype(), device(), opaque_handle_, sizes_);
     copy_tensor_metadata(
-        /*src_impl=*/this,
-        /*dest_impl=*/impl.get(),
+        /*src_opaque_impl=*/this,
+        /*dest_opaque_impl=*/impl.get(),
         /*version_counter=*/std::move(version_counter),
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
     impl->refresh_numel();
@@ -157,6 +157,21 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
         src_opaque_impl,
         dest_opaque_impl,
         version_counter,
+        allow_tensor_metadata_change);
+
+    // OpaqueTensorImpl-specific fields.
+    dest_opaque_impl->opaque_handle_ = src_opaque_impl->opaque_handle_;
+  }
+
+  static void copy_tensor_metadata(
+      const OpaqueTensorImpl<OpaqueHandle>* src_opaque_impl,
+      OpaqueTensorImpl<OpaqueHandle>* dest_opaque_impl,
+      c10::VariableVersion&& version_counter,
+      bool allow_tensor_metadata_change) {
+    TensorImpl::copy_tensor_metadata(
+        src_opaque_impl,
+        dest_opaque_impl,
+        std::move(version_counter),
         allow_tensor_metadata_change);
 
     // OpaqueTensorImpl-specific fields.
