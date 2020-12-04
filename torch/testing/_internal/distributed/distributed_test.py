@@ -4278,9 +4278,10 @@ class DistributedTest:
                 if self.rank == src_rank
                 else [None for _ in collectives_object_test_list]
             )
-            scatter_list = scatter_list[: int(os.environ["WORLD_SIZE"])]
+            world_size = dist.get_world_size()
+            scatter_list = scatter_list[: world_size]
             i = 0
-            while len(scatter_list) < int(os.environ["WORLD_SIZE"]):
+            while len(scatter_list) < world_size:
                 scatter_list.append(scatter_list[i])
                 i += 1
 
