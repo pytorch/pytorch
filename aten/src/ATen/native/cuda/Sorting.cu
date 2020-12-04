@@ -316,6 +316,10 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
     int64_t dim,
     bool keepdim,
     bool ignore_nan) {
+  // See note [Writing Nondeterministic Operations]
+  // If there are duplicate elements of a median value, the procedure for choosing which
+  // of the duplicates to use for the indices output is nondeterministic.
+  at::globalContext().alertNotDeterministic("median CUDA with indices output");
   NoNamesGuard guard;
 
   dim = at::maybe_wrap_dim(dim, self.dim());
@@ -410,6 +414,10 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cuda(
     int64_t k,
     int64_t dim,
     bool keepdim) {
+  // See note [Writing Nondeterministic Operations]
+  // If there are duplicate elements of the kth value, the procedure for choosing which
+  // of the duplicates to use for the indices output is nondeterministic.
+  at::globalContext().alertNotDeterministic("kthvalue CUDA");
   auto result = [&]() {
     NoNamesGuard guard;
     // `kthvalue_out_impl_cuda` expects contiguous in input `self`.

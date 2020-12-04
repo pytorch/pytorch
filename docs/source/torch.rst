@@ -92,6 +92,7 @@ Indexing, Slicing, Joining, Mutating Ops
     index_select
     masked_select
     movedim
+    moveaxis
     narrow
     nonzero
     reshape
@@ -510,6 +511,7 @@ BLAS and LAPACK Operations
     eig
     geqrf
     ger
+    inner
     inverse
     det
     logdet
