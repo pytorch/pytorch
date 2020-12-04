@@ -310,15 +310,12 @@ def load_deprecated_signatures(
                     name=python_sig.name,
                     input_args=tuple(input_args),
                     input_kwargs=tuple(input_kwargs),
-                    # TODO: when we remove the difference for deprecated output_args, this should be a pass through
-                    output_args=None if not python_sig.output_args else
-                    PythonOutArgument.from_outputs(python_sig.output_args.outputs, pyi=pyi, deprecated=True),
+                    output_args=python_sig.output_args,
                     tensor_options_args=python_sig.tensor_options_args,
                     method=python_sig.method,
                     deprecated_args_names=tuple(args),
                     deprecated_args_exprs=tuple(call_args),
                     returns=python_sig.returns,
-                    pyi=pyi,
                 ),
                 function=pair.function,
             ))
