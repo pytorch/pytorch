@@ -25,8 +25,8 @@ void postSetStateValidate(const IValue& v);
 namespace {
 
 struct ClassResolver : public Resolver {
-  explicit ClassResolver(SourceImporter source_importer)
-      : source_importer_(std::move(source_importer)) {}
+  explicit ClassResolver(const SourceImporter& source_importer)
+      : source_importer_(source_importer) {}
   TypePtr resolveType(const std::string& name, const SourceRange& loc)
       override {
     return source_importer_.loadType(c10::QualifiedName(name));
@@ -42,7 +42,7 @@ class ScriptModuleDeserializer final {
       std::shared_ptr<CompilationUnit> cu,
       std::unique_ptr<PyTorchStreamReader> reader,
       const c10::optional<at::Device>& device)
-      : compilation_unit_(cu),
+      : compilation_unit_(std::move(cu)),
         reader_(std::move(reader)),
         device_(device),
         source_importer_(
@@ -130,7 +130,7 @@ Module ScriptModuleDeserializer::LEGACY_deserialize() {
     LEGACY_pickled_ivalues_ =
         LEGACY_loadPickleArchive("attributes.pkl").toTuple()->elements();
   }
-  LEGACY_moduleStack_.push_back("__torch__");
+  LEGACY_moduleStack_.emplace_back("__torch__");
   const auto& module_def = model_def.main_module();
 
   // Move tensors in constant table.
@@ -267,7 +267,7 @@ void ScriptModuleDeserializer::LEGACY_moduleSetState(
   if (setstate->num_inputs() == 1) {
     setstate->run({module._ivalue()});
   } else if (setstate->num_inputs() == 2) {
-    setstate->run({module._ivalue(), state});
+    setstate->run({module._ivalue(), std::move(state)});
   } else {
     AT_ERROR("Unexpected schema on '__setstate__'");
   }
@@ -385,7 +385,8 @@ Module LEGACY_deserialize(
     std::shared_ptr<CompilationUnit> cu,
     std::unique_ptr<caffe2::serialize::PyTorchStreamReader> reader,
     const c10::optional<c10::Device>& device) {
-  ScriptModuleDeserializer deserializer(cu, std::move(reader), device);
+  ScriptModuleDeserializer deserializer(
+      std::move(cu), std::move(reader), device);
   return deserializer.LEGACY_deserialize();
 }
 

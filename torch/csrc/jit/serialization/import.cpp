@@ -109,7 +109,7 @@ class ScriptModuleDeserializer final {
   ScriptModuleDeserializer(
       std::shared_ptr<CompilationUnit> cu,
       std::unique_ptr<PyTorchStreamReader> reader)
-      : compilation_unit_(cu),
+      : compilation_unit_(std::move(cu)),
         reader_(std::move(reader)),
         source_importer_(
             compilation_unit_,
@@ -144,7 +144,7 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
   // Decouple how to get obj from type. In this file it's dependent on
   // Method.run() and graph executor, etc.
   // For bytecode import we need to decouple these dependencies.
-  auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
+  auto obj_loader = [&](const at::StrongTypePtr& type, IValue input) {
     auto cls = type.type_->expect<at::ClassType>();
     auto qn = cls->name();
     size_t n = cls->numAttributes();
