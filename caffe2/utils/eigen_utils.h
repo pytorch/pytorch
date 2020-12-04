@@ -73,17 +73,28 @@ using EArrXf = Eigen::ArrayXf;
 using EArrXd = Eigen::ArrayXd;
 using EArrXi = Eigen::ArrayXi;
 using EArrXb = EArrXt<bool>;
+using EArrXI32  = EArrXt<int32_t>;
+using EArrXU16  = EArrXt<uint16_t>;
+using EArrXU8  = EArrXt<uint8_t>;
 
 // 2-d array, column major
 template <typename T>
 using EArrXXt = Eigen::Array<T, Eigen::Dynamic, Eigen::Dynamic>;
 using EArrXXf = Eigen::ArrayXXf;
+using EArrXXI32 = EArrXXt<int32_t>;
+using EArrXXU16 = EArrXXt<uint16_t>;
+using EArrXXU8 = EArrXXt<uint8_t>;
+using EArrXXi = EArrXXt<int>;
 
 // 2-d array, row major
 template <typename T>
 using ERArrXXt =
     Eigen::Array<T, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
 using ERArrXXf = ERArrXXt<float>;
+using ERArrXXI32t = ERArrXXt<int32_t>;
+using ERArrXXU16t = ERArrXXt<uint16_t>;
+using ERArrXXU8t = ERArrXXt<uint8_t>;
+using ERArrXXi = ERArrXXt<int>;
 
 // 1-d vector
 template <typename T>
