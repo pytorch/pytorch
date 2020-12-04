@@ -1301,9 +1301,9 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
 }
 
 // This is the structured kernels implementation of set_output.  It is
-// NEVER actually called directly; instead, a subclass of TensorIterator
+// NEVER actually called directly; instead, a subclass of TensorIteratorBase
 // will override set_output to actually do the operation, and then call
-// set_output on the subclass to setup metadata further on PyTorch.
+// set_output on the TensorIteratorBase to setup TI's metadata.
 // The precondition for this function is that maybe_get_output() now
 // unconditionally returns a real Tensor (prior to output setting,
 // this function may return an undefined tensor.)
@@ -1339,9 +1339,9 @@ void TensorIteratorBase::set_output(int64_t output_idx, IntArrayRef sizes, IntAr
       //
       // This is a slight memory pessimization, because previously
       // original_tensor only got resized at the end of the computation, rather
-      // than at the end.  However, the peak memory usage is the same, since you
-      // need to materialize both original tensor and temporary tensor to do the
-      // copy.
+      // than at the beginning (as happens here).  However, the peak memory
+      // usage is the same, since you need to materialize both original tensor
+      // and temporary tensor to do the copy.
       //
       // (*) Actually, technically, we probably do know what the shape
       // should be, since we do shape computation before dtype computation.
@@ -1403,7 +1403,10 @@ void TensorIterator::set_output(int64_t output_idx, IntArrayRef sizes, IntArrayR
   }
 }
 
-// Not actually used by anything, here for completeness
+// Not actually used by anything (TensorIterator subclass calls
+// its own implementation of set_output which knows exactly where
+// all the outputs are), but we have to provide all pure virtual methods
+// for MetaBase
 const Tensor& TensorIterator::maybe_get_output(int64_t output_idx) {
   return operands_[output_idx].tensor;
 }

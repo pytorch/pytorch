@@ -1,9 +1,5 @@
 #include <ATen/ATen.h>
 
-// Test is currently broken
-
-#if 0
-
 #ifdef AT_CUDNN_ENABLED
 #error "AT_CUDNN_ENABLED should not be visible in public headers"
 #endif
@@ -18,8 +14,6 @@
 
 #ifdef CAFFE2_STATIC_LINK_CUDA
 #error "CAFFE2_STATIC_LINK_CUDA should not be visible in public headers"
-#endif
-
 #endif
 
 auto main() -> int {}
