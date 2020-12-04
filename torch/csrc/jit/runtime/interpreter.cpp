@@ -1640,8 +1640,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       Node* node = frame.function->instructions_source_[pc];
       if (node->callstack()) {
         for (const auto& p : (*node->callstack())->vec()) {
-          entries.emplace_back(StackEntry{previous_fn_name, p.second});
-          previous_fn_name = p.first->name();
+          entries.emplace_back(StackEntry{previous_fn_name, std::get<1>(p)});
+          previous_fn_name = std::get<0>(p)->name();
         }
       }
       entries.emplace_back(StackEntry{previous_fn_name, node->sourceRange()});
