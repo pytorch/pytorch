@@ -52,16 +52,16 @@ void SparseGCSTensorImpl::resize_and_clear_(int64_t nnz_size, int64_t ptr_size, 
   auto empty_values = at::empty(nnz_size, values().options());
   auto empty_reduction = at::empty(redux_size, reduction().options());
 
-  std::cout << "MUST ASSING\n";
-  std::cout << "empyt reduction: " << empty_reduction.dtype() << std::endl;
+  TORCH_CHECK(empty_indices.scalar_type() == kInt,   "empty_indices must be an int32 type, but got: ", empty_indices.dtype());
+  TORCH_CHECK(empty_pointers.scalar_type() == kInt,  "empty_pointers must be int32 type, but got: ",   empty_pointers.dtype());
+  TORCH_CHECK(empty_reduction.scalar_type() == kInt, "empty_reduction must be int32 type, but got: ",  empty_reduction.dtype());
 
   // directly set to the member variables. there should be lots of error checking here.
   pointers_ = empty_pointers;
   indices_ = empty_indices;
   values_ = empty_values;
   reduction_ = empty_reduction;
-  
-  std::cout << "ASSIGNED ALL reduction_type: " << reduction_.dtype() << std::endl; 
+
   sizes_ = size.vec();
 }
 
@@ -82,7 +82,6 @@ void SparseGCSTensorImpl::set_member_tensors_unsafe(const Tensor& pointers, cons
   TORCH_CHECK(!values.is_sparse(), "expected values to be a dense tensor, but got values of layout ", values.layout());
   TORCH_CHECK(!reduction.is_sparse(), "expected reduction to be a dense tensor, but got reduction of layout ", reduction.layout());
 
-  std::cout << "TORCH CHECK reduction type: " << reduction.dtype() << " reduction_ type: " << reduction_.dtype() <<std::endl;
   TORCH_CHECK(values.device().type() == device().type(), "device type of values (", values.device().type(),
               ") must match device type of device().type()", device().type(), ")");
   TORCH_CHECK(!indices.is_cuda() || indices.get_device() == values.get_device(), "device of indices (", indices.get_device(),
@@ -93,16 +92,20 @@ void SparseGCSTensorImpl::set_member_tensors_unsafe(const Tensor& pointers, cons
   TORCH_CHECK(indices.size(0) == values.size(0), "indices and values must have same nnz, but got nnz from indices: ",
               indices.size(0), ", nnz from values: ", values.size(0));
 
-  TORCH_CHECK((((indices.dim() == pointers.dim()) == values.dim()) == reduction.dim()) == 1,
-              "indices, pointers, values and reduction must have dim=1 but got indices.dim()=",
-              indices.dim(), " pointers.dim()=", pointers.dim(), " values.dim()=", values.dim(), " reduction.dim()=", reduction.dim());
+  TORCH_CHECK(pointers.dim() == 1, "pointers must have dim=1 but got pointers.dim()=", pointers.dim());
+  TORCH_CHECK(indices.dim() == 1, "indices must have dim=1 but got indices.dim()=", indices.dim()); 
+  TORCH_CHECK(values.dim() == 1, "values must have dim=1 but got values.dim()=", values.dim());
+  TORCH_CHECK(reduction.dim() == 1, "reduction must have dim=1 but got reduction.dim()=", reduction.dim());
+
+  TORCH_CHECK(indices.scalar_type() == kInt, "indices must be an int32 type, but got: ", indices.dtype());
+  TORCH_CHECK(pointers.scalar_type() == kInt, "pointers must be int32 type, but got: ", pointers.dtype());
+  TORCH_CHECK(reduction.scalar_type() == kInt, "reduction must be int32 type, but got: ", reduction.dtype());
+  TORCH_CHECK(values.scalar_type() == typeMetaToScalarType(dtype()), "dtype of values (", values.scalar_type(), ") must match dtype of sparse tensor (", typeMetaToScalarType(dtype()), ")");
   
   pointers_ = pointers;
   indices_ = indices;
   values_ = values;
   reduction_ = reduction;
-
-  std::cout << "DONE ASSIGN 1: reduction_ -> " << reduction_.dtype() << " reduction -> " << reduction.dtype() << std::endl;
 
   AT_ASSERT(device() == values_.device());    
   AT_ASSERT(indices_.device() == values_.device());
@@ -110,8 +113,6 @@ void SparseGCSTensorImpl::set_member_tensors_unsafe(const Tensor& pointers, cons
 
 
   auto reduction_accessor = reduction_.accessor<int32_t, 1>();
-
-    std::cout << "POST ACCESSOR\n";  
 
   rsplit_dim_ = reduction_accessor[reduction_.size(0)-1];
     
@@ -121,7 +122,6 @@ void SparseGCSTensorImpl::set_member_tensors_unsafe(const Tensor& pointers, cons
   dims1_.resize(sizes_.size() - rsplit_dim_);
   strides1_.resize(1);
   
-  std::cout << "RESIZE THIS SHIW\n";
   for (int i = 0; i < rsplit_dim_; ++i) { dims0_[i] = i; }
   for (int i = 0; i < sizes_.size() - rsplit_dim_; ++i) { dims1_[i] = i + rsplit_dim_; }
 

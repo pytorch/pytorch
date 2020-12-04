@@ -25,10 +25,10 @@ Tensor& s_addmm_out_sparse_gcs_dense_cpu(
     Scalar beta,
     Scalar alpha) {
   // TODO: This error message seems awfully opaque
-  AT_ASSERT(!t.is_cuda());
-  TORCH_CHECK(!r.is_cuda(), "addmm: expected 'out' to be CPU tensor, but got CUDA tensor");
-  TORCH_CHECK(!sparse_.is_cuda(), "addmm: expected 'mat1' to be a CPU tensor, but got a CUDA tensor");
-  TORCH_CHECK(!dense.is_cuda(), "addmm: expected 'mat2' to be a CPU tensor, but got a CUDA tensor");
+  AT_ASSERT(t.device().type() == kCPU);
+  TORCH_CHECK(r.device().type() == kCPU, "addmm: expected 'out' to be CPU tensor, but got CUDA tensor");
+  TORCH_CHECK(sparse_.device().type() == kCPU, "addmm: expected 'mat1' to be a CPU tensor, but got a CUDA tensor");
+  TORCH_CHECK(dense.device().type() == kCPU, "addmm: expected 'mat2' to be a CPU tensor, but got a CUDA tensor");
 
   TORCH_CHECK(sparse_.dim() == 2, "addmm: matrices expected, got ", sparse_.dim(), "D tensor");
   TORCH_CHECK(dense.dim() == 2, "addmm: matrices expected, got ", dense.dim(), "D tensor");
@@ -96,7 +96,7 @@ SparseTensor& _sparse_gcs_mm_out(
   const Tensor& dense
 ) {
   Tensor t = at::zeros({}, dense.options());
-  return at::addmm_out(result, t, sparse, dense, 0, 1);  // redispatch!
+  return at::addmm_out(result, t, sparse, dense, 0.0, 1.0);  // redispatch!
 }
 
 Tensor add_sparse_gcs(const Tensor& self, const Tensor& other, Scalar alpha) {

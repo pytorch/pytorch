@@ -50,19 +50,22 @@ namespace at { namespace native {
       sparse_matrix_t A = 0;
       matrix_descr desc;
       desc.type = SPARSE_MATRIX_TYPE_GENERAL;
-      mkl_sparse_s_create_csr(&A, SPARSE_INDEX_BASE_ZERO, nrows, ncols, pointers,
+      int retval = mkl_sparse_s_create_csr(&A, SPARSE_INDEX_BASE_ZERO, nrows, ncols, pointers,
                               pointers+1, indices, values);
+      TORCH_CHECK(retval == 0, "mkl_sparse_d_create_csr failed with error code: ", retval);
+
       mkl_sparse_s_mm(SPARSE_OPERATION_NON_TRANSPOSE, alpha, A, desc,
                       SPARSE_LAYOUT_ROW_MAJOR, dense, dense_ncols, dense_ncols, beta,
                       res, dense_ncols);
+      mkl_sparse_destroy(A);
     }
 
     // TODO: The types here are long int but int = LongTensor only when using lp64 for MKL. SHould we resort
     // to using IntTensor for the indices and pointers?
-    static inline void sparse_mm_mkl_impl(double * res, int * indices, int * pointers,
+    static inline void sparse_mm_mkl_impl(double * res, int32_t * indices, int32_t * pointers,
                                           double * values, double * dense, double * t,
-                                          double alpha, double beta, int nrows,
-                                          int ncols, int dense_ncols) {
+                                          double alpha, double beta, int32_t nrows,
+                                          int32_t ncols, int32_t dense_ncols) {
       sparse_matrix_t A = 0;
       matrix_descr desc;
       desc.type = SPARSE_MATRIX_TYPE_GENERAL;
@@ -83,15 +86,14 @@ namespace at { namespace native {
                                               const Tensor& dense, const Tensor& t, Scalar alpha,
                                               Scalar beta, IntArrayRef size, IntArrayRef dense_size) {
       sparse_mm_mkl_impl(res.data_ptr<scalar_t>(),
-                         indices.data_ptr<int>(),
-                         pointers.data_ptr<int>(),
+                         indices.data_ptr<int32_t>(),
+                         pointers.data_ptr<int32_t>(),
                          values.data_ptr<scalar_t>(),
                          dense.data_ptr<scalar_t>(),
                          t.data_ptr<scalar_t>(),
                          alpha.to<scalar_t>(),
                          beta.to<scalar_t>(),
-                         static_cast<int>(size[0]), static_cast<int>(size[1]),
-                         static_cast<int>(dense_size[1]));
+                         size[0], size[1], dense_size[1]);
     }
 
   Tensor _sparse_mm_mkl_(Tensor& self, const SparseTensor& sparse_, const Tensor& dense,

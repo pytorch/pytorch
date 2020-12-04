@@ -33,6 +33,7 @@ using at::IntArrayRef;
 using at::kCPU;
 using at::kCUDA;
 using at::kLong;
+using at::kInt;
 using at::Scalar;
 using at::ScalarType;
 using at::Storage;
@@ -615,16 +616,16 @@ Tensor sparse_gcs_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
     const auto inferred_scalar_type = r.scalartypeWithDefault(5, scalar_type);
     at::OptionalDeviceGuard device_guard(r.deviceOptional(8));    
 
-    Tensor pointers =  internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(8), r.pyobject(0),
+    Tensor pointers =  internal_new_from_data(inferred_dispatch_key, kInt, r.deviceOptional(7), r.pyobject(0),
                                               /*copy_variables=*/false, /*copy_numpy=*/true,
                                               /*type_inference=*/false);
-    Tensor indices = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(8), r.pyobject(1),
+    Tensor indices = internal_new_from_data(inferred_dispatch_key, kInt, r.deviceOptional(7), r.pyobject(1),
                                               /*copy_variables=*/false, /*copy_numpy=*/true,
                                               /*type_inference=*/false);
-    Tensor values = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(8), r.pyobject(2),
+    Tensor values = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(7), r.pyobject(2),
                                             /*copy_variables=*/false, /*copy_numpy=*/true,
                                             /*type_inference=*/type_inference);
-    Tensor reduction = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(8), r.pyobject(3),
+    Tensor reduction = internal_new_from_data(inferred_dispatch_key, kInt, r.deviceOptional(7), r.pyobject(3),
                                            /*copy_variables=*/false, /*copy_numpy=*/true,
                                            /*type_inference=*/true);
     return at::sparse_gcs_tensor(pointers, indices, values, reduction, r.intlist(4),

@@ -1026,10 +1026,10 @@ class Tensor(torch._C._TensorBase):
                 vals.extend(v)
 
         reduction = torch.IntTensor(reduction)
-        return torch.sparse_gcs_tensor(torch.tensor(ro, dtype=torch.int32),
-                                       torch.tensor(co, dtype=torch.int32),
+        print(torch.IntTensor(co).type())
+        return torch.sparse_gcs_tensor(torch.IntTensor(ro), torch.IntTensor(co),
                                        torch.tensor(vals, dtype=self.dtype),
-                                       reduction, shape)
+                                       reduction, shape, dtype=self.dtype)
 
 
     def _update_names(self, names, inplace):

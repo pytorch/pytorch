@@ -53,7 +53,7 @@ class TestSparseGCS(TestCase):
         sp = torch.tensor([[1, 2], [3, 4]]).to_sparse_gcs(None, -999)
         self.assertEqual(torch.tensor([0, 2, 4], dtype=torch.int32), sp.pointers())
         self.assertEqual(torch.tensor([0, 1, 0, 1], dtype=torch.int32), sp.indices())
-        self.assertEqual(torch.tensor([1, 2, 3, 4], dtype=torch.double), sp.values())
+        self.assertEqual(torch.tensor([1, 2, 3, 4], dtype=torch.int64), sp.values())
 
     def test_dense_convert(self):
         size = (5, 5, 5, 5, 5)

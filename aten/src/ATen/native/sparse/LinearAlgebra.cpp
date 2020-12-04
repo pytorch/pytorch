@@ -28,14 +28,14 @@ namespace at { namespace native {
   Tensor _sparse_gcs_mm_cpu(Tensor& res, const SparseTensor& sparse_, const Tensor& temp_res,
                             const Tensor& dense, Scalar alpha, Scalar beta) {
 
-    TORCH_CHECK(sparse_.dim() == 2, "sparse_gcs_mm_cpu: sparse matrix must have 2 dimensions, not ",
+    TORCH_CHECK(sparse_.dim() == 2, "sparse_gcs_mm_cpu: sparse matrix dimensionality must be 2, got ",
                 sparse_.dim());
     TORCH_CHECK(sparse_.size(1) == dense.size(0),
                 "sparse_gcs_mm_cpu: Expected dim1 of sparse matrix to be same as dim0 of dense.");
  
-    LongTensor indices = sparse_.indices();
-    LongTensor pointers = sparse_.pointers();
-    Tensor values      = sparse_.values();
+    auto indices = sparse_.indices();
+    auto pointers = sparse_.pointers();
+    auto values   = sparse_.values();
     int64_t nnz = sparse_._nnz();
     int64_t dim_k = dense.size(0);
     
@@ -56,7 +56,7 @@ namespace at { namespace native {
     });
 
     if (at::hasMKL()) {
-      at::_sparse_mm_mkl_(res, sparse_, dense, temp_res, alpha, beta);      
+      at::_sparse_mm_mkl_(res, sparse_, dense, temp_res, alpha, beta);
     }
     else {
       int64_t dense_stride0 = dense.stride(0);
@@ -71,19 +71,18 @@ namespace at { namespace native {
           scalar_t* dense_ptr = dense.data_ptr<scalar_t>();
           scalar_t* res_ptr = res.data_ptr<scalar_t>();
 
-          auto indices_accessor = indices.accessor<int, 1>();
-          auto pointers_accessor = pointers.accessor<int, 1>();
+          auto indices_accessor = indices.accessor<int32_t, 1>();
+          auto pointers_accessor = pointers.accessor<int32_t, 1>();
           auto values_accessor = values.accessor<scalar_t, 1>();
 
           for (int iptr = 0; iptr < pointers.size(0)-1; ++iptr) {
             int start_index = pointers_accessor[iptr];
             int end_index = pointers_accessor[iptr+1];
             int nindices = end_index - start_index;
-            int icol, index;
 
             for (int i = start_index; i < end_index; ++i) {
               auto val = values_accessor[i];
-              icol = indices_accessor[i];
+              auto icol = indices_accessor[i];
 
               THBlas_axpy<scalar_t>(dim_k,
                 cast_alpha * val, dense_ptr + icol * dense_stride0, dense_stride1,

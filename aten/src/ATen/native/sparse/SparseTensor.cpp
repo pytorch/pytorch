@@ -175,7 +175,6 @@ Tensor sparse_gcs_tensor(const Tensor& pointers, const Tensor& indices, const Te
   int64_t nnz_size = values.numel();
   int64_t ptr_size = pointers.numel();
   int64_t redux_size = reduction.numel();
-  std::cout << "BEGIN reduction tyep: " << reduction.dtype() << std::endl;
   
   get_sparse_impl<SparseGCSTensorImpl>(self)->resize_and_clear_(nnz_size, ptr_size, redux_size, size);
   get_sparse_impl<SparseGCSTensorImpl>(self)->set_member_tensors_unsafe(pointers,
