@@ -351,7 +351,7 @@ namespace {
   }
 
   bool _is_same_size_as_sparse_gcs(const SparseTensor& self, const SparseTensor& src) {
-    return self.dim().size() == src.dim().size() && self.sizes().equals(src.sizes());
+    return self.dim() == src.dim() && self.sizes().equals(src.sizes());
   }
 }
 
@@ -365,12 +365,10 @@ SparseTensor& resize_as_sparse_(SparseTensor& self, const SparseTensor& src) {
 
 SparseTensor& resize_as_sparse_gcs_(SparseTensor& self, const SparseTensor& src) {
   if (!_is_same_size_as_sparse_gcs(self, src)) {
-    get_sparse_impl<SparseGCSTensorImpl>(self)->resize_(src.sizes());
+    get_sparse_impl<SparseGCSTensorImpl>(self)->resize_as_(src);
   }
   return self;
 }
-
-
 
 std::vector<int> make_strides(std::vector<int> shape) {
   std::vector<int> dims(shape.size());

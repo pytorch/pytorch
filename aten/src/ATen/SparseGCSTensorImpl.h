@@ -34,7 +34,6 @@ struct CAFFE2_API SparseGCSTensorImpl : public TensorImpl {
  public:
   explicit SparseGCSTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta&);
 
-  void resize_(IntArrayRef size);
   void resize_and_clear_(int64_t nnz_size, int64_t ptr_size, int64_t redux_size, IntArrayRef size);
   void resize_as_(const Tensor& src);
   

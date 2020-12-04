@@ -37,12 +37,10 @@ namespace at { namespace native {
     auto indices = sparse_.indices();
     auto pointers = sparse_.pointers();
     auto values   = sparse_.values();
-    int64_t nnz = sparse_._nnz();
     int64_t dim_k = dense.size(0);
     
     AT_DISPATCH_FLOATING_TYPES(
       values.scalar_type(), "addmm_sparse_gcs_dense", [&] {
-        scalar_t cast_alpha = alpha.to<scalar_t>();
         scalar_t cast_beta = beta.to<scalar_t>();
 
         if (cast_beta == 0) {
@@ -79,7 +77,6 @@ namespace at { namespace native {
           for (int iptr = 0; iptr < pointers.size(0)-1; ++iptr) {
             int start_index = pointers_accessor[iptr];
             int end_index = pointers_accessor[iptr+1];
-            int nindices = end_index - start_index;
 
             for (int i = start_index; i < end_index; ++i) {
               auto val = values_accessor[i];

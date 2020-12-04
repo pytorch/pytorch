@@ -28,7 +28,7 @@
 namespace at { namespace native {
     using namespace at::sparse;
     Tensor _sparse_mm_mkl_(Tensor& self, const SparseTensor& sparse_, const Tensor& dense, const Tensor& t,
-                                        Scalar alpha, Scalar beta) {
+                            Scalar alpha, Scalar beta) {
       AT_ERROR("sparse_mm_mkl: ATen not compiled with MKL support");
     }
 }}
@@ -44,9 +44,9 @@ namespace at { namespace native {
 namespace at { namespace native {
     using namespace at::sparse;
     
-    static inline void sparse_mm_mkl_impl(float * res, int * indices, int * pointers, float * values,
+    static inline void sparse_mm_mkl_impl(float * res, int32_t * indices, int32_t * pointers, float * values,
                                           float * dense, float * t, float alpha, float beta,
-                                          int nrows, int ncols, int dense_ncols) {
+                                          int32_t nrows, int32_t ncols, int32_t dense_ncols) {
       sparse_matrix_t A = 0;
       matrix_descr desc;
       desc.type = SPARSE_MATRIX_TYPE_GENERAL;
@@ -60,23 +60,21 @@ namespace at { namespace native {
       mkl_sparse_destroy(A);
     }
 
-    // TODO: The types here are long int but int = LongTensor only when using lp64 for MKL. SHould we resort
+    // TODO: The types here are long int32_t but int32_t = LongTensor only when using lp64 for MKL. SHould we resort
     // to using IntTensor for the indices and pointers?
-    static inline void sparse_mm_mkl_impl(double * res, int32_t * indices, int32_t * pointers,
-                                          double * values, double * dense, double * t,
-                                          double alpha, double beta, int32_t nrows,
-                                          int32_t ncols, int32_t dense_ncols) {
+    static inline void sparse_mm_mkl_impl(double * res, int32_t * indices, int32_t * pointers, double * values, 
+                                          double * dense, double * t, double alpha, double beta, 
+                                          int32_t nrows, int32_t ncols, int32_t dense_ncols) {
       sparse_matrix_t A = 0;
       matrix_descr desc;
       desc.type = SPARSE_MATRIX_TYPE_GENERAL;
-      int retval = mkl_sparse_d_create_csr(&A, SPARSE_INDEX_BASE_ZERO, nrows, ncols, pointers, pointers+1,
+      int  retval = mkl_sparse_d_create_csr(&A, SPARSE_INDEX_BASE_ZERO, nrows, ncols, pointers, pointers+1,
                               indices, values);
       TORCH_CHECK(retval == 0, "mkl_sparse_d_create_csr failed with error code: ", retval);
 
       mkl_sparse_d_mm(SPARSE_OPERATION_NON_TRANSPOSE, alpha, A, desc,
                       SPARSE_LAYOUT_ROW_MAJOR, dense, dense_ncols, dense_ncols,
                       beta, res, dense_ncols);
-
       mkl_sparse_destroy(A);
     }
 
