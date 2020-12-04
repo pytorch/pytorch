@@ -447,7 +447,10 @@ def has_tensor_options(f: NativeFunction) -> bool:
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
-def argument_type_str(t: Type) -> str:
+# 'simple_type' was introduced by the old codegen, which is slightly
+# different from the python schema type, e.g.: doesn't have '?' suffix
+# for optional Tensor/TensorList; doesn't have '[size]' suffix for list type.
+def argument_type_str(t: Type, *, simple_type: bool = False) -> str:
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor:
             return 'Tensor'
@@ -465,7 +468,13 @@ def argument_type_str(t: Type) -> str:
             return t.name.name
 
     elif isinstance(t, OptionalType):
-        elem = argument_type_str(t.elem)
+        if str(t.elem) == 'Tensor':
+            if not simple_type or local.use_c10_dispatcher().dispatcher_uses_new_style():
+                # Is it desired to keep '?' for simple_type with new style dispatcher?
+                return 'Tensor?'
+            else:
+                return 'Tensor'
+        elem = argument_type_str(t.elem, simple_type=simple_type)
         if elem == 'Layout':
             # TODO: fix this special case in PythonArgParser?
             return 'Layout'
@@ -473,29 +482,35 @@ def argument_type_str(t: Type) -> str:
             return f'{elem}?'
 
     elif isinstance(t, ListType):
+        size = t.size if not simple_type else None
         if str(t.elem) == 'bool':
             assert t.size is not None
             return f'std::array<bool,{t.size}>'
         elif str(t.elem) == 'int':
-            return f'IntArrayRef[{t.size}]' if t.size is not None else 'IntArrayRef'
+            return f'IntArrayRef[{size}]' if size is not None else 'IntArrayRef'
         elif str(t.elem) == 'Tensor':
-            return f'TensorList[{t.size}]' if t.size is not None else 'TensorList'
+            return f'TensorList[{size}]' if size is not None else 'TensorList'
         elif str(t.elem) == 'Tensor?':
-            # TODO: clone the old codegen behavior but does it make sense?
-            return 'TensorList?'
+            if simple_type:
+                return 'TensorList'
+            else:
+                # TODO: clone the old codegen behavior but does it make sense?
+                return 'TensorList?'
         elif str(t.elem) == 'Dimname':
-            return f'DimnameList[{t.size}]' if t.size is not None else 'DimnameList'
-        elem = argument_type_str(t.elem)
+            return f'DimnameList[{size}]' if size is not None else 'DimnameList'
+        elem = argument_type_str(t.elem, simple_type=simple_type)
         return f'ArrayRef<{elem}>'
 
     raise RuntimeError(f'unrecognized type {repr(t)}')
 
-def argument(cpp_arg: CppArgument) -> PythonArgument:
-    a = cpp_arg.argument
-    if not isinstance(a, Argument):
-        # cpp's TensorOptionsArguments is ignored, we will reintroduce the
-        # scattered fields in tensor_options_args.
-        raise RuntimeError(f'unsupported cpp argument: \'{cpp_arg}\'')
+def argument_type_size(t: Type) -> Optional[int]:
+    l = t.is_list_like()
+    if l is not None and str(l.elem) != 'bool':
+        return l.size
+    else:
+        return None
+
+def argument(a: Argument) -> PythonArgument:
     return PythonArgument(
         name=a.name,
         type=a.type,
@@ -507,25 +522,19 @@ def argument(cpp_arg: CppArgument) -> PythonArgument:
 
 def signature(f: NativeFunction, *, method: bool = False) -> PythonSignature:
     # Use cpp api to gather TensorOptions fields from kwargs.
-    # Always set 'method' to false as ThisArgument is not relevant - 'self'
-    # is still included as regular Argument type.
-    # TODO: maybe directly generate from FunctionSchema to avoid slicing back
-    # into args/kwargs/outputs?
-    cpp_sig = _cpp_signature(f, method=False)
-
     # Skip ThisArgument if this is method signature.
     # Skip TensorOptionsArguments in C++ signature. Python side TensorOptions
     # arguments are created based on different rules - see below.
-    cpp_arguments = tuple(filter(lambda a: not (method and a.name == 'self') and
-                                 not isinstance(a.argument, TensorOptionsArguments), cpp_sig.arguments()))
+    nonout_args, out_args = cpp.group_arguments(f.func, method=method)
+    args = tuple(a for a in itertools.chain.from_iterable([nonout_args, out_args]) if isinstance(a, Argument))
 
-    kwarg_only_set = set(a.name for a in f.func.kwarg_only_arguments)
-    out_arg_set = set(a.name for a in f.func.out_arguments)
+    input_arg_set = set(a.name for a in f.func.arguments.positional)
+    kwarg_only_set = set(a.name for a in f.func.arguments.kwarg_only)
+    out_arg_set = set(a.name for a in f.func.arguments.out)
 
-    input_args = tuple(map(argument,
-                           filter(lambda a: not (a.name in kwarg_only_set or a.name in out_arg_set), cpp_arguments)))
-    input_kwargs = tuple(map(argument, filter(lambda a: a.name in kwarg_only_set, cpp_arguments)))
-    outputs = tuple(map(argument, filter(lambda a: a.name in out_arg_set, cpp_arguments)))
+    input_args = tuple(map(argument, filter(lambda a: a.name in input_arg_set, args)))
+    input_kwargs = tuple(map(argument, filter(lambda a: a.name in kwarg_only_set, args)))
+    outputs = tuple(map(argument, filter(lambda a: a.name in out_arg_set, args)))
 
     # Reintroduce the scattered fields of TensorOptions for Python.
     # Compared to the cpp counterpart, the python arguments have new property
@@ -536,7 +545,7 @@ def signature(f: NativeFunction, *, method: bool = False) -> PythonSignature:
     # source of drift between eager and JIT. Pull this logic out to a shared place.
 
     has_tensor_input_arg = any(a.type.is_tensor_like()
-                               for a in itertools.chain(f.func.arguments, f.func.kwarg_only_arguments))
+                               for a in itertools.chain(f.func.arguments.positional, f.func.arguments.kwarg_only))
     if any(a.name == 'requires_grad' for a in f.func.schema_order_arguments()):
         raise ValueError('argument named requires_grad is reserved, should not explicitly add it in the schema')
 
@@ -649,7 +658,7 @@ def dispatch_lambda_args(ps: PythonSignature, f: NativeFunction) -> Tuple[Dispat
                               ps.deprecated_args_names)
         cpp_args = list(map(lambda n: m[n], ordered_args))
 
-    out_args: Set[str] = set(a.name for a in f.func.out_arguments)
+    out_args: Set[str] = set(a.name for a in f.func.arguments.out)
 
     # Convert from cpp argument to lambda argument
     def dispatch_lambda_arg(cpp_arg: CppArgument) -> DispatchLambdaArgument:
