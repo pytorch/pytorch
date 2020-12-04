@@ -821,6 +821,38 @@ class TestGradCheckOverride(TestCase):
             torch.add,
         })
 
+class TestNamedTuple(TestCase):
+    """ Regression test for gh-47090 """
+    def test_max(self):
+        x = torch.tensor([1, 2])
+        xs = x.as_subclass(SubTensor2)
+        r = torch.max(x, dim=0)
+        rs = torch.max(xs, dim=0)
+        self.assertEqual(type(r), type(rs))
+        self.assertEqual(r, rs)
+
+class TestGradNewOnesOverride(TestCase):
+    """ Regression test for gh-47069 """
+    def test_newones(self):
+        t = torch.tensor([1, 2]).as_subclass(SubTensor2)
+        n = t.new_ones((1, 2))
+        self.assertEqual(type(n), SubTensor2)
+
+class TestWrapTorchFunction(TestCase):
+    def test_wrap_torch_function(self):
+        class A:
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs):
+                return -1
+
+        def dispatcher(a):
+            return (a,)
+
+        @torch.overrides.wrap_torch_function(dispatcher)
+        def f(a):
+            return a
+
+        self.assertEqual(f(A()), -1)
 
 if __name__ == '__main__':
     unittest.main()

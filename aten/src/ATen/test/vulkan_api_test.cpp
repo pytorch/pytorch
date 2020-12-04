@@ -14,7 +14,13 @@ bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor>& inputs) {
     maxValue = fmax(tensor.abs().max().item<float>(), maxValue);
   }
 
-  return diff.abs().max().item<float>() < (2e-6 * maxValue);
+#ifdef USE_VULKAN_FP16_INFERENCE
+  constexpr float tolerance = 1e-2;
+#else
+  constexpr float tolerance = 1e-5;
+#endif
+
+  return diff.abs().max().item<float>() < (tolerance * maxValue);
 }
 
 bool almostEqual(const at::Tensor& a, const at::Tensor& b) {
@@ -148,6 +154,33 @@ TEST(VulkanAPITest, addmm) {
   const auto bias_cpu = at::rand({179, 163}, at::device(at::kCPU).dtype(at::kFloat));
   const auto m1_cpu = at::rand({179, 67}, at::device(at::kCPU).dtype(at::kFloat));
   const auto m2_cpu = at::rand({67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto out_cpu = at::addmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+
+  const auto bias_vulkan = bias_cpu.vulkan();
+  const auto m1_vulkan = m1_cpu.vulkan();
+  const auto m2_vulkan = m2_cpu.vulkan();
+  const auto out_vulkan = at::addmm(bias_vulkan, m1_vulkan, m2_vulkan, beta, alpha);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    std::cout << "Expected:\n" << out_cpu << std::endl;
+    std::cout << "Got:\n" << out_vulkan.cpu() << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, addmm_expand) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  constexpr float alpha = 2.1f;
+  constexpr float beta = 103.24;
+
+  const auto bias_cpu = at::rand({1000}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({1, 1280}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({1280, 1000}, at::device(at::kCPU).dtype(at::kFloat));
   const auto out_cpu = at::addmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
 
   const auto bias_vulkan = bias_cpu.vulkan();
@@ -473,11 +506,11 @@ TEST(VulkanAPITest, empty) {
 }
 
 TEST(VulkanAPITest, mean) {
-  const auto in_cpu = at::rand({5, 3, 9, 9}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-  const auto out_cpu = at::mean(in_cpu, {-1, -2}, false);
+  const auto in_cpu = at::rand({17, 3, 79, 53}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  const auto out_cpu = at::mean(in_cpu, {-1, -2}, true);
 
   const auto in_vulkan = in_cpu.vulkan();
-  const auto out_vulkan = at::mean(in_vulkan, {-1, -2}, false);
+  const auto out_vulkan = at::mean(in_vulkan, {-1, -2}, true);
 
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
   if (!check) {
@@ -488,12 +521,12 @@ TEST(VulkanAPITest, mean) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, mean_keep_dim) {
-  const auto in_cpu = at::rand({10, 3, 21, 21}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-  const auto out_cpu = at::mean(in_cpu, {-1, -2}, true);
+TEST(VulkanAPITest, mean2d) {
+  const auto in_cpu = at::rand({11, 7, 173, 37}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  const auto out_cpu = at::mean(in_cpu, {-1, -2}, false);
 
   const auto in_vulkan = in_cpu.vulkan();
-  const auto out_vulkan = at::mean(in_vulkan, {-1, -2}, true);
+  const auto out_vulkan = at::mean(in_vulkan, {-1, -2}, false);
 
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
   if (!check) {
@@ -629,6 +662,267 @@ TEST(VulkanAPITest, upsample_nearest2d) {
   if (!check) {
     std::cout << "Expected:\n" << out_cpu << std::endl;
     std::cout << "Got:\n" << out_vulkan.cpu() << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+enum class OpType {
+  addmm,
+  conv2d,
+  hardtanh_,
+  mean,
+ };
+
+class BaseOp {
+ public:
+  explicit BaseOp(const OpType type) : type_(type) {}
+  virtual ~BaseOp() = default;
+
+  virtual at::Tensor run(at::Tensor&) const = 0;
+  virtual std::string toString() const = 0;
+
+ private:
+  OpType type_;
+};
+
+class Addmm final : public BaseOp {
+ public:
+  Addmm(
+      const int64_t m1H,
+      const int64_t m1W,
+      const int64_t m2W,
+      const float beta,
+      const float alpha)
+    : BaseOp(OpType::addmm),
+      m2_(at::rand(c10::IntArrayRef({m1W, m2W}), at::device(at::kCPU).dtype(at::kFloat))),
+      v_m2(m2_.vulkan()),
+      b_(at::rand(c10::IntArrayRef({m1H, m2W}), at::device(at::kCPU).dtype(at::kFloat))),
+      v_b_(b_.vulkan()),
+      beta_(beta),
+      alpha_(alpha) {
+  }
+
+  at::Tensor run(at::Tensor& t) const override {
+    if (t.is_vulkan()) {
+      return at::addmm(v_b_, t, v_m2, beta_, alpha_);
+    }
+
+    return at::addmm(b_, t, m2_, beta_, alpha_);
+  }
+
+  std::string toString() const override {
+    return "addmm";
+  }
+
+ private:
+  at::Tensor m2_;
+  at::Tensor v_m2;
+  at::Tensor b_;
+  at::Tensor v_b_;
+  float beta_;
+  float alpha_;
+};
+
+class Conv2d final : public BaseOp {
+ public:
+  Conv2d(
+      const c10::IntArrayRef wsizes,
+      const int64_t groups,
+      const int64_t stride,
+      const int64_t padding)
+      : BaseOp(OpType::conv2d),
+        groups_(groups),
+        stride_(stride),
+        padding_(padding),
+        w_(at::rand(wsizes, at::device(at::kCPU).dtype(at::kFloat))),
+        b_(at::rand(wsizes[0], at::device(at::kCPU).dtype(at::kFloat))){
+  }
+
+  at::Tensor run(at::Tensor& t) const override {
+    return at::conv2d(t, w_, b_, {stride_}, {padding_}, {1}, groups_);
+  }
+
+  std::string toString() const override {
+    return "conv2d";
+  }
+
+ private:
+  int64_t groups_;
+  int64_t stride_;
+  int64_t padding_;
+  at::Tensor w_;
+  at::Tensor b_;
+};
+
+class Hardtanh_ final : public BaseOp {
+ public:
+  Hardtanh_() : BaseOp(OpType::hardtanh_) {}
+
+  at::Tensor run(at::Tensor& input) const override {
+    return at::hardtanh_(input, 0, 6);
+  }
+
+  std::string toString() const override {
+    return "hardtanh_";
+  }
+};
+
+class Mean final : public BaseOp {
+ public:
+  Mean() : BaseOp(OpType::mean) {}
+
+  at::Tensor run(at::Tensor& input) const override {
+    return at::mean(input, {2, 3}, false);
+  }
+
+  std::string toString() const override {
+    return "mean";
+  }
+};
+
+class OpsList {
+ public:
+  OpsList() {}
+  explicit OpsList(std::vector<std::unique_ptr<BaseOp>> ops)
+    : ops_(std::move(ops)) {
+  }
+
+  auto run(const at::Tensor& input) {
+    at::Tensor output = input;
+
+    for (const auto& op : ops_) {
+      output = op->run(output);
+    }
+
+    return output;
+  }
+
+  auto run(const at::Tensor& input, const at::Tensor& v_input) {
+    at::Tensor output = input;
+    at::Tensor v_output = v_input;
+
+    for (const auto& op : ops_) {
+      output = op->run(output);
+      v_output = op->run(v_output);
+    }
+
+    return std::make_pair(output, v_output);
+  }
+
+ protected:
+  std::vector<std::unique_ptr<BaseOp>> ops_;
+};
+
+class MobileNetV2 final : public OpsList {
+ public:
+  MobileNetV2() {
+    ops_.emplace_back(new Conv2d({32, 3, 3, 3}, 1, 2, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({32, 1, 3, 3}, 32, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({16, 32, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({96, 16, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({96, 1, 3, 3}, 96, 2, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({24, 96, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({144, 24, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({144, 1, 3, 3}, 144, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({24, 144, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({144, 24, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({144, 1, 3, 3}, 144, 2, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({32, 144, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({192, 32, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({192, 1, 3, 3}, 192, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({32, 192, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({192, 32, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({192, 1, 3, 3}, 192, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({32, 192, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({192, 32, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({192, 1, 3, 3}, 192, 2, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({64, 192, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({384, 64, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({384, 1, 3, 3}, 384, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({64, 384, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({384, 64, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({384, 1, 3, 3}, 384, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({64, 384, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({384, 64, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({384, 1, 3, 3}, 384, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({64, 384, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({384, 64, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({384, 1, 3, 3}, 384, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({96, 384, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({576, 96, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({576, 1, 3, 3}, 576, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({96, 576, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({576, 96, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({576, 1, 3, 3}, 576, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({96, 576, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({576, 96, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({576, 1, 3, 3}, 576, 2, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({160, 576, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({960, 160, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({960, 1, 3, 3}, 960, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({160, 960, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({960, 160, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({960, 1, 3, 3}, 960, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({160, 960, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({960, 160, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({960, 1, 3, 3}, 960, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({320, 960, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({1280, 320, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Mean());
+    ops_.emplace_back(new Addmm(1, 1280, 1000, 0, 1));
+  }
+};
+
+TEST(VulkanAPITest, mobilenetv2) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  MobileNetV2 mn2;
+
+  const auto input = at::rand({1, 3, 224, 224}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto output = mn2.run(input, input.vulkan());
+
+  const auto check = almostEqual(output.first, output.second.cpu());
+  if (!check) {
+    std::cout << "Expected:\n" << output.first << std::endl;
+    std::cout << "Got:\n" << output.second.cpu() << std::endl;
   }
 
   ASSERT_TRUE(check);

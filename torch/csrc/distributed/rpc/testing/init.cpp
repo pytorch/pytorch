@@ -19,14 +19,15 @@ using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
 PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
   // Add the FaultyProcessGroupAgent and its backend options object to the
-  // python module torch.distributed.rpc._testing
-  auto faulty_agent_module =
-      THPObjectPtr(PyImport_ImportModule("torch.distributed.rpc._testing"));
-  if (!faulty_agent_module) {
-    throw python_error();
+  // python module torch._C._distributed_rpc_testing
+  auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
+  if (!torch_C_module) {
+      throw python_error();
   }
 
-  auto module = py::handle(faulty_agent_module).cast<py::module>();
+  auto torch_C_m = py::handle(torch_C_module).cast<py::module>();
+  auto m = torch_C_m.def_submodule("_distributed_rpc_testing", "distributed rpc testing bindings");
+  auto module = py::handle(m).cast<py::module>();
 
   // Import the rpc_module so we can subclass ProcessGroupAgent
   py::module rpc_module = py::module::import("torch.distributed.rpc");
@@ -66,7 +67,7 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
       .def(
           py::init<
               std::string,
-              std::shared_ptr<::c10d::ProcessGroup>,
+              c10::intrusive_ptr<::c10d::ProcessGroup>,
               int,
               std::chrono::milliseconds,
               const std::vector<std::string>&,
@@ -95,6 +96,11 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
       .def(
           "get_worker_info",
           (const WorkerInfo& (ProcessGroupAgent::*)(const std::string&)const) &
+              ProcessGroupAgent::getWorkerInfo,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_worker_info",
+          (const WorkerInfo& (ProcessGroupAgent::*)(worker_id_t id) const) &
               ProcessGroupAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(

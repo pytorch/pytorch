@@ -28,10 +28,27 @@ using BoundsInfo =
 
 TORCH_API BoundsInfo inferBounds(Stmt* s, bool distinctAccessKinds = true);
 
+// Bounds inference caching the analysis. The MemDependencyChecker must already
+// have been run.
+TORCH_API BoundsInfo getInferredBounds(
+    analysis::MemDependencyChecker& analyzer,
+    Stmt* s,
+    bool distinctAccessKinds = true);
+
 TORCH_API void printBoundsInfo(const BoundsInfo& v);
 
 TORCH_API std::vector<const Expr*> getBoundExtents(
     const std::vector<TensorAccessBoundsInfo>& infos);
+
+// The kind of dependency found, in increasing order of exclusivity.
+enum class HazardKind {
+  ReadAfterWrite,
+  WriteAfterRead,
+  WriteAfterWrite,
+  NoDependency,
+};
+TORCH_API HazardKind
+getPotentialHazards(analysis::MemDependencyChecker& analyzer, Stmt* A, Stmt* B);
 
 } // namespace tensorexpr
 } // namespace jit

@@ -22,6 +22,8 @@ namespace {
     template <typename T>
     class SqrtAndReciprocalReal : public ::testing::Test {};
     template <typename T>
+    class FractionAndRemainderReal : public ::testing::Test {};
+    template <typename T>
     class Trigonometric : public ::testing::Test {};
     template <typename T>
     class ErrorFunctions : public ::testing::Test {};
@@ -42,6 +44,8 @@ namespace {
     template <typename T>
     class Pow : public ::testing::Test {};
     template <typename T>
+    class RangeFactories : public ::testing::Test {};
+    template <typename T>
     class BitwiseFloatsAdditional : public ::testing::Test {};
     template <typename T>
     class BitwiseFloatsAdditional2 : public ::testing::Test {};
@@ -57,7 +61,6 @@ namespace {
     using QuantTestedTypes = ::testing::Types<vqint8, vquint8, vqint>;
     using RealFloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vlong, vint, vshort>;
     using FloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl, vlong, vint, vshort>;
-    using SingleFloat = ::testing::Types<vfloat>;
     using ComplexTypes = ::testing::Types<vcomplex, vcomplexDbl>;
     TYPED_TEST_CASE(Memory, ALLTestedTypes);
     TYPED_TEST_CASE(Arithmetics, FloatIntTestedTypes);
@@ -69,6 +72,7 @@ namespace {
     TYPED_TEST_CASE(Rounding, RealFloatTestedTypes);
     TYPED_TEST_CASE(SqrtAndReciprocal, FloatTestedTypes);
     TYPED_TEST_CASE(SqrtAndReciprocalReal, RealFloatTestedTypes);
+    TYPED_TEST_CASE(FractionAndRemainderReal, RealFloatTestedTypes);
     TYPED_TEST_CASE(Trigonometric, RealFloatTestedTypes);
     TYPED_TEST_CASE(ErrorFunctions, RealFloatTestedTypes);
     TYPED_TEST_CASE(Exponents, RealFloatTestedTypes);
@@ -80,6 +84,7 @@ namespace {
     TYPED_TEST_CASE(LogarithmReals, RealFloatTestedTypes);
     TYPED_TEST_CASE(Pow, RealFloatTestedTypes);
     TYPED_TEST_CASE(RealTests, RealFloatTestedTypes);
+    TYPED_TEST_CASE(RangeFactories, FloatIntTestedTypes);
     TYPED_TEST_CASE(BitwiseFloatsAdditional, RealFloatTestedTypes);
     TYPED_TEST_CASE(BitwiseFloatsAdditional2, FloatTestedTypes);
     TYPED_TEST_CASE(QuantizationTests, QuantTestedTypes);
@@ -198,7 +203,6 @@ namespace {
             [](vec v) { return v.sqrt(); },
             createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
     }
-
     TYPED_TEST(SqrtAndReciprocalReal, RSqrt) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -216,6 +220,23 @@ namespace {
             [](vec v) { return v.reciprocal(); },
             createDefaultUnaryTestCase<vec>(TestSeed()),
             RESOLVE_OVERLOAD(filter_zero));
+    }
+    TYPED_TEST(FractionAndRemainderReal, Frac) {
+      using vec = TypeParam;
+      test_unary<vec>(
+          NAME_INFO(frac),
+          RESOLVE_OVERLOAD(frac),
+          [](vec v) { return v.frac(); },
+          createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
+    }
+    TYPED_TEST(FractionAndRemainderReal, Fmod) {
+      using vec = TypeParam;
+      test_binary<vec>(
+          NAME_INFO(fmod),
+          RESOLVE_OVERLOAD(std::fmod),
+          [](vec v0, vec v1) { return v0.fmod(v1); },
+          createDefaultBinaryTestCase<vec>(TestSeed()),
+          RESOLVE_OVERLOAD(filter_fmod));
     }
     TYPED_TEST(Trigonometric, Sin) {
         using vec = TypeParam;
@@ -702,29 +723,74 @@ namespace {
             ASSERT_EQ(expected, actual) << "Failure Details:\n"
                 << std::hex << "Expected:\n#\t" << expected
                 << "\nActual:\n#\t" << actual;
-        } //
+        }
+    }
+    TYPED_TEST(BitwiseFloatsAdditional, Convert) {
+        using vec = TypeParam;
+        using VT = ValueType<TypeParam>;
+        using IntVT = at::vec256::int_same_size_t<VT>;
+
+        // verify float to int
+        CACHE_ALIGN VT input1[vec::size()];
+        CACHE_ALIGN IntVT expected_vals1[vec::size()];
+        CACHE_ALIGN IntVT actual_vals1[vec::size()];
+        for (int64_t i = 0; i < vec::size(); i++) {
+            input1[i] = (VT)i * (VT)2.1 + (VT)0.5;
+            expected_vals1[i] = static_cast<IntVT>(input1[i]);
+        }
+        at::vec256::convert(input1, actual_vals1, vec::size());
+        auto expected1 = VecType<IntVT>::loadu(expected_vals1);
+        auto actual1 = VecType<IntVT>::loadu(actual_vals1);
+        if (AssertVec256<VecType<IntVT>>(NAME_INFO(test_convert_to_int), expected1, actual1).check()) {
+          return;
+        }
+
+        // verify int to float
+        CACHE_ALIGN IntVT input2[vec::size()];
+        CACHE_ALIGN VT expected_vals2[vec::size()];
+        CACHE_ALIGN VT actual_vals2[vec::size()];
+        for (int64_t i = 0; i < vec::size(); i++) {
+            input2[i] = (IntVT)i * (IntVT)2 + (IntVT)1;
+            expected_vals2[i] = (VT)input2[i];
+        }
+        at::vec256::convert(input2, actual_vals2, vec::size());
+        auto expected2 = vec::loadu(expected_vals2);
+        auto actual2 = vec::loadu(actual_vals2);
+        AssertVec256<vec>(NAME_INFO(test_convert_to_float), expected2, actual2).check();
+    }
+    TYPED_TEST(BitwiseFloatsAdditional, Fmadd) {
+        using vec = TypeParam;
+        using VT = ValueType<TypeParam>;
+
+        auto test_case = TestingCase<vec>::getBuilder()
+          .addDomain(CheckWithinDomains<VT>{
+              {{(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}},
+              true, getDefaultTolerance<VT>()})
+          .setTestSeed(TestSeed());
+
+        test_ternary<vec>(
+            NAME_INFO(clamp), RESOLVE_OVERLOAD(local_fmadd),
+            [](const vec& v0, const vec& v1, const vec& v2) {
+                return at::vec256::fmadd(v0, v1, v2);
+            },
+            test_case,
+            RESOLVE_OVERLOAD(filter_fmadd));
     }
     template<typename vec, typename VT, int64_t mask>
     typename std::enable_if_t<(mask < 0 || mask> 255), void>
-        test_blend(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()])
+    test_blend(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()])
     {
     }
     template<typename vec, typename VT, int64_t mask>
     typename std::enable_if_t<(mask >= 0 && mask <= 255), void>
-        test_blend(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()])
-    {
-        //generate expected_val
+    test_blend(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()]) {
+        // generate expected_val
         int64_t m = mask;
         for (int64_t i = 0; i < vec::size(); i++) {
-            if (m & 0x01) {
-                expected_val[i] = b[i];
-            }
-            else {
-                expected_val[i] = a[i];
-            }
+            expected_val[i] = (m & 0x01) ? b[i] : a[i];
             m = m >> 1;
         }
-        //test with blend
+        // test with blend
         auto vec_a = vec::loadu(a);
         auto vec_b = vec::loadu(b);
         auto expected = vec::loadu(expected_val);
@@ -732,6 +798,47 @@ namespace {
         auto mask_str = std::string("\nblend mask: ") + std::to_string(mask);
         if (AssertVec256<vec>(std::string(NAME_INFO(test_blend)) + mask_str, expected, actual).check()) return;
         test_blend<vec, VT, mask - 1>(expected_val, a, b);
+    }
+    template<typename vec, typename VT, int64_t idx, int64_t N>
+    std::enable_if_t<(!is_complex<VT>::value && idx == N), bool>
+    test_blendv(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()], VT mask[vec::size()]) {
+        // generate expected_val
+        for (int64_t i = 0; i < vec::size(); i++) {
+            int64_t hex_mask = 0;
+            std::memcpy(&hex_mask, &mask[i], sizeof(VT));
+            expected_val[i] = (hex_mask & 0x01) ? b[i] : a[i];
+        }
+        // test with blendv
+        auto vec_a = vec::loadu(a);
+        auto vec_b = vec::loadu(b);
+        auto vec_m = vec::loadu(mask);
+        auto expected = vec::loadu(expected_val);
+        auto actual = vec::blendv(vec_a, vec_b, vec_m);
+        auto mask_str = std::string("\nblendv mask: ");
+        for (int64_t i = 0; i < vec::size(); i++) {
+            mask_str += std::to_string(mask[i]) + " ";
+        }
+        if (AssertVec256<vec>(std::string(NAME_INFO(test_blendv)) + mask_str, expected, actual).check()) {
+            return false;
+        }
+        return true;
+    }
+    template<typename vec, typename VT, int64_t idx, int64_t N>
+    std::enable_if_t<(!is_complex<VT>::value && idx != N), bool>
+    test_blendv(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()], VT mask[vec::size()]) {
+        // shuffle mask and do blendv test
+        VT m = mask[idx];
+        if (!test_blendv<vec, VT, idx+1, N>(expected_val, a, b, mask)) return false;
+        if (m != (VT)0) {
+          mask[idx] = (VT)0;
+        }
+        else {
+          int64_t hex_mask = 0xFFFFFFFFFFFFFFFF;
+          std::memcpy(&mask[idx], &hex_mask, sizeof(VT));
+        }
+        if (!test_blendv<vec, VT, idx+1, N>(expected_val, a, b, mask)) return false;
+        mask[idx] = m;
+        return true;
     }
     template<typename T, int N>
     void blend_init(T(&a)[N], T(&b)[N]) {
@@ -760,6 +867,16 @@ namespace {
         a[1] = a[0] + add;
         b[1] = b[0] + add;
     }
+    TYPED_TEST(BitwiseFloatsAdditional, Blendv) {
+        using vec = TypeParam;
+        using VT = ValueType<TypeParam>;
+        CACHE_ALIGN VT a[vec::size()];
+        CACHE_ALIGN VT b[vec::size()];
+        CACHE_ALIGN VT mask[vec::size()] = {0};
+        CACHE_ALIGN VT expected_val[vec::size()];
+        blend_init(a, b);
+        test_blendv<vec, VT, 0, vec::size()>(expected_val, a, b, mask);
+    }
     TYPED_TEST(BitwiseFloatsAdditional2, Blend) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -769,6 +886,60 @@ namespace {
         blend_init(a, b);
         constexpr int64_t power_sets = 1LL << (vec::size());
         test_blend<vec, VT, power_sets - 1>(expected_val, a, b);
+    }
+    template<typename vec, typename VT>
+    void test_set(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()], int64_t count){
+        if (count < 0) return;
+        //generate expected_val
+        for (int64_t i = 0; i < vec::size(); i++) {
+            expected_val[i] = (i < count) ? b[i] : a[i];
+        }
+        // test with set
+        auto vec_a = vec::loadu(a);
+        auto vec_b = vec::loadu(b);
+        auto expected = vec::loadu(expected_val);
+        auto actual = vec::set(vec_a, vec_b, count);
+
+        auto count_str = std::string("\ncount: ") + std::to_string(count);
+        if (AssertVec256<vec>(std::string(NAME_INFO(test_set)) + count_str, expected, actual).check()) {
+          return;
+        }
+        test_set<vec, VT>(expected_val, a, b, (count == 0 ? -1 : count / 2));
+    }
+    TYPED_TEST(BitwiseFloatsAdditional2, Set) {
+        using vec = TypeParam;
+        using VT = ValueType<TypeParam>;
+        CACHE_ALIGN VT a[vec::size()];
+        CACHE_ALIGN VT b[vec::size()];
+        CACHE_ALIGN VT expected_val[vec::size()];
+        blend_init(a, b);
+        test_set<vec, VT>(expected_val, a, b, vec::size());
+    }
+    template<typename T>
+    std::enable_if_t<!is_complex<T>::value, void>
+    arange_init(T& base, T& step) {
+        base = (T)5.0;
+        step = (T)2.0;
+    }
+    template<typename T>
+    std::enable_if_t<is_complex<T>::value, void>
+    arange_init(T& base, T& step) {
+       base = T(5.0, 5.0);
+       step = T(2.0, 3.0);
+    }
+    TYPED_TEST(RangeFactories, Arange) {
+        using vec = TypeParam;
+        using VT = ValueType<TypeParam>;
+        using UVT = UvalueType<TypeParam>;
+        CACHE_ALIGN VT expected_val[vec::size()];
+        VT base, step;
+        arange_init(base, step);
+        for (int64_t i = 0; i < vec::size(); i++) {
+            expected_val[i] = base + VT((UVT)i) * step;
+        }
+        auto expected = vec::loadu(expected_val);
+        auto actual = vec::arange(base, step);
+        AssertVec256<vec>(NAME_INFO(test_arange), expected, actual).check();
     }
     TEST(ComplexTests, TestComplexFloatImagRealConj) {
         float aa[] = { 1.5488e-28,2.5488e-28,3.5488e-28,4.5488e-28,5.5488e-28,6.5488e-28,7.5488e-28,8.5488e-28 };
@@ -976,14 +1147,15 @@ namespace {
                         DomainRange<VT>{(VT)fake_zp, (VT)fake_qsix}
                 }})
             .setTestSeed(TestSeed());
-                test_ternary<vec>(
-                    NAME_INFO(relu6),
-                    RESOLVE_OVERLOAD(relu6),
-                    [](/*const*/ vec& v0, const vec& v1, const vec& v2) {
-                        return  v0.relu6(v1, v2);
-                    },
-                    test_case);
+        test_ternary<vec>(
+            NAME_INFO(relu6),
+            RESOLVE_OVERLOAD(relu6),
+            [](/*const*/ vec& v0, const vec& v1, const vec& v2) {
+                return  v0.relu6(v1, v2);
+            },
+            test_case);
     }
+
 #else
 #error GTEST does not have TYPED_TEST
 #endif
