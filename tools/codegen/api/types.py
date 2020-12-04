@@ -1,6 +1,6 @@
 from tools.codegen.model import *
 from dataclasses import dataclass
-from typing import Optional, Union, Sequence, Tuple, TypeVar
+from typing import Optional, Union, Sequence, Tuple, TypeVar, List
 
 _T = TypeVar('_T')
 
@@ -66,10 +66,9 @@ class CppArgumentPackIface:
 @dataclass(frozen=True)
 class CppSingleArgumentPack(CppArgumentPackIface):
     this: CppArgument
-    is_out_argument: bool
 
     def no_default(self) -> 'CppSingleArgumentPack':
-        return CppSingleArgumentPack(this=self.this.no_default(), is_out_argument=self.is_out_argument)
+        return CppSingleArgumentPack(this=self.this.no_default())
 
     @property
     def type(self) -> str:
@@ -151,52 +150,36 @@ class CppSignature:
     # The schema this signature is derived from
     func: FunctionSchema
 
-    # The name of the C++ function, e.g. "abs" or "abs_out"
-    name: str
+    # Is this a C++ signature for a method, i.e. Tensor::my_op(...)?
+    method: bool
 
-    # Enough information about the C++ types to generate a full
-    # C++ type signature for this signature.  I'm not too sure
-    # if these are the right representations, so for now this
-    # is intended to be more abstract.
-    _argument_packs: Tuple[CppArgumentPack, ...]
-    _returns_type: str
+    # Is this a faithful C++ signature (i.e. following the JIT schema) or a convenience API
+    # (i.e. with a potential TensorOptions argument and out arguments in the front)
+    faithful: bool
 
     # Return the unpacked argument structure of this signature,
     # discarding information about which arguments are semantically
     # related to each other.
     def arguments(self) -> Sequence[CppArgument]:
-        return [sub_a for a in self._argument_packs for sub_a in a.explicit_arguments()]
+        return [sub_a for a in self.argument_packs() for sub_a in a.explicit_arguments()]
 
     # Return the packed argument structure of this signature.  This preserves
     # high-level structure of the arguments so you may find it easier to do
     # translations working with this representation.
     def argument_packs(self) -> Sequence[CppArgumentPack]:
-        return self._argument_packs
-
-    # Render the C++ declaration for this signature
-    def decl(self) -> str:
-        cpp_args_str = ', '.join(map(str, self.arguments()))
-        return f"{self._returns_type} {self.name}({cpp_args_str})"
-
-    # Render the C++ definition for this signature, not including
-    # the body (with curly braces)
-    def defn(self, *, prefix: str = "") -> str:
-        cpp_args_str = ', '.join(a.str_no_default() for a in self.arguments())
-        name = prefix + self.name
-        return f"{self._returns_type} {name}({cpp_args_str})"
-
-    # NB: This constructor knows how to disambiguate defaults when
-    # faithful is True.  Ideally this would live as an external process
-    # see https://github.com/pytorch/pytorch/pull/45666
-    @staticmethod
-    def _from_grouped_arguments(
-        func: FunctionSchema,
-        arguments: Sequence[Union[Argument, TensorOptionsArguments, SelfArgument]],
-        out_arguments: Sequence[Argument],
-        *,
-        faithful: bool
-    ) -> 'CppSignature':
-        if faithful:
+        positional_and_kwargs: List[Union[Argument, SelfArgument, TensorOptionsArguments]] = \
+            list(self.func.arguments.pre_self_positional)
+        if self.func.arguments.self_arg is not None:
+            if self.method:
+                positional_and_kwargs.append(self.func.arguments.self_arg)
+            else:
+                positional_and_kwargs.append(self.func.arguments.self_arg.argument)
+        positional_and_kwargs.extend(self.func.arguments.post_self_positional)
+        positional_and_kwargs.extend(self.func.arguments.pre_tensor_options_kwarg_only)
+        if self.func.arguments.tensor_options is not None:
+            positional_and_kwargs.append(self.func.arguments.tensor_options)
+        positional_and_kwargs.extend(self.func.arguments.post_tensor_options_kwarg_only)
+        if self.faithful:
             # Faithful signatures will ungroup arguments into argument
             # packs.
             #
@@ -205,23 +188,31 @@ class CppSignature:
             # principle, we should be able to do this at some later
             # point in time with other overload disambiguation
             argument_packs = tuple(
-                cpp.argument_faithful(a, is_out_argument=False).no_default() for a in arguments
-            ) + tuple(
-                cpp.argument_faithful(a, is_out_argument=True).no_default() for a in out_arguments
+                cpp.argument_faithful(a).no_default() for a in (tuple(positional_and_kwargs) + self.func.arguments.out)
             )
         else:
             argument_packs = tuple(
-                cpp.argument(a, is_out_argument=True) for a in out_arguments
-            ) + tuple(
-                cpp.argument(a, is_out_argument=False) for a in arguments
+                cpp.argument(a) for a in (self.func.arguments.out + tuple(positional_and_kwargs))
             )
-        name = cpp.name(func, use_suffix_for_out_overloads=not faithful)
-        return CppSignature(
-            func=func,
-            name=name,
-            _argument_packs=argument_packs,
-            _returns_type=cpp.returns_type(func.returns),
-        )
+        return argument_packs
+
+    def name(self) -> str:
+        return cpp.name(self.func, use_suffix_for_out_overloads=not self.faithful)
+
+    # Render the C++ declaration for this signature
+    def decl(self) -> str:
+        returns_type = cpp.returns_type(self.func.returns)
+        cpp_args_str = ', '.join(map(str, self.arguments()))
+        return f"{returns_type} {self.name()}({cpp_args_str})"
+
+    # Render the C++ definition for this signature, not including
+    # the body (with curly braces)
+    def defn(self, *, prefix: str = "") -> str:
+        returns_type = cpp.returns_type(self.func.returns)
+        cpp_args_str = ', '.join(a.str_no_default() for a in self.arguments())
+        name = prefix + self.name()
+        return f"{returns_type} {name}({cpp_args_str})"
+
 
 # Represents group of all CppSignatures associated with a
 # FunctionSchema.  Right now, that's the regular, user-visible
@@ -235,13 +226,12 @@ class CppSignatureGroup:
 
     @staticmethod
     def from_schema(func: FunctionSchema, *, method: bool) -> 'CppSignatureGroup':
-        (grouped_arguments, grouped_out_arguments) = cpp.group_arguments(func, method=method)
         faithful_signature: Optional[CppSignature]
-        if any(isinstance(a, TensorOptionsArguments) for a in grouped_arguments) or len(func.arguments.out) > 0:
-            faithful_signature = CppSignature._from_grouped_arguments(func, grouped_arguments, grouped_out_arguments, faithful=True)
+        if func.arguments.tensor_options is not None or len(func.arguments.out) > 0:
+            faithful_signature = CppSignature(func=func, faithful=True, method=method)
         else:
             faithful_signature = None
-        signature = CppSignature._from_grouped_arguments(func, grouped_arguments, grouped_out_arguments, faithful=False)
+        signature = CppSignature(func=func, faithful=False, method=method)
         return CppSignatureGroup(
             func=func,
             signature=signature,
@@ -266,7 +256,6 @@ class DispatcherArgument:
     # dispatcher NEVER has defaults
     argument: Union[Argument, TensorOptionsArguments]
     # TensorOptionsArguments can occur when not using full c10 dispatch
-    is_out_argument: bool
 
     def __str__(self) -> str:
         return f"{self.type} {self.name}"
@@ -337,7 +326,6 @@ class NativeArgument:
     # easier to call them directly to bypass dispatch.
     default: Optional[str]
     argument: Union[Argument, TensorOptionsArguments]
-    is_out_argument: bool
 
     # Convention here is swapped because arguably NativeFunctions.h
     # shouldn't have defaults (they should be handled during dispatching).
