@@ -13,10 +13,26 @@
 
 namespace c10d {
 
+#ifdef USE_C10D_GLOO
+constexpr char* GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
+#endif
+
+inline std::vector<std::string> split(
+    char separator,
+    const std::string& string) {
+  std::vector<std::string> pieces;
+  std::stringstream ss(string);
+  std::string item;
+  while (std::getline(ss, item, separator)) {
+    pieces.push_back(std::move(item));
+  }
+  return pieces;
+}
+
 class Backend {
  public:
   // Maps to Backend.__new__ in Python.
-  static std::string get(std::string);
+  static std::string get(const std::string&);
 
   // TODO: How to support registering third_party backend?
   static void registerBackend();
@@ -27,8 +43,12 @@ class Backend {
   std::unordered_set<std::string> registered_backends_;
 };
 
-class DistributedC10d {
+class TORCH_PYTHON_API DistributedC10d : public torch::CustomClassHolder {
  public:
+  static c10::intrusive_ptr<DistributedC10d> get();
+
+  DistributedC10d() = default;
+
   void initProcessGroup(
       const std::string& backend,
       const std::string& init_method,
@@ -183,8 +203,24 @@ class DistributedC10d {
 
   c10::intrusive_ptr<ProcessGroup> worldProcessGroup();
 
+  c10::intrusive_ptr<ProcessGroup> newProcessGroupHelper(
+    const int64_t world_size,
+    const int64_t rank,
+    const std::vector<int64_t>& group_ranks,
+    const std::string& backend_str,
+    const c10::intrusive_ptr<Store>& store,
+    c10::optional<std::string> group_name,
+    int64_t timeout_milisesonds);
+
+  c10::intrusive_ptr<ProcessGroup> getProcessGroupByName(
+      const std::string& name) const;
+
+  std::string getNameOfProcessGroup(
+      const c10::intrusive_ptr<ProcessGroup>& pg) const;
+
+    void registerProcessGroupName(const c10::intrusive_ptr<ProcessGroup>& process_group, const std::string& name);
+
  private:
-  DistributedC10d(){};
 
   bool rankNotInGroup(const c10::intrusive_ptr<ProcessGroup>& group) const;
   int64_t getGroupRank(
