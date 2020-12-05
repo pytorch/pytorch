@@ -131,7 +131,7 @@ struct TORCH_CUDA_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   uint64_t seed() override;
   void set_philox_offset_per_thread(uint64_t offset);
   uint64_t philox_offset_per_thread();
-  void graph_prologue(int64_t* offset_extragraph_);
+  void graph_prologue(int64_t* offset_extragraph);
   uint64_t graph_epilogue();
   PhiloxCudaState philox_cuda_state(uint64_t increment);
 

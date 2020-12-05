@@ -57,9 +57,6 @@ def clamp_max(g, self, max):
 # Opset 11 gather accepts negative indices
 @parse_args('v', 'i', 'v')
 def select(g, self, dim, index):
-    index_scalar_type = index.type().scalarType()
-    if index_scalar_type is None or index_scalar_type not in ['Long', 'Int']:
-        index = g.op("Cast", index, to_i=sym_help.cast_pytorch_to_onnx["Long"])
     return g.op("Gather", self, index, axis_i=dim)
 
 
@@ -947,3 +944,22 @@ def embedding_bag(g,
     # aten::embedding_bag returns a tuple of 4 elements: output, offset2bag, bag_size, max_indices.
     # But the last three outputs are not used in torch.nn.EmbeddingBag or torch.nn.functional.embedding_bag.
     return loop.node().output(), None, None, None
+
+
+def prim_ConstantChunk(g, self, chunks, dim):
+    input_shape = g.op("Shape", self)
+    axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
+    axis_next = g.op("Constant", value_t=torch.tensor([dim + 1], dtype=torch.long))
+    input_shape_dim = g.op("Slice", input_shape, axis, axis_next)
+    start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
+    chunk_size = g.op("Constant", value_t=torch.tensor([chunks], dtype=torch.long))
+    chunk_size_minus_1 = g.op("Constant", value_t=torch.tensor([chunks - 1], dtype=torch.long))
+    input_shape_dim_shift = g.op("Add", input_shape_dim, chunk_size_minus_1)
+    chunk_dim = g.op("Div", input_shape_dim_shift, chunk_size)
+    res = []
+    for i in range(chunks):
+        index = g.op("Constant", value_t=torch.tensor([i + 1], dtype=torch.long))
+        end = g.op("Mul", chunk_dim, index)
+        res.append(g.op("Slice", self, start, end, axis))
+        start = end
+    return res

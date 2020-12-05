@@ -181,7 +181,7 @@ bool TensorImpl::compute_non_overlapping_and_dense() const {
   std::sort(perm.begin(), perm.end(), [&](int64_t a, int64_t b) {
       if (sizes_and_strides_.size_at_unchecked(a) < 2) {
         return false;
-      } else if (sizes_and_strides_.size_at_unchecked(a) < 2) {
+      } else if (sizes_and_strides_.size_at_unchecked(b) < 2) {
         return true;
       }
       return sizes_and_strides_.stride_at_unchecked(a) < sizes_and_strides_.stride_at_unchecked(b);
