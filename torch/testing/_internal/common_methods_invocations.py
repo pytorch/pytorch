@@ -145,12 +145,9 @@ class OpInfo(object):
         """
         return self.inplace_variant
 
-    def sample_inputs(self, device, dtype, requires_grad=False):
+    def sample_inputs(op_info, device, dtype, requires_grad=False):
         """Returns an iterable of SampleInputs."""
-        if self.sample_inputs:
-            return self.sample_inputs_func(self, device, dtype, requires_grad)
-        else:
-            return tuple()
+        return op_info.sample_inputs_func(op_info, device, dtype, requires_grad)
 
     # Returns True if the test should be skipped and False otherwise
     def should_skip(self, cls_name, test_name, device_type, dtype):
