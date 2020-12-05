@@ -7556,6 +7556,35 @@ Example::
             [3, 2, 1, 0]])
 """.format(**common_args))
 
+add_docstr(torch.msort,
+           r"""
+msort(input, *, out=None) -> Tensor
+
+Sorts the elements of the :attr:`input` tensor along its first dimension
+in ascending order by value.
+
+.. note:: `torch.msort(t)` is equivalent to `torch.sort(t, dim=0)[0]`.
+          See also :func:`torch.sort`.
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> t = torch.randn(3, 4)
+    >>> t
+    tensor([[-0.1321,  0.4370, -1.2631, -1.1289],
+            [-2.0527, -1.1250,  0.2275,  0.3077],
+            [-0.0881, -0.1259, -0.5495,  1.0284]])
+    >>> torch.msort(t)
+    tensor([[-2.0527, -1.1250, -1.2631, -1.1289],
+            [-0.1321, -0.1259, -0.5495,  0.3077],
+            [-0.0881,  0.4370,  0.2275,  1.0284]])
+""".format(**common_args))
+
 add_docstr(torch.sparse_coo_tensor,
            r"""
 sparse_coo_tensor(indices, values, size=None, *, dtype=None, device=None, requires_grad=False) -> Tensor
