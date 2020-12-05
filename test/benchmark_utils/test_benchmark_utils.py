@@ -2,6 +2,7 @@ import json
 import os
 import re
 import textwrap
+import timeit
 from typing import Any, List, Tuple
 import unittest
 
@@ -168,6 +169,7 @@ class TestBenchmarkUtils(TestCase):
         timer = benchmark_utils.Timer(
             "torch::Tensor y = x + 1;",
             setup="torch::Tensor x = torch::empty({1});",
+            timer=timeit.default_timer,
             language=benchmark_utils.Language.CPP,
         )
         t = timer.timeit(10)
@@ -449,6 +451,7 @@ class TestBenchmarkUtils(TestCase):
 
     @slowTest
     @unittest.skipIf(IS_WINDOWS, "Valgrind is not supported on Windows.")
+    @unittest.skipIf(IS_SANDCASTLE, "Valgrind is OSS only.")
     def test_collect_callgrind(self):
         with self.assertRaisesRegex(
             ValueError,
@@ -504,6 +507,32 @@ class TestBenchmarkUtils(TestCase):
             wrapper_singleton()._bindings_module,
             "JIT'd bindings are only for back testing."
         )
+
+    @slowTest
+    @unittest.skipIf(IS_WINDOWS, "Valgrind is not supported on Windows.")
+    @unittest.skipIf(IS_SANDCASTLE, "Valgrind is OSS only.")
+    def test_collect_cpp_callgrind(self):
+        timer = benchmark_utils.Timer(
+            "x += 1;",
+            setup="torch::Tensor x = torch::ones({1});",
+            timer=timeit.default_timer,
+            language="c++",
+        )
+        stats = [
+            timer.collect_callgrind()
+            for _ in range(3)
+        ]
+        counts = [s.counts() for s in stats]
+
+        self.assertGreater(
+            min(counts), 0, "No stats were collected")
+        self.assertEqual(
+            min(counts), max(counts), "C++ Callgrind should be deterministic")
+
+        for s in stats:
+            self.assertEqual(
+                s.counts(denoise=True), s.counts(denoise=False),
+                "De-noising should not apply to C++.")
 
     def test_manipulate_callgrind_stats(self):
         stats_no_data, stats_with_data = load_callgrind_artifacts()

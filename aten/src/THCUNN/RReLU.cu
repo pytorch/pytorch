@@ -7,6 +7,7 @@
 #include <THC/THCApply.cuh>
 #include <THCUNN/common.h>
 #include <ATen/cuda/detail/KernelUtils.h>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <curand.h>
 #include <curand_kernel.h>
 #include <curand_philox4x32_x.h>
@@ -39,12 +40,17 @@ inline double __device__ curand_uniform_type<double>(curandStatePhilox4_32_10_t 
 }
 
 template <typename T>
-__global__ void rreluUpdateOutputTrain(int n, std::pair<uint64_t, uint64_t> seeds,
+__global__ void rreluUpdateOutputTrain(int n, at::PhiloxCudaState philox_args,
   T *input, T* noise, T *output, double a, double b)
 {
+  auto seeds = at::cuda::philox::unpack(philox_args);
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   curandStatePhilox4_32_10_t state;
-  curand_init(seeds.first, idx, seeds.second, &state);
+  curand_init(std::get<0>(seeds),
+              idx,
+              std::get<1>(seeds),
+              &state);
+
   CUDA_KERNEL_LOOP(i, n)
   {
     if (input[i] <= 0)
