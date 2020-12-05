@@ -3842,24 +3842,23 @@ struct to_ir {
     int64_t step_size = 1;
     if (step) {
       auto val = toIValue(step->value(*graph));
-      TORCH_CHECK(val->isInt(), "Step size should always be a valid integer");
+      TORCH_CHECK(val->isInt(), "Step size should always be an integer");
       step_size = val->to<int64_t>();
     }
 
-    int64_t beg = INT64_MAX;
+    int64_t beg = std::numeric_limits<int64_t>::max();
     if (beg_val) {
       beg = getAdjTupleIndex(
           loc, tuple_type, getSliceInd(beg_val->value(*graph), loc), true);
     }
 
-    int64_t end = INT64_MAX;
+    int64_t end = std::numeric_limits<int64_t>::max();
     if (end_val) {
       end = getAdjTupleIndex(
           loc, tuple_type, getSliceInd(end_val->value(*graph), loc), true);
     }
 
-    int64_t num_values =
-        PySlice_AdjustIndices(tuple_len, &beg, &end, step_size);
+    int64_t num_values = slice_indices_adjust(tuple_len, &beg, &end, step_size);
 
     return graph
         ->insertNode(graph->createTupleSlice(

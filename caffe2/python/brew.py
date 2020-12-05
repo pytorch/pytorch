@@ -74,6 +74,7 @@ class HelperWrapper(object):
         'loop' : loop,
         'db_input' : db_input,
         'fused_8bit_rowwise_quantized_to_float' : fused_8bit_rowwise_quantized_to_float,
+        'sparse_lengths_sum_4bit_rowwise_sparse': sparse_lengths_sum_4bit_rowwise_sparse,
     }
 
     def __init__(self, wrapped):

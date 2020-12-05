@@ -5,7 +5,7 @@
 namespace torch {
 namespace jit {
 
-int64_t PySlice_AdjustIndices(
+int64_t slice_indices_adjust(
     int64_t length,
     int64_t* start,
     int64_t* stop,

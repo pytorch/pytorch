@@ -7,16 +7,17 @@
 namespace torch {
 namespace jit {
 
-// "Copyright (c) 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010,
+// Copyright (c) 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010,
 // 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020 Python Software
-// Foundation; All Rights Reserved"
+// Foundation; All Rights Reserved
+//
 // Stolen (with appropriate modifications)
 // from cpython repo Objects/sliceobject.c with comment: this is harder to get
 // right than you might think
 //
 // This adjusts indexes according to python list semantics and returns number
 // of elements in the resulting list.
-TORCH_API int64_t PySlice_AdjustIndices(
+TORCH_API int64_t slice_indices_adjust(
     int64_t length,
     int64_t* start,
     int64_t* stop,
