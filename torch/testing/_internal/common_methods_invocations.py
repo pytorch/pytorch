@@ -628,11 +628,10 @@ if TEST_SCIPY:
                                     dtypes=[torch.complex64, torch.complex128]),),
                        dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                        dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
-                       dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                       dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                        promotes_integers_to_float=True,
                        skip_bfloat16_grad=True,
-                       assert_autodiffed=True,
-                       test_complex_grad=False),  # Reference: https://github.com/pytorch/pytorch/issues/48552
+                       assert_autodiffed=True),
         UnaryUfuncInfo('erf',
                        ref=scipy.special.erf,
                        decorators=(precisionOverride({torch.float16: 1e-2,
