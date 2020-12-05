@@ -639,8 +639,8 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
 }
 
 Tensor& sinc_out(Tensor& result, const Tensor& self) {
-  Tensor product = self * M_PI;
-  result = at::sin(product) / product;
+  auto iter = TensorIterator::unary_op(result, self);
+  sinc_stub(iter.device_type(), iter);
   return result;
 }
 Tensor sinc(const Tensor& self) { return unary_op_impl(self, at::sinc_out); }
@@ -725,6 +725,7 @@ DEFINE_DISPATCH(sign_stub);
 DEFINE_DISPATCH(signbit_stub);
 DEFINE_DISPATCH(sgn_stub);
 DEFINE_DISPATCH(sin_stub);
+DEFINE_DISPATCH(sinc_stub);
 DEFINE_DISPATCH(sinh_stub);
 DEFINE_DISPATCH(sqrt_stub);
 DEFINE_DISPATCH(tan_stub);

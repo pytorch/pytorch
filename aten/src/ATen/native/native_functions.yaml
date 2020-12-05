@@ -3504,17 +3504,17 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    Math: sinc
+    DefaultBackend: sinc
 
 - func: sinc_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    Math: sinc_
+    DefaultBackend: sinc_
 
 - func: sinc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    Math: sinc_out
+    CPU: sinc_out
 
 - func: sinh(Tensor self) -> Tensor
   use_c10_dispatcher: full
