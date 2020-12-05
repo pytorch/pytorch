@@ -37,13 +37,6 @@ from abc import ABC, abstractmethod
 import operator
 import warnings
 
-from typing import Any, Callable, Dict
-
-# This is the Quantizer class instance from torch/quantization/fx/quantize.py.
-# Define separately to prevent circular imports.
-# TODO(future PR): improve this.
-QuantizerCls = Any
-
 # -------------------------
 # Pattern Registrations
 # -------------------------
@@ -54,7 +47,7 @@ QuantizerCls = Any
 class QuantizeHandler(ABC):
     """ Base handler class for the quantizer patterns
     """
-    def __init__(self, quantizer: QuantizerCls, node: Node):
+    def __init__(self, quantizer, node):
         """ Records pattern information in __init__, which will be used
         in convert
         """
@@ -65,9 +58,7 @@ class QuantizeHandler(ABC):
         self.all_node_args = True
 
     @abstractmethod
-    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
-                debug: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         """ Convert the given node to a quantized node and insert
         it to the quantized graph
         """
@@ -80,20 +71,18 @@ class QuantizeHandler(ABC):
 @register_quant_pattern((torch.nn.functional.relu, operator.add))
 @register_quant_pattern((torch.nn.functional.relu, torch.add))
 class Add(QuantizeHandler):
-    def __init__(self, quantizer: QuantizerCls, node: Node):
+    def __init__(self, quantizer, node):
         super().__init__(quantizer, node)
         self.relu_node = None
         if (node.op == 'call_function' and node.target is torch.nn.functional.relu) or \
            (node.op == 'call_module' and isinstance(quantizer.modules[node.target], torch.nn.ReLU)):
             self.relu_node = node
-            node = node.args[0]  # type: ignore
+            node = node.args[0]
         assert node.op == 'call_function' and node.target in [operator.add, torch.add]
         self.add_node = node
         self.num_node_args = len([a for a in self.add_node.args[:2] if isinstance(a, Node)])
 
-    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
-                debug: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         if self.num_node_args == 1:
             # add scalar
             if self.relu_node is not None:
@@ -130,20 +119,18 @@ class Add(QuantizeHandler):
 @register_quant_pattern((torch.nn.functional.relu, operator.mul))
 @register_quant_pattern((torch.nn.functional.relu, torch.mul))
 class Mul(QuantizeHandler):
-    def __init__(self, quantizer: QuantizerCls, node: Node):
+    def __init__(self, quantizer, node):
         super().__init__(quantizer, node)
         self.relu_node = None
         if (node.op == 'call_function' and node.target is torch.nn.functional.relu) or \
            (node.op == 'call_module' and isinstance(quantizer.modules[node.target], torch.nn.ReLU)):
             self.relu_node = node
-            node = node.args[0]  # type: ignore
+            node = node.args[0]
         assert node.op == 'call_function' and node.target in [operator.mul, torch.mul]
         self.mul_node = node
         self.num_node_args = len([a for a in self.mul_node.args[:2] if isinstance(a, Node)])
 
-    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
-                debug: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         if self.num_node_args == 1:
             # mul scalar
             if self.relu_node is not None:
@@ -172,9 +159,7 @@ class Mul(QuantizeHandler):
 
 @register_quant_pattern(torch.cat)
 class Cat(QuantizeHandler):
-    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
-                debug: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         if not self.all_node_args:
             return NotImplemented
         activation_post_process = quantizer.activation_post_process_map[node.name]
@@ -206,20 +191,18 @@ class Cat(QuantizeHandler):
 @register_quant_pattern((torch.nn.ReLU, torch.nn.Conv2d))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.Conv2d))
 class ConvRelu(QuantizeHandler):
-    def __init__(self, quantizer: QuantizerCls, node: Node):
+    def __init__(self, quantizer, node):
         super().__init__(quantizer, node)
         self.relu_node = None
         if (node.op == 'call_function' and node.target is torch.nn.functional.relu) or \
            (node.op == 'call_module' and isinstance(quantizer.modules[node.target], torch.nn.ReLU)):
             self.relu_node = node
-            node = node.args[0]  # type: ignore
+            node = node.args[0]
         self.conv_node = node
         if node.op == 'call_module':
             self.conv = quantizer.modules[self.conv_node.target]
 
-    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
-                debug: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         # TODO: debug option for conv module
         qconfig = quantizer.qconfig_map[node.name]
         activation_statically_quantized = activation_is_statically_quantized(qconfig)
@@ -247,8 +230,7 @@ class ConvRelu(QuantizeHandler):
                 self.conv_node.target,
                 (load_arg(quantized=True)(self.conv_node.args[0]),),
                 {})
-        else:  # call_function
-            assert self.conv_node.op == 'call_function'
+        elif self.conv_node.op == 'call_function':
             if self.relu_node is not None:
                 raise Exception("functional conv + relu is not supported yet")
             if debug:
@@ -291,20 +273,18 @@ class ConvRelu(QuantizeHandler):
 @register_quant_pattern((torch.nn.ReLU, torch.nn.Linear))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.Linear))
 class LinearReLUQuantizeHandler(QuantizeHandler):
-    def __init__(self, quantizer: QuantizerCls, node: Node):
+    def __init__(self, quantizer, node):
         super().__init__(quantizer, node)
         self.relu_node = None
         if (node.op == 'call_function' and node.target is torch.nn.functional.relu) or \
            (node.op == 'call_module' and isinstance(quantizer.modules[node.target], torch.nn.ReLU)):
             self.relu_node = node
-            node = node.args[0]  # type: ignore
+            node = node.args[0]
         self.linear_node = node
         if node.op == 'call_module':
             self.linear = quantizer.modules[self.linear_node.target]
 
-    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
-                debug: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         # Supported combinations are:
         # quant_type | activation (compute_type) | weight
         #  static       quint8                      qint8
@@ -358,8 +338,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 'call_module',
                 self.linear_node.target,
                 (load_arg(quantized=activation_statically_quantized)(self.linear_node.args[0]),), {})
-        else:  # call_function
-            assert self.linear_node.op == 'call_function'
+        elif self.linear_node.op == 'call_function':
             if debug:
                 quantized_input_idxs = []
                 if activation_statically_quantized:
@@ -426,15 +405,13 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.nn.intrinsic.BNReLU2d)
 @register_quant_pattern(torch.nn.intrinsic.BNReLU3d)
 class BatchNorm(QuantizeHandler):
-    def __init__(self, quantizer: QuantizerCls, node: Node):
+    def __init__(self, quantizer, node):
         super().__init__(quantizer, node)
         assert node.op == 'call_module'
         self.bn_node = node
         self.bn = quantizer.modules[self.bn_node.target]
 
-    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
-                debug: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         if convert_custom_config_dict is None:
             convert_custom_config_dict = {}
         additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
@@ -454,12 +431,10 @@ class BatchNorm(QuantizeHandler):
 @register_quant_pattern(torch.nn.EmbeddingBag)
 @mark_input_output_not_observed()
 class Embedding(QuantizeHandler):
-    def __init__(self, quantizer: QuantizerCls, node: Node):
+    def __init__(self, quantizer, node):
         super().__init__(quantizer, node)
 
-    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
-                debug: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         # Supported combinations are:
         # quant_type  | activation | weight | activation_compute_type
         # weight_only |  float32   | quint8 | None
@@ -511,9 +486,7 @@ ARGS_TO_SKIP = {
 class DefaultNode(QuantizeHandler):
     ''' Common quantized op, first input and first output will be quantized
     '''
-    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
-                debug: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         if not self.all_node_args:
             return NotImplemented
         assert node.op in ['call_module', 'call_function'], 'Only call_module and ' + \
@@ -555,9 +528,7 @@ class DefaultNode(QuantizeHandler):
 # TODO: elu is using scale/zero_point instead of output_scale, output_zero_point
 @register_quant_pattern(torch.nn.functional.elu)
 class ELU(QuantizeHandler):
-    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
-                debug: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         activation_post_process = quantizer.activation_post_process_map[node.name]
         scale, zero_point = activation_post_process.calculate_qparams()
         scale = float(scale)
@@ -582,9 +553,7 @@ class ELU(QuantizeHandler):
 @register_quant_pattern('tanh', default_symmetric_fixed_qparams_fake_quant)
 @register_quant_pattern('tanh_', default_symmetric_fixed_qparams_fake_quant)
 class FixedQParamsOpQuantizeHandler(QuantizeHandler):
-    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
-                debug: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
 # these ops have quantized equivalents that do not need any extra information
@@ -653,17 +622,13 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern('unsqueeze_')
 @register_quant_pattern('view')
 class CopyNode(QuantizeHandler):
-    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
-                debug: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
 # Default quantization handler, used for quantization of input and output
 # of quantizable objects (e.g. modules and functionals)
 class DefaultQuantizeHandler(QuantizeHandler):
-    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
-                debug: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+    def convert(self, quantizer, node):
         assert self.all_node_args
         root_module = quantizer.modules['']
         return quantize_node(
@@ -672,9 +637,7 @@ class DefaultQuantizeHandler(QuantizeHandler):
             node, quantizer.activation_post_process_map[node.name])
 
 class CustomModuleQuantizeHandler(QuantizeHandler):
-    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
-                debug: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         """ Convert a float custom module to quantized custom module
         """
         assert node.op == 'call_module'
@@ -703,9 +666,7 @@ class StandaloneModuleQuantizeHandler(QuantizeHandler):
     """ Converts an observed standalone module to quantized standalone module
     by calling convert_fx on the observed standalone module.
     """
-    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
-                debug: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         assert node.op == 'call_module'
         qconfig = quantizer.qconfig_map[node.name]
         convert = torch.quantization.quantize_fx._convert_standalone_module_fx  # type: ignore

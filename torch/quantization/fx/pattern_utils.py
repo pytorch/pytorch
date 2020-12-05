@@ -1,12 +1,11 @@
 import torch
 import sys
 from collections import OrderedDict
-from typing import Dict, Any
-
-from .quantization_types import Pattern
+from typing import Dict, Any, Union, Tuple, Callable
 
 # TODO(future PR): fix the typing on QuantizeHandler (currently a circular dependency)
 QuantizeHandler = Any
+Pattern = Union[Callable, Tuple[Callable, Callable], Tuple[Callable, Callable, Callable]]
 
 # pattern for conv bn fusion
 DEFAULT_FUSION_PATTERNS = OrderedDict()
