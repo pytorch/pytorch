@@ -4274,7 +4274,7 @@ Keyword arguments:
 
 add_docstr(torch.xlogy,
            r"""
-xlogy(self, other) -> Tensor
+xlogy(self, other, *, out=None) -> Tensor
 
 Compute ``self*log(other)`` so that ``0 * log(0)`` returns zero.
 Similar to SciPy's `scipy.special.xlogy`.
@@ -4306,7 +4306,7 @@ Example::
     tensor([1.3863, 2.7726, 4.1589])
 
 
-.. function:: xlogy(self, other) -> Tensor
+.. function:: xlogy(self, other, *, out=None) -> Tensor
 
 Compute ``x*log(y)`` so that ``0 * log(0)`` returns zero.
 Similar to SciPy's `scipy.special.xlogy`.
