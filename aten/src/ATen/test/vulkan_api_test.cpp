@@ -269,7 +269,8 @@ TEST(VulkanAPITest, conv2d) {
   constexpr int64_t groups = 1;
   constexpr std::array<int64_t, 2u> stride{1, 2};
   constexpr std::array<int64_t, 2u> padding{3, 0};
-  constexpr std::array<int64_t, 2u> dilation{1, 3};
+  //TODO: Support conv2d with dilation != 1
+  constexpr std::array<int64_t, 2u> dilation{1, 1};
 
   constexpr struct {
     uint32_t batches;
