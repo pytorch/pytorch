@@ -1,5 +1,5 @@
 #include <ATen/ATen.h>
-#include <ATen/SparseTensorImpl.h>
+#include <ATen/SparseCOOTensorImpl.h>
 #include <ATen/SparseGCSTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/InitialTensorOptions.h>
@@ -40,6 +40,7 @@ SparseGCSTensorImpl::SparseGCSTensorImpl(at::DispatchKeySet key_set,
 
 void SparseGCSTensorImpl::resize_and_clear_(int64_t nnz_size, int64_t ptr_size, int64_t redux_size, IntArrayRef size) {
   // TODO: perform error checking.
+  TORCH_CHECK(size.size() + 1 == redux_size, "size of the reduction array has to be len(sparse.shape)+1, but got: ", redux_size);
 
   // call pointers().options() here since the struct contructor calls the tensor constructor
   // with args for device specific init.
@@ -57,7 +58,6 @@ void SparseGCSTensorImpl::resize_and_clear_(int64_t nnz_size, int64_t ptr_size, 
   indices_ = empty_indices;
   values_ = empty_values;
   reduction_ = empty_reduction;
-
   sizes_ = size.vec();
 }
 

@@ -3,7 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Layout.h>
 #include <ATen/Parallel.h>
-#include <ATen/SparseTensorImpl.h>
+#include <ATen/SparseCOOTensorImpl.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/SparseTensorUtils.h>
@@ -78,7 +78,7 @@ SparseTensor new_sparse(c10::optional<ScalarType> dtype, c10::optional<Layout> l
   } else {
     dispatch_key = DispatchKey::SparseCPU;
   }
-  return detail::make_tensor<SparseTensorImpl>(
+  return detail::make_tensor<SparseCOOTensorImpl>(
       DispatchKeySet(dispatch_key), scalarTypeToTypeMeta(dtype_or_default(dtype)));
 }
 
@@ -149,7 +149,7 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, const Ten
 
   // arg checking
   TORCH_CHECK(!options.has_layout() || options.layout() == kSparse, "expected sparse layout, but got layout ", options.layout());
-  // the following checks are redundant because they are also checked in SparseTensorImpl::set_indices_and_values_unsafe
+  // the following checks are redundant because they are also checked in SparseCOOTensorImpl::set_indices_and_values_unsafe
   // but we need to ensure them in order to infer the shape.
   TORCH_CHECK(indices.dim() == 2, "indices must be sparse_dim x nnz, but got: ", indices.sizes())
   TORCH_CHECK(!indices.is_sparse(), "expected indices to be a dense tensor, but got indices of layout ", indices.layout());
@@ -195,7 +195,7 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, const Ten
 void _validate_sparse_coo_tensor_args(const Tensor& indices, const Tensor& values_, ArrayRef<int64_t> size) {
   Tensor values = expand_values_if_needed(values_);
 
-  // the following checks are redundant because they are also checked in SparseTensorImpl::set_indices_and_values_unsafe
+  // the following checks are redundant because they are also checked in SparseCOOTensorImpl::set_indices_and_values_unsafe
   // but we need to ensure them in order to infer the shape.
   TORCH_CHECK(indices.dim() == 2, "indices must be sparse_dim x nnz, but got: ", indices.sizes())
   TORCH_CHECK(!indices.is_sparse(), "expected indices to be a dense tensor, but got indices of layout ", indices.layout());

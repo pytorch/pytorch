@@ -4700,7 +4700,7 @@
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA, SparseGCS_CPU, SparseGCS_CUDA: sparse_to_dense
+    SparseCPU, SparseCUDA, SparseGCS_CPU: sparse_to_dense
     MkldnnCPU: mkldnn_to_dense
 
 - func: to_dense_backward(Tensor grad, Tensor input) -> Tensor
@@ -4787,7 +4787,7 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: indices_sparse
-    SparseGCS_CPU, SparseGCS_CUDA: indices_sparse_gcs
+    SparseGCS_CPU: indices_sparse_gcs
   device_guard: False
 
 - func: values(Tensor(a) self) -> Tensor(a)
@@ -4795,21 +4795,21 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: values_sparse
-    SparseGCS_CPU, SparseGCS_CUDA: values_sparse_gcs
+    SparseGCS_CPU: values_sparse_gcs
   device_guard: False
 
 - func: pointers(Tensor(a) self) -> Tensor(a)
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    SparseGCS_CPU, SparseGCS_CUDA: pointers_sparse_gcs
+    SparseGCS_CPU: pointers_sparse_gcs
   device_guard: False
 
 - func: reduction(Tensor(a) self) -> Tensor(a)
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    SparseGCS_CPU, SparseGCS_CUDA: reduction_sparse_gcs
+    SparseGCS_CPU: reduction_sparse_gcs
   device_guard: False
 
 - func: hspmm.out(Tensor mat1, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)

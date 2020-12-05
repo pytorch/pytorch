@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
-#include <ATen/SparseTensorImpl.h>
+#include <ATen/SparseCOOTensorImpl.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/InitialTensorOptions.h>

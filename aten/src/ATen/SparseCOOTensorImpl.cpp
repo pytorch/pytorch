@@ -1,5 +1,5 @@
 #include <ATen/ATen.h>
-#include <ATen/SparseTensorImpl.h>
+#include <ATen/SparseCOOTensorImpl.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 
@@ -30,12 +30,12 @@ namespace {
 //
 // This means that we allocate a [1,0] size indices tensor and a [0] size
 // values tensor for such an empty tensor.
-SparseTensorImpl::SparseTensorImpl(at::DispatchKeySet key_set, const caffe2::TypeMeta data_type)
-  :   SparseTensorImpl(key_set, data_type
+SparseCOOTensorImpl::SparseCOOTensorImpl(at::DispatchKeySet key_set, const caffe2::TypeMeta data_type)
+  :   SparseCOOTensorImpl(key_set, data_type
       , at::empty({1, 0}, at::initialTensorOptions().device(sparseTensorSetToDeviceType(key_set)).dtype(ScalarType::Long))
       , at::empty({0}, at::initialTensorOptions().device(sparseTensorSetToDeviceType(key_set)).dtype(data_type))) {}
 
-SparseTensorImpl::SparseTensorImpl(at::DispatchKeySet key_set, const caffe2::TypeMeta data_type, at::Tensor indices, at::Tensor values)
+SparseCOOTensorImpl::SparseCOOTensorImpl(at::DispatchKeySet key_set, const caffe2::TypeMeta data_type, at::Tensor indices, at::Tensor values)
     : TensorImpl(key_set, data_type, values.device())
     , sparse_dim_(1)
     , dense_dim_(0)
@@ -48,37 +48,37 @@ SparseTensorImpl::SparseTensorImpl(at::DispatchKeySet key_set, const caffe2::Typ
   AT_ASSERT(values_.device() == device());
 }
 
-IntArrayRef SparseTensorImpl::strides() const {
+IntArrayRef SparseCOOTensorImpl::strides() const {
   AT_ERROR("sparse tensors do not have strides");
 }
-bool SparseTensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
+bool SparseCOOTensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
   AT_ERROR("sparse tensors do not have is_contiguous");
 }
-int64_t SparseTensorImpl::stride(int64_t d) const {
+int64_t SparseCOOTensorImpl::stride(int64_t d) const {
   AT_ERROR("sparse tensors do not have strides");
 }
-void SparseTensorImpl::set_size(int64_t dim, int64_t new_size) {
+void SparseCOOTensorImpl::set_size(int64_t dim, int64_t new_size) {
   AT_ERROR("sparse tensors do not have set_size");
 }
-void SparseTensorImpl::set_stride(int64_t dim, int64_t new_stride) {
+void SparseCOOTensorImpl::set_stride(int64_t dim, int64_t new_stride) {
   AT_ERROR("sparse tensors do not have set_stride");
 }
-void SparseTensorImpl::set_storage_offset(int64_t storage_offset) {
+void SparseCOOTensorImpl::set_storage_offset(int64_t storage_offset) {
   AT_ERROR("sparse tensors do not have set_storage_offset");
 }
-int64_t SparseTensorImpl::dim() const {
+int64_t SparseCOOTensorImpl::dim() const {
   return sparse_dim_ + dense_dim_;
 }
-bool SparseTensorImpl::has_storage() const {
+bool SparseCOOTensorImpl::has_storage() const {
   return false;
 }
-const Storage& SparseTensorImpl::storage() const {
+const Storage& SparseCOOTensorImpl::storage() const {
   AT_ERROR("sparse tensors do not have storage");
 }
-int64_t SparseTensorImpl::storage_offset() const {
+int64_t SparseCOOTensorImpl::storage_offset() const {
   AT_ERROR("sparse tensors do not have storage");
 }
-void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values) {
+void SparseCOOTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values) {
   TORCH_CHECK(allow_tensor_metadata_change(), "set_indices_and_values_unsafe ", err_msg_tensor_metadata_change_not_allowed);
 
   TORCH_CHECK(!indices.is_sparse(), "expected indices to be a dense tensor, but got indices of layout ", indices.layout());
