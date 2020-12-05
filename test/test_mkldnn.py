@@ -19,7 +19,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests, TemporaryF
 
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 
-types = [torch.bfloat16]
+types = [torch.float, torch.bfloat16]
 
 # Comment the line below to find out the CI machines having MKL-DNN build disabled
 @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
