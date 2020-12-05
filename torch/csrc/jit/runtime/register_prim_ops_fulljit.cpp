@@ -338,6 +338,34 @@ RegisterOperators reg(
          [](Stack* stack) { stack->emplace_back(at::Tensor()); },
          aliasAnalysisSpecialCase()),
      Operator(
+         "prim::ReductionSizes(int[] size, int[] red_axes, bool keepdim = False) -> int[]",
+         [](Stack* stack) {
+           bool keepdim = pop(stack).toBool();
+           c10::List<int64_t> axes = pop(stack).toIntList();
+           c10::List<int64_t> size = pop(stack).toIntList();
+           if (keepdim) {
+             for (const auto& axis : axes) {
+               size.set(axis, 1);
+             }
+           } else {
+             int64_t index = 0;
+             auto iter = size.begin();
+             std::sort(axes.begin(), axes.end());
+             for (const auto& axis : axes) {
+               // move iter to the next axis
+               iter += axis - index;
+
+               // input iter points to axis and is updated to axis + 1
+               iter = size.erase(iter);
+
+               // update current index for iter
+               index = axis + 1;
+             }
+           }
+           push(stack, IValue(std::move(size)));
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::BroadcastSizes(...) -> int[]",
          [](Stack* stack) {
            auto num_inputs = pop(stack).toInt();
@@ -348,7 +376,7 @@ RegisterOperators reg(
                  at::infer_size(size, peek(stack, i, num_inputs).toIntVector());
            }
            drop(stack, num_inputs);
-           push(stack, IValue(std::move(size)));
+           push(stack, IValue(size));
          },
          aliasAnalysisSpecialCase()),
      Operator(
