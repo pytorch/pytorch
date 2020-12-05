@@ -293,7 +293,8 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
     const c10::VariableVersion& version_counter,
     bool allow_tensor_metadata_change) const {
   auto impl = c10::make_intrusive<TensorImpl>(
-      Storage(storage()), key_set_, data_type_);
+      // No need to populate Storage; copy_tensor_metadata will do it for us.
+      key_set_, data_type_, device_opt_);
   copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
@@ -308,7 +309,8 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
     c10::VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) const {
   auto impl = c10::make_intrusive<TensorImpl>(
-      Storage(storage()), key_set_, data_type_);
+      // No need to populate Storage; copy_tensor_metadata will do it for us.
+      key_set_, data_type_, device_opt_);
   copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
