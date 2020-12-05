@@ -234,36 +234,35 @@ bool texprReductionsEnabled() {
   return texpr_reductions_enabled;
 }
 
-// TODO: if a value has differently typed uses, temporarily insert a node
-// specializing the type for each use and later remove, instead of bailing
-bool profiledWithDifferentTypes(Value* v) {
-  std::vector<TypePtr> types;
-  for (const auto& use : v->uses()) {
-    if (use.user->kind() == prim::profile) {
-      types.push_back(use.user->ty(attr::profiled_type));
-    }
-  }
-  for (size_t i = 1; i < types.size(); ++i) {
-    if (types.at(i - 1) != types.at(i)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 void removeProfileNodesAndSpecializeTypes(Block* b) {
   for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
     if (it->kind() == prim::profile) {
       GRAPH_DEBUG("Removing prim::profile: %", it->output()->debugName());
       it->output()->replaceAllUsesWith(it->input());
-      if (!profiledWithDifferentTypes(it->input())) {
-        it->input()->setType(it->ty(attr::profiled_type));
-      } else {
-        GRAPH_DEBUG(
-            "Ignoring value with differently typed profiles :%",
-            it->output()->debugName());
+      auto profiled_type = it->ty(attr::profiled_type)->expect<TensorType>();
+
+      // A value can be profiled with differently typed uses.
+      // This can occur from:
+      // - having a use which is not executed, so the type will be
+      // TensorType::get()
+      // - control-flow that depends on tensor type:
+      //   if x.size() == 2 op(x) else op(x)
+      // - mutation of the value on a field represented in the tensor type
+      //   op(x); x.resize_([...]); op(x)
+
+      // The most common case today with num_profiles = 1 is from the first
+      // case. Here we can just ignore non-profiled uses, and choose any of the
+      // profiled uses. Because we guard all tensor types in the runtime, even
+      // if we set a Value to have a profiled type from one use and then execute
+      // a use with a different profiled type, we will still be correct.
+      // In the future we could consider unifying the types of uses, or adding a
+      // type refinement node so uses can have the correct corresponding type.
+      if (profiled_type == TensorType::get()) {
+        continue;
       }
+      it->input()->setType(it->ty(attr::profiled_type));
       it.destroyCurrent();
+
     } else {
       for (Block* ib : it->blocks()) {
         removeProfileNodesAndSpecializeTypes(ib);
