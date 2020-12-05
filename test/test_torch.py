@@ -1883,6 +1883,7 @@ class AbstractTestCases:
             with TemporaryFileName() as fname:
                 assert_with_filename(fname)
 
+            self.assertEqual(IS_FILESYSTEM_UTF8_ENCODING, True)
             if IS_FILESYSTEM_UTF8_ENCODING:
                 with TemporaryDirectoryName(suffix='中文') as dname, TemporaryFileName(dir=dname) as fname:
                     assert_with_filename(fname)
@@ -1914,6 +1915,7 @@ class AbstractTestCases:
             with TemporaryFileName() as fname:
                 assert_with_filename(fname)
 
+            self.assertEqual(IS_FILESYSTEM_UTF8_ENCODING, True)
             if IS_FILESYSTEM_UTF8_ENCODING:
                 with TemporaryDirectoryName(suffix='中文') as dname, TemporaryFileName(dir=dname) as fname:
                     assert_with_filename(fname)
