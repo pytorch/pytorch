@@ -1100,13 +1100,13 @@
 - name: trunc(Tensor self) -> Tensor
   self: zeros_like(grad)
 
-- name: to_dense(Tensor self) -> Tensor
+- name: to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
   self: to_dense_backward(grad, self)
 
 - name: to_sparse(Tensor self) -> Tensor
   self: grad.to_dense()
 
-- name: to_mkldnn(Tensor self) -> Tensor
+- name: to_mkldnn(Tensor self, ScalarType? dtype=None) -> Tensor
   self: to_mkldnn_backward(grad, self)
 
 - name: unfold(Tensor(a) self, int dimension, int size, int step) -> Tensor(a)
