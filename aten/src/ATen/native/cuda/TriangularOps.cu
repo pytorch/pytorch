@@ -67,14 +67,14 @@ Tensor& triu_tril_cuda_template(Tensor& result, const Tensor& self, int64_t k, c
       triu_tril_kernel<scalar_t, int32_t, upper>
         <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
           result_info, self_info, k, N);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       auto result_info = cuda::detail::getTensorInfo<scalar_t, int64_t>(result);
       auto self_info = cuda::detail::getTensorInfo<scalar_t, int64_t>(self);
       triu_tril_kernel<scalar_t, int64_t, upper>
         <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
           result_info, self_info, k, N);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   });
   return result;
@@ -192,7 +192,7 @@ Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
               sz,
               self_stride_0 + self_stride_1,
               result_stride);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   } else {
     auto n_elems = self.numel();
@@ -221,7 +221,7 @@ Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
               n_elems,
               result_stride_0 + result_stride_1,
               self_stride);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   }
 

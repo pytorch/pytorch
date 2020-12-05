@@ -239,7 +239,7 @@ def get_call(method_name, func_type, args, kwargs):
     argument_str += ', ' if len(args) and len(kwargs) else ''
     argument_str += kwargs_str
 
-    if func_type == 'functional':
+    if func_type == 'functional' or func_type == 'function':
         call = 'torch.{}({})'.format(method_name, argument_str)
     elif func_type == 'method':
         call = '{}.{}({})'.format(self_arg, method_name, argument_str)
@@ -460,6 +460,13 @@ def create_script_module(self, nn_module, constructor_args, *args, **kwargs):
         create_script_module.last_graph = module.graph  # type: ignore[attr-defined]
         return module
     return script_module
+
+def check_alias_annotation(method_name, args, kwargs):
+    formals, tensors, actuals = get_script_args(args)
+    call = get_call(method_name, 'method', actuals, kwargs)
+    script = script_template.format(', '.join(formals), call)
+    CU = torch.jit.CompilationUnit(script)
+    torch._C._jit_check_alias_annotation(CU.the_method.graph, tuple(tensors), method_name)
 
 def get_nn_module_name_from_kwargs(**kwargs):
     if 'module_name' in kwargs:
