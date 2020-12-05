@@ -702,7 +702,7 @@ def isend(tensor,
 
 
 def irecv(tensor,
-          src=None,
+          src,
           group=group.WORLD,
           tag=0):
     """
@@ -710,8 +710,7 @@ def irecv(tensor,
 
     Arguments:
         tensor (Tensor): Tensor to fill with received data.
-        src (int, optional): Source rank. Will receive from any
-            process if unspecified.
+        src (int): Source rank.
         group (ProcessGroup, optional): The process group to work on
         tag (int, optional): Tag to match recv with remote send
 
@@ -725,15 +724,11 @@ def irecv(tensor,
         return
 
     if group == GroupMember.WORLD:
-        pg = _check_default_pg()
+        default_pg = _check_default_pg()
+        return default_pg.recv([tensor], src, tag)
     else:
-        pg = group
-
-    if src is None:
-        return pg.recv_anysource([tensor], tag)
-    else:
-        group_src_rank = _get_group_rank(pg, src)
-        return pg.recv([tensor], group_src_rank, tag)
+        group_src_rank = _get_group_rank(group, src)
+        return group.recv([tensor], group_src_rank, tag)
 
 
 def send(tensor,
