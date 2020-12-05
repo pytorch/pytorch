@@ -1097,11 +1097,11 @@ def main() -> None:
     # a key contains, e.g., CUDA to classify it as a CUDA backend
     dispatch_keys = [
         "CPU",
-        "SparseCPU",
+        "SparseCOO_CPU",
         "SparseGCS_CPU",
         "MkldnnCPU",
         "CUDA",
-        "SparseCUDA",
+        "SparseCOO_CUDA",
         "SparseGCS_CUDA",
         "QuantizedCPU",
         "QuantizedCUDA",

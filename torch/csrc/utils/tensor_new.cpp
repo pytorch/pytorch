@@ -346,11 +346,11 @@ void check_base_legacy_new(c10::DispatchKey dispatch_key, at::Layout expected_la
                 " but got: ", dispatch_key);
   } else if(expected_layout == c10::kSparse) {
     // NOTE: no sparse XLA
-    TORCH_CHECK(dispatch_key == c10::DispatchKey::SparseCPU
-                || dispatch_key == c10::DispatchKey::SparseCUDA
+    TORCH_CHECK(dispatch_key == c10::DispatchKey::SparseCOO_CPU
+                || dispatch_key == c10::DispatchKey::SparseCOO_CUDA
                 || dispatch_key == c10::DispatchKey::SparseHIP,
-                "new(): expected DispatchKey: ", c10::DispatchKey::SparseCPU,
-                " or ", c10::DispatchKey::SparseCUDA,
+                "new(): expected DispatchKey: ", c10::DispatchKey::SparseCOO_CPU,
+                " or ", c10::DispatchKey::SparseCOO_CUDA,
                 " or ", c10::DispatchKey::SparseHIP,
                 " but got: ", dispatch_key);
   } else {

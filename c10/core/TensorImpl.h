@@ -432,8 +432,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
-    return key_set_.has(DispatchKey::SparseCPU) ||
-           key_set_.has(DispatchKey::SparseCUDA) ||
+    return key_set_.has(DispatchKey::SparseCOO_CPU) ||
+           key_set_.has(DispatchKey::SparseCOO_CUDA) ||
            key_set_.has(DispatchKey::SparseHIP) ||
            key_set_.has(DispatchKey::SparseGCS_CPU) ||
            key_set_.has(DispatchKey::SparseGCS_CUDA);
@@ -453,7 +453,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_cuda() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
     return key_set_.has(DispatchKey::CUDA) ||
-        key_set_.has(DispatchKey::SparseCUDA) ||
+        key_set_.has(DispatchKey::SparseCOO_CUDA) ||
         key_set_.has(DispatchKey::QuantizedCUDA);
   }
 
@@ -912,8 +912,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * One TensorImpl can be copied to another TensorImpl if they have the same
    * DispatchKeySet. The only two special cases (for legacy reason) are:
-   * CPU is compatible with CUDA and SparseCPU is
-   * compatible with SparseCUDA.
+   * CPU is compatible with CUDA and SparseCOO_CPU is
+   * compatible with SparseCOO_CUDA.
    */
   inline bool has_compatible_shallow_copy_type(DispatchKeySet from) {
     auto is_dense = [](DispatchKeySet ts) {
@@ -922,8 +922,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
              ts.has(DispatchKey::HIP);
     };
     auto is_sparse = [](DispatchKeySet ts) {
-      return ts.has(DispatchKey::SparseCPU) ||
-             ts.has(DispatchKey::SparseCUDA) ||
+      return ts.has(DispatchKey::SparseCOO_CPU) ||
+             ts.has(DispatchKey::SparseCOO_CUDA) ||
              ts.has(DispatchKey::SparseHIP);
     };
     return (key_set_ == from) || (is_dense(key_set_) && is_dense(from)) || (is_sparse(key_set_) && is_sparse(from));

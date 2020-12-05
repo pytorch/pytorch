@@ -9,8 +9,8 @@
 #include <ATen/native/sparse/ParamUtils.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
-#include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
-#include <ATen/native/sparse/cuda/SparseCUDABlas.cuh>
+#include <ATen/native/sparse/cuda/SparseCOO_CUDAApplyUtils.cuh>
+#include <ATen/native/sparse/cuda/SparseCOO_CUDABlas.cuh>
 
 #include <THC/THCTensorMathPointwise.cuh>
 #include <THC/THCThrustAllocator.cuh>

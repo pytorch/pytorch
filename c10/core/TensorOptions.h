@@ -634,9 +634,9 @@ inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::opti
       case Layout::Sparse:
         switch (device_.type()) {
           case DeviceType::CPU:
-            return DispatchKey::SparseCPU;
+            return DispatchKey::SparseCOO_CPU;
           case DeviceType::CUDA:
-            return DispatchKey::SparseCUDA;
+            return DispatchKey::SparseCOO_CUDA;
           case DeviceType::HIP:
             return DispatchKey::SparseHIP;
           default:
@@ -688,9 +688,9 @@ inline DeviceType computeDeviceType(DispatchKey tid) {
     return DeviceType::MSNPU;
   } else if (tid == DispatchKey::XLA) {
     return DeviceType::XLA;
-  } else if (tid == DispatchKey::SparseCPU) {
+  } else if (tid == DispatchKey::SparseCOO_CPU) {
     return DeviceType::CPU;
-  } else if (tid == DispatchKey::SparseCUDA) {
+  } else if (tid == DispatchKey::SparseCOO_CUDA) {
     return DeviceType::CUDA;
   } else if (tid == DispatchKey::SparseHIP) {
     return DeviceType::HIP;

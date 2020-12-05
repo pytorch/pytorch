@@ -74,9 +74,9 @@ SparseTensor new_sparse(c10::optional<ScalarType> dtype, c10::optional<Layout> l
   AT_ASSERT(layout.has_value() && *layout == kSparse);
   DispatchKey dispatch_key;
   if (device_or_default(device).is_cuda()) {
-    dispatch_key = DispatchKey::SparseCUDA;
+    dispatch_key = DispatchKey::SparseCOO_CUDA;
   } else {
-    dispatch_key = DispatchKey::SparseCPU;
+    dispatch_key = DispatchKey::SparseCOO_CPU;
   }
   return detail::make_tensor<SparseCOOTensorImpl>(
       DispatchKeySet(dispatch_key), scalarTypeToTypeMeta(dtype_or_default(dtype)));
