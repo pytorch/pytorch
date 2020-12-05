@@ -33,29 +33,33 @@ static inline void cudaCheck(cudaError_t result, const char * file, int line) {
 
 struct CUDAMethods : public CUDAStubs {
   void record(int* device, CUDAEventStub* event, int64_t* cpu_ns) const override {
-      LOG(INFO) << "Start record";
+      //std::cout << "Test log" << std::endl;
+      std::cout << "Start record" << std::endl;
     TORCH_CUDA_CHECK(cudaGetDevice(device));
     // Hack: setting device
     at::cuda::OptionalCUDAGuard device_guard;
     auto device_ix = *device;
     device_guard.set_index(device_ix);
-    LOG(INFO) << "Done setting device";
+    std::cout << "Done setting device" <<  " index is " << device_ix << std::endl;
     CUevent_st* cuda_event_ptr;
+    std::cout << "Device " << device_ix << " calling cuda event create" << std::endl;
     TORCH_CUDA_CHECK(cudaEventCreate(&cuda_event_ptr));
+    std::cout << "Device " << device_ix << " done with cuda event create" << std::endl;
     *event = std::shared_ptr<CUevent_st>(cuda_event_ptr, [](CUevent_st* ptr) {
       TORCH_CUDA_CHECK(cudaEventDestroy(ptr));
     });
     auto stream = at::cuda::getCurrentCUDAStream();
     *cpu_ns = getTime();
     TORCH_CUDA_CHECK(cudaEventRecord(cuda_event_ptr, stream));
-    LOG(INFO) << "Done with record";
+    std::cout << "Device " << device_ix << " done with record" << std::endl;
   }
 
   float elapsed(const CUDAEventStub* event, const CUDAEventStub* event2) const override{
-      LOG(INFO) << "Calling cudaEventSynchronize";
+      std::cout << " calling cudaEventSynchronize" << std::endl;
     TORCH_CUDA_CHECK(cudaEventSynchronize(event->get()));
+    std::cout << "synchronized event, calling sync on event2" << std::endl;
     TORCH_CUDA_CHECK(cudaEventSynchronize(event2->get()));
-    LOG(INFO) << "Synchronized event and event2";
+    std::cout << "synchrnoized event and event2" << std::endl;
     float ms;
     TORCH_CUDA_CHECK(cudaEventElapsedTime(&ms, event->get(), event2->get()));
     return ms*1000.0;

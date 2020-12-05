@@ -144,11 +144,14 @@ void syncStreams(
     std::vector<at::cuda::CUDAEvent>& ncclEvents,
     std::vector<at::cuda::CUDAStream>& ncclStreams) {
   for (size_t i = 0; i < devices.size(); ++i) {
+      auto device_ix = devices[i].index();
+      std::cout << " blocking stream for device " << device_ix << std::endl;
     at::cuda::CUDAStream& ncclStream = ncclStreams[i];
     at::cuda::CUDAEvent& ncclEvent = ncclEvents[i];
     ncclEvent.record(at::cuda::getCurrentCUDAStream(devices[i].index()));
     ncclEvent.block(ncclStream);
   }
+  std::cout << "done blocking all streams" << std::endl;
 }
 
 // Given a ncclUniqueId, convert it to a string representation that can be put

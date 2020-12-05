@@ -2561,6 +2561,8 @@ class DistributedTest:
         @unittest.skipIf(BACKEND != "nccl", "Only Nccl backend supports allgather multigpu")
         @skip_if_no_gpu
         def test_all_gather_multigpu(self):
+            import os
+            print(f"rank {self.rank} pid {os.getpid()}")
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
             self._test_all_gather_multigpu_helper(group, group_id, rank, rank_to_GPU)
