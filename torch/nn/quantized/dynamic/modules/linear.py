@@ -21,7 +21,7 @@ class Linear(nnq.Linear):
 
     Examples::
 
-        >>> m = nn.quantized.dynamic.Linear(20, 30)
+        >>> m = torch.nn.quantized.dynamic.Linear(20, 30)
         >>> input = torch.randn(128, 20)
         >>> output = m(input)
         >>> print(output.size())
