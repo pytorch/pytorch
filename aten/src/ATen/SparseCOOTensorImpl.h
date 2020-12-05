@@ -209,7 +209,7 @@ public:
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
       c10::VariableVersion&& version_counter,
       bool allow_tensor_metadata_change) const override {
-    auto impl = c10::make_intrusive<SparseTensorImpl>(key_set(), dtype());
+    auto impl = c10::make_intrusive<SparseCOOTensorImpl>(key_set(), dtype());
     copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
