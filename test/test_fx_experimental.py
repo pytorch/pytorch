@@ -141,6 +141,26 @@ class TestFXExperimental(JitTestCase):
         self.assertEqual(traced(a, b), module_with_submodules(a, b))
         assert dag.nodes[0].logical_device_ids == [0]
 
+    def test_lack_of_devices(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, a, b):
+                return a + b
+
+        m = TestModule()
+        traced = symbolic_trace(m)
+        a = torch.rand(4)
+        b = torch.rand(4)
+        graph_manipulation.get_size_of_all_nodes(traced, [a, b])
+        partitioner = Partitioner()
+        devices = [Device("dev_0", 4, 0), Device("dev_1", 4, 1)]
+        partitioner_config = PartitionerConfig(devices, PartitionMode.size_based)
+        catch_runtime_error = False
+        try:
+            ret = partitioner.partition_graph(traced, m, partitioner_config)
+        except RuntimeError:
+            catch_runtime_error = True
+        assert catch_runtime_error
+
     def test_partition_node_manipulation(self):
         class TestModule(torch.nn.Module):
             def forward(self, a, b):
