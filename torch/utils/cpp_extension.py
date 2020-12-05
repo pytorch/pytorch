@@ -1545,7 +1545,7 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
             arch = f'{capability[0]}.{capability[1]}'
             if arch not in arch_list:
                 arch_list.append(arch)
-            arch_list = sorted(arch_list)
+        arch_list = sorted(arch_list)
     else:
         # Deal with lists that are ' ' separated (only deal with ';' after)
         _arch_list = _arch_list.replace(' ', ';')
