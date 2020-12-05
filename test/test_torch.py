@@ -19,7 +19,7 @@ from itertools import product, combinations, permutations
 from torch import multiprocessing as mp
 from torch.testing._internal.common_utils import (
     TestCase, TEST_WITH_ROCM, run_tests,
-    IS_WINDOWS, IS_STDIN_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
+    IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
     do_test_dtypes, IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
     skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
@@ -1883,7 +1883,7 @@ class AbstractTestCases:
             with TemporaryFileName() as fname:
                 assert_with_filename(fname)
 
-            if IS_STDIN_UTF8_ENCODING:
+            if IS_FILESYSTEM_UTF8_ENCODING:
                 with TemporaryDirectoryName(suffix='中文') as dname, TemporaryFileName(dir=dname) as fname:
                     assert_with_filename(fname)
 
@@ -1914,7 +1914,7 @@ class AbstractTestCases:
             with TemporaryFileName() as fname:
                 assert_with_filename(fname)
 
-            if IS_STDIN_UTF8_ENCODING:
+            if IS_FILESYSTEM_UTF8_ENCODING:
                 with TemporaryDirectoryName(suffix='中文') as dname, TemporaryFileName(dir=dname) as fname:
                     assert_with_filename(fname)
 
