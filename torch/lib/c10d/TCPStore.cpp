@@ -381,15 +381,9 @@ TCPStore::TCPStore(
   if (isServer_) {
     // Opening up the listening socket
     std::tie(masterListenSocket_, tcpStorePort_) = tcputil::listen(masterPort);
-    
-    std::string socketAddr = tcputil::getLocalSocketAddr(masterListenSocket_);
-
     // Now start the daemon
     tcpStoreDaemon_ = std::unique_ptr<TCPStoreDaemon>(
         new TCPStoreDaemon(masterListenSocket_));
-
-    // Server should connect to its listen addr
-    tcpStoreAddr_ = socketAddr;
   }
   // Connect to the daemon
   storeSocket_ = tcputil::connect(

@@ -1,5 +1,6 @@
 import torch
 import unittest
+import sys
 from typing import Dict
 from torch.fx.symbolic_trace import symbolic_trace
 from torch.fx.graph_module import GraphModule
@@ -727,6 +728,37 @@ terrible spacing
             return torch.relu(x)
 
         traced = symbolic_trace_with_rewrite(foo)
+
+    def test_to_folder(self):
+        class Test(torch.nn.Module):
+            def __init__(self):
+                super(Test, self).__init__()
+                self.W = torch.nn.Parameter(torch.randn(2))
+                self.seq = torch.nn.Sequential(torch.nn.BatchNorm1d(2, 2))
+                self.linear = torch.nn.Linear(2, 2)
+                self.attr = torch.randn(2)
+                self.register_buffer('attr2', torch.randn(2))
+
+            def forward(self, x):
+                return self.linear(self.seq(self.W + self.attr + self.attr2 + x))
+
+        mod = symbolic_trace(Test())
+        module_name = 'Foo'
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_dir = Path(tmp_dir)
+            mod.to_folder(tmp_dir, module_name)
+            # Recipe taken from here:
+            # https://docs.python.org/3/library/importlib.html#importing-a-source-file-directly
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(module_name, tmp_dir / '__init__.py')
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = module
+            spec.loader.exec_module(module)
+            t = torch.randn(2, 2)
+            self.assertEqual(module.Foo()(t), mod(t))
+
 
 
 if __name__ == "__main__":
