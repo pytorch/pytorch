@@ -1100,6 +1100,20 @@ Tensor& ldexp_(Tensor& self, const Tensor& other) {
   return at::ldexp_out(self, self, other);
 }
 
+Tensor& xlogy_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_float_op(result, self, other);
+  xlogy_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor& xlogy_out(Tensor& result, Scalar self, const Tensor& other) {
+  return at::xlogy_out(result, c10::scalar_to_tensor(self, other.device()), other);
+}
+
+Tensor& xlogy_out(Tensor& result, const Tensor& self, Scalar other) {
+  return at::xlogy_out(result, self, c10::scalar_to_tensor(other, self.device()));
+}
+
 Tensor xlogy(const Tensor& x, const Tensor& y) {
   Tensor result;
   auto iter = TensorIterator::binary_float_op(result, x, y);
@@ -1113,6 +1127,14 @@ Tensor xlogy(Scalar x, const Tensor& y) {
 
 Tensor xlogy(const Tensor& x, Scalar y) {
   return at::xlogy(x, c10::scalar_to_tensor(y, x.device()));
+}
+
+Tensor& xlogy_(Tensor& x, const Tensor& y) {
+  return at::xlogy_out(x, x, y);
+}
+
+Tensor& xlogy_(Tensor& x, Scalar y) {
+  return at::xlogy_out(x, x, c10::scalar_to_tensor(y, x.device()));
 }
 
 // TODO: Deduplicate this with the TensorIterator logic.  This would
