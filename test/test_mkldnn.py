@@ -80,8 +80,6 @@ class TestMkldnn(TestCase):
                                        "Cannot access data pointer of Tensor that doesn't have storage",
                                        lambda: mkldnn_tensor.data_ptr() != 0)
 
-
-
     def test_unsupported(self):
         # unsupported types and unsupported types with gpu
         for dtype in [torch.double, torch.half, torch.uint8, torch.int8,
@@ -685,7 +683,6 @@ class TestMkldnn(TestCase):
                 model(x),
                 mkldnn_model(x.to_mkldnn()).to_dense(),
             )
-        y = mkldnn_model(x.to_mkldnn()).to_dense()
 
     @skipIfNoTorchVision
     def test_resnet18(self):
