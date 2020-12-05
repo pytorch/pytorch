@@ -340,37 +340,37 @@ void SquashSliceAndSelect(Node* index_put_node) {
   auto outer_block = block_node->owningBlock();
   auto next_node = outer_block->owningNode();
   if (nullptr == next_node) {
-    orig_data->replaceAllUsesAfterNodeWith(new_index_put->node(), new_index_put);
+    orig_data->replaceAllUsesAfterNodeWith(
+        new_index_put->node(), new_index_put);
     return;
   }
-  for (auto block_inputs: outer_block->inputs()) {
+  for (auto block_inputs : outer_block->inputs()) {
     if (block_inputs->debugName() == orig_data->debugName()) {
       AT_ERROR(
-        "More than one aten::index_put in a subblock are not supported.");
+          "More than one aten::index_put in a subblock are not supported.");
     }
   }
 
   // Register index_put outputs through the blocks.
   outer_block->registerOutput(new_index_put);
-  std::vector<std::pair<Block*, Node*>> node_list = {std::make_pair(outer_block, next_node)};
+  std::vector<std::pair<Block*, Node*>> node_list = {
+      std::make_pair(outer_block, next_node)};
   next_node->addOutput()->copyMetadata(new_index_put);
   auto next_block = next_node->owningBlock();
-  while (true)
-  {
-      if (nullptr == next_block->owningNode())
-          break;
-      outer_block = next_block;
-      outer_block->registerOutput(next_node->output(0));
-      next_node = outer_block->owningNode();
-      next_node->addOutput()->copyMetadata(new_index_put);
-      next_block = next_node->owningBlock();
-      node_list.emplace_back(std::make_pair(outer_block, next_node));
+  while (true) {
+    if (nullptr == next_block->owningNode())
+      break;
+    outer_block = next_block;
+    outer_block->registerOutput(next_node->output(0));
+    next_node = outer_block->owningNode();
+    next_node->addOutput()->copyMetadata(new_index_put);
+    next_block = next_node->owningBlock();
+    node_list.emplace_back(std::make_pair(outer_block, next_node));
   }
 
   // Register index_put inputs through the blocks.
   auto next_data = orig_data;
-  while (!node_list.empty())
-  {
+  while (!node_list.empty()) {
     auto cur_pair = node_list.back();
     // Add input to current node.
     cur_pair.second->addInput(next_data);
@@ -386,13 +386,14 @@ void SquashSliceAndSelect(Node* index_put_node) {
     size_t idx = 0;
     for (auto inputs_ : node->inputs()) {
       if (inputs_ == prev_data) {
-          node->replaceInput(idx, next_data);
-          idx ++;
-          break;
+        node->replaceInput(idx, next_data);
+        idx++;
+        break;
       }
     }
   }
-  orig_data->replaceAllUsesAfterNodeWith(next_node->output(0)->node(), next_node->output(0));
+  orig_data->replaceAllUsesAfterNodeWith(
+      next_node->output(0)->node(), next_node->output(0));
 }
 
 void PrepareCopyForONNX(Block* block) {
