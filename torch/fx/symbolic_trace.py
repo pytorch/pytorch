@@ -2,6 +2,7 @@ import inspect
 from types import CodeType, FunctionType
 from typing import Any, Dict, Optional, List, Callable, Union
 import torch
+from torch._C import ScriptObject  # type: ignore
 
 from .node import Argument
 from .graph import Graph
@@ -86,7 +87,7 @@ class Tracer(TracerBase):
         # a get_attr to retrieve that tensor. Otherwise, we'll store away the
         # tensor value into a special attribute on the Module s.t. we can
         # retrieve it with a get_attr.
-        if isinstance(a, torch.Tensor):
+        if isinstance(a, (torch.Tensor, ScriptObject)):
             qualname : Optional[str] = self.tensor_attrs.get(a)
 
             # Tensor was not found in the Module hierarchy, stow it away in a
@@ -221,7 +222,7 @@ class Tracer(TracerBase):
 
         def collect_tensor_attrs(m : torch.nn.Module, prefix_atoms : List[str]):
             for k, v in m.__dict__.items():
-                if isinstance(v, torch.Tensor):
+                if isinstance(v, (torch.Tensor, ScriptObject)):
                     self.tensor_attrs[v] = '.'.join(prefix_atoms + [k])
             for k, v in m.named_children():
                 collect_tensor_attrs(v, prefix_atoms + [k])
