@@ -4315,11 +4315,11 @@ Similar to SciPy's `scipy.special.xlogy`.
     \text{out}_i = x_i * \log{{y_i}}
 
 .. note::
-    NaN in :attr:`y` is propagated even if value of :attr:`x` is 0.
+    NaN in :attr:`other` is propagated even if value of :attr:`self` is 0.
 
 Args:
-    x (Number or Tensor)
-    y (Tensor)
+    self (Number or Tensor)
+    other (Tensor)
 
 Keyword args:
     {out}
