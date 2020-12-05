@@ -367,30 +367,28 @@ void SquashSliceAndSelect(Node* index_put_node) {
       node_list.emplace_back(std::make_pair(outer_block, next_node));
   }
 
-  if (true) {
-    // Register index_put inputs through the blocks.
-    auto next_data = orig_data;
-    while (!node_list.empty())
-    {
-      auto cur_pair = node_list.back();
-      auto cur_node = cur_pair.second;
-      cur_node->addInput(next_data);
-      auto cur_block = cur_pair.first;
-      auto cur_input = cur_block->addInput();
-      cur_input->copyMetadata(next_data);
-      next_data = cur_input;
-      node_list.pop_back();
-    }
-    // Update index_put inputs inside the inner most block.
-    auto prev_data = block_node->input(0);
-    for (auto node : block_node->owningBlock()->nodes()) {
-      size_t idx = 0;
-      for (auto inputs_ : node->inputs()) {
-        if (inputs_ == prev_data) {
-            node->replaceInput(idx, next_data);
-            idx ++;
-            break;
-        }
+  // Register index_put inputs through the blocks.
+  auto next_data = orig_data;
+  while (!node_list.empty())
+  {
+    auto cur_pair = node_list.back();
+    // Add input to current node.
+    cur_pair.second->addInput(next_data); 
+    // Add input to current block.
+    auto cur_input = cur_pair.first->addInput();
+    cur_input->copyMetadata(next_data);
+    next_data = cur_input;
+    node_list.pop_back();
+  }
+  // Update index_put inputs inside the inner most block.
+  auto prev_data = block_node->input(0);
+  for (auto node : block_node->owningBlock()->nodes()) {
+    size_t idx = 0;
+    for (auto inputs_ : node->inputs()) {
+      if (inputs_ == prev_data) {
+          node->replaceInput(idx, next_data);
+          idx ++;
+          break;
       }
     }
   }
