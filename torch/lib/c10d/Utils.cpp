@@ -56,14 +56,6 @@ PortType getSocketPort(int fd) {
 
 } // namespace
 
-std::string getLocalSocketAddr(int fd) {
-  struct ::sockaddr_storage addrStorage;
-  socklen_t addrLen = sizeof(addrStorage);
-  SYSCHECK_ERR_RETURN_NEG1(getsockname(
-      fd, reinterpret_cast<struct ::sockaddr*>(&addrStorage), &addrLen));
-  return sockaddrToString(reinterpret_cast<struct ::sockaddr*>(&addrStorage));
-}
-
 std::string sockaddrToString(struct ::sockaddr* addr) {
   char address[INET6_ADDRSTRLEN + 1];
   if (addr->sa_family == AF_INET) {
