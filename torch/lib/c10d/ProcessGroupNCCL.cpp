@@ -144,7 +144,8 @@ void syncStreams(
     std::vector<at::cuda::CUDAEvent>& ncclEvents,
     std::vector<at::cuda::CUDAStream>& ncclStreams) {
   for (size_t i = 0; i < devices.size(); ++i) {
-      auto device_ix = devices[i].index();
+      int device_ix = devices[i].index();
+      std::cout << device_ix << " is int " << std::endl;
       std::cout << " blocking stream for device " << device_ix << std::endl;
     at::cuda::CUDAStream& ncclStream = ncclStreams[i];
     at::cuda::CUDAEvent& ncclEvent = ncclEvents[i];
@@ -1062,7 +1063,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   const auto key = getKeyFromDevices(devices);
   auto& ncclComms = getNCCLComm(key, devices, opType);
 
+  std::this_thread::sleep_for(std::chrono::seconds(8));
+  std::cout << "Rank " << getRank() << " done with sleep " << std::endl;
   // First let NCCL streams wait for input tensors allocation streams
+  std::cout << "RANK " << getRank() << " calling syncStreams " << std::endl;
   syncStreams(devices, ncclEvents_[key], ncclStreams_[key]);
 
   // Work itself will create the CUDA events on all GPUs of tensors
