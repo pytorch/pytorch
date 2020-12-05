@@ -163,7 +163,8 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
   }
 
   auto torch_C_m = py::handle(torch_C_module).cast<py::module>();
-  auto m = torch_C_m.def_submodule("_distributed_c10d", "distributed c10d bindings");
+  auto m =
+      torch_C_m.def_submodule("_distributed_c10d", "distributed c10d bindings");
 
   auto module = py::handle(m).cast<py::module>();
 
@@ -184,14 +185,20 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
   shared_ptr_class_<::c10d::GradBucket>(module, "_GradBucket")
       .def(
           py::init<
+              size_t,
               const std::vector<Tensor>&,
               const std::vector<size_t>&,
               const std::vector<size_t>&,
               const std::vector<c10::IntArrayRef>&>(),
+          py::arg("index"),
           py::arg("tensors"),
           py::arg("offsets"),
           py::arg("lengths"),
           py::arg("sizes_list"))
+      .def(
+          "get_index",
+          &::c10d::GradBucket::getIndex,
+          py::call_guard<py::gil_scoped_release>())
       .def(
           "get_tensors",
           &::c10d::GradBucket::getTensors,
@@ -1095,7 +1102,8 @@ Arguments:
           &::c10d::ProcessGroup::Work::wait,
           py::arg("timeout") = kNoTimeout,
           py::call_guard<py::gil_scoped_release>())
-      .def("get_future",
+      .def(
+          "get_future",
           [](::c10d::ProcessGroup::Work& work)
               -> std::shared_ptr<jit::PythonFutureWrapper> {
             return std::make_shared<jit::PythonFutureWrapper>(work.getFuture());
@@ -1258,7 +1266,6 @@ static const auto ProcessGroupWorkTorchBind =
               return work->wait();
             })
         .def("result", &::c10d::ProcessGroup::Work::result);
-
 
 // TODO: Support argument names in Python API.
 static const auto ProcessGroupTorchBind =
