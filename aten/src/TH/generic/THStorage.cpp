@@ -115,10 +115,9 @@ void THStorage_(resizeBytes)(THStorage* storage, ptrdiff_t size_bytes) {
 
 void THStorage_(fill)(THStorage *storage, scalar_t value)
 {
-  ptrdiff_t i;
   auto type_meta = caffe2::TypeMeta::Make<scalar_t>();
   size_t numel = storage->nbytes() / type_meta.itemsize();
-  for (i = 0; i < numel; i++)
+  for (size_t i = 0; i < numel; i++)
     THStorage_(data)(storage)[i] = value;
 }
 
