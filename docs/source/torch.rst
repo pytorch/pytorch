@@ -414,6 +414,7 @@ Comparison Ops
     not_equal
     sort
     topk
+    msort
 
 
 Spectral Ops
