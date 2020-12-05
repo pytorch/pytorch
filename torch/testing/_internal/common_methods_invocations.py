@@ -253,14 +253,23 @@ class UnaryUfuncInfo(OpInfo):
 
 def sample_inputs_addmm(self, device, dtype, requires_grad):
     return (SampleInput((make_tensor((S, S), device, dtype,
-                                     low=None, high=None, 
-                                     requires_grad=requires_grad), 
-                        make_tensor((S, S), device, dtype, 
-                                    low=None, high=None, 
-                                    requires_grad=requires_grad), 
-                        make_tensor((S, S), device, dtype, 
-                                    low=None, high=None, 
-                                    requires_grad=False))),) 
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                         make_tensor((S, S), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                         make_tensor((S, S), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=False))),)
+
+
+def sample_inputs_xlogy(self, device, dtype, requires_grad):
+    return (SampleInput((make_tensor((S, S), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                         make_tensor((S, S), device, dtype,
+                                     low=0, high=None,
+                                     requires_grad=requires_grad))),)
 
 
 # Operator database (sorted alphabetically)
@@ -659,6 +668,18 @@ if TEST_SCIPY:
                                     dtypes=[torch.bfloat16]),),
                        assert_autodiffed=True,
                        promotes_integers_to_float=True),
+        OpInfo('xlogy',
+               dtypes=all_types_and(torch.bool),
+               dtypesIfCPU=all_types_and(torch.bool, torch.half, torch.bfloat16),
+               dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+               test_inplace_grad=True,
+               supports_tensor_out=True,
+               skips=(
+                   # RuntimeError: "isfinite" not implemented for 'BFloat16'
+                   SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                            dtypes=[torch.bfloat16]),),
+               promotes_integers_to_float=True,
+               sample_inputs_func=sample_inputs_xlogy),
     ]
     op_db = op_db + op_db_scipy_reference
 
