@@ -334,7 +334,7 @@ else:
         with tempfile.TemporaryDirectory(suffix=suffix) as d:
             yield d
 
-IS_STDIN_UTF8_ENCODING = sys.stdin.encoding is not None and sys.stdin.encoding.lower() == 'utf-8'
+IS_FILESYSTEM_UTF8_ENCODING = sys.getfilesystemencoding() == 'utf-8'
 
 def _check_module_exists(name):
     r"""Returns if a top-level module with :attr:`name` exists *without**
