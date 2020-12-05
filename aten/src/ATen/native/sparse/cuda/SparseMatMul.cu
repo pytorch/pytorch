@@ -536,7 +536,7 @@ template<> struct CusparseMatrixMultiplyOp<float> {
     return Sgemm2(lhs, rhs, empty, &alpha, nullptr, output_values, output_indices);
   }
 
-  csrOutput Sgemm2(
+  csrOutput Sgemm2( 
       const ScsrMatrixRef& A,
       const ScsrMatrixRef& B,
       const ScsrMatrixRef& C,
