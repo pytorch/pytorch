@@ -13,7 +13,6 @@ import gc
 import types
 import math
 from functools import partial
-import locale
 import inspect
 import io
 import operator
