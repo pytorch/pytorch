@@ -39,17 +39,17 @@ TEST(TensorOptionsTest, ConstructsWellFromCUDATypes_CUDA) {
   REQUIRE_OPTIONS(kCUDA, -1, kInt, kStrided);
 
   options = getDeprecatedTypeProperties(Backend::SparseCOO_CUDA, kFloat).options();
-  REQUIRE_OPTIONS(kCUDA, -1, kFloat, kSparse);
+  REQUIRE_OPTIONS(kCUDA, -1, kFloat, kSparseCOO);
 
   options = getDeprecatedTypeProperties(Backend::SparseCOO_CUDA, kByte).options();
-  REQUIRE_OPTIONS(kCUDA, -1, kByte, kSparse);
+  REQUIRE_OPTIONS(kCUDA, -1, kByte, kSparseCOO);
 
   options = CUDA(kFloat).options(/*device=*/5);
   REQUIRE_OPTIONS(kCUDA, 5, kFloat, kStrided);
 
   options =
       getDeprecatedTypeProperties(Backend::SparseCOO_CUDA, kFloat).options(/*device=*/5);
-  REQUIRE_OPTIONS(kCUDA, 5, kFloat, kSparse);
+  REQUIRE_OPTIONS(kCUDA, 5, kFloat, kSparseCOO);
 }
 
 TEST(TensorOptionsTest, ConstructsWellFromCUDATensors_MultiCUDA) {
@@ -57,7 +57,7 @@ TEST(TensorOptionsTest, ConstructsWellFromCUDATensors_MultiCUDA) {
   REQUIRE_OPTIONS(kCUDA, 0, kDouble, kStrided);
 
   options = empty(5, getDeprecatedTypeProperties(Backend::SparseCOO_CUDA, kByte)).options();
-  REQUIRE_OPTIONS(kCUDA, 0, kByte, kSparse);
+  REQUIRE_OPTIONS(kCUDA, 0, kByte, kSparseCOO);
 
   if (torch::cuda::device_count() > 1) {
     Tensor tensor;
@@ -70,9 +70,9 @@ TEST(TensorOptionsTest, ConstructsWellFromCUDATensors_MultiCUDA) {
 
     {
       DeviceGuard guard(CUDADevice(1));
-      tensor = empty(5, device(kCUDA).layout(kSparse));
+      tensor = empty(5, device(kCUDA).layout(kSparseCOO));
     }
     options = tensor.options();
-    REQUIRE_OPTIONS(kCUDA, 1, kFloat, kSparse);
+    REQUIRE_OPTIONS(kCUDA, 1, kFloat, kSparseCOO);
   }
 }

@@ -32,8 +32,8 @@ TEST(TensorOptionsTest, UtilityFunctionsReturnTheRightTensorOptions) {
   auto options = dtype(kInt);
   REQUIRE_OPTIONS(kCPU, -1, kInt, kStrided);
 
-  options = layout(kSparse);
-  REQUIRE_OPTIONS(kCPU, -1, kFloat, kSparse);
+  options = layout(kSparseCOO);
+  REQUIRE_OPTIONS(kCPU, -1, kFloat, kSparseCOO);
 
   options = device({kCUDA, 1});
   REQUIRE_OPTIONS(kCUDA, 1, kFloat, kStrided);
@@ -41,8 +41,8 @@ TEST(TensorOptionsTest, UtilityFunctionsReturnTheRightTensorOptions) {
   options = device_index(1);
   REQUIRE_OPTIONS(kCUDA, 1, kFloat, kStrided);
 
-  options = dtype(kByte).layout(kSparse).device(kCUDA, 2).device_index(3);
-  REQUIRE_OPTIONS(kCUDA, 3, kByte, kSparse);
+  options = dtype(kByte).layout(kSparseCOO).device(kCUDA, 2).device_index(3);
+  REQUIRE_OPTIONS(kCUDA, 3, kByte, kSparseCOO);
 }
 
 TEST(TensorOptionsTest, ConstructsWellFromCPUTypes) {
@@ -59,10 +59,10 @@ TEST(TensorOptionsTest, ConstructsWellFromCPUTypes) {
   REQUIRE_OPTIONS(kCPU, -1, kInt, kStrided);
 
   options = TensorOptions(getDeprecatedTypeProperties(Backend::SparseCOO_CPU, kFloat));
-  REQUIRE_OPTIONS(kCPU, -1, kFloat, kSparse);
+  REQUIRE_OPTIONS(kCPU, -1, kFloat, kSparseCOO);
 
   options = TensorOptions(getDeprecatedTypeProperties(Backend::SparseCOO_CPU, kByte));
-  REQUIRE_OPTIONS(kCPU, -1, kByte, kSparse);
+  REQUIRE_OPTIONS(kCPU, -1, kByte, kSparseCOO);
 }
 
 TEST(TensorOptionsTest, ConstructsWellFromCPUTensors) {
@@ -70,7 +70,7 @@ TEST(TensorOptionsTest, ConstructsWellFromCPUTensors) {
   REQUIRE_OPTIONS(kCPU, -1, kDouble, kStrided);
 
   options = empty(5, getDeprecatedTypeProperties(Backend::SparseCOO_CPU, kByte)).options();
-  REQUIRE_OPTIONS(kCPU, -1, kByte, kSparse);
+  REQUIRE_OPTIONS(kCPU, -1, kByte, kSparseCOO);
 }
 
 TEST(TensorOptionsTest, ConstructsWellFromVariables) {
