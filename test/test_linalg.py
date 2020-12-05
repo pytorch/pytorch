@@ -41,6 +41,48 @@ AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
 class TestLinalg(TestCase):
     exact_dtype = True
 
+    @dtypes(torch.float, torch.cfloat)
+    @precisionOverride({torch.float: 1e-06, torch.cfloat: 1e-06})
+    def test_inner(self, device, dtype):
+        def check(a_sizes_, b_sizes_):
+            for a_sizes, b_sizes in ((a_sizes_, b_sizes_), (b_sizes_, a_sizes_)):
+                a = torch.randn(a_sizes, dtype=dtype, device=device)
+                b = torch.randn(b_sizes, dtype=dtype, device=device)
+                res = torch.inner(a, b)
+                ref = np.inner(a.cpu().numpy(), b.cpu().numpy())
+                self.assertEqual(res.cpu(), torch.from_numpy(np.array(ref)))
+                out = torch.zeros_like(res)
+                torch.inner(a, b, out=out)
+                self.assertEqual(res, out)
+
+        check([], [])                       # scalar x scalar
+        check([], [0])                      # scalar x empty
+        check([], [3])                      # scalar x 1D
+        check([], [2, 3, 4])                # scalar x 3D
+
+        check([0], [0])                     # empty x empty
+        check([0], [2, 0])                  # empty x 2D
+
+        check([2], [2])                     # 1D x 1D
+        check([2], [3, 1, 2])               # 1D x 3D
+        check([2], [3, 0, 2])               # 1D x 3D empty
+
+        check([1, 2], [3, 2])               # 2D x 2D
+        check([1, 2], [3, 4, 2])            # 2D x 3D
+        check([2, 1, 3, 2], [1, 3, 2, 2])   # 4D x 4D
+
+        # Test discontiguous input
+        a = torch.randn(3, 2, device=device, dtype=dtype).transpose_(0, 1)
+        b = torch.randn(4, 3, device=device, dtype=dtype)[::2, :]
+        self.assertFalse(a.is_contiguous() or b.is_contiguous())
+        self.assertEqual(a.inner(b).cpu().numpy(), np.inner(a.cpu().numpy(), b.cpu().numpy()))
+
+        # Test error message
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"inner\(\) the last dimension must match on both "
+                                    r"input tensors but got shapes \[2, 3\] and \[2, 2\]"):
+            torch.randn(2, 3, device=device, dtype=dtype).inner(torch.randn(2, 2, device=device, dtype=dtype))
+
     # Tests torch.outer, and its alias, torch.ger, vs. NumPy
     @precisionOverride({torch.bfloat16: 1e-1})
     @dtypes(*(torch.testing.get_all_dtypes()))
@@ -944,6 +986,122 @@ class TestLinalg(TestCase):
                 input = torch.randn(*input_size, dtype=dtype, device=device)
                 for ord in ord_settings:
                     run_test_case(input, ord, dim, keepdim)
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoMagma
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 1e-3})
+    def test_cond(self, device, dtype):
+        def run_test_case(input, p):
+            result = torch.linalg.cond(input, p)
+            result_numpy = np.linalg.cond(input.cpu().numpy(), p)
+            self.assertEqual(result, result_numpy, rtol=1e-2, atol=self.precision)
+
+            # test out= variant
+            out = torch.empty_like(result)
+            ans = torch.linalg.cond(input, p, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(ans, result)
+
+        norm_types = [1, -1, 2, -2, inf, -inf, 'fro', 'nuc', None]
+        input_sizes = [(32, 32), (2, 3, 3, 3)]
+        for input_size in input_sizes:
+            input = torch.randn(*input_size, dtype=dtype, device=device)
+            for p in norm_types:
+                # frobenius norm not supported for complex tensors
+                if dtype.is_complex and p == 'fro':
+                    with self.assertRaisesRegex(RuntimeError, "frobenius norm not supported for complex tensors"):
+                        torch.linalg.cond(input, p)
+                    continue
+                run_test_case(input, p)
+
+        # test empty batch sizes
+        input_sizes = [(0, 3, 3), (0, 2, 5, 5)]
+        for input_size in input_sizes:
+            input = torch.randn(*input_size, dtype=dtype, device=device)
+            for p in norm_types:
+                run_test_case(input, p)
+
+        # test non-square input
+        input_sizes = [(16, 32), (32, 16), (2, 3, 5, 3), (2, 3, 3, 5)]
+        for input_size in input_sizes:
+            input = torch.randn(*input_size, dtype=dtype, device=device)
+            for p in [2, -2, None]:
+                run_test_case(input, p)
+
+        # test for singular input
+        a = torch.eye(3, dtype=dtype, device=device)
+        a[-1, -1] = 0  # make 'a' singular
+        for p in norm_types:
+            run_test_case(a, p)
+
+        # test for 0x0 matrices. NumPy doesn't work for such input, we return 0
+        input_sizes = [(0, 0), (2, 5, 0, 0)]
+        for input_size in input_sizes:
+            input = torch.randn(*input_size, dtype=dtype, device=device)
+            for p in ['fro', 2]:
+                expected_dtype = a.real.dtype if dtype.is_complex and p == 2 else dtype
+                expected = torch.zeros(input_size[:-2], dtype=expected_dtype, device=device)
+                actual = torch.linalg.cond(input, p)
+                self.assertEqual(actual, expected)
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoMagma
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 1e-3})
+    def test_cond_errors_and_warnings(self, device, dtype):
+        norm_types = [1, -1, 2, -2, inf, -inf, 'fro', 'nuc', None]
+
+        # cond expects the input to be at least 2-dimensional
+        a = torch.ones(3, dtype=dtype, device=device)
+        for p in norm_types:
+            with self.assertRaisesRegex(RuntimeError, r'supports matrices or batches of matrices'):
+                torch.linalg.cond(a, p)
+
+        # for some norm types cond expects the input to be square
+        a = torch.ones(3, 2, dtype=dtype, device=device)
+        norm_types = [1, -1, inf, -inf, 'fro', 'nuc']
+        for p in norm_types:
+            with self.assertRaisesRegex(RuntimeError, r'supports square matrices or batches of square matrices'):
+                torch.linalg.cond(a, p)
+
+        # if non-empty out tensor with wrong shape is passed a warning is given
+        a = torch.ones((2, 2), dtype=dtype, device=device)
+        for p in ['fro', 2]:
+            real_dtype = a.real.dtype if dtype.is_complex and p == 2 else dtype
+            out = torch.empty(a.shape, dtype=real_dtype, device=device)
+            with warnings.catch_warnings(record=True) as w:
+                # Trigger warning
+                torch.linalg.cond(a, p, out=out)
+                # Check warning occurs
+                self.assertEqual(len(w), 1)
+                self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+        # dtypes should match
+        out = torch.empty_like(a).to(torch.int)
+        for p in ['fro', 2]:
+            with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match"):
+                torch.linalg.cond(a, p, out=out)
+
+        # for batched input if at least one matrix in the batch is not invertible,
+        # we can't get the result for all other (possibly) invertible matrices in the batch without an explicit for loop.
+        # this should change when at::inverse works with silent errors
+        # NumPy works fine in this case because it's possible to silence the error and get the inverse matrix results
+        # possibly filled with NANs
+        batch_dim = 3
+        a = torch.eye(3, 3, dtype=dtype, device=device)
+        a = a.reshape((1, 3, 3))
+        a = a.repeat(batch_dim, 1, 1)
+        a[0, -1, -1] = 0  # now a[0] is singular
+        for p in [1, -1, inf, -inf, 'fro', 'nuc']:
+            with self.assertRaisesRegex(RuntimeError, "linalg_cond does not support yet"):
+                torch.linalg.cond(a, p)
+
+        # check invalid norm type
+        a = torch.ones(3, 3, dtype=dtype, device=device)
+        for p in ['wrong_norm', 5]:
+            with self.assertRaisesRegex(RuntimeError, f"linalg_cond got an invalid norm type: {p}"):
+                torch.linalg.cond(a, p)
 
     # Test autograd and jit functionality for linalg functions.
     # TODO: Once support for linalg functions is added to method_tests in common_methods_invocations.py,
