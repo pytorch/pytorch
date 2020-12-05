@@ -1,12 +1,17 @@
 import torch
+import torch.nn as nn
 import torch.overrides
+from torch.nn.modules.module import _addindent
 import linecache
-from typing import Type, Dict, List, Any, Union
+from typing import Type, Dict, List, Any, Union, Optional
 from .graph import Graph
 import copy
 import sys
 import traceback
 import math
+from pathlib import Path
+import os
+import warnings
 
 # normal exec loses the source code, however we can patch
 # the linecache module to still recover it.
@@ -193,6 +198,60 @@ class GraphModule(torch.nn.Module):
         """
         self._graph = g
         self.recompile()
+
+
+    def to_folder(self, folder: Union[str, os.PathLike], module_name="FxModule"):
+        """Dumps out module to ``folder`` with ``module_name`` so that it can be
+        imported with ``from <folder> import <module_name>``
+        """
+        folder = Path(folder)
+        Path(folder).mkdir(exist_ok=True)
+        torch.save(self.state_dict(), folder / 'state_dict.pt')
+        tab = " " * 4
+        model_str = f"""
+import torch
+from torch.nn import *
+class {module_name}(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+"""
+
+        def _gen_model_repr(module_name: str, module: torch.nn.Module) -> Optional[str]:
+            safe_reprs = [nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d]
+            if type(module) in safe_reprs:
+                return f"{module.__repr__()}"
+            else:
+                return None
+
+        blobified_modules = []
+        for module_name, module in self.named_children():
+            module_str = _gen_model_repr(module_name, module)
+            if module_str is None:
+                module_file = folder / f'{module_name}.pt'
+                torch.save(module, module_file)
+                blobified_modules.append(module_name)
+                module_repr = module.__repr__().replace('\r', ' ').replace('\n', ' ')
+                module_str = f"torch.load(r'{module_file}') # {module_repr}"
+            model_str += f"{tab*2}self.{module_name} = {module_str}\n"
+
+        for buffer_name, buffer in self._buffers.items():
+            model_str += f"{tab*2}self.register_buffer('{buffer_name}', torch.empty({list(buffer.shape)}))\n"
+
+        for param_name, param in self._parameters.items():
+            model_str += f"{tab*2}self.{param_name} = torch.nn.Parameter(torch.empty({list(buffer.shape)}))\n"
+
+        model_str += f"{tab*2}self.load_state_dict(torch.load(r'{folder}/state_dict.pt'))\n"
+        model_str += f"{_addindent(self.code, 4)}\n"
+
+        module_file = folder / 'module.py'
+        module_file.write_text(model_str)
+
+        init_file = folder / '__init__.py'
+        init_file.write_text('from .module import *')
+
+        if len(blobified_modules) > 0:
+            warnings.warn("Was not able to save the following children modules as reprs -"
+                          f"saved as pickled files instead: {blobified_modules}")
 
     def recompile(self) -> None:
         """
