@@ -953,6 +953,7 @@ class TestLinalg(TestCase):
     # their matrix norm results match
     @skipCUDAIfNoMagma
     @dtypes(torch.float, torch.double)
+    @precisionOverride({torch.float32: 2e-5})
     def test_norm_matrix(self, device, dtype):
         def run_test_case(input, p, dim, keepdim):
             result = torch.linalg.norm(input, ord, dim, keepdim)
