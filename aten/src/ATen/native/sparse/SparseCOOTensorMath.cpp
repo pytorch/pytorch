@@ -1,4 +1,4 @@
-#include <ATen/native/sparse/SparseTensorMath.h>
+#include <ATen/native/sparse/SparseCOOTensorMath.h>
 
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
