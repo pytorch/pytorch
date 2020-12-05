@@ -4,7 +4,6 @@
 #include <c10/core/StreamGuard.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <ATen/Utils.h>
-#include <cuda.h>
 
 namespace at {
 namespace cuda {
