@@ -289,6 +289,21 @@ c10::AutogradMetaInterface* TensorImpl::autograd_meta() const {
   return autograd_meta_.get();
 }
 
+c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
+    const c10::VariableVersion& version_counter,
+    bool allow_tensor_metadata_change) const {
+  auto impl = c10::make_intrusive<TensorImpl>(
+      Storage(storage()), key_set_, data_type_);
+  copy_tensor_metadata(
+      /*src_impl=*/this,
+      /*dest_impl=*/impl.get(),
+      /*version_counter=*/version_counter,
+      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+  impl->refresh_numel();
+  impl->refresh_contiguous();
+  return impl;
+}
+
 void TensorImpl::copy_tensor_metadata(
     const TensorImpl* src_impl,
     TensorImpl* dest_impl,
