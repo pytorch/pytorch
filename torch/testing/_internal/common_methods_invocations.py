@@ -145,9 +145,9 @@ class OpInfo(object):
         """
         return self.inplace_variant
 
-    def sample_inputs(op_info, device, dtype, requires_grad=False):
+    def sample_inputs(self, device, dtype, requires_grad=False):
         """Returns an iterable of SampleInputs."""
-        return op_info.sample_inputs_func(op_info, device, dtype, requires_grad)
+        return self.sample_inputs_func(self, device, dtype, requires_grad)
 
     # Returns True if the test should be skipped and False otherwise
     def should_skip(self, cls_name, test_name, device_type, dtype):
@@ -192,10 +192,10 @@ M = 10
 S = 5
 
 
-def sample_inputs_unary(self, device, dtype, requires_grad):
-    low, high = self.domain
-    low = low if low is None else low + self._domain_eps
-    high = high if high is None else high - self._domain_eps
+def sample_inputs_unary(op_info, device, dtype, requires_grad):
+    low, high = op_info.domain
+    low = low if low is None else low + op_info._domain_eps
+    high = high if high is None else high - op_info._domain_eps
 
     return (SampleInput(make_tensor((L,), device, dtype,
                                     low=low, high=high,
@@ -251,7 +251,7 @@ class UnaryUfuncInfo(OpInfo):
         self._domain_eps = 1e-5
 
 
-def sample_inputs_addmm(self, device, dtype, requires_grad):
+def sample_inputs_addmm(op_info, device, dtype, requires_grad):
     return (SampleInput((make_tensor((S, S), device, dtype,
                                      low=None, high=None,
                                      requires_grad=requires_grad),
