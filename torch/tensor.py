@@ -983,7 +983,8 @@ class Tensor(torch._C._TensorBase):
         def apply_reduction(index, strides, dims):
             return sum(strides[k] * index[dims[k]] for k in range(len(dims)))
 
-        shape = self.shape
+        print("shape ", self.shape)
+        shape = self.size()
         N = len(shape)
         # TODO: N=0, N=1
         if reduction is None:
@@ -1025,11 +1026,9 @@ class Tensor(torch._C._TensorBase):
                 co.extend(c)
                 vals.extend(v)
 
-        reduction = torch.IntTensor(reduction)
-        print(torch.IntTensor(co).type())
         return torch.sparse_gcs_tensor(torch.IntTensor(ro), torch.IntTensor(co),
                                        torch.tensor(vals, dtype=self.dtype),
-                                       reduction, shape, dtype=self.dtype)
+                                       torch.IntTensor(reduction), shape, dtype=self.dtype)
 
 
     def _update_names(self, names, inplace):

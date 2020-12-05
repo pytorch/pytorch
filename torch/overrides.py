@@ -203,6 +203,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._make_subclass,
         Tensor.stride,
         Tensor.unflatten,
+        Tensor.to_sparse_gcs,
     }
 
 
@@ -889,7 +890,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor._nnz: lambda self: -1,
         Tensor.pointers: lambda self: -1,
         Tensor.reduction: lambda self: -1,
-        Tensor.to_sparse_gcs: lambda self: -1,
         Tensor._update_names: lambda self, names, inplace: -1,
         Tensor._values: lambda self: -1,
         Tensor.align_as: lambda self, other: -1,
