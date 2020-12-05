@@ -131,7 +131,7 @@ class TestFXExperimental(JitTestCase):
         devices = [
             Device("dev_0", 125, 0),
             Device("dev_1", 125, 1),
-            Device("dev_2", 125, 2),
+            Device("dev_2", 125, 2)
         ]
         partitioner_config = PartitionerConfig(devices)
         ret = partitioner.partition_graph(traced, m, partitioner_config)
@@ -172,12 +172,12 @@ class TestFXExperimental(JitTestCase):
             def __init__(self):
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
+                self.c = torch.rand(4)
 
             def forward(self, a, b):
                 add_1 = a + b
                 linear = self.linear(add_1)
-                e = torch.rand(4)
-                add_2 = linear + e
+                add_2 = linear + self.c
                 return add_2
 
         m = TestModule()
@@ -189,9 +189,9 @@ class TestFXExperimental(JitTestCase):
         devices = [
             Device("dev_0", 125, 0),
             Device("dev_1", 125, 1),
-            Device("dev_2", 125, 2),
+            Device("dev_2", 125, 2)
         ]
-        partitioner_config = PartitionerConfig(devices)
+        partitioner_config = PartitionerConfig(devices, PartitionMode.size_based)
         ret = partitioner.partition_graph(traced, m, partitioner_config)
         module_with_submodules = ret.module_with_submodules
         dag = ret.dag
@@ -219,7 +219,7 @@ class TestFXExperimental(JitTestCase):
         graph_manipulation.get_size_of_all_nodes(traced, [a])
         partitioner = Partitioner()
         devices = [Device("dev_0", 120, 0), Device("dev_1", 160, 1)]
-        partitioner_config = PartitionerConfig(devices)
+        partitioner_config = PartitionerConfig(devices, PartitionMode.size_based)
         ret = partitioner.partition_graph(traced, m, partitioner_config)
         module_with_submodules = ret.module_with_submodules
         dag = ret.dag
@@ -282,7 +282,7 @@ class TestFXExperimental(JitTestCase):
         devices = [
             Device("dev_0", 33000000, 0),
             Device("dev_1", 33000000, 1),
-            Device("dev_2", 33000000, 2),
+            Device("dev_2", 33000000, 2)
         ]
         partitioner_config = PartitionerConfig(devices, PartitionMode.sparse_nn)
         partitioner = Partitioner()
