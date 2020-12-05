@@ -945,43 +945,45 @@ struct to_ir {
   }
 
   void emitDelete(const Delete& stmt) {
-    if (stmt.expr().kind() == TK_SUBSCRIPT) {
-      Subscript subscript(stmt.expr());
-      const List<Expr>& subscript_exprs = subscript.subscript_exprs();
-      if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
-        throw ErrorReport(stmt.range())
-            << "del statements only support deletion at a single index, "
-               "slicing is not supported"
-               " (see https://github.com/pytorch/pytorch/issues/31430)";
-      }
-      const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
-      const SourceRange& val_range = subscript.value().range();
-      Value* idx = emitExpr(subscript_exprs[0]);
-      Value* val = sv->asValue(val_range, method);
-
-      // If val is a class instance, this is a method call to a type-specific
-      // implementation of del defined in a __delitem__ method.
-      if (auto cls = val->type()->cast<ClassType>()) {
-        if (!cls->findMethod("__delitem__")) {
+    for (const auto& target : stmt.targets()) {
+      if (target.kind() == TK_SUBSCRIPT) {
+        Subscript subscript(target);
+        const List<Expr>& subscript_exprs = subscript.subscript_exprs();
+        if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
           throw ErrorReport(stmt.range())
-              << "Class does not define __delitem__";
+              << "del statements only support deletion at a single index, "
+                 "slicing is not supported"
+                 " (see https://github.com/pytorch/pytorch/issues/31430)";
         }
+        const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
+        const SourceRange& val_range = subscript.value().range();
+        Value* idx = emitExpr(subscript_exprs[0]);
+        Value* val = sv->asValue(val_range, method);
 
-        // Use MethodValue to call the method to handle recursion.
-        MethodValue(val, "__delitem__")
-            .call(stmt.range(), method, {idx}, {}, 0);
+        // If val is a class instance, this is a method call to a type-specific
+        // implementation of del defined in a __delitem__ method.
+        if (auto cls = val->type()->cast<ClassType>()) {
+          if (!cls->findMethod("__delitem__")) {
+            throw ErrorReport(stmt.range())
+                << "Class does not define __delitem__";
+          }
+
+          // Use MethodValue to call the method to handle recursion.
+          MethodValue(val, "__delitem__")
+              .call(stmt.range(), method, {idx}, {}, 0);
+        } else {
+          auto node = graph->create(aten::Delete, {val, idx}, 0)
+                          ->setSourceRange(stmt.range());
+          graph->insertNode(node);
+        }
+      } else if (target.kind() == TK_VAR) {
+        Var var(target);
+        environment_stack->removeVar(var.name(), /*check_if_removed=*/true);
       } else {
-        auto node = graph->create(aten::Delete, {val, idx}, 0)
-                        ->setSourceRange(stmt.range());
-        graph->insertNode(node);
+        throw ErrorReport(stmt.range())
+            << "del statements are only supported for deleting"
+               " list and dict items and variables";
       }
-    } else if (stmt.expr().kind() == TK_VAR) {
-      Var var(stmt.expr());
-      environment_stack->removeVar(var.name(), /*check_if_removed=*/true);
-    } else {
-      throw ErrorReport(stmt.range())
-          << "del statements are only supported for deleting"
-             " list and dict items and variables";
     }
   }
 
