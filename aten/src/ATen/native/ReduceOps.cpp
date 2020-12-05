@@ -1275,7 +1275,7 @@ Tensor value_selecting_reduction_backward(const Tensor& grad, int64_t dim, const
   return at::zeros(sizes, grad.options()).scatter_(dim, indices, grad);
 }
 
-Tensor unsqueeze_multiple(const Tensor & t, IntArrayRef dim, size_t n_dims) {
+Tensor unsqueeze_multiple(const Tensor & t, IntArrayRef dim, int64_t n_dims) {
     auto dims_to_unsqueeze = at::dim_list_to_bitset(dim, n_dims);
     Tensor res = t;
     for (size_t i = 0; i < n_dims; i++){
@@ -1291,7 +1291,7 @@ Tensor sum_backward(const Tensor & grad, IntArrayRef sizes, IntArrayRef dims, bo
     if (dims.size()==1) {
       return grad.unsqueeze(dims[0]).expand(sizes);
     } else {
-      Tensor res = unsqueeze_multiple(grad, dims, sizes.size());
+      Tensor res = at::unsqueeze_multiple(grad, dims, (int64_t)(sizes.size()));
       return res.expand(sizes);
     }
   } else {
@@ -1329,7 +1329,7 @@ Tensor var_backward(const Tensor& grad_, const Tensor & self, IntArrayRef dim, b
     return at::var_backward(grad, self, unbiased);
   }
   if (!keepdim && self.dim() > 1) {
-    grad = unsqueeze_multiple(grad, dim, self.dim());
+    grad = at::unsqueeze_multiple(grad, dim, self.dim());
   }
   return (2.0 / (_safe_size(self.sizes(), dim) - unbiased)) * grad * (self - self.mean(dim, true));
 }

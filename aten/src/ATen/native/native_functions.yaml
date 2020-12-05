@@ -4113,6 +4113,8 @@
   dispatch:
     DefaultBackend: unsqueeze
 
+- func: unsqueeze_multiple(Tensor(a) self, int[1] dim, int n_dims) -> Tensor(a)
+
 - func: unsqueeze_(Tensor(a!) self, int dim) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
