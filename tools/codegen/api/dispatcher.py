@@ -6,7 +6,7 @@ import tools.codegen.api.native as native
 import tools.codegen.local as local
 
 import itertools
-from typing import Sequence, Optional, Tuple, List, TypeVar, Callable
+from typing import Sequence, Optional, Tuple
 
 # This file describes the translation of JIT schema to the dispatcher
 # API, the *unboxed* calling convention by which invocations through

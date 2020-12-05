@@ -288,7 +288,7 @@ void TestIndexingMixedDevice(DeprecatedTypeProperties& type) {
 void TestDispatch() {
   Tensor tensor = randn({20, 20});
   Tensor other = randn({20, 20});
-  auto result = tensor.m(relu).m(mse_loss, other, at::Reduction::Mean);
+  auto result = tensor.relu().mse_loss(other, at::Reduction::Mean);
   ASSERT_TRUE(result.allclose(mse_loss(relu(tensor), other)));
 }
 
