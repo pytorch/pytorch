@@ -502,7 +502,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   Layout layout() const {
     // NB: This method is not virtual and avoid dispatches for perf.
     if (is_sparse()) {
-      return kSparse;
+      return kSparseCOO;
     } else if (is_mkldnn()) {
       return kMkldnn;
     } else {

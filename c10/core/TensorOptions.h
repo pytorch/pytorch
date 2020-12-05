@@ -334,7 +334,7 @@ struct C10_API TensorOptions {
 
   /// Returns if the layout is sparse
   bool is_sparse() const {
-    return layout_ == c10::Layout::Sparse;
+    return layout_ == c10::Layout::SparseCOO;
   }
 
   // For compatibility with legacy tensor.type() comparisons
@@ -631,7 +631,7 @@ inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::opti
             AT_ERROR("Unsupported device type for dense layout: ", device_.type());
         }
       }
-      case Layout::Sparse:
+      case Layout::SparseCOO:
         switch (device_.type()) {
           case DeviceType::CPU:
             return DispatchKey::SparseCOO_CPU;
