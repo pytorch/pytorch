@@ -1542,7 +1542,10 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
             # used to build pytorch, so we use the maximum supported capability of pytorch
             # to clamp the capability.
             capability = min(max_supported_sm, capability)
-            arch_list.append(f'{capability[0]}.{capability[1]}')
+            arch = f'{capability[0]}.{capability[1]}'
+            if arch not in arch_list:
+                arch_list.append(arch)
+            arch_list = sorted(arch_list)
     else:
         # Deal with lists that are ' ' separated (only deal with ';' after)
         _arch_list = _arch_list.replace(' ', ';')
