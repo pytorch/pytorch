@@ -152,7 +152,6 @@ Tensor& add_sparse_gcs_(Tensor& self, const Tensor& other, Scalar alpha) {
 
 int32_t gcs_to_dense_convert(int32_t iptr, int32_t icol, Tensor& out,
                              const SparseTensor& src) {
-  int32_t drow, dcol;
   int32_t index = out.storage_offset();
   auto src_impl = get_sparse_impl<SparseGCSTensorImpl>(src);
   
@@ -227,7 +226,6 @@ Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense,
   });
   return out;
 }
-
 
 SparseTensor& add_out_sparse_gcs_cpu(SparseTensor& out, const SparseTensor& self, const SparseTensor& src, Scalar alpha) {
   if (!self.is_sparse()) {
