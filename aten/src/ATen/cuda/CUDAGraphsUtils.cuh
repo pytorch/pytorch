@@ -2,6 +2,7 @@
 
 #include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAEvent.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/cuda/CUDAGuard.h>
 
@@ -68,10 +69,15 @@ inline std::ostream& operator<<(std::ostream& os, CaptureStatus status) {
 
 inline CaptureStatus currentStreamCaptureStatus() {
   #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
-  cudaStreamCaptureStatus is_capturing;
-  AT_CUDA_CHECK(cudaStreamIsCapturing(at::cuda::getCurrentCUDAStream(),
-                                      &is_capturing));
-  return CaptureStatus(is_capturing);
+  // don't create a context if we don't have to
+  if (at::detail::getCUDAHooks().hasPrimaryContext(c10::cuda::current_device())) {
+    cudaStreamCaptureStatus is_capturing;
+    AT_CUDA_CHECK(cudaStreamIsCapturing(at::cuda::getCurrentCUDAStream(),
+                                        &is_capturing));
+    return CaptureStatus(is_capturing);
+  } else {
+    return CaptureStatus::None;
+  }
   #else
   return CaptureStatus::None;
   #endif

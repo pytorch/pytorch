@@ -708,5 +708,15 @@ std::tuple<Tensor, Tensor> sort_cpu(
   return sort_out_cpu(values, indices, self, dim, descending);
 }
 
+Tensor& msort_out(Tensor& values, const Tensor& self) {
+  Tensor indices = at::empty({0}, self.options().dtype(kLong));
+  at::sort_out(values, indices, self, 0, false);
+  return values;
+}
+
+Tensor msort(const Tensor& self) {
+  return std::get<0>(at::sort(self, 0, false));
+}
+
 } // namespace native
 } // namespace at

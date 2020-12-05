@@ -243,7 +243,7 @@ Tensor _amp_update_scale_cuda(Tensor& growth_tracker,
     growth_factor,
     backoff_factor,
     growth_interval);
-  TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return new_scale;
 }

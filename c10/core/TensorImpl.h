@@ -790,7 +790,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
           } else {
             // Keep stride monotonically increasing to match NumPy.
             sizes_and_strides_.stride_at_unchecked(dim) =
-              std::max<int64_t>(sizes_and_strides_.stride_at_unchecked(dim + 1), 1) *
+              std::max<int64_t>(sizes_and_strides_.size_at_unchecked(dim + 1), 1) *
               sizes_and_strides_.stride_at_unchecked(dim + 1);
           }
         }
