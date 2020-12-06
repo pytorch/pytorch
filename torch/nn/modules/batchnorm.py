@@ -435,7 +435,13 @@ class SyncBatchNorm(_BatchNorm):
         >>> m = nn.SyncBatchNorm(100)
         >>> # creating process group (optional)
         >>> # process_ids is a list of int identifying rank ids.
-        >>> process_group = torch.distributed.new_group(process_ids)
+        >>> process_ids = list(range(8))
+        >>> r1, r2 = process_ids[:4], process_ids[4:] 
+        >>> # Note: every rank calls into new_group for every
+        >>> # process group created, even if that rank is not
+        >>> # part of the group.
+        >>> process_groups = torch.distributed.new_group([pids] for pids in [r1, r2])
+        >>> process_group = process_groups[0 if dist.get_rank() <= 3 else 1]
         >>> # Without Learnable Parameters
         >>> m = nn.BatchNorm3d(100, affine=False, process_group=process_group)
         >>> input = torch.randn(20, 100, 35, 45, 10)
@@ -565,7 +571,13 @@ class SyncBatchNorm(_BatchNorm):
             >>>          ).cuda()
             >>> # creating process group (optional)
             >>> # process_ids is a list of int identifying rank ids.
-            >>> process_group = torch.distributed.new_group(process_ids)
+            >>> process_ids = list(range(8))
+            >>> r1, r2 = process_ids[:4], process_ids[4:] 
+            >>> # Note: every rank calls into new_group for every
+            >>> # process group created, even if that rank is not
+            >>> # part of the group.
+            >>> process_groups = torch.distributed.new_group([pids] for pids in [r1, r2])
+            >>> process_group = process_groups[0 if dist.get_rank() <= 3 else 1]
             >>> sync_bn_module = torch.nn.SyncBatchNorm.convert_sync_batchnorm(module, process_group)
 
         """
