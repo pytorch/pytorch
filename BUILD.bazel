@@ -131,6 +131,7 @@ genrule(
         "aten/src/ATen/RegisterQuantizedCPU.cpp",
         "aten/src/ATen/RegisterSparseCPU.cpp",
         "aten/src/ATen/RegisterMath.cpp",
+        "aten/src/ATen/RegisterMeta.cpp",
         "aten/src/ATen/RegisterDefaultBackend.cpp",
         "aten/src/ATen/RegisterSchema.cpp",
         "aten/src/ATen/Functions.h",
@@ -457,6 +458,7 @@ filegroup(
     name = "aten_srcs_cu",
     srcs = [
         "aten/src/ATen/cuda/detail/IndexUtils.cu.cc",
+        "aten/src/ATen/cuda/detail/CUDAGraphsUtils.cu.cc",
         "aten/src/ATen/native/cuda/Activation.cu.cc",
         "aten/src/ATen/native/cuda/AdaptiveAveragePooling.cu.cc",
         "aten/src/ATen/native/cuda/AdaptiveAveragePooling3d.cu.cc",
