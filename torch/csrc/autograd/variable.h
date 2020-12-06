@@ -453,13 +453,21 @@ inline Variable make_variable_differentiable_view(
     CreationMeta creation_meta,
     c10::optional<std::function<at::Tensor(const at::Tensor&)>> view_func = c10::nullopt) {
   if (data.defined()) {
-    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
-      /*version_counter=*/0,
-      /*allow_tensor_metadata_change=*/true);
-    data_impl_copy->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
-      data_impl_copy.get(), std::move(base), std::move(view_func),
-      creation_meta));
-    return Variable(data_impl_copy);
+    c10::intrusive_ptr<at::TensorImpl> data_impl;
+    // If we already did a TensorImpl allocation for data, just reuse it.
+    // Otherwise(e.g tensor.swapdim(0, 0) when we return the same tensor as input), we have to use shallow_copy_and_detach to create a new
+    // TensorImpl to avoid moving leaf node into graph interior.
+    // This guarantees only 1 TensorImpl allocation happens in view ops.
+    if (base.unsafeGetTensorImpl() == data.unsafeGetTensorImpl()) {
+      data_impl = data.getIntrusivePtr()->shallow_copy_and_detach(
+        /*version_counter=*/0,
+        /*allow_tensor_metadata_change=*/true);
+    } else {
+       data_impl = data.getIntrusivePtr();
+    }
+    data_impl->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
+        data_impl.get(), std::move(base), std::move(view_func), creation_meta));
+    return Variable(data_impl);
   }
   return Variable();
 }
@@ -471,6 +479,9 @@ inline Variable make_variable_non_differentiable_view(
     at::Tensor data,
     bool allow_tensor_metadata_change = true) {
   if (data.defined()) {
+    // Currently all of non-differentiable view ops(detach/_indices/_values)
+    // share the same TensorImpl as their base Tensor. Thus a new TensorImpl
+    // allocation here is required.
     auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
       /*version_counter=*/impl::version_counter(base),
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
