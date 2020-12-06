@@ -1,5 +1,4 @@
 #pragma once
-#include <ATen/ATen.h>
 
 #include <cstddef>
 #include <exception>

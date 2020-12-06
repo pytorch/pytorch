@@ -1,5 +1,6 @@
 #include <ATen/record_function.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <c10/macros/Macros.h>
 #include <algorithm>
 #include <cstdlib>
 #include <random>
@@ -32,21 +33,26 @@ thread_local uint64_t current_thread_id_ = 0;
 thread_local bool tls_record_function_enabled_ = true;
 
 // Low probability constant
-const double kLowProb = 0.001;
-thread_local int tries_left_ = 0;
+static const double kLowProb = 0.001;
+struct CoinflipTLS {
+  int tries_left_;
+  std::mt19937 genGeo_;
+  std::mt19937 genZeroOne_;
+  std::geometric_distribution<int> distGeo_;
+  std::uniform_real_distribution<double> distZeroOne_;
+  CoinflipTLS();
+};
+
+CoinflipTLS::CoinflipTLS()
+    : tries_left_(0), genGeo_(std::random_device()()), genZeroOne_(std::random_device()()), distGeo_(kLowProb), distZeroOne_(0.0, 1.0) {}
+thread_local CoinflipTLS coinflip_tls_;
 
 int sample_geometric() {
-  static thread_local auto gen =
-      std::make_unique<std::mt19937>(std::random_device()());
-  std::geometric_distribution<int> dist(kLowProb);
-  return dist(*gen);
+  return coinflip_tls_.distGeo_(coinflip_tls_.genGeo_);
 }
 
 double sample_zero_one() {
-  static thread_local auto gen =
-      std::make_unique<std::mt19937>(std::random_device()());
-  std::uniform_real_distribution<double> dist(0.0, 1.0);
-  return dist(*gen);
+  return coinflip_tls_.distZeroOne_(coinflip_tls_.genZeroOne_);
 }
 
 } // namespace
@@ -117,42 +123,89 @@ class CallbackManager {
     return !rf_tls_.sorted_tls_callbacks_.empty();
   }
 
+  // We need this function to be inlined: init() is a hot path and
+  // callbackShouldRun is even hotter because it's called multiple
+  // times per init(). Profiling shows that the function prologue is
+  // taking up a significant fraction of the time.
+  static bool C10_ALWAYS_INLINE callbackShouldRun(const RecordFunctionCallback& cb, RecordScope scope) {
+    // first check whether this callback is interested in
+    // the given scope type
+    if (!cb.checkScope(scope)) {
+      return false;
+    }
+    // if we have registered should_run_ function, use it
+    if (cb.should_run_) {
+      return cb.should_run_(cb);
+    }
+
+    if (cb.sampling_prob_ == 1.0) {
+      return true;
+    }
+    // model the low probability events as events happening
+    // with probability kLowProb followed by another sampling with
+    // probability (sampling_prob__ / kLowProb), then replace the coin
+    // flip for kLowProb with a thread local number of tries tries_left_
+    // sampled from the geometric distribution.
+    if (cb.sampling_prob_ < kLowProb) {
+      if (coinflip_tls_.tries_left_ == 0) {
+        coinflip_tls_.tries_left_ = sample_geometric();
+        return (sample_zero_one() < cb.sampling_prob_ / kLowProb);
+      } else {
+        --coinflip_tls_.tries_left_;
+        return false;
+      }
+    } else {
+      return (sample_zero_one() < cb.sampling_prob_);
+    }
+  }
+
   // init is called by RecordFunction in constructor to
   // determine which thread local and global callbacks are going
   // to be executed and whether any of them need inputs
-  inline void init(RecordFunction& rec_fn) {
-    auto scope = rec_fn.scope();
-    bool found_active_cb = false;
+  inline void init(RecordFunction& rec_fn, RecordScope scope) {
     bool found_needs_inputs = false;
     bool found_needs_ids = false;
-    auto init_handles = [
-        scope, &found_active_cb, &found_needs_inputs, &found_needs_ids](
-          CallbackHandles& handles, RecordFunctionCallbacks& cbs, ObserverContextList& ctx_list) {
-      handles.clear();
 
-      size_t num_callbacks = 0;
-      for (const auto& cb : cbs) {
-        if (cb.first.shouldRun(scope)) {
-          handles.push_back(cb.second);
-          ++num_callbacks;
-          found_active_cb = true;
-          if (cb.first.needsInputs()) {
-            found_needs_inputs = true;
-          }
-          if (cb.first.needsIds()) {
-            found_needs_ids = true;
-          }
+    for (const auto& cb: rf_tls_.sorted_tls_callbacks_) {
+      if (callbackShouldRun(cb.first, scope)) {
+        if (cb.first.needsInputs()) {
+          found_needs_inputs = true;
         }
+        if (cb.first.needsIds()) {
+          found_needs_ids = true;
+        }
+        if (!rec_fn.state_) {
+          rec_fn.state_ = std::make_unique<RecordFunction::State>(scope);
+        }
+        rec_fn.state_->sorted_active_tls_handles_.push_back(cb.second);
       }
-      // Pre-allocate observer context list with nullptr.
-      ctx_list.resize(num_callbacks);
-    };
+    }
 
-    init_handles(rec_fn.sorted_active_tls_handles_, rf_tls_.sorted_tls_callbacks_, rec_fn.tls_ctx_);
-    init_handles(rec_fn.sorted_active_global_handles_, sorted_global_callbacks_, rec_fn.global_ctx_);
-    rec_fn.active_ = found_active_cb;
-    rec_fn.needs_inputs = found_needs_inputs;
-    if (found_needs_ids && found_active_cb) {
+    for (const auto& cb: sorted_global_callbacks_) {
+      if (callbackShouldRun(cb.first, scope)) {
+        if (cb.first.needsInputs()) {
+          found_needs_inputs = true;
+        }
+        if (cb.first.needsIds()) {
+          found_needs_ids = true;
+        }
+        if (!rec_fn.state_) {
+          rec_fn.state_ = std::make_unique<RecordFunction::State>(scope);
+        }
+        rec_fn.state_->sorted_active_global_handles_.push_back(cb.second);
+      }
+    }
+
+    if (!rec_fn.state_) {
+      return;
+    }
+
+    // Pre-allocate observer context list with nullptr.
+    rec_fn.state_->tls_ctx_.resize(rec_fn.state_->sorted_active_tls_handles_.size());
+    rec_fn.state_->global_ctx_.resize(rec_fn.state_->sorted_active_global_handles_.size());
+
+    rec_fn.state_->needs_inputs = found_needs_inputs;
+    if (found_needs_ids) {
       rec_fn.setHandle(next_unique_record_function_handle());
     }
   }
@@ -160,30 +213,30 @@ class CallbackManager {
   void runStartCallbacks(RecordFunction& rf) {
     mergeRunCallbacks(
         sorted_global_callbacks_,
-        rf.sorted_active_global_handles_,
-        rf.global_ctx_,
+        rf.state_->sorted_active_global_handles_,
+        rf.state_->global_ctx_,
         /* is_start */ true,
         rf);
     mergeRunCallbacks(
         rf_tls_.sorted_tls_callbacks_,
-        rf.sorted_active_tls_handles_,
-        rf.tls_ctx_,
+        rf.state_->sorted_active_tls_handles_,
+        rf.state_->tls_ctx_,
         /* is_start */ true,
         rf);
-    rf.called_start_callbacks_ = true;
+    rf.state_->called_start_callbacks_ = true;
   }
 
   void runEndCallbacks(RecordFunction& rf) {
     mergeRunCallbacks(
         sorted_global_callbacks_,
-        rf.sorted_active_global_handles_,
-        rf.global_ctx_,
+        rf.state_->sorted_active_global_handles_,
+        rf.state_->global_ctx_,
         /* is_start */ false,
         rf);
     mergeRunCallbacks(
         rf_tls_.sorted_tls_callbacks_,
-        rf.sorted_active_tls_handles_,
-        rf.tls_ctx_,
+        rf.state_->sorted_active_tls_handles_,
+        rf.state_->tls_ctx_,
         /* is_start */ false,
         rf);
   }
@@ -255,37 +308,6 @@ namespace {
   }
 } // namespace
 
-bool RecordFunctionCallback::shouldRun(RecordScope scope) const {
-  // first check whether this callback is interested in
-  // the given scope type
-  if (!checkScope(scope)) {
-    return false;
-  }
-  // if we have registered should_run_ function, use it
-  if (should_run_) {
-    return should_run_(*this);
-  }
-  // otherwise potentially do the uniform sampling
-  if (sampling_prob_ != 1.0) {
-    // model the low probability events as events happening
-    // with prob. kLowProb followed by another sampling with
-    // prob. (sampling_prob_ / kLowProb), then replace the coin
-    // flip for kLowProb with a thread local number of tries tries_left_
-    // sampled from the geometric distribution
-    if (sampling_prob_ < kLowProb) {
-      if (tries_left_ == 0) {
-        tries_left_ = sample_geometric();
-        return (sample_zero_one() < sampling_prob_ / kLowProb);
-      } else {
-        --tries_left_;
-        return false;
-      }
-    } else {
-      return (sample_zero_one() < sampling_prob_);
-    }
-  }
-  return true;
-}
 
 RecordFunctionCallbacks _getTLSCallbacks() {
   return rf_tls_.sorted_tls_callbacks_;
@@ -352,12 +374,13 @@ void enableRecordFunction(bool enable) {
   rf_tls_.tls_record_function_enabled_ = enable;
 }
 
-RecordFunction::RecordFunction(RecordScope scope) : scope_(scope) {
+RecordFunction::RecordFunction(RecordScope scope) {
   auto* rf_tls_ptr = &rf_tls_;
-  auto& m = manager();
-  if (rf_tls_ptr->tls_record_function_enabled_ &&
-      (!m.sorted_global_callbacks_.empty() || !rf_tls_ptr->sorted_tls_callbacks_.empty())) {
-    m.init(*this);
+  if (rf_tls_ptr->tls_record_function_enabled_) {
+    auto& m = manager();
+    if (!m.sorted_global_callbacks_.empty() || !rf_tls_ptr->sorted_tls_callbacks_.empty()) {
+      m.init(*this, scope);
+    }
   }
 }
 
@@ -374,10 +397,10 @@ void RecordFunction::before(const char* name, int64_t sequence_nr) {
   if (!isActive()) {
     return;
   }
-  name_ = StringView(name);
-  sequence_nr_ = sequence_nr;
-  thread_id_ = currentThreadId();
-  operator_name_.reset();
+  state_->name_ = StringView(name);
+  state_->sequence_nr_ = sequence_nr;
+  state_->thread_id_ = currentThreadId();
+  state_->operator_name_.reset();
 
   manager().runStartCallbacks(*this);
 }
@@ -386,10 +409,10 @@ void RecordFunction::before(std::string name, int64_t sequence_nr) {
   if (!isActive()) {
     return;
   }
-  name_ = StringView(std::move(name));
-  sequence_nr_ = sequence_nr;
-  thread_id_ = currentThreadId();
-  operator_name_.reset();
+  state_->name_ = StringView(std::move(name));
+  state_->sequence_nr_ = sequence_nr;
+  state_->thread_id_ = currentThreadId();
+  state_->operator_name_.reset();
 
   manager().runStartCallbacks(*this);
 }
@@ -400,10 +423,10 @@ void RecordFunction::before(
   if (!isActive()) {
     return;
   }
-  sequence_nr_ = sequence_nr;
-  thread_id_ = currentThreadId();
-  operator_name_ = op.operator_name();
-  name_ = StringView(op.schema().name());
+  state_->sequence_nr_ = sequence_nr;
+  state_->thread_id_ = currentThreadId();
+  state_->operator_name_ = op.operator_name();
+  state_->name_ = StringView(op.schema().name());
 
   manager().runStartCallbacks(*this);
 }
@@ -422,10 +445,10 @@ RecordFunction::~RecordFunction() {
 }
 
 void RecordFunction::end() {
-  if (isActive() && called_start_callbacks_) {
+  if (isActive() && state_->called_start_callbacks_) {
     manager().runEndCallbacks(*this);
+    state_.reset();
   }
-  active_ = false;
 }
 
 } // namespace at
