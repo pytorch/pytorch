@@ -46,7 +46,12 @@ static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& in
 
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
 
-  if (use_loop_launch(batch_size, n)) {
+  // heuristic:
+  //   cublas_x_batched doesn't work very well for small batchsize
+  //   cublas_x_batched is intended to be used for matrices of small sizes where the launch overhead is a significant factor.
+  const bool use_cusolver_parallel_launch = (batch_size <= 8) || (/* batch_size > 8 && */ n >= 512);
+
+  if (use_cusolver_parallel_launch) {
     int* p_infos = infos.data_ptr<int>();
 
     auto dataPtr = allocator.allocate(sizeof(int) * n * batch_size);
