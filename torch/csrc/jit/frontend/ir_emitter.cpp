@@ -1221,8 +1221,13 @@ struct to_ir {
         }
         auto expr_out = emitToBool(expr.range(), emitExpr(expr));
         c10::optional<bool> static_if = c10::nullopt;
-        if (expr_out->node()->kind() == aten::is_scripting) {
+        auto kind = expr_out->node()->kind();
+        if (kind == aten::is_scripting) {
           static_if = true;
+        } else if (
+            kind == aten::has_torch_function ||
+            kind == aten::object_has_torch_function) {
+          static_if = false;
         }
         // MetaCompile on boolean literals and constants
         if (auto maybe_ivalue = toIValue(expr_out)) {

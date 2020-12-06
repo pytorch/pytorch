@@ -28,7 +28,10 @@ import types
 from typing import Dict, Set, List, Any, Callable, Iterable
 
 import torch
-from torch._C import _is_torch_function_enabled, _disabled_torch_function_impl, _all_tensors
+from torch._C import (
+    _is_torch_function_enabled, _disabled_torch_function_impl,
+    _has_torch_function, _object_has_torch_function, _add_docstr
+)
 
 __all__ = [
     "get_ignored_functions",
@@ -1162,10 +1165,12 @@ def handle_torch_function(
                     '__torch_function__: {}'
                     .format(func_name, [type(arg) for arg in overloaded_args]))
 
-def has_torch_function(relevant_args: Iterable[Any]) -> bool:
-    """Check for __torch_function__ implementations in the elements of an iterable.
 
-    Considers exact ``Tensor`` s non-dispatchable.
+has_torch_function = _add_docstr(
+    _has_torch_function,
+    r"""Check for __torch_function__ implementations in the elements of an iterable.
+
+    Considers exact ``Tensor`` s and ``Parameter`` s non-dispatchable.
 
     Arguments
     ---------
@@ -1183,23 +1188,22 @@ def has_torch_function(relevant_args: Iterable[Any]) -> bool:
     torch.is_tensor_like
         Checks if something is a Tensor-like, including an exact ``Tensor``.
     """
-    return (
-        # For normal use, we want to return False as quickly as possible.
-        #  1) The `_all_tensors()` call is very cheap (~50 ns) and will be enough
-        #     to reject all Tensor args.
-        #  2) `_is_torch_function_enabled` is reasonably cheap (~100 ns), but
-        #     is True by default so we evaluate it second.
-        #  3) Finally, we only do the very expensive (hundreds of ns per arg)
-        #     Python check if the other checks pass.
-        not _all_tensors(relevant_args)
-        and _is_torch_function_enabled()
-        and any(
-            type(a) is not torch.Tensor and
-            getattr(a, '__torch_function__', _disabled_torch_function_impl)
-            is not _disabled_torch_function_impl
-            for a in relevant_args
-        )
-    )
+)
+
+
+object_has_torch_function = _add_docstr(
+    _object_has_torch_function,
+    r"""Special case of `has_torch_function` for single inputs.
+
+    Instead of:
+      `has_torch_function((t,))`
+
+    call:
+      `object_has_torch_function(t)`
+
+    which skips unnecessary packing and unpacking work.
+    """
+)
 
 
 @functools.lru_cache(None)

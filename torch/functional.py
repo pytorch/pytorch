@@ -5,9 +5,8 @@ from typing import (
 import torch
 import torch.nn.functional as F
 from torch.types import _size
-from torch._C import _is_tensor
 from ._lowrank import svd_lowrank, pca_lowrank
-from .overrides import has_torch_function, handle_torch_function
+from .overrides import has_torch_function, object_has_torch_function, handle_torch_function
 from ._jit_internal import boolean_dispatch, List
 from ._jit_internal import _overload as overload
 from torch._autograd_functions import _LU
@@ -67,7 +66,7 @@ def broadcast_tensors(*tensors):
         tensor([[0, 1, 2],
                 [0, 1, 2]])
     """
-    if has_torch_function(tensors) and not torch.jit.is_scripting():
+    if has_torch_function(tensors):
         return handle_torch_function(broadcast_tensors, tensors, *tensors)
     return _VF.broadcast_tensors(tensors)  # type: ignore
 
@@ -111,7 +110,7 @@ def split(tensor, split_size_or_sections, dim=0):
                  [6, 7],
                  [8, 9]]))
     """
-    if not _is_tensor(tensor) and has_torch_function((tensor,)) and not torch.jit.is_scripting():
+    if object_has_torch_function(tensor):
         return handle_torch_function(split, (tensor,), tensor, split_size_or_sections,
                                         dim=dim)
     # Overwriting reason:
@@ -200,7 +199,7 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
         tensor(2.9802e-08)
     """
     tens_ops = (LU_data, LU_pivots)
-    if has_torch_function(tens_ops) and not torch.jit.is_scripting():
+    if has_torch_function(tens_ops):
         return handle_torch_function(
             lu_unpack, tens_ops, LU_data, LU_pivots, unpack_data=unpack_data,
             unpack_pivots=unpack_pivots)
@@ -330,7 +329,7 @@ Examples::
     >>> torch.einsum('...ij->...ji', A).shape # batch permute
     torch.Size([2, 3, 5, 4])
 """
-    if has_torch_function(operands) and not torch.jit.is_scripting():
+    if has_torch_function(operands):
         return handle_torch_function(einsum, operands, equation, *operands)
     if len(operands) == 1 and isinstance(operands[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
@@ -379,7 +378,7 @@ else:
 
 
 def _meshgrid(*tensors):
-    if has_torch_function(tensors) and not torch.jit.is_scripting():
+    if has_torch_function(tensors):
         return handle_torch_function(meshgrid, tensors, *tensors)
     if len(tensors) == 1 and isinstance(tensors[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
@@ -494,7 +493,7 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
         Tensor: A tensor containing the STFT result with shape described above
 
     """
-    if not _is_tensor(input) and has_torch_function((input,)) and not torch.jit.is_scripting():
+    if object_has_torch_function(input):
         return handle_torch_function(
             stft, (input,), input, n_fft, hop_length=hop_length, win_length=win_length,
             window=window, center=center, pad_mode=pad_mode, normalized=normalized,
@@ -571,7 +570,7 @@ def istft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
     Returns:
         Tensor: Least squares estimation of the original signal of size (..., signal_length)
     """
-    if not _is_tensor(input) and has_torch_function((input,)) and not torch.jit.is_scripting():
+    if object_has_torch_function(input):
         return handle_torch_function(
             istft, (input,), input, n_fft, hop_length=hop_length, win_length=win_length,
             window=window, center=center, normalized=normalized, onesided=onesided,
@@ -654,7 +653,7 @@ def _unique_impl(input: Tensor, sorted: bool = True,
                 [ 1,  2]])
 
     """
-    if not _is_tensor(input) and has_torch_function((input,)) and not torch.jit.is_scripting():
+    if object_has_torch_function(input):
         return handle_torch_function(
             unique, (input,), input, sorted=sorted, return_inverse=return_inverse,
             return_counts=return_counts, dim=dim)
@@ -729,7 +728,7 @@ def _unique_consecutive_impl(input: Tensor, return_inverse: bool = False,
         >>> counts
         tensor([2, 2, 1, 2, 1])
     """
-    if not _is_tensor(input) and has_torch_function((input,)) and not torch.jit.is_scripting():
+    if object_has_torch_function(input):
         return handle_torch_function(
             unique_consecutive, (input,), input, return_inverse=return_inverse,
             return_counts=return_counts, dim=dim)
@@ -741,7 +740,7 @@ def _unique_consecutive_impl(input: Tensor, return_inverse: bool = False,
 def _return_counts(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
     # type: (Tensor, bool, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor]
 
-    if not _is_tensor(input) and has_torch_function((input,)) and not torch.jit.is_scripting():
+    if object_has_torch_function(input):
         return _unique_impl(input, sorted, return_inverse, return_counts, dim)
 
     output, _, counts = _unique_impl(input, sorted, return_inverse, return_counts, dim)
@@ -751,7 +750,7 @@ def _return_counts(input, sorted=True, return_inverse=False, return_counts=False
 def _return_output(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
     # type: (Tensor, bool, bool, bool, Optional[int]) -> Tensor
 
-    if not _is_tensor(input) and has_torch_function((input,)) and not torch.jit.is_scripting():
+    if object_has_torch_function(input):
         return _unique_impl(input, sorted, return_inverse, return_counts, dim)
 
     output, _, _ = _unique_impl(input, sorted, return_inverse, return_counts, dim)
@@ -761,7 +760,7 @@ def _return_output(input, sorted=True, return_inverse=False, return_counts=False
 def _return_inverse(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
     # type: (Tensor, bool, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor]
 
-    if not _is_tensor(input) and has_torch_function((input,)) and not torch.jit.is_scripting():
+    if object_has_torch_function(input):
         return _unique_impl(input, sorted, return_inverse, return_counts, dim)
 
     output, inverse_indices, _ = _unique_impl(input, sorted, return_inverse, return_counts, dim)
@@ -803,7 +802,7 @@ unique.__doc__ = _unique_impl.__doc__
 def _consecutive_return_counts(input, return_inverse=False, return_counts=False, dim=None):
     # type: (Tensor, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor]
 
-    if not _is_tensor(input) and has_torch_function((input,)) and not torch.jit.is_scripting():
+    if object_has_torch_function(input):
         return _unique_consecutive_impl(input, return_inverse, return_counts, dim)
 
     output, _, counts = _unique_consecutive_impl(input, return_inverse, return_counts, dim)
@@ -813,7 +812,7 @@ def _consecutive_return_counts(input, return_inverse=False, return_counts=False,
 def _consecutive_return_output(input, return_inverse=False, return_counts=False, dim=None):
     # type: (Tensor, bool, bool, Optional[int]) -> Tensor
 
-    if not _is_tensor(input) and has_torch_function((input,)) and not torch.jit.is_scripting():
+    if object_has_torch_function(input):
         return _unique_consecutive_impl(input, return_inverse, return_counts, dim)
 
     output, _, _ = _unique_consecutive_impl(input, return_inverse, return_counts, dim)
@@ -823,7 +822,7 @@ def _consecutive_return_output(input, return_inverse=False, return_counts=False,
 def _consecutive_return_inverse(input, return_inverse=False, return_counts=False, dim=None):
     # type: (Tensor, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor]
 
-    if not _is_tensor(input) and has_torch_function((input,)) and not torch.jit.is_scripting():
+    if object_has_torch_function(input):
         return _unique_consecutive_impl(input, return_inverse, return_counts, dim)
 
     output, inverse_indices, _ = _unique_consecutive_impl(input, return_inverse, return_counts, dim)
@@ -912,7 +911,7 @@ def tensordot(a, b, dims=2, out=None):
                 [  1.5513, -14.4737,  -6.5113],
                 [ -0.2850,   4.2573,  -3.5997]])
     """
-    if has_torch_function((a, b)) and not torch.jit.is_scripting():
+    if has_torch_function((a, b)):
         return handle_torch_function(tensordot, (a, b), a, b, dims=dims)
     if isinstance(dims, (list, tuple)) or \
        (isinstance(dims, torch.Tensor) and dims.numel() > 1):
@@ -957,7 +956,7 @@ def cartesian_prod(*tensors):
                 [3, 4],
                 [3, 5]])
     """
-    if has_torch_function(tensors) and not torch.jit.is_scripting():
+    if has_torch_function(tensors):
         return handle_torch_function(cartesian_prod, tensors, *tensors)
     return _VF.cartesian_prod(tensors)  # type: ignore
 
@@ -1038,7 +1037,7 @@ def cdist(x1, x2, p=2., compute_mode='use_mm_for_euclid_dist_if_necessary'):
                 [2.7138, 3.8322],
                 [2.2830, 0.3791]])
     """
-    if has_torch_function((x1, x2)) and not torch.jit.is_scripting():
+    if has_torch_function((x1, x2)):
         return handle_torch_function(
             cdist, (x1, x2), x1, x2, p=p, compute_mode=compute_mode)
     if compute_mode == 'use_mm_for_euclid_dist_if_necessary':
@@ -1077,7 +1076,7 @@ def atleast_1d(*tensors):
         >>> torch.atleast_1d((x,y))
         (tensor([0.5000]), tensor([1.]))
     """
-    if has_torch_function(tensors) and not torch.jit.is_scripting():
+    if has_torch_function(tensors):
         return handle_torch_function(atleast_1d, tensors, *tensors)
     if len(tensors) == 1:
         tensors = tensors[0]
@@ -1111,7 +1110,7 @@ def atleast_2d(*tensors):
         >>> torch.atleast_2d((x,y))
         (tensor([[0.5000]]), tensor([[1.]]))
     """
-    if has_torch_function(tensors) and not torch.jit.is_scripting():
+    if has_torch_function(tensors):
         return handle_torch_function(atleast_2d, tensors, *tensors)
     if len(tensors) == 1:
         tensors = tensors[0]
@@ -1154,7 +1153,7 @@ def atleast_3d(*tensors):
         >>> torch.atleast_3d((x,y))
         (tensor([[[0.5000]]]), tensor([[[1.]]]))
     """
-    if has_torch_function(tensors) and not torch.jit.is_scripting():
+    if has_torch_function(tensors):
         return handle_torch_function(atleast_3d, tensors, *tensors)
     if len(tensors) == 1:
         tensors = tensors[0]
@@ -1280,7 +1279,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         (tensor(3.7417), tensor(11.2250))
     """
 
-    if not _is_tensor(input) and has_torch_function((input,)) and not torch.jit.is_scripting():
+    if object_has_torch_function(input):
         return handle_torch_function(
             norm, (input,), input, p=p, dim=dim, keepdim=keepdim, out=out, dtype=dtype)
 
@@ -1375,7 +1374,7 @@ def chain_matmul(*matrices):
 
     .. _`[CLRS]`: https://mitpress.mit.edu/books/introduction-algorithms-third-edition
     """
-    if has_torch_function(matrices) and not torch.jit.is_scripting():
+    if has_torch_function(matrices):
         return handle_torch_function(chain_matmul, matrices, *matrices)
     return _VF.chain_matmul(matrices)  # type: ignore
 
@@ -1494,7 +1493,7 @@ def _check_list_size(out_len: int, get_infos: bool, out: _ListOrSeq) -> None:
 
 def _lu_with_infos(A, pivot=True, get_infos=False, out=None):
     # type: (Tensor, bool, bool, Optional[Tuple[Tensor, Tensor, Tensor]]) -> Tuple[Tensor, Tensor, Tensor]
-    if not _is_tensor(A) and has_torch_function((A,)) and not torch.jit.is_scripting():
+    if object_has_torch_function(A):
         return handle_torch_function(
             lu, (A,), A, pivot=pivot, get_infos=get_infos, out=out)
     result = _lu_impl(A, pivot, get_infos, out)
@@ -1509,7 +1508,7 @@ def _lu_with_infos(A, pivot=True, get_infos=False, out=None):
 def _lu_no_infos(A, pivot=True, get_infos=False, out=None):
     # type: (Tensor, bool, bool, Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tensor]
     # need to check for torch_function here so that we exit if
-    if not _is_tensor(A) and has_torch_function((A,)) and not torch.jit.is_scripting():
+    if object_has_torch_function(A):
         return handle_torch_function(
             lu, (A,), A, pivot=pivot, get_infos=get_infos, out=out)
     result = _lu_impl(A, pivot, get_infos, out)

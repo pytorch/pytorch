@@ -17,6 +17,19 @@ namespace torch {
   void set_disabled_torch_function_impl(PyObject* value) {
     disabled_torch_function = value;
   }
+
+  bool fast_has_torch_function(PyObject *obj) {
+    PyTypeObject *tp = Py_TYPE(obj);
+
+    if (tp->tp_getattr != NULL) {
+        auto res = (*tp->tp_getattr)(obj, "__torch_function__");
+        if (res == NULL) {
+          PyErr_Clear();
+        }
+        return res == disabled_torch_function;
+    }
+    return false;
+  }
 }
 
 typedef struct {
@@ -124,4 +137,32 @@ PyObject* THPModule_disable_torch_function(PyObject *self, PyObject *a) {
   torch::enable_torch_function = old_value;
   return result;
   END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_object_has_torch_function(PyObject*, PyObject *obj) {
+  // Special case `THPModule_has_torch_function` for the single arg case.
+
+  if (
+    torch::torch_function_enabled() &&
+    !THPVariableOrParameter_CheckExact(obj) &&
+    torch::fast_has_torch_function(obj)
+  ) Py_RETURN_TRUE;
+
+  Py_RETURN_FALSE;
+}
+
+PyObject* THPModule_has_torch_function(PyObject*, PyObject *arg) {
+  // NB: `jit.script` will treat this function as always returning False.
+
+  PyObject* args(PySequence_Fast(arg, "expected a sequence"));
+  if (!args || !torch::torch_function_enabled()) Py_RETURN_FALSE;
+
+  auto n = PySequence_Fast_GET_SIZE(args);
+  for (Py_ssize_t i = 0; i < n; i++) {
+    PyObject* obj = PySequence_Fast_GET_ITEM(args, i);
+    if (!THPVariableOrParameter_CheckExact(obj) &&
+        torch::fast_has_torch_function(obj))
+      Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
 }
