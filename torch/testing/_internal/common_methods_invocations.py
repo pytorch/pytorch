@@ -320,7 +320,7 @@ class SpectralFuncInfo(OpInfo):
                  dtypesIfCPU=None,
                  dtypesIfCUDA=None,
                  dtypesIfROCM=None,
-                 ndimensional,
+                 ndimensional: bool,  # Whether dim argument can be a tuple
                  skips=None,
                  **kwargs):
         skips = skips if skips is not None else []
