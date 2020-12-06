@@ -746,9 +746,9 @@ ProcessedNode::ProcessedNode(
 
 void ProcessedNode::run(std::vector<IValue>& reg) const {
   if (fn_) {
-    fn_->operator()(this, reg);
+    fn_(this, reg);
   } else if (native_fn_) {
-    native_fn_->operator()(this, reg);
+    native_fn_(this, reg);
   } else {
     std::vector<IValue> stack;
     const size_t size = node_->inputs().size();
