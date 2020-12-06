@@ -11,17 +11,6 @@
 
 constexpr int64_t kShortStoreTimeoutMillis = 100;
 
-void testNewTcpStore() {
-  const auto unKnownMasterAddr = "192.168.11.17";
-
-  // Ensure that the server can still connect to itself while the master addr is wrong
-  c10::make_intrusive<c10d::TCPStore>(unKnownMasterAddr,
-      0,
-      0, // 0 worker
-      true,
-      std::chrono::milliseconds(kShortStoreTimeoutMillis), true);
-}
-
 // Different ports for different tests.
 void testHelper(const std::string& prefix = "") {
   const auto numThreads = 16;
@@ -138,10 +127,6 @@ void testHelper(const std::string& prefix = "") {
     std::string val = "thread_val_" + std::to_string(numIterations - 1);
     c10d::test::check(*serverStore, key, val);
   }
-}
-
-TEST(TCPStoreTest, testNewTcpStore) {
-  testNewTcpStore();
 }
 
 TEST(TCPStoreTest, testHelper) {

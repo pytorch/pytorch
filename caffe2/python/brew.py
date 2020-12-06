@@ -55,6 +55,7 @@ class HelperWrapper(object):
         'sum': sum,
         'reduce_sum': reduce_sum,
         'sub': sub,
+        'arg_min': arg_min,
         'transpose': transpose,
         'iter': iter,
         'accuracy': accuracy,
