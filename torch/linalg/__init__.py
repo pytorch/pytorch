@@ -85,13 +85,14 @@ Examples::
 inv = _add_docstr(_linalg.linalg_inv, r"""
 linalg.inv(input, *, out=None) -> Tensor
 
-This function computes the inverse matrix of a square matrix, or batch of such matrices, :attr:`input`.
+This function computes the "multiplicative inverse" matrix of a square matrix, or batch of such matrices, :attr:`input`.
 The result satisfies the relation
 ``matmul(inv(input), input) = matmul(input, inv(input)) = eye(input.shape[0]).expand_as(input)``.
 
 Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` data types.
 
-.. note:: If :attr:`input` is a non-invertible matrix or not a square matrix then a RuntimeError will be thrown.
+.. note:: If :attr:`input` is a non-invertible matrix or non-square matrix, or batch with at least one such matrix,
+          then a RuntimeError will be thrown.
 
 .. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
 
