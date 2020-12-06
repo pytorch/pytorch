@@ -10,7 +10,7 @@
 namespace torch { namespace autograd {
 
 #define CHECK_RESULT(RESULT, VAR) \
-  if (!(RESULT.is_sparse() || VAR.is_sparse())) { \
+  if (!(RESULT.is_sparse() || VAR.is_sparse()) && !(at::is_nested_tensor_impl(RESULT) || at::is_nested_tensor_impl(VAR))) { \
     if (!utils::obeys_layout_contract(RESULT, VAR)) { \
       TORCH_WARN_ONCE("grad and param do not obey the gradient layout contract. " \
                       "This is not an error, but may impair performance.\n" \
