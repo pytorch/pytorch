@@ -3513,13 +3513,13 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: sinc
+    CPU: sinc
 
 - func: sinc_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: sinc_
+    CPU: sinc_
 
 - func: sinc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:

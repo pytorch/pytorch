@@ -639,6 +639,8 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
 }
 
 Tensor& sinc_out(Tensor& result, const Tensor& self) {
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()),
+              "sinc is not implemented for ", self.scalar_type());
   auto iter = TensorIterator::unary_op(result, self);
   sinc_stub(iter.device_type(), iter);
   return result;
