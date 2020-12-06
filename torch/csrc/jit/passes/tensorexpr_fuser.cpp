@@ -172,6 +172,8 @@ bool isSupported(Node* node) {
         return false;
       }
     }
+
+    // Operator is only supported on CUDA.
     if (node->isMemberOf(cuda_only_operator_set)) {
       auto device = tensorexpr::pickDeviceType(node->inputs());
       if (!device) {
@@ -272,9 +274,9 @@ void removeProfileNodesAndSpecializeTypes(Block* b) {
 }
 
 void RemoveProfileNodesAndSpecializeTypes(std::shared_ptr<Graph>& graph) {
-  GRAPH_DEBUG("Before removeProfileNodesAndSpecializeTypes", *graph);
+  GRAPH_DEBUG("Before removeProfileNodesAndSpecializeTypes:\n", *graph);
   removeProfileNodesAndSpecializeTypes(graph->block());
-  GRAPH_DEBUG("After removeProfileNodesAndSpecializeTypes", *graph);
+  GRAPH_DEBUG("After removeProfileNodesAndSpecializeTypes:\n", *graph);
 }
 
 void removeTensorTypeSpecialization(Value* v) {
@@ -726,6 +728,34 @@ class TensorExprFuser {
     return true;
   }
 
+  bool typesAreSupported(const Node* node) {
+    // clang-format off
+    // breaks up the schema strings so they are no longer discoverable with ctrl-F
+    static const OperatorSet float_only_operator_set{
+      "aten::fmod.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::fmod.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::remainder.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::remainder.Tensor(Tensor self, Tensor other) -> Tensor",
+    };
+    // clang-format on
+
+    // Value is only supported if operands are floats.
+    if (node->isMemberOf(float_only_operator_set)) {
+      for (const Value* v : node->inputs()) {
+        if (auto const& tt = v->type()->cast<TensorType>()) {
+          auto const& st = tt->scalarType();
+          if (!st || !isFloatingType(*st)) {
+            return false;
+          }
+        } else if (!v->type()->cast<FloatType>()) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
 #define REQ(cond)                           \
   if (!(cond)) {                            \
     GRAPH_DEBUG("Failed cond " #cond "\n"); \
@@ -767,6 +797,7 @@ class TensorExprFuser {
     }
 
     REQ(tensorexpr::isSupported(node));
+    REQ(typesAreSupported(node));
     return true;
   }
 
