@@ -283,7 +283,7 @@ def sample_inputs_linalg_inv(op_info, device, dtype, requires_grad=False):
     batches = [(), (0, ), (4, ), (2, 3)]
     ns = [0, 5]
     out = []
-    for batch, n in itertools.product(batches, ns):
+    for batch, n in product(batches, ns):
         a = random_fullrank_matrix_distinct_singular_value(n, *batch, dtype=dtype).to(device)
         a.requires_grad = requires_grad
         out.append(SampleInput(a))
