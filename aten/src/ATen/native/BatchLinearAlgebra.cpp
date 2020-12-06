@@ -495,7 +495,9 @@ Tensor& linalg_solve_out(Tensor& result, const Tensor& input, const Tensor& othe
 
   // Now check LAPACK/MAGMA error codes
   // batchCheckErrors(Tensor, char*) calls 'infos = infos.to(kCPU)'
-  if (result.dim() > 2) {
+  auto expected_batched_rhs_shape = IntArrayRef(input.sizes().data(), input.dim()-1);  // A.shape[:-1]
+  bool is_rhs_broadcasted = other.dim() == 1 || (input.dim()-1 == other.dim() && other.sizes().equals(expected_batched_rhs_shape));
+  if (is_rhs_broadcasted ? result.dim() > 1 : result.dim() > 2) {
     batchCheckErrors(infos, "linalg_solve");
   } else {
     singleCheckErrors(infos.item().toInt(), "linalg_solve");
