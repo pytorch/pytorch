@@ -1162,12 +1162,10 @@ std::tuple<Tensor, Tensor> _solve_helper_cuda(const Tensor& self, const Tensor& 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "solve_cuda", [&]{
     apply_solve<scalar_t>(self_working_copy, A_working_copy, infos);
   });
-  infos = infos.to(kCPU);
-  std::vector<int64_t> infos_(infos.data_ptr<int>(), infos.data_ptr<int>() + batchCount(self));
   if (self.dim() > 2) {
-    batchCheckErrors(infos_, "solve_cuda");
+    batchCheckErrors(infos, "solve_cuda");
   } else {
-    singleCheckErrors(infos_[0], "solve_cuda");
+    singleCheckErrors(infos.item().toInt(), "solve_cuda");
   }
   return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
 }
