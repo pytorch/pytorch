@@ -1,4 +1,4 @@
-from functools import reduce
+from functools import reduce, wraps
 from operator import mul, itemgetter
 import collections
 
@@ -21,7 +21,8 @@ from torch.testing._internal.common_utils import \
      random_symmetric_matrix, random_symmetric_psd_matrix,
      random_symmetric_pd_matrix, make_nonzero_det,
      random_fullrank_matrix_distinct_singular_value, set_rng_seed,
-     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY)
+     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
+     torch_to_numpy_dtype_dict)
 
 if TEST_SCIPY:
     import scipy.special
@@ -262,6 +263,31 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad):
                                     low=None, high=None,
                                     requires_grad=False))),)
 
+def np_unary_ufunc_integer_promotion_wrapper(fn):
+    # Wrapper that passes PyTorch's default scalar
+    #   type as an argument to the wrapped NumPy
+    #   unary ufunc when given an integer input.
+    #   This mimicks PyTorch's integer->floating point
+    #   type promotion.
+    #
+    # This is necessary when NumPy promotes
+    #   integer types to double, since PyTorch promotes
+    #   integer types to the default scalar type.
+
+    # Helper to determine if promotion is needed
+    def is_integral(dtype):
+        return dtype in [np.bool, np.uint8, np.int8, np.int16, np.int32, np.int64]
+
+    # NOTE: Promotion in PyTorch is from integer types to the default dtype
+    np_dtype = torch_to_numpy_dtype_dict[torch.get_default_dtype()]
+
+    @wraps(fn)
+    def wrapped_fn(x):
+        if is_integral(x.dtype):
+            return fn(x, dtype=np_dtype)
+        return fn(x)
+
+    return wrapped_fn
 
 # Operator database (sorted alphabetically)
 op_db: List[Any] = [
@@ -508,8 +534,10 @@ op_db: List[Any] = [
                                 dtypes=[torch.float], active_if=TEST_WITH_ROCM),
                    )),
     UnaryUfuncInfo('sinh',
-                   ref=np.sinh,
-                   dtypesIfCPU=floating_and_complex_types(),
+                   ref=np_unary_ufunc_integer_promotion_wrapper(np.sinh),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+                   promotes_integers_to_float=True,
                    assert_autodiffed=True,
                    decorators=(precisionOverride({torch.float16: 1e-2}),),
                    skips=(
@@ -519,6 +547,9 @@ op_db: List[Any] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble],
                                 active_if=IS_WINDOWS),
+                       # Reference: https://github.com/pytorch/pytorch/issues/48641
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cpu', dtypes=[torch.int8]),
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 device_type='cuda', dtypes=[torch.float16]),
                    )),
