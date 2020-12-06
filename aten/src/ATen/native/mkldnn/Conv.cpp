@@ -98,7 +98,7 @@ ideep::tensor _mkldnn_convolution(
   return y;
 }
 
-Tensor mkldnn_convolution(
+Tensor mkldnn_convolution_block(
     const Tensor& input,
     const Tensor& weight,
     const Tensor& bias,
@@ -129,6 +129,46 @@ Tensor mkldnn_convolution(
     return mkldnn_to_dense(
         new_with_itensor_mkldnn(std::move(mkldnn_output), optTypeMetaToScalarType(input.options().dtype_opt()),
                                 input.options().device_opt()));
+  }
+}
+
+Tensor mkldnn_convolution_plain(
+    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
+    int64_t groups) {
+
+  auto output_sizes =
+      conv_output_size(input.sizes(), weight.sizes(), padding, stride, dilation);
+  auto result = at::empty(output_sizes, input.options());
+
+  auto y = get_mkldnn_tensor(result);
+  auto x = get_mkldnn_tensor(input);
+  auto w = get_mkldnn_tensor(weight);
+  if (bias.defined()) {
+    auto b = get_mkldnn_tensor(bias);
+    ideep::convolution_forward::compute</*plain=*/true>(
+        x, w, b, output_sizes, y,
+        stride.vec(), dilation.vec(), padding.vec(), padding.vec(), groups);
+  } else {
+    ideep::convolution_forward::compute</*plain=*/true>(
+        x, w, output_sizes, y,
+        stride.vec(), dilation.vec(), padding.vec(), padding.vec(), groups);
+  }
+  return result;
+}
+
+Tensor mkldnn_convolution(
+    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
+    int64_t groups) {
+  if (input.is_mkldnn()) {
+    // This path is only used when user manually converts model or 
+    // input tensor to blocked format by invocating to_mkldnn()
+    return mkldnn_convolution_block(input, weight, bias, padding, stride, dilation, groups);
+  } else {
+    // This path is used for Pytorch default CPU path where
+    // the input/output are all of plain format
+    return mkldnn_convolution_plain(input, weight, bias, padding, stride, dilation, groups);
   }
 }
 
