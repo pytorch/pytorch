@@ -317,7 +317,7 @@ class SpectralFuncInfo(OpInfo):
                  *,
                  ref=None,  # Reference implementation (probably in np.fft namespace)
                  dtypes=floating_and_complex_types(),
-                 ndimensional,
+                 ndimensional: bool,  # Whether dim argument can be a tuple
                  skips=None,
                  **kwargs):
         skips = skips if skips is not None else []
