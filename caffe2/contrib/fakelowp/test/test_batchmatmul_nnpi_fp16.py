@@ -1,8 +1,3 @@
-
-
-
-
-
 import numpy as np
 import unittest
 import caffe2.python.fakelowp.init_shared_libs  # noqa
@@ -11,6 +6,7 @@ from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 from caffe2.python.fakelowp.test_utils import print_test_debug_info
+import datetime
 from hypothesis import given, settings
 import hypothesis.strategies as st
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -29,7 +25,7 @@ class TestBatchMatMul(serial.SerializedTestCase):
         trans_b=st.booleans(),
         run_ints=st.booleans()
     )
-    @settings(deadline=None)
+    @settings(deadline=datetime.timedelta(seconds=10))
     def test_batch_matmul(self, M, K, N, C, rand_seed, trans_a, trans_b, run_ints):
         np.random.seed(rand_seed)
         workspace.ResetWorkspace()
