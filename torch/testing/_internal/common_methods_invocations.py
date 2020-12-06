@@ -263,6 +263,23 @@ def sample_inputs_addmm(self, device, dtype, requires_grad):
                                     requires_grad=False))),) 
 
 def sample_inputs_linalg_solve(self, device, dtype, requires_grad=False):
+    """
+    This function generates always solvable input for torch.linalg.solve
+    Using random_fullrank_matrix_distinct_singular_value gives a non-singular (=invertible, =solvable) matrices 'a'.
+    The first input to torch.linalg.solve is generated as the itertools.product of 'batches' and 'ns'.
+    The second input is generated as the product of 'batches', 'ns' and 'nrhs'.
+    In total this function generates 18 SampleInputs
+    'batches' cases include:
+        () - single input,
+        (0,) - zero batched dimension,
+        (2,) - batch of two matrices.
+    'ns' gives 0x0 and 5x5 matrices.
+    and 'nrhs' controls the number of vectors to solve for:
+        () - using 1 as the number of vectors implicitly
+        (1,) - same as () but explicit
+        (3,) - solve for 3 vectors.
+    Zeros in dimensions are edge cases in the implementation and important to test for in order to avoid unexpected crashes.
+    """
     from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
     batches = [(), (0, ), (2, )]
