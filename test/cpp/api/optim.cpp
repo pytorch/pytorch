@@ -15,6 +15,7 @@
 
 using namespace torch::nn;
 using namespace torch::optim;
+using torch::Tensor;
 
 template <typename OptimizerClass, typename Options>
 bool test_optimizer_xor(Options options) {
@@ -22,9 +23,9 @@ bool test_optimizer_xor(Options options) {
 
   Sequential model(
       Linear(2, 8),
-      Functional(torch::sigmoid),
+      Functional(static_cast<Tensor(*)(const Tensor&)>(torch::sigmoid)),
       Linear(8, 1),
-      Functional(torch::sigmoid));
+      Functional(static_cast<Tensor(*)(const Tensor&)>(torch::sigmoid)));
 
   const int64_t kBatchSize = 200;
   const int64_t kMaximumNumberOfEpochs = 3000;
@@ -89,9 +90,9 @@ void check_exact_values(
 
   Sequential model(
       Linear(2, 3),
-      Functional(torch::sigmoid),
+      Functional(static_cast<Tensor(*)(const Tensor&)>(torch::sigmoid)),
       Linear(3, 1),
-      Functional(torch::sigmoid));
+      Functional(static_cast<Tensor(*)(const Tensor&)>(torch::sigmoid)));
 
   model->to(torch::kFloat64);
 
