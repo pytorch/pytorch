@@ -1397,29 +1397,29 @@
   variants: function
   device_guard: False
 
-- func: cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
+- func: cumsum(Tensor self, int dim, *, ScalarType? dtype=None, bool exclusive=False) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
     DefaultBackend: cumsum
 
-- func: cumsum_(Tensor(a!) self, int dim, *, ScalarType? dtype=None) -> Tensor(a!)
+- func: cumsum_(Tensor(a!) self, int dim, *, ScalarType? dtype=None, bool exclusive=False) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
   dispatch:
     DefaultBackend: cumsum_
 
-- func: cumsum.out(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+- func: cumsum.out(Tensor self, int dim, *, ScalarType? dtype=None, bool exclusive=False, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     DefaultBackend: cumsum_out
 
-- func: cumsum.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+- func: cumsum.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None, bool exclusive=False) -> Tensor
   variants: function, method
 
-- func: cumsum_.dimname(Tensor(a!) self, Dimname dim, *, ScalarType? dtype=None) -> Tensor(a!)
+- func: cumsum_.dimname(Tensor(a!) self, Dimname dim, *, ScalarType? dtype=None, bool exclusive=False) -> Tensor(a!)
   variants: method
 
-- func: cumsum.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+- func: cumsum.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, bool exclusive=False, Tensor(a!) out) -> Tensor(a!)
 
 - func: ctc_loss.IntList(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0, int reduction=Mean, bool zero_infinity=False) -> Tensor
   use_c10_dispatcher: full
