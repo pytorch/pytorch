@@ -2612,27 +2612,6 @@ class TestAutograd(TestCase):
         self.assertTrue(torch.allclose(input1.grad, input2.grad, rtol=0.01, atol=0.0))
 
     @skipIfNoLapack
-    def test_cholesky_solve(self):
-        def _test_with_size(A_dims, B_dims, upper):
-            root = torch.rand(*A_dims).requires_grad_()
-            b = torch.rand(*B_dims).requires_grad_()
-
-            def func(root, b, upper):
-                if upper:
-                    A = root.triu()
-                else:
-                    A = root.tril()
-                return torch.cholesky_solve(b, A, upper)
-
-            gradcheck(func, [root, b, upper])
-            gradgradcheck(func, [root, b, upper])
-
-        for (a_size, b_size), upper in product([((3, 3), (3, 4)), ((3, 3), (3, 2)),
-                                                ((2, 3, 3), (2, 3, 4)), ((2, 3, 3), (2, 3, 2))],
-                                               [True, False]):
-            _test_with_size(a_size, b_size, upper)
-
-    @skipIfNoLapack
     def test_eig(self):
         def func(B):
             return torch.eig(B, eigenvectors=True)
