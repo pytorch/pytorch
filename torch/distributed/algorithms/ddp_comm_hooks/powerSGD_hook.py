@@ -70,7 +70,7 @@ class PowerSGDState(object):
 
 def powerSGD_hook(
     state: PowerSGDState,
-    bucket: dist._GradBucket,
+    bucket,
 ) -> torch.futures.Future:
     """
     This DDP communication hook implements a simplified PowerSGD gradient compression
