@@ -283,7 +283,7 @@ class TestCommon(JitCommonTestCase):
                     #   sure inputs that aren't supposed to be modified aren't)
                     # Note: only runs in float32 and int64 because schema isn't affected by dtype,
                     #   so running it on all dtypes is would be excessive
-                    if dtype in [torch.float32, torch.int32] and func_type == 'method':
+                    if dtype in [torch.float32, torch.int32]:
                         check_alias_annotation(name, (*sample.input,) + sample.args, sample.kwargs,
                                                func_type=func_type, aten_name=op.aten_name)
 

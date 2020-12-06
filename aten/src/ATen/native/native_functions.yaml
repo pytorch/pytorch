@@ -2047,18 +2047,6 @@
   dispatch:
     CPU, CUDA: native_group_norm_backward
 
-- func: ifft(Tensor self, int signal_ndim, bool normalized=False) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-
-- func: rfft(Tensor self, int signal_ndim, bool normalized=False, bool onesided=True) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-
-- func: irfft(Tensor self, int signal_ndim, bool normalized=False, bool onesided=True, int[] signal_sizes=[]) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-
 - func: _fft_with_size(Tensor self, int signal_ndim, bool complex_input, bool complex_output, bool inverse, int[] checked_signal_sizes, bool normalized, bool onesided, int[] output_sizes) -> Tensor
   use_c10_dispatcher: full
   variants: function
@@ -9395,10 +9383,6 @@
   python_module: fft
   use_c10_dispatcher: full
   variants: function
-
-- func: fft(Tensor self, int signal_ndim, bool normalized=False) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
 
 ## Functions for linear algebra and the torch.linalg namespace
 # Note [linalg namespace binding]
