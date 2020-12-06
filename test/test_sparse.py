@@ -1961,9 +1961,9 @@ class TestSparse(TestCase):
 
     def test_round(self):
         device = 'cuda' if self.is_cuda else 'cpu'
-        data_type = [torch.float, torch.double, torch.float64]              
-        
-        for data_type in (torch.float, torch.double, torch.float64):             
+        data_type = [torch.float, torch.double, torch.float64]
+
+        for data_type in (torch.float, torch.double, torch.float64):
             if not self.is_uncoalesced:
                 input_coalesced = torch.sparse_coo_tensor(
                     indices=torch.tensor([[0, 1, 2]]),
@@ -2022,9 +2022,9 @@ class TestSparse(TestCase):
     def test_ceil(self):
 
         device = 'cuda' if self.is_cuda else 'cpu'
-        data_type = [torch.float, torch.double, torch.float64]              
-        
-        for data_type in (torch.float, torch.double, torch.float64):             
+        data_type = [torch.float, torch.double, torch.float64]
+
+        for data_type in (torch.float, torch.double, torch.float64):
             if not self.is_uncoalesced:
                 input_coalesced = torch.sparse_coo_tensor(
                     indices=torch.tensor([[0, 1, 2]]),
@@ -2078,13 +2078,13 @@ class TestSparse(TestCase):
             sparse_tensor_copy = sparse_tensor.clone()
             self.assertEqual(expected_output, op(sparse_tensor_copy).to_dense())
 
- 
+
     def test_floor(self):
 
         device = 'cuda' if self.is_cuda else 'cpu'
-        data_type = [torch.float, torch.double, torch.float64]              
-        
-        for data_type in (torch.float, torch.double, torch.float64):             
+        data_type = [torch.float, torch.double, torch.float64]
+
+        for data_type in (torch.float, torch.double, torch.float64):
             if not self.is_uncoalesced:
                 input_coalesced = torch.sparse_coo_tensor(
                     indices=torch.tensor([[0, 1, 2]]),
@@ -2124,9 +2124,9 @@ class TestSparse(TestCase):
                     device=device,
                     dtype=data_type
                 )
-                self._test_floor(input_uncoalesced)   
+                self._test_floor(input_uncoalesced)
 
-    
+
     def _test_trunc(self, sparse_tensor):
         dense_tensor = sparse_tensor.to_dense()
         expected_output = dense_tensor.trunc()
@@ -2141,9 +2141,9 @@ class TestSparse(TestCase):
     def test_trunc(self):
 
         device = 'cuda' if self.is_cuda else 'cpu'
-        data_type = [torch.float, torch.double, torch.float64]              
-        
-        for data_type in (torch.float, torch.double, torch.float64):             
+        data_type = [torch.float, torch.double, torch.float64]
+
+        for data_type in (torch.float, torch.double, torch.float64):
             if not self.is_uncoalesced:
                 input_coalesced = torch.sparse_coo_tensor(
                     indices=torch.tensor([[0, 1, 2]]),
