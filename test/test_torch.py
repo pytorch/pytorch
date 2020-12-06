@@ -23,14 +23,15 @@ from torch.testing._internal.common_utils import (
     do_test_dtypes, IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
     skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy,
-    wrapDeterministicFlagAPITest)
+    wrapDeterministicFlagAPITest, DeterministicGuard)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm,
     onlyCUDA, onlyCPU,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
-    PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyOnCPUAndCUDA)
+    PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyOnCPUAndCUDA,
+    expectedAlertNondeterministic)
 from typing import Dict, List
 import torch.backends.quantized
 import torch.testing._internal.data
@@ -2550,6 +2551,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             y = torch.empty_meta(2 ** 20)
             z = x + y
             self.assertEqual(z.size(), (2 ** 20, 2 ** 20))
+            self.assertRaises(RuntimeError, lambda: z[0][0].item())
 
         def test_upsample_nearest1d_meta(self):
             # TODO: this is not a sustainable way of testing meta functions,
@@ -2560,12 +2562,14 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             x = torch.empty_meta(2 * 10 ** 8, 3, 2 * 10 ** 8)
             z = torch.nn.functional.interpolate(x, scale_factor=2)
             self.assertEqual(z.size(), (2 * 10 ** 8, 3, 4 * 10 ** 8))
+            self.assertRaises(RuntimeError, lambda: z[0][0][0].item())
 
             # interpolate doesn't seem to support out=
             # (not sure why passing None here doesn't work? How strange...)
             z = torch.empty_meta(0)
             torch._C._nn.upsample_nearest1d(x, (4 * 10 ** 8,), 2, out=z)
             self.assertEqual(z.size(), (2 * 10 ** 8, 3, 4 * 10 ** 8))
+            self.assertRaises(RuntimeError, lambda: z[0][0][0].item())
 
         def test_normal_shape(self):
             warned = False
@@ -2820,8 +2824,7 @@ class TestTorchDeviceType(TestCase):
 
     @onlyCPU
     def test_set_deterministic_beta_warning(self, device):
-        det = torch.is_deterministic()
-        try:
+        with DeterministicGuard(torch.is_deterministic()):
             # Ensures setting to false does not throw a warning
             with warnings.catch_warnings(record=True) as w:
                 warnings.simplefilter("always")
@@ -2831,8 +2834,6 @@ class TestTorchDeviceType(TestCase):
             # Setting set_deterministic(True) throws a warning once per process
             with self.maybeWarnsRegex(UserWarning, "torch.set_deterministic is in beta"):
                 torch.set_deterministic(True)
-        finally:
-            torch.set_deterministic(det)
 
     @dtypes(torch.float32, torch.complex64)
     def test_storage(self, device, dtype):
@@ -3480,6 +3481,29 @@ class TestTorchDeviceType(TestCase):
                 _test_in_place_broadcastable(small2, small_expanded, large_expanded)
                 _test_in_place_broadcastable(small2, small, large)
 
+    # Ensures that kthvalue throws nondeterministic alerts in the correct cases
+    @dtypes(torch.double)
+    def test_kthvalue_nondeterministic_alert(self, device, dtype):
+        @expectedAlertNondeterministic('kthvalue CUDA', 'cuda')
+        def test_func(slf, device, call_type):
+            S = 10
+            k = 5
+            a = torch.randn(S, device=device)
+            if call_type == 'function':
+                torch.kthvalue(a, k)
+            elif call_type == 'method':
+                a.kthvalue(k)
+            elif call_type == 'out':
+                values = torch.empty_like(a)
+                indices = torch.empty((), device=device, dtype=torch.long)
+                torch.kthvalue(a, k, out=(values, indices))
+            else:
+                self.fail(f"'{call_type}' is not a valid call type")
+
+        test_func(self, device, 'function')
+        test_func(self, device, 'method')
+        test_func(self, device, 'out')
+
     def test_embedding_scalar_weight_error(self, device):
         indices = torch.rand(2, 2, device=device).long()
         weight = torch.tensor(1.0)
@@ -3499,6 +3523,37 @@ class TestTorchDeviceType(TestCase):
         y = torch.zeros(3, device=device)
         y[1] = 1.
         run_test(x, y)
+
+    # Ensures that median throws nondeterministic alerts in the correct cases
+    @dtypes(torch.double)
+    def test_median_nondeterministic_alert(self, device, dtype):
+        def test_func(slf, device, call_type):
+            S = 10
+            a = torch.randn(S, device=device)
+            if call_type == 'function':
+                torch.median(a)
+            elif call_type == 'function with indices':
+                torch.median(a, 0)
+            elif call_type == 'method':
+                a.median()
+            elif call_type == 'method with indices':
+                a.median(0)
+            elif call_type == 'out with indices':
+                result = torch.empty_like(a)
+                indices = torch.empty((), dtype=torch.long, device=device)
+                torch.median(a, 0, out=(result, indices))
+            else:
+                self.fail(f"'{call_type}' is not a valid call type")
+
+        @expectedAlertNondeterministic('median CUDA with indices output', 'cuda')
+        def test_func_expect_error(slf, device, call_type):
+            test_func(slf, device, call_type)
+
+        test_func(self, device, 'function')
+        test_func_expect_error(self, device, 'function with indices')
+        test_func(self, device, 'method')
+        test_func_expect_error(self, device, 'method with indices')
+        test_func_expect_error(self, device, 'out with indices')
 
     @skipCUDANonDefaultStreamIf(True)
     def test_multinomial_alias(self, device):
@@ -4285,6 +4340,29 @@ class TestTorchDeviceType(TestCase):
         a = torch.randn(3, 5)
         c = torch.zeros(3)
         self.assertRaises(IndexError, lambda: a.index_copy_(dim=1, index=torch.tensor([3]), source=c))
+
+    # Ensures that index_copy throws nondeterministic alerts in the correct cases
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.double)
+    def test_index_copy_nondeterministic_alert(self, device, dtype):
+        @expectedAlertNondeterministic('index_copy')
+        def test_func(slf, device, call_type):
+            S = 10
+            a = torch.randn(S, device=device)
+            b = torch.randn(S, device=device)
+            index = torch.randint(S, (S,), device=device)
+            if call_type == 'function':
+                torch.index_copy(a, 0, index, b)
+            elif call_type == 'method':
+                a.index_copy(0, index, b)
+            elif call_type == 'method inplace':
+                a.index_copy_(0, index, b)
+            else:
+                self.fail(f"'{call_type}' is not a valid call type")
+
+        test_func(self, device, 'function')
+        test_func(self, device, 'method')
+        test_func(self, device, 'method inplace')
 
     def test_index_fill(self, device):
         for dt in torch.testing.get_all_dtypes():

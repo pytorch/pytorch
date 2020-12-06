@@ -1397,6 +1397,7 @@ def all_gather_object(object_list, obj, group=group.WORLD):
     Example::
         >>> # Note: Process group initialization omitted on each rank.
         >>> import torch.distributed as dist
+        >>> # Assumes world_size of 3.
         >>> gather_objects = ["foo", 12, {1: 2}] # any picklable object
         >>> output = [None for _ in gather_objects]
         >>> dist.all_gather_object(output, gather_objects[dist.get_rank()])
@@ -1480,6 +1481,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
     Example::
         >>> # Note: Process group initialization omitted on each rank.
         >>> import torch.distributed as dist
+        >>> # Assumes world_size of 3.
         >>> gather_objects = ["foo", 12, {1: 2}] # any picklable object
         >>> output = [None for _ in gather_objects]
         >>> dist.gather_object(
@@ -1584,6 +1586,7 @@ def broadcast_object_list(object_list, src, group=group.WORLD):
         >>> # Note: Process group initialization omitted on each rank.
         >>> import torch.distributed as dist
         >>> if dist.get_rank() == 0:
+        >>>     # Assumes world_size of 3.
         >>>     objects = ["foo", 12, {1: 2}] # any picklable object
         >>> else:
         >>>     objects = [None, None, None]
@@ -1650,7 +1653,7 @@ def scatter_object_list(
             element will store the object scattered to this rank.
         scatter_object_input_list (List[Any]): List of input objects to scatter.
             Each object must be picklable. Only objects on the ``src`` rank will
-             be scattered, and the argument can be ``None`` for non-src ranks.
+            be scattered, and the argument can be ``None`` for non-src ranks.
         src (int): Source rank from which to scatter
             ``scatter_object_input_list``.
         group: (ProcessGroup, optional): The process group to work on.
@@ -1673,8 +1676,10 @@ def scatter_object_list(
         >>> # Note: Process group initialization omitted on each rank.
         >>> import torch.distributed as dist
         >>> if dist.get_rank() == 0:
+        >>>     # Assumes world_size of 3.
         >>>     objects = ["foo", 12, {1: 2}] # any picklable object
         >>> else:
+        >>>     # Can be any list on non-src ranks, elements are not used.
         >>>     objects = [None, None, None]
         >>> output_list = [None]
         >>> dist.scatter_object_list(output_list, objects, src=0)
@@ -1693,7 +1698,7 @@ def scatter_object_list(
             "Expected argument scatter_object_output_list to be a list of size at least 1."
         )
 
-    my_rank = get_rank()
+    my_rank = get_rank(group)
     if my_rank == src:
         tensor_list, tensor_sizes = zip(
             *[_object_to_tensor(obj) for obj in scatter_object_input_list]
