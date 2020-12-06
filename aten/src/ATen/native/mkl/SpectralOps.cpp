@@ -9,14 +9,6 @@ namespace at { namespace native {
 
 REGISTER_NO_CPU_DISPATCH(fft_fill_with_conjugate_symmetry_stub, fft_fill_with_conjugate_symmetry_fn);
 
-Tensor _fft_mkl(const Tensor& input, int64_t signal_ndim,
-                bool complex_input, bool complex_output,
-                bool inverse, IntArrayRef checked_signal_sizes,
-                int64_t normalization, bool onesided,
-                IntArrayRef output_sizes) {
-  AT_ERROR("fft: ATen not compiled with MKL support");
-}
-
 Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, int64_t last_dim_size) {
   AT_ERROR("fft: ATen not compiled with MKL support");
 }
@@ -278,97 +270,6 @@ static DftiDescriptor _plan_mkl_fft(
   MKL_DFTI_CHECK(DftiCommitDescriptor(descriptor.get()));
 
   return descriptor;
-}
-
-// MKL DFTI
-Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
-                bool complex_input, bool complex_output,
-                bool inverse, IntArrayRef checked_signal_sizes,
-                int64_t normalization, bool onesided,
-                IntArrayRef output_sizes) {
-  Tensor input = self;
-  bool need_contiguous = false;
-  // real/imag dimension must aligned when viewed as of complex type
-  if (complex_input) {
-    need_contiguous |= input.stride(-1) != 1;
-    for (int64_t i = 0; !need_contiguous && i <= signal_ndim; i++) {
-      need_contiguous |= input.stride(i) % 2 != 0;
-    }
-  }
-
-  // check if we can use MKL because MKL_LONG is 32bit on some OS, e.g. Windows
-  // need to check input and output size and strides
-  // be careful about complex domain, where the stride needs to be divided by 2
-  // only need to test upper bound MKL_LONG_MAX as these values are non-negative
-  if (sizeof(MKL_LONG) < sizeof(int64_t)) {
-    int64_t inumel = 1 /* istride if we contiguous-fy */, onumel = 1;
-    int64_t isize, osize, istride, ostride;
-    for (int64_t i = signal_ndim; i >= 0; i--) {
-      isize = input.size(i);
-      osize = output_sizes[i];
-      istride = complex_input ? input.stride(i) >> 1 : input.stride(i);
-      ostride = onumel;
-      TORCH_CHECK(isize <= MKL_LONG_MAX && osize <= MKL_LONG_MAX && ostride <= MKL_LONG_MAX,
-               "MKL FFT: input signal numel exceeds allowed range [1 ~ ", MKL_LONG_MAX, "]");
-      if (!need_contiguous && istride > MKL_LONG_MAX) {
-        // If we didn't plan to contiguous-fy but the `istride` exceeds bound,
-        // check if we can stride (equal to `inumel`) get back within bound if
-        // we contiguous-fy. If so, then we need to always check `inumel`
-        // instead for the remaining iterations. The iterations before this are
-        // fine as `inumel` is non-decreasing.
-        need_contiguous = true;
-      }
-      TORCH_CHECK(!need_contiguous || inumel <= MKL_LONG_MAX,
-               "MKL FFT: input signal numel exceeds allowed range [1 ~ ", MKL_LONG_MAX, "]");
-      inumel *= isize;
-      onumel *= osize;
-    }
-  }
-
-  if (need_contiguous) {
-    input = input.contiguous();
-  }
-
-
-  Tensor output = at::empty(output_sizes, input.options());
-
-  DimVector full_sizes(signal_ndim + 1);
-  full_sizes[0] = self.size(0);
-  std::copy(checked_signal_sizes.cbegin(), checked_signal_sizes.cend(), full_sizes.begin() + 1);
-
-  // If "complex" is true, convert strides from complex viewed as real to complex strides.
-  // Otherwise, returns a copy of strides if "complex" is false.
-  auto convert_strides = [signal_ndim](IntArrayRef strides, bool complex) {
-    DimVector res(signal_ndim + 1);
-    if (complex) {
-      for (int64_t i = 0; i < res.size(); ++i) {
-        res[i] = strides[i] / 2;
-      }
-    } else {
-      res.assign(strides.cbegin(), strides.cend());
-    }
-    return res;
-  };
-  const auto in_strides = convert_strides(input.strides(), complex_input);
-  const auto out_strides = convert_strides(output.strides(), complex_output);
-
-  auto descriptor = _plan_mkl_fft(
-      in_strides, out_strides, full_sizes, complex_input, complex_output,
-      normalization, !inverse, input.scalar_type());
-
-  if (inverse) {
-    MKL_DFTI_CHECK(DftiComputeBackward(descriptor.get(), input.data_ptr(), output.data_ptr()));
-  } else {
-    MKL_DFTI_CHECK(DftiComputeForward(descriptor.get(), input.data_ptr(), output.data_ptr()));
-  }
-  // now if needed, fill out the other half using Hermitian symmetry dim
-  if (!complex_input && complex_output && !onesided) {
-    DimVector signal_dims(signal_ndim);
-    std::iota(signal_dims.begin(), signal_dims.end(), 1);
-    auto out_as_complex = at::view_as_complex(output);
-    at::native::_fft_fill_with_conjugate_symmetry_(out_as_complex, signal_dims);
-  }
-  return output;
 }
 
 // Execute a general fft operation (can be c2c, onesided r2c or onesided c2r)

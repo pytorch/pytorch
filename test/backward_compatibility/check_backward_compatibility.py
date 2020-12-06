@@ -187,6 +187,7 @@ allow_list = [
     ("aten::ifft", datetime.date(2021, 1, 31)),
     ("aten::irfft", datetime.date(2021, 1, 31)),
     ("aten::rfft", datetime.date(2021, 1, 31)),
+    ("aten::_fft_with_size", datetime.date(2021, 1, 31)),
 ]
 
 def allow_listed(schema, allow_list):
