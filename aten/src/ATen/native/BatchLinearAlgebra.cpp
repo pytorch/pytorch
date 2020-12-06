@@ -418,8 +418,8 @@ std::tuple<Tensor&,Tensor&> solve_out(Tensor& solution, Tensor& lu, const Tensor
 /*
 Computes the inverse of n-by-n matrix 'self'
 This is an in-place routine, content of 'self' is overriden.
-'infos' is an int Tensor containing error codes for each matrix in the batched input.
-'infos_lu' is for holding lapackLU errors, and 'infos_getri' is for holding lapackGetri errors
+'infos_lu' and 'infos_getri' are int Tensors containing error codes for each matrix in the batched input.
+'infos_lu' is for holding lapackLU errors, and 'infos_getri' is for holding lapackGetri errors.
 For more information see LAPACK's documentation for GETRI and GETRF routines.
 */
 template <typename scalar_t>
