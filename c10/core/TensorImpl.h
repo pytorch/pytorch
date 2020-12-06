@@ -935,18 +935,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
       const c10::VariableVersion& version_counter,
-      bool allow_tensor_metadata_change) const {
-    auto impl = c10::make_intrusive<TensorImpl>(
-        Storage(storage()), key_set_, data_type_);
-    copy_tensor_metadata(
-      /*src_impl=*/this,
-      /*dest_impl=*/impl.get(),
-      /*version_counter=*/version_counter,
-      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-    impl->refresh_numel();
-    impl->refresh_contiguous();
-    return impl;
-  }
+      bool allow_tensor_metadata_change) const;
+
+  /**
+   * Return a TensorImpl that is a shallow-copy of this TensorImpl.
+   *
+   * For usage of `version_counter` and `allow_tensor_metadata_change`,
+   * see NOTE [ TensorImpl Shallow-Copying ].
+   */
+  virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
+      c10::VariableVersion&& version_counter,
+      bool allow_tensor_metadata_change) const;
 
   /**
    * Shallow-copies data from another TensorImpl into this TensorImpl.
@@ -967,6 +966,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   void set_version_counter(
     const c10::VariableVersion& version_counter) noexcept {
     version_counter_ = version_counter;
+  }
+
+  void set_version_counter(
+    c10::VariableVersion&& version_counter) noexcept {
+    version_counter_ = std::move(version_counter);
   }
 
   const c10::VariableVersion& version_counter() const noexcept {
@@ -1579,6 +1583,24 @@ protected:
       const TensorImpl* src_impl,
       TensorImpl* dest_impl,
       const c10::VariableVersion& version_counter,
+      bool allow_tensor_metadata_change);
+
+  /**
+   * Copy the tensor metadata fields (e.g. sizes / strides / storage pointer / storage_offset)
+   * from one TensorImpl to another TensorImpl.
+   *
+   * For usage of `version_counter` and `allow_tensor_metadata_change`, see NOTE [ TensorImpl Shallow-Copying ].
+   */
+  static void copy_tensor_metadata(
+      const TensorImpl* src_impl,
+      TensorImpl* dest_impl,
+      c10::VariableVersion&& version_counter,
+      bool allow_tensor_metadata_change);
+
+private:
+  static void copy_tensor_metadata_except_version_counter(
+      const TensorImpl* src_impl,
+      TensorImpl* dest_impl,
       bool allow_tensor_metadata_change);
 
 protected:
