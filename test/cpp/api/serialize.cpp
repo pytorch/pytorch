@@ -16,14 +16,15 @@
 using namespace torch::test;
 using namespace torch::nn;
 using namespace torch::optim;
+using torch::Tensor;
 
 namespace {
 Sequential xor_model() {
   return Sequential(
       Linear(2, 8),
-      Functional(at::sigmoid),
+      Functional(static_cast<Tensor (*)(const Tensor&)>(at::sigmoid)),
       Linear(8, 1),
-      Functional(at::sigmoid));
+      Functional(static_cast<Tensor (*)(const Tensor&)>(at::sigmoid)));
 }
 
 torch::Tensor save_and_load(torch::Tensor input) {

@@ -12,6 +12,8 @@
 
 using namespace torch::nn;
 using namespace torch::test;
+using torch::Tensor;
+using torch::Scalar;
 
 class TestModel : public torch::nn::Module {
  public:
@@ -1451,7 +1453,7 @@ TEST_F(ModulesTest, FunctionalWithTorchFunction) {
 
 TEST_F(ModulesTest, FunctionalArgumentBinding) {
   auto functional =
-      Functional(torch::elu, /*alpha=*/1, /*scale=*/0, /*input_scale=*/1);
+      Functional(static_cast<Tensor(*)(const Tensor&, Scalar, Scalar, Scalar)>(torch::elu), /*alpha=*/1, /*scale=*/0, /*input_scale=*/1);
   ASSERT_EQ(functional(torch::ones({})).item<float>(), 0);
 }
 
