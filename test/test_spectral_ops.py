@@ -1,13 +1,11 @@
 import torch
+import numpy as np
+
 import unittest
 import math
 from contextlib import contextmanager
 from itertools import product
 import itertools
-
-# saves the torch.fft function that's clobbered by importing the torch.fft module
-fft_fn = torch.fft
-import torch.fft
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_WITH_SLOW, TEST_NUMPY, TEST_LIBROSA, slowAwareTest)
@@ -18,11 +16,6 @@ from torch.autograd.gradcheck import gradgradcheck
 
 from distutils.version import LooseVersion
 from typing import Optional, List
-
-
-if TEST_NUMPY:
-    import numpy as np
-
 
 if TEST_LIBROSA:
     import librosa
