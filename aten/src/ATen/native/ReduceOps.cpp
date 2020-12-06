@@ -81,7 +81,7 @@ Tensor& _cumsum_out_cpu(Tensor& result, const Tensor& self, int64_t dim) {
   return result;
 }
 
-Tensor cumsum(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype, bool exclusive=false) {
+Tensor cumsum(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype, bool exclusive) {
   auto result = [&]() {
     NoNamesGuard guard;
     return at::_cumsum(integer_upcast(self, dtype), dim);
@@ -90,7 +90,7 @@ Tensor cumsum(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype, 
   return result;
 }
 
-Tensor& cumsum_(Tensor& self, int64_t dim, c10::optional<ScalarType> dtype, bool exclusive=false) {
+Tensor& cumsum_(Tensor& self, int64_t dim, c10::optional<ScalarType> dtype, bool exclusive) {
   TORCH_CHECK(
           !dtype.has_value() || (self.scalar_type() == dtype.value()),
           "provided dtype must match the dtype of self tensor in cumsum. Got ",
@@ -102,7 +102,7 @@ Tensor& cumsum_(Tensor& self, int64_t dim, c10::optional<ScalarType> dtype, bool
   return at::_cumsum_out(self, self, dim);
 }
 
-Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype, bool exclusive=false) {
+Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype, bool exclusive) {
   // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
   TORCH_CHECK(
       !dtype.has_value() || (result.scalar_type() == dtype.value()),
@@ -1171,13 +1171,13 @@ Tensor logcumsumexp(const Tensor& self, Dimname dim) {
 Tensor& logcumsumexp_out(Tensor& result, const Tensor& self, Dimname dim) {
   return at::logcumsumexp_out(result, self, dimname_to_position(self, dim));
 }
-Tensor cumsum(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype, bool exclusive=false) {
+Tensor cumsum(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype, bool exclusive) {
   return at::cumsum(self, dimname_to_position(self, dim), dtype);
 }
-Tensor& cumsum_(Tensor& self, Dimname dim, c10::optional<ScalarType> dtype, bool exclusive=false) {
+Tensor& cumsum_(Tensor& self, Dimname dim, c10::optional<ScalarType> dtype, bool exclusive) {
     return native::cumsum_(self, dimname_to_position(self, dim), dtype);
 }
-Tensor& cumsum_out(Tensor& result, const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype, bool exclusive=false) {
+Tensor& cumsum_out(Tensor& result, const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype, bool exclusive) {
   return at::cumsum_out(result, self, dimname_to_position(self, dim), dtype);
 }
 Tensor cumprod(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
