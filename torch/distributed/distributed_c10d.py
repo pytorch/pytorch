@@ -1616,7 +1616,7 @@ def scatter_object_list(
             element will store the object scattered to this rank.
         scatter_object_input_list (List[Any]): List of input objects to scatter.
             Each object must be picklable. Only objects on the ``src`` rank will
-             be scattered, and the argument can be ``None`` for non-src ranks.
+            be scattered, and the argument can be ``None`` for non-src ranks.
         src (int): Source rank from which to scatter
             ``scatter_object_input_list``.
         group: (ProcessGroup, optional): The process group to work on.
@@ -1646,7 +1646,7 @@ def scatter_object_list(
             "Expected argument scatter_object_output_list to be a list of size at least 1."
         )
 
-    my_rank = get_rank()
+    my_rank = get_rank(group)
     if my_rank == src:
         tensor_list, tensor_sizes = zip(
             *[_object_to_tensor(obj) for obj in scatter_object_input_list]
