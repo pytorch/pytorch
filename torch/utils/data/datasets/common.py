@@ -1,13 +1,9 @@
-import sys
 import os
 import fnmatch
 import warnings
-import tarfile
-import zipfile
-from typing import List, Iterable, Union, Any
-from io import IOBase
+from typing import List, Union, Iterable
 
-def match_masks(name : str, masks : Union[str, List[str]]):
+def match_masks(name : str, masks : Union[str, List[str]]) -> bool :
     # empty mask matches any input name
     if not masks:
         return True
@@ -24,7 +20,7 @@ def get_file_pathnames_from_root(
         root: str,
         masks: Union[str, List[str]],
         recursive: bool = False,
-        abspath: bool = False) :
+        abspath: bool = False) -> Iterable[str] :
 
     # print out an error message and raise the error out
     def onerror(err : OSError):
