@@ -3647,10 +3647,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 b2 = make_tensor(shape2, device, dtype, low=-1, high=1).expand(num_batches, N, O)
                 yield b1, b2
             # zero-sized tensors
-            bug = (self.device_type == 'cuda' and dtype == torch.half and torch.version.cuda is not None and
-                   float(torch.version.cuda) < 11)
-            if bug:
-                return
             for z1, z2, z3, z4 in itertools.product((True, False), repeat=4):
                 shape1 = (num_batches if z1 else 0, M if z2 else 0, N if z3 else 0)
                 shape2 = (num_batches if z1 else 0, N if z3 else 0, O if z4 else 0)
@@ -3900,10 +3896,6 @@ else:
                 out_tensor = torch.zeros_like(ref)
                 yield b1, b2, ref, out_tensor
             # zero-sized tensors
-            bug = (self.device_type == 'cuda' and dtype == torch.half and torch.version.cuda is not None and
-                   float(torch.version.cuda) < 11)
-            if bug:
-                return
             for z1, z2, z3, z4 in itertools.product((True, False), repeat=4):
                 shape1 = (num_batches if z1 else 0, M if z2 else 0, N if z3 else 0)
                 shape2 = (num_batches if z1 else 0, N if z3 else 0, O if z4 else 0)
