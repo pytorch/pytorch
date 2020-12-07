@@ -457,7 +457,6 @@ class TestTEFuser(JitTestCase):
             ge = self.checkTrace(f, (x, y, z), inputs_require_grads=False)
             self.assertAllFused(ge.graph_for(x, y, z))
 
-    @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")
     def test_bitwise_ops(self):
         def apply(fn):
             return lambda x, y, z: fn(fn(x, y), z)
@@ -1229,12 +1228,14 @@ class TestTEFuser(JitTestCase):
             torch.bool,
         ]
         unary_ops = [
+            torch.lgamma,
             torch.sigmoid,
             torch.reciprocal,
             torch.neg,
             torch.relu,
             torch.log,
             torch.log10,
+            torch.log1p,
             torch.log2,
             torch.exp,
             torch.expm1,
@@ -1251,6 +1252,7 @@ class TestTEFuser(JitTestCase):
             torch.tanh,
             torch.sqrt,
             torch.rsqrt,
+            # FIXME: Fails in IR Eval: torch.int8 abs cpu (1,)
             torch.abs,
             torch.ceil,
             torch.floor,
@@ -1287,6 +1289,7 @@ class TestTEFuser(JitTestCase):
             return lambda x, y: fn(x, y)
 
         dtypes = [
+            # FIXME: Fails in IR Eval: torch.int8 and_ cpu
             torch.int8,
             torch.uint8,
             torch.int16,
@@ -1309,21 +1312,23 @@ class TestTEFuser(JitTestCase):
             lambda x, y: torch.lerp(x, y, 0.5),
             torch.atan2,
             torch.div,
-
-            # FIXME: comparison ops yield different results when fused
-            # torch.eq,
-            # torch.ne,
-            # torch.ge,
-            # torch.gt,
-            # torch.lt,
-
-            # FIXME: fails on CPU backend with int8
-            # torch.fmod,
-            # torch.remainder,
+            torch.eq,
+            torch.ne,
+            torch.ge,
+            torch.gt,
+            torch.lt,
+            torch.fmod,
+            torch.remainder,
 
             # FIXME: segfaults on CPU backend
             # operator.__rshift__,
             # operator.__lshift__,
+
+            lambda x, y: y.type_as(x),
+        ]
+        fp_only = [
+            torch.fmod,
+            torch.remainder,
         ]
         devices = self.devices
         for dtype, op, device in product(dtypes, binary_ops, devices):
@@ -1340,7 +1345,8 @@ class TestTEFuser(JitTestCase):
             try:
                 t = torch.jit.trace(fn, (x, y))
                 self.assertEqual(ref, t(x, y))
-                self.assertAllFused(t.graph_for(x, y))
+                if op not in fp_only or dtype.is_floating_point:
+                    self.assertAllFused(t.graph_for(x, y))
             except Exception as e:
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), op.__name__, device])
@@ -1356,6 +1362,7 @@ class TestTEFuser(JitTestCase):
             torch.uint8,
             torch.int16,
             torch.int32,
+            # FIXME: Fails in IR Eval: torch.int64 and_ cpu
             torch.int64,
             torch.float16,
             torch.float32,
@@ -1414,18 +1421,15 @@ class TestTEFuser(JitTestCase):
             torch.int16,
             torch.int32,
             torch.int64,
-            # FIXME: breaks in IR eval
-            # torch.float16,
+            torch.float16,
             torch.float32,
             torch.float64,
             torch.bool
         ]
         binary_ops = [
             torch.div,
-
-            # FIXME: wrong results with int8 on cpu
-            # torch.remainder,
-            # torch.fmod,
+            torch.remainder,
+            torch.fmod,
         ]
         devices = self.devices
         # Maybe we should split this into separate tests to speed it up by
@@ -1444,10 +1448,9 @@ class TestTEFuser(JitTestCase):
             try:
                 t = torch.jit.trace(fn, (x))
                 self.assertEqual(ref, t(x))
-                self.assertAllFused(t.graph_for(x))
             except Exception as e:
                 raise RuntimeError(
-                    " ".join(["Failed:", str(dtype), op.__name__, device])
+                    "Failed: {} {} {} {}".format(dtype, op.__name__, device, scalar)
                 )
 
     def test_binary_cuda_only_ops(self):
@@ -1529,6 +1532,89 @@ class TestTEFuser(JitTestCase):
                 t = torch.jit.trace(fn, (x, y, z))
                 self.assertEqual(ref, t(x, y, z))
                 self.assertAllFused(t.graph_for(x, y, z))
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), op.__name__, device])
+                )
+
+    @unittest.skip("FIXME: fuser doesn't include ListConstruct nodes to the group causing a failure")
+    def test_list_ops(self):
+        def apply(fn):
+            return lambda x, y, z: fn([x * x, y * y, z * z])
+
+        dtypes = [
+            torch.int8,
+            torch.uint8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.float16,
+            torch.float32,
+            torch.float64,
+            torch.bool,
+        ]
+        devices = self.devices
+        list_ops = [
+            torch.cat,
+        ]
+        for dtype, op, device in product(dtypes, list_ops, devices):
+            try:
+                x = self.data_for(dtype, device, size=[5, 4, 1, 7])
+                y = self.data_for(dtype, device, size=[5, 4, 1, 7])
+                z = self.data_for(dtype, device, size=[5, 4, 1, 7])
+                fn = apply(op)
+                ref = fn(x, y, z)
+            except Exception:
+                # If eager mode doesn't support a dtype/op/device combo,
+                # neither does the fuser.  Catch everything to avoid needing to
+                # guess what errors might be thrown by eager.
+                continue
+            try:
+                t = torch.jit.trace(fn, (x, y, z))
+                self.assertEqual(ref, t(x, y, z))
+                self.assertAllFused(t.graph_for(x, y, z))
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), op.__name__, device])
+                )
+
+    def test_where_ops(self):
+        def apply(fn):
+            return lambda cond, x, y: fn(cond, x, y)
+
+        dtypes = [
+            torch.int8,
+            torch.uint8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.float16,
+            torch.float32,
+            torch.float64,
+            torch.bool,
+        ]
+        ops = [
+            torch.where,
+            lambda cond, x, y: torch.where(cond, x, 3.1415),
+            lambda cond, x, y: torch.where(cond, 42, y),
+        ]
+        devices = self.devices
+        for dtype, op, device in product(dtypes, ops, devices):
+            try:
+                cond = self.data_for(torch.bool, device)
+                x = self.data_for(dtype, device)
+                y = self.data_for(dtype, device)
+                fn = apply(op)
+                ref = fn(cond, x, y)
+            except Exception:
+                # If eager mode doesn't support a dtype/op/device combo,
+                # neither does the fuser.  Catch everything to avoid needing to
+                # guess what errors might be thrown by eager.
+                continue
+            try:
+                t = torch.jit.trace(fn, (cond, x, y))
+                self.assertEqual(ref, t(cond, x, y))
+                self.assertAllFused(t.graph_for(cond, x, y))
             except Exception as e:
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), op.__name__, device])
