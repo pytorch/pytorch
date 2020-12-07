@@ -2474,12 +2474,9 @@ class DistributedTest:
                         _build_tensor(src + 1, master_value).cuda(device=i)
                         for i in rank_to_GPU[rank]
                     ]
-                    # TODO: Setting expect_event=False to disable profiling
-                    # tests. Once https://github.com/pytorch/pytorch/issues/48127
-                    # is addressed, this should be reverted.
                     self.call_dist_op(
                         "reduce", False, dist.reduce_multigpu, tensors, src, op, group_id,
-                        expect_event=False)
+                        expect_event=len(tensors) == 1)
                     expected_tensor = _build_tensor(src + 1, expected_value)
                     self.assertEqual(tensors[0], expected_tensor)
                 else:
@@ -2487,12 +2484,9 @@ class DistributedTest:
                         _build_tensor(src + 1, worker_value).cuda(device=i)
                         for i in rank_to_GPU[rank]
                     ]
-                    # TODO: Setting expect_event=False to disable profiling
-                    # tests. Once https://github.com/pytorch/pytorch/issues/48127
-                    # is addressed, this should be reverted.
                     self.call_dist_op(
                         "reduce", False, dist.reduce_multigpu, tensors, src, op, group_id,
-                        expect_event=False)
+                        expect_event=len(tensors) == 1)
 
             self._barrier()
 
@@ -2532,13 +2526,10 @@ class DistributedTest:
                 for gpu in rank_to_GPU[rank]:
                     output_tensors.append([t.cuda(device=gpu) for t in output_per_gpu])
                     expected_output.append([t.cuda(device=gpu) for t in expected_per_gpu])
-                # TODO: Setting expect_event=False to disable profiling
-                # tests. Once https://github.com/pytorch/pytorch/issues/48127
-                # is addressed, this should be reverted.
                 self.call_dist_op(
                     "all_gather", False,
                     dist.all_gather_multigpu, output_tensors, tensors, group_id,
-                    expect_event=False)
+                    expect_event=len(expected_output) == 1)
                 self.assertEqual(output_tensors, expected_output)
 
             self._barrier()
