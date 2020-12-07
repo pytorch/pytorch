@@ -4349,9 +4349,10 @@ Similar to SciPy's `scipy.special.xlogy`.
     \text{out}_{i} = \begin{cases}
         \text{NaN} & \text{if } \text{other}_{i} \eq \text{NaN} \\
         0 & \text{if } \text{self}_{i} \eq 0.0 \\
-        x_i * \log{{y_i}} & \text{otherwise} \\
+        self_i * \log{other_i} & \text{otherwise} \\
     \end{cases}
 
+""" + r"""
 .. note::
     NaN in :attr:`other` is propagated even if value of :attr:`self` is 0.
 
@@ -4375,6 +4376,7 @@ Example::
     >>> torch.xlogy(x, 4)
     tensor([1.3863, 2.7726, 4.1589])
 
+""".format(**common_args) + r"""
 
 .. function:: xlogy(self, other, *, out=None) -> Tensor
 
@@ -4385,9 +4387,10 @@ Similar to SciPy's `scipy.special.xlogy`.
     \text{out}_{i} = \begin{cases}
         \text{NaN} & \text{if } \text{other}_{i} \eq \text{NaN} \\
         0 & \text{if } \text{self}_{i} \eq 0.0 \\
-        x_i * \log{{y_i}} & \text{otherwise} \\
+        self_i * \log{other_i} & \text{otherwise} \\
     \end{cases}
 
+""" + r"""
 .. note::
     NaN in :attr:`other` is propagated even if value of :attr:`self` is 0.
 
