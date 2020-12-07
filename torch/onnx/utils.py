@@ -333,6 +333,8 @@ def _decide_input_format(model, args):
                     param = sig.parameters[optional_arg]
                     if param.default is param.empty:
                         args.append(None)
+                    else:
+                        args.append(param.default)
             args = tuple(args)
         return args
     # Cases of models without forward functions and dict inputs
