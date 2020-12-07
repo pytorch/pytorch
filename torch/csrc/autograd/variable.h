@@ -464,6 +464,7 @@ inline Variable make_variable_differentiable_view(
         /*version_counter=*/0,
         /*allow_tensor_metadata_change=*/true);
     } else {
+       TORCH_INTERNAL_ASSERT(data.use_count() == 1);
        data_impl = data.getIntrusivePtr();
     }
     data_impl->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
