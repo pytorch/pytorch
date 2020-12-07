@@ -35,3 +35,17 @@ def get_file_pathnames_from_root(
                 yield os.path.join(path, f)
         if not recursive:
             break
+
+
+def get_file_binaries_from_pathnames(pathnames : Iterable):
+
+    if not isinstance(pathnames, Iterable):
+        warnings.warn("get_file_binaries_from_pathnames needs the input be an Iterable")
+        raise TypeError
+
+    for pathname in pathnames:
+        if not isinstance(pathname, str):
+            warnings.warn("file pathname must be string type, but got {}".format(type(pathname)))
+            raise TypeError
+
+        yield (pathname, open(pathname, 'rb'))
