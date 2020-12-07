@@ -412,8 +412,8 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
       }
       // Check for errors and throw appropriate exception.
       checkAndThrowException();
-      std::this_thread::sleep_for(
-          std::chrono::milliseconds(kSynchronizeBusyWaitMillis));
+      //std::this_thread::sleep_for(
+       //   std::chrono::milliseconds(kSynchronizeBusyWaitMillis));
     }
     checkAndThrowException();
   }
