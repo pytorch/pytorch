@@ -296,76 +296,107 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
 def einsum(equation, *operands):
     r"""einsum(equation, *operands) -> Tensor
 
-This function provides a way of computing multilinear expressions (i.e. sums of products) using the
-Einstein summation convention.
+    Sums the product of the elements of the input :attr:`operands` along dimensions specified using a notation
+    based on the Einstein summation convention.
 
-Args:
-    equation (string): The equation is given in terms of lower case letters (indices) to be associated
-           with each dimension of the operands and result. The left hand side lists the operands
-           dimensions, separated by commas. There should be one index letter per tensor dimension.
-           The right hand side follows after `->` and gives the indices for the output.
-           If the `->` and right hand side are omitted, it implicitly defined as the alphabetically
-           sorted list of all indices appearing exactly once in the left hand side.
-           The indices not apprearing in the output are summed over after multiplying the operands
-           entries.
-           If an index appears several times for the same operand, a diagonal is taken.
-           Ellipses `...` represent a fixed number of dimensions. If the right hand side is inferred,
-           the ellipsis dimensions are at the beginning of the output.
-    operands (Tensor): The operands to compute the Einstein sum of.
+    Einsum allows computing many common multi-dimensional linear algebraic array operations by representing them
+    in a short-hand format based on the Einstein summation convention, given by :attr:`equation`. The details of 
+    this format are described below, but the general idea is to label every dimension of the input :attr:`operands`
+    with some subscript and define which subscripts are part of the output. The output is then computed by summing
+    the product of the elements of the :attr:`operands` along the dimensions whose subscripts are not part of the
+    output. For example, matrix multiplication can be computed using einsum as `torch.einsum("ij,jk->ik", A, B)`.
+    Here, j is the summation subscript and i and k the output subscripts (see section below for more details on why).
 
-.. note::
+    Equation:
 
-    This function does not optimize the given expression, so a different formula for the same computation may
-    run faster or consume less memory. Projects like opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/)
-    can optimize the formula for you.
+        The :attr:`equation` string specifies the subscripts (lower case letters `['a', 'z']`) for each dimension of
+        the input :attr:`operands` in the same order as the dimensions, separating subcripts for each operand by a
+        comma (','), e.g. `'ij,jk'` specify subscripts for two 2D operands. The dimensions labeled with the same subscript
+        must be broadcastable, that is, their size must either match or be `1`. The exception is if a subscript is
+        repeated for the same input operand, in which case the dimensions labeled with this subscript for this operand
+        must match in size and the operand will be replaced by its diagonal along these dimensions. The subscripts that
+        appear exactly once in the :attr:`equation` will be part of the output, sorted in increasing alphabetical order.
+        The output is computed by multiplying the input :attr:`operands` element-wise, with their dimensions aligned based
+        on the subscripts, and then summing out the dimensions whose subscripts are not part of the output.
 
-Examples::
+        Optionally, the output subscripts can be explicitly defined by adding an arrow ('->') at the end of the equation
+        followed by the subscripts for the output. For instance, the following equation computes the transpose of a
+        matrix multiplication: 'ij,jk->ki'. The output subscripts must appear at least once for some input operand and
+        at most once for the output.
 
-    >>> x = torch.randn(5)
-    >>> y = torch.randn(4)
-    >>> torch.einsum('i,j->ij', x, y)  # outer product
-    tensor([[-0.0570, -0.0286, -0.0231,  0.0197],
-            [ 1.2616,  0.6335,  0.5113, -0.4351],
-            [ 1.4452,  0.7257,  0.5857, -0.4984],
-            [-0.4647, -0.2333, -0.1883,  0.1603],
-            [-1.1130, -0.5588, -0.4510,  0.3838]])
+        Ellipsis ('...') can be used in place of subscripts to broadcast the dimensions covered by the ellipsis.
+        Each input operand may contain at most one ellipsis which will cover the dimensions not covered by subscripts,
+        e.g. for an input operand with 5 dimensions, the ellipsis in the equation `'ab...c'` cover the third and fourth
+        dimensions. The ellipsis does not need to cover the same number of dimensions across the :attr:`operands` but the
+        'shape' of the ellipsis (the size of the dimensions covered by them) must broadcast together. If the output is not
+        explicitly defined with the arrow ('->') notation, the ellipsis will come first in the output (left-most dimensions),
+        before the subscript labels that appear exactly once for the input operands. e.g. the following equation implements
+        batch matrix multiplication `'...ij,...jk'`.
 
+        A few final notes: the equation may contain whitespaces between the different elements (subscripts, ellipsis,
+        arrow and comma) but something like `'. . .'` is not valid. An empty string `''` is valid for scalar operands.
 
-    >>> A = torch.randn(3,5,4)
-    >>> l = torch.randn(2,5)
-    >>> r = torch.randn(2,4)
-    >>> torch.einsum('bn,anm,bm->ba', l, A, r) # compare torch.nn.functional.bilinear
-    tensor([[-0.3430, -5.2405,  0.4494],
-            [ 0.3311,  5.5201, -3.0356]])
+    .. note::
 
+        ``torch.einsum`` handles ellipsis ('...') differently from NumPy in that it allows dimensions
+        covered by the ellipsis to be summed over, that is, ellipsis are not required to be part of the output.
 
-    >>> As = torch.randn(3,2,5)
-    >>> Bs = torch.randn(3,5,4)
-    >>> torch.einsum('bij,bjk->bik', As, Bs) # batch matrix multiplication
-    tensor([[[-1.0564, -1.5904,  3.2023,  3.1271],
-             [-1.6706, -0.8097, -0.8025, -2.1183]],
+    .. note::
 
-            [[ 4.2239,  0.3107, -0.5756, -0.2354],
-             [-1.4558, -0.3460,  1.5087, -0.8530]],
+        This function does not optimize the given expression, so a different formula for the same computation may
+        run faster or consume less memory. Projects like opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/)
+        can optimize the formula for you.
 
-            [[ 2.8153,  1.8787, -4.3839, -1.2112],
-             [ 0.3728, -2.1131,  0.0921,  0.8305]]])
+    Args:
+        equation (string): The subscripts for the Einstein summation.
+        operands (Tensor): The operands to compute the Einstein sum of.
 
-    >>> A = torch.randn(3, 3)
-    >>> torch.einsum('ii->i', A) # diagonal
-    tensor([-0.7825,  0.8291, -0.1936])
+    Examples::
 
-    >>> A = torch.randn(4, 3, 3)
-    >>> torch.einsum('...ii->...i', A) # batch diagonal
-    tensor([[-1.0864,  0.7292,  0.0569],
-            [-0.9725, -1.0270,  0.6493],
-            [ 0.5832, -1.1716, -1.5084],
-            [ 0.4041, -1.1690,  0.8570]])
+        # trace
+        >>> torch.einsum('ii', torch.randn(4, 4))
+        tensor(-1.2104)
 
-    >>> A = torch.randn(2, 3, 4, 5)
-    >>> torch.einsum('...ij->...ji', A).shape # batch permute
-    torch.Size([2, 3, 5, 4])
-"""
+        # diagonal
+        >>> torch.einsum('ii->i', torch.randn(4, 4))
+        tensor([-0.1034,  0.7952, -0.2433,  0.4545])
+
+        # outer product
+        >>> x = torch.randn(5)
+        >>> y = torch.randn(4)
+        >>> torch.einsum('i,j->ij', x, y)
+        tensor([[ 0.1156, -0.2897, -0.3918,  0.4963],
+                [-0.3744,  0.9381,  1.2685, -1.6070],
+                [ 0.7208, -1.8058, -2.4419,  3.0936],
+                [ 0.1713, -0.4291, -0.5802,  0.7350],
+                [ 0.5704, -1.4290, -1.9323,  2.4480]])
+
+        # batch matrix multiplication
+        >>> As = torch.randn(3,2,5)
+        >>> Bs = torch.randn(3,5,4)
+        >>> torch.einsum('bij,bjk->bik', As, Bs)
+        tensor([[[-1.0564, -1.5904,  3.2023,  3.1271],
+                [-1.6706, -0.8097, -0.8025, -2.1183]],
+
+                [[ 4.2239,  0.3107, -0.5756, -0.2354],
+                [-1.4558, -0.3460,  1.5087, -0.8530]],
+
+                [[ 2.8153,  1.8787, -4.3839, -1.2112],
+                [ 0.3728, -2.1131,  0.0921,  0.8305]]])
+
+        # batch permute
+        >>> A = torch.randn(2, 3, 4, 5)
+        >>> torch.einsum('...ij->...ji', A).shape 
+        torch.Size([2, 3, 5, 4])
+
+        # equivalent to torch.nn.functional.bilinear
+        >>> A = torch.randn(3,5,4)
+        >>> l = torch.randn(2,5)
+        >>> r = torch.randn(2,4)
+        >>> torch.einsum('bn,anm,bm->ba', l, A, r)
+        tensor([[-0.3430, -5.2405,  0.4494],
+                [ 0.3311,  5.5201, -3.0356]])
+    """
     if not torch.jit.is_scripting():
         if any(type(t) is not Tensor for t in operands) and has_torch_function(operands):
             return handle_torch_function(einsum, operands, equation, *operands)
