@@ -2011,37 +2011,37 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    @dtypes(*floating_and_complex_types())
     def test_svd_square(self, device, dtype):
         self._test_svd_helper((10, 10), True, False, device, dtype)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.float, torch.double)
+    @dtypes(*floating_types())
     def test_svd_square_col_maj(self, device, dtype):
         self._test_svd_helper((10, 10), True, True, device, dtype)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.float, torch.double)
+    @dtypes(*floating_types())
     def test_svd_tall_some(self, device, dtype):
         self._test_svd_helper((20, 5), True, False, device, dtype)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.float, torch.double)
+    @dtypes(*floating_types())
     def test_svd_tall_all(self, device, dtype):
         self._test_svd_helper((20, 5), False, False, device, dtype)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.float, torch.double)
+    @dtypes(*floating_types())
     def test_svd_tall_some_col_maj(self, device, dtype):
         self._test_svd_helper((5, 20), True, True, device, dtype)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.float, torch.double)
+    @dtypes(*floating_types())
     def test_svd_tall_all_col_maj(self, device, dtype):
         self._test_svd_helper((5, 20), False, True, device, dtype)
 
@@ -4525,60 +4525,6 @@ else:
                                         "Expected LU_pivots and LU_data to be on the same device"):
                 torch.lu_solve(b, A, torch.rand(A.shape[:-1], device=b_device).int())
 
-    def _test_svd_helper(self, shape, some, col_maj, device, dtype):
-        cpu_tensor = torch.randn(shape, device='cpu').to(dtype)
-        device_tensor = cpu_tensor.to(device=device)
-        if col_maj:
-            cpu_tensor = cpu_tensor.t()
-            device_tensor = device_tensor.t()
-        cpu_result = torch.svd(cpu_tensor, some=some)
-        device_result = torch.svd(device_tensor, some=some)
-        m = min(cpu_tensor.shape[-2:])
-        # torch.svd returns torch.return_types.svd which is a tuple of (U, V, S).
-        # - When some==False, U[..., m:] can be arbitrary.
-        # - When some==True, U shape: [..., m], V shape: [m, m]
-        # - Signs are not deterministic. If the sign of a column of U is changed
-        #   then the corresponding column of the V has to be changed.
-        # Thus here we only compare result[..., :m].abs() from CPU and device.
-        for x, y in zip(cpu_result, device_result):
-            self.assertEqual(x[..., :m].abs(), y[..., :m].abs(), atol=1e-5, rtol=0)
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_svd_square(self, device, dtype):
-        self._test_svd_helper((10, 10), True, False, device, dtype)
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(*floating_types())
-    def test_svd_square_col_maj(self, device, dtype):
-        self._test_svd_helper((10, 10), True, True, device, dtype)
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(*floating_types())
-    def test_svd_tall_some(self, device, dtype):
-        self._test_svd_helper((20, 5), True, False, device, dtype)
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(*floating_types())
-    def test_svd_tall_all(self, device, dtype):
-        self._test_svd_helper((20, 5), False, False, device, dtype)
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(*floating_types())
-    def test_svd_tall_some_col_maj(self, device, dtype):
-        self._test_svd_helper((5, 20), True, True, device, dtype)
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(*floating_types())
-    def test_svd_tall_all_col_maj(self, device, dtype):
-        self._test_svd_helper((5, 20), False, True, device, dtype)
-
     @precisionOverride({torch.float32: 5e-3, torch.complex64: 1e-3})
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -5519,145 +5465,6 @@ else:
         batch_dims_set = [(), (3,), (3, 5), (5, 3, 5)]
         for batch_dims, eigenvectors, upper in itertools.product(batch_dims_set, (True, False), (True, False)):
             run_test((5,) + batch_dims, eigenvectors, upper)
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.double)
-    def test_svd(self, device, dtype):
-        def run_test(dims, some, compute_uv):
-            x = torch.randn(*dims, dtype=dtype, device=device)
-            outu = torch.tensor((), dtype=dtype, device=device)
-            outs = torch.tensor((), dtype=dtype, device=device)
-            outv = torch.tensor((), dtype=dtype, device=device)
-            torch.svd(x, some=some, compute_uv=compute_uv, out=(outu, outs, outv))
-
-            if compute_uv:
-                if some:
-                    x_recon = torch.matmul(outu, torch.matmul(outs.diag_embed(), outv.transpose(-2, -1)))
-                    self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using U @ diag(S) @ V.T')
-                else:
-                    narrow_u = outu[..., :min(*dims[-2:])]
-                    narrow_v = outv[..., :min(*dims[-2:])]
-                    x_recon = torch.matmul(narrow_u, torch.matmul(outs.diag_embed(), narrow_v.transpose(-2, -1)))
-                    self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using U @ diag(S) @ V.T')
-            else:
-                _, singvals, _ = torch.svd(x, compute_uv=True)
-                self.assertEqual(singvals, outs, msg='Singular values mismatch')
-                self.assertEqual(outu, torch.zeros_like(outu), msg='U not zero')
-                self.assertEqual(outv, torch.zeros_like(outv), msg='V not zero')
-
-            resu, ress, resv = torch.svd(x, some=some, compute_uv=compute_uv)
-            self.assertEqual(resu, outu, msg='outputs of svd and svd with out differ')
-            self.assertEqual(ress, outs, msg='outputs of svd and svd with out differ')
-            self.assertEqual(resv, outv, msg='outputs of svd and svd with out differ')
-
-            # test non-contiguous
-            x = torch.randn(*dims, dtype=dtype, device=device)
-            n_dim = len(dims)
-            # Reverse the batch dimensions and the matrix dimensions and then concat them
-            x = x.permute(tuple(range(n_dim - 3, -1, -1)) + (n_dim - 1, n_dim - 2))
-            assert not x.is_contiguous(), "x is intentionally non-contiguous"
-            resu, ress, resv = torch.svd(x, some=some, compute_uv=compute_uv)
-            if compute_uv:
-                if some:
-                    x_recon = torch.matmul(resu, torch.matmul(ress.diag_embed(), resv.transpose(-2, -1)))
-                    self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using U @ diag(S) @ V.T')
-                else:
-                    narrow_u = resu[..., :min(*dims[-2:])]
-                    narrow_v = resv[..., :min(*dims[-2:])]
-                    x_recon = torch.matmul(narrow_u, torch.matmul(ress.diag_embed(), narrow_v.transpose(-2, -1)))
-                    self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using U @ diag(S) @ V.T')
-            else:
-                _, singvals, _ = torch.svd(x, compute_uv=True)
-                self.assertEqual(singvals, ress, msg='Singular values mismatch')
-                self.assertEqual(resu, torch.zeros_like(resu), msg='U not zero')
-                self.assertEqual(resv, torch.zeros_like(resv), msg='V not zero')
-
-        shapes = [(3, 3), (5, 3, 3), (7, 5, 3, 3),  # square matrices
-                  (7, 3), (5, 7, 3), (7, 5, 7, 3),  # fat matrices
-                  (3, 7), (5, 3, 7), (7, 5, 3, 7)]  # thin matrices
-        for dims, some, compute_uv in itertools.product(shapes, [True, False], [True, False]):
-            run_test(dims, some, compute_uv)
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    def test_svd_no_singularvectors(self, device):
-        for size in [(5, 5), (5, 20), (20, 5)]:
-            a = torch.randn(*size, device=device)
-            u, s_expect, v = torch.svd(a)
-            u, s_actual, v = torch.svd(a, compute_uv=False)
-            self.assertEqual(s_expect, s_actual, msg="Singular values don't match")
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    def test_svd_lowrank(self, device):
-        import torch
-        from torch.testing._internal.common_utils import random_lowrank_matrix, random_sparse_matrix
-
-        dtype = torch.double
-
-        def run_subtest(actual_rank, matrix_size, batches, device, svd_lowrank, **options):
-            density = options.pop('density', 1)
-            if isinstance(matrix_size, int):
-                rows = columns = matrix_size
-            else:
-                rows, columns = matrix_size
-            if density == 1:
-                a_input = random_lowrank_matrix(actual_rank, rows, columns, *batches, device=device, dtype=dtype)
-                a = a_input
-            else:
-                assert batches == ()
-                a_input = random_sparse_matrix(rows, columns, density, device=device, dtype=dtype)
-                a = a_input.to_dense()
-
-            q = min(*size)
-            u, s, v = svd_lowrank(a_input, q=q, **options)
-
-            # check if u, s, v is a SVD
-            u, s, v = u[..., :q], s[..., :q], v[..., :q]
-            A = u.matmul(s.diag_embed()).matmul(v.transpose(-2, -1))
-            self.assertEqual(A, a)
-
-            # check if svd_lowrank produces same singular values as torch.svd
-            U, S, V = torch.svd(a)
-            self.assertEqual(s.shape, S.shape)
-            self.assertEqual(u.shape, U.shape)
-            self.assertEqual(v.shape, V.shape)
-            self.assertEqual(s, S)
-
-            if density == 1:
-                # actual_rank is known only for dense inputs
-                #
-                # check if pairs (u, U) and (v, V) span the same
-                # subspaces, respectively
-                u, s, v = u[..., :actual_rank], s[..., :actual_rank], v[..., :actual_rank]
-                U, S, V = U[..., :actual_rank], S[..., :actual_rank], V[..., :actual_rank]
-                self.assertEqual(u.transpose(-2, -1).matmul(U).det().abs(), torch.ones(batches, device=device, dtype=dtype))
-                self.assertEqual(v.transpose(-2, -1).matmul(V).det().abs(), torch.ones(batches, device=device, dtype=dtype))
-
-        all_batches = [(), (1,), (3,), (2, 3)]
-        for actual_rank, size, all_batches in [
-                (2, (17, 4), all_batches),
-                (4, (17, 4), all_batches),
-                (4, (17, 17), all_batches),
-                (10, (100, 40), all_batches),
-                (7, (1000, 1000), [()]),
-        ]:
-            # dense input
-            for batches in all_batches:
-                run_subtest(actual_rank, size, batches, device, torch.svd_lowrank)
-                if size != size[::-1]:
-                    run_subtest(actual_rank, size[::-1], batches, device, torch.svd_lowrank)
-
-        # sparse input
-        for size in [(17, 4), (4, 17), (17, 17), (100, 40), (40, 100), (1000, 1000)]:
-            for density in [0.005, 0.1]:
-                run_subtest(None, size, (), device, torch.svd_lowrank, density=density)
-
-        # jitting support
-        jitted = torch.jit.script(torch.svd_lowrank)
-        actual_rank, size, batches = 2, (17, 4), ()
-        run_subtest(actual_rank, size, batches, device, jitted)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
