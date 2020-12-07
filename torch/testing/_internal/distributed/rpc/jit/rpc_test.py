@@ -21,9 +21,6 @@ from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
 
-def run(rref, func_name, args, kwargs):
-    return getattr(rref.local_value(), func_name)(*args, **kwargs)
-
 def rref_isinstance(rref, cls_to_check):
     return isinstance(rref.local_value(), cls_to_check)
 
@@ -360,6 +357,10 @@ class MyScriptModule(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def forward(self) -> Tensor:
+        return self.a
+
+    @torch.jit.script_method
+    def custom_func(self) -> Tensor:
         return self.a
 
 
@@ -973,20 +974,19 @@ class JitRpcTest(
         )
         self.assertTrue(remote_end_is_script)
         # Run forward pass remotely.
-        # TODO: make RRef helper work with ScriptModule.
-        remote_forward_output = rpc.rpc_sync(
-            remote_script_module.owner(),
-            run,
-            args=(remote_script_module, "forward", (), {}),
-        )
+        remote_forward_output = remote_script_module.rpc_sync().forward()
         self.assertEqual(remote_forward_output, torch.ones(self.rank))
+        # Run function defined on ScriptModule remotely.
+        remote_func_output = remote_script_module.rpc_sync().custom_func()
+        self.assertEqual(remote_func_output, torch.ones(self.rank))
         # Ensure we can transfer ScriptModule RRef to this rank and run
         # forward pass.
         local_script_module = remote_script_module.to_here()
         self.assertTrue(isinstance(local_script_module, torch.jit.ScriptModule))
         rank_ones_tensor = local_script_module()
         self.assertEqual(rank_ones_tensor, torch.ones(self.rank))
-
+        local_script_func_output = local_script_module.custom_func()
+        self.assertEqual(local_script_func_output, torch.ones(self.rank))
 
     @dist_init
     def test_load_script_module_with_pickled_rref(self):
