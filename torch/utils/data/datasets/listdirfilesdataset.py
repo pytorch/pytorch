@@ -1,7 +1,7 @@
 from torch.utils.data.dataset import IterableDataset
 from torch.utils.data.datasets.common import get_file_pathnames_from_root
 
-from typing import List, Iterable, Union
+from typing import List, Union, Iterator
 
 class ListDirFilesIterableDataset(IterableDataset):
     r""" :class:`ListDirFilesIterableDataset`
@@ -27,7 +27,7 @@ class ListDirFilesIterableDataset(IterableDataset):
         self.abspath : bool = abspath
         self.length : int = length
 
-    def __iter__(self) -> Iterable[str] :
+    def __iter__(self) -> Iterator[str] :
         yield from get_file_pathnames_from_root(self.root, self.masks, self.abspath)
 
     def __len__(self):

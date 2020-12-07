@@ -3,7 +3,7 @@ import fnmatch
 import warnings
 from typing import List, Union, Iterable
 
-def match_masks(name : str, masks : Union[str, List[str]]) -> bool :
+def match_masks(name : str, masks : Union[str, List[str]]) -> bool:
     # empty mask matches any input name
     if not masks:
         return True
@@ -14,13 +14,13 @@ def match_masks(name : str, masks : Union[str, List[str]]) -> bool :
     for mask in masks:
         if fnmatch.fnmatch(name, mask):
             return True
-        return False
+    return False
 
 def get_file_pathnames_from_root(
         root: str,
         masks: Union[str, List[str]],
         recursive: bool = False,
-        abspath: bool = False) -> Iterable[str] :
+        abspath: bool = False) -> Iterable[str]:
 
     # print out an error message and raise the error out
     def onerror(err : OSError):
