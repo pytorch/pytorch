@@ -18,6 +18,7 @@ from torch.quantization import (
     QuantType,
     QuantStub,
     DeQuantStub,
+    QuantWrapper,
     quant_type_to_str,
     default_qconfig,
     default_dynamic_qconfig,
@@ -44,7 +45,14 @@ from torch.testing._internal.common_quantization import (
     skip_if_no_torchvision,
     train_one_epoch,
     run_ddp,
+    test_only_eval_fn,
+    test_only_train_fn,
+)
+
+# toy models
+from torch.testing._internal.common_quantization import (
     LinearModelWithSubmodule,
+    ResNetBase,
 )
 
 from torch.testing._internal.common_quantized import (
@@ -2188,6 +2196,57 @@ class TestQuantizeFxModels(QuantizationTestCase):
                                      'eager mode quantization on model: ' + name +
                                      ' should match. Mode: ' + mode +
                                      ' diff:' + str(diff_from_eager[mode][name]))
+
+    def _test_building_block(self, quant_type, BB):
+        eager = BB().float()
+        graph = copy.deepcopy(eager)
+
+        if quant_type == "static":
+            qconfig = default_qconfig
+            eager_prepare = prepare
+            graph_prepare = prepare_fx
+            eager.eval()
+            graph.eval()
+            calibrate_or_train = test_only_eval_fn
+            data = self.img_data_2d
+        else:
+            qconfig = default_qat_qconfig
+            eager_prepare = prepare_qat
+            graph_prepare = prepare_qat_fx
+            eager.train()
+            graph.train()
+            calibrate_or_train = test_only_train_fn
+            data = self.img_data_2d_train
+
+        if hasattr(eager, "fuse_model"):
+            eager.fuse_model()
+        eager = QuantWrapper(eager)
+        eager.qconfig = qconfig
+        eager = eager_prepare(eager)
+
+        qconfig_dict = {"": qconfig}
+        graph = graph_prepare(graph, qconfig_dict)
+
+        eager_out = eager(data[0][0])
+        graph_out = graph(data[0][0])
+        self.assertEqual(eager_out, graph_out)
+
+        calibrate_or_train(eager, data)
+        calibrate_or_train(graph, data)
+
+        eager = convert(eager)
+        graph = convert_fx(graph)
+
+        eager_out = eager(data[0][0])
+        graph_out = graph(data[0][0])
+        self.assertEqual(eager_out, graph_out)
+
+    @skipIfNoFBGEMM
+    def test_resnet_base(self):
+        models = [ResNetBase]
+        options = itertools.product(self.static_quant_types, models)
+        for quant_type, M in options:
+            self._test_building_block(quant_type, M)
 
     @skip_if_no_torchvision
     @skipIfNoFBGEMM
