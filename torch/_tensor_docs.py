@@ -1557,6 +1557,12 @@ ger(vec2) -> Tensor
 See :func:`torch.ger`
 """)
 
+add_docstr_all('inner', r"""
+inner(other) -> Tensor
+
+See :func:`torch.inner`.
+""")
+
 add_docstr_all('outer', r"""
 outer(vec2) -> Tensor
 
@@ -1767,6 +1773,11 @@ and ``index[i] == j``, then the ``i``\ th row of :attr:`tensor` is copied to the
 The :attr:`dim`\ th dimension of :attr:`tensor` must have the same size as the
 length of :attr:`index` (which must be a vector), and all other dimensions must
 match :attr:`self`, or an error will be raised.
+
+.. note::
+    If :attr:`index` contains duplicate entries, multiple elements from
+    :attr:`tensor` will be copied to the same index of :attr:`self`. The result
+    is nondeterministic since it depends on which copy occurs last.
 
 Args:
     dim (int): dimension along which to index
@@ -2401,6 +2412,12 @@ add_docstr_all('movedim', r"""
 movedim(source, destination) -> Tensor
 
 See :func:`torch.movedim`
+""")
+
+add_docstr_all('moveaxis', r"""
+moveaxis(source, destination) -> Tensor
+
+See :func:`torch.moveaxis`
 """)
 
 add_docstr_all('mul', r"""
@@ -3363,6 +3380,13 @@ add_docstr_all('sort',
 sort(dim=-1, descending=False) -> (Tensor, LongTensor)
 
 See :func:`torch.sort`
+""")
+
+add_docstr_all('msort',
+               r"""
+msort() -> Tensor
+
+See :func:`torch.msort`
 """)
 
 add_docstr_all('argsort',
@@ -4330,33 +4354,6 @@ istft(n_fft, hop_length=None, win_length=None, window=None,
  center=True, normalized=False, onesided=True, length=None) -> Tensor
 
 See :func:`torch.istft`
-""")
-
-add_docstr_all('fft', r"""
-fft(signal_ndim, normalized=False) -> Tensor
-
-See :func:`torch.fft`
-""")
-
-add_docstr_all('ifft',
-               r"""
-ifft(signal_ndim, normalized=False) -> Tensor
-
-See :func:`torch.ifft`
-""")
-
-add_docstr_all('rfft',
-               r"""
-rfft(signal_ndim, normalized=False, onesided=True) -> Tensor
-
-See :func:`torch.rfft`
-""")
-
-add_docstr_all('irfft',
-               r"""
-irfft(signal_ndim, normalized=False, onesided=True, signal_sizes=None) -> Tensor
-
-See :func:`torch.irfft`
 """)
 
 add_docstr_all('det',

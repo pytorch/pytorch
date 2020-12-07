@@ -315,7 +315,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: exponential_
    .. automethod:: fix
    .. automethod:: fix_
-   .. automethod:: fft
    .. automethod:: fill_
    .. automethod:: flatten
    .. automethod:: flip
@@ -359,7 +358,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: igamma_
    .. automethod:: igammac
    .. automethod:: igammac_
-   .. automethod:: ifft
    .. automethod:: index_add_
    .. automethod:: index_add
    .. automethod:: index_copy_
@@ -371,10 +369,10 @@ view of a storage and defines numeric operations on it.
    .. automethod:: index_select
    .. automethod:: indices
       :noindex:
+   .. automethod:: inner
    .. automethod:: int
    .. automethod:: int_repr
    .. automethod:: inverse
-   .. automethod:: irfft
    .. automethod:: isclose
    .. automethod:: isfinite
    .. automethod:: isinf
@@ -461,6 +459,8 @@ view of a storage and defines numeric operations on it.
       :noindex:
    .. automethod:: mode
    .. automethod:: movedim
+   .. automethod:: moveaxis
+   .. automethod:: msort
    .. automethod:: mul
    .. automethod:: mul_
    .. automethod:: multiply
@@ -535,7 +535,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: resize_as_
    .. automethod:: retain_grad
       :noindex:
-   .. automethod:: rfft
    .. automethod:: roll
    .. automethod:: rot90
    .. automethod:: round

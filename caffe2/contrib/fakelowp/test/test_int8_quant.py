@@ -1,12 +1,12 @@
-
-
 # Must happen before importing caffe2.python.*
 import caffe2.python.fakelowp.init_shared_libs  # noqa
+import datetime
 import numpy as np
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 import caffe2.python.serialized_test.serialized_test_util as serial
+from hypothesis import settings
 
 workspace.GlobalInit(
     [
@@ -18,6 +18,7 @@ workspace.GlobalInit(
 )
 
 class QuantTest(serial.SerializedTestCase):
+    @settings(deadline=datetime.timedelta(seconds=10))
     def test_dequantize(self):
         pred_net = caffe2_pb2.NetDef()
         pred_net.name = "pred"
@@ -60,6 +61,7 @@ class QuantTest(serial.SerializedTestCase):
         Y_glow = workspace.FetchBlob("Y")
         np.testing.assert_equal(Y_ref, Y_glow)
 
+    @settings(deadline=datetime.timedelta(seconds=20))
     def test_quantize(self):
         pred_net = caffe2_pb2.NetDef()
         pred_net.name = "pred"
