@@ -1484,7 +1484,7 @@ TEST(LoopNest, ScheduleInlineThreeMixedSplit) {
   ASSERT_THROWS_WITH(l.computeInline(a->buf()), "compound indices");
 }
 
-// Make sure we don't cache random vars that are not being inlined.
+// Check that inlining works for output tensors too
 TEST(LoopNest, ScheduleInlineOutputTensors) {
   KernelScope kernel_scope;
   const int M = 4;
