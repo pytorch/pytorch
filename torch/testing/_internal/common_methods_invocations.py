@@ -22,7 +22,7 @@ from torch.testing._internal.common_utils import \
      random_symmetric_pd_matrix, make_nonzero_det,
      random_fullrank_matrix_distinct_singular_value, set_rng_seed,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
-     torch_to_numpy_dtype_dict, TEST_WITH_SLOW, TEST_MKL)
+     torch_to_numpy_dtype_dict, TEST_WITH_SLOW)
 
 if TEST_SCIPY:
     import scipy.special
