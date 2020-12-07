@@ -4346,7 +4346,11 @@ Compute ``self*log(other)`` so that ``0 * log(0)`` returns zero.
 Similar to SciPy's `scipy.special.xlogy`.
 
 .. math::
-    \text{out}_i = x_i * \log{{y_i}}
+    \text{out}_{i} = \begin{cases}
+        \text{NaN} & \text{if } \text{other}_{i} \eq \text{NaN} \\
+        0 & \text{if } \text{self}_{i} \eq 0.0 \\
+        x_i * \log{{y_i}} & \text{otherwise}
+    \end{cases}
 
 .. note::
     NaN in :attr:`other` is propagated even if value of :attr:`self` is 0.
@@ -4378,7 +4382,11 @@ Compute ``x*log(y)`` so that ``0 * log(0)`` returns zero.
 Similar to SciPy's `scipy.special.xlogy`.
 
 .. math::
-    \text{out}_i = x_i * \log{{y_i}}
+    \text{out}_{i} = \begin{cases}
+        \text{NaN} & \text{if } \text{other}_{i} \eq \text{NaN} \\
+        0 & \text{if } \text{self}_{i} \eq 0.0 \\
+        x_i * \log{{y_i}} & \text{otherwise}
+    \end{cases}
 
 .. note::
     NaN in :attr:`other` is propagated even if value of :attr:`self` is 0.
@@ -4395,7 +4403,7 @@ Example::
     >>> y = torch.tensor([3, 2, 1])
     >>> torch.xlogy(2, y)
     tensor([2.1972, 1.3863, 0.0000])
-""")
+""".format(**common_args))
 
 add_docstr(torch.logical_and,
            r"""
