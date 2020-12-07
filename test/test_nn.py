@@ -6883,10 +6883,10 @@ class TestNN(NNTestCase):
     def test_batchnorm_nhwc_cpu(self):
         def helper(self, size):
             channels = size[1]
-            input = torch.randint(1, 10, size, dtype=torch.float32, device='cpu', requires_grad=True)
+            input = torch.randn(size, dtype=torch.float32, device='cpu', requires_grad=True)
             input = input.contiguous(memory_format=torch.channels_last)
             input.retain_grad()
-            grad = torch.randint(1, 10, size, dtype=torch.float32, device='cpu')
+            grad = torch.randn(size, dtype=torch.float32, device='cpu')
             grad = grad.contiguous(memory_format=torch.channels_last)
             bn = nn.BatchNorm2d(channels).cpu().float()
             bn.weight.data.uniform_()
