@@ -89,10 +89,10 @@ def adam(params: List[Tensor],
             # Maintains the maximum of all 2nd moment running avg. till now
             torch.maximum(max_exp_avg_sq, exp_avg_sq, out=max_exp_avg_sq)
             # Use the max. for normalizing running avg. of gradient
-            denom = (max_exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(eps)
+            denom = max_exp_avg_sq.sqrt().add_(eps)
         else:
-            denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(eps)
+            denom = exp_avg_sq.sqrt().add_(eps)
 
-        step_size = lr / bias_correction1
+        step_size = lr *  math.sqrt(bias_correction2) / bias_correction1
 
         param.addcdiv_(exp_avg, denom, value=-step_size)
