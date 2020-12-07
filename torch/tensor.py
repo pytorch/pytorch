@@ -10,7 +10,7 @@ import torch._C as _C
 from torch._namedtensor_internals import (
     update_names, check_serializing_named_tensor, resolve_ellipsis,
     unzip_namedshape, single_ellipsis_index, is_ellipsis)
-from torch.overrides import has_torch_function, handle_torch_function
+from torch.overrides import has_torch_function, object_has_torch_function, handle_torch_function
 import torch.utils.hooks as hooks
 
 
@@ -21,7 +21,7 @@ def _wrap_type_error_to_not_implemented(f):
 
     @functools.wraps(f, assigned=assigned)
     def wrapped(*args, **kwargs):
-        if not all(type(t) is Tensor for t in args) and has_torch_function(args):
+        if has_torch_function(args):
             return handle_torch_function(wrapped, args, *args, **kwargs)
         try:
             return f(*args, **kwargs)
@@ -39,9 +39,8 @@ def _wrap_type_error_to_not_implemented(f):
 # otherwise, it will not show up in autocomplete.
 class Tensor(torch._C._TensorBase):
     def __deepcopy__(self, memo):
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.__deepcopy__, relevant_args, self, memo)
+        if object_has_torch_function(self):
+            return handle_torch_function(Tensor.__deepcopy__, (self,), self, memo)
         if not self.is_leaf:
             raise RuntimeError("Only Tensors created explicitly by the user "
                                "(graph leaves) support the deepcopy protocol at the moment")
@@ -80,9 +79,8 @@ class Tensor(torch._C._TensorBase):
             return new_tensor
 
     def __reduce_ex__(self, proto):
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.__reduce_ex__, relevant_args, self, proto)
+        if object_has_torch_function(self):
+            return handle_torch_function(Tensor.__reduce_ex__, (self,), self, proto)
         check_serializing_named_tensor(self)
         # See Note [Don't serialize hooks]
         torch.utils.hooks.warn_if_has_hooks(self)
@@ -148,9 +146,8 @@ class Tensor(torch._C._TensorBase):
             return (torch._utils._rebuild_tensor_v2, args)
 
     def __setstate__(self, state):
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.__setstate__, relevant_args, self, state)
+        if object_has_torch_function(self):
+            return handle_torch_function(Tensor.__setstate__, (self,), self, state)
         # Warning: this method is NOT called when you torch.load() a tensor;
         # that is managed by _rebuild_tensor_v2
         if not self.is_leaf:
@@ -168,9 +165,8 @@ class Tensor(torch._C._TensorBase):
         self.requires_grad, _, self._backward_hooks = state
 
     def __repr__(self):
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.__repr__, relevant_args, self)
+        if object_has_torch_function(self):
+            return handle_torch_function(Tensor.__repr__, (self,), self)
         # All strings are unicode in Python 3.
         return torch._tensor_str._str(self)
 
@@ -215,11 +211,10 @@ class Tensor(torch._C._TensorBase):
                 used to compute the attr::tensors. All the provided inputs must be leaf
                 Tensors.
         """
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
+        if object_has_torch_function(self):
             return handle_torch_function(
                 Tensor.backward,
-                relevant_args,
+                (self,),
                 self,
                 gradient=gradient,
                 retain_graph=retain_graph,
@@ -256,9 +251,8 @@ class Tensor(torch._C._TensorBase):
 
             >>> h.remove()  # removes the hook
         """
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.register_hook, relevant_args, self, hook)
+        if object_has_torch_function(self):
+            return handle_torch_function(Tensor.register_hook, (self,), self, hook)
         if not self.requires_grad:
             raise RuntimeError("cannot register a hook on a tensor that "
                                "doesn't require gradient")
@@ -324,9 +318,8 @@ class Tensor(torch._C._TensorBase):
 
     def retain_grad(self):
         r"""Enables .grad attribute for non-leaf Tensors."""
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.retain_grad, relevant_args, self)
+        if object_has_torch_function(self):
+            return handle_torch_function(Tensor.retain_grad, (self,), self)
         if not self.requires_grad:
             raise RuntimeError("can't retain_grad on Tensor that has requires_grad=False")
         if self.is_leaf:  # no-op for leaves
@@ -355,9 +348,8 @@ class Tensor(torch._C._TensorBase):
 
         This is always ``True`` for CUDA tensors.
         """
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.is_shared, relevant_args, self)
+        if object_has_torch_function(self):
+            return handle_torch_function(Tensor.is_shared, (self,), self)
         return self.storage().is_shared()
 
     def share_memory_(self):
@@ -366,17 +358,15 @@ class Tensor(torch._C._TensorBase):
         This is a no-op if the underlying storage is already in shared memory
         and for CUDA tensors. Tensors in shared memory cannot be resized.
         """
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.share_memory_, relevant_args, self)
+        if object_has_torch_function(self):
+            return handle_torch_function(Tensor.share_memory_, (self,), self)
         self.storage().share_memory_()
         return self
 
     def __reversed__(self):
         r"""Reverses the tensor along dimension 0."""
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.__reversed__, relevant_args, self)
+        if object_has_torch_function(self):
+            return handle_torch_function(Tensor.__reversed__, (self,), self)
         if self.dim() == 0:
             return self
         else:
@@ -384,17 +374,15 @@ class Tensor(torch._C._TensorBase):
 
     def norm(self, p="fro", dim=None, keepdim=False, dtype=None):
         r"""See :func:`torch.norm`"""
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.norm, relevant_args, self, p=p, dim=dim, keepdim=keepdim, dtype=dtype)
+        if object_has_torch_function(self):
+            return handle_torch_function(Tensor.norm, (self,), self, p=p, dim=dim, keepdim=keepdim, dtype=dtype)
         return torch.norm(self, p, dim, keepdim, dtype=dtype)
 
     def lu(self, pivot=True, get_infos=False):
         r"""See :func:`torch.lu`"""
         # If get_infos is True, then we don't need to check for errors and vice versa
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.lu, relevant_args, self, pivot=pivot, get_infos=get_infos)
+        if object_has_torch_function(self):
+            return handle_torch_function(Tensor.lu, (self,), self, pivot=pivot, get_infos=get_infos)
 
         if not torch._jit_internal.is_scripting():
             if self.requires_grad:
@@ -434,10 +422,9 @@ class Tensor(torch._C._TensorBase):
           This function changed signature at version 0.4.1. Calling with
           the previous signature may cause error or return incorrect result.
         """
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
+        if object_has_torch_function(self):
             return handle_torch_function(
-                Tensor.stft, relevant_args, self, n_fft, hop_length=hop_length,
+                Tensor.stft, (self,), self, n_fft, hop_length=hop_length,
                 win_length=win_length, window=window, center=center, pad_mode=pad_mode, normalized=normalized,
                 onesided=onesided, return_complex=return_complex
             )
@@ -450,10 +437,9 @@ class Tensor(torch._C._TensorBase):
               onesided: Optional[bool] = None, length: Optional[int] = None,
               return_complex: bool = False):
         r"""See :func:`torch.istft`"""
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
+        if object_has_torch_function(self):
             return handle_torch_function(
-                Tensor.istft, relevant_args, self, n_fft, hop_length=hop_length, win_length=win_length,
+                Tensor.istft, (self,), self, n_fft, hop_length=hop_length, win_length=win_length,
                 window=window, center=center, normalized=normalized, onesided=onesided, length=length,
                 return_complex=return_complex
             )
@@ -461,16 +447,15 @@ class Tensor(torch._C._TensorBase):
                            normalized, onesided, length, return_complex=return_complex)
 
     def resize(self, *sizes):
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.resize, relevant_args, self, *sizes)
+        if object_has_torch_function(self):
+            return handle_torch_function(Tensor.resize, (self,), self, *sizes)
         warnings.warn("non-inplace resize is deprecated")
         from torch.autograd._functions import Resize
         return Resize.apply(self, sizes)
 
     def resize_as(self, tensor):
         relevant_args = (self, tensor)
-        if type(self) is not Tensor and type(tensor) is not Tensor and has_torch_function(relevant_args):
+        if has_torch_function(relevant_args):
             return handle_torch_function(Tensor.resize_as, relevant_args, self, tensor)
         warnings.warn("non-inplace resize_as is deprecated")
         from torch.autograd._functions import Resize
@@ -479,9 +464,8 @@ class Tensor(torch._C._TensorBase):
     def split(self, split_size, dim=0):
         r"""See :func:`torch.split`
         """
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.split, relevant_args, self, split_size, dim=dim)
+        if object_has_torch_function(self):
+            return handle_torch_function(Tensor.split, (self,), self, split_size, dim=dim)
         if isinstance(split_size, int):
             return super(Tensor, self).split(split_size, dim)
         elif isinstance(split_size, Tensor):
@@ -498,10 +482,9 @@ class Tensor(torch._C._TensorBase):
 
         See :func:`torch.unique`
         """
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
+        if object_has_torch_function(self):
             return handle_torch_function(
-                Tensor.unique, relevant_args, self, sorted=sorted, return_inverse=return_inverse,
+                Tensor.unique, (self,), self, sorted=sorted, return_inverse=return_inverse,
                 return_counts=return_counts, dim=dim
             )
         return torch.unique(self, sorted=sorted, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
@@ -511,23 +494,22 @@ class Tensor(torch._C._TensorBase):
 
         See :func:`torch.unique_consecutive`
         """
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
+        if object_has_torch_function(self):
             return handle_torch_function(
-                Tensor.unique_consecutive, relevant_args, self, return_inverse=return_inverse,
+                Tensor.unique_consecutive, (self,), self, return_inverse=return_inverse,
                 return_counts=return_counts, dim=dim
             )
         return torch.unique_consecutive(self, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
 
     def __rsub__(self, other):
         relevant_args = (self, other)
-        if type(self) is not Tensor and type(other) is not Tensor and has_torch_function(relevant_args):
+        if has_torch_function(relevant_args):
             return handle_torch_function(Tensor.__rsub__, relevant_args, self, other)
         return _C._VariableFunctions.rsub(self, other)
 
     def __rdiv__(self, other):
         relevant_args = (self, other)
-        if type(self) is not Tensor and type(other) is not Tensor and has_torch_function(relevant_args):
+        if has_torch_function(relevant_args):
             return handle_torch_function(Tensor.__rdiv__, relevant_args, self, other)
         if self.dtype.is_floating_point or self.dtype.is_complex:
             return self.reciprocal() * other
@@ -540,16 +522,15 @@ class Tensor(torch._C._TensorBase):
     __pow__ = _C._TensorBase.pow
 
     def __format__(self, format_spec):
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.__format__, relevant_args, self, format_spec)
+        if object_has_torch_function(self):
+            return handle_torch_function(Tensor.__format__, (self,), self, format_spec)
         if self.dim() == 0:
             return self.item().__format__(format_spec)
         return object.__format__(self, format_spec)
 
     def __ipow__(self, other):  # type: ignore[misc]
         relevant_args = (self, other)
-        if type(self) is not Tensor and type(other) is not Tensor and has_torch_function(relevant_args):
+        if has_torch_function(relevant_args):
             return handle_torch_function(Tensor.__ipow__, relevant_args, self, other)
         return NotImplemented
 
@@ -570,9 +551,8 @@ class Tensor(torch._C._TensorBase):
     __abs__ = _C._TensorBase.abs
 
     def __len__(self):
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.__len__, relevant_args, self)
+        if object_has_torch_function(self):
+            return handle_torch_function(Tensor.__len__, (self,), self)
         if self.dim() == 0:
             raise TypeError("len() of a 0-d tensor")
         return self.shape[0]
@@ -584,9 +564,8 @@ class Tensor(torch._C._TensorBase):
         # (e.g., if you zip(*hiddens), the eager map will force all the
         # indexes of hiddens[0] before hiddens[1], while the generator
         # map will interleave them.)
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.__iter__, relevant_args, self)
+        if object_has_torch_function(self):
+            return handle_torch_function(Tensor.__iter__, (self,), self)
         if self.dim() == 0:
             raise TypeError('iteration over a 0-d tensor')
         if torch._C._get_tracing_state():
@@ -597,15 +576,13 @@ class Tensor(torch._C._TensorBase):
         return iter(self.unbind(0))
 
     def __hash__(self):
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.__hash__, relevant_args, self)
+        if object_has_torch_function(self):
+            return handle_torch_function(Tensor.__hash__, (self,), self)
         return id(self)
 
     def __dir__(self):
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.__dir__, relevant_args, self)
+        if object_has_torch_function(self):
+            return handle_torch_function(Tensor.__dir__, (self,), self)
         if self.is_quantized:
             warnings.warn('Only a small subset of methods are supported for quantized tensors.')
         tensor_methods = dir(self.__class__)
@@ -623,9 +600,8 @@ class Tensor(torch._C._TensorBase):
     __array_priority__ = 1000    # prefer Tensor ops over numpy ones
 
     def __array__(self, dtype=None):
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.__array__, relevant_args, self, dtype=dtype)
+        if object_has_torch_function(self):
+            return handle_torch_function(Tensor.__array__, (self,), self, dtype=dtype)
         if dtype is None:
             return self.numpy()
         else:
@@ -634,9 +610,8 @@ class Tensor(torch._C._TensorBase):
     # Wrap Numpy array again in a suitable tensor when done, to support e.g.
     # `numpy.sin(tensor) -> tensor` or `numpy.greater(tensor, 0) -> ByteTensor`
     def __array_wrap__(self, array):
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.__array_wrap__, relevant_args, self, array=array)
+        if object_has_torch_function(self):
+            return handle_torch_function(Tensor.__array_wrap__, (self,), self, array=array)
         if array.dtype == bool:
             # Workaround, torch has no built-in bool tensor
             array = array.astype('uint8')
@@ -649,9 +624,8 @@ class Tensor(torch._C._TensorBase):
             element (Tensor or scalar): element to be checked
                 for presence in current tensor"
         """
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.__contains__, relevant_args, self, element)
+        if object_has_torch_function(self):
+            return handle_torch_function(Tensor.__contains__, (self,), self, element)
         if isinstance(element, (torch.Tensor, Number)):
             # type hint doesn't understand the __contains__ result array
             return (element == self).any().item()  # type: ignore[union-attr]
@@ -668,10 +642,9 @@ class Tensor(torch._C._TensorBase):
         See:
         https://numba.pydata.org/numba-doc/latest/cuda/cuda_array_interface.html
         """
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
+        if object_has_torch_function(self):
             # TODO mypy doesn't support @property, see: https://github.com/python/mypy/issues/6185
-            return handle_torch_function(Tensor.__cuda_array_interface__.__get__, relevant_args, self)  # type: ignore[attr-defined]
+            return handle_torch_function(Tensor.__cuda_array_interface__.__get__, (self,), self)  # type: ignore[attr-defined]
 
         # raise AttributeError for unsupported tensors, so that
         # hasattr(cpu_tensor, "__cuda_array_interface__") is False.
@@ -764,9 +737,8 @@ class Tensor(torch._C._TensorBase):
             The named tensor API is experimental and subject to change.
 
         """
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.refine_names, relevant_args, self, *names)
+        if object_has_torch_function(self):
+            return handle_torch_function(Tensor.refine_names, (self,), self, *names)
         names = resolve_ellipsis(names, self.names, 'refine_names')
         return super(Tensor, self).refine_names(names)
 
@@ -806,9 +778,8 @@ class Tensor(torch._C._TensorBase):
             The named tensor API is experimental and subject to change.
 
         """
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.align_to, relevant_args, self, *names)
+        if object_has_torch_function(self):
+            return handle_torch_function(Tensor.align_to, (self,), self, *names)
         ellipsis_idx = single_ellipsis_index(names, 'align_to')
         if ellipsis_idx is None:
             return super(Tensor, self).align_to(names)
@@ -842,9 +813,8 @@ class Tensor(torch._C._TensorBase):
         .. warning::
             The named tensor API is experimental and subject to change.
         """
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.unflatten, relevant_args, self, dim, sizes)
+        if object_has_torch_function(self):
+            return handle_torch_function(Tensor.unflatten, (self,), self, dim, sizes)
 
         if not sizes:
             raise RuntimeError("unflatten: sizes must be non-empty")
@@ -858,9 +828,8 @@ class Tensor(torch._C._TensorBase):
     def rename_(self, *names, **rename_map):
         """In-place version of :meth:`~Tensor.rename`."""
 
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.rename_, relevant_args, self, *names, **rename_map)
+        if object_has_torch_function(self):
+            return handle_torch_function(Tensor.rename_, (self,), self, *names, **rename_map)
 
         # Note [rename_ / rename API]
         # The Python API for these is different from the C++ API. In Python:
@@ -903,17 +872,15 @@ class Tensor(torch._C._TensorBase):
             The named tensor API is experimental and subject to change.
 
         """
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.rename, relevant_args, self, *names, **rename_map)
+        if object_has_torch_function(self):
+            return handle_torch_function(Tensor.rename, (self,), self, *names, **rename_map)
 
         # See Note [rename_ / rename API]
         return update_names(self, names, rename_map, inplace=False)
 
     def _update_names(self, names, inplace):
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor._update_names, relevant_args, self, names, inplace)
+        if object_has_torch_function(self):
+            return handle_torch_function(Tensor._update_names, (self,), self, names, inplace)
 
         # See Note [rename_ / rename API]
         if inplace:
@@ -929,10 +896,9 @@ class Tensor(torch._C._TensorBase):
         The attribute will then contain the gradients computed and future calls to
         :func:`backward` will accumulate (add) gradients into it.
         """
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
+        if object_has_torch_function(self):
             # TODO mypy doesn't support @property, see: https://github.com/python/mypy/issues/6185
-            return handle_torch_function(Tensor.grad.__get__, relevant_args, self)  # type: ignore[attr-defined]
+            return handle_torch_function(Tensor.grad.__get__, (self,), self)  # type: ignore[attr-defined]
 
         if self.requires_grad and not hasattr(self, "retains_grad") and not self.is_leaf and self._grad is None:
             warnings.warn("The .grad attribute of a Tensor that is not a leaf Tensor is being accessed. Its .grad "
@@ -944,18 +910,16 @@ class Tensor(torch._C._TensorBase):
 
     @grad.setter
     def grad(self, new_grad):
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
+        if object_has_torch_function(self):
             # TODO mypy doesn't support @property, see: https://github.com/python/mypy/issues/6185
-            return handle_torch_function(Tensor.grad.__set__, relevant_args, self, new_grad)  # type: ignore[attr-defined]
+            return handle_torch_function(Tensor.grad.__set__, (self,), self, new_grad)  # type: ignore[attr-defined]
         self._grad = new_grad
 
     @grad.deleter
     def grad(self):
-        relevant_args = (self,)
-        if type(self) is not Tensor and has_torch_function(relevant_args):
+        if object_has_torch_function(self):
             # TODO mypy doesn't support @property, see: https://github.com/python/mypy/issues/6185
-            return handle_torch_function(Tensor.grad.__delete__, relevant_args, self)  # type: ignore[attr-defined]
+            return handle_torch_function(Tensor.grad.__delete__, (self,), self)  # type: ignore[attr-defined]
         del self._grad
 
     @classmethod

@@ -628,6 +628,8 @@ static PyMethodDef TorchMethods[] = {
   {"_is_xnnpack_enabled", THPModule_isEnabledXNNPACK, METH_NOARGS, nullptr},
   {"_is_torch_function_enabled", THPModule_isEnabledTorchFunction, METH_NOARGS, nullptr},
   {"_disabled_torch_function_impl", THPModule_disable_torch_function, METH_VARARGS, nullptr},
+  {"_has_torch_function", THPModule_has_torch_function, METH_O, nullptr},
+  {"_object_has_torch_function", THPModule_object_has_torch_function, METH_O, nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 

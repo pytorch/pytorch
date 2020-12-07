@@ -17,6 +17,28 @@ namespace torch {
   void set_disabled_torch_function_impl(PyObject* value) {
     disabled_torch_function = value;
   }
+
+  /*
+   * Reference: https://github.com/numpy/numpy/blob/f4c497c768e0646df740b647782df463825bfd27/numpy/core/src/common/get_attr_string.h#L42
+   *
+   * Specialized, stripped down version of PyObject_FastGetAttrString, which is
+   * itself a stripped down version of PyObject_GetAttrString.
+  */
+  bool fast_has_torch_function(PyObject *obj) {
+    PyTypeObject *tp = Py_TYPE(obj);
+
+    // NOLINTNEXTLINE(modernize-use-nullptr)
+    if (tp->tp_getattr != NULL) {
+        auto res = (*tp->tp_getattr)(obj, "__torch_function__");
+
+        // NOLINTNEXTLINE(modernize-use-nullptr)
+        if (res == NULL) {
+          PyErr_Clear();
+        }
+        return res == disabled_torch_function;
+    }
+    return false;
+  }
 }
 
 typedef struct {
@@ -124,4 +146,30 @@ PyObject* THPModule_disable_torch_function(PyObject *self, PyObject *a) {
   torch::enable_torch_function = old_value;
   return result;
   END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_has_torch_function(PyObject*, PyObject *arg) {
+  PyObject* args(PySequence_Fast(arg, "expected a sequence"));
+  if (!args || !torch::torch_function_enabled()) Py_RETURN_FALSE;
+
+  auto n = PySequence_Fast_GET_SIZE(args);
+  for (Py_ssize_t i = 0; i < n; i++) {
+    PyObject* obj = PySequence_Fast_GET_ITEM(args, i);
+    if (!THPVariable_CheckExact(obj) &&
+        torch::fast_has_torch_function(obj))
+      Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+}
+
+PyObject* THPModule_object_has_torch_function(PyObject*, PyObject *obj) {
+  // Special case `THPModule_has_torch_function` for the single arg case.
+
+  if (
+    !THPVariable_CheckExact(obj) &&
+    torch::torch_function_enabled() &&
+    torch::fast_has_torch_function(obj)
+  ) Py_RETURN_TRUE;
+
+  Py_RETURN_FALSE;
 }

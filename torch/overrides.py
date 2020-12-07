@@ -28,7 +28,7 @@ import types
 from typing import Dict, Set, List, Any, Callable, Iterable
 
 import torch
-from torch._C import _is_torch_function_enabled, _disabled_torch_function_impl
+from torch._C import _has_torch_function, _object_has_torch_function, _add_docstr
 
 __all__ = [
     "get_ignored_functions",
@@ -1182,33 +1182,36 @@ def handle_torch_function(
                     '__torch_function__: {}'
                     .format(func_name, [type(arg) for arg in overloaded_args]))
 
-def has_torch_function(relevant_args: Iterable[Any]) -> bool:
-    """Check for __torch_function__ implementations in the elements of an iterable.
-
-    Considers exact ``Tensor`` s non-dispatchable.
-
+has_torch_function = _add_docstr(
+    _has_torch_function,
+    r"""Check for __torch_function__ implementations in the elements of an iterable.
+    Considers exact ``Tensor`` s and ``Parameter`` s non-dispatchable.
     Arguments
     ---------
     relevant_args : iterable
         Iterable or aguments to check for __torch_function__ methods.
-
     Returns
     -------
     bool
         True if any of the elements of relevant_args have __torch_function__
         implementations, False otherwise.
-
     See Also
     ________
     torch.is_tensor_like
         Checks if something is a Tensor-like, including an exact ``Tensor``.
     """
-    return _is_torch_function_enabled() and any(
-        type(a) is not torch.Tensor and
-        getattr(a, '__torch_function__', _disabled_torch_function_impl)
-        is not _disabled_torch_function_impl
-        for a in relevant_args
-    )
+)
+
+object_has_torch_function = _add_docstr(
+    _object_has_torch_function,
+    r"""Special case of `has_torch_function` for single inputs.
+    Instead of:
+      `has_torch_function((t,))`
+    call:
+      `object_has_torch_function(t)`
+    which skips unnecessary packing and unpacking work.
+    """
+)
 
 @functools.lru_cache(None)
 def get_overridable_functions() -> Dict[Any, List[Callable]]:
