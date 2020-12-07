@@ -13,6 +13,12 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
+
+// For the record I don't think this is a correct pimpl idiom.
+// Including Impl header in interface header defeats the purpose
+// because you can't change Impl private members without forcing
+// everything that included the interface to rebuild.
+// Impl should be forward-declared in the interface header instead.
 #include <c10/core/GeneratorImpl.h>
 
 /**
