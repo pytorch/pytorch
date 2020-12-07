@@ -2313,11 +2313,12 @@ def _var_mean(g, input, dim, unbiased, keepdim):
         num_elements = numel(g, input)
     else:
         mean = g.op("ReduceMean", input, axes_i=dim, keepdims_i=keepdim)
+        t_mean = g.op("ReduceMean", input, axes_i=dim, keepdims_i=1)
         redudced_dims = g.op("Shape", input)
         # dim could contain one or multiple dimensions
         redudced_dims = g.op("Gather", redudced_dims, g.op("Constant", value_t=torch.tensor(dim)), axis_i=0)
         num_elements = g.op("ReduceProd", redudced_dims, keepdims_i=0)
-    sub_v = g.op("Sub", input, mean)
+    sub_v = g.op("Sub", input, t_mean)
     sqr_sub = g.op("Mul", sub_v, sub_v)
     keepdim_mean = 0 if dim is None else keepdim
     var = g.op("ReduceMean", sqr_sub, axes_i=dim, keepdims_i=keepdim_mean)

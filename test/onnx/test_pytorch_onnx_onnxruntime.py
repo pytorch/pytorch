@@ -1997,6 +1997,31 @@ class TestONNXRuntime(unittest.TestCase):
         model = VarianceUnbiased()
         self.run_test(model, x)
 
+    def test_var_mean_mixed_dims(self):
+        class ReverseDims(torch.nn.Module):
+            def forward(self, input):
+                return torch.var_mean(input, dim=(2, 1), unbiased=False)
+
+        x = torch.randn(2, 3, 4)
+        model = ReverseDims()
+        self.run_test(model, x)
+
+        class SkipDims(torch.nn.Module):
+            def forward(self, input):
+                return torch.var_mean(input, dim=(0, 2), unbiased=False)
+        
+        x = torch.randn(2, 3, 4)
+        model = SkipDims()
+        self.run_test(model, x)
+
+        class NonZeroDims(torch.nn.Module):
+            def forward(self, input):
+                return torch.var_mean(input, dim=(1, 2), unbiased=False)
+        
+        x = torch.randn(2, 3, 4)
+        model = NonZeroDims()
+        self.run_test(model, x)
+
     def test_var_mean_keepdim(self):
         class Variance(torch.nn.Module):
             def forward(self, input):
