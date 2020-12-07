@@ -632,25 +632,13 @@ op_db: List[Any] = [
                        # Reference: https://github.com/pytorch/pytorch/pull/47293#issuecomment-721774436
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.bfloat16]),
-                       # RuntimeError: sqrt does not support automatic differentiation for outputs with complex dtype.
-                       SkipInfo('TestGradients', 'test_fn_grad',
-                                dtypes=[torch.cdouble]),
-                       SkipInfo('TestGradients', 'test_fn_gradgrad',
-                                dtypes=[torch.cdouble]),
-                       SkipInfo('TestGradients', 'test_method_grad',
-                                dtypes=[torch.cdouble]),
-                       SkipInfo('TestGradients', 'test_method_gradgrad',
-                                dtypes=[torch.cdouble]),
-                       SkipInfo('TestGradients', 'test_inplace_grad',
-                                dtypes=[torch.cdouble]),
-                       SkipInfo('TestGradients', 'test_inplace_gradgrad',
-                                dtypes=[torch.cdouble]),
                        SkipInfo('TestCommon', 'test_variant_consistency_eager',
                                 dtypes=[torch.cfloat, torch.cdouble]),
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 dtypes=[torch.cfloat, torch.cdouble])),
                    promotes_integers_to_float=True,
-                   handles_complex_extremals=False),
+                   handles_complex_extremals=False,
+                   test_complex_grad=False),
 ]
 
 if TEST_SCIPY:
