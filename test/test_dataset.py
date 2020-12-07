@@ -26,7 +26,7 @@ class TestIterableDatasetBasic(TestCase):
         try:
             self.temp_dir.cleanup()
         except Exception as e:
-            warnings.warn("TestIterableDatasetBasic was not able to cleanup temp dir due to ", e)
+            warnings.warn("TestIterableDatasetBasic was not able to cleanup temp dir due to {}".format(str(e)))
 
     def test_listdirfiles_iterable_dataset(self):
         temp_dir = self.temp_dir.name
