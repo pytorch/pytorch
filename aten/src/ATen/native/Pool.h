@@ -15,6 +15,12 @@ using max_pool2d_backward_fn = void(*)(Tensor& grad_input, const Tensor& grad_ou
 DECLARE_DISPATCH(max_pool2d_fn, max_pool2d_kernel);
 DECLARE_DISPATCH(max_pool2d_backward_fn, max_pool2d_backward_kernel);
 
+// averge pooling has same signature for forward and backward
+using avg_pool2d_fn = void(*)(Tensor& output, const Tensor& input, int kW, int kH,
+    int dW, int dH, int padW, int padH, bool count_include_pad, c10::optional<int64_t> divisor_override);
+DECLARE_DISPATCH(avg_pool2d_fn, avg_pool2d_kernel);
+DECLARE_DISPATCH(avg_pool2d_fn, avg_pool2d_backward_kernel);
+
 namespace {
 
 template <typename dest_t, typename src_t>
