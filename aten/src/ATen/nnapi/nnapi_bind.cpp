@@ -1,6 +1,6 @@
 #include <vector>
 
-#include <torch/script.h>
+#include <ATen/ATen.h>
 #include <torch/custom_class.h>
 
 #include <ATen/nnapi/nnapi_wrapper.h>
@@ -52,8 +52,8 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
   }
 
   void init(
-      torch::Tensor serialized_model_tensor,
-      std::vector<torch::Tensor> parameter_buffers) {
+      at::Tensor serialized_model_tensor,
+      std::vector<at::Tensor> parameter_buffers) {
     TORCH_CHECK(!model_, "Attempted to re-initialize NnapiCompilation.");
 
     load_platform_library();
@@ -105,8 +105,8 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
   }
 
   void run(
-      std::vector<torch::Tensor> inputs,
-      std::vector<torch::Tensor> outputs) {
+      std::vector<at::Tensor> inputs,
+      std::vector<at::Tensor> outputs) {
     ANeuralNetworksExecution* execution;
     check_nnapi->Execution_create(compilation_.get(), &execution);
     ExecutionPtr execution_unique_ptr(execution);
@@ -140,7 +140,7 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
     }
 
     check_nnapi->Execution_compute(execution);
-    
+
     // TODO: Maybe skip this for fixed-size outputs?
     for (size_t i = 0; i < outputs.size(); i++) {
       auto& t = outputs[i];
@@ -154,7 +154,7 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
     }
   }
 
-  static void get_operand_type(const Tensor& t, ANeuralNetworksOperandType* operand, std::vector<uint32_t>* dims) {
+  static void get_operand_type(const at::Tensor& t, ANeuralNetworksOperandType* operand, std::vector<uint32_t>* dims) {
     operand->dimensionCount = t.dim();
     TORCH_CHECK(operand->dimensionCount == t.dim()); // Check for overflow.
     dims->resize(t.dim());
