@@ -370,7 +370,6 @@
   structured_delegate: add.out
   variants: function, method
   dispatch:
-    CPU, CUDA: add
     SparseCPU, SparseCUDA: add_sparse
     MkldnnCPU: mkldnn_add
 
@@ -379,7 +378,6 @@
   variants: method
   structured_delegate: add.out
   dispatch:
-    CPU, CUDA: add_
     SparseCPU, SparseCUDA: add_sparse_
     MkldnnCPU: mkldnn_add_
 
@@ -2824,20 +2822,22 @@
 - func: mul.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
+  structured_delegate: mul.out
   dispatch:
-    CPU, CUDA: mul
     SparseCPU, SparseCUDA: mul_sparse
     MkldnnCPU: mkldnn_mul
 
 - func: mul_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
+  structured_delegate: mul.out
   dispatch:
-    CPU, CUDA: mul_
     SparseCPU, SparseCUDA: mul_sparse_
     MkldnnCPU: mkldnn_mul_
 
 - func: mul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: mul_out
     SparseCPU: mul_out_sparse_cpu

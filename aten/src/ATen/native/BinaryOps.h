@@ -26,6 +26,7 @@ inline void sub_check(const Tensor& self, const Tensor& other) {
 }
 
 using structured_binary_fn_alpha = void(*)(TensorIteratorBase&, Scalar alpha);
+using structured_binary_fn = void(*)(TensorIteratorBase&);
 
 using binary_fn_alpha = void(*)(TensorIterator&, Scalar alpha);
 using binary_fn_beta = void(*)(TensorIterator&, double beta);
@@ -36,7 +37,7 @@ using binary_clamp_fn_alpha =
 DECLARE_DISPATCH(structured_binary_fn_alpha, add_stub);
 DECLARE_DISPATCH(binary_clamp_fn_alpha, add_clamp_stub);
 DECLARE_DISPATCH(binary_fn_alpha, sub_stub);
-DECLARE_DISPATCH(binary_fn, mul_stub);
+DECLARE_DISPATCH(structured_binary_fn, mul_stub);
 DECLARE_DISPATCH(binary_fn, div_stub);
 DECLARE_DISPATCH(binary_fn, remainder_stub);
 DECLARE_DISPATCH(binary_fn, atan2_stub);

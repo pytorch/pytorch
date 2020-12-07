@@ -420,7 +420,7 @@ bool test_mul() {
   {                                                                           \
     auto X1 = torch::rand(a1, at::TensorOptions(at::kCPU).dtype(at::kFloat)); \
     auto X2 = torch::rand(a2, at::TensorOptions(at::kCPU).dtype(at::kFloat)); \
-    auto Y1 = at::native::mul(X1, X2);                                        \
+    auto Y1 = at::mul(X1, X2);                                        \
     auto MX1 = X1.metal();                                                    \
     auto MX2 = X2.metal();                                                    \
     auto Y2 = at::native::metal::mpscnn::mul(MX1, MX2).cpu();                 \

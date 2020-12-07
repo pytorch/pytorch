@@ -97,7 +97,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::mul, aten_mul, [](Node* n) -> SROperator {
     }
     auto out_t = p_node->Output(0, reg).toTensor();
     out_t.resize_({0});
-    at::native::mul_out(out_t, in0_t, in1_t);
+    at::mul_out(out_t, in0_t, in1_t);
   };
 });
 

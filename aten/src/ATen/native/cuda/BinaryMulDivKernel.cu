@@ -64,7 +64,7 @@ void div_kernel_cuda(TensorIterator& iter) {
   }
 }
 
-void mul_kernel_cuda(TensorIterator& iter) {
+void mul_kernel_cuda(TensorIteratorBase& iter) {
   if (!isIntegralType(iter.common_dtype(), /*includeBool*/ true) &&
     (iter.is_cpu_scalar(1) || iter.is_cpu_scalar(2))) {
     //if common dtype is half the scalar constant can overflow in half precision, and yet the result can
