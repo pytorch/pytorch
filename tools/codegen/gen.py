@@ -265,6 +265,19 @@ void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
 """
 
     def gen_structured_class_set_output_body(self, k: SchemaKind) -> str:
+        if self.dispatch_key == 'CUDA':
+            maybe_set_guard = """
+auto current_device = guard_.current_device();
+if (C10_UNLIKELY(current_device.has_value())) {
+  TORCH_INTERNAL_ASSERT(*current_device == options.device(),
+    "structured kernels don't support multi-device outputs");
+} else {
+  guard_.set_device(options.device());
+}
+"""
+        else:
+            maybe_set_guard = ''
+
         if k is SchemaKind.functional:
             if self.dispatch_key == "Meta":
                 return """
@@ -286,6 +299,7 @@ if (strides.empty()) {
                 else:
                     raise AssertionError("unsupported dispatch key")
                 return f"""
+{maybe_set_guard}
 if (strides.empty()) {{
     outputs_[output_idx] = {empty_impl}(sizes, {expanded_topts}, options.memory_format_opt());
 }} else {{
@@ -293,16 +307,17 @@ if (strides.empty()) {{
 }}
 """
         elif k is SchemaKind.inplace:
-            return "// TODO: consistency check?"
+            return maybe_set_guard
         elif k is SchemaKind.out:
-            return """
+            return f"""
+{maybe_set_guard}
 at::native::resize_output(outputs_[output_idx], sizes);
-if (!strides.empty()) {
+if (!strides.empty()) {{
     TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
     at::native::as_strided_(outputs_[output_idx], sizes, strides);
-} else if (options.memory_format_opt().has_value()) {
+}} else if (options.memory_format_opt().has_value()) {{
     outputs_[output_idx].get().unsafeGetTensorImpl()->empty_tensor_restride(*options.memory_format_opt());
-}
+}}
 """
         else:
             assert_never(k)
@@ -333,6 +348,11 @@ if (!strides.empty()) {
             assert len(f.func.arguments.out) == 1, "multi-out structured not supported yet"
             output_type = "std::reference_wrapper<Tensor>"
 
+        if self.dispatch_key == 'CUDA':
+            guard_field = 'c10::cuda::OptionalCUDAGuard guard_;'
+        else:
+            guard_field = ''
+
         return f"""
 struct {class_name} final : public {parent_class} {{
     {self.gen_structured_class_ctor(k, class_name)}
@@ -341,6 +361,7 @@ struct {class_name} final : public {parent_class} {{
         return outputs_[output_idx];
     }}
     std::array<{output_type}, {len(f.func.returns)}> outputs_;
+    {guard_field}
 }};
 """
 
@@ -405,21 +426,6 @@ struct {class_name} final : public {parent_class} {{
                 else:
                     impl_call = f"op.impl({out_expr}, {functional_exprs});"
 
-                device_guard = ""
-                if is_generic_dispatch_key(self.dispatch_key) or is_cuda_dispatch_key(self.dispatch_key):
-                    # TODO: avoid copypasting the computation of self_args,
-                    # candidate_args and device_of
-                    self_args = (a for a in f.func.arguments.positional if a.name == "self")
-                    candidate_args = itertools.chain(self_args, f.func.arguments.out, f.func.arguments.positional)
-                    device_of = next((f'{a.name}' for a in candidate_args if a.type.is_tensor_like()), None)
-
-                    device_guard = ''
-                    if f.device_guard and device_of is not None:
-                        # TODO: Use OptionalCUDAGuard when possible
-                        device_guard = f"const OptionalDeviceGuard device_guard(device_of({device_of}));"
-                    # TODO: figure out what to do about structured kernels and
-                    # factory functions
-
                 # For an overview of what this template code looks like, see
                 # https://github.com/pytorch/rfcs/pull/9
                 return f"""\
@@ -431,7 +437,6 @@ struct {class_name} final : public {parent_class} {{
 )}
 
 {sig.defn()} {{
-    {device_guard}
     {op_init}
     op.meta({functional_exprs});
     {impl_call}
@@ -1231,11 +1236,13 @@ def main() -> None:
     cuda_fm = make_file_manager(options.install_dir)
 
     extra_cuda_headers = '''\
+#include <c10/cuda/CUDAGuard.h>
 #include <ATen/cuda/ATenCUDAGeneral.h>
 #include <ATen/cuda/CUDADevice.h>
 #include <ATen/cuda/CUDAContext.h>'''
     if options.rocm:
         extra_cuda_headers = '''\
+#include <c10/hip/HIPGuard.h>
 #include <ATen/hip/ATenHIPGeneral.h>
 #include <ATen/hip/HIPDevice.h>
 #include <ATen/hip/HIPContext.h>'''
