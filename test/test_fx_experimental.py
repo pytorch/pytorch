@@ -1,5 +1,6 @@
 import torch
 import unittest
+import sys
 from typing import Dict
 from torch.fx.symbolic_trace import symbolic_trace
 from torch.fx.graph_module import GraphModule
@@ -139,6 +140,26 @@ class TestFXExperimental(JitTestCase):
         dag = ret.dag
         self.assertEqual(traced(a, b), module_with_submodules(a, b))
         assert dag.nodes[0].logical_device_ids == [0]
+
+    def test_lack_of_devices(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, a, b):
+                return a + b
+
+        m = TestModule()
+        traced = symbolic_trace(m)
+        a = torch.rand(4)
+        b = torch.rand(4)
+        graph_manipulation.get_size_of_all_nodes(traced, [a, b])
+        partitioner = Partitioner()
+        devices = [Device("dev_0", 4, 0), Device("dev_1", 4, 1)]
+        partitioner_config = PartitionerConfig(devices, PartitionMode.size_based)
+        catch_runtime_error = False
+        try:
+            ret = partitioner.partition_graph(traced, m, partitioner_config)
+        except RuntimeError:
+            catch_runtime_error = True
+        assert catch_runtime_error
 
     def test_partition_node_manipulation(self):
         class TestModule(torch.nn.Module):
@@ -727,6 +748,37 @@ terrible spacing
             return torch.relu(x)
 
         traced = symbolic_trace_with_rewrite(foo)
+
+    def test_to_folder(self):
+        class Test(torch.nn.Module):
+            def __init__(self):
+                super(Test, self).__init__()
+                self.W = torch.nn.Parameter(torch.randn(2))
+                self.seq = torch.nn.Sequential(torch.nn.BatchNorm1d(2, 2))
+                self.linear = torch.nn.Linear(2, 2)
+                self.attr = torch.randn(2)
+                self.register_buffer('attr2', torch.randn(2))
+
+            def forward(self, x):
+                return self.linear(self.seq(self.W + self.attr + self.attr2 + x))
+
+        mod = symbolic_trace(Test())
+        module_name = 'Foo'
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_dir = Path(tmp_dir)
+            mod.to_folder(tmp_dir, module_name)
+            # Recipe taken from here:
+            # https://docs.python.org/3/library/importlib.html#importing-a-source-file-directly
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(module_name, tmp_dir / '__init__.py')
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = module
+            spec.loader.exec_module(module)
+            t = torch.randn(2, 2)
+            self.assertEqual(module.Foo()(t), mod(t))
+
 
 
 if __name__ == "__main__":
