@@ -2503,6 +2503,12 @@ class TestBinaryUfuncs(TestCase):
     @dtypes(*product(torch.testing.get_all_dtypes(include_complex=False, include_bfloat16=False),
                      torch.testing.get_all_dtypes(include_complex=False, include_bfloat16=False)))
     def test_xlogy(self, device, dtypes):
+        def out_variant_helper(torch_fn, x, y):
+            expected = torch_fn(x, y)
+            out = torch.empty_like(expected)
+            torch_fn(x, y, out=out)
+            self.assertEqual(expected, out)
+
         x_dtype, y_dtype = dtypes
 
         # Tensor-Tensor Test (tensor of same and different shape)
@@ -2516,6 +2522,9 @@ class TestBinaryUfuncs(TestCase):
         self.compare_with_numpy(torch_fn, reference_fn, x, exact_dtype=False)
         self.compare_with_numpy(torch_fn, reference_fn, y, exact_dtype=False)
         self.compare_with_numpy(torch_fn, reference_fn, z, exact_dtype=False)
+        out_variant_helper(torch.xlogy, x, x)
+        out_variant_helper(torch.xlogy, x, y)
+        out_variant_helper(torch.xlogy, x, z)
 
         # Scalar-Tensor Test
         torch_fn = partial(torch.xlogy, 3.14)
@@ -2524,19 +2533,24 @@ class TestBinaryUfuncs(TestCase):
         self.compare_with_numpy(torch_fn, reference_fn, x, exact_dtype=False)
         self.compare_with_numpy(torch_fn, reference_fn, y, exact_dtype=False)
         self.compare_with_numpy(torch_fn, reference_fn, z, exact_dtype=False)
+        out_variant_helper(torch.xlogy, 3.14, x)
+        out_variant_helper(torch.xlogy, 3.14, y)
+        out_variant_helper(torch.xlogy, 3.14, z)
 
         # Special Values Tensor-Tensor
-        t = torch.tensor([1., 2., float('inf'), -float('inf'), float('nan')], device=device)
+        t = torch.tensor([0., 1., 2., float('inf'), -float('inf'), float('nan')], device=device)
         zeros = torch.tensor(5, dtype=y_dtype, device=device)
 
         torch_fn = partial(torch.xlogy, zeros)
         reference_fn = partial(scipy.special.xlogy, zeros.cpu().numpy())
         self.compare_with_numpy(torch_fn, reference_fn, t, exact_dtype=False)
+        out_variant_helper(torch.xlogy, zeros, t)
 
         # Special Values Scalar-Tensor
         torch_fn = partial(torch.xlogy, 0)
         reference_fn = partial(scipy.special.xlogy, 0)
         self.compare_with_numpy(torch_fn, reference_fn, t, exact_dtype=False)
+        out_variant_helper(torch.xlogy, 0, t)
 
     def test_xlogy_exceptions(self, device):
         for dtype in torch.testing.get_all_complex_dtypes():
@@ -2548,6 +2562,12 @@ class TestBinaryUfuncs(TestCase):
         y = torch.ones(2, 4, device=device)
         with self.assertRaisesRegex(RuntimeError, "must match the size of tensor b"):
             torch.xlogy(x, y)
+
+        for dtype in torch.testing.get_all_int_dtypes():
+            x = torch.ones(3, device=device, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError,
+                                        "can't be cast to the desired output type"):
+                torch.xlogy(x, 1, out=torch.empty_like(x))
 
 tensor_binary_ops = [
     '__lt__', '__le__',
