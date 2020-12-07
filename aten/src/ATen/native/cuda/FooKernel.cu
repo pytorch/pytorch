@@ -325,27 +325,31 @@ Tensor foo_cuda(const Tensor& self, const Tensor& other, Scalar alpha_scalar) {
   // Creates functor arg
   // TODO: refactor with dispatch macro?
   // TODO: support float or double dynamically
-  FooFunctor<float> my_functor{alpha_scalar.to<float>()};
-  bool dynamic_casting = needs_dynamic_casting<FooFunctor<float>>::check(iter);
 
-  JiteratorKey key = construct_jiterator_key(iter.common_dtype(), dynamic_casting);
-  c10::optional<CUfunction> maybe_function = get_jitted_function(foo_cache, key);
-  CUfunction function;
-  if (maybe_function) {
-    std::cout << "found function" << std::endl;
-    function = *maybe_function;
-  } else {
-    std::cout << "jitting function" << std::endl;
-    // TODO: make kernel name generic
-    // Note: even though code is generated on an iter that can potentially
-    // be split, the properties of the iter that are used for codegen
-    // won't change if it is split
-    auto code = generate_code(iter, dynamic_casting);
-//    std::cout << "code " << code << "\n";
-    const std::string kernel_name{"FooFunctor_kernel"};
-    function = jit_pwise_function(foo_cache, key, code, kernel_name);
-  }
-  prepare_args_and_launch(function, iter, my_functor, dynamic_casting);
+
+  AT_DISPATCH_ALL_TYPES(iter.common_dtype(), "foo", [&]() {
+    FooFunctor<scalar_t> my_functor{alpha_scalar.to<scalar_t>()};
+    bool dynamic_casting = needs_dynamic_casting<FooFunctor<scalar_t>>::check(iter);
+
+    JiteratorKey key = construct_jiterator_key(iter.common_dtype(), dynamic_casting);
+    c10::optional<CUfunction> maybe_function = get_jitted_function(foo_cache, key);
+    CUfunction function;
+    if (maybe_function) {
+      std::cout << "found function" << std::endl;
+      function = *maybe_function;
+    } else {
+      std::cout << "jitting function" << std::endl;
+      // TODO: make kernel name generic
+      // Note: even though code is generated on an iter that can potentially
+      // be split, the properties of the iter that are used for codegen
+      // won't change if it is split
+      auto code = generate_code(iter, dynamic_casting);
+  //    std::cout << "code " << code << "\n";
+      const std::string kernel_name{"FooFunctor_kernel"};
+      function = jit_pwise_function(foo_cache, key, code, kernel_name);
+    }
+    prepare_args_and_launch(function, iter, my_functor, dynamic_casting);
+  });
   return iter.output();
 }
 
