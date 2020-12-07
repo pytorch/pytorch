@@ -403,14 +403,17 @@ Using the :attr:`dim` argument to compute matrix norms::
 svd = _add_docstr(_linalg.linalg_svd, r"""
 linalg.svd(input, full_matrices=True, compute_uv=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
-
 Compute the singular value decomposition of either a matrix or batch of
 matrices :attr:`input`." The singular value decomposition is represented as a
 namedtuple ``(U, S, Vh)``, such that :math:`input = U \times diag(S) \times
 Vh`. If the inputs are batches, then returns batched outputs for all of ``U``,
 ``S`` and ``Vh``.
 
-If :attr:`full_matrices` is ``False``, the method returns the reduced singular
+The original tensor can be reconstructed by::
+
+    U @ diag(S) @ Vh
+
+If :attr:`full_matrices` is ``False`` (default), the method returns the reduced singular
 value decomposition i.e., if the last two dimensions of :attr:`input` are
 ``m`` and ``n``, then the returned `U` and `V` matrices will contain only
 :math:`min(n, m)` orthonormal columns.
@@ -421,22 +424,6 @@ tensors with no elements and the same device as :attr:`input`. The
 
 The dtypes of ``U`` and ``V`` are the same as :attr:`input`'s. ``S`` will
 always be real-valued, even if :attr:`input` is complex.
-
-.. warning:: **Differences with** :meth:`~torch.svd`:
-
-             * :attr:`full_matrices` is the opposite of
-               :meth:`~torch.svd`'s :attr:`some`. Note that default value
-               for both is ``True``, so the default behavior is effectively
-               the opposite.
-
-             * it returns ``Vh``, whereas :meth:`~torch.svd` returns
-               ``V``. The result is that when using :meth:`~torch.svd` you
-               need to manually transpose ``V`` in order to reconstruct the
-               original matrix.
-
-             * If :attr:`compute_uv=False`, it returns empty tensors for ``U``
-               and ``Vh``, whereas :meth:`~torch.svd` returns zero-filled
-               tensors.
 
 .. note:: Unlike NumPy's ``linalg.svd``, this always returns a namedtuple of
           three tensors, even when :attr:`compute_uv=False`.
@@ -459,7 +446,6 @@ always be real-valued, even if :attr:`input` is complex.
           can be arbitrary bases of the subspaces.
 
 .. note:: The `S` tensor can only be used to compute gradients if :attr:`compute_uv` is True.
-
 
 
 Args:
