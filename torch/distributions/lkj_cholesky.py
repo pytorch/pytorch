@@ -79,7 +79,7 @@ class LKJCholesky(Distribution):
         return new
 
     def sample(self, sample_shape=torch.Size()):
-        # This uses the Onion method, but tere are a few differences from [1] Sec. 3.2:
+        # This uses the Onion method, but there are a few differences from [1] Sec. 3.2:
         # - This vectorizes the for loop and also works for heterogeneous eta.
         # - Same algorithm generalizes to n=1.
         # - The procedure is simplified since we are sampling the cholesky factor of
@@ -94,7 +94,8 @@ class LKJCholesky(Distribution):
         u_hypersphere[..., 0, :].fill_(0.)
         w = torch.sqrt(y) * u_hypersphere
         # Fill diagonal elements; clamp for numerical stability
-        diag_elems = torch.clamp(1 - torch.sum(w**2, dim=-1), min=0.).sqrt()
+        eps = torch.finfo(w.dtype).tiny
+        diag_elems = torch.clamp(1 - torch.sum(w**2, dim=-1), min=eps).sqrt()
         w += torch.diag_embed(diag_elems)
         return w
 
