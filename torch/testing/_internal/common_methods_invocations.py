@@ -323,20 +323,17 @@ class SpectralFuncInfo(OpInfo):
                  ndimensional: bool,  # Whether dim argument can be a tuple
                  skips=None,
                  **kwargs):
-        skips = skips if skips is not None else []
         dtypesIfCPU = dtypesIfCPU if dtypesIfCPU is not None else dtypes
         dtypesIfCUDA = dtypesIfCUDA if dtypesIfCUDA is not None else dtypes
         dtypesIfROCM = dtypesIfROCM if dtypesIfROCM is not None else dtypes
 
         # gradgrad is quite slow
         if not TEST_WITH_SLOW:
+            skips = skips if skips is not None else []
             skips.append(SkipInfo('TestGradients', 'test_fn_gradgrad'))
 
-        if not TEST_MKL:
-            skips.append(SkipInfo(device_type='cpu'))
-
-        if TEST_WITH_ROCM:
-            skips.append(SkipInfo(device_type='cuda'))
+        decorators = decorators if decorators is not None else []
+        decorators += [skipCPUIfNoMkl, skipCUDAIfRocm]
 
         super().__init__(name=name,
                          dtypes=dtypes,
@@ -344,6 +341,7 @@ class SpectralFuncInfo(OpInfo):
                          dtypesIfCUDA=dtypesIfCUDA,
                          dtypesIfROCM=dtypesIfROCM,
                          skips=skips,
+                         decorators=decorators,
                          **kwargs)
         self.ref = ref if ref is not None else _getattr_qual(np, name)
         self.ndimensional = ndimensional
