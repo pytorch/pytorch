@@ -244,7 +244,11 @@ class RegisterDispatchKey:
             assert_never(f)
 
     def gen_structured(self, g: StructuredNativeFunctions) -> List[str]:
-        if self.dispatch_key not in g.out.dispatch:
+        if self.dispatch_key == 'Meta':
+            assert self.dispatch_key not in g.out.dispatch, \
+                "Do not explicitly specify Meta dispatch key on structured " \
+                "functions, they will be automatically generated for you"
+        elif self.dispatch_key not in g.out.dispatch:
             return []
 
         # Inner helper function to close over g
@@ -272,35 +276,42 @@ class RegisterDispatchKey:
             sig = NativeSignature.from_schema(f.func)
 
             if self.target is Target.DEFINITION:
-                out_impl_name = f"at::native::{g.out.dispatch[self.dispatch_key]}"
-
                 # TODO: work a little harder to generate fresh names for 'result'
                 # TODO: less praying that I picked the right argument name for 'self'
 
                 if k is SchemaKind.functional:
                     out_expr = "result"
-                    prologue = "auto result = tensor_from_meta(meta_result);"
+                    if self.dispatch_key == "Meta":
+                        prologue = "auto result = meta_tensor_from_meta(meta_result);"
+                    else:
+                        prologue = "auto result = tensor_from_meta(meta_result);"
                 elif k is SchemaKind.inplace:
                     out_expr = "self"
                     prologue = "// TODO: consistency check assert"
                 elif k is SchemaKind.out:
                     # TODO: generalize this for multi-out
-                    assert len(f.func.out_arguments) == 1, "multi-out structured not supported yet"
+                    assert len(f.func.arguments.out) == 1, "multi-out structured not supported yet"
                     # TODO: properly get the expression as it was brought into
                     # scope by sig
-                    out_expr = f.func.out_arguments[0].name
+                    out_expr = f.func.arguments.out[0].name
                     prologue = f"""
 // TODO: add a consistency check for meta_result
 {out_expr}.resize_(meta_result.sizes);
 """
+
+                if self.dispatch_key == "Meta":
+                    out_impl_call = "// meta function does nothing"
+                else:
+                    out_impl_name = f"at::native::{g.out.dispatch[self.dispatch_key]}"
+                    out_impl_call = f"{out_impl_name}({out_expr}, {functional_exprs});"
 
                 device_guard = ""
 
                 if is_generic_dispatch_key(self.dispatch_key) or is_cuda_dispatch_key(self.dispatch_key):
                     # TODO: avoid copypasting the computation of self_args,
                     # candidate_args and device_of
-                    self_args = (a for a in f.func.arguments if a.name == "self")
-                    candidate_args = itertools.chain(self_args, f.func.out_arguments, f.func.arguments)
+                    self_args = (a for a in f.func.arguments.positional if a.name == "self")
+                    candidate_args = itertools.chain(self_args, f.func.arguments.out, f.func.arguments.positional)
                     device_of = next((f'{a.name}' for a in candidate_args if a.type.is_tensor_like()), None)
 
                     device_guard = ''
@@ -317,7 +328,7 @@ class RegisterDispatchKey:
     {device_guard}
     auto meta_result = meta::{meta_name}({functional_exprs});
     {prologue}
-    {out_impl_name}({out_expr}, {functional_exprs});
+    {out_impl_call}
     return {out_expr};
 }}
 """
@@ -358,11 +369,11 @@ class RegisterDispatchKey:
 
             cuda_guard = ""
             if is_generic_dispatch_key(self.dispatch_key) or is_cuda_dispatch_key(self.dispatch_key):
-                self_args = (a for a in f.func.arguments if a.name == "self")
+                self_args = (a for a in f.func.arguments.positional if a.name == "self")
 
                 # There is precedence for which argument we use to do
                 # device guard.  This describes the precedence order.
-                candidate_args = itertools.chain(self_args, f.func.out_arguments, f.func.arguments)
+                candidate_args = itertools.chain(self_args, f.func.arguments.out, f.func.arguments.positional)
 
                 # Only tensor like arguments are eligible
                 device_of = next((f'{a.name}' for a in candidate_args if a.type.is_tensor_like()), None)
@@ -487,8 +498,8 @@ class ComputeTensorMethod:
             return None
 
         assert not f.func.is_out_fn()
-        assert len(f.func.arguments) > 0
-        assert sum(a.name == 'self' for a in f.func.arguments) == 1
+        assert len(f.func.arguments.positional) > 0
+        assert sum(a.name == 'self' for a in f.func.arguments.positional) == 1
 
         name = cpp.name(f.func)
 
@@ -757,7 +768,7 @@ def compute_returns_yaml(f: NativeFunction) -> Tuple[List[Dict[str, str]], Dict[
             # See Note [name and field_name]
             ret['field_name'] = r.name
             if f.func.is_out_fn():
-                name_to_field_name[f.func.out_arguments[i].name] = r.name
+                name_to_field_name[f.func.arguments.out[i].name] = r.name
 
         returns.append(ret)
 
@@ -778,7 +789,7 @@ def compute_cpp_argument_yaml(cpp_a: CppArgument, *, schema_order: bool, kwarg_o
         if cpp_a.default is not None:
             arg['default'] = cpp_a.default
         return arg
-    elif isinstance(cpp_a.argument, ThisArgument):
+    elif isinstance(cpp_a.argument, SelfArgument):
         raise AssertionError()
     elif isinstance(cpp_a.argument, Argument):
         return compute_argument_yaml(
@@ -817,8 +828,8 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
 
     # These sets are used to conveniently test if an argument is a
     # kwarg-only or out argument
-    kwarg_only_set = set(a.name for a in f.func.kwarg_only_arguments)
-    out_arg_set = set(a.name for a in f.func.out_arguments)
+    kwarg_only_set = set(a.name for a in f.func.arguments.kwarg_only)
+    out_arg_set = set(a.name for a in f.func.arguments.out)
 
     sig_group = CppSignatureGroup.from_schema(f.func, method=False)
     cpp_args = sig_group.signature.arguments()
@@ -1048,6 +1059,7 @@ def main() -> None:
 
     # TODO: how come ValuesView isn't a Sequence lol
     grouped_native_functions = list(concatMap(flatten_pre_group, list(pre_grouped_native_functions.values())))
+    structured_native_functions = [g for g in grouped_native_functions if isinstance(g, StructuredNativeFunctions)]
 
     template_dir = os.path.join(options.source_path, "templates")
 
@@ -1093,6 +1105,9 @@ def main() -> None:
         "QuantizedCUDA",
         "Math",
         "DefaultBackend",
+        # Meta is a magic key: it is automatically generated for structured
+        # kernels
+        "Meta",
     ]
     if options.backend_whitelist:
         dispatch_keys = [k for k in dispatch_keys if is_generic_dispatch_key(k) or k in options.backend_whitelist]
@@ -1129,9 +1144,7 @@ def main() -> None:
     })
 
     cpu_fm.write('MetaFunctions.h', lambda: {
-        'declarations':
-            list(mapMaybe(compute_meta_function_declaration,
-                          (g for g in grouped_native_functions if isinstance(g, StructuredNativeFunctions)))),
+        'declarations': list(map(compute_meta_function_declaration, structured_native_functions)),
     })
 
     schema_selector = selector
