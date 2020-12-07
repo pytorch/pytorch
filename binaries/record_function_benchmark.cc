@@ -8,7 +8,6 @@
 #include <ctime>
 
 C10_DEFINE_int(iter, 10000, "Number of iterations");
-C10_DEFINE_int(warmup_iter, 10, "Number of warmup iterations");
 C10_DEFINE_int(sampled_iter, 10e6,
     "Number of iterations for the sampled observer benchmark");
 
@@ -91,8 +90,8 @@ int main(int argc, char** argv) {
   at::enableRecordFunction();
   at::clearCallbacks();
 
-  auto duration = runTensorGEMMBench(kSmallTensorSize, FLAGS_warmup_iter);
-  std::cout << "Warmup time: " << duration << " us." << std::endl;
+  std::cout << "Warm up" << std::endl;
+  runBenchmark();
 
   std::cout << "Running without observers" << std::endl;
   runBenchmark();
