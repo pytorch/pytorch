@@ -3,20 +3,20 @@
 #include <c10/macros/Macros.h>
 #include <ATen/cpu/vec256/intrinsics.h>
 
-using vbool8   = __vector __bool char;
-using vbool16  = __vector __bool short;
-using vbool32  = __vector __bool int;
-using vbool64  = __vector __bool long long;
-using vint8    = __vector signed char;
-using vint16   = __vector signed short;
-using vint32   = __vector signed int;
-using vint64   = __vector signed long long;
-using vuint8   = __vector unsigned char;
-using vuint16  = __vector unsigned short;
-using vuint32  = __vector unsigned  int;
-using vuint64  = __vector unsigned long long;
-using vfloat32 = __vector float;
-using vfloat64 = __vector double;
+using vbool8   =  __attribute__((altivec(vector__))) __attribute__((altivec(bool__))) char;
+using vbool16  =  __attribute__((altivec(vector__))) __attribute__((altivec(bool__))) short;
+using vbool32  =  __attribute__((altivec(vector__))) __attribute__((altivec(bool__))) int;
+using vbool64  =  __attribute__((altivec(vector__))) __attribute__((altivec(bool__))) long long;
+using vint8    =  __attribute__((altivec(vector__)))  signed char;
+using vint16   =  __attribute__((altivec(vector__)))  signed short;
+using vint32   =  __attribute__((altivec(vector__)))  signed int;
+using vint64   =  __attribute__((altivec(vector__)))  signed long long;
+using vuint8   =  __attribute__((altivec(vector__)))  unsigned char;
+using vuint16  =  __attribute__((altivec(vector__)))  unsigned short;
+using vuint32  =  __attribute__((altivec(vector__)))  unsigned  int;
+using vuint64  =  __attribute__((altivec(vector__)))  unsigned long long;
+using vfloat32 =  __attribute__((altivec(vector__)))  float;
+using vfloat64 =  __attribute__((altivec(vector__)))  double;
 
 #if !defined(vec_float)
 C10_ALWAYS_INLINE vfloat32 vec_float(const vint32& vec_in) {
