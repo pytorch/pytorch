@@ -551,6 +551,21 @@ class TestFX(JitTestCase):
         x = torch.rand(3, 4)
         self.assertEqual(loaded(x), traced(x))
 
+    def test_all_input_nodes(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        a : torch.fx.Node = graph.placeholder('x')
+        b : torch.fx.Node = graph.call_module('linear_mod', args=(a,))
+        c : torch.fx.Node = graph.get_attr('y_attr')
+        d : torch.fx.Node = graph.call_function(operator.add, args=(b, c))
+        e : torch.fx.Node = graph.call_function(torch.unsqueeze, args=(d, 0))
+        graph.output(e)
+        graph.lint()
+
+        self.assertEqual(b.all_input_nodes, [a])
+        self.assertEqual(c.all_input_nodes, [])
+        self.assertEqual(d.all_input_nodes, [b, c])
+        self.assertEqual(e.all_input_nodes, [d])
+
     def test_deepcopy_graphmodule_with_transform(self):
         st = SimpleTest()
         traced = symbolic_trace(st)
@@ -1122,6 +1137,21 @@ class TestFX(JitTestCase):
                 return "foo"
 
         m = M()
+        self.checkGraphModule(m, ())
+
+    def test_torchbind_class_attribute_in_fx(self):
+        if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS:
+            self.skipTest("torch.classes._TorchScriptTesting._StackString is registered, skipping")
+
+        class FooBar1234(torch.nn.Module):
+            def __init__(self):
+                super(FooBar1234, self).__init__()
+                self.f = torch.classes._TorchScriptTesting._StackString(["3", "4"])
+
+            def forward(self):
+                return self.f.top()
+
+        m = FooBar1234()
         self.checkGraphModule(m, ())
 
 

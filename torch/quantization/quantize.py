@@ -21,7 +21,6 @@ from .qconfig import default_dynamic_qconfig, float16_dynamic_qconfig, float_qpa
 
 def is_activation_post_process(module):
     return (isinstance(module, torch.quantization.ObserverBase) or
-            isinstance(module, torch.quantization.FakeQuantize) or
             isinstance(module, torch.quantization.FakeQuantizeBase))
 
 def _propagate_qconfig_helper(module, qconfig_dict, allow_list=None,
@@ -296,7 +295,7 @@ def quantize(model, run_fn, run_args, mapping=None, inplace=False):
         model = copy.deepcopy(model)
     model.eval()
     prepare(model, inplace=True)
-    run_fn(model, run_args)
+    run_fn(model, *run_args)
     convert(model, mapping, inplace=True)
     return model
 
@@ -423,7 +422,7 @@ def quantize_qat(model, run_fn, run_args, inplace=False):
         model = copy.deepcopy(model)
     model.train()
     prepare_qat(model, inplace=True)
-    run_fn(model, run_args)
+    run_fn(model, *run_args)
     convert(model, inplace=True)
     return model
 
