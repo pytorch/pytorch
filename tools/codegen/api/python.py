@@ -392,7 +392,7 @@ class PythonSignature:
     # for error parsing.
     #
     # For a translation to mypy-valid type signatures, see
-    # tools/gen_pyi.py.  If you change any logic here, please
+    # signature_str_pyi.  If you change any logic here, please
     # check that file too.
     def signature_str(self, *, skip_outputs: bool = False) -> str:
         args = self.arguments(skip_outputs=skip_outputs)

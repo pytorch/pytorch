@@ -585,9 +585,6 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, out: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description='Generate type stubs for PyTorch')
-    parser.add_argument('--declarations-path', metavar='DECL',
-                        default='torch/share/ATen/Declarations.yaml',
-                        help='path to Declarations.yaml')
     parser.add_argument('--native-functions-path', metavar='NATIVE',
                         default='aten/src/ATen/native/native_functions.yaml',
                         help='path to native_functions.yaml')
