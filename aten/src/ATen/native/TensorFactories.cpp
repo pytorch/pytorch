@@ -311,7 +311,7 @@ Tensor empty_like(
   Tensor result;
 
   if (memory_format == MemoryFormat::Preserve) {
-    if (self.is_non_overlapping_and_dense()) {
+    if (self.layout() != c10::kSparse && self.is_non_overlapping_and_dense()) {
       result = at::empty_strided(self.sizes(), self.strides(), options.memory_format(c10::nullopt));
     } else if (self.unsafeGetTensorImpl()->support_as_strided() && self.layout() == kStrided) {
       // If input tensor is not dense and non-overlapping but strided, we will infer an output strides

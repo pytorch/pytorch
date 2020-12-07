@@ -54,6 +54,9 @@ IntArrayRef SparseTensorImpl::strides() const {
 bool SparseTensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
   AT_ERROR("sparse tensors do not have is_contiguous");
 }
+bool SparseTensorImpl::is_non_overlapping_and_dense() const {
+  AT_ERROR("sparse tensors do not have is_non_overlapping_and_dense");
+}
 int64_t SparseTensorImpl::stride(int64_t d) const {
   AT_ERROR("sparse tensors do not have strides");
 }

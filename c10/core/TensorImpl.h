@@ -1437,7 +1437,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return is_channels_last_3d_;
   }
 
-  bool is_non_overlapping_and_dense() const {
+  virtual bool is_non_overlapping_and_dense() const {
     return is_non_overlapping_and_dense_;
   }
 
