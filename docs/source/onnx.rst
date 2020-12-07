@@ -277,7 +277,8 @@ In addition, Dropout layer need defined in init function so that inferencing can
 Using dictionaries to handle Named Arguments as model inputs
 ------------------------------------------------------------
 
-There are two ways to handle models which consist of named parameters or keyword arguments as inputs: 
+There are two ways to handle models which consist of named parameters or keyword arguments as inputs:
+ 
 * The first method is to pass all the inputs in the same order as required by the model and pass None
   values for the keyword arguments that do not require a value to be passed
 
@@ -299,6 +300,7 @@ For example, in the model: ::
     z = torch.randn(2, 3) 
 
 There are two ways of exporting the model:
+
 * Not using a dictionary for the keyword arguments and passing all the inputs in the same order 
   as required by the model ::
 
