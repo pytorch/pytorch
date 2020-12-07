@@ -241,6 +241,9 @@ struct TORCH_API RecordFunction {
     // flag is used to check whether the start callbacks were called
     bool called_start_callbacks_ = false;
 
+    // Whether the RecordFunction is pre-sampled
+    bool pre_sampled_;
+
     // Used internally to keep track of thread local and global callbacks
     // that were picked to run; must be sorted;
     CallbackHandles sorted_active_tls_handles_;
@@ -259,9 +262,6 @@ struct TORCH_API RecordFunction {
     std::vector<c10::IValue> inputs_;
 
     c10::optional<c10::OperatorName> operator_name_;
-
-    // Whether the RecordFunction is pre-sampled
-    bool pre_sampled_;
 
     // Kind of scope this RecordFunction is observing
     const RecordScope scope_;

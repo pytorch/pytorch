@@ -66,28 +66,28 @@ void set_record_function_tls_(const RecordFunctionTLS& tls) {
 class CallbackManager {
  public:
   CallbackHandle addThreadLocalCallback(RecordFunctionCallback cb) {
+    if (cb.samplingProb() > kLowProb) {
+      // pre-sampling of RecordFunction with prob. kLowProb cannot be used
+      LOG(WARNING) << "Adding a non-sampled callback / callback with high sampling "
+                   << "frequency can cause singnificant runtime overhead";
+      at::setRecordAllFunctions();
+    }
     // note: monotonically increasing callbacks_unique_id keeps
     // sorted_tls_callbacks_ sorted
     auto handle = next_unique_callback_handle();
     rf_tls_.sorted_tls_callbacks_.emplace_back(std::move(cb), handle);
-    if (cb.samplingProb() > kLowProb) {
-      // pre-sampling of RecordFunction with prob. kLowProb cannot be used
-      LOG(WARNING) << "Adding a non-sampled callback / callback with high sampling "
-                   << "frequency can cause singnificant runtime overhead";
-      at::setRecordAllFunctions();
-    }
     return handle;
   }
 
   CallbackHandle addGlobalCallback(RecordFunctionCallback cb) {
-    auto handle = next_unique_callback_handle();
-    sorted_global_callbacks_.emplace_back(std::move(cb), handle);
     if (cb.samplingProb() > kLowProb) {
       // pre-sampling of RecordFunction with prob. kLowProb cannot be used
       LOG(WARNING) << "Adding a non-sampled callback / callback with high sampling "
                    << "frequency can cause singnificant runtime overhead";
       at::setRecordAllFunctions();
     }
+    auto handle = next_unique_callback_handle();
+    sorted_global_callbacks_.emplace_back(std::move(cb), handle);
     return handle;
   }
 
@@ -487,10 +487,10 @@ std::atomic<int> global_record_all_functions_ {0};
 }
 
 void setRecordAllFunctions() {
-  ++global_record_all_functions_;
+  global_record_all_functions_.fetch_add(1, std::memory_order_relaxed);
 }
 void unsetRecordAllFunctions() {
-  TORCH_CHECK(--global_record_all_functions_ >= 0);
+  TORCH_CHECK(global_record_all_functions_.fetch_sub(1, std::memory_order_relaxed) >= 0);
 }
 
 bool shouldRunRecordFunction(bool& pre_sampled) {
