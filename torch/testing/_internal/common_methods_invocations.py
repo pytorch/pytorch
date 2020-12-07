@@ -14,7 +14,7 @@ from torch.testing import \
      floating_and_complex_types, floating_and_complex_types_and,
      all_types_and_complex_and, all_types_and)
 from torch.testing._internal.common_device_type import \
-    (skipCUDAIfNoMagma, skipCPUIfNoLapack,
+    (skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfRocm,
      expectedAlertNondeterministic, precisionOverride)
 from torch.testing._internal.common_utils import \
     (prod_single_zero, random_square_matrix_of_rank,
@@ -322,6 +322,7 @@ class SpectralFuncInfo(OpInfo):
                  dtypesIfROCM=None,
                  ndimensional: bool,  # Whether dim argument can be a tuple
                  skips=None,
+                 decorators=None,
                  **kwargs):
         dtypesIfCPU = dtypesIfCPU if dtypesIfCPU is not None else dtypes
         dtypesIfCUDA = dtypesIfCUDA if dtypesIfCUDA is not None else dtypes
