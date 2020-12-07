@@ -719,7 +719,7 @@ if(CMAKE_CROSSCOMPILING)
   elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "arm")
     # Support for arm cross compilation
     set(CUDA_TOOLKIT_TARGET_NAME "armv7-linux-gnueabihf")
-  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
     # Support for aarch64 cross compilation
     if (ANDROID_ARCH_NAME STREQUAL "arm64")
       set(CUDA_TOOLKIT_TARGET_NAME "aarch64-linux-androideabi")
