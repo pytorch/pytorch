@@ -5,7 +5,7 @@ tensors and defines mathematical operations over these tensors.
 Additionally, it provides many utilities for efficient serializing of
 Tensors and arbitrary types, and other useful utilities.
 
-It has a CUDA counterpart, that enables you to run your tensor computations
+It has a CUDA counterpart that enables you to run your tensor computations
 on an NVIDIA GPU with compute capability >= 3.0.
 """
 
@@ -327,7 +327,7 @@ def set_default_dtype(d):
 
 def set_deterministic(d):
     r""" Sets whether PyTorch operations must use "deterministic"
-    algorithms. That is, algorithms which, given the same input, and when
+    algorithms. That is, algorithms, when given the same input and
     run on the same software and hardware, always produce the same output.
     When True, operations will use deterministic algorithms when available,
     and if only nondeterministic algorithms are available they will throw a
