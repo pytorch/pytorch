@@ -43,6 +43,8 @@ using namespace torch::autograd;
 namespace py = pybind11;
 
 PyObject *THPVariableClass = nullptr;
+PyObject *ParameterClass = nullptr;
+
 
 static const char* VOLATILE_WARNING =
     "volatile was removed and now has no effect. Use "

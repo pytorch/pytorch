@@ -20,11 +20,20 @@ struct THPVariable {
 
 THP_API PyObject *THPVariableClass;
 
+// NB: Unfortunately it is more efficient to store ParameterClass here rather
+//     than in `python_variable.cpp` with a getter method.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+THP_API PyObject *ParameterClass;
+
 bool THPVariable_initModule(PyObject *module);
 THP_API PyObject * THPVariable_Wrap(torch::autograd::Variable var);
 
 static inline bool THPVariable_CheckExact(PyObject *obj) {
-  return Py_TYPE(obj) == (PyTypeObject*)THPVariableClass;
+  auto obj_py_type = Py_TYPE(obj);
+  return (
+    obj_py_type == (PyTypeObject*)THPVariableClass ||
+    obj_py_type == (PyTypeObject*)ParameterClass
+  );
 }
 
 inline bool THPVariable_Check(PyObject *obj)

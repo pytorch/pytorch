@@ -528,7 +528,7 @@ def gen_has_torch_function_check(
     if noarg:
         if method:
             return f"""\
-if(check_has_torch_function(self_)) {{
+if(!THPVariable_CheckExact(self_) && check_has_torch_function(self_)) {{
   return handle_torch_function(self_, "{name}");
 }}
 """
