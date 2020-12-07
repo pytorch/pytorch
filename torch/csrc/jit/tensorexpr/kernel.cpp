@@ -935,8 +935,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::sigmoid: {
-      return computeOneOperand(
-          "aten_sigmoid", v, [](const ExprHandle& a) { return sigmoid(a); });
+      return computeOneOperand("aten_sigmoid", v, [](const ExprHandle& a) {
+        return sigmoid(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::reciprocal: {
@@ -1147,8 +1148,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::sinh: {
-      return computeOneOperand(
-          "aten_sinh", v, [](const ExprHandle& a) { return sinh(a); });
+      return computeOneOperand("aten_sinh", v, [](const ExprHandle& a) {
+        return sinh(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::atan: {
