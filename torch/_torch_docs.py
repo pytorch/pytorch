@@ -4342,19 +4342,21 @@ add_docstr(torch.xlogy,
            r"""
 xlogy(self, other, *, out=None) -> Tensor
 
-Compute ``self*log(other)`` so that ``0 * log(0)`` returns zero.
+Compute ``self * log(other)`` so that ``0 * log(0)`` returns zero.
+
 Similar to SciPy's `scipy.special.xlogy`.
 
 .. math::
     \text{out}_{i} = \begin{cases}
-        \text{NaN} & \text{if } \text{other}_{i} \eq \text{NaN} \\
-        0 & \text{if } \text{self}_{i} \eq 0.0 \\
-        self_i * \log{other_i} & \text{otherwise} \\
+        \text{NaN} & \text{if } \text{other}_{i} = \text{NaN} \\
+        0 & \text{if } \text{self}_{i} = 0.0 \\
+        self_i * \log{(other_i)} & \text{otherwise}
     \end{cases}
 
 """ + r"""
+
 .. note::
-    NaN in :attr:`other` is propagated even if value of :attr:`self` is 0.
+    ``NaN`` in :attr:`other` is propagated even if value of :attr:`self` is 0.
 
 Args:
     self (Tensor)
@@ -4380,19 +4382,21 @@ Example::
 
 .. function:: xlogy(self, other, *, out=None) -> Tensor
 
-Compute ``x*log(y)`` so that ``0 * log(0)`` returns zero.
+Compute ``self * log(other)`` so that ``0 * log(0)`` returns zero.
+
 Similar to SciPy's `scipy.special.xlogy`.
 
 .. math::
     \text{out}_{i} = \begin{cases}
-        \text{NaN} & \text{if } \text{other}_{i} \eq \text{NaN} \\
-        0 & \text{if } \text{self}_{i} \eq 0.0 \\
-        self_i * \log{other_i} & \text{otherwise} \\
+        \text{NaN} & \text{if } \text{other}_{i} = \text{NaN} \\
+        0 & \text{if } \text{self}_{i} = 0.0 \\
+        self_i * \log{(other_i)} & \text{otherwise}
     \end{cases}
 
 """ + r"""
+
 .. note::
-    NaN in :attr:`other` is propagated even if value of :attr:`self` is 0.
+    ``NaN`` in :attr:`other` is propagated even if value of :attr:`self` is 0.
 
 Args:
     self (Number or Tensor)
