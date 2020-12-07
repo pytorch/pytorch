@@ -1039,6 +1039,13 @@ class TestCase(expecttest.TestCase):
 
         return _compare_scalars_internal(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan)
 
+    # Construct assert messages basd on internal messages and user message.
+    def _get_assert_msg(msg=msg, internal_msg=None): 
+        if msg is None:
+            return f"internal assert message: {internal_msg}"
+        else:
+            return f"user assert message: {msg}; internal assert message: {internal_msg}"
+
     def assertEqualIgnoreType(self, *args, **kwargs) -> None:
         # If you are seeing this function used, that means test is written wrongly
         # and deserves detailed investigation
@@ -1049,7 +1056,7 @@ class TestCase(expecttest.TestCase):
     def assertEqual(self, x, y, msg: Optional[str] = None, *,
                     atol: Optional[float] = None, rtol: Optional[float] = None,
                     equal_nan=True, exact_dtype=True, exact_device=False) -> None:
-        assert (atol is None) == (rtol is None), "If one of atol or rtol is specified the other must be, too"
+        assert (atol is None) == (rtol is None), "If one of atol or rtol is specified, then the other must be too"
 
         # Tensor x Number and Number x Tensor comparisons
         if isinstance(x, torch.Tensor) and isinstance(y, Number):
@@ -1065,17 +1072,20 @@ class TestCase(expecttest.TestCase):
         elif isinstance(y, torch.Tensor) and isinstance(x, np.bool_):
             self.assertEqual(x, y.item(), atol=atol, rtol=rtol, msg=msg,
                              exact_dtype=exact_dtype, exact_device=exact_device)
+
         # Tensor x Tensor
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
-            super().assertEqual(x.is_sparse, y.is_sparse, msg=msg)
-            super().assertEqual(x.is_quantized, y.is_quantized, msg=msg)
+            debug_msg = ("Attempted to compare with different is_sparse settings: "
+                         f"Expected: {x.is_sparse}; Actual: {y.is_sparse}.")
+            super().assertEqual(x.is_sparse, y.is_sparse, msg=_get_assert_msg(msg=msg, internal_msg=debug_msg))
+            debug_msg = ("Attempted to compare with different is_quantized settings: "
+                         f"Expected: {x.is_quantized}; Actual: {y.is_quantized}.")
+            super().assertEqual(x.is_quantized, y.is_quantized, msg=_get_assert_msg(msg=msg, internal_msg=debug_msg))
             if x.is_sparse:
                 if x.size() != y.size():
-                    debug_msg_sparse = ("Attempted to compare equality of tensors with different sizes. "
-                                        f"Got sizes {x.size()} and {y.size()}.")
-                    if msg is None:
-                        msg = debug_msg_sparse
-                    self.assertTrue(False, msg=msg)
+                    debug_msg_sparse = ("Attempted to compare equality of tensors with different sizes: "
+                                        f"Expected: {x.size()}; Actual: {y.size()}.")
+                    super().assertTrue(False, msg=_get_assert_msg(msg=msg, internal_msg=debug_msg_sparse))
 
                 x = x.coalesce()
                 y = y.coalesce()
@@ -1084,20 +1094,20 @@ class TestCase(expecttest.TestCase):
                                                                  equal_nan=equal_nan, exact_dtype=exact_dtype,
                                                                  exact_device=exact_device)
 
-                if not indices_result and msg is None:
+                if not indices_result:
                     assert debug_msg is not None
-                    msg = "Sparse tensor indices failed to compare as equal! " + debug_msg
-                self.assertTrue(indices_result, msg=msg)
+                    debug_msg = "Sparse tensor indices failed to compare as equal! " + debug_msg
+                super().assertTrue(indices_result, msg=_get_assert_msg(msg, internal_msg=debug_msg))
 
                 values_result, debug_msg = self._compareTensors(x._values(), y._values(),
                                                                 rtol=rtol, atol=atol,
                                                                 equal_nan=equal_nan, exact_dtype=exact_dtype,
                                                                 exact_device=exact_device)
 
-                if not values_result and msg is None:
+                if not values_result:
                     assert debug_msg is not None
-                    msg = "Sparse tensor values failed to compare as equal! " + debug_msg
-                self.assertTrue(values_result, msg=msg)
+                    debug_msg = "Sparse tensor values failed to compare as equal! " + debug_msg
+                super().assertTrue(values_result, msg=msg=_get_assert_msg(msg, internal_msg=debug_msg))
             elif x.is_quantized and y.is_quantized:
                 self.assertEqual(x.qscheme(), y.qscheme(), atol=atol, rtol=rtol,
                                  msg=msg, exact_dtype=exact_dtype,
@@ -1127,10 +1137,10 @@ class TestCase(expecttest.TestCase):
                                                          exact_dtype=exact_dtype,
                                                          exact_device=exact_device)
 
-                if not result and msg is None:
+                if not result:
                     assert debug_msg is not None
-                    msg = "Quantized representations failed to compare as equal! " + debug_msg
-                self.assertTrue(result, msg=msg)
+                    debug_msg = "Quantized representations failed to compare as equal! " + debug_msg
+                super().assertTrue(result, msg=_get_assert_msg(msg, internal_msg=debug_msg))
             else:
                 result, debug_msg = self._compareTensors(x, y, rtol=rtol, atol=atol,
                                                          equal_nan=equal_nan, exact_dtype=exact_dtype,
@@ -1138,13 +1148,16 @@ class TestCase(expecttest.TestCase):
 
                 if not result:
                     assert debug_msg is not None
-                    msg = msg or "Tensors failed to compare as equal!"
-                    msg = f'{msg}\n{debug_msg}'
-                self.assertTrue(result, msg=msg)
+                    debug_msg = "Tensors failed to compare as equal!" + debug_msg
+                super().assertTrue(result, msg=_get_assert_msg(msg, internal_msg=debug_msg))
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
-            super().assertEqual(x, y, msg=msg)
+            debug_msg = ("Attempted to compare with different [string] types: "
+                         f"Expected: {isinstance(x, string_classes)}; Actual: {isinstance(y, string_classes)}.")
+            super().assertEqual(x, y, msg=_get_assert_msg(msg, internal_msg=debug_msg))
         elif type(x) == set and type(y) == set:
-            super().assertEqual(x, y, msg=msg)
+            debug_msg = ("Attempted to compare with different [set] types: "
+                         f"Expected: {type(x) == set}; Actual: {type(y) == set}.")
+            super().assertEqual(x, y, msg=_get_assert_msg(msg, internal_msg=debug_msg))
         elif isinstance(x, dict) and isinstance(y, dict):
             if isinstance(x, OrderedDict) and isinstance(y, OrderedDict):
                 self.assertEqual(x.items(), y.items(), atol=atol, rtol=rtol,
@@ -1161,23 +1174,27 @@ class TestCase(expecttest.TestCase):
                                  exact_dtype=exact_dtype, exact_device=exact_device)
         elif isinstance(x, type) and isinstance(y, type):
             # See TestTorch.test_assert_equal_generic_meta
-            super().assertEqual(x, y, msg=msg)
+            debug_msg = ("Attempted to compare with different [type] types: "
+                         f"Expected: {isinstance(x, type)}; Actual: {isinstance(y, type)}.")
+            super().assertEqual(x, y, msg=_get_assert_msg(msg, internal_msg=debug_msg))
         elif is_iterable(x) and is_iterable(y):
-            super().assertEqual(len(x), len(y), msg=msg)
+            debug_msg = ("Attempted to compare iterables with different length: "
+                         f"Expected: {len(x)}; Actual: {len(y)}.")
+            super().assertEqual(x, y, msg=_get_assert_msg(msg, internal_msg=debug_msg))
             for x_, y_ in zip(x, y):
                 self.assertEqual(x_, y_, atol=atol, rtol=rtol, msg=msg,
                                  exact_dtype=exact_dtype, exact_device=exact_device)
         elif isinstance(x, bool) and isinstance(y, bool):
-            self.assertTrue(x == y, msg=msg)
+            super().assertTrue(x == y, msg=msg)
 
         # Scalar x Scalar
         elif isinstance(x, Number) and isinstance(y, Number):
             result, debug_msg = self._compareScalars(x, y, rtol=rtol, atol=atol,
                                                      equal_nan=equal_nan)
-            if not result and msg is None:
+            if not result:
                 assert debug_msg is not None
-                msg = "Scalars failed to compare as equal! " + debug_msg
-            self.assertTrue(result, msg=msg)
+                debug_msg = "Scalars failed to compare as equal! " + debug_msg
+            super().assertTrue(result, msg=_get_assert_msg(msg, internal_msg=debug_msg))
         # Tensor x Numpy array
         elif isinstance(x, torch.Tensor) and isinstance(y, np.ndarray):
             self.assertEqual(x, torch.from_numpy(y), atol=atol, rtol=rtol, msg=msg,
