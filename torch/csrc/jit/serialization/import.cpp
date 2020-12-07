@@ -108,7 +108,7 @@ class ScriptModuleDeserializer final {
  public:
   ScriptModuleDeserializer(
       std::shared_ptr<CompilationUnit> cu,
-      std::unique_ptr<PyTorchStreamReader> reader)
+      std::shared_ptr<PyTorchStreamReader> reader)
       : compilation_unit_(std::move(cu)),
         reader_(std::move(reader)),
         source_importer_(
@@ -128,7 +128,7 @@ class ScriptModuleDeserializer final {
   IValue readArchive(const std::string& archive_name);
 
   std::shared_ptr<CompilationUnit> compilation_unit_;
-  std::unique_ptr<PyTorchStreamReader> reader_;
+  std::shared_ptr<PyTorchStreamReader> reader_;
   c10::optional<at::Device> device_;
   std::vector<at::IValue> constants_table_;
   SourceImporter source_importer_;
@@ -175,7 +175,6 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
       return obj;
     }
   };
-
   return readArchiveAndTensors(
       archive_name, type_resolver, obj_loader, device_, *reader_.get());
 }
@@ -257,8 +256,7 @@ Module ScriptModuleDeserializer::deserialize(
   }
   if (reader_->hasRecord("model.json")) {
 #if !defined(C10_MOBILE) && !defined(C10_DISABLE_LEGACY_IMPORT)
-    return torch::jit::LEGACY_deserialize(
-        compilation_unit_, std::move(reader_), device_);
+    return torch::jit::LEGACY_deserialize(compilation_unit_, reader_, device_);
 #else
     AT_ERROR("Legacy model format is not supported on mobile.");
 #endif
@@ -271,7 +269,6 @@ Module ScriptModuleDeserializer::deserialize(
   rewriteQuantizedConvForBC(m);
   return m;
 }
-
 } // namespace
 
 Module import_ir_module(
@@ -323,7 +320,7 @@ Module load(
 }
 
 Module load(
-    std::unique_ptr<ReadAdapterInterface> rai,
+    std::shared_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files) {
   // Verify that we're loading a zip archive and not a torch.save pickle archive
@@ -347,7 +344,7 @@ Module load(
         " produced by `torch.jit.save()`");
   }
 
-  auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
+  auto reader = std::make_shared<PyTorchStreamReader>(std::move(rai));
   auto cu = std::make_shared<CompilationUnit>();
 
   ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
