@@ -459,13 +459,12 @@ inline Variable make_variable_differentiable_view(
     // we have to use shallow_copy_and_detach to create a new TensorImpl to avoid
     // moving leaf node into graph interior. This guarantees only 1 TensorImpl
     // allocation happens in view ops.
-    if (base.unsafeGetTensorImpl() == data.unsafeGetTensorImpl()) {
+    if (data.getIntrusivePtr().use_count() == 1 && data.getIntrusivePtr()->unique_version()) {
+       data_impl = data.getIntrusivePtr();
+    } else {
       data_impl = data.getIntrusivePtr()->shallow_copy_and_detach(
         /*version_counter=*/0,
         /*allow_tensor_metadata_change=*/true);
-    } else {
-       TORCH_INTERNAL_ASSERT(data.use_count() == 1);
-       data_impl = data.getIntrusivePtr();
     }
     data_impl->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
         data_impl.get(), std::move(base), std::move(view_func), creation_meta));
