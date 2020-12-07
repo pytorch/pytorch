@@ -5,6 +5,8 @@
 
 #include <c10/core/DeviceGuard.h>
 
+//Build flag USE_CUDA_MPI forces CUDA-Aware MPI support and removes run-time checks. 
+//USE_CUDA_MPI is meant for older MPI libraries that don't support MPIX_Query_cuda_support()
 #if ((defined(OPEN_MPI) && OPEN_MPI) || (defined(MVAPICH2_NUMVERSION) && (MVAPICH2_NUMVERSION >= 20205300))) && !USE_CUDA_MPI
 #include <mpi-ext.h> // Needed for CUDA-aware check
 #endif
