@@ -1040,7 +1040,7 @@ class TestCase(expecttest.TestCase):
         return _compare_scalars_internal(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan)
 
     # Construct assert messages basd on internal messages and user message.
-    def _get_assert_msg(msg=msg, internal_msg=None): 
+    def _get_assert_msg(self, msg, internal_msg=None):
         if msg is None:
             return f"internal assert message: {internal_msg}"
         else:
@@ -1107,7 +1107,7 @@ class TestCase(expecttest.TestCase):
                 if not values_result:
                     assert debug_msg is not None
                     debug_msg = "Sparse tensor values failed to compare as equal! " + debug_msg
-                super().assertTrue(values_result, msg=msg=_get_assert_msg(msg, internal_msg=debug_msg))
+                super().assertTrue(values_result, msg=_get_assert_msg(msg, internal_msg=debug_msg))
             elif x.is_quantized and y.is_quantized:
                 self.assertEqual(x.qscheme(), y.qscheme(), atol=atol, rtol=rtol,
                                  msg=msg, exact_dtype=exact_dtype,
