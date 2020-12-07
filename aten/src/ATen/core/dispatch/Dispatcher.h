@@ -402,6 +402,7 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
         }
       }
     }
+    // keeping the guard alive while executing the kernel
     return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
   }
 #endif  // PYTORCH_DISABLE_PER_OP_PROFILING
@@ -456,6 +457,7 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
         }
       }
     }
+    // keeping the guard alive while executing the kernel
     kernel.callBoxed(op, stack);
     return;
   }

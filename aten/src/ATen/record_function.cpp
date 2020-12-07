@@ -72,6 +72,8 @@ class CallbackManager {
     rf_tls_.sorted_tls_callbacks_.emplace_back(std::move(cb), handle);
     if (cb.samplingProb() > kLowProb) {
       // pre-sampling of RecordFunction with prob. kLowProb cannot be used
+      LOG(WARNING) << "Adding a non-sampled callback / callback with high sampling "
+                   << "frequency can cause singnificant runtime overhead";
       at::setRecordAllFunctions();
     }
     return handle;
@@ -82,6 +84,8 @@ class CallbackManager {
     sorted_global_callbacks_.emplace_back(std::move(cb), handle);
     if (cb.samplingProb() > kLowProb) {
       // pre-sampling of RecordFunction with prob. kLowProb cannot be used
+      LOG(WARNING) << "Adding a non-sampled callback / callback with high sampling "
+                   << "frequency can cause singnificant runtime overhead";
       at::setRecordAllFunctions();
     }
     return handle;
@@ -139,7 +143,7 @@ class CallbackManager {
   // taking up a significant fraction of the time.
   static bool C10_ALWAYS_INLINE callbackShouldRun(
       const RecordFunctionCallback& cb, RecordScope scope, bool pre_sampled) {
-    TORCH_CHECK(
+    TORCH_INTERNAL_ASSERT(
         !pre_sampled || (cb.sampling_prob_ <= kLowProb),
         "Incorrect usage of a pre-sampled RecordFunction with a high-frequency "
         " or non-sampled callback");
