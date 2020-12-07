@@ -179,3 +179,40 @@ namespace test_drop {
     static_assert(std::is_same<typelist<int32_t>, drop_t<typelist<int64_t, int32_t>, 1>>::value, "");
     static_assert(std::is_same<typelist<>, drop_t<typelist<int64_t, int32_t>, 2>>::value, "");
 }
+
+namespace test_insert {
+    static_assert(std::is_same<typelist<int64_t>, insert_t<typelist<>, 0, int64_t>>::value, "");
+    static_assert(std::is_same<typelist<int64_t, char>, insert_t<typelist<char>, 0, int64_t>>::value, "");
+    static_assert(std::is_same<typelist<char, int64_t>, insert_t<typelist<char>, 1, int64_t>>::value, "");
+    static_assert(std::is_same<typelist<int64_t, char, bool>, insert_t<typelist<char, bool>, 0, int64_t>>::value, "");
+    static_assert(std::is_same<typelist<char, int64_t, bool>, insert_t<typelist<char, bool>, 1, int64_t>>::value, "");
+    static_assert(std::is_same<typelist<char, bool, int64_t>, insert_t<typelist<char, bool>, 2, int64_t>>::value, "");
+}
+
+namespace test_remove_by_index {
+    static_assert(std::is_same<typelist<>, remove_by_index_t<typelist<int64_t>, 0>>::value, "");
+    static_assert(std::is_same<typelist<char>, remove_by_index_t<typelist<int64_t, char>, 0>>::value, "");
+    static_assert(std::is_same<typelist<char>, remove_by_index_t<typelist<char, int64_t>, 1>>::value, "");
+    static_assert(std::is_same<typelist<char, bool>, remove_by_index_t<typelist<int64_t, char, bool>, 0>>::value, "");
+    static_assert(std::is_same<typelist<char, bool>, remove_by_index_t<typelist<char,int64_t, bool>, 1>>::value, "");
+    static_assert(std::is_same<typelist<char, bool>, remove_by_index_t<typelist<char, bool, int64_t>, 2>>::value, "");
+}
+
+namespace test_set {
+    static_assert(std::is_same<
+        set_t<typelist<int>, 0, char>,
+        typelist<char>
+    >::value, "");
+    static_assert(std::is_same<
+        set_t<typelist<int, double, bool>, 0, char>,
+        typelist<char, double, bool>
+    >::value, "");
+        static_assert(std::is_same<
+        set_t<typelist<int, double, bool>, 1, char>,
+        typelist<int, char, bool>
+    >::value, "");
+    static_assert(std::is_same<
+        set_t<typelist<int, double, bool>, 2, char>,
+        typelist<int, double, char>
+    >::value, "");
+}

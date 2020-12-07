@@ -336,6 +336,38 @@ struct find_if<typelist<Head, Tail...>, Condition, std::enable_if_t<!Condition<H
   static constexpr size_t value = 1 + find_if<typelist<Tail...>, Condition>::value;
 };
 
+
+/**
+ * Insert a type at a given position.
+ * Example:
+ *   typelist<int64_t, std::string, char, bool> == insert_t<typelist<int64_t, std::string, bool>, 2, char>
+ */
+template<class TypeList, size_t Pos, class Value>
+using insert_t = concat_t<
+  take_t<TypeList, Pos>,
+  typelist<Value>,
+  drop_t<TypeList, Pos>
+>;
+
+/**
+ * Remove a type at a given position.
+ * Example:
+ *   typelist<int64_t, std::string, char, bool> == remove_t<typelist<int64_t, std::string, bool>, 2, char>
+ */
+template<class TypeList, size_t Pos>
+using remove_by_index_t = concat_t<
+  take_t<TypeList, Pos>,
+  drop_t<TypeList, Pos+1>
+>;
+
+/**
+  * Set one of the elements of a type list to a different type
+  * Example:
+  *   set_t<typelist<int, char, std::string, double>, 2, float> == typelist<int, char, float, double>
+  */
+template<class TypeList, size_t Index, class Value>
+using set_t = insert_t<remove_by_index_t<TypeList, Index>, Index, Value>;
+
 /**
  * Maps a list of types into a list of values.
  * Examples:
