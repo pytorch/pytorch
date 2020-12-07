@@ -950,7 +950,7 @@ struct to_ir {
         Subscript subscript(target);
         const List<Expr>& subscript_exprs = subscript.subscript_exprs();
         if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
-          throw ErrorReport(stmt.range())
+          throw ErrorReport(target.range())
               << "del statements only support deletion at a single index, "
                  "slicing is not supported"
                  " (see https://github.com/pytorch/pytorch/issues/31430)";
@@ -964,7 +964,7 @@ struct to_ir {
         // implementation of del defined in a __delitem__ method.
         if (auto cls = val->type()->cast<ClassType>()) {
           if (!cls->findMethod("__delitem__")) {
-            throw ErrorReport(stmt.range())
+            throw ErrorReport(target.range())
                 << "Class does not define __delitem__";
           }
 
@@ -973,14 +973,14 @@ struct to_ir {
               .call(stmt.range(), method, {idx}, {}, 0);
         } else {
           auto node = graph->create(aten::Delete, {val, idx}, 0)
-                          ->setSourceRange(stmt.range());
+                          ->setSourceRange(target.range());
           graph->insertNode(node);
         }
       } else if (target.kind() == TK_VAR) {
         Var var(target);
         environment_stack->removeVar(var.name(), /*check_if_removed=*/true);
       } else {
-        throw ErrorReport(stmt.range())
+        throw ErrorReport(target.range())
             << "del statements are only supported for deleting"
                " list and dict items and variables";
       }
