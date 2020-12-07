@@ -364,6 +364,8 @@ class TestPostTrainingStatic(QuantizationTestCase):
                     self.assertEqual(type(model.module.conv1), nn.intrinsic.quantized.ConvReLU2d)
                     self.assertEqual(type(model.module.myop), nn.quantized.QFunctional)
                     self.assertEqual(type(model.module.avgpool), nn.AdaptiveAvgPool2d)
+                    self.assertEqual(type(model.module.fc), nnq.Linear)
+
                     test_only_eval_fn(model, self.img_data_2d)
                     self.checkNoQconfig(model)
 
