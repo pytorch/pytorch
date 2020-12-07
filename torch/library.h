@@ -643,7 +643,7 @@ public:
 /// for any given namespace.
 #define TORCH_LIBRARY(ns, m) \
   static void TORCH_LIBRARY_init_ ## ns (torch::Library&); \
-  static torch::detail::TorchLibraryInit TORCH_LIBRARY_static_init_ ## ns ( \
+  static const torch::detail::TorchLibraryInit TORCH_LIBRARY_static_init_ ## ns ( \
     torch::Library::DEF, \
     &TORCH_LIBRARY_init_ ## ns, \
     #ns, c10::nullopt, __FILE__, __LINE__ \
@@ -669,7 +669,7 @@ public:
 /// that it can only be called once for a given namespace.
 #define _TORCH_LIBRARY_FRAGMENT(ns, m, uid) \
   static void C10_CONCATENATE(TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _, uid) (torch::Library&); \
-  static torch::detail::TorchLibraryInit C10_CONCATENATE(TORCH_LIBRARY_FRAGMENT_static_init_ ## ns ## _, uid) ( \
+  static const torch::detail::TorchLibraryInit C10_CONCATENATE(TORCH_LIBRARY_FRAGMENT_static_init_ ## ns ## _, uid) ( \
     torch::Library::FRAGMENT, \
     &C10_CONCATENATE(TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _, uid), \
     #ns, c10::nullopt, __FILE__, __LINE__ \
@@ -725,7 +725,7 @@ public:
 /// and dispatch key in the same translation unit.
 #define _TORCH_LIBRARY_IMPL(ns, k, m, uid) \
   static void C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k ## _, uid) (torch::Library&); \
-  static torch::detail::TorchLibraryInit C10_CONCATENATE(TORCH_LIBRARY_IMPL_static_init_ ## ns ## _ ## k ## _, uid) ( \
+  static const torch::detail::TorchLibraryInit C10_CONCATENATE(TORCH_LIBRARY_IMPL_static_init_ ## ns ## _ ## k ## _, uid) ( \
     torch::Library::IMPL, \
     c10::guts::if_constexpr<c10::impl::dispatch_key_whitelist_check(c10::DispatchKey::k)>( \
       []() { return & C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k ## _, uid); }, \
