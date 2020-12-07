@@ -11,7 +11,7 @@ namespace jit {
 // 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020 Python Software
 // Foundation; All Rights Reserved
 //
-// Stolen (with appropriate modifications)
+// Stolen (with appropriate modifications) by @agolynski (https://github.com/pytorch/pytorch/pull/33019)
 // from cpython repo Objects/sliceobject.c with comment: this is harder to get
 // right than you might think
 //
