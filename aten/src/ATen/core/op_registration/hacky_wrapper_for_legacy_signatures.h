@@ -2,6 +2,7 @@
 
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
+#include <c10/util/IntegerSequence.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/CompileTimeFunctionPointer.h>
 #include <ATen/Tensor.h>
@@ -207,12 +208,111 @@ constexpr auto with_explicit_optional_tensors(KernelFunc kernel_func) {
     return kernel_func;
 }
 
+template<class Arg> constexpr bool is_out_argument_() {
+    return std::is_same<at::Tensor&, Arg>::value;
+}
+template<class Arg> using is_out_argument = guts::bool_constant<is_out_argument_<Arg>()>;
+
+template<class OutTensorArgIndices, class KernelFunc>
+struct with_out_arguments_reordered_impl final {
+private:
+    // For an example op
+    //   > aten::example(Tensor a, int64_t b, Tensor(a!) out_c, int64_t d, Tensor(b!) out_e) -> (Tensor(a!), Tensor(b!))
+    // we get a KernelFunc
+    //   > KernelFunc = std::tuple<Tensor, Tensor> example(Tensor& out_c, Tensor& out_e, const Tensor& a, int64_t b, int64_t d)
+    //   > OutTensorArgIndices = [2, 4]
+    // with the out arguments at the front and OutTensorArgIndices represents the indices of the out
+    // arguments in the schema, and reorder that into
+    //   > std::tuple<Tensor, Tensor> example(const Tensor& a, int64_t b, Tensor& out_c, int64_t d, Tensor& out_e)
+    // where the out arguments are in the back.
+
+    using kernel_signature_traits = guts::infer_function_traits_t<typename KernelFunc::FuncType>;
+    static_assert(
+        guts::typelist::all<
+            is_out_argument,
+            guts::typelist::take_t<
+                typename kernel_signature_traits::parameter_types,
+                OutTensorArgIndices::size()
+            >
+        >::value,
+        "The kernel function has the wrong number of leading Tensor& arguments to match the out arguments in the JIT signature"
+    );
+    static constexpr size_t num_parameters = guts::typelist::size<typename kernel_signature_traits::parameter_types>::value;
+
+    // schema_nonout_arg_indices is a list of all argument indices in the schema function
+    // that aren't out arguments.
+    // In the aten::example op mentioned above, this would be
+    //   > schema_nonout_arg_indices = [0, 1, 3]
+    using schema_nonout_arg_indices = guts::iseq::remove_all_by_index_t<std::make_index_sequence<num_parameters>, guts::iseq::reverse_t<OutTensorArgIndices>>;
+
+    // kernel_to_schema_permutation then contains a mapping from argument index in KernelFunc to the corresponding
+    // argument index in the schema.
+    // For the aten::example op, that'll be
+    //  > kernel_to_schema_permutation_indices = [2, 4, 0, 1, 3]
+    // Interpreted as a mapping, this means
+    //  - argument 0 in KernelFunc maps to argument 2 in the schema,
+    //  - argument 1 in KernelFunc maps to argument 4 in the schema,
+    //  - argument 2 in KernelFunc maps to argument 0 in the schema,
+    //  - ...
+    // We can use this as a permutation function to reorder types or values correspondingly
+    using kernel_to_schema_permutation_indices = guts::iseq::concat_t<OutTensorArgIndices, schema_nonout_arg_indices>;
+    using kernel_to_schema_permutation = guts::iseq::permutation<kernel_to_schema_permutation_indices>;
+
+    // We also need the inverse permutation because parameters (i.e. types) and arguments (i.e. values)
+    // need to be mapped in inverted directions. For types, we generate the schema order types from
+    // the KernelFunction types, but for arguments we get schema order arguments and need to generate
+    // the KernelFunction arguments.
+    using schema_to_kernel_permutation = typename kernel_to_schema_permutation::inverted_t;
+
+    using target_signature_parameters = typename schema_to_kernel_permutation::template apply_to_typelist_t<
+        typename kernel_signature_traits::parameter_types>;
+
+    template<class Return, class ParameterList>
+    struct wrapper_;
+    template<class Return, class... Parameters>
+    struct wrapper_<Return, guts::typelist::typelist<Parameters...>> {
+        static Return call(Parameters... args) {
+            // call through to KernelFunc but reorder arguments as determined
+            // by the permutation we calculated above.
+            return guts::apply(KernelFunc::func_ptr(),
+                kernel_to_schema_permutation::apply_to_tuple(std::tuple<Parameters...>(std::forward<Parameters>(args)...)));
+        }
+    };
+
+public:
+    using wrapper = wrapper_<typename kernel_signature_traits::return_type, target_signature_parameters>;
+};
+
+
+/**
+ * Take a kernel function that has a number of `Tensor`, `const Tensor&` or `Tensor&` arguments
+ * where all `Tensor&` arguments are at the beginning, and take a `std::index_sequence OutTensorArgIndices`.
+ * Create a wrapper function that has `Tensor&` arguments at the indices given by `OutTensorArgIndices`
+ * and calls through the underlying kernel function by reordering them to the front.
+ * This wrapper also changes the argument type from `Tensor&` to `const Tensor&`.
+ */
+template<class OutTensorArgIndices, class KernelFunc, std::enable_if_t<(OutTensorArgIndices::size() > 0), int> = 0>
+constexpr auto with_out_arguments_reordered(KernelFunc kernel_func) {
+    // SFINAE case for kernels that have out tensor arguments.
+    // Wrap them and reorder the arguments.
+    using impl = with_out_arguments_reordered_impl<OutTensorArgIndices, KernelFunc>;
+    return TORCH_FN((&impl::wrapper::call));
 }
 
-template<class TargetSignature, class FuncPtr>
+template<class OutTensorArgIndices, class KernelFunc, std::enable_if_t<(OutTensorArgIndices::size() == 0), int> = 0>
+constexpr auto with_out_arguments_reordered(KernelFunc kernel_func) {
+    // SFINAE case for kernels that don't have out tensor arguments.
+    // Don't wrap them but just use the kernel directly.
+    return kernel_func;
+}
+
+}
+
+template<class TargetSignature, class OutTensorArgIndices, class FuncPtr>
 constexpr auto hacky_wrapper_for_legacy_signatures(FuncPtr kernel_func) {
-    auto with_tensoroptions_scattered = detail::with_scattered_tensor_options(kernel_func);
-    auto result = detail::with_explicit_optional_tensors<TargetSignature>(with_tensoroptions_scattered);
+    auto with_scattered_tensor_options = detail::with_scattered_tensor_options(kernel_func);
+    auto with_out_arguments_reordered = detail::with_out_arguments_reordered<OutTensorArgIndices>(with_scattered_tensor_options);
+    auto result = detail::with_explicit_optional_tensors<TargetSignature>(with_out_arguments_reordered);
     static_assert(std::is_same<TargetSignature, typename decltype(result)::FuncType>::value, "Generated signature doesn't match the expected one.");
     return result;
 };

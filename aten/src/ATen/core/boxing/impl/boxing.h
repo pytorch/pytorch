@@ -41,6 +41,8 @@ struct has_ivalue_to<T, guts::void_t<decltype(std::declval<IValue>().to<T>())>>
 : std::true_type
 {};
 
+template<class T> using is_mutable_tensor = std::is_same<at::Tensor&, T>;
+
 //
 // boxing predicates
 //
@@ -64,6 +66,8 @@ using can_unbox =
   guts::conjunction<
     guts::disjunction<
       has_ivalue_to<T>,
+      // TODO mutable Tensor returns are a special case that we want to remove
+      is_mutable_tensor<T>,
       // void returns are ok
       std::is_same<void, T>
     >,
