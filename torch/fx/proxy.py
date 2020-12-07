@@ -33,8 +33,8 @@ class TracerBase:
 
         If kind = 'placeholder', then we're creating a Node that
         represents the parameter of a function. If we need to encode
-        a default parameter, we use the `args` tuple. `args` is
-        otherwise empty for `placeholder` Nodes.
+        a default parameter, we use the ``args`` tuple. ``args`` is
+        otherwise empty for ``placeholder`` Nodes.
         '''
         args_ = self.create_arg(args)
         kwargs_ = self.create_arg(kwargs)
