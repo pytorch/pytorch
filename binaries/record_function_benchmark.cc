@@ -12,7 +12,6 @@ C10_DEFINE_int(sampled_iter, 10e6,
     "Number of iterations for the sampled observer benchmark");
 
 namespace {
-const int kNumSampledCb = 2;
 const int kTensorSize = 16;
 const int kSmallTensorSize = 1;
 const float kLowSamplingProb = 0.0001;
@@ -97,10 +96,12 @@ int main(int argc, char** argv) {
   runBenchmark();
 
   addTestCallback();
-  for (int idx = 0; idx < kNumSampledCb; ++idx) {
-    addTestCallback(kLowSamplingProb);
-  }
-  std::cout << "Running with empty observers" << std::endl;
+  std::cout << "Running with empty non-sampled observer" << std::endl;
+  runBenchmark();
+  at::clearCallbacks();
+
+  addTestCallback(kLowSamplingProb);
+  std::cout << "Running with empty sampled observer" << std::endl;
   runBenchmark();
   at::clearCallbacks();
 
