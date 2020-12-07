@@ -464,7 +464,7 @@ class _NnapiSerializer(object):
                 f"Expected constant value of type {typekind}, but got {ctype.kind()} for value '{jitval!r}'")
         return record
 
-    def transponse_to_nhwc(in_id, oper):
+    def transpose_to_nhwc(self, in_id, oper):
         if oper.shape[2:] != (1, 1):
             raise Exception("Automatic transpose only supported for H,W == 1,1")
 
@@ -488,10 +488,10 @@ class _NnapiSerializer(object):
 
         # Assume NHWC is preferred if there is a mismatch.
         orders = (in0_oper.dim_order, in1_oper.dim_order)
-        if orders == (DimOrder.PRESUMED_CONTIGUOUS, DimOrder.CHANNELS_LAST)
-            return transpose_to_nhwc(in0_id, in0_oper) + (in1_id, in1_oper)
-        if orders == (DimOrder.CHANNELS_LAST, DimOrder.PRESUMED_CONTIGUOUS)
-            return (in0_id, in0_oper) + transpose_to_nhwc(in1_id, in1_oper)
+        if orders == (DimOrder.PRESUMED_CONTIGUOUS, DimOrder.CHANNELS_LAST):
+            return self.transpose_to_nhwc(in0_id, in0_oper) + (in1_id, in1_oper)
+        if orders == (DimOrder.CHANNELS_LAST, DimOrder.PRESUMED_CONTIGUOUS):
+            return (in0_id, in0_oper) + self.transpose_to_nhwc(in1_id, in1_oper)
 
         raise Exception(
             "Automatic transpose not supported for dim_orders: %r, %r" %
