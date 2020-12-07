@@ -455,9 +455,10 @@ inline Variable make_variable_differentiable_view(
   if (data.defined()) {
     c10::intrusive_ptr<at::TensorImpl> data_impl;
     // If we already did a TensorImpl allocation for data, just reuse it.
-    // Otherwise(e.g tensor.swapdim(0, 0) when we return the same tensor as input), we have to use shallow_copy_and_detach to create a new
-    // TensorImpl to avoid moving leaf node into graph interior.
-    // This guarantees only 1 TensorImpl allocation happens in view ops.
+    // Otherwise(e.g tensor.swapdim(0, 0) when we return the same tensor as input),
+    // we have to use shallow_copy_and_detach to create a new TensorImpl to avoid
+    // moving leaf node into graph interior. This guarantees only 1 TensorImpl
+    // allocation happens in view ops.
     if (base.unsafeGetTensorImpl() == data.unsafeGetTensorImpl()) {
       data_impl = data.getIntrusivePtr()->shallow_copy_and_detach(
         /*version_counter=*/0,
