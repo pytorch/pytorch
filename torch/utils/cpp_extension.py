@@ -847,19 +847,18 @@ def CUDAExtension(name, sources, *args, **kwargs):
     TORCH_CUDA_ARCH_LIST="6.1 8.6" python build_my_extension.py
     TORCH_CUDA_ARCH_LIST="5.2 6.0 6.1 7.0 7.5 8.0 8.6+PTX" python build_my_extension.py
 
-    The `+PTX` option is special and if provided as shown in the last example will support any card
-    whose compute capability was not compiled for and it'll use JIT at runtime instead (that's, of
-    course, if the instruction sets match - some old cards won't be possible to use.)
+    The +PTX option causes extension kernel binaries to include PTX instructions for the specified
+    compute capability (CC). PTX is an intermediate representation that allows kernels to
+    runtime-compile for any CC >= the specified CC (for example, 8.6+PTX generates PTX that can
+    runtime-compile for any GPU with CC >= 8.6). This improves your binary's forward compatibility.
+    However, relying on older PTX to provide forward compat by runtime-compiling for newer CCs can
+    modestly reduce performance on those newer CCs. If you know exact CC(s) of the GPUs you want to
+    target, you're always better off specifying them individually. For example, if you want your
+    extension to run on 8.0 and 8.6, "8.0+PTX" would work functionally because it includes PTX that
+    can runtime-compile for 8.6, but "8.0 8.6" would be better.
 
-    Notes: 
-
-    - the more archs get included the slower the building process will be, as it will build a
-      separate kernel image for each arch
-
-    - to get the best performance it's always the best to compile for the exact compute capability
-      of the cards you are going to use the extension with. e.g. while sm_80 will work just fine on
-      a sm_86-based card, you could be missing out on the new instruction sets available to the
-      sm_86 card.
+    Note that while it's possible to include all supported archs, the more archs get included the
+    slower the building process will be, as it will build a separate kernel image for each arch.
 
     '''
     library_dirs = kwargs.get('library_dirs', [])
