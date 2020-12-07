@@ -597,13 +597,15 @@ op_db: List[Any] = [
                    promotes_integers_to_float=True),
     UnaryUfuncInfo('expm1',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.expm1),
-                   decorators=(precisionOverride({torch.bfloat16: 1.5}),),
                    dtypes=all_types_and(torch.bool, torch.half),
                    dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half),
                    promotes_integers_to_float=True,
                    assert_autodiffed=True,
                    skips=(
+                       # Reference: https://github.com/pytorch/pytorch/pull/48926#issuecomment-739734774
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cpu', dtypes=[torch.bfloat16]),
                        # RuntimeError: "isfinite" not implemented for 'BFloat16'
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 device_type='cpu', dtypes=[torch.bfloat16]),
