@@ -114,7 +114,7 @@ int main(int argc, char** argv) {
       }
   );
 
-  runPureRecordFunctionBench(FLAGS_sampled_iter);
+  auto duration = runPureRecordFunctionBench(FLAGS_sampled_iter);
 
   std::cout << "Pure RecordFunction runtime of " << FLAGS_sampled_iter
             << " iterations: " << duration
