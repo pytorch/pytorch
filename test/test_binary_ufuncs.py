@@ -2552,6 +2552,36 @@ class TestBinaryUfuncs(TestCase):
         self.compare_with_numpy(torch_fn, reference_fn, t, exact_dtype=False)
         out_variant_helper(torch.xlogy, 0, t)
 
+    @skipIf(not TEST_SCIPY, "Scipy required for the test.")
+    def test_xlogy_bfloat16(self, device):
+        def _compare_helper(x, y):
+            x_np = x if isinstance(x, float) else x.cpu().to(torch.float).numpy()
+            y_np = y if isinstance(y, float) else y.cpu().to(torch.float).numpy()
+            expected = torch.from_numpy(scipy.special.xlogy(x_np, y_np))
+            actual = torch.xlogy(x, y)
+            self.assertEqual(expected, actual, exact_dtype=False)
+
+        x_dtype, y_dtype = torch.bfloat16, torch.bfloat16
+
+        # Tensor-Tensor Test (tensor of same and different shape)
+        x = make_tensor((3, 2, 4, 5), device, x_dtype, low=0.5, high=1000)
+        y = make_tensor((3, 2, 4, 5), device, y_dtype, low=0.5, high=1000)
+        z = make_tensor((4, 5), device, y_dtype, low=0.5, high=1000)
+
+        _compare_helper(x, x)
+        _compare_helper(x, y)
+        _compare_helper(x, z)
+
+        _compare_helper(x, 3.14)
+        _compare_helper(y, 3.14)
+        _compare_helper(z, 3.14)
+
+        # Special Values Tensor-Tensor
+        t = torch.tensor([0., 1., 2., float('inf'), -float('inf'), float('nan')], device=device)
+        zeros = torch.tensor(5, dtype=y_dtype, device=device)
+        _compare_helper(t, zeros)
+        _compare_helper(t, 0.)
+
     def test_xlogy_exceptions(self, device):
         for dtype in torch.testing.get_all_complex_dtypes():
             x = torch.tensor([1 + 1j], device=device, dtype=dtype)
