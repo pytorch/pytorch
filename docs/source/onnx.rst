@@ -280,6 +280,7 @@ Using dictionaries to handle Named Arguments as model inputs
 There are two ways to handle models which consist of named parameters or keyword arguments as inputs: 
 * The first method is to pass all the inputs in the same order as required by the model and pass None
   values for the keyword arguments that do not require a value to be passed
+
 * The second and more intuitive method is to represent the keyword arguments as key-value pairs where
   the key represents the name of the argument in the model signature and the value represents the value
   of the argument to be passed
@@ -303,39 +304,37 @@ There are two ways of exporting the model:
 
       torch.onnx.export(model, (x, None, z), ‘test.onnx’) 
 
-  As the 'y' keyword argument has no value to be passed, we pass a None value instead
-
 * Using a dictionary to represent the keyword arguments. This dictionary is always passed in
   addition to the non-keyword arguments and is always the last argument in the args tuple. ::
 
       torch.onnx.export(model, (x, {'y': None, 'z': z}), ‘test.onnx’)
 
-  For cases in which there are no keyword arguments, models can be exported with either an
-  empty or no dictionary. For example, ::
+For cases in which there are no keyword arguments, models can be exported with either an
+empty or no dictionary. For example, ::
 
-      torch.onnx.export(model, (x, {}), ‘test.onnx’)
-      or
-      torch.onnx.export(model, (x, ), ‘test.onnx’)
+    torch.onnx.export(model, (x, {}), ‘test.onnx’)
+    or
+    torch.onnx.export(model, (x, ), ‘test.onnx’)
 
-  except in cases in which the last input is also of a dictionary type. In these cases it
-  is mandatory to have an empty dictionary as the last argument in the args tuple. 
-  For example, ::
+An exception to this rule are cases in which the last input is also of a dictionary type. 
+In these cases it is mandatory to have an empty dictionary as the last argument in the 
+args tuple. For example, ::
 
-      class Model(torch.nn.Module): 
-        def forward(self, k, x): 
-          ...  
-          return x 
-      m = Model() 
-      k = torch.randn(2, 3)   
-      x = {torch.tensor(1.): torch.randn(2, 3)}
+    class Model(torch.nn.Module): 
+      def forward(self, k, x): 
+        ...  
+        return x 
+    m = Model() 
+    k = torch.randn(2, 3)   
+    x = {torch.tensor(1.): torch.randn(2, 3)}
 
-  Without the presence of the empty dictionary, the export call assumes that the 
-  ‘x’ input is intended to represent the optional dictionary consisting of named arguments. 
-  In order to prevent this from being an issue a constraint is placed to provide an empty 
-  dictionary as the last input in the tuple args in such cases. 
-  The new call would look like this. :: 
+Without the presence of the empty dictionary, the export call assumes that the 
+‘x’ input is intended to represent the optional dictionary consisting of named arguments. 
+In order to prevent this from being an issue a constraint is placed to provide an empty 
+dictionary as the last input in the tuple args in such cases. 
+The new call would look like this. :: 
 
-      torch.onnx.export(model, (k, x, {}), ‘test.onnx’) 
+    torch.onnx.export(model, (k, x, {}), ‘test.onnx’) 
 
 
 Indexing

@@ -77,10 +77,9 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             The model below provides such an example. 
 
                 class Model(torch.nn.Module): 
-                    def forward(self, k, x): 
-                        ... 
+                    def forward(self, k, x): 
                         ... 
-                        return x 
+                        return x 
 
                 m = Model() 
                 k = torch.randn(2, 3)   
