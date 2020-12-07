@@ -1057,6 +1057,7 @@ class TestCase(expecttest.TestCase):
                     atol: Optional[float] = None, rtol: Optional[float] = None,
                     equal_nan=True, exact_dtype=True, exact_device=False) -> None:
         assert (atol is None) == (rtol is None), "If one of atol or rtol is specified, then the other must be too"
+        debug_msg: Optional[str] = None
 
         # Tensor x Number and Number x Tensor comparisons
         if isinstance(x, torch.Tensor) and isinstance(y, Number):
@@ -1180,7 +1181,7 @@ class TestCase(expecttest.TestCase):
         elif is_iterable(x) and is_iterable(y):
             debug_msg = ("Attempted to compare iterables with different length: "
                          f"Expected: {len(x)}; Actual: {len(y)}.")
-            super().assertEqual(x, y, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+            super().assertEqual(len(x), len(y), msg=self._get_assert_msg(msg, debug_msg=debug_msg))
             for x_, y_ in zip(x, y):
                 self.assertEqual(x_, y_, atol=atol, rtol=rtol, msg=msg,
                                  exact_dtype=exact_dtype, exact_device=exact_device)
