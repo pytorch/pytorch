@@ -324,9 +324,15 @@ def _decide_input_format(model, args):
         if isinstance(args[-1], dict):
             args_dict = args[-1]
             args = list(args)[:-1]
-            for optional_arg in ordered_list_keys:
+            n_nonkeyword = len(args)
+            for optional_arg in ordered_list_keys[n_nonkeyword:]:
                 if optional_arg in args_dict:
                     args.append(args_dict[optional_arg])
+                # Check if this arg has a default value
+                else:
+                    param = sig.parameters[optional_arg]
+                    if param.default is param.empty:
+                        args.append(None)
             args = tuple(args)
         return args
     # Cases of models without forward functions and dict inputs
