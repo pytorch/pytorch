@@ -235,6 +235,9 @@ class RegisterDispatchKey:
     # registration code for.
     selector: SelectiveBuilder
 
+    # Whether or not we are actually code-genning for ROCm
+    rocm: bool
+
     def __post_init__(self) -> None:
         assert self.target is not Target.DECLARATION
 
@@ -349,7 +352,10 @@ if (!strides.empty()) {{
             output_type = "std::reference_wrapper<Tensor>"
 
         if self.dispatch_key == 'CUDA':
-            guard_field = 'c10::cuda::OptionalCUDAGuard guard_;'
+            if self.rocm:
+                guard_field = 'c10::cuda::OptionalHIPGuard guard_;'
+            else:
+                guard_field = 'c10::cuda::OptionalCUDAGuard guard_;'
         else:
             guard_field = ''
 
@@ -1279,11 +1285,11 @@ def main() -> None:
                 '',
             'DispatchKey': dispatch_key,
             'dispatch_definitions': list(concatMap(
-                RegisterDispatchKey(dispatch_key, Target.DEFINITION, selector),
+                RegisterDispatchKey(dispatch_key, Target.DEFINITION, selector, rocm=options.rocm),
                 grouped_native_functions
             )),
             'dispatch_registrations': list(concatMap(
-                RegisterDispatchKey(dispatch_key, Target.REGISTRATION, selector),
+                RegisterDispatchKey(dispatch_key, Target.REGISTRATION, selector, rocm=options.rocm),
                 grouped_native_functions
             )),
         })
