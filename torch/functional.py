@@ -19,6 +19,7 @@ __all__ = [
     'atleast_2d',
     'atleast_3d',
     'align_tensors',
+    'broadcast_shapes',
     'broadcast_tensors',
     'cartesian_prod',
     'block_diag',
@@ -70,6 +71,39 @@ def broadcast_tensors(*tensors):
         if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
             return handle_torch_function(broadcast_tensors, tensors, *tensors)
     return _VF.broadcast_tensors(tensors)  # type: ignore
+
+
+def broadcast_shapes(*shapes):
+    r"""broadcast_shapes(*shapes) -> Size
+
+    Similar to :func:`broadcast_tensors` but for shapes.
+
+    This is equivalent to
+    ``torch.broadcast_tensors(*map(torch.empty, shapes))[0].shape``
+    but avoids the need create to intermediate tensors. This is useful for
+    broadcasting tensors of common batch shape but different rightmost shape,
+    e.g. to broadcast mean vectors with covariance matrices.
+
+    Example::
+
+        >>> torch.broadcast_shapes((2,), (3, 1), (1, 1, 1))
+        torch.Size([1, 3, 2])
+
+    Args:
+        \*shapes (torch.Size): Shapes of tensors.
+
+    Returns:
+        shape (torch.Size): A shape compatible with all input shapes.
+
+    Raises:
+        RuntimeError: If shapes are incompatible.
+    """
+    # TODO Movie this to C++ once the jit has better support for torch.Size.
+    with torch.no_grad():
+        scalar = torch.zeros((), device="cpu")
+        tensors = [scalar.expand(shape) for shape in shapes]
+        tensors = broadcast_tensors(*tensors)
+        return tensors[0].shape
 
 
 def split(tensor, split_size_or_sections, dim=0):
@@ -285,7 +319,7 @@ def einsum(equation, *operands):
         The output is computed by multiplying the input :attr:`operands` element-wise, with their dimensions aligned based
         on the subscripts, and then summing out the dimensions whose subscripts are not part of the output.
 
-        Optionally, the output subscripts can be explictly defined by adding an arrow ('->') at the end of the equation
+        Optionally, the output subscripts can be explicitly defined by adding an arrow ('->') at the end of the equation
         followed by the subscripts for the output. For instance, the following equation computes the transpose of a
         matrix multiplication: 'ij,jk->ki'. The output subscripts must appear at least once for some input operand and
         at most once for the output.
@@ -294,13 +328,18 @@ def einsum(equation, *operands):
         Each input operand may contain at most one ellipsis which will cover the dimensions not covered by subscripts,
         e.g. for an input operand with 5 dimensions, the ellipsis in the equation `'ab...c'` cover the third and fourth
         dimensions. The ellipsis does not need to cover the same number of dimensions across the :attr:`operands` but the
-        'shape' of the ellipsis (the size of the dimensions covered by them) must be broadcastable. In implicit mode,
-        the ellipsis will come first in the output. In explicit mode, if an ellipses covers at least one dimension then
-        it must appear in the output since the dimensions under the ellipsis cannot be summed over. e.g. the following
-        equation implements batch matrix multiplication `'...ij,...jk->...ik'`.
+        'shape' of the ellipsis (the size of the dimensions covered by them) must broadcast together. If the output is not
+        explicitly defined with the arrow ('->') notation, the ellipsis will come first in the output (left-most dimensions),
+        before the subscript labels that appear exactly once for the input operands. e.g. the following equation implements
+        batch matrix multiplication `'...ij,...jk'`.
 
         A few final notes: the equation may contain whitespaces between the different elements (subscripts, ellipsis,
         arrow and comma) but something like `'. . .'` is not valid. An empty string `''` is valid for scalar operands.
+
+    .. note::
+
+        ``torch.einsum`` handles ellipsis ('...') differently from NumPy in that it allows dimensions
+        covered by the ellipsis to be summed over, that is, ellipsis are not required to be part of the output.
 
     .. note::
 
@@ -377,38 +416,37 @@ if TYPE_CHECKING:
         return _meshgrid(*tensors)
 else:
     def meshgrid(*tensors):
+        r"""Take :math:`N` tensors, each of which can be either scalar or 1-dimensional
+        vector, and create :math:`N` N-dimensional grids, where the :math:`i` :sup:`th` grid is defined by
+        expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
+
+        Args:
+            tensors (list of Tensor): list of scalars or 1 dimensional tensors. Scalars will be
+                treated as tensors of size :math:`(1,)` automatically
+
+        Returns:
+            seq (sequence of Tensors): If the input has :math:`k` tensors of size
+            :math:`(N_1,), (N_2,), \ldots , (N_k,)`, then the output would also have :math:`k` tensors,
+            where all tensors are of size :math:`(N_1, N_2, \ldots , N_k)`.
+
+        Example::
+
+            >>> x = torch.tensor([1, 2, 3])
+            >>> y = torch.tensor([4, 5, 6])
+            >>> grid_x, grid_y = torch.meshgrid(x, y)
+            >>> grid_x
+            tensor([[1, 1, 1],
+                    [2, 2, 2],
+                    [3, 3, 3]])
+            >>> grid_y
+            tensor([[4, 5, 6],
+                    [4, 5, 6],
+                    [4, 5, 6]])
+        """
         return _meshgrid(*tensors)
 
 
 def _meshgrid(*tensors):
-    r"""Take :math:`N` tensors, each of which can be either scalar or 1-dimensional
-vector, and create :math:`N` N-dimensional grids, where the :math:`i` :sup:`th` grid is defined by
-expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
-
-
-    Args:
-        tensors (list of Tensor): list of scalars or 1 dimensional tensors. Scalars will be
-        treated as tensors of size :math:`(1,)` automatically
-
-    Returns:
-        seq (sequence of Tensors): If the input has :math:`k` tensors of size
-        :math:`(N_1,), (N_2,), \ldots , (N_k,)`, then the output would also have :math:`k` tensors,
-        where all tensors are of size :math:`(N_1, N_2, \ldots , N_k)`.
-
-    Example::
-
-        >>> x = torch.tensor([1, 2, 3])
-        >>> y = torch.tensor([4, 5, 6])
-        >>> grid_x, grid_y = torch.meshgrid(x, y)
-        >>> grid_x
-        tensor([[1, 1, 1],
-                [2, 2, 2],
-                [3, 3, 3]])
-        >>> grid_y
-        tensor([[4, 5, 6],
-                [4, 5, 6],
-                [4, 5, 6]])
-    """
     if not torch.jit.is_scripting():
         if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
             return handle_torch_function(meshgrid, tensors, *tensors)

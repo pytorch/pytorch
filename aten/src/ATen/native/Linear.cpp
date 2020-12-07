@@ -150,10 +150,10 @@ Tensor einsum(std::string equation, TensorList operands) {
 
   // Find arrow (->) to split equation into lhs and rhs
   const auto arrow_pos = equation.find("->");
+  const auto lhs = equation.substr(0, arrow_pos);
 
   // Convert labels for input operands into an index in [0, 25] and store
   // them in op_labels for each operand along with ELLIPSIS.
-  std::string lhs = equation.substr(0, arrow_pos);
   std::vector<std::vector<int>> op_labels(operands.size());
   bool found_ell = false;
   std::string::size_type curr_op = 0;
@@ -207,8 +207,8 @@ Tensor einsum(std::string equation, TensorList operands) {
       "einsum() more operands were provided than specified in the equation");
 
   // Labels must be within [a, z].
-  constexpr int total_labels = 'z' - 'a' + 1;
-  std::vector<int> label_count(total_labels, 0);
+  constexpr int TOTAL_LABELS = 'z' - 'a' + 1;
+  std::vector<int> label_count(TOTAL_LABELS, 0);
 
   // The maximum number of dimensions covered by any ellipsis, needed when
   // unsqueezing missing dimensions from operands to permute and broadcast
@@ -218,7 +218,7 @@ Tensor einsum(std::string equation, TensorList operands) {
   // We do this after parsing labels to make it more readable and simpler
   // to compute the number of dimensions covered by ellipsis.
   for (std::size_t i = 0; i < operands.size(); ++i) {
-    Tensor operand = operands[i];
+    const Tensor operand = operands[i];
     std::vector<int> labels = op_labels[i];
     int64_t nlabels = labels.size();
     int64_t ndims = operand.dim();
@@ -248,26 +248,27 @@ Tensor einsum(std::string equation, TensorList operands) {
 
   // Mapping of label to index in the permuted tensors (out_dims + sum_dims)
   // This will be used for aligning the dimensions of all input operands
-  std::vector<int> label_perm_index(total_labels, -1);
+  std::vector<int> label_perm_index(TOTAL_LABELS, -1);
   
   // Current index in the permuted shape
   int perm_index = 0;
 
   // Start index of ellipsis dimensions in the permuted shape
   int64_t ell_index = 0;
+  found_ell = false;
 
   if (arrow_pos == std::string::npos) {
     // Implicit output is ellipsis (...) + labels seen only once
     perm_index = ell_num_dim;
-    for (int label = 0; label < total_labels; ++label) {
+    found_ell = true;
+    for (int label = 0; label < TOTAL_LABELS; ++label) {
       if (label_count[label] == 1) {
         label_perm_index[label] = perm_index++;
       }
     }
   } else {
     // Parse explicit output
-    std::string rhs = equation.substr(arrow_pos + 2);
-    found_ell = false;
+    const std::string rhs = equation.substr(arrow_pos + 2);
     for (std::size_t i = 0; i < rhs.length(); ++i) {
       switch (rhs[i]) {
         case ' ':
@@ -309,18 +310,19 @@ Tensor einsum(std::string equation, TensorList operands) {
           label_count[rhs[i] - 'a'] = -1;
       }
     }
-
-    TORCH_CHECK(
-        // Dimensions under ellipsis are not contracted, so ensure it appears in output
-        ell_num_dim <= 0 || found_ell,
-        "einsum() ellipsis (...) covering one or more dimensions was given in the input but not in the output");
   }
 
   // Save output size before adding sum dims
-  int out_size = perm_index;
+  const int out_size = perm_index;
+
+  // If ellipsis is not part of the output, add to contraction dimensions
+  if (ell_num_dim > 0 && !found_ell) {
+    ell_index = perm_index;
+    perm_index += ell_num_dim;
+  }
 
   // Add contraction labels (labels not present in output)
-  for (int label = 0; label < total_labels; ++label) {
+  for (int label = 0; label < TOTAL_LABELS; ++label) {
     if (label_count[label] > 0 && label_perm_index[label] == -1) {
       label_perm_index[label] = perm_index++;
     }
@@ -333,9 +335,10 @@ Tensor einsum(std::string equation, TensorList operands) {
   std::vector<Tensor> permuted_operands;
   for (std::size_t i = 0; i < operands.size(); ++i) {
     std::vector<int64_t> perm_shape(perm_index, -1);
-    std::vector<int64_t> label_dim(total_labels, -1);
-    std::vector<int> labels = op_labels[i];
+    std::vector<int64_t> label_dim(TOTAL_LABELS, -1);
+    const std::vector<int> labels = op_labels[i];
     Tensor operand = operands[i];
+    const auto sizes = operand.sizes();
     std::size_t j = 0;
 
     for (int label : labels) {
@@ -353,15 +356,15 @@ Tensor einsum(std::string equation, TensorList operands) {
         // Repeated label, take diagonal
         int64_t dim = label_dim[label];
         TORCH_CHECK(
-            operand.size(j) == operand.size(dim),
+            sizes[j] == sizes[dim],
             "einsum() subscript ",
             char(label + 'a'),
             " is repeated for operand ",
             i,
             " but the sizes don't match, ",
-            operand.size(j),
+            sizes[j],
             " != ",
-            operand.size(dim));
+            sizes[dim]);
         operand = operand.diagonal(0, j, dim).movedim(-1, dim);
       } else {
         // Lookup output index for label
