@@ -875,6 +875,15 @@ inline IValue argumentToIValue(
             py::repr(object)),
         "\nCast error details: ",
         error.what()));
+  } catch (const py::error_already_set& error) {
+    throw schema_match_error(c10::str(
+        schema.formatTypeMismatchMsg(
+            argument,
+            friendlyTypeName(object),
+            argumentPosition,
+            py::repr(object)),
+        "\n Python error details: ",
+        error.what()));
   }
 }
 
