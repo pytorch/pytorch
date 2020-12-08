@@ -38,43 +38,58 @@ class Rprop(Optimizer):
             with torch.enable_grad():
                 loss = closure()
 
+        grads = []
+        states = []
+        params_with_grad = []
+        step_sizes = []
+
         for group in self.param_groups:
             for p in group['params']:
-                if p.grad is None:
-                    continue
-                grad = p.grad
-                if grad.is_sparse:
-                    raise RuntimeError('Rprop does not support sparse gradients')
-                state = self.state[p]
-
-                # State initialization
-                if len(state) == 0:
-                    state['step'] = 0
-                    state['prev'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    state['step_size'] = grad.new().resize_as_(grad).fill_(group['lr'])
-
                 etaminus, etaplus = group['etas']
                 step_size_min, step_size_max = group['step_sizes']
-                step_size = state['step_size']
 
-                state['step'] += 1
+                if p.grad is not None:
+                    if p.grad.is_sparse:
+                        raise RuntimeError('RMSprop does not support sparse gradients')
 
-                sign = grad.mul(state['prev']).sign()
+                    grads.append(p.grad)
+                    params_with_grad.append(p)
+
+                    state = self.state[p]
+                    # State initialization
+                    if len(state) == 0:
+                        state['step'] = 0
+                        state['prev'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                        state['step_size'] = p.grad.new().resize_as_(p.grad).fill_(group['lr'])
+
+                        state['step'] += 1
+
+                    states.append(state)
+                    step_sizes.append(state['step_size'])
+
+            signs = torch._foreach_mul(grads, [s['prev'] for s in states])
+            signs = [s.sign() for s in signs]
+            for sign in signs:
                 sign[sign.gt(0)] = etaplus
                 sign[sign.lt(0)] = etaminus
                 sign[sign.eq(0)] = 1
 
-                # update stepsizes with step size updates
-                step_size.mul_(sign).clamp_(step_size_min, step_size_max)
+            # update stepsizes with step size updates
+            torch._foreach_mul_(step_sizes, signs)
+            for step_size in step_sizes:
+                step_size.clamp_(step_size_min, step_size_max)
 
-                # for dir<0, dfdx=0
-                # for dir>=0 dfdx=dfdx
-                grad = grad.clone(memory_format=torch.preserve_format)
-                grad[sign.eq(etaminus)] = 0
+            # for dir<0, dfdx=0
+            # for dir>=0 dfdx=dfdx
+            for i in range(len(grads)): 
+                grads[i] = grads[i].clone(memory_format=torch.preserve_format)
+                grads[i][signs[i].eq(etaminus)] = 0
 
-                # update parameters
-                p.addcmul_(grad.sign(), step_size, value=-1)
+            # update parameters
+            grad_signs = [grad.sign() for grad in grads]
+            torch._foreach_addcmul_(params_with_grad, grad_signs, step_sizes, value=-1)
 
-                state['prev'].copy_(grad)
+            for i in range(len(states)):
+                states[i]['prev'].copy_(grads[i])
 
         return loss
