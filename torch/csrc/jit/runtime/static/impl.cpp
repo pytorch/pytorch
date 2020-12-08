@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
+#include <torch/csrc/jit/runtime/static/passes.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 namespace torch {
@@ -20,6 +21,8 @@ void OptimizeGraph(std::shared_ptr<torch::jit::Graph>& graph) {
   Canonicalize(graph);
   ConstantPropagation(graph);
   RemoveTensorMutation(graph);
+  ConstantPropagation(graph);
+  FuseInferenceOpsForSparseNN(graph);
   ConstantPropagation(graph);
 }
 
