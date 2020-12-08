@@ -31,7 +31,7 @@ static void setupFusion(Fusion* fusion) {
   fusion->addInput(t2);
 
   auto t3 = castOp(DataType::Float, t2);
-  
+
   // input tensor
   auto t4 = TensorViewBuilder().ndims(3).dtype(DataType::Half).build();
   fusion->addInput(t4);
@@ -39,26 +39,26 @@ static void setupFusion(Fusion* fusion) {
   auto t5 = castOp(DataType::Float, t4);
   auto t6 = broadcast(t3, {true, true, false});
   auto t7 = add(t6, t5);
-  auto t8 = mul(t7, new Float(k_079));
-  auto t9 = mul(t7, new Float(k_004));
+  auto t8 = mul(t7, new Double(k_079));
+  auto t9 = mul(t7, new Double(k_004));
   auto t10 = mul(t9, t7);
   auto t11 = add(t10, new Int(1));
   auto t12 = mul(t8, t11);
   auto t13 = unaryOp(UnaryOpType::Tanh, t12);
-  auto t14 = mul(t7, new Float(0.5));
+  auto t14 = mul(t7, new Double(0.5));
   auto t15 = mul(t13, t13);
   auto t16 = unaryOp(UnaryOpType::Neg, t15);
   auto t17 = add(t16, new Int(1));
-  auto t18 = mul(t7, new Float(k_010));
+  auto t18 = mul(t7, new Double(k_010));
   auto t19 = mul(t18, t7);
-  auto t20 = add(t19, new Float(k_079));
+  auto t20 = add(t19, new Double(k_079));
   auto t21 = mul(t17, t20);
   auto t22 = mul(t14, t21);
   auto t23 = add(t13, new Int(1));
-  auto t24 = mul(t23, new Float(0.5));
+  auto t24 = mul(t23, new Double(0.5));
   auto t25 = add(t22, t24);
   auto t26 = mul(t25, t1);
-  
+
   // Save float output for validation
   fusion->addOutput(t26);
   auto t27 = castOp(DataType::Half, t26);
@@ -171,7 +171,7 @@ static void GeluBackward_RunFusion(benchmark::State& benchmark_state) {
   executor.compileFusion(&fusion);
 
   cudaDeviceSynchronize();
-  
+
   for (auto _ : benchmark_state) {
     outputs = executor.runFusion(c10::ArrayRef<c10::IValue>(inputs));
     cudaDeviceSynchronize();
@@ -201,7 +201,7 @@ static void GeluBackward_RunFusion_GpuOnly(benchmark::State& benchmark_state) {
   executor.compileFusion(&fusion);
 
   cudaDeviceSynchronize();
-  
+
   for (auto _ : benchmark_state) {
     outputs = executor.runFusion(c10::ArrayRef<c10::IValue>(inputs));
     benchmark_state.SetIterationTime(executor.kernelTimeMs() / 1000.0);
