@@ -588,7 +588,21 @@ def compute_native_function_declaration(f: NativeFunction) -> List[str]:
         seen.add(n)
         returns_type = native.returns_type(f.func.returns)
         args = native.arguments(f.func)
-        rs.append(f"CAFFE2_API {returns_type} {n}({', '.join(a.str_with_default() for a in args)});")
+
+        def arg_to_str(arg: NativeArgument) -> str:
+            if f.func.is_out_fn():
+                # out overloads don't get default arguments because
+                # defaulted arguments would be before the out argument
+                # in the argument list and that doesn't work.
+                # TODO We should consider if we just want to remove
+                # default arguments from all at::native functions
+                # but that would be a larger change because we need
+                # to change a lot of call sites
+                return str(arg)
+            else:
+                return arg.str_with_default()
+
+        rs.append(f"CAFFE2_API {returns_type} {n}({', '.join(arg_to_str(a) for a in args)});")
 
     return rs
 
