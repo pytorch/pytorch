@@ -56,9 +56,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-#ifdef USE_CUDA_NOT_ROCM
 class FullDeviceContext;
-#endif
 
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
