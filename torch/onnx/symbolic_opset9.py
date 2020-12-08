@@ -1235,7 +1235,15 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         bias_value = torch.tensor([0.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
         bias = g.op("Constant", value_t=bias_value)
-
+    # If track_running_stats is set to False batch statistics are instead used during evaluation time    
+    if running_mean is None or sym_help._is_none(running_mean) or running_var is None or sym_help._is_none(running_var):
+        assert len(input_sizes) > 1
+        reshape_in = g.op("Reshape", input, 
+                          g.op("Constant", value_t=torch.tensor([input_sizes[0], input_sizes[1], -1], dtype=torch.int64)))
+        trans_in = g.op('Transpose', reshape_in, perm_i=[0, 2, 1])
+        running_var, running_mean = _var_mean(g, trans_in, 
+                                              g.op("Constant", value_t=torch.tensor([0, 1], dtype=torch.int64)), 
+                                              False, False)
     out = g.op("BatchNormalization", input, weight, bias, running_mean, running_var,
                epsilon_f=eps,
                momentum_f=1 - momentum,
@@ -1332,17 +1340,7 @@ def index_select(g, self, dim, index):
     # In case of a scalar index, index_select returns a tensor with the same rank as the input.
     # To match this behavior in ONNX, we make index a 1D tensor so that the following gather
     # also produces a tensor with the same rank as the input.
-
-    index_const = sym_help._maybe_get_scalar(index)
-    index_dim = index.type().dim()
-    if not sym_help._is_value(index_const):
-        # Index is a constant scalar. Make it a size 1 constant tensor.
-        index = g.op("Constant", value_t=torch.LongTensor([index_const]))
-    elif index_dim is not None:
-        if index_dim == 0:
-            # Index is a scalar. Reshape it to a size 1 tensor.
-            index = g.op("Reshape", index, g.op("Constant", value_t=torch.LongTensor([1])))
-    return g.op("Gather", self, index, axis_i=dim)
+    return sym_help._select_helper(g, self, dim, index)
 
 
 def index_put(g, self, indices_list_value, values, accumulate):
@@ -1741,6 +1739,15 @@ def slice(g, self, *args):
 def hardtanh(g, self, min_val, max_val):
     return g.op("Clip", self, min_f=min_val, max_f=max_val)
 
+
+@parse_args('v')
+def hardswish(g, self):
+    input = g.op("Add", self, g.op('Constant', value_t=torch.tensor(3, dtype=torch.float)))
+    hardtanh_ = sym_help._hardtanh_helper(g, input, 
+                                          g.op('Constant', value_t=torch.tensor(0, dtype=torch.float)), 
+                                          g.op('Constant', value_t=torch.tensor(6, dtype=torch.float)))
+    hardtanh_ = g.op("Div", hardtanh_, g.op('Constant', value_t=torch.tensor(6, dtype=torch.float)))
+    return g.op("Mul", self, hardtanh_)
 
 def alias(g, self):
     return self
@@ -2174,9 +2181,15 @@ def flatten(g, input, start_dim, end_dim):
 
     return sym_help._flatten_helper(g, input, start_dim, end_dim, dim)
 
+# Emitted from `torch.nonzero(x, as_tuple=False)`
 @parse_args('v')
 def nonzero(g, input):
     return t(g, g.op('NonZero', input))
+
+
+# Emitted from `torch.nonzero(x, as_tuple=True)`
+def nonzero_numpy(g, input, _outputs=None):
+    return unbind(g, nonzero(g, input), 1, _outputs=_outputs)
 
 
 @parse_args('v')
@@ -2449,7 +2462,7 @@ def index(g, self, index):
 
     indices = [try_mask_to_index(idx) for idx in indices]
     if len(indices) == 1:
-        return index_select(g, self, 0, indices[0])
+        return sym_help._select_helper(g, self, 0, indices[0], apply_reshape=False)
     else:
         # Multiple tensors as indices. Each tensor could either be
         #   1. prim::Constant()
