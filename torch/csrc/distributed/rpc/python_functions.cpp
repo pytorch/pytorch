@@ -63,17 +63,38 @@ std::shared_ptr<Operator> matchBuiltinOp(
   Symbol symbol = Symbol::fromQualString(opName);
 
   std::shared_ptr<jit::Operator> matchedOperator;
-
   if (symbol.is_aten()) {
+    // Prefer C10 ops so that they go through C10 dispatch. We expect the
+    // total # of possible overloaded ops (i.e. size of below ops list) to be
+    // small (i.e. it is 10 for torch.add) so a worst-case linear search should
+    // not incur significant extra overhead.
+    auto ops = torch::jit::getAllOperatorsFor(symbol);
+    std::vector<std::shared_ptr<torch::jit::Operator>> c10OpsForSymbol;
+    for (const auto& op : ops) {
+      if (op->isC10Op()) {
+        c10OpsForSymbol.push_back(op);
+      }
+    }
+    // Don't throw on failures in this call, since we are not examining on all
+    // operators here, and the matched operator may indeed not be a c10 op.
     std::pair<std::shared_ptr<torch::jit::Operator>, torch::jit::Stack>
         opWithStack = torch::jit::getOpWithStack(
-            torch::jit::getAllOperatorsFor(symbol), args, kwargs);
-    matchedOperator = std::get<0>(opWithStack);
-    // Assign stack
-    stack = std::get<1>(opWithStack);
+            c10OpsForSymbol, args, kwargs, false /* throwOnMatchFailure */);
+
+    if ((matchedOperator = std::get<0>(opWithStack)) != nullptr) {
+      stack = std::get<1>(opWithStack);
+    } else {
+      // Will throw on operator match failures since this call searches through
+      // all ops for the symbol.
+      std::pair<std::shared_ptr<torch::jit::Operator>, torch::jit::Stack>
+          opWithStack = torch::jit::getOpWithStack(ops, args, kwargs);
+      matchedOperator = std::get<0>(opWithStack);
+      stack = std::get<1>(opWithStack);
+    }
   }
 
-  // Ensure that we found an operator.
+  // We should never hit this path, since if !matchedOperator, then the last
+  // call to getOpWithStack should have thrown.
   TORCH_CHECK(
       matchedOperator != nullptr,
       "Failed to match operator name ",
