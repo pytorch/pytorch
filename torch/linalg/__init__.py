@@ -580,22 +580,13 @@ with :math:`Q` being an orthogonal matrix or batch of orthogonal matrices and
 Depending on the value of :attr:`mode` this function returns the reduced or
 complete QR factorization. See below for a list of valid modes.
 
-.. warning:: **Differences with** :meth:`~torch.qr`:
+.. note::  **Differences with** ``numpy.linalg.qr``:
 
-             * ``torch.qr`` takes a boolean parameter ``some`` instead of ``mode``:
+           * ``mode='raw'`` is not implemented
 
-               - ``some=True`` is equivalent of ``mode='reduced'``: both are the
-                 default
-
-               - ``some=False`` is equivalent of ``mode='complete'``.
-
-             **Differences with** ``numpy.linalg.qr``:
-
-             * ``mode='raw'`` is not implemented
-
-             * unlike ``numpy.linalg.qr``, this function always returns a
-               tuple of two tensors. When ``mode='r'``, the `Q` tensor is an
-               empty tensor.
+           * unlike ``numpy.linalg.qr``, this function always returns a
+             tuple of two tensors. When ``mode='r'``, the `Q` tensor is an
+             empty tensor.
 
 .. note::
           Backpropagation is not supported for ``mode='r'``. Use ``mode='reduced'`` instead.
