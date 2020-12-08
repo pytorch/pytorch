@@ -375,7 +375,7 @@ class SpectralFuncInfo(OpInfo):
                 SampleInput(nd_tensor, kwargs=dict(n=7)),
                 SampleInput(tensor),
 
-                *(SampleInput(nd_tensor, kwargs=dict(dim=0))
+                *(SampleInput(nd_tensor, kwargs=dict(dim=dim))
                   for dim in [-1, -2, -3]),
             ]
 
