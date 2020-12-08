@@ -280,6 +280,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::frac:
     case aten::lgamma:
     case aten::type_as:
+    case aten::masked_fill:
       return sizesForValue(v->node()->input(0));
 
     case aten::sub:
@@ -310,7 +311,6 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
       }
       return broadcastShapes(shapes);
     }
-
     case aten::lerp:
     case aten::clamp:
     case aten::threshold:
@@ -669,7 +669,8 @@ Tensor* TensorExprKernel::computeThreeOperand(
     const torch::jit::Value* v,
     const std::function<
         ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>&
-        innerExpr) {
+        innerExpr,
+    bool promote_inputs) {
   auto const& n = v->node();
   std::vector<std::vector<ExprHandle>> shapes;
   for (size_t idx = 0; idx < 3; idx++) {
@@ -688,8 +689,9 @@ Tensor* TensorExprKernel::computeThreeOperand(
             tensorOrConstant(n->inputs()[1], indices),
             tensorOrConstant(n->inputs()[2], indices),
         };
-
-        promoteInputs(inputs);
+        if (promote_inputs) {
+          promoteInputs(inputs);
+        }
         ExprHandle compute = innerExpr(inputs[0], inputs[1], inputs[2]);
         return demoteOutput(compute, n->output());
       });
@@ -893,6 +895,21 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
             return Max::make(boolToInteger(lhs), boolToInteger(rhs), false);
           });
     } break;
+
+    case aten::masked_fill: {
+      return computeThreeOperand(
+          "aten::masked_fill",
+          v,
+          [](const ExprHandle& input,
+             const ExprHandle& mask,
+             const ExprHandle& value) {
+            auto val = promoteToDtype(value, input.dtype().scalar_type());
+            auto true_val = IntImm::make(1);
+            return ifThenElse(
+                CompareSelect::make(mask, true_val, kEQ), val, input);
+          },
+          /*promote_inputs*/ false);
+    }
 
     case aten::clamp: {
       bool noMin = false;
