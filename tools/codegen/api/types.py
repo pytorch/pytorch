@@ -1,6 +1,6 @@
 from tools.codegen.model import *
 from dataclasses import dataclass
-from typing import Optional, Union, Sequence, Tuple, TypeVar, List
+from typing import Optional, Union, Sequence, Tuple, TypeVar
 
 _T = TypeVar('_T')
 
