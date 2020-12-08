@@ -1,6 +1,7 @@
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/utils/python_strings.h>
 
 namespace torch {
   static thread_local bool enable_torch_function = true;
@@ -16,28 +17,6 @@ namespace torch {
 
   void set_disabled_torch_function_impl(PyObject* value) {
     disabled_torch_function = value;
-  }
-
-  /*
-   * Reference: https://github.com/numpy/numpy/blob/f4c497c768e0646df740b647782df463825bfd27/numpy/core/src/common/get_attr_string.h#L42
-   *
-   * Specialized, stripped down version of PyObject_FastGetAttrString, which is
-   * itself a stripped down version of PyObject_GetAttrString.
-  */
-  bool fast_has_torch_function(PyObject *obj) {
-    PyTypeObject *tp = Py_TYPE(obj);
-
-    // NOLINTNEXTLINE(modernize-use-nullptr)
-    if (tp->tp_getattr != NULL) {
-        auto res = (*tp->tp_getattr)(obj, "__torch_function__");
-
-        // NOLINTNEXTLINE(modernize-use-nullptr)
-        if (res == NULL) {
-          PyErr_Clear();
-        }
-        return res == disabled_torch_function;
-    }
-    return false;
   }
 }
 
@@ -148,6 +127,42 @@ PyObject* THPModule_disable_torch_function(PyObject *self, PyObject *a) {
   END_HANDLE_TH_ERRORS
 }
 
+inline bool has_torch_function_attr(PyObject* obj) {
+  constexpr char* name = "__torch_function__";
+  PyTypeObject *tp = Py_TYPE(obj);
+
+  // NOLINTNEXTLINE(modernize-use-nullptr)
+  PyObject *res = (PyObject *)NULL;
+
+  /* Attribute referenced by (char *)name */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
+  if (tp->tp_getattr != NULL) {
+      res = (*tp->tp_getattr)(obj, name);
+      // NOLINTNEXTLINE(modernize-use-nullptr)
+      if (res == NULL) {
+        PyErr_Clear();
+      }
+  }
+  /* Attribute referenced by (PyObject *)name */
+  // NOLINTNEXTLINE(modernize-use-nullptr)
+  else if (tp->tp_getattro != NULL) {
+      PyObject *w = THPUtils_internString(name);
+      // NOLINTNEXTLINE(modernize-use-nullptr)
+      if (w != NULL) {
+        res = (*tp->tp_getattro)(obj, w);
+        // NOLINTNEXTLINE(modernize-use-nullptr)
+        if (res == NULL) {
+          PyErr_Clear();
+        }
+      }
+      Py_DECREF(w);
+  }
+
+  // NOLINTNEXTLINE(modernize-use-nullptr)
+  return (res != NULL &&
+          res != torch::disabled_torch_function);
+}
+
 inline bool sequence_has_torch_function(PyObject* args) {
   // NB: The caller is expected to guarantee a sequence.
   if (!torch::torch_function_enabled())
@@ -157,7 +172,9 @@ inline bool sequence_has_torch_function(PyObject* args) {
   for (Py_ssize_t i = 0; i < n; i++) {
     PyObject* obj = PySequence_Fast_GET_ITEM(args, i);
     if (!THPVariable_CheckExact(obj) &&
-        torch::fast_has_torch_function(obj))
+        !PyFloat_CheckExact(obj) &&
+        !PyLong_CheckExact(obj) &&
+        has_torch_function_attr(obj))
       return true;
   }
 
@@ -190,8 +207,10 @@ PyObject* THPModule_object_has_torch_function(PyObject*, PyObject *obj) {
 
   if (
     !THPVariable_CheckExact(obj) &&
+    !PyFloat_CheckExact(obj) &&
+    !PyLong_CheckExact(obj) &&
     torch::torch_function_enabled() &&
-    torch::fast_has_torch_function(obj)
+    PyObject_GetAttrString(obj, "__torch_function__") != torch::disabled_torch_function
   ) Py_RETURN_TRUE;
 
   Py_RETURN_FALSE;

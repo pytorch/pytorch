@@ -167,6 +167,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.nn.functional.upsample_bilinear,
         torch.nn.functional.upsample_nearest,
         torch.nn.functional.has_torch_function,
+        torch.nn.functional.object_has_torch_function,
         torch.nn.functional.handle_torch_function,
         torch.nn.functional.sigmoid,
         torch.nn.functional.hardsigmoid,
