@@ -60,7 +60,7 @@ Tensor& triu_tril_cuda_template(Tensor& result, const Tensor& self, int64_t k, c
   int64_t N = self.numel();
   dim3 dim_block = cuda::getApplyBlock();
   dim3 dim_grid((N + dim_block.x - 1) / dim_block.x);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), name, [&]{
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "triu_tril_cuda_template", [&]{
     if (cuda::detail::canUse32BitIndexMath(result) && cuda::detail::canUse32BitIndexMath(self)) {
       auto result_info = cuda::detail::getTensorInfo<scalar_t, int32_t>(result);
       auto self_info = cuda::detail::getTensorInfo<scalar_t, int32_t>(self);
