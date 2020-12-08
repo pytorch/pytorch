@@ -24,7 +24,6 @@ from torch.testing import (
 if TEST_SCIPY:
     import scipy
 
-
 # Tests for unary "universal functions (ufuncs)" that accept a single
 # tensor and have common properties like:
 #   - they are elementwise functions
