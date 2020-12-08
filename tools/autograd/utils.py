@@ -47,8 +47,14 @@ def split_name_params(prototype):
 def uninplace_api_name(api_name):
     if api_name.endswith('_') and not api_name.endswith('__'):
         api_name = api_name[:-1]
+    return unout_api_name(api_name)
+
+def make_out_api_name_faithful(api_name):
+    # Variable kernel needs to call the _outf overload instead of the _out overload
+    # because the _outf overload matches the argument order as it's passed into
+    # the variable kernel
     if api_name.endswith('_out'):
-        api_name = api_name[:-4]
+        api_name = api_name + 'f'
     return api_name
 
 
