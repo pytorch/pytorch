@@ -82,6 +82,12 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
       const ShapeInfoMap& shape_hints_max_bs,
       const std::unordered_map<int, ShapeInfoMap> &shape_hints_per_bs);
 
+  // Check that output shape hints are present to ensure we can pass them to
+  // OnnxifiOp
+  bool canPassOutputShapeHintsPerBs(
+      const OperatorDef& op,
+      const std::unordered_map<int, ShapeInfoMap>& shape_hints_per_bs) const;
+
   // We already have all the ops and external inputs and outputs!
   OperatorDef buildOnnxifiOp(
       const std::string& onnx_model_str,

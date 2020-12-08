@@ -128,6 +128,10 @@ class OnnxifiOp final : public Operator<Context> {
       adjust_quantized_offset_ = 0;
     }
 
+    LOG(INFO) << "use_onnx_=" << use_onnx_
+        << ", use_glow_aot_=" << use_glow_aot_
+        << ", use_passed_output_shapes_=" << use_passed_output_shapes_;
+
     if (use_passed_output_shapes_) {
       // Populate output_shapes_per_bs_
       for (int bs = 1; bs < max_batch_size_; ++bs) {
@@ -145,6 +149,7 @@ class OnnxifiOp final : public Operator<Context> {
 
         for (output_idx = 0; output_idx < output_names_.size(); ++output_idx) {
           auto it = name_to_shape.find(output_names_[output_idx]);
+          CAFFE_ENFORCE(it != name_to_shape.end());
           output_shapes_per_bs_[bs].push_back({});
           auto &output_shapes = output_shapes_per_bs_[bs].back();
           std::copy(it->second.dims.cbegin(), it->second.dims.cend(), std::back_inserter(output_shapes));
@@ -486,7 +491,7 @@ class OnnxifiOp final : public Operator<Context> {
   std::unordered_map<std::string, ShapeInfo> input_shape_info_;
 
   // Whether we should use passed output shape hints or do shape inference
-  bool use_passed_output_shapes_{false};
+  const bool use_passed_output_shapes_{false};
 
   // Whether we need to resize outputs or not
   bool adjust_output_batch_{false};
