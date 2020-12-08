@@ -21,32 +21,6 @@ def argument_type(a: Argument) -> str:
     assert not a.is_write
     return dispatcher.argumenttype_type(a.type, mutable=False)
 
-def returntype_type(t: Type) -> str:
-    r = cpp.valuetype_type(t)
-    if r is not None:
-        return r
-
-    if isinstance(t, BaseType):
-        if t.name == BaseTy.Tensor:
-            return 'TensorMeta'
-    elif isinstance(t, ListType):
-        raise NotImplementedError("list returns not supported yet")
-
-    raise AssertionError(f"unrecognized return type {t}")
-
-def return_type(r: Return) -> str:
-    assert not r.is_write
-    return returntype_type(r.type)
-
-def returns_type(rs: Sequence[Return]) -> str:
-    if len(rs) == 0:
-        return 'void'
-    elif len(rs) == 1:
-        return return_type(rs[0])
-    else:
-        args = ','.join(map(return_type, rs))
-        return f'std::tuple<{args}>'
-
 def argument(a: Argument) -> MetaArgument:
     return MetaArgument(
         type=argument_type(a),
