@@ -379,10 +379,8 @@ class TORCH_API RecordFunctionCallback {
     return end_;
   }
 
-  // whether the callbacks should run in the given scope
-  bool shouldRun(RecordScope scope) const;
-
  private:
+  friend class CallbackManager;
   std::function<std::unique_ptr<ObserverContext>(const RecordFunction&)> start_;
   std::function<void(const RecordFunction&, ObserverContext*)> end_;
   bool(*should_run_)(const RecordFunctionCallback&) = nullptr;
@@ -417,6 +415,11 @@ class TORCH_API RecordFunctionCallback {
 #define RECORD_USER_SCOPE(fn) \
   RECORD_FUNCTION_WITH_SCOPE( \
     at::RecordScope::USER_SCOPE, fn, {})
+
+// RECORD_USER_SCOPE with inputs
+#define RECORD_USER_SCOPE_WITH_INPUTS(fn, inputs) \
+  RECORD_FUNCTION_WITH_SCOPE( \
+    at::RecordScope::USER_SCOPE, fn, inputs)
 
 // Notes:
 //  - two types of callbacks are provided: thread local and global

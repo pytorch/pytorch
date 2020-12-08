@@ -1,24 +1,23 @@
-#include <algorithm>
-#include <cstdint>
-#include <vector>
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/InferSize.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/WrapDimUtils.h>
-#include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
-#include <ATen/native/Resize.h>
-#include <ATen/native/TypeProperties.h>
-#include <ATen/SparseTensorUtils.h>
-#include <ATen/quantized/QTensorImpl.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/SparseTensorUtils.h>
+#include <ATen/WrapDimUtils.h>
+#include <ATen/native/Copy.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/native/cpu/CatKernel.h>
-#include <ATen/native/Copy.h>
-#include <ATen/MemoryOverlap.h>
+#include <ATen/quantized/QTensorImpl.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
+#include <algorithm>
+#include <cstdint>
+#include <vector>
 
 namespace at {
 namespace native {
@@ -1071,7 +1070,12 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
   }
 }
 
-Tensor slice(const Tensor& self, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, c10::optional<int64_t> step) {
+Tensor slice(
+    const Tensor& self,
+    int64_t dim,
+    c10::optional<int64_t> start,
+    c10::optional<int64_t> end,
+    c10::optional<int64_t> step) {
   int64_t ndim = self.dim();
   if (ndim == 0) {
     TORCH_CHECK_INDEX(false, "slice() cannot be applied to a 0-dim tensor.");
@@ -1110,7 +1114,7 @@ Tensor slice(const Tensor& self, int64_t dim, c10::optional<int64_t> start, c10:
   }
   auto storage_offset = self.storage_offset() + start_val * strides[dim];
   auto len = end_val - start_val;
-  sizes[dim] = (len + step_val - 1) / step_val;  // round-up
+  sizes[dim] = (len + step_val - 1) / step_val; // round-up
   strides[dim] *= step_val;
   auto result = self.as_strided(sizes, strides, storage_offset);
   namedinference::propagate_names(result, self);
@@ -2011,6 +2015,14 @@ Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
 }
 
 Tensor movedim(const Tensor& self, int64_t src, int64_t dst) {
+  return at::movedim(self, IntArrayRef{src}, IntArrayRef{dst});
+}
+
+Tensor moveaxis(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
+  return at::movedim(self, src, dst);
+}
+
+Tensor moveaxis(const Tensor& self, int64_t src, int64_t dst) {
   return at::movedim(self, IntArrayRef{src}, IntArrayRef{dst});
 }
 
