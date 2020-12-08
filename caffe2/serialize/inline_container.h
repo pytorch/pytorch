@@ -156,7 +156,7 @@ class CAFFE2_API PyTorchStreamReader final {
  public:
   explicit PyTorchStreamReader(const std::string& file_name);
   explicit PyTorchStreamReader(std::istream* in);
-  explicit PyTorchStreamReader(std::unique_ptr<ReadAdapterInterface> in);
+  explicit PyTorchStreamReader(std::shared_ptr<ReadAdapterInterface> in);
 
   // return dataptr, size
   std::tuple<at::DataPtr, size_t> getRecord(const std::string& name);
@@ -180,7 +180,7 @@ class CAFFE2_API PyTorchStreamReader final {
   std::unique_ptr<mz_zip_archive> ar_;
   std::string archive_name_;
   std::string archive_name_plus_slash_;
-  std::unique_ptr<ReadAdapterInterface> in_;
+  std::shared_ptr<ReadAdapterInterface> in_;
   int64_t version_;
 };
 
