@@ -242,7 +242,7 @@ TensorpipeReadBuffers tensorpipeAllocate(
 Message tensorpipeDeserialize(
     tensorpipe::Message&& message,
     TensorpipeReadBuffers&& buffers) {
-  c10::cuda::device_synchronize();
+  // c10::cuda::device_synchronize();
   // Tensors
   std::vector<at::Tensor> tensors;
   const char* pickleData = buffers.pickle.data();
