@@ -1,5 +1,6 @@
 # This script outputs relevant system environment info
 # Run it with `python collect_env.py`.
+import ctypes
 import locale
 import re
 import subprocess
@@ -43,7 +44,10 @@ def run(command):
                          stderr=subprocess.PIPE, shell=True)
     raw_output, raw_err = p.communicate()
     rc = p.returncode
-    enc = locale.getpreferredencoding()
+    if get_platform() == 'win32':
+        enc = f'cp{ctypes.cdll.kernel32.GetOEMCP()}'
+    else:
+        enc = locale.getpreferredencoding()
     output = raw_output.decode(enc)
     err = raw_err.decode(enc)
     return rc, output.strip(), err.strip()
