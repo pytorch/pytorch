@@ -460,7 +460,7 @@ inline Variable make_variable_differentiable_view(
     // moving leaf node into graph interior. This guarantees only 1 TensorImpl
     // allocation happens in view ops.
     if (data.getIntrusivePtr().use_count() == 1 && data.getIntrusivePtr()->unique_version()) {
-       data_impl = data.getIntrusivePtr();
+      data_impl = data.getIntrusivePtr();
     } else {
       data_impl = data.getIntrusivePtr()->shallow_copy_and_detach(
         /*version_counter=*/0,
