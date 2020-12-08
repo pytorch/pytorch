@@ -949,8 +949,8 @@ TORCH_API ska::flat_hash_map<std::type_index, c10::ClassTypePtr>&
 getCustomClassTypeMap();
 
 template <typename T>
-c10::ClassTypePtr getCustomClassType() {
-  auto tmap = c10::getCustomClassTypeMap();
+c10::ClassTypePtr getCustomClassTypeImpl() {
+  auto& tmap = c10::getCustomClassTypeMap();
   auto res = tmap.find(std::type_index(typeid(T)));
   if (res == tmap.end()) {
     throw c10::Error("Can't find class id in custom class type map", "");
@@ -959,8 +959,17 @@ c10::ClassTypePtr getCustomClassType() {
 }
 
 template <typename T>
+c10::ClassTypePtr getCustomClassType() {
+  // Classes are never unregistered from getCustomClassTypeMap and the
+  // hash lookup can be a hot path, so just cache.
+  // TODO: can we skip using a hash table entirely?
+  static c10::ClassTypePtr cache = return getCustomClassTypeImpl<T>();
+  return cache;
+}
+
+template <typename T>
 inline bool isCustomClassRegistered() {
-  auto tmap = c10::getCustomClassTypeMap();
+  auto& tmap = c10::getCustomClassTypeMap();
   return tmap.find(std::type_index(typeid(T))) != tmap.end();
 }
 
