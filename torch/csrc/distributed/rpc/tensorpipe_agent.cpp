@@ -223,7 +223,7 @@ struct FullDeviceContextGuard {
 
   ~FullDeviceContextGuard() noexcept {
     for (auto& stream : prevStreams_) {
-      at::cuda::setCurrentCUDAStream(std::move(stream));
+      at::cuda::setCurrentCUDAStream(stream);
     }
   }
 
@@ -464,8 +464,8 @@ void TensorPipeAgent::pipeRead(
 
     pipe->read(
         std::move(tpMessage),
-        [this, tpBuffers{
-             std::make_shared<TensorpipeReadBuffers>(std::move(tpBuffers))},
+        [tpBuffers{
+            std::make_shared<TensorpipeReadBuffers>(std::move(tpBuffers))},
          fn{std::move(fn)},
          ctx{std::move(ctx)}](
             const tensorpipe::Error& error,
@@ -505,8 +505,7 @@ void TensorPipeAgent::pipeWrite(
       [tpBuffers{
            std::make_shared<TensorpipeWriteBuffers>(std::move(tpBuffers))},
        fn{std::move(fn)},
-       ctx{std::move(ctx)},
-       this](
+       ctx{std::move(ctx)}](
           const tensorpipe::Error& error, tensorpipe::Message /* unused */) {
         ctx->recordTensors(tpBuffers->tensors);
         fn(error);
