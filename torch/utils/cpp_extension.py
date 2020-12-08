@@ -838,20 +838,21 @@ def CUDAExtension(name, sources, *args, **kwargs):
     will make nvcc fall back to building kernels with the newest version of PTX your nvcc does
     support (see below for details on PTX).
 
-    However, you can explicitly specify which archs you want the extension to support like so:
+    You can override the default behavior using `TORCH_CUDA_ARCH_LIST` to explicitly specify which
+    CCs you want the extension to support:
 
     TORCH_CUDA_ARCH_LIST="6.1 8.6" python build_my_extension.py
     TORCH_CUDA_ARCH_LIST="5.2 6.0 6.1 7.0 7.5 8.0 8.6+PTX" python build_my_extension.py
 
     The +PTX option causes extension kernel binaries to include PTX instructions for the specified
-    compute capability (CC). PTX is an intermediate representation that allows kernels to
-    runtime-compile for any CC >= the specified CC (for example, 8.6+PTX generates PTX that can
-    runtime-compile for any GPU with CC >= 8.6). This improves your binary's forward compatibility.
-    However, relying on older PTX to provide forward compat by runtime-compiling for newer CCs can
-    modestly reduce performance on those newer CCs. If you know exact CC(s) of the GPUs you want to
-    target, you're always better off specifying them individually. For example, if you want your
-    extension to run on 8.0 and 8.6, "8.0+PTX" would work functionally because it includes PTX that
-    can runtime-compile for 8.6, but "8.0 8.6" would be better.
+    CC. PTX is an intermediate representation that allows kernels to runtime-compile for any CC >=
+    the specified CC (for example, 8.6+PTX generates PTX that can runtime-compile for any GPU with
+    CC >= 8.6). This improves your binary's forward compatibility. However, relying on older PTX to
+    provide forward compat by runtime-compiling for newer CCs can modestly reduce performance on
+    those newer CCs. If you know exact CC(s) of the GPUs you want to target, you're always better
+    off specifying them individually. For example, if you want your extension to run on 8.0 and 8.6,
+    "8.0+PTX" would work functionally because it includes PTX that can runtime-compile for 8.6, but
+    "8.0 8.6" would be better.
 
     Note that while it's possible to include all supported archs, the more archs get included the
     slower the building process will be, as it will build a separate kernel image for each arch.
