@@ -114,7 +114,6 @@ enum class BinaryOpType {
   CeilDiv,
   Lshift,
   Rshift,
-  Xor,
 
   // Logical Ops
   // Int operations, leave position of Mod as first logical op see
@@ -130,7 +129,8 @@ enum class BinaryOpType {
   // op. These are ops that have different operators based on output type. See
   // is boolean op. These ops also don't work on floating point inputs.
   And,
-  Or
+  Or,
+  Xor
 };
 
 // Return if output of operator should be a boolean

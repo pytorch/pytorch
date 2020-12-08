@@ -258,7 +258,10 @@ DataType getOutputType(BinaryOpType op_type, Val* v1, Val* v2) {
     } else if (integer_input && !all_integer_input) {
       return isIntegralType(v1_dtype) ? v1_dtype : v2_dtype;
     } else {
-      return DataType::Int;
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "Currently no support for float inputs to int operations. ",
+          "Inputs should be manually casted first.");
     }
   } else if (isLogicalOp(op_type)) {
     // If boolean op

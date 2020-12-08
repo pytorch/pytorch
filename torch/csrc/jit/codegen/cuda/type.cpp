@@ -44,7 +44,7 @@ bool isIntegralType(DataType dtype) {
 }
 
 bool isIntegerOp(const BinaryOpType bopt) {
-  return bopt >= BinaryOpType::Mod && bopt <= BinaryOpType::Xor;
+  return bopt >= BinaryOpType::Mod && bopt <= BinaryOpType::Rshift;
 }
 
 bool isLogicalOp(const BinaryOpType bopt) {
@@ -52,7 +52,7 @@ bool isLogicalOp(const BinaryOpType bopt) {
 }
 
 bool alsoBooleanOperator(const BinaryOpType bopt) {
-  return bopt >= BinaryOpType::And && bopt <= BinaryOpType::Or;
+  return bopt >= BinaryOpType::And && bopt <= BinaryOpType::Xor;
 }
 
 bool alsoBooleanOperator(const UnaryOpType uopt) {
@@ -340,8 +340,6 @@ static const char* binary_op_type_inline_op2string(BinaryOpType t) {
       return "<<";
     case BinaryOpType::Rshift:
       return ">>";
-    case BinaryOpType::Xor:
-      return "^";
     // Logical Ops
     case BinaryOpType::Eq:
       return "==";
@@ -360,6 +358,8 @@ static const char* binary_op_type_inline_op2string(BinaryOpType t) {
       return "&";
     case BinaryOpType::Or:
       return "|";
+    case BinaryOpType::Xor:
+      return "^";
     default:
       break;
   }
@@ -372,6 +372,8 @@ std::string stringifyBooleanOp(const BinaryOpType bopt) {
       return "&&";
     case BinaryOpType::Or:
       return "||";
+    case BinaryOpType::Xor:
+      return "!=";
     default:
       TORCH_INTERNAL_ASSERT(false, bopt, " is not a boolean operator.")
   }

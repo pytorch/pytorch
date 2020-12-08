@@ -567,9 +567,12 @@ class TestCudaFuser(JitTestCase):
 
         # We shouldn't need this redefinition of the function, but otherwise it won't recompile for a new type
         def jit_or(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
-            return x & y | z
+            return (x & y) | z
 
-        for jit_func in [jit_or, ]:
+        def jit_xor(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
+            return (x & y) ^ z
+
+        for jit_func in [jit_or, jit_xor]:
             x = torch.rand(4, 2, dtype=torch.float, device="cuda").round().to(torch.bool)
             y = torch.rand(4, 2, dtype=torch.float, device="cuda").round().to(torch.bool)
             z = torch.rand(4, 2, dtype=torch.float, device="cuda").round().to(torch.bool)
