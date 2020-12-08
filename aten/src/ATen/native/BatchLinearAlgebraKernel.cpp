@@ -10,7 +10,7 @@ namespace at { namespace native {
 namespace {
 
 template <typename scalar_t>
-static void apply_eig(const Tensor& self, bool eigenvectors, Tensor& vals_, Tensor& vecs_, int64_t* info_ptr) {
+void apply_eig(const Tensor& self, bool eigenvectors, Tensor& vals_, Tensor& vecs_, int64_t* info_ptr) {
 #ifndef USE_LAPACK
   TORCH_CHECK(false, "Calling torch.eig on a CPU tensor requires compiling ",
     "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
@@ -43,8 +43,11 @@ static void apply_eig(const Tensor& self, bool eigenvectors, Tensor& vals_, Tens
 #endif
 }
 
-static std::tuple<Tensor, Tensor> eig_kernel_impl(const Tensor& self, bool& eigenvectors) {
+std::tuple<Tensor, Tensor> eig_kernel_impl(const Tensor& self, bool& eigenvectors) {
   int64_t n = self.size(-1);
+  // lapackEig function expects the input to be column major, or stride {1, n},
+  // so we must set the stride manually since the default stride for tensors is
+  // row major, {n, 1}
   Tensor self_ = at::empty_strided(
       {n, n},
       {1, n},
