@@ -2509,6 +2509,17 @@ class TestBinaryUfuncs(TestCase):
             torch_fn(x, y, out=out)
             self.assertEqual(expected, out)
 
+        def inplace_variant_helper(x, y):
+            if x.dtype in torch.testing.get_all_int_dtypes() + [torch.bool]:
+                with self.assertRaisesRegex(RuntimeError,
+                                            "can't be cast to the desired output type"):
+                    x.clone().xlogy_(y)
+            else:
+                expected = torch.empty_like(x)
+                torch.xlogy(x, y, out=expected)
+                inplace_out = x.clone().xlogy_(y)
+                self.assertEqual(expected, inplace_out)
+
         x_dtype, y_dtype = dtypes
 
         # Tensor-Tensor Test (tensor of same and different shape)
@@ -2525,6 +2536,9 @@ class TestBinaryUfuncs(TestCase):
         out_variant_helper(torch.xlogy, x, x)
         out_variant_helper(torch.xlogy, x, y)
         out_variant_helper(torch.xlogy, x, z)
+        inplace_variant_helper(x, x)
+        inplace_variant_helper(x, y)
+        inplace_variant_helper(x, z)
 
         # Scalar-Tensor Test
         torch_fn = partial(torch.xlogy, 3.14)
@@ -2539,12 +2553,13 @@ class TestBinaryUfuncs(TestCase):
 
         # Special Values Tensor-Tensor
         t = torch.tensor([0., 1., 2., float('inf'), -float('inf'), float('nan')], device=device)
-        zeros = torch.tensor(5, dtype=y_dtype, device=device)
+        zeros = torch.zeros(6, dtype=y_dtype, device=device)
 
         torch_fn = partial(torch.xlogy, zeros)
         reference_fn = partial(scipy.special.xlogy, zeros.cpu().numpy())
         self.compare_with_numpy(torch_fn, reference_fn, t, exact_dtype=False)
         out_variant_helper(torch.xlogy, zeros, t)
+        inplace_variant_helper(zeros, t)
 
         # Special Values Scalar-Tensor
         torch_fn = partial(torch.xlogy, 0)
