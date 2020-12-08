@@ -30,6 +30,7 @@
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
 
+#include <torch/csrc/jit/jit_log.h>
 #define DEBUG_PRINT 0
 
 using namespace torch::jit::tensorexpr;
@@ -518,6 +519,13 @@ void LLVMCodeGenImpl::emitKernel(
   if (llvm::verifyFunction(*fn_, &llvm::outs())) {
     throw std::runtime_error("Function verification failed");
   }
+
+  // print graph debug info.
+  std::string fnstr;
+  llvm::raw_string_ostream FS(fnstr);
+  fn_->print(FS);
+  GRAPH_DEBUG("LLVM Function:\n", FS.str(), "\n");
+
   optimize(*module_);
 
 #if DEBUG_PRINT

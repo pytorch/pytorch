@@ -3382,6 +3382,13 @@ sort(dim=-1, descending=False) -> (Tensor, LongTensor)
 See :func:`torch.sort`
 """)
 
+add_docstr_all('msort',
+               r"""
+msort() -> Tensor
+
+See :func:`torch.msort`
+""")
+
 add_docstr_all('argsort',
                r"""
 argsort(dim=-1, descending=False) -> LongTensor
@@ -4347,33 +4354,6 @@ istft(n_fft, hop_length=None, win_length=None, window=None,
  center=True, normalized=False, onesided=True, length=None) -> Tensor
 
 See :func:`torch.istft`
-""")
-
-add_docstr_all('fft', r"""
-fft(signal_ndim, normalized=False) -> Tensor
-
-See :func:`torch.fft`
-""")
-
-add_docstr_all('ifft',
-               r"""
-ifft(signal_ndim, normalized=False) -> Tensor
-
-See :func:`torch.ifft`
-""")
-
-add_docstr_all('rfft',
-               r"""
-rfft(signal_ndim, normalized=False, onesided=True) -> Tensor
-
-See :func:`torch.rfft`
-""")
-
-add_docstr_all('irfft',
-               r"""
-irfft(signal_ndim, normalized=False, onesided=True, signal_sizes=None) -> Tensor
-
-See :func:`torch.irfft`
 """)
 
 add_docstr_all('det',
