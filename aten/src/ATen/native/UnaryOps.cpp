@@ -343,8 +343,8 @@ Tensor& cos_out(Tensor& result, const Tensor& self) { return unary_op_impl_float
 Tensor cos(const Tensor& self) { return unary_op_impl_float(self, cos_stub); }
 Tensor& cos_(Tensor& self) { return unary_op_impl_(self, at::cos_out); }
 
-Tensor& sinh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sinh_stub); }
-Tensor sinh(const Tensor& self) { return unary_op_impl(self, at::sinh_out); }
+Tensor& sinh_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, sinh_stub); }
+Tensor sinh(const Tensor& self) { return unary_op_impl_float(self, sinh_stub); }
 Tensor& sinh_(Tensor& self) { return unary_op_impl_(self, at::sinh_out); }
 
 Tensor& cosh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, cosh_stub); }
