@@ -488,10 +488,11 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     auto copy = graph->copy();
     runProfilingInsensitiveOptimizations(copy);
     pr_ = ProfilingRecord::instrumentGraph(copy);
-    // TODO: order for now is important; we should make
-    // both InsertProfileNodesForSpecializeAutogradZero and
-    // InsertProfileNodesForCUDAFuser less sensitive to the presence
-    // of other profiling nodes
+    // `InsertProfileNodesForSpecializeAutogradZero` profiles a definition vs a
+    // use and it doesn't expect any profile nodes between a graph input and its
+    // consumer, `aten::_grad_sum_to_size`. This means we need to run it first,
+    // before any other pass that could insert `prim::iprofile_value` node on
+    // `aten::_grad_sum_to_size` input.
     InsertProfileNodesForSpecializeAutogradZero(pr_.get());
     if (RegisterCudaFuseGraph::isRegistered()) {
       torch::jit::fuser::cuda::InsertProfileNodesForCUDAFuser(pr_.get());
