@@ -465,12 +465,9 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
 
     .. warning::
         From version 1.8.0, :attr:`return_complex` must be given explicitly for
-        real inputs. Set to False to preserve the legacy behavior of returning
-        a real tensor with an extra last dimension for the real and imaginary
-        components.
-
-    or
-        True to return a complex output.
+        real inputs. Set to True to return a complex output, or False to
+        preserve the legacy behavior of returning a real tensor with an extra
+        last dimension for the real and imaginary components.
 
     The STFT computes the Fourier transform of short overlapping windows of the
     input. This giving frequency components of the signal as they change over
