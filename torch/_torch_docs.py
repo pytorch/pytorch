@@ -6612,9 +6612,6 @@ Otherwise, if :attr:`some` is ``False``, this function returns the complete QR f
           columns of :attr:`input` are linearly independent.
           This behavior will propably change once QR supports pivoting.
 
-.. note:: precision may be lost if the magnitudes of the elements of :attr:`input`
-          are large
-
 .. note:: While it should always give you a valid decomposition, it may not
           give you the same one across platforms - it will depend on your
           LAPACK implementation.

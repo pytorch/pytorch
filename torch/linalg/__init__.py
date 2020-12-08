@@ -596,9 +596,6 @@ complete QR factorization. See below for a list of valid modes.
           columns of :attr:`input` are linearly independent.
           This behavior may change in the future.
 
-.. note:: precision may be lost if the magnitudes of the elements of :attr:`input`
-          are large
-
 .. note:: This function uses LAPACK for CPU inputs and MAGMA for CUDA inputs,
           and may produce different decompositions on different device types
           and different platforms, depending on the precise version of the
