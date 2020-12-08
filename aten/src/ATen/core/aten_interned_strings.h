@@ -220,6 +220,7 @@ _(aten, blackman_window) \
 _(aten, block_diag) \
 _(aten, bmm) \
 _(aten, broadcast_tensors) \
+_(aten, broadcast_to) \
 _(aten, cartesian_prod) \
 _(aten, cat) \
 _(aten, cauchy) \

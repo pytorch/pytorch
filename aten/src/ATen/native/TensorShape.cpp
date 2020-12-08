@@ -78,6 +78,10 @@ Tensor& set_cpu_(Tensor& result) {
   return result;
 }
 
+Tensor broadcast_to(const Tensor& self, IntArrayRef size) {
+  return self.expand(size);
+}
+
 std::vector<Tensor> broadcast_tensors(TensorList tensors) {
   return expand_outplace(tensors);
 }

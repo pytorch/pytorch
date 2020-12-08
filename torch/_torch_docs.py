@@ -1130,6 +1130,31 @@ Example:
     tensor([ True, False, False])
 """.format(**common_args))
 
+add_docstr(torch.broadcast_to,
+           r"""
+broadcast_to(input, size) -> Tensor
+
+Broadcasts the input tensor to a new shape according to :ref:`broadcasting-semantics`.
+
+.. warning::
+    More than one element of a broadcasted tensor may refer to a single
+    memory location. As a result, in-place operations (especially ones that
+    are vectorized) may result in incorrect behavior. If you need to write
+    to the tensors, please clone them first.
+
+Args:
+    {input}
+    size (tuple): a tuple defining the shape of the output tensor.
+
+Example::
+
+    >>> x = torch.tensor([1, 2, 3])
+    >>> torch.broadcast_to(x, (3, 3))
+    tensor([[1, 2, 3],
+            [1, 2, 3],
+            [1, 2, 3]])
+""".format(**common_args))
+
 add_docstr(torch.stack,
            r"""
 stack(tensors, dim=0, *, out=None) -> Tensor
