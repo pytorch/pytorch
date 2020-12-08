@@ -87,7 +87,7 @@ class C10_API Scalar {
   }
 
   Scalar operator-() const;
-
+  Scalar conj() const;
   ScalarType type() const {
     if (isComplex()) {
       return ScalarType::ComplexDouble;

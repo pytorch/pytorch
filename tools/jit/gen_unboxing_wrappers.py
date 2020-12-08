@@ -535,7 +535,8 @@ def main():
     parser.add_argument('template_path', metavar='TEMPLATE_PATH',
                         help='path to templates directory')
     args = parser.parse_args()
-    gen_unboxing_wrappers(args.declarations, args.out, args.template_path)
+    gen_unboxing_wrappers(args.declarations, args.out, args.template_path,
+                          SelectiveBuilder.get_nop_selector())
 
 
 if __name__ == '__main__':

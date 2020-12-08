@@ -32,11 +32,16 @@ namespace autograd {
 ///     value of `create_graph`.
 /// \param create_graph If `true`, graph of the derivative will be constructed, allowing
 ///     to compute higher order derivative products. Defaults to `false`.
+/// \param inputs Inputs w.r.t. which the gradient will be accumulated into
+///     `at::Tensor::grad`. All other Tensors will be ignored. If not provided, the gradient
+///     is accumulated into all the leaf Tensors that were used to compute param `tensors`.
+///     All the provided inputs must be leaf Tensors.
 TORCH_API void backward(
     const variable_list& tensors,
     const variable_list& grad_tensors = {},
     c10::optional<bool> retain_graph = c10::nullopt,
-    bool create_graph = false);
+    bool create_graph = false,
+    const variable_list& inputs = {});
 
 /// Computes and returns the sum of gradients of outputs with respect to the inputs.
 ///

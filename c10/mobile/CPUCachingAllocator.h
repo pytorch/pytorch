@@ -54,6 +54,9 @@ class C10_API CPUCachingAllocator {
    * No speculative allocation for any future allocations.
    */
   private:
+    inline void* allocate_and_cache(const size_t bytes);
+    void free_cached();
+  protected:
     // Invariants.
     // 1. If memory is ever allocated via this allocator then
     //    the pointer will exist in allocation_map_, unless the allocator
@@ -71,9 +74,6 @@ class C10_API CPUCachingAllocator {
     // As a result of above invariants, allocated memory ptr cannot be in
     // available_map_ unless it is in allocation_map_ as well.
     ska::flat_hash_map<size_t, c10::SmallVector<void*, 16>> available_map_;
-    inline void* allocate_and_cache(const size_t bytes);
-    void free_cached();
-  protected:
     static ska::flat_hash_map<void*, size_t> allocation_map_;
     // Since allocation_map, which is a global instance, is mutated/read via
     // all public APIs we need a global mutex.

@@ -121,7 +121,7 @@ def _split_tensor_list_constants(g, block):
 
 
 def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=False, fixed_batch_size=False,
-                    params_dict=None, use_new_jit_passes=False, dynamic_axes=None, input_names=None):
+                    params_dict=None, use_new_jit_passes=True, dynamic_axes=None, input_names=None):
     # Inline everything
     torch._C._jit_pass_inline(graph)
 
@@ -358,10 +358,10 @@ def _create_jit_graph(model, args, _retain_param_name, use_new_jit_passes):
             if not use_new_jit_passes:
                 method_graph, params = torch._C._jit_pass_lower_graph(graph, model._c)
             else:
-                freezed_m = torch._C._freeze_module(model._c)
+                freezed_m = torch._C._freeze_module(model._c, preserveParameters=True)
+                freezed_m, params = torch._C._jit_onnx_list_model_parameters(freezed_m)
                 method_graph = freezed_m._get_method('forward').graph
                 method_graph.eraseInput(0)  # Remove 'self' from model inputs
-                params = []
 
             in_vars, in_desc = torch.jit._flatten(tuple(args) + tuple(params))
             graph = _propagate_and_assign_input_shapes(
@@ -396,7 +396,7 @@ def _model_to_graph(model, args, verbose=False,
                     example_outputs=None,
                     _retain_param_name=False, do_constant_folding=True,
                     _disable_torch_constant_prop=False, fixed_batch_size=False,
-                    training=None, use_new_jit_passes=False,
+                    training=None, use_new_jit_passes=True,
                     dynamic_axes=None):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     # Special case for common case of passing a single Tensor
@@ -494,7 +494,8 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                              export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None,
                              google_printer=False, opset_version=None, _retain_param_name=False,
                              do_constant_folding=True, keep_initializers_as_inputs=None,
-                             fixed_batch_size=False, custom_opsets=None, add_node_names=True):
+                             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
+                             onnx_shape_inference=True):
     from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
     from torch.onnx.symbolic_helper import _set_operator_export_type
     if opset_version is None:
@@ -503,6 +504,8 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
         custom_opsets = {}
     _set_opset_version(opset_version)
     _set_operator_export_type(operator_export_type)
+    from torch.onnx.symbolic_helper import _set_onnx_shape_inference
+    _set_onnx_shape_inference(onnx_shape_inference)
     with select_model_mode_for_export(model, training):
         val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
                                                          operator_export_type,
@@ -583,7 +586,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
             enable_onnx_checker=True, use_external_data_format=False,
-            onnx_shape_inference=False, use_new_jit_passes=False):
+            onnx_shape_inference=True, use_new_jit_passes=True):
 
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError('torch.nn.DataParallel is not supported by ONNX '
@@ -911,8 +914,9 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
             ns_op_name = n.kind()
         ns, op_name = ns_op_name.split("::")
         if ns == "onnx":
-            # Use the original node directly
-            return None
+            # Clone node to trigger ONNX shape inference
+            attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
+            return g.op(op_name, *inputs, **attrs, outputs=n.outputsSize())
 
         elif ns == "aten":
             is_exportable_aten_op = sym_registry.is_registered_op(op_name, '', opset_version)
@@ -948,10 +952,11 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 else:
                     raise RuntimeError("Unsupported prim::Constant kind: `{}`. Send a bug report.".format(
                         n.kindOf("value")))
-            elif n.mustBeNone() or op_name == "ListConstruct" or op_name == "ListUnpack":
+            elif n.mustBeNone() or op_name == "ListConstruct" or op_name == "ListUnpack" or op_name == "Uninitialized":
                 # None is not an ONNX operator; keep it as None
                 # Let the exporter handle and finally eliminate these ops
                 # ListConstruct and ListUnpack will be erased in the ONNX peephole pass
+                # Uninitialized will be erased during shape/type inference
                 return None
             elif op_name == "device" and n.output().type().kind() == "DeviceObjType":
                 return None
@@ -961,8 +966,21 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 for b in n.blocks():
                     new_block = new_node.addBlock()
                     # Copy input metadata to subblock
-                    # This is for Loop only, since If only has a single input.
+                    #
+                    # If format:
+                    #   prim::If(cond)
+                    #     block0()
+                    #     block1()
+                    #
+                    # Loop format:
+                    #   prim::Loop(iter, cond, input_1, ..., input_n)
+                    #     block0(iter, input_1, ..., input_n)
+                    #
+                    # For `If` node, there is nothing to copy.
+                    # For `Loop` node, copy metadata for `iter`, `input_1`, ..., `input_n`.
                     for i, b_in in enumerate(b.inputs()):
+                        if i == 0 and i < len(inputs):
+                            b_in.setType(inputs[i].type())
                         if i > 0 and (i + 1) < len(inputs):
                             b_in.setType(inputs[i + 1].type())
                     torch._C._jit_pass_onnx_block(b, new_block, operator_export_type, env)

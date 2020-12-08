@@ -37,7 +37,7 @@ class Node:
         self._update_args_kwargs(map_arg(args, lambda x: x), map_arg(kwargs, lambda x: x))  # type: ignore
 
         # All of the nodes that use the value produced by this Node
-        # Note one user may correspond to several uses, e.g. the node fo `x + x`
+        # Note one user may correspond to several uses, e.g. the node fo ``x + x``
         # would appear once here, but represents two uses.
         #
         # Is a dict to act as an "ordered set". Keys are significant, value dont-care
@@ -49,9 +49,9 @@ class Node:
         # For placeholder nodes, this value will be used to type-annotate the
         # generated function parameters.
         # For the return ndoe, this value will be used to type-annotate the
-        # generated function return type. (Note this is a special case. `return`
+        # generated function return type. (Note this is a special case. ``return``
         # does not produce a value, it's more of a notation. Thus, this value
-        # describes the type of args[0] in the `return` node.
+        # describes the type of args[0] in the ``return`` node.
         self.type : Optional[Any] = type
         self._prev = self
         self._next = self
@@ -59,10 +59,16 @@ class Node:
 
     @property
     def next(self) -> 'Node':
+        """
+        Get the next node in the linked list
+        """
         return self._next
 
     @property
     def prev(self) -> 'Node':
+        """
+        Get the previous node in the linked list
+        """
         return self._prev
 
     def prepend(self, x: 'Node'):
@@ -83,7 +89,7 @@ class Node:
 
     def append(self, x: 'Node'):
         """Insert x after this node in the list of nodes in the graph.
-        Equvalent to `self.next.prepend(x)`
+        Equvalent to ``self.next.prepend(x)``
 
         Args:
             x (Node): The node to put after this node. Must be a member of the same graph.
@@ -96,19 +102,51 @@ class Node:
 
     @property
     def args(self) -> Tuple[Argument, ...]:
+        """
+        Return the tuple of arguments to this Node. The interpretation of arguments
+        depends on the node's opcode. See the ``fx.Graph`` docstring for more
+        information.
+        """
         return self._args
 
     @args.setter
     def args(self, a : Tuple[Argument, ...]):
+        """
+        Set the tuple of arguments to this Node. The interpretation of arguments
+        depends on the node's opcode. See the ``fx.Graph`` docstring for more
+        information.
+        """
         self._update_args_kwargs(map_arg(a, lambda x: x), self._kwargs)  # type: ignore
 
     @property
     def kwargs(self) -> Dict[str, Argument]:
+        """
+        Return the dict of kwargs to this Node. The interpretation of arguments
+        depends on the node's opcode. See the ``fx.Graph`` docstring for more
+        information.
+        """
         return self._kwargs
 
     @kwargs.setter
     def kwargs(self, k : Dict[str, Argument]):
+        """
+        Set the dict of kwargs to this Node. The interpretation of arguments
+        depends on the node's opcode. See the ``fx.Graph`` docstring for more
+        information.
+        """
         self._update_args_kwargs(self._args, map_arg(k, lambda x: x))  # type: ignore
+
+    @property
+    def all_input_nodes(self) -> List['Node']:
+        """
+        Return all Nodes that are inputs to this Node. This is equivalent to
+        iterating over ``args`` and ``kwargs`` and only collecting the values that
+        are Nodes
+        """
+        all_nodes : List['Node'] = []
+        map_arg(self.args, lambda n: all_nodes.append(n))
+        map_arg(self.kwargs, lambda n: all_nodes.append(n))
+        return all_nodes
 
     def _update_args_kwargs(self, new_args : Tuple[Argument, ...], new_kwargs : Dict[str, Argument]):
         self._args = new_args
@@ -129,7 +167,7 @@ class Node:
 
     def replace_all_uses_with(self, replace_with : 'Node') -> List['Node']:
         """
-        Replace all uses of `self` in the Graph with the Node `replace_with`.
+        Replace all uses of ``self`` in the Graph with the Node ``replace_with``.
         Returns the list of nodes on which this change was made.
         """
         to_process = list(self.users)
@@ -151,7 +189,7 @@ class Node:
 
 
 def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
-    """ apply fn to each Node appearing arg. arg may be a list, tuple, slice, or dict with string keys. """
+    """ Apply fn to each Node appearing arg. arg may be a list, tuple, slice, or dict with string keys. """
     if isinstance(a, tuple):
         return tuple(map_arg(elem, fn) for elem in a)
     if isinstance(a, list):

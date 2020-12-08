@@ -9,9 +9,8 @@
 #include <c10d/PrefixStore.hpp>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
+#include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-
-#include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 
 
 // Forward-declare the TensorPipe classes we need, to avoid including its
@@ -21,7 +20,7 @@ namespace tensorpipe {
 
 class CpuBuffer;
 
-#ifdef USE_CUDA
+#ifdef USE_CUDA_NOT_ROCM
 class CudaBuffer;
 #endif
 
@@ -43,7 +42,7 @@ template <typename TBuffer>
 class Context;
 using CpuContext = Context<CpuBuffer>;
 
-#ifdef USE_CUDA
+#ifdef USE_CUDA_NOT_ROCM
 using CudaContext = Context<CudaBuffer>;
 #endif
 
@@ -57,6 +56,10 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+#ifdef USE_CUDA_NOT_ROCM
+class FullDeviceContext;
+#endif
+
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
 
@@ -66,6 +69,7 @@ struct TransportRegistration {
   std::string address;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
 
 struct CpuChannelRegistration {
@@ -73,16 +77,19 @@ struct CpuChannelRegistration {
   int64_t priority;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_REGISTRY(TensorPipeCpuChannelRegistry, CpuChannelRegistration);
 
 struct CudaChannelRegistration {
-#ifdef USE_CUDA
+#ifdef USE_CUDA_NOT_ROCM
   std::shared_ptr<tensorpipe::channel::CudaContext> channel;
-#endif
   int64_t priority;
+#endif
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_REGISTRY(TensorPipeCudaChannelRegistry, CudaChannelRegistration);
+
 
 constexpr auto kDefaultNumWorkerThreads = 16;
 
@@ -165,11 +172,11 @@ struct AggregatedNetworkData {
 class TensorPipeAgent : public RpcAgent {
  public:
   TensorPipeAgent(
-      const std::shared_ptr<::c10d::Store>& store,
+      const c10::intrusive_ptr<::c10d::Store>& store,
       std::string selfName,
       worker_id_t selfId,
       int worldSize,
-      std::shared_ptr<c10d::ProcessGroup> processGroup,
+      c10::intrusive_ptr<::c10d::ProcessGroup> processGroup,
       TensorPipeRpcBackendOptions opts,
       std::unique_ptr<RequestCallback> cb);
 
@@ -225,7 +232,9 @@ class TensorPipeAgent : public RpcAgent {
   void pipeRead(
       const std::shared_ptr<tensorpipe::Pipe>&,
       std::function<void(
-          const tensorpipe::Error&, Message&&, DevicesContext&&)>) noexcept;
+          const tensorpipe::Error&,
+          Message&&,
+          std::shared_ptr<FullDeviceContext>)>) noexcept;
 
   // TensorPipe write function that could be used to write response
   // messages by server, and write request messages by client.
@@ -233,7 +242,7 @@ class TensorPipeAgent : public RpcAgent {
       const std::shared_ptr<tensorpipe::Pipe>&,
       Message&& message,
       std::vector<c10::DeviceIndex>&& devices,
-      DevicesContext&& ctx,
+      std::shared_ptr<FullDeviceContext> ctx,
       std::function<void(const tensorpipe::Error&)>) noexcept;
 
   // Callback of listener accept()
@@ -248,7 +257,7 @@ class TensorPipeAgent : public RpcAgent {
       std::shared_ptr<tensorpipe::Pipe>& pipe,
       std::shared_ptr<FutureMessage>& futureResponseMessage,
       uint64_t messageId,
-      DevicesContext&& ctx);
+      std::shared_ptr<FullDeviceContext> ctx);
 
   // Collects metrics from successful RPC calls
   void trackNetworkData(
@@ -310,7 +319,7 @@ class TensorPipeAgent : public RpcAgent {
   // The join method is required to behave like a barrier and perform collective
   // operations. For simplicity and reliability, we offload this to a process
   // group, but probably one day we might want to re-implement them using RPCs.
-  const std::shared_ptr<c10d::ProcessGroup> processGroup_;
+  const c10::intrusive_ptr<::c10d::ProcessGroup> processGroup_;
 
   mutable std::mutex mutex_;
   uint64_t nextMessageID_{0};

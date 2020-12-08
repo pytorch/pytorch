@@ -249,6 +249,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: contiguous
    .. automethod:: copy_
    .. automethod:: conj
+   .. automethod:: copysign
+   .. automethod:: copysign_
    .. automethod:: cos
    .. automethod:: cos_
    .. automethod:: cosh
@@ -265,7 +267,9 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cummax
    .. automethod:: cummin
    .. automethod:: cumprod
+   .. automethod:: cumprod_
    .. automethod:: cumsum
+   .. automethod:: cumsum_
    .. automethod:: data_ptr
    .. automethod:: deg2rad
    .. automethod:: dequantize
@@ -311,13 +315,14 @@ view of a storage and defines numeric operations on it.
    .. automethod:: exponential_
    .. automethod:: fix
    .. automethod:: fix_
-   .. automethod:: fft
    .. automethod:: fill_
    .. automethod:: flatten
    .. automethod:: flip
    .. automethod:: fliplr
    .. automethod:: flipud
    .. automethod:: float
+   .. automethod:: float_power
+   .. automethod:: float_power_
    .. automethod:: floor
    .. automethod:: floor_
    .. automethod:: floor_divide
@@ -349,7 +354,10 @@ view of a storage and defines numeric operations on it.
    .. automethod:: hypot_
    .. automethod:: i0
    .. automethod:: i0_
-   .. automethod:: ifft
+   .. automethod:: igamma
+   .. automethod:: igamma_
+   .. automethod:: igammac
+   .. automethod:: igammac_
    .. automethod:: index_add_
    .. automethod:: index_add
    .. automethod:: index_copy_
@@ -361,10 +369,10 @@ view of a storage and defines numeric operations on it.
    .. automethod:: index_select
    .. automethod:: indices
       :noindex:
+   .. automethod:: inner
    .. automethod:: int
    .. automethod:: int_repr
    .. automethod:: inverse
-   .. automethod:: irfft
    .. automethod:: isclose
    .. automethod:: isfinite
    .. automethod:: isinf
@@ -388,6 +396,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: kthvalue
    .. automethod:: lcm
    .. automethod:: lcm_
+   .. automethod:: ldexp
+   .. automethod:: ldexp_
    .. automethod:: le
    .. automethod:: le_
    .. automethod:: less_equal
@@ -449,6 +459,8 @@ view of a storage and defines numeric operations on it.
       :noindex:
    .. automethod:: mode
    .. automethod:: movedim
+   .. automethod:: moveaxis
+   .. automethod:: msort
    .. automethod:: mul
    .. automethod:: mul_
    .. automethod:: multiply
@@ -523,7 +535,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: resize_as_
    .. automethod:: retain_grad
       :noindex:
-   .. automethod:: rfft
    .. automethod:: roll
    .. automethod:: rot90
    .. automethod:: round
@@ -581,10 +592,13 @@ view of a storage and defines numeric operations on it.
    .. automethod:: sum
    .. automethod:: sum_to_size
    .. automethod:: svd
+   .. automethod:: swapaxes
+   .. automethod:: swapdims
    .. automethod:: symeig
    .. automethod:: t
    .. automethod:: t_
    .. automethod:: tensor_split
+   .. automethod:: tile
    .. automethod:: to
    .. automethod:: to_mkldnn
    .. automethod:: take
