@@ -19,10 +19,6 @@ struct THPVariable {
 };
 
 THP_API PyObject *THPVariableClass;
-
-// NB: Unfortunately it is more efficient to store ParameterClass here rather
-//     than in `python_variable.cpp` with a getter method.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 THP_API PyObject *ParameterClass;
 
 bool THPVariable_initModule(PyObject *module);
