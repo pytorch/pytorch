@@ -1595,6 +1595,7 @@ class TestTensorExprFuser(BaseTestClass):
 
         torch.testing.assert_allclose(ref, test)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_multiple_outputs(self):
         # A bug reported internally similar to the one reported in #48533
         def foo(a, b, c):
