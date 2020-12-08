@@ -209,6 +209,9 @@ class _RemoteModule(nn.Module):
         """
         return rpc.rpc_sync(self.on, _param_rrefs, args=(self.module_rref, recurse))
 
+    def get_module_rref(self) -> rpc.RRef[nn.Module]:
+        return self.module_rref
+
     def register_buffer(
         self, name: str, tensor: Optional[Tensor], persistent: bool = True
     ) -> None:
