@@ -597,7 +597,7 @@ complete QR factorization. See below for a list of valid modes.
           This behavior may change in the future.
 
 .. note:: This function uses LAPACK for CPU inputs and MAGMA for CUDA inputs,
-          and may produce different decompositions on different device types
+          and may produce different (valid) decompositions on different device types
           and different platforms, depending on the precise version of the
           underlying library.
 
