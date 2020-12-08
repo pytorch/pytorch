@@ -432,7 +432,7 @@ void LoopNestGenerator::handle(const Expr* expr) {
   //  If this is a reduction, initialize the output (open for loops to inner
   //  most, predicate, initialize, place next after allocation if exists, close
   //  to computeAt)
-  if (out->hasAnyReduction()) {
+  if (out->hasReduction()) {
     initReduction(out, expr->as<ReductionOp>()->init(), alloc_expr);
   }
 

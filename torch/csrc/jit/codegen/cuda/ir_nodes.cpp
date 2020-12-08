@@ -585,7 +585,7 @@ TensorDomain::TensorDomain(
       root_domain_.size());
 
   // Just due to clang-tidy, correct value set in resetDomains
-  has_reduction_ = false;
+  has_nontrivial_reduction_ = false;
   domain_ = root_domain_;
   resetDomains();
 }
@@ -623,7 +623,7 @@ TensorDomain::TensorDomain(
   });
 
   // Just due to clang-tidy, correct value set in resetDomains
-  has_reduction_ = false;
+  has_nontrivial_reduction_ = false;
   resetDomains();
   name_ = fusion_->registerVal(this);
 }
@@ -673,7 +673,7 @@ TensorDomain::TensorDomain(
   });
 
   // Just due to clang-tidy, correct value set in resetDomains
-  has_reduction_ = false;
+  has_nontrivial_reduction_ = false;
   resetDomains();
   name_ = fusion_->registerVal(this);
 }
@@ -686,7 +686,7 @@ TensorDomain::TensorDomain(const TensorDomain* src, IrCloner* ir_cloner)
       no_reduction_domain_(ir_cloner->clone(src->no_reduction_domain_)),
       rfactor_domain_(ir_cloner->clone(src->rfactor_domain_)),
       contiguity_(src->contiguity()),
-      has_reduction_(src->has_reduction_) {}
+      has_nontrivial_reduction_(src->has_nontrivial_reduction_) {}
 
 bool TensorDomain::operator==(const TensorDomain& other) const {
   // Checks equality of each class field. Should not be necessary to
@@ -753,7 +753,7 @@ bool TensorDomain::sameAs(
 }
 
 bool TensorDomain::hasReduction() const {
-  return has_reduction_;
+  return has_nontrivial_reduction_;
 }
 
 bool TensorDomain::hasBlockReduction() const {

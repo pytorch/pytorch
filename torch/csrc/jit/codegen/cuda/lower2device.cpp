@@ -261,6 +261,16 @@ class GpuLower::KernelIrMapper : private OptInConstDispatch {
   }
 
   void handle(const ReductionOp* node) final {
+    // If trivial reduction operation lower to set operation.
+    if (!node->out()->as<TensorView>()->hasReduction() &&
+        node->out()->as<TensorView>()->hasAnyReduction()) {
+      const auto lowered_node = ir_builder_.create<kir::UnaryOp>(
+          UnaryOpType::Set, lowerValue(node->out()), lowerValue(node->in()));
+      TORCH_CHECK(
+          gpu_lower_->kir_expr_map_.insert({node, lowered_node}).second);
+      return;
+    }
+
     const auto lowered_node = ir_builder_.create<kir::ReductionOp>(
         node->getReductionOpType(),
         lowerValue(node->init()),

@@ -543,8 +543,18 @@ TORCH_CUDA_API c10::optional<ReductionParams> getReductionHeuristics(
   FusionGuard fg(fusion);
 
   auto red_root_dom = red_tv->getRootDomain();
-  const bool fastest_dim_reduction =
-      red_root_dom[red_root_dom.size() - 1]->isReduction();
+  bool fastest_dim_reduction = true;
+  for (size_t i = red_root_dom.size(); i > 0; i--) {
+    if (red_root_dom[i - 1]->isBroadcast()) {
+      continue;
+    } else if (red_root_dom[i - 1]->isReduction()) {
+      fastest_dim_reduction = true;
+      break;
+    } else {
+      fastest_dim_reduction = false;
+      break;
+    }
+  }
 
   TORCH_INTERNAL_ASSERT(
       red_tv != nullptr, "Reduction TensorView wasn't found.");

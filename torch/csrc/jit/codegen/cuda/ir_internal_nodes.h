@@ -423,7 +423,7 @@ class TORCH_CUDA_API TensorDomain : public Val {
   void resetDomains() {
     no_reduction_domain_ = noReductions(domain_);
     no_bcast_domain_ = noBroadcasts(domain_);
-    has_reduction_ = hasNontrivialReduction(domain_);
+    has_nontrivial_reduction_ = hasNontrivialReduction(domain_);
   }
 
   // i here is int, as we want to accept negative value and ::size_type can be a
@@ -467,7 +467,7 @@ class TORCH_CUDA_API TensorDomain : public Val {
   std::vector<IterDomain*> no_reduction_domain_;
   const std::vector<IterDomain*> rfactor_domain_;
   const std::vector<bool> contiguity_;
-  bool has_reduction_;
+  bool has_nontrivial_reduction_;
 };
 
 //! Representation a split on an IterDomain by "factor"
