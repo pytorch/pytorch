@@ -14,7 +14,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, deviceCountAtLeast, onlyOnCPUAndCUDA,
-    onlyCPU, skipCUDAIfNotRocm, largeTensorTest, precisionOverride, dtypes,
+    onlyCPU, largeTensorTest, precisionOverride, dtypes,
     onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU)
 
 # TODO: refactor tri_tests_args, _compare_trilu_indices, run_additional_tri_tests
@@ -2581,7 +2581,6 @@ class TestTensorCreation(TestCase):
         self.assertEqual(cpu_tensor, device_tensor)
 
     @onlyCUDA
-    @skipCUDAIfNotRocm
     def test_arange_bfloat16(self, device):
         ref_tensor = torch.tensor([0, 1, 2, 3], dtype=torch.bfloat16, device=device)
         bfloat16_tensor = torch.arange(0, 4, dtype=torch.bfloat16, device=device)
