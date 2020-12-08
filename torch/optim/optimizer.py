@@ -15,6 +15,7 @@ class _RequiredParameter(object):
 required = _RequiredParameter()
 
 
+# Just a dummy comment
 class Optimizer(object):
     r"""Base class for all optimizers.
 
