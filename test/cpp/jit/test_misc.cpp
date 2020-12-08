@@ -368,9 +368,9 @@ TEST(ATenNativeBatchNormTest, Basic) {
 }
 
 TEST(CustomFusionTest, Basic) {
-  #if defined(FBCODE_CAFFE2)
-      return;
-  #endif
+#if defined(FBCODE_CAFFE2)
+  return;
+#endif
 
   auto graph_string = R"IR(
     graph(%0 : Float(2, 3, 4),
@@ -406,9 +406,9 @@ TEST(CustomFusionTest, Basic) {
 }
 
 TEST(CustomFusionTest, NestedBlocks) {
-  #if defined(FBCODE_CAFFE2)
-      return;
-  #endif
+#if defined(FBCODE_CAFFE2)
+  return;
+#endif
 
   auto graph_string = R"IR(
   graph(%0 : Float(2, 3, 4),
@@ -1133,16 +1133,17 @@ TEST(RecordFunctionTest, Basic) {
 TEST(RecordFunctionTest, OperatorNameOverload) {
   std::set<std::string> operator_names;
 
-  at::addGlobalCallback(
-      at::RecordFunctionCallback([&operator_names](
-                                     const at::RecordFunction& fn) {
-        c10::optional<c10::OperatorName> op_name = fn.operator_name();
-        if (op_name.has_value()) {
-          operator_names.insert(c10::toString(*op_name));
-        } else {
-          operator_names.insert("No Operator Name");
-        }
-      }).scopes({at::RecordScope::FUNCTION}));
+  at::addGlobalCallback(at::RecordFunctionCallback(
+                            [&operator_names](const at::RecordFunction& fn) {
+                              c10::optional<c10::OperatorName> op_name =
+                                  fn.operator_name();
+                              if (op_name.has_value()) {
+                                operator_names.insert(c10::toString(*op_name));
+                              } else {
+                                operator_names.insert("No Operator Name");
+                              }
+                            })
+                            .scopes({at::RecordScope::FUNCTION}));
   auto t = torch::randn({1, 2, 3}, at::kCPU);
   t.set_requires_grad(false);
   auto t2 = t.pow(2);

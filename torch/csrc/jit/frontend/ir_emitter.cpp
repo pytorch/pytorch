@@ -1280,7 +1280,7 @@ struct to_ir {
     // comprehension introduces it's own scope. no variable assigned
     // leaks into the rest of the graph
     Node* n =
-        graph->insertNode(create(prim::ListComprehensionScope, lc.range(), 0));
+        graph->insertNode(create(prim::ComprehensionScope, lc.range(), 0));
     auto* comprehension_block = n->addBlock();
     pushFrame(comprehension_block);
     WithInsertPoint guard(comprehension_block);
@@ -1325,7 +1325,7 @@ struct to_ir {
     // A dict comprehension introduces its own scope. No variable assigned
     // may leak into the rest of the graph
     Node* n =
-        graph->insertNode(create(prim::ListComprehensionScope, dc.range(), 0));
+        graph->insertNode(create(prim::ComprehensionScope, dc.range(), 0));
     auto* comprehension_block = n->addBlock();
     pushFrame(comprehension_block);
     WithInsertPoint guard(comprehension_block);
@@ -1340,7 +1340,7 @@ struct to_ir {
       NamedValue input_k = NamedValue(loc, "", k);
       NamedValue input_v = NamedValue(loc, "", v);
       emitBuiltinCall(
-          loc, *graph, aten::_set_item, {input_k, input_v}, {}, self);
+          loc, *graph, aten::_set_item, {self, input_k, input_v}, {});
     };
     emitFor(targets_list, itrs, loc, emit_body);
     popFrame();

@@ -331,10 +331,23 @@ class TestJit(JitTestCase):
             def dot(points, query, dim):
                 return (points * query).sum(dim)
 
-    def test_dict_comprehension(self):
+    def test_dict_comprehension_foo(self):
         def fn():
             return {i : chr(i + 65) for i in range(4)}
         self.checkScript(fn, ())
+
+    def test_dict_comprehension_with_type_annotation(self):
+        def fn():
+            d: Dict[int, str] = {i : chr(i + 65) for i in range(4)}
+            return d
+        self.checkScript(fn, ())
+
+        with self.assertRaisesRegex(RuntimeError, ""):
+            with self.assertRaisesRegex(AssertionError, "Expected Dict type annotation for dict comprehension, found Tuple[int, str]"):
+                @torch.jit.script
+                def fn():
+                    d: Tuple[int, str] = {i : chr(i + 65) for i in range(4)}
+                    return d
 
     def test_dict_comprehension_scope(self):
         def comprehension_can_access_outer_scope_variables():
