@@ -19,7 +19,7 @@ List<Tensor> consume_list(List<Tensor> a) {
 // registering this consume op with correct alias information which is DEFAULT.
 TORCH_LIBRARY_FRAGMENT(operator_benchmark, m) {
     m.def("_consume", &consume);
-    m.def("_consume_list", &consume_list);
+    m.def("_consume.list", &consume_list);
 }
 
 PYBIND11_MODULE(cpp_extension, m) {
