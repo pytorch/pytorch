@@ -9560,7 +9560,7 @@
   dispatch:
     Math: linalg_cond_out
 
-- func: _linalg_solve_out_helper_(Tensor(a!) self, Tensor(b!) input, Tensor(c!) infos) -> Tensor(a!)
+- func: _linalg_solve_out_helper_(Tensor(a!) self, Tensor(b!) other, Tensor(c!) infos) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function
   dispatch:
