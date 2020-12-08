@@ -1,5 +1,6 @@
 #include <ATen/record_function.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <c10/macros/Macros.h>
 #include <algorithm>
 #include <cstdlib>
 #include <random>
@@ -32,21 +33,26 @@ thread_local uint64_t current_thread_id_ = 0;
 thread_local bool tls_record_function_enabled_ = true;
 
 // Low probability constant
-const double kLowProb = 0.001;
-thread_local int tries_left_ = 0;
+static const double kLowProb = 0.001;
+struct CoinflipTLS {
+  int tries_left_;
+  std::mt19937 genGeo_;
+  std::mt19937 genZeroOne_;
+  std::geometric_distribution<int> distGeo_;
+  std::uniform_real_distribution<double> distZeroOne_;
+  CoinflipTLS();
+};
+
+CoinflipTLS::CoinflipTLS()
+    : tries_left_(0), genGeo_(std::random_device()()), genZeroOne_(std::random_device()()), distGeo_(kLowProb), distZeroOne_(0.0, 1.0) {}
+thread_local CoinflipTLS coinflip_tls_;
 
 int sample_geometric() {
-  static thread_local auto gen =
-      std::make_unique<std::mt19937>(std::random_device()());
-  std::geometric_distribution<int> dist(kLowProb);
-  return dist(*gen);
+  return coinflip_tls_.distGeo_(coinflip_tls_.genGeo_);
 }
 
 double sample_zero_one() {
-  static thread_local auto gen =
-      std::make_unique<std::mt19937>(std::random_device()());
-  std::uniform_real_distribution<double> dist(0.0, 1.0);
-  return dist(*gen);
+  return coinflip_tls_.distZeroOne_(coinflip_tls_.genZeroOne_);
 }
 
 } // namespace
@@ -117,6 +123,42 @@ class CallbackManager {
     return !rf_tls_.sorted_tls_callbacks_.empty();
   }
 
+  // We need this function to be inlined: init() is a hot path and
+  // callbackShouldRun is even hotter because it's called multiple
+  // times per init(). Profiling shows that the function prologue is
+  // taking up a significant fraction of the time.
+  static bool C10_ALWAYS_INLINE callbackShouldRun(const RecordFunctionCallback& cb, RecordScope scope) {
+    // first check whether this callback is interested in
+    // the given scope type
+    if (!cb.checkScope(scope)) {
+      return false;
+    }
+    // if we have registered should_run_ function, use it
+    if (cb.should_run_) {
+      return cb.should_run_(cb);
+    }
+
+    if (cb.sampling_prob_ == 1.0) {
+      return true;
+    }
+    // model the low probability events as events happening
+    // with probability kLowProb followed by another sampling with
+    // probability (sampling_prob__ / kLowProb), then replace the coin
+    // flip for kLowProb with a thread local number of tries tries_left_
+    // sampled from the geometric distribution.
+    if (cb.sampling_prob_ < kLowProb) {
+      if (coinflip_tls_.tries_left_ == 0) {
+        coinflip_tls_.tries_left_ = sample_geometric();
+        return (sample_zero_one() < cb.sampling_prob_ / kLowProb);
+      } else {
+        --coinflip_tls_.tries_left_;
+        return false;
+      }
+    } else {
+      return (sample_zero_one() < cb.sampling_prob_);
+    }
+  }
+
   // init is called by RecordFunction in constructor to
   // determine which thread local and global callbacks are going
   // to be executed and whether any of them need inputs
@@ -125,7 +167,7 @@ class CallbackManager {
     bool found_needs_ids = false;
 
     for (const auto& cb: rf_tls_.sorted_tls_callbacks_) {
-      if (cb.first.shouldRun(scope)) {
+      if (callbackShouldRun(cb.first, scope)) {
         if (cb.first.needsInputs()) {
           found_needs_inputs = true;
         }
@@ -140,7 +182,7 @@ class CallbackManager {
     }
 
     for (const auto& cb: sorted_global_callbacks_) {
-      if (cb.first.shouldRun(scope)) {
+      if (callbackShouldRun(cb.first, scope)) {
         if (cb.first.needsInputs()) {
           found_needs_inputs = true;
         }
@@ -266,37 +308,6 @@ namespace {
   }
 } // namespace
 
-bool RecordFunctionCallback::shouldRun(RecordScope scope) const {
-  // first check whether this callback is interested in
-  // the given scope type
-  if (!checkScope(scope)) {
-    return false;
-  }
-  // if we have registered should_run_ function, use it
-  if (should_run_) {
-    return should_run_(*this);
-  }
-  // otherwise potentially do the uniform sampling
-  if (sampling_prob_ != 1.0) {
-    // model the low probability events as events happening
-    // with prob. kLowProb followed by another sampling with
-    // prob. (sampling_prob_ / kLowProb), then replace the coin
-    // flip for kLowProb with a thread local number of tries tries_left_
-    // sampled from the geometric distribution
-    if (sampling_prob_ < kLowProb) {
-      if (tries_left_ == 0) {
-        tries_left_ = sample_geometric();
-        return (sample_zero_one() < sampling_prob_ / kLowProb);
-      } else {
-        --tries_left_;
-        return false;
-      }
-    } else {
-      return (sample_zero_one() < sampling_prob_);
-    }
-  }
-  return true;
-}
 
 RecordFunctionCallbacks _getTLSCallbacks() {
   return rf_tls_.sorted_tls_callbacks_;
