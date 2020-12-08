@@ -31,13 +31,12 @@ bool canRunNatively(Node* n) {
   // In alphabetical order
   const static std::unordered_set<std::string> native_nodes{
       "aten::flatten",
+      "aten::narrow",
       "aten::permute",
       "aten::reshape",
       "aten::slice",
       "aten::transpose",
       "aten::to",
-      "aten::reshape",
-      "aten::slice",
       "prim::ListConstruct",
       "prim::ListUnpack",
       "prim::TupleConstruct"};
@@ -378,6 +377,37 @@ getNativeOperation(Node* n) {
       auto in4_i = p_node->Input(4, reg).toInt();
       p_node->Output(0, reg) =
           at::native::slice(in0_t, in1_i, in2_i, in3_i, in4_i);
+    };
+  } else if (n->kind() == c10::Symbol::fromQualString("aten::narrow")) {
+    return [](const ProcessedNode* p_node, std::vector<IValue>& reg) {
+      auto self = p_node->Input(0, reg).toTensor(); // self
+      auto dim = p_node->Input(1, reg).toInt(); // dim
+      int64_t start = 0;
+      if (p_node->Input(2, reg).isScalar()) {
+        start = p_node->Input(2, reg).toInt();
+      } else {
+        auto t = p_node->Input(2, reg).toTensor();
+        start = t.item<int64_t>();
+      }
+      auto length = p_node->Input(3, reg).toInt(); // length
+      TORCH_CHECK(
+          self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
+      auto cur_size = self.size(dim);
+      if (start != cur_size && start < 0) { // start being the end is valid, but
+                                            // not a valid dim specification.
+        start = at::maybe_wrap_dim(start, cur_size);
+      }
+      TORCH_CHECK(
+          length >= 0 && start <= cur_size - length,
+          "start (",
+          start,
+          ") + length (",
+          length,
+          ") exceeds dimension size (",
+          cur_size,
+          ").");
+      p_node->Output(0, reg) =
+          at::native::slice(self, dim, start, start + length, 1);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::to")) {
     return [](const ProcessedNode* p_node, std::vector<IValue>& reg) {
