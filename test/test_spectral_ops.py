@@ -6,7 +6,7 @@ from itertools import product
 import itertools
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, TEST_WITH_SLOW, TEST_NUMPY, TEST_LIBROSA, slowAwareTest)
+    (TestCase, run_tests, TEST_WITH_SLOW, TEST_NUMPY, TEST_LIBROSA)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyOnCPUAndCUDA,
      skipCPUIfNoMkl, skipCUDAIfRocm, deviceCountAtLeast, onlyCUDA, OpDTypes)
@@ -126,32 +126,15 @@ class TestFFT(TestCase):
             )
         ]
 
-        torch_fn = op.get_op()
-        numpy_fn = op.ref
-
-        def fn(t: torch.Tensor, n: Optional[int], dim: int, norm: Optional[str]):
-            return torch_fn(t, n, dim, norm)
-        scripted_fn = torch.jit.script(fn)
-
-        # TODO: revisit the following function if t.fft() becomes torch.fft.fft
-        # def method_fn(t, n, dim, norm):
-        #     return getattr(t, fname)(n, dim, norm)
-        # scripted_method_fn = torch.jit.script(method_fn)
-
-        # TODO: revisit the following function if t.fft() becomes torch.fft.fft
-        # torch_fns = (torch.fft.fft, torch.Tensor.fft, scripted_fn, scripted_method_fn)
-        torch_fns = (torch_fn, scripted_fn)
-
         for iargs in test_args:
             args = list(iargs)
             input = args[0]
             args = args[1:]
 
-            expected = numpy_fn(input.cpu().numpy(), *args)
+            expected = op.ref(input.cpu().numpy(), *args)
             exact_dtype = dtype in (torch.double, torch.complex128)
-            for fn in torch_fns:
-                actual = fn(input, *args)
-                self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+            actual = op(input, *args)
+            self.assertEqual(actual, expected, exact_dtype=exact_dtype)
 
     @skipCUDAIfRocm
     @skipCPUIfNoMkl
@@ -273,29 +256,6 @@ class TestFFT(TestCase):
         if TEST_WITH_SLOW:
             self.assertTrue(gradgradcheck(test_fn, inputs))
 
-
-    @slowAwareTest
-    @onlyOnCPUAndCUDA
-    @ops(spectral_funcs, allowed_dtypes=[torch.double, torch.complex128])  # gradcheck requires double
-    def test_backward_1d(self, device, dtype, op):
-        test_args = list(product(
-            # input
-            (torch.randn(67, device=device, dtype=dtype),
-             torch.randn(9, 6, 3, device=device, dtype=dtype)),
-            # n
-            (None, 6),
-            # dim
-            (-1, 0),
-            # norm
-            (None, "forward", "backward", "ortho") if TEST_WITH_SLOW else (None,)
-        ))
-
-        for iargs in test_args:
-            args = list(iargs)
-            input = args[0]
-            args = args[1:]
-            self._fft_grad_check_helper(op.get_op(), input, args)
-
     # nd-fft tests
 
     @onlyOnCPUAndCUDA
@@ -323,19 +283,10 @@ class TestFFT(TestCase):
             shape = itertools.islice(itertools.cycle(range(4, 9)), input_ndim)
             input = torch.randn(*shape, device=device, dtype=dtype)
             for norm in norm_modes:
-                torch_fn = op.get_op()
-                numpy_fn = op.ref
-
-                def fn(t: torch.Tensor, s: Optional[List[int]], dim: Optional[List[int]], norm: Optional[str]):
-                    return torch_fn(t, s, dim, norm)
-
-                torch_fns = (torch_fn, torch.jit.script(fn))
-
-                expected = numpy_fn(input.cpu().numpy(), s, dim, norm)
+                expected = op.ref(input.cpu().numpy(), s, dim, norm)
                 exact_dtype = dtype in (torch.double, torch.complex128)
-                for fn in torch_fns:
-                    actual = fn(input, s, dim, norm)
-                    self.assertEqual(actual, expected, exact_dtype=exact_dtype)
+                actual = op(input, s, dim, norm)
+                self.assertEqual(actual, expected, exact_dtype=exact_dtype)
 
     @skipCUDAIfRocm
     @skipCPUIfNoMkl
@@ -376,33 +327,6 @@ class TestFFT(TestCase):
                 # For real input, ifftn(fftn(x)) will convert to complex
                 self.assertEqual(x, y, exact_dtype=(
                     forward != torch.fft.fftn or x.is_complex()))
-
-    @slowAwareTest
-    @onlyOnCPUAndCUDA
-    @ops([op for op in spectral_funcs if op.ndimensional],
-         allowed_dtypes=[torch.double, torch.complex128])  # gradcheck requires double
-    def test_backward_nd(self, device, dtype, op):
-        # input_ndim, s, dim
-        transform_desc = [
-            *product((2, 3), (None,), (None, (0,), (0, -1))),
-            *product((2, 3), (None, (4, 10)), (None,)),
-            (4, None, None),
-            (3, (10, 10), (0, 1)),
-            (2, (1, 1), (0, 1)),
-            (2, None, (1,)),
-            (1, None, (0,)),
-            (1, (11,), (0,)),
-        ]
-        if not TEST_WITH_SLOW:
-            transform_desc = [desc for desc in transform_desc if desc[0] < 3]
-        norm_modes = (None, "forward", "backward", "ortho") if TEST_WITH_SLOW else (None, )
-
-        for input_ndim, s, dim in transform_desc:
-            shape = itertools.islice(itertools.cycle(range(4, 9)), input_ndim)
-            input = torch.randn(*shape, device=device, dtype=dtype)
-
-            for norm in norm_modes:
-                self._fft_grad_check_helper(op.get_op(), input, (s, dim, norm))
 
     @onlyOnCPUAndCUDA
     @ops([op for op in spectral_funcs if op.ndimensional],

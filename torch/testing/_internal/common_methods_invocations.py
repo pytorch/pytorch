@@ -165,7 +165,11 @@ class OpInfo(object):
         return self.inplace_variant
 
     def sample_inputs(self, device, dtype, requires_grad=False):
-        """Returns an iterable of SampleInputs."""
+        """Returns an iterable of SampleInputs.
+
+        These samples should be sufficient to test the function works correctly
+        with autograd, TorchScript, etc.
+        """
         return self.sample_inputs_func(self, device, dtype, requires_grad)
 
     # Returns True if the test should be skipped and False otherwise
@@ -349,24 +353,30 @@ class SpectralFuncInfo(OpInfo):
 
 
     def sample_inputs(self, device, dtype, requires_grad=False):
-        tensor = make_tensor((L, M), device, dtype,
-                             low=None, high=None,
+        nd_tensor = make_tensor((S, S + 1, S + 2), device, dtype, low=None, high=None,
+                                requires_grad=requires_grad)
+        tensor = make_tensor((31,), device, dtype, low=None, high=None,
                              requires_grad=requires_grad)
+
         if self.ndimensional:
             return [
+                SampleInput(nd_tensor, kwargs=dict(s=(3, 10), dim=(1, 2), norm='ortho')),
+                SampleInput(nd_tensor, kwargs=dict(norm='ortho')),
+                SampleInput(nd_tensor, kwargs=dict(s=(8,))),
                 SampleInput(tensor),
-                SampleInput(tensor, kwargs=dict(dim=(-2,))),
-                SampleInput(tensor, kwargs=dict(norm='ortho')),
-                SampleInput(tensor, kwargs=dict(s=(10, 15))),
-                SampleInput(tensor, kwargs=dict(s=10, dim=1, norm='ortho')),
+
+                *(SampleInput(nd_tensor, kwargs=dict(dim=dim))
+                  for dim in [-1, -2, -3, (0, -1)]),
             ]
         else:
             return [
+                SampleInput(nd_tensor, kwargs=dict(n=10, dim=1, norm='ortho')),
+                SampleInput(nd_tensor, kwargs=dict(norm='ortho')),
+                SampleInput(nd_tensor, kwargs=dict(n=7)),
                 SampleInput(tensor),
-                SampleInput(tensor, kwargs=dict(dim=-2)),
-                SampleInput(tensor, kwargs=dict(norm='ortho')),
-                SampleInput(tensor, kwargs=dict(n=15)),
-                SampleInput(tensor, kwargs=dict(n=10, dim=1, norm='ortho')),
+
+                *(SampleInput(nd_tensor, kwargs=dict(dim=0))
+                  for dim in [-1, -2, -3]),
             ]
 
 
