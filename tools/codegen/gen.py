@@ -1021,7 +1021,8 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
     ]
 
     cpp_schema_order_types = [
-        cpp.argument(a).type for a in schema_order_jit_arguments
+        # NB: method here doesn't matter
+        cpp.argument(a, method=False).type for a in schema_order_jit_arguments
     ]
 
     cpp_returns = cpp.returns_type(f.func.returns)

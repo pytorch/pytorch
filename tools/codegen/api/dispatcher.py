@@ -6,7 +6,7 @@ import tools.codegen.api.native as native
 import tools.codegen.local as local
 
 import itertools
-from typing import Sequence, Optional, Tuple
+from typing import Sequence, Optional, Tuple, List, Union
 
 # This file describes the translation of JIT schema to the dispatcher
 # API, the *unboxed* calling convention by which invocations through
@@ -142,16 +142,23 @@ def cppargument_exprs(
         assert_never(a)
 
 def cpparguments_exprs(func: FunctionSchema, * , method: bool, api_is_faithful: bool) -> Sequence[DispatcherExpr]:
-    dispatcher_calling_convention_is_faithful = local.use_c10_dispatcher().dispatcher_uses_new_style()
-    arguments = cpp.group_arguments(func, method=method, faithful=dispatcher_calling_convention_is_faithful)
+    dispatcher_is_faithful = local.use_c10_dispatcher().dispatcher_uses_new_style()
+
+    arguments: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
+    if dispatcher_is_faithful:
+        arguments.extend(func.arguments.non_out)
+        arguments.extend(func.arguments.out)
+    else:
+        arguments.extend(func.arguments.out)
+        arguments.extend(func.arguments.non_out)
 
     if api_is_faithful:
         argument_packs = tuple(
-            cpp.argument_faithful(a) for a in arguments
+            cpp.argument_faithful(a, method=method) for a in arguments
         )
     else:
         argument_packs = tuple(
-            cpp.argument(a) for a in arguments
+            cpp.argument(a, method=method) for a in arguments
         )
 
     return _cpparguments_exprs(argument_packs)
