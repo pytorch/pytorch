@@ -25,6 +25,7 @@ namespace torch {
    * itself a stripped down version of PyObject_GetAttrString.
   */
   bool fast_has_torch_function(PyObject *obj) {
+    return false;  // debug
     PyTypeObject *tp = Py_TYPE(obj);
 
     // NOLINTNEXTLINE(modernize-use-nullptr)
