@@ -353,7 +353,7 @@ if (!strides.empty()) {{
 
         if self.dispatch_key == 'CUDA':
             if self.rocm:
-                guard_field = 'c10::hip::OptionalHIPGuard guard_;'
+                guard_field = 'c10::hip::OptionalHIPGuardMasqueradingAsCUDA guard_;'
             else:
                 guard_field = 'c10::cuda::OptionalCUDAGuard guard_;'
         else:
@@ -579,10 +579,15 @@ class ComputeFunction:
 
         assert self.target is Target.DEFINITION
 
-        def generate_defn(sig: CppSignature) -> str:
+        def generate_defn(faithful: bool) -> str:
             dispatcher_sig = DispatcherSignature.from_schema(f.func)
 
-            dispatcher_exprs = dispatcher.cpparguments_exprs(sig.argument_packs())
+            if faithful and sig_group.faithful_signature is not None:
+                sig = sig_group.faithful_signature
+            else:
+                sig = sig_group.signature
+
+            dispatcher_exprs = dispatcher.cpparguments_exprs(f.func, method=False, api_is_faithful=faithful)
             dispatcher_exprs_str = ', '.join(a.expr for a in dispatcher_exprs)
 
             return f"""
@@ -595,10 +600,9 @@ class ComputeFunction:
 }}
 """
 
-        result = generate_defn(sig_group.signature)
+        result = generate_defn(sig_group.faithful_signature is None)
         if sig_group.faithful_signature is not None:
-            if local.use_c10_dispatcher().dispatcher_uses_new_style():
-                result += generate_defn(sig_group.faithful_signature)
+            result += generate_defn(True)
 
         return result
 
@@ -630,10 +634,16 @@ class ComputeTensorMethod:
 
         assert self.target is Target.DEFINITION
 
-        def generate_defn(sig: CppSignature) -> str:
+        def generate_defn(faithful: bool) -> str:
             dispatcher_sig = DispatcherSignature.from_schema(f.func)
 
-            dispatcher_exprs = dispatcher.cpparguments_exprs(sig.argument_packs())
+            if faithful:
+                sig = sig_group.faithful_signature
+                assert sig is not None
+            else:
+                sig = sig_group.signature
+
+            dispatcher_exprs = dispatcher.cpparguments_exprs(f.func, method=True, api_is_faithful=faithful)
             dispatcher_exprs_str = ', '.join(a.expr for a in dispatcher_exprs)
 
             return f"""
@@ -646,9 +656,9 @@ class ComputeTensorMethod:
 }}
 """
 
-        result = generate_defn(sig_group.signature)
+        result = generate_defn(faithful=False)
         if sig_group.faithful_signature is not None:
-            result += generate_defn(sig_group.faithful_signature)
+            result += generate_defn(faithful=True)
 
         return result
 
@@ -1007,7 +1017,10 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
         for a in schema_order_jit_arguments
     ]
 
-    cpp_schema_order_types = [cpp.argument(a).type for a in schema_order_jit_arguments]
+    cpp_schema_order_types = [
+        cpp.argument(a).type for a in schema_order_jit_arguments
+    ]
+
     cpp_returns = cpp.returns_type(f.func.returns)
     schema_order_cpp_signature = f"{cpp_returns} ({', '.join(cpp_schema_order_types)})"
 
@@ -1248,7 +1261,7 @@ def main() -> None:
 #include <ATen/cuda/CUDAContext.h>'''
     if options.rocm:
         extra_cuda_headers = '''\
-#include <c10/hip/HIPGuard.h>
+#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h.h>
 #include <ATen/hip/ATenHIPGeneral.h>
 #include <ATen/hip/HIPDevice.h>
 #include <ATen/hip/HIPContext.h>'''
