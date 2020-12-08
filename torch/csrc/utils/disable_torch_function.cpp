@@ -127,6 +127,12 @@ PyObject* THPModule_disable_torch_function(PyObject *self, PyObject *a) {
   END_HANDLE_TH_ERRORS
 }
 
+/*
+ * Reference: https://github.com/numpy/numpy/blob/f4c497c768e0646df740b647782df463825bfd27/numpy/core/src/common/get_attr_string.h#L42
+ *
+ * Specialized, stripped down version of PyObject_FastGetAttrString, which is
+ * itself a stripped down version of PyObject_GetAttrString.
+ */
 inline bool has_torch_function_attr(PyObject* obj) {
   constexpr char* name = "__torch_function__";
   PyTypeObject *tp = Py_TYPE(obj);
