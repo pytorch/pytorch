@@ -23,10 +23,14 @@ from typing import Optional, Sequence, Union, List
 # BTW: policy on name collisions: we try not to have types with
 # collisions, but functions are fair game to collide
 
-def name(func: FunctionSchema) -> str:
+def name(func: FunctionSchema, *, faithful_name_for_out_overloads: bool = False) -> str:
     name = str(func.name.name)
     if func.is_out_fn():
-        name += '_out'
+        if faithful_name_for_out_overloads:
+            name += '_outf'
+        else:
+            name += '_out'
+
     return name
 
 # Translation of "value types" in JIT schema to C++ API type.  Value
@@ -273,10 +277,11 @@ def argument_faithful(
         return argument(a)
 
 def group_arguments(
-    func: FunctionSchema, *, method: bool
+    func: FunctionSchema, *, method: bool, faithful: bool,
 ) -> Sequence[Union[Argument, TensorOptionsArguments, SelfArgument]]:
     args: List[Union[Argument, SelfArgument, TensorOptionsArguments]] = []
-    args.extend(func.arguments.out)
+    if not faithful:
+        args.extend(func.arguments.out)
     args.extend(func.arguments.pre_self_positional)
     if func.arguments.self_arg is not None:
         if method:
@@ -288,4 +293,6 @@ def group_arguments(
     if func.arguments.tensor_options is not None:
         args.append(func.arguments.tensor_options)
     args.extend(func.arguments.post_tensor_options_kwarg_only)
+    if faithful:
+        args.extend(func.arguments.out)
     return args
