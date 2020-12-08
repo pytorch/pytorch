@@ -2009,7 +2009,7 @@ class TestONNXRuntime(unittest.TestCase):
         class SkipDims(torch.nn.Module):
             def forward(self, input):
                 return torch.var_mean(input, dim=(0, 2), unbiased=False)
-        
+
         x = torch.randn(2, 3, 4)
         model = SkipDims()
         self.run_test(model, x)
@@ -2017,7 +2017,7 @@ class TestONNXRuntime(unittest.TestCase):
         class NonZeroDims(torch.nn.Module):
             def forward(self, input):
                 return torch.var_mean(input, dim=(1, 2), unbiased=False)
-        
+
         x = torch.randn(2, 3, 4)
         model = NonZeroDims()
         self.run_test(model, x)
