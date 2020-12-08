@@ -415,7 +415,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
         [fut, cb = std::move(callback)]() {
           try {
             fut->markCompleted(cb());
-          } catch (std::exception& e) {
+          } catch (std::exception&) {
             fut->setError(std::current_exception());
           }
         });
