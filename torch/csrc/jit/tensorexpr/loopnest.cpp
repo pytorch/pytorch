@@ -542,10 +542,10 @@ Stmt* LoopNest::lowerToStmt(Tensor* t) {
 
 class FunctionInliner : public IRMutator {
  public:
-  FunctionInliner(
-      Store* producer,
-      const std::unordered_set<const Buf*>& outputs)
-      : buf_(producer->buf()), producer_(producer), outputs_(outputs) {
+  FunctionInliner(Store* producer, std::unordered_set<const Buf*> outputs)
+      : buf_(producer->buf()),
+        producer_(producer),
+        outputs_(std::move(outputs)) {
     for (auto* i : producer->indices()) {
       const Var* index_var = dynamic_cast<const Var*>(i);
       if (index_var == nullptr) {
