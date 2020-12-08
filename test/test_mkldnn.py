@@ -169,8 +169,8 @@ class TestMkldnn(TestCase):
             self._test_tracing(mkldnn_conv1d, (x.to_mkldnn(),))
 
     def test_conv2d(self):
-        options = itertools.product([1, 4], [True, False], [1, 2])
-        for groups, bias, dilation in options:
+        options = itertools.product([True, False], [1, 4], [True, False], [1, 2])
+        for train, groups, bias, dilation in options:
             N = torch.randint(3, 10, (1,)).item()
             C = torch.randint(1, 3, (1,)).item() * groups
             M = torch.randint(1, 3, (1,)).item() * groups
@@ -183,14 +183,35 @@ class TestMkldnn(TestCase):
                                      dilation=dilation,
                                      bias=bias,
                                      groups=groups).float()
-            mkldnn_conv2d = mkldnn_utils.to_mkldnn(copy.deepcopy(conv2d))
+            x1 = x.clone()
+            x2 = x.clone().to_mkldnn()
+            if train:
+                x1.requires_grad_()
+                x2.requires_grad_()
+                mkldnn_conv2d = copy.deepcopy(conv2d)
+            else:
+                mkldnn_conv2d = mkldnn_utils.to_mkldnn(copy.deepcopy(conv2d))
             with torch.backends.mkldnn.flags(enabled=False):
-                y_aten = conv2d(x)
-            y_mkldnn = mkldnn_conv2d(x.to_mkldnn()).to_dense()
+                y_aten = conv2d(x1)
+                if train:
+                    loss1 = y_aten.sum()
+                    loss1.backward()
+            y_mkldnn = mkldnn_conv2d(x2).to_dense()
+            if train:
+                loss2 = y_mkldnn.sum()
+                loss2.backward()
             self.assertEqual(y_aten, y_mkldnn)
-
-            self._test_serialization(mkldnn_conv2d, (x.to_mkldnn(),))
-            self._test_tracing(mkldnn_conv2d, (x.to_mkldnn(),))
+            if train:
+                self.assertEqual(x1.grad, x2.grad.to_dense())
+                self.assertEqual(conv2d.weight.grad,
+                                 mkldnn_conv2d.weight.grad,
+                                 atol=1e-3,
+                                 rtol=1e-3)
+                if bias:
+                    self.assertEqual(conv2d.bias.grad, mkldnn_conv2d.bias.grad)
+            else:
+                self._test_serialization(mkldnn_conv2d, (x.to_mkldnn(),))
+                self._test_tracing(mkldnn_conv2d, (x.to_mkldnn(),))
 
     def test_conv2d_bf16(self):
         options = itertools.product([1, 4], [True, False], [1, 2])

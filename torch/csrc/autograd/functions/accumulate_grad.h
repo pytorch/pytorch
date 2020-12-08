@@ -99,7 +99,8 @@ struct TORCH_API AccumulateGrad : public Node {
       if (!GradMode::is_enabled() &&
           !new_grad.is_sparse() &&
           new_grad.use_count() <= num_expected_refs &&
-          utils::obeys_layout_contract(new_grad, variable)) {
+          ((!new_grad.is_mkldnn() &&utils::obeys_layout_contract(new_grad, variable))
+           || new_grad.is_mkldnn())){
         // we aren't setting up for double-backward
         // not sparse
         // no other user-visible tensor references new_grad
@@ -130,7 +131,7 @@ struct TORCH_API AccumulateGrad : public Node {
             new_grad.sizes(),
             new_grad.options()));
       } else {
-        if (new_grad.is_sparse()) {
+        if (new_grad.is_sparse() || new_grad.is_mkldnn()) {
           update_grad(new_grad.clone());
         } else {
           // Deep copies new_grad according to the "Gradient Layout Contract."
@@ -157,7 +158,7 @@ struct TORCH_API AccumulateGrad : public Node {
         // 2. `variable_grad` is dense, and `new_grad` is sparse.
         // 3. `variable_grad` is dense, and `new_grad` is dense.
         //
-        // In all of these three cases, `variable_grad += new_grad` is a
+        // In all of these four cases, `variable_grad += new_grad` is a
         // valid operation which adds `new_grad` to `variable_grad` in
         // place. `variable_grad` is thus still referring to the same tensor
         // after the operation.
