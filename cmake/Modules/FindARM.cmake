@@ -41,9 +41,7 @@ IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
    ENDIF (OMAP4_TRUE)
 
 ELSEIF(CMAKE_SYSTEM_NAME MATCHES "Darwin")
-   EXEC_PROGRAM("/usr/sbin/sysctl -n hw.optional.arm64" OUTPUT_VARIABLE
-      IS_ARM64)
-   IF(IS_ARM64 STREQUAL "1")
+   IF(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
       set(NEON_FOUND true CACHE BOOL "NEON available on ARM64")
    ENDIF()
    EXEC_PROGRAM("/usr/sbin/sysctl -n machdep.cpu.features" OUTPUT_VARIABLE
