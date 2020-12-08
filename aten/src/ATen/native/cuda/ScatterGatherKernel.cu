@@ -72,11 +72,11 @@ static void _launch_scatter_gather_kernel(int64_t N, const func_t& f) {
     return;
   }
 
-  dim3 block(nt);
-  dim3 grid((N + block.x * vt - 1) / (block.x * vt));
-  auto stream = at::cuda::getCurrentCUDAStream();
+  const dim3 block(nt);
+  const dim3 grid((N + block.x * vt - 1) / (block.x * vt));
+  const auto stream = at::cuda::getCurrentCUDAStream();
   _scatter_gather_elementwise_kernel<nt, vt, func_t><<<grid, block, 0, stream>>>(N, f);
-  AT_CUDA_CHECK(cudaGetLastError());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 
@@ -494,5 +494,5 @@ REGISTER_DISPATCH(scatter_fill_stub, &scatter_fill_cuda_kernel);
 REGISTER_DISPATCH(scatter_add_stub, &scatter_add_cuda_kernel);
 REGISTER_DISPATCH(scatter_reduce_stub, &scatter_reduce_cuda_kernel);
 REGISTER_DISPATCH(scatter_scalar_reduce_stub, &scatter_scalar_reduce_cuda_kernel);
-    
+
 }} // namespace at::native
