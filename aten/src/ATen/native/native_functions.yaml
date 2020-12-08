@@ -112,9 +112,11 @@
   variants: method
 
 - func: align_to(Tensor(a) self, Dimname[] names) -> Tensor(a)
+  use_c10_dispatcher: full
   variants: method
 
 - func: align_to.ellipsis_idx(Tensor(a) self, Dimname[] order, int ellipsis_idx) -> Tensor(a)
+  use_c10_dispatcher: full
   variants: method
 
 - func: align_as(Tensor self, Tensor other) -> Tensor
@@ -125,6 +127,7 @@
   use_c10_dispatcher: full
 
 - func: refine_names(Tensor(a) self, Dimname[] names) -> Tensor(a)
+  use_c10_dispatcher: full
   variants: method
 
 - func: _use_cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank) -> bool
@@ -1920,12 +1923,14 @@
   variants: function, method
 
 - func: flatten.DimnameList(Tensor(a) self, Dimname[] dims, Dimname out_dim) -> Tensor(a)
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: unflatten.int(Tensor(a) self, int dim, int[] sizes, Dimname[]? names=None) -> Tensor(a)
   variants: method
 
 - func: unflatten.Dimname(Tensor(a) self, Dimname dim, int[] sizes, Dimname[] names) -> Tensor(a)
+  use_c10_dispatcher: full
   variants: method
 
 - func: fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)
