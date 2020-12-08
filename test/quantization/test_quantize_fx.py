@@ -2210,6 +2210,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             calibrate_or_train = test_only_eval_fn
             data = self.img_data_2d
         else:
+            assert quant_type == "qat"
             qconfig = default_qat_qconfig
             eager_prepare = prepare_qat
             graph_prepare = prepare_qat_fx
@@ -2241,7 +2242,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
         graph_out = graph(data[0][0])
         self.assertEqual(eager_out, graph_out)
 
-    @skipIfNoFBGEMM
+    @override_qengines
     def test_resnet_base(self):
         models = [ResNetBase]
         options = itertools.product(self.static_quant_types, models)
