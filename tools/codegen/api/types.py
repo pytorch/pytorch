@@ -167,18 +167,7 @@ class CppSignature:
     # high-level structure of the arguments so you may find it easier to do
     # translations working with this representation.
     def argument_packs(self) -> Sequence[CppArgumentPack]:
-        positional_and_kwargs: List[Union[Argument, SelfArgument, TensorOptionsArguments]] = \
-            list(self.func.arguments.pre_self_positional)
-        if self.func.arguments.self_arg is not None:
-            if self.method:
-                positional_and_kwargs.append(self.func.arguments.self_arg)
-            else:
-                positional_and_kwargs.append(self.func.arguments.self_arg.argument)
-        positional_and_kwargs.extend(self.func.arguments.post_self_positional)
-        positional_and_kwargs.extend(self.func.arguments.pre_tensor_options_kwarg_only)
-        if self.func.arguments.tensor_options is not None:
-            positional_and_kwargs.append(self.func.arguments.tensor_options)
-        positional_and_kwargs.extend(self.func.arguments.post_tensor_options_kwarg_only)
+        grouped_args = cpp.group_arguments(self.func, method=self.method, faithful=self.faithful)
         if self.faithful:
             # Faithful signatures will ungroup arguments into argument
             # packs.
@@ -188,11 +177,11 @@ class CppSignature:
             # principle, we should be able to do this at some later
             # point in time with other overload disambiguation
             argument_packs = tuple(
-                cpp.argument_faithful(a).no_default() for a in (tuple(positional_and_kwargs) + self.func.arguments.out)
+                cpp.argument_faithful(a).no_default() for a in grouped_args
             )
         else:
             argument_packs = tuple(
-                cpp.argument(a) for a in (self.func.arguments.out + tuple(positional_and_kwargs))
+                cpp.argument(a) for a in grouped_args
             )
         return argument_packs
 

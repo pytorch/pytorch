@@ -457,7 +457,6 @@ class TestTEFuser(JitTestCase):
             ge = self.checkTrace(f, (x, y, z), inputs_require_grads=False)
             self.assertAllFused(ge.graph_for(x, y, z))
 
-    @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")
     def test_bitwise_ops(self):
         def apply(fn):
             return lambda x, y, z: fn(fn(x, y), z)
@@ -1318,16 +1317,18 @@ class TestTEFuser(JitTestCase):
             torch.ge,
             torch.gt,
             torch.lt,
-
-            # FIXME: fails on CPU backend with int8
-            # torch.fmod,
-            # torch.remainder,
+            torch.fmod,
+            torch.remainder,
 
             # FIXME: segfaults on CPU backend
             # operator.__rshift__,
             # operator.__lshift__,
 
             lambda x, y: y.type_as(x),
+        ]
+        fp_only = [
+            torch.fmod,
+            torch.remainder,
         ]
         devices = self.devices
         for dtype, op, device in product(dtypes, binary_ops, devices):
@@ -1344,7 +1345,8 @@ class TestTEFuser(JitTestCase):
             try:
                 t = torch.jit.trace(fn, (x, y))
                 self.assertEqual(ref, t(x, y))
-                self.assertAllFused(t.graph_for(x, y))
+                if op not in fp_only or dtype.is_floating_point:
+                    self.assertAllFused(t.graph_for(x, y))
             except Exception as e:
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), op.__name__, device])
@@ -1426,10 +1428,8 @@ class TestTEFuser(JitTestCase):
         ]
         binary_ops = [
             torch.div,
-
-            # FIXME: wrong results with int8 on cpu
-            # torch.remainder,
-            # torch.fmod,
+            torch.remainder,
+            torch.fmod,
         ]
         devices = self.devices
         # Maybe we should split this into separate tests to speed it up by
@@ -1448,10 +1448,9 @@ class TestTEFuser(JitTestCase):
             try:
                 t = torch.jit.trace(fn, (x))
                 self.assertEqual(ref, t(x))
-                self.assertAllFused(t.graph_for(x))
             except Exception as e:
                 raise RuntimeError(
-                    " ".join(["Failed:", str(dtype), op.__name__, device])
+                    "Failed: {} {} {} {}".format(dtype, op.__name__, device, scalar)
                 )
 
     def test_binary_cuda_only_ops(self):
