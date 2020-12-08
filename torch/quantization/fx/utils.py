@@ -260,4 +260,3 @@ def assert_and_get_unique_device(module: torch.nn.Module) -> Any:
     )
     device = next(iter(devices)) if len(devices) > 0 else None
     return device
-

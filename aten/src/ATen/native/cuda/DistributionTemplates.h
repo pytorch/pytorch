@@ -155,6 +155,7 @@ void distribution_nullary_kernel(at::TensorIterator& iter,
         *out = transform_func(rand);
       }
     );
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     auto offset_calc = make_offset_calculator<1>(iter);
     distribution_elementwise_grid_stride_kernel<accscalar_t, unroll_factor><<<grid, block, 0, stream>>>(
@@ -167,8 +168,8 @@ void distribution_nullary_kernel(at::TensorIterator& iter,
         *out = transform_func(rand);
       }
     );
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
-  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 // Binary kernel
@@ -260,10 +261,12 @@ void distribution_binary_kernel(TensorIterator &iter, PhiloxCudaState philox_arg
     distribution_binary_elementwise_kernel<<<grid,num_threads, 0, stream>>>(
         numel, f, philox_args, output_data, input_data_1, input_data_2,
         TrivialOffsetCalculator<2>(), TrivialOffsetCalculator<1>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     distribution_binary_elementwise_kernel<<<grid, num_threads, 0, stream>>>(
         numel, f, philox_args, output_data, input_data_1, input_data_2,
         make_input_offset_calculator<2>(iter), make_output_offset_calculator(iter));
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
 
