@@ -1821,6 +1821,12 @@ struct getTypePtr_<std::string> final {
     return StringType::get();
   }
 };
+template <>
+struct getTypePtr_<at::Dimname> final {
+  static TypePtr call() {
+    return StringType::get();
+  }
+};
 template <class T>
 struct getTypePtr_<std::vector<T>> final {
   static TypePtr call() {
