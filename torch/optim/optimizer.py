@@ -201,6 +201,8 @@ class Optimizer(object):
                 (in one case it does the step with a gradient of 0 and in the other it skips
                 the step altogether).
         """
+        if not hasattr(self, "_zero_grad_profile_name"):
+            self._hook_for_profile()
         with torch.autograd.profiler.record_function(self._zero_grad_profile_name):
             for group in self.param_groups:
                 for p in group['params']:
