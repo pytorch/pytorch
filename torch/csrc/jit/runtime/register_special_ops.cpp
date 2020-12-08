@@ -377,7 +377,8 @@ RegisterOperators reg({
         [](Stack* stack) { push(stack, false); },
         aliasAnalysisFromSchema()),
     OperatorGenerator(
-        TORCH_SELECTIVE_SCHEMA("aten::object_has_torch_function(Any obj) -> bool"),
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::object_has_torch_function(Any obj) -> bool"),
         [](Stack* stack) { push(stack, false); },
         aliasAnalysisFromSchema()),
     OperatorGenerator(

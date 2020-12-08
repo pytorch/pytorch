@@ -43,6 +43,8 @@ using namespace torch::autograd;
 namespace py = pybind11;
 
 PyObject *THPVariableClass = nullptr;
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject *ParameterClass = nullptr;
 
 
