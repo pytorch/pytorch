@@ -251,6 +251,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::reciprocal:
     case aten::neg:
     case aten::relu:
+    case aten::isnan:
     case aten::log:
     case aten::log10:
     case aten::log1p:
@@ -949,6 +950,15 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::neg: {
       return computeOneOperand("aten_neg", v, [](const ExprHandle& a) {
         return ExprHandle(-0) - a;
+      });
+    } break;
+
+    case aten::isnan: {
+      return computeOneOperand("aten_relu", v, [](const ExprHandle& a) {
+        if (!a.dtype().is_floating_point()) {
+          return IntImm::make(0);
+        }
+        return isnan(a);
       });
     } break;
 

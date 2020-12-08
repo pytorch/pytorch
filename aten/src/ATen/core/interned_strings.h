@@ -225,6 +225,7 @@ namespace c10 {
   _(aten, lt_)                       \
   _(aten, less)                      \
   _(aten, less_)                     \
+  _(aten, isnan)                     \
   _(aten, mul)                       \
   _(aten, mul_)                      \
   _(aten, multiply)                  \

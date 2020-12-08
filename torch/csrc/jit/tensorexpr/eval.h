@@ -888,6 +888,8 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       case kFrac:
         T intpart;
         return std::modf(v, &intpart);
+      case kIsNan:
+        return std::isnan(v);
       default:
         throw std::runtime_error("Invalid op_type: " + c10::to_string(op_type));
     }

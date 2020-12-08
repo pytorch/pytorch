@@ -1211,6 +1211,21 @@ class TestTEFuser(JitTestCase):
         else:
             return v.to(dtype)
 
+    def test_isnan(self):
+        inputs = [
+            torch.tensor([2., 4., float('nan')]),
+            torch.tensor([2, 4]),
+            torch.rand([4, 4]).fill_(float('nan')),
+            torch.rand([4, 4])
+        ]
+
+        for inp, device in product(inputs, self.devices):
+            inp = inp.to(device=device)
+            f = torch.jit.trace(lambda x: x.isnan(), (inp,))
+            warmup_forward(f, inp)
+            self.assertEqual(f(inp), inp.isnan())
+            self.assertLastGraphAllFused()
+
     @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")
     def test_unary_ops(self):
         def apply(fn):
