@@ -1,8 +1,8 @@
 import re
 import os
 import yaml
-from collections import defaultdict
 from .nested_dict import nested_dict
+from typing import Dict, List
 
 
 __all__ = [
@@ -52,7 +52,7 @@ def uninplace_api_name(api_name):
     return api_name
 
 
-def write(dirname, name, template, env):
+def write(dirname: str, name: str, template: CodeTemplate, env: Dict[str, List[str]]) -> None:
     env['generated_comment'] = GENERATED_COMMENT.substitute(filename=template.filename)
     path = os.path.join(dirname, name)
     # See Note [Unchanging results for ninja]
@@ -68,12 +68,6 @@ def write(dirname, name, template, env):
             f.write(new_val)
     else:
         print("Skipped writing {}".format(path))
-
-def is_tensor_method(declaration):
-    return 'Tensor' in declaration['method_of']
-
-def is_torch_function(declaration):
-    return 'namespace' in declaration['method_of']
 
 def is_out_variant(decl):
     return decl['name'].endswith('_out')
@@ -91,12 +85,6 @@ def load_op_list_and_strip_overload(op_list, op_list_path):
             op_list += yaml.load(f, Loader=YamlLoader)
     # strip out the overload part
     return {opname.split('.', 1)[0] for opname in op_list}
-
-def group_declarations_by_op_name(declarations):
-    groups = defaultdict(list)
-    for d in declarations:
-        groups[op_name(d)].append(d)
-    return groups
 
 def is_output(arg):
     return arg.get('output', False)
