@@ -68,5 +68,7 @@ static std::tuple<Tensor, Tensor> eig_kernel_impl(const Tensor& self, bool& eige
 } // anonymous namespace
 
 REGISTER_ARCH_DISPATCH(eig_stub, DEFAULT, &eig_kernel_impl);
+REGISTER_AVX_DISPATCH(eig_stub, &eig_kernel_impl);
+REGISTER_AVX2_DISPATCH(eig_stub, &eig_kernel_impl);
 
 }} // namespace at::native
