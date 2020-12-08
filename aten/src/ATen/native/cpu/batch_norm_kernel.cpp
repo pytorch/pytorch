@@ -205,11 +205,10 @@ void batch_norm_cpu_collect_stats_contiguous_impl(
       // compute mean per input
       accscalar_t sum = 0;
       for (int64_t n = 0; n < n_batch; n++) {
-        scalar_t* x_ptr = input_data + n * n_channel * image_size + c * image_size;
-        sum += vec256::reduce_all<scalar_t>(
-            [](Vec& x, Vec& y) { return x + y; },
-            x_ptr,
-            image_size);
+        for (int64_t i = 0; i < image_size; i++) {
+          auto offset = n * n_channel * image_size + c * image_size + i;
+          sum += input_data[offset];
+        }
       }
       scalar_t mean = sum / N;
       mean_data[c] = mean;
@@ -217,12 +216,11 @@ void batch_norm_cpu_collect_stats_contiguous_impl(
       // compute variance per input
       accscalar_t _var_sum = 0;
       for (int64_t n = 0; n < n_batch; n++) {
-        scalar_t* x_ptr = input_data + n * n_channel * image_size + c * image_size;
-        _var_sum += vec256::map_reduce_all<scalar_t>(
-            [mean](Vec x) { return (x - Vec(mean)) * (x - Vec(mean)); },
-            [](Vec x, Vec y) { return x + y; },
-            x_ptr,
-            image_size);
+        for (int64_t i = 0; i < image_size; i++) {
+          auto offset = n * n_channel * image_size + c * image_size + i;
+          auto x = input_data[offset];
+          _var_sum += (x - mean) * (x - mean);
+        }
       }
       var_sum_data[c] = _var_sum;
     }
