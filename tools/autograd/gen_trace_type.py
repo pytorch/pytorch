@@ -1,4 +1,5 @@
-from typing import Optional, List, Sequence
+import itertools
+from typing import Optional, List, Sequence, Union
 
 from tools.codegen.api.types import *
 import tools.codegen.api.cpp as cpp
@@ -6,7 +7,31 @@ from tools.codegen.code_template import CodeTemplate
 from tools.codegen.gen import with_native_function, parse_native_yaml, FileManager, mapMaybe
 from tools.codegen.model import *
 
-from .gen_variable_type import MANUAL_TRACER
+# Note [Manual Backend kernels]
+# For these ops, we want to manually register to dispatch key Backend and
+# skip codegen-ed registeration to all keys before Backend.
+# For codegen this means:
+#   - op set below must match ops with manual_kernel_registration=True in native_functions.yaml
+#     where we skip codegen backend kernels
+#   - all ops below are part of MANUAL_AUTOGRAD to skip codegen Autograd kernel registration
+#   - all ops below are part of MANUAL_TRACER to skip codegen Tracer kernel registration
+# Note: we still register to dispatch key Profiler for these ops, keeping it untouched for now.
+# You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
+MANUAL_BACKEND = set([
+    'options', 'data', 'set_data', 'is_leaf', 'output_nr', '_version', 'retain_grad',
+    '_backward', 'requires_grad_',
+])
+
+# For these ops we want to skip the codegen-ed registration to both Autograd and Tracer keys.
+# You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
+MANUAL_AUTOGRAD_AND_TRACER = set([
+    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_',
+])
+
+# Currently MANUAL_AUTOGRAD and MANUAL_TRACER share the same set of ops:
+#   union(MANUAL_BACKEND, MANUAL_AUTOGRAD_AND_TRACER)
+# You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
+MANUAL_AUTOGRAD = MANUAL_TRACER = MANUAL_BACKEND | MANUAL_AUTOGRAD_AND_TRACER
 
 # These functions we don't want to record for tracing, because we always want
 # to trace their constituent parts.  This is a temporary hack in lieue
@@ -112,7 +137,7 @@ def format_trace_inputs(f: NativeFunction) -> str:
     if f.func.is_out_fn():
         # for *_out functions, handle the result argument differently for inplace/outplace.
         # For inplace: just add the input to the end to confirm with the JIT schema
-        name = f.func.out_arguments[0].name  # TODO: old codegen behavior - should fix
+        name = f.func.arguments.out[0].name  # TODO: old codegen behavior - should fix
         inplace = ADD_TRACE_INPUT.substitute(name=name, input=name)
 
         # for outplace: do nothing, except if the function is a factory.
@@ -120,7 +145,7 @@ def format_trace_inputs(f: NativeFunction) -> str:
         # take an extra TensorOptions argument, which is missing in the _out function
         has_tensor_return = any(r.type.is_tensor_like() for r in f.func.returns)
         has_tensor_input_arg = any(a.type.is_tensor_like()
-                                   for a in itertools.chain(f.func.arguments, f.func.kwarg_only_arguments))
+                                   for a in itertools.chain(f.func.arguments.positional, f.func.arguments.kwarg_only))
         is_factory_method = f.category_override == 'factory' or (has_tensor_return and not has_tensor_input_arg)
 
         # HACK: preserve old codegen behavior - the old codegen set the `is_factory_method`
@@ -226,7 +251,7 @@ def format_prerecord_trace(f: NativeFunction) -> str:
         add_trace_inputs=format_trace_inputs(f) + additional_inputs,
         inplace_guard=INPLACE_GUARD.substitute(
             name=cpp.name(f.func),
-            mutable_input=f.func.out_arguments[0].name if f.func.out_arguments else 'self',
+            mutable_input=f.func.arguments.out[0].name if f.func.arguments.out else 'self',
         ) if is_inplace else '',
     )
 
@@ -244,7 +269,7 @@ def format_postrecord_trace(f: NativeFunction) -> str:
     # For outplacing ops, *_out overloads require special handling to move the
     # output *argument* to a return value
     if f.func.is_out_fn():
-        output_names_outplace = [arg.name for arg in f.func.out_arguments]
+        output_names_outplace = [arg.name for arg in f.func.arguments.out]
         output_names_inplace = cpp.return_names(f)
 
         # Code size optimization: the common case is that the return value is

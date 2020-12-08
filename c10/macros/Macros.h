@@ -77,8 +77,10 @@
  * str and ending with a number that varies with the line.
  */
 #ifdef __COUNTER__
+#define C10_UID __COUNTER__
 #define C10_ANONYMOUS_VARIABLE(str) C10_CONCATENATE(str, __COUNTER__)
 #else
+#define C10_UID __LINE__
 #define C10_ANONYMOUS_VARIABLE(str) C10_CONCATENATE(str, __LINE__)
 #endif
 
@@ -182,6 +184,14 @@ namespace at { namespace cuda { using namespace c10::hip; }}
 #define C10_NOINLINE __declspec(noinline)
 #else
 #define C10_NOINLINE
+#endif
+
+#if __has_attribute(always_inline) || defined(__GNUC__)
+#define C10_ALWAYS_INLINE __attribute__((__always_inline__)) inline
+#elif defined(_MSC_VER)
+#define C10_ALWAYS_INLINE __forceinline
+#else
+#define C10_ALWAYS_INLINE inline
 #endif
 
 #include <sstream>
