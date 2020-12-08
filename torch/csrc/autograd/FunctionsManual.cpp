@@ -2312,8 +2312,8 @@ std::tuple<Tensor, Tensor> cholesky_solve_backward(
   if (grad_x.defined()) {
     grad_self = grad_x.cholesky_solve(input2, /*upper=*/upper);
 
-    Tensor common_term = at::matmul(grad_self, result.transpose(-2, -1));
-    common_term = common_term + common_term.transpose(-2, -1);
+    Tensor common_term = at::matmul(grad_self, result.conj().transpose(-2, -1));
+    common_term = common_term + common_term.conj().transpose(-2, -1);
 
     if (upper) {
       grad_input2 = -at::matmul(input2, common_term);
