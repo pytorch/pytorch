@@ -16,17 +16,21 @@ from typing import Optional, Sequence, Union, List
 #
 #   - for 'use_c10_dispatcher: full' functions, optional tensors are
 #     represented explicitly using c10::optional
-#
+#t
 #   - defaulting lives here (in fact, the dispatcher is completely
 #     oblivious of defaults!)
 #
 # BTW: policy on name collisions: we try not to have types with
 # collisions, but functions are fair game to collide
 
-def name(func: FunctionSchema, *, use_suffix_for_out_overloads: bool = True) -> str:
+def name(func: FunctionSchema, *, faithful_name_for_out_overloads: bool = False) -> str:
     name = str(func.name.name)
-    if use_suffix_for_out_overloads and func.is_out_fn():
-        name += '_out'
+    if func.is_out_fn():
+        if faithful_name_for_out_overloads:
+            name += '_outf'
+        else:
+            name += '_out'
+
     return name
 
 # Translation of "value types" in JIT schema to C++ API type.  Value
