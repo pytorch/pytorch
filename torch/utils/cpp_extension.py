@@ -833,11 +833,10 @@ def CUDAExtension(name, sources, *args, **kwargs):
 
     By default the extension will be compiled to run on all archs of the cards visible during the
     building process of the extension, plus PTX. If down the road a new card is installed the
-    extension may need to be recompiled.
-
-    If a visible card has a compute capability (CC) that's newer than the newest version for which
-    your nvcc can build fully-compiled binaries, Pytorch will make nvcc fall back to building
-    kernels with the newest version of PTX your nvcc does support (see below for details on PTX).
+    extension may need to be recompiled. If a visible card has a compute capability (CC) that's
+    newer than the newest version for which your nvcc can build fully-compiled binaries, Pytorch
+    will make nvcc fall back to building kernels with the newest version of PTX your nvcc does
+    support (see below for details on PTX).
 
     However, you can explicitly specify which archs you want the extension to support like so:
 
