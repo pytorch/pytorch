@@ -81,7 +81,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
       dgamma = M > 0 ? at::native::empty_like(gamma, at::MemoryFormat::Contiguous) : at::native::zeros_like(gamma, at::MemoryFormat::Contiguous);
     }
     if (grad_input_mask[2]) {
-      dbeta = M > 0 ? at::native::empty_like(gamma, at::MemoryFormat::Contiguous) : at::native::zeros_like(gamma, at::MemoryFormat::Contiguous);
+      dbeta = M > 0 ? at::native::empty_like(beta, at::MemoryFormat::Contiguous) : at::native::zeros_like(beta, at::MemoryFormat::Contiguous);
     }
     if (M > 0) {
       LayerNormBackwardKernel(
