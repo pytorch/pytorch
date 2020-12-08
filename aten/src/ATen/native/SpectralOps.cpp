@@ -468,12 +468,12 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
   auto win_length = win_lengthOpt.value_or(n_fft);
   const bool return_complex = return_complexOpt.value_or(
       self.is_complex() || (window.defined() && window.is_complex()));
-  if (!return_complexOpt && !return_complex) {
-    TORCH_WARN_ONCE("stft will require the return_complex parameter be explicitly "
-                    " specified in a future PyTorch release. Use return_complex=False "
-                    " to preserve the current behavior or return_complex=True to return "
-                    " a complex output.");
-  }
+  TORCH_CHECK(
+    return_complexOpt.has_value() || return_complex,
+    "stft requires the return_complex parameter be explicitly "
+    "specified for real inputs. Use return_complex=True to return "
+    "a complex-valued tensor, or return_complex=True to return "
+    "a real-valued tensor with an extra complex dimension.");
 
   if (!at::isFloatingType(self.scalar_type()) && !at::isComplexType(self.scalar_type())) {
     std::ostringstream ss;
