@@ -163,7 +163,11 @@ def get_nvidia_smi():
     # Note: nvidia-smi is currently available only on Windows and Linux
     smi = 'nvidia-smi'
     if get_platform() == 'win32':
-        smi = '"C:\\Program Files\\NVIDIA Corporation\\NVSMI\\%s"' % smi
+        smis = [f'C:\\Program Files\\NVIDIA Corporation\\NVSMI\\{smi}', f'C:\\Windows\\System32\\{smi}']
+        for candidate_smi in smis:
+            if os.path.exists(candidate_smi):
+                smi = f'"{candidate_smi}"'
+                break
     return smi
 
 
