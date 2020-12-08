@@ -702,7 +702,7 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=floating_types(),
                    dtypesIfCUDA=floating_types(),
                    dtypesIfROCM=floating_types(),
-                   decorators=(precisionOverride({torch.float16: 1e-2}))),
+                   decorators=(precisionOverride({torch.float16: 1e-2}),)),
     UnaryUfuncInfo('sinh',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.sinh),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool),
