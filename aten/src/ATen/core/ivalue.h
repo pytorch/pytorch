@@ -962,8 +962,9 @@ template <typename T>
 c10::ClassTypePtr getCustomClassType() {
   // Classes are never unregistered from getCustomClassTypeMap and the
   // hash lookup can be a hot path, so just cache.
-  // TODO: can we skip using a hash table entirely?
-  static c10::ClassTypePtr cache = return getCustomClassTypeImpl<T>();
+  // For the same reason, it's fine If this ends up getting duplicated across
+  // DSO boundaries for whatever reason.
+  static c10::ClassTypePtr cache = getCustomClassTypeImpl<T>();
   return cache;
 }
 
