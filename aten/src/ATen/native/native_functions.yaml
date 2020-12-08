@@ -6963,10 +6963,13 @@
     CUDA: _histc_cuda
 
 - func: histogram.uniformbins(Tensor self, int bins=10, float[]? range=None, Tensor? weights=None, bool density=False) -> (Tensor, Tensor)
+  use_c10_dispatcher: full
   variants: method, function
+
+- func: _histogram_helper_uniform_bins(Tensor self, int nbins, Tensor? weights, Scalar minvalue, Scalar maxvalue) -> Tensor
   dispatch:
-    CPU: _histogram_cpu_uniform_bins
-    CUDA: _histogram_cuda_uniform_bins
+    CPU: _histogram_uniform_bins_helper_cpu
+    CUDA: _histogram_uniform_bins_helper_cuda
 
 - func: histogram.custombins(Tensor self, Tensor bins, Tensor? weights=None, bool density=False) -> (Tensor, Tensor)
   variants: method, function

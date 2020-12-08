@@ -5,10 +5,6 @@
 #include <THC/THCAtomics.cuh>
 #include <THC/THCNumerics.cuh>
 
-#include <ATen/native/SummaryOpsUtils.h>
-
-#include <tuple>
-
 namespace at {
 namespace cuda {
 #define THRESH_NUMBER_BINS_FOR_MULTI_BLOCK_MEM 100
@@ -362,39 +358,15 @@ Tensor _histc_cuda_template(
 
 ///////////////// histogram /////////////////
 template <typename input_t, typename weights_t>
-std::tuple<Tensor,Tensor> _histogram_cuda_template_uniform_bins(
+Tensor _histogram_cuda_template_uniform_bins(
     const Tensor& self,
     int64_t nbins,
-    const Tensor& weights,
-    c10::optional<ArrayRef<double>> range,
-    bool density) {
-  auto computed_range = at::native::_histogram_maybe_compute_range<input_t>(self, range);
-  input_t minvalue = computed_range.first;
-  input_t maxvalue = computed_range.second;
+    const Tensor& weights /* optional */,
+    input_t minvalue,
+    input_t maxvalue) {
 
-  TORCH_CHECK(nbins > 0, "bins must be > 0");
-#ifndef __HIP_PLATFORM_HCC__
-  TORCH_CHECK(
-      !(THCNumerics<input_t>::isinf(minvalue) ||
-        THCNumerics<input_t>::isinf(maxvalue) ||
-        THCNumerics<input_t>::isnan(minvalue) ||
-        THCNumerics<input_t>::isnan(maxvalue)),
-      "range of [",
-      minvalue,
-      ", ",
-      maxvalue,
-      "] is not finite");
-#else
-  TORCH_CHECK(
-      !(std::isinf(minvalue) || std::isinf(maxvalue) || std::isnan(minvalue) ||
-        std::isnan(maxvalue)),
-      "range of [",
-      minvalue,
-      ", ",
-      maxvalue,
-      "] is not finite");
-#endif
   bool has_weights = weights.defined();
+
   Tensor hist;
   if (has_weights) {
     hist = native::zeros({nbins}, weights.options());
@@ -407,26 +379,7 @@ std::tuple<Tensor,Tensor> _histogram_cuda_template_uniform_bins(
 
   }
 
-  Tensor edges;
-  if (c10::isFloatingType(self.scalar_type())) {
-    edges = at::linspace(
-        static_cast<double>(minvalue),
-        static_cast<double>(maxvalue),
-        nbins + 1,
-        self.options());
-  } else {
-    edges = at::linspace(
-        static_cast<double> (minvalue),
-        static_cast<double> (maxvalue),
-        nbins + 1,
-        self.options().dtype(c10::get_default_dtype()));
-  }
-    
-  if (density) { // Compute the density
-    hist = at::native::_histogram_normalize_density(hist, edges, true);
-  }
-
-  return std::make_tuple(hist, edges);
+  return hist;
 }
 
 } // namespace
@@ -471,56 +424,81 @@ Tensor& _histc_out_cuda(Tensor& result, const Tensor& self, int64_t bins, Scalar
   return result;
 }
 
-std::tuple<Tensor,Tensor> _histogram_cuda_uniform_bins(
+Tensor _histogram_uniform_bins_helper_cuda(
     const Tensor& self,
     int64_t nbins,
-    c10::optional<ArrayRef<double>> range,
     const Tensor& weights /* optional */,
-    bool density) {
-  // Weights having a different shape from input is not supported yet. TO DO:
-  // Add support for weights broadcastable to input
+    Scalar minvalue,
+    Scalar maxvalue) {
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("_histogram_uniform_bins_helper_cuda");
   bool has_weights = weights.defined();
   Tensor flattened_weights;
   if (has_weights) {
-    TORCH_CHECK(
-        weights.sizes() == self.sizes(),
-        "histogram only supports input and weights of the same shape"); 
-    // This is a hacky workaround for CUDA_tensor_histogram indexing being broken with multidim weights
+    // This is a hacky workaround for CUDA_tensor_histogram indexing being
+    // broken with multidim weights. If that gets fixed, this will break because
+    // of inconsistent shapes, in that case please remove this line.
     flattened_weights = weights.flatten(0);
   }
-  // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic because of atomicAdd usage
-  globalContext().alertNotDeterministic("_histogram_cuda");
   return AT_DISPATCH_ALL_TYPES(
-      self.scalar_type(), "histogram_cpu_uniform_bins", [&] {
+      self.scalar_type(), "_histogram_uniform_bins_helper_cuda", [&] {
     const auto scalar = weights.scalar_type();
         switch (scalar) {
           case ScalarType::Float:
             return _histogram_cuda_template_uniform_bins<scalar_t, float>(
-                self, nbins, flattened_weights, range, density);
+                self,
+                nbins,
+                flattened_weights,
+                minvalue.to<scalar_t>(),
+                maxvalue.to<scalar_t>());
           case ScalarType::Double:
             return _histogram_cuda_template_uniform_bins<scalar_t, double>(
-                self, nbins, flattened_weights, range, density);
+                self,
+                nbins,
+                flattened_weights,
+                minvalue.to<scalar_t>(),
+                maxvalue.to<scalar_t>());
           case ScalarType::Char:
             return _histogram_cuda_template_uniform_bins<scalar_t, int8_t>(
-                self, nbins, flattened_weights, range, density);
+                self,
+                nbins,
+                flattened_weights,
+                minvalue.to<scalar_t>(),
+                maxvalue.to<scalar_t>());
           case ScalarType::Byte:
             return _histogram_cuda_template_uniform_bins<scalar_t, uint8_t>(
-                self, nbins, flattened_weights, range, density);
+                self,
+                nbins,
+                flattened_weights,
+                minvalue.to<scalar_t>(),
+                maxvalue.to<scalar_t>());
           case ScalarType::Short:
             return _histogram_cuda_template_uniform_bins<scalar_t, int16_t>(
-                self, nbins, flattened_weights, range, density);
+                self,
+                nbins,
+                flattened_weights,
+                minvalue.to<scalar_t>(),
+                maxvalue.to<scalar_t>());
           case ScalarType::Int:
             return _histogram_cuda_template_uniform_bins<scalar_t, int32_t>(
-                self, nbins, flattened_weights, range, density);
+                self,
+                nbins,
+                flattened_weights,
+                minvalue.to<scalar_t>(),
+                maxvalue.to<scalar_t>());
           case ScalarType::Long:
           case ScalarType::Undefined:
             return _histogram_cuda_template_uniform_bins<scalar_t, int64_t>(
-                self, nbins, flattened_weights, range, density);
+                self,
+                nbins,
+                flattened_weights,
+                minvalue.to<scalar_t>(),
+                maxvalue.to<scalar_t>());
           default:
             TORCH_CHECK(
                 false, "Scalar type ", scalar, " not supported for weights");
-            return std::make_tuple(Tensor(), Tensor());
+            return Tensor();
         }
     });
   }
