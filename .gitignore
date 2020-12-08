@@ -76,6 +76,7 @@ torch/lib/*.exe*
 torch/lib/*.dylib*
 torch/lib/*.h
 torch/lib/*.lib
+torch/lib/*.pdb
 torch/lib/*.so*
 torch/lib/protobuf*.pc
 torch/lib/build
@@ -192,6 +193,7 @@ build_ios
 /build_*
 .build_debug/*
 .build_release/*
+.build_profile/*
 distribute/*
 *.testbin
 *.bin
