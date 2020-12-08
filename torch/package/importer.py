@@ -140,7 +140,7 @@ class PackageImporter:
     def _read_extern(self):
         return self.zip_reader.get_record('extern_modules').decode('utf-8').splitlines(keepends=False)
 
-    def _make_module(self, name: str, filename: Optional[str], is_package: bool):
+    def _make_module(self, name: str, filename: Optional[str], is_package: bool, parent: str):
         spec = importlib.machinery.ModuleSpec(name, self, is_package=is_package)  # type: ignore
         module = importlib.util.module_from_spec(spec)
         self.modules[name] = module
@@ -150,12 +150,18 @@ class PackageImporter:
         ns['__file__'] = filename
         ns['__cached__'] = None
         ns['__builtins__'] = self.patched_builtins
+
+        # pre-emptively install on the parent to prevent IMPORT_FROM from trying to
+        # access sys.modules
+        self._install_on_parent(parent, name, module)
+
         if filename is not None:
             code = self._compile_source(filename)
             exec(code, ns)
+
         return module
 
-    def _load_module(self, name: str):
+    def _load_module(self, name: str, parent: str):
         cur : _PathNode = self.root
         for atom in name.split('.'):
             if not isinstance(cur, _PackageNode) or atom not in cur.children:
@@ -166,7 +172,7 @@ class PackageImporter:
             if isinstance(cur, _ExternNode):
                 module = self.modules[name] = importlib.import_module(name)
                 return module
-        return self._make_module(name, cur.source_file, isinstance(cur, _PackageNode))  # type: ignore
+        return self._make_module(name, cur.source_file, isinstance(cur, _PackageNode), parent)  # type: ignore
 
     def _compile_source(self, fullpath):
         source = self.zip_reader.get_record(fullpath)
@@ -178,6 +184,14 @@ class PackageImporter:
     def get_source(self, module_name) -> str:
         module = self.import_module(module_name)
         return self.zip_reader.get_record(module.__file__).decode('utf-8')
+
+    def _install_on_parent(self, parent: str, name: str, module: types.ModuleType):
+        if not parent:
+            return
+        # Set the module as an attribute on its parent.
+        parent_module = self.modules[parent]
+        if parent_module.__loader__ is self:  # type: ignore
+            setattr(parent_module, name.rpartition('.')[2], module)
 
     # note: copied from cpython's import code, with call to create module replaced with _make_module
     def _do_find_and_load(self, name):
@@ -196,13 +210,10 @@ class PackageImporter:
                 msg = (_ERR_MSG + '; {!r} is not a package').format(name, parent)
                 raise ModuleNotFoundError(msg, name=name) from None
 
-        module = self._load_module(name)
+        module = self._load_module(name, parent)
 
-        if parent:
-            # Set the module as an attribute on its parent.
-            parent_module = self.modules[parent]
-            if parent_module.__loader__ is self:  # type: ignore
-                setattr(parent_module, name.rpartition('.')[2], module)
+        self._install_on_parent(parent, name, module)
+
         return module
 
     # note: copied from cpython's import code
