@@ -398,7 +398,11 @@ class FunctionSchema:
     returns: Tuple['Return', ...]
 
     def schema_order_arguments(self) -> Iterator['Argument']:
-        return itertools.chain(self.arguments.positional, self.arguments.kwarg_only, self.arguments.out)
+        return itertools.chain(
+            self.arguments.flat_positional,
+            self.arguments.flat_kwarg_only,
+            self.arguments.out
+        )
 
     @staticmethod
     def parse(func: str) -> 'FunctionSchema':
@@ -428,7 +432,7 @@ class FunctionSchema:
         # This means that all mutable returns should be aliased to a keyword argument
         # (except for "self", which we explicitly don't treat as an out argument because of its use in methods)
         # See Note [is_out_fn]
-        out_and_self = list(self.arguments.out) + [arg for arg in self.arguments.positional if arg.name == "self"]
+        out_and_self = list(self.arguments.out) + [arg for arg in self.arguments.flat_positional if arg.name == "self"]
         mutable_returns = [ret for ret in self.returns if ret.annotation is not None and ret.annotation.is_write]
         for ret in mutable_returns:
             assert any([ret.annotation == arg.annotation for arg in out_and_self]), \
@@ -899,7 +903,14 @@ class Arguments:
     out: Tuple[Argument, ...]  # these are also kwarg-only
 
     @property
-    def positional(self) -> Sequence[Argument]:
+    def flat_non_out(self) -> Sequence[Argument]:
+        ret: List[Argument] = []
+        ret.extend(self.flat_positional)
+        ret.extend(self.flat_kwarg_only)
+        return ret
+
+    @property
+    def flat_positional(self) -> Sequence[Argument]:
         ret: List[Argument] = []
         ret.extend(self.pre_self_positional)
         if self.self_arg is not None:
@@ -909,7 +920,7 @@ class Arguments:
 
     # NB: doesn't contain out arguments
     @property
-    def kwarg_only(self) -> Sequence[Argument]:
+    def flat_kwarg_only(self) -> Sequence[Argument]:
         ret: List[Argument] = []
         ret.extend(self.pre_tensor_options_kwarg_only)
         if self.tensor_options is not None:
@@ -1056,10 +1067,10 @@ class Arguments:
 
     def __str__(self) -> str:
         all_arguments: List[str] = []
-        all_arguments.extend(map(str, self.positional))
-        if self.kwarg_only or self.out:
+        all_arguments.extend(map(str, self.flat_positional))
+        if self.flat_kwarg_only or self.out:
             all_arguments.append('*')
-        all_arguments.extend(map(str, self.kwarg_only))
+        all_arguments.extend(map(str, self.flat_kwarg_only))
         all_arguments.extend(map(str, self.out))
         return ', '.join(all_arguments)
 

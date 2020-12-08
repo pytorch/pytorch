@@ -30,4 +30,4 @@ def argument(a: Argument) -> MetaArgument:
 
 def arguments(func: FunctionSchema) -> Sequence[MetaArgument]:
     assert not func.arguments.out
-    return list(map(argument, itertools.chain(func.arguments.positional, func.arguments.kwarg_only)))
+    return list(map(argument, func.arguments.flat_non_out))

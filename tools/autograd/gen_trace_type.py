@@ -144,8 +144,7 @@ def format_trace_inputs(f: NativeFunction) -> str:
         # Factories are a bit special because their out-of-place overloads
         # take an extra TensorOptions argument, which is missing in the _out function
         has_tensor_return = any(r.type.is_tensor_like() for r in f.func.returns)
-        has_tensor_input_arg = any(a.type.is_tensor_like()
-                                   for a in itertools.chain(f.func.arguments.positional, f.func.arguments.kwarg_only))
+        has_tensor_input_arg = any(a.type.is_tensor_like() for a in f.func.arguments.flat_non_out)
         is_factory_method = f.category_override == 'factory' or (has_tensor_return and not has_tensor_input_arg)
 
         # HACK: preserve old codegen behavior - the old codegen set the `is_factory_method`
