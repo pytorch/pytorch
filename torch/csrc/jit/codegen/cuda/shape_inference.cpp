@@ -181,6 +181,55 @@ class NaiveTypePropagator {
         node->output()->setType(out_type);
         break;
       }
+      case aten::native_layer_norm: {
+        auto out_type = node->input(0)->type()->cast<TensorType>();
+        node->output(0)->setType(out_type);
+
+        auto mean_rstd_type = TensorType::create(
+            *out_type->scalarType(),
+            *out_type->device(),
+            *out_type->dim(),
+            out_type->requires_grad());
+
+        node->output(1)->setType(mean_rstd_type);
+        node->output(2)->setType(mean_rstd_type);
+
+        break;
+      }
+      case aten::native_layer_norm_backward: {
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+        auto out_mask_list = constant_as<c10::List<bool>>(node->input(7));
+        TORCH_INTERNAL_ASSERT(
+            out_mask_list.has_value(), "output mask for layer_norm_backward");
+        std::vector<int> output_mask;
+        for (const auto value : out_mask_list->vec()) {
+          output_mask.emplace_back(static_cast<int>(value));
+        }
+
+        if (output_mask[0]) {
+          auto out_type = node->input(0)->type()->cast<TensorType>();
+          node->output(0)->setType(out_type);
+        }
+
+        if (output_mask[1] &&
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+            !node->input(5)->type()->isSubtypeOf(
+                static_cast<c10::TypePtr>(NoneType::get()))) {
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+          auto weight_type = node->input(5)->type()->cast<TensorType>();
+          node->output(1)->setType(weight_type);
+        }
+
+        if (output_mask[2] &&
+            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+            !node->input(6)->type()->isSubtypeOf(
+                static_cast<c10::TypePtr>(NoneType::get()))) {
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+          auto bias_type = node->input(6)->type()->cast<TensorType>();
+          node->output(2)->setType(bias_type);
+        }
+        break;
+      }
       case aten::softmax: {
         auto out_type = node->input(0)->type()->cast<TensorType>();
 
@@ -191,6 +240,11 @@ class NaiveTypePropagator {
             out_type = out_type->withScalarType(opt_ivalue->toScalarType());
           }
         }
+        node->output()->setType(out_type);
+        break;
+      }
+      case aten::_softmax_backward_data: {
+        auto out_type = node->input(0)->type()->cast<TensorType>();
         node->output()->setType(out_type);
         break;
       }

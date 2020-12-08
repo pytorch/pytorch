@@ -49,17 +49,13 @@ TEST(MathKernelTest, NativeLayerNorm) {
       std::vector<int64_t> normalized_shape(normalized_size, 10);
       const auto weight = rand(normalized_shape);
       const auto bias = rand(normalized_shape);
-      const int normalized_ndim = normalized_shape.size();
-      const int axis = input_ndim - normalized_ndim;
-      auto M = prod_intlist(input_shape.cbegin(), input_shape.cbegin()+ axis);
-      auto N = prod_intlist(input_shape.cbegin() + axis, input_shape.cend());
 
       auto out = at::native_layer_norm(
-            input, undef_weight ? undef : weight, undef_weight ? undef : bias ,
-            M, N, eps);
+            input, normalized_shape, undef_weight ? undef : weight, undef_weight ? undef : bias,
+            eps);
       auto math_out = at::native::math_native_layer_norm(
-            input, undef_weight ? undef : weight, undef_weight ? undef : bias,
-            M, N, eps);
+            input, normalized_shape, undef_weight ? undef : weight, undef_weight ? undef : bias,
+            eps);
       ASSERT_ALLCLOSE_TOLERANCES(std::get<0>(out), std::get<0>(math_out), 1e-4, 1e-6);
       ASSERT_ALLCLOSE_TOLERANCES(std::get<1>(out), std::get<1>(math_out), 1e-4, 1e-6);
       ASSERT_ALLCLOSE_TOLERANCES(std::get<2>(out), std::get<2>(math_out), 1e-4, 1e-6);

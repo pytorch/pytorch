@@ -238,9 +238,11 @@ struct CudaGraphFuser {
     // have a valid mapping
     group->insertBefore(n);
     Node* mergedNode = mergeNodeIntoGroup(group, n);
-    getSubgraph(group).registerOutput(mergedNode->output());
-    auto sel = group->addOutput();
-    sel->copyMetadata(n->output());
+    for (size_t i = 0; i < n->outputs().size(); i++) {
+      getSubgraph(group).registerOutput(mergedNode->output(i));
+      auto sel = group->addOutput();
+      sel->copyMetadata(n->output(i));
+    }
     n->replaceAllUsesWith(group);
     n->destroy();
     return group;
@@ -281,17 +283,21 @@ struct CudaGraphFuser {
       mergeFusionGroups(group, producer->node());
       return group;
     }
-    AT_ASSERT(producer->node()->outputs().size() == 1);
     Node* merged = mergeNodeIntoGroup(group, producer->node());
     // remaining uses of this producer can occur because we allow
     // fusion in cases where uses remain after the consumer
     // if these exist, re-route them to the version of producer
     // created in FusionGroup
-    if (producer->uses().size() != 0) {
-      getSubgraph(group).registerOutput(merged->output());
-      Value* new_producer = group->addOutput();
-      new_producer->copyMetadata(producer);
-      producer->replaceAllUsesWith(new_producer);
+
+    // We need to apply this to all outputs from producer->node();
+    auto producer_outputs = producer->node()->outputs();
+    for (size_t i = 0; i < producer_outputs.size(); i++) {
+      if (producer_outputs[i]->uses().size() != 0) {
+        getSubgraph(group).registerOutput(merged->outputs()[i]);
+        Value* new_producer = group->addOutput();
+        new_producer->copyMetadata(producer_outputs[i]);
+        producer_outputs[i]->replaceAllUsesWith(new_producer);
+      }
     }
     producer->node()->destroy();
     return group;
@@ -768,6 +774,16 @@ struct CudaGraphFuser {
         Value* size = size_node->output(0);
         size->setType(ListType::ofInts());
         shape_of.emplace(n->output(), size);
+        continue;
+      }
+      // TODO: output(1) & output(2) should also be marked
+      if (n->kind() == aten::native_layer_norm) {
+        shape_of.emplace(n->output(0), shape_of.at(n->input(0)));
+        continue;
+      }
+      // TODO: output(1) & output(2) should also be marked
+      if (n->kind() == aten::native_layer_norm_backward) {
+        shape_of.emplace(n->output(0), shape_of.at(n->input(0)));
         continue;
       }
       auto tensor_inputs = filter(n->inputs(), [](Value* v) {

@@ -79,15 +79,42 @@ inline bool isFusibleNode(const Node* node) {
   return isFusible;
 }
 
-bool hasNonElementWiseOperation(const Node* node) {
-  if (!isElementWiseNode(node)) {
-    return true;
+bool maybeBroadcast(
+    const TensorTypePtr& type,
+    const std::vector<c10::optional<int64_t>>& shape) {
+  if (type->dim()) {
+    if (type->dim().value() < shape.size()) {
+      // no broadcast for reduction operation;
+      return false;
+    } else if (type->dim().value() > shape.size()) {
+      // increased rank means there is reduction;
+      return true;
+    } else {
+      // same rank, we need to iterate through sizes and check if size-1
+      // exists in input `shape`
+      for (const auto& opt_size : shape) {
+        // TODO: not sure if we need to check for output size != 1, since we
+        // are currently marking all size-1 dimension as broadcast in codegen.
+        if (opt_size.has_value() && opt_size.value() == 1) {
+          return true;
+        }
+      }
+    }
   }
+  return false;
+}
+
+bool hasNonElementWiseOperation(const Node* node) {
   if (node->kind() == prim::CudaFusionGroup) {
     for (auto n : node->g(attr::Subgraph)->nodes()) {
       if (hasNonElementWiseOperation(n)) {
         return true;
       }
+    }
+  } else {
+    // prim::Constant is not parsible, but it is also not nonElementWise
+    if (node->kind() != prim::Constant && !isElementWiseNode(node)) {
+      return true;
     }
   }
   return false;
@@ -104,33 +131,49 @@ bool hasNonElementWiseOperation(const Node* node) {
 bool maybeBroadcastOnShape(
     const Node* n,
     const std::vector<c10::optional<int64_t>>& shape) {
-  TORCH_INTERNAL_ASSERT(
-      n->outputs().size() == 1,
-      "not expecting multiple outputs from a node, graph partitioning logic needs to be updated");
+  // TODO: we are only checking output 0. This means that our current check for
+  // normalization is not complete.
   // assumes that if output is not a tensor type, it's not broadcasting
   if (auto out_type = n->output(0)->type()->cast<TensorType>()) {
-    if (out_type->dim()) {
-      if (out_type->dim().value() < shape.size()) {
-        // no broadcast for reduction operation;
-        return false;
-      } else if (out_type->dim().value() > shape.size()) {
-        // increased rank means there is reduction;
-        return true;
-      } else {
-        // same rank, we need to iterate through sizes and check if size-1
-        // exists in input `shape`
-        for (const auto& opt_size : shape) {
-          // TODO: not sure if we need to check for output size != 1, since we
-          // are currently marking all size-1 dimension as broadcast in codegen.
-          if (opt_size.has_value() && opt_size.value() == 1) {
-            return true;
-          }
+    return maybeBroadcast(out_type, shape);
+  }
+  return false;
+};
+
+// return true if node is pointwise operation and input tensors all have
+// identical shape.
+bool isNonBroadcastElementWise(const Node* n) {
+  if (hasNonElementWiseOperation(n)) {
+    return false;
+  }
+
+  // This check might not be needed since we are handling Elementwise operations
+  // only. We can blindly just take output(0) for shape check. I'm putting it
+  // here just to be on the safe side. TORCH_INTERNAL_ASSERT(n->outputs().size()
+  // == 1, "ElementWise Operation expects to have single tensor output");
+  if (n->outputs().size() != 1) {
+    return false;
+  }
+  auto n_output_type = n->output(0)->type()->cast<TensorType>();
+
+  // TODO: we need to stay on safer side instead of "default to return true when
+  // shape information is not available.", Change that when we enable profiling
+  // on autodiff FW execution.
+  if (n_output_type != nullptr && n_output_type->sizes().sizes()) {
+    std::vector<c10::optional<int64_t>> n_output_shape =
+        n_output_type->sizes().sizes().value();
+
+    for (auto input : n->inputs()) {
+      if (auto t_type = input->type()->cast<TensorType>()) {
+        if (maybeBroadcast(t_type, n_output_shape)) {
+          return false;
         }
       }
     }
   }
-  return false;
-};
+
+  return true;
+}
 
 //! [ Note - tricky broadcasting ]
 //!
@@ -324,7 +367,12 @@ bool isFusibleCudaFusionGroup(const Node* fusion, const Node* node) {
 
   // TODO: lift the restriction of not fusing producer containing reduction when
   //       we have proper scheduling.
-  if (isFusibleCudaFusionGroup(node) && !hasNonElementWiseOperation(node) &&
+  if (isFusibleCudaFusionGroup(node) &&
+      // if:
+      //   1. producer node is a naive PW (with/without bcast);
+      //   2. consumer fusion is a naive PW (without bcast);
+      (!hasNonElementWiseOperation(node) ||
+       isNonBroadcastElementWise(fusion)) &&
       !createTrickyBroadcast(fusion, node)) {
     // ensure if the node has a designated device, it's on the same device with
     // fusion.

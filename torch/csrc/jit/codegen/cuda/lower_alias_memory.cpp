@@ -84,7 +84,7 @@ class AllocateReuseModifier {
       const auto output_alloc = alloc_it->second;
 
       const auto input_alloc = findCompatibleInputAllocate(
-          SymbolicSizePrinter::printSize(output_alloc), def);
+          tv->dtype(), SymbolicSizePrinter::printSize(output_alloc), def);
 
       if (input_alloc != nullptr) {
         output_alloc->setAlias(input_alloc);
@@ -108,6 +108,7 @@ class AllocateReuseModifier {
 
   // Find an Input Allocate that is compatible with the Output Allocate
   const kir::Allocate* findCompatibleInputAllocate(
+      const DataType output_dtype,
       const std::string& output_size_str,
       const kir::Expr* expr) {
     // Stop searching if current op is not point-wise
@@ -122,12 +123,12 @@ class AllocateReuseModifier {
           first_tv_input = input_tv;
         }
 
-        const auto input_alloc = map_tv_to_allocations_[input_tv->name()];
-
         // input_alloc == nullptr implies that input_tv is a kernel input
+        const auto input_alloc = map_tv_to_allocations_[input_tv->name()];
         if (input_alloc != nullptr) {
           if (candidate_alias_tv_.find(input_tv) != candidate_alias_tv_.end() &&
               output_size_str == SymbolicSizePrinter::printSize(input_alloc) &&
+              output_dtype == input_tv->dtype() &&
               map_tv_to_last_usage_[input_tv] <= map_expr_to_pos_[expr]) {
             return input_alloc;
           }
@@ -140,7 +141,7 @@ class AllocateReuseModifier {
     if (first_tv_input != nullptr &&
         map_tv_to_last_usage_[first_tv_input] <= map_expr_to_pos_[expr]) {
       if (const auto def = first_tv_input->definition()) {
-        return findCompatibleInputAllocate(output_size_str, def);
+        return findCompatibleInputAllocate(output_dtype, output_size_str, def);
       }
     }
 

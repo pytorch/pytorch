@@ -79,12 +79,12 @@ TORCH_CUDA_API void scheduleReduction(
     TensorView* red_tv,
     std::vector<TensorView*> outs_of_red);
 
-TORCH_CUDA_API c10::optional<ReductionParams> getMultipleReductionHeuristics(
+TORCH_CUDA_API c10::optional<ReductionParams> getNormalizationHeuristics(
     Fusion* fusion,
     const at::ArrayRef<c10::IValue>& fusion_inputs,
     const std::vector<TensorView*>& reduction_tv);
 
-TORCH_CUDA_API void scheduleMultipleReduction(
+TORCH_CUDA_API void scheduleNormalization(
     Fusion* fusion,
     const ReductionParams& rparams,
     const std::vector<TensorView*>& reduction_tv,

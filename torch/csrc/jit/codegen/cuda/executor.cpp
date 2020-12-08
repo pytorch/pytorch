@@ -319,9 +319,10 @@ LaunchParams FusionExecutor::computeLaunchParams(
   // Calculate Dynamic Shared Memory Size
   // Add workspace for reduction and broadcast
   uint64_t reduction_broadcast_workspace = 0;
-  if (kernel_summary.has_block_reductions ||
-      kernel_summary.has_grid_reductions ||
-      kernel_summary.has_block_broadcasts) {
+  const bool has_workspace = kernel_summary.has_block_reductions ||
+      kernel_summary.has_grid_reductions || kernel_summary.has_block_broadcasts;
+  if (has_workspace &&
+      kernel_summary.largest_smem_data_type != DataType::Null) {
     // Not using nThreads here since it does not handle uninitialized value
     reduction_broadcast_workspace =
         dataTypeSize(kernel_summary.largest_smem_data_type) *
