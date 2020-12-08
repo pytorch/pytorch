@@ -6316,10 +6316,6 @@ _types_no_half = [
     torch.uint8
 ]
 
-# _types2 adds bfloat16 type to  _types only on ROCm. Should eventually be unified
-# with _types when bfloat16 bringup is complete on all platforms.
-_types2 = _types + [torch.bfloat16] if TEST_WITH_ROCM else _types
-
 _float_types = [torch.half, torch.float, torch.double]
 
 _complex_types = [torch.cfloat, torch.cdouble]
@@ -6327,10 +6323,6 @@ _complex_types = [torch.cfloat, torch.cdouble]
 _complex_types_skip_rocm = [] if TEST_WITH_ROCM else _complex_types
 
 _float_types_no_half = [torch.float, torch.double]
-
-# _float_types2 adds bfloat16 type to _float_types only on ROCm. Should eventually be unified
-# with _float_types when bfloat16 bringup is complete on all platforms
-_float_types2 = _float_types + [torch.bfloat16] if TEST_WITH_ROCM else _float_types
 
 _signed_types = [
     torch.half, torch.bfloat16, torch.float, torch.double,
@@ -6605,10 +6597,14 @@ tensor_op_tests = [
     ('dot', '', _medium_1d, lambda t, d: [_medium_1d(t, d)],
         1e-2, 1e-5, 1e-5, _float_types + _complex_types, _cpu_types, False),
     ('element_size', '', _medium_1d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False),
-    ('eq', '', _small_3d_ones, lambda t, d: [_small_3d(t, d)], 1e-5, 1e-5, 1e-5, _types2),
-    ('eq', 'equal', _small_3d_ones, lambda t, d: [_small_3d_ones(t, d)], 1e-5, 1e-5, 1e-5, _types2),
-    ('ne', '', _small_3d_ones, lambda t, d: [_small_3d(t, d)], 1e-5, 1e-5, 1e-5, _types2),
-    ('ne', 'equal', _small_3d_ones, lambda t, d: [_small_3d_ones(t, d)], 1e-5, 1e-5, 1e-5, _types2),
+    ('eq', '', _small_3d_ones, lambda t, d: [_small_3d(t, d)], 1e-5, 1e-5, 1e-5,
+        torch.testing.get_all_dtypes(include_complex=False, include_bool=False)),
+    ('eq', 'equal', _small_3d_ones, lambda t, d: [_small_3d_ones(t, d)], 1e-5, 1e-5, 1e-5,
+        torch.testing.get_all_dtypes(include_complex=False, include_bool=False)),
+    ('ne', '', _small_3d_ones, lambda t, d: [_small_3d(t, d)], 1e-5, 1e-5, 1e-5,
+        torch.testing.get_all_dtypes(include_complex=False, include_bool=False)),
+    ('ne', 'equal', _small_3d_ones, lambda t, d: [_small_3d_ones(t, d)], 1e-5, 1e-5, 1e-5,
+        torch.testing.get_all_dtypes(include_complex=False, include_bool=False)),
     ('equal', 'equal', _small_3d_ones, lambda t, d: [_small_3d_ones(t, d)],
         1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('equal', '', _small_3d_ones, lambda t, d: [_small_3d(t, d)], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
@@ -6622,10 +6618,14 @@ tensor_op_tests = [
     ('lcm', '', _small_3d, lambda t, d: [_small_3d(t, d)], 0, 0, 0,
      [torch.int16, torch.int32, torch.int64],
      [torch.int16, torch.int32, torch.int64], True, [onlyOnCPUAndCUDA]),
-    ('ge', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-5, 1e-5, 1e-5, _types2),
-    ('le', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-5, 1e-5, 1e-5, _types2),
-    ('gt', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-5, 1e-5, 1e-5, _types2),
-    ('lt', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-5, 1e-5, 1e-5, _types2),
+    ('ge', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-5, 1e-5, 1e-5,
+        torch.testing.get_all_dtypes(include_complex=False, include_bool=False)),
+    ('le', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-5, 1e-5, 1e-5,
+        torch.testing.get_all_dtypes(include_complex=False, include_bool=False)),
+    ('gt', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-5, 1e-5, 1e-5,
+        torch.testing.get_all_dtypes(include_complex=False, include_bool=False)),
+    ('lt', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-5, 1e-5, 1e-5,
+        torch.testing.get_all_dtypes(include_complex=False, include_bool=False)),
     ('is_contiguous', '', _medium_2d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     # TODO: can't check negative case - cross-device copy is contiguous
     ('is_same_size', 'negative', _medium_2d, lambda t, d: [_small_3d(t, d)],
@@ -6689,10 +6689,12 @@ tensor_op_tests = [
     ('narrow', '', _small_3d, lambda t, d: [1, 3, 2], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('narrow', 'neg_dim', _small_3d, lambda t, d: [-1, 3, 2], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('nonzero', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('norm', '', _small_3d, lambda t, d: [], 1e-1, 1e-1, 1e-5, _float_types2, _cpu_types, False),
-    ('norm', '3_norm', _small_3d, lambda t, d: [3], 1e-1, 1e-1, 1e-5, _float_types2, _cpu_types, False),
-    ('norm', '3_norm_dim', _small_3d, lambda t, d: [3, 0], 1e-1, 1e-1, 1e-5, _float_types2, _cpu_types, False),
-    ('norm', '3_norm_neg_dim', _small_3d, lambda t, d: [3, -2], 1e-1, 1e-1, 1e-5, _float_types2, _cpu_types, False),
+    ('norm', '', _small_3d, lambda t, d: [], 1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes(), _cpu_types, False),
+    ('norm', '3_norm', _small_3d, lambda t, d: [3], 1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes(), _cpu_types, False),
+    ('norm', '3_norm_dim', _small_3d, lambda t, d: [3, 0], 1e-1, 1e-1, 1e-5,
+        torch.testing.get_all_fp_dtypes(), _cpu_types, False),
+    ('norm', '3_norm_neg_dim', _small_3d, lambda t, d: [3, -2], 1e-1, 1e-1, 1e-5,
+        torch.testing.get_all_fp_dtypes(), _cpu_types, False),
     ('new_ones', '', _small_3d, lambda t, d: [1, 2, 3, 4, 5], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('permute', '', _new_t((1, 2, 3, 4)), lambda t, d: [2, 1, 3, 0], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('put_', '', _new_t((2, 5, 3)),
@@ -6707,12 +6709,16 @@ tensor_op_tests = [
                       torch.LongTensor([[1], [2]]).to(dtype=_convert_t(t, d), device=d),
                       True],
         1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('prod', '', lambda t, d: _small_2d(t, d, oneish=True),
-        lambda t, d: [], 1e-2, 1e-1, 1e-5, _types2, _cpu_types, False),
-    ('prod', 'dim', _small_3d, lambda t, d: [1], 1e-3, 1e-1, 1e-5, _types2, _cpu_types, False),
-    ('prod', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-1, 1e-5, _types2, _cpu_types, False),
-    ('sum', '', _small_2d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _types2, _cpu_types, False),
-    ('sum', 'dim', _small_3d, lambda t, d: [1], 1e-2, 1e-2, 1e-5, _types2, _cpu_types, False),
+    ('prod', '', lambda t, d: _small_2d(t, d, oneish=True), lambda t, d: [], 1e-2, 1e-1, 1e-5,
+        torch.testing.get_all_dtypes(include_complex=False, include_bool=False), _cpu_types, False),
+    ('prod', 'dim', _small_3d, lambda t, d: [1], 1e-3, 1e-1, 1e-5,
+        torch.testing.get_all_dtypes(include_complex=False, include_bool=False), _cpu_types, False),
+    ('prod', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-1, 1e-5,
+        torch.testing.get_all_dtypes(include_complex=False, include_bool=False), _cpu_types, False),
+    ('sum', '', _small_2d, lambda t, d: [], 1e-2, 1e-2, 1e-5,
+        torch.testing.get_all_dtypes(include_complex=False, include_bool=False), _cpu_types, False),
+    ('sum', 'dim', _small_3d, lambda t, d: [1], 1e-2, 1e-2, 1e-5,
+        torch.testing.get_all_dtypes(include_complex=False, include_bool=False), _cpu_types, False),
     ('sum', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-2, 1e-5, 1e-5, _types, _cpu_types, False),
     ('sum', 'complex', _small_2d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _complex_types, _cpu_types, False),
     ('sum', 'complex_dim', _small_3d, lambda t, d: [1], 1e-2, 1e-2, 1e-5, _complex_types, _cpu_types, False),
