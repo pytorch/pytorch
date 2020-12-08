@@ -244,7 +244,7 @@ def _hardtanh_helper(g, input, min_val, max_val):
         from torch.onnx.symbolic_opset9 import hardtanh
         return hardtanh(g, input, min_val, max_val)
     else:
-        from torch.onnx.symbolic_opset11 import hardtanh
+        from torch.onnx.symbolic_opset11 import hardtanh  # type: ignore[no-redef]
         return hardtanh(g, input, min_val, max_val)
 
 def _is_fp(value):
