@@ -332,17 +332,17 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: acos
+    CPU: acos
 
 - func: acos_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: acos_
+    CPU: acos_
 
 - func: acos.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: acos_out
+    CPU: acos_out
 
 # arccos, alias of acos
 - func: arccos(Tensor self) -> Tensor
@@ -550,17 +550,17 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: acosh
+    CPU: acosh
 
 - func: acosh_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: acosh_
+    CPU: acosh_
 
 - func: acosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: acosh_out
+    CPU: acosh_out
 
 # arccosh, alias for acosh
 - func: arccosh(Tensor self) -> Tensor
@@ -577,17 +577,17 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: asinh
+    CPU: asinh
 
 - func: asinh_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: asinh_
+    CPU: asinh_
 
 - func: asinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: asinh_out
+    CPU: asinh_out
 
 # arcsinh, alias for asinh
 - func: arcsinh(Tensor self) -> Tensor
@@ -604,17 +604,17 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: atanh
+    CPU: atanh
 
 - func: atanh_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: atanh_
+    CPU: atanh_
 
 - func: atanh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: atanh_out
+    CPU: atanh_out
 
 # arctanh, alias for atanh
 - func: arctanh(Tensor self) -> Tensor
@@ -645,20 +645,20 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    CPU, CUDA: asin
-    SparseCPU, SparseCUDA: asin_sparse
+    CPU: asin
+    SparseCPU: asin_sparse
 
 - func: asin_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    CPU, CUDA: asin_
-    SparseCPU, SparseCUDA: asin_sparse_
+    CPU: asin_
+    SparseCPU: asin_sparse_
 
 - func: asin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: asin_out
-    SparseCPU, SparseCUDA: asin_out_sparse
+    CPU: asin_out
+    SparseCPU: asin_out_sparse
 
 # arcsin, alias of asin
 - func: arcsin(Tensor self) -> Tensor
@@ -675,17 +675,17 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: atan
+    CPU: atan
 
 - func: atan_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: atan_
+    CPU: atan_
 
 - func: atan.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: atan_out
+    CPU: atan_out
 
 # arctan, alias of atan
 - func: arctan(Tensor self) -> Tensor
@@ -1199,17 +1199,17 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: cosh
+    CPU: cosh
 
 - func: cosh_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: cosh_
+    CPU: cosh_
 
 - func: cosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: cosh_out
+    CPU: cosh_out
 
 - func: cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, float margin=0.0, int reduction=Mean) -> Tensor
   use_c10_dispatcher: full
@@ -1930,7 +1930,7 @@
 
 - func: gcd.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: gcd_out
+    CPU: gcd_out
 
 - func: gcd(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
@@ -1942,7 +1942,7 @@
 
 - func: lcm.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: lcm_out
+    CPU: lcm_out
 
 - func: lcm(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
@@ -2875,13 +2875,13 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: mvlgamma
+    CPU: mvlgamma
 
 - func: mvlgamma_(Tensor(a!) self, int p) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    DefaultBackend: mvlgamma_
+    CPU: mvlgamma_
 
 - func: narrow_copy(Tensor self, int dim, int start, int length) -> Tensor
   use_c10_dispatcher: full
@@ -3501,17 +3501,17 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: sinh
+    CPU: sinh
 
 - func: sinh_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: sinh_
+    CPU: sinh_
 
 - func: sinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: sinh_out
+    CPU: sinh_out
 
 # Returns a copy of this `Variable` that is detached from its autograd graph.
 # This method is OK to call if the `Variable` is a view.
@@ -3868,18 +3868,18 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    CPU, CUDA: tanh
+    CPU: tanh
     QuantizedCPU: tanh_quantized_cpu
 
 - func: tanh_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: tanh_
+    CPU: tanh_
 
 - func: tanh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: tanh_out
+    CPU: tanh_out
 
 - func: tensordot(Tensor self, Tensor other, int[] dims_self, int[] dims_other) -> Tensor
   use_c10_dispatcher: full
@@ -5516,13 +5516,12 @@
   variants: method
   dispatch:
     CPU: _lgamma__cpu
-    CUDA: _lgamma__cuda
 
 - func: atan2_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    CPU, CUDA: atan2_
+    CPU: atan2_
 
 - func: tril_(Tensor(a!) self, int diagonal=0) -> Tensor(a!)
   use_c10_dispatcher: full
@@ -5542,7 +5541,7 @@
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    CPU, CUDA: digamma_
+    CPU: digamma_
 
 - func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
   use_c10_dispatcher: full
@@ -6436,33 +6435,32 @@
 - func: lgamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: _lgamma_out_cpu
-    CUDA: _lgamma_out_cuda
 
 - func: lgamma(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU, CUDA: lgamma
+    CPU: lgamma
 
 - func: digamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: digamma_out
+    CPU: digamma_out
 
 - func: digamma(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU, CUDA: digamma
+    CPU: digamma
 
 - func: polygamma.out(int n, Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: polygamma_out
+    CPU: polygamma_out
 
 - func: polygamma(int n, Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    DefaultBackend: polygamma
+    CPU: polygamma
 
 - func: erfinv(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -6486,17 +6484,17 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: i0
+    CPU: i0
 
 - func: i0_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: i0_
+    CPU: i0_
 
 - func: i0.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: i0_out
+    CPU: i0_out
 
 - func: sign(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -6531,13 +6529,13 @@
 
 - func: atan2.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: atan2_out
+    CPU: atan2_out
 
 - func: atan2(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU, CUDA: atan2
+    CPU: atan2
 
 - func: lerp.Scalar_out(Tensor self, Tensor end, Scalar weight, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -6612,33 +6610,33 @@
 
 - func: igamma.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: igamma_out
+    CPU: igamma_out
 
 - func: igamma(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU, CUDA: igamma
+    CPU: igamma
 
 - func: igamma_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU, CUDA: igamma_
+    CPU: igamma_
 
 - func: igammac.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: igammac_out
+    CPU: igammac_out
 
 - func: igammac(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU, CUDA: igammac
+    CPU: igammac
 
 - func: igammac_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU, CUDA: igammac_
+    CPU: igammac_
 
 - func: nextafter.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
