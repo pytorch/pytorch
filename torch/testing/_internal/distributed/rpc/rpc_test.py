@@ -4841,3 +4841,9 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         self.assertEqual(rref.to_here(), torch.ones(2).to(1))
 
         rpc.shutdown()
+
+    @dist_init
+    def test_op_with_invalid_args(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        with self.assertRaisesRegex(RuntimeError, "Overloaded torch operator invoked from Python failed to many any schema"):
+            rpc.rpc_sync(dst, torch.add, args=())
