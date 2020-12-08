@@ -23,7 +23,7 @@
 #     differentiable subcomponents.
 #
 
-from .utils import CodeTemplate, nested_dict, write, uninplace_api_name, unout_api_name
+from .utils import CodeTemplate, nested_dict, write, uninplace_api_name, make_out_api_name_faithful
 from .gen_autograd import VIEW_FUNCTIONS, VIEW_FUNCTIONS_WITH_METADATA_CHANGE, \
     MULTI_OUTPUT_SAFE_FUNCTIONS, RETURNS_VIEWS_OF_INPUT
 from .gen_autograd_functions import uses_single_grad
@@ -78,7 +78,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'bmm', 'diagonal', 'alias', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
     'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'take', 'fill_',
     'exp', 'nonzero', 'mean', 'inverse', 'solve', 'linalg_cholesky', 'addcmul', 'addcdiv',
-    'matrix_exp', 'linalg_eigh',
+    'matrix_exp', 'linalg_eigh', 'cholesky_solve',
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
@@ -615,7 +615,7 @@ def emit_body(declaration):
         """ Dispatch call via function in a namespace or method on Tensor."""
         if 'namespace' in declaration['method_of']:
             if declaration['use_c10_dispatcher'] in ['hacky_wrapper_for_legacy_signatures', 'full']:
-                dispatcher_api_name = unout_api_name(api_name)
+                dispatcher_api_name = make_out_api_name_faithful(api_name)
             else:
                 assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
                 dispatcher_api_name = api_name
