@@ -1261,7 +1261,7 @@ def main() -> None:
 #include <ATen/cuda/CUDAContext.h>'''
     if options.rocm:
         extra_cuda_headers = '''\
-#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h.h>
+#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
 #include <ATen/hip/ATenHIPGeneral.h>
 #include <ATen/hip/HIPDevice.h>
 #include <ATen/hip/HIPContext.h>'''
