@@ -832,6 +832,56 @@ TORCH_API const Expr* flatten_index(
     const std::vector<const Expr*>& dims,
     const std::vector<const Expr*>& indices);
 
+inline ExprHandle maximumVal(ScalarType type) {
+  switch (type) {
+#define MAX_BY_TYPE_CASE(Type, Name) \
+  case ScalarType::Name:             \
+    return ExprHandle(std::numeric_limits<Type>::max());
+    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, MAX_BY_TYPE_CASE)
+#undef MAX_BY_TYPE_CASE
+    default:
+      throw unsupported_dtype();
+  }
+  return ExprHandle();
+}
+
+// pytorch eager uses -std::numeric_limits::max(), not ::min()
+inline ExprHandle minimumVal(ScalarType type) {
+  switch (type) {
+#define MAX_BY_TYPE_CASE(Type, Name) \
+  case ScalarType::Name:             \
+    return ExprHandle(-std::numeric_limits<Type>::max());
+    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, MAX_BY_TYPE_CASE)
+#undef MAX_BY_TYPE_CASE
+    default:
+      throw unsupported_dtype();
+  }
+}
+
+inline ExprHandle infinityVal(ScalarType type) {
+  switch (type) {
+#define MAX_BY_TYPE_CASE(Type, Name) \
+  case ScalarType::Name:             \
+    return ExprHandle(std::numeric_limits<Type>::infinity());
+    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, MAX_BY_TYPE_CASE)
+#undef MAX_BY_TYPE_CASE
+    default:
+      throw unsupported_dtype();
+  }
+}
+
+inline ExprHandle negInfinityVal(ScalarType type) {
+  switch (type) {
+#define MAX_BY_TYPE_CASE(Type, Name) \
+  case ScalarType::Name:             \
+    return ExprHandle(-std::numeric_limits<Type>::infinity());
+    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, MAX_BY_TYPE_CASE)
+#undef MAX_BY_TYPE_CASE
+    default:
+      throw unsupported_dtype();
+  }
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

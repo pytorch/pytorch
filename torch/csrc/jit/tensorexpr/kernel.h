@@ -118,7 +118,8 @@ class TORCH_API TensorExprKernel {
           const ExprHandle&,
           const ExprHandle&,
           const ExprHandle&,
-          const ExprHandle&)>& innerExpr);
+          const ExprHandle&)>& innerExpr,
+      bool promote_inputs = true);
 
   Tensor* computeSum(const torch::jit::Value* v);
 

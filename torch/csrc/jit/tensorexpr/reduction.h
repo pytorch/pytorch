@@ -181,31 +181,6 @@ class Sum : public Reducer {
         }) {}
 };
 
-inline ExprHandle maximumVal(ScalarType type) {
-  switch (type) {
-#define MAX_BY_TYPE_CASE(Type, Name) \
-  case ScalarType::Name:             \
-    return ExprHandle(std::numeric_limits<Type>::max());
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, MAX_BY_TYPE_CASE)
-#undef MAX_BY_TYPE_CASE
-    default:
-      throw unsupported_dtype();
-  }
-  return ExprHandle();
-}
-
-inline ExprHandle minimumVal(ScalarType type) {
-  switch (type) {
-#define MAX_BY_TYPE_CASE(Type, Name) \
-  case ScalarType::Name:             \
-    return ExprHandle(std::numeric_limits<Type>::min());
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, MAX_BY_TYPE_CASE)
-#undef MAX_BY_TYPE_CASE
-    default:
-      throw unsupported_dtype();
-  }
-}
-
 class Maximum : public Reducer {
  public:
   // TODO possible to remove this arg by deferring the init value until we
