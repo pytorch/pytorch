@@ -514,6 +514,19 @@ class TestUnaryUfuncs(TestCase):
         x = torch.tensor(dataset, device=device, dtype=dtype)
         self.compare_with_numpy(torch.digamma, scipy.special.digamma, x)
 
+    @unittest.skipIf(not TEST_SCIPY, "Requires SciPy")
+    @dtypes(torch.float, torch.double)
+    def test_digamma(self, device, dtype):
+        nan = float('nan')
+        tensor = torch.randn(10, 10, 10, dtype=dtype, device=device)
+        self.compare_with_numpy(torch.digamma, scipy.special.digamma, tensor)
+
+        # Tests pole behavior
+        tensor = torch.tensor([-0.999999994, -1.999999994, -2.0000000111,
+                               -100.99999994, -1931.99999994, 0.000000111,
+                               -0.000000111, 0, -0, -1, -2, -931], dtype=dtype, device=device)
+        self.compare_with_numpy(torch.digamma, scipy.special.digamma, tensor)
+
     # TODO opinfo mvlgamma
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_mvlgamma(self, device):
@@ -1202,30 +1215,6 @@ class TestUnaryUfuncs(TestCase):
         for n in [0, 1, 2, 3, 4, 5]:
             torch.autograd.gradcheck(lambda x: x.polygamma(n),
                                      cpu_tensor)
-
-    # Note: fails when using float tensors
-    # TODO: update this test to just compare against NumPy
-    @onlyCUDA
-    @dtypes(torch.double)
-    def test_digamma(self, device, dtype):
-        cpu_tensor = torch.randn(10, 10, 10, dtype=dtype)
-        device_tensor = cpu_tensor.to(device)
-        zeros = torch.zeros(10, 10, 10, dtype=dtype)
-        cpu_out = cpu_tensor.digamma()
-        device_out = device_tensor.digamma()
-        norm_errors = (device_out - cpu_out.to(device)) / device_out
-        self.assertEqual(norm_errors, zeros)
-
-        # Tests pole behavior
-        cpu_tensor = torch.tensor([-0.999999994, -1.999999994, -2.0000000111,
-                                   -100.99999994, -1931.99999994, 0.000000111,
-                                   -0.000000111, 0, -1, -2, -931], dtype=dtype)
-        expected_errors = torch.tensor([0, 0, 0, 0, 0, 0, 0, nan, nan, nan, nan], dtype=dtype)
-        device_tensor = cpu_tensor.to(device)
-        cpu_out = cpu_tensor.digamma()
-        device_out = device_tensor.digamma()
-        norm_errors = (device_out - cpu_out.to(device)) / device_out
-        self.assertEqual(norm_errors, expected_errors)
 
     # TODO: update to compare against NumPy by rationalizing with OpInfo
     @onlyCUDA
