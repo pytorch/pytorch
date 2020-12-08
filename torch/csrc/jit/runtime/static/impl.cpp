@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
+#include <torch/csrc/jit/runtime/static/passes.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 namespace torch {
@@ -20,6 +21,8 @@ void OptimizeGraph(std::shared_ptr<torch::jit::Graph>& graph) {
   Canonicalize(graph);
   ConstantPropagation(graph);
   RemoveTensorMutation(graph);
+  ConstantPropagation(graph);
+  FuseInferenceOpsForSparseNN(graph);
   ConstantPropagation(graph);
 }
 
@@ -585,8 +588,12 @@ void StaticRuntime::deallocate_registers(const std::vector<size_t>& internals) {
   // they will be re-created in the next iteration regardless
   for (auto i : internals) {
     if (reg_[i].isTensor()) {
-      if (reg_[i].toTensor().storage().nbytes() > 0) {
-        reg_[i] = IValue();
+      // If the tensor has no storage, we can keep it around. We
+      // implement by moving out of the register (leaving behind an
+      // empty IValue for free!) and possibly moving back.
+      at::Tensor asTensor = std::move(reg_[i]).toTensor();
+      if (asTensor.storage().nbytes() == 0) {
+        reg_[i] = std::move(asTensor);
       }
     } else {
       reg_[i] = IValue();
@@ -746,9 +753,9 @@ ProcessedNode::ProcessedNode(
 
 void ProcessedNode::run(std::vector<IValue>& reg) const {
   if (fn_) {
-    fn_->operator()(this, reg);
+    fn_(this, reg);
   } else if (native_fn_) {
-    native_fn_->operator()(this, reg);
+    native_fn_(this, reg);
   } else {
     std::vector<IValue> stack;
     const size_t size = node_->inputs().size();
