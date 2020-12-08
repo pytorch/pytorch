@@ -1,7 +1,9 @@
 #ifdef TORCH_ENABLE_LLVM
 
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
+
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/llvm_jit.h>
 
 #include <memory>
@@ -14,6 +16,7 @@
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/Host.h>
 #include <llvm/Support/TargetSelect.h>
+#include <llvm/Support/raw_os_ostream.h>
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/Transforms/IPO/AlwaysInliner.h>
 #include <llvm/Transforms/IPO/PassManagerBuilder.h>
@@ -29,8 +32,6 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
-
-#define DEBUG_PRINT 0
 
 using namespace torch::jit::tensorexpr;
 
@@ -492,6 +493,26 @@ class LLVMIntrinsicsExpander : public GenericIntrinsicsExpander {
   }
 };
 
+static std::string moduleToString(const llvm::Module& module) {
+  std::string ret;
+  llvm::raw_string_ostream rs(ret);
+  rs << module;
+  return rs.str();
+}
+
+static std::string asmToString(llvm::TargetMachine& TM, llvm::Module& module) {
+  llvm::SmallVector<char, 0> asmBuffer;
+  llvm::raw_svector_ostream asmStream(asmBuffer);
+  llvm::legacy::PassManager PM;
+  TM.addPassesToEmitFile(
+      PM,
+      asmStream,
+      nullptr,
+      llvm::TargetMachine::CodeGenFileType::CGFT_AssemblyFile);
+  PM.run(module);
+  return asmStream.str();
+}
+
 void LLVMCodeGenImpl::emitKernel(
     Stmt* stmt,
     const std::vector<llvm::Type*>& params) {
@@ -518,27 +539,15 @@ void LLVMCodeGenImpl::emitKernel(
 
   irb_.CreateRet(value_);
 
-#if DEBUG_PRINT
-  llvm::errs() << *module_;
-#endif
+  GRAPH_DEBUG("LLVM IR (before optimizations):\n", moduleToString(*module_));
+
   if (llvm::verifyFunction(*fn_, &llvm::outs())) {
     throw std::runtime_error("Function verification failed");
   }
   optimize(*module_);
 
-#if DEBUG_PRINT
-  llvm::errs() << *module_;
-  llvm::SmallVector<char, 0> asmBuffer;
-  llvm::raw_svector_ostream asmStream(asmBuffer);
-  llvm::legacy::PassManager PM;
-  TM_->addPassesToEmitFile(
-      PM,
-      asmStream,
-      nullptr,
-      llvm::TargetMachine::CodeGenFileType::CGFT_AssemblyFile);
-  PM.run(*module_);
-  llvm::errs() << asmStream.str();
-#endif
+  GRAPH_DEBUG("LLVM IR (after optimizations):\n", moduleToString(*module_));
+  GRAPH_DEBUG("LLVM-generated machine code:\n", asmToString(*TM_, *module_));
 }
 
 // TODO: The binary ops are copypasta.
