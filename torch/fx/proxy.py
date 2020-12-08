@@ -51,7 +51,14 @@ class TracerBase:
         """
         # aggregates
         if isinstance(a, (tuple, list)):
-            return type(a)(self.create_arg(elem) for elem in a)
+            if hasattr(a, '_fields'):
+                # NamedTuple constructors don't seem to like getting a generator
+                # expression as an argument to their constructor, so build this
+                # intermediate tuple and unpack it into the NamedTuple constructor
+                args = tuple(self.create_arg(elem) for elem in a)
+                return type(a)(*args)
+            else:
+                return type(a)(self.create_arg(elem) for elem in a)
         elif isinstance(a, dict):
             r = {}
             for k, v in a.items():
