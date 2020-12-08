@@ -112,8 +112,6 @@ def is_match(modules, node, pattern, max_uses=sys.maxsize):
         return True
 
     if len(arg_matches) != len(node.args):
-        print('arg matches:', arg_matches)
-        print('node args:', node.args)
         return False
 
     return all(is_match(modules, node, arg_match, max_uses=1) for node, arg_match in zip(node.args, arg_matches))
