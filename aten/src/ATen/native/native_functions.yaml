@@ -1263,7 +1263,7 @@
   dispatch:
     CUDA: cudnn_convolution
 
-- func: _cudnn_convolution_v8(Tensor self, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool allow_tf32) -> Tensor
+- func: _cudnn_convolution_v8(Tensor self, Tensor weight, int[] padding, int[] stride, int[] dilation, bool benchmark, bool deterministic, bool allow_tf32) -> Tensor
   use_c10_dispatcher: full
   dispatch:
     CUDA: _cudnn_convolution_v8

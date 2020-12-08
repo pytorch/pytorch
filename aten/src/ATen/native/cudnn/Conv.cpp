@@ -1004,7 +1004,7 @@ Tensor cudnn_convolution(
     int64_t groups, bool benchmark, bool deterministic, bool allow_tf32)
 {
   if (!benchmark) {
-    return at::_cudnn_convolution_v8(input_t, weight_t, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
+    return at::_cudnn_convolution_v8(input_t, weight_t, padding, stride, dilation, benchmark, deterministic, allow_tf32);
   }
 
   TensorArg input  { input_t,  "input",  1 },
@@ -1023,7 +1023,7 @@ Tensor cudnn_convolution_transpose_backward_input(
     int64_t groups, bool benchmark, bool deterministic, bool allow_tf32)
 {
   if (!benchmark) {
-    return at::_cudnn_convolution_v8(grad_output_t, weight_t, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
+    return at::_cudnn_convolution_v8(grad_output_t, weight_t, padding, stride, dilation, benchmark, deterministic, allow_tf32);
   }
 
   TensorArg grad_output { grad_output_t,  "grad_output", 1 },
