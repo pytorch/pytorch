@@ -371,12 +371,6 @@ class SpectralFuncInfo(OpInfo):
                 SampleInput(tensor, kwargs=dict(n=10, dim=1, norm='ortho')),
             ]
 
-        out = []
-        for a in test_cases:
-            a.requires_grad = requires_grad
-            out.append(SampleInput(a))
-        return out
-
 
 def sample_inputs_svd(op_info, device, dtype, requires_grad=False):
     """
