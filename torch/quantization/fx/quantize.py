@@ -246,7 +246,7 @@ def get_qconfig(modules, qconfig_dict, module_name, global_qconfig):
 
 def insert_observer(
         node: Node, observer: torch.quantization.ObserverBase,
-        model_device: Any, model: torch.nn.Module,
+        model: torch.nn.Module,
         activation_post_process_map: Dict[str, torch.quantization.ObserverBase],
         env: Dict[Any, Any], observed_graph: Graph, load_arg: Callable,
         observed_node_names_set: Set[str]):
@@ -257,6 +257,7 @@ def insert_observer(
          observer: observer/fake_quantize module instance
     """
     # respect device affinity when adding observers
+    model_device = assert_and_get_unique_device(model)
     if model_device:
         observer.to(model_device)
     # add observer module as attribute
@@ -313,7 +314,6 @@ def insert_observer_for_output_of_the_node(
         modules: Dict[str, torch.nn.Module],
         model: torch.nn.Module,
         pattern: Any,
-        model_device: Any,
         activation_post_process_map: Dict[str, torch.quantization.ObserverBase],
         env: Dict[Any, Any],
         observed_graph: Graph,
@@ -338,7 +338,7 @@ def insert_observer_for_output_of_the_node(
                 "activation_post_process constructor not provided " + \
                 "for pattern:" + str(pattern)
             insert_observer(
-                node, activation_post_process_ctr(), model_device,
+                node, activation_post_process_ctr(),
                 model, activation_post_process_map, env, observed_graph,
                 load_arg, observed_node_names_set)
         elif (isinstance(quantize_handler,
@@ -386,13 +386,13 @@ def insert_observer_for_output_of_the_node(
             # observer for outputs
             new_observer = qconfig.activation()
             insert_observer(
-                node, new_observer, model_device, model,
+                node, new_observer, model,
                 activation_post_process_map, env, observed_graph,
                 load_arg, observed_node_names_set)
 
 def insert_observer_for_input_arg_of_observed_node(
         node: Node, observed_node_names_set: Set[str], quants: Dict[str, Any],
-        model_device: Any, model: torch.nn.Module,
+        model: torch.nn.Module,
         activation_post_process_map: Dict[str, torch.quantization.ObserverBase],
         env: Dict[str, str], observed_graph: Graph,
         load_arg: Callable):
@@ -401,7 +401,7 @@ def insert_observer_for_input_arg_of_observed_node(
         if activation_post_process_ctr is not None:
             insert_observer(
                 node, activation_post_process_ctr(),
-                model_device, model, activation_post_process_map,
+                model, activation_post_process_map,
                 env, observed_graph, load_arg, observed_node_names_set)
 
 # A dictionary for querying the weight index for a given op
@@ -565,7 +565,6 @@ class Quantizer:
 
         get_new_observer_name = get_new_attr_name_with_prefix(
             'activation_post_process_')
-        model_device = assert_and_get_unique_device(model)
 
         result_node : Optional[Node] = None
         for node in model.graph.nodes:
@@ -591,14 +590,14 @@ class Quantizer:
                         node)
                     insert_observer_for_output_of_the_node(
                         node, obj, qconfig, self.modules, model, pattern,
-                        model_device, self.activation_post_process_map, env,
+                        self.activation_post_process_map, env,
                         observed_graph, load_arg, observed_node_names_set,
                         matched_nodes)
             else:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
             insert_observer_for_input_arg_of_observed_node(
                 node, observed_node_names_set, quants,
-                model_device, model, self.activation_post_process_map, env,
+                model, self.activation_post_process_map, env,
                 observed_graph, load_arg)
 
 
