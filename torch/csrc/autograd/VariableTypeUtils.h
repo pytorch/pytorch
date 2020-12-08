@@ -194,11 +194,11 @@ inline Tensor as_view(const Tensor & base, Tensor& tensor, bool is_differentiabl
     base_var = base_var._base();
   }
   if (is_differentiable) {
-    return make_variable_differentiable_view(std::move(base_var), std::move(tensor), creation_meta, std::move(view_func));
+    return make_variable_differentiable_view(std::move(base_var), tensor, creation_meta, std::move(view_func));
   } else {
     TORCH_CHECK(creation_meta == CreationMeta::DEFAULT,
                 "Non-differentiable views must have creation_meta=CreationMeta::DEFAULT");
-    return make_variable_non_differentiable_view(std::move(base_var), std::move(tensor));
+    return make_variable_non_differentiable_view(std::move(base_var), tensor);
   }
 }
 
@@ -211,11 +211,11 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& ten
   }
   for(Tensor &tensor : tensors) {
     if (is_differentiable) {
-      tensor = make_variable_differentiable_view(base_var, std::move(tensor), creation_meta);
+      tensor = make_variable_differentiable_view(base_var, tensor, creation_meta);
     } else {
       TORCH_CHECK(creation_meta == CreationMeta::DEFAULT,
                   "Non-differentiable views must have creation_meta=CreationMeta::DEFAULT");
-      tensor = make_variable_non_differentiable_view(base_var, std::move(tensor));
+      tensor = make_variable_non_differentiable_view(base_var, tensor);
     }
   }
   return tensors;
