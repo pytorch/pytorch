@@ -515,13 +515,15 @@ class TestUnaryUfuncs(TestCase):
     @dtypes(torch.cfloat, torch.cdouble)
     def test_abs_complex_edge_values(self, device, dtype):
         values = get_hard_complex_values(dtype)
+        values_t = torch.tensor(values, dtype=dtype, device=device)
 
-        for value in values:
-            t = torch.tensor(value, dtype=dtype, device=device)
-            self.compare_with_numpy(torch.abs, np.abs, t)
+        for value in values_t:
+            self.compare_with_numpy(torch.abs, np.abs, value)
 
             # for vectorized version.
-            t = torch.tensor([value] * 100, dtype=dtype, device=device)
+            # Note: view(1) is needed as value is 0-d tensor
+            #       and torch.cat doesn't support 0-d tensor.
+            t = torch.cat([value.view(1)] * 8)
             self.compare_with_numpy(torch.abs, np.abs, t)
 
     # TODO opinfo mvlgamma
