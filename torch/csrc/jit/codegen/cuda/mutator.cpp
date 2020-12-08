@@ -112,7 +112,7 @@ Statement* OptOutMutator::mutate(Split* s) {
     return s;
   }
   FusionGuard::getCurFusion()->removeExpr(s);
-  return new Split(ot, inr, in, fact);
+  return new Split(ot, inr, in, fact, s->innerSplit());
 }
 
 Statement* OptOutMutator::mutate(Merge* m) {

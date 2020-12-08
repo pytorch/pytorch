@@ -316,7 +316,7 @@ void IrPrinter::handle(const BroadcastOp* bop) {
 }
 
 void IrPrinter::handle(const Split* s) {
-  os_ << "Split: ";
+  os_ << (s->innerSplit() ? "Split: " : "Outer split: ");
   handle(s->in());
   os_ << " by factor " << s->factor() << " -> ";
   handle(s->outer());

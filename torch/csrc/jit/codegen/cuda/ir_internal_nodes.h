@@ -197,6 +197,9 @@ class TORCH_CUDA_API TernaryOp : public Expr {
   Val* const in3_ = nullptr;
 };
 
+// Friends for direct access to split
+class TensorDomain;
+class ReplayTransformations;
 //! Simply a representation of an annotated 1D iterable from start to extent.
 //! TensorDomains which represent how to iterate over a tensor is made up of
 //! IterDomains to form an ND iterable. We directly set parallization strategies
@@ -226,10 +229,6 @@ class TORCH_CUDA_API IterDomain : public Val {
   }
 
   static IterDomain* merge(IterDomain* outer, IterDomain* inner);
-
-  // TODO: Make protected and friend TensorDomain so only it can call into this
-  // directly, users should not be able to use this call
-  static std::pair<IterDomain*, IterDomain*> split(IterDomain* in, Val* factor);
 
   //! Run concretization pass and return the concretized domain of broadcast id
   static const IterDomain* concretizeDomain(IterDomain* bcast_dom);
@@ -316,6 +315,14 @@ class TORCH_CUDA_API IterDomain : public Val {
   bool isTrivialReduction() const {
     return isReduction() && rawExtent()->isOneInt();
   }
+
+ protected:
+  friend TensorDomain;
+  friend ReplayTransformations;
+  static std::pair<IterDomain*, IterDomain*> split(
+      IterDomain* in,
+      Val* factor,
+      bool inner_split);
 
  private:
   Val* const start_ = nullptr;
@@ -432,12 +439,15 @@ class TORCH_CUDA_API TensorDomain : public Val {
 
   size_t posOf(IterDomain* id) const;
 
-  // Split "axis" into 2 axes where the inner axes is size of "factor"
-  // and outer axis is size axis.size() / factor. Allow factor to be symbolic
-  // value instead of constant.
-  // TODO: Make protected and friend TensorDomain so only it can call into this
-  // directly, users should not be able to use this call
-  void split(int axis_, Val* factor);
+  // Split "axis" into 2 axes
+  //! inner_split dictates if the factor section of the split should be inside
+  //! the
+  //! remainer or outside.
+  //! e.g. split(0, 4, inner_split = true) will result in:
+  //! tv[id{extent}] -> tv[id{ceilDiv(extent, factor)}, id{factor}]
+  //! e.g. split(0, 4, inner_split = false) will result in:
+  //! tv[id{extent}] -> tv[id{factor}, id{ceilDiv(extent, factor)}]
+  void split(int axis_, Val* factor, bool inner_split);
 
   // Merge axis_o and axis_i. axis_i is the fast changing dimension. Resulting
   // axis is by default placed at original position axis_o
@@ -471,10 +481,16 @@ class TORCH_CUDA_API TensorDomain : public Val {
 };
 
 //! Representation a split on an IterDomain by "factor"
-//! \todo Implement split by nparts
+//! inner_split dictates if the factor section of the split should be inside the
+//! remainer or outside.
 class TORCH_CUDA_API Split : public Expr {
  public:
-  Split(IterDomain* outer, IterDomain* inner, IterDomain* in, Val* factor);
+  Split(
+      IterDomain* outer,
+      IterDomain* inner,
+      IterDomain* in,
+      Val* factor,
+      bool inner_split = true);
 
   Split(const Split* src, IrCloner* ir_cloner);
 
@@ -491,6 +507,10 @@ class TORCH_CUDA_API Split : public Expr {
     return factor_;
   }
 
+  bool innerSplit() const {
+    return inner_split_;
+  }
+
   bool sameAs(const Statement* other) const override;
 
  private:
@@ -498,6 +518,7 @@ class TORCH_CUDA_API Split : public Expr {
   IterDomain* const inner_ = nullptr;
   IterDomain* const in_ = nullptr;
   Val* const factor_ = nullptr;
+  bool inner_split_ = true;
 };
 
 //! Merge the IterDomains outer and inner into one domain, outer and inner

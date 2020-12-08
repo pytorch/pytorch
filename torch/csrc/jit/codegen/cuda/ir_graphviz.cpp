@@ -84,7 +84,8 @@ class IrNodeLabel : private OptInConstDispatch {
   }
 
   void handle(const Split* split) override {
-    label_ << "Split(factor=" << IrNodeLabel::gen(split->factor()) << ")";
+    label_ << "Split(inner=" << (split->innerSplit() ? "true" : "false")
+           << ", factor=" << IrNodeLabel::gen(split->factor()) << ")";
   }
 
   void handle(const Merge* merge) override {

@@ -335,7 +335,7 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
   return this;
 }
 
-TensorView* TensorView::split(int axis, Val* factor) {
+TensorView* TensorView::split(int axis, Val* factor, bool inner_split) {
   // Only check things associated with axis, factor will be validated in
   // IterDomain
   TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to do split on a 0-dim TensorView");
@@ -352,12 +352,12 @@ TensorView* TensorView::split(int axis, Val* factor) {
           " thisComputeAtAxis = ",
           getThisComputeAtAxis());
 
-  domain()->split(axis, factor);
+  domain()->split(axis, factor, inner_split);
   return this;
 }
 
-TensorView* TensorView::split(int axis, unsigned int factor) {
-  domain()->split(axis, new Int(factor));
+TensorView* TensorView::split(int axis, unsigned int factor, bool inner_split) {
+  domain()->split(axis, new Int(factor), inner_split);
   return this;
 }
 

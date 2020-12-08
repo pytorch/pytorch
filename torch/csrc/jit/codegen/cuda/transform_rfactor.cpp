@@ -48,13 +48,13 @@ class ReplayRFactor : public ReplayTransformations {
       return ReplayTransformations::handle(s);
 
     // outer loop size
-    Val* oe = ceilDiv(mapped->extent(), s->factor());
+    Val* remainder = ceilDiv(mapped->extent(), s->factor());
 
     // Manually replay the split, making reduction = false and rfactor = true
     // outer IterDomain
     IterDomain* ido = new IterDomain(
         new Int(0),
-        oe->as<Int>(),
+        s->innerSplit() ? remainder->as<Int>() : s->factor(),
         mapped->getParallelType(),
         rfactor_outer ? IterType::Reduction : IterType::Iteration,
         true); // broadcast
@@ -62,13 +62,13 @@ class ReplayRFactor : public ReplayTransformations {
     // inner IterDomain
     IterDomain* idi = new IterDomain(
         new Int(0),
-        s->factor(),
+        s->innerSplit() ? s->factor() : remainder->as<Int>(),
         mapped->getParallelType(),
         rfactor_inner ? IterType::Reduction : IterType::Iteration,
         true);
 
     // Generate the split node
-    new Split(ido, idi, mapped, s->factor());
+    new Split(ido, idi, mapped, s->factor(), s->innerSplit());
 
     // Remove mapped id from leaf IDs
     leaf_ids_.erase(mapped);

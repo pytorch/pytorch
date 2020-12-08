@@ -233,15 +233,21 @@ class TORCH_CUDA_API TensorView : public Val {
     compute_at_view_ = nullptr;
   }
 
-  // Split "axis" into 2 axes where the inner axes is size of "factor"
-  // and outer axis is size axis.size() / factor
-  TensorView* split(int axis, unsigned int factor);
+  // Split "axis" into 2 axes
+  //! inner_split dictates if the factor section of the split should be inside
+  //! the
+  //! remainer or outside.
+  //! e.g. split(0, 4, inner_split = true) will result in:
+  //! tv[id{extent}] -> tv[id{ceilDiv(extent, factor)}, id{factor}]
+  //! e.g. split(0, 4, inner_split = false) will result in:
+  //! tv[id{extent}] -> tv[id{factor}, id{ceilDiv(extent, factor)}]
+  TensorView* split(int axis, unsigned int factor, bool inner_split = true);
 
   // Split "axis" into 2 axes where the inner axes is size of "factor"
   // and outer axis is size axis.size() / factor. Factor can be a symbolic
   // value instead of constant. This requires setting the symbolic value as an
   // input, or using a parallel dim from NamedScalar::getParallelDim
-  TensorView* split(int axis, Val* factor);
+  TensorView* split(int axis, Val* factor, bool inner_split = true);
 
   // Merge axis_o and axis_i into 1 IterDomain
   TensorView* merge(int axis_o, int axis_i);
