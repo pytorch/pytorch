@@ -13,8 +13,6 @@ from functools import wraps
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _parse_arg, _unimplemented
 
-from typing import Optional
-
 import numpy
 import math
 import warnings
@@ -313,7 +311,7 @@ def _maybe_cast_reduce_op_input(g, self):
     if dtype is not None:
         # pytorch reduce-ops cast all other integral types to int64
         if not sym_help._is_fp(self) and not (dtype == 'Long'):
-            self = _cast_Long(g, self, False)  # type: ignore
+            self = _cast_Long(g, self, False)
     return self
 
 
@@ -2094,7 +2092,7 @@ def _pack_padded_sequence(g, input, lengths, batch_first):
     # It's really only necessary because those operators expand to something that
     # only works with int32 types in Caffe2...
     if lengths.type().scalarType() != 'Int':
-        lengths = _cast_Int(g, lengths, False)  # type: ignore
+        lengths = _cast_Int(g, lengths, False)
     return g.op("prim::PackPadded", input, lengths, outputs=2)
 
 
@@ -2439,7 +2437,7 @@ def arange(g, *args):
 
 
 def masked_fill(g, self, mask, value):
-    mask = _cast_Bool(g, mask, False)  # type: ignore
+    mask = _cast_Bool(g, mask, False)
     value = sym_help._maybe_get_scalar(value)
     return g.op('Where', mask, sym_help._if_scalar_type_as(g, value, self), self)
 
@@ -2737,7 +2735,6 @@ def as_strided(g, self, sizes, strides, offset=None):
     sizes = sym_help._maybe_get_const(sizes, 'is')
     rank = len(strides)
     self_1d = g.op("Reshape", self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64)))
-    ind: Optional[torch.Tensor]
     if not sym_help._is_value(sizes):
         ind = torch.tensor([0], dtype=torch.long)
         for i, (size, stride) in enumerate(zip(sizes, strides)):
