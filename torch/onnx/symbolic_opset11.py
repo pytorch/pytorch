@@ -645,7 +645,8 @@ def squeeze(g, self, dim=None):
     adjusted_dim = dim
     if input_rank is not None and dim < 0:
         adjusted_dim += input_rank
-    if (dim < 0 and input_rank is None) or sym_help._get_tensor_dim_size(self, adjusted_dim) is None:
+    dim_size = sym_help._get_tensor_dim_size(self, adjusted_dim)
+    if (dim < 0 and input_rank is None) or dim_size is None:
         # If onnx shape inference is not on, export always as dynamic.
         # Because we cannot tell if observed static shape is also static at runtime.
         # create 'cond' node (condition is shape[i]==1)
@@ -666,9 +667,9 @@ def squeeze(g, self, dim=None):
 
     # For static input shape
     dim = adjusted_dim
-    if sym_help._get_tensor_dim_size(self, dim) > 1:
+    if dim_size > 1:
         warnings.warn("This model contains a squeeze operation on dimension " + str(dim) + ". The size of " +
-                      "this dimension in the given input is " + str(input_shape[dim]) + ". The model will " +
+                      "this dimension in the given input is " + str(dim_size) + ". The model will " +
                       "be exported without the squeeze node. If the model is intended to be used with dynamic " +
                       "input shapes, please export with dynamic_axes argument.")
         return self
