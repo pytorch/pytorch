@@ -1,6 +1,5 @@
 import torch
-from typing import Tuple
-from ..optimizer import Optimizer, _params_t
+from ..optimizer import Optimizer
 
 
 class Adamax(Optimizer):
@@ -21,9 +20,8 @@ class Adamax(Optimizer):
     __ https://arxiv.org/abs/1412.6980
     """
 
-    def __init__(self, params: _params_t, lr: float = 2e-3,
-                 betas: Tuple[float, float] = (0.9, 0.999), eps: float = 1e-8,
-                 weight_decay: float = 0) -> None:
+    def __init__(self, params, lr=2e-3, betas=(0.9, 0.999), eps=1e-8,
+                 weight_decay=0):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -98,7 +96,7 @@ class Adamax(Optimizer):
                     exp_inf.unsqueeze(0),
                     grad.abs().add_(eps).unsqueeze_(0)
                 ], 0)
-                torch.amax(norm_buf, 0, keepdim=False, out=exp_inf)
+                torch.max(norm_buf, 0, keepdim=False, out=(exp_inf, exp_inf.new().long()))
 
             bias_corrections = [1 - beta1 ** state['step'] for state in states]
             clr = [-1 * (group['lr'] / bias_correction) for bias_correction in bias_corrections]

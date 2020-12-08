@@ -373,7 +373,8 @@ def masked_scatter(g, self, mask, source):
 def _len(g, self):
     if _is_tensor_list(self) or self.node().kind() == "onnx::SplitToSequence":
         return g.op("SequenceLength", self)
-    return g.op("Size", self)
+    sz_0 = size(g, self, g.op("Constant", value_t=torch.LongTensor([0])))
+    return g.op('Squeeze', sz_0, axes_i=[0])
 
 
 def __getitem_(g, self, i):
@@ -733,7 +734,7 @@ def __rshift_(g, self, other):
     if not sym_help._is_fp(self):
         other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx['Float'])
     two_pow = g.op('Pow', two, other)
-
+    two_pow = g.op('Cast', two_pow, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
     rshift = g.op('Div', self, two_pow)
     return rshift
 
@@ -752,7 +753,7 @@ def __lshift_(g, self, other):
     if not sym_help._is_fp(self):
         other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx['Float'])
     two_pow = g.op('Pow', two, other)
-
+    two_pow = g.op('Cast', two_pow, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
     lshift = g.op('Mul', self, two_pow)
     return lshift
 
@@ -943,3 +944,22 @@ def embedding_bag(g,
     # aten::embedding_bag returns a tuple of 4 elements: output, offset2bag, bag_size, max_indices.
     # But the last three outputs are not used in torch.nn.EmbeddingBag or torch.nn.functional.embedding_bag.
     return loop.node().output(), None, None, None
+
+
+def prim_ConstantChunk(g, self, chunks, dim):
+    input_shape = g.op("Shape", self)
+    axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
+    axis_next = g.op("Constant", value_t=torch.tensor([dim + 1], dtype=torch.long))
+    input_shape_dim = g.op("Slice", input_shape, axis, axis_next)
+    start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
+    chunk_size = g.op("Constant", value_t=torch.tensor([chunks], dtype=torch.long))
+    chunk_size_minus_1 = g.op("Constant", value_t=torch.tensor([chunks - 1], dtype=torch.long))
+    input_shape_dim_shift = g.op("Add", input_shape_dim, chunk_size_minus_1)
+    chunk_dim = g.op("Div", input_shape_dim_shift, chunk_size)
+    res = []
+    for i in range(chunks):
+        index = g.op("Constant", value_t=torch.tensor([i + 1], dtype=torch.long))
+        end = g.op("Mul", chunk_dim, index)
+        res.append(g.op("Slice", self, start, end, axis))
+        start = end
+    return res

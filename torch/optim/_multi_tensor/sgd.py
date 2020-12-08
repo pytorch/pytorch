@@ -1,7 +1,6 @@
 import torch
-from ..optimizer import Optimizer, _params_t
+from ..optimizer import Optimizer, required
 
-required = float()
 
 class SGD(Optimizer):
     r"""Implements stochastic gradient descent (optionally with momentum).
@@ -53,9 +52,8 @@ class SGD(Optimizer):
         The Nesterov version is analogously modified.
     """
 
-    def __init__(self, params: _params_t, lr: float = required,
-                 momentum: float = 0., dampening: float = 0.,
-                 weight_decay: float = 0., nesterov: bool = False) -> None:
+    def __init__(self, params, lr=required, momentum=0, dampening=0,
+                 weight_decay=0, nesterov=False):
         if lr is not required and lr < 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if momentum < 0.0:

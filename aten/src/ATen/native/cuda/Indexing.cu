@@ -233,18 +233,18 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
       AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
       value_.scalar_type(), "indexing_backward", [&] {
       AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "indexing_backward", [&] {
-      indexing_backward_kernel<scalar_t, UNROLL><<<grid, block, 0, stream>>>(
-        sorted_indices.data_ptr<int64_t>(),
-        orig_indices.data_ptr<int64_t>(),
-        value_.data_ptr<scalar_t>(),
-        src_.data_ptr<scalar_t>(),
-        num_indices,
-        sliceSize,
-        strideBefore,
-        nElemBefore);
+        indexing_backward_kernel<scalar_t, UNROLL><<<grid, block, 0, stream>>>(
+          sorted_indices.data_ptr<int64_t>(),
+          orig_indices.data_ptr<int64_t>(),
+          value_.data_ptr<scalar_t>(),
+          src_.data_ptr<scalar_t>(),
+          num_indices,
+          sliceSize,
+          strideBefore,
+          nElemBefore);
+        });
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
-      });
-      AT_CUDA_CHECK(cudaGetLastError());
       if (permuted)
           self.copy_(src_.permute(inversePerm));
   }
@@ -476,21 +476,23 @@ Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const 
 
   int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
-#define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM) \
+#define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM)  \
   indexAddSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM> \
-    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(   \
-      selfInfo, sourceInfo, indexInfo,                    \
-      selfAddDim, sourceAddDim, sliceSize, selfAddDimSize);
+    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                                \
+      selfInfo, sourceInfo, indexInfo,                                               \
+      selfAddDim, sourceAddDim, sliceSize, selfAddDimSize);                          \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define LARGE_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE,                        \
-                    SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR)  \
+                    SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR)            \
   indexAddLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                       \
-                     SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR> \
-    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(         \
-      selfInfo, sourceInfo, indexInfo,                          \
-      selfAddDim, sourceAddDim, sourceTotalSize,                     \
-      (IDX_IS_MAJOR) ? sliceSize : numIndex,                \
-      selfAddDimSize);
+                     SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR>           \
+    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                       \
+      selfInfo, sourceInfo, indexInfo,                                      \
+      selfAddDim, sourceAddDim, sourceTotalSize,                            \
+      (IDX_IS_MAJOR) ? sliceSize : numIndex,                                \
+      selfAddDimSize);                                                      \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
   dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));
@@ -725,22 +727,24 @@ void index_select_out_cuda_impl(Tensor& out, const Tensor& self, long dim,
 
   int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
-#define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM) \
+#define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM)         \
   indexSelectSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM>     \
-    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(           \
-      outInfo, selfInfo, indicesInfo,                            \
-      outSelectDim, selfSelectDim, static_cast<TYPE>(sliceSize), \
-      selfSelectDimSize);
+    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                                   \
+      outInfo, selfInfo, indicesInfo,                                                   \
+      outSelectDim, selfSelectDim, static_cast<TYPE>(sliceSize),                        \
+      selfSelectDimSize);                                                               \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define LARGE_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE,                           \
-                    DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR)     \
+                    DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR)                   \
   indexSelectLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                       \
-                        DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR> \
-    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(            \
-      outInfo, selfInfo, indicesInfo,                             \
-      outSelectDim, selfSelectDim, static_cast<TYPE>(outTotalSize), \
-      static_cast<TYPE>((IDX_IS_MAJOR) ? sliceSize : numIndices),  \
-      selfSelectDimSize);
+                        DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR>               \
+    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                          \
+      outInfo, selfInfo, indicesInfo,                                          \
+      outSelectDim, selfSelectDim, static_cast<TYPE>(outTotalSize),            \
+      static_cast<TYPE>((IDX_IS_MAJOR) ? sliceSize : numIndices),              \
+      selfSelectDimSize);                                                      \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
   dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));
@@ -882,7 +886,8 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out){
   //However, out with correct sizes and incorrect strides will have to be copied to from the intermediate we've produced.
   bool need_to_copy = out.dim() == 2 && out.sizes()[0] == num_nonzeros_h && out.sizes()[1] == self.dim() && !out.t().is_contiguous();
   at::Tensor out_temp = need_to_copy ?
-    at::native::empty_cuda({self.dim(), num_nonzeros_h}, out.options()) :
+    at::native::empty_cuda({self.dim(), num_nonzeros_h}, optTypeMetaToScalarType(out.options().dtype_opt()),
+                           out.options().layout_opt(), out.options().device_opt(), out.options().pinned_memory_opt()) :
     out.resize_({self.dim(), num_nonzeros_h});
   //Scalars are expected to produce output of size (1,0), so we can't write to it
   if (self.dim() > 0) {
@@ -931,7 +936,7 @@ Tensor& nonzero_out_cuda(Tensor& out, const Tensor& self){
 }
 
 Tensor nonzero_cuda(const Tensor& self){
-  Tensor out = at::native::empty_cuda({0}, self.options().dtype(kLong));
+  Tensor out = at::native::empty_cuda({0}, kLong, self.options().layout_opt(), self.options().device_opt(), self.options().pinned_memory_opt());
   return nonzero_out_cuda(out, self);
 }
 

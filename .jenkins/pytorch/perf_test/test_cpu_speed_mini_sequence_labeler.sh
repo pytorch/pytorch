@@ -21,7 +21,7 @@ test_cpu_speed_mini_sequence_labeler () {
 
   for (( i=1; i<=NUM_RUNS; i++ )) do
     runtime=$(get_runtime_of_command python main.py)
-    SAMPLE_ARRAY+=(${runtime})
+    SAMPLE_ARRAY+=("${runtime}")
   done
 
   cd ../../..
