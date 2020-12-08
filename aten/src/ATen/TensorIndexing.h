@@ -250,10 +250,6 @@ static inline Tensor boolToIndexingTensor(const Tensor& self, bool value, const 
   }
 }
 
-static inline Tensor scalarToTensorCPU(Scalar v, const TensorOptions& options) {
-  return at::detail::scalar_tensor_static(v, v.type(), options.device_opt());
-}
-
 static inline Tensor scalarToTensorNonNativeDeviceType(Scalar v, const TensorOptions& options) {
   return at::scalar_tensor(v, options);
 }
@@ -321,8 +317,8 @@ static inline int64_t count_specified_dimensions(const ArrayRef<TensorIndex>& in
 // The rest of the functions are in `at::indexing::impl` namespace, signifying
 // that they shouldn't be used from Python indexing implementation.
 static inline Tensor scalarToTensor(Scalar v, const TensorOptions& options, const at::Device& self_device) {
-  if (self_device == at::kCPU) {
-    return impl::scalarToTensorCPU(v, options);
+  if (self_device == at::kCPU && !v.isComplex() && options.dtype_opt()->toScalarType() != ScalarType::ComplexDouble) {
+    return at::detail::scalar_tensor_static(v, options.dtype_opt()->toScalarType(), self_device);
   } else {
     return impl::scalarToTensorNonNativeDeviceType(v, options);
   }
