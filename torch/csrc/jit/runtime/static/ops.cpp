@@ -6,17 +6,23 @@
 namespace torch {
 namespace jit {
 
-namespace {
-inline at::Tensor create_empty_from(const at::Tensor& t) {
-  return at::empty({0}, t.options());
-}
-} // namespace
-
 C10_DEFINE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
 
 bool canRunOutOfPlace(Node* n) {
   auto op_name = std::string(n->kind().toQualString());
   return SROperatorRegistry()->Has(op_name);
+}
+
+bool canReuseInputs(Node* n) {
+  auto op_name = std::string(n->kind().toQualString());
+  DCHECK(SROperatorRegistry()->Has(op_name));
+  return SROperatorRegistry()->Create(op_name)->CanReuseInput();
+}
+
+bool canReuseOutputs(Node* n) {
+  auto op_name = std::string(n->kind().toQualString());
+  DCHECK(SROperatorRegistry()->Has(op_name));
+  return SROperatorRegistry()->Create(op_name)->CanReuseOutput();
 }
 
 // TODO: expand to include all view producing ops, mostly in

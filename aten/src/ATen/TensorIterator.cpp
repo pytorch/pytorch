@@ -945,15 +945,15 @@ TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tenso
 }
 
 void TensorIteratorBase::populate_operands(TensorIteratorConfig& config) {
-  for (int i = 0; i < config.tensors_.size(); i++) {
-    operands_.emplace_back(std::move(config.tensors_[i]));
+  for (auto& tensor: config.tensors_) {
     // If *any* of the arguments is a meta tensor, the overall
     // computation is a meta computation (don't do any work,
     // just compute output information).  This aligns with
     // our multiple dispatch semantics.
-    if (operands_[i].tensor.is_meta()) {
+    if (tensor.is_meta()) {
       is_meta_ = true;
     }
+    operands_.emplace_back(std::move(tensor));
   }
   num_outputs_ = config.num_outputs_;
 }
