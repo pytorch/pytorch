@@ -1,3 +1,4 @@
+import sys
 import torch
 import functools
 import inspect
@@ -31,13 +32,27 @@ class _DecoratorContextManager:
         @functools.wraps(func)
         def generator_context(*args, **kwargs):
             gen = func(*args, **kwargs)
-            while True:
-                try:
-                    with self.__class__():
-                        x = next(gen)
-                    yield x
-                except StopIteration:
-                    break
+            grad_mode_context = type(self)()
+            try:
+                with grad_mode_context:
+                    response = gen.send(None)
+                while True:
+                    try:
+                        request = yield response
+                    except GeneratorExit:
+                        with grad_mode_context:
+                            gen.close()
+                        raise
+                    except BaseException:
+                        typ, val, tb = sys.exc_info()
+                        with grad_mode_context:
+                            response = gen.throw(typ, val, tb.tb_next)
+                    else:
+                        with grad_mode_context:
+                            response = gen.send(request)
+            except StopIteration as e:
+                return e.value
+
         return generator_context
 
     def __enter__(self) -> None:
