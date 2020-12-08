@@ -295,7 +295,7 @@ Tensor fft_ifftn(const Tensor& self, c10::optional<IntArrayRef> s,
 Tensor fft_rfftn(const Tensor& self, c10::optional<IntArrayRef> s,
                 c10::optional<IntArrayRef> dim,
                 c10::optional<std::string> norm_str) {
-  TORCH_CHECK(!self.is_complex(), "rfftn expects a real input tensor, but got ", self.scalar_type());
+  TORCH_CHECK(!self.is_complex(), "rfftn expects a real-valued input tensor, but got ", self.scalar_type());
   auto desc = canonicalize_fft_shape_and_dim_args(self, s, dim);
   TORCH_CHECK(desc.shape.size() > 0, "rfftn must transform at least one axis");
   Tensor input = promote_tensor_fft(self, /*require_complex=*/false);
