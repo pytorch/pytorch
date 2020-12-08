@@ -1,11 +1,9 @@
 #include <ATen/cuda/Exceptions.h>
-#include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAGraph.h>
 #include <ATen/Functions.h>
 #include <c10/cuda/CUDAFunctions.h>
 
 namespace at {
-
 namespace cuda {
 
 CUDAGraph::CUDAGraph()
@@ -43,6 +41,7 @@ void CUDAGraph::capture_begin() {
               "default stream.)");
 
   capture_stream_ = stream;
+  capture_gen_ = gen;
 
   // cudaStreamCaptureModeGlobal is the most conservative option to
   // prevent potentially unsafe CUDA API calls during capture.  See
@@ -64,6 +63,7 @@ void CUDAGraph::capture_end() {
 
   TORCH_CHECK(stream == capture_stream_,
               "Capture must end on the same stream it began on.");
+
   AT_CUDA_CHECK(cudaStreamEndCapture(capture_stream_, &graph_));
   TORCH_CHECK(graph_ != NULL, "Invalid capture.");
   has_graph_ = true;
@@ -76,6 +76,10 @@ void CUDAGraph::capture_end() {
 
   auto* gen = get_generator_or_default<CUDAGeneratorImpl>(
       c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
+  TORCH_CHECK(gen == capture_gen_,
+              "Default CUDA RNG generator on current device at capture end "
+              "is different from default generator on current device "
+              "when capture began");
   wholegraph_increment_ = gen->capture_epilogue();
 
   // Now that we've instantiated graph_ into graph_exec_,

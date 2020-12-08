@@ -3280,6 +3280,7 @@ class TestCudaComm(TestCase):
             self.assertEqual(expected_a, x.a)
             self.assertEqual(expected_b, x.b)
 
+    @unittest.skipIf(int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     def test_graph_capture_simple(self):
         s1 = torch.cuda.Stream()
 
@@ -3297,6 +3298,7 @@ class TestCudaComm(TestCase):
 
         self.assertTrue(a.sum().item() == 3000.)
 
+    @unittest.skipIf(int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     def test_graph_rng_functional(self):
         # The caching allocator isn't yet graph-safe.
         # In this test, graphed regions try to ensure allocator safety by
@@ -3372,6 +3374,7 @@ class TestCudaComm(TestCase):
         for op, kwargs in ops_with_kwargs:
             run(op, kwargs)
 
+    @unittest.skipIf(int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     def test_graph_rng_distributions(self):
         # The caching allocator isn't yet graph-safe.
         # In this test, all ops maintain static references to inputs and outputs
