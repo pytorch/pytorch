@@ -128,8 +128,10 @@ class TestStaticRuntime(TestCase):
         attention_a = StaticRuntime(attention)
         o_test = attention_a(src, src, src, src_mask)
         o_test_kw = attention_a(src, src, value=src, mask=src_mask)
+
         for a, b in zip(o_ref, o_test):
             torch.testing.assert_allclose(a, b)
+
         for a, b in zip(o_ref, o_test_kw):
             torch.testing.assert_allclose(a, b)
 
@@ -150,9 +152,9 @@ class TestStaticRuntime(TestCase):
         attention = torch.jit.script(attention)
         attention_a = StaticRuntime(attention)
 
-        attention_a.benchmark([src, src, src, src_mask], {}, 10, 10)
+        attention_a.benchmark([src, src, src, src_mask], {}, 2, 2)
         metrics = attention_a.benchmark_individual_ops(
-            [src, src, src, src_mask], {}, 10, 10
+            [src, src, src, src_mask], {}, 2, 2
         )
 
     def test_mlp(self):
@@ -193,6 +195,13 @@ class TestStaticRuntime(TestCase):
         o_test = tg_a(s, s, s)[0]
         torch.testing.assert_allclose(o_ref, o_test)
 
+    def test_leaky_relu(self):
+        s = torch.randn(5, 5)
+        tg = torch.jit.script(nn.LeakyReLU(0.1))
+        o_ref = tg(s)
+        tg_a = StaticRuntime(tg)
+        o_test = tg_a(s)[0]
+        torch.testing.assert_allclose(o_ref, o_test)
 
 if __name__ == "__main__":
     run_tests()

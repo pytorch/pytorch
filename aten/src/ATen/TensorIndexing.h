@@ -5,6 +5,10 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/Functions.h>
 
+// TODO: try to remove this
+// There is some back story, see https://github.com/pytorch/pytorch/issues/48684
+#include <ATen/NativeFunctions.h>
+
 namespace at {
 namespace indexing {
 
@@ -13,7 +17,7 @@ const int64_t INDEX_MIN = std::numeric_limits<int64_t>::min();
 
 enum class TensorIndexType { None, Ellipsis, Integer, Boolean, Slice, Tensor };
 
-constexpr c10::nullopt_t None{c10::nullopt_t::init()};
+constexpr c10::nullopt_t None = c10::nullopt;
 
 struct CAFFE2_API EllipsisIndexType final { EllipsisIndexType() {} };
 CAFFE2_API extern const EllipsisIndexType Ellipsis;

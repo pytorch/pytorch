@@ -519,7 +519,7 @@ std::pair<size_t, MatchedSchema> matchSchemas(
           render_errors ? &failure_messages : nullptr,
           allow_conversions);
       if (matched_schema) {
-        return std::make_pair(i, std::move(*matched_schema));
+        return std::make_pair(i, *matched_schema);
       }
     }
   }
@@ -551,8 +551,8 @@ static Value* packOutputs(
   TupleTypePtr named_tuple = nullptr;
   if (field_names) {
     auto types = fmap(values, [](Value* v) { return v->type(); });
-    named_tuple = TupleType::createNamed(
-        c10::nullopt, field_names.value(), std::move(types));
+    named_tuple =
+        TupleType::createNamed(c10::nullopt, field_names.value(), types);
   }
   return g.insertNode(g.createTuple(values, named_tuple))->output();
 }
@@ -584,14 +584,15 @@ Value* emitBuiltinCall(
     const SourceRange& loc,
     Graph& graph,
     Symbol name,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
     const c10::optional<NamedValue>& self) {
   const auto& variants = getAllOperatorsFor(name);
   const auto& builtin_functions = getAllBuiltinFunctionsFor(name);
 
   std::stringstream failure_messages;
   std::vector<const FunctionSchema*> schemas;
+  schemas.reserve(variants.size());
   for (const std::shared_ptr<Operator>& op : variants) {
     schemas.push_back(&op->schema());
   }
@@ -620,7 +621,7 @@ Value* emitBuiltinCall(
     throw error;
   }
 
-  auto matched = matchSchemas(schemas, loc, graph, inputs, attributes, self);
+  auto matched = matchSchemas(schemas, loc, graph, args, kwargs, self);
 
   if (matched.first < variants.size()) {
     return emitBuiltinNode(matched.second, loc, graph, name);

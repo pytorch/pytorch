@@ -11,14 +11,19 @@
 #include <c10d/Store.hpp>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
+
 // Forward-declare the TensorPipe classes we need, to avoid including its
 // headers in PyTorch's ones and thus have it become a public dependency.
 
 namespace tensorpipe {
 
+#if defined(USE_CUDA) && !defined(__HIP_PLATFORM_HCC__)
+#define USE_CUDA_NOT_ROCM
+#endif
+
 class CpuBuffer;
 
-#ifdef USE_CUDA
+#ifdef USE_CUDA_NOT_ROCM
 class CudaBuffer;
 #endif
 
@@ -40,7 +45,7 @@ template <typename TBuffer>
 class Context;
 using CpuContext = Context<CpuBuffer>;
 
-#ifdef USE_CUDA
+#ifdef USE_CUDA_NOT_ROCM
 using CudaContext = Context<CudaBuffer>;
 #endif
 
@@ -63,6 +68,7 @@ struct TransportRegistration {
   std::string address;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
 
 struct CpuChannelRegistration {
@@ -70,16 +76,19 @@ struct CpuChannelRegistration {
   int64_t priority;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_REGISTRY(TensorPipeCpuChannelRegistry, CpuChannelRegistration);
 
 struct CudaChannelRegistration {
-#ifdef USE_CUDA
+#ifdef USE_CUDA_NOT_ROCM
   std::shared_ptr<tensorpipe::channel::CudaContext> channel;
-#endif
   int64_t priority;
+#endif
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_REGISTRY(TensorPipeCudaChannelRegistry, CudaChannelRegistration);
+
 
 constexpr auto kDefaultNumWorkerThreads = 16;
 
@@ -161,11 +170,11 @@ struct AggregatedNetworkData {
 class TensorPipeAgent : public RpcAgent {
  public:
   TensorPipeAgent(
-      const std::shared_ptr<::c10d::Store>& store,
+      const c10::intrusive_ptr<::c10d::Store>& store,
       std::string selfName,
       worker_id_t selfId,
       int worldSize,
-      std::shared_ptr<c10d::ProcessGroup> processGroup,
+      c10::intrusive_ptr<::c10d::ProcessGroup> processGroup,
       TensorPipeRpcBackendOptions opts,
       std::unique_ptr<RequestCallback> cb);
 
@@ -303,7 +312,7 @@ class TensorPipeAgent : public RpcAgent {
   // The join method is required to behave like a barrier and perform collective
   // operations. For simplicity and reliability, we offload this to a process
   // group, but probably one day we might want to re-implement them using RPCs.
-  const std::shared_ptr<c10d::ProcessGroup> processGroup_;
+  const c10::intrusive_ptr<::c10d::ProcessGroup> processGroup_;
 
   mutable std::mutex mutex_;
   uint64_t nextMessageID_{0};

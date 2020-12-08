@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
+#include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/remove_redundant_profiles.h>
@@ -79,9 +80,9 @@ bool isSupported(Node* node) {
       "aten::lt.Tensor(Tensor self, Tensor other) -> Tensor",
       "aten::lt.Scalar(Tensor self, Scalar other) -> Tensor",
       "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor",
-      "aten::pow.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor",
-      // TODO : do we support pow.Scalar ?
-      "aten::pow.Scalar(Scalar self, Tensor exponent) -> Tensor",
+      // TODO: uncomment when we properly support pow
+      // "aten::pow.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor",
+      // "aten::pow.Scalar(Scalar self, Tensor exponent) -> Tensor",
       // TODO: support clamp_min, clamp_max
       "aten::clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor",
       "aten::lerp.Scalar(Tensor self, Tensor end, Scalar weight) -> Tensor",
@@ -141,17 +142,20 @@ bool isSupported(Node* node) {
       "aten::where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor",
       "aten::where.ScalarOther(Tensor condition, Tensor self, Scalar other) -> Tensor",
       "aten::where.Scalar(Tensor condition, Scalar self, Scalar other) -> Tensor",
-      "aten::where(Tensor condition) -> Tensor[]",
       // TODO: enable other min/max variants, operators that can be both
       // elementwise or reductions:
       "aten::min.other(Tensor self, Tensor other) -> Tensor",
       "aten::max.other(Tensor self, Tensor other) -> Tensor",
       // TODO: enable slice, shape inference is not implemented for this op yet
   };
+  static const OperatorSet cuda_only_operator_set{
+      "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor",
+  };
   static const OperatorSet supported_reduction_set{
       "aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor",
       "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor",
       "aten::softmax.int(Tensor self, int dim , ScalarType? dtype=None) -> Tensor",
+      "aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
   };
   // clang-format on
 
@@ -165,6 +169,17 @@ bool isSupported(Node* node) {
     // Value is either an int or a float (can occur from .item())
     for (Value* v : node->inputs()) {
       if (v->type()->cast<NumberType>()) {
+        return false;
+      }
+    }
+
+    // Operator is only supported on CUDA.
+    if (node->isMemberOf(cuda_only_operator_set)) {
+      auto device = tensorexpr::pickDeviceType(node->inputs());
+      if (!device) {
+        device = tensorexpr::pickDeviceType(node->outputs());
+      }
+      if (!device || device->is_cpu()) {
         return false;
       }
     }
@@ -221,36 +236,35 @@ bool texprReductionsEnabled() {
   return texpr_reductions_enabled;
 }
 
-// TODO: if a value has differently typed uses, temporarrily insert a node
-// specializing the type for each use and later remove, instead of bailing
-bool profiledWithDifferentTypes(Value* v) {
-  std::vector<TypePtr> types;
-  for (const auto& use : v->uses()) {
-    if (use.user->kind() == prim::profile) {
-      types.push_back(use.user->ty(attr::profiled_type));
-    }
-  }
-  for (size_t i = 1; i < types.size(); ++i) {
-    if (types.at(i - 1) != types.at(i)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 void removeProfileNodesAndSpecializeTypes(Block* b) {
   for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
     if (it->kind() == prim::profile) {
       GRAPH_DEBUG("Removing prim::profile: %", it->output()->debugName());
       it->output()->replaceAllUsesWith(it->input());
-      if (!profiledWithDifferentTypes(it->input())) {
-        it->input()->setType(it->ty(attr::profiled_type));
-      } else {
-        GRAPH_DEBUG(
-            "Ignoring value with differently typed profiles :%",
-            it->output()->debugName());
+      auto profiled_type = it->ty(attr::profiled_type)->expect<TensorType>();
+
+      // A value can be profiled with differently typed uses.
+      // This can occur from:
+      // - having a use which is not executed, so the type will be
+      // TensorType::get()
+      // - control-flow that depends on tensor type:
+      //   if x.size() == 2 op(x) else op(x)
+      // - mutation of the value on a field represented in the tensor type
+      //   op(x); x.resize_([...]); op(x)
+
+      // The most common case today with num_profiles = 1 is from the first
+      // case. Here we can just ignore non-profiled uses, and choose any of the
+      // profiled uses. Because we guard all tensor types in the runtime, even
+      // if we set a Value to have a profiled type from one use and then execute
+      // a use with a different profiled type, we will still be correct.
+      // In the future we could consider unifying the types of uses, or adding a
+      // type refinement node so uses can have the correct corresponding type.
+      if (profiled_type == TensorType::get()) {
+        continue;
       }
+      it->input()->setType(it->ty(attr::profiled_type));
       it.destroyCurrent();
+
     } else {
       for (Block* ib : it->blocks()) {
         removeProfileNodesAndSpecializeTypes(ib);
@@ -260,7 +274,9 @@ void removeProfileNodesAndSpecializeTypes(Block* b) {
 }
 
 void RemoveProfileNodesAndSpecializeTypes(std::shared_ptr<Graph>& graph) {
+  GRAPH_DEBUG("Before removeProfileNodesAndSpecializeTypes:\n", *graph);
   removeProfileNodesAndSpecializeTypes(graph->block());
+  GRAPH_DEBUG("After removeProfileNodesAndSpecializeTypes:\n", *graph);
 }
 
 void removeTensorTypeSpecialization(Value* v) {
@@ -607,6 +623,8 @@ class TensorExprFuser {
       SubgraphUtils::unmergeSubgraph(n);
       return true;
     }
+    // Cleanup the subgraph from duplicated constants while we're at it.
+    ConstantPooling(subgraph);
     return false;
   }
 
@@ -658,16 +676,27 @@ class TensorExprFuser {
     return fusion_group;
   }
 
+  bool shapeIsKnown(Value* v) {
+    if (v->type()->cast<TensorType>()) {
+      if (!v->isCompleteTensor()) {
+        return false;
+      }
+      if (*v->type()->cast<TensorType>()->dim() == 0) {
+        return false;
+      }
+    }
+    return true;
+  }
   bool allShapesAreKnown(Node* node) {
     // TODO: Relax the checks to support dynamic shapes
     for (Value* input : node->inputs()) {
-      if (input->type()->cast<TensorType>()) {
-        if (!input->isCompleteTensor()) {
-          return false;
-        }
-        if (*input->type()->cast<TensorType>()->dim() == 0) {
-          return false;
-        }
+      if (!shapeIsKnown(input)) {
+        return false;
+      }
+    }
+    for (Value* output : node->outputs()) {
+      if (!shapeIsKnown(output)) {
+        return false;
       }
     }
     return true;
@@ -696,6 +725,34 @@ class TensorExprFuser {
         return false;
       }
     }
+    return true;
+  }
+
+  bool typesAreSupported(const Node* node) {
+    // clang-format off
+    // breaks up the schema strings so they are no longer discoverable with ctrl-F
+    static const OperatorSet float_only_operator_set{
+      "aten::fmod.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::fmod.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::remainder.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::remainder.Tensor(Tensor self, Tensor other) -> Tensor",
+    };
+    // clang-format on
+
+    // Value is only supported if operands are floats.
+    if (node->isMemberOf(float_only_operator_set)) {
+      for (const Value* v : node->inputs()) {
+        if (auto const& tt = v->type()->cast<TensorType>()) {
+          auto const& st = tt->scalarType();
+          if (!st || !isFloatingType(*st)) {
+            return false;
+          }
+        } else if (!v->type()->cast<FloatType>()) {
+          return false;
+        }
+      }
+    }
+
     return true;
   }
 
@@ -740,6 +797,7 @@ class TensorExprFuser {
     }
 
     REQ(tensorexpr::isSupported(node));
+    REQ(typesAreSupported(node));
     return true;
   }
 
