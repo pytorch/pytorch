@@ -517,17 +517,16 @@ std::vector<Dimname> compute_bmm_outnames(
 }
 
 std::vector<Dimname> compute_baddbmm_outnames(
-    TensorImpl* result,
-    TensorImpl* batch1,
-    TensorImpl* batch2,
-    TensorImpl* bias) {
-  if (!impl::has_names(result) && !impl::has_names(batch1) &&
-      !impl::has_names(batch2) && !impl::has_names(bias)) {
+    Tensor& result,
+    const Tensor& self,
+    const Tensor& other,
+    const Tensor& bias) {
+  if (!result.has_names() && !self.has_names()
+    && !other.has_names() && !bias.has_names()) {
     return {};
   }
-  auto bmm_names = compute_matmul_outnames(
-      impl::get_names(batch1), impl::get_names(batch2));
-  auto baddbmm_names = unify_from_right(impl::get_names(bias), bmm_names);
+  auto bmm_names = compute_matmul_outnames(self.names(), other.names());
+  auto baddbmm_names = unify_from_right(bias.names(), bmm_names);
   return baddbmm_names;
 }
 

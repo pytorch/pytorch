@@ -36,6 +36,8 @@
 #include <type_traits>
 #include <utility>
 
+#include <c10/util/Metaprogramming.h>
+
 #define TR2_OPTIONAL_REQUIRES(...) \
   typename std::enable_if<__VA_ARGS__::value, bool>::type = false
 
@@ -384,6 +386,9 @@ struct trivially_copyable_optimization_optional_base {
   ~trivially_copyable_optimization_optional_base() = default;
 };
 
+// CUDA 9.2 and below fail while trying to compile default move constructor
+// see https://github.com/pytorch/csprng/issues/84
+#if (!defined(__CUDA_ARCH__) || !defined(CUDA_VERSION) || CUDA_VERSION > 9200)
 template <class T>
 using OptionalBase = typename std::conditional<
     std::is_trivially_destructible<T>::value &&
@@ -400,9 +405,20 @@ using OptionalBase = typename std::conditional<
         constexpr_optional_base<typename std::remove_const<
             T>::type>, // use base with trivial destructor
         optional_base<typename std::remove_const<T>::type>>::type>::type;
+#else
+template <class T>
+using OptionalBase = typename std::conditional<
+        std::is_trivially_destructible<T>::value, // if possible
+        constexpr_optional_base<typename std::remove_const<
+            T>::type>, // use base with trivial destructor
+        optional_base<typename std::remove_const<T>::type>>::type;
+#endif 
 
 template <class T>
 class optional : private OptionalBase<T> {
+// CUDA 9.2 and below fail while trying to compile default move constructor
+// see https://github.com/pytorch/csprng/issues/84
+#if (!defined(__CUDA_ARCH__) || !defined(CUDA_VERSION) || CUDA_VERSION > 9200)
   template <class U> // re-declaration for nvcc on Windows.
   using OptionalBase = typename std::conditional<
       std::is_trivially_destructible<U>::value &&
@@ -415,6 +431,14 @@ class optional : private OptionalBase<T> {
           constexpr_optional_base<typename std::remove_const<
               U>::type>, // use base with trivial destructor
           optional_base<typename std::remove_const<U>::type>>::type>::type;
+#else
+  template <class U>
+  using OptionalBase = typename std::conditional<
+          std::is_trivially_destructible<U>::value, // if possible
+          constexpr_optional_base<typename std::remove_const<
+              U>::type>, // use base with trivial destructor
+          optional_base<typename std::remove_const<U>::type>>::type;
+#endif 
 
   static_assert(
       !std::is_same<typename std::decay<T>::type, nullopt_t>::value,
@@ -474,7 +498,19 @@ class optional : private OptionalBase<T> {
 
   optional(const optional& rhs) = default;
 
+// CUDA 9.2 and below fail while trying to compile default move constructor
+// see https://github.com/pytorch/csprng/issues/84
+#if (!defined(__CUDA_ARCH__) || !defined(CUDA_VERSION) || CUDA_VERSION > 9200)
   optional(optional&& rhs) = default;
+#else
+  optional(optional&& rhs) noexcept(
+      std::is_nothrow_move_constructible<T>::value) {
+    if (rhs.initialized()) {
+      ::new (static_cast<void*>(dataptr())) T(std::move(*rhs));
+      OptionalBase<T>::init_ = true;
+    }
+  }
+#endif
 
   // see https://github.com/akrzemi1/Optional/issues/16
   // and https://en.cppreference.com/w/cpp/utility/optional/optional,
@@ -642,6 +678,22 @@ class optional : private OptionalBase<T> {
     clear();
   }
 };
+
+template <class T, class F>
+constexpr T value_or_else(const optional<T>& v, F&& func) {
+  static_assert(std::is_convertible<typename guts::infer_function_traits_t<F>::return_type, T>::value,
+    "func parameters must be a callable that returns a type convertible to the value stored in the optional");
+  return v.has_value() ? *v : detail_::convert<T>(std::forward<F>(func)());
+}
+
+template <class T, class F>
+constexpr T value_or_else(optional<T>&& v, F&& func) {
+  static_assert(std::is_convertible<typename guts::infer_function_traits_t<F>::return_type, T>::value,
+    "func parameters must be a callable that returns a type convertible to the value stored in the optional");
+  return v.has_value()
+    ? constexpr_move(std::move(v).contained_val())
+    : detail_::convert<T>(std::forward<F>(func)());
+}
 
 
 // XXX: please refrain from using optional<T&>, since it is being against with
