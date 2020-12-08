@@ -488,10 +488,10 @@ void TensorIteratorBase::allocate_or_resize_outputs() {
         set_output(i, tensor_shape, tensor_stride, op.options(), names_);
       }
       op.current_dtype = op.target_dtype;
-    } else if (op.tensor.defined() && !names_.empty()) {
-      // Even if we don't resize, we may still propagate names, esp
-      // if we were doing an inplace operation
-      namedinference::propagate_names(op.tensor, names_);
+    } else if (op.tensor.defined()) {
+      // Even if we don't resize, we still need to tell set_output about
+      // the output, so that we properly set guard and propagate names
+      set_output(i, op.tensor.sizes(), {}, op.tensor.options(), names_);
     }
   }
 }
