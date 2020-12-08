@@ -40,6 +40,9 @@ class SubgraphMatcher {
   bool matchNodes(const Node* n1, Node* n2);
   bool matchAttributes(const Node* n1, Node* n2);
 
+  bool isPatternInput(const Value* v) const;
+  bool isPatternOutput(const Value* v) const;
+
   std::unordered_map<const Node*, Node*> nodes_map_;
   std::unordered_map<const Value*, Value*> values_map_;
 
@@ -60,13 +63,29 @@ bool patternGraphIsValid(const Graph& pattern) {
   }
 
   // Verify that pattern graph returns only one value.
-  const Node* bottom_node = *(pattern.nodes().end());
-  if (bottom_node->inputs().size() != 1) {
-    return false;
-  }
+//   const Node* bottom_node = *(pattern.nodes().end());
+//   if (bottom_node->inputs().size() != 1) {
+//     return false;
+//   }
 
   // TODO: Verify that nodes in the pattern don't alias.
   return true;
+}
+
+bool SubgraphMatcher::isPatternInput(const Value* v) const {
+  return (v->owningGraph() == &pattern_ && v->node()->kind() == prim::Param);
+}
+
+bool SubgraphMatcher::isPatternOutput(const Value* v) const {
+  if (v->owningGraph() != &pattern_) {
+    return false;
+  }
+  for (const Value* output : pattern_.outputs()) {
+    if (v == output) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -98,8 +117,8 @@ bool SubgraphMatcher::matchValues(const Value* v1, Value* v2) {
   // When V2 is ANCHOR, we're comparing exiting values, and when V1->node is
   // PARAM, we're comparing entering values - in these two cases the number of
   // uses don't need to be the same.
-  if (v1->uses().size() != v2->uses().size() && v2->node() != anchor_ &&
-      v1->node()->kind() != prim::Param) {
+  if (v1->uses().size() != v2->uses().size() && !isPatternOutput(v1) &&
+      !isPatternInput(v1)) {
     GRAPH_DEBUG(
         "Values %",
         v1->debugName(),
@@ -297,11 +316,14 @@ bool SubgraphMatcher::matchesSubgraphFromAnchorNode(Node* anchor) {
   anchor_ = anchor;
 
   const Node* bottom_node = *(pattern_.nodes().end());
-  AT_ASSERT(bottom_node->inputs().size() == 1);
-  bottom_node = bottom_node->input()->node();
+  bottom_node = bottom_node->input(0)->node();
 
   if (!matchNodes(bottom_node, anchor)) {
     return false;
+  }
+
+  for (const Value* output : pattern_.outputs()) {
+    AT_ASSERT(values_map_.count(output));
   }
 
   GRAPH_UPDATE("Pattern matched!\n");

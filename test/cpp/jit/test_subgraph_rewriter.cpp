@@ -122,5 +122,41 @@ graph(%a, %b):
   FileCheck().check("c::ccc")->check_not("d::ddd")->run(*graph);
 }
 
+TEST(SubgraphRewriterTest, MultiOutput) {
+  auto graph = std::make_shared<Graph>();
+
+  parseIR(
+      R"IR(
+graph(%0, %1):
+  %a1, %a2 = a::aaa(%0, %1)
+  %b = b::bbb(%a1)
+  %c = c::ccc(%b)
+
+  %x1, %x2 = a::aaa(%c, %a2)
+  %y = b::bbb(%x1)
+  %z = d::ddd(%y)
+  return (%z))IR",
+      graph.get());
+
+    std::string pattern = R"IR(
+graph(%0, %1):
+  %a1, %a2 = a::aaa(%0, %1)
+  %b = b::bbb(%a1)
+  return (%b, %a2))IR";
+
+  std::string replacement = R"IR(
+graph(%a, %b):
+  %x, %y = ab::ababab(%a, %b)
+  return (%x, %y))IR";
+
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(pattern, replacement);
+
+  auto g = graph->copy();
+  g->dump();
+  rewriter.runOnGraph(g);
+  g->dump();
+  FileCheck().check("ab::ababab")->check("ab::ababab")->run(*g);
+}
 } // namespace jit
 } // namespace torch
