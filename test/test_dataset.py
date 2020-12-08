@@ -1,12 +1,14 @@
 import tempfile
 import tarfile
+import zipfile
 import warnings
 import os
 
 from torch.testing._internal.common_utils import (TestCase, run_tests)
 
 from torch.utils.data.datasets import (
-    ListDirFilesIterableDataset, LoadFilesFromDiskIterableDataset, ReadFilesFromTarIterableDataset)
+    ListDirFilesIterableDataset, LoadFilesFromDiskIterableDataset, ReadFilesFromTarIterableDataset,
+    ReadFilesFromZipIterableDataset)
 
 def create_temp_dir_and_files():
     # Note: the temp dir and files within it will be deleted in tearDown()
@@ -72,6 +74,25 @@ class TestIterableDatasetBasic(TestCase):
             self.assertTrue(rec[1].read() == open(file_pathname, 'rb').read())
 
         os.remove(temp_tarfile_pathname)
+
+    def test_readfilesfromzip_iterable_dataset(self):
+        temp_dir = self.temp_dir.name
+        temp_zipfile_pathname = os.path.join(temp_dir, "test_zip.zip")
+        with zipfile.ZipFile(temp_zipfile_pathname, 'w') as myzip:
+            myzip.write(self.temp_files[0])
+            myzip.write(self.temp_files[1])
+            myzip.write(self.temp_files[2])
+        dataset1 = ListDirFilesIterableDataset(temp_dir, '*.zip')
+        dataset2 = LoadFilesFromDiskIterableDataset(dataset1)
+        dataset3 = ReadFilesFromZipIterableDataset(dataset2)
+
+        for rec in dataset3:
+            file_pathname = rec[0][rec[0].find('.zip') + 4:]
+            self.assertTrue(file_pathname in self.temp_files)
+            self.assertTrue(rec[1].read() == open(file_pathname, 'rb').read())
+
+        os.remove(temp_zipfile_pathname)
+
 
 if __name__ == '__main__':
     run_tests()
