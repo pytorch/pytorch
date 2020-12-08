@@ -252,7 +252,7 @@ struct ZeroFunctor {
         TensorListMetadata<1>& tl) {
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
-            int n = tl.sizes[tensor_loc];
+            int n = tl.numel_for_tensor[tensor_loc];
 
             T* args[depth];
             bool all_aligned = init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc);
