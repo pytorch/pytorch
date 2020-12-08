@@ -379,6 +379,16 @@ class SpectralFuncInfo(OpInfo):
 
 
 def sample_inputs_svd(op_info, device, dtype, requires_grad=False):
+    """
+    This function generates input for torch.svd with distinct singular values so that autograd is always stable.
+    Matrices of different size:
+        square matrix - S x S size
+        tall marix - S x (S-2)
+        wide matrix - (S-2) x S
+    and batched variants of above are generated.
+    Each SampleInput has a function 'output_process_fn_grad' attached to it that is applied on the output of torch.svd
+    It is needed for autograd checks, because backward of svd doesn't work for an arbitrary loss function.
+    """
     from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
     test_cases1 = (  # some=True (default)
@@ -435,6 +445,11 @@ def sample_inputs_svd(op_info, device, dtype, requires_grad=False):
 
 
 def sample_inputs_pinverse(op_info, device, dtype, requires_grad=False):
+    """
+    This function generates input for torch.pinverse with distinct singular values so that autograd is always stable.
+    Implementation of torch.pinverse depends on torch.svd, therefore it's sufficient to check only square S x S matrix
+    and the batched (3 x S x S) input.
+    """
     from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
     test_cases = (
