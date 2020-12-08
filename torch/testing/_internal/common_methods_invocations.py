@@ -509,7 +509,9 @@ op_db: List[Any] = [
                    )),
     UnaryUfuncInfo('sinc',
                    ref=np.sinc,
+                   dtypes=floating_types(),
                    dtypesIfCPU=floating_types(),
+                   dtypesIfCUDA=floating_types(),
                    decorators=(precisionOverride({torch.float16: 1e-2}),),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',

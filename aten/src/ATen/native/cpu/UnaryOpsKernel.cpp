@@ -306,7 +306,10 @@ static void sinc_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "sinc_cpu", [&]() {
     cpu_kernel(
         iter,
-        [=](scalar_t a) -> scalar_t { return (a == static_cast<scalar_t>(0) ? 1 : std::sin(a * static_cast<scalar_t>(M_PI)) / (a * static_cast<scalar_t>(M_PI))); });
+        [=](scalar_t a) -> scalar_t {
+          scalar_t product = scalar_t(M_PI) * a;
+          return a == scalar_t(0) ? scalar_t(1) : std::sin(product) / product;
+        });
   });
 }
 
