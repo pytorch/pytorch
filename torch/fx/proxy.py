@@ -56,7 +56,7 @@ class TracerBase:
                 # expression as an argument to their constructor, so build this
                 # intermediate tuple and unpack it into the NamedTuple constructor
                 args = tuple(self.create_arg(elem) for elem in a)
-                return type(a)(*args)
+                return type(a)(*args) # type: ignore
             else:
                 return type(a)(self.create_arg(elem) for elem in a)
         elif isinstance(a, dict):
