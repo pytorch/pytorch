@@ -241,7 +241,7 @@ Tensor fftn_c2c(
 Tensor fftn_r2c(
     Tensor input, IntArrayRef shape, IntArrayRef dim,
     c10::optional<std::string> norm_str, bool onesided) {
-  TORCH_CHECK(!input.is_complex(), "Expected a real input tensor to FFT");
+  TORCH_CHECK(!input.is_complex(), "rfftn expects a real input tensor, but got ", self.scalar_type());
   input = promote_tensor_fft(input, /*require_complex=*/false);
   if (dim.empty()) {
     TORCH_CHECK(!onesided, "rfftn must transform at least one axis");
