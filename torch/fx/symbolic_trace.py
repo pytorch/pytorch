@@ -88,7 +88,7 @@ class Tracer(TracerBase):
                     return self.create_node('get_attr', n, (), {})
             raise NameError('parameter is not a member of this module')
         elif isinstance(a, torch.Tensor):
-            for n, p in self.root.named_buffers():
+            for n, p in self.root.named_buffers():  # type: ignore[assignment]
                 if a is p:
                     return self.create_node('get_attr', n, (), {})
 
