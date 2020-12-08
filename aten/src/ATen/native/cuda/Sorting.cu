@@ -204,6 +204,7 @@ struct KthValueLauncher {
         self_info.strides[collapse_self_dim],
         values_info,
         indices_info);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 };
 
@@ -238,6 +239,7 @@ struct MedianLauncher {
         num_slices,
         self_info.strides[collapse_self_dim],
         ignore_nan);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 };
 
@@ -290,8 +292,6 @@ void kthvalue_cuda_template(
     values.squeeze_(dim);
     indices.squeeze_(dim);
   }
-
-  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cuda(
@@ -371,8 +371,6 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
                 vals, inds, in, dim, MedianLauncher(ignore_nan));
           }
         });
-
-    AT_CUDA_CHECK(cudaGetLastError());
   }
 
   guard.reset();
