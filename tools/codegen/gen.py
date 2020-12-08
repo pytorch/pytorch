@@ -353,7 +353,7 @@ if (!strides.empty()) {{
 
         if self.dispatch_key == 'CUDA':
             if self.rocm:
-                guard_field = 'c10::cuda::OptionalHIPGuard guard_;'
+                guard_field = 'c10::hip::OptionalHIPGuard guard_;'
             else:
                 guard_field = 'c10::cuda::OptionalCUDAGuard guard_;'
         else:
