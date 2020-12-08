@@ -833,6 +833,7 @@ op_db: List[OpInfo] = [
                    promotes_integers_to_float=True,
                    handles_complex_extremals=False),
     OpInfo('linalg.solve',
+           aten_name='linalg_solve',
            op=torch.linalg.solve,
            dtypes=floating_and_complex_types(),
            test_inplace_grad=False,
