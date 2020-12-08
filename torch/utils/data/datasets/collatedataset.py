@@ -1,12 +1,14 @@
+from collections.abc import Sized
 from torch.utils.data import IterableDataset, _utils
-from typing import TypeVar, Callable, Union
+from types import MethodType
+from typing import TypeVar, Callable, Iterator
 
 
 T_co = TypeVar('T_co', covariant=True)
-T = TypeVar('T')
-S = TypeVar('S')
+S_co = TypeVar('S_co', covariant=True)
 
-class CollateDataset(IterableDataset[S]):
+
+class CollateDataset(IterableDataset[T_co]):
     r""" Prototype of :class:`CollateDataset`.
 
     IterableDataset to collate samples from dataset to Tensor(s) by `util_.collate.default_collate`,
@@ -15,29 +17,50 @@ class CollateDataset(IterableDataset[S]):
         dataset: IterableDataset being collated
         collate_fn: Customized collate function to collect and combine data or a batch of data.
                     Default function collates to Tensor(s) based on data type.
-        collate_batch_fn: Function creates batch or re-batch from input IterableDataset (bucket, pad).
+
+    Example: Convert integer data to float Tensor
+        >>> class MyIterableDataset(torch.utils.data.IterableDataset):
+        ...     def __init__(self, start, end):
+        ...         super(MyIterableDataset).__init__()
+        ...         assert end > start, "this example code only works with end >= start"
+        ...         self.start = start
+        ...         self.end = end
+        ...
+        ...     def __iter__(self):
+        ...         return iter(range(self.start, self.end))
+        ...
+        ...     def __len__(self):
+        ...         return self.end - self.start
+        ...
+        >>> ds = MyIterableDataset(start=3, end=7)
+        >>> print(list(ds))
+        [3, 4, 5, 6]
+
+        >>> def collate_fn(batch):
+        ...     return torch.tensor(batch, dtype=torch.float)
+        ...
+        >>> collated_ds = CollateDataset(ds, collate_fn=collate_fn)
+        >>> print(list(collated_ds))
+        [tensor(3.), tensor(4.), tensor(5.), tensor(6.)]
     """
+
     def __init__(self,
-                 dataset: IterableDataset[T_co],
+                 dataset: IterableDataset[S_co],
                  *,
-                 collate_fn: Callable[[Union[T, T_co]], S] = _utils.collate.default_collate,
-                 collate_batch_fn: Callable[[IterableDataset[T_co]], T] = None,
-                 ):
-        super().__init__()
+                 collate_fn: Callable[[S_co], T_co] = _utils.collate.default_collate,
+                 ) -> None:
+        super(CollateDataset, self).__init__()
         self.dataset = dataset
         self.collate_fn = collate_fn
-        self.collate_batch_fn = collate_batch_fn
 
-    def __iter__(self) -> S:
-        if self.collate_batch_fn is not None:
-            for batch in self.collate_batch_fn(self.dataset):
-                yield self.collate_fn(batch)
-        else:
-            for batch in self.dataset:
-                yield self.collate_fn(batch)
+    def __iter__(self) -> Iterator[T_co]:
+        for data in self.dataset:
+            yield self.collate_fn(data)
 
-    def __len__(self):
-        if len(self.dataset) < 0:
-            raise NotImplementedError
-        else:
+    # `__len__` is attached to class not instance
+    # Assume dataset has implemented `__len__` or raise NotImplementedError
+    def __len__(self) -> int:
+        if isinstance(self.dataset, Sized) and len(self.dataset) >= 0:
             return len(self.dataset)
+        else:
+            raise NotImplementedError
