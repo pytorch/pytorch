@@ -68,9 +68,7 @@ class CallbackManager {
   CallbackHandle addThreadLocalCallback(RecordFunctionCallback cb) {
     if (cb.samplingProb() > kLowProb) {
       // pre-sampling of RecordFunction with prob. kLowProb cannot be used
-      LOG(WARNING) << "Adding a non-sampled callback / callback with high sampling "
-                   << "frequency can cause singnificant runtime overhead";
-      at::setRecordAllFunctions();
+      at::bumpRecordAllFunctions();
     }
     // note: monotonically increasing callbacks_unique_id keeps
     // sorted_tls_callbacks_ sorted
@@ -82,9 +80,7 @@ class CallbackManager {
   CallbackHandle addGlobalCallback(RecordFunctionCallback cb) {
     if (cb.samplingProb() > kLowProb) {
       // pre-sampling of RecordFunction with prob. kLowProb cannot be used
-      LOG(WARNING) << "Adding a non-sampled callback / callback with high sampling "
-                   << "frequency can cause singnificant runtime overhead";
-      at::setRecordAllFunctions();
+      at::bumpRecordAllFunctions();
     }
     auto handle = next_unique_callback_handle();
     sorted_global_callbacks_.emplace_back(std::move(cb), handle);
@@ -104,7 +100,7 @@ class CallbackManager {
       if (it != cbs.end()) {
         if (it->first.samplingProb() > kLowProb) {
           // try to restore pre-sampling of RecordFunction
-          at::unsetRecordAllFunctions();
+          at::releaseRecordAllFunctions();
         }
         // keeps it sorted
         cbs.erase(it);
@@ -486,27 +482,31 @@ namespace {
 std::atomic<int> global_record_all_functions_ {0};
 }
 
-void setRecordAllFunctions() {
+void bumpRecordAllFunctions() {
   global_record_all_functions_.fetch_add(1, std::memory_order_relaxed);
 }
-void unsetRecordAllFunctions() {
+
+void releaseRecordAllFunctions() {
   TORCH_CHECK(global_record_all_functions_.fetch_sub(1, std::memory_order_relaxed) >= 0);
 }
 
-bool shouldRunRecordFunction(bool& pre_sampled) {
+bool checkRecordAllFunctions() {
+  return (global_record_all_functions_.load(std::memory_order_relaxed) > 0);
+}
+
+bool shouldRunRecordFunction(bool* pre_sampled) {
   auto* rf_tls_ptr = &rf_tls_;
   if (!rf_tls_ptr->tls_record_function_enabled_) {
-    pre_sampled = false;
+    *pre_sampled = false;
     return false;
   }
 
   if (global_record_all_functions_.load(std::memory_order_relaxed) > 0) {
-    pre_sampled = false;
+    *pre_sampled = false;
     return true;
   }
 
-  pre_sampled = true;
-
+  *pre_sampled = true;
   auto* coinflip_tls_ptr = &coinflip_tls_;
   if (coinflip_tls_ptr->tries_left_ == 0) {
     coinflip_tls_ptr->tries_left_ = sample_geometric();

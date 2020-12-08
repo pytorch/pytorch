@@ -20,7 +20,7 @@ const float kLowSamplingProb = 0.0001;
 void addTestCallback(
     double sampling_prob = 1.0,
     std::function<void(const at::RecordFunction&)> fn =
-        [](const at::RecordFunction& fn) {}) {
+        [](const at::RecordFunction&) {}) {
   auto cb = at::RecordFunctionCallback(
       std::move(fn),
       [](const at::RecordFunction&) {})
@@ -50,7 +50,7 @@ float runPureRecordFunctionBench(int iter) {
   std::chrono::time_point<clock> start_time = clock::now();
   for (auto idx = 0; idx < iter; ++idx) {
     bool pre_sampled = false;
-    if (at::shouldRunRecordFunction(pre_sampled)) {
+    if (at::shouldRunRecordFunction(&pre_sampled)) {
       at::RecordFunction guard(at::RecordScope::USER_SCOPE, pre_sampled);
       if (C10_UNLIKELY(guard.isActive())) {
         guard.before("Test", -1);

@@ -139,7 +139,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     at::NoNamesGuard no_names_guard;
 
     bool pre_sampled = false;
-    if (at::shouldRunRecordFunction(pre_sampled)) {
+    if (at::shouldRunRecordFunction(&pre_sampled)) {
       // Using RecordFunction to trogger observers in the backward pass
       at::RecordFunction guard(at::RecordScope::BACKWARD_FUNCTION, pre_sampled);
       if (guard.isActive()) {

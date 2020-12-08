@@ -378,7 +378,7 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
   // this boolean is passed into RecordFunction to adjust the sampling rates of
   // the callbacks
   bool pre_sampled = false;
-  if (at::shouldRunRecordFunction(pre_sampled)) {
+  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
     // Check if we need to run callbacks registered with RecordFunction
     // If true and callbacks need inputs, we box the arguments and pass
     // them into the callbacks and also into the kernel call
@@ -441,7 +441,7 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
 
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   bool pre_sampled = false;
-  if (at::shouldRunRecordFunction(pre_sampled)) {
+  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
     // using already existing stack to record function execution in observers
     at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
     if (C10_UNLIKELY(guard.isActive())) {

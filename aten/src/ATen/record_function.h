@@ -242,7 +242,7 @@ struct TORCH_API RecordFunction {
     bool called_start_callbacks_ = false;
 
     // Whether the RecordFunction is pre-sampled
-    bool pre_sampled_;
+    bool pre_sampled_ = false;
 
     // Used internally to keep track of thread local and global callbacks
     // that were picked to run; must be sorted;
@@ -560,16 +560,17 @@ TORCH_API const RecordFunctionTLS& get_record_function_tls_();
 TORCH_API void set_record_function_tls_(const RecordFunctionTLS& tls);
 
 // Checks whether RecordFunction should be called,
-// sets boolean argument value to whether pre-sampling was used
-TORCH_API bool shouldRunRecordFunction(bool&);
+// sets boolean pointed by the argument to whether pre-sampling was used
+TORCH_API bool shouldRunRecordFunction(bool*);
 
 // The following functions are used to disable/enable pre-sampling of RecordFunction
 // when high-frequency/non-sampled callbacks are added/removed.
-// Note: every set call is supposed to be matched with with the corresponding unset
-// call.
+// Note: every call to bumpRecordAllFunctions() is supposed to be matched with
+// the corresponding releaseRecordAllFunctions() call.
 // Note: disabling pre-sampling of RecordFunction incurs an extra overhead, since
 // RecordFunction will be created for each operator call.
-TORCH_API void setRecordAllFunctions();
-TORCH_API void unsetRecordAllFunctions();
+TORCH_API void bumpRecordAllFunctions();
+TORCH_API void releaseRecordAllFunctions();
+TORCH_API bool checkRecordAllFunctions();
 
 } // namespace at
