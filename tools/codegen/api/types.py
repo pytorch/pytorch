@@ -197,7 +197,7 @@ class CppSignature:
         return argument_packs
 
     def name(self) -> str:
-        return cpp.name(self.func, use_suffix_for_out_overloads=not self.faithful)
+        return cpp.name(self.func, faithful_name_for_out_overloads=self.faithful)
 
     # Render the C++ declaration for this signature
     def decl(self) -> str:

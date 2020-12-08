@@ -22,9 +22,9 @@ namespace {
 Sequential xor_model() {
   return Sequential(
       Linear(2, 8),
-      Functional(static_cast<Tensor (*)(const Tensor&)>(at::sigmoid)),
+      Functional(at::sigmoid),
       Linear(8, 1),
-      Functional(static_cast<Tensor (*)(const Tensor&)>(at::sigmoid)));
+      Functional(at::sigmoid));
 }
 
 torch::Tensor save_and_load(torch::Tensor input) {
