@@ -361,12 +361,17 @@ class ModuleDict(Module):
             for key, module in modules.items():
                 self[key] = module
         else:
-            for j, m in enumerate(modules.items()):
+            # modules here can be a list with two items
+            for j, m in enumerate(modules):
+                if not isinstance(m, container_abcs.Iterable):
+                    raise TypeError("ModuleDict update sequence element "
+                                    "#" + str(j) + " should be Iterable; is" +
+                                    type(m).__name__)
                 if not len(m) == 2:
                     raise ValueError("ModuleDict update sequence element "
                                      "#" + str(j) + " has length " + str(len(m)) +
                                      "; 2 is required")
-                self[m[0]] = m[1]
+                self[m[0]] = m[1]  # type: ignore[assignment]
 
     def forward(self):
         raise NotImplementedError()
@@ -628,12 +633,16 @@ class ParameterDict(Module):
             for key, parameter in sorted(parameters.items()):
                 self[key] = parameter
         else:
-            for j, p in enumerate(parameters.items()):
+            for j, p in enumerate(parameters):
+                if not isinstance(p, container_abcs.Iterable):
+                    raise TypeError("ParameterDict update sequence element "
+                                    "#" + str(j) + " should be Iterable; is" +
+                                    type(p).__name__)
                 if not len(p) == 2:
                     raise ValueError("ParameterDict update sequence element "
                                      "#" + str(j) + " has length " + str(len(p)) +
                                      "; 2 is required")
-                self[p[0]] = p[1]
+                self[p[0]] = p[1]  # type: ignore[assignment]
 
     def extra_repr(self) -> str:
         child_lines = []
