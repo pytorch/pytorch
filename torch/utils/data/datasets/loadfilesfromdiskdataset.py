@@ -4,7 +4,7 @@ from torch.utils.data.datasets.common import get_file_binaries_from_pathnames
 from typing import Iterable, Iterator
 
 class LoadFilesFromDiskIterableDataset(IterableDataset):
-    r""" :class:`LoadFilesFromDiskIterDataset`.
+    r""" :class:`LoadFilesFromDiskIterableDataset`.
 
     IterableDataset to load file binary streams from given pathnames,
     yield pathname and binary stream in a tuple.
