@@ -16,19 +16,18 @@ from torch.nn.quantized.modules.utils import _pair_from_first
 from torch.nn.quantized.modules.utils import _quantize_weight
 from torch.nn.utils import fuse_conv_bn_weights
 
-from typing import Optional, Tuple
-
 _SUPPORTED_PADDING = {
     'zeros',
     'reflect'
 }
 
+
 def _reverse_repeat_padding(padding: List[int]) -> List[int]:
     _reversed_padding_repeated_twice: List[int] = []
     N = len(padding)
-    for idx in range(N): # pad in padding:
+    for idx in range(N):
         for _ in range(2):
-            _reversed_padding_repeated_twice.append(padding[N-idx-1])
+            _reversed_padding_repeated_twice.append(padding[N - idx - 1])
     return _reversed_padding_repeated_twice
 
 class _ConvNd(nn.Module):
@@ -43,7 +42,7 @@ class _ConvNd(nn.Module):
                  output_padding: _size_1_t,
                  groups: int,
                  bias: bool,
-                 padding_mode: str='zeros'):
+                 padding_mode: str = 'zeros'):
 
         super(_ConvNd, self).__init__()
         if in_channels % groups != 0:
@@ -255,9 +254,9 @@ class Conv1d(_ConvNd):
                  stride: _size_1_t = 1,
                  padding: _size_1_t = 0,
                  dilation: _size_1_t = 1,
-                 groups:int = 1,
+                 groups: int = 1,
                  bias: bool = True,
-                 padding_mode: str ='zeros'):
+                 padding_mode: str = 'zeros'):
         kernel_size = _pair_from_first(kernel_size)
         stride = _pair_from_first(stride)
         padding = _pair_from_first(padding)
@@ -272,7 +271,7 @@ class Conv1d(_ConvNd):
 
     def set_weight_bias(self, w, b):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
-        if self.padding_mode is 'zeros':
+        if self.padding_mode == 'zeros':
             self._packed_params = torch.ops.quantized.conv1d_prepack(
                 w, b, self.stride, self.padding, self.dilation, self.groups)
         else:
@@ -462,7 +461,7 @@ class Conv3d(_ConvNd):
 
     def set_weight_bias(self, w, b):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
-        if self.padding_mode is 'zeros':
+        if self.padding_mode == 'zeros':
             self._packed_params = torch.ops.quantized.conv3d_prepack(
                 w, b, self.stride, self.padding, self.dilation, self.groups)
         else:
