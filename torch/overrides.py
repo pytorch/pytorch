@@ -1,14 +1,16 @@
 """
-Python implementation of __torch_function__
+Python implementation of ``__torch_function__``
 
-While most of the torch API and handling for __torch_function__ happens
+While most of the torch API and handling for ``__torch_function__`` happens
 at the C++ level, some of the torch API is written in Python so we need
-python-level handling for __torch_function__ overrides as well. The main
+python-level handling for ``__torch_function__`` overrides as well. The main
 developer-facing functionality in this file are handle_torch_function and
 has_torch_function. See torch/functional.py and test/test_overrides.py
 for usage examples.
 
-NOTE: heavily inspired by NumPy's ``__array_function__`` (see:
+Note
+----
+heavily inspired by NumPy's ``__array_function__`` (see:
 https://github.com/pytorch/pytorch/issues/24015 and
 https://www.numpy.org/neps/nep-0018-array-function-protocol.html
 )
@@ -28,15 +30,35 @@ from typing import Dict, Set, List, Any, Callable, Iterable
 import torch
 from torch._C import _is_torch_function_enabled, _disabled_torch_function_impl
 
+__all__ = [
+    "get_ignored_functions",
+    "get_overridable_functions",
+    "get_testing_overrides",
+    "handle_torch_function",
+    "has_torch_function",
+    "is_tensor_like",
+    "is_tensor_method_or_property",
+    "wrap_torch_function",
+]
+
 @functools.lru_cache(None)
 def get_ignored_functions() -> Set[Callable]:
-    """Return public functions that cannot be overridden by __torch_function__
+    """
+    Return public functions that cannot be overridden by ``__torch_function__``.
 
     Returns
     -------
-    A tuple of functions that are publicly available in the torch API but cannot
-    be overridden with __torch_function__. Mostly this is because none of the
-    arguments of these functions are tensors or tensor-likes.
+    Tuple[Callable]
+        A tuple of functions that are publicly available in the torch API but cannot
+        be overridden with ``__torch_function__``. Mostly this is because none of the
+        arguments of these functions are tensors or tensor-likes.
+
+    Examples
+    --------
+    >>> torch.Tensor.as_subclass in torch.overrides.get_ignored_functions()
+    True
+    >>> torch.add in torch.overrides.get_ignored_functions()
+    False
     """
     Tensor = torch.Tensor
     return {
@@ -97,6 +119,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.as_strided,
         torch.bartlett_window,
         torch.blackman_window,
+        torch.broadcast_shapes,
         torch.can_cast,
         torch.cudnn_affine_grid_generator,
         torch.cudnn_batch_norm,
@@ -109,6 +132,8 @@ def get_ignored_functions() -> Set[Callable]:
         torch.empty_strided,
         torch.empty_quantized,
         torch.eye,
+        torch.fft.fftfreq,
+        torch.fft.rfftfreq,
         torch.from_file,
         torch.full,
         torch.hamming_window,
@@ -188,12 +213,20 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
 
     Returns
     -------
-    A dictionary that maps overridable functions in the PyTorch API to
-    lambda functions that have the same signature as the real function
-    and unconditionally return -1. These lambda functions are useful
-    for testing API coverage for a type that defines __torch_function__.
+    Dict[Callable, Callable]
+        A dictionary that maps overridable functions in the PyTorch API to
+        lambda functions that have the same signature as the real function
+        and unconditionally return -1. These lambda functions are useful
+        for testing API coverage for a type that defines ``__torch_function__``.
+
+    Examples
+    --------
+    >>> import inspect
+    >>> my_add = torch.overrides.get_testing_overrides()[torch.add]
+    >>> inspect.signature(my_add)
+    <Signature (input, other, out=None)>
     """
-    # Every function in the PyTorch API that can be overriden needs an entry
+    # Every function in the PyTorchAPI that can be overriden needs an entry
     # in this dict.
     #
     # Optimally we would use inspect to get the function signature and define
@@ -287,6 +320,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.complex: lambda real, imag: -1,
         torch.copysign: lambda input, other, out=None: -1,
         torch.polar: lambda abs, ang: -1,
+        torch.linalg.cond: lambda input, ord=None: -1,
         torch.conj: lambda input, out=None: -1,
         torch.constant_pad_nd: lambda input, pad, value=0: -1,
         torch.conv1d: lambda input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1: -1,
@@ -357,8 +391,24 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.fbgemm_pack_quantized_matrix: lambda input, a, b: -1,
         torch.feature_alpha_dropout: lambda input, p, train: -1,
         torch.feature_dropout: lambda input, p, train: -1,
+        torch.fft.fft: lambda input, n=None, dim=-1, norm=None: -1,
+        torch.fft.ifft: lambda input, n=None, dim=-1, norm=None: -1,
+        torch.fft.rfft: lambda input, n=None, dim=-1, norm=None: -1,
+        torch.fft.irfft: lambda input, n=None, dim=-1, norm=None: -1,
+        torch.fft.hfft: lambda input, n=None, dim=-1, norm=None: -1,
+        torch.fft.ihfft: lambda input, n=None, dim=-1, norm=None: -1,
+        torch.fft.fftn: lambda input, s=None, dim=None, norm=None: -1,
+        torch.fft.ifftn: lambda input, s=None, dim=None, norm=None: -1,
+        torch.fft.rfftn: lambda input, s=None, dim=None, norm=None: -1,
+        torch.fft.irfftn: lambda input, s=None, dim=None, norm=None: -1,
+        torch.fft.fft2: lambda input, s=None, dim=(-2, -1), norm=None: -1,
+        torch.fft.ifft2: lambda input, s=None, dim=(-2, -1), norm=None: -1,
+        torch.fft.rfft2: lambda input, s=None, dim=(-2, -1), norm=None: -1,
+        torch.fft.irfft2: lambda input, s=None, dim=(-2, -1), norm=None: -1,
+        torch.fft.fftshift: lambda input, dim=None: -1,
+        torch.fft.ifftshift: lambda input, dim=None: -1,
+        torch.fft.fft: lambda input, n=None, dim=-1, norm=None: -1,
         torch.fix: lambda input, out=None: -1,
-        torch.fft: lambda input, signal_ndim, normalized=False: -1,
         torch.flatten: lambda input, start_dim=0, end_dim=-1: -1,
         torch.flip: lambda input, dims: -1,
         torch.fliplr: lambda input: -1,
@@ -377,6 +427,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.greater_equal: lambda input, other, out=None: -1,
         torch.geqrf: lambda input, out=None: -1,
         torch.i0: lambda input, out=None: -1,
+        torch.inner: lambda input, other, out=None: -1,
         torch.outer: lambda input, vec2, out=None: -1,  # alias for torch.ger
         torch.ger: lambda input, vec2, out=None: -1,
         torch.grid_sampler: lambda input, grid, interpolation_mode, padding_mode, align_corners: -1,
@@ -394,7 +445,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.hspmm: lambda mat1, mat2, out=None: -1,
         torch.hstack: lambda tensors, out=None: -1,
         torch.hypot: lambda input, other, out=None: -1,
-        torch.ifft: lambda input, signal_ndim, normalized=False: -1,
         torch.igamma: lambda input, other, out=None: -1,
         torch.igammac: lambda input, other, out=None: -1,
         torch.imag: lambda input, out=None: -1,
@@ -412,7 +462,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
                               cudnn_enabled: -1),
         torch.int_repr: lambda input: -1,
         torch.inverse: lambda input, out=None: -1,
-        torch.irfft: lambda input, signal_ndim, normalized=False, onesided=True, signal_sizes=None: -1,
         torch.is_complex: lambda input: -1,
         torch.is_distributed: lambda input: -1,
         torch.is_floating_point: lambda input: -1,
@@ -464,6 +513,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.matmul: lambda input, other, out=None: -1,
         torch.matrix_power: lambda input, n: -1,
         torch.matrix_rank: lambda input, tol=None, symmetric=False: -1,
+        torch.linalg.matrix_rank: lambda input, tol=None, hermitian=False: -1,
         torch.matrix_exp: lambda input: -1,
         torch.max: lambda input, out=None: -1,
         torch.maximum: lambda input, other, out=None: -1,
@@ -490,6 +540,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.mm: lambda input, mat2, out=None: -1,
         torch.mode: lambda input, dim=-1, keepdim=False, out=None: -1,
         torch.movedim: lambda input, source, destination: -1,
+        torch.moveaxis: lambda input, source, destination: -1,
+        torch.msort: lambda input, descending=False, out=None: -1,
         torch.mul: lambda input, other, out=None: -1,
         torch.multiply: lambda input, other, out=None: -1,
         torch.multinomial: lambda input, num_samples, replacement=False, out=None: -1,
@@ -696,7 +748,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.renorm: lambda input, p, dim, maxnorm, out=None: -1,
         torch.repeat_interleave: lambda input, dim=None: -1,
         torch.reshape: lambda input, shape: -1,
-        torch.rfft: lambda input, signal_ndim, normalized=False, onesided=True: -1,
         torch.rnn_relu: lambda input, hx, params, has_biases, num_layers, dropout, train, bidirectional, batch_first: -1,
         torch.rnn_relu_cell: lambda input, hx, w_ih, w_hh, b_ih=None, b_hh=None: -1,
         torch.rnn_tanh: lambda input, hx, params, has_biases, num_layers, dropout, train, bidirectional, batch_first: -1,
@@ -979,6 +1030,41 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
     ret.update(ret2)
     return ret
 
+def wrap_torch_function(dispatcher: Callable):
+    """Wraps a given function with ``__torch_function__`` -related functionality.
+
+    Parameters
+    ----------
+    dispatcher: Callable
+        A callable that returns an iterable of Tensor-likes passed into the function.
+
+    Note
+    ----
+    This decorator may reduce the performance of your code. Generally, it's enough to express
+    your code as a series of functions that, themselves, support __torch_function__. If you
+    find yourself in the rare situation where this is not the case, e.g. if you're wrapping a
+    low-level library and you also need it to work for Tensor-likes, then this function is available.
+
+    Examples
+    --------
+    >>> def dispatcher(a): # Must have the same signature as func
+    ...     return (a,)
+    >>> @torch.overrides.wrap_torch_function(dispatcher)
+    >>> def func(a): # This will make func dispatchable by __torch_function__
+    ...     return a + 0
+    """
+    def inner(func):
+        @functools.wraps(func)
+        def wrapped(*args, **kwargs):
+            relevant_args = dispatcher(*args, **kwargs)
+            if has_torch_function(relevant_args):
+                return handle_torch_function(func, relevant_args, *args, **kwargs)
+
+            return func(*args, **kwargs)
+
+        return wrapped
+
+    return inner
 
 def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
     """Returns a list of arguments on which to call __torch_function__.
@@ -1004,18 +1090,15 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
 
     Returns
     -------
-    overloaded_types : collection of types
-        Types of arguments from relevant_args with __torch_function__ methods.
     overloaded_args : list
         Arguments from relevant_args on which to call __torch_function__
         methods, in the order in which they should be called.
 
     .. _NEP-0018:
        https://numpy.org/neps/nep-0018-array-function-protocol.html
-
     """
     # Runtime is O(num_arguments * num_unique_types)
-    overloaded_types = []
+    overloaded_types = set()
     overloaded_args = []
     for arg in relevant_args:
         arg_type = type(arg)
@@ -1026,7 +1109,7 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
             # Create lists explicitly for the first type (usually the only one
             # done) to avoid setting up the iterator for overloaded_args.
             if overloaded_types:
-                overloaded_types.append(arg_type)
+                overloaded_types.add(arg_type)
                 # By default, insert argument at the end, but if it is
                 # subclass of another argument, insert it before that argument.
                 # This ensures "subclasses before superclasses".
@@ -1037,7 +1120,7 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
                         break
                 overloaded_args.insert(index, arg)
             else:
-                overloaded_types = [arg_type]
+                overloaded_types = {arg_type}
                 overloaded_args = [arg]
 
     return overloaded_args
@@ -1045,7 +1128,7 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
 
 def handle_torch_function(
         public_api: Callable, relevant_args: Iterable[Any], *args, **kwargs) -> Any:
-    """Implement a function with checks for __torch_function__ overrides.
+    """Implement a function with checks for ``__torch_function__`` overrides.
 
     See torch::autograd::handle_torch_function for the equivalent of this
     function in the C++ implementation.
@@ -1065,13 +1148,20 @@ def handle_torch_function(
 
     Returns
     -------
-    Result from calling `implementation()` or an `__torch_function__`
-    method, as appropriate.
+    object
+        Result from calling ``implementation`` or an ``__torch_function__``
+        method, as appropriate.
 
     Raises
     ------
     TypeError : if no implementation is found.
 
+    Example
+    -------
+    >>> def func(a):
+    ...     if type(a) is not torch.Tensor:  # This will make func dispatchable by __torch_function__
+    ...         return handle_torch_function(func, (a,), a)
+    ...     return a + 0
     """
     # Check for __torch_function__ methods.
     overloaded_args = _get_overloaded_args(relevant_args)
@@ -1093,7 +1183,9 @@ def handle_torch_function(
                     .format(func_name, [type(arg) for arg in overloaded_args]))
 
 def has_torch_function(relevant_args: Iterable[Any]) -> bool:
-    """Check for __torch_function__ implementations in the elements of an iterable
+    """Check for __torch_function__ implementations in the elements of an iterable.
+
+    Considers exact ``Tensor`` s non-dispatchable.
 
     Arguments
     ---------
@@ -1102,8 +1194,14 @@ def has_torch_function(relevant_args: Iterable[Any]) -> bool:
 
     Returns
     -------
-    True if any of the elements of relevant_args have __torch_function__
-    implementations, False otherwise.
+    bool
+        True if any of the elements of relevant_args have __torch_function__
+        implementations, False otherwise.
+
+    See Also
+    ________
+    torch.is_tensor_like
+        Checks if something is a Tensor-like, including an exact ``Tensor``.
     """
     return _is_torch_function_enabled() and any(
         type(a) is not torch.Tensor and
@@ -1118,8 +1216,9 @@ def get_overridable_functions() -> Dict[Any, List[Callable]]:
 
     Returns
     -------
-    A dictionary that maps namespaces that contain overridable functions
-    to functions in that namespace that can be overridden.
+    Dict[Any, List[Callable]]
+        A dictionary that maps namespaces that contain overridable functions
+        to functions in that namespace that can be overridden.
     """
     overridable_funcs = collections.defaultdict(list)
     tested_namespaces = [
@@ -1175,7 +1274,7 @@ def get_overridable_functions() -> Dict[Any, List[Callable]]:
     return overridable_funcs
 
 @functools.lru_cache(None)
-def get_tensor_methods() -> Set[Callable]:
+def _get_tensor_methods() -> Set[Callable]:
     """ Returns a set of the overridable methods on ``torch.Tensor`` """
     overridable_funcs = get_overridable_functions()
     methods = set(overridable_funcs[torch.Tensor])
@@ -1195,14 +1294,47 @@ def is_tensor_method_or_property(func: Callable) -> bool:
     1. Methods/properties sometimes don't contain a `__module__` slot.
     2. They require that the first passed-in argument is an instance
        of ``torch.Tensor``.
+
+    Examples
+    --------
+    >>> is_tensor_method_or_property(torch.Tensor.add)
+    True
+    >>> is_tensor_method_or_property(torch.add)
+    False
     """
-    return func in get_tensor_methods() or func.__name__ == "__get__"
+    return func in _get_tensor_methods() or func.__name__ == "__get__"
 
 def is_tensor_like(inp):
     """
-    Returns ``True`` if the passed-in input is a tensor-like.
+    Returns ``True`` if the passed-in input is a Tensor-like.
 
     Currently, this occurs whenever there's a ``__torch_function__``
-    attribute on the input.
+    attribute on the type of the input.
+
+    Examples
+    --------
+    A subclass of tensor is generally a Tensor-like.
+
+    >>> class SubTensor(torch.Tensor): ...
+    >>> is_tensor_like(SubTensor([0]))
+    True
+
+    Built-in or user types aren't usually Tensor-like.
+
+    >>> is_tensor_like(6)
+    False
+    >>> is_tensor_like(None)
+    False
+    >>> class NotATensor: ...
+    >>> is_tensor_like(NotATensor())
+    False
+
+    But, they can be made Tensor-like by implementing __torch_function__.
+
+    >>> class TensorLike:
+    ...     def __torch_function__(self, func, types, args, kwargs):
+    ...         return -1
+    >>> is_tensor_like(TensorLike())
+    True
     """
-    return type(inp) is torch.Tensor or hasattr(inp, "__torch_function__")
+    return type(inp) is torch.Tensor or hasattr(type(inp), "__torch_function__")

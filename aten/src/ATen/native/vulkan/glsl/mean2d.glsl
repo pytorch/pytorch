@@ -1,29 +1,41 @@
 #version 450 core
 #define PRECISION $precision
+
 layout(std430) buffer;
 layout(std430) uniform;
-layout(set = 0, binding = 0, rgba32f) uniform PRECISION restrict writeonly image3D   uOutput;
+
+/* Qualifiers: layout - storage - precision - memory */
+
+layout(set = 0, binding = 0, rgba16f) uniform PRECISION restrict writeonly image3D   uOutput;
 layout(set = 0, binding = 1)          uniform PRECISION                    sampler3D uInput;
-layout(set = 0, binding = 2)          uniform PRECISION restrict                     Block {
-  int W;
-  int H;
+layout(set = 0, binding = 2)          uniform PRECISION restrict           Block {
+  ivec4 size;
+  ivec2 isize;
 } uBlock;
 
-layout(local_size_x_id = 1, local_size_y_id = 2, local_size_z_id = 3) in;
+layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
+
+// This implementation is suboptimal and should be revisted.
 
 void main() {
-  ivec3 pos = ivec3(gl_GlobalInvocationID);
-  vec4 r = vec4(1.0) / (float(uBlock.W) * float(uBlock.H));
-  vec4 acc = vec4(0);
-  int xi, yi;
-  int zi = (imageSize(uOutput).x*pos.y + pos.x)/4;
-  int zo = (imageSize(uOutput).x*pos.y + pos.x)%4;
-  for (yi = 0; yi < uBlock.H; ++yi) {
-    for (xi = 0; xi < uBlock.W; ++xi) {
-      acc += texelFetch(uInput, ivec3(xi, yi, zi), 0);
-    }
-  }
-  vec4 outValue = r * acc;
+  const ivec3 pos = ivec3(gl_GlobalInvocationID);
 
-  imageStore(uOutput, pos, vec4(outValue[zo], 0,0,0));
+  if (all(lessThan(pos, uBlock.size.xyz))) {
+    vec4 sum = vec4(0);
+
+    const int z = pos.x + uBlock.size.x * pos.y;
+    const int zi = z / 4;
+    const int zo = z % 4;
+
+    for (int y = 0; y < uBlock.isize.y; ++y) {
+      for (int x = 0; x < uBlock.isize.x; ++x) {
+        sum += texelFetch(uInput, ivec3(x, y, zi), 0);
+      }
+    }
+
+    imageStore(
+        uOutput,
+        pos,
+        vec4(sum[zo], 0, 0, 0) / uBlock.size.w);
+  }
 }
