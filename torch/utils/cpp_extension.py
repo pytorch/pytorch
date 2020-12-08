@@ -832,15 +832,12 @@ def CUDAExtension(name, sources, *args, **kwargs):
     Compute capabilities:
 
     By default the extension will be compiled to run on all archs of the cards visible during the
-    building process of the extension. If down the road a new card is installed the extension may
-    need to be recompiled.
+    building process of the extension, plus PTX. If down the road a new card is installed the
+    extension may need to be recompiled.
 
-    This default may also clamp a higher arch to a lower one that has the same binary compatibility
-    if pytorch was compiled with that lower one. e.g. ``sm_86`` could be clamped down to `sm_80`.
-    For a variety of technical reasons the distributed pytorch binary doesn't build against the full
-    range of computer capabilities, e.g. it includes only `sm_60` and `sm_70`,but not `sm_61` and
-    `sm_75`. The not included ones are binary compatible with the included ones, but you might not
-    be getting the best performance.
+    If a visible card has a compute capability (CC) that's newer than the newest version for which
+    your nvcc can build fully-compiled binaries, Pytorch will make nvcc fall back to building
+    kernels with the newest version of PTX your nvcc does support (see below for details on PTX).
 
     However, you can explicitly specify which archs you want the extension to support like so:
 
