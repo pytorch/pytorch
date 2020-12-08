@@ -1638,6 +1638,9 @@ and `c` is returned such that:
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `c`
 
+Supports real-valued and complex-valued inputs.
+For the complex-valued inputs the transpose operator above is the conjugate transpose.
+
 Args:
     input (Tensor): input matrix :math:`b` of size :math:`(*, m, k)`,
                 where :math:`*` is zero or more batch dimensions
@@ -6783,7 +6786,7 @@ between :attr:`low` (inclusive) and :attr:`high` (exclusive).
 
 The shape of the tensor is defined by the variable argument :attr:`size`.
 
-.. note:
+.. note::
     With the global dtype default (``torch.float32``), this function returns
     a tensor with dtype ``torch.int64``.
 
