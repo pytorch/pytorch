@@ -4638,7 +4638,7 @@ Alias for :func:`torch.lt`.
 
 add_docstr(torch.lu_solve,
            r"""
-lu_solve(input, LU_data, LU_pivots, *, out=None) -> Tensor
+lu_solve(b, LU_data, LU_pivots, *, out=None) -> Tensor
 
 Returns the LU solve of the linear system :math:`Ax = b` using the partially pivoted
 LU factorization of A from :meth:`torch.lu`.
@@ -6786,7 +6786,7 @@ between :attr:`low` (inclusive) and :attr:`high` (exclusive).
 
 The shape of the tensor is defined by the variable argument :attr:`size`.
 
-.. note:
+.. note::
     With the global dtype default (``torch.float32``), this function returns
     a tensor with dtype ``torch.int64``.
 
