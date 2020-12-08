@@ -1326,7 +1326,7 @@ inline const Graph* Value::owningGraph() const {
 
 /************* All nodes not required to be defined before Graph **************/
 struct ProfileOp : public Node {
-  static constexpr Symbol Kind = ::c10::prim::profile;
+  static const Symbol Kind;
   ProfileOp(Graph* graph, std::function<void(std::vector<IValue>&)> callback)
       : Node(graph, ::c10::prim::profile), callback_(std::move(callback)) {}
 
@@ -1346,7 +1346,7 @@ struct ProfileOp : public Node {
 };
 
 struct TORCH_API ProfileOptionalOp : public Node {
-  static constexpr Symbol Kind = ::c10::prim::profile_optional;
+  static const Symbol Kind;
   ProfileOptionalOp(
       Graph* graph,
       std::function<void(std::vector<IValue>&)> callback)

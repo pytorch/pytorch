@@ -424,10 +424,6 @@ Spectral Ops
     :toctree: generated
     :nosignatures:
 
-    fft
-    ifft
-    rfft
-    irfft
     stft
     istft
     bartlett_window
