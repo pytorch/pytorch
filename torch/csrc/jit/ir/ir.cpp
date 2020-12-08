@@ -2061,8 +2061,8 @@ TypePtr NamedValue::type() const {
   }
 }
 
-constexpr Symbol ProfileOp::Kind;
-constexpr Symbol ProfileOptionalOp::Kind;
+const Symbol ProfileOp::Kind = ::c10::prim::profile;
+const Symbol ProfileOptionalOp::Kind = ::c10::prim::profile_optional;
 
 OperatorSet::OperatorSet(std::initializer_list<const char*> sig_literals) {
   for (const char* sig : sig_literals) {
