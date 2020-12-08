@@ -1,5 +1,5 @@
 import torch
-from ..optimizer import Optimizer, _params_t
+from ..optimizer import Optimizer
 
 
 class RMSprop(Optimizer):
@@ -31,9 +31,7 @@ class RMSprop(Optimizer):
 
     """
 
-    def __init__(self, params: _params_t, lr: float = 1e-2, alpha: float = 0.99,
-                 eps: float = 1e-8, weight_decay: float = 0.,
-                 momentum: float = 0., centered: bool = False) -> None:
+    def __init__(self, params, lr=1e-2, alpha=0.99, eps=1e-8, weight_decay=0, momentum=0, centered=False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:

@@ -1,7 +1,6 @@
 import math
 import torch
-from typing import Tuple
-from ..optimizer import Optimizer, _params_t
+from ..optimizer import Optimizer
 
 
 class AdamW(Optimizer):
@@ -31,9 +30,8 @@ class AdamW(Optimizer):
         https://openreview.net/forum?id=ryQu7f-RZ
     """
 
-    def __init__(self, params: _params_t, lr: float = 1e-3,
-                 betas: Tuple[float, float] = (0.9, 0.999), eps: float = 1e-8,
-                 weight_decay: float = 1e-2, amsgrad: bool = False) -> None:
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
+                 weight_decay=1e-2, amsgrad=False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:

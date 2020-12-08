@@ -27,6 +27,7 @@ namespace c10 {
   _(prim, Assign)                    \
   _(prim, BroadcastingChunk)         \
   _(prim, BroadcastSizes)            \
+  _(prim, ReductionSizes)            \
   _(prim, Constant)                  \
   _(prim, ChunkSizes)                \
   _(prim, Drop)                      \
@@ -235,6 +236,7 @@ namespace c10 {
   _(aten, _ger)                      \
   _(aten, ger)                       \
   _(aten, outer)                     \
+  _(aten, transpose)                 \
   _(aten, transpose_)                \
   _(aten, unsqueeze_)                \
   _(aten, __getitem__)               \
@@ -279,6 +281,12 @@ namespace c10 {
   _(aten, zero_)                     \
   _(aten, fill_)                     \
   _(aten, masked_fill_)              \
+  _(aten, swapaxes)                  \
+  _(aten, swapaxes_)                 \
+  _(aten, swapdims)                  \
+  _(aten, swapdims_)                 \
+  _(aten, movedim)                   \
+  _(aten, moveaxis)                  \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \
