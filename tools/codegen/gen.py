@@ -480,8 +480,7 @@ class ComputeFunction:
 
         result = generate_defn(sig_group.signature)
         if sig_group.faithful_signature is not None:
-            if local.use_c10_dispatcher().dispatcher_uses_new_style():
-                result += generate_defn(sig_group.faithful_signature)
+            result += generate_defn(sig_group.faithful_signature)
 
         return result
 
