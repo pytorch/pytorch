@@ -423,7 +423,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
             } else {
               fut->markCompleted(std::move(res));
             }
-          } catch (std::exception& e) {
+          } catch (std::exception&) {
             fut->setError(std::current_exception());
           }
         });
