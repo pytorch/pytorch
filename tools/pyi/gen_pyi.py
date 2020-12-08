@@ -49,7 +49,7 @@ def group_by_base_name(python_funcs: Sequence[PythonSignatureNativeFunctionPair]
 def get_py_torch_functions(
         python_funcs: Sequence[PythonSignatureNativeFunctionPair],
         method: bool = False,
-) -> Mapping[str, Sequence[PythonSignatureGroup]]:
+) -> Sequence[PythonSignatureGroup]:
     """
     Get declarations (grouped by name) which should be generated
     as either functions in the "torch" module or methods on Tensor.
@@ -65,7 +65,7 @@ def get_py_torch_functions(
                 Variant.method in python_func.function.variants)
 
     should_bind = should_bind_method if method else should_bind_function
-    return group_by_base_name([f for f in python_funcs if should_bind(f)])
+    return group_overloads([f for f in python_funcs if should_bind(f)])
 
 
 # TODO: Consider defining some aliases for our Union[...] types, to make
@@ -176,54 +176,44 @@ def sig_for_ops(opname: str) -> List[str]:
     else:
         raise Exception("unknown op", opname)
 
-def generate_named_tuples(funcs: Sequence[PythonSignatureGroup]) -> Dict[str, str]:
-    namedtuples: Dict[str, str] = {}
-    for sig_group in funcs:
-        named_tuple = sig_group.signature.returns.named_tuple_pyi()
-        if named_tuple is not None:
-            tuple_name, tuple_def = named_tuple
-            if tuple_name in namedtuples:
-                assert namedtuples[tuple_name] == tuple_def
-            else:
-                namedtuples[tuple_name] = tuple_def
-    return namedtuples
+def generate_named_tuples(sig_group: PythonSignatureGroup, namedtuples: Dict[str, str]) -> None:
+    # deprecated signatures are not used when computing named tuples
+    if sig_group.signature.deprecated:
+        return
+    named_tuple = sig_group.signature.returns.named_tuple_pyi()
+    if named_tuple is None:
+        return
+    tuple_name, tuple_def = named_tuple
+    if tuple_name in namedtuples:
+        assert namedtuples[tuple_name] == tuple_def
+    else:
+        namedtuples[tuple_name] = tuple_def
 
-def generate_type_hints(funcs: Sequence[PythonSignatureGroup], is_tensor: bool = False) -> List[str]:
-    """generate_type_hints(funcs, is_tensor=False)
-
-    Generates type hints for the declarations pertaining to the function
-    :attr:`funcs` are the func from the parsed native_functions.yaml.
-    The :attr:`is_tensor` flag indicates whether we are parsing
-    members of the Tensor class (true) or functions in the
-    `torch` namespace (default, false).
-    """
-
+def generate_type_hints(sig_group: PythonSignatureGroup) -> List[str]:
     type_hints = []
-    any_out = any([g for g in funcs if g.outplace is not None])
 
-    for sig_group in funcs:
-        # Some deprecated ops that are on the blocklist are still included in pyi
-        if sig_group.signature.name in blocklist and not sig_group.signature.deprecated:
-            continue
+    # Some deprecated ops that are on the blocklist are still included in pyi
+    if sig_group.signature.name in blocklist and not sig_group.signature.deprecated:
+        return type_hints
 
-        # deprecated signatures have separate entries for their functional and out variants
-        # (as opposed to the native ops, which fuse the two into a single signature).
-        # generate the functional variant here, if an out variant exists.
-        if sig_group.signature.deprecated and sig_group.outplace is not None:
-            type_hint = sig_group.signature.signature_str_pyi(skip_outputs=True)
-            type_hints.append(type_hint)
-
-        # PythonSignatureGroups that have both a functional + out variant get a single signature, with an optional out argument
-        # Generates the out variant if one exists. Otherwise, generate the functional variant
-        type_hint = sig_group.signature.signature_str_pyi(
-            skip_outputs=sig_group.outplace is None)
+    # deprecated signatures have separate entries for their functional and out variants
+    # (as opposed to the native ops, which fuse the two into a single signature).
+    # generate the functional variant here, if an out variant exists.
+    if sig_group.signature.deprecated and sig_group.outplace is not None:
+        type_hint = sig_group.signature.signature_str_pyi(skip_outputs=True)
         type_hints.append(type_hint)
 
-        # Some operators also additionally have a vararg variant of their signature
-        type_hint_vararg = sig_group.signature.signature_str_pyi_vararg(
-            skip_outputs=sig_group.outplace is None)
-        if type_hint_vararg:
-            type_hints.append(type_hint_vararg)
+    # PythonSignatureGroups that have both a functional + out variant get a single signature, with an optional out argument
+    # Generates the out variant if one exists. Otherwise, generate the functional variant
+    type_hint = sig_group.signature.signature_str_pyi(
+        skip_outputs=sig_group.outplace is None)
+    type_hints.append(type_hint)
+
+    # Some operators also additionally have a vararg variant of their signature
+    type_hint_vararg = sig_group.signature.signature_str_pyi_vararg(
+        skip_outputs=sig_group.outplace is None)
+    if type_hint_vararg:
+        type_hints.append(type_hint_vararg)
 
     return type_hints
 
@@ -376,11 +366,10 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, out: str) -> None:
 
     function_signatures = load_signatures(native_yaml_path, deprecated_yaml_path, method=False, pyi=True)
     sig_groups = get_py_torch_functions(function_signatures)
-    for name in sorted(sig_groups.keys()):
-        unsorted_function_hints[name] += generate_type_hints(sig_groups[name])
-        # deprecated signatures are not used when computing named tuples
-        native_groups = [g for g in sig_groups[name] if not g.signature.deprecated]
-        namedtuples.update(generate_named_tuples(native_groups))
+    for group in sorted(sig_groups, key=lambda g: g.signature.name):
+        name = group.signature.name
+        unsorted_function_hints[name] += generate_type_hints(group)
+        generate_named_tuples(group, namedtuples)
 
     function_hints = []
     for name, hints in sorted(unsorted_function_hints.items()):
@@ -490,9 +479,10 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, out: str) -> None:
     tensor_method_signatures = load_signatures(native_yaml_path, deprecated_yaml_path, method=True, skip_deprecated=True, pyi=True)
     tensor_method_sig_groups = get_py_torch_functions(tensor_method_signatures, method=True)
 
-    for name in sorted(tensor_method_sig_groups.keys()):
-        unsorted_tensor_method_hints[name] += generate_type_hints(tensor_method_sig_groups[name], is_tensor=True)
-        namedtuples.update(generate_named_tuples(tensor_method_sig_groups[name]))
+    for group in sorted(tensor_method_sig_groups, key=lambda g: g.signature.name):
+        name = group.signature.name
+        unsorted_tensor_method_hints[name] += generate_type_hints(group)
+        generate_named_tuples(group, namedtuples)
 
     for op in all_ops:
         name = '__{}__'.format(op)
