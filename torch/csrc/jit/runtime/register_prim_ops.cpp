@@ -824,6 +824,11 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
+             "aten::__contains__.int_list(int[] l, int item) -> bool"),
+         listContains<int64_t>,
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
              "aten::__contains__.str_list(str[] l, str item) -> bool"),
          listContains<std::string>,
          aliasAnalysisFromSchema()),
