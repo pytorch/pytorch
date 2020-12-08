@@ -619,7 +619,7 @@ Tensor & gather_out_cpu_cuda(Tensor & result, const Tensor & self, int64_t dim, 
   result.resize_(index.sizes());
   at::assert_no_internal_overlap(result);
   at::assert_no_overlap(result, self);
-  at::assert_no_overlap(result, index);
+  at::assert_no_partial_overlap(result, index);
   gather_stub(result.device().type(), result, self, dim, index);
   return result;
 }

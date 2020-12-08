@@ -5043,7 +5043,7 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             torch.gather(src, 0, ind, out=src)
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            torch.gather(ind.clone(), 0, ind, out=ind)
+            torch.gather(ind.clone(), 0, ind[1:], out=ind[:1])
 
     @onlyOnCPUAndCUDA
     def test_take_mem_overlap(self, device):
