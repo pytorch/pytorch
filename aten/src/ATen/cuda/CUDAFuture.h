@@ -119,6 +119,10 @@ struct TORCH_CUDA_API CUDAFuture : at::ivalue::Future {
   // Once WorkNCCL is gone (as part of the Future and Work merge) this should be
   // fixed.
  protected:
+  // The events that correspond to the completion of the async I/O kernels. They
+  // are recorded on the appropriate streams when the future is marked completed
+  // and can then be queried/waited/blocked on. There is one event for each
+  // distinct device on which the value's tensors reside.
   std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents_;
 
  private:
