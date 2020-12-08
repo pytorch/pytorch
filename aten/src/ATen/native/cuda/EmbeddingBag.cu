@@ -245,8 +245,8 @@ Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
               max_indices.data_ptr<index_t>(), grad.data_ptr<scalar_t>(),
               grad_weight.data_ptr<scalar_t>(), stride, numBags);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
-        });
       });
+  });
 
   return grad_weight;
 }
