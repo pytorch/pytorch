@@ -26,7 +26,11 @@ static void imageYUV420CenterCropToFloatBuffer(
     jfloatArray jnormMeanRGB,
     jfloatArray jnormStdRGB,
     jobject outBuffer,
-    jint outOffset) {
+    jint outOffset,
+    jint memoryFormatCode) {
+  constexpr static int32_t kMemoryFormatContiguous = 1;
+  constexpr static int32_t kMemoryFormatChannelsLast = 2;
+
   float* outData = (float*)jniEnv->GetDirectBufferAddress(outBuffer);
 
   jfloat normMeanRGB[3];
@@ -93,25 +97,50 @@ static void imageYUV420CenterCropToFloatBuffer(
   int xBeforeRtn, yBeforeRtn;
   int yIdx, uvIdx, ui, vi, a0, ri, gi, bi;
   int channelSize = tensorWidth * tensorHeight;
-  int wr = outOffset;
-  int wg = wr + channelSize;
-  int wb = wg + channelSize;
-  for (int x = 0; x < tensorWidth; x++) {
+  // A bit of code duplication to avoid branching in the cycles
+  if (memoryFormatCode == kMemoryFormatContiguous) {
+    int wr = outOffset;
+    int wg = wr + channelSize;
+    int wb = wg + channelSize;
     for (int y = 0; y < tensorHeight; y++) {
-      xBeforeRtn = cropXAdd + cropXMult * (int)(x * scale);
-      yBeforeRtn = cropYAdd + cropYMult * (int)(y * scale);
-      yIdx = yBeforeRtn * yRowStride + xBeforeRtn * yPixelStride;
-      uvIdx = (yBeforeRtn >> 1) * uvRowStride + xBeforeRtn * uvPixelStride;
-      ui = uData[uvIdx];
-      vi = vData[uvIdx];
-      a0 = 1192 * (yData[yIdx] - 16);
-      ri = (a0 + 1634 * (vi - 128)) >> 10;
-      gi = (a0 - 832 * (vi - 128) - 400 * (ui - 128)) >> 10;
-      bi = (a0 + 2066 * (ui - 128)) >> 10;
-      outData[wr++] = (clamp0255(ri) - normMeanRm255) / normStdRm255;
-      outData[wg++] = (clamp0255(gi) - normMeanGm255) / normStdGm255;
-      outData[wb++] = (clamp0255(bi) - normMeanBm255) / normStdBm255;
+      for (int x = 0; x < tensorWidth; x++) {
+        xBeforeRtn = cropXAdd + cropXMult * (int)(x * scale);
+        yBeforeRtn = cropYAdd + cropYMult * (int)(y * scale);
+        yIdx = yBeforeRtn * yRowStride + xBeforeRtn * yPixelStride;
+        uvIdx = (yBeforeRtn >> 1) * uvRowStride + xBeforeRtn * uvPixelStride;
+        ui = uData[uvIdx];
+        vi = vData[uvIdx];
+        a0 = 1192 * (yData[yIdx] - 16);
+        ri = (a0 + 1634 * (vi - 128)) >> 10;
+        gi = (a0 - 832 * (vi - 128) - 400 * (ui - 128)) >> 10;
+        bi = (a0 + 2066 * (ui - 128)) >> 10;
+        outData[wr++] = (clamp0255(ri) - normMeanRm255) / normStdRm255;
+        outData[wg++] = (clamp0255(gi) - normMeanGm255) / normStdGm255;
+        outData[wb++] = (clamp0255(bi) - normMeanBm255) / normStdBm255;
+      }
     }
+  } else if (memoryFormatCode == kMemoryFormatChannelsLast) {
+    int wc = outOffset;
+    for (int y = 0; y < tensorHeight; y++) {
+      for (int x = 0; x < tensorWidth; x++) {
+        xBeforeRtn = cropXAdd + cropXMult * (int)(x * scale);
+        yBeforeRtn = cropYAdd + cropYMult * (int)(y * scale);
+        yIdx = yBeforeRtn * yRowStride + xBeforeRtn * yPixelStride;
+        uvIdx = (yBeforeRtn >> 1) * uvRowStride + xBeforeRtn * uvPixelStride;
+        ui = uData[uvIdx];
+        vi = vData[uvIdx];
+        a0 = 1192 * (yData[yIdx] - 16);
+        ri = (a0 + 1634 * (vi - 128)) >> 10;
+        gi = (a0 - 832 * (vi - 128) - 400 * (ui - 128)) >> 10;
+        bi = (a0 + 2066 * (ui - 128)) >> 10;
+        outData[++wc] = (clamp0255(ri) - normMeanRm255) / normStdRm255;
+        outData[++wc] = (clamp0255(gi) - normMeanGm255) / normStdGm255;
+        outData[++wc] = (clamp0255(bi) - normMeanBm255) / normStdBm255;
+      }
+    }
+  } else {
+    jclass Exception = jniEnv->FindClass("java/lang/IllegalArgumentException");
+    jniEnv->ThrowNew(Exception,"Illegal memory format code");
   }
 }
 } // namespace pytorch_vision_jni
