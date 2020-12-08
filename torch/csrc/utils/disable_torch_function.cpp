@@ -148,17 +148,39 @@ PyObject* THPModule_disable_torch_function(PyObject *self, PyObject *a) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPModule_has_torch_function(PyObject*, PyObject *arg) {
-  PyObject* args(PySequence_Fast(arg, "expected a sequence"));
-  if (!args || !torch::torch_function_enabled()) Py_RETURN_FALSE;
+inline bool sequence_has_torch_function(PyObject* args) {
+  // NB: The caller is expected to guarantee a sequence.
+  if (!torch::torch_function_enabled())
+    return false;
 
-  auto n = PySequence_Fast_GET_SIZE(args);
+  Py_ssize_t n = PySequence_Fast_GET_SIZE(args);
   for (Py_ssize_t i = 0; i < n; i++) {
     PyObject* obj = PySequence_Fast_GET_ITEM(args, i);
     if (!THPVariable_CheckExact(obj) &&
         torch::fast_has_torch_function(obj))
-      Py_RETURN_TRUE;
+      return true;
   }
+
+  return false;
+}
+
+PyObject* THPModule_has_torch_function(PyObject*, PyObject *arg) {
+  bool result;
+  if (PyTuple_CheckExact(arg) || PyList_CheckExact(arg)) {
+    // Fast path:
+    //   If we know that we have a tuple or list, we can skip an INCREF and
+    //   DECREF from PySequence_Fast. Core functions will always follow this
+    //   convention (almost always tuples), and it shaves ~3.5% off the cost of
+    //   the check.
+    result = sequence_has_torch_function(arg);
+  } else {
+    PyObject* args(PySequence_Fast(arg, "expected a sequence"));
+    result = sequence_has_torch_function(args);
+    Py_DECREF(args);
+  }
+
+  if (result)
+    Py_RETURN_TRUE;
   Py_RETURN_FALSE;
 }
 
