@@ -22,7 +22,8 @@ import torch._C
 
 # Need to discuss how we want this exposed, and under what build circumstances.
 # Keeping it simple for now.
-from torch._C import _CUDAGraphBase as Graph
+if int(torch.version.cuda.split(".")[0]) >= 11:
+    from torch._C import _CUDAGraphBase as Graph
 
 try:
     from torch._C import _cudart  # type: ignore
