@@ -4342,7 +4342,7 @@ add_docstr(torch.xlogy,
            r"""
 xlogy(self, other, *, out=None) -> Tensor
 
-Compute ``self * log(other)`` so that ``0 * log(0)`` returns zero.
+Computes ``self * log(other)`` except it treats ``0 * log(0)`` as ``0``.
 
 Similar to SciPy's `scipy.special.xlogy`.
 
@@ -4355,12 +4355,11 @@ Similar to SciPy's `scipy.special.xlogy`.
 
 """ + r"""
 
-.. note::
-    ``NaN`` in :attr:`other` is propagated even if value of :attr:`self` is 0.
-
 Args:
-    self (Tensor)
+    self (Number or Tensor)
     other (Number or Tensor)
+
+.. note:: Both attr:`self` and attr:`other` cannot be number.
 
 Keyword args:
     {out}
@@ -4377,37 +4376,6 @@ Example::
     tensor([1.0986, 1.3863, 0.0000])
     >>> torch.xlogy(x, 4)
     tensor([1.3863, 2.7726, 4.1589])
-
-""".format(**common_args) + r"""
-
-.. function:: xlogy(self, other, *, out=None) -> Tensor
-
-Compute ``self * log(other)`` so that ``0 * log(0)`` returns zero.
-
-Similar to SciPy's `scipy.special.xlogy`.
-
-.. math::
-    \text{out}_{i} = \begin{cases}
-        \text{NaN} & \text{if } \text{other}_{i} = \text{NaN} \\
-        0 & \text{if } \text{self}_{i} = 0.0 \\
-        self_i * \log{(other_i)} & \text{otherwise}
-    \end{cases}
-
-""" + r"""
-
-.. note::
-    ``NaN`` in :attr:`other` is propagated even if value of :attr:`self` is 0.
-
-Args:
-    self (Number or Tensor)
-    other (Tensor)
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> y = torch.tensor([3, 2, 1])
     >>> torch.xlogy(2, y)
     tensor([2.1972, 1.3863, 0.0000])
 """.format(**common_args))

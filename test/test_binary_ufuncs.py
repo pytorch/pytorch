@@ -2597,23 +2597,6 @@ class TestBinaryUfuncs(TestCase):
         _compare_helper(t, zeros)
         _compare_helper(t, 0.)
 
-    def test_xlogy_exceptions(self, device):
-        for dtype in torch.testing.get_all_complex_dtypes():
-            x = torch.tensor([1 + 1j], device=device, dtype=dtype)
-            with self.assertRaisesRegex(RuntimeError, "not implemented for"):
-                torch.xlogy(x, x)
-
-        x = torch.ones(3, 2, device=device)
-        y = torch.ones(2, 4, device=device)
-        with self.assertRaisesRegex(RuntimeError, "must match the size of tensor b"):
-            torch.xlogy(x, y)
-
-        for dtype in torch.testing.get_all_int_dtypes():
-            x = torch.ones(3, device=device, dtype=dtype)
-            with self.assertRaisesRegex(RuntimeError,
-                                        "can't be cast to the desired output type"):
-                torch.xlogy(x, 1, out=torch.empty_like(x))
-
 tensor_binary_ops = [
     '__lt__', '__le__',
     '__gt__', '__ge__',
