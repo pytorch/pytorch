@@ -213,23 +213,15 @@ def generate_type_hints(funcs: Sequence[PythonSignatureGroup], is_tensor: bool =
             type_hint = sig_group.signature.signature_str_pyi(skip_outputs=True)
             type_hints.append(type_hint)
 
-        # TODO: remove HACK
-        # the pyi codegen currently adds an optional out param in cases where the current op does NOT have an out variant,
-        # but an overload of the op DOES have an out variant.
-        # TODO: After that, we should consider killing this method entirely and operating per PythonSignatureGroup
-        # rather than grouping their overloads together
-        # (since there isn't much else semantically meaningful about grouping overloads)
-        # this hack also doesn't apply to deprecated ops
-        hacky_add_output = any_out and sig_group.outplace is None and not sig_group.signature.deprecated
         # PythonSignatureGroups that have both a functional + out variant get a single signature, with an optional out argument
         # Generates the out variant if one exists. Otherwise, generate the functional variant
         type_hint = sig_group.signature.signature_str_pyi(
-            skip_outputs=sig_group.outplace is None, hacky_add_output=hacky_add_output)
+            skip_outputs=sig_group.outplace is None)
         type_hints.append(type_hint)
 
         # Some operators also additionally have a vararg variant of their signature
         type_hint_vararg = sig_group.signature.signature_str_pyi_vararg(
-            skip_outputs=sig_group.outplace is None, hacky_add_output=hacky_add_output)
+            skip_outputs=sig_group.outplace is None)
         if type_hint_vararg:
             type_hints.append(type_hint_vararg)
 
