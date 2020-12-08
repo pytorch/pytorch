@@ -68,7 +68,7 @@ def name(func: FunctionSchema) -> str:
 
 def arguments(func: FunctionSchema) -> Tuple[DispatcherArgument, ...]:
     if local.use_c10_dispatcher().dispatcher_uses_new_style():
-        return tuple(map(argument, itertools.chain(func.arguments.out, func.arguments.positional, func.arguments.kwarg_only)))
+        return tuple(map(argument, itertools.chain(func.arguments.positional, func.arguments.kwarg_only, func.arguments.out)))
     else:
         return tuple(
             DispatcherArgument(type=la.type, name=la.name, argument=la.argument)
@@ -137,7 +137,22 @@ def cppargument_exprs(
     else:
         assert_never(a)
 
-def cpparguments_exprs(args: Sequence[CppArgumentPack]) -> Sequence[DispatcherExpr]:
+def cpparguments_exprs(func: FunctionSchema, * , method: bool, api_is_faithful: bool) -> Sequence[DispatcherExpr]:
+    dispatcher_calling_convention_is_faithful = local.use_c10_dispatcher().dispatcher_uses_new_style()
+    arguments = cpp.group_arguments(func, method=method, faithful=dispatcher_calling_convention_is_faithful)
+
+    if api_is_faithful:
+        argument_packs = tuple(
+            cpp.argument_faithful(a) for a in arguments
+        )
+    else:
+        argument_packs = tuple(
+            cpp.argument(a) for a in arguments
+        )
+
+    return _cpparguments_exprs(argument_packs)
+
+def _cpparguments_exprs(args: Sequence[CppArgumentPack]) -> Sequence[DispatcherExpr]:
     tensor_options = next(
         (a.this for a in args if isinstance(a, CppSingleArgumentPack) and
             isinstance(a.this.argument, TensorOptionsArguments)),
@@ -148,13 +163,13 @@ def cpparguments_exprs(args: Sequence[CppArgumentPack]) -> Sequence[DispatcherEx
 # I don't think this is entirely sound, but it should be reasonably
 # close
 def nativearguments_exprs(args: Sequence[NativeArgument]) -> Sequence[DispatcherExpr]:
-    return cpparguments_exprs([
+    return _cpparguments_exprs([
         CppSingleArgumentPack(CppArgument(type=a.type, name=a.name, default=None, argument=a.argument))
         for a in args
     ])
 
 def exprs(args: Sequence[DispatcherArgument]) -> Sequence[DispatcherExpr]:
-    return cpparguments_exprs([
+    return _cpparguments_exprs([
         CppSingleArgumentPack(CppArgument(type=a.type, name=a.name, default=None, argument=a.argument))
         for a in args
     ])
