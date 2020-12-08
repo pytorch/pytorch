@@ -100,7 +100,7 @@ py::object cast_dict(std::vector<py::object> objs) {
   py::dict sequence = {};
   for (size_t i = 0; i < num_objs; ++i) {
     py::tuple obj = py::reinterpret_borrow<py::tuple>(objs[i]);
-    sequence[obj[0]] = std::move(obj[1]);
+    sequence[obj[0]] = obj[1];
   }
   return std::move(sequence);
 }

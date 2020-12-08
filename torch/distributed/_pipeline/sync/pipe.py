@@ -327,7 +327,7 @@ class Pipe(Module):
 
         if not self.devices:
             # Empty sequential module is not illegal.
-            return input
+            return RRef(input)
 
         # Divide a mini-batch into micro-batches.
         batches = microbatch.scatter(input, self.chunks)
