@@ -20,6 +20,7 @@ import torch.distributed as c10d
 import torch.distributed as dist
 import torch.distributed.algorithms.ddp_comm_hooks.default_hooks as default
 import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
+import torch.distributed.launch as launch
 import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
 from torch import nn
@@ -373,6 +374,18 @@ class PythonStoreTest(TestCase):
         # of this test function.
         c10d._test_python_store(MyPythonStore())
 
+class LaunchTest(TestCase):
+    def test_check_filename(self):
+        try:
+            tmp_file = tempfile.NamedTemporaryFile(delete=True)
+            file_name = tmp_file.name
+            launch.check_filename(file_name)
+            self.assertRaises(FileExistsError, launch.check_filename, file_name)
+        except FileExistsError as e:
+            tmp_file.close()
+            # file should be delete in every call.
+            launch.check_filename(file_name)
+            launch.check_filename(file_name)
 
 class RendezvousTest(TestCase):
     def test_unknown_handler(self):
