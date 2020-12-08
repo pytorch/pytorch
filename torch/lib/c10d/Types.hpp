@@ -62,6 +62,7 @@ struct AllToAllOptions {
 };
 
 struct BarrierOptions {
+  int deviceId = -1;
   std::chrono::milliseconds timeout = kUnsetTimeout;
 };
 

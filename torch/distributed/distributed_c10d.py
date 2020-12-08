@@ -21,6 +21,7 @@ from torch._C._distributed_c10d import (
     ReduceScatterOptions,
     ScatterOptions,
     ReduceOp,
+    BarrierOptions,
     Store,
     PrefixStore,
     ProcessGroup,
@@ -361,7 +362,8 @@ def init_process_group(backend,
                        world_size=-1,
                        rank=-1,
                        store=None,
-                       group_name=''):
+                       group_name='',
+                       deviceId=None):
     """
     Initializes the default distributed process group, and this will also
     initialize the distributed package.
@@ -414,6 +416,9 @@ def init_process_group(backend,
             might result in subsequent CUDA operations running on corrupted
             data. Only one of these two environment variables should be set.
         group_name (str, optional, deprecated): Group name.
+        deviceId (int, optional): device Id in case of NCCL backend
+            deviceId is used to specify the GPU number to be used for barrier
+            operation. By default; for rank 0 , cuda 0 will be used and so on.
 
     To enable ``backend == Backend.MPI``, PyTorch needs to be built from source
     on a system that supports MPI.
@@ -483,7 +488,10 @@ def init_process_group(backend,
     # barrier at the end to ensure that once we return from this method, all
     # process groups including global variables are updated correctly on all
     # ranks.
-    barrier()
+    if deviceId is not None and backend != Backend.NCCL:
+        # Ignore deviceId for backend other than NCCL
+        deviceId = None
+    barrier(deviceId=deviceId)
 
 def _new_process_group_helper(world_size,
                               rank,
@@ -2310,7 +2318,8 @@ def all_to_all(output_tensor_list,
 
 
 def barrier(group=group.WORLD,
-            async_op=False):
+            async_op=False,
+            deviceId=None):
     """
     Synchronizes all processes.
 
@@ -2328,11 +2337,15 @@ def barrier(group=group.WORLD,
     if _rank_not_in_group(group):
         return
 
+    opts = BarrierOptions()
+    if deviceId is not None:
+        opts.deviceId = deviceId
+
     if group == GroupMember.WORLD:
-        default_pg = _check_default_pg()
+        default_pg = _check_default_pg(opts=opts)
         work = default_pg.barrier()
     else:
-        work = group.barrier()
+        work = group.barrier(opts=opts)
 
     if async_op:
         return work
