@@ -90,7 +90,6 @@ struct AutogradZeroSpecializer {
     }
     if (getProfilingMode()) {
       if (auto versioning_if = guardSpecializations()) {
-        removeProfiledOptionalUses(graph_->block());
         specializeAutogradOps(versioning_if->blocks()[0]);
         GRAPH_DUMP("After versioning graph", graph_);
       }
@@ -150,24 +149,30 @@ struct AutogradZeroSpecializer {
     }
   }
 
-  static Node* getUseWithAttribute(Value* inp, Symbol kind) {
-    for (auto use : inp->uses()) {
+  static void getUsesWithAttribute_(Value* inp, Symbol attr, std::vector<Node*>& uses) {
+      for (auto use : inp->uses()) {
       if (use.user->kind() != prim::profile_ivalue) {
         continue;
       }
 
-      if (use.user->hasAttribute(kind)) {
-        return use.user;
+      if (use.user->hasAttribute(attr)) {
+        uses.push_back(use.user);
       }
 
-      auto pn = getUseWithAttribute(use.user->output(), kind);
-      if (pn) {
-        return pn;
-      }
+      getUsesWithAttribute_(use.user->output(), attr, uses);
     }
-
-    return nullptr;
   }
+
+  // this is to deal with the fact that there could be other passes that
+  // would like to profile this exact same value. this helper walks
+  // chains of `prim::profile_ivalue` to locate the one inserted by/for
+  // `specializeAutogradZero`
+  static std::vector<Node*> getUsesWithAttribute(Value* inp, Symbol attr) {
+    std::vector<Node*> uses;
+    getUsesWithAttribute_(inp, attr, uses);
+    return uses;
+  }
+
 
   static Node* getUse(Value* inp, Symbol kind) {
     for (auto use : inp->uses()) {
@@ -179,17 +184,14 @@ struct AutogradZeroSpecializer {
     return nullptr;
   }
 
-  void removeProfiledOptionalUses(Block* b) {
-    for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
-      if (it->kind() == prim::profile_ivalue &&
-          it->hasAttribute(countsAttribute)) {
-        it->output()->replaceAllUsesWith(it->input());
-        it.destroyCurrent();
-      } else {
-        for (Block* ib : it->blocks()) {
-          removeProfiledOptionalUses(ib);
-        }
-      }
+  void removeProfiledOptionalUses(const std::vector<Node*>& uses) {
+    TORCH_INTERNAL_ASSERT(!uses.empty());
+    auto inp = uses[0]->input();
+    // this removes `prim::profile_ivalue` from the original and to-specialize blocks
+    // N.B. the false block isn't impacted as it has been already encapsulated in
+    // a fallback function
+    for (auto u : uses) {
+      u->output()->replaceAllUsesWith(inp);
     }
   }
 
@@ -213,8 +215,11 @@ struct AutogradZeroSpecializer {
     std::vector<Value*> nonzero_values;
 
     for (auto inp : graph_->inputs()) {
-      if (auto profile_ivalue_node =
-              getUseWithAttribute(inp, countsAttribute)) {
+      std::vector<Node*> iprofile_counts_nodes = getUsesWithAttribute(inp, countsAttribute);
+      if (!iprofile_counts_nodes.empty()) {
+      // the original `prim::profile_value[num_present=0,...]` on `inp` is copied into
+      // `true_block` and `false_block`.
+        auto profile_ivalue_node =  iprofile_counts_nodes[0];
         TORCH_INTERNAL_ASSERT(
             profile_ivalue_node->hasAttribute(countsAttribute));
         const auto& counts_attr =
@@ -226,6 +231,7 @@ struct AutogradZeroSpecializer {
           checks.push_back(check->output());
           profiled_none_.insert(inp);
         }
+        removeProfiledOptionalUses(iprofile_counts_nodes);
         continue;
       }
 
@@ -252,7 +258,7 @@ struct AutogradZeroSpecializer {
         nonzero_values.push_back(inp);
       }
     }
-
+    GRAPH_DUMP("After for loop", graph_);
     // unable to specialize any of the inputs
     if (nonzero_values.size() == 0 && zero_values.size() == 0) {
       GRAPH_DUMP("Unable to add any specialization guards", graph_);
