@@ -115,6 +115,10 @@ struct TORCH_API EmbeddingBagOptions {
   /// If ``true``, `offsets` has one additional element, where the last element
   /// is equivalent to the size of `indices`. This matches the CSR format.
   TORCH_ARG(bool, include_last_offset) = false;
+  /// If given, pads the embedding vector at index `padding_idx`. When
+  /// a `padding_idx` is encountered in `input` during a reduction,
+  /// it is skipped. This allows each bag to be a different logical size.
+  TORCH_ARG(c10::optional<int64_t>, padding_idx) = c10::nullopt;
 };
 
 // ============================================================================
@@ -141,6 +145,10 @@ struct TORCH_API EmbeddingBagFromPretrainedOptions {
   /// is equivalent to the size of `indices`. This matches the CSR format. Note:
   /// this option is currently only supported when ``mode="sum"``.
   TORCH_ARG(bool, include_last_offset) = false;
+  /// If given, pads the embedding vector at index `padding_idx`. When
+  /// a `padding_idx` is encountered in `input` during a reduction,
+  /// it is skipped. This allows each bag to be a different logical size.
+  TORCH_ARG(c10::optional<int64_t>, padding_idx) = c10::nullopt;
 };
 
 // ============================================================================
@@ -179,6 +187,10 @@ struct TORCH_API EmbeddingBagFuncOptions {
   /// is equivalent to the size of `indices`. This matches the CSR format. Note:
   /// this option is currently only supported when ``mode="sum"``.
   TORCH_ARG(bool, include_last_offset) = false;
+  /// If given, pads the embedding vector at index `padding_idx`. When
+  /// a `padding_idx` is encountered in `input` during a reduction,
+  /// it is skipped. This allows each bag to be a different logical size.
+  TORCH_ARG(c10::optional<int64_t>, padding_idx) = c10::nullopt;
 };
 
 } // namespace functional

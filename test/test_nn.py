@@ -3701,11 +3701,26 @@ class TestNN(NNTestCase):
         output = embedding(input)
         self.assertEqual(a, output)
 
+    def test_embedding_bag_from_pretrained(self):
+        a = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
+        embedding = nn.EmbeddingBag.from_pretrained(a)
+        self.assertEqual(a, embedding.weight)
+
+        input = torch.tensor([0, 1], dtype=torch.long)
+        output = embedding(input, torch.arange(input.size(0)))
+        self.assertEqual(a, output)
+
     def test_embedding_from_pretrained_padding_idx(self):
         padding_idx = 2
         embeddings = torch.rand(4, 3, requires_grad=True)
         embedding_nn = nn.Embedding.from_pretrained(embeddings, padding_idx=padding_idx)
         self.assertEqual(embedding_nn.weight[padding_idx].sum(), 0)
+
+    def test_embedding_bag_from_pretrained_padding_idx(self):
+        padding_idx = 2
+        embeddings = torch.rand(4, 3, requires_grad=True)
+        embedding_nn = nn.EmbeddingBag.from_pretrained(embeddings, padding_idx=padding_idx)
+        self.assertEqual(embedding_nn.weight, embeddings)
 
     def test_embedding_from_pretrained_options(self):
         a = torch.Tensor([[1, 2, 3], [4, 5, 6]])
@@ -3743,6 +3758,50 @@ class TestNN(NNTestCase):
         res_F = F.embedding(a, embeddings, padding_idx=2)
 
         self.assertEqual(res_old, res_F)
+
+    def test_embedding_bag_functional(self):
+        a = torch.tensor([
+            [1, 3, 2],
+            [0, 2, 1]
+        ], dtype=torch.long)
+        embeddings = torch.rand(4, 3, requires_grad=True)
+
+        embed_old = torch.nn.EmbeddingBag(4, 3)
+        embed_old.weight = torch.nn.Parameter(embeddings)
+        res_old = embed_old(a)
+
+        res_F = F.embedding_bag(a, embeddings)
+        self.assertEqual(res_old, res_F)
+
+        embed_old = torch.nn.EmbeddingBag(4, 3)
+        embed_old = embed_old.from_pretrained(embeddings, padding_idx=2)
+        res_old = embed_old(a)
+        res_F = F.embedding_bag(a, embeddings, padding_idx=2)
+
+        self.assertEqual(res_old, res_F)
+
+    # Make sure that error is thrown if padding_idx is out of bounds
+    def test_embedding_bag_padding_idx_error(self):
+        a = torch.tensor([
+            [1, 3, 2],
+            [0, 2, 1]
+        ], dtype=torch.long)
+        num_embeddings = 4
+        num_features = 3
+        embeddings = torch.rand(num_embeddings, num_features, requires_grad=True)
+
+        functional_err_msg = r'padding_idx must be within the number of embeddings'
+        module_err_msg = r'padding_idx must be within num_embeddings'
+
+        for padding_idx in range(-(num_embeddings + 2), (num_embeddings + 2)):
+            if (padding_idx < -num_embeddings) or (padding_idx >= num_embeddings):
+                with self.assertRaisesRegex(RuntimeError, functional_err_msg):
+                    F.embedding_bag(a, embeddings, padding_idx=padding_idx)
+                with self.assertRaisesRegex(AssertionError, module_err_msg):
+                    torch.nn.EmbeddingBag(num_embeddings, num_features, padding_idx=padding_idx)
+            else:
+                F.embedding_bag(a, embeddings, padding_idx=padding_idx)
+                torch.nn.EmbeddingBag(num_embeddings, num_features, padding_idx=padding_idx)
 
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                          'Linear_FP16_weight requires FBGEMM. FBGEMM is only optimized for CPUs'
@@ -12389,6 +12448,252 @@ class TestNNDeviceType(NNTestCase):
                 after = (embedding.weight + embedding.weight.grad)[padding_idx]
                 embedding.zero_grad()
                 self.assertEqual(after, pre)
+
+    # Check correctness of torch.nn.functional.embedding_bag forward and
+    # backward functions with padding_idx, given a 1D input separated into bags
+    # with an offset array. Compare against an equivalent 2D input that uses
+    # padding indices to fill in the gaps indicated by the offset array
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float32, torch.float64)
+    @dtypesIfCUDA(torch.half, torch.bfloat16)
+    def test_embedding_bag_1D_padding_idx(self, device, dtype):
+        num_features = 3
+        max_indices_per_bag = 10
+        num_bags = 10
+        num_words = 100
+
+        def gen_1D_indices_offsets(include_last_offset, allpad):
+            indices = []
+            offsets = []
+            cur_offset = 0
+
+            # Make one bag full and one bag empty, for extra coverage
+            empty_bag = random.randint(0, num_bags - 1)
+            full_bag = empty_bag
+            while full_bag == empty_bag:
+                full_bag = random.randint(0, num_bags - 1)
+
+            for bag in range(num_bags):
+                offsets.append(cur_offset)
+                if bag == full_bag:
+                    bag_size = max_indices_per_bag
+                elif bag == empty_bag:
+                    bag_size = 0
+                else:
+                    bag_size = random.randint(1, max_indices_per_bag - 1)
+                indices += [1 if allpad else random.randint(0, num_words - 1) for _ in range(bag_size)]
+                cur_offset += bag_size
+
+            # embedding_bag requires first entry of offsets to be 0
+            assert offsets[0] == 0
+
+            indices = torch.tensor(indices, device=device)
+
+            if include_last_offset:
+                offsets.append(indices.size(0))
+
+            offsets = torch.tensor(offsets, device=device)
+
+            return indices, offsets
+
+        # Convert a 1-D indices-offsets representation into 2-D. Fill any empty
+        # indices with padding_idx
+        def gen_2D_indices_from_1D(indices_1D, offsets, include_last_offset, padding_idx):
+            assert offsets[0] == 0
+            if include_last_offset:
+                offsets = offsets[:-1]
+            indices_2D = torch.empty(num_bags, max_indices_per_bag, device=device, dtype=torch.long)
+            for bag in range(num_bags):
+                # Determine the start and end position of the bag within indices_1D
+                start = offsets[bag]
+                end = len(indices_1D) if bag + 1 == num_bags else offsets[bag + 1]
+                end = min(len(indices_1D), end)
+
+                # Pull out the bag's indices from indices_1D, and fill any
+                # remaining space with padding indices
+                indices_in_bag = []
+                for item_pos in range(0, max_indices_per_bag):
+                    if (start + item_pos) < end:
+                        indices_in_bag.append(indices_1D[start + item_pos])
+                    else:
+                        indices_in_bag.append(padding_idx)
+                indices_2D[bag] = torch.tensor(indices_in_bag, device=device)
+
+            return indices_2D
+
+        test_cases = product(['max', 'mean', 'sum'], [False, True], [False, True], [False, True])
+
+        for mode, sparse, include_last_offset, allpad in test_cases:
+            # Max sparse and bfloat16 are not supported
+            if mode == 'max':
+                if sparse or (dtype == torch.bfloat16):
+                    continue
+            indices_1D, offsets = gen_1D_indices_offsets(include_last_offset, allpad)
+            for padding_idx_1D in list(set(indices_1D.tolist())) + [None]:
+                msg = (
+                    f"mode: '{mode}', sparse: {sparse}, include_last_offset: {include_last_offset}, "
+                    f"padding_idx_1D: {padding_idx_1D}")
+
+                # If 1D input does not use a padding index, we still need one for the 2D input,
+                # so we can add one dummy word to the weights to act as the padded word
+                padding_idx_2D = padding_idx_1D if padding_idx_1D is not None else num_words
+                num_words_with_padding = num_words if padding_idx_1D is not None else num_words + 1
+
+                indices_2D = gen_2D_indices_from_1D(
+                    indices_1D,
+                    offsets,
+                    include_last_offset,
+                    padding_idx_2D)
+
+                weights = torch.randn(
+                    num_words_with_padding,
+                    num_features,
+                    dtype=dtype,
+                    device=device,
+                    requires_grad=True)
+                weights_check = weights.clone().detach().requires_grad_(True)
+
+                bag = torch.nn.functional.embedding_bag(
+                    indices_1D,
+                    weights,
+                    offsets,
+                    padding_idx=padding_idx_1D,
+                    mode=mode,
+                    sparse=sparse,
+                    include_last_offset=include_last_offset)
+
+                bag_check = torch.nn.functional.embedding_bag(
+                    indices_2D,
+                    weights_check,
+                    padding_idx=padding_idx_2D,
+                    mode=mode,
+                    sparse=sparse)
+                self.assertEqual(bag, bag_check, msg=msg)
+
+                bag.sum().backward()
+                bag_check.sum().backward()
+
+                # Sometimes, half dtype gradients mismatch by a greater amount
+                # than other dtypes
+                if dtype in [torch.half, torch.bfloat16]:
+                    atol = 0.01
+                    rtol = 0.01
+                else:
+                    atol = None
+                    rtol = None
+                self.assertEqual(weights.grad, weights_check.grad, msg=msg, atol=atol, rtol=rtol)
+
+    # Check correctness of torch.nn.functional.embedding_bag forward and
+    # backward functions with padding_idx, given a 2D indices input. Compare
+    # against torch.nn.functional.embedding followed by a reduction.
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float32, torch.float64)
+    @dtypesIfCUDA(torch.half, torch.bfloat16)
+    def test_embedding_bag_2D_padding_idx(self, device, dtype):
+        # Use a Python implementation of embedding_bag with padding_idx support
+        # to check torch.nn.functional.embedding_bag correctness
+        def embedding_bag_check(indices, weights, mode, sparse, padding_idx):
+            assert padding_idx is not None
+            embedding = torch.nn.functional.embedding(
+                indices,
+                weights,
+                padding_idx=padding_idx,
+                sparse=sparse)
+
+            reduction_dim = indices.dim() - 1
+
+            if mode == 'sum' or mode == 'mean':
+                # We must avoid including elements at padding_idx in the
+                # sum/mean, so multiply those elements by 0, and multiply
+                # all other elements by 1
+                per_sample_weights = indices.ne(padding_idx).to(dtype).unsqueeze(-1)
+                res = embedding.mul(per_sample_weights).sum(dim=reduction_dim)
+
+                if mode == 'mean':
+                    weights_sum = per_sample_weights.sum(dim=reduction_dim)
+                    res = res.div(weights_sum)
+
+            elif mode == 'max':
+                # We must avoid allowing elements at padding_idx to be chosen
+                # as the max, so set those elements to negative infinity
+                res = embedding.masked_fill(
+                    indices.unsqueeze(-1) == padding_idx, -float('inf')
+                ).amax(dim=reduction_dim)
+
+            else:
+                raise RuntimeError(f"mode '{mode}' is not available")
+
+            # If a row is all padding, set its corresponding result row to 0.
+            # This is needed because the above mean and max mode
+            # implementations set these elements to nan and -inf, respectively
+            if mode in ['mean', 'max']:
+                res = res.masked_fill(
+                    indices.eq(padding_idx).all(dim=-1).unsqueeze(-1),
+                    0)
+
+            return res
+
+        num_features = 3
+        num_words = 10
+        indices_dim1 = 10
+
+        for mode, sparse, allpad, indices_dim0 in product(['max', 'mean', 'sum'], [False, True], [False, True], [1, 10]):
+            # Max sparse and bfloat16 are not supported
+            if mode == 'max':
+                if sparse or (dtype == torch.bfloat16):
+                    continue
+
+            if allpad:
+                indices = torch.empty(indices_dim0, indices_dim1, dtype=torch.long, device=device).fill_(1)
+            else:
+                indices = torch.randint(0, num_words, (indices_dim0, indices_dim1), device=device)
+
+                if indices_dim0 > 1:
+                    # Fill one row with duplicate index so we can test with a fully
+                    # padded row
+                    duplicate_row = random.randint(0, indices_dim0 - 1)
+                    indices[duplicate_row] = indices[duplicate_row][0]
+
+            for padding_idx in list(set(indices.flatten(0, -1).tolist())):
+                weights = torch.randn(num_words, num_features, dtype=dtype, device=device, requires_grad=True)
+                weights_check = weights.clone().detach().requires_grad_(True)
+
+                msg = (
+                    f"mode: '{mode}', sparse: {sparse}, padding_idx: {padding_idx}, "
+                    f"allpad: {allpad}, indices.size(): {indices.size()}")
+
+                # Check forward with a Python implementation of padding_idx embedding_bag
+                bag_check = embedding_bag_check(
+                    indices,
+                    weights_check,
+                    mode,
+                    sparse,
+                    padding_idx)
+                bag = torch.nn.functional.embedding_bag(
+                    indices,
+                    weights,
+                    padding_idx=padding_idx,
+                    mode=mode,
+                    sparse=sparse)
+
+                self.assertEqual(bag, bag_check, msg=msg)
+
+                bag_check.sum().backward()
+                grad_check = weights_check.grad
+
+                bag.sum().backward()
+                grad = weights.grad
+
+                # Sometimes, half dtype gradients mismatch by a greater amount
+                # than other dtypes
+                if dtype in [torch.half, torch.bfloat16]:
+                    atol = 0.01
+                    rtol = 0.01
+                else:
+                    atol = None
+                    rtol = None
+                self.assertEqual(grad, grad_check, msg=msg, atol=atol, rtol=rtol)
 
     # Test fails on Vg20
     @skipCUDAIfRocm

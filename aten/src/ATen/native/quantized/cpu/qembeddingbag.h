@@ -12,7 +12,8 @@ Tensor& embedding_bag_byte_rowwise_offsets_out(
     bool pruned_weights,
     const c10::optional<Tensor>& per_sample_weights_,
     const c10::optional<Tensor>& compressed_indices_mapping,
-    bool include_last_offset);
+    bool include_last_offset,
+    c10::optional<int64_t> padding_idx);
 
 Tensor embedding_bag_4bit_rowwise_offsets_out(
     Tensor& output,
@@ -24,6 +25,7 @@ Tensor embedding_bag_4bit_rowwise_offsets_out(
     bool pruned_weights,
     const c10::optional<Tensor>& per_sample_weights_,
     const c10::optional<Tensor>& compressed_indices_mapping,
-    bool include_last_offset);
+    bool include_last_offset,
+    c10::optional<int64_t> padding_idx);
 } // native
 } // at

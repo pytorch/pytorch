@@ -795,7 +795,7 @@ def flatten(g, input, start_dim, end_dim):
     return sym_help._flatten_helper(g, input, start_dim, end_dim, dim)
 
 
-@parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v', 'i')
+@parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v', 'i', 'i')
 def embedding_bag(g,
                   embedding_matrix,
                   indices,
@@ -804,9 +804,12 @@ def embedding_bag(g,
                   mode,
                   sparse,
                   per_sample_weights,
-                  include_last_offset):
+                  include_last_offset,
+                  padding_idx):
     if scale_grad_by_freq and sym_help._training_mode:
         return sym_help._onnx_unsupported('embedding_bag with scale_grad_by_freq for training mode')
+    if padding_idx is not None and padding_idx >= 0:
+        raise RuntimeError('embedding_bag with padding_idx')
 
     loop_condition = g.op("Constant", value_t=torch.tensor(1))
     loop_condition = g.op("Cast", loop_condition, to_i=9)

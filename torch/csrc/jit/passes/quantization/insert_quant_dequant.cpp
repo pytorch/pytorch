@@ -349,11 +349,12 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
 
   if (is_aten_op) {
     TORCH_CHECK(
-        inputs_size == 8,
-        "Expecting FP aten::embedding_bag operator to have 8 inputs");
+        inputs_size == 9,
+        "Expecting FP aten::embedding_bag operator to have 9 inputs");
     // input 0 is the output of prepack op.
-    // Last input is added after we account for extra input in 4-bit case.
-    for (auto i = 1; i < inputs_size - 1; ++i) {
+    // Last two inputs are handled after we account for extra input in 4-bit
+    // case.
+    for (unsigned long i = 1; i < inputs_size - 2; ++i) {
       qembedding_bag_inputs.push_back(embedding_bag_inputs[i]);
     }
     // The sparse field in the float operator denotes sparse gradients.
@@ -362,8 +363,8 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
     qembedding_bag_inputs[5] = pruned_const;
   } else {
     TORCH_CHECK(
-        inputs_size == 11,
-        "Expecting F.embedding_bag operator to have 11 inputs");
+        inputs_size == 12,
+        "Expecting F.embedding_bag operator to have 12 inputs");
     qembedding_bag_inputs.push_back(embedding_bag_inputs[1]); // indices
     qembedding_bag_inputs.push_back(embedding_bag_inputs[3]); // offsets
     qembedding_bag_inputs.push_back(
@@ -375,7 +376,10 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
   }
 
   qembedding_bag_inputs.push_back(none); // compressed_indices_mapping
-  qembedding_bag_inputs.push_back(embedding_bag_inputs[inputs_size - 1]);
+  qembedding_bag_inputs.push_back(
+      embedding_bag_inputs[inputs_size - 2]); // include_last_offset
+  qembedding_bag_inputs.push_back(
+      embedding_bag_inputs[inputs_size - 1]); // padding_idx
 
   Node* qembedding_bag =
       g->create(Symbol::fromQualString(quant_fn), qembedding_bag_inputs);

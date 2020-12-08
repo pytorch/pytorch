@@ -641,6 +641,12 @@ REGISTER_OPERATOR_FUNCTOR(
         if (p_node->Output(0).isNone()) {
           p_node->Output(0) = create_empty_from(weight, at::kFloat);
         }
+        c10::optional<int64_t> padding_idx;
+        if (p_node->Input(9).isNone()) {
+          padding_idx = c10::nullopt;
+        } else {
+          padding_idx = p_node->Input(9).toInt();
+        }
         auto& out_t = p_node->Output(0).toTensor();
         fastResizeToZero(out_t);
         return at::native::embedding_bag_byte_rowwise_offsets_out(
@@ -653,7 +659,8 @@ REGISTER_OPERATOR_FUNCTOR(
             pruned_weights,
             per_sample_weights,
             compressed_indices_mapping,
-            include_last_offset);
+            include_last_offset,
+            padding_idx);
       };
     });
 REGISTER_OPERATOR_FUNCTOR(
@@ -670,6 +677,12 @@ REGISTER_OPERATOR_FUNCTOR(
         const auto compressed_indices_mapping =
             p_node->Input(7).toOptional<at::Tensor>();
         const auto include_last_offset = p_node->Input(8).toBool();
+        c10::optional<int64_t> padding_idx;
+        if (p_node->Input(9).isNone()) {
+          padding_idx = c10::nullopt;
+        } else {
+          padding_idx = p_node->Input(9).toInt();
+        }
         if (p_node->Output(0).isNone()) {
           p_node->Output(0) = create_empty_from(weight, at::kFloat);
         }
@@ -685,7 +698,8 @@ REGISTER_OPERATOR_FUNCTOR(
             pruned_weights,
             per_sample_weights,
             compressed_indices_mapping,
-            include_last_offset);
+            include_last_offset,
+            padding_idx);
       };
     });
 

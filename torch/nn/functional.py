@@ -1927,6 +1927,7 @@ def embedding_bag(
     sparse: bool = False,
     per_sample_weights: Optional[Tensor] = None,
     include_last_offset: bool = False,
+    padding_idx: Optional[int] = None,
 ) -> Tensor:
     r"""Computes sums, means or maxes of `bags` of embeddings, without instantiating the
     intermediate embeddings.
@@ -1961,8 +1962,12 @@ def embedding_bag(
             :attr:`offsets`, if those are not None.
 
         include_last_offset (bool, optional): if ``True``, the size of offsets is equal to the number of bags + 1.
-        The last element is the size of the input, or the ending index position of the last bag (sequence).
+                                              The last element is the size of the input, or the ending index
+                                              position of the last bag (sequence).
 
+        padding_idx (int, optional): If given, indicates which indices in :attr:`input` represent padding. When
+                                     a :attr:`padding_idx` is encountered in :attr:`input` during a reduction,
+                                     it is skipped. This allows each bag to be a different logical size.
 
     Shape:
 
@@ -1998,9 +2003,17 @@ def embedding_bag(
         >>> # a batch of 2 samples of 4 indices each
         >>> input = torch.tensor([1,2,4,5,4,3,2,9])
         >>> offsets = torch.tensor([0,4])
-        >>> F.embedding_bag(embedding_matrix, input, offsets)
+        >>> F.embedding_bag(input, embedding_matrix, offsets)
         tensor([[ 0.3397,  0.3552,  0.5545],
                 [ 0.5893,  0.4386,  0.5882]])
+
+        >>> # example with padding_idx
+        >>> embedding_matrix = torch.rand(10, 3)
+        >>> input = torch.tensor([2, 2, 2, 2, 4, 3, 2, 9])
+        >>> offsets = torch.tensor([0,4])
+        >>> F.embedding_bag(input, embedding_matrix, offsets, padding_idx=2, mode='sum')
+        tensor([[ 0.0000,  0.0000,  0.0000],
+                [-0.7082,  3.2145, -2.6251]])
     """
     if has_torch_function_variadic(input, weight):
         return handle_torch_function(
@@ -2016,6 +2029,7 @@ def embedding_bag(
             sparse=sparse,
             per_sample_weights=per_sample_weights,
             include_last_offset=include_last_offset,
+            padding_idx=padding_idx,
         )
     # Check for backward compatibility.
     # Used to be embedding_bag(weight, input, ...)
@@ -2089,7 +2103,7 @@ def embedding_bag(
         )
 
     ret, _, _, _ = torch.embedding_bag(
-        weight, input, offsets, scale_grad_by_freq, mode_enum, sparse, per_sample_weights, include_last_offset
+        weight, input, offsets, scale_grad_by_freq, mode_enum, sparse, per_sample_weights, include_last_offset, padding_idx
     )
     return ret
 

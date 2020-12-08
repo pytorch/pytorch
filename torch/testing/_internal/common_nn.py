@@ -2595,6 +2595,29 @@ new_module_tests = [
         desc='max',
     ),
     dict(
+        fullname='EmbeddingBag_mean_padding_idx',
+        constructor=lambda: nn.EmbeddingBag(4, 3, padding_idx=1),
+        cpp_constructor_args='torch::nn::EmbeddingBagOptions(4, 3).padding_idx(1)',
+        input_fn=lambda: torch.stack([torch.randperm(3), torch.randperm(3)]),
+        check_gradgrad=False,
+    ),
+    dict(
+        fullname='EmbeddingBag_sum_padding_idx',
+        constructor=lambda: nn.EmbeddingBag(4, 3, None, 2., False, 'sum', padding_idx=1),
+        cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
+                                .max_norm(c10::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kSum).padding_idx(1)''',
+        input_fn=lambda: torch.stack([torch.randperm(3), torch.randperm(3)]),
+        check_gradgrad=False,
+    ),
+    dict(
+        fullname='EmbeddingBag_max_padding_idx',
+        constructor=lambda: nn.EmbeddingBag(4, 3, None, 2., False, 'max', padding_idx=1),
+        cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
+                                .max_norm(c10::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kMax).padding_idx(1)''',
+        input_fn=lambda: torch.stack([torch.randperm(3), torch.randperm(3)]),
+        check_gradgrad=False,
+    ),
+    dict(
         fullname='EmbeddingBag_sparse',
         constructor=lambda: nn.EmbeddingBag(4, 3, sparse=True),
         cpp_constructor_args='torch::nn::EmbeddingBagOptions(4, 3).sparse(true)',

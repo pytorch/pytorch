@@ -93,7 +93,7 @@ class Embedding : public torch::nn::ModuleHolder<EmbeddingImpl> {
 ///
 /// Example:
 /// ```
-/// EmbeddingBag model(EmbeddingBagOptions(10, 2).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true).mode(torch::kSum));
+/// EmbeddingBag model(EmbeddingBagOptions(10, 2).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true).mode(torch::kSum).padding_idx(1));
 /// ```
 class TORCH_API EmbeddingBagImpl : public torch::nn::Cloneable<EmbeddingBagImpl> {
  public:
@@ -143,7 +143,8 @@ class EmbeddingBag : public torch::nn::ModuleHolder<EmbeddingBagImpl> {
         .norm_type(options.norm_type())
         .scale_grad_by_freq(options.scale_grad_by_freq())
         .mode(options.mode())
-        .sparse(options.sparse()));
+        .sparse(options.sparse())
+        .padding_idx(options.padding_idx()));
     embeddingbag->weight.set_requires_grad(!options.freeze());
     return embeddingbag;
   }
