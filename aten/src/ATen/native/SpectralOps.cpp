@@ -571,7 +571,9 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
   }
 }
 
-// Like view_as_complex but may clone if the input can't be directly viewed as complex
+// Create complex tensor from the old style of real tensor with size=(..., 2)
+// This is to support istft in the transition to requiring complex input.
+// NOTE: This may return a view of the input tensor, or might clone if necessary
 static Tensor as_complex(const Tensor& self) {
   const bool can_view_as_complex = [&]{
     auto strides = self.strides();
