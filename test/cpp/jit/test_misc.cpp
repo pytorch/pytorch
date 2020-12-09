@@ -721,11 +721,7 @@ void checkTracedInputs(const TracedTestInputs& inputs) {
   TORCH_CHECK(found_mul);
 }
 
-static bool bad_scope;
-static size_t fun_cnt = 0;
-static size_t ts_fun_cnt = 0;
-static size_t user_scope_cnt = 0;
-
+static bool bad_scope = false;
 template <RecordScope scope, size_t* cnt>
 std::unique_ptr<at::ObserverContext> checkScopeCallback(const at::RecordFunction& fn) {
   if (fn.scope() == scope) {
@@ -767,6 +763,10 @@ void checkScopeCallbacks() {
         }
         return nullptr;
       }));
+
+  static size_t fun_cnt;
+  static size_t ts_fun_cnt;
+  static size_t user_scope_cnt;
 
   bad_scope = false;
   fun_cnt = 0;
@@ -919,12 +919,12 @@ TEST(RecordFunctionTest, SampledCallbacks) {
   clearCallbacks();
 }
 
-static std::vector<std::string> fn_names;
-static std::mutex guard_mtx;
-
 TEST(RecordFunctionTest, RecordFunctionGuard) {
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
+
+  static std::vector<std::string> fn_names;
+  static std::mutex guard_mtx;
 
   // check record function guard
   addGlobalCallback(RecordFunctionCallback(
@@ -1090,12 +1090,12 @@ TEST(RecordFunctionTest, Callbacks) {
   clearCallbacks();
 }
 
-static bool ran = false;
 TEST(RecordFunctionTest, ShouldRun) {
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
 
   should_run = false;
+  static bool ran = false;
   addGlobalCallback(RecordFunctionCallback(
                         [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> { ran = true; return nullptr; })
                         .setShouldRun(shouldRunCallback));
@@ -1113,12 +1113,12 @@ TEST(RecordFunctionTest, ShouldRun) {
   clearCallbacks();
 }
 
-static std::string recorded_op;
-static bool has_ids = false;
-
 TEST(RecordFunctionTest, Basic) {
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
+
+  static std::string recorded_op;
+  static bool has_ids = false;
 
   // test propagation of TLS callbacks
   std::thread t([]() {
@@ -1162,8 +1162,8 @@ TEST(RecordFunctionTest, Basic) {
   clearCallbacks();
 }
 
-static std::set<std::string> operator_names;
 TEST(RecordFunctionTest, OperatorNameOverload) {
+  static std::set<std::string> operator_names;
   at::addGlobalCallback(at::RecordFunctionCallback(
                             [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
                               c10::optional<c10::OperatorName> op_name =
@@ -1213,9 +1213,9 @@ void checkDebugInfo(c10::DebugInfoKind kind, int model_id) {
   TORCH_CHECK(test_debug_info->getModelId() == model_id);
 }
 
-static std::atomic<bool> done{false};
-
 TEST(ThreadLocalDebugInfoTest, Basic) {
+  static std::atomic<bool> done{false};
+
   TORCH_CHECK(
       c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::TEST_INFO) == nullptr);
   auto debug_info = std::make_shared<TestThreadLocalDebugInfo>();
