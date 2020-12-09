@@ -7,7 +7,7 @@ from ._custom_import_pickler import create_custom_import_pickler, import_module_
 from ._importlib import _normalize_path
 import types
 import importlib
-from typing import List, Any, Callable, Dict, Tuple
+from typing import List, Any, Callable, Dict, Tuple, Union
 from distutils.sysconfig import get_python_lib
 from pathlib import Path
 import linecache
@@ -211,7 +211,7 @@ node [shape=box];
         of modules"""
 
         for pattern, action in self.patterns:
-            if pattern.fullmatch(module_name):
+            if pattern.matches(module_name):
                 action(module_name)
                 return
 
@@ -220,7 +220,7 @@ node [shape=box];
             if self.verbose:
                 print(f'implicitly adding {root_name} to external modules '
                       f'since it is part of the standard library and is a dependency.')
-            self.extern_module(root_name)
+            self.save_extern_module(root_name)
             return
 
         self.save_module(module_name, dependencies)
@@ -303,32 +303,7 @@ node [shape=box];
         filename = self._filename(package, resource)
         self._write(filename, binary)
 
-    def extern_module(self, module_name: str):
-        """Include `module` in the list of external modules the package can import.
-        This will prevent dependency discover from saving
-        it in the package. The importer will load an external module directly from the standard import system.
-        Code for extern modules must also exist in the process loading the package.
-
-        Args:
-            module_name (str): e.g. "my_package.my_subpackage" the name of the external module.
-                This can also be a glob-style pattern, as described in :meth:`mock_module`
-        """
-        if self._add_if_pattern(module_name, self.extern_module):
-            return
-
-        if module_name not in self.external:
-            self.external.append(module_name)
-
-    def extern_modules(self, module_names: List[str]):
-        """Extern a list of modules. Convience wrapper for calling :meth:`extern_module` on many items.
-
-        Args:
-            module_names (List[str]): List of module names
-        """
-        for m in module_names:
-            self.extern_module(m)
-
-    def mock_module(self, module_name: str):
+    def mock(self, include: 'GlobPattern', exclude: 'GlobPattern' = []):
         """Replace the code for `module_name` in the package with a fake implementation. This module will return a fake
         object for any attribute accessed from it. Because we copy file-by-file, the dependency resolution will sometimes
         find files that are imported by model files but whose functionality is never used
@@ -343,29 +318,39 @@ node [shape=box];
                   'torch.**' -- matches all submodules of torch, e.g. 'torch.nn' and torch.nn.functional'
                   'torch.*' -- matches 'torch.nn' or 'torch.functional', but not 'torch.nn.functional'
         """
-        if self._add_if_pattern(module_name, self.mock_module):
-            return
+        self.patterns.append( (_GlobGroup(include, exclude), self.save_mock_module) )
 
+    def extern(self, include: 'GlobPattern', exclude: 'GlobPattern' = []):
+        """Include `module` in the list of external modules the package can import.
+        This will prevent dependency discover from saving
+        it in the package. The importer will load an external module directly from the standard import system.
+        Code for extern modules must also exist in the process loading the package.
+
+        Args:
+            module_name (str): e.g. "my_package.my_subpackage" the name of the external module.
+                This can also be a glob-style pattern, as described in :meth:`mock_module`
+        """
+        self.patterns.append( (_GlobGroup(include, exclude), self.save_extern_module) )
+
+    def save_extern_module(self, module_name: str):
+        """Add `module_name` to the list of external modules, regardless of whether it is
+        required by other modules.
+
+        Prefer using `extern` to only mark modules extern if they are actually required by the packaged code.
+        """
+        if module_name not in self.external:
+            self.external.append(module_name)
+
+    def save_mock_module(self, module_name: str):
+        """Add `module_name` to the package, implemented it with a mocked out version that
+        can be imported but does not include any implementations.
+
+        Prefer using `mock` to only include this module if it is required by other modules.
+        """
         if '_mock' not in self.provided:
             self.save_source_file('_mock', str(Path(__file__).parent / '_mock.py'), dependencies=False)
         is_package = hasattr(self._import_module(module_name), '__path__')
         self.save_source_string(module_name, _MOCK_IMPL, is_package, dependencies=False)
-
-
-    def mock_modules(self, module_names):
-        """Mock a list of modules. Convience wrapper for calling :meth:`mock_module` on many items.
-
-        Args:
-            module_names (List[str]): List of module names
-        """
-        for module_name in module_names:
-            self.mock_module(module_name)
-
-    def _add_if_pattern(self, potential_pattern: str, action: Callable[[str], None]):
-        if '*' in potential_pattern or '?' in potential_pattern:
-            self.patterns.append((_module_glob_to_re(potential_pattern), action))
-            return True
-        return False
 
     def _module_is_already_provided(self, qualified_name: str) -> bool:
         for mod in self.external:
@@ -441,7 +426,6 @@ node [shape=box];
         return module_name == 'torch' or (module_name not in _DISALLOWED_MODULES
                                           and _is_builtin_or_stdlib_module(self._import_module(module_name)))
 
-
 # even though these are in the standard library, we do not allow them to be
 # automatically externed since they offer a lot of system level access
 _DISALLOWED_MODULES = ['sys', 'io']
@@ -471,8 +455,37 @@ def _read_file(filename: str) -> str:
         b = f.read()
         return b.decode('utf-8')
 
-_glob_re_filter = {'**': '.*', '*': '[^.]*', '?': '.', '.': '\\.'}
-_glob_split = re.compile(f'({"|".join(re.escape(x) for x in _glob_re_filter.keys())})')
-def _module_glob_to_re(module_name):
-    pattern = ''.join(_glob_re_filter.get(x, x) for x in _glob_split.split(module_name))
-    return re.compile(pattern)
+GlobPattern = Union[str, List[str]]
+
+
+class _GlobGroup:
+    def __init__(self, include: 'GlobPattern', exclude: 'GlobPattern'):
+        self.include = _GlobGroup._glob_list(include)
+        self.exclude = _GlobGroup._glob_list(exclude)
+
+    def matches(self, candidate: str) -> bool:
+        candidate = '.' + candidate
+        return any(p.fullmatch(candidate) for p in self.include) and all(not p.fullmatch(candidate) for p in self.exclude)
+
+    @staticmethod
+    def _glob_list(elems: 'GlobPattern'):
+        if isinstance(elems, str):
+            return [_GlobGroup._glob_to_re(elems)]
+        else:
+            return [_GlobGroup._glob_to_re(e) for e in elems]
+
+    @staticmethod
+    def _glob_to_re(pattern: str):
+        # to avoid corner cases for the first component, we prefix the candidate string
+        # with '.' so `import torch` will regex against `.torch`
+        def component_to_re(component):
+            if '**' in component:
+                if component == '**':
+                    return '(\\.[^.]+)*'
+                else:
+                    raise ValueError('** can only appear as an entire path segment')
+            else:
+                return '\\.' + '[^.]*'.join(re.escape(x) for x in component.split('*'))
+
+        result = ''.join(component_to_re(c) for c in pattern.split('.'))
+        return re.compile(result)
