@@ -13,8 +13,8 @@
 
 namespace torch {
 namespace jit {
-
 namespace {
+
 void OptimizeGraph(std::shared_ptr<torch::jit::Graph>& graph) {
   Inline(*graph);
   ConstantPropagation(graph);
