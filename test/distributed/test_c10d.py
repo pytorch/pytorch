@@ -1,3 +1,4 @@
+import argparse
 import copy
 import math
 import operator
@@ -375,18 +376,23 @@ class PythonStoreTest(TestCase):
         c10d._test_python_store(MyPythonStore())
 
 class LaunchTest(TestCase):
-    def test_check_filename(self):
+    def test_process_init_method(self):
+        tmp_file = tempfile.NamedTemporaryFile(delete=True)
+        file_name = tmp_file.name
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--init_method')
+        current_env = os.environ.copy()
         try:
-            tmp_file = tempfile.NamedTemporaryFile(delete=True)
-            file_name = tmp_file.name
-            launch.check_filename(file_name)
+            init_method = f"file:///{file_name}"
+            launch.process_init_method(init_method, current_env)
             self.assertRaises(FileExistsError, launch.check_filename, file_name)
         except FileExistsError as e:
             tmp_file.close()
             # file should be delete in every call.
-            launch.check_filename(file_name)
-            launch.check_filename(file_name)
-
+            launch.process_init_method(init_method, current_env)
+            launch.process_init_method(init_method, current_env)
+            assert current_env["INIT_METHOD"] == init_method
+    
 class RendezvousTest(TestCase):
     def test_unknown_handler(self):
         with self.assertRaisesRegex(RuntimeError, "^No rendezvous handler"):

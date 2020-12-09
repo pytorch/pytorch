@@ -218,13 +218,18 @@ def parse_args():
     parser.add_argument('training_script_args', nargs=REMAINDER)
     return parser.parse_args()
 
-def check_filename(file_name):
+def process_init_method(init_method, envs):
     """
     check that one file can be created with the filename
     """
-    f = open(file_name, "x")
-    f.close()
-    os.remove(file_name)
+    if init_method:
+        url_obj = urlparse(init_method)
+        if url_obj.scheme == "file":
+            file_name = urllib.request.url2pathname(url_obj.path)
+            f = open(file_name, "x")
+            f.close()
+            os.remove(file_name)
+            envs["INIT_METHOD"] = init_method    
 
 def main():
     args = parse_args()
@@ -258,13 +263,7 @@ def main():
             # create the relative directory
             os.mkdir(os.path.join(os.getcwd(), args.logdir))
 
-    if args.init_method:
-        url_obj = urlparse(args.init_method)
-        if url_obj.scheme == "file":
-            if args.nnodes > 1:
-                print("You're using FileStore on {} nodes, please make sure it's a shared network path".format(args.nnodes))
-            check_filename(urllib.request.url2pathname(url_obj.path))
-            current_env["INIT_METHOD"] = args.init_method
+    process_init_method(args.init_method, current_env)
 
     subprocess_file_handles = []
 
