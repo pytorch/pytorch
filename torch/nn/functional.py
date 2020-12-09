@@ -4123,7 +4123,6 @@ def multi_head_attention_forward(query: Tensor,
 
     head_dim = embed_dim // num_heads
     assert head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
-    scaling = float(head_dim) ** -0.5
 
     if not use_separate_proj_weight:
         if (query is key or torch.equal(query, key)) and (key is value or torch.equal(key, value)):
@@ -4204,7 +4203,6 @@ def multi_head_attention_forward(query: Tensor,
             q = linear(query, q_proj_weight_non_opt, in_proj_bias)
             k = linear(key, k_proj_weight_non_opt, in_proj_bias)
             v = linear(value, v_proj_weight_non_opt, in_proj_bias)
-    q = q * scaling
 
     if attn_mask is not None:
         assert attn_mask.dtype == torch.float32 or attn_mask.dtype == torch.float64 or \
@@ -4276,29 +4274,26 @@ def multi_head_attention_forward(query: Tensor,
         if key_padding_mask is not None:
             key_padding_mask = pad(key_padding_mask, (0, 1))
 
-    attn_output_weights = torch.bmm(q, k.transpose(1, 2))
-    assert list(attn_output_weights.size()) == [bsz * num_heads, tgt_len, src_len]
-
-    if attn_mask is not None:
-        if attn_mask.dtype == torch.bool:
-            attn_output_weights.masked_fill_(attn_mask, float('-inf'))
-        else:
-            attn_output_weights += attn_mask
-
-
+    # Combine attn_mask and key_padding_mask into a single mask.
     if key_padding_mask is not None:
-        attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
-        attn_output_weights = attn_output_weights.masked_fill(
-            key_padding_mask.unsqueeze(1).unsqueeze(2),
-            float('-inf'),
+        key_padding_mask = (
+            key_padding_mask.unsqueeze(1)
+                            .unsqueeze(2)
+                            .repeat(1, num_heads, tgt_len, 1)
+                            .view(bsz * num_heads, tgt_len, src_len)
         )
-        attn_output_weights = attn_output_weights.view(bsz * num_heads, tgt_len, src_len)
+        if attn_mask is None:
+            attn_mask = key_padding_mask
+        else:
+            attn_mask = attn_mask.expand(bsz * num_heads, tgt_len, src_len).contiguous()
+            if attn_mask.dtype == torch.bool:
+                attn_mask.bitwise_or_(key_padding_mask)
+            else:
+                attn_mask.masked_fill_(key_padding_mask, float('-inf'))
 
-    attn_output_weights = softmax(
-        attn_output_weights, dim=-1)
-    attn_output_weights = dropout(attn_output_weights, p=dropout_p, training=training)
-
-    attn_output = torch.bmm(attn_output_weights, v)
+    attn_output, attn_output_weights = scaled_dot_product(
+        q, k, v, attn_mask=attn_mask, dropout_p=dropout_p, training=training, batch_first=True)
+    assert list(attn_output_weights.size()) == [bsz * num_heads, tgt_len, src_len]
     assert list(attn_output.size()) == [bsz * num_heads, tgt_len, head_dim]
     attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
     attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
@@ -4309,3 +4304,47 @@ def multi_head_attention_forward(query: Tensor,
         return attn_output, attn_output_weights.sum(dim=1) / num_heads
     else:
         return attn_output, None
+
+
+def scaled_dot_product(query: torch.Tensor,
+                       key: torch.Tensor,
+                       value: torch.Tensor,
+                       attn_mask: Optional[torch.Tensor] = None,
+                       dropout_p: float = 0.0,
+                       training: bool = True,
+                       batch_first: bool = False
+                       ) -> Tuple[torch.Tensor, torch.Tensor]:
+    r"""Uses a scaled dot product with the projected key-value pair to update
+    the projected query.
+    Args:
+        query (Tensor): Projected query
+        key (Tensor): Projected key
+        value (Tensor): Projected value
+        attn_mask (Tensor, optional): 3D mask that prevents attention to certain positions.
+        dropout_p (float): probability of dropping an attention weight.
+        training: apply dropout if ``True``.
+        batch_first: If ``True``, then the input and output tensors are provided
+            as `(batch, seq, feature)`. Default: ``False``
+    Shape:
+        - query: :math:`(..., L, N, E)`
+        - key: :math:`(..., S, N, E)`
+        - value: :math:`(..., S, N, E)`
+        - attn_mask: 3D mask :math:`(N, L, S)` where N is the batch size, L is the target sequence length,
+          S is the source sequence length. attn_mask ensures that position i is allowed to attend the unmasked
+          positions. If a ByteTensor is provided, the non-zero positions are not allowed to attend
+          while the zero positions will be unchanged. If a BoolTensor is provided, positions with ``True``
+          are not allowed to attend while ``False`` values will be unchanged. If a FloatTensor
+          is provided, it will be added to the attention weight.
+        - Output: :math:`(..., L, N, E)`, :math:`(..., N, L, S)`
+        Note: It's optional to have the query/key/value inputs with more than three dimensions (for broadcast purpose).
+            The function will operate on the last three dimensions.
+        where L is the target length, S is the source length, N is the batch size, and
+        E is the embedding dimension.
+    """
+    if not torch.jit.is_scripting():
+        tens_ops = (query, key, value, attn_mask)
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+            return handle_torch_function(
+                scaled_dot_product, tens_ops, query, key, value, attn_mask=attn_mask)
+
+    return torch._C._nn.scaled_dot_product(query, key, value, attn_mask, dropout_p, training, batch_first)

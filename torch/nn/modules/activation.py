@@ -985,6 +985,53 @@ class MultiheadAttention(Module):
                 attn_mask=attn_mask)
 
 
+class ScaledDotProduct(Module):
+
+    def __init__(self, dropout=0.0, batch_first=False):
+        r"""Processes a projected query and key-value pair to apply
+        scaled dot product attention.
+        Args:
+            dropout (float): probability of dropping an attention weight.
+            batch_first: If ``True``, then the input and output tensors are provided
+                as `(batch, seq, feature)`. Default: ``False``
+        Examples::
+            >>> SDP = torchtext.nn.ScaledDotProduct(dropout=0.1)
+            >>> q = torch.randn(21, 256, 3)
+            >>> k = v = torch.randn(21, 256, 3)
+            >>> attn_output, attn_weights = SDP(q, k, v)
+            >>> print(attn_output.shape, attn_weights.shape)
+            torch.Size([21, 256, 3]) torch.Size([256, 21, 21])
+        """
+        super(ScaledDotProduct, self).__init__()
+        self.dropout = dropout
+        self.batch_first = batch_first
+
+    def forward(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor,
+                attn_mask: Optional[torch.Tensor] = None
+                ) -> Tuple[torch.Tensor, torch.Tensor]:
+        r"""Uses a scaled dot product with the projected key-value pair to update
+        the projected query.
+        Args:
+            query (Tensor): Projected query
+            key (Tensor): Projected key
+            value (Tensor): Projected value
+            attn_mask (BoolTensor, optional): 3D mask that prevents attention to certain positions.
+        Shape:
+            - query: :math:`(..., L, N, E)`
+            - key: :math:`(..., S, N, E)`
+            - value: :math:`(..., S, N, E)`
+            - attn_mask: :math:`(N, L, S)`, positions with ``True`` are not allowed to attend
+                while ``False`` values will be unchanged.
+            - Output: :math:`(..., L, N, E)`, :math:`(N, L, S)`
+            Note: It's optional to have the query/key/value inputs with more than three dimensions (for broadcast purpose).
+                The ScaledDotProduct module will operate on the last three dimensions.
+            where L is the target length, S is the source length, N is the batch size, and
+            E is the embedding dimension.
+        """
+        return F.scaled_dot_product(query, key, value, attn_mask=attn_mask, dropout_p=self.dropout,
+                                    training=self.training, batch_first=self.batch_first)
+
+
 class PReLU(Module):
     r"""Applies the element-wise function:
 

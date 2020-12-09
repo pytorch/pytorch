@@ -6,7 +6,7 @@ from .conv import Conv1d, Conv2d, Conv3d, \
 from .activation import Threshold, ReLU, Hardtanh, ReLU6, Sigmoid, Tanh, \
     Softmax, Softmax2d, LogSoftmax, ELU, SELU, CELU, GELU, Hardshrink, LeakyReLU, LogSigmoid, \
     Softplus, Softshrink, MultiheadAttention, PReLU, Softsign, Softmin, Tanhshrink, RReLU, GLU, \
-    Hardsigmoid, Hardswish, SiLU
+    Hardsigmoid, Hardswish, SiLU, ScaledDotProduct
 from .loss import L1Loss, NLLLoss, KLDivLoss, MSELoss, BCELoss, BCEWithLogitsLoss, NLLLoss2d, \
     CosineEmbeddingLoss, CTCLoss, HingeEmbeddingLoss, MarginRankingLoss, \
     MultiLabelMarginLoss, MultiLabelSoftMarginLoss, MultiMarginLoss, SmoothL1Loss, \
@@ -58,5 +58,6 @@ __all__ = [
     'TransformerEncoderLayer', 'TransformerDecoderLayer', 'Transformer',
     'LazyLinear', 'LazyConv1d', 'LazyConv2d', 'LazyConv3d',
     'LazyConvTranspose1d', 'LazyConvTranspose2d', 'LazyConvTranspose3d',
-    'Flatten', 'Unflatten', 'Hardsigmoid', 'Hardswish', 'SiLU', 'TripletMarginWithDistanceLoss', 'ChannelShuffle'
+    'Flatten', 'Unflatten', 'Hardsigmoid', 'Hardswish', 'SiLU', 'ScaledDotProduct',
+    'TripletMarginWithDistanceLoss', 'ChannelShuffle'
 ]

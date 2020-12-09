@@ -73,6 +73,67 @@ if TEST_NUMPY:
 DOUBLE_TENSORTYPES = [torch.double]
 
 
+def _scaled_dot_attn_ref(Q, K, V, dims, attn_mask=None, key_padding_mask=None):
+    """ Numpy-based reference implementation of scaled dot attention
+    for testing"""
+
+    QKT = _batchmatmul(
+        Q,
+        np.transpose(K, axes=[0, 1, 3, 2])
+        / np.sqrt(dims[3], dtype=np.float32),  # divide by sqrt(d_head)
+    )
+    # N, H, L, S
+    b1, b2, s1, s2 = QKT.shape
+    mask_dims = 0 if attn_mask is None else len(attn_mask.shape)
+    if attn_mask is not None or key_padding_mask is not None:
+        # assert s1 == s2
+        for i in range(b1):
+            for j in range(b2):
+                for m in range(s1):
+                    for n in range(s2):
+                        # Handle 2D attn mask.
+                        if mask_dims == 2 and attn_mask[m][n]:
+                            QKT[i, j, m, n] = -np.inf
+
+                        # Handle 3D attn mask.
+                        if mask_dims == 3 and attn_mask[i][m][n]:
+                            QKT[i, j, m, n] = -np.inf
+
+                        # Handle key padding mask.
+                        if key_padding_mask is not None and key_padding_mask[i][n]:
+                            QKT[i, j, m, n] = -np.inf
+
+    reference = _softmax(QKT)
+    ref_attn_weight = reference
+    ref_attn_weight = np.sum(ref_attn_weight, axis=1) / b2
+    reference = _batchmatmul(reference, V)
+    return reference, ref_attn_weight
+
+def _batchmatmul(a, b):  # batchmatmul over 4 dim matrix
+    """ Numpy-based batch matrix multiply over 4 dim matrix"""
+    assert a.shape[0] == b.shape[0]
+    assert a.shape[1] == b.shape[1]
+    retval = np.zeros(
+        (a.shape[0], a.shape[1], a.shape[2], b.shape[3]), dtype=np.float32
+    )
+    for i in range(a.shape[0]):
+        for j in range(a.shape[1]):
+            retval[i, j, :, :] = np.matmul(a[i, j, :, :], b[i, j, :, :])
+    return retval
+
+def _softmax(x):  # softmax over 4 dim matrix
+    """ Numpy-based reference softmax over 4 dim matrix"""
+    np.seterr(invalid='ignore')
+    output = np.zeros(x.shape, dtype=np.float64)
+    for i in range(x.shape[0]):
+        for j in range(x.shape[1]):
+            for k in range(x.shape[2]):
+                x_curr = x[i, j, k, :]
+                e_x = np.exp(x_curr - np.amax(x_curr))
+                output[i, j, k, :] = e_x / np.sum(e_x)
+    return output
+
+
 # WARNING: If you add a new top-level test case to this file, you MUST
 # update test/run_test.py to list it, otherwise it will NOT be run in
 # CI.
@@ -3241,57 +3302,6 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "numpy not found")
     def test_multihead_attention(self):
-        def _scaled_dot_attn_ref(Q, K, V, dims, unseen_mask=None, key_padding_mask=None):
-            """ Numpy-based reference implementation of scaled dot attention
-            for testing"""
-
-            QKT = _batchmatmul(
-                Q,
-                np.transpose(K, axes=[0, 1, 3, 2])
-                / np.sqrt(dims[3], dtype=np.float32),  # divide by sqrt(d_head)
-            )
-            b1, b2, s1, s2 = QKT.shape
-            if unseen_mask is not None or key_padding_mask is not None:
-                # assert s1 == s2
-                for i in range(b1):
-                    for j in range(b2):
-                        for m in range(s1):
-                            for n in range(s2):
-                                if unseen_mask is not None and unseen_mask[m][n] == 0:
-                                    QKT[i, j, m, n] = -np.inf
-                                if key_padding_mask is not None and key_padding_mask[i][n]:
-                                    QKT[i, j, m, n] = -np.inf
-
-            reference = _softmax(QKT)
-            ref_attn_weight = reference
-            ref_attn_weight = np.sum(ref_attn_weight, axis=1) / b2
-            reference = _batchmatmul(reference, V)
-            return reference, ref_attn_weight
-
-        def _batchmatmul(a, b):  # batchmatmul over 4 dim matrix
-            """ Numpy-based batch matrix multiply over 4 dim matrix"""
-            assert a.shape[0] == b.shape[0]
-            assert a.shape[1] == b.shape[1]
-            retval = np.zeros(
-                (a.shape[0], a.shape[1], a.shape[2], b.shape[3]), dtype=np.float32
-            )
-            for i in range(a.shape[0]):
-                for j in range(a.shape[1]):
-                    retval[i, j, :, :] = np.matmul(a[i, j, :, :], b[i, j, :, :])
-            return retval
-
-        def _softmax(x):  # softmax over 4 dim matrix
-            """ Numpy-based reference softmax over 4 dim matrix"""
-            np.seterr(invalid='ignore')
-            output = np.zeros(x.shape, dtype=np.float64)
-            for i in range(x.shape[0]):
-                for j in range(x.shape[1]):
-                    for k in range(x.shape[2]):
-                        x_curr = x[i, j, k, :]
-                        e_x = np.exp(x_curr - np.amax(x_curr))
-                        output[i, j, k, :] = e_x / np.sum(e_x)
-            return output
-
         def _split_heads_ref(X, dims, nheads, d_head):
             X_split = np.reshape(X, dims[:2] + [nheads, d_head])
             X_split_transposed = np.transpose(X_split, [0, 2, 1, 3])
@@ -3362,10 +3372,10 @@ class TestNN(NNTestCase):
                 attn_mask = np.random.randint(0 , 2, size=(1, seq_len))
                 attn_mask_tensor = torch.from_numpy(attn_mask).float()
                 if byte_mask:
-                    attn_mask_tensor = (attn_mask_tensor == 0).byte()
+                    attn_mask_tensor = (attn_mask_tensor > 0).byte()
                 else:
-                    attn_mask_tensor.masked_fill_(attn_mask_tensor == 0, float('-inf'))
-                    attn_mask_tensor.masked_fill_(attn_mask_tensor > 0, float('0.0'))
+                    attn_mask_tensor.masked_fill_(attn_mask_tensor > 0, float('-inf'))
+                    attn_mask_tensor.masked_fill_(attn_mask_tensor == 0, float('0.0'))
                     attn_mask_tensor = attn_mask_tensor.double()
 
                 decoder_state_tensor = torch.from_numpy(decoder_state).to(torch.get_default_dtype())
@@ -3429,7 +3439,7 @@ class TestNN(NNTestCase):
                     K_fc = np.concatenate((K_fc, np.repeat(bias_k, K_fc.shape[0], axis=0)), axis=1)
                     V_fc = np.concatenate((V_fc, np.repeat(bias_v, V_fc.shape[0], axis=0)), axis=1)
                     if attn_mask is not None:
-                        attn_mask = np.concatenate((attn_mask, np.ones([1, 1])), axis=1)
+                        attn_mask = np.concatenate((attn_mask, np.zeros([1, 1])), axis=1)
                     if key_padding_mask is not None:
                         key_padding_mask = np.concatenate((key_padding_mask, np.full((batch_sz, 1), False, dtype=bool)), axis=1)
                     dims[1] += 1
@@ -3453,7 +3463,7 @@ class TestNN(NNTestCase):
                     V_split = np.concatenate((V_split, np.zeros([V_split.shape[0], V_split.shape[1], 1, V_split.shape[3]])), axis=2)
 
                     if attn_mask is not None:
-                        attn_mask = np.concatenate((attn_mask, np.ones([1, 1])), axis=1)
+                        attn_mask = np.concatenate((attn_mask, np.zeros([1, 1])), axis=1)
 
                     if key_padding_mask is not None:
                         key_padding_mask = np.concatenate((key_padding_mask, np.full((batch_sz, 1), False, dtype=bool)), axis=1)
@@ -3462,7 +3472,7 @@ class TestNN(NNTestCase):
                     K=K_split,
                     V=V_split,
                     dims=Q_split.shape,
-                    unseen_mask=attn_mask,
+                    attn_mask=attn_mask,
                     key_padding_mask=key_padding_mask
                 )
                 combined_attn_heads = _combine_heads_ref(
@@ -3526,6 +3536,158 @@ class TestNN(NNTestCase):
             test_multihead_attn_all_arguments2()  # Test MultiheadAttention with all the argument.
         test_multihead_attn_all_arguments3()  # Test MultiheadAttention with all the argument.
         test_multihead_attn_all_arguments4()  # Test MultiheadAttention with all the argument.
+
+    @unittest.skipIf(not TEST_NUMPY, "numpy not found")
+    def test_scaled_dot_product(self):
+        def _scaled_dot_product_helper(add_attn_mask=True, batch_first=True, num_addl_batch_dims=0, byte_mask=False):
+            SDP = nn.ScaledDotProduct(dropout=0.5, batch_first=batch_first)
+            SDP.eval()
+
+            # Batch first by default & add additional batch dims as needed.
+            L, S, N, E = 5, 4, 32, 256
+            addl_batch_dims = [2 for _ in range(num_addl_batch_dims)]
+            q = np.random.randn(*(addl_batch_dims + [N, L, E]))
+            k = np.random.randn(*(addl_batch_dims + [N, S, E]))
+            v = np.random.randn(*(addl_batch_dims + [N, S, E]))
+            attn_mask = None
+            if add_attn_mask:
+                attn_mask = np.random.choice([True, False], size=(N, L, S), p=[0.5, 0.5]).astype(
+                    np.byte if byte_mask else np.bool)
+
+            # Call reference implementation (only supports N, H, L/S, E format and boolean mask).
+            # Handle additional batch dims within the "heads" dim.
+            if num_addl_batch_dims == 0:
+                # Dummy heads dim to match expected reference shape.
+                q_ref = np.expand_dims(q, 1)
+                k_ref = np.expand_dims(k, 1)
+                v_ref = np.expand_dims(v, 1)
+            else:
+                q_ref = q.reshape(-1, *q.shape[-3:]).swapaxes(0, 1)
+                k_ref = k.reshape(-1, *k.shape[-3:]).swapaxes(0, 1)
+                v_ref = v.reshape(-1, *v.shape[-3:]).swapaxes(0, 1)
+            attn_mask_ref = None if attn_mask is None else attn_mask.astype(np.bool)
+            reference, reference_weights = _scaled_dot_attn_ref(q_ref,
+                                                                k_ref,
+                                                                v_ref,
+                                                                dims=q_ref.shape,
+                                                                attn_mask=attn_mask_ref,
+                                                                key_padding_mask=None)
+            if num_addl_batch_dims == 0:
+                reference = reference.squeeze(1)
+            else:
+                reference = reference.swapaxes(0, 1).reshape(q.shape)
+
+            # Call function under test.
+            q, k, v = torch.from_numpy(q), torch.from_numpy(k), torch.from_numpy(v)
+            if attn_mask is not None:
+                attn_mask = torch.from_numpy(attn_mask).to(torch.uint8 if byte_mask else torch.bool)
+            if not batch_first:
+                reference = reference.swapaxes(-3, -2)
+                q, k, v = q.transpose(-3, -2), k.transpose(-3, -2), v.transpose(-3, -2)
+            result, result_weights = SDP(q, k, v, attn_mask=attn_mask)
+
+            # Verify result & weight shapes.
+            self.assertEqual(tuple(result.shape),
+                             tuple(addl_batch_dims + [N, L, E]) if batch_first
+                             else tuple(addl_batch_dims + [L, N, E]))
+            self.assertEqual(tuple(result_weights.shape),
+                             tuple(addl_batch_dims + [N, L, S]))
+
+            # result_weights = reference_weights
+            if num_addl_batch_dims > 0:
+                # To compare with reference, average across additional batch dims.
+                result_weights = result_weights.mean(dim=tuple(range(num_addl_batch_dims)))
+            result_weights = result_weights.detach().numpy()
+            np.testing.assert_allclose(result_weights, reference_weights, atol=1e-5)
+
+            # result = reference
+            result = result.detach().numpy()
+            np.testing.assert_allclose(result, reference, atol=1e-5)
+
+        def _scaled_dot_product_error_case_helper(q_shape, k_shape, v_shape, attn_mask_shape=None, batch_first=True):
+            SDP = nn.ScaledDotProduct(dropout=0.5, batch_first=batch_first)
+            SDP.eval()
+            q = torch.randn(q_shape)
+            k = torch.randn(k_shape)
+            v = torch.randn(v_shape)
+            attn_mask = None if attn_mask_shape is None else (torch.rand(attn_mask_shape) > 0.5)
+            self.assertRaises(RuntimeError, lambda: SDP(q, k, v, attn_mask=attn_mask))
+
+        def test_scaled_dot_product_no_mask_batch_not_first():
+            _scaled_dot_product_helper(add_attn_mask=False, batch_first=False)
+
+        def test_scaled_dot_product_no_mask_batch_first():
+            _scaled_dot_product_helper(add_attn_mask=False, batch_first=True)
+
+        def test_scaled_dot_product_with_bool_mask_batch_not_first():
+            _scaled_dot_product_helper(add_attn_mask=True, batch_first=False)
+
+        def test_scaled_dot_product_with_bool_mask_batch_first():
+            _scaled_dot_product_helper(add_attn_mask=True, batch_first=True)
+
+        def test_scaled_dot_product_with_byte_mask_batch_not_first():
+            _scaled_dot_product_helper(add_attn_mask=True, batch_first=False, byte_mask=True)
+
+        def test_scaled_dot_product_with_byte_mask_batch_first():
+            _scaled_dot_product_helper(add_attn_mask=True, batch_first=True, byte_mask=True)
+
+        def test_scaled_dot_product_with_4_dims_batch_not_first():
+            _scaled_dot_product_helper(add_attn_mask=True, batch_first=False, num_addl_batch_dims=1)
+
+        def test_scaled_dot_product_with_4_dims_batch_first():
+            _scaled_dot_product_helper(add_attn_mask=True, batch_first=True, num_addl_batch_dims=1)
+
+        def test_scaled_dot_product_with_5_dims_batch_not_first():
+            _scaled_dot_product_helper(add_attn_mask=True, batch_first=False, num_addl_batch_dims=2)
+
+        def test_scaled_dot_product_with_5_dims_batch_first():
+            _scaled_dot_product_helper(add_attn_mask=True, batch_first=True, num_addl_batch_dims=2)
+
+        def test_scaled_dot_product_error_feature_dims_unequal():
+            L, S, N, E = 5, 4, 32, 256
+            _scaled_dot_product_error_case_helper(q_shape=(L, N, E + 1), k_shape=(L, S, E), v_shape=(L, S, E))
+            _scaled_dot_product_error_case_helper(q_shape=(L, N, E), k_shape=(L, S, E + 1), v_shape=(L, S, E))
+            _scaled_dot_product_error_case_helper(q_shape=(L, N, E), k_shape=(L, S, E), v_shape=(L, S, E + 1))
+
+        def test_scaled_dot_product_error_unequal_key_value_dims():
+            L, S, N, E = 5, 4, 32, 256
+            _scaled_dot_product_error_case_helper(q_shape=(L, N, E), k_shape=(L + 1, S, E), v_shape=(L, S, E))
+            _scaled_dot_product_error_case_helper(q_shape=(L, N, E), k_shape=(L, S + 1, E), v_shape=(L, S, E))
+            _scaled_dot_product_error_case_helper(q_shape=(L, N, E), k_shape=(L, S, E), v_shape=(L + 1, S, E))
+            _scaled_dot_product_error_case_helper(q_shape=(L, N, E), k_shape=(L, S, E), v_shape=(L, S + 1, E))
+
+        def test_scaled_dot_product_error_non_3d_attn_mask():
+            L, S, N, E = 5, 4, 32, 256
+            _scaled_dot_product_error_case_helper(q_shape=(L, N, E), k_shape=(L, S, E), v_shape=(L, S, E),
+                                                  attn_mask_shape=(N,))
+            _scaled_dot_product_error_case_helper(q_shape=(L, N, E), k_shape=(L, S, E), v_shape=(L, S, E),
+                                                  attn_mask_shape=(N, L))
+            _scaled_dot_product_error_case_helper(q_shape=(L, N, E), k_shape=(L, S, E), v_shape=(L, S, E),
+                                                  attn_mask_shape=(N, L, S, E))
+
+        def test_scaled_dot_product_error_invalid_attn_mask_dims():
+            L, S, N, E = 5, 4, 32, 256
+            _scaled_dot_product_error_case_helper(q_shape=(L, N, E), k_shape=(L, S, E), v_shape=(L, S, E),
+                                                  attn_mask_shape=(N + 1, L, S))
+            _scaled_dot_product_error_case_helper(q_shape=(L, N, E), k_shape=(L, S, E), v_shape=(L, S, E),
+                                                  attn_mask_shape=(N, L + 1, S))
+            _scaled_dot_product_error_case_helper(q_shape=(L, N, E), k_shape=(L, S, E), v_shape=(L, S, E),
+                                                  attn_mask_shape=(N, L, S + 1))
+
+        test_scaled_dot_product_no_mask_batch_not_first()
+        test_scaled_dot_product_no_mask_batch_first()
+        test_scaled_dot_product_with_bool_mask_batch_not_first()
+        test_scaled_dot_product_with_bool_mask_batch_first()
+        test_scaled_dot_product_with_byte_mask_batch_not_first()
+        test_scaled_dot_product_with_byte_mask_batch_first()
+        test_scaled_dot_product_with_4_dims_batch_not_first()
+        test_scaled_dot_product_with_4_dims_batch_first()
+        test_scaled_dot_product_with_5_dims_batch_not_first()
+        test_scaled_dot_product_with_5_dims_batch_first()
+        test_scaled_dot_product_error_feature_dims_unequal()
+        test_scaled_dot_product_error_unequal_key_value_dims()
+        test_scaled_dot_product_error_non_3d_attn_mask()
+        test_scaled_dot_product_error_invalid_attn_mask_dims()
 
     def test_multihead_attn_3d_attn_mask(self):
         embed_dim = 8
