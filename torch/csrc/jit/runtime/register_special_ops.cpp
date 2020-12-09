@@ -13,7 +13,6 @@
 
 #include <aten/src/ATen/InitialTensorOptions.h>
 #include <c10/core/ScalarType.h>
-#include <torch/csrc/jit/cuda/cuda.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 
 #include <regex>
@@ -434,63 +433,6 @@ RegisterOperators reg({
         "aten::set_grad_enabled(bool val) -> ()",
         [](Stack* stack) { torch::GradMode::set_enabled(pop(stack).toBool()); },
         aliasAnalysisConservative()),
-    Operator(
-        "cuda::current_stream(int64_t val) -> __torch__.torch.classes.cuda.Stream",
-        [](Stack* stack) {
-          auto idx = uint16_t(pop(stack).toInt());
-          auto v = make_custom_class<torch::jit::CUDAStream>(idx);
-          auto st = v.toCustomClass<torch::jit::CUDAStream>();
-          st->setStream(idx, true);
-          push(stack, IValue(st));
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
-        "cuda::default_stream(int64_t val) -> __torch__.torch.classes.cuda.Stream",
-        [](Stack* stack) {
-          auto idx = uint16_t(pop(stack).toInt());
-          auto v = make_custom_class<torch::jit::CUDAStream>(idx);
-          auto st = v.toCustomClass<torch::jit::CUDAStream>();
-          st->setStream(idx);
-          push(stack, IValue(st));
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::current_device() -> int",
-        [](Stack* stack) {
-          auto v = c10::cuda::current_device();
-          push(stack, static_cast<int>(v));
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
-        "cuda::_cuda_setDevice(int64_t val) -> ()",
-        [](Stack* stack) {
-          int64_t idx = -1;
-          pop(stack, idx);
-          c10::cuda::set_device(static_cast<c10::DeviceIndex>(idx));
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
-        "cuda::_cuda_getDeviceIndex(Device device) -> int",
-        [](Stack* stack) {
-          auto device = pop(stack);
-          auto idx = device.toDevice().index();
-          push(stack, idx);
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
-        "cuda::_cuda_getDeviceCount() -> int",
-        [](Stack* stack) { push(stack, at::cuda::device_count()); },
-        aliasAnalysisFromSchema()),
-    Operator(
-        "cuda::_cuda_setStream(__torch__.torch.classes.cuda.Stream stream) -> ()",
-        [](Stack* stack) {
-          auto v = pop(stack);
-          auto s = v.toCustomClass<torch::jit::CUDAStream>();
-          auto packed = s->pack();
-          auto unpacked = c10::cuda::CUDAStream::unpack(packed);
-          c10::cuda::setCurrentCUDAStream(unpacked);
-        },
-        aliasAnalysisFromSchema()),
 });
 } // namespace
 } // namespace jit
