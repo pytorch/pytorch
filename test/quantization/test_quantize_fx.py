@@ -49,7 +49,6 @@ from torch.testing._internal.common_quantization import (
     test_only_train_fn,
 )
 
-# toy models
 from torch.testing._internal.common_quantization import (
     LinearModelWithSubmodule,
     ResNetBase,
@@ -2201,7 +2200,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
         eager = BB().float()
         graph = copy.deepcopy(eager)
 
-        if quant_type == "static":
+        if quant_type == QuantType.STATIC:
             qconfig = default_qconfig
             eager_prepare = prepare
             graph_prepare = prepare_fx
@@ -2210,7 +2209,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             calibrate_or_train = test_only_eval_fn
             data = self.img_data_2d
         else:
-            assert quant_type == "qat"
+            assert quant_type == QuantType.QAT
             qconfig = default_qat_qconfig
             eager_prepare = prepare_qat
             graph_prepare = prepare_qat_fx
