@@ -67,6 +67,12 @@ collectives_object_test_list = [
     [1, 2, True, "string", [4, 5, "nested"]],
 ]
 
+# Allowlist of distributed backends where profiling collectives is supported.
+PROFILING_SUPPORTED_BACKENDS = [
+    dist.Backend.NCCL,
+    dist.Backend.GLOO,
+]
+
 # Dummy NamedTuple data structures to test DDP support for NamedTuple types.
 EXPECTED_FIELDS = ("a", "b")
 TestNamedTupleInput_0 = namedtuple("NamedTuple", EXPECTED_FIELDS)
@@ -1297,7 +1303,7 @@ class DistributedTest:
             def get_event(postfix):
                 return [event for event in prof.function_events if event.name.endswith(postfix)]
 
-            if expect_event:
+            if expect_event and dist.get_backend() in PROFILING_SUPPORTED_BACKENDS:
                 events = get_event(profiling_title_postfix)
                 self.assertEqual(len(events), len(op_calls))
                 for e in events:
