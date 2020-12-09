@@ -229,14 +229,22 @@ std::tuple<Tensor, Tensor> _histogram_template(
     // promoting the tensor and instead output a warning.
     if (static_cast<double>(minvalue) != range.value()[0] ||
         static_cast<double>(maxvalue) != range.value()[1]) {
-      TORCH_WARN_ONCE(
+      TORCH_WARN(
           "Value in range cannot be represented by tensor's scalar type, casting to ",
           self.scalar_type());
     }
   } else {
-    // Really tensor.cpu()? At least this is how the current implementations of histc_cuda and bincount do it.
-    minvalue = *self.min().cpu().data_ptr<scalar_t>();
-    maxvalue = *self.max().cpu().data_ptr<scalar_t>();
+    if (self.numel() == 0) {
+      // Case with empty tensor and undefined range, numpy treats it this way,
+      // histc throws a cryptic error message.
+      minvalue = 0;
+      maxvalue = 1;       
+    } else {
+      // Really tensor.cpu()? At least this is how the current implementations
+      // of histc_cuda and bincount do it.
+      minvalue = *self.min().cpu().data_ptr<scalar_t>();
+      maxvalue = *self.max().cpu().data_ptr<scalar_t>();   
+    }
     // This is done to avoid divide by zero if input min is equal to input max.
     // In this case computing the histogram can also be skipped altogether, as
     // it's equal to the sum of weights in the middle bin, and zero everywhere
