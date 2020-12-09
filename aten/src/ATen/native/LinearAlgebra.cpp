@@ -125,8 +125,7 @@ Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
     return at::matmul(V_conj.conj() * S_pseudoinv.unsqueeze(-2), U.conj().transpose(-2, -1));
   } else {
     Tensor S, U;
-    // TODO: replace self.symeig with linalg_eigh
-    std::tie(S, U) = input.symeig(/*eigenvectors=*/true);
+    std::tie(S, U) = at::linalg_eigh(input);
     // For Hermitian matrices, singular values equal to abs(eigenvalues)
     Tensor S_abs = S.abs();
     // eigenvalues are sorted in ascending order starting with negative values, we need a maximum value of abs(eigenvalues)
