@@ -29,13 +29,15 @@ class TestOpInfo(TestCase):
     @onlyOnCPUAndCUDA
     @ops(op_db, dtypes=OpDTypes.unsupported)
     def test_unsupported_dtypes(self, device, dtype, op):
-        samples = op.sample_inputs(device, dtype)
-        if len(samples) == 0:
-            self.skipTest("Skipped! No sample inputs!")
-
-        # NOTE: only tests on first sample
-        sample = samples[0]
+        # sample_inputs can have a function for generating the input that doesn't work for specified dtype
+        # https://github.com/pytorch/pytorch/issues/49024
         with self.assertRaises(RuntimeError):
+            samples = op.sample_inputs(device, dtype)
+            if len(samples) == 0:
+                self.skipTest("Skipped! No sample inputs!")
+
+            # NOTE: only tests on first sample
+            sample = samples[0]
             op(*sample.input, *sample.args, **sample.kwargs)
 
     # Verifies that ops have their supported dtypes

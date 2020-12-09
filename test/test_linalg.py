@@ -2119,9 +2119,6 @@ class TestLinalg(TestCase):
             run_test_main(A, hermitian)
             run_test_numpy(A, hermitian)
 
-    # TODO: implement tests using OpInfo
-    # This test is here insead of method_tests of common_methods_invocations.py because
-    # adding 'linalg.' functions there breaks some Facebook internal tests
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float64)
