@@ -954,7 +954,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::isnan: {
-      return computeOneOperand("aten_relu", v, [](const ExprHandle& a) {
+      return computeOneOperand("aten_isnan", v, [](const ExprHandle& a) {
         if (!a.dtype().is_floating_point()) {
           return IntImm::make(0);
         }
