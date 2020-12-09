@@ -106,6 +106,11 @@ Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
     return at::empty(input_sizes, input.options());
   }
 
+  Tensor rcond_ = rcond;
+  if (rcond.dim() > 0) {
+    rcond_ = rcond.unsqueeze(-1);
+  }
+
   // If not Hermitian use singular value decomposition, else use eigenvalue decomposition
   if (!hermitian) {
     // until https://github.com/pytorch/pytorch/issues/45821 is resolved
@@ -114,7 +119,7 @@ Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
     // TODO: replace input.svd with linalg_svd
     std::tie(U, S, V_conj) = input.svd();
     Tensor max_val = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);  // singular values are sorted in descending order
-    Tensor S_pseudoinv = at::where(S > rcond * max_val, S.reciprocal(), at::zeros({}, S.options())).to(input.dtype());
+    Tensor S_pseudoinv = at::where(S > rcond_ * max_val, S.reciprocal(), at::zeros({}, S.options())).to(input.dtype());
     // computes V @ diag(S_pseudoinv) @ U.T.conj()
     // TODO: replace V_conj.conj() -> V once https://github.com/pytorch/pytorch/issues/45821 is resolved
     return at::matmul(V_conj.conj() * S_pseudoinv.unsqueeze(-2), U.conj().transpose(-2, -1));
@@ -125,16 +130,15 @@ Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
     // For Hermitian matrices, singular values equal to abs(eigenvalues)
     Tensor S_abs = S.abs();
     // eigenvalues are sorted in ascending order starting with negative values, we need a maximum value of abs(eigenvalues)
-    Tensor max_val = std::get<0>(S_abs.max(/*dim=*/-1));
-    Tensor S_pseudoinv = at::where(S_abs > (rcond * max_val).unsqueeze_(-1), S.reciprocal(), at::zeros({}, S.options())).to(input.dtype());
+    Tensor max_val = S_abs.amax(/*dim=*/-1, /*keepdim=*/true);
+    Tensor S_pseudoinv = at::where(S_abs > rcond_ * max_val, S.reciprocal(), at::zeros({}, S.options())).to(input.dtype());
     // computes U @ diag(S_pseudoinv) @ U.conj().T
     return at::matmul(U * S_pseudoinv.unsqueeze(-2), U.conj().transpose(-2, -1));
   }
 }
 
 Tensor linalg_pinv(const Tensor& input, double rcond, bool hermitian) {
-  ScalarType real_dtype = toValueType(input.scalar_type());
-  Tensor rcond_tensor = at::full({}, rcond, input.options().dtype(real_dtype));
+  Tensor rcond_tensor = at::full({}, rcond, input.options().dtype(ScalarType::Double));
   return at::linalg_pinv(input, rcond_tensor, hermitian);
 }
 
@@ -150,8 +154,7 @@ Tensor& linalg_pinv_out(Tensor& result, const Tensor& input, const Tensor& rcond
 }
 
 Tensor& linalg_pinv_out(Tensor& result, const Tensor& input, double rcond, bool hermitian) {
-  ScalarType real_dtype = toValueType(input.scalar_type());
-  Tensor rcond_tensor = at::full({}, rcond, input.options().dtype(real_dtype));
+  Tensor rcond_tensor = at::full({}, rcond, input.options().dtype(ScalarType::Double));
   return at::linalg_pinv_out(result, input, rcond_tensor, hermitian);
 }
 
