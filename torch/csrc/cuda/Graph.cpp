@@ -22,7 +22,7 @@ void THCPGraph_init(PyObject *module) {
   // say "module_" is more up-to-date syntax.
   auto torch_C_m = py::handle(module).cast<py::module_>();
 
-  shared_ptr_class_<::at::cuda::CUDAGraph>(module, "_CUDAGraphBase")
+  shared_ptr_class_<::at::cuda::CUDAGraph>(module, "_CudaGraphBase")
       .def(py::init<>())
       .def("capture_begin",
            &::at::cuda::CUDAGraph::capture_begin,

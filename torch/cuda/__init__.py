@@ -16,14 +16,9 @@ import warnings
 import threading
 from typing import List, Optional, Tuple, Union
 from ._utils import _get_device_index, _dummy_type
-from .streams import Stream, Event
+from .streams import Stream, Event, Graph
 from .. import device as _device
 import torch._C
-
-# Need to discuss how we want this exposed, and under what build circumstances.
-# Keeping it simple for now.
-if int(torch.version.cuda.split(".")[0]) >= 11:
-    from torch._C import _CUDAGraphBase as Graph
 
 try:
     from torch._C import _cudart  # type: ignore
