@@ -2,11 +2,11 @@
 
 #include <functional>
 
-#include <c10d/comm.hpp>
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/util/Exception.h>
 #include <c10/util/hash.h>
+#include <c10d/comm.hpp>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function_hook.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
@@ -713,6 +713,7 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
       bucket.work = process_group_->allreduce(tensors);
     } else {
       GradBucket grad_bucket(
+          next_bucket_,
           tensors,
           // Since currently we do not support single-process multiple-device
           // mode, we can assume only one replica in the bucket.

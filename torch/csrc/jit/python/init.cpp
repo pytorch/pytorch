@@ -39,6 +39,7 @@
 #include <torch/csrc/jit/passes/onnx/eval_peephole.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.h>
 #include <torch/csrc/jit/passes/onnx/function_substitution.h>
+#include <torch/csrc/jit/passes/onnx/list_model_parameters.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/preprocess_for_onnx.h>
@@ -279,6 +280,9 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_quant_fusion",
           [](std::shared_ptr<Graph>& g) { return QuantFusion(g); })
       .def("_jit_pass_fold_convbn", &FoldConvBatchNorm)
+      .def(
+          "_jit_onnx_list_model_parameters",
+          [](Module& module) { return list_module_parameters(module); })
       .def(
           "_freeze_module",
           [](Module& module,
