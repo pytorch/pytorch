@@ -392,7 +392,7 @@ class LaunchTest(TestCase):
             launch.process_init_method(init_method, current_env)
             launch.process_init_method(init_method, current_env)
             assert current_env["INIT_METHOD"] == init_method
-    
+
 class RendezvousTest(TestCase):
     def test_unknown_handler(self):
         with self.assertRaisesRegex(RuntimeError, "^No rendezvous handler"):
