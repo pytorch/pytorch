@@ -56,6 +56,105 @@ Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db) {
 }
 
 namespace tensorexpr {
+
+static const OperatorSet& supported_eltwise_set() {
+  // clang-format off
+  // breaks up the schema strings so they are no longer discoverable with ctrl-F
+    static const OperatorSet supported_eltwise_set{
+        "aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor",
+        "aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor",
+        "aten::_cast_Float(Tensor self, bool non_blocking) -> Tensor",
+        "aten::type_as(Tensor self, Tensor other) -> Tensor",
+        "aten::sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor",
+        "aten::sub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor",
+        "aten::mul.Tensor(Tensor self, Tensor other) -> Tensor",
+        "aten::mul.Scalar(Tensor self, Scalar other) -> Tensor",
+        "aten::div.Tensor(Tensor self, Tensor other) -> Tensor",
+        "aten::div.Scalar(Tensor self, Scalar other) -> Tensor",
+        "aten::eq.Tensor(Tensor self, Tensor other) -> Tensor",
+        "aten::eq.Scalar(Tensor self, Scalar other) -> Tensor",
+        "aten::ne.Tensor(Tensor self, Tensor other) -> Tensor",
+        "aten::ne.Scalar(Tensor self, Scalar other) -> Tensor",
+        "aten::ge.Tensor(Tensor self, Tensor other) -> Tensor",
+        "aten::ge.Scalar(Tensor self, Scalar other) -> Tensor",
+        "aten::gt.Tensor(Tensor self, Tensor other) -> Tensor",
+        "aten::gt.Scalar(Tensor self, Scalar other) -> Tensor",
+        "aten::le.Tensor(Tensor self, Tensor other) -> Tensor",
+        "aten::le.Scalar(Tensor self, Scalar other) -> Tensor",
+        "aten::lt.Tensor(Tensor self, Tensor other) -> Tensor",
+        "aten::lt.Scalar(Tensor self, Scalar other) -> Tensor",
+        "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor",
+        // TODO: uncomment when we properly support pow
+        // "aten::pow.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor",
+        // "aten::pow.Scalar(Scalar self, Tensor exponent) -> Tensor",
+        // TODO: support clamp_min, clamp_max
+        "aten::clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor",
+        "aten::lerp.Scalar(Tensor self, Tensor end, Scalar weight) -> Tensor",
+        "aten::lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor",
+        "aten::lgamma(Tensor self) -> Tensor",
+        "aten::log10(Tensor self) -> Tensor",
+        "aten::log(Tensor self) -> Tensor",
+        "aten::log2(Tensor self) -> Tensor",
+        "aten::log1p(Tensor self) -> Tensor",
+        "aten::exp(Tensor self) -> Tensor",
+        "aten::erf(Tensor self) -> Tensor",
+        "aten::erfc(Tensor self) -> Tensor",
+        "aten::fmod.Scalar(Tensor self, Scalar other) -> Tensor",
+        "aten::fmod.Tensor(Tensor self, Tensor other) -> Tensor",
+        "aten::cos(Tensor self) -> Tensor",
+        "aten::sin(Tensor self) -> Tensor",
+        "aten::tan(Tensor self) -> Tensor",
+        "aten::acos(Tensor self) -> Tensor",
+        "aten::asin(Tensor self) -> Tensor",
+        "aten::atan(Tensor self) -> Tensor",
+        "aten::atan2(Tensor self, Tensor other) -> Tensor",
+        "aten::cosh(Tensor self) -> Tensor",
+        "aten::sinh(Tensor self) -> Tensor",
+        "aten::tanh(Tensor self) -> Tensor",
+        "aten::sqrt(Tensor self) -> Tensor",
+        "aten::rsqrt(Tensor self) -> Tensor",
+        "aten::abs(Tensor self) -> Tensor",
+        "aten::floor(Tensor self) -> Tensor",
+        "aten::ceil(Tensor self) -> Tensor",
+        "aten::round(Tensor self) -> Tensor",
+        "aten::trunc(Tensor self) -> Tensor",
+        "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
+        "aten::remainder.Scalar(Tensor self, Scalar other) -> Tensor",
+        "aten::remainder.Tensor(Tensor self, Tensor other) -> Tensor",
+        "aten::sigmoid(Tensor self) -> Tensor",
+        "aten::relu(Tensor self) -> Tensor",
+        "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor",
+        "aten::neg(Tensor self) -> Tensor",
+        "aten::reciprocal(Tensor self) -> Tensor",
+        "aten::expm1(Tensor self) -> Tensor",
+        "aten::frac(Tensor self) -> Tensor",
+        // TODO: uncomment once we can handle rand+broadcasts
+        // "aten::rand_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+        "aten::__and__.Scalar(Tensor self, Scalar other) -> Tensor",
+        "aten::__and__.Tensor(Tensor self, Tensor other) -> Tensor",
+        "aten::__or__.Scalar(Tensor self, Scalar other) -> Tensor",
+        "aten::__or__.Tensor(Tensor self, Tensor other) -> Tensor",
+        "aten::__xor__.Scalar(Tensor self, Scalar other) -> Tensor",
+        "aten::__xor__.Tensor(Tensor self, Tensor other) -> Tensor",
+        "aten::__lshift__.Scalar(Tensor self, Scalar other) -> Tensor",
+        "aten::__lshift__.Tensor(Tensor self, Tensor other) -> Tensor",
+        "aten::__rshift__.Scalar(Tensor self, Scalar other) -> Tensor",
+        "aten::__rshift__.Tensor(Tensor self, Tensor other) -> Tensor",
+        "aten::where.self(Tensor condition, Tensor self, Tensor other) -> Tensor",
+        "aten::where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor",
+        "aten::where.ScalarOther(Tensor condition, Tensor self, Scalar other) -> Tensor",
+        "aten::where.Scalar(Tensor condition, Scalar self, Scalar other) -> Tensor",
+        // TODO: enable other min/max variants, operators that can be both
+        // elementwise or reductions:
+        "aten::min.other(Tensor self, Tensor other) -> Tensor",
+        "aten::max.other(Tensor self, Tensor other) -> Tensor",
+        // TODO: enable slice, shape inference is not implemented for this op yet
+    };
+  // clang-format on
+
+  return supported_eltwise_set;
+}
+
 bool isSupported(Node* node) {
   // For Block codegen we allow limited ops.
   if (tensorexpr::getTEGenerateBlockCode()) {
@@ -134,14 +233,12 @@ bool isSupported(Node* node) {
       // "aten::masked_fill.Tensor(Tensor self, Tensor mask, Tensor value) -> Tensor", TODO: requires 0-dim Tensor
       "aten::remainder.Scalar(Tensor self, Scalar other) -> Tensor",
       "aten::remainder.Tensor(Tensor self, Tensor other) -> Tensor",
-      "aten::cat(Tensor[] tensors, int dim=0) -> Tensor",
       "aten::sigmoid(Tensor self) -> Tensor",
       "aten::relu(Tensor self) -> Tensor",
       "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor",
       "aten::neg(Tensor self) -> Tensor",
       "aten::reciprocal(Tensor self) -> Tensor",
       "aten::expm1(Tensor self) -> Tensor",
-      "aten::unsqueeze(Tensor(a) self, int dim) -> Tensor(a)",
       "aten::frac(Tensor self) -> Tensor",
       // TODO: uncomment once we can handle rand+broadcasts
       // "aten::rand_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
@@ -174,9 +271,14 @@ bool isSupported(Node* node) {
       "aten::softmax.int(Tensor self, int dim , ScalarType? dtype=None) -> Tensor",
       "aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
   };
+  static const OperatorSet supported_misc_set{
+      "aten::cat(Tensor[] tensors, int dim=0) -> Tensor",
+      "aten::unsqueeze(Tensor(a) self, int dim) -> Tensor(a)",
+  };
   // clang-format on
 
-  if (node->isMemberOf(supported_operator_set) ||
+  if (node->isMemberOf(supported_eltwise_set()) ||
+      node->isMemberOf(supported_misc_set) ||
       (texpr_reductions_enabled && node->isMemberOf(supported_reduction_set))) {
     // We only insert guards on Tensor types, so we rely on the output
     // of a node being uniquely determined by its input types.
@@ -482,18 +584,6 @@ class TensorExprFuser {
     }
 
     for (Node* n : subgraph->nodes()) {
-      // XXX: Use of shape_of.emplace is crucial to the output shape
-      // optimization!
-      if (n->kind() == aten::cat) {
-        // This is a bit more involved, because we have to account for the case
-        // when inputs have different shapes, but fortunately those tensors are
-        // always outputs, and so we can simply avoid replacing their queries,
-        // because it won't help us.
-        continue;
-      }
-      if (n->kind() == prim::Constant) {
-        continue;
-      }
       if (n->kind() == prim::ConstantChunk) {
         Node* sizes_node = graph->insertNode(
             graph->create(prim::ChunkSizes, shape_of.at(n->input()), 2));
@@ -513,6 +603,13 @@ class TensorExprFuser {
         shape_of.emplace(outputs.at(outputs.size() - 1), last_size);
         continue;
       }
+
+      // we only support shape calculations for elementwise and
+      // a few exceptions (e.g. prim::ConstantChunk, etc) listed above
+      if (!n->isMemberOf(tensorexpr::supported_eltwise_set())) {
+        continue;
+      }
+
       auto tensor_inputs = filter(n->inputs(), [](Value* v) {
         return v->type()->isSubtypeOf(TensorType::get());
       });
