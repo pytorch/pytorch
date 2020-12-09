@@ -14,6 +14,11 @@ from torch.quantization.quantize_fx import (
     prepare_qat_fx,
 )
 
+from torch.quantization.fx.pattern_utils import (
+    is_match,
+    MatchAllNode,
+)
+
 from torch.quantization import (
     QuantType,
     QuantStub,
@@ -186,6 +191,31 @@ class TestFuseFx(QuantizationTestCase):
 
 @skipIfNoFBGEMM
 class TestQuantizeFx(QuantizationTestCase):
+    def test_pattern_match(self):
+        """ test MatchAllNode with
+            conv - bn - add - relu pattern
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(1, 1, 1)
+                self.bn = nn.BatchNorm2d(1)
+                self.relu = nn.ReLU()
+
+            def forward(self, x, y):
+                x = self.conv(x)
+                x = self.bn(x)
+                x = x + y
+                x = self.relu(x)
+                return x
+
+        pattern = (nn.ReLU, (operator.add, (nn.BatchNorm2d, nn.Conv2d), MatchAllNode))
+        m = torch.fx.symbolic_trace(M())
+        modules = dict(m.named_modules())
+        for n in m.graph.nodes:
+            if n.op == 'call_module' and type(modules[n.target]) == nn.ReLU:
+                self.assertTrue(is_match(modules, n, pattern))
+
     def _get_conv_linear_test_cases(self):
         ''' Returns a list of test cases, with format:
         is_dynamic, ModuleClass, module_constructor_inputs,
