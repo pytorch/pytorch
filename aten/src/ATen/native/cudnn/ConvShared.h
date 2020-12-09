@@ -2,6 +2,8 @@
 
 #include <ATen/cudnn/cudnn-wrapper.h>
 #include <ATen/cudnn/Descriptors.h>
+#include <ATen/cudnn/Types.h>
+#include <ATen/native/ConvUtils.h>
 
 namespace at { namespace native {
 
