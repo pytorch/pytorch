@@ -2330,13 +2330,13 @@ def gaussian_nll_loss(input, target, var, eps=1e-8, full=False, reduction='mean'
         full: True/False (bool), include the constant term in the loss
             calculation. Default: False.
         reduction: specifies the reduction to apply to the output:
-	    'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
-	    'mean': the sum of the output will be divided by the number of
+            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
+            'mean': the sum of the output will be divided by the number of
             elements in the output, 'sum': the output will be summed.
-	    Default: 'mean'.
+            Default: 'mean'.
 
     Output:
-	loss: scalar by default. If reduction is 'none', then (N, *), same
+        loss: scalar by default. If reduction is 'none', then (N, *), same
             shape as input.
 
     """
