@@ -293,7 +293,7 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
     TORCH_INTERNAL_ASSERT(op.target_dtype == op.current_dtype)
 
     // Acquires the first non-CPU device (if any) as the common device
-    if (common_device == kCPU && !op.tensor.device().is_cpu()) {
+    if (common_device.is_cpu() && !op.tensor.device().is_cpu()) {
       common_device = op.tensor.device();
     }
 
@@ -400,7 +400,7 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
 
     // Creates temporaries for CPU operations, if needed and requested
     // TODO: reuse temporaries when possible (e.g. for inplace operations)
-    if (common_device == kCPU) {
+    if (common_device.is_cpu()) {
       // Casts to outputs by creating temporaries of the correct dtype (if needed)
       if (config.cast_common_dtype_to_outputs_ && op.is_output && op.current_dtype != common_dtype_) {
         TORCH_INTERNAL_ASSERT(op.tensor.defined());

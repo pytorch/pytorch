@@ -193,7 +193,7 @@ static inline Tensor applySlice(
   // Skip this optimization if we are tracing, as the trace may be polymorphic
   // over the shape of the `self` tensor, and we still want to record
   // the slice.
-  int64_t length = (self_device == at::kCPU || self_device == at::kCUDA) ? self_sizes[dim] : self.size(dim);
+  int64_t length = (self_device.is_cpu() || self_device.is_cuda()) ? self_sizes[dim] : self.size(dim);
   if (!disable_slice_optimization && start == 0 && stop == length && step == 1) {
     return self;
   }
@@ -242,7 +242,7 @@ static inline Tensor boolToIndexingTensorNonNativeDeviceType(const Tensor& self,
 }
 
 static inline Tensor boolToIndexingTensor(const Tensor& self, bool value, const at::Device& self_device) {
-  if (self_device == at::kCPU || self_device == at::kCUDA) {
+  if (self_device.is_cpu() || self_device.is_cuda()) {
     return boolToIndexingTensorCPUOrCUDA(self, value);
   } else {
     return boolToIndexingTensorNonNativeDeviceType(self, value);
@@ -320,7 +320,7 @@ static inline int64_t count_specified_dimensions(const ArrayRef<TensorIndex>& in
 // The rest of the functions are in `at::indexing::impl` namespace, signifying
 // that they shouldn't be used from Python indexing implementation.
 static inline Tensor scalarToTensor(Scalar v, const TensorOptions& options, const at::Device& self_device) {
-  if (self_device == at::kCPU || self_device == at::kCUDA) {
+  if (self_device.is_cpu() || self_device.is_cuda()) {
     return impl::scalarToTensorCPUOrCUDA(v, options);
   } else {
     return impl::scalarToTensorNonNativeDeviceType(v, options);

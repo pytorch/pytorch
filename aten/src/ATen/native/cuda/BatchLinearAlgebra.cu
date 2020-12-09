@@ -974,7 +974,7 @@ void magmaSymeig<c10::complex<float>, float>(
       ldwa, reinterpret_cast<magmaFloatComplex*>(work), lwork, rwork, lrwork, iwork, liwork, info);
   AT_CUDA_CHECK(cudaGetLastError());
 }
-    
+
 template<>
 void magmaEig<double>(
     magma_vec_t jobvl, magma_vec_t jobvr, magma_int_t n, double *A, magma_int_t lda,
@@ -1902,7 +1902,7 @@ static void apply_eig(const Tensor& self, bool eigenvectors, Tensor& out_eigvals
 TORCH_CHECK(false, "Calling torch.eig on a CUDA tensor requires compiling PyTorch with MAGMA. "
                    "Either transfer the tensor to the CPU before calling torch.eig or recompile with MAGMA.");
 #else
-  TORCH_INTERNAL_ASSERT(self.device() == at::kCPU, "Internal error: apply_eig needs a CPU tensor");
+  TORCH_INTERNAL_ASSERT(self.device().is_cpu(), "Internal error: apply_eig needs a CPU tensor");
   magma_vec_t jobvr = eigenvectors ? MagmaVec : MagmaNoVec;
   magma_int_t n = magma_int_cast(self.size(-1), "n");
   auto self_data = self.data_ptr<scalar_t>();
@@ -2022,7 +2022,7 @@ std::tuple<Tensor, Tensor> _syevd_helper_cuda(const Tensor& self, bool compute_e
   bool upper = uplo == 'U' ? true : false;
   return _symeig_helper_cuda(self, compute_eigenvectors, upper);
 }
-    
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ svd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<typename scalar_t>

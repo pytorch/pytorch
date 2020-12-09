@@ -18,7 +18,7 @@ Tensor& fill_out(Tensor& self, Scalar value) {
     self.copy_(out);
     return self;
   }
-  if (self.device() == at::kCPU && self.numel() == 1 && !self.is_complex() && !value.isComplex()) {
+  if (self.device().is_cpu() && self.numel() == 1 && !self.is_complex() && !value.isComplex()) {
     return at::detail::scalar_fill(self, value);
   }
   auto iter = TensorIteratorConfig()
@@ -105,7 +105,7 @@ Tensor& zero_cpu_(Tensor &self, int64_t nelements) {
 
 Tensor& zero_(Tensor &self) {
   int64_t nelements = at::prod_intlist(self.sizes());
-  if (self.device() == at::kCPU &&
+  if (self.device().is_cpu() &&
       self.is_non_overlapping_and_dense() &&
       nelements < internal::GRAIN_SIZE) {
     return zero_cpu_(self, nelements);

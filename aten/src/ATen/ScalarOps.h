@@ -23,7 +23,7 @@ namespace c10 {
 // to implement this without going through Derived Types (which are not part of core).
 inline at::Tensor scalar_to_tensor(Scalar s, const Device device = at::kCPU) {
   // This is the fast track we have for CPU scalar tensors.
-  if (device == at::kCPU && !s.isComplex()) {
+  if (device.is_cpu() && !s.isComplex()) {
     if (s.isFloatingPoint()) {
       return at::detail::scalar_tensor_static(s, at::kDouble, at::kCPU);
     } else if (s.isBoolean()) {
