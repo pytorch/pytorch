@@ -52,6 +52,7 @@ def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Seque
             func=info.func,
             op=op_name,
             derivatives=info.derivatives,
+            forward_derivatives=info.forward_derivatives,
             all_saved_inputs=info.all_saved_inputs,
             all_saved_outputs=info.all_saved_outputs,
             args_with_derivatives=info.args_with_derivatives,
@@ -65,6 +66,7 @@ def cpp_arguments(f: NativeFunction) -> Sequence[CppArgument]:
     return CppSignatureGroup.from_schema(f.func, method=False).signature.arguments()
 
 def create_derivative(f: NativeFunction, formula: str, var_names: Tuple[str, ...]) -> Derivative:
+    original_formula = formula
     arguments = cpp_arguments(f)
     argument_names = tuple(a.name for a in arguments)
     argument_types = tuple(a.type for a in arguments)
@@ -85,10 +87,134 @@ def create_derivative(f: NativeFunction, formula: str, var_names: Tuple[str, ...
 
     return Derivative(
         formula=formula,
+        original_formula=original_formula,
         var_names=var_names,
         saved_inputs=saved_inputs,
         saved_outputs=saved_outputs,
     )
+
+
+def find_required_inputs_fw_grads(formula: str) -> Tuple[str, ...]:
+    FW_GRAD_REGEX = r'(\w+).fw_grad'
+    return re.findall(FW_GRAD_REGEX, formula)
+
+def create_forward_derivative(f: NativeFunction, formula: str, names: Tuple[str, ...]):
+    assert len(names) == 1, "Forward derivatives can define gradients for only one output at a time"
+    var_name = names[0]
+    var_type = None
+    for r in f.func.returns:
+        if r.name == var_name:
+            var_type = r.type
+            break
+    # Handle default return names
+    if var_type is None:
+        if var_name == "result":
+            assert len(f.func.returns) == 1
+            var_type = f.func.returns[0].type
+        else:
+            res = re.findall(r"^result(\d+)$", var_name)
+            if len(res) == 1:
+                arg_idx = int(res[0])
+                var_type = f.func.returns[arg_idx].type
+
+    assert var_type is not None, "No matching output for forward derivative definition"
+    return ForwardDerivative(
+        formula=formula,
+        var_name=var_name,
+        var_type=var_type,
+        required_inputs_fw_grad=find_required_inputs_fw_grads(formula),
+        required_inputs_primal=None)
+
+def postprocess_forward_derivatives(
+    f: NativeFunction,
+    defn_name: str,
+    all_arg_names: Tuple[str, ...],
+    derivatives: Tuple[Derivative, ...],
+    forward_derivatives: Tuple[ForwardDerivative, ...],
+    args_with_derivatives: Sequence[CppArgument]
+) -> Tuple[ForwardDerivative, ...]:
+
+    updated_derivatives: Tuple[ForwardDerivative, ...] = []
+
+    for defn in forward_derivatives:
+        formula = defn.formula
+        required_inputs = defn.required_inputs_fw_grad
+        if formula == "auto_element_wise":
+            if (not len(args_with_derivatives) == 1) or len(forward_derivatives) > 1:
+                raise RuntimeError(f"Derivative definition of {defn_name} in derivatives.yaml defines the "
+                                    "forward definition of gradient as element_wise but this only "
+                                    "works for functions with a single differentiable input and a "
+                                    "single differentiable output.")
+            if not len(derivatives) == 1:
+                raise RuntimeError(f"Derivative definition of {defn_name} in derivatives.yaml defines the "
+                                    "forward definition of gradient as element_wise but it does not "
+                                    "defines the gradient formula for its argument which is required.")
+
+            backward_formula = derivatives[0].original_formula
+            input_name = args_with_derivatives[0].name
+
+            def repl(m):
+                return f"{m.group(1)}{input_name}_fw_grad{m.group(2)}"
+            fw_formula = re.sub(IDENT_REGEX.format("grad"), repl, backward_formula)
+
+            required_inputs = all_arg_names
+            formula = fw_formula
+        elif formula == "auto_linear":
+            if len(forward_derivatives) > 1:
+                raise RuntimeError(f"Derivative definition of {defn_name} in derivatives.yaml defines the "
+                                    "forward definition of gradient as linear but this only works "
+                                    "for functions with a single differentiable output.")
+
+            diff_arg_names = [arg.name for arg in args_with_derivatives]
+            assert len(diff_arg_names) > 0
+
+            new_args = []
+            for arg_name in all_arg_names:
+                if arg_name in diff_arg_names:
+                    arg_name = arg_name + "_fw_grad"
+                new_args.append(arg_name)
+
+            if Variant.function in f.variants:
+                fw_formula = "at::{}({})".format(defn_name, ", ".join(new_args))
+            else:
+                assert f.func.kind() is not SchemaKind.inplace
+                assert Variant.method in f.variants
+                fw_formula = "{}.{}({})".format(new_args[0], defn_name, ", ".join(new_args[1:]))
+
+            required_inputs = diff_arg_names
+            formula = fw_formula
+
+        # During forward formula, we use the primal instead of the input Tensors
+        required_inputs_primal = set()
+        for arg in args_with_derivatives:
+            if arg.type == 'TensorList':
+                # The functions taking TensorList handle everything internaly
+                continue
+            arg_name = arg.name
+
+            def repl(m):
+                required_inputs_primal.add(arg_name)
+                return "{}{}_primal{}".format(m.group(1), arg_name, m.group(2))
+            formula = re.sub(IDENT_REGEX.format(arg_name), repl, formula)
+
+        updated_derivatives.append(ForwardDerivative(
+            formula=formula,
+            var_name=defn.var_name,
+            var_type=defn.var_type,
+            required_inputs_fw_grad=required_inputs,
+            required_inputs_primal=required_inputs_primal))
+
+    return updated_derivatives
+
+def is_forward_derivative_definition(all_arg_names: Tuple[str, ...], names: Tuple[str, ...]) -> bool:
+    if len(names) > 1:
+        # Forward definition are always for a single output at a time
+        return False
+    name = names[0]
+    if name not in all_arg_names:
+        return True
+    else:
+        return False
 
 def create_differentiability_info(
     defn: Dict[Any, Any],
@@ -146,22 +272,31 @@ def create_differentiability_info(
     @with_native_function
     def set_up_derivatives(f: NativeFunction) -> Tuple[
         Sequence[Derivative],
+        Sequence[ForwardDerivative],
         Sequence[CppArgument],
         Sequence[str],
     ]:
         # Set up the derivative information
         derivatives: List[Derivative] = []
+        forward_derivatives: List[ForwardDerivative] = []
         non_differentiable_arg_names: List[str] = []
         args_with_derivatives_set: Set[str] = set()
+
+        all_arg_names = [a.name for a in cpp_arguments(f)]
+
         for raw_names in sorted(defn.keys()):
             formula = defn[raw_names]
             names = split_names(raw_names)
-            if formula.lower().strip() == 'non_differentiable':
-                non_differentiable_arg_names += names
+
+            if is_forward_derivative_definition(all_arg_names, names):
+                forward_derivatives.append(create_forward_derivative(f, formula, names))
             else:
-                derivative = create_derivative(f, formula, names)
-                derivatives.append(derivative)
-                args_with_derivatives_set |= set(names)
+                if formula.lower().strip() == 'non_differentiable':
+                    non_differentiable_arg_names += names
+                else:
+                    derivative = create_derivative(f, formula, names)
+                    derivatives.append(derivative)
+                    args_with_derivatives_set |= set(names)
 
         overlap = args_with_derivatives_set.intersection(non_differentiable_arg_names)
         if overlap:
@@ -171,12 +306,16 @@ def create_differentiability_info(
         # Next, let us determine the list of inputs in order.
         # TODO: do we need eagerly calculate and save it here? Can it be derived
         # from NativeFunction and `derivatives` on callsites instead?
-        args_with_derivatives = list(filter(lambda a: a.name in args_with_derivatives_set, cpp_arguments(f)))
+        args_with_derivatives = [a for a in cpp_arguments(f) if a.name in args_with_derivatives_set]
+
+        # Postprocess forward derivatives definitions now that we know the differentiable arguments
+        forward_derivatives = postprocess_forward_derivatives(f, defn_name,
+            all_arg_names, derivatives, forward_derivatives, args_with_derivatives)
 
         # Test to see if the use of 'grads' makes sense.
         check_grad_usage(defn_name, derivatives)
 
-        return derivatives, args_with_derivatives, non_differentiable_arg_names
+        return derivatives, forward_derivatives, args_with_derivatives, non_differentiable_arg_names
 
     # NB: Removes 'name' from defn dictionary
     specification = defn.pop('name')
@@ -208,13 +347,19 @@ def create_differentiability_info(
                            "but this name would be shadowed by our codegen. "
                            "Please use a different name in native_functions.yaml.")
 
-    derivatives, args_with_derivatives, non_differentiable_arg_names = set_up_derivatives(canonical)
+    if 'result' in (a.name for a in cpp_arguments(canonical)):
+        raise RuntimeError(f"Schema for {defn_name} has an argument named result, "
+                            "but this is only allowed for outputs."
+                            "Please use a different name in native_functions.yaml.")
+
+    derivatives, forward_derivatives, args_with_derivatives, non_differentiable_arg_names = set_up_derivatives(canonical)
 
     return DifferentiabilityInfo(
         name=defn_name,
         func=canonical,
         op=None,
         derivatives=derivatives,
+        forward_derivatives=forward_derivatives,
         all_saved_inputs=dedup_vars([v for d in derivatives for v in d.saved_inputs]),
         all_saved_outputs=dedup_vars([v for d in derivatives for v in d.saved_outputs]),
         args_with_derivatives=args_with_derivatives,
