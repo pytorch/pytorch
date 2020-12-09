@@ -369,12 +369,16 @@ at::Tensor embedding_bag_byte_helper(
       "Expect 32 or 64 bit offsets, but found ",
       offsets.scalar_type(),
       " instead.");
+  TORCH_CHECK(
+      weight.is_contiguous() && indices.is_contiguous() &&
+          offsets.is_contiguous(),
+      "Expect weight, indices, and offsets to be contiguous.");
 
   // Using helper function to support different type combination without the
   // need to cast, which can be additional performance overhead
   if (indices.scalar_type() == at::kInt && offsets.scalar_type() == at::kInt) {
     return embedding_bag_byte_impl<int, int>(
-        weight.contiguous(),
+        weight,
         indices,
         offsets,
         pruned_weights,
@@ -385,7 +389,7 @@ at::Tensor embedding_bag_byte_helper(
   } else if (
       indices.scalar_type() == at::kInt && offsets.scalar_type() == at::kLong) {
     return embedding_bag_byte_impl<int, int64_t>(
-        weight.contiguous(),
+        weight,
         indices,
         offsets,
         pruned_weights,
@@ -396,7 +400,7 @@ at::Tensor embedding_bag_byte_helper(
   } else if (
       indices.scalar_type() == at::kLong && offsets.scalar_type() == at::kInt) {
     return embedding_bag_byte_impl<int64_t, int>(
-        weight.contiguous(),
+        weight,
         indices,
         offsets,
         pruned_weights,
@@ -408,7 +412,7 @@ at::Tensor embedding_bag_byte_helper(
 
   // default case given the TORCH_CHECK above
   return embedding_bag_byte_impl<int64_t, int64_t>(
-      weight.contiguous(),
+      weight,
       indices,
       offsets,
       pruned_weights,
@@ -458,12 +462,16 @@ at::Tensor embedding_bag_4bit_helper(
       "Expect 32 or 64 bit offsets, but found ",
       offsets.scalar_type(),
       " instead.");
+  TORCH_CHECK(
+      weight.is_contiguous() && indices.is_contiguous() &&
+          offsets.is_contiguous(),
+      "Expect weight, indices, and offsets to be contiguous.");
 
   // Using helper function to support different type combination without the
   // need to cast, which can be additional performance overhead
   if (indices.scalar_type() == at::kInt && offsets.scalar_type() == at::kInt) {
     return embedding_bag_4bit_impl<int, int>(
-        weight.contiguous(),
+        weight,
         indices,
         offsets,
         pruned_weights,
@@ -473,7 +481,7 @@ at::Tensor embedding_bag_4bit_helper(
   } else if (
       indices.scalar_type() == at::kInt && offsets.scalar_type() == at::kLong) {
     return embedding_bag_4bit_impl<int, int64_t>(
-        weight.contiguous(),
+        weight,
         indices,
         offsets,
         pruned_weights,
@@ -483,7 +491,7 @@ at::Tensor embedding_bag_4bit_helper(
   } else if (
       indices.scalar_type() == at::kLong && offsets.scalar_type() == at::kInt) {
     return embedding_bag_4bit_impl<int64_t, int>(
-        weight.contiguous(),
+        weight,
         indices,
         offsets,
         pruned_weights,
@@ -492,7 +500,7 @@ at::Tensor embedding_bag_4bit_helper(
         include_last_offset);
   }
   return embedding_bag_4bit_impl<int64_t, int64_t>(
-      weight.contiguous(),
+      weight,
       indices,
       offsets,
       pruned_weights,
@@ -511,7 +519,7 @@ at::Tensor PackedEmbeddingBagWeight::embeddingbag_byte(
     bool include_last_offset,
     bool is_embedding_op) {
   return embedding_bag_byte_helper(
-      packed_w.contiguous(),
+      packed_w,
       indices,
       offsets_in,
       pruned_weights,
@@ -538,7 +546,7 @@ at::Tensor PackedEmbeddingBagWeight::embeddingbag_4bit(
   }
 
   return embedding_bag_4bit_helper(
-      packed_w.contiguous(),
+      packed_w,
       indices,
       offsets_in,
       pruned_weights,
@@ -564,7 +572,7 @@ Tensor embedding_bag_byte_rowwise_offsets(
     const c10::optional<Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
   return embedding_bag_byte_helper(
-      weight.contiguous(),
+      weight,
       indices,
       offsets_in,
       pruned_weights,
@@ -594,7 +602,7 @@ Tensor embedding_bag_4bit_rowwise_offsets(
   }
 
   return embedding_bag_4bit_helper(
-      weight.contiguous(),
+      weight,
       indices,
       offsets_in,
       pruned_weights,
