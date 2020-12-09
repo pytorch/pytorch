@@ -941,6 +941,7 @@ struct PythonPrintImpl {
         if (node->outputs().size() == 1 &&
             node->output()->type()->kind() == TypeKind::FunctionType) {
           auto fn = node->output()->type()->expect<FunctionType>();
+          std::cout << "python_print adding func dep: " << fn->name()->name() << std::endl;
           deps_table_.add(fn);
           stmt << fn->annotation_str(type_printer_);
         } else if (!node->mustBeNone()) {
@@ -1071,8 +1072,11 @@ struct PythonPrintImpl {
         stmt << ")";
 
         if (auto selfClass = self->type()->cast<ClassType>()) {
+          std::cout << "call method selfClass: " << selfClass->name()->name() << std::endl;
           deps_table_.add(selfClass);
-          const Function& method = selfClass->getMethod(node->s(attr::name));
+          const Function& method = selfClass->getMethod(node->s(attr::name)); //prints out function here??
+          // where are the methods printed out tho???
+          std::cout << "   func name: " << method.name() << std::endl;
           TORCH_INTERNAL_ASSERT(
               method.qualname() ==
               QualifiedName(selfClass->name()->qualifiedName(), methodName));
@@ -1308,6 +1312,15 @@ struct PythonPrintImpl {
       }
     }
 
+    /* TODO fields
+    for (auto& hook : classType->getForwardHooks()) {
+      printFunction(*hook);
+    }
+    for (auto& pre_hook : classType->getForwardPreHooks()) {
+      printFunction(*pre_hook);
+    }
+    */
+
     bool is_module = classType->is_module();
     body_ << "class " << classType->name()->name();
     if (is_module) {
@@ -1348,6 +1361,25 @@ struct PythonPrintImpl {
         }
         body_ << "]\n";
 #endif
+        auto forwardPreHooks = classType->getForwardPreHooks();
+        if (forwardPreHooks.size() > 0) {
+          indent();
+          body_ << "__forward_pre_hooks__ = [";
+          for (const auto& pre_hook : forwardPreHooks) {
+            body_ << "\"" << pre_hook->name() << "\", ";
+          }
+          body_ << "]\n";
+        }
+
+        auto forwardHooks = classType->getForwardHooks();
+        if (forwardHooks.size() > 0) {
+          indent();
+          body_ << "__forward_hooks__ = [";
+          for (const auto& hook : forwardHooks) {
+            body_ << "\"" << hook->name() << "\", ";
+          }
+          body_ << "]\n";
+        }
       }
 
       for (size_t i = 0; i < numAttrs; i++) {
@@ -1392,12 +1424,20 @@ struct PythonPrintImpl {
 
       // TODO fields
       for (auto& method : classType->methods()) {
+        std::cout << "printing method: " << method->name() << std::endl;
         printFunction(*method);
+      }
+      for (auto& hook : classType->getForwardHooks()) {
+        printFunction(*hook);
+      }
+      for (auto& pre_hook : classType->getForwardPreHooks()) {
+        printFunction(*pre_hook);
       }
     }
   }
 
   void printNamedType(const c10::NamedTypePtr& type) {
+    std::cout << "print named type: " << type->name()->name() << std::endl;
     if (auto functionType = type->cast<FunctionType>()) {
       printFunction(*functionType->function());
     } else if (auto classType = type->cast<ClassType>()) {
@@ -1519,10 +1559,12 @@ void PythonPrint::printNamedType(const c10::NamedTypePtr& type) {
 }
 
 void PythonPrint::printFunction(const Function& func) {
+  std::cout << "printing function: " << func.name() << std::endl;
   pImpl->printFunction(func);
 }
 
 void PythonPrint::printMethod(const Function& func) {
+  std::cout << "printing method: " << func.name() << std::endl;
   pImpl->printMethod(func);
 }
 

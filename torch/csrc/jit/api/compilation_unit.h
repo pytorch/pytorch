@@ -71,6 +71,36 @@ struct TORCH_API CompilationUnit {
     TORCH_CHECK(false, "attempted to get undefined function ", name.name());
   }
 
+  Function* find_hook(const c10::QualifiedName& name) const {
+    auto it = hook_dict_.find(name);
+    if (it == hook_dict_.end()) {
+      return nullptr;
+    }
+    return hooks_[it->second].get();
+  }
+
+  Function& get_hook(const c10::QualifiedName& name) const {
+    if (auto r = find_hook(name)) {
+      return *r;
+    }
+    TORCH_CHECK(false, "attempted to get undefined hook ", name.name());
+  }
+
+  Function* find_pre_hook(const c10::QualifiedName& name) const {
+    auto it = pre_hook_dict_.find(name);
+    if (it == pre_hook_dict_.end()) {
+      return nullptr;
+    }
+    return pre_hooks_[it->second].get();
+  }
+
+  Function& get_pre_hook(const c10::QualifiedName& name) const {
+    if (auto r = find_pre_hook(name)) {
+      return *r;
+    }
+    TORCH_CHECK(false, "attempted to get undefined pre hook ", name.name());
+  }
+
   void set_optimized(bool o) {
     TORCH_WARN(
         "CompilationUnit::set_optimized() is deprecated and has no effect. "
@@ -86,6 +116,7 @@ struct TORCH_API CompilationUnit {
 
   // for historic reasons, these are defined in ir_emitter.cpp
   // Returns the list of Function's just defined.
+  // Used to compile module methods and properites
   std::vector<Function*> define(
       const c10::optional<c10::QualifiedName>& prefix,
       const std::vector<Property>& properties,
@@ -98,6 +129,22 @@ struct TORCH_API CompilationUnit {
       const Self* self,
       // see [name mangling]
       bool shouldMangle = false);
+  
+  // Used to compile hooks and prehooks
+  std::vector<Function*> define_hooks(
+    const c10::optional<c10::QualifiedName>& prefix,
+    const std::vector<Def>& hookDefinitions,
+    const std::vector<ResolverPtr>& 
+        hookDefResolvers,/* determines how we handle free
+                     variables in each definition*/
+      // if non-null, the first argument to each def, is bound to this value
+    const std::vector<Def>& preHookDefinitions,
+    const std::vector<ResolverPtr>& 
+        preHookDefResolvers,/* determines how we handle free
+                     variables in each definition*/
+      // if non-null, the first argument to each def, is bound to this value
+    const Self* self,
+    bool shouldMangle = false);
 
   // same as above but parse the definitions from source
   // Returns the list of Function's just defined.
@@ -217,7 +264,7 @@ struct TORCH_API CompilationUnit {
           // Don't erase because the dict_
           auto it = dict_.find(method->qualname());
           TORCH_INTERNAL_ASSERT(it != dict_.end());
-          functions_[it->second] = nullptr;
+          functions_[it->second] = nullptr; // TODO also clear all hooks and pre hooks
           // Erase in our big lookup table
           dict_.erase(it);
         }
@@ -250,7 +297,7 @@ struct TORCH_API CompilationUnit {
   // Python Module will have different types but the same qualified name.
   c10::QualifiedName mangle(const c10::QualifiedName& name) const {
     auto mangled = name;
-    while (get_type(mangled) || find_function(mangled)) {
+    while (get_type(mangled) || find_function(mangled) || find_hook(mangled) || find_pre_hook(mangled)) {
       mangled = mangler_.mangle(mangled);
     }
     return mangled;
@@ -263,7 +310,8 @@ struct TORCH_API CompilationUnit {
       const ResolverPtr& resolver,
       const Self* self,
       const std::unordered_map<std::string, Function*>& function_table,
-      bool shouldMangle = false) const;
+      bool shouldMangle = false,
+      int temp_switch = 0) const;
 
   // Define a property on \p self.
   struct PropertyPair;
@@ -285,10 +333,38 @@ struct TORCH_API CompilationUnit {
     dict_[functions_.back()->qualname()] = functions_.size() - 1;
     return *functions_.back();
   }
+
+  Function& register_hook(std::unique_ptr<Function> fn) {
+    TORCH_CHECK(
+        0 == hook_dict_.count(fn->qualname().qualifiedName()),
+        "hook '",
+        fn->qualname().qualifiedName(),
+        "' already defined.");
+    hooks_.emplace_back(std::move(fn));
+    hook_dict_[hooks_.back()->qualname()] = hooks_.size() - 1;
+    return *hooks_.back();
+  }
+  Function& register_pre_hook(std::unique_ptr<Function> fn) {
+    TORCH_CHECK(
+        0 == pre_hook_dict_.count(fn->qualname().qualifiedName()),
+        "prehook '",
+        fn->qualname().qualifiedName(),
+        "' already defined.");
+    pre_hooks_.emplace_back(std::move(fn));
+    pre_hook_dict_[pre_hooks_.back()->qualname()] = pre_hooks_.size() - 1;
+    return *pre_hooks_.back();
+  }
+
   std::vector<std::unique_ptr<Function>> functions_;
+  std::vector<std::unique_ptr<Function>> hooks_;
+  std::vector<std::unique_ptr<Function>> pre_hooks_;
   // for fast lookup
-  std::unordered_map<c10::QualifiedName, size_t> dict_;
+  std::unordered_map<c10::QualifiedName, size_t> dict_; // TODO take out hooks and make own dict??
+  std::unordered_map<c10::QualifiedName, size_t> hook_dict_; // TODO take out hooks and make own dict??
+  std::unordered_map<c10::QualifiedName, size_t> pre_hook_dict_; // TODO take out hooks and make own dict??
   std::unordered_map<c10::QualifiedName, size_t> classDict_;
+
+  // READ TODO: combine hooks dicts into normal dict; hooks aren't any different from other methods at this point
 
   // [class ownership] Right now there aree two relationships between classes
   // and compilation units:

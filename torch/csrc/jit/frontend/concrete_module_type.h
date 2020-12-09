@@ -76,6 +76,9 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
 
   void addModule(std::string name, std::shared_ptr<ConcreteModuleType> meta);
 
+  void addForwardHook(uint64_t hook_python_id);
+  void addForwardPreHook(uint64_t pre_hook_python_id);
+
   void addOverload(
       std::string methodName,
       std::vector<std::string> overloadedMethodNames);
@@ -163,6 +166,12 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   std::unordered_map<std::string, c10::Symbol> builtinFunctions_;
   // The concrete types of any submodules
   std::vector<ModuleInfo> modules_;
+  // Python ID of hooks to be called before/after forward when the module 
+  // is called directly, used to insure modules have different types
+  // when they have different python hooks
+  // Actual hooks are added to ClassType directly during compilation 
+  std::vector<uint64_t> forward_hook_ids;
+  std::vector<uint64_t> forward_pre_hook_ids;
 
   // If something is a ModuleDict/ModuleList, it means:
   //   1. The order of the submodules matters for comparing the type
@@ -206,6 +215,7 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   getModulesPy() const;
 
   bool equals(const ConcreteModuleType& other) const {
+    std::cout << "in concrete_module_type thinnggy" << std::endl;
     if (jitType_ == other.jitType_) {
       // If the computed types are the same, these modules can (obviously) share
       // a type.

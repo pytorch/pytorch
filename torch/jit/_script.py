@@ -12,7 +12,7 @@ import inspect
 import copy
 import pickle
 import warnings
-from typing import Any, Dict
+from typing import Any, Dict, Callable
 
 
 import torch
@@ -332,6 +332,11 @@ if _enabled:
 
         def _replicate_for_data_parallel(self):
             return self._actual_script_module._replicate_for_data_parallel()
+
+        #def _call_impl(self, *input, **kwargs):
+        #    print("overrid it?")
+
+        #__call__ : Callable[..., Any] = _call_impl
 
     class RecursiveScriptModule(ScriptModule):
         # XXX: RecursiveScriptModule inherits from ScriptModule for the sole
@@ -711,6 +716,8 @@ if _enabled:
         "extra_repr",
         "_slow_forward",
         "_tracing_name",
+        "register_forward_pre_hook",
+        "register_forward_hook",
         "eval",
         "train",
     }

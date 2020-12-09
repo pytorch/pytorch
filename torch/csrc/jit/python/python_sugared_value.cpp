@@ -489,7 +489,7 @@ std::shared_ptr<SugaredValue> ModuleValue::tryGetAttr(
     return std::make_shared<ModuleValue>(
         m.graph()->insertGetAttr(self_, field),
         ConcreteModuleType::fromJitType(selfType->getAttribute(field)));
-  } else if (selfType->hasAttribute(field) || selfType->findMethod(field)) {
+  } else if (selfType->hasAttribute(field) || selfType->findMethod(field) || selfType->findForwardHook(field) || selfType->findForwardPreHook(field)) {
     // ...otherwise, methods, parameters, attributes, and buffers are all
     // first class so they get returned as SimpleValues
     return std::make_shared<SimpleValue>(self_)->attr(loc, m, field);

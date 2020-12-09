@@ -30,6 +30,7 @@ void inlineCalls(Block* block) {
       case prim::CallMethod: {
         const std::string& name = cur->s(attr::name);
         if (auto class_type = cur->input(0)->type()->cast<ClassType>()) {
+          std::cout << "here in inline CallMethod! need to change" << std::endl;
           Function& function = class_type->getMethod(name);
           if (!function.isGraphFunction()) {
             continue;

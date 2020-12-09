@@ -1572,6 +1572,9 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "add_builtin_function",
           &ConcreteModuleTypeBuilder::addBuiltinFunction)
+      .def("add_forward_hook", &ConcreteModuleTypeBuilder::addForwardHook)
+      .def(
+          "add_forward_pre_hook", &ConcreteModuleTypeBuilder::addForwardPreHook)
       .def("add_module", &ConcreteModuleTypeBuilder::addModule)
       .def("add_overload", &ConcreteModuleTypeBuilder::addOverload)
       .def("set_poisoned", &ConcreteModuleTypeBuilder::setPoisoned)
@@ -1670,6 +1673,74 @@ void initJitScriptBindings(PyObject* module) {
               method.setSchema(getSchemaWithNameAndDefaults(
                   defs_it->range(),
                   method.getSchema(),
+                  at::nullopt,
+                  *defaults_it));
+              ++defs_it;
+              ++defaults_it;
+            }
+          })
+      .def(
+          "_create_hooks",
+          [](std::shared_ptr<ConcreteModuleType> concreteType,
+             const std::vector<Def>& hookDefs,
+             const std::vector<ResolutionCallback>& hookRcbs,
+             const std::vector<FunctionDefaults>& hookDefaults,
+             const std::vector<Def>& preHookDefs,
+             const std::vector<ResolutionCallback>& preHookRcbs,
+             const std::vector<FunctionDefaults>& preHookDefaults) {
+            TORCH_INTERNAL_ASSERT(hookDefs.size() == hookRcbs.size());
+            TORCH_INTERNAL_ASSERT(preHookDefs.size() == preHookRcbs.size());
+            std::vector<ResolverPtr> hookResolvers, preHookResolvers;
+
+            hookResolvers.reserve(hookRcbs.size());
+            for (auto& callback : hookRcbs) {
+              hookResolvers.push_back(pythonResolver(callback));
+            }
+            preHookResolvers.reserve(preHookRcbs.size());
+            for (auto& callback : preHookRcbs) {
+              preHookResolvers.push_back(pythonResolver(callback));
+            }
+
+            auto str_name = concreteType->getJitType()->str(); 
+            const auto& selfType =
+                concreteType->getJitType()->expect<ClassType>();
+            const auto& prefix = selfType->name().value();
+            const auto self = ModuleSelf(std::move(concreteType));
+            auto cu = selfType->compilation_unit();
+            cu->define_hooks(
+                prefix,
+                hookDefs,
+                hookResolvers,
+                preHookDefs,
+                preHookResolvers,
+                &self,
+                true);
+            // Stitch in default arguments for each Def if provided
+            auto defaults_it = hookDefaults.begin();
+            auto defs_it = hookDefs.begin();
+            while (defs_it != hookDefs.end()) {
+              const auto hook_name =
+                  QualifiedName(prefix, (*defs_it).name().name());
+              auto& hook = cu->get_hook(hook_name);
+              //std::cout << "str_name's method name : " << hook_name.name() << std::endl;
+              hook.setSchema(getSchemaWithNameAndDefaults(
+                  defs_it->range(),
+                  hook.getSchema(),
+                  at::nullopt,
+                  *defaults_it));
+              ++defs_it;
+              ++defaults_it;
+            }
+
+            defaults_it = preHookDefaults.begin(); // TODO make sure don't need new vars here
+            defs_it = preHookDefs.begin();
+            while (defs_it != preHookDefs.end()) {
+              const auto pre_hook_name =
+                  QualifiedName(prefix, (*defs_it).name().name());
+              auto& pre_hook = cu->get_pre_hook(pre_hook_name);
+              pre_hook.setSchema(getSchemaWithNameAndDefaults(
+                  defs_it->range(),
+                  pre_hook.getSchema(),
                   at::nullopt,
                   *defaults_it));
               ++defs_it;

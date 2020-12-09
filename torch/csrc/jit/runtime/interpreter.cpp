@@ -89,6 +89,8 @@ void insertEnterMethodCalls(Graph& g) {
   std::vector<Node*> enter_nodes;
   block_queue.emplace_back(g.block());
 
+  // std::cout << "called during execution!" << std::endl;
+
   // Traverse the graph while drilling down into blocks belonging to
   // a node and add all encountered prim::Enter nodes to enter_nodes.
   while (!block_queue.empty()) {
@@ -933,9 +935,12 @@ struct CodeImpl {
             node->inputs().slice(1));
         break;
       case prim::CallMethod:
+        std::cout << "calling method??" << std::endl;
         if (auto class_type = node->inputs().at(0)->type()->cast<ClassType>()) {
+          std::cout << "calling method!" << std::endl;
           emitCall(&class_type->getMethod(node->s(attr::name)), node->inputs());
         } else {
+          std::cout << "calling method! 22" << std::endl;
           emitInterfaceCall(node->s(attr::name), node->inputs());
         }
         break;
@@ -1297,6 +1302,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             // reduce the number of compilations for too dynamic callers we
             // might miss opportunities where a caller is dynamic but a callee
             // gets stable arguments
+            std::cout << "calling interface getmethod" << std::endl;
             Function& function =
                 peek(stack, 0, inst.N)
                     .toObject()

@@ -401,6 +401,7 @@ class ScriptModuleSerializer {
     for (size_t i = 0; i < class_deps_.size(); ++i) {
       // note: convertNameType may extend class_deps_, so re-checking
       // .size() is necessary
+      std::cout << "write code class dep: " << class_deps_[i]->name()->name() << std::endl;
       convertNamedType(class_deps_[i]);
     }
 
@@ -481,6 +482,7 @@ class ScriptModuleSerializer {
               type_printer,
               /*enforce_importable=*/true));
     }
+    std::cout << "export_module.cpp pping " << class_type->name()->name() << std::endl;
     pp->printNamedType(class_type);
   }
 

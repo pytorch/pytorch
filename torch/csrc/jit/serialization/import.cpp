@@ -62,6 +62,7 @@ IValue readArchiveAndTensors(
     c10::optional<ObjLoader> obj_loader,
     c10::optional<at::Device> device,
     PyTorchStreamReader& stream_reader) {
+  std::cout << "readArchineAndTenstors hit w/ name: " << archive_name << std::endl;
   std::string picklename = archive_name + ".pkl";
   at::DataPtr pickle_ptr;
   size_t pickle_size;
@@ -346,6 +347,8 @@ Module load(
         "but `torch::jit::load()` can only load files"
         " produced by `torch.jit.save()`");
   }
+
+  std::cout << "loading file!!!! in import.cpp" << std::endl;
 
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   auto cu = std::make_shared<CompilationUnit>();

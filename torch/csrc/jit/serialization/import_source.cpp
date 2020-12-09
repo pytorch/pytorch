@@ -231,13 +231,17 @@ struct SourceImporterImpl : public Resolver,
 
   TypePtr resolveType(const std::string& name, const SourceRange& loc)
       override {
-    return findNamedType(QualifiedName(name));
+    std::cout << "resolvingType import_source.cpp " << name << std::endl;
+    TypePtr type = findNamedType(QualifiedName(name));
+    std::cout << "done resolvingType import_source.cpp " << name << std::endl;
+    return type;
   }
 
  private:
   void importFunction(const std::string& qualifier, const Def& def) {
     std::vector<Def> definitions{def};
     std::vector<ResolverPtr> resolvers{shared_from_this()};
+    std::cout << "importFunction import_source.cpp: " << qualifier << std::endl;
     cu_->define(
         qualifier,
         /*properties=*/{},
@@ -347,6 +351,8 @@ struct SourceImporterImpl : public Resolver,
       const QualifiedName& qualified_classname,
       const ClassDef& class_def,
       bool is_module) {
+
+        std::cout << "importing class!: " << qualified_classname.name() <<  std::endl;
     // BC for TorchBind classes
     //
     // Previously we would serialize TorchBind classes as actual
@@ -367,13 +373,19 @@ struct SourceImporterImpl : public Resolver,
         c10::QualifiedName(qualified_classname), cu_, is_module);
 
     std::vector<Def> methods;
-    std::vector<ResolverPtr> resolvers;
+    std::vector<Def> pre_hooks;
+    std::vector<Def> hooks;
+    std::vector<ResolverPtr> method_resolvers;
+    std::vector<ResolverPtr> pre_hook_resolvers;
+    std::vector<ResolverPtr> hook_resolvers;
     std::vector<Assign> attributes;
     std::vector<Assign> constants;
 
     // Module-specific: which attrs are parameters?
     std::unordered_set<std::string> parameter_names;
     std::unordered_set<std::string> buffer_names;
+    std::unordered_set<std::string> pre_hook_names;
+    std::unordered_set<std::string> hook_names;
     // Process statements, splitting things into attribute and method
     // definitions.
     for (const auto& statement : class_def.body()) {
@@ -407,6 +419,22 @@ struct SourceImporterImpl : public Resolver,
                     ListLiteral(assign.rhs().get()).inputs();
                 for (const auto& buffer : buffer_list) {
                   buffer_names.insert(StringLiteral(buffer).text());
+                }
+              } else if (name == "__forward_pre_hooks__") {
+                TORCH_INTERNAL_ASSERT(
+                    is_module, "Forward hooks only exist on modules at the moment");
+                const auto pre_hook_list =
+                    ListLiteral(assign.rhs().get()).inputs();
+                for (const auto& pre_hook : pre_hook_list) {
+                  pre_hook_names.insert(StringLiteral(pre_hook).text());
+                }
+              } else if (name == "__forward_hooks__") {
+                TORCH_INTERNAL_ASSERT(
+                    is_module, "Forward hooks only exist on modules at the moment");
+                const auto hook_list =
+                    ListLiteral(assign.rhs().get()).inputs();
+                for (const auto& hook : hook_list) {
+                  hook_names.insert(StringLiteral(hook).text());
                 }
               } else {
                 if (auto fixed_up = attributeAssignmentSpecialHandlingHack(
@@ -442,8 +470,20 @@ struct SourceImporterImpl : public Resolver,
           }
         } break;
         case TK_DEF: {
-          methods.emplace_back(Def(statement));
-          resolvers.push_back(shared_from_this());
+          Def def = Def(statement);
+          if (pre_hook_names.find(def.name().name()) != pre_hook_names.end()){
+            std::cout << "def pre hook name:" << Def(statement).name() << std::endl;
+            pre_hooks.emplace_back(def);
+            pre_hook_resolvers.push_back(shared_from_this());
+          } else if (hook_names.find(def.name().name())!= hook_names.end()){
+            std::cout << "def hook name:" << Def(statement).name() << std::endl;
+            hooks.emplace_back(def);
+            hook_resolvers.push_back(shared_from_this());
+          } else {
+            std::cout << "def method name:" << Def(statement).name() << std::endl;
+            methods.emplace_back(def);
+            method_resolvers.push_back(shared_from_this());
+          }
         } break;
         default: {
           TORCH_INTERNAL_ASSERT(
@@ -492,8 +532,16 @@ struct SourceImporterImpl : public Resolver,
         /*properties=*/{},
         /*propResolvers=*/{},
         methods,
-        resolvers,
-        &self);
+        method_resolvers,
+        &self); //at this point need to know where to put method on class type, either method/hook/prehook
+    cu_->define_hooks(
+                qualified_classname,
+                hooks,
+                hook_resolvers,
+                pre_hooks,
+                pre_hook_resolvers,
+                &self,
+                true);
   }
 
   void importEnum(

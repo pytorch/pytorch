@@ -2248,6 +2248,17 @@ struct CAFFE2_API ClassType : public NamedType {
     return attributes_.at(slot).getKind() == AttributeKind::BUFFER;
   }
 
+  void addForwardPreHook(torch::jit::Function* pre_hook_ptr);
+  void addForwardHook(torch::jit::Function* hook_ptr);
+  //void addForwardPreHookId(uint64_t pre_hook_python_id);
+  //void addForwardHookId(uint64_t hook_python_id);
+  torch::jit::Function* findForwardPreHook(const std::string& name) const;
+  torch::jit::Function& getForwardPreHook(const std::string& name) const;
+  torch::jit::Function* findForwardHook(const std::string& name) const;
+  torch::jit::Function& getForwardHook(const std::string& name) const;
+  std::vector<torch::jit::Function*>& getForwardHooks();
+  std::vector<torch::jit::Function*>& getForwardPreHooks();
+
   void addMethod(torch::jit::Function* method);
   torch::jit::Function* findMethod(const std::string& name) const;
   torch::jit::Function& getMethod(const std::string& name) const;
@@ -2313,6 +2324,12 @@ struct CAFFE2_API ClassType : public NamedType {
 
   // List of methods associated with this class.
   std::vector<torch::jit::Function*> methods_;
+
+  // List of hooks to be ran before/after forward
+  std::vector<torch::jit::Function*> forward_hooks;
+  std::vector<torch::jit::Function*> forward_pre_hooks;
+  //std::vector<uint64_t> forward_hook_ids;
+  //std::vector<uint64_t> forward_pre_hook_ids;
 
   // List of properties exposed by this class.
   std::vector<Property> properties_;
