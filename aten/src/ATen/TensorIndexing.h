@@ -226,7 +226,7 @@ static inline Tensor applySelect(
 static inline Tensor boolToIndexingTensorCPUOrCUDA(const Tensor& self, bool value) {
   // booleans add a dimension of size 1. true indexes this dimension as if 0:, false as empty.
   if (value) {
-    return at::native::zeros({1}, {}, self.options().dtype(kLong));
+    return at::empty({1}, {}, self.options().dtype(kLong)).fill_(0.);
   } else {
     return at::native::empty({0}, {}, self.options().dtype(kLong));
   }
