@@ -335,6 +335,8 @@ def try_ann_to_type(ann, loc):
     # Maybe resolve a NamedTuple to a Tuple Type
     def fake_rcb(key):
         return None
+    # If ann is a NamedTuple, check that it meet requirements for JIT compilation.
+    torch._jit_internal.check_can_compile_named_tuple(ann, loc)
     return torch._C._resolve_type_from_object(ann, loc, fake_rcb)
 
 

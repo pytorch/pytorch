@@ -364,6 +364,45 @@ class TestScriptPy3(JitTestCase):
                 tup = MyCoolNamedTuple(c=[1, 2, 3], b=3.5, a=9)  # noqa
                 return tup
 
+    def test_named_tuple_methods_error(self):
+        class NamedTupleWithMethods(NamedTuple):
+            a: int
+
+            def get_a(self) -> int:
+                return self.a
+
+        raises_regex_with_highlight = self.assertRaisesRegexWithHighlight(
+            Exception,
+            "User-defined functions in NamedTuples are currently not supported",
+            "NamedTupleWithMethods",
+        )
+
+        with raises_regex_with_highlight:
+            @torch.jit.script
+            def foo():
+                tup = NamedTupleWithMethods(a=1)
+                return tup
+
+    def test_named_tuple_staticmethod_error(self):
+        class NamedTupleWithMethods(NamedTuple):
+            a: int
+
+            @staticmethod
+            def from_tuple(tup: Tuple[int]) -> 'NamedTupleWithMethods':
+                return NamedTupleWithMethods(a=tup[0])
+
+        raises_regex_with_highlight = self.assertRaisesRegexWithHighlight(
+            Exception,
+            "Static functions in NamedTuples are currently not supporte",
+            "NamedTupleWithMethods",
+        )
+
+        with raises_regex_with_highlight:
+            @torch.jit.script
+            def foo():
+                tup = NamedTupleWithMethods(a=1)
+                return tup
+
     @unittest.skipIf(True, "broken while these tests were not in CI")
     def test_named_tuple_serialization(self):
         class MyCoolNamedTuple(NamedTuple):

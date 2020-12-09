@@ -33,6 +33,19 @@ else:
 boolean_dispatched: 'weakref.WeakKeyDictionary[Callable, Dict[str, Callable]]' = weakref.WeakKeyDictionary()  # noqa: T484
 
 
+class FrontendError(Exception):
+    def __init__(self, source_range, msg):
+        self.source_range = source_range
+        self.msg = msg
+
+        # This has to be instantiated here so the ErrorReport is accurate to the
+        # call stack when the FrontendError was raised
+        self.error_report = torch._C.ErrorReport(self.source_range)
+
+    def __str__(self):
+        return self.msg + self.error_report.what().lstrip()
+
+
 def createResolutionCallbackFromEnv(lookup_base):
     """
     Creates a resolution callback that will look up qualified names in an
@@ -215,6 +228,43 @@ def createResolutionCallbackFromClosure(fn):
             return None
 
     return createResolutionCallbackFromEnv(closure_lookup())
+
+def check_can_compile_named_tuple(cls, loc):
+    """
+    Check that a NamedTuple can be compiled. This means that it must not have additional
+    user-defined methods.
+
+    Arguments:
+        cls: The NamedTuple subclass in question.
+        loc: A SourceRange instance corresponding to the definition of cls.
+    """
+    # These are methods common to all NamedTuples. Using an allowlist is not the cleanest approach,
+    # but these methods don't exist on NamedTuple or tuple, so it is not possible to write code like:
+    #   for name, value in cls.__dict__.items():
+    #       if getattr(NamedTuple, name) is None and getattr(tuple, name) is None:
+    #           # Must be a user-defined function.
+    allowed_methods = [
+        "__annotations__",
+        "__doc__",
+        "__getnewargs__",
+        "__module__",
+        "__new__",
+        "__repr__",
+        "__slots__",
+        "_asdict",
+        "_field_defaults",
+        "_field_types",
+        "_fields",
+        "_make",
+        "_replace",
+        "_source",
+    ]
+
+    for name, value in cls.__dict__.items():
+        if name not in allowed_methods and inspect.isfunction(value):
+            raise FrontendError(loc, "User-defined methods in NamedTuples are currently not supported")
+        elif name not in allowed_methods and inspect.isroutine(value) and is_static_fn(cls, name):
+            raise FrontendError(loc, "Static functions in NamedTuples are currently not supported")
 
 
 def can_compile_class(cls):

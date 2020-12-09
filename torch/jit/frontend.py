@@ -17,7 +17,7 @@ from torch._C._jit_tree_views import (
 )
 from torch._utils_internal import get_source_lines_and_file
 
-from torch._jit_internal import SourceContext, should_drop, is_static_fn
+from torch._jit_internal import FrontendError, SourceContext, should_drop, is_static_fn
 import torch.jit.annotations
 
 # Borrowed from cPython implementation
@@ -83,19 +83,6 @@ if sys.version_info >= (3, 6):
         ast.AnnAssign: "annotated assignments",
     })
     # NB: no specific token for AnnAssign
-
-
-class FrontendError(Exception):
-    def __init__(self, source_range, msg):
-        self.source_range = source_range
-        self.msg = msg
-
-        # This has to be instantiated here so the ErrorReport is accurate to the
-        # call stack when the FrontendError was raised
-        self.error_report = torch._C.ErrorReport(self.source_range)
-
-    def __str__(self):
-        return self.msg + self.error_report.what().lstrip()
 
 
 class NotSupportedError(FrontendError):
