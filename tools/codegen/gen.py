@@ -643,12 +643,8 @@ DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::mult
 }}
 """
         elif self.target is Target.REGISTRATION:
-            if local.use_c10_dispatcher() is UseC10Dispatcher.full:
+            if local.use_c10_dispatcher().dispatcher_uses_new_style():
                 return f"""m.impl("aten::{f.func.name}", TORCH_FN({name}));"""
-            elif local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
-                return f"""m.impl("aten::{f.func.name}",
-          c10::impl::hacky_wrapper_for_legacy_signatures<{dispatcher_sig.type()}>(
-            TORCH_FN({name})));"""
             else:
                 assert local.use_c10_dispatcher() is UseC10Dispatcher.with_codegenerated_unboxing_wrapper
                 return f"""m.impl_UNBOXED("aten::{f.func.name}", {name});"""
