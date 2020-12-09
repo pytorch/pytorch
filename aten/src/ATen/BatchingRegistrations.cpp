@@ -187,6 +187,24 @@ std::vector<Tensor> chunk_batching_rule(const Tensor& self, int64_t chunks, int6
   return result;
 }
 
+Tensor clamp_batching_rule(const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto result = at::clamp(self_physical.tensor(), min, max);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
+Tensor clamp_min_batching_rule(const Tensor& self, Scalar min) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto result = at::clamp_min(self_physical.tensor(), min);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
+Tensor clamp_max_batching_rule(const Tensor& self, Scalar max) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto result = at::clamp_max(self_physical.tensor(), max);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
 std::vector<Tensor> tensor_split_sections_batching_rule(const Tensor& self, int64_t sections, int64_t dim) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim_physical = self_physical.getPhysicalDim(dim);
@@ -923,8 +941,8 @@ Tensor new_empty_strided_batching_rule(
         size.size(), ") must match dimensionality of strides (",
         stride.size(), ")");
   auto storage_size = native::storage_size_for(size, stride);
-  for (int64_t idx = 0; idx < physical_strides.size(); ++idx) {
-    physical_strides[idx] *= storage_size;
+  for (auto& physical_stride : physical_strides) {
+    physical_stride *= storage_size;
   }
 
   // physical_strides = [B1 * B2 * S, B2 * S, S] + strides
@@ -983,6 +1001,11 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("unsqueeze", unsqueeze_batching_rule);
   m.impl("view", view_batching_rule);
   m.impl("view_as", native::view_as); // composite wrt autograd
+
+  // clamp operations
+  m.impl("clamp", clamp_batching_rule);
+  m.impl("clamp_min", clamp_min_batching_rule);
+  m.impl("clamp_max", clamp_max_batching_rule);
 
   // unary pointwise, out-of-place, no additional arguments.
 #define UNARY_POINTWISE(op) m.impl(#op, \

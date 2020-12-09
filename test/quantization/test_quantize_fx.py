@@ -14,6 +14,11 @@ from torch.quantization.quantize_fx import (
     prepare_qat_fx,
 )
 
+from torch.quantization.fx.pattern_utils import (
+    is_match,
+    MatchAllNode,
+)
+
 from torch.quantization import (
     QuantType,
     QuantStub,
@@ -186,6 +191,31 @@ class TestFuseFx(QuantizationTestCase):
 
 @skipIfNoFBGEMM
 class TestQuantizeFx(QuantizationTestCase):
+    def test_pattern_match(self):
+        """ test MatchAllNode with
+            conv - bn - add - relu pattern
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(1, 1, 1)
+                self.bn = nn.BatchNorm2d(1)
+                self.relu = nn.ReLU()
+
+            def forward(self, x, y):
+                x = self.conv(x)
+                x = self.bn(x)
+                x = x + y
+                x = self.relu(x)
+                return x
+
+        pattern = (nn.ReLU, (operator.add, (nn.BatchNorm2d, nn.Conv2d), MatchAllNode))
+        m = torch.fx.symbolic_trace(M())
+        modules = dict(m.named_modules())
+        for n in m.graph.nodes:
+            if n.op == 'call_module' and type(modules[n.target]) == nn.ReLU:
+                self.assertTrue(is_match(modules, n, pattern))
+
     def _get_conv_linear_test_cases(self):
         ''' Returns a list of test cases, with format:
         is_dynamic, ModuleClass, module_constructor_inputs,
@@ -550,9 +580,9 @@ class TestQuantizeFx(QuantizationTestCase):
                 ns.call_module(torch.quantization.MinMaxObserver): 2
             }
             self.checkGraphModuleNodes(m, expected_node_occurrence=count_check)
-            # for output of conv in the standalone module
+            # for input and output of conv in the standalone module
             count_check = {
-                ns.call_module(torch.quantization.MinMaxObserver): 1
+                ns.call_module(torch.quantization.MinMaxObserver): 2
             }
             self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=count_check)
 
@@ -565,11 +595,11 @@ class TestQuantizeFx(QuantizationTestCase):
             }
             self.checkGraphModuleNodes(m, expected_node_occurrence=count_check)
             count_check = {
-                # quantization of input happens in parent module
-                # quantization of output happens in the quantized conv module
-                ns.call_function(torch.quantize_per_tensor) : 0,
-                # dequantization for output happens in parent module
-                ns.call_method('dequantize') : 0,
+                # standalone module will take float as input and output
+                # so we'll see quantize and dequantize in the modoule
+                ns.call_function(torch.quantize_per_tensor) : 1,
+                ns.call_module(nnq.Conv2d): 1,
+                ns.call_method('dequantize') : 1,
             }
             self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=count_check)
             res = m(data)
@@ -1117,6 +1147,71 @@ class TestQuantizeFx(QuantizationTestCase):
             ]
             self.checkGraphModeFxOp(
                 M().eval(), (data,), quant_type, expected_node_list=node_list)
+
+    def _test_quantized_inputs_outputs(
+            self, convert_custom_config_dict, count_check):
+        """
+        Test the option to have inputs and outputs of the graph quantized
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(1, 1, 1)
+                self.conv2 = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.conv2(x)
+                return x
+
+        # quantized input, quantized output
+        m = M()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        m.eval()
+        mp = torch.quantization.quantize_fx.prepare_fx(m, qconfig_dict)
+        mp(torch.randn(1, 1, 4, 4))
+        mq = torch.quantization.quantize_fx.convert_fx(
+            mp, convert_custom_config_dict=convert_custom_config_dict)
+        self.checkGraphModuleNodes(mq, expected_node_occurrence=count_check)
+
+    def test_quantized_input_quantized_output(self):
+        convert_custom_config_dict = {
+            'input_quantized_idxs': [0], 'output_quantized_idxs': [0]}
+        count_check = {
+            ns.call_function(torch.quantize_per_tensor): 0,
+            ns.call_method('dequantize'): 0,
+        }
+        self._test_quantized_inputs_outputs(
+            convert_custom_config_dict, count_check)
+
+    def test_fp32_input_quantized_output(self):
+        convert_custom_config_dict = {
+            'output_quantized_idxs': [0]}
+        count_check = {
+            ns.call_function(torch.quantize_per_tensor): 1,
+            ns.call_method('dequantize'): 0,
+        }
+        self._test_quantized_inputs_outputs(
+            convert_custom_config_dict, count_check)
+
+    def test_quantized_input_fp32_output(self):
+        convert_custom_config_dict = {
+            'input_quantized_idxs': [0]}
+        count_check = {
+            ns.call_function(torch.quantize_per_tensor): 0,
+            ns.call_method('dequantize'): 1,
+        }
+        self._test_quantized_inputs_outputs(
+            convert_custom_config_dict, count_check)
+
+    def test_fp32_input_fp32_output(self):
+        convert_custom_config_dict = {}
+        count_check = {
+            ns.call_function(torch.quantize_per_tensor): 1,
+            ns.call_method('dequantize'): 1,
+        }
+        self._test_quantized_inputs_outputs(
+            convert_custom_config_dict, count_check)
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
@@ -2038,15 +2133,14 @@ class TestQuantizeFxModels(QuantizationTestCase):
         original_out = model(input_value)
         is_not_tuple_out = not isinstance(original_out, tuple)
         script_out = script(input_value)
-        self.assertEqual(
-            (original_out - script_out).abs().max(), 0,
-            'Reslut of original graph module and script module does not match')
 
         # set to train just before quantization
+        prepare_fx_fn = prepare_fx
         if mode != 'static':
             model.train()
+            prepare_fx_fn = prepare_qat_fx
 
-        prepared = prepare_fx(model, qconfig_dict)
+        prepared = prepare_fx_fn(model, qconfig_dict)
 
         if mode == 'ddp':
             mp.spawn(run_ddp,
@@ -2142,15 +2236,11 @@ class TestQuantizeFxModels(QuantizationTestCase):
         quantized_model_list = set(quantized_model_list) - no_pretrained_model
         # test eager and graph consistency
         model_list = quantized_model_list
-        # slice need to be fixed in symbolic tracing(https://github.com/pytorch/pytorch/issues/43511)
-        model_list = set(model_list) - {'googlenet', 'inception_v3'}
-        # getattr should not be used as node name(https://github.com/pytorch/pytorch/issues/43522)
-        model_list -= {'shufflenet_v2_x1_0', 'mobilenet_v2'}
-
+        # inception_v3 is not symbolically traceable: https://github.com/pytorch/pytorch/issues/48813
+        model_list = set(model_list) - {'inception_v3'}
         # mobilenet: dropout error RuntimeError: "bernoulli_scalar_cpu_" not implemented for 'QUInt8'
         # incpetion_v3: looks like there is some problem with AuxLogits
-        quantized_not_working = [('qat', 'mobilenet_v2'),
-                                 ('qat', 'inception_v3'),
+        quantized_not_working = [('qat', 'inception_v3'),
                                  ('static', 'inception_v3')]
 
         fx_eager_not_matching = ['googlenet',  # because _transform_input is not quantized in eager
@@ -2192,7 +2282,6 @@ class TestQuantizeFxModels(QuantizationTestCase):
     @skip_if_no_torchvision
     @skip_if_not_multigpu
     @skipIfNoFBGEMM
-    @unittest.skip('TODO: not working yet due to https://github.com/pytorch/pytorch/issues/43513')
     def test_resnet18_ddp(self):
         from torchvision import models
         from torchvision.models import quantization as quantized_models

@@ -2,6 +2,7 @@
 import torch
 import warnings
 from sys import maxsize as maxsize
+from typing import Set
 
 import torch.onnx
 # This import monkey-patches graph manipulation methods on Graph, used for the
@@ -125,7 +126,7 @@ def parse_args(*arg_descriptors):
         def wrapper(g, *args, **kwargs):
             # some args may be optional, so the length may be smaller
             assert len(arg_descriptors) >= len(args)
-            args = [_parse_arg(arg, arg_desc) for arg, arg_desc in zip(args, arg_descriptors)]
+            args = [_parse_arg(arg, arg_desc) for arg, arg_desc in zip(args, arg_descriptors)]  # type: ignore
             # only support _outputs in kwargs
             assert len(kwargs) <= 1
             if len(kwargs) == 1:
@@ -213,14 +214,38 @@ def _try_get_scalar_type(*args):
     return None
 
 
+def _select_helper(g, self, dim, index, apply_reshape=True):
+    index_const = _maybe_get_scalar(index)
+    index_dim = index.type().dim()
+    if not _is_value(index_const):
+        # Index is a constant scalar. Make it a size 1 constant tensor.
+        index = g.op("Constant", value_t=torch.LongTensor([index_const]))
+    elif index_dim is not None and apply_reshape:
+        if index_dim == 0:
+            # Index is a scalar. Reshape it to a size 1 tensor.
+            index = g.op("Reshape", index, g.op("Constant", value_t=torch.LongTensor([1])))
+
+    index_scalar_type = index.type().scalarType()
+    if index_scalar_type is None or index_scalar_type not in ['Long', 'Int']:
+        index = g.op("Cast", index, to_i=cast_pytorch_to_onnx["Long"])
+    return g.op("Gather", self, index, axis_i=dim)
+
+
 def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     if _export_onnx_opset_version <= 9:
-        from torch.onnx.symbolic_opset9 import _slice
-        return _slice(g, input, axes, starts, ends)
+        from torch.onnx.symbolic_opset9 import _slice as _slice9
+        return _slice9(g, input, axes, starts, ends)
     else:
-        from torch.onnx.symbolic_opset10 import _slice
-        return _slice(g, input, axes, starts, ends, steps, dynamic_slice)
+        from torch.onnx.symbolic_opset10 import _slice as _slice10
+        return _slice10(g, input, axes, starts, ends, steps, dynamic_slice)
 
+def _hardtanh_helper(g, input, min_val, max_val):
+    if _export_onnx_opset_version <= 10:
+        from torch.onnx.symbolic_opset9 import hardtanh
+        return hardtanh(g, input, min_val, max_val)
+    else:
+        from torch.onnx.symbolic_opset11 import hardtanh  # type: ignore[no-redef]
+        return hardtanh(g, input, min_val, max_val)
 
 def _is_fp(value):
     if value:
@@ -356,7 +381,7 @@ def _interpolate_get_scales_and_mode(g, input, size, scale_factor, mode , align_
                 size = g.op("Concat", *size, axis_i=0)
         scale_factor = _interpolate_size_to_scales(g, input, size, dim)
     else:
-        return _unimplemented("Both size and scales are None in __interpolate")
+        return _unimplemented("interpolate", "Both size and scales are None in __interpolate")
     return scale_factor, mode
 
 
@@ -364,7 +389,7 @@ def _unbind_helper(g, self, dim, _outputs):
     if _export_onnx_opset_version <= 9:
         from torch.onnx.symbolic_opset9 import unbind
     else:
-        from torch.onnx.symbolic_opset11 import unbind
+        from torch.onnx.symbolic_opset11 import unbind  # type: ignore[no-redef]
     return unbind(g, self, dim, _outputs)
 
 
@@ -372,7 +397,8 @@ def _scatter_helper(g, self, dim, index, src):
     if _export_onnx_opset_version <= 10:
         from torch.onnx.symbolic_opset9 import scatter
     else:
-        from torch.onnx.symbolic_opset11 import scatter
+        # for mypy, scatter was imported two lines above
+        from torch.onnx.symbolic_opset11 import scatter  # type: ignore
     return scatter(g, self, dim, index, src)
 
 
@@ -420,7 +446,8 @@ def _index_fill_reshape_helper(g, self, dim, index):
     if _export_onnx_opset_version <= 10:
         from torch.onnx.symbolic_opset9 import scatter
     else:
-        from torch.onnx.symbolic_opset11 import scatter
+        # for mypy, scatter was imported two lines above
+        from torch.onnx.symbolic_opset11 import scatter  # type: ignore
 
     if self.type().dim() is None:
         return _unimplemented("index_fill", "input rank not accesible")
@@ -608,4 +635,4 @@ scalar_type_to_onnx = [
 
 # Global set to store the list of quantized operators in the network.
 # This is currently only used in the conversion of quantized ops from PT -> C2 via ONNX.
-_quantized_ops = set()
+_quantized_ops: Set[int] = set()

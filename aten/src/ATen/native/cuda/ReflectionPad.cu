@@ -200,10 +200,9 @@ void reflection_pad1d_out_template(
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
           input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
           input_w, pad_l, pad_r);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   );
-
-  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 void reflection_pad1d_backward_out_template(
@@ -213,7 +212,7 @@ void reflection_pad1d_backward_out_template(
   if (grad_input.numel() == 0) {
     return;
   }
-                      
+
   TORCH_CHECK(canUse32BitIndexMath(input),
     "input tensor must fit into 32-bit index math");
 
@@ -252,15 +251,14 @@ void reflection_pad1d_backward_out_template(
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
           grad_input.data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
           input_w, pad_l, pad_r);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   );
-
-  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 void reflection_pad2d_out_template(
     Tensor &output, const Tensor &input_, IntArrayRef padding) {
-  
+
   TORCH_CHECK(canUse32BitIndexMath(input_),
     "input tensor must fit into 32-bit index math");
 
@@ -331,10 +329,9 @@ void reflection_pad2d_out_template(
           input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
           input_w, input_h,
           pad_t, pad_b, pad_l, pad_r);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   );
-
-  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 void reflection_pad2d_backward_out_template(
@@ -344,7 +341,7 @@ void reflection_pad2d_backward_out_template(
   if (grad_input.numel() == 0) {
     return;
   }
-  
+
   TORCH_CHECK(canUse32BitIndexMath(input),
     "input tensor must fit into 32-bit index math");
   TORCH_CHECK(canUse32BitIndexMath(grad_output_),
@@ -393,10 +390,9 @@ void reflection_pad2d_backward_out_template(
           grad_input.data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
           input_w, input_h,
           pad_t, pad_b, pad_l, pad_r);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   );
-
-  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 } // namespace
