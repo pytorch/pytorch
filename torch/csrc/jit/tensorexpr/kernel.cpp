@@ -917,10 +917,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
           [](const ExprHandle& input,
              const ExprHandle& mask,
              const ExprHandle& value) {
+            // value needs to promote to input, not vice versa
             auto val = promoteToDtype(value, input.dtype().scalar_type());
-            auto true_val = IntImm::make(1);
-            return ifThenElse(
-                CompareSelect::make(mask, true_val, kEQ), val, input);
+            return ifThenElse(mask, val, input);
           },
           /*promote_inputs*/ false);
     }
@@ -932,14 +931,14 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
           v,
           [node](
               const ExprHandle& input,
-              const ExprHandle& nan,
-              const ExprHandle& pos_inf,
-              const ExprHandle& neg_inf) {
+              const ExprHandle& nan_replacement,
+              const ExprHandle& pos_inf_replacement,
+              const ExprHandle& neg_inf_replacement) {
             if (!input.dtype().is_floating_point()) {
               return input;
             }
 
-            // we dont use default promoteTypes logic, 
+            // we dont use default promoteTypes logic,
             // because we cast the non-input types to the input dtype
             auto value_or_default_at_index =
                 [&](size_t index, ExprHandle val, ExprHandle default_v) {
@@ -953,11 +952,17 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
                 };
 
             auto nan_val = value_or_default_at_index(
-                1, nan, Cast::make(input.dtype(), DoubleImm::make(0.)));
+                1,
+                nan_replacement,
+                Cast::make(input.dtype(), DoubleImm::make(0.)));
             auto pos_inf_val = value_or_default_at_index(
-                2, pos_inf, maximumVal(input.dtype().scalar_type()));
+                2,
+                pos_inf_replacement,
+                maximumVal(input.dtype().scalar_type()));
             auto neg_inf_val = value_or_default_at_index(
-                3, neg_inf, minimumVal(input.dtype().scalar_type()));
+                3,
+                neg_inf_replacement,
+                minimumVal(input.dtype().scalar_type()));
 
             auto positive_infinity = infinityVal(input.dtype().scalar_type());
             auto negative_infinity =
@@ -971,7 +976,8 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
                 neg_inf_val,
                 pos_inf_replaced);
             return ifThenElse(isnan(input), nan_val, infs_replaced);
-          }, /*promote_inputs*/false);
+          },
+          /*promote_inputs*/ false);
     }
 
     case aten::clamp: {
@@ -1034,7 +1040,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::isnan: {
-      return computeOneOperand("aten_relu", v, [](const ExprHandle& a) {
+      return computeOneOperand("aten_isnan", v, [](const ExprHandle& a) {
         if (!a.dtype().is_floating_point()) {
           return IntImm::make(0);
         }
