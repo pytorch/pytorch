@@ -1638,6 +1638,9 @@ and `c` is returned such that:
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `c`
 
+Supports real-valued and complex-valued inputs.
+For the complex-valued inputs the transpose operator above is the conjugate transpose.
+
 Args:
     input (Tensor): input matrix :math:`b` of size :math:`(*, m, k)`,
                 where :math:`*` is zero or more batch dimensions
@@ -4635,7 +4638,7 @@ Alias for :func:`torch.lt`.
 
 add_docstr(torch.lu_solve,
            r"""
-lu_solve(input, LU_data, LU_pivots, *, out=None) -> Tensor
+lu_solve(b, LU_data, LU_pivots, *, out=None) -> Tensor
 
 Returns the LU solve of the linear system :math:`Ax = b` using the partially pivoted
 LU factorization of A from :meth:`torch.lu`.
@@ -6783,7 +6786,7 @@ between :attr:`low` (inclusive) and :attr:`high` (exclusive).
 
 The shape of the tensor is defined by the variable argument :attr:`size`.
 
-.. note:
+.. note::
     With the global dtype default (``torch.float32``), this function returns
     a tensor with dtype ``torch.int64``.
 

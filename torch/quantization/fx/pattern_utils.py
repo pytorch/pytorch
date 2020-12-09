@@ -1,11 +1,12 @@
 import torch
 import sys
 from collections import OrderedDict
-from typing import Dict, Any, Union, Tuple, Callable
+from typing import Dict, Any
+
+from .quantization_types import Pattern
 
 # TODO(future PR): fix the typing on QuantizeHandler (currently a circular dependency)
 QuantizeHandler = Any
-Pattern = Union[Callable, Tuple[Callable, Callable], Tuple[Callable, Callable, Callable]]
 
 # pattern for conv bn fusion
 DEFAULT_FUSION_PATTERNS = OrderedDict()
@@ -55,6 +56,12 @@ def mark_input_output_not_observed():
 def input_output_observed(qh):
     return type(qh) not in DEFAULT_NOT_OBSERVED_QUANTIZE_HANDLER
 
+
+class MatchAllNode:
+    """ A node pattern that matches all nodes
+    """
+    pass
+
 # Example use of register pattern function:
 # @register_fusion_pattern(torch.nn.ReLU, (torch.nn.BatchNorm2d, torch.nn.Conv2d)))
 # class ConvBNReLUFusion():
@@ -77,6 +84,9 @@ def is_match(modules, node, pattern, max_uses=sys.maxsize):
     else:
         self_match = pattern
         arg_matches = []
+
+    if isinstance(self_match, type) and issubclass(self_match, MatchAllNode):
+        return True
 
     if len(node.users) > max_uses:
         return False
