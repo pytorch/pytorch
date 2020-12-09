@@ -392,6 +392,19 @@ Tensor mv_sparse(const SparseTensor& self, const Tensor& vec)
 }
 
 // --------------------------------------------------------------------
+// frac_out(SparseTensor)
+// --------------------------------------------------------------------
+Tensor& frac_out_sparse(Tensor& result, const Tensor& self) {
+  Tensor temp = self.coalesce();
+  Tensor temp_result = at::frac(temp.values());
+  get_sparse_impl(result)->resize_(
+      temp.sparse_dim(), temp.dense_dim(), temp.sizes());
+  copy_into_sparse(result, temp.indices(), temp_result, true);
+  get_sparse_impl(result)->coalesced_ = true;
+  return result;
+}
+
+// --------------------------------------------------------------------
 // add(SparseTensor, SparseTensor, Scalar)  [broadcasts]
 // --------------------------------------------------------------------
 

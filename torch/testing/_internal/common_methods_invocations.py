@@ -1059,6 +1059,27 @@ op_db: List[OpInfo] = [
            supports_tensor_out=False,
            sample_inputs_func=sample_inputs_pinverse,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
+    UnaryUfuncInfo('frac',
+                   ref=np.arcsin,
+                   domain=(-1, 1),
+                   supports_sparse=True,
+                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
+                   promotes_integers_to_float=True,
+                   dtypes=all_types_and_complex_and(torch.bool),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+                   assert_autodiffed=True,
+                   skip_bfloat16_grad=True,
+                   skips=(
+                       SkipInfo('TestSparseUnaryUfuncs', 'test_sparse_consistency',
+                                device_type='cpu', dtypes=[torch.bool, torch.short, torch.int, torch.long]),
+                       SkipInfo('TestSparseUnaryUfuncs', 'test_sparse_consistency',
+                                device_type='cpu', dtypes=[torch.uint8, torch.int8]),
+                       SkipInfo('TestSparseUnaryUfuncs', 'test_sparse_consistency',
+                                device_type='cuda', dtypes=[torch.bool, torch.short, torch.int, torch.long]),
+                       SkipInfo('TestSparseUnaryUfuncs', 'test_sparse_consistency',
+                                device_type='cuda', dtypes=[torch.uint8, torch.int8])
+                   )),
 ]
 
 if TEST_SCIPY:

@@ -2049,6 +2049,7 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: frac_out
+    SparseCPU, SparseCUDA: frac_out_sparse
 
 - func: full.names(int[] size, Scalar fill_value, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures

@@ -447,6 +447,8 @@ tensors <sparse-coo-docs>`:
 :meth:`~torch.Tensor.div_`
 :meth:`~torch.Tensor.floor_divide`
 :meth:`~torch.Tensor.floor_divide_`
+:meth:`~torch.Tensor.frac`
+:meth:`~torch.Tensor.frac_`
 :meth:`~torch.Tensor.get_device`
 :meth:`~torch.Tensor.index_select`
 :meth:`~torch.Tensor.isnan`
