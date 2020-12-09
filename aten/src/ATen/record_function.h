@@ -90,8 +90,11 @@ typedef uint64_t RecordFunctionHandle;
 struct TORCH_API RecordFunction {
   // Default constructor is used with before function called afterwards:
   //  scope - record scope that this function tracks
+  //  pre_sampled - whether this RecordFunction was already pre-sampled with
+  //    kLowProb probability
   RecordFunction(
-      RecordScope scope = RecordScope::FUNCTION);
+      RecordScope scope = RecordScope::FUNCTION,
+      bool pre_sampled = false);
 
   template <typename F>
   void before(
@@ -238,6 +241,9 @@ struct TORCH_API RecordFunction {
     // flag is used to check whether the start callbacks were called
     bool called_start_callbacks_ = false;
 
+    // Whether the RecordFunction is pre-sampled
+    bool pre_sampled_ = false;
+
     // Used internally to keep track of thread local and global callbacks
     // that were picked to run; must be sorted;
     CallbackHandles sorted_active_tls_handles_;
@@ -330,7 +336,7 @@ class TORCH_API RecordFunctionCallback {
   }
 
   RecordFunctionCallback& samplingProb(double sampling_prob) {
-    TORCH_CHECK(sampling_prob >= 0.0 && sampling_prob_ <= 1.0,
+    TORCH_CHECK(sampling_prob >= 0.0 && sampling_prob <= 1.0,
         "Invalid sampling probability");
     sampling_prob_ = sampling_prob;
     return *this;
@@ -544,10 +550,27 @@ struct TORCH_API RecordFunctionTLS {
   RecordFunctionCallbacks sorted_tls_callbacks_;
 
   bool tls_record_function_enabled_ = true;
+
+  // Stores the number of coin flips before the next successful coin flip
+  int tries_left_ = 0;
 };
 
 TORCH_API const RecordFunctionTLS& get_record_function_tls_();
 
 TORCH_API void set_record_function_tls_(const RecordFunctionTLS& tls);
+
+// Checks whether RecordFunction should be called,
+// sets boolean pointed by the argument to whether pre-sampling was used
+TORCH_API bool shouldRunRecordFunction(bool*);
+
+// The following functions are used to disable/enable pre-sampling of RecordFunction
+// when high-frequency/non-sampled callbacks are added/removed.
+// Note: every call to bumpRecordAllFunctions() is supposed to be matched with
+// the corresponding releaseRecordAllFunctions() call.
+// Note: disabling pre-sampling of RecordFunction incurs an extra overhead, since
+// RecordFunction will be created for each operator call.
+TORCH_API void bumpRecordAllFunctions();
+TORCH_API void releaseRecordAllFunctions();
+TORCH_API bool checkRecordAllFunctions();
 
 } // namespace at
