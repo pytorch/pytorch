@@ -19,7 +19,6 @@ ThreadLocalState::ThreadLocalState(bool keep_grad_mode)
     grad_mode_enabled_ = GradMode::is_enabled();
   }
 #endif
-  bumped_record_all_functions_ = at::checkRecordAllFunctions();
 }
 
 /* static */
