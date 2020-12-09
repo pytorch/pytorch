@@ -538,7 +538,8 @@ class TensorExprFuser {
     }
   }
 
-  // No Ops in eager shouldn't be outputs of Fusion Groups
+  // No Ops in eager shouldn't be outputs of Fusion Groups because it 
+  // will degrade perf and change aliasing relationships
   static bool unexecutedEagerOp(Node* n) {
     if (n->kind() != aten::to) {
       return false;
