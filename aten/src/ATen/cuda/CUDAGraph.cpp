@@ -6,6 +6,22 @@
 namespace at {
 namespace cuda {
 
+/**
+ * Note [CUDA Graph Wrapper Class]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * Q: Why do we need graph capture and launch bindings in Pytorch?
+ *    Why can't they live in a user extension, for example?
+ *
+ * A1: Convenience.
+ * A2: To ensure valid numerics on replay, some native CUDA ops (like RNG ops with
+ *     CPU statefulness) need cooperation from the capture and replay bindings
+ *     (see Note [CUDA Graph-safe RNG states] in CUDAGeneratorImpl.h).
+ *
+ *     We can't expect users to know about this cooperation.  If users write capture
+ *     bindings naively in an extension, they likely won't interact with the native
+ *     ops properly.  Their graphs would yield invalid numerics on replay.
+ */
+
 CUDAGraph::CUDAGraph()
   // CUDAStreams may not be default-constructed.
   : capture_stream_(at::cuda::getCurrentCUDAStream()) {

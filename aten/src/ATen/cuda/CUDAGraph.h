@@ -15,10 +15,10 @@ struct TORCH_CUDA_API CUDAGraph {
   void replay();
 
   protected:
-  #if CUDA_VERSION >= 11000
+#if CUDA_VERSION >= 11000
   cudaGraph_t graph_ = NULL;
   cudaGraphExec_t graph_exec_ = NULL;
-  #endif
+#endif
 
   // internal states for error checking
   bool has_graph_ = false;
