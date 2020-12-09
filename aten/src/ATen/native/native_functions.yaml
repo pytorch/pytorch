@@ -367,6 +367,7 @@
 
 - func: add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
+  structured_delegate: add.out
   variants: function, method
   dispatch:
     CPU, CUDA: add
@@ -376,12 +377,15 @@
 - func: add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
+  structured_delegate: add.out
   dispatch:
     CPU, CUDA: add_
     SparseCPU, SparseCUDA: add_sparse_
     MkldnnCPU: mkldnn_add_
 
 - func: add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: add_out
     SparseCPU: add_out_sparse_cpu
