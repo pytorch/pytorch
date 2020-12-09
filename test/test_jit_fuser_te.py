@@ -1218,9 +1218,20 @@ class TestTEFuser(JitTestCase):
             torch.rand([4, 4]).fill_(float('nan')),
             torch.rand([4, 4])
         ]
+        dtypes = [
+            torch.int8,
+            torch.uint8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.float16,
+            torch.float32,
+            torch.float64,
+            torch.bool,
+        ]
 
-        for inp, device in product(inputs, self.devices):
-            inp = inp.to(device=device)
+        for inp, device, dtype in product(inputs, self.devices, dtypes):
+            inp = inp.to(device=device, dtype=dtype)
             f = torch.jit.trace(lambda x: x.isnan(), (inp,))
             warmup_forward(f, inp)
             self.assertEqual(f(inp), inp.isnan())
