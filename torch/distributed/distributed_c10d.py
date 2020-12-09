@@ -2342,8 +2342,8 @@ def barrier(group=group.WORLD,
         opts.deviceId = deviceId
 
     if group == GroupMember.WORLD:
-        default_pg = _check_default_pg(opts=opts)
-        work = default_pg.barrier()
+        default_pg = _check_default_pg()
+        work = default_pg.barrier(opts=opts)
     else:
         work = group.barrier(opts=opts)
 
