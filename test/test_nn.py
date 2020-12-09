@@ -4503,9 +4503,9 @@ class TestNN(NNTestCase):
             F.poisson_nll_loss(input, target, reduction='total')
 
     def test_gaussian_nll_loss_reduction_modes(self):
-        input = torch.tensor([0.5, 1.5, 2.5])
-        target = torch.tensor([1., 2., 3.])
-        var = torch.tensor([0.5, 1., 1.5])
+        input = torch.tensor([[0.5, 1.5, 2.5], [2., 4., 6.]])
+        target = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
+        var = torch.tensor([[0.5, 1., 1.5], [1., 1.5, 2.]])
         component_wise_loss = 0.5*(torch.sum(torch.log(var) + (input - target)**2/var, dim=1))
         self.assertEqual(component_wise_loss,
                          F.gaussian_nll_loss(input, target, var,
@@ -4517,7 +4517,7 @@ class TestNN(NNTestCase):
                          F.gaussian_nll_loss(input, target, var,
                          reduction='mean'))
         with self.assertRaisesRegex(ValueError, 'is not valid'):
-            F.gaussian_nll_loss(input, target, reduction='total')
+            F.gaussian_nll_loss(input, target, var, reduction='total')
 
 
     def test_KLDivLoss_batch_mean(self):
