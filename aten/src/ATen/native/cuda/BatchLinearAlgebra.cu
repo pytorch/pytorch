@@ -1690,12 +1690,16 @@ std::tuple<Tensor, Tensor> _triangular_solve_helper_cuda(const Tensor& self, con
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ qr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-static void apply_qr(Tensor& Q, Tensor& R, magma_int_t m, magma_int_t n, int64_t n_columns,
+static void apply_qr(Tensor& Q, Tensor& R, int64_t q_size_minus_2, int64_t r_size_minus_1, int64_t n_columns,
                      bool compute_q, std::vector<int64_t>& infos) {
 #ifndef USE_MAGMA
 AT_ERROR("qr: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
+
+  magma_int_t m = magma_int_cast(q_size_minus_2, "Q.size(-2)");
+  magma_int_t n = magma_int_cast(r_size_minus_1, "R.size(-1)");
+
   auto r_data = R.data_ptr<scalar_t>();
   auto r_matrix_stride = matrixStride(R);
   magma_int_t k = m < n ? m : n;
@@ -1781,8 +1785,8 @@ std::tuple<Tensor,Tensor> _linalg_qr_helper_cuda(const Tensor& self, std::string
   }
   r_working_copy = cloneBatchedColumnMajor(self);
 
-  magma_int_t m = magma_int_cast(q_sizes[self.dim() - 2], "Q.size(-2)");
-  magma_int_t n = magma_int_cast(r_working_copy.size(-1), "R.size(-1)");
+  int64_t m = q_sizes[self.dim() - 2];
+  int64_t n = r_working_copy.size(-1);
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "qr_cuda", [&]{
     apply_qr<scalar_t>(q_working_copy, r_working_copy, m, n, n_columns_q, compute_q, infos);
