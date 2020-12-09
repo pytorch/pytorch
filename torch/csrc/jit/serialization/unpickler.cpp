@@ -408,7 +408,7 @@ PickleOpCode Unpickler::readInstruction() {
       }
       at::DataPtr storage_ptr = read_record_(key);
       int64_t numel = args.at(4).toInt();
-      caffe2::TypeMeta dtype = at::CUDA(type).typeMeta();
+      caffe2::TypeMeta dtype = at::CPU(type).typeMeta();
       at::Storage storage(
           c10::Storage::use_byte_size_t(),
           numel * dtype.itemsize(),
@@ -416,7 +416,7 @@ PickleOpCode Unpickler::readInstruction() {
           /*allocator=*/nullptr,
           /*resizable=*/false); // NB: we didn't set any allocator for the
                                 // tensor
-      auto options = at::CUDA(type).options();
+      auto options = at::CPU(type).options();
 
       if (use_storage_device_) {
         options = options.device(storage.device());
