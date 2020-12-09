@@ -1,4 +1,3 @@
-import itertools
 from dataclasses import dataclass
 from typing import Optional, Union, Sequence, Set, List, Tuple, Dict
 

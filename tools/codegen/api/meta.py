@@ -1,11 +1,9 @@
 from tools.codegen.model import *
 from tools.codegen.api.types import MetaArgument
 
-import tools.codegen.api.cpp as cpp
 import tools.codegen.api.dispatcher as dispatcher
 
 from typing import Sequence
-import itertools
 
 # Follows dispatcher calling convention, but:
 #   - Mutable arguments not allowed.  Meta functions are always
