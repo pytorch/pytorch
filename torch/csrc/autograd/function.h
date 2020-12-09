@@ -133,26 +133,33 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// Evaluates the function on the given inputs and returns the result of the
   /// function call.
   variable_list operator()(variable_list&& inputs) {
-    // Using RecordFunction to trogger observers in the backward pass
-    at::RecordFunction guard(at::RecordScope::BACKWARD_FUNCTION);
-    if (guard.isActive()) {
-      // Using sequence number and thread id to correlate with
-      // the forward pass function
-      guard.setForwardThreadId(thread_id_);
-      if (guard.needsInputs()) {
-        guard.before(
-          name(),
-          std::vector<c10::IValue>(inputs.begin(), inputs.end()),
-          sequence_nr());
-      } else {
-        guard.before(name(), sequence_nr());
-      }
-    }
     // In the first iteration of named tensors, autograd ignores names and
     // operates on unnamed tensors. In the long term, autograd should
     // probably operate with names.
     at::NoNamesGuard no_names_guard;
-    return apply(std::move(inputs));
+
+    bool pre_sampled = false;
+    if (at::shouldRunRecordFunction(&pre_sampled)) {
+      // Using RecordFunction to trogger observers in the backward pass
+      at::RecordFunction guard(at::RecordScope::BACKWARD_FUNCTION, pre_sampled);
+      if (guard.isActive()) {
+        // Using sequence number and thread id to correlate with
+        // the forward pass function
+        guard.setForwardThreadId(thread_id_);
+        if (guard.needsInputs()) {
+          guard.before(
+            name(),
+            std::vector<c10::IValue>(inputs.begin(), inputs.end()),
+            sequence_nr());
+        } else {
+          guard.before(name(), sequence_nr());
+        }
+      }
+      // keeping stack guard object alive during the call
+      return apply(std::move(inputs));
+    } else {
+      return apply(std::move(inputs));
+    }
   }
 
   // Graph Connectivity API

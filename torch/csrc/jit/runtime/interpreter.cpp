@@ -1607,10 +1607,11 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   static void checkAndStartRecordFunction(Frame& frame, Stack& stack) {
+    bool pre_sampled = false;
     if (!frame.record_function && at::hasCallbacks() &&
-        at::isRecordFunctionEnabled()) {
+        at::shouldRunRecordFunction(&pre_sampled)) {
       auto rec_fn = std::make_unique<at::RecordFunction>(
-          at::RecordScope::TORCHSCRIPT_FUNCTION);
+          at::RecordScope::TORCHSCRIPT_FUNCTION, pre_sampled);
       if (rec_fn->isActive()) {
         if (rec_fn->needsInputs()) {
           rec_fn->before(
