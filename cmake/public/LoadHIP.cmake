@@ -205,9 +205,4 @@ if(HIP_FOUND)
   # roctx is part of roctracer
   find_library(ROCM_ROCTX_LIB roctx64 HINTS ${ROCTRACER_PATH}/lib)
   set(roctracer_INCLUDE_DIRS ${ROCTRACER_PATH}/include)
-
-  # Necessary includes for building PyTorch since we include HIP headers that depend on hcc/hsa headers.
-  set(hcc_INCLUDE_DIRS ${HCC_PATH}/include)
-  set(hsa_INCLUDE_DIRS ${HSA_PATH}/include)
-
 endif()

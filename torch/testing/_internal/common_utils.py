@@ -398,43 +398,73 @@ def skipIfRocm(fn):
             fn(*args, **kwargs)
     return wrapper
 
+# Context manager for setting deterministic flag and automatically
+# resetting it to its original value
+class DeterministicGuard:
+    def __init__(self, deterministic):
+        self.deterministic = deterministic
+
+    def __enter__(self):
+        self.deterministic_restore = torch.is_deterministic()
+        torch.set_deterministic(self.deterministic)
+
+    def __exit__(self, exception_type, exception_value, traceback):
+        torch.set_deterministic(self.deterministic_restore)
+
 # This decorator can be used for API tests that call torch.set_deterministic().
 # When the test is finished, it will restore the previous deterministic flag
-# setting. Also, if CUDA >= 10.2, this will set the environment variable
-# CUBLAS_WORKSPACE_CONFIG=:4096:8 so that the error associated with that setting
-# is not thrown during the test unless the test changes that variable on purpose.
-# The previous CUBLAS_WORKSPACE_CONFIG setting will also be restored once the
-# test is finished.
+# setting.
+#
+# If CUDA >= 10.2, this will set the environment variable
+# CUBLAS_WORKSPACE_CONFIG=:4096:8 so that the error associated with that
+# setting is not thrown during the test unless the test changes that variable
+# on purpose. The previous CUBLAS_WORKSPACE_CONFIG setting will also be
+# restored once the test is finished.
+#
+# Note that if a test requires CUDA to actually register the changed
+# CUBLAS_WORKSPACE_CONFIG variable, a new subprocess must be created, because
+# CUDA only checks the variable when the runtime initializes. Tests can be
+# run inside a subprocess like so:
+#
+#   import subprocess, sys, os
+#   script = '''
+#   # Test code should go here
+#   '''
+#   try:
+#       subprocess.check_output(
+#           [sys.executable, '-c', script],
+#           stderr=subprocess.STDOUT,
+#           cwd=os.path.dirname(os.path.realpath(__file__)),
+#           env=os.environ.copy())
+#   except subprocess.CalledProcessError as e:
+#       error_message = e.output.decode('utf-8')
+#       # Handle exceptions raised by the subprocess here
+#
 def wrapDeterministicFlagAPITest(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        deterministic_restore = torch.is_deterministic()
+        with DeterministicGuard(torch.is_deterministic()):
+            class CuBLASConfigGuard:
+                cublas_var_name = 'CUBLAS_WORKSPACE_CONFIG'
 
-        is_cuda10_2_or_higher = (
-            (torch.version.cuda is not None)
-            and ([int(x) for x in torch.version.cuda.split(".")] >= [10, 2]))
+                def __enter__(self):
+                    self.is_cuda10_2_or_higher = (
+                        (torch.version.cuda is not None)
+                        and ([int(x) for x in torch.version.cuda.split(".")] >= [10, 2]))
+                    if self.is_cuda10_2_or_higher:
+                        self.cublas_config_restore = os.environ.get(self.cublas_var_name)
+                        os.environ[self.cublas_var_name] = ':4096:8'
 
-        if is_cuda10_2_or_higher:
-            cublas_var_name = 'CUBLAS_WORKSPACE_CONFIG'
-            cublas_config_restore = os.environ.get(cublas_var_name)
-            os.environ[cublas_var_name] = ':4096:8'
-
-        def restore():
-            torch.set_deterministic(deterministic_restore)
-            if is_cuda10_2_or_higher:
-                cur_cublas_config = os.environ.get(cublas_var_name)
-                if cublas_config_restore is None:
-                    if cur_cublas_config is not None:
-                        del os.environ[cublas_var_name]
-                else:
-                    os.environ[cublas_var_name] = cublas_config_restore
-        try:
-            fn(*args, **kwargs)
-        except RuntimeError:
-            restore()
-            raise
-        else:
-            restore()
+                def __exit__(self, exception_type, exception_value, traceback):
+                    if self.is_cuda10_2_or_higher:
+                        cur_cublas_config = os.environ.get(self.cublas_var_name)
+                        if self.cublas_config_restore is None:
+                            if cur_cublas_config is not None:
+                                del os.environ[self.cublas_var_name]
+                        else:
+                            os.environ[self.cublas_var_name] = self.cublas_config_restore
+            with CuBLASConfigGuard():
+                fn(*args, **kwargs)
     return wrapper
 
 def skipIfCompiledWithoutNumpy(fn):
@@ -1510,13 +1540,13 @@ def random_hermitian_pd_matrix(matrix_size, *batch_dims, dtype, device):
     """
     Returns a batch of random Hermitian positive-definite matrices.
     The shape of the result is batch_dims + (matrix_size, matrix_size)
-
     The following example creates a tensor of size 2 x 4 x 3 x 3
     >>> matrices = random_hermitian_pd_matrix(3, 2, 4, dtype=dtype, device=device)
     """
     A = torch.randn(*(batch_dims + (matrix_size, matrix_size)),
                     dtype=dtype, device=device)
-    return torch.matmul(A, A.transpose(-2, -1).conj())
+    return torch.matmul(A, A.transpose(-2, -1).conj()) \
+        + torch.eye(matrix_size, dtype=dtype, device=device)
 
 
 def make_nonzero_det(A, sign=None, min_singular_value=0.1):
