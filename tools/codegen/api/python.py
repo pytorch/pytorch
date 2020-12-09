@@ -1,4 +1,3 @@
-import itertools
 from dataclasses import dataclass
 from typing import Optional, Union, Sequence, Set, List, Tuple, Dict
 
@@ -729,6 +728,8 @@ def signature(f: NativeFunction, *, method: bool = False, pyi: bool = False) -> 
     args: List[Argument] = []
     args.extend(f.func.arguments.pre_self_positional)
     # Skip SelfArgument if this is method.
+    if not method and f.func.arguments.self_arg is not None:
+        args.append(f.func.arguments.self_arg.argument)
     args.extend(f.func.arguments.post_self_positional)
     args.extend(f.func.arguments.pre_tensor_options_kwarg_only)
     # Skip TensorOptionsArguments. Python side TensorOptions
