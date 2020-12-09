@@ -201,7 +201,7 @@ def load_signatures(
     @with_native_function
     def gen_signature_pairs(f: NativeFunction) -> PythonSignatureNativeFunctionPair:
         return PythonSignatureNativeFunctionPair(
-            signature=signature(f, method=method),
+            signature=signature(f, method=method, pyi=pyi),
             function=f,
         )
 
