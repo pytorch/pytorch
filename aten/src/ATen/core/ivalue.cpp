@@ -22,7 +22,7 @@ namespace ivalue {
 
 // This is in ivalue.cpp because we need to access Type::annotation_str, which
 // is declared in jit_type.h
-void checkCustomClassType(TypePtr expected_type, TypePtr actual_type) {
+void checkCustomClassType(const Type* expected_type, const Type* actual_type) {
   // NB: doing pointer comparison here
   // If in the future there ever arises a need to call operator== on custom class
   // Type's, this needs to be changed!

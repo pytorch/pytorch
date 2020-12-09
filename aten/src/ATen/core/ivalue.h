@@ -959,7 +959,7 @@ c10::ClassTypePtr getCustomClassTypeImpl() {
 }
 
 template <typename T>
-c10::ClassTypePtr getCustomClassType() {
+const c10::ClassTypePtr& getCustomClassType() {
   // Classes are never unregistered from getCustomClassTypeMap and the
   // hash lookup can be a hot path, so just cache.
   // For the same reason, it's fine If this ends up getting duplicated across
