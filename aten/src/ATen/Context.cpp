@@ -3,6 +3,7 @@
 #include <ATen/Context.h>
 
 #include <c10/core/TensorOptions.h>
+#include <c10/core/CPUAllocator.h>
 
 #include <mutex>
 #include <sstream>
@@ -232,7 +233,7 @@ bool Context::setFlushDenormal(bool on) {
 }
 
 Allocator* getCPUAllocator() {
-  return getTHDefaultAllocator();
+  return c10::GetCPUAllocator();
 }
 
 // override_allow_tf32_flag = true
