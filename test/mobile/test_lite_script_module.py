@@ -1,7 +1,7 @@
 import unittest
 import torch
 import torch.utils.bundled_inputs
-
+from torch.utils.mobile_optimizer import *
 import io
 from typing import NamedTuple
 from collections import namedtuple
@@ -36,7 +36,7 @@ class TestLiteScriptModule(unittest.TestCase):
         mobile_module_run_method_result = mobile_module.run_method("forward", input)
         torch.testing.assert_allclose(script_module_result, mobile_module_run_method_result)
 
-    def test_save_mobile_module_with_debug_info(self):
+    def test_save_mobile_module_with_debug_info_with_trace(self):
         class A(torch.nn.Module):
             def __init__(self):
                 super(A, self).__init__()
@@ -55,13 +55,83 @@ class TestLiteScriptModule(unittest.TestCase):
 
         input = torch.tensor([5])
         trace_module = torch.jit.trace(B(), input)
-        bytes = trace_module._save_to_buffer_for_lite_interpreter(_save_mobile_debug_info=True)
+        exported_module = trace_module._save_to_buffer_for_lite_interpreter(_save_mobile_debug_info=True)
 
-        assert(b"mobile_debug.pkl" in bytes)
-        assert(b"module_debug_info" in bytes)
-        assert(b"top(B).forward" in bytes)
-        assert(b"top(B).A0(A).forward" in bytes)
-        assert(b"top(B).A1(A).forward" in bytes)
+        assert(b"mobile_debug.pkl" in exported_module)
+        assert(b"module_debug_info" in exported_module)
+        assert(b"top(B).forward" in exported_module)
+        assert(b"top(B).A0(A).forward" in exported_module)
+        assert(b"top(B).A1(A).forward" in exported_module)
+
+    def test_save_mobile_module_with_debug_info_with_script_duplicate_class(self):
+        class A(torch.nn.Module):
+            def __init__(self):
+                super(A, self).__init__()
+
+            def forward(self, x):
+                return x + 1
+
+        class B(torch.nn.Module):
+            def __init__(self):
+                super(B, self).__init__()
+                self.A0 = A()
+                self.A1 = A()
+
+            def forward(self, x):
+                return self.A0(x) + self.A1(x)
+
+        input_data = torch.tensor([5])
+        scripted_module = torch.jit.script(B(), input_data)
+        exported_module = scripted_module._save_to_buffer_for_lite_interpreter(_save_mobile_debug_info=True)
+
+        assert(b"mobile_debug.pkl" in exported_module)
+        assert(b"module_debug_info" in exported_module)
+        assert(b"top(B).forward" in exported_module)
+        assert(b"top(B).A0(A).forward" in exported_module)
+        assert(b"top(B).A1(A).forward" in exported_module)
+
+    def test_save_mobile_module_with_debug_info_with_script_nested_call(self):
+        class A(torch.nn.Module):
+            def __init__(self):
+                super(A, self).__init__()
+
+            def forward(self, x):
+                return x + 1
+
+        class B(torch.nn.Module):
+            def __init__(self):
+                super(B, self).__init__()
+
+            def forward(self, x):
+                return x + 2
+
+        class C(torch.nn.Module):
+            def __init__(self):
+                super(C, self).__init__()
+                self.A0 = A()
+                self.B0 = B()
+
+            def forward(self, x):
+                return self.A0(self.B0(x)) + 1
+
+        input = torch.tensor([5])
+        scripted_module = torch.jit.script(C(), input)
+
+        optimized_scripted_module = optimize_for_mobile(scripted_module)
+
+        exported_module = scripted_module._save_to_buffer_for_lite_interpreter(_save_mobile_debug_info=True)
+        optimized_exported_module = optimized_scripted_module._save_to_buffer_for_lite_interpreter(_save_mobile_debug_info=True)
+        assert(b"mobile_debug.pkl" in exported_module)
+        assert(b"module_debug_info" in exported_module)
+        assert(b"top(C).forward" in exported_module)
+        assert(b"top(C).A0(A).forward" in exported_module)
+        assert(b"top(C).B0(B).forward" in exported_module)
+
+        assert(b"mobile_debug.pkl" in optimized_exported_module)
+        assert(b"module_debug_info" in optimized_exported_module)
+        assert(b"top(C).forward" in optimized_exported_module)
+        assert(b"top(C).A0(A).forward" in optimized_exported_module)
+        assert(b"top(C).B0(B).forward" in optimized_exported_module)
 
     def test_load_mobile_module_with_debug_info(self):
         class MyTestModule(torch.nn.Module):

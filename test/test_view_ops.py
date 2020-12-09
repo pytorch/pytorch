@@ -535,11 +535,12 @@ class TestViewOps(TestCase):
                 out[idx_1, idx_2] = random.random()
                 self.assertEqual(t[idx_2, idx_1], out[idx_1, idx_2])
 
-        op = partial(torch.movedim, source=(0, 1), destination=(1, 0))
-        run_test(device, op)
+        for fn in [torch.movedim, torch.moveaxis]:
+            op = partial(fn, source=(0, 1), destination=(1, 0))
+            run_test(device, op)
 
-        op = partial(torch.movedim, source=0, destination=1)
-        run_test(device, op)
+            op = partial(fn, source=0, destination=1)
+            run_test(device, op)
 
 class TestOldViewOps(TestCase):
     def test_ravel(self, device):

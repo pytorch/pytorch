@@ -40,7 +40,7 @@ class ScriptModuleDeserializer final {
  public:
   ScriptModuleDeserializer(
       std::shared_ptr<CompilationUnit> cu,
-      std::unique_ptr<PyTorchStreamReader> reader,
+      std::shared_ptr<PyTorchStreamReader> reader,
       const c10::optional<at::Device>& device)
       : compilation_unit_(std::move(cu)),
         reader_(std::move(reader)),
@@ -76,7 +76,7 @@ class ScriptModuleDeserializer final {
   std::shared_ptr<Source> sourceLoader(const std::string& qualifier);
 
   std::shared_ptr<CompilationUnit> compilation_unit_;
-  std::unique_ptr<PyTorchStreamReader> reader_;
+  std::shared_ptr<PyTorchStreamReader> reader_;
   c10::optional<at::Device> device_;
   // Legacy only tensor can be a constant.
   std::vector<at::IValue> constant_table_;
@@ -383,7 +383,7 @@ Module ScriptModuleDeserializer::LEGACY_convertModule(
 
 Module LEGACY_deserialize(
     std::shared_ptr<CompilationUnit> cu,
-    std::unique_ptr<caffe2::serialize::PyTorchStreamReader> reader,
+    std::shared_ptr<caffe2::serialize::PyTorchStreamReader> reader,
     const c10::optional<c10::Device>& device) {
   ScriptModuleDeserializer deserializer(
       std::move(cu), std::move(reader), device);

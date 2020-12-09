@@ -13,6 +13,7 @@ Functions
 ---------
 
 .. autofunction:: cholesky
+.. autofunction:: cond
 .. autofunction:: det
 .. autofunction:: eigh
 .. autofunction:: eigvalsh
