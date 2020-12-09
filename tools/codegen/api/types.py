@@ -157,6 +157,8 @@ class CppSignature:
     # (i.e. with a potential TensorOptions argument and out arguments in the front)
     faithful: bool
 
+    fallback_binding: bool = False
+
     # Return the unpacked argument structure of this signature,
     # discarding information about which arguments are semantically
     # related to each other.
@@ -186,7 +188,10 @@ class CppSignature:
         return argument_packs
 
     def name(self) -> str:
-        return cpp.name(self.func, faithful_name_for_out_overloads=self.faithful)
+        n = cpp.name(self.func, faithful_name_for_out_overloads=self.faithful)
+        if self.fallback_binding:
+            n = f"__dispatch_{n}"
+        return n
 
     # Render the C++ declaration for this signature
     def decl(self) -> str:
@@ -214,13 +219,13 @@ class CppSignatureGroup:
     faithful_signature: Optional[CppSignature]
 
     @staticmethod
-    def from_schema(func: FunctionSchema, *, method: bool) -> 'CppSignatureGroup':
+    def from_schema(func: FunctionSchema, *, method: bool, fallback_binding: bool = False) -> 'CppSignatureGroup':
         faithful_signature: Optional[CppSignature]
         if func.arguments.tensor_options is not None or len(func.arguments.out) > 0:
-            faithful_signature = CppSignature(func=func, faithful=True, method=method)
+            faithful_signature = CppSignature(func=func, faithful=True, method=method, fallback_binding=fallback_binding)
         else:
             faithful_signature = None
-        signature = CppSignature(func=func, faithful=False, method=method)
+        signature = CppSignature(func=func, faithful=False, method=method, fallback_binding=fallback_binding)
         return CppSignatureGroup(
             func=func,
             signature=signature,
