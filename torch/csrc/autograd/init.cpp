@@ -334,10 +334,10 @@ static PyMethodDef methods[] = { // NOLINT
   {"autocast_decrement_nesting", autocast_decrement_nesting, METH_NOARGS, nullptr},
   {"set_anomaly_enabled", set_anomaly_mode_enabled, METH_O, nullptr},
   {"is_anomaly_enabled", is_anomaly_mode_enabled, METH_NOARGS, nullptr},
-  {"make_dual", castPyCFunctionWithKeywords(python_make_dual), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"unpack_dual", castPyCFunctionWithKeywords(python_unpack_dual), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"enter_dual_level", python_enter_dual_level, METH_NOARGS, nullptr},
-  {"exit_dual_level", castPyCFunctionWithKeywords(python_exit_dual_level), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"_make_dual", castPyCFunctionWithKeywords(python_make_dual), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"_unpack_dual", castPyCFunctionWithKeywords(python_unpack_dual), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"_enter_dual_level", python_enter_dual_level, METH_NOARGS, nullptr},
+  {"_exit_dual_level", castPyCFunctionWithKeywords(python_exit_dual_level), METH_VARARGS | METH_KEYWORDS, nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 

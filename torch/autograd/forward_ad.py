@@ -18,7 +18,7 @@ def enter_dual_level():
     by the other functions in this API.
     """
     global _current_level
-    new_level = torch._C.enter_dual_level()
+    new_level = torch._C._enter_dual_level()
     if new_level != _current_level + 1:
         raise RuntimeError("Entering a new forward AD level but the current level "
                            "is not valid. Make sure you did not modified it directly.")
@@ -39,7 +39,7 @@ def exit_dual_level(*, level=None):
     if level != _current_level:
         raise RuntimeError("Trying to exit a forward AD level that was not the last one "
                            "that was created. This is not supported.")
-    torch._C.exit_dual_level(level=level)
+    torch._C._exit_dual_level(level=level)
     _current_level = level - 1
 
 def make_dual(tensor, tangent, *, level=None):
@@ -65,7 +65,7 @@ def make_dual(tensor, tangent, *, level=None):
         raise RuntimeError("Trying to create a dual Tensor for forward AD but no level "
                            "exists, make sure to enter_dual_level() first.")
 
-    return torch._C.make_dual(tensor, tangent, level=level)
+    return torch._C._make_dual(tensor, tangent, level=level)
 
 def unpack_dual(tensor, *, level=None):
     r"""Function that unpacks a "dual object" to recover two plain tensors, one representing
@@ -80,7 +80,7 @@ def unpack_dual(tensor, *, level=None):
     if level < 0:
         return tensor, None
 
-    return torch._C.unpack_dual(tensor, level=level)
+    return torch._C._unpack_dual(tensor, level=level)
 
 class dual_level(_DecoratorContextManager):
     r"""Context-manager that controls the current forward ad level. It
