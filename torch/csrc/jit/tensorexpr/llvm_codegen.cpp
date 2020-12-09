@@ -856,8 +856,7 @@ void LLVMCodeGenImpl::visit(const Cast* v) {
   if (srcType->isFPOrFPVectorTy()) {
     if (dstType->isFPOrFPVectorTy()) {
       // as with eager, convert from Double -> Half by Converting to Float then
-      // Half
-      // TODO: __truncdfhf2
+      // Half. TODO: __truncdfhf2
       if (v->dtype().scalar_type() == ScalarType::Half &&
           v->src_value()->dtype().scalar_type() == ScalarType::Double) {
         value_ = irb_.CreateFPCast(
