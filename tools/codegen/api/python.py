@@ -738,11 +738,11 @@ def signature(f: NativeFunction, *, method: bool = False) -> PythonSignature:
 # TODO blowtorch
 # note: removing this will be BC-breaking. A quick test shows that
 # randperm will otherwise default its dtype to torch.float64
- def _dtype_default_type_hack(name: str) -> str:
-     if name.startswith('randperm') or name == 'tril_indices' or name == 'triu_indices':
-         return 'torch.int64'
-     else:
-         return 'None'
+def _dtype_default_type_hack(name: str) -> str:
+    if name.startswith('randperm') or name == 'tril_indices' or name == 'triu_indices':
+        return 'torch.int64'
+    else:
+        return 'None'
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
 #                          Python Interface
