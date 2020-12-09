@@ -55,5 +55,5 @@ def argument(a: Argument) -> MetaArgument:
     )
 
 def arguments(func: FunctionSchema) -> Sequence[MetaArgument]:
-    assert not func.out_arguments
-    return list(map(argument, itertools.chain(func.arguments, func.kwarg_only_arguments)))
+    assert not func.arguments.out
+    return list(map(argument, itertools.chain(func.arguments.positional, func.arguments.kwarg_only)))

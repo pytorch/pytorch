@@ -5,6 +5,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/cpu/vec256/vec256.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/Parallel.h>
 #include <ATen/native/cpu/Loops.h>
 
 

@@ -652,7 +652,8 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: asin
+    CPU, CUDA: asin
+    SparseCPU, SparseCUDA: asin_sparse
 
 - func: asin_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
@@ -1699,6 +1700,7 @@
     CPU: resize_
     CUDA: resize_cuda_
     QuantizedCPU: quantized_resize_cpu_
+    Meta: resize_meta_
 
 - func: empty_quantized(int[] size, Tensor qtensor) -> Tensor
   use_c10_dispatcher: full
@@ -2052,18 +2054,6 @@
   dispatch:
     CPU, CUDA: native_group_norm_backward
 
-- func: ifft(Tensor self, int signal_ndim, bool normalized=False) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-
-- func: rfft(Tensor self, int signal_ndim, bool normalized=False, bool onesided=True) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-
-- func: irfft(Tensor self, int signal_ndim, bool normalized=False, bool onesided=True, int[] signal_sizes=[]) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-
 - func: _fft_with_size(Tensor self, int signal_ndim, bool complex_input, bool complex_output, bool inverse, int[] checked_signal_sizes, bool normalized, bool onesided, int[] output_sizes) -> Tensor
   use_c10_dispatcher: full
   variants: function
@@ -2353,7 +2343,8 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: log1p
+    CPU, CUDA: log1p
+    SparseCPU, SparseCUDA: log1p_sparse
 
 - func: log1p_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
@@ -3058,6 +3049,15 @@
   variants: function, method
 
 - func: movedim.int(Tensor(a) self, int source, int destination) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: function, method
+
+# moveaxis, alias for movedim
+- func: moveaxis.intlist(Tensor(a) self, int[] source, int[] destination) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: moveaxis.int(Tensor(a) self, int source, int destination) -> Tensor(a)
   use_c10_dispatcher: full
   variants: function, method
 
@@ -3924,6 +3924,10 @@
   dispatch:
     CPU: threshold_backward
     CUDA: threshold_backward_cuda
+
+- func: tile(Tensor self, int[] dims) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
 
 - func: transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
   use_c10_dispatcher: full
@@ -5588,15 +5592,13 @@
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    CPU: fmod_
-    CUDA: fmod_cuda_
+    CPU, CUDA: fmod_
 
 - func: fmod_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    CPU: fmod_
-    CUDA: fmod_cuda_
+    CPU, CUDA: fmod_
 
 - func: remainder_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   use_c10_dispatcher: full
@@ -6231,14 +6233,14 @@
 - func: eig.e(Tensor self, bool eigenvectors=False, *, Tensor(a!) e, Tensor(b!) v) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
   dispatch:
     CPU: legacy::cpu::_th_eig_out
-    CUDA: legacy::cuda::_th_eig_out
+    CUDA: eig_cuda_out
 
 - func: eig(Tensor self, bool eigenvectors=False) -> (Tensor eigenvalues, Tensor eigenvectors)
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_eig
-    CUDA: legacy::cuda::_th_eig
+    CUDA: eig_cuda
 
 - func: svd.U(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
   dispatch:
@@ -6582,27 +6584,23 @@
 
 - func: fmod.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: fmod_out
-    CUDA: fmod_cuda_out
+    CPU, CUDA: fmod_out
 
 - func: fmod.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: fmod
-    CUDA: fmod_cuda
+    CPU, CUDA: fmod
 
 - func: fmod.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: fmod_out
-    CUDA: fmod_cuda_out
+    CPU, CUDA: fmod_out
 
 - func: fmod.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: fmod
-    CUDA: fmod_cuda
+    CPU, CUDA: fmod
 
 - func: hypot.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -6776,6 +6774,16 @@
 - func: sort.dimname(Tensor self, Dimname dim, bool descending=False) -> (Tensor values, Tensor indices)
   variants: method, function
 
+- func: msort.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    Math: msort_out
+
+- func: msort(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: method, function
+  dispatch:
+    Math: msort
+
 - func: argsort(Tensor self, int dim=-1, bool descending=False) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
@@ -6872,6 +6880,47 @@
   dispatch:
     CPU, CUDA: pow
     SparseCPU, SparseCUDA: pow_sparse_scalar
+
+- func: float_power.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    Math: float_power_out
+
+- func: float_power.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    Math: float_power
+
+- func: float_power.Scalar_out(Scalar self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    Math: float_power_out
+
+- func: float_power.Scalar(Scalar self, Tensor exponent) -> Tensor
+  use_c10_dispatcher: full
+  dispatch:
+    Math: float_power
+
+- func: float_power.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    Math: float_power_out
+
+- func: float_power.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    Math: float_power
+
+- func: float_power_.Scalar(Tensor(a!) self, Scalar exponent) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+  dispatch:
+    Math: float_power_
+
+- func: float_power_.Tensor(Tensor(a!) self, Tensor exponent) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+  dispatch:
+    Math: float_power_
 
 - func: normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
@@ -7567,6 +7616,54 @@
   dispatch:
     CPU: foreach_tensor_frac_slow_
     CUDA: foreach_tensor_frac_cuda_
+
+- func: _foreach_reciprocal(Tensor[] tensors) -> Tensor[]
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_reciprocal_slow
+    CUDA: foreach_tensor_reciprocal_cuda
+
+- func: _foreach_reciprocal_(Tensor(a!)[] self) -> ()
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_reciprocal_slow_
+    CUDA: foreach_tensor_reciprocal_cuda_
+
+- func: _foreach_sigmoid(Tensor[] tensors) -> Tensor[]
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_sigmoid_slow
+    CUDA: foreach_tensor_sigmoid_cuda
+
+- func: _foreach_sigmoid_(Tensor(a!)[] self) -> ()
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_sigmoid_slow_
+    CUDA: foreach_tensor_sigmoid_cuda_
+
+- func: _foreach_trunc(Tensor[] tensors) -> Tensor[]
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_trunc_slow
+    CUDA: foreach_tensor_trunc_cuda
+
+- func: _foreach_trunc_(Tensor(a!)[] self) -> ()
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_trunc_slow_
+    CUDA: foreach_tensor_trunc_cuda_
 
 - func: _foreach_addcdiv_.Scalar(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> ()
   use_c10_dispatcher: full
@@ -9342,10 +9439,6 @@
   use_c10_dispatcher: full
   variants: function
 
-- func: fft(Tensor self, int signal_ndim, bool normalized=False) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-
 ## Functions for linear algebra and the torch.linalg namespace
 # Note [linalg namespace binding]
 # Functions in the linalg python module should have their names start with
@@ -9380,6 +9473,43 @@
   dispatch:
     DefaultBackend: det
 
+- func: _syevd_helper(Tensor self, bool compute_eigenvectors, str uplo) -> (Tensor, Tensor)
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: _syevd_helper_cpu
+    CUDA: _syevd_helper_cuda
+
+- func: linalg_eigh(Tensor self, str UPLO="L") -> (Tensor eigenvalues, Tensor eigenvectors)
+  python_module: linalg
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    DefaultBackend: linalg_eigh
+
+- func: linalg_eigh.eigvals(Tensor self, str UPLO="L", *, Tensor(a!) eigvals, Tensor(b!) eigvecs) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
+  python_module: linalg
+  dispatch:
+    DefaultBackend: linalg_eigh_out
+
+- func: linalg_eigvalsh(Tensor self, str UPLO="L") -> Tensor
+  python_module: linalg
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    DefaultBackend: linalg_eigvalsh
+
+- func: linalg_eigvalsh.out(Tensor self, str UPLO='L', *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  dispatch:
+    DefaultBackend: linalg_eigvalsh_out
+
+- func: inner(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: inner.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+
 # torch.outer, alias for torch.ger
 - func: outer(Tensor self, Tensor vec2) -> Tensor
   use_c10_dispatcher: full
@@ -9413,6 +9543,30 @@
   python_module: linalg
   variants: function
 
+- func: linalg_cond(Tensor self, Scalar? p=None) -> Tensor
+  python_module: linalg
+  variants: function
+  dispatch:
+    Math: linalg_cond
+
+- func: linalg_cond.out(Tensor self, Scalar? p=None, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+  dispatch:
+    Math: linalg_cond_out
+
+- func: linalg_cond.p_str(Tensor self, str p) -> Tensor
+  python_module: linalg
+  variants: function
+  dispatch:
+    Math: linalg_cond
+
+- func: linalg_cond.p_str_out(Tensor self, str p, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+  dispatch:
+    Math: linalg_cond_out
+
 - func: linalg_tensorinv(Tensor self, int ind=2) -> Tensor
   python_module: linalg
   variants: function
@@ -9436,6 +9590,18 @@
   variants: function
   dispatch:
     Math: linalg_tensorsolve_out
+
+- func: linalg_matrix_rank(Tensor self, float? tol=None, bool hermitian=False) -> Tensor
+  python_module: linalg
+  variants: function
+  dispatch:
+    Math: linalg_matrix_rank
+
+- func: linalg_matrix_rank.out(Tensor self, float? tol=None, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+  dispatch:
+    Math: linalg_matrix_rank_out
 
 ## Functions that are only for testing
 # It is undocumented and should not be used outside of tests.

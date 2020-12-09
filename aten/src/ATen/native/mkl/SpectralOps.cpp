@@ -185,22 +185,102 @@ REGISTER_ARCH_DISPATCH(fft_fill_with_conjugate_symmetry_stub, DEFAULT, &_fft_fil
 REGISTER_AVX_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
 REGISTER_AVX2_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
 
+// Constructs an mkl-fft plan descriptor representing the desired transform
+// For complex types, strides are in units of 2 * element_size(dtype)
+// sizes are for the full signal, including batch size and always two-sided
+static DftiDescriptor _plan_mkl_fft(
+    IntArrayRef in_strides, IntArrayRef out_strides, IntArrayRef sizes,
+    bool complex_input, bool complex_output,
+    int64_t normalization, bool forward, ScalarType dtype) {
+  const int64_t signal_ndim = sizes.size() - 1;
+  TORCH_INTERNAL_ASSERT(in_strides.size() == sizes.size());
+  TORCH_INTERNAL_ASSERT(out_strides.size() == sizes.size());
+
+  // precision
+  const DFTI_CONFIG_VALUE prec = [&]{
+    switch (c10::toValueType(dtype)) {
+      case ScalarType::Float: return DFTI_SINGLE;
+      case ScalarType::Double: return DFTI_DOUBLE;
+      default: TORCH_CHECK(false, "MKL FFT doesn't support tensors of type: ", dtype);
+    }
+  }();
+  // signal type
+  const DFTI_CONFIG_VALUE signal_type = [&]{
+    if (forward) {
+      return complex_input ? DFTI_COMPLEX : DFTI_REAL;
+    } else {
+      return complex_output ? DFTI_COMPLEX : DFTI_REAL;
+    }
+  }();
+  // create descriptor with signal size
+  using MklDimVector = c10::SmallVector<MKL_LONG, at::kDimVectorStaticSize>;
+  MklDimVector mkl_signal_sizes(sizes.begin() + 1, sizes.end());
+  DftiDescriptor descriptor;
+  descriptor.init(prec, signal_type, signal_ndim, mkl_signal_sizes.data());
+  // out of place FFT
+  MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), DFTI_PLACEMENT, DFTI_NOT_INPLACE));
+  // batch mode
+  MKL_LONG mkl_batch_size = sizes[0];
+  MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), DFTI_NUMBER_OF_TRANSFORMS, mkl_batch_size));
+
+  // batch dim stride, i.e., dist between each data
+  TORCH_CHECK(in_strides[0] <= MKL_LONG_MAX && out_strides[0] <= MKL_LONG_MAX);
+  MKL_LONG idist = in_strides[0];
+  MKL_LONG odist = out_strides[0];
+  MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), DFTI_INPUT_DISTANCE, idist));
+  MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), DFTI_OUTPUT_DISTANCE, odist));
+
+  // signal strides
+  // first val is offset, set to zero (ignored)
+  MklDimVector mkl_istrides(1 + signal_ndim, 0), mkl_ostrides(1 + signal_ndim, 0);
+  for (int64_t i = 1; i <= signal_ndim; i++) {
+    TORCH_CHECK(in_strides[i] <= MKL_LONG_MAX && out_strides[i] <= MKL_LONG_MAX);
+    mkl_istrides[i] = in_strides[i];
+    mkl_ostrides[i] = out_strides[i];
+  }
+  MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), DFTI_INPUT_STRIDES, mkl_istrides.data()));
+  MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), DFTI_OUTPUT_STRIDES, mkl_ostrides.data()));
+  // if conjugate domain of real is involved, set standard CCE storage type
+  // this will become default in MKL in future
+  if (!complex_input || !complex_output) {
+    MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), DFTI_CONJUGATE_EVEN_STORAGE, DFTI_COMPLEX_COMPLEX));
+  }
+  // rescale if requested
+  const auto norm = static_cast<fft_norm_mode>(normalization);
+  int64_t signal_numel = at::prod_intlist(IntArrayRef(sizes.data() + 1, signal_ndim));
+  if (norm != fft_norm_mode::none) {
+    const double scale = (
+      (norm == fft_norm_mode::by_root_n) ?
+      1.0 / std::sqrt(static_cast<double>(signal_numel)) :
+      1.0 / static_cast<double>(signal_numel));
+    const auto scale_direction = forward ? DFTI_FORWARD_SCALE : DFTI_BACKWARD_SCALE;
+    MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), scale_direction, scale));
+  }
+
+  if (sizeof(MKL_LONG) < sizeof(int64_t)) {
+    TORCH_CHECK(signal_numel <= MKL_LONG_MAX,
+                "MKL FFT: input signal numel exceeds allowed range [1, ", MKL_LONG_MAX, "]");
+  }
+
+  // finalize
+  MKL_DFTI_CHECK(DftiCommitDescriptor(descriptor.get()));
+
+  return descriptor;
+}
+
 // MKL DFTI
 Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
                 bool complex_input, bool complex_output,
                 bool inverse, IntArrayRef checked_signal_sizes,
                 int64_t normalization, bool onesided,
                 IntArrayRef output_sizes) {
-  int64_t batch = self.size(0);
   Tensor input = self;
+  bool need_contiguous = false;
   // real/imag dimension must aligned when viewed as of complex type
   if (complex_input) {
-    bool need_contiguous = input.stride(-1) != 1;
+    need_contiguous |= input.stride(-1) != 1;
     for (int64_t i = 0; !need_contiguous && i <= signal_ndim; i++) {
       need_contiguous |= input.stride(i) % 2 != 0;
-    }
-    if (need_contiguous) {
-      input = input.contiguous();
     }
   }
 
@@ -209,7 +289,6 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
   // be careful about complex domain, where the stride needs to be divided by 2
   // only need to test upper bound MKL_LONG_MAX as these values are non-negative
   if (sizeof(MKL_LONG) < sizeof(int64_t)) {
-    bool need_contiguous = false;
     int64_t inumel = 1 /* istride if we contiguous-fy */, onumel = 1;
     int64_t isize, osize, istride, ostride;
     for (int64_t i = signal_ndim; i >= 0; i--) {
@@ -233,78 +312,42 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
       onumel *= osize;
     }
   }
+
+  if (need_contiguous) {
+    input = input.contiguous();
+  }
+
+
   Tensor output = at::empty(output_sizes, input.options());
 
-  // precision
-  DFTI_CONFIG_VALUE prec;
-  if (input.scalar_type() == ScalarType::Float) {
-    prec = DFTI_SINGLE;
-  } else if (input.scalar_type() == ScalarType::Double) {
-    prec = DFTI_DOUBLE;
-  } else {
-    std::ostringstream ss;
-    ss << "MKL FFT doesn't support tensor of type: "
-       << toString(input.scalar_type());
-    AT_ERROR(ss.str());
-  }
-  // signal type
-  DFTI_CONFIG_VALUE signal_type;
-  if (!inverse) {
-    signal_type = complex_input ? DFTI_COMPLEX : DFTI_REAL;
-  } else {
-    signal_type = complex_output ? DFTI_COMPLEX : DFTI_REAL;
-  }
-  // create descriptor with signal size
-  std::vector<MKL_LONG> mkl_signal_sizes(checked_signal_sizes.begin(), checked_signal_sizes.end());
-  DftiDescriptor descriptor;
-  descriptor.init(prec, signal_type, signal_ndim, mkl_signal_sizes.data());
-  // out of place FFT
-  MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), DFTI_PLACEMENT, DFTI_NOT_INPLACE));
-  // batch mode
-  MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), DFTI_NUMBER_OF_TRANSFORMS, batch));
+  DimVector full_sizes(signal_ndim + 1);
+  full_sizes[0] = self.size(0);
+  std::copy(checked_signal_sizes.cbegin(), checked_signal_sizes.cend(), full_sizes.begin() + 1);
 
-  auto istrides = input.strides();
-  auto ostrides = output.strides();
-  // batch dim stride, i.e., dist between each data
-  MKL_LONG idist = complex_input ? istrides[0] >> 1 : istrides[0];
-  MKL_LONG odist = complex_output ? ostrides[0] >> 1 : ostrides[0];
-  MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), DFTI_INPUT_DISTANCE, idist));
-  MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), DFTI_OUTPUT_DISTANCE, odist));
-  // signal strides
-  // first val is offset, set to zero (ignored)
-  std::vector<MKL_LONG> mkl_istrides(1 + signal_ndim, 0), mkl_ostrides(1 + signal_ndim, 0);
-  for (int64_t i = 1; i <= signal_ndim; i++) {
-    mkl_istrides[i] = complex_input ? istrides[i] >> 1 : istrides[i];
-    mkl_ostrides[i] = complex_output ? ostrides[i] >> 1 : ostrides[i];
-  }
-  MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), DFTI_INPUT_STRIDES, mkl_istrides.data()));
-  MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), DFTI_OUTPUT_STRIDES, mkl_ostrides.data()));
-  // if conjugate domain of real is involved, set standard CCE storage type
-  // this will become default in MKL in future
-  if (!complex_input || !complex_output) {
-    MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), DFTI_CONJUGATE_EVEN_STORAGE, DFTI_COMPLEX_COMPLEX));
-  }
-  // rescale if requested
-  const auto norm = static_cast<fft_norm_mode>(normalization);
-  if (norm != fft_norm_mode::none) {
-    auto signal_numel = at::prod_intlist(checked_signal_sizes);
-    double double_scale;
-    if (norm == fft_norm_mode::by_root_n) {
-      double_scale = 1.0 / std::sqrt(static_cast<double>(signal_numel));
+  // If "complex" is true, convert strides from complex viewed as real to complex strides.
+  // Otherwise, returns a copy of strides if "complex" is false.
+  auto convert_strides = [signal_ndim](IntArrayRef strides, bool complex) {
+    DimVector res(signal_ndim + 1);
+    if (complex) {
+      for (int64_t i = 0; i < res.size(); ++i) {
+        res[i] = strides[i] / 2;
+      }
     } else {
-      double_scale = 1.0 / static_cast<double>(signal_numel);
+      res.assign(strides.cbegin(), strides.cend());
     }
-    MKL_DFTI_CHECK(DftiSetValue(descriptor.get(),
-      inverse ? DFTI_BACKWARD_SCALE : DFTI_FORWARD_SCALE,
-      prec == DFTI_DOUBLE ? double_scale : static_cast<float>(double_scale)));
-  }
-  // finalize
-  MKL_DFTI_CHECK(DftiCommitDescriptor(descriptor.get()));
-  // run
-  if (!inverse) {
-    MKL_DFTI_CHECK(DftiComputeForward(descriptor.get(), input.data_ptr(), output.data_ptr()));
-  } else {
+    return res;
+  };
+  const auto in_strides = convert_strides(input.strides(), complex_input);
+  const auto out_strides = convert_strides(output.strides(), complex_output);
+
+  auto descriptor = _plan_mkl_fft(
+      in_strides, out_strides, full_sizes, complex_input, complex_output,
+      normalization, !inverse, input.scalar_type());
+
+  if (inverse) {
     MKL_DFTI_CHECK(DftiComputeBackward(descriptor.get(), input.data_ptr(), output.data_ptr()));
+  } else {
+    MKL_DFTI_CHECK(DftiComputeForward(descriptor.get(), input.data_ptr(), output.data_ptr()));
   }
   // now if needed, fill out the other half using Hermitian symmetry dim
   if (!complex_input && complex_output && !onesided) {

@@ -11,6 +11,7 @@ from torch import nn
 from torch.distributed._pipeline.sync import Pipe
 from torch.distributed._pipeline.sync.skip import pop, skippable, stash
 from torch.distributed._pipeline.sync.skip.portal import PortalBlue, PortalCopy, PortalOrange
+from torch.testing._internal.distributed.pipeline.utils import convert_to_balance
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
@@ -52,7 +53,8 @@ def test_1to3(balance, checkpoint):
             return output
 
     model = nn.Sequential(Layer1(), Layer2(), Layer3())
-    model = Pipe(model, balance, chunks=3, checkpoint=checkpoint)
+    model = convert_to_balance(model, balance)
+    model = Pipe(model, chunks=3, checkpoint=checkpoint)
 
     in_device = model.devices[0]
     out_device = model.devices[-1]
@@ -81,7 +83,7 @@ def test_none_skip():
             return input
 
     model = nn.Sequential(Stash(), Pop())
-    model = Pipe(model, [1, 1], devices=["cpu", "cpu"], chunks=5)
+    model = Pipe(model, chunks=5)
 
     input = torch.rand(10, requires_grad=True)
     output = model(input)
