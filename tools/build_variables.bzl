@@ -268,6 +268,7 @@ core_sources_full_mobile = [
 core_sources_full = core_sources_full_mobile + [
     "torch/csrc/jit/runtime/static/impl.cpp",
     "torch/csrc/jit/runtime/static/ops.cpp",
+    "torch/csrc/jit/runtime/static/passes.cpp",
 ]
 
 libtorch_core_sources = sorted(core_sources_common + core_sources_full + core_trainer_sources)
@@ -530,6 +531,7 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/passes/onnx/unpack_quantized_weights.cpp",
     "torch/csrc/jit/passes/onnx/remove_inplace_ops_for_onnx.cpp",
     "torch/csrc/jit/passes/onnx/shape_type_inference.cpp",
+    "torch/csrc/jit/python/pybind_utils.cpp",
     "torch/csrc/jit/python/python_arg_flatten.cpp",
     "torch/csrc/jit/python/python_custom_class.cpp",
     "torch/csrc/jit/python/python_interpreter.cpp",
