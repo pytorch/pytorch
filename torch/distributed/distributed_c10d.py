@@ -218,7 +218,7 @@ def _get_group_size(group):
     """
     Helper that gets a given group's world size.
     """
-    if group is GroupMember.WORLD:
+    if group is GroupMember.WORLD or group is None:
         default_pg = _get_default_group()
         return default_pg.size()
     if group not in _pg_group_ranks:
@@ -638,7 +638,7 @@ def get_rank(group=None):
         return -1
 
     default_pg = _get_default_group()
-    if group is None:
+    if group is None or group is GroupMember.WORLD:
         return default_pg.rank()
 
     return _get_group_rank(group, default_pg.rank())
