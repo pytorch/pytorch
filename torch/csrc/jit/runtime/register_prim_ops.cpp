@@ -824,6 +824,11 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
+             "aten::__contains__.int_list(int[] l, int item) -> bool"),
+         listContains<int64_t>,
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
              "aten::__contains__.str_list(str[] l, str item) -> bool"),
          listContains<std::string>,
          aliasAnalysisFromSchema()),
@@ -1347,7 +1352,7 @@ int64_t normalizeIndex(int64_t idx, int64_t list_size) {
 
 int64_t stringFindImpl(
     std::string string,
-    std::string substr,
+    const std::string& substr,
     int64_t start,
     int64_t end,
     bool reverse = false) {

@@ -25,6 +25,7 @@
 #include <ostream>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 // This file contains classes which assist in desugaring Python style
@@ -87,13 +88,13 @@ using ModuleLookup = std::function<Module(const std::vector<std::string>&)>;
 struct TORCH_API Module : public Object {
   explicit Module(c10::QualifiedName class_name);
   Module(std::shared_ptr<CompilationUnit> cu, const c10::ClassTypePtr& type);
-  Module() {}
+  Module() = default;
   Module(
       c10::QualifiedName,
       std::shared_ptr<CompilationUnit> cu,
       bool shouldMangle = false);
   Module(ModulePtr module_value) : Object(std::move(module_value)) {}
-  ~Module() {}
+  ~Module() = default;
 
   void set_optimized(bool o) {
     TORCH_WARN(
@@ -133,7 +134,7 @@ struct TORCH_API Module : public Object {
 
   void register_attribute(
       const std::string& name,
-      const TypePtr t,
+      const TypePtr& t,
       IValue v,
       bool is_param = false,
       bool is_buffer = false) {
@@ -264,7 +265,7 @@ struct TORCH_API Module : public Object {
       const std::unordered_map<TypePtr, TypePtr>& type_remap);
 
   c10::QualifiedName getNameForMethod(std::string basename) const {
-    return QualifiedName(*type()->name(), basename);
+    return QualifiedName(*type()->name(), std::move(basename));
   }
 
   void to_impl(
@@ -440,7 +441,7 @@ struct slot_list_impl {
   }
 
   slot_list_impl(Module module, bool recurse, bool return_module)
-      : module_(std::move(module)),
+      : module_(module),
         recurse_(recurse),
         return_module_(return_module),
         size_(c10::nullopt) {
@@ -547,7 +548,7 @@ struct NamedPolicy {
       }
       name = ss.str();
     }
-    return value_type{std::move(name), Policy::create(cursors, v)};
+    return value_type{std::move(name), Policy::create(cursors, std::move(v))};
   }
   static bool valid(const ClassTypePtr& t, size_t i, const IValue& v) {
     return Policy::valid(t, i, v);

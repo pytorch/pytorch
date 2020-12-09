@@ -18,6 +18,7 @@ from torch._six import string_classes
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes, TrainingMode
 from torch._C import ListType, OptionalType, _propagate_and_assign_input_shapes, _check_onnx_proto
+from typing import Union, Tuple, List
 
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
@@ -76,7 +77,7 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
     if aten or export_raw_ir:
         assert operator_export_type is None
         assert aten ^ export_raw_ir
-        operator_export_type = OperatorExportTypes.ATEN if aten else OperatorExportTypes.RAW
+        operator_export_type = OperatorExportTypes.ONNX_ATEN if aten else OperatorExportTypes.RAW
     elif operator_export_type is None:
         if torch.onnx.PYTORCH_ONNX_CAFFE2_BUNDLE:
             operator_export_type = OperatorExportTypes.ONNX_ATEN_FALLBACK
@@ -121,7 +122,7 @@ def _split_tensor_list_constants(g, block):
 
 
 def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=False, fixed_batch_size=False,
-                    params_dict=None, use_new_jit_passes=False, dynamic_axes=None, input_names=None):
+                    params_dict=None, use_new_jit_passes=True, dynamic_axes=None, input_names=None):
     # Inline everything
     torch._C._jit_pass_inline(graph)
 
@@ -351,6 +352,7 @@ def _trace_and_get_graph_from_model(model, args):
 
 def _create_jit_graph(model, args, _retain_param_name, use_new_jit_passes):
     torch_out = None
+    params: Union[List, Tuple]
     if isinstance(model, torch.jit.ScriptModule):
         try:
             graph = model.forward.graph
@@ -358,10 +360,10 @@ def _create_jit_graph(model, args, _retain_param_name, use_new_jit_passes):
             if not use_new_jit_passes:
                 method_graph, params = torch._C._jit_pass_lower_graph(graph, model._c)
             else:
-                freezed_m = torch._C._freeze_module(model._c)
+                freezed_m = torch._C._freeze_module(model._c, preserveParameters=True)
+                freezed_m, params = torch._C._jit_onnx_list_model_parameters(freezed_m)
                 method_graph = freezed_m._get_method('forward').graph
                 method_graph.eraseInput(0)  # Remove 'self' from model inputs
-                params = []
 
             in_vars, in_desc = torch.jit._flatten(tuple(args) + tuple(params))
             graph = _propagate_and_assign_input_shapes(
@@ -396,7 +398,7 @@ def _model_to_graph(model, args, verbose=False,
                     example_outputs=None,
                     _retain_param_name=False, do_constant_folding=True,
                     _disable_torch_constant_prop=False, fixed_batch_size=False,
-                    training=None, use_new_jit_passes=False,
+                    training=None, use_new_jit_passes=True,
                     dynamic_axes=None):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     # Special case for common case of passing a single Tensor
@@ -442,7 +444,7 @@ def _model_to_graph(model, args, verbose=False,
     param_names = input_and_param_names[len(input_and_param_names) - len(params):]
     params_dict = dict(zip(param_names, params))
 
-    if training is None or training == TrainingMode.EVAL or (training == TrainingMode.PRESERVE and not is_originally_training):
+    if training is None or training == TrainingMode.EVAL:
         params_dict = torch._C._jit_pass_onnx_eval_peephole(graph, params_dict)
 
     if do_constant_folding and _export_onnx_opset_version in torch.onnx.constant_folding_opset_versions:
@@ -476,7 +478,7 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
     if aten or export_raw_ir:
         assert operator_export_type is None
         assert aten ^ export_raw_ir
-        operator_export_type = OperatorExportTypes.ATEN if aten else OperatorExportTypes.RAW
+        operator_export_type = OperatorExportTypes.ONNX_ATEN if aten else OperatorExportTypes.RAW
     elif operator_export_type is None:
         operator_export_type = OperatorExportTypes.ONNX
     return _export_to_pretty_string(model, args, f, export_params, verbose, training,
@@ -586,7 +588,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
             enable_onnx_checker=True, use_external_data_format=False,
-            onnx_shape_inference=True, use_new_jit_passes=False):
+            onnx_shape_inference=True, use_new_jit_passes=True):
 
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError('torch.nn.DataParallel is not supported by ONNX '
@@ -1051,6 +1053,10 @@ def _graph_constant(g, value, dims, type, *args, **kwargs):
         dims = [1]
         isscalar = True
     type = type.lower()
+    tensor: Union[torch.CharTensor, torch.ShortTensor,
+                  torch.IntTensor, torch.LongTensor,
+                  torch.HalfTensor, torch.FloatTensor,
+                  torch.DoubleTensor]
     if type == "char":
         tensor = torch.CharTensor(*dims)
     elif type == "short":
@@ -1068,7 +1074,7 @@ def _graph_constant(g, value, dims, type, *args, **kwargs):
     else:
         raise ValueError("Unknown type, type should be one of the following strings: "
                          "char, short, int, long, half, float, double")
-    tensor.fill_(value)
+    tensor.fill_(value)  # type: ignore
     if isscalar:
         return g.op("Constant", *args, value_z=tensor, **kwargs)
     return g.op("Constant", *args, value_t=tensor, **kwargs)
@@ -1141,8 +1147,8 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
             dynamic_axes[key] = value_dict
 
 
-torch._C.Graph.op = _graph_op
-torch._C.Graph.at = _graph_at
-torch._C.Block.op = _block_op
-torch._C.Graph.constant = _graph_constant
-torch._C.Node.__getitem__ = _node_getitem
+torch._C.Graph.op = _graph_op  # type: ignore
+torch._C.Graph.at = _graph_at  # type: ignore
+torch._C.Block.op = _block_op  # type: ignore
+torch._C.Graph.constant = _graph_constant  # type: ignore
+torch._C.Node.__getitem__ = _node_getitem  # type: ignore

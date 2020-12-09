@@ -32,6 +32,19 @@ _TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
 TORCH_LIB_PATH = os.path.join(_TORCH_PATH, 'lib')
 
 
+# Taken directly from python stdlib < 3.9
+# See https://github.com/pytorch/pytorch/issues/48617
+def _nt_quote_args(args: Optional[List[str]]) -> List[str]:
+    """Quote command-line arguments for DOS/Windows conventions.
+
+    Just wraps every argument which contains blanks in double quotes, and
+    returns a new argument list.
+    """
+    # Cover None-type
+    if not args:
+        return []
+    return [f'"{arg}"' if ' ' in arg else arg for arg in args]
+
 def _find_cuda_home() -> Optional[str]:
     r'''Finds the CUDA install path.'''
     # Guess #1
@@ -654,7 +667,6 @@ class BuildExtension(build_ext, object):
                     cuda_post_cflags = list(extra_postargs)
                 cuda_post_cflags = win_cuda_flags(cuda_post_cflags)
 
-            from distutils.spawn import _nt_quote_args  # type: ignore
             cflags = _nt_quote_args(cflags)
             post_cflags = _nt_quote_args(post_cflags)
             if with_cuda:
@@ -816,6 +828,35 @@ def CUDAExtension(name, sources, *args, **kwargs):
                 cmdclass={
                     'build_ext': BuildExtension
                 })
+
+    Compute capabilities:
+
+    By default the extension will be compiled to run on all archs of the cards visible during the
+    building process of the extension, plus PTX. If down the road a new card is installed the
+    extension may need to be recompiled. If a visible card has a compute capability (CC) that's
+    newer than the newest version for which your nvcc can build fully-compiled binaries, Pytorch
+    will make nvcc fall back to building kernels with the newest version of PTX your nvcc does
+    support (see below for details on PTX).
+
+    You can override the default behavior using `TORCH_CUDA_ARCH_LIST` to explicitly specify which
+    CCs you want the extension to support:
+
+    TORCH_CUDA_ARCH_LIST="6.1 8.6" python build_my_extension.py
+    TORCH_CUDA_ARCH_LIST="5.2 6.0 6.1 7.0 7.5 8.0 8.6+PTX" python build_my_extension.py
+
+    The +PTX option causes extension kernel binaries to include PTX instructions for the specified
+    CC. PTX is an intermediate representation that allows kernels to runtime-compile for any CC >=
+    the specified CC (for example, 8.6+PTX generates PTX that can runtime-compile for any GPU with
+    CC >= 8.6). This improves your binary's forward compatibility. However, relying on older PTX to
+    provide forward compat by runtime-compiling for newer CCs can modestly reduce performance on
+    those newer CCs. If you know exact CC(s) of the GPUs you want to target, you're always better
+    off specifying them individually. For example, if you want your extension to run on 8.0 and 8.6,
+    "8.0+PTX" would work functionally because it includes PTX that can runtime-compile for 8.6, but
+    "8.0 8.6" would be better.
+
+    Note that while it's possible to include all supported archs, the more archs get included the
+    slower the building process will be, as it will build a separate kernel image for each arch.
+
     '''
     library_dirs = kwargs.get('library_dirs', [])
     library_dirs += library_paths(cuda=True)
@@ -838,6 +879,27 @@ def CUDAExtension(name, sources, *args, **kwargs):
     kwargs['libraries'] = libraries
 
     include_dirs = kwargs.get('include_dirs', [])
+
+    if IS_HIP_EXTENSION:
+        build_dir = os.getcwd()
+        if not include_dirs:
+            include_dirs = ['*']
+        hipify_result = hipify_python.hipify(
+            project_directory=build_dir,
+            output_directory=build_dir,
+            includes=[os.path.join(os.path.relpath(include_dir, build_dir), '*') for include_dir in include_dirs],
+            extra_files=[os.path.abspath(s) for s in sources],
+            show_detailed=True,
+            is_pytorch_extension=True,
+        )
+
+        hipified_sources = set()
+        for source in sources:
+            s_abs = os.path.abspath(source)
+            hipified_sources.add(hipify_result[s_abs]["hipified_path"] if s_abs in hipify_result else s_abs)
+
+        sources = list(hipified_sources)
+
     include_dirs += include_paths(cuda=True)
     kwargs['include_dirs'] = include_dirs
 
@@ -1463,16 +1525,24 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
 
     # If not given, determine what's best for the GPU / CUDA version that can be found
     if not _arch_list:
-        capability = torch.cuda.get_device_capability()
-        supported_sm = [int(arch.split('_')[1])
-                        for arch in torch.cuda.get_arch_list() if 'sm_' in arch]
-        max_supported_sm = max((sm // 10, sm % 10) for sm in supported_sm)
-        # Capability of the device may be higher than what's supported by the user's
-        # NVCC, causing compilation error. User's NVCC is expected to match the one
-        # used to build pytorch, so we use the maximum supported capability of pytorch
-        # to clamp the capability.
-        capability = min(max_supported_sm, capability)
-        arch_list = [f'{capability[0]}.{capability[1]}']
+        arch_list = []
+        # the assumption is that the extension should run on any of the currently visible cards,
+        # which could be of different types - therefore all archs for visible cards should be included
+        for i in range(torch.cuda.device_count()):
+            capability = torch.cuda.get_device_capability(i)
+            supported_sm = [int(arch.split('_')[1])
+                            for arch in torch.cuda.get_arch_list() if 'sm_' in arch]
+            max_supported_sm = max((sm // 10, sm % 10) for sm in supported_sm)
+            # Capability of the device may be higher than what's supported by the user's
+            # NVCC, causing compilation error. User's NVCC is expected to match the one
+            # used to build pytorch, so we use the maximum supported capability of pytorch
+            # to clamp the capability.
+            capability = min(max_supported_sm, capability)
+            arch = f'{capability[0]}.{capability[1]}'
+            if arch not in arch_list:
+                arch_list.append(arch)
+        arch_list = sorted(arch_list)
+        arch_list[-1] += '+PTX'
     else:
         # Deal with lists that are ' ' separated (only deal with ';' after)
         _arch_list = _arch_list.replace(' ', ';')
@@ -1676,7 +1746,6 @@ def _write_ninja_file_to_build_library(path,
 
     if IS_WINDOWS:
         cflags = common_cflags + COMMON_MSVC_FLAGS + extra_cflags
-        from distutils.spawn import _nt_quote_args  # type: ignore
         cflags = _nt_quote_args(cflags)
     else:
         cflags = common_cflags + ['-fPIC', '-std=c++14'] + extra_cflags
@@ -1687,7 +1756,7 @@ def _write_ninja_file_to_build_library(path,
         cuda_flags += _get_rocm_arch_flags(cuda_flags)
         sources = [s if not _is_cuda_file(s) else
                    os.path.abspath(os.path.join(
-                       path, get_hip_file_path(os.path.relpath(s, path))))
+                       path, get_hip_file_path(os.path.relpath(s, path), is_pytorch_extension=True)))
                    for s in sources]
     elif with_cuda:
         cuda_flags = common_cflags + COMMON_NVCC_FLAGS + _get_cuda_arch_flags()
