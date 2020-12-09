@@ -6,7 +6,8 @@ from torch.testing._internal.common_utils import (TestCase, run_tests)
 from torch.utils.data.datasets import (ListDirFilesIterableDataset, LoadFilesFromDiskIterableDataset)
 
 def create_temp_dir_and_files():
-    # Note: the temp dir and files within it will be deleted in tearDown()
+    # The temp dir and files within it will be released and deleted in tearDown().
+    # Adding `noqa: P201` to avoid mypy's warning on not releasing the dir handle within this function.
     temp_dir = tempfile.TemporaryDirectory()  # noqa: P201
     temp_dir_path = temp_dir.name
     temp_file1 = tempfile.NamedTemporaryFile(dir=temp_dir_path, delete=False)  # noqa: P201
