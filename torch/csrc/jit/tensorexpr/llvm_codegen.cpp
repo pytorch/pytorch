@@ -522,7 +522,8 @@ void LLVMCodeGenImpl::emitKernel(
   if (is_enabled(__FILE__, ::torch::jit::JitLoggingLevels::GRAPH_DEBUG)) {
     module_->print(asmStream, nullptr);
   }
-  GRAPH_DEBUG("\nLLVM module before optimizations\n\n", asmStream.str().str(), "\n");
+  GRAPH_DEBUG(
+      "\nLLVM module before optimizations\n\n", asmStream.str().str(), "\n");
 
   optimize(*module_);
 
@@ -538,7 +539,8 @@ void LLVMCodeGenImpl::emitKernel(
         llvm::TargetMachine::CodeGenFileType::CGFT_AssemblyFile);
     PM.run(*module_);
   }
-  GRAPH_DEBUG("\nLLVM module after optimizations\n\n", asmStream.str().str(), "\n");
+  GRAPH_DEBUG(
+      "\nLLVM module after optimizations\n\n", asmStream.str().str(), "\n");
 }
 
 // TODO: The binary ops are copypasta.
