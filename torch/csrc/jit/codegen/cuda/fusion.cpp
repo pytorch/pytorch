@@ -4,10 +4,10 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
 #include <torch/csrc/jit/codegen/cuda/ir_printer.h>
+#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 
-// TODO(kir): only needed until we can fix Fusion::origin()
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 
 namespace torch {
@@ -43,9 +43,6 @@ void swap(Fusion& a, Fusion& b) noexcept {
   swap(a.val_type_name_map_, b.val_type_name_map_);
   swap(a.expr_name_counter_, b.expr_name_counter_);
 
-  swap(a.origin_, b.origin_);
-  swap(a.uses_, b.uses_);
-
   swap(a.inputs_, b.inputs_);
   swap(a.outputs_, b.outputs_);
 
@@ -75,34 +72,41 @@ Fusion::Fusion(const Fusion& other) {
     val_set_.insert(ir_cloner.clone(val));
   }
 
-  for (auto expr : other.expr_set_) {
-    expr_set_.insert(ir_cloner.clone(expr));
-  }
-
   for (auto val : other.val_deque_) {
     val_deque_.push_back(ir_cloner.clone(val));
+  }
+
+  for (auto old_expr : other.expr_set_) {
+    auto new_expr = ir_cloner.clone(old_expr);
+    expr_set_.insert(new_expr);
+
+    // ir_cloner doesn't go through registerStmt, so we need to "Register Expr"
+    // we would similarly need to do to val if there was in that pass that is
+    // also not covered here.
+    for (Val* input : new_expr->inputs()) {
+      auto uses_copy = input->uses();
+      if (std::find(uses_copy.begin(), uses_copy.end(), new_expr) ==
+          uses_copy.end()) {
+        uses_copy.push_back(new_expr);
+        input->setUses(uses_copy);
+      }
+    }
   }
 
   val_type_name_map_ = other.val_type_name_map_;
   expr_name_counter_ = other.expr_name_counter_;
 
-  for (const auto& kv : other.origin_) {
-    auto val = ir_cloner.clone(kv.first);
-    auto expr = ir_cloner.clone(kv.second);
-    origin_.insert({val, expr});
-  }
-
-  for (const auto& kv : other.uses_) {
-    auto val = ir_cloner.clone(kv.first);
-    std::unordered_set<Expr*> val_uses;
-    for (auto expr : kv.second) {
-      val_uses.insert(ir_cloner.clone(expr));
-    }
-    uses_.insert({val, std::move(val_uses)});
-  }
-
   inputs_ = ir_cloner.clone(other.inputs_);
   outputs_ = ir_cloner.clone(other.outputs_);
+
+  for (auto inp : inputs_) {
+    inp->setIsFusionInput(true);
+  }
+  for (auto out : outputs_) {
+    out->setIsFusionOutput(true);
+  }
+
+  resetTvUses();
 }
 
 Fusion::Fusion(Fusion&& other) noexcept {
@@ -152,9 +156,6 @@ void Fusion::clear() noexcept {
 
   expr_name_counter_ = 0;
 
-  origin_.clear();
-  uses_.clear();
-
   inputs_.clear();
   outputs_.clear();
 }
@@ -165,16 +166,16 @@ void Fusion::removeExpr(Expr* expr) {
   // that removing something that doesn't exist simply does nothing. For now,
   // we're going with the strictest model which errors.
 
-  for (auto out : expr->outputs())
-    if (origin_.find(out) != origin_.end())
-      if (origin_.find(out)->second == expr)
-        origin_.erase(out);
+  for (auto out : expr->outputs()) {
+    out->setDefinition(nullptr);
+  }
 
   for (auto inp : expr->inputs()) {
-    if (uses_.find(inp) != uses_.end()) {
-      if (uses_.find(inp)->second.find(expr) != uses_.find(inp)->second.end()) {
-        uses_.find(inp)->second.erase(expr);
-      }
+    auto uses_copy = inp->uses();
+    auto it = std::find(uses_copy.begin(), uses_copy.end(), expr);
+    if (it != uses_copy.end()) {
+      uses_copy.erase(it);
+      inp->setUses(uses_copy);
     }
   }
 
@@ -186,17 +187,16 @@ void Fusion::removeExpr(Expr* expr) {
 void Fusion::removeVal(Val* val) {
   assertInFusion(val, "Cannot remove val ");
 
-  for (Val* inp : inputs())
-    if (val->sameAs(inp))
-      TORCH_CHECK(false, "Cannot remove val as it is an input of the fusion.");
+  TORCH_CHECK(
+      !val->isFusionInput(),
+      "Cannot remove val as it is an input of the fusion.");
+  TORCH_CHECK(
+      !val->isFusionOutput(),
+      "Cannot remove val as it is an output of the fusion.");
 
-  for (Val* out : outputs())
-    if (val->sameAs(out))
-      TORCH_CHECK(false, "Cannot remove val as it is an output of the fusion.");
-
-  Expr* orig = origin(val);
+  Expr* orig = val->definition();
   if (orig != nullptr)
-    removeExpr(origin(val));
+    removeExpr(val->definition());
 
   for (Expr* use : unordered_uses(val))
     removeExpr(use);
@@ -217,22 +217,13 @@ void Fusion::addInput(Val* input) {
 
   if (input->getValType().value() == ValType::TensorView) {
     auto tv = input->as<TensorView>();
-    if (tv->hasReduction()) {
-      TORCH_WARN_ONCE(
-          "Registered input ",
-          input,
-          " has a reduction axis, but this does nothing in the fusion.");
-    }
     tv->setMemoryType(MemoryType::Global);
   }
 
-  TORCH_INTERNAL_ASSERT(
-      input->getOrigin() == nullptr,
-      input,
-      " cannot be registered as an input as it is used as an output of an expression (",
-      input->getOrigin(),
-      ").");
   inputs_.push_back(input);
+  input->setIsFusionInput(true);
+
+  resetTvUses();
 }
 
 void Fusion::addOutput(Val* output) {
@@ -242,6 +233,27 @@ void Fusion::addOutput(Val* output) {
     tv->setMemoryType(MemoryType::Global);
   }
   outputs_.push_back(output);
+  output->setIsFusionOutput(true);
+
+  resetTvUses();
+}
+
+void Fusion::removeInput(Val* input) {
+  auto find_input = std::find(inputs_.begin(), inputs_.end(), input);
+  if (find_input != inputs_.end()) {
+    inputs_.erase(find_input);
+  }
+  input->setIsFusionInput(false);
+  resetTvUses();
+}
+
+void Fusion::removeOutput(Val* output) {
+  auto find_output = std::find(outputs_.begin(), outputs_.end(), output);
+  if (find_output != outputs_.end()) {
+    outputs_.erase(find_output);
+  }
+  output->setIsFusionOutput(false);
+  resetTvUses();
 }
 
 bool Fusion::inFusion(const Statement* stmt) const {
@@ -263,8 +275,8 @@ void Fusion::assertInFusion(const Statement* stmt, const std::string& msg)
   TORCH_CHECK(inFusion(stmt), msg, " it was not found in the active fusion.");
 }
 
-std::vector<Expr*> Fusion::exprs(bool from_outputs_only) {
-  return ExprSort::getExprs(this, from_outputs_only);
+std::vector<Expr*> Fusion::exprs() {
+  return ExprSort::getExprs(this);
 }
 
 std::unordered_set<Val*> Fusion::inputsOf(Val* val) {
@@ -310,8 +322,22 @@ void Fusion::printMath(bool from_outputs_only) {
   FUSER_PERF_SCOPE("Fusion::printMath");
 
   FusionGuard fg(this);
+  auto exprs_for_print = exprs();
+
+  // If we want everything in the fusion, grab all values without uses to
+  // traverse from.
+  if (!from_outputs_only) {
+    std::vector<Val*> leaf_vals;
+    for (auto val : deterministic_vals()) {
+      if (val->uses().empty()) {
+        leaf_vals.push_back(val);
+      }
+    }
+    exprs_for_print = ExprSort::getExprs(this, leaf_vals);
+  }
+
   std::cout << "\n%kernel_math {\n";
-  for (auto expr : exprs(from_outputs_only)) {
+  for (auto expr : exprs_for_print) {
     std::cout << expr;
   }
   std::cout << "}\n\n";
@@ -352,24 +378,25 @@ StmtNameType Fusion::registerExpr(Expr* expr) {
 
   for (Val* input : expr->inputs()) {
     assertInFusion(input, "Input to expr is invalid, ");
-    if (uses_.find(input) == uses_.end()) {
-      uses_[input] = {expr};
-    } else {
-      uses_.find(input)->second.emplace(expr);
+    auto uses_copy = input->uses();
+    if (std::find(uses_copy.begin(), uses_copy.end(), expr) ==
+        uses_copy.end()) {
+      uses_copy.push_back(expr);
+      input->setUses(uses_copy);
     }
   }
 
   for (Val* output : expr->outputs()) {
     assertInFusion(output, "Output to expr is invalid, ");
-    auto it = origin_.find(output);
-    if (it != origin_.end()) {
-      removeExpr(it->second); // will also remove origin entry
+    if (output->definition() != nullptr) {
+      removeExpr(output->definition());
     }
-
-    origin_[output] = expr;
+    output->setDefinition(expr);
   }
 
   expr_set_.emplace(expr);
+
+  resetTvUses();
   return getExprName();
 }
 
@@ -389,10 +416,28 @@ StmtNameType Fusion::registerStatement(Statement* stmt) {
   return kInvalidStmName;
 }
 
-bool Fusion::used(Val* val) const {
-  assertInFusion(val, "Cannot detect if val was used, ");
-  return (uses_.find(val) != uses_.end()) &&
-      (uses_.find(val)->second.size() > 0);
+void Fusion::resetTvUses() {
+  // getExprs only uses definition, so even if we've modified uses already to
+  // remove dead exprs, this could reinsert them. getExprs is also boundeds by
+  // inputs as registered inputs will return nullptr as their definition.
+  const auto all_tvs = ir_utils::filterByType<TensorView>(val_set_);
+  auto used_exprs = ExprSort::getExprs(this);
+
+  for (auto tv : all_tvs) {
+    tv->setUses(std::deque<Expr*>());
+  }
+
+  // Same as in register expr
+  for (auto expr : used_exprs) {
+    for (Val* input : expr->inputs()) {
+      std::deque<Expr*> uses_copy = input->uses();
+      if (std::find(uses_copy.begin(), uses_copy.end(), expr) ==
+          uses_copy.end()) {
+        uses_copy.push_back(expr);
+        input->setUses(uses_copy);
+      }
+    }
+  }
 }
 
 const std::unordered_set<Val*>& Fusion::vals() const noexcept {
@@ -408,34 +453,22 @@ const std::unordered_set<Expr*>& Fusion::unordered_exprs() const noexcept {
 }
 
 std::unordered_set<Expr*> Fusion::unordered_uses(Val* val) const {
-  assertInFusion(val, "Cannot detect where val was used, ");
-  if (uses_.find(val) != uses_.end()) {
-    auto ret = uses_.find(val)->second;
-    return ret;
-  }
-  return std::unordered_set<Expr*>();
+  return std::unordered_set<Expr*>(val->uses().begin(), val->uses().end());
 }
 
-Expr* Fusion::origin(const Val* val) const {
-  assertInFusion(val, "Cannot detect the origin of val, ");
-  auto it = origin_.find(val);
-  return it != origin_.end() ? it->second : nullptr;
+Expr* Fusion::definition(const Val* val) const {
+  assertInFusion(val, "Cannot detect the definition of val, ");
+  return val->definition();
 }
 
 bool Fusion::hasInput(const Val* val) const {
-  return std::find(inputs_.begin(), inputs_.end(), val) != inputs_.end();
+  assertInFusion(val, "Cannot check if val is an input, ");
+  return val->isFusionInput();
 }
 
 bool Fusion::hasOutput(const Val* val) const {
-  return std::find(outputs_.begin(), outputs_.end(), val) != outputs_.end();
-}
-
-void Fusion::replaceInput(Val* replace, Val* with) {
-  std::replace(inputs_.begin(), inputs_.end(), replace, with);
-}
-
-void Fusion::replaceOutput(Val* replace, Val* with) {
-  std::replace(outputs_.begin(), outputs_.end(), replace, with);
+  assertInFusion(val, "Cannot check if val is an output, ");
+  return val->isFusionOutput();
 }
 
 StmtNameType Fusion::getValName(ValType vtype) {
@@ -448,7 +481,7 @@ StmtNameType Fusion::getExprName() {
 
 // Indicate to kernel to set itself up to generate random numbers
 bool Fusion::isStochastic() {
-  for (auto expr : exprs(true))
+  for (auto expr : exprs())
     if (expr->getExprType() == ExprType::UnaryOp)
       if (expr->as<UnaryOp>()->getUnaryOpType() == UnaryOpType::RandLike)
         return true;
@@ -458,7 +491,7 @@ bool Fusion::isStochastic() {
 bool Fusion::hasReduction() {
   FUSER_PERF_SCOPE("Fusion::hasReduction");
 
-  for (auto expr : exprs(true))
+  for (auto expr : exprs())
     for (auto out : expr->outputs())
       if (out->getValType() == ValType::TensorView)
         if (out->as<TensorView>()->hasReduction())

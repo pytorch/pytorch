@@ -238,8 +238,6 @@ class TORCH_CUDA_API OptInDispatch : public PolymorphicBase {
 
 class TORCH_CUDA_API OptOutMutator : public PolymorphicBase {
  public:
-  virtual void mutate(Fusion* fusion);
-
   // Hierarchal dispatch functions for handle
   virtual Statement* mutate(Statement* s);
   virtual Statement* mutate(Expr* e);

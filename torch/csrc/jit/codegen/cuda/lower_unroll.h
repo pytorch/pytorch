@@ -66,7 +66,7 @@ class TORCH_CUDA_API UnrollPass {
       const ThreadPredicateMap& thread_predicates,
       const ComputeAtRootDomainMap& ca_root_map)
       : thread_predicates_(thread_predicates), ca_root_map_(ca_root_map) {
-    p2c_root_map_ = loop_utils::p2cRootMap(fusion->exprs(true));
+    p2c_root_map_ = loop_utils::p2cRootMap(fusion->exprs());
   }
 
   // Wrapper to access thread_predicates_ based on an output TV

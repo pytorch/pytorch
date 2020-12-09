@@ -520,7 +520,7 @@ class RejectMultipleGridReductions : public IterVisitor {
  public:
   static void analyze(Fusion* fusion) {
     RejectMultipleGridReductions multi_grid;
-    multi_grid.traverse(fusion, true);
+    multi_grid.traverse(fusion);
   }
 
  private:
@@ -1223,6 +1223,8 @@ Split::Split(
   addOutput(outer);
   addOutput(inner);
   addInput(in);
+  // TODO add factor as an input, need to check Split::Split during validation
+  // and need to check BestEffortReplay::findFirstMismatchedID addInput(factor);
   name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 

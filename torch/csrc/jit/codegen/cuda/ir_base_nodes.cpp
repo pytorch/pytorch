@@ -54,11 +54,14 @@ Val::Val(ValType _vtype, DataType _dtype, bool register_val)
 }
 
 Val::Val(const Val* src, IrCloner* ir_cloner)
-    : Statement(src, ir_cloner), vtype_(src->vtype_), dtype_(src->dtype_) {}
+    : Statement(src, ir_cloner),
+      vtype_(src->vtype_),
+      dtype_(src->dtype_),
+      definition_(ir_cloner->clone(src->definition())) {}
 
 namespace {
 
-// Traverse origin of all values involved in constructing the provided val.
+// Traverse definition of all values involved in constructing the provided val.
 // Check if all values involved are constant values, meaning the provided
 // val is also a constant value.
 class ConstCheck : OptOutConstDispatch {
@@ -88,11 +91,11 @@ class ConstCheck : OptOutConstDispatch {
   }
 
   void handle(const Val* val) override {
-    const Expr* orig = FusionGuard::getCurFusion()->origin(val);
-    if (orig != nullptr)
-      handle(orig);
-    else
+    if (val->definition() != nullptr) {
+      handle(val->definition());
+    } else {
       OptOutConstDispatch::handle(val);
+    }
   }
 
  public:
@@ -136,20 +139,16 @@ c10::optional<DataType> Val::getDataType() const {
   return dtype_;
 }
 
-Expr* Val::getOrigin() const {
-  return fusion_->origin(this);
-}
-
 bool Val::isProducerOf(const Val* other) const {
   TORCH_INTERNAL_ASSERT(other != nullptr);
   TORCH_INTERNAL_ASSERT(fusion() == other->fusion());
-  Expr* origin = getOrigin();
-  if (origin == nullptr) {
+
+  if (definition() == nullptr) {
     return false;
   }
   return std::any_of(
-      origin->inputs().begin(),
-      origin->inputs().end(),
+      definition()->inputs().begin(),
+      definition()->inputs().end(),
       [other](const Val* input) { return input == other; });
 }
 

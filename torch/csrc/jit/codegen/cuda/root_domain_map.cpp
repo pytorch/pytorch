@@ -73,7 +73,7 @@ std::unordered_map<IterDomain*, IterDomain*> PairwiseRootDomainMap::map(
 
   std::vector<bool> broadcast_flags;
   if (BroadcastOp* bop =
-          dynamic_cast<BroadcastOp*>(consumer_tv_->getOrigin())) {
+          dynamic_cast<BroadcastOp*>(consumer_tv_->definition())) {
     broadcast_flags = bop->getBroadcastDimFlags();
   }
 
@@ -249,11 +249,11 @@ bool ComputeAtRootDomainMap::canMap(
     const TensorDomain* td_b,
     const IterDomain* id_b) const {
   TORCH_INTERNAL_ASSERT(
-      id_a->getOrigin() == nullptr || id_a->isRFactorProduct(),
+      id_a->definition() == nullptr || id_a->isRFactorProduct(),
       "Non-root domain is not supproted: ",
       id_a);
   TORCH_INTERNAL_ASSERT(
-      id_b->getOrigin() == nullptr || id_b->isRFactorProduct(),
+      id_b->definition() == nullptr || id_b->isRFactorProduct(),
       "Non-root domain is not supproted: ",
       id_b);
 
@@ -274,7 +274,7 @@ bool ComputeAtRootDomainMap::canMap(
     const TensorDomain* td_b,
     const IterDomain* id_b) const {
   TORCH_INTERNAL_ASSERT(
-      id_b->getOrigin() == nullptr || id_b->isRFactorProduct(),
+      id_b->definition() == nullptr || id_b->isRFactorProduct(),
       "Non-root domain is not supproted: ",
       id_b);
 

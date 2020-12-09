@@ -496,7 +496,7 @@ class TORCH_CUDA_API IterDomain final : public Val {
   bool is_rfactor_domain_ = false;
 
   // An IterDomain is "simple" if the original Fusion IterDomain
-  // doesn't have a definition ("origin" expression)
+  // doesn't have a definition ("definition" expression)
   //
   // TODO(kir): this feels like a hack, revisit
   //

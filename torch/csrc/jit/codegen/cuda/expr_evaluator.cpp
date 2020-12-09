@@ -20,7 +20,7 @@ void ExpressionEvaluator::bind(Val* value, Int::ScalarType concrete_value) {
   }
   TORCH_CHECK(!value->isConstScalar(), "Tried to bind to a constant value");
   TORCH_CHECK(
-      value->getOrigin() == nullptr,
+      value->definition() == nullptr,
       "Tried to bind to a value that is computed in the fusion IR");
   known_values_[value] = concrete_value;
 }
@@ -29,9 +29,8 @@ c10::optional<Int::ScalarType> ExpressionEvaluator::evaluate(Val* value) {
   FUSER_PERF_SCOPE("ExpressionEvaluator::evaluate");
   auto maybe_concrete_value = getValue(value);
   if (!maybe_concrete_value.has_value()) {
-    auto origin = value->getOrigin();
-    if (origin != nullptr) {
-      OptOutDispatch::handle(origin);
+    if (value->definition() != nullptr) {
+      OptOutDispatch::handle(value->definition());
       maybe_concrete_value = getValue(value);
     }
   }

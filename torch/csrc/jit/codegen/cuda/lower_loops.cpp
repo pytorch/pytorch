@@ -574,12 +574,12 @@ void mapMissingInputsToAncestors(
     const TensorView* tv,
     const std::unordered_map<const Expr*, bool>& expr_status,
     std::vector<const TensorView*>& ancestors) {
-  const Expr* expr = tv->getOrigin();
+  const Expr* expr = tv->definition();
   const auto& expr_inputs = ir_utils::filterByType<TensorView>(expr->inputs());
   for (auto input : expr_inputs) {
-    const Expr* input_origin = input->getOrigin();
-    if (input_origin != nullptr) {
-      if (expr_status.find(input_origin) == expr_status.end()) {
+    const Expr* input_definition = input->definition();
+    if (input_definition != nullptr) {
+      if (expr_status.find(input_definition) == expr_status.end()) {
         mapMissingInputsToAncestors(input, expr_status, ancestors);
       } else {
         ancestors.push_back(input);
@@ -606,9 +606,9 @@ std::unordered_map<const Expr*, std::vector<const TensorView*>> findExprTvInputs
     auto& tv_inputs = map_expr_to_tv_inputs[expr];
 
     for (auto input : expr_inputs) {
-      const Expr* input_origin = input->getOrigin();
-      bool missing_input = input_origin != nullptr &&
-          expr_status.find(input_origin) == expr_status.end();
+      const Expr* input_definition = input->definition();
+      bool missing_input = input_definition != nullptr &&
+          expr_status.find(input_definition) == expr_status.end();
 
       if (missing_input) {
         // Map missing input to ancestor that is present in exprs_status
@@ -650,10 +650,10 @@ void reorderSegmentBreadthFirst(
           expr_inputs.begin(),
           expr_inputs.end(),
           [&expr_status](const TensorView* input) {
-            const Expr* input_origin = input->getOrigin();
-            return input_origin == nullptr ||
-                (expr_status.find(input_origin) != expr_status.end() &&
-                 expr_status.at(input_origin));
+            const Expr* input_definition = input->definition();
+            return input_definition == nullptr ||
+                (expr_status.find(input_definition) != expr_status.end() &&
+                 expr_status.at(input_definition));
           });
       if (ready_to_visit) {
         std::iter_swap(seg_begin, it);
@@ -704,7 +704,7 @@ void mergeNonRootGroupsIntoRootGroups(
   for (auto it = computed_at_exprs.begin(); it != computed_at_exprs.end();) {
     TensorView* target = it->first;
     if (target->hasComputeAt()) {
-      Expr* target_expr = target->getOrigin();
+      Expr* target_expr = target->definition();
       TensorView* target_of_target = target_map.at(target_expr);
       auto& target_group = computed_at_exprs.at(target_of_target);
       auto pos =
@@ -819,6 +819,7 @@ void LoopNestGenerator::generate(const std::vector<Expr*>& exprs) {
   TORCH_INTERNAL_ASSERT(lowered_exprs_.empty());
 
   // Identify all shared memory TensorViews
+  // TODO: Make function to get all used TensorViews / used Vals
   for (auto v : fusion_->vals()) {
     if (v->getValType().value() == ValType::TensorView) {
       if (v->as<TensorView>()->getMemoryType() == MemoryType::Shared) {

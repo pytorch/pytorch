@@ -341,7 +341,7 @@ class TORCH_CUDA_API IterDomain : public Val {
 //! if we want to know the previous operation generating a particular
 //! TensorDomain we can simply call:
 //!
-//!     FusionGuard::getCurFusion()->origin(a_tensor_domain)
+//!     FusionGuard::getCurFusion()->definition(a_tensor_domain)
 //!
 //! which should give us an operation in the list [split, merge] or similar
 //! operations that take in a TensorDomain, applies a transformation and outputs

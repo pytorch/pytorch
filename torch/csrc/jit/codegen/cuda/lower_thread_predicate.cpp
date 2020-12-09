@@ -219,7 +219,7 @@ ThreadPredicateMap::ThreadPredicateMap(Fusion* fusion) : fusion_(fusion) {
       insert(tv, ParallelTypeBitmap(), SourceMap());
     }
   }
-  for (auto expr : fusion_->exprs(true)) {
+  for (auto expr : fusion_->exprs()) {
     updateBitSet(expr);
   }
 }

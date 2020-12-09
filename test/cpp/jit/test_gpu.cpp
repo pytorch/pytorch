@@ -485,7 +485,7 @@ TEST(NVFuserTest, FusionClear_CUDA) {
 
   fusion.clear();
 
-  TORCH_CHECK(fusion.exprs().empty());
+  TORCH_CHECK(fusion.unordered_exprs().empty());
   TORCH_CHECK(fusion.vals().empty());
 
   TORCH_CHECK(fusion.inputs().empty());
@@ -648,7 +648,7 @@ TEST(NVFuserTest, FusionMove_CUDA) {
   //    standard library containers:
   //    https://en.cppreference.com/w/cpp/utility/move
   //
-  TORCH_CHECK(fusion.exprs().empty());
+  TORCH_CHECK(fusion.unordered_exprs().empty());
   TORCH_CHECK(fusion.vals().empty());
   TORCH_CHECK(fusion.inputs().empty());
   TORCH_CHECK(fusion.outputs().empty());
@@ -716,36 +716,6 @@ TEST(NVFuserTest, FusionSimpleTypePromote_CUDA) {
   TORCH_CHECK(d5->getDataType() == DataType::Double);
 }
 
-class ZeroMutator : public OptOutMutator {
- public:
-  Statement* mutate(Double* f) {
-    if (f->isConst() && *(f->value()) == 1.0)
-      return new Double(0.0);
-    return f;
-  }
-  void mutate(Fusion* f) {
-    OptOutMutator::mutate(f);
-  }
-};
-
-TEST(NVFuserTest, FusionMutator_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  Double* d4 = new Double{1.f};
-  Int* i1 = new Int{3};
-  Val* d5 = add(d4, i1);
-  ZeroMutator mutator;
-  mutator.mutate(&fusion);
-  Val* lhs = static_cast<BinaryOp*>(fusion.origin(d5))->lhs();
-  TORCH_CHECK(
-      lhs->getValType().value() == ValType::Scalar &&
-      lhs->getDataType().value() == DataType::Double);
-  Double* dlhs = static_cast<Double*>(lhs);
-
-  TORCH_CHECK(dlhs->value().value() == 0.f);
-}
-
 TEST(NVFuserTest, FusionRegister_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -756,7 +726,7 @@ TEST(NVFuserTest, FusionRegister_CUDA) {
   TORCH_CHECK(v1->name() + 1 == v2->name());
   TORCH_CHECK(v2->name() + 1 == v3->name());
   TORCH_CHECK(v3->name() + 1 == v4->name());
-  TORCH_CHECK(fusion.origin(v3)->name() + 1 == fusion.origin(v4)->name());
+  TORCH_CHECK(v3->definition()->name() + 1 == v4->definition()->name());
 }
 
 // dummy expr with 2 outputs only for toposort test.
@@ -793,55 +763,49 @@ TEST(NVFuserTest, FusionTopoSort_CUDA) {
   Double* v5 = new Double();
   Double* v6 = new Double();
 
+  std::vector<Val*> inputs = {v0, v1};
+  for (auto val : inputs) {
+    fusion.addInput(val);
+  }
+
   Expr* e0 = new DummyExpr(v3, v2, v1, v0);
   Expr* e1 = new BinaryOp(BinaryOpType::Add, v4, v3, v2);
   Expr* e2 = new BinaryOp(BinaryOpType::Add, v5, v2, v4);
   Expr* e3 = new BinaryOp(BinaryOpType::Add, v6, v5, v5);
 
-  std::vector<Expr*> exprs = fusion.exprs();
-
-  TORCH_CHECK(exprs.size() == 4);
-  TORCH_CHECK(exprs[0] == e0);
-  TORCH_CHECK(exprs[1] == e1);
-  TORCH_CHECK(exprs[2] == e2);
-  TORCH_CHECK(exprs[3] == e3);
-
   fusion.addOutput(v2);
-  exprs = fusion.exprs(true);
-  TORCH_CHECK(exprs.size() == 1);
+  fusion.addOutput(v3);
+  auto exprs = fusion.exprs();
+  TORCH_CHECK(exprs.size() == 1, "Found ", exprs.size(), " but expecting 1");
   TORCH_CHECK(exprs[0] == e0);
 
   fusion.addOutput(v5);
-  exprs = fusion.exprs(true);
+  exprs = fusion.exprs();
+  TORCH_CHECK(exprs.size() == 3, "Found ", exprs.size(), " but expecting 3");
   TORCH_CHECK(exprs[0] == e0);
   TORCH_CHECK(exprs[1] == e1);
   TORCH_CHECK(exprs[2] == e2);
 
   fusion.addOutput(v4);
-  exprs = fusion.exprs(true);
-  TORCH_CHECK(exprs[0] == e0);
-  TORCH_CHECK(exprs[1] == e1);
-  TORCH_CHECK(exprs[2] == e2);
-
-  fusion.addOutput(v3);
-  exprs = fusion.exprs(true);
+  exprs = fusion.exprs();
+  TORCH_CHECK(exprs.size() == 3, "Found ", exprs.size(), " but expecting 3");
   TORCH_CHECK(exprs[0] == e0);
   TORCH_CHECK(exprs[1] == e1);
   TORCH_CHECK(exprs[2] == e2);
 
   fusion.addOutput(v6);
-  exprs = fusion.exprs(true);
-  TORCH_CHECK(exprs.size() == 4);
+  exprs = fusion.exprs();
+  TORCH_CHECK(exprs.size() == 4, "Found ", exprs.size(), " but expecting 4");
   TORCH_CHECK(exprs[0] == e0);
   TORCH_CHECK(exprs[1] == e1);
   TORCH_CHECK(exprs[2] == e2);
   TORCH_CHECK(exprs[3] == e3);
 
-  TORCH_CHECK(fusion.origin(v2)->name() == 0);
-  TORCH_CHECK(fusion.origin(v3)->name() == 0);
-  TORCH_CHECK(fusion.origin(v4)->name() == 1);
-  TORCH_CHECK(fusion.origin(v5)->name() == 2);
-  TORCH_CHECK(fusion.origin(v6)->name() == 3);
+  TORCH_CHECK(v2->definition()->name() == 0);
+  TORCH_CHECK(v3->definition()->name() == 0);
+  TORCH_CHECK(v4->definition()->name() == 1);
+  TORCH_CHECK(v5->definition()->name() == 2);
+  TORCH_CHECK(v6->definition()->name() == 3);
 }
 
 TEST(NVFuserTest, FusionTensor_CUDA) {
@@ -954,7 +918,7 @@ TEST(NVFuserTest, FusionTVSplit_CUDA) {
 
   tv = tv->split(2, 2);
   TORCH_CHECK(tv->nDims() == 4);
-  Expr* outer = tv->axis(2)->extent()->getOrigin();
+  Expr* outer = tv->axis(2)->extent()->definition();
 
   TORCH_CHECK(
       outer->getExprType().value() == ExprType::BinaryOp &&
@@ -979,7 +943,7 @@ TEST(NVFuserTest, FusionTVMerge_CUDA) {
   TensorView* tv = makeSymbolicTensor(3);
 
   tv = tv->merge(1);
-  Expr* axisOp = tv->axis(1)->extent()->getOrigin();
+  Expr* axisOp = tv->axis(1)->extent()->definition();
 
   TORCH_CHECK(
       tv->nDims() == 2 && axisOp->getExprType() == ExprType::BinaryOp &&
@@ -1249,7 +1213,7 @@ TEST(NVFuserTest, FusionForLoop_CUDA) {
   auto ID0 = new kir::IterDomain(new IterDomain(new Int(0), new Int(8)));
 
   TensorView* TV2 = add(TV0, TV1);
-  BinaryOp* op = static_cast<BinaryOp*>(TV2->getOrigin());
+  BinaryOp* op = static_cast<BinaryOp*>(TV2->definition();
   fusion.addOutput(TV2);
 
   auto fl = new kir::ForLoop(new kir::Int(c10::nullopt), ID0, {op});
@@ -5896,7 +5860,7 @@ TEST(NVFuserTest, FusionReductionKeepDimScheduler_CUDA) {
   TensorView* tv1 = reductionOp(
       BinaryOpType::Add, {red_dim}, new Double(0), tv0, /*keep_dim=*/true);
 
-  TensorView* red_tv = fusion.origin(tv1)->inputs()[0]->as<TensorView>();
+  TensorView* red_tv = tv1->definition()->inputs()[0]->as<TensorView>();
 
   fusion.addOutput(tv1);
 

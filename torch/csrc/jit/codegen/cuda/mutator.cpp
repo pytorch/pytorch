@@ -9,24 +9,6 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-void OptOutMutator::mutate(Fusion* fusion) {
-  std::vector<Expr*> orig_exprs = fusion->exprs();
-
-  /*
-   * We go through all the exprs, in topologically sorted order. We call mutate
-   * on them which could insert nodes, removes nodes, or both. These operations
-   * modify the dag and the Fusion will keep track of what has/hasn't been
-   * changed by the origin dependency tracking that it does. If an operation is
-   * added, and its output node is a val which previously was the output of
-   * another expresion, that older expresion will be removed as we can only
-   * assign a Val once due to our SSA restriction. Therefore we don't need to
-   * manually track what expressions stayed constant or were changed.
-   */
-
-  for (Statement* stmt : orig_exprs)
-    mutate(stmt);
-}
-
 // MUTATE FUNCTIONS FOR VALS
 
 Statement* OptOutMutator::mutate(IterDomain* id) {

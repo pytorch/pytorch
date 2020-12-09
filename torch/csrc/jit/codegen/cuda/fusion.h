@@ -4,6 +4,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 
 #include <unordered_map>
 #include <unordered_set>
@@ -94,29 +95,30 @@ class TORCH_CUDA_API Fusion final {
   void removeVal(Val* val);
 
   //! Register input as an input of the fusion
+  // TODO: Rename to register
   void addInput(Val* input);
 
   //! Register output as an output of the fusion
+  // TODO: Rename to register
   void addOutput(Val* output);
+
+  //! Deregister input as an input of the fusion
+  // TODO: Rename to register
+  void removeInput(Val* input);
+
+  //! Deregister output as an output of the fusion
+  // TODO: Rename to register
+  void removeOutput(Val* output);
+
+  //! Clear Expr's from TV uses that are not required to produce outputs from
+  //! inputs
+  void resetTvUses();
 
   //! Check if stmt is properly registered with this fusion
   bool inFusion(const Statement* stmt) const;
 
   //! Throw an error if stmt is not in this fusion
   void assertInFusion(const Statement* stmt, const std::string& msg = "") const;
-
-  //! Return a list of topologically sorted expressions. We can start
-  //! by only traversing back from registered outputs, or from all terminating
-  //! Vals.
-  //!
-  //! from_outputs_only:
-  //!   True - Sort from DAG associated with registered outputs
-  //!   False - Sort from all terminating Vals.
-  //!
-  std::vector<Expr*> exprs(bool from_outputs_only = false);
-
-  //! Return a vector of fusion inputs that feed this Val
-  std::unordered_set<Val*> inputsOf(Val* val);
 
   //! Assert that all leaves found from outputs are registered as an input
   void validateInputs();
@@ -139,18 +141,22 @@ class TORCH_CUDA_API Fusion final {
 
   //! Register expr with this fusion.
   //! When we register an expression, we want to update the dependency tracking
-  //! of Vals. We add expr to our general expr_set_, we add use tracking for
-  //! inputs and origin tracking for outputs
+  //! of Vals. We add expr to our general expr_set_,
   StmtNameType registerExpr(Expr* expr);
 
   //! Register stmt with this fusion
   StmtNameType registerStatement(Statement* stmt);
 
-  //! Check if val is used in this fusion. Not equivelent to DCE
-  bool used(Val* val) const;
+  //! Return a list of topologically sorted expressions. This only includes
+  //! exprs required to genereate registered outputs.
+  std::vector<Expr*> exprs();
+
+  //! Return a vector of fusion inputs that feed this Val
+  std::unordered_set<Val*> inputsOf(Val* val);
 
   //! Return the set of Vals registered with this fusion
   const std::unordered_set<Val*>& vals() const noexcept;
+
   //! Return in insertion order
   const std::deque<Val*>& deterministic_vals() const noexcept;
 
@@ -161,7 +167,7 @@ class TORCH_CUDA_API Fusion final {
   std::unordered_set<Expr*> unordered_uses(Val* val) const;
 
   //! Return the Expr that produces val
-  Expr* origin(const Val* val) const;
+  Expr* definition(const Val* val) const;
 
   //! Indicate to kernel to set itself up to generate random numbers
   bool isStochastic();
@@ -182,9 +188,6 @@ class TORCH_CUDA_API Fusion final {
   bool hasInput(const Val* val) const;
   bool hasOutput(const Val* val) const;
 
-  void replaceInput(Val* replace, Val* with);
-  void replaceOutput(Val* replace, Val* with);
-
  private:
   // Return an int that monotonically increases for each val/expr, some are
   // explicitly incremented by type.
@@ -203,10 +206,6 @@ class TORCH_CUDA_API Fusion final {
 
   // Expression names counter
   StmtNameType expr_name_counter_ = 0;
-
-  // Dependency tracking for Vals. Where did it come from? Where is it used?
-  std::unordered_map<const Val*, Expr*> origin_;
-  std::unordered_map<Val*, std::unordered_set<Expr*>> uses_;
 
   // Fusion inputs and outputs
   std::vector<Val*> inputs_;

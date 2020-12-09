@@ -233,7 +233,7 @@ std::set<int> getDimsToSkip(
     size_t pos) {
   std::set<int> dims_to_skip;
   if (tv->isConsumerOf(ca_tv)) {
-    if (BroadcastOp* bop = dynamic_cast<BroadcastOp*>(ca_tv->getOrigin())) {
+    if (BroadcastOp* bop = dynamic_cast<BroadcastOp*>(ca_tv->definition())) {
       const auto& bcast_flags = bop->getBroadcastDimFlags();
       std::unordered_set<IterDomain*> root_dims_to_skip;
       for (size_t i = 0; i < ca_tv->getRootDomain().size(); ++i) {
@@ -397,17 +397,16 @@ TensorView* TensorView::reorder(const std::unordered_map<int, int>& old2new_) {
 TensorView* TensorView::rFactor(const std::vector<int>& axes) {
   TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to rFactor a 0-dim TensorView");
   FusionGuard fg(fusion());
-  Expr* origin_expr = fusion()->origin(this);
   TORCH_CHECK(
-      origin_expr != nullptr &&
-          origin_expr->getExprType() == ExprType::ReductionOp,
+      definition() != nullptr &&
+          definition()->getExprType() == ExprType::ReductionOp,
       "Error rfactoring ",
       this,
-      " its origin is either a nullptr or not a reduction.");
+      " its definition is either a nullptr or not a reduction.");
   TORCH_CHECK(
       !domain()->hasRFactor(), "Cannot call rfactor on the same view twice.");
 
-  ReductionOp* this_origin = origin_expr->as<ReductionOp>();
+  ReductionOp* this_definition = definition()->as<ReductionOp>();
 
   // Split tensor view into 2 parts
   auto domain_pair = domain()->rFactor(axes);
@@ -425,17 +424,17 @@ TensorView* TensorView::rFactor(const std::vector<int>& axes) {
   TensorView* consumer = this;
 
   // Setup dependency chain, inserting producer before this op.
-  // Expr* producer_origin =
+  // Expr* producer_definition =
   new ReductionOp(
-      this_origin->getReductionOpType(),
-      this_origin->init(),
+      this_definition->getReductionOpType(),
+      this_definition->init(),
       producer,
-      this_origin->in());
+      this_definition->in());
 
-  // Expr* consumer_origin =
+  // Expr* consumer_definition =
   new ReductionOp(
-      this_origin->getReductionOpType(),
-      this_origin->init(),
+      this_definition->getReductionOpType(),
+      this_definition->init(),
       consumer,
       producer);
 
@@ -456,7 +455,6 @@ std::vector<TensorView*> TensorView::duplicate() {
   // Warning: error may occur if the same TensorView
   // is used multiple times in the same expression
   std::vector<TensorView*> duplicates;
-  Expr* origin_expr = fusion()->origin(this);
   size_t count = 0;
   for (auto expr : usages) {
     // Skip the first usage to reuse original TensorView
@@ -470,7 +468,7 @@ std::vector<TensorView*> TensorView::duplicate() {
       producer->setDomain(
           TransformReplay::fullSelfReplay(producer->domain(), this->domain()));
 
-      createExprConsumer(origin_expr, producer);
+      createExprConsumer(definition(), producer);
       createExprProducer(expr, this, producer);
 
       // Set ComputeAt position for this duplicate TV
@@ -492,19 +490,17 @@ std::vector<TensorView*> TensorView::duplicate() {
 TensorView* TensorView::cache_before() {
   FusionGuard fg(fusion());
 
-  Expr* origin_expr = fusion()->origin(this);
   TORCH_CHECK(
-      origin_expr != nullptr && !fusion()->hasInput(this),
+      definition() != nullptr && !isFusionInput(),
       "Error adding cache_before ",
       this,
-      " its origin is a nullptr and we restrict using cache_before on an input.");
+      " its definition is a nullptr and we restrict using cache_before on an input.");
 
   TORCH_CHECK(
-      fusion()->hasOutput(this) ||
-          origin_expr->getExprType() != ExprType::ReductionOp,
+      isFusionOutput() || definition()->getExprType() != ExprType::ReductionOp,
       "Error adding cache_before ",
       this,
-      " its origin is a reduction and it is not an output, instead please use cache_after.");
+      " its definition is a reduction and it is not an output, instead please use cache_after.");
 
   // Create Producer Domain
   // This domain will be the consumer, so create the producer
@@ -521,10 +517,10 @@ TensorView* TensorView::cache_before() {
   // required for correctness.
   bool cache_replayed = false;
 
-  // this TV is an output and its origin is a reduction
+  // this TV is an output and its definition is a reduction
   // remove reduction axis from this tv
   bool consumer_replay_needed = false;
-  if (origin_expr->getExprType() == ExprType::ReductionOp) {
+  if (definition()->getExprType() == ExprType::ReductionOp) {
     size_t i = 0;
     auto no_reduction_root_domain = TensorDomain::noReductions(getRootDomain());
     std::vector<IterDomain*> new_root_domain(no_reduction_root_domain.size());
@@ -546,20 +542,20 @@ TensorView* TensorView::cache_before() {
   }
 
   // Insert producer - Cache_Before (CB) - before this TV.
-  // Before: Prev TV -> [Origin Op] -> This TV
-  // After:  Prev TV -> [Origin Op] -> New CB TV -> [Set Op] -> This TV
+  // Before: Prev TV -> [Definition Op] -> This TV
+  // After:  Prev TV -> [Definition Op] -> New CB TV -> [Set Op] -> This TV
 
   // Get inputs for origin expression
-  auto expr_inputs = origin_expr->inputs();
-
-  // Expr* producer_origin =
-  createExprConsumer(origin_expr, producer);
+  auto expr_inputs = definition()->inputs();
+  auto def_expr = definition();
+  // Expr* producer_definition =
+  createExprConsumer(def_expr, producer);
 
   // Expr* producer_uses =
   new UnaryOp(UnaryOpType::Set, consumer, producer);
 
-  // origin_expr is no longer valid
-  origin_expr = nullptr;
+  // definition_ is no longer valid
+  // setDefinition(nullptr);
 
   if (consumer_replay_needed) {
     TransformReplay::replayCasP(consumer, producer, -1);
@@ -592,22 +588,22 @@ TensorView* TensorView::cache_before() {
 
   // Before: Prev TV -> This TV
   // After:  Prev TV -> New TV (CB) -> This TV
-  // Iterate over origin expression inputs for cache_before on outputs
+  // Iterate over definition expression inputs for cache_before on outputs
   auto producer_this_pos = producer->getThisComputeAtAxis();
-  for (TensorView* origin_input :
+  for (TensorView* definition_input :
        ir_utils::filterByType<TensorView>(expr_inputs)) {
-    if (origin_input->hasComputeAt() &&
-        origin_input->getComputeAtView() == this) {
+    if (definition_input->hasComputeAt() &&
+        definition_input->getComputeAtView() == this) {
       if (!cache_replayed) {
         TransformReplay::replayPasC(producer, consumer, -1);
         cache_replayed = true;
       }
-      auto origin_rel_ca_pos = origin_input->getRelativeComputeAtAxis();
-      origin_input->setComputeAt(
+      auto definition_rel_ca_pos = definition_input->getRelativeComputeAtAxis();
+      definition_input->setComputeAt(
           producer,
-          (int)origin_input->getThisComputeAtAxis(),
-          origin_rel_ca_pos);
-      producer_this_pos = std::max(producer_this_pos, origin_rel_ca_pos);
+          (int)definition_input->getThisComputeAtAxis(),
+          definition_rel_ca_pos);
+      producer_this_pos = std::max(producer_this_pos, definition_rel_ca_pos);
     }
   }
 
@@ -680,7 +676,7 @@ TensorView* TensorView::cache_after() {
     createExprProducer(expr, this, consumer);
   }
 
-  // Expr* consumer_origin =
+  // Expr* consumer_definition =
   new UnaryOp(UnaryOpType::Set, consumer, producer);
 
   // Before: This TV -> Next TV
@@ -902,7 +898,7 @@ struct CreateExprProducer : public OptInDispatch {
 
 } // namespace
 
-// In Cache Before, for the origin expr of the original tensor,
+// In Cache Before, for the definition expr of the original tensor,
 // we create a new operation where the original tensor is replaced
 // with the new cache tensor. This function creates a new expr
 // given the consumer, the output of the expression.

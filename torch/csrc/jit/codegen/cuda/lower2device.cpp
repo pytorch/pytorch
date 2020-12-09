@@ -119,7 +119,7 @@ void GpuLower::lower() {
 
   // Run our passes keeping the lowered expressions and forwarding them
   const auto lowered_exprs =
-      LoopNestGenerator::loweredExprs(fusion_, fusion_->exprs(true));
+      LoopNestGenerator::loweredExprs(fusion_, fusion_->exprs());
 
   const auto unrolled_loops =
       UnrollPass::runPass(fusion_, lowered_exprs, preds, ca_root_map);
@@ -162,7 +162,7 @@ class GpuLower::KernelIrMapper : private OptInConstDispatch {
 
       // Lower the value definition, if any
       if (value->isScalar()) {
-        if (auto def = value->getOrigin()) {
+        if (auto def = value->definition()) {
           const auto kir_def = lowerExpr(def);
           TORCH_INTERNAL_ASSERT(kir_value->definition() == kir_def);
         }

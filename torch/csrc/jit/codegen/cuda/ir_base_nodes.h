@@ -207,7 +207,24 @@ class TORCH_CUDA_API Val : public Statement {
 
   // Returns the Expr that this value is an output of, returns nullptr if none
   // was found
-  Expr* getOrigin() const;
+  Expr* definition() const {
+    if (is_fusion_input_) {
+      return nullptr;
+    }
+    return definition_;
+  }
+
+  const std::deque<Expr*>& uses() const {
+    return uses_;
+  }
+
+  bool isFusionInput() const {
+    return is_fusion_input_;
+  }
+
+  bool isFusionOutput() const {
+    return is_fusion_output_;
+  }
 
   //! Returns true when other is a producer of this
   bool isProducerOf(const Val* other) const;
@@ -238,8 +255,34 @@ class TORCH_CUDA_API Val : public Statement {
   static Statement* mutatorDispatch(T mutator, Val*);
 
  protected:
+  friend Fusion;
+
   const ValType vtype_;
   const DataType dtype_;
+
+  void setDefinition(Expr* expr) {
+    definition_ = expr;
+  }
+
+  void setIsFusionInput(bool is_fusion_input) {
+    is_fusion_input_ = is_fusion_input;
+  }
+
+  void setIsFusionOutput(bool is_fusion_output) {
+    is_fusion_output_ = is_fusion_output;
+  }
+
+  void setUses(std::deque<Expr*> uses) {
+    uses_ = uses;
+  }
+
+ private:
+  // Following is managed by Fusion and can change.
+  bool is_fusion_input_ = false;
+  bool is_fusion_output_ = false;
+
+  Expr* definition_ = nullptr;
+  std::deque<Expr*> uses_;
 };
 
 //!  A Expr represents a "computation." These are functions that takes inputs

@@ -88,7 +88,7 @@ IterDomain::IterDomain(
       parallel_type_(iter_domain->getParallelType()),
       iter_type_(iter_domain->getIterType()),
       is_rfactor_domain_(iter_domain->isRFactorProduct()),
-      is_simple_(iter_domain->getOrigin() == nullptr) {
+      is_simple_(iter_domain->definition() == nullptr) {
   // preserve the fusion node's name
   setName(iter_domain->name());
 }

@@ -310,10 +310,10 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
     for (auto expr : fusion_->unordered_exprs()) {
       if (expr->getExprType() == ExprType::BroadcastOp) {
         auto output = expr->output(0);
-        auto input_origin_expr = expr->input(0)->getOrigin();
+        auto input_def_expr = expr->input(0)->definition();
         if (!fusion_->unordered_uses(output).empty() &&
-            input_origin_expr != nullptr &&
-            input_origin_expr->getExprType() == ExprType::ReductionOp) {
+            input_def_expr != nullptr &&
+            input_def_expr->getExprType() == ExprType::ReductionOp) {
           return true;
         }
       }

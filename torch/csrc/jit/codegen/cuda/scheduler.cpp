@@ -459,11 +459,9 @@ TORCH_CUDA_API c10::optional<ReductionParams> getNormalizationHeuristics(
     TORCH_INTERNAL_ASSERT(tv != nullptr, "Reduction TensorView wasn't found.");
     TORCH_INTERNAL_ASSERT(
         tv->hasReduction(), "TensorView doesn't have a reduction.");
-    const auto reduction_origin_expr = fusion->origin(tv);
     TORCH_INTERNAL_ASSERT(
-        reduction_origin_expr->getExprType() != c10::nullopt &&
-            reduction_origin_expr->getExprType().value() ==
-                ExprType::ReductionOp,
+        tv->definition()->getExprType() != c10::nullopt &&
+            tv->definition()->getExprType().value() == ExprType::ReductionOp,
         "TensorView doesn't have a reduction.");
   }
 
@@ -557,7 +555,7 @@ TORCH_CUDA_API c10::optional<ReductionParams> getReductionHeuristics(
 
   TORCH_INTERNAL_ASSERT(
       red_tv->hasReduction(), "TensorView doesn't have a reduction.");
-  const auto red_expr = fusion->origin(red_tv);
+  const auto red_expr = red_tv->definition();
 
   TORCH_INTERNAL_ASSERT(
       red_expr->getExprType() != c10::nullopt &&
@@ -928,7 +926,7 @@ std::vector<TensorView*> findTensorViewsToDuplicate(
     const std::vector<TensorView*>& other_tv) {
   std::vector<TensorView*> duplicate_tv;
   // Initialize stack with any pointwise op with multiple usages
-  // Find any pointwise origin expressions via depth-first search (DFS)
+  // Find any pointwise definition expressions via depth-first search (DFS)
   std::vector<TensorView*> stack;
   for (auto tensor : other_tv) {
     if (fusion->unordered_uses(tensor).size() > 1 &&
@@ -943,13 +941,13 @@ std::vector<TensorView*> findTensorViewsToDuplicate(
     stack.pop_back();
 
     if (visited.find(tensor->name()) == visited.end()) {
-      auto origin_expr = tensor->getOrigin();
-      if (canDuplicate(origin_expr)) {
+      auto def_expr = tensor->definition();
+      if (canDuplicate(def_expr)) {
         duplicate_tv.push_back(tensor);
 
         for (auto input_tv :
-             ir_utils::filterByType<TensorView>(origin_expr->inputs())) {
-          if (!fusion->hasInput(input_tv) && !fusion->hasOutput(input_tv) &&
+             ir_utils::filterByType<TensorView>(def_expr->inputs())) {
+          if (!input_tv->isFusionInput() && !input_tv->isFusionOutput() &&
               !isConstantAllocation(input_tv)) {
             stack.push_back(input_tv);
           }
