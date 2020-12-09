@@ -19,7 +19,7 @@ from tools.codegen.model import *
 # You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
 MANUAL_BACKEND = set([
     'options', 'data', 'set_data', 'is_leaf', 'output_nr', '_version', 'retain_grad',
-    '_backward', 'requires_grad_',
+    '_backward', 'requires_grad_', 'fw_primal',
 ])
 
 # For these ops we want to skip the codegen-ed registration to both Autograd and Tracer keys.

@@ -2,11 +2,15 @@
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <ATen/autocast_mode.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/utils/wrap_outputs.h>
+#include <torch/csrc/autograd/utils/python_arg_parsing.h>
+#include <torch/csrc/utils/pycfunction_helpers.h>
 
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   using namespace torch::autograd::profiler;
@@ -175,6 +179,54 @@ static PyObject * is_anomaly_mode_enabled(PyObject* _unused, PyObject *arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * python_enter_dual_level(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  // It is unlikely that the depth of forward nesting will overflow int64_t so we
+  // just static cast here.
+  return utils::wrap(static_cast<int64_t>(forward_ad::enter_dual_level()));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * python_exit_dual_level(PyObject* _unused, PyObject* args, PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "exit_dual_level(int64_t level)"
+  });
+
+  ParsedArgs<1> parsed_args;
+  auto _r = parser.parse(args, kwargs, parsed_args);
+
+  forward_ad::exit_dual_level(_r.toInt64(0));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * python_make_dual(PyObject* _unused, PyObject* args, PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "make_dual(Tensor tensor, Tensor tangent, *, int64_t level)"
+  });
+
+  ParsedArgs<3> parsed_args;
+  auto _r = parser.parse(args, kwargs, parsed_args);
+
+  return utils::wrap(forward_ad::make_dual(_r.tensor(0), _r.tensor(1), _r.toInt64(2)));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * python_unpack_dual(PyObject* _unused, PyObject* args, PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "unpack_dual(Tensor tensor, *, int64_t level)"
+  });
+
+  ParsedArgs<2> parsed_args;
+  auto _r = parser.parse(args, kwargs, parsed_args);
+
+  return utils::wrap(forward_ad::unpack_dual(_r.tensor(0), _r.toInt64(1)));
+  END_HANDLE_TH_ERRORS
+}
+
 // autograd methods on torch._C
 static PyMethodDef methods[] = { // NOLINT
   {"_set_grad_enabled", set_grad_enabled, METH_O, nullptr},
@@ -186,6 +238,10 @@ static PyMethodDef methods[] = { // NOLINT
   {"autocast_decrement_nesting", autocast_decrement_nesting, METH_NOARGS, nullptr},
   {"set_anomaly_enabled", set_anomaly_mode_enabled, METH_O, nullptr},
   {"is_anomaly_enabled", is_anomaly_mode_enabled, METH_NOARGS, nullptr},
+  {"make_dual", castPyCFunctionWithKeywords(python_make_dual), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"unpack_dual", castPyCFunctionWithKeywords(python_unpack_dual), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"enter_dual_level", python_enter_dual_level, METH_NOARGS, nullptr},
+  {"exit_dual_level", castPyCFunctionWithKeywords(python_exit_dual_level), METH_VARARGS | METH_KEYWORDS, nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 

@@ -20,6 +20,7 @@ from .anomaly_mode import detect_anomaly, set_detect_anomaly
 from ..overrides import has_torch_function, handle_torch_function
 from . import profiler
 from . import functional
+from . import forward_ad
 
 __all__ = ['Variable', 'Function', 'backward', 'grad_mode']
 
