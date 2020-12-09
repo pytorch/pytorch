@@ -314,12 +314,16 @@ struct CAFFE2_API PackedEmbeddingBagWeight : public EmbeddingPackedParamsBase {
       int64_t bit_rate,
       c10::QScheme q_scheme,
       int64_t version)
-    : packed_w(std::move(packed_w)),
-      w_scale(std::move(w_scale)),
-      w_zp(std::move(w_zp)),
-      bit_rate_(bit_rate),
-      q_scheme(q_scheme),
-      version_(version) {}
+      : packed_w(std::move(packed_w)),
+        w_scale(std::move(w_scale)),
+        w_zp(std::move(w_zp)),
+        bit_rate_(bit_rate),
+        q_scheme(q_scheme),
+        version_(version) {
+    if (!packed_w.is_contiguous()) {
+      packed_w = packed_w.contiguous();
+    }
+  }
 
   at::Tensor packed_w;
   std::vector<float> w_scale;

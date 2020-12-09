@@ -21,8 +21,34 @@ Argument = Optional[Union[
 ]]
 
 class Node:
-    def __init__(self, graph: 'Graph', name: str, op: str, target: Target,
-                 args: Tuple[Argument, ...], kwargs: Dict[str, Argument],
+    """
+    ``Node`` is the data structure that represents individual operations within
+    a ``Graph``. For the most part, Nodes represent callsites to various entities,
+    such as operators, methods, and Modules (some exceptions include nodes that
+    specify function inputs and outputs). Each ``Node`` has a function specified
+    by its ``op`` property. The ``Node`` semantics for each value of ``op`` are as follows:
+
+    - ``placeholder`` represents a function input. The ``name`` attribute specifies the name this value will take on.
+      ``target`` is similarly the name of the argument. ``args`` holds either: 1) nothing, or 2) a single argument
+      denoting the default parameter of the function input. ``kwargs`` is don't-care. Placeholders correspond to
+      the function parameters (e.g. ``x``) in the graph printout.
+    - ``get_attr`` retrieves a parameter from the module hierarchy. ``name`` is similarly the name the result of the
+      fetch is assigned to. ``target`` is the fully-qualified name of the parameter's position in the module hierarchy.
+      ``args`` and ``kwargs`` are don't-care
+    - ``call_function`` applies a free function to some values. ``name`` is similarly the name of the value to assign
+      to. ``target`` is the function to be applied. ``args`` and ``kwargs`` represent the arguments to the function,
+      following the Python calling convention
+    - ``call_module`` applies a module in the module hierarchy's ``forward()`` method to given arguments. ``name`` is
+      as previous. ``target`` is the fully-qualified name of the module in the module hierarchy to call.
+      ``args`` and ``kwargs`` represent the arguments to invoke the module on, *including the self argument*.
+    - ``call_method`` calls a method on a value. ``name`` is as similar. ``target`` is the string name of the method
+      to apply to the ``self`` argument. ``args`` and ``kwargs`` represent the arguments to invoke the module on,
+      *including the self argument*
+    - ``output`` contains the output of the traced function in its ``args[0]`` attribute. This corresponds to the "return" statement
+      in the Graph printout.
+    """
+    def __init__(self, graph: 'Graph', name: str, op: str, target: 'Target',
+                 args: Tuple['Argument', ...], kwargs: Dict[str, 'Argument'],
                  type : Optional[Any] = None) -> None:
         self.graph = graph
         self.name = name  # unique name of value being created
@@ -60,23 +86,33 @@ class Node:
     @property
     def next(self) -> 'Node':
         """
-        Get the next node in the linked list
+        Returns the next ``Node`` in the linked list of Nodes.
+
+        Returns:
+
+            The next ``Node`` in the linked list of Nodes.
         """
         return self._next
 
     @property
     def prev(self) -> 'Node':
         """
-        Get the previous node in the linked list
+        Returns the previous ``Node`` in the linked list of Nodes.
+
+        Returns:
+
+            The previous ``Node`` in the linked list of Nodes.
         """
         return self._prev
 
-    def prepend(self, x: 'Node'):
-        """Insert x before this node in the list of nodes in the graph.
-           Before: p -> self
-                   bx -> x -> ax
-           After:  p -> x -> self
-                   bx -> ax
+    def prepend(self, x: 'Node') -> None:
+        """
+        Insert x before this node in the list of nodes in the graph. Example::
+
+            Before: p -> self
+                    bx -> x -> ax
+            After:  p -> x -> self
+                    bx -> ax
 
         Args:
             x (Node): The node to put before this node. Must be a member of the same graph.
@@ -87,8 +123,9 @@ class Node:
         p._next, x._prev = x, p
         x._next, self._prev = self, x
 
-    def append(self, x: 'Node'):
-        """Insert x after this node in the list of nodes in the graph.
+    def append(self, x: 'Node') -> None:
+        """
+        Insert x after this node in the list of nodes in the graph.
         Equvalent to ``self.next.prepend(x)``
 
         Args:
@@ -103,9 +140,12 @@ class Node:
     @property
     def args(self) -> Tuple[Argument, ...]:
         """
-        Return the tuple of arguments to this Node. The interpretation of arguments
-        depends on the node's opcode. See the ``fx.Graph`` docstring for more
+        The tuple of arguments to this ``Node``. The interpretation of arguments
+        depends on the node's opcode. See the :class:`Node` docstring for more
         information.
+
+        Assignment to this property is allowed. All accounting of uses and users
+        is updated automatically on assignment.
         """
         return self._args
 
@@ -121,9 +161,12 @@ class Node:
     @property
     def kwargs(self) -> Dict[str, Argument]:
         """
-        Return the dict of kwargs to this Node. The interpretation of arguments
-        depends on the node's opcode. See the ``fx.Graph`` docstring for more
+        The dict of keyword arguments to this ``Node``. The interpretation of arguments
+        depends on the node's opcode. See the :class:`Node` docstring for more
         information.
+
+        Assignment to this property is allowed. All accounting of uses and users
+        is updated automatically on assignment.
         """
         return self._kwargs
 
@@ -141,7 +184,12 @@ class Node:
         """
         Return all Nodes that are inputs to this Node. This is equivalent to
         iterating over ``args`` and ``kwargs`` and only collecting the values that
-        are Nodes
+        are Nodes.
+
+        Returns:
+
+            List of ``Nodes`` that appear in the ``args`` and ``kwargs`` of this
+            ``Node``, in that order.
         """
         all_nodes : List['Node'] = []
         map_arg(self.args, lambda n: all_nodes.append(n))
@@ -149,6 +197,9 @@ class Node:
         return all_nodes
 
     def _update_args_kwargs(self, new_args : Tuple[Argument, ...], new_kwargs : Dict[str, Argument]):
+        """
+        This API is internal. Do *not* call it directly.
+        """
         self._args = new_args
         self._kwargs = new_kwargs
 
@@ -168,7 +219,14 @@ class Node:
     def replace_all_uses_with(self, replace_with : 'Node') -> List['Node']:
         """
         Replace all uses of ``self`` in the Graph with the Node ``replace_with``.
-        Returns the list of nodes on which this change was made.
+
+        Args:
+
+            replace_with (Node): The node to replace all uses of ``self`` with.
+
+        Returns:
+
+            The list of Nodes on which this change was made.
         """
         to_process = list(self.users)
         for use_node in to_process:
