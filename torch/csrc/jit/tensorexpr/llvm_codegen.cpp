@@ -519,7 +519,7 @@ void LLVMCodeGenImpl::emitKernel(
   // print graph debug info before optimization
   llvm::SmallVector<char, 0> asmBuffer;
   llvm::raw_svector_ostream asmStream(asmBuffer);
-  if (is_enabled(__FILE__, ::torch::jit::JitLoggingLevels::GRAPH_DEBUG)) {
+  if GRAPH_DEBUG_ENABLED {
     module_->print(asmStream, nullptr);
   }
   GRAPH_DEBUG(
@@ -529,7 +529,7 @@ void LLVMCodeGenImpl::emitKernel(
 
   // print graph debug info after optimization
   asmBuffer.set_size(0);
-  if (is_enabled(__FILE__, ::torch::jit::JitLoggingLevels::GRAPH_DEBUG)) {
+  if GRAPH_DEBUG_ENABLED {
     module_->print(asmStream, nullptr);
     llvm::legacy::PassManager PM;
     TM_->addPassesToEmitFile(
