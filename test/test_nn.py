@@ -2826,7 +2826,8 @@ class TestNN(NNTestCase):
                     def fn(weight):
                         return wrapped_m(input)
 
-                    torch.autograd.gradcheck(fn, (m.weight_orig,))
+                    # The input is not actually used and so forward ad check will fail
+                    torch.autograd.gradcheck(fn, (m.weight_orig,), check_forward=False)
 
     @skipIfNoLapack
     def test_spectral_norm_load_state_dict(self):

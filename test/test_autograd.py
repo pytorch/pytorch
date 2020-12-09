@@ -3950,9 +3950,9 @@ class TestAutograd(TestCase):
         def fn(sparse):
             return torch.sparse.sum(sparse)
 
-        gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nnz=True)
+        gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nnz=True, check_forward=False)
         with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
-            gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nnz=False)
+            gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nnz=False, check_forward=False)
 
     def test_gradcheck_nondeterministic(self):
         class NonDetFunc(Function):
@@ -5466,8 +5466,8 @@ class TestAutogradFunctional(TestCase):
         self.assertIsNotNone(res[0].grad_fn)
         self.assertIsNotNone(res[1].grad_fn)
 
-        gradcheck(lambda inp, v: autogradF.vjp(reducer, inputs, v, create_graph=True), (inputs, v))
-        gradgradcheck(lambda inp, v: autogradF.vjp(reducer, inputs, v, create_graph=True), (inputs, v))
+        gradcheck(lambda inp, v: autogradF.vjp(reducer, inputs, v, create_graph=True), (inputs, v), check_forward=False)
+        gradgradcheck(lambda inp, v: autogradF.vjp(reducer, inputs, v, create_graph=True), (inputs, v), check_forward=False)
 
         def adder(x, y):
             return 2 * x + 3 * y, x * y
@@ -5519,7 +5519,10 @@ class TestAutogradFunctional(TestCase):
 
     def test_jvp_err_check_strict(self):
         def foo(a):
-            return a.detach()
+            # break both forward and backward mode links
+            out = a.detach()
+            out, _= fwAD.unpack_dual(out)
+            return out
 
         def bar(a):
             # Make a non-leaf Tensor that requires_grad but that is not connected to the input
@@ -5527,7 +5530,7 @@ class TestAutogradFunctional(TestCase):
 
         inp = torch.rand(4)
         v = torch.rand(4)
-        with self.assertRaisesRegex(RuntimeError, "Output 0 of the user-provided function does not require gradients."):
+        with self.assertRaisesRegex(RuntimeError, "The output of the user-provided function is independent of input 0"):
             res = autogradF.jvp(foo, inp, v, strict=True)
         res = autogradF.jvp(foo, inp, v, strict=False)
         self._assert_same_struct(res[1], res[0])
@@ -5617,8 +5620,16 @@ class TestAutogradFunctional(TestCase):
         self.assertIsNotNone(res[0].grad_fn)
         self.assertIsNotNone(res[1].grad_fn)
 
-        gradcheck(lambda inp, v: autogradF.jvp(reducer, inp, v, create_graph=True), (inputs, v))
-        gradgradcheck(lambda inp, v: autogradF.jvp(reducer, inp, v, create_graph=True), (inputs, v))
+        res = autogradF.jvp(reducer, inputs, v, create_graph=True, fw_mode=False)
+        self._assert_same_struct(res[1], res[0])
+        self.assertIsNotNone(res[0].grad_fn)
+        self.assertIsNotNone(res[1].grad_fn)
+
+        # check_forward=False here as nested forward is not supported yet
+        gradcheck(lambda inp, v: autogradF.jvp(reducer, inp, v, create_graph=True), (inputs, v), check_forward=False)
+        gradgradcheck(lambda inp, v: autogradF.jvp(reducer, inp, v, create_graph=True), (inputs, v), check_forward=False)
+        gradcheck(lambda inp, v: autogradF.jvp(reducer, inp, v, create_graph=True, fw_mode=False), (inputs, v))
+        gradgradcheck(lambda inp, v: autogradF.jvp(reducer, inp, v, create_graph=True, fw_mode=False), (inputs, v))
 
         def adder(x, y):
             return 2 * x + 3 * y, x * y
@@ -5626,18 +5637,28 @@ class TestAutogradFunctional(TestCase):
         inputs = (torch.rand(2, requires_grad=True), torch.rand(2, requires_grad=True))
         v = (torch.tensor([1., 0.], requires_grad=True), torch.tensor([1., 0.], requires_grad=True))
 
-        gradcheck(lambda *args: autogradF.jvp(adder, args[:2], args[2:], create_graph=True)[1], inputs + v)
-        gradgradcheck(lambda *args: autogradF.jvp(adder, args[:2], args[2:], create_graph=True)[1], inputs + v)
+        # check_forward=False here as nested forward is not supported yet
+        gradcheck(lambda *args: autogradF.jvp(adder, args[:2], args[2:], create_graph=True)[1], inputs + v, check_forward=False)
+        gradgradcheck(lambda *args: autogradF.jvp(adder, args[:2], args[2:], create_graph=True)[1], inputs + v, check_forward=False)
+        gradcheck(lambda *args: autogradF.jvp(adder, args[:2], args[2:], create_graph=True, fw_mode=False)[1], inputs + v)
+        gradgradcheck(lambda *args: autogradF.jvp(adder, args[:2], args[2:], create_graph=True, fw_mode=False)[1], inputs + v)
+
+        fw_mode = True
 
         def foo(*args):
             x, y = args[:2]
             v = args[2:]
 
             x = x.cos()
-            val, grad = autogradF.jvp(adder, (x, y), v, create_graph=True)
+            val, grad = autogradF.jvp(adder, (x, y), v, create_graph=True, fw_mode=fw_mode)
 
             return val[0].exp() + val[1].exp() + grad[0].exp() + grad[1].exp() + x.exp() + y.exp()
 
+        # check_forward=False here as nested forward is not supported yet
+        gradcheck(foo, inputs + v, check_forward=False)
+        gradgradcheck(foo, inputs + v, check_forward=False)
+
+        fw_mode = False
         gradcheck(foo, inputs + v)
         gradgradcheck(foo, inputs + v)
 
@@ -6500,6 +6521,7 @@ class TestAutogradForwardMode(TestCase):
             view = baz.detach()
             view += dual
             self.assertEqual(fwAD.unpack_dual(baz)[1], fwAD.unpack_dual(dual)[1])
+
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
 
@@ -7264,7 +7286,8 @@ class TestAutogradDeviceType(TestCase):
 
         gradcheck(func, [a, b], raise_exception=True)
         go = torch.randn(a.size(), device=device, requires_grad=True)
-        gradgradcheck(func, (a, b), (go,))
+        # TODO(albanD): re-enable forward tests
+        gradgradcheck(func, (a, b), (go,), check_forward=False)
 
     def test_inplace_view_multiple_outputs(self, device):
         root = torch.arange(9.).reshape(3, 3).requires_grad_()

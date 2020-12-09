@@ -5013,8 +5013,11 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
             # could probably unify check_jacobian above with this.
             params = tuple(x for x in module.parameters())
             num_inputs = len(input_tuple)
+            # These modules don't actually take the arguments as inputs so forward check will fail for these
+            check_forward = len(params) == 0
             _assertGradAndGradgradChecks(
-                test_case, lambda *args, **kw: test_case._forward(module, args[:num_inputs]), input_tuple + params)
+                test_case, lambda *args, **kw: test_case._forward(module, args[:num_inputs]), input_tuple + params,
+                check_forward=check_forward)
 
         # check if module can be printed
         module.__repr__()
