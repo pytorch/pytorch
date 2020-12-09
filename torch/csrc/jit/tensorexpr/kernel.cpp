@@ -903,10 +903,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
           [](const ExprHandle& input,
              const ExprHandle& mask,
              const ExprHandle& value) {
+            // value needs to promote to input, not vice versa
             auto val = promoteToDtype(value, input.dtype().scalar_type());
-            auto true_val = IntImm::make(1);
-            return ifThenElse(
-                CompareSelect::make(mask, true_val, kEQ), val, input);
+            return ifThenElse(mask, val, input);
           },
           /*promote_inputs*/ false);
     }
@@ -971,7 +970,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::isnan: {
-      return computeOneOperand("aten_relu", v, [](const ExprHandle& a) {
+      return computeOneOperand("aten_isnan", v, [](const ExprHandle& a) {
         if (!a.dtype().is_floating_point()) {
           return IntImm::make(0);
         }

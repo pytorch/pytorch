@@ -1212,6 +1212,20 @@ class TestTEFuser(JitTestCase):
             return v.to(dtype)
 
     def test_masked_fill(self):
+        # check scalar overload 
+        def foo(x, mask):
+            return torch.masked_fill(x, mask, .6), torch.masked_fill(x, mask, 2)
+
+        mask = torch.tensor([True, False])
+        foo.__disable_jit_function_caching__ = True
+        for inp in (torch.rand([2, 2]).to(torch.int), mask), (torch.rand([2, 2]), mask):
+            ref = foo(*inp)
+            foo_s = torch.jit.script(foo)
+            warmup_forward(foo_s, *inp)
+            self.assertEqual(foo_s(*inp), ref)
+            self.assertLastGraphAllFused()
+
+        # check tensor overload
         dtypes = [
             torch.int8,
             torch.uint8,
