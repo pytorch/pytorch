@@ -589,20 +589,19 @@ def compute_native_function_declaration(f: NativeFunction) -> List[str]:
         returns_type = native.returns_type(f.func.returns)
         args = native.arguments(f.func)
 
-        def arg_to_str(arg: NativeArgument) -> str:
-            if f.func.is_out_fn():
-                # out overloads don't get default arguments because
-                # defaulted arguments would be before the out argument
-                # in the argument list and that doesn't work.
-                # TODO We should consider if we just want to remove
-                # default arguments from all at::native functions
-                # but that would be a larger change because we need
-                # to change a lot of call sites
-                return str(arg)
-            else:
-                return arg.str_with_default()
+        if f.func.is_out_fn():
+            # out overloads don't get default arguments because
+            # defaulted arguments would be before the out argument
+            # in the argument list and that doesn't work.
+            # TODO We should consider if we just want to remove
+            # default arguments from all at::native functions
+            # but that would be a larger change because we need
+            # to change a lot of call sites
+            args_str = ', '.join(str(a) for a in args)
+        else:
+            args_str = ', '.join(a.str_with_default() for a in args)
 
-        rs.append(f"CAFFE2_API {returns_type} {n}({', '.join(arg_to_str(a) for a in args)});")
+        rs.append(f"CAFFE2_API {returns_type} {n}({args_str});")
 
     return rs
 
@@ -673,13 +672,8 @@ DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::mult
 }}
 """
         elif self.target is Target.REGISTRATION:
-            if local.use_c10_dispatcher() is UseC10Dispatcher.full:
+            if local.use_c10_dispatcher().dispatcher_uses_new_style():
                 return f"""m.impl("aten::{f.func.name}", TORCH_FN({name}));"""
-            elif local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
-                return f"""m.impl("aten::{f.func.name}",
-          c10::impl::hacky_wrapper_for_legacy_signatures<{dispatcher_sig.type()},
-            std::index_sequence<{', '.join(mutable_argument_indices(f.func))}>>(
-            TORCH_FN({name})));"""
             else:
                 assert local.use_c10_dispatcher() is UseC10Dispatcher.with_codegenerated_unboxing_wrapper
                 return f"""m.impl_UNBOXED("aten::{f.func.name}", {name});"""
