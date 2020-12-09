@@ -2178,9 +2178,14 @@ class TestReductions(TestCase):
 
 
     @onlyCUDA
-    @expectedAlertNondeterministic('_histogram_cuda', fn_has_device_arg=False)
-    def test_histogram_alert_nondeterministic(self, device):
+    @expectedAlertNondeterministic('_histogram_uniform_bins_helper_cuda', fn_has_device_arg=False)
+    def test_histogram_alert_nondeterministic_uniform_bins(self, device):
         torch.histogram(torch.tensor([], device=device))
+
+    @onlyCUDA
+    @expectedAlertNondeterministic('_bincount_cuda', fn_has_device_arg=False)
+    def test_histogram_alert_nondeterministic_custom_bins(self, device):
+        torch.histogram(torch.tensor([], device=device), torch.tensor([1., 2.], device=device))
 
     @onlyCPU
     def test_histogram_bin_edges_sorted(self, device):
@@ -2239,7 +2244,7 @@ class TestReductions(TestCase):
         with self.assertRaisesRegex(RuntimeError, "max must be larger than min"):
             torch.histogram(torch.tensor([1., 2., 3.], dtype=torch.float, device=device),
                             bins=4, range=(5, 1))
-        # element in range cannot be represented by tensor's dtype - when this is fixed, the test should fail.
+        # element in range cannot be represented by tensor's dtype
         with self.assertWarnsRegex(UserWarning, 'range'):
             actual = torch.histogram(
                 torch.tensor([0, 1, 2, 1], dtype=torch.int64, device=device),
