@@ -968,12 +968,6 @@ const c10::ClassTypePtr& getCustomClassType() {
   return cache;
 }
 
-template <typename T>
-inline bool isCustomClassRegistered() {
-  auto& tmap = c10::getCustomClassTypeMap();
-  return tmap.find(std::type_index(typeid(T))) != tmap.end();
-}
-
 TORCH_API std::unordered_map<std::string, std::function<PyObject*(void*)>>&
 getClassConverter();
 } // namespace c10
