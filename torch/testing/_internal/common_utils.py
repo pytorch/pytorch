@@ -1042,9 +1042,9 @@ class TestCase(expecttest.TestCase):
     # Construct assert messages basd on internal messages and user message.
     def _get_assert_msg(self, msg, debug_msg=None):
         if msg is None:
-            return f"internal assert message: {debug_msg}"
+            return f"\n{debug_msg}"
         else:
-            return f"user assert message: {msg}; internal assert message: {debug_msg}"
+            return f"\n{msg}\n{debug_msg}"
 
     def assertEqualIgnoreType(self, *args, **kwargs) -> None:
         # If you are seeing this function used, that means test is written wrongly
