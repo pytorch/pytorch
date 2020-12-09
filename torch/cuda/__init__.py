@@ -299,6 +299,7 @@ def get_device_properties(device: _device_t) -> _CudaDeviceProperties:
         raise AssertionError("Invalid device id")
     return _get_device_properties(device)  # type: ignore[name-defined]
 
+
 @contextlib.contextmanager
 def stream(stream):
     r"""Context-manager that selects a given stream.
@@ -332,6 +333,7 @@ def stream(stream):
         if src_prev_stream.device != stream.device:
             torch._C._cuda_setStream(dst_prev_stream._cdata)
         torch._C._cuda_setStream(src_prev_stream._cdata)
+
 
 def device_count() -> int:
     r"""Returns the number of GPUs available."""
