@@ -1210,30 +1210,28 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         except StopIteration:
             return
 
-        # for _ in range(self._num_workers):  # find the next active worker, if any
-        #     worker_queue_idx = next(self._worker_queue_idx_cycle)
-        #     if self._workers_status[worker_queue_idx]:
-        #         break
-        # else:
-        #     # not found (i.e., didn't break)
-        #     return
-
+        # Every worker will get chance to get data, but if there is other worker
+        # who has less data to process, that worker get indices next
         worker_queue_idx = next(self._worker_queue_idx_cycle)
-        worker_queue_size = self._index_queues[worker_queue_idx].qsize()
+        worker_queue_size = float('inf')
+
+        # worker_queue_size is valid only if worker is not exhausted
+        if self._workers_status[worker_queue_idx]:
+            worker_queue_size = self._index_queues[worker_queue_idx].qsize()
         for i in range(self._num_workers):  # find the next active worker, if any
             size = self._index_queues[i].qsize()
-            if size < worker_queue_size:
+            if size < worker_queue_size and self._workers_status[i]:
                 worker_queue_size = size
                 worker_queue_idx = i
+            if worker_queue_size == 0:
+                break
         # print("Queue size of selected queue: ", worker_queue_size)
-
-        if self._workers_status[worker_queue_idx]:
+        # Check if worker at worker_queue_idx is not exhausted
+        if worker_queue_size != float('inf'):
             self._index_queues[worker_queue_idx].put((self._send_idx, index))
             self._task_info[self._send_idx] = (worker_queue_idx,)
             self._tasks_outstanding += 1
             self._send_idx += 1
-        else:
-            return
 
     def _process_data(self, data):
         self._rcvd_idx += 1
