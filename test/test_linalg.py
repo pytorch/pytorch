@@ -2069,8 +2069,7 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_pinv(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix, \
-                                                         random_fullrank_matrix_distinct_singular_value as fullrank
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
         def run_test_main(A, hermitian):
             # Testing against definition for pseudo-inverses
@@ -2132,7 +2131,7 @@ class TestLinalg(TestCase):
             a.requires_grad_()
 
             def func(a, hermitian):
-                if hermitian == True:
+                if hermitian:
                     a = a + a.conj().transpose(-2, -1)
                 return torch.linalg.pinv(a, hermitian=hermitian)
 
@@ -2156,7 +2155,7 @@ class TestLinalg(TestCase):
         a.requires_grad_()
 
         def func(a, hermitian):
-            if hermitian == True:
+            if hermitian:
                 a = a + a.conj().transpose(-2, -1)
             return torch.linalg.pinv(a, hermitian=hermitian)
 

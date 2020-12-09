@@ -103,7 +103,7 @@ class OpInfo(object):
                  promotes_integers_to_float=False,  # whether op promotes unary output to float or not
                  sample_inputs_func=None,  # function to generate sample inputs
                  aten_name=None,  # name of the corresponding aten:: operator
-                 variant_test_name='', # additional string to include in the test name
+                 variant_test_name='',  # additional string to include in the test name
                  ):
 
         # Validates the dtypes are generated from the dispatch-related functions
