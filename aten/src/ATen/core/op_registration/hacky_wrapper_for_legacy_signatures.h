@@ -289,11 +289,6 @@ public:
  * where all `Tensor&` arguments are at the beginning, and take a `std::index_sequence OutTensorArgIndices`.
  * Create a wrapper function that has `Tensor&` arguments at the indices given by `OutTensorArgIndices`
  * and calls through the underlying kernel function by reordering them to the front.
- * This wrapper also changes the argument type from `Tensor&` to `const Tensor&` because the dispatcher cannot
- * handle non-const references and expects everything to be `const&` or by value. Note that this is in line
- * with a longer term goal to get rid of mutable references here since constness of Tensor objects actually
- * doesn't mean anything and `const&` are generally better behaved in C++ than `&`, for example with the
- * extension of temporary lifetime of function returns.
  */
 template<class OutTensorArgIndices, class KernelFunc, std::enable_if_t<(OutTensorArgIndices::size() > 0), int> = 0>
 constexpr auto with_out_arguments_reordered(KernelFunc kernel_func) {
