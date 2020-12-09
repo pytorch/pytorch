@@ -195,6 +195,21 @@ elseif(INTERN_USE_EIGEN_BLAS)
   list(APPEND Caffe2_DEPENDENCY_LIBS eigen_blas)
 endif()
 
+# ---[ FFTW
+set(AT_FFTW_ENABLED 0)
+set(USE_FFTW OFF)
+if(USE_FFTW OR NOT MKL_FOUND)
+  find_library(LIBFFTW3 fftw3)
+  if(LIBFFTW3)
+    find_path(FFTW3_INCLUDE_DIR NAMES fftw3.h ONLY_CMAKE_FIND_ROOT_PATH)
+    if(FFTW3_INCLUDE_DIR)
+      SET(AT_FFTW_ENABLED 1)
+      SET(USE_FFTW ON)
+      include_directories(${FFTW3_INCLUDE_DIR})
+    endif()
+  endif()
+endif()
+
 # ---[ Dependencies
 # NNPACK and family (QNNPACK, PYTORCH_QNNPACK, and XNNPACK) can download and
 # compile their dependencies in isolation as part of their build.  These dependencies
