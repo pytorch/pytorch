@@ -7,7 +7,6 @@
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/generated/Functions.h>
-#include <torch/csrc/Exceptions.h>
 
 #include <ATen/core/VariableHooksInterface.h>
 
@@ -570,7 +569,7 @@ namespace {
     if (base.dim() != other.dim()) {
       return false;
     }
-    for (size_t i=0; i<base.dim(); ++i) {
+    for (int64_t i=0; i<base.dim(); ++i) {
       if (base.sizes()[i] != other.sizes()[i]) {
         return false;
       }

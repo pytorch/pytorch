@@ -5427,7 +5427,7 @@ class TestAutogradFunctional(TestCase):
         def foo(a):
             # break both forward and backward mode links
             out = a.detach()
-            out, _= fwAD.unpack_dual(out)
+            out, _ = fwAD.unpack_dual(out)
             return out
 
         def bar(a):

@@ -3,11 +3,14 @@
 namespace torch { namespace autograd {
 
 namespace {
-    static uint64_t next_forward_idx_ = 0;
-    static std::vector<std::shared_ptr<ForwardADLevel>> all_forward_levels_;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     static std::mutex all_forward_levels_mutex_;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+    static uint64_t next_forward_idx_ = 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+    static std::vector<std::shared_ptr<ForwardADLevel>> all_forward_levels_;
 
-    static at::Tensor singleton_undefined_tensor;
+    const static at::Tensor singleton_undefined_tensor;
 
 }
 
