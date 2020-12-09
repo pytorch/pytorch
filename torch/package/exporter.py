@@ -303,7 +303,7 @@ node [shape=box];
         filename = self._filename(package, resource)
         self._write(filename, binary)
 
-    def mock(self, include: 'GlobPattern', exclude: 'GlobPattern' = []):
+    def mock(self, include: 'GlobPattern', *, exclude: 'GlobPattern' = []):
         """Replace the code for `module_name` in the package with a fake implementation. This module will return a fake
         object for any attribute accessed from it. Because we copy file-by-file, the dependency resolution will sometimes
         find files that are imported by model files but whose functionality is never used
@@ -320,7 +320,7 @@ node [shape=box];
         """
         self.patterns.append( (_GlobGroup(include, exclude), self.save_mock_module) )
 
-    def extern(self, include: 'GlobPattern', exclude: 'GlobPattern' = []):
+    def extern(self, include: 'GlobPattern', *, exclude: 'GlobPattern' = []):
         """Include `module` in the list of external modules the package can import.
         This will prevent dependency discover from saving
         it in the package. The importer will load an external module directly from the standard import system.
@@ -402,16 +402,12 @@ node [shape=box];
         for key in sorted(self.serialized_storages.keys()):
             name = 'data/{}'.format(key)
             storage = self.serialized_storages[key]
-            if storage.device.type == 'cpu':
-                # If it's on the CPU we can directly copy it into the zip file
-                num_bytes = storage.size() * storage.element_size()
-                self.zip_file.write_record(name, storage.data_ptr(), num_bytes)
-            else:
-                # Copy to a buffer, then serialize that
-                buf = io.BytesIO()
-                storage._write_file(buf, _should_read_directly(buf))
-                buf_value = buf.getvalue()
-                self._write(name, buf_value)
+            # location information is saved in python, but to actually
+            # get the data from non cpu tensors we need to move them over first
+            if storage.device.type != 'cpu':
+                storage = storage.cpu()
+            num_bytes = storage.size() * storage.element_size()
+            self.zip_file.write_record(name, storage.data_ptr(), num_bytes)
         contents = ('\n'.join(self.external) + '\n')
         self._write('extern_modules', contents)
         del self.zip_file
@@ -460,8 +456,12 @@ GlobPattern = Union[str, List[str]]
 
 class _GlobGroup:
     def __init__(self, include: 'GlobPattern', exclude: 'GlobPattern'):
+        self._dbg = f'_GlobGroup(include={include}, exclude={exclude})'
         self.include = _GlobGroup._glob_list(include)
         self.exclude = _GlobGroup._glob_list(exclude)
+
+    def __str__(self):
+        return self._dbg
 
     def matches(self, candidate: str) -> bool:
         candidate = '.' + candidate
