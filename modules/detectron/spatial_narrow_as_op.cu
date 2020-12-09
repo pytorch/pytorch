@@ -115,7 +115,6 @@ bool SpatialNarrowAsOp<CUDAContext>::DoRunWithType() {
       out_width,
       A.template data<T>(),
       C->template mutable_data<T>());
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return true;
 }
@@ -153,7 +152,6 @@ bool SpatialNarrowAsGradientOp<CUDAContext>::DoRunWithType() {
       out_width,
       dC.template data<T>(),
       dA->template mutable_data<T>());
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return true;
 }
