@@ -6966,6 +6966,7 @@
   variants: method, function
 
 - func: _histogram_helper_uniform_bins(Tensor self, int nbins, Tensor? weights, Scalar minvalue, Scalar maxvalue) -> Tensor
+  variants: function
   dispatch:
     CPU: _histogram_uniform_bins_helper_cpu
     CUDA: _histogram_uniform_bins_helper_cuda
