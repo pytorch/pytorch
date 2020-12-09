@@ -1039,12 +1039,12 @@ class TestCase(expecttest.TestCase):
 
         return _compare_scalars_internal(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan)
 
-    # Construct assert messages basd on internal messages and user message.
+    # Construct assert messages basd on internal debug message and user provided message.
     def _get_assert_msg(self, msg, debug_msg=None):
-        if msg is None:
-            return f"\n{debug_msg}"
+        if debug_msg is None:
+            return msg
         else:
-            return f"\n{msg}\n{debug_msg}"
+            return f"\n{debug_msg}" if msg is None else f"{msg}\n{debug_msg}"
 
     def assertEqualIgnoreType(self, *args, **kwargs) -> None:
         # If you are seeing this function used, that means test is written wrongly
@@ -1152,12 +1152,12 @@ class TestCase(expecttest.TestCase):
                     debug_msg = "Tensors failed to compare as equal!" + debug_msg_generic
                 super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
-            debug_msg = ("Attempted to compare with different [string] types: "
-                         f"Expected: {isinstance(x, string_classes)}; Actual: {isinstance(y, string_classes)}.")
+            debug_msg = ("Attempted to compare [string] types: "
+                         f"Expected: {repr(x)}; Actual: {repr(y)}.")
             super().assertEqual(x, y, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
         elif type(x) == set and type(y) == set:
-            debug_msg = ("Attempted to compare with different [set] types: "
-                         f"Expected: {type(x) == set}; Actual: {type(y) == set}.")
+            debug_msg = ("Attempted to compare [set] types: "
+                         f"Expected: {x}; Actual: {y}.")
             super().assertEqual(x, y, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
         elif isinstance(x, dict) and isinstance(y, dict):
             if isinstance(x, OrderedDict) and isinstance(y, OrderedDict):
@@ -1175,11 +1175,11 @@ class TestCase(expecttest.TestCase):
                                  exact_dtype=exact_dtype, exact_device=exact_device)
         elif isinstance(x, type) and isinstance(y, type):
             # See TestTorch.test_assert_equal_generic_meta
-            debug_msg = ("Attempted to compare with different [type] types: "
-                         f"Expected: {isinstance(x, type)}; Actual: {isinstance(y, type)}.")
+            debug_msg = ("Attempted to compare [type] types: "
+                         f"Expected: {x}; Actual: {y}.")
             super().assertEqual(x, y, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
         elif is_iterable(x) and is_iterable(y):
-            debug_msg = ("Attempted to compare iterables with different length: "
+            debug_msg = ("Attempted to compare the lengths of [iterable] types: "
                          f"Expected: {len(x)}; Actual: {len(y)}.")
             super().assertEqual(len(x), len(y), msg=self._get_assert_msg(msg, debug_msg=debug_msg))
             for x_, y_ in zip(x, y):
