@@ -24,6 +24,9 @@ class StreamWrapper:
     def __del__(self):
         self.close()
 
+    def __call__(self):
+        return self.stream
+
     def seekable(self):
         return hasattr(self.stream, "seekable") and self.stream.seekable()
 
