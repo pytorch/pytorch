@@ -161,6 +161,37 @@ class TestFXExperimental(JitTestCase):
             catch_runtime_error = True
         assert catch_runtime_error
 
+    def test_large_node_error(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, a):
+                linear = self.linear(a)
+                add = linear + a
+                return add
+
+        m = TestModule()
+        traced = symbolic_trace(m)
+        a = torch.rand(4)
+        graph_manipulation.get_size_of_all_nodes(traced, [a])
+        partitioner = Partitioner()
+        devices = [
+            Device("dev_0", 40, 0),
+            Device("dev_1", 40, 0),
+            Device("dev_2", 40, 0),
+            Device("dev_3", 40, 0),
+            Device("dev_4", 40, 0)
+        ]
+        partitioner_config = PartitionerConfig(devices, PartitionMode.size_based)
+        catch_runtime_error = False
+        try:
+            ret = partitioner.partition_graph(traced, m, partitioner_config)
+        except RuntimeError:
+            catch_runtime_error = True
+        assert catch_runtime_error
+
     def test_partition_node_manipulation(self):
         class TestModule(torch.nn.Module):
             def forward(self, a, b):
@@ -186,7 +217,6 @@ class TestFXExperimental(JitTestCase):
                 selected_node = node
         partition.remove_node(selected_node)
         assert(partition.used_mem_bytes == 80)
-
 
     def test_size_based_partition(self):
         class TestModule(torch.nn.Module):
