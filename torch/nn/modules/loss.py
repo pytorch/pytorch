@@ -297,6 +297,38 @@ class PoissonNLLLoss(_Loss):
                                   eps=self.eps, reduction=self.reduction)
 
 
+class GaussianNLLLoss(_Loss):
+    r"""Negative log likelihood loss with Gaussian distribution
+
+    The loss can be described as::
+
+    target ~ N(input, var)
+
+    loss(input, target, var) = %TODO - need help with math
+
+
+    Examples::
+
+        >>> loss = nn.GaussianNLLLoss()
+        >>> input = torch.randn(5, 2, requires_grad=True)
+        >>> target = torch.randn(5, 2)
+        >>> var = torch.ones(5, 2)
+        >>> output = loss(input, target, var)
+        >>> output.backward()
+    """
+    __constants__ = ['full', 'eps', 'reduction']
+    full: bool
+    eps: float
+
+    def __init__(self, full: bool = False, eps: float = 1e-8, reduction: str = 'mean') -> None:
+        super(GaussianNLLLoss, self).__init__(reduction)
+        self.full = full
+        self.eps = eps
+
+    def forward(self, input: Tensor, target: Tensor, var: Tensor) -> Tensor:
+        return F.gaussian_nll_loss(input, target, var, full=self.full, eps=self.eps, reduction=self.reduction)
+
+
 class KLDivLoss(_Loss):
     r"""The Kullback-Leibler divergence loss measure
 
