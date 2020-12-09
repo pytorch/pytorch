@@ -1,3 +1,7 @@
+#include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
+
+#if AT_CUDNN_ENABLED()
+
 #include <ATen/native/cudnn/ConvShared.h>
 
 // NOTE [cuDNN API version]
@@ -429,3 +433,5 @@ Tensor cudnn_convolution_transpose_backward_weight(
 }
 
 }}
+
+#endif  // AT_CUDNN_ENABLED

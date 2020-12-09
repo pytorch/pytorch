@@ -1,3 +1,4 @@
+#include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
 #include <ATen/ATen.h>
 #include <ATen/native/ConvUtils.h>
 

@@ -1,3 +1,5 @@
+#include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
+
 #if AT_CUDNN_ENABLED()
 
 #include <limits>
@@ -7,7 +9,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
-#include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/native/cudnn/ConvShared.h>
 
