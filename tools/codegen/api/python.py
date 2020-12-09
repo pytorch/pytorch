@@ -653,7 +653,7 @@ def argument(a: Argument) -> PythonArgument:
     )
 
 # Generates a PythonSignature that can be used for either .pyi or PythonArgParser codegen
-def signature(f: NativeFunction, *, method: bool = False) -> PythonSignature:
+def signature(f: NativeFunction, *, method: bool = False, pyi: bool = False) -> PythonSignature:
     # Use cpp api to gather TensorOptions fields from kwargs.
     # Skip SelfArgument if this is method.
     # Skip TensorOptionsArguments in C++ signature. Python side TensorOptions
