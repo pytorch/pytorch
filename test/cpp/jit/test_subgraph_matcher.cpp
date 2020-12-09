@@ -500,14 +500,62 @@ graph(%x):
       &pattern1);
   ASSERT_ANY_THROW(findPatternMatches(pattern1, graph));
 
-  parseIR(
-      R"IR(
-graph(%x):
-  %y = my::op1(%x)
-  %z = my::op2(%x)
-  return (%y, %z))IR",
-      &pattern2);
-  ASSERT_ANY_THROW(findPatternMatches(pattern2, graph));
+//   parseIR(
+//       R"IR(
+// graph(%x):
+//   %y = my::op1(%x)
+//   %z = my::op2(%x)
+//   return (%y, %z))IR",
+//       &pattern2);
+//   ASSERT_ANY_THROW(findPatternMatches(pattern2, graph));
+}
+
+TEST(SubgraphMatcherTest, MultiOutput) {
+  {
+    Graph graph, pattern;
+    parseIR(
+        R"IR(
+graph(%0):
+  %a = a::aaa(%0)
+  %b = b::bbb(%a)
+  %c = c::ccc(%a, %b)
+  %x = a::aaa(%c)
+  %y = b::bbb(%x)
+  %z = d::ddd(%x, %y)
+  return (%y))IR",
+        &graph);
+    parseIR(
+        R"IR(
+graph(%0):
+  %a = a::aaa(%0)
+  %b = b::bbb(%a)
+  return (%b, %a))IR",
+        &pattern);
+    AT_ASSERT(findPatternMatches(pattern, graph).size() == 2);
+  }
+  {
+    Graph graph, pattern;
+    parseIR(
+        R"IR(
+graph(%0, %1):
+  %a1, %a2 = a::aaa(%0, %1)
+  %b = b::bbb(%a1)
+  %c = c::ccc(%b)
+
+  %x1, %x2 = a::aaa(%c, %a2)
+  %y = b::bbb(%x1)
+  %z = d::ddd(%y)
+  return (%z))IR",
+        &graph);
+    parseIR(
+        R"IR(
+graph(%0, %1):
+  %a1, %a2 = a::aaa(%0, %1)
+  %b = b::bbb(%a1)
+  return (%b, %a2))IR",
+        &pattern);
+    AT_ASSERT(findPatternMatches(pattern, graph).size() == 2);
+  }
 }
 
 } // namespace jit

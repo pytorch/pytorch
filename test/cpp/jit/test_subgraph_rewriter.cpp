@@ -122,5 +122,91 @@ graph(%a, %b):
   FileCheck().check("c::ccc")->check_not("d::ddd")->run(*graph);
 }
 
+TEST(SubgraphRewriterTest, MultiOutput) {
+  {
+    auto graph = std::make_shared<Graph>();
+
+    parseIR(
+        R"IR(
+graph(%0, %1):
+  %a1, %a2 = a::aaa(%0, %1)
+  %b = b::bbb(%a1)
+  %c = c::ccc(%b)
+
+  %x1, %x2 = a::aaa(%c, %a2)
+  %y = b::bbb(%x1)
+  %z = d::ddd(%y)
+  return (%z))IR",
+        graph.get());
+
+    std::string pattern = R"IR(
+graph(%0, %1):
+  %a1, %a2 = a::aaa(%0, %1)
+  %b = b::bbb(%a1)
+  return (%b, %a2))IR";
+
+    std::string replacement = R"IR(
+graph(%a, %b):
+  %x, %y = ab::ababab(%a, %b)
+  return (%x, %y))IR";
+
+    SubgraphRewriter rewriter;
+    rewriter.RegisterRewritePattern(pattern, replacement);
+
+    auto g = graph->copy();
+    g->dump();
+    rewriter.runOnGraph(g);
+    g->dump();
+    FileCheck().check("ab::ababab")->check("ab::ababab")->run(*g);
+  }
+  {
+    auto graph = std::make_shared<Graph>();
+
+    parseIR(
+        R"IR(
+    graph(%k, %m, %x1, %x2, %x3, %x4, %y1, %y2, %y3, %y4):
+      %a1 = aa::aaa(%x1, %k)
+      %b1_1, %b1_2 = bb::bbb(%y1, %a1)
+      %a2 = aa::aaa(%x2, %k)
+      %b2_1, %b2_2 = bb::bbb(%y2, %a2)
+      %a3 = aa::aaa(%x3, %k)
+      %b3_1, %b3_2 = bb::bbb(%y3, %a3)
+      %a4 = aa::aaa(%x4, %k)
+      %b4_1, %b4_2 = bb::bbb(%y4, %a4)
+      %c = cc::ccc(%b4_1)
+      %d1 = dd::ddd(%b1_2, %m)
+      %e1 = ee::eee(%b1_1, %d1)
+      %d2 = dd::ddd(%b2_2, %m)
+      %e2 = ee::eee(%b2_1, %d2)
+      %d3 = dd::ddd(%b3_2, %m)
+      %e3 = ee::eee(%b3_1, %d3)
+      %d4 = dd::ddd(%b4_2, %m)
+      %e4 = ee::eee(%b4_1, %d4)
+      return (%d1, %d2, %d3, %d4, %e1, %e2, %e3, %e4)
+      )IR",
+        graph.get());
+
+    std::string pattern = R"IR(
+    graph(%a, %b, %c, %d):
+        %y0 = aa::aaa(%b, %c)
+        %y1, %y2 = bb::bbb(%a, %y0)
+        %y3 = dd::ddd(%y2, %d)
+        return (%y3, %y1))IR";
+
+    std::string replacement = R"IR(
+    graph(%a, %b, %c, %d):
+      %x, %y = ab::ababab(%a, %b, %c, %d)
+      return (%x, %y))IR";
+
+    SubgraphRewriter rewriter;
+    rewriter.RegisterRewritePattern(pattern, replacement);
+
+    auto g = graph->copy();
+    g->dump();
+    rewriter.runOnGraph(g);
+    g->dump();
+    FileCheck().check("ab::ababab")->check("ab::ababab")->run(*g);
+  }
+}
 } // namespace jit
 } // namespace torch
