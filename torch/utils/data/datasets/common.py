@@ -2,18 +2,29 @@ import os
 import fnmatch
 import warnings
 from typing import List, Union, Iterable
+from io import BufferedIOBase
 
 class StreamWrapper:
-    # this is a wrapper class which wraps file/stream handle
+    # this is a wrapper class which wraps streaming handle
     def __init__(self, stream):
+        if not isinstance(stream, BufferedIOBase):
+            warnings.warn("StreamWrapper can only wrap BufferedIOBase based obj, but got {}".format(type(stream)))
+            raise TypeError
         self.stream = stream
+
     def read(self, *args, **kw):
-        res = self.stream.read(*args, **kw)
+        # put type ignore here to avoid mypy complaining too many args
+        res = self.stream.read(*args, **kw)  # type: ignore
         return res
+
     def close(self):
         self.stream.close()
+
     def __del__(self):
         self.close()
+
+    def __call__(self):
+        return self.stream
 
 
 def match_masks(name : str, masks : Union[str, List[str]]) -> bool:
