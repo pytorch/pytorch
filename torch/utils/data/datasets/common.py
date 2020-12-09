@@ -11,10 +11,20 @@ from io import BufferedIOBase
 class StreamWrapper:
     # this is a wrapper class which wraps streaming handle
     def __init__(self, stream):
-        if not isinstance(stream, BufferedIOBase):
+        # if input is a StreamWrapper already, then transfer ownership
+        if isinstance(stream, StreamWrapper):
+            self.stream = stream()
+            stream.reset()
+        # only accept streaming obj
+        elif isinstance(stream, BufferedIOBase):
+            self.stream = stream
+        else:
             warnings.warn("StreamWrapper can only wrap BufferedIOBase based obj, but got {}".format(type(stream)))
             raise TypeError
-        self.stream = stream
+
+    def reset(self):
+        # behavior is undefined if calling any method other than close() after reset() is called
+        self.stream = None
 
     def read(self, *args, **kw):
         # put type ignore here to avoid mypy complaining too many args
@@ -22,7 +32,8 @@ class StreamWrapper:
         return res
 
     def close(self):
-        self.stream.close()
+        if self.stream:
+            self.stream.close()
 
     def __del__(self):
         self.close()
@@ -38,6 +49,9 @@ class StreamWrapper:
         # put type ignore here to avoid mypy complaining too many args
         self.stream.seek(*args, **kw)  # type: ignore
 
+    def tell(self):
+        return self.stream.tell()
+
 
 def match_masks(name : str, masks : Union[str, List[str]]) -> bool:
     # empty mask matches any input name
@@ -51,6 +65,7 @@ def match_masks(name : str, masks : Union[str, List[str]]) -> bool:
         if fnmatch.fnmatch(name, mask):
             return True
     return False
+
 
 def get_file_pathnames_from_root(
         root: str,
@@ -142,7 +157,8 @@ def extract_files_from_single_tar_pathname_binary(
             raise e
         binary_stream.seek(0)
 
-    yield (pathname, binary_stream)
+    # yield original pathname binary tuple if the binary stream is not a zip stream
+    yield (pathname, StreamWrapper(binary_stream))
 
 
 def extract_files_from_single_zip_pathname_binary(
@@ -159,7 +175,7 @@ def extract_files_from_single_zip_pathname_binary(
                     continue
 
                 inner_pathname = os.path.normpath(os.path.join(pathname, zipinfo.filename))
-                yield (inner_pathname, zips.open(zipinfo))
+                yield (inner_pathname, StreamWrapper(zips.open(zipinfo)))
             return
     except zipfile.BadZipFile as e:
         # Note: We have no way to verify whether a non-seekable stream (eg. PIPE stream) is zip without
@@ -170,4 +186,5 @@ def extract_files_from_single_zip_pathname_binary(
             raise e
         binary_stream.seek(0)
 
-    yield (pathname, binary_stream)
+    # yield original pathname binary tuple if the binary stream is not a zip stream
+    yield (pathname, StreamWrapper(binary_stream))
