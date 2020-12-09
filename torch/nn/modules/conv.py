@@ -16,7 +16,7 @@ from ..common_types import _size_1_t, _size_2_t, _size_3_t
 from typing import Optional, List, Tuple
 
 convolution_notes = \
-    {"groups_note": """* :attr:`groups` controls the connections between inputs and outputs.
+    {"groups_note": r"""* :attr:`groups` controls the connections between inputs and outputs.
       :attr:`in_channels` and :attr:`out_channels` must both be divisible by
       :attr:`groups`. For example,
 
@@ -27,14 +27,14 @@ convolution_notes = \
           concatenated.
         * At groups= :attr:`in_channels`, each input channel is convolved with
           its own set of filters (of size
-          :math:`\\frac{\\text{out\_channels}}{\\text{in\_channels}}`).""",  # noqa: W605
+          :math:`\frac{\text{out\_channels}}{\text{in\_channels}}`).""",
 
-        "depthwise_separable_note": """When `groups == in_channels` and `out_channels == K * in_channels`,
+        "depthwise_separable_note": r"""When `groups == in_channels` and `out_channels == K * in_channels`,
         where `K` is a positive integer, this operation is also known as a "depthwise convolution".
 
         In other words, for an input of size :math:`(N, C_{in}, L_{in})`,
         a depthwise convolution with a depthwise multiplier `K` can be performed with the arguments
-        :math:`(C_\\text{in}=C_\\text{in}, C_\\text{out}=C_\\text{in} \\times \\text{K}, ..., \\text{groups}=C_\\text{in})`."""}  # noqa: W605,B950
+        :math:`(C_\text{in}=C_\text{in}, C_\text{out}=C_\text{in} \times \text{K}, ..., \text{groups}=C_\text{in})`."""}  # noqa: B950
 
 
 
