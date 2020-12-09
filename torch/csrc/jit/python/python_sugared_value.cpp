@@ -967,9 +967,11 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return std::make_shared<FunctionValue>(callee->function_);
   } else if (py::isinstance<py::module>(obj)) {
     std::string obj_name = py::cast<py::str>(py::getattr(obj, "__name__"));
+    #ifdef USE_CUDA
     if (obj_name.compare("torch.cuda") == 0) {
       return std::make_shared<CUDAPythonModuleValue>(obj);
     }
+    #endif
     return std::make_shared<PythonModuleValue>(obj);
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr() ||
