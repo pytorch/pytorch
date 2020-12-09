@@ -99,6 +99,12 @@ class TORCH_CUDA_API PairwiseRootDomainMap : public RootDomainMap {
       const std::unordered_set<IterDomain*>& root_dims_to_map,
       bool producer_to_consumer) const override;
 
+  std::unordered_map<IterDomain*, IterDomain*> mapTranspose(
+      const TensorDomain* producer,
+      const TensorDomain* consumer,
+      const std::unordered_set<IterDomain*>& root_dims_to_map,
+      bool producer_to_consumer) const;
+
  private:
   const TensorView* producer_tv_ = nullptr;
   const TensorView* consumer_tv_ = nullptr;
@@ -351,6 +357,8 @@ class TORCH_CUDA_API ComputeAtRootDomainMapBuilder : private BackwardVisitor {
   }
 
   void handle(BroadcastOp* op) override;
+
+  void handle(TransposeOp* op) override;
 
   void handle(TensorView* tv) override;
 

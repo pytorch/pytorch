@@ -163,6 +163,30 @@ class TORCH_CUDA_API ReductionOp : public Expr {
   Val* const in_ = nullptr;
 };
 
+class TORCH_CUDA_API TransposeOp : public Expr {
+ public:
+  TransposeOp(TensorView* out, TensorView* in, std::vector<int> new2old);
+
+  TransposeOp(const TransposeOp* src, IrCloner* ir_cloner);
+
+  TensorView* out() const {
+    return out_;
+  }
+
+  TensorView* in() const {
+    return in_;
+  }
+
+  const std::vector<int>& new2old() const {
+    return new2old_;
+  }
+
+ private:
+  TensorView* const out_ = nullptr;
+  TensorView* const in_ = nullptr;
+  const std::vector<int> new2old_;
+};
+
 class TORCH_CUDA_API TernaryOp : public Expr {
  public:
   TernaryOp(TernaryOpType type, Val* out, Val* in1, Val* in2, Val* in3);

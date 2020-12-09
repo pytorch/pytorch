@@ -71,6 +71,11 @@ std::unordered_map<IterDomain*, IterDomain*> PairwiseRootDomainMap::map(
   TORCH_INTERNAL_ASSERT(producer_tv_->domain() == producer);
   TORCH_INTERNAL_ASSERT(consumer_tv_->domain() == consumer);
 
+  if (consumer_tv_->getOrigin()->isA<TransposeOp>()) {
+    return mapTranspose(
+        producer, consumer, root_dims_to_map, producer_to_consumer);
+  }
+
   std::vector<bool> broadcast_flags;
   if (BroadcastOp* bop =
           dynamic_cast<BroadcastOp*>(consumer_tv_->definition())) {
@@ -78,19 +83,13 @@ std::unordered_map<IterDomain*, IterDomain*> PairwiseRootDomainMap::map(
   }
 
   std::unordered_map<IterDomain*, IterDomain*> dom_map;
-  const auto& producer_root = producer->getMaybeRFactorDomain();
+  const auto producer_root =
+      TensorDomain::noReductions(producer->getMaybeRFactorDomain());
   const auto& consumer_root = consumer->getRootDomain();
   size_t itc = 0, itp = 0;
   while (itc < consumer_root.size() && itp < producer_root.size()) {
     IterDomain* producer_id = producer_root[itp];
     IterDomain* consumer_id = consumer_root[itc];
-
-    // When the producer ID is a reduction domain, there should never
-    // be any matching domain in the consumer.
-    if (producer_id->isReduction()) {
-      itp++;
-      continue;
-    }
 
     // When the consumer ID is a new broadcast domain, there is no
     // mapping for it.
@@ -111,6 +110,35 @@ std::unordered_map<IterDomain*, IterDomain*> PairwiseRootDomainMap::map(
     }
     itc++;
     itp++;
+  }
+  return dom_map;
+}
+
+std::unordered_map<IterDomain*, IterDomain*> PairwiseRootDomainMap::
+    mapTranspose(
+        const TensorDomain* producer,
+        const TensorDomain* consumer,
+        const std::unordered_set<IterDomain*>& root_dims_to_map,
+        bool producer_to_consumer) const {
+  const auto producer_root =
+      TensorDomain::noReductions(producer->getMaybeRFactorDomain());
+  const auto& consumer_root = consumer->getRootDomain();
+
+  std::unordered_map<IterDomain*, IterDomain*> dom_map;
+
+  TransposeOp* top = dynamic_cast<TransposeOp*>(consumer_tv_->getOrigin());
+  TORCH_INTERNAL_ASSERT(top != nullptr);
+
+  const auto& new2old = top->new2old();
+  for (size_t i = 0; i < consumer_root.size(); ++i) {
+    IterDomain* map_key_id = producer_root[new2old[i]];
+    IterDomain* map_value_id = consumer_root[i];
+    if (!producer_to_consumer) {
+      std::swap(map_key_id, map_value_id);
+    }
+    if (root_dims_to_map.find(map_key_id) != root_dims_to_map.end()) {
+      dom_map.insert(std::make_pair(map_key_id, map_value_id));
+    }
   }
   return dom_map;
 }
@@ -595,6 +623,23 @@ void ComputeAtRootDomainMapBuilder::handle(BroadcastOp* op) {
         " of ",
         out_td);
     root_map_.new_broadcast_domains_.insert(DomainKey(out_td, *out_it));
+  }
+}
+
+void ComputeAtRootDomainMapBuilder::handle(TransposeOp* op) {
+  const TensorDomain* in_td = op->in()->as<TensorView>()->domain();
+  std::vector<IterDomain*> in_root =
+      TensorDomain::noReductions(in_td->getRootDomain());
+
+  const TensorDomain* out_td = op->out()->as<TensorView>()->domain();
+  const auto& out_root = out_td->getRootDomain();
+
+  TORCH_INTERNAL_ASSERT(in_root.size() == out_root.size());
+
+  const auto& new2old = op->new2old();
+
+  for (size_t it = 0; it < out_root.size(); it++) {
+    setMaybeMapped(in_td, in_root[new2old[it]], out_td, out_root[it]);
   }
 }
 

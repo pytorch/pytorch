@@ -315,6 +315,11 @@ void IrPrinter::handle(const BroadcastOp* bop) {
   os_ << bop->out() << " = broadcast( " << bop->in() << " )\n";
 }
 
+void IrPrinter::handle(const TransposeOp* top) {
+  indent();
+  os_ << top->out() << " = transpose( " << top->in() << " )\n";
+}
+
 void IrPrinter::handle(const Split* s) {
   os_ << (s->innerSplit() ? "Split: " : "Outer split: ");
   handle(s->in());

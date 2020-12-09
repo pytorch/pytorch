@@ -339,6 +339,53 @@ bool ReductionOp::sameAs(const Statement* other) const {
       init()->sameAs(other_op->init()));
 }
 
+TransposeOp::TransposeOp(
+    TensorView* out,
+    TensorView* in,
+    std::vector<int> new2old)
+    : Expr(ExprType::TransposeOp),
+      out_(out),
+      in_(in),
+      new2old_(std::move(new2old)) {
+  // Sanity check of the input parameters. Maybe not necessary as they
+  // should be checked at function transpose.
+
+  TORCH_INTERNAL_ASSERT(
+      !in->hasRFactor(), "Transposing rFactor tensors is not supported.");
+
+  TORCH_INTERNAL_ASSERT(
+      TensorDomain::noReductions(in->getRootDomain()).size() ==
+      out->getRootDomain().size());
+
+  TORCH_INTERNAL_ASSERT(new2old_.size() == out->getRootDomain().size());
+
+  // Make sure the entries of new2old are unique and range from 0 to
+  // N-1, where N == new2old.size().
+  std::set<int> old_positions(new2old_.begin(), new2old_.end());
+  TORCH_INTERNAL_ASSERT(old_positions.size() == new2old_.size());
+  // old_positions is sorted, so the first entry must be 0.
+  TORCH_INTERNAL_ASSERT(
+      *(old_positions.begin()) == 0,
+      "Invalid new2old vector detected: ",
+      new2old_);
+  // The last entry must be N-1, since old_positions is sorted, starts
+  // with 0, and its length is N.
+  TORCH_INTERNAL_ASSERT(
+      *(old_positions.rbegin()) == (int)(new2old_.size() - 1),
+      "Invalid new2old vector detected: ",
+      new2old_);
+
+  addOutput(out);
+  addInput(in);
+  name_ = FusionGuard::getCurFusion()->registerExpr(this);
+}
+
+TransposeOp::TransposeOp(const TransposeOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      out_(ir_cloner->clone(src->out_)),
+      in_(ir_cloner->clone(src->in_)),
+      new2old_(src->new2old_) {}
+
 IterDomain::IterDomain(
     Val* start,
     Val* extent,
@@ -892,96 +939,7 @@ std::vector<IterDomain*> TensorDomain::orderedAs(
   // Eventhough these checks are already in TensorView, we want to redo them as
   // we can enter this function from other places, not through TensorView
 
-  // adjust based on negative values (any negative values gets nDims added to
-  // it)
-  std::unordered_map<int, int> old2new;
-  auto ndims = dom.size();
-  std::transform(
-      old2new_.begin(),
-      old2new_.end(),
-      std::inserter(old2new, old2new.begin()),
-      [ndims](std::unordered_map<int, int>::value_type entry) {
-        return std::unordered_map<int, int>::value_type({
-            entry.first < 0 ? entry.first + ndims : entry.first,
-            entry.second < 0 ? entry.second + ndims : entry.second,
-        });
-      });
-
-  // Check if any adjusted values are < 0, or >= nDims, which are invalid
-
-  TORCH_CHECK(
-      std::none_of(
-          old2new.begin(),
-          old2new.end(),
-          [ndims](std::unordered_map<int, int>::value_type entry) {
-            return entry.first < 0 || (unsigned int)entry.first >= ndims ||
-                entry.second < 0 || (unsigned int)entry.second >= ndims;
-          }),
-      "Reorder axes are not within the number of dimensions of the provided domain.");
-
-  // Going to use sets, to see if any duplicate values are in the map.
-
-  std::set<int> old_pos_set;
-  std::transform(
-      old2new.begin(),
-      old2new.end(),
-      std::inserter(old_pos_set, old_pos_set.begin()),
-      [](std::unordered_map<int, int>::value_type entry) {
-        return entry.first;
-      });
-
-  std::set<int> new_pos_set;
-  std::transform(
-      old2new.begin(),
-      old2new.end(),
-      std::inserter(new_pos_set, new_pos_set.begin()),
-      [](std::unordered_map<int, int>::value_type entry) {
-        return entry.second;
-      });
-
-  // Error out if duplicate values are found.
-  TORCH_CHECK(
-      old_pos_set.size() == old2new.size() &&
-          new_pos_set.size() == old2new.size(),
-      "Duplicate entries in transformation map sent to TensorView reorder.");
-
-  // END VALIDATION CHECKS
-
-  std::vector<int> new2old(ndims, -1);
-
-  // Go through each old and new position, make sure they're within [0, ndims)
-  for (std::pair<int, int> elem : old2new) {
-    int old_pos = elem.first;
-    int new_pos = elem.second;
-    new2old[new_pos] = old_pos;
-  }
-
-  // old_positions that already have a new position
-  std::set<int> old_positions(new2old.begin(), new2old.end());
-  old_positions.erase(-1);
-
-  // All available new positions
-  std::set<int> all_positions;
-  for (decltype(ndims) i{0}; i < ndims; i++)
-    all_positions.insert(i);
-
-  // Check what positions haven't been specified.
-  std::set<int> positions_left;
-  std::set_difference(
-      all_positions.begin(),
-      all_positions.end(),
-      old_positions.begin(),
-      old_positions.end(),
-      std::inserter(positions_left, positions_left.end()));
-
-  // Fill in positions that weren't specified, in relative order,
-  // in empty spots in the set of new positions.
-  // new2old[new_position] = old_position
-  auto it = positions_left.begin(); // old positions left
-  std::transform(
-      new2old.begin(), new2old.end(), new2old.begin(), [&it](int i) -> int {
-        return i == -1 ? *it++ : i;
-      });
+  auto new2old = ir_utils::normalizeOld2New(old2new_, dom.size());
 
   std::vector<IterDomain*> reordered_domain;
   std::transform(

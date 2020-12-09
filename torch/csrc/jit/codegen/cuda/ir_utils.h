@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
 #include <iterator>
+#include <unordered_map>
 
 namespace torch {
 namespace jit {
@@ -108,6 +109,23 @@ template <typename FilterType, typename ContainerType>
 auto filterByType(const ContainerType& inputs) {
   return filterByType<FilterType>(inputs.cbegin(), inputs.cend());
 }
+
+//! Returns a list of new-to-old mappings.
+//!
+//! The input map does not need to be complete. Missing axes are
+//! assumed not to be affected.
+//!
+//! This is used to preprocess broadcast and transpose arguments.
+//!
+//! Example: (N := ndims)
+//!   {{0, 1}} -> [1, 0, ...., N-1]
+//!   Transposes the first two axes with no other change.
+//!
+//!   {{0, -1}} -> [N-1, ...., 0]
+//!   Swaps the first and last axes.
+std::vector<int> normalizeOld2New(
+    const std::unordered_map<int, int>& old2new_in,
+    size_t ndims);
 
 } // namespace ir_utils
 } // namespace cuda

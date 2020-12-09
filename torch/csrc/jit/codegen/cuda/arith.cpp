@@ -670,6 +670,26 @@ TensorView* broadcast(
   return out_tensor;
 }
 
+TensorView* transpose(
+    TensorView* inp,
+    const std::unordered_map<int, int>& old2new) {
+  auto inp_domain = TensorDomain::noReductions(inp->getRootDomain());
+  std::vector<IterDomain*> out_domain(inp_domain.size());
+
+  auto new2old = ir_utils::normalizeOld2New(old2new, inp_domain.size());
+
+  for (size_t i = 0; i < out_domain.size(); ++i) {
+    auto in_id = inp_domain[new2old[i]];
+    out_domain[i] = new IterDomain(in_id->start(), in_id->extent());
+  }
+
+  TensorView* out_tensor = new TensorView(
+      new TensorDomain(out_domain, std::vector<bool>(out_domain.size(), true)),
+      inp->getDataType().value());
+  new TransposeOp(out_tensor, inp, new2old);
+  return out_tensor;
+}
+
 // COMPOUND OPERATIONS
 
 // add_alpha
