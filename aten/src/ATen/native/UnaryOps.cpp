@@ -343,8 +343,14 @@ Tensor& cos_out(Tensor& result, const Tensor& self) { return unary_op_impl_float
 Tensor cos(const Tensor& self) { return unary_op_impl_float(self, cos_stub); }
 Tensor& cos_(Tensor& self) { return unary_op_impl_(self, at::cos_out); }
 
-Tensor& sinc_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, sinc_stub); }
-Tensor sinc(const Tensor& self) { return unary_op_impl_float(self, sinc_stub); }
+Tensor& sinc_out(Tensor& result, const Tensor& self) {
+  TORCH_CHECK(self.scalar_type() != at::kBool, "sinc is not supported for boolean inputs");
+  return unary_op_impl_float_out(result, self, sinc_stub);
+}
+Tensor sinc(const Tensor& self) {
+  TORCH_CHECK(self.scalar_type() != at::kBool, "sinc is not supported for boolean inputs");
+  return unary_op_impl_float(self, sinc_stub);
+}
 Tensor& sinc_(Tensor& self) { return unary_op_impl_(self, at::sinc_out); }
 
 Tensor& sinh_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, sinh_stub); }
