@@ -28,7 +28,8 @@ class StreamWrapper:
         return res
 
     def close(self):
-        self.stream.close()
+        if self.stream:
+            self.stream.close()
 
     def __del__(self):
         self.close()
