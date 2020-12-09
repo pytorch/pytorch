@@ -81,6 +81,7 @@ import io
 class TestQuantizeJitPasses(QuantizationTestCase):
     """ Test graph mode quantization passes used by quantize_jit
     """
+
     def test_foldbn_trivial(self):
         bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
         conv_module = {2 : torch.nn.Conv2d, 3 : torch.nn.Conv3d}
@@ -2708,6 +2709,28 @@ class TestQuantizeJitOps(QuantizationTestCase):
             FileCheck().check("quantized::conv2d") \
                        .run(converted_model.graph)
 
+    @skipIfNoFBGEMM
+    def test_cat_linear(self):
+        class LinearModel(torch.nn.Module):
+            def __init__(self):
+                super(LinearModel, self).__init__()
+                self.weight = torch.randn(5, 5)
+
+            def forward(self, x, y):
+                a = torch.cat([x, y])
+                b = F.linear(a, self.weight)
+                c = F.linear(b, self.weight)
+                return b, c
+
+        model = LinearModel().eval()
+        qconfig = {'' : default_qconfig}
+        float_model = torch.jit.script(model)
+        prepared_model = prepare_jit(float_model, qconfig)
+        prepared_model(torch.rand(5, 5), torch.rand(5, 5))
+        converted_model = convert_jit(prepared_model)
+        FileCheck().check("quantized::linear") \
+                   .check("quantized::linear") \
+                   .run(converted_model.graph)
 
 class TestQuantizeDynamicJitPasses(QuantizationTestCase):
     def test_prepare_dynamic(self):
