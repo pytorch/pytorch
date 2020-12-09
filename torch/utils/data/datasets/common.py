@@ -5,47 +5,6 @@ import tarfile
 from typing import List, Union, Iterable, Any
 from io import BufferedIOBase
 
-class StreamWrapper:
-    # this is a wrapper class which wraps streaming handle
-    def __init__(self, stream):
-        # if input is a StreamWrapper already, then transfer ownership
-        if isinstance(stream, StreamWrapper):
-            self.stream = stream()
-            stream.reset()
-        # only accept streaming obj
-        elif isinstance(stream, BufferedIOBase):
-            self.stream = stream
-        else:
-            warnings.warn("StreamWrapper can only wrap BufferedIOBase based obj, but got {}".format(type(stream)))
-            raise TypeError
-
-    def reset(self):
-        # behavior is undefined if calling any method other than close() after reset() is called
-        self.stream = None
-
-    def read(self, *args, **kw):
-        # put type ignore here to avoid mypy complaining too many args
-        res = self.stream.read(*args, **kw)  # type: ignore
-        return res
-
-    def close(self):
-        if self.stream:
-            self.stream.close()
-
-    def __del__(self):
-        self.close()
-
-    def __call__(self):
-        return self.stream
-
-    def seekable(self):
-        return hasattr(self.stream, "seekable") and self.stream.seekable()
-
-    def seek(self, *args, **kw):
-        # call seakable() first to make sure this stream support seek()
-        # put type ignore here to avoid mypy complaining too many args
-        self.stream.seek(*args, **kw)  # type: ignore
-
 
 def match_masks(name : str, masks : Union[str, List[str]]) -> bool:
     # empty mask matches any input name
@@ -59,6 +18,7 @@ def match_masks(name : str, masks : Union[str, List[str]]) -> bool:
         if fnmatch.fnmatch(name, mask):
             return True
     return False
+
 
 def get_file_pathnames_from_root(
         root: str,
@@ -92,7 +52,7 @@ def get_file_binaries_from_pathnames(pathnames : Iterable):
             warnings.warn("file pathname must be string type, but got {}".format(type(pathname)))
             raise TypeError
 
-        yield (pathname, StreamWrapper(open(pathname, 'rb')))
+        yield (pathname, open(pathname, 'rb'))
 
 
 def validate_pathname_binary(rec):
@@ -102,7 +62,7 @@ def validate_pathname_binary(rec):
         return "pathname_binary tuple length should be 2, but got {}".format(str(len(rec)))
     if not isinstance(rec[0], str):
         return "pathname_binary should have string type pathname, but got {}".format(type(rec[0]))
-    if not isinstance(rec[1], BufferedIOBase) and not isinstance(rec[1], StreamWrapper):
+    if not isinstance(rec[1], BufferedIOBase):
         return "pathname_binary should have BufferedIOBase based binary type, but got {}".format(type(rec[1]))
     return ""
 
@@ -125,17 +85,17 @@ def extract_files_from_single_tar_pathname_binary(
                     raise tarfile.ExtractError
 
                 inner_pathname = os.path.normpath(os.path.join(pathname, tarinfo.name))
-                yield (inner_pathname, StreamWrapper(extract_fobj))
+                yield (inner_pathname, extract_fobj)
             return
-    except tarfile.TarError:
+    except tarfile.TarError as e:
         # Note: We have no way to verify whether a non-seekable stream (eg. PIPE stream) is tar without
         #       changing stream handle position, however, there is no way to move such stream's handle back.
         #       So the entire tar extraction process will be aborted if a non-seekable stream is not tar exactable.
         if not seekable:
             warnings.warn("Unable to reset the non-tarfile stream {}, abort!".format(pathname))
-            raise tarfile.ExtractError
+            raise e
         binary_stream.seek(0)
-
+    # yield original pathname binary tuple if the binary stream is not a tar stream
     yield (pathname, binary_stream)
 
 
