@@ -211,8 +211,7 @@ class TestForeach(TestCase):
         for N in N_values:
             tensors = self._get_test_data(device, dtype, N)
 
-            if dtype in torch.testing.integral_types_and(torch.bool) or \
-               dtype in [torch.half] and self.device_type == 'cpu' or \
+            if dtype in [torch.half] and self.device_type == 'cpu' or \
                dtype in [torch.bfloat16]:
                 with self.assertRaisesRegex(RuntimeError, "not implemented"):
                     expected = [torch.cosh(tensors[i]) for i in range(N)]

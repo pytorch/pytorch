@@ -208,6 +208,9 @@ private:
   at::Tensor tensor_slow(int i);
   at::Scalar scalar_slow(int i);
   at::Scalar scalar_slow(PyObject* arg);
+
+  template <typename T>
+  at::Scalar get_scalar(T arg);
 };
 
 struct FunctionParameter {
@@ -296,7 +299,7 @@ inline std::vector<at::Scalar> PythonArgs::scalarlist(int i) {
   std::vector<at::Scalar> res(size);
   for (int idx = 0; idx < size; idx++) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx) : PyList_GET_ITEM(arg.get(), idx);
-    res[idx] = scalar_slow(obj);
+    res[idx] = get_scalar(obj);
   }
   return res;
 }
