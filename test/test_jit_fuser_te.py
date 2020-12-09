@@ -1211,6 +1211,42 @@ class TestTEFuser(JitTestCase):
         else:
             return v.to(dtype)
 
+    def test_masked_fill(self):
+        dtypes = [
+            torch.int8,
+            torch.uint8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.float16,
+            torch.float32,
+            torch.float64,
+            torch.bool,
+        ]
+        sizes = [(2,), (4, 4)]
+        for self_dtype, mask_dtype, device, size in product(dtypes, dtypes, self.devices, sizes):
+            try:
+                input_v = self.data_for(self_dtype, device, size=size)
+                val = self.data_for(val_dtype, device, size=size)
+                mask = self.data_for(torch.bool, device, size=size)
+
+                def fn(input_v, val, mask):
+                    return torch.masked_fill(input_v, mask, val)
+                ref = fn(input_v, val, mask)
+            except Exception:
+                # If eager mode doesn't support a dtype/op/device combo,
+                # neither does the fuser.  Catch everything to avoid needing to
+                # guess what errors might be thrown by eager.
+                continue
+            try:
+                t = torch.jit.trace(fn, (input_v, val, mask))
+                torch.testing.assert_allclose(ref, t((input_v, val, mask)))
+                self.assertAllFused(t.graph_for(x))
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), op.__name__, device, str(size)])
+                )
+
     def test_isnan(self):
         inputs = [
             torch.tensor([2., 4., float('nan')]),
