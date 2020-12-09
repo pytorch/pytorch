@@ -6,6 +6,8 @@ from torch.overrides import is_tensor_like
 from itertools import product
 import warnings
 from typing import Callable, Union, Optional, Iterable, List
+from torch._vmap_internals import vmap
+import functools
 
 def zero_gradients(x):
     if isinstance(x, torch.Tensor):
@@ -201,6 +203,32 @@ def get_analytical_jacobian(input, output, nondet_tol=0.0, grad_out=1.0):
 
     return jacobian, reentrant, correct_grad_sizes, correct_grad_types
 
+def test_batched_grad(input, output):
+    diff_input_list = list(iter_tensors(input, True))
+    grad = functools.partial(torch.autograd.grad, output, diff_input_list, retain_graph=True, allow_unused=True)
+
+    def vjp(v):
+        results = grad(v)
+        results = tuple(grad if grad is not None else
+                        torch.zeros([], dtype=output.dtype, device=output.device).expand(inp.shape)
+                        for grad, inp in zip(results, diff_input_list))
+        return results
+
+    grad_outputs = [torch.randn_like(output) for _ in range(2)]
+
+    expected = [vjp(gO) for gO in grad_outputs]
+    expected = [torch.stack(shards) for shards in zip(*expected)]
+
+    # Squash warnings since these are expected to happen in most cases
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="Batching rule not implemented")
+        warnings.filterwarnings("ignore", message="torch.vmap is an experimental prototype")
+        result = vmap(vjp)(torch.stack(grad_outputs))
+    for res, exp in zip(result, expected):
+        if torch.allclose(res, exp):
+            continue
+        return fail_test("TODO")
+
 
 def _as_tuple(x):
     if istuple(x):
@@ -234,7 +262,8 @@ def gradcheck(
     check_sparse_nnz: bool = False,
     nondet_tol: float = 0.0,
     check_undefined_grad: bool = True,
-    check_grad_dtypes: bool = False
+    check_grad_dtypes: bool = False,
+    check_batched_grad: bool = False,
 ) -> bool:
     r"""Check gradients computed via small finite differences against analytical
     gradients w.r.t. tensors in :attr:`inputs` that are of floating point or complex type
@@ -401,6 +430,10 @@ def gradcheck(
         if out_is_complex and not reentrant_with_imag_grad_out:
             return not_reentrant_error(' (calculated using complex valued grad output)')
 
+        if check_batched_grad:
+            assert reentrant
+            test_batched_grad(tupled_inputs, o)
+
     # check if the backward multiplies by grad_output
     output = _differentiable_outputs(func(*tupled_inputs))
     if any([o.requires_grad for o in output]):
@@ -494,7 +527,8 @@ def gradgradcheck(
     raise_exception: bool = True,
     nondet_tol: float = 0.0,
     check_undefined_grad: bool = True,
-    check_grad_dtypes: bool = False
+    check_grad_dtypes: bool = False,
+    check_batched_grad: bool = False,
 ) -> bool:
     r"""Check gradients of gradients computed via small finite differences
     against analytical gradients w.r.t. tensors in :attr:`inputs` and
@@ -571,6 +605,7 @@ def gradgradcheck(
         grad_inputs = torch.autograd.grad(outputs, input_args, grad_outputs, create_graph=True)
         return grad_inputs
 
-    return gradcheck(new_func, tupled_inputs + tupled_grad_outputs, eps, atol, rtol, raise_exception,
-                     nondet_tol=nondet_tol, check_undefined_grad=check_undefined_grad,
-                     check_grad_dtypes=check_grad_dtypes)
+    return gradcheck(
+        new_func, tupled_inputs + tupled_grad_outputs, eps, atol, rtol, raise_exception,
+        nondet_tol=nondet_tol, check_undefined_grad=check_undefined_grad,
+        check_grad_dtypes=check_grad_dtypes, check_batched_grad=check_batched_grad)
