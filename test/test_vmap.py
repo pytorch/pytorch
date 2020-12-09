@@ -1390,6 +1390,12 @@ class TestVmapOperators(Namespace.TestVmapBase):
         B0, B1 = 3, 5
         test(Tensor.fill_, [TensorFactory.randn([B0, B1]), TensorFactory.randn(B0)])
 
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"output with shape .+ doesn't match the broadcast shape"):
+            # Runtime Error is thrown when the tensor being written to isn't being vmapped over
+            vmap(Tensor.fill_, (None, 0))(TensorFactory.randn([B0, B1]),
+                                          TensorFactory.randn([B0]))
+
     def _test_complex_views(self, op, dtypes):
         test = self._vmap_view_test
 
