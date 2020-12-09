@@ -300,7 +300,6 @@ jit_sources_full = [
     "torch/csrc/jit/runtime/register_c10_ops.cpp",
     "torch/csrc/jit/runtime/register_prim_ops.cpp",
     "torch/csrc/jit/runtime/register_prim_ops_fulljit.cpp",
-    "torch/csrc/jit/runtime/register_cuda_ops.cpp",
     "torch/csrc/jit/runtime/register_special_ops.cpp",
     "torch/csrc/jit/passes/remove_inplace_ops.cpp",
     "torch/csrc/jit/passes/utils/check_alias_annotation.cpp",
@@ -458,6 +457,7 @@ libtorch_python_cuda_core_sources = [
     "torch/csrc/cuda/shared/cudart.cpp",
     "torch/csrc/cuda/shared/nvtx.cpp",
     "torch/csrc/cuda/utils.cpp",
+    "torch/csrc/jit/runtime/register_cuda_ops.cpp",
 ]
 
 libtorch_python_cuda_sources = libtorch_python_cuda_core_sources + [

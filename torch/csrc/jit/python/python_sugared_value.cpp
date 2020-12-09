@@ -217,7 +217,7 @@ std::shared_ptr<SugaredValue> PythonModuleValue::attr(
   return toSugaredValue(member, m, loc, /*is_constant=*/true);
 }
 
-
+#ifdef USE_CUDA
 std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
     const SourceRange& loc,
     Function& m,
@@ -243,6 +243,7 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
   // even though it is possible, though rare, for someone to mutate them
   return toSugaredValue(member, m, loc, /*is_constant=*/true);
 }
+#endif
 
 Value* ModuleValue::asValue(const SourceRange& loc, Function& m) {
   return self_;
