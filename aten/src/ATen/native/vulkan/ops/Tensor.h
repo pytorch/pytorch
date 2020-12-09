@@ -210,10 +210,10 @@ class vTensor final {
   vTensor* host(Access::Flags access);
 
   template<typename Type>
-  Future<Type, Access::Read> host(api::Command::Buffer&) const && = delete;
+  Future<Type, Access::Read> host() const && = delete;
 
   template<typename Type, Access::Flags kAccess>
-  Future<Type, kAccess> host(api::Command::Buffer&) && = delete;
+  Future<Type, kAccess> host() && = delete;
 
   /*
     Device
@@ -270,6 +270,8 @@ class vTensor final {
     IntArrayRef strides() const;
 
    private:
+    class CMD;
+
     class State final {
      public:
       State();
@@ -329,8 +331,11 @@ class vTensor final {
    private:
     // Accessors / Lazy Allocation
     Buffer& buffer() const;
+    Buffer& buffer(CMD&, Stage::Flags, Access::Flags) const;
     Image& image() const;
+    Image& image(CMD&, Stage::Flags, Access::Flags) const;
     Buffer& staging() const;
+    Buffer& staging(CMD&, Stage::Flags, Access::Flags) const;
     Fence& fence() const;
 
     // Validation
