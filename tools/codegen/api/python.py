@@ -583,7 +583,7 @@ def _cpp_signature(f: NativeFunction, *, method: bool = False) -> CppSignature:
 
 def has_tensor_options(f: NativeFunction) -> bool:
     return any(filter(lambda a: isinstance(a, TensorOptionsArguments),
-                      cpp.group_arguments(f.func, method=False)))
+                      cpp.group_arguments(f.func, method=False, faithful=True)))
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -731,7 +731,7 @@ def signature(f: NativeFunction, *, method: bool = False, pyi: bool = False) -> 
     # Skip SelfArgument if this is method.
     # Skip TensorOptionsArguments in C++ signature. Python side TensorOptions
     # arguments are created based on different rules - see below.
-    cpp_args = cpp.group_arguments(f.func, method=method)
+    cpp_args = cpp.group_arguments(f.func, method=method, faithful=True)
     args = tuple(a for a in cpp_args if isinstance(a, Argument))
 
     input_arg_set = set(a.name for a in f.func.arguments.positional)
