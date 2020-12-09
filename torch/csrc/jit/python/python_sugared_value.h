@@ -90,6 +90,8 @@ struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
       const std::string& field) override;
 };
 
+// Represents all the CUDA JIT modules. All the CUDA API's with torch.cuda.*
+// are resolved to CUDAPythonModuleValue.
 struct VISIBILITY_HIDDEN CUDAPythonModuleValue : public PythonValue {
   explicit CUDAPythonModuleValue(py::object mod)
       : PythonValue(std::move(mod)) {}
