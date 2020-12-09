@@ -6963,7 +6963,6 @@
     CUDA: _histc_cuda
 
 - func: histogram.uniformbins(Tensor self, int bins=10, float[]? range=None, Tensor? weights=None, bool density=False) -> (Tensor, Tensor)
-  use_c10_dispatcher: full
   variants: method, function
 
 - func: _histogram_helper_uniform_bins(Tensor self, int nbins, Tensor? weights, Scalar minvalue, Scalar maxvalue) -> Tensor
