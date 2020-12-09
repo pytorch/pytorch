@@ -637,8 +637,32 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
 // see concrete implementation in python_ivalue.h
 struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
  public:
+  struct InferredType {
+    InferredType(TypePtr type) : type_(std::move(type)) {}
+    InferredType(std::string reason)
+        : type_(nullptr), reason_(std::move(reason)) {}
+    TypePtr type() const {
+      TORCH_INTERNAL_ASSERT(type_);
+      return type_;
+    }
+    bool success() const {
+      return type_ != nullptr;
+    }
+    const std::string& reason() const {
+      TORCH_INTERNAL_ASSERT(!type_);
+      return reason_;
+    }
+
+  private:
+    TypePtr type_;
+    std::string reason_;
+  };
+
   virtual PyObject* getPyObject() = 0;
-  virtual IValue toIValue() = 0;
+  virtual InferredType tryToInferType() = 0;
+  virtual IValue toIValue(const TypePtr& type, c10::optional<int32_t> N = c10::nullopt) = 0;
+  virtual std::string toStr() = 0;
+
   virtual ~PyObjectHolder(){};
 };
 

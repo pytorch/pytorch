@@ -157,8 +157,12 @@ void IValue::visit(const std::function<bool (const IValue &)>& visitor) const {
       break;
     }
     case Tag::PyObject: {
-      IValue contained_value = toPyObjectHolder()->toIValue();
-      contained_value.visit(visitor);
+      c10::intrusive_ptr<at::ivalue::PyObjectHolder> py_obj = toPyObjectHolder();
+      auto match = py_obj->tryToInferType();
+      if (match.success()) {
+        auto contained_value = py_obj->toIValue(match.type());
+        contained_value.visit(visitor);
+      }
       break;
     }
     default:
@@ -206,7 +210,11 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
     }
     case Tag::PyObject: {
       subValues.insert(*this);
-      IValue contained_value = toPyObjectHolder()->toIValue();
+      c10::intrusive_ptr<at::ivalue::PyObjectHolder> py_obj = toPyObjectHolder();
+      auto match = py_obj->tryToInferType();
+      TORCH_INTERNAL_ASSERT(match.success(),
+            "Tracer cannot infer type of ", py_obj->toStr(), "\n:", match.reason());
+      auto contained_value = py_obj->toIValue(match.type());
       contained_value.getSubValues(subValues);
       break;
     }
