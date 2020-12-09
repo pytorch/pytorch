@@ -408,7 +408,6 @@ void LLVMCodeGenImpl::emitWrapper(const std::vector<llvm::Type*>& params) {
 class LLVMIntrinsicsExpander : public GenericIntrinsicsExpander {
  private:
   const Expr* mutate(const Intrinsics* v) {
-#ifdef USE_FAST_CPU_INTRINSICS
     if (v->op_type() == kTanh) {
       ScalarType stype = v->dtype().scalar_type();
       if (stype == ScalarType::Float) {
@@ -420,7 +419,6 @@ class LLVMIntrinsicsExpander : public GenericIntrinsicsExpander {
         return fast_sigmoid(v->param(0)->accept_mutator(this));
       }
     }
-#endif
     // TODO: fast exp
     // TODO: fast erf
     // TODO: fast sigmoid
@@ -505,6 +503,7 @@ void LLVMCodeGenImpl::emitKernel(
 #else
   GenericIntrinsicsExpander intrinsics_expander;
 #endif
+  stmt = stmt->accept_mutator(&intrinsics_expander);
 
   // Compile the kernel.
   stmt->accept(this);

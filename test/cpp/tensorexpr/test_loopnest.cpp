@@ -1484,6 +1484,49 @@ TEST(LoopNest, ScheduleInlineThreeMixedSplit) {
   ASSERT_THROWS_WITH(l.computeInline(a->buf()), "compound indices");
 }
 
+// Check that inlining works for output tensors too
+TEST(LoopNest, ScheduleInlineOutputTensors) {
+  KernelScope kernel_scope;
+  const int M = 4;
+  const int N = 5;
+  const int K = 6;
+
+  Tensor* x = Compute(
+      "x",
+      {{M, "m1"}, {N, "n1"}, {K, "k1"}},
+      [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
+        return m * n * k;
+      });
+  Tensor* y = Compute(
+      "y",
+      {{M, "m2"}, {N, "n2"}, {K, "k2"}},
+      [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
+        return x->call(m, n, k) + m;
+      });
+
+  LoopNest l1({x, y});
+  l1.computeInline(x->buf());
+
+  // would normally compare results but Rand isn't implemented in the
+  // SimpleIREvaluator, even if we could seed it.
+  Stmt* stmt1 = IRSimplifier::simplify(l1.root_stmt());
+  std::ostringstream oss;
+  oss << *stmt1;
+
+  // Check the IR we produced
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int m1 = 0; m1 < 4; m1++)
+# CHECK:   for (int n1 = 0; n1 < 5; n1++)
+# CHECK:     for (int k1 = 0; k1 < 6; k1++)
+# CHECK:       x[m1, n1, k1] = (n1 * m1) * k1;
+# CHECK: for (int m2 = 0; m2 < 4; m2++)
+# CHECK:   for (int n2 = 0; n2 < 5; n2++)
+# CHECK:     for (int k2 = 0; k2 < 6; k2++)
+# CHECK:       y[m2, n2, k2] = (n2 * m2) * k2 + m2;)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
 TEST(LoopNest, ScheduleFuserStyle) {
   KernelScope kernel_scope;
   const int kVectorSize = 8;

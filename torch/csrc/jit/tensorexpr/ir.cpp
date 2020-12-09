@@ -176,7 +176,7 @@ const Expr* flatten_index(
 
 Dtype Intrinsics::IntrinsicsDtype(IntrinsicsOp op_type, Dtype dt1) {
   if (op_type == kIsNan) {
-    return dt1.cloneWithScalarType(ScalarType::int);
+    return dt1.cloneWithScalarType(ScalarType::Int);
   }
   // TODO: check the op_type and make a real decision
   return dt1;

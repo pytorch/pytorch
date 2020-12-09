@@ -888,7 +888,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       case kLgamma:
         return std::lgamma(v);
       case kFrac:
-        TReturn intpart;
+        TInput intpart;
         return std::modf(v, &intpart);
       case kIsNan:
         return std::isnan(v);
@@ -898,7 +898,6 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   }
 
   // specialization for float -> int ops (just kIsNan currently)
-  template <>
   int compute_intrinsics(IntrinsicsOp op_type, float v) {
     switch (op_type) {
       case kIsNan:
@@ -908,8 +907,8 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     }
   }
 
-  template <typename T>
-  T compute_intrinsics(IntrinsicsOp op_type, T v1, T v2) {
+  template <typename TReturn, typename TInput>
+  TReturn compute_intrinsics(IntrinsicsOp op_type, TInput v1, TInput v2) {
     switch (op_type) {
       case kPow:
         return std::pow(v1, v2);
