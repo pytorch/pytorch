@@ -2,40 +2,6 @@ import os
 import fnmatch
 import warnings
 from typing import List, Union, Iterable
-from io import BufferedIOBase
-
-class StreamWrapper:
-    # this is a wrapper class which wraps streaming handle
-    def __init__(self, stream):
-        # if input is a StreamWrapper already, then transfer ownership
-        if isinstance(stream, StreamWrapper):
-            self.stream = stream()
-            stream.reset()
-        # only accept streaming obj
-        elif isinstance(stream, BufferedIOBase):
-            self.stream = stream
-        else:
-            warnings.warn("StreamWrapper can only wrap BufferedIOBase based obj, but got {}".format(type(stream)))
-            raise TypeError
-
-    def reset(self):
-        # behavior is undefined if calling any method other than close() after reset() is called
-        self.stream = None
-
-    def read(self, *args, **kw):
-        # put type ignore here to avoid mypy complaining too many args
-        res = self.stream.read(*args, **kw)  # type: ignore
-        return res
-
-    def close(self):
-        if self.stream:
-            self.stream.close()
-
-    def __del__(self):
-        self.close()
-
-    def __call__(self):
-        return self.stream
 
 
 def match_masks(name : str, masks : Union[str, List[str]]) -> bool:
@@ -50,6 +16,7 @@ def match_masks(name : str, masks : Union[str, List[str]]) -> bool:
         if fnmatch.fnmatch(name, mask):
             return True
     return False
+
 
 def get_file_pathnames_from_root(
         root: str,
@@ -83,4 +50,4 @@ def get_file_binaries_from_pathnames(pathnames : Iterable):
             warnings.warn("file pathname must be string type, but got {}".format(type(pathname)))
             raise TypeError
 
-        yield (pathname, StreamWrapper(open(pathname, 'rb')))
+        yield (pathname, open(pathname, 'rb'))
