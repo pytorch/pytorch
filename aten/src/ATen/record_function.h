@@ -379,10 +379,8 @@ class TORCH_API RecordFunctionCallback {
     return end_;
   }
 
-  // whether the callbacks should run in the given scope
-  bool shouldRun(RecordScope scope) const;
-
  private:
+  friend class CallbackManager;
   std::function<std::unique_ptr<ObserverContext>(const RecordFunction&)> start_;
   std::function<void(const RecordFunction&, ObserverContext*)> end_;
   bool(*should_run_)(const RecordFunctionCallback&) = nullptr;
