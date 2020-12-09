@@ -1068,34 +1068,9 @@ at::Tensor PythonArgs::tensor_slow(int i) {
   return tensor;
 }
 
-at::Scalar PythonArgs::scalar_slow(int i) {
-  if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
-    auto& var = THPVariable_Unpack(args[i]);
-    jit::tracer::ArgumentStash::stashValue(
-        signature.params[i].name, idx, var, jit::NumberType::get());
-  }
 
-  // Zero-dim tensors are converted to Scalars as-is. Note this doesn't currently
-  // handle most NumPy scalar types except np.float64.
-  if (THPVariable_Check(args[i])) {
-    return ((THPVariable*)args[i])->cdata.item();
-  }
-
-  if (THPUtils_checkLong(args[i])) {
-    return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(args[i])));
-  }
-
-  if (PyBool_Check(args[i])) {
-    return at::Scalar(THPUtils_unpackBool(args[i]));
-  }
-
-  if (PyComplex_Check(args[i])) {
-    return at::Scalar(THPUtils_unpackComplexDouble(args[i]));
-  }
-  return at::Scalar(THPUtils_unpackDouble(args[i]));
-}
-
-at::Scalar PythonArgs::scalar_slow(PyObject* arg) {
+template <typename T>
+at::Scalar PythonArgs::get_scalar(T arg) {
   // Zero-dim tensors are converted to Scalars as-is. Note this doesn't currently
   // handle most NumPy scalar types except np.float64.
   if (THPVariable_Check(arg)) {
@@ -1114,6 +1089,20 @@ at::Scalar PythonArgs::scalar_slow(PyObject* arg) {
     return at::Scalar(THPUtils_unpackComplexDouble(arg));
   }
   return at::Scalar(THPUtils_unpackDouble(arg));
+}
+
+at::Scalar PythonArgs::scalar_slow(int i) {
+  if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
+    auto& var = THPVariable_Unpack(args[i]);
+    jit::tracer::ArgumentStash::stashValue(
+        signature.params[i].name, idx, var, jit::NumberType::get());
+  }
+
+  return get_scalar(args[i]);
+}
+
+at::Scalar PythonArgs::scalar_slow(PyObject* arg) {
+  return get_scalar(arg);
 }
 
 } // namespace torch
