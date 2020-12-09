@@ -2174,40 +2174,6 @@ class TestLinalg(TestCase):
             gradcheck(func, [a, hermitian])
             gradgradcheck(func, [a, hermitian])
 
-    @precisionOverride({torch.float32: 5e-3, torch.complex64: 5e-3})
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_pinverse(self, device, dtype):
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value as fullrank
-
-        def run_test(M):
-            # Testing against definition for pseudo-inverses
-            MPI = torch.pinverse(M)
-            MPI_ = MPI.cpu().numpy()
-            M_ = M.cpu().numpy()
-            if M.numel() > 0:
-                self.assertEqual(M_, np.matmul(np.matmul(M_, MPI_), M_))
-                self.assertEqual(MPI_, np.matmul(np.matmul(MPI_, M_), MPI_))
-                self.assertEqual(np.matmul(M_, MPI_), np.matmul(M_, MPI_).swapaxes(-2, -1).conj())
-                self.assertEqual(np.matmul(MPI_, M_), np.matmul(MPI_, M_).swapaxes(-2, -1).conj())
-            else:
-                self.assertEqual(M.shape, MPI.shape[:-2] + (MPI.shape[-1], MPI.shape[-2]))
-        for sizes in [(5, 5), (3, 5, 5), (3, 7, 5, 5),  # square matrices
-                      (3, 2), (5, 3, 2), (7, 5, 3, 2),  # fat matrices
-                      (2, 3), (5, 2, 3), (7, 5, 2, 3),  # thin matrices
-                      (0, 0), (0, 2), (2, 0), (3, 0, 0), (0, 3, 0), (0, 0, 3)]:  # zero numel matrices
-            M = torch.randn(*sizes, dtype=dtype, device=device)
-            run_test(M)
-
-        # Test inverse and pseudo-inverse for invertible matrix
-        for sizes in [(5, 5), (3, 5, 5), (3, 7, 5, 5)]:
-            matsize = sizes[-1]
-            batchdims = sizes[:-2]
-            M = fullrank(matsize, *batchdims, dtype=dtype, device=device)
-            self.assertEqual(torch.eye(matsize, dtype=dtype, device=device).expand(sizes), M.pinverse().matmul(M),
-                             atol=1e-7, rtol=0, msg='pseudo-inverse for invertible matrix')
-
     def solve_test_helper(self, A_dims, b_dims, device, dtype):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
