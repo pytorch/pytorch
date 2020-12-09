@@ -498,6 +498,7 @@ class _BaseDataLoaderIter(object):
         self._base_seed = torch.empty((), dtype=torch.int64).random_(generator=loader.generator).item()
         self._persistent_workers = loader.persistent_workers
         self._num_yielded = 0
+        self._profile_name = "enumerate(DataLoader)#{}.__next__".format(self.__class__.__name__)
 
     def __iter__(self) -> '_BaseDataLoaderIter':
         return self
@@ -514,22 +515,23 @@ class _BaseDataLoaderIter(object):
         raise NotImplementedError
 
     def __next__(self) -> Any:
-        if self._sampler_iter is None:
-            self._reset()
-        data = self._next_data()
-        self._num_yielded += 1
-        if self._dataset_kind == _DatasetKind.Iterable and \
-                self._IterableDataset_len_called is not None and \
-                self._num_yielded > self._IterableDataset_len_called:
-            warn_msg = ("Length of IterableDataset {} was reported to be {} (when accessing len(dataloader)), but {} "
-                        "samples have been fetched. ").format(self._dataset, self._IterableDataset_len_called,
-                                                              self._num_yielded)
-            if self._num_workers > 0:
-                warn_msg += ("For multiprocessing data-loading, this could be caused by not properly configuring the "
-                             "IterableDataset replica at each worker. Please see "
-                             "https://pytorch.org/docs/stable/data.html#torch.utils.data.IterableDataset for examples.")
-            warnings.warn(warn_msg)
-        return data
+        with torch.autograd.profiler.record_function(self._profile_name):
+            if self._sampler_iter is None:
+                self._reset()
+            data = self._next_data()
+            self._num_yielded += 1
+            if self._dataset_kind == _DatasetKind.Iterable and \
+                    self._IterableDataset_len_called is not None and \
+                    self._num_yielded > self._IterableDataset_len_called:
+                warn_msg = ("Length of IterableDataset {} was reported to be {} (when accessing len(dataloader)), but {} "
+                            "samples have been fetched. ").format(self._dataset, self._IterableDataset_len_called,
+                                                                  self._num_yielded)
+                if self._num_workers > 0:
+                    warn_msg += ("For multiprocessing data-loading, this could be caused by not properly configuring the "
+                                 "IterableDataset replica at each worker. Please see "
+                                 "https://pytorch.org/docs/stable/data.html#torch.utils.data.IterableDataset for examples.")
+                warnings.warn(warn_msg)
+            return data
 
     next = __next__  # Python 2 compatibility
 
@@ -1292,13 +1294,10 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     if self._persistent_workers or self._workers_status[worker_id]:
                         self._mark_worker_as_unavailable(worker_id, shutdown=True)
                 for w in self._workers:
+                    # We should be able to join here, but in case anything went
+                    # wrong, we set a timeout and if the workers fail to join,
+                    # they are killed in the `finally` block.
                     w.join(timeout=_utils.MP_STATUS_CHECK_INTERVAL)
-                    if w.is_alive():
-                        # Existing mechanisms try to make the workers exit
-                        # peacefully, but in case that we unfortunately reach
-                        # here, which we shouldn't, (e.g., pytorch/pytorch#39570),
-                        # we kill the worker.
-                        w.terminate()
                 for q in self._index_queues:
                     q.cancel_join_thread()
                     q.close()
@@ -1316,6 +1315,13 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 if self._worker_pids_set:
                     _utils.signal_handling._remove_worker_pids(id(self))
                     self._worker_pids_set = False
+                for w in self._workers:
+                    if w.is_alive():
+                        # Existing mechanisms try to make the workers exit
+                        # peacefully, but in case that we unfortunately reach
+                        # here, which we shouldn't, (e.g., pytorch/pytorch#39570),
+                        # we kill the worker.
+                        w.terminate()
 
     def __del__(self):
         self._shutdown_workers()
