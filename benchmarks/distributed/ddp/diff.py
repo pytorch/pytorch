@@ -24,7 +24,7 @@ def main():
     args = parser.parse_args()
 
     if len(args.file) != 2:
-        raise "Must specify 2 files to diff"
+        raise RuntimeError("Must specify 2 files to diff")
 
     ja = load(args.file[0])
     jb = load(args.file[1])

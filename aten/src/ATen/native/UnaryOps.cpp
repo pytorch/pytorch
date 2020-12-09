@@ -149,8 +149,8 @@ Tensor& deg2rad_out(Tensor& result, const Tensor& self) {
 Tensor deg2rad(const Tensor& self) { return unary_op_impl(self, at::deg2rad_out); }
 Tensor& deg2rad_(Tensor& self) { return unary_op_impl_(self, at::deg2rad_out); }
 
-Tensor& asin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, asin_stub); }
-Tensor asin(const Tensor& self) { return unary_op_impl(self, at::asin_out); }
+Tensor& asin_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, asin_stub); }
+Tensor asin(const Tensor& self) { return unary_op_impl_float(self, asin_stub); }
 Tensor& asin_(Tensor& self) { return unary_op_impl_(self, at::asin_out); }
 
 // arcsin, alias of asin
@@ -258,12 +258,12 @@ Tensor& expm1_out(Tensor& result, const Tensor& self) { return unary_op_impl_out
 Tensor expm1(const Tensor& self) { return unary_op_impl(self, at::expm1_out); }
 Tensor& expm1_(Tensor& self) { return unary_op_impl_(self, at::expm1_out); }
 
-Tensor& erf_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, erf_stub); }
-Tensor erf(const Tensor& self) { return unary_op_impl(self, at::erf_out); }
+Tensor& erf_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, erf_stub); }
+Tensor erf(const Tensor& self) { return unary_op_impl_float(self, erf_stub); }
 Tensor& erf_(Tensor& self) { return unary_op_impl_(self, at::erf_out); }
 
-Tensor& erfc_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, erfc_stub); }
-Tensor erfc(const Tensor& self) { return unary_op_impl(self, at::erfc_out); }
+Tensor& erfc_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, erfc_stub); }
+Tensor erfc(const Tensor& self) { return unary_op_impl_float(self, erfc_stub); }
 Tensor& erfc_(Tensor& self) { return unary_op_impl_(self, at::erfc_out); }
 
 Tensor& frac_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, frac_stub); }
@@ -292,8 +292,8 @@ Tensor& log10_out(Tensor& result, const Tensor& self) { return unary_op_impl_flo
 Tensor log10(const Tensor& self) { return unary_op_impl_float(self, log10_stub); }
 Tensor& log10_(Tensor& self) { return unary_op_impl_(self, at::log10_out); }
 
-Tensor& log1p_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, log1p_stub); }
-Tensor log1p(const Tensor& self) { return unary_op_impl(self, at::log1p_out); }
+Tensor& log1p_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, log1p_stub); }
+Tensor log1p(const Tensor& self) { return unary_op_impl_float(self, log1p_stub); }
 Tensor& log1p_(Tensor& self) { return unary_op_impl_(self, at::log1p_out); }
 
 Tensor& log2_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, log2_stub); }
@@ -343,12 +343,12 @@ Tensor& cos_out(Tensor& result, const Tensor& self) { return unary_op_impl_float
 Tensor cos(const Tensor& self) { return unary_op_impl_float(self, cos_stub); }
 Tensor& cos_(Tensor& self) { return unary_op_impl_(self, at::cos_out); }
 
-Tensor& sinh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sinh_stub); }
-Tensor sinh(const Tensor& self) { return unary_op_impl(self, at::sinh_out); }
+Tensor& sinh_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, sinh_stub); }
+Tensor sinh(const Tensor& self) { return unary_op_impl_float(self, sinh_stub); }
 Tensor& sinh_(Tensor& self) { return unary_op_impl_(self, at::sinh_out); }
 
-Tensor& cosh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, cosh_stub); }
-Tensor cosh(const Tensor& self) { return unary_op_impl(self, at::cosh_out); }
+Tensor& cosh_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, cosh_stub); }
+Tensor cosh(const Tensor& self) { return unary_op_impl_float(self, cosh_stub); }
 Tensor& cosh_(Tensor& self) { return unary_op_impl_(self, at::cosh_out); }
 
 Tensor& acosh_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, acosh_stub); }
@@ -385,8 +385,8 @@ Tensor& sqrt_(Tensor& self) { return unary_op_impl_(self, at::sqrt_out); }
 Tensor square(const Tensor& self) { return at::pow(self, 2); }
 Tensor& square_(Tensor& self) { return at::pow_out(self, self, 2); }
 
-Tensor& sigmoid_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sigmoid_stub);  }
-Tensor sigmoid(const Tensor& self) { return unary_op_impl(self, at::sigmoid_out);  }
+Tensor& sigmoid_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, sigmoid_stub);  }
+Tensor sigmoid(const Tensor& self) { return unary_op_impl_float(self, sigmoid_stub);  }
 Tensor& sigmoid_(Tensor& self) { return unary_op_impl_(self, at::sigmoid_out);  }
 
 Tensor& logit_out(

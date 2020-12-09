@@ -13,7 +13,7 @@ constexpr auto kProfileEventsStartIdx = 3;
 RpcWithProfilingResp::RpcWithProfilingResp(
     rpc::MessageType messageType,
     rpc::Message&& wrappedMessage,
-    std::vector<torch::autograd::profiler::Event> profiledEvents,
+    std::vector<torch::autograd::profiler::LegacyEvent> profiledEvents,
     rpc::ProfilingId profilingId)
     : messageType_(messageType),
       wrappedMessage_(std::move(wrappedMessage)),
@@ -32,7 +32,7 @@ RpcWithProfilingResp::RpcWithProfilingResp(
     std::unique_ptr<rpc::RpcCommandBase> wrappedRpc,
     rpc::MessageType wrappedMessageType,
     std::vector<torch::Tensor> tensors,
-    std::vector<torch::autograd::profiler::Event> profiledEvents,
+    std::vector<torch::autograd::profiler::LegacyEvent> profiledEvents,
     rpc::ProfilingId profilingId)
     : messageType_(messageType),
       wrappedRpc_(std::move(wrappedRpc)),
@@ -52,7 +52,7 @@ rpc::MessageType RpcWithProfilingResp::wrappedMessageType() const {
   return wrappedMessageType_;
 }
 
-std::vector<torch::autograd::profiler::Event> RpcWithProfilingResp::
+std::vector<torch::autograd::profiler::LegacyEvent> RpcWithProfilingResp::
     getProfiledEvents() const {
   return profiledEvents_;
 }
@@ -119,15 +119,15 @@ std::unique_ptr<RpcWithProfilingResp> RpcWithProfilingResp::fromMessage(
       static_cast<rpc::MessageType>(tupleElements[0].toInt());
   rpc::ProfilingId profilingId = rpc::ProfilingId::fromIValue(tupleElements[1]);
   int profiledEventsSize = tupleElements[2].toInt();
-  std::vector<torch::autograd::profiler::Event> remoteEvents;
+  std::vector<torch::autograd::profiler::LegacyEvent> remoteEvents;
   remoteEvents.reserve(profiledEventsSize);
   for (int i = kProfileEventsStartIdx;
        i < kProfileEventsStartIdx + profiledEventsSize;
        ++i) {
     TORCH_CHECK(i < tupleElements.size());
     // Reconstruct remote event from the ivalues.
-    torch::autograd::profiler::Event fromIvalueEvent =
-        torch::autograd::profiler::Event::fromIValue(tupleElements[i]);
+    torch::autograd::profiler::LegacyEvent fromIvalueEvent =
+        torch::autograd::profiler::LegacyEvent::fromIValue(tupleElements[i]);
     remoteEvents.push_back(std::move(fromIvalueEvent));
   }
 

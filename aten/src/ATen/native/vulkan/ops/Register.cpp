@@ -1,10 +1,10 @@
-#ifdef USE_VULKAN
+#ifdef USE_VULKAN_API
 
-#include <torch/library.h>
-#include <torch/custom_class.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/Convolution.h>
 #include <ATen/native/vulkan/ops/Mm.h>
+#include <torch/custom_class.h>
+#include <torch/library.h>
 
 namespace at {
 namespace native {
@@ -77,4 +77,4 @@ TORCH_LIBRARY_IMPL(vulkan_prepack, Vulkan, m) {
 } // namespace native
 } // namespace at
 
-#endif /* USE_VULKAN */
+#endif /* USE_VULKAN_API */

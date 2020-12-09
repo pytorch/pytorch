@@ -822,7 +822,7 @@ class TestGradCheckOverride(TestCase):
         })
 
 class TestNamedTuple(TestCase):
-    "Regression test for gh-47090"
+    """ Regression test for gh-47090 """
     def test_max(self):
         x = torch.tensor([1, 2])
         xs = x.as_subclass(SubTensor2)
@@ -837,6 +837,45 @@ class TestGradNewOnesOverride(TestCase):
         t = torch.tensor([1, 2]).as_subclass(SubTensor2)
         n = t.new_ones((1, 2))
         self.assertEqual(type(n), SubTensor2)
+
+
+class TestBroadcastAllOverride(TestCase):
+    """ test for gh-37141 """
+    def test_broadcast_all(self):
+        from torch.distributions.utils import broadcast_all
+        a = torch.tensor([1.2, 3.4, 5.6])
+        a_w = Wrapper(a)
+        b = torch.tensor(5.0)
+        b_w = Wrapper(b)
+        c = torch.tensor([5.0, 5.0, 5.0])
+
+        o_1 = broadcast_all(a_w, b_w)
+        self.assertTrue(isinstance(o_1[0], Wrapper))
+        self.assertTrue(isinstance(o_1[1], Wrapper))
+        self.assertEqual(o_1[0]._data, a)
+        self.assertEqual(o_1[1]._data, c)
+
+        o_2 = broadcast_all(a_w, b)
+        self.assertTrue(isinstance(o_2[0], Wrapper))
+        self.assertTrue(isinstance(o_2[1], Wrapper))
+        self.assertEqual(o_2[0]._data, a)
+        self.assertEqual(o_2[1]._data, c)
+
+class TestWrapTorchFunction(TestCase):
+    def test_wrap_torch_function(self):
+        class A:
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs):
+                return -1
+
+        def dispatcher(a):
+            return (a,)
+
+        @torch.overrides.wrap_torch_function(dispatcher)
+        def f(a):
+            return a
+
+        self.assertEqual(f(A()), -1)
 
 if __name__ == '__main__':
     unittest.main()

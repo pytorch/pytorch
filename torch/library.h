@@ -658,25 +658,16 @@ public:
 /// within the same namespace cannot be easily put into one macro block
 /// (this is mostly the case for custom ops in fbcode that were ported from
 /// the old API)
-#define TORCH_LIBRARY_FRAGMENT(ns, m) \
-  static void TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## k (torch::Library&); \
-  static torch::detail::TorchLibraryInit TORCH_LIBRARY_FRAGMENT_static_init_ ## ns ## _ ## k ( \
-    torch::Library::FRAGMENT, \
-    &TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## k, \
-    #ns, c10::nullopt, __FILE__, __LINE__ \
-  ); \
-  void TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## k (torch::Library& m)
+#define TORCH_LIBRARY_FRAGMENT(ns,  m) _TORCH_LIBRARY_FRAGMENT(ns, m, C10_UID)
 
 /// \private
 ///
-/// This macro should only be used in a few legacy areas.
-/// This macro is a version of TORCH_LIBRARY() that:
-///     - doesn't enforce that there is only library for the given namespace
-///     - takes in a unique identifier that it appends to the names
-///       of each static variable that it creates
-/// It effectively lets you define multiple TORCH_LIBRARY_FRAGMENT blocks
-/// for the same namespace within the same translation unit, avoiding naming collisions.
-#define TORCH_LIBRARY_FRAGMENT_UNIQUE(ns, m, uid) \
+/// The above macro requires an extra unique identifier (uid) to prevent variable name collisions
+/// This can happen if TORCH_LIBRARY_FRAGMENT is called multiple times with the same namespace
+/// in the same translation unit.
+/// Note that the TORCH_LIBRARY variant doesn't run into this problem, because it enforces
+/// that it can only be called once for a given namespace.
+#define _TORCH_LIBRARY_FRAGMENT(ns, m, uid) \
   static void C10_CONCATENATE(TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _, uid) (torch::Library&); \
   static torch::detail::TorchLibraryInit C10_CONCATENATE(TORCH_LIBRARY_FRAGMENT_static_init_ ## ns ## _, uid) ( \
     torch::Library::FRAGMENT, \
@@ -725,40 +716,25 @@ public:
 ///
 // NB: if the dispatch key is not whitelisted, we simply omit the Library
 // call entirely
-#define TORCH_LIBRARY_IMPL(ns, k, m) \
-  static void TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k (torch::Library&); \
-  static torch::detail::TorchLibraryInit TORCH_LIBRARY_IMPL_static_init_ ## ns ## _ ## k ( \
-    torch::Library::IMPL, \
-    c10::guts::if_constexpr<c10::impl::dispatch_key_whitelist_check(c10::DispatchKey::k)>( \
-      []() { return & TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k; }, \
-      []() { return [](torch::Library&) -> void {}; } \
-    ), \
-    #ns, c10::make_optional(c10::DispatchKey::k), \
-    __FILE__, __LINE__ \
-  ); \
-  void TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k (torch::Library& m)
+#define TORCH_LIBRARY_IMPL(ns, k, m) _TORCH_LIBRARY_IMPL(ns, k, m, C10_UID)
 
 /// \private
 ///
-/// This macro should only be used in a few legacy areas.
-/// This macro is a version of TORCH_LIBRARY_IMPL() that:
-///     - takes in a unique identifier that it appends to the names
-///       of each static variable that it creates
-/// It effectively lets you define multiple TORCH_LIBRARY_IMPL blocks
-/// for the same namespace/dispatch key within the same translation unit,
-/// avoiding naming collisions.
-#define TORCH_LIBRARY_IMPL_UNIQUE(ns, k, m, uid) \
-  static void C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k, uid) (torch::Library&); \
-  static torch::detail::TorchLibraryInit C10_CONCATENATE(TORCH_LIBRARY_IMPL_static_init_ ## ns ## _ ## k, uid) ( \
+/// The above macro requires an extra unique identifier (uid) to prevent variable name collisions.
+/// This can happen if TORCH_LIBRARY_IMPL is called multiple times with the same namespace
+/// and dispatch key in the same translation unit.
+#define _TORCH_LIBRARY_IMPL(ns, k, m, uid) \
+  static void C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k ## _, uid) (torch::Library&); \
+  static torch::detail::TorchLibraryInit C10_CONCATENATE(TORCH_LIBRARY_IMPL_static_init_ ## ns ## _ ## k ## _, uid) ( \
     torch::Library::IMPL, \
     c10::guts::if_constexpr<c10::impl::dispatch_key_whitelist_check(c10::DispatchKey::k)>( \
-      []() { return & C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k, uid); }, \
+      []() { return & C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k ## _, uid); }, \
       []() { return [](torch::Library&) -> void {}; } \
     ), \
     #ns, c10::make_optional(c10::DispatchKey::k), \
     __FILE__, __LINE__ \
   ); \
-  void C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k, uid) (torch::Library& m)
+  void C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k ## _, uid) (torch::Library& m)
 
 
 // These are variants of the macros above which are to be used for testing (they
