@@ -14,10 +14,16 @@ from torch.quantization.quantize_fx import (
     prepare_qat_fx,
 )
 
+from torch.quantization.fx.pattern_utils import (
+    is_match,
+    MatchAllNode,
+)
+
 from torch.quantization import (
     QuantType,
     QuantStub,
     DeQuantStub,
+    QuantWrapper,
     quant_type_to_str,
     default_qconfig,
     default_dynamic_qconfig,
@@ -44,7 +50,13 @@ from torch.testing._internal.common_quantization import (
     skip_if_no_torchvision,
     train_one_epoch,
     run_ddp,
+    test_only_eval_fn,
+    test_only_train_fn,
+)
+
+from torch.testing._internal.common_quantization import (
     LinearModelWithSubmodule,
+    ResNetBase,
 )
 
 from torch.testing._internal.common_quantized import (
@@ -186,6 +198,31 @@ class TestFuseFx(QuantizationTestCase):
 
 @skipIfNoFBGEMM
 class TestQuantizeFx(QuantizationTestCase):
+    def test_pattern_match(self):
+        """ test MatchAllNode with
+            conv - bn - add - relu pattern
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(1, 1, 1)
+                self.bn = nn.BatchNorm2d(1)
+                self.relu = nn.ReLU()
+
+            def forward(self, x, y):
+                x = self.conv(x)
+                x = self.bn(x)
+                x = x + y
+                x = self.relu(x)
+                return x
+
+        pattern = (nn.ReLU, (operator.add, (nn.BatchNorm2d, nn.Conv2d), MatchAllNode))
+        m = torch.fx.symbolic_trace(M())
+        modules = dict(m.named_modules())
+        for n in m.graph.nodes:
+            if n.op == 'call_module' and type(modules[n.target]) == nn.ReLU:
+                self.assertTrue(is_match(modules, n, pattern))
+
     def _get_conv_linear_test_cases(self):
         ''' Returns a list of test cases, with format:
         is_dynamic, ModuleClass, module_constructor_inputs,
@@ -2188,6 +2225,58 @@ class TestQuantizeFxModels(QuantizationTestCase):
                                      'eager mode quantization on model: ' + name +
                                      ' should match. Mode: ' + mode +
                                      ' diff:' + str(diff_from_eager[mode][name]))
+
+    def _test_building_block(self, quant_type, BB):
+        eager = BB().float()
+        graph = copy.deepcopy(eager)
+
+        if quant_type == QuantType.STATIC:
+            qconfig = default_qconfig
+            eager_prepare = prepare
+            graph_prepare = prepare_fx
+            eager.eval()
+            graph.eval()
+            calibrate_or_train = test_only_eval_fn
+            data = self.img_data_2d
+        else:
+            assert quant_type == QuantType.QAT
+            qconfig = default_qat_qconfig
+            eager_prepare = prepare_qat
+            graph_prepare = prepare_qat_fx
+            eager.train()
+            graph.train()
+            calibrate_or_train = test_only_train_fn
+            data = self.img_data_2d_train
+
+        if hasattr(eager, "fuse_model"):
+            eager.fuse_model()
+        eager = QuantWrapper(eager)
+        eager.qconfig = qconfig
+        eager = eager_prepare(eager)
+
+        qconfig_dict = {"": qconfig}
+        graph = graph_prepare(graph, qconfig_dict)
+
+        eager_out = eager(data[0][0])
+        graph_out = graph(data[0][0])
+        self.assertEqual(eager_out, graph_out)
+
+        calibrate_or_train(eager, data)
+        calibrate_or_train(graph, data)
+
+        eager = convert(eager)
+        graph = convert_fx(graph)
+
+        eager_out = eager(data[0][0])
+        graph_out = graph(data[0][0])
+        self.assertEqual(eager_out, graph_out)
+
+    @override_qengines
+    def test_resnet_base(self):
+        models = [ResNetBase]
+        options = itertools.product(self.static_quant_types, models)
+        for quant_type, M in options:
+            self._test_building_block(quant_type, M)
 
     @skip_if_no_torchvision
     @skipIfNoFBGEMM
