@@ -348,7 +348,8 @@ bool available(
                                         (c10::DeviceType::Vulkan == bias->device().type())) &&
                                        (kFloat == bias->scalar_type()) &&
                                        (transposed ? false /* to be addded in the future */
-                                                   : (weight.size(Layout::Filter::output) == bias->size(Layout::Filter::output))))
+                                                   : (weight.size(Layout::Filter::output) ==
+                                                          bias->size(Layout::Filter::output))))
                                     : true) &&
          // Stride
          (stride[Layout::Parameter::height] > 0) &&

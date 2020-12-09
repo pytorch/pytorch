@@ -383,10 +383,10 @@ Command::Buffer Command::Pool::allocate() {
         Configuration::kQuantum);
 
     allocate_command_buffers(
-       device_,
-       command_pool_.get(),
-       buffer_.pool.data() + buffer_.in_use,
-       Configuration::kQuantum);
+        device_,
+        command_pool_.get(),
+        buffer_.pool.data() + buffer_.in_use,
+        Configuration::kQuantum);
   }
 
   return Buffer(buffer_.pool[buffer_.in_use++]);

@@ -34,62 +34,58 @@ Tensor adaptive_avg_pool2d(
   };
 
   api::Command::Buffer command_buffer = context->command().pool.allocate();
-  command_buffer.begin();
-  {
-    if (v_self.has_image()) {
-      const uvec3 v_output_size = v_output.extents();
-      const uvec3 v_self_size = v_self.extents();
 
-      const vec2 stride {
-        static_cast<float>(v_self_size.data[0u]) / v_output_size.data[0u],
-        static_cast<float>(v_self_size.data[1u]) / v_output_size.data[1u],
-      };
+  if C10_LIKELY(v_self.has_image()) {
+    const uvec3 v_output_size = v_output.extents();
+    const uvec3 v_self_size = v_self.extents();
 
-      const struct {
-        uvec3 size;
-        uint32_t _;
-        vec2 stride;
-        vec2 kernel;
-      } block {
-        v_output.extents(),
-        0u,
-        stride,
+    const vec2 stride {
+      static_cast<float>(v_self_size.data[0u]) / v_output_size.data[0u],
+      static_cast<float>(v_self_size.data[1u]) / v_output_size.data[1u],
+    };
+
+    const struct {
+      uvec3 size;
+      uint32_t _;
+      vec2 stride;
+      vec2 kernel;
+    } block {
+      v_output.extents(),
+      0u,
+      stride,
+      {
+        v_self_size.data[0u] - (v_output_size.data[0u] - 1u) * stride.data[0u],
+        v_self_size.data[1u] - (v_output_size.data[1u] - 1u) * stride.data[1u],
+      },
+    };
+
+    context->dispatch(
+        command_buffer,
         {
-          v_self_size.data[0u] - (v_output_size.data[0u] - 1u) * stride.data[0u],
-          v_self_size.data[1u] - (v_output_size.data[1u] - 1u) * stride.data[1u],
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         },
-      };
-
-      context->dispatch(
-          command_buffer,
-          {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          },
-          VK_KERNEL(adaptive_avg_pool2d),
-          v_output.extents(),
-          // Write-only access bypasses synchronization but inserts appropriate
-          // barriers if necessary.
-          v_output.image(
-              command_buffer,
-              vTensor::Stage::Compute,
-              vTensor::Access::Write),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_self.image(
-              command_buffer,
-              vTensor::Stage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
-    }
-    else {
-      TORCH_CHECK(false, "Not implemented!");
-    }
+        VK_KERNEL(adaptive_avg_pool2d),
+        v_output.extents(),
+        // Write-only access bypasses synchronization but inserts appropriate
+        // barriers if necessary.
+        v_output.image(
+            command_buffer,
+            vTensor::Stage::Compute,
+            vTensor::Access::Write),
+        // Read-only access is implied on const tensors and triggers an async
+        // synchronization if necessary.
+        v_self.image(
+            command_buffer,
+            vTensor::Stage::Compute),
+        // Object lifetime is managed by the resource pool.
+        // It is OK not to keep track of the handle.
+        context->resource().pool.uniform(block).object);
   }
-  command_buffer.end();
-  command_buffer.submit(context->gpu().queue);
+  else {
+    TORCH_CHECK(false, "Not implemented!");
+  }
 
   return convert(v_output);
 }
@@ -172,71 +168,65 @@ Tensor avg_pool2d(
   };
 
   api::Command::Buffer command_buffer = context->command().pool.allocate();
-  command_buffer.begin();
-  {
-    using namespace utils;
 
-    if (v_self.has_image()) {
-      const struct {
-        uvec3 extents;
-        int32_t range;
-        ivec2 iextents;
-        ivec2 stride;
-        ivec2 padding;
-        ivec2 kernel;
-      } block {
+  if C10_LIKELY(v_self.has_image()) {
+    const struct {
+      uvec3 extents;
+      int32_t range;
+      ivec2 iextents;
+      ivec2 stride;
+      ivec2 padding;
+      ivec2 kernel;
+    } block {
+      v_output.extents(),
+      safe_downcast<int32_t>(
+          kernel[Layout::Parameter::width] *
+          kernel[Layout::Parameter::height]),
+      {
+        safe_downcast<int32_t>(self.size(Layout::Activation4D::width)),
+        safe_downcast<int32_t>(self.size(Layout::Activation4D::height)),
+      },
+      {
+        safe_downcast<int32_t>(stride[Layout::Parameter::width]),
+        safe_downcast<int32_t>(stride[Layout::Parameter::height]),
+      },
+      {
+        safe_downcast<int32_t>(padding[Layout::Parameter::width]),
+        safe_downcast<int32_t>(padding[Layout::Parameter::height]),
+      },
+      {
+        safe_downcast<int32_t>(kernel[Layout::Parameter::width]),
+        safe_downcast<int32_t>(kernel[Layout::Parameter::height]),
+      },
+    };
+
+    context->dispatch(
+        command_buffer,
+        {
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        },
+        VK_KERNEL(avg_pool2d),
         v_output.extents(),
-        safe_downcast<int32_t>(
-            kernel[Layout::Parameter::width] *
-            kernel[Layout::Parameter::height]),
-        {
-          safe_downcast<int32_t>(self.size(Layout::Activation4D::width)),
-          safe_downcast<int32_t>(self.size(Layout::Activation4D::height)),
-        },
-        {
-          safe_downcast<int32_t>(stride[Layout::Parameter::width]),
-          safe_downcast<int32_t>(stride[Layout::Parameter::height]),
-        },
-        {
-          safe_downcast<int32_t>(padding[Layout::Parameter::width]),
-          safe_downcast<int32_t>(padding[Layout::Parameter::height]),
-        },
-        {
-          safe_downcast<int32_t>(kernel[Layout::Parameter::width]),
-          safe_downcast<int32_t>(kernel[Layout::Parameter::height]),
-        },
-      };
-
-      context->dispatch(
-          command_buffer,
-          {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          },
-          VK_KERNEL(avg_pool2d),
-          v_output.extents(),
-          // Write-only access bypasses synchronization but inserts appropriate
-          // barriers if necessary.
-          v_output.image(
-              command_buffer,
-              vTensor::Stage::Compute,
-              vTensor::Access::Write),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_self.image(
-              command_buffer,
-              vTensor::Stage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
-    }
-    else {
-      TORCH_CHECK(false, "Not implemented!");
-    }
+        // Write-only access bypasses synchronization but inserts appropriate
+        // barriers if necessary.
+        v_output.image(
+            command_buffer,
+            vTensor::Stage::Compute,
+            vTensor::Access::Write),
+        // Read-only access is implied on const tensors and triggers an async
+        // synchronization if necessary.
+        v_self.image(
+            command_buffer,
+            vTensor::Stage::Compute),
+        // Object lifetime is managed by the resource pool.
+        // It is OK not to keep track of the handle.
+        context->resource().pool.uniform(block).object);
   }
-  command_buffer.end();
-  command_buffer.submit(context->gpu().queue);
+  else {
+    TORCH_CHECK(false, "Not implemented!");
+  }
 
   return convert(v_output);
 }

@@ -20,7 +20,7 @@ struct Command final {
 
   class Buffer final {
    public:
-    Buffer(VkCommandBuffer command_buffer = VK_NULL_HANDLE);
+    explicit Buffer(VkCommandBuffer command_buffer);
     Buffer(const Buffer&) = delete;
     Buffer& operator=(const Buffer&) = delete;
     Buffer(Buffer&&);
@@ -28,6 +28,7 @@ struct Command final {
     ~Buffer() = default;
 
     operator bool() const;
+    VkCommandBuffer handle() const;
 
     void begin();
     void end();
@@ -127,6 +128,10 @@ inline Command::Buffer& Command::Buffer::operator=(Buffer&& buffer) {
 
 inline Command::Buffer::operator bool() const {
   return VK_NULL_HANDLE != command_buffer_;
+}
+
+inline VkCommandBuffer Command::Buffer::handle() const {
+  return command_buffer_;
 }
 
 inline void Command::Buffer::Bound::reset() {

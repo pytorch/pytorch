@@ -37,63 +37,59 @@ Tensor upsample_nearest2d(
   };
 
   api::Command::Buffer command_buffer = context->command().pool.allocate();
-  command_buffer.begin();
-  {
-    if (v_input.has_image()) {
-      const struct {
-        uvec3 extents;
-        uint32_t _;
-        ivec2 iextents;
-        vec2 scale;
-      } block {
-        v_output.extents(),
-        0u,
-        {
-          safe_downcast<int32_t>(input.size(Layout::Activation4D::width) - 1),
-          safe_downcast<int32_t>(input.size(Layout::Activation4D::height) - 1),
-        },
-        {
-            compute_scales_value<float>(
-                scales_w,
-                v_input_sizes[Layout::Activation4D::width],
-                output_sizes[Layout::Parameter::width]),
-            compute_scales_value<float>(
-                scales_h,
-                v_input_sizes[Layout::Activation4D::height],
-                output_sizes[Layout::Parameter::height]),
-        },
-      };
 
-      context->dispatch(
-          command_buffer,
-          {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          },
-          VK_KERNEL(upsample_nearest2d),
-          v_output.extents(),
-          // Write-only access bypasses synchronization but inserts appropriate
-          // barriers if necessary.
-          v_output.image(
-              command_buffer,
-              vTensor::Stage::Compute,
-              vTensor::Access::Write),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_input.image(
-              command_buffer,
-              vTensor::Stage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
-    }
-    else {
-      TORCH_CHECK(false, "Not implemented!");
-    }
+  if C10_LIKELY(v_input.has_image()) {
+    const struct {
+      uvec3 extents;
+      uint32_t _;
+      ivec2 iextents;
+      vec2 scale;
+    } block {
+      v_output.extents(),
+      0u,
+      {
+        safe_downcast<int32_t>(input.size(Layout::Activation4D::width) - 1),
+        safe_downcast<int32_t>(input.size(Layout::Activation4D::height) - 1),
+      },
+      {
+          compute_scales_value<float>(
+              scales_w,
+              v_input_sizes[Layout::Activation4D::width],
+              output_sizes[Layout::Parameter::width]),
+          compute_scales_value<float>(
+              scales_h,
+              v_input_sizes[Layout::Activation4D::height],
+              output_sizes[Layout::Parameter::height]),
+      },
+    };
+
+    context->dispatch(
+        command_buffer,
+        {
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        },
+        VK_KERNEL(upsample_nearest2d),
+        v_output.extents(),
+        // Write-only access bypasses synchronization but inserts appropriate
+        // barriers if necessary.
+        v_output.image(
+            command_buffer,
+            vTensor::Stage::Compute,
+            vTensor::Access::Write),
+        // Read-only access is implied on const tensors and triggers an async
+        // synchronization if necessary.
+        v_input.image(
+            command_buffer,
+            vTensor::Stage::Compute),
+        // Object lifetime is managed by the resource pool.
+        // It is OK not to keep track of the handle.
+        context->resource().pool.uniform(block).object);
   }
-  command_buffer.end();
-  command_buffer.submit(context->gpu().queue);
+  else {
+    TORCH_CHECK(false, "Not implemented!");
+  }
 
   return convert(v_output);
 }

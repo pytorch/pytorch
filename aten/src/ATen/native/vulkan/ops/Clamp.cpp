@@ -29,52 +29,48 @@ Tensor clamp(
   };
 
   api::Command::Buffer command_buffer = context->command().pool.allocate();
-  command_buffer.begin();
-  {
-    if (v_output.has_image() && v_self.has_image()) {
-      const struct {
-        uvec3 extents;
-        uint32_t _;
-        vec2 clamp;
-      } block {
-        v_output.extents(),
-        0u,
-        {
-          min ? min->to<float>() : -std::numeric_limits<float>::infinity(),
-          max ? max->to<float>() : std::numeric_limits<float>::infinity(),
-        },
-      };
 
-      context->dispatch(
-          command_buffer,
-          {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          },
-          VK_KERNEL(clamp),
-          v_output.extents(),
-          // Write-only access bypasses synchronization but inserts appropriate
-          // barriers if necessary.
-          v_output.image(
-              command_buffer,
-              vTensor::Stage::Compute,
-              vTensor::Access::Write),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_self.image(
-              command_buffer,
-              vTensor::Stage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
-    }
-    else {
-      TORCH_CHECK(false, "Not implemented!");
-    }
+  if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
+    const struct {
+      uvec3 extents;
+      uint32_t _;
+      vec2 clamp;
+    } block {
+      v_output.extents(),
+      0u,
+      {
+        min ? min->to<float>() : -std::numeric_limits<float>::infinity(),
+        max ? max->to<float>() : std::numeric_limits<float>::infinity(),
+      },
+    };
+
+    context->dispatch(
+        command_buffer,
+        {
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        },
+        VK_KERNEL(clamp),
+        v_output.extents(),
+        // Write-only access bypasses synchronization but inserts appropriate
+        // barriers if necessary.
+        v_output.image(
+            command_buffer,
+            vTensor::Stage::Compute,
+            vTensor::Access::Write),
+        // Read-only access is implied on const tensors and triggers an async
+        // synchronization if necessary.
+        v_self.image(
+            command_buffer,
+            vTensor::Stage::Compute),
+        // Object lifetime is managed by the resource pool.
+        // It is OK not to keep track of the handle.
+        context->resource().pool.uniform(block).object);
   }
-  command_buffer.end();
-  command_buffer.submit(context->gpu().queue);
+  else {
+    TORCH_CHECK(false, "Not implemented!");
+  }
 
   return convert(v_output);
 }
@@ -96,46 +92,42 @@ Tensor& clamp_(
   vTensor& v_self = convert(self);
 
   api::Command::Buffer command_buffer = context->command().pool.allocate();
-  command_buffer.begin();
-  {
-    if (v_self.has_image()) {
-      const struct {
-        uvec3 extents;
-        uint32_t _;
-        vec2 clamp;
-      } block {
-        v_self.extents(),
-        0u,
-        {
-          min ? min->to<float>() : -std::numeric_limits<float>::infinity(),
-          max ? max->to<float>() : std::numeric_limits<float>::infinity(),
-        },
-      };
 
-      context->dispatch(
-          command_buffer,
-          {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          },
-          VK_KERNEL(clamp_),
-          v_self.extents(),
-          // Read-Write access triggers an async synchronization if necessory
-          // and inserts appropriate barriers if hazards are detected.
-          v_self.image(
-              command_buffer,
-              vTensor::Stage::Compute,
-              vTensor::Access::Read | vTensor::Access::Write),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
-    }
-    else {
-      TORCH_CHECK(false, "Not implemented!");
-    }
+  if C10_LIKELY(v_self.has_image()) {
+    const struct {
+      uvec3 extents;
+      uint32_t _;
+      vec2 clamp;
+    } block {
+      v_self.extents(),
+      0u,
+      {
+        min ? min->to<float>() : -std::numeric_limits<float>::infinity(),
+        max ? max->to<float>() : std::numeric_limits<float>::infinity(),
+      },
+    };
+
+    context->dispatch(
+        command_buffer,
+        {
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        },
+        VK_KERNEL(clamp_),
+        v_self.extents(),
+        // Read-Write access triggers an async synchronization if necessory
+        // and inserts appropriate barriers if hazards are detected.
+        v_self.image(
+            command_buffer,
+            vTensor::Stage::Compute,
+            vTensor::Access::Read | vTensor::Access::Write),
+        // Object lifetime is managed by the resource pool.
+        // It is OK not to keep track of the handle.
+        context->resource().pool.uniform(block).object);
   }
-  command_buffer.end();
-  command_buffer.submit(context->gpu().queue);
+  else {
+    TORCH_CHECK(false, "Not implemented!");
+  }
 
   return self;
 }

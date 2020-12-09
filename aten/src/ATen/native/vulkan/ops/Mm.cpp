@@ -10,8 +10,8 @@ namespace {
 using namespace api::utils;
 
 vTensor pack_weights(
-  api::Resource::Pool& pool,
-  const Tensor& weight_arg) {
+    api::Resource::Pool& pool,
+    const Tensor& weight_arg) {
   if (weight_arg.is_vulkan()) {
     return convert(weight_arg);
   }
@@ -52,7 +52,9 @@ vTensor pack_biases(
   vTensor v_bias{
       api::context(),
       &pool,
-      {weight_arg.sizes()[Layout::Parameter::width]},
+      {
+          weight_arg.size(Layout::Parameter::width),
+      },
       weight_arg.options(),
   };
 
@@ -66,7 +68,8 @@ vTensor pack_biases(
           v_bias_payload.get(),
           bias_arg->contiguous().data_ptr<float>(),
           std::min(bias_arg->nbytes(), v_bias.nbytes()));
-    } else {
+    }
+    else {
       memset(
           v_bias_payload.get(),
           // 2's complement integers and IEEE-754 floating point numbers both
@@ -163,52 +166,49 @@ Tensor mm(
   };
 
   api::Command::Buffer command_buffer = context->command().pool.allocate();
-  command_buffer.begin();
-  {
-    if (v_mat1.has_image() && v_mat2.has_image()) {
-      const struct {
-        uvec3 size;
-        int32_t K;
-      } block {
-        v_output.extents(),
-        safe_downcast<int32_t>(v_mat1_sizes[Layout::Parameter::width]),
-      };
 
-      context->dispatch(
-          command_buffer,
-          {
-              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          },
-          VK_KERNEL(mm),
-          v_output.extents(),
-          // Write-only access bypasses synchronization but inserts appropriate
-          // barriers if necessary.
-          v_output.image(
-              command_buffer,
-              vTensor::Stage::Compute,
-              vTensor::Access::Write),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_mat1.image(
-              command_buffer,
-              vTensor::Stage::Compute),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_mat2.image(
-              command_buffer,
-              vTensor::Stage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
-    } else {
-      TORCH_CHECK(false, "Not implemented!");
-    }
+  if C10_LIKELY(v_mat1.has_image() && v_mat2.has_image()) {
+    const struct {
+      uvec3 size;
+      int32_t K;
+    } block {
+      v_output.extents(),
+      safe_downcast<int32_t>(v_mat1_sizes[Layout::Parameter::width]),
+    };
+
+    context->dispatch(
+        command_buffer,
+        {
+            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        },
+        VK_KERNEL(mm),
+        v_output.extents(),
+        // Write-only access bypasses synchronization but inserts appropriate
+        // barriers if necessary.
+        v_output.image(
+            command_buffer,
+            vTensor::Stage::Compute,
+            vTensor::Access::Write),
+        // Read-only access is implied on const tensors and triggers an async
+        // synchronization if necessary.
+        v_mat1.image(
+            command_buffer,
+            vTensor::Stage::Compute),
+        // Read-only access is implied on const tensors and triggers an async
+        // synchronization if necessary.
+        v_mat2.image(
+            command_buffer,
+            vTensor::Stage::Compute),
+        // Object lifetime is managed by the resource pool.
+        // It is OK not to keep track of the handle.
+        context->resource().pool.uniform(block).object);
   }
-  command_buffer.end();
-  command_buffer.submit(context->gpu().queue);
+  else {
+    TORCH_CHECK(false, "Not implemented!");
+  }
 
   return convert(v_output);
 }
@@ -282,67 +282,64 @@ Tensor LinearOpContext::run(
   };
 
   api::Command::Buffer command_buffer = context->command().pool.allocate();
-  command_buffer.begin();
-  {
-    if (v_output.has_image() &&
-        v_input.has_image() &&
-        packed_.v_weight.has_image() &&
-        packed_.v_bias.has_image()) {
-      const struct {
-        uvec3 size;
-        int32_t K;
-        vec2 multiplier;
-      } block {
-          v_output.extents(),
-          safe_downcast<int32_t>(v_input.sizes()[Layout::Parameter::width]),
-          {
-            alpha,
-            beta,
-          },
-      };
 
-      context->dispatch(
-          command_buffer,
-          {
-              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          },
-          VK_KERNEL(addmm),
-          v_output.extents(),
-          // Write-only access bypasses synchronization but inserts appropriate
-          // barriers if necessary.
-          v_output.image(
-              command_buffer,
-              vTensor::Stage::Compute,
-              vTensor::Access::Write),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_input.image(
-              command_buffer,
-              vTensor::Stage::Compute),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          packed_.v_weight.image(
-              command_buffer,
-              vTensor::Stage::Compute),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          packed_.v_bias.image(
-              command_buffer,
-              vTensor::Stage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
-    }
-    else {
-      TORCH_CHECK(false, "Not implemented!");
-    }
+  if C10_LIKELY(
+      v_output.has_image() &&
+      v_input.has_image() &&
+      packed_.v_weight.has_image() &&
+      packed_.v_bias.has_image()) {
+    const struct {
+      uvec3 size;
+      int32_t K;
+      vec2 multiplier;
+    } block {
+        v_output.extents(),
+        safe_downcast<int32_t>(v_input.sizes()[Layout::Parameter::width]),
+        {
+          alpha,
+          beta,
+        },
+    };
+
+    context->dispatch(
+        command_buffer,
+        {
+            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        },
+        VK_KERNEL(addmm),
+        v_output.extents(),
+        // Write-only access bypasses synchronization but inserts appropriate
+        // barriers if necessary.
+        v_output.image(
+            command_buffer,
+            vTensor::Stage::Compute,
+            vTensor::Access::Write),
+        // Read-only access is implied on const tensors and triggers an async
+        // synchronization if necessary.
+        v_input.image(
+            command_buffer,
+            vTensor::Stage::Compute),
+        // Read-only access is implied on const tensors and triggers an async
+        // synchronization if necessary.
+        packed_.v_weight.image(
+            command_buffer,
+            vTensor::Stage::Compute),
+        // Read-only access is implied on const tensors and triggers an async
+        // synchronization if necessary.
+        packed_.v_bias.image(
+            command_buffer,
+            vTensor::Stage::Compute),
+        // Object lifetime is managed by the resource pool.
+        // It is OK not to keep track of the handle.
+        context->resource().pool.uniform(block).object);
   }
-  command_buffer.end();
-  command_buffer.submit(context->gpu().queue);
+  else {
+    TORCH_CHECK(false, "Not implemented!");
+  }
 
   return convert(v_output);
 }

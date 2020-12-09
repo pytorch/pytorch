@@ -41,7 +41,6 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
     // Vulkan -> Vulkan
     else if (at::kVulkan == src.device().type()) {
       api::Command::Buffer command_buffer = api::context()->command().pool.allocate();
-      command_buffer.begin();
 
       command_buffer.copy(
           // - Read-only access is implied on const tensors.  Memory barriers
@@ -60,9 +59,6 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
               command_buffer,
               vTensor::Stage::Transfer,
               vTensor::Access::Write));
-
-      command_buffer.end();
-      command_buffer.submit(api::context()->gpu().queue);
     }
     else {
       TORCH_INTERNAL_ASSERT(false, "Unsupported!");
