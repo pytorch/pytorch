@@ -5,57 +5,53 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 
-#include "test/cpp/jit/test_utils.h"
+#include <test/cpp/jit/test_utils.h>
 
+#include <torch/csrc/autograd/engine.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/codegen/fuser/interface.h>
+#include <torch/csrc/jit/frontend/code_template.h>
+#include <torch/csrc/jit/frontend/ir_emitter.h>
+#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/ir/attributes.h>
+#include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/ir/scope.h>
 #include <torch/csrc/jit/ir/type_hashing.h>
+#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
-#include "torch/csrc/autograd/generated/variable_factories.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/codegen/fuser/interface.h"
-#include "torch/csrc/jit/frontend/code_template.h"
-#include "torch/csrc/jit/frontend/tracer.h"
-#include "torch/csrc/jit/ir/alias_analysis.h"
-#include "torch/csrc/jit/ir/attributes.h"
-#include "torch/csrc/jit/ir/irparser.h"
-#include "torch/csrc/jit/ir/scope.h"
-#include "torch/csrc/jit/jit_log.h"
-#include "torch/csrc/jit/passes/bailout_graph.h"
-#include "torch/csrc/jit/passes/common_subexpression_elimination.h"
-#include "torch/csrc/jit/passes/constant_propagation.h"
-#include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/jit/passes/graph_fuser.h"
-#include "torch/csrc/jit/passes/guard_elimination.h"
-#include "torch/csrc/jit/passes/inline_autodiff_subgraphs.h"
-#include "torch/csrc/jit/passes/insert_guards.h"
-#include "torch/csrc/jit/passes/liveness.h"
-#include "torch/csrc/jit/passes/loop_unrolling.h"
-#include "torch/csrc/jit/passes/lower_grad_of.h"
-#include "torch/csrc/jit/passes/lower_tuples.h"
-#include "torch/csrc/jit/passes/pass_manager.h"
-#include "torch/csrc/jit/passes/requires_grad_analysis.h"
-#include "torch/csrc/jit/passes/shape_analysis.h"
-#include "torch/csrc/jit/passes/utils/subgraph_utils.h"
-#include "torch/csrc/jit/runtime/argument_spec.h"
-#include "torch/csrc/jit/runtime/autodiff.h"
-#include "torch/csrc/jit/runtime/custom_operator.h"
-#include "torch/csrc/jit/runtime/interpreter.h"
-#include "torch/csrc/jit/runtime/symbolic_script.h"
-#include "torch/csrc/jit/serialization/import.h"
-
-#include "torch/csrc/autograd/engine.h"
-#include "torch/csrc/autograd/variable.h"
-
+#include <torch/csrc/jit/passes/common_subexpression_elimination.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/graph_fuser.h>
+#include <torch/csrc/jit/passes/guard_elimination.h>
+#include <torch/csrc/jit/passes/inline_autodiff_subgraphs.h>
+#include <torch/csrc/jit/passes/insert_guards.h>
+#include <torch/csrc/jit/passes/liveness.h>
+#include <torch/csrc/jit/passes/loop_unrolling.h>
+#include <torch/csrc/jit/passes/lower_grad_of.h>
+#include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/passes/pass_manager.h>
+#include <torch/csrc/jit/passes/requires_grad_analysis.h>
+#include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
+#include <torch/csrc/jit/runtime/argument_spec.h>
+#include <torch/csrc/jit/runtime/autodiff.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/jit/runtime/profiling_record.h>
+#include <torch/csrc/jit/runtime/symbolic_script.h>
+#include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/testing/file_check.h>
+#include <torch/jit.h>
 #include <torch/script.h>
 
-#include "torch/csrc/jit/api/module.h"
-#include "torch/csrc/jit/frontend/ir_emitter.h"
-#include "torch/csrc/jit/runtime/profiling_record.h"
-#include "torch/jit.h"
-
-#include "onnx/onnx_pb.h"
+#include <onnx/onnx_pb.h>
 
 #include <c10/util/Exception.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
@@ -368,9 +364,9 @@ TEST(ATenNativeBatchNormTest, Basic) {
 }
 
 TEST(CustomFusionTest, Basic) {
-  #if defined(FBCODE_CAFFE2)
-      return;
-  #endif
+#if defined(FBCODE_CAFFE2)
+  return;
+#endif
 
   auto graph_string = R"IR(
     graph(%0 : Float(2, 3, 4),
@@ -406,9 +402,9 @@ TEST(CustomFusionTest, Basic) {
 }
 
 TEST(CustomFusionTest, NestedBlocks) {
-  #if defined(FBCODE_CAFFE2)
-      return;
-  #endif
+#if defined(FBCODE_CAFFE2)
+  return;
+#endif
 
   auto graph_string = R"IR(
   graph(%0 : Float(2, 3, 4),
@@ -1133,16 +1129,17 @@ TEST(RecordFunctionTest, Basic) {
 TEST(RecordFunctionTest, OperatorNameOverload) {
   std::set<std::string> operator_names;
 
-  at::addGlobalCallback(
-      at::RecordFunctionCallback([&operator_names](
-                                     const at::RecordFunction& fn) {
-        c10::optional<c10::OperatorName> op_name = fn.operator_name();
-        if (op_name.has_value()) {
-          operator_names.insert(c10::toString(*op_name));
-        } else {
-          operator_names.insert("No Operator Name");
-        }
-      }).scopes({at::RecordScope::FUNCTION}));
+  at::addGlobalCallback(at::RecordFunctionCallback(
+                            [&operator_names](const at::RecordFunction& fn) {
+                              c10::optional<c10::OperatorName> op_name =
+                                  fn.operator_name();
+                              if (op_name.has_value()) {
+                                operator_names.insert(c10::toString(*op_name));
+                              } else {
+                                operator_names.insert("No Operator Name");
+                              }
+                            })
+                            .scopes({at::RecordScope::FUNCTION}));
   auto t = torch::randn({1, 2, 3}, at::kCPU);
   t.set_requires_grad(false);
   auto t2 = t.pow(2);
@@ -1848,7 +1845,7 @@ def foo(x):
           ASSERT_TRUE(n->callstack());
           auto callstack_vector = (*n->callstack())->vec();
           ASSERT_EQ(callstack_vector.size(), 1);
-          ASSERT_EQ(callstack_vector[0].first, &cu->get_function("bar"));
+          ASSERT_EQ(std::get<0>(callstack_vector[0]), &cu->get_function("bar"));
           break;
         }
         case 7: {
@@ -1858,8 +1855,8 @@ def foo(x):
           ASSERT_TRUE(n->callstack());
           auto callstack_vector = (*n->callstack())->vec();
           ASSERT_EQ(callstack_vector.size(), 2);
-          ASSERT_EQ(callstack_vector[0].first, &cu->get_function("baz"));
-          ASSERT_EQ(callstack_vector[1].first, &cu->get_function("ham"));
+          ASSERT_EQ(std::get<0>(callstack_vector[0]), &cu->get_function("baz"));
+          ASSERT_EQ(std::get<0>(callstack_vector[1]), &cu->get_function("ham"));
           break;
         }
         case 11: {
@@ -1888,7 +1885,7 @@ def foo(x):
       ASSERT_TRUE(n->callstack());
       auto callstack_vector = (*n->callstack())->vec();
       ASSERT_EQ(callstack_vector.size(), 1);
-      ASSERT_EQ(callstack_vector[0].first, &cu->get_function("ham"));
+      ASSERT_EQ(std::get<0>(callstack_vector[0]), &cu->get_function("ham"));
     }
   }
 }

@@ -374,10 +374,13 @@ def set_deterministic(d):
         * :class:`torch.nn.EmbeddingBag` when called on a CUDA tensor that requires grad
         * :func:`torch.scatter_add_` when called on a CUDA tensor
         * :func:`torch.index_add_` when called on a CUDA tensor
+        * :func:`torch.index_copy`
         * :func:`torch.index_select` when called on a CUDA tensor that requires grad
         * :func:`torch.repeat_interleave` when called on a CUDA tensor that requires grad
         * :func:`torch.histc` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor
+        * :func:`torch.kthvalue` with called on a CUDA tensor
+        * :func:`torch.median` with indices output when called on a CUDA tensor
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
     10.2 or greater, unless the environment variable `CUBLAS_WORKSPACE_CONFIG=:4096:8`
@@ -565,7 +568,7 @@ def _assert(condition, message):
 import torch.cuda
 import torch.autograd
 from torch.autograd import no_grad, enable_grad, set_grad_enabled
-# import torch.fft  # TODO: enable once torch.fft() is removed
+import torch.fft
 import torch.futures
 import torch.nn
 import torch.nn.intrinsic

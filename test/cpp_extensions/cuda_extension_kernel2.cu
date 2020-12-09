@@ -20,4 +20,5 @@ void tanh_add_cuda(const float* x, const float* y, float* output, int size) {
   const int threads = 1024;
   const int blocks = (size + threads - 1) / threads;
   tanh_add_kernel<<<blocks, threads>>>(x, y, output, size);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
