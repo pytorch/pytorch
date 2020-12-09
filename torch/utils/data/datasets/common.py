@@ -7,10 +7,20 @@ from io import BufferedIOBase
 class StreamWrapper:
     # this is a wrapper class which wraps streaming handle
     def __init__(self, stream):
-        if not isinstance(stream, BufferedIOBase):
+        # if input is a StreamWrapper already, then transfer ownership
+        if isinstance(stream, StreamWrapper):
+            self.stream = stream()
+            stream.reset()
+        # only accept streaming obj
+        elif isinstance(stream, BufferedIOBase):
+            self.stream = stream
+        else:
             warnings.warn("StreamWrapper can only wrap BufferedIOBase based obj, but got {}".format(type(stream)))
             raise TypeError
-        self.stream = stream
+
+    def reset(self):
+        # behavior is undefined if calling any method other than close() after reset() is called
+        self.stream = None
 
     def read(self, *args, **kw):
         # put type ignore here to avoid mypy complaining too many args
