@@ -161,6 +161,8 @@ alias_infos = (
               lambda d: torch.randn(20, 3, 2, 1, device=d), get_args=lambda d: (3, 1)),
     AliasInfo('row_stack', torch.row_stack, 'vstack', torch.vstack,
               lambda d: ((torch.randn(20, device=d), torch.randn(20, device=d)))),
+    AliasInfo('moveaxis', torch.moveaxis, 'movedim', torch.movedim,
+              lambda d: torch.randn(20, 3, 2, 1, device=d), get_args=lambda d: (3, 1)),
 )
 
 # Placeholder test class for validating that aliases are correctly
