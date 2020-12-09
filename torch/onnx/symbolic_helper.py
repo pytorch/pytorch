@@ -213,6 +213,23 @@ def _try_get_scalar_type(*args):
     return None
 
 
+def _select_helper(g, self, dim, index, apply_reshape=True):
+    index_const = _maybe_get_scalar(index)
+    index_dim = index.type().dim()
+    if not _is_value(index_const):
+        # Index is a constant scalar. Make it a size 1 constant tensor.
+        index = g.op("Constant", value_t=torch.LongTensor([index_const]))
+    elif index_dim is not None and apply_reshape:
+        if index_dim == 0:
+            # Index is a scalar. Reshape it to a size 1 tensor.
+            index = g.op("Reshape", index, g.op("Constant", value_t=torch.LongTensor([1])))
+
+    index_scalar_type = index.type().scalarType()
+    if index_scalar_type is None or index_scalar_type not in ['Long', 'Int']:
+        index = g.op("Cast", index, to_i=cast_pytorch_to_onnx["Long"])
+    return g.op("Gather", self, index, axis_i=dim)
+
+
 def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     if _export_onnx_opset_version <= 9:
         from torch.onnx.symbolic_opset9 import _slice
@@ -221,6 +238,13 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
         from torch.onnx.symbolic_opset10 import _slice
         return _slice(g, input, axes, starts, ends, steps, dynamic_slice)
 
+def _hardtanh_helper(g, input, min_val, max_val):
+    if _export_onnx_opset_version <= 10:
+        from torch.onnx.symbolic_opset9 import hardtanh
+        return hardtanh(g, input, min_val, max_val)
+    else:
+        from torch.onnx.symbolic_opset11 import hardtanh
+        return hardtanh(g, input, min_val, max_val)
 
 def _is_fp(value):
     if value:
