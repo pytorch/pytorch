@@ -655,7 +655,7 @@ class Tensor(torch._C._TensorBase):
         if type(self) is not Tensor and has_torch_function(relevant_args):
             return handle_torch_function(Tensor.__array__, relevant_args, self, dtype=dtype)
         if dtype is None:
-            return self.numpy()
+            return self.cpu().numpy()
         else:
             return self.numpy().astype(dtype, copy=False)
 
