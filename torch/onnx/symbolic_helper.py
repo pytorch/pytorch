@@ -178,6 +178,29 @@ def _is_tensor(x):
 def _is_tensor_list(x):
     return isinstance(x.type(), torch._C.ListType) and isinstance(x.type().getElementType(), torch._C.TensorType)
 
+def _get_tensor_rank(x):
+    if not _is_tensor(x) or x.type() is None:
+        return None
+    return x.type().dim()
+
+def _get_tensor_sizes(x, allow_nonstatic=True):
+    if not _is_tensor(x) or x.type() is None:
+        return None
+    if allow_nonstatic:
+        # Each individual symbol is returned as None.
+        # e.g. [1, 'a', 'b'] -> [1, None, None]
+        return x.type().varyingSizes()
+    # returns None, if exists any symbol in sizes.
+    # e.g. [1, 'a', 'b'] -> None
+    return x.type().sizes()
+
+def _get_tensor_dim_size(x, dim):
+    try:
+        sizes = _get_tensor_sizes(x)
+        return sizes[dim]
+    except Exception:
+        pass
+    return None
 
 def _unimplemented(op, msg):
     warnings.warn("ONNX export failed on " + op + " because " + msg + " not supported")
@@ -216,7 +239,7 @@ def _try_get_scalar_type(*args):
 
 def _select_helper(g, self, dim, index, apply_reshape=True):
     index_const = _maybe_get_scalar(index)
-    index_dim = index.type().dim()
+    index_dim = _get_tensor_rank(index)
     if not _is_value(index_const):
         # Index is a constant scalar. Make it a size 1 constant tensor.
         index = g.op("Constant", value_t=torch.LongTensor([index_const]))
@@ -344,7 +367,8 @@ def _get_interpolate_attributes(g, mode, args):
 
 def _interpolate_get_scales(g, scale_factor, dim):
     offsets = g.op("Constant", value_t=torch.ones(2, dtype=torch.float32))
-    if isinstance(scale_factor.type(), torch._C.ListType) or (scale_factor.isCompleteTensor() and scale_factor.type().dim() > 0):
+    scale_factor_rank = _get_tensor_rank(scale_factor)
+    if isinstance(scale_factor.type(), torch._C.ListType) or (scale_factor_rank is not None and scale_factor_rank > 0):
         return g.op("Concat", offsets, scale_factor, axis_i=0)
     else:
         scale_factor = _unsqueeze_helper(g, scale_factor, 0)
