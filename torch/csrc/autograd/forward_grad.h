@@ -30,7 +30,7 @@ struct ForwardGrad;
 // On the other hand, the level, when it is released, will reset all the gradients for this
 // level on all the ForwardGrad.
 
-struct TORCH_API ForwardADLevel{
+struct TORCH_API ForwardADLevel {
     ForwardADLevel(uint64_t idx): idx_(idx) {}
     ~ForwardADLevel();
 
