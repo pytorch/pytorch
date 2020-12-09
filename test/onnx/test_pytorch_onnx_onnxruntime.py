@@ -754,7 +754,10 @@ class TestONNXRuntime(unittest.TestCase):
                 return x.transpose(0, 1)
 
         x = torch.randn(32, 3, 64, 64)
-        self.run_test(TransposeModule(), x)
+        y = torch.randn(16, 3, 8, 64)
+        self.run_test(TransposeModule(), x, input_names=['x'],
+                      dynamic_axes={'x': [0, 2]},
+                      test_with_inputs=[y])
 
     def squeeze_model_tests(self, d, x1, x2):
         class Squeeze(torch.nn.Module):
@@ -841,7 +844,10 @@ class TestONNXRuntime(unittest.TestCase):
     def test_maxpool_adaptive(self):
         model = torch.nn.AdaptiveMaxPool1d((5), return_indices=False)
         x = torch.randn(20, 16, 50, requires_grad=True)
-        self.run_test(model, x)
+        y = torch.randn(32, 16, 50, requires_grad=True)
+        self.run_test(model, x, input_names=['x'],
+                      dynamic_axes={'x' : [0]},
+                      test_with_inputs=[y])
 
     def test_maxpool_2d(self):
         model = torch.nn.MaxPool2d(5, padding=(1, 2))
@@ -903,7 +909,10 @@ class TestONNXRuntime(unittest.TestCase):
     def test_avgpool_3d_ceil(self):
         model = torch.nn.AvgPool3d(3, 2, ceil_mode=True)
         x = torch.randn(20, 16, 50, 44, 31)
-        self.run_test(model, x)
+        y = torch.randn(32, 8, 50, 44, 31)
+        self.run_test(model, x, input_names=['x'],
+                      dynamic_axes={'x' : [0, 1]},
+                      test_with_inputs=[y])
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_floating_point(self):
@@ -3838,7 +3847,11 @@ class TestONNXRuntime(unittest.TestCase):
                 return x.unfold(dimension=2, size=2, step=2)
 
         x = torch.randn(4, 2, 3, requires_grad=True)
-        self.run_test(UnfoldModel(), x)
+        y = torch.randn(2, 1, 3, requires_grad=True)
+        self.run_test(UnfoldModel(), x,
+                      dynamic_axes={'x': [0, 1]},
+                      input_names=['x'],
+                      test_with_inputs=[y])
 
     @skipIfONNXShapeInference(False)
     def test_unfold_infer_shape(self):
@@ -3854,6 +3867,21 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(32, 3, 64)
         self.run_test(UnfoldModule(), x)
+
+    def test_prelu(self):
+        class PReluModel(torch.nn.Module):
+            def __init__(self):
+                super(PReluModel, self).__init__()
+                self.prelu = torch.nn.PReLU()
+
+            def forward(self, x):
+                return self.prelu(x)
+
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(2, 4, 5)
+        self.run_test(PReluModel(), x, input_names=['x'],
+                      dynamic_axes={'x': [1, 2]},
+                      test_with_inputs=[y])
 
     def test_remainder(self):
         class RemainderModel(torch.nn.Module):
@@ -3890,6 +3918,15 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randint(10, (2, 3))
         self.run_test(FModModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_glu(self):
+        class GluModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.glu(x)
+
+        x = torch.randn(2, 4, 5, 6, requires_grad=True)
+        self.run_test(GluModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_gelu(self):
