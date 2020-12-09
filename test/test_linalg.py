@@ -2119,19 +2119,6 @@ class TestLinalg(TestCase):
             run_test_main(A, hermitian)
             run_test_numpy(A, hermitian)
 
-    # TODO(@ivanyashchuk): implement rcond to be matrix-wise tolerance (tensor of floats for each matrix)
-    @unittest.expectedFailure
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_pinv_rcond_xfailing(self, device, dtype):
-            # for input shape (3, 2, 2) it should be possible to specify rcond for each matrix in the batch
-            A = torch.randn(3, 2, 2, dtype=dtype, device=device)
-            rcond = torch.rand(3, dtype=torch.float64, device=device)
-            expected = np.linalg.pinv(A.cpu().numpy(), rcond=rcond.cpu().numpy())
-            actual = torch.linalg.pinv(A, rcond=rcond)
-            self.assertEqual(actual, expected)
-
     # TODO: implement tests using OpInfo
     # This test is here insead of method_tests of common_methods_invocations.py because
     # adding 'linalg.' functions there breaks some Facebook internal tests
