@@ -188,6 +188,9 @@ FOREACH_UNARY_OP(sinh);
 FOREACH_UNARY_OP(round);
 FOREACH_UNARY_OP(lgamma);
 FOREACH_UNARY_OP(frac);
+FOREACH_UNARY_OP(trunc);
+FOREACH_UNARY_OP(reciprocal);
+FOREACH_UNARY_OP(sigmoid);
 
 FOREACH_POINTWISE_OP_SCALAR(addcdiv);
 FOREACH_POINTWISE_OP_SCALAR(addcmul);
@@ -201,7 +204,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_slow(TensorList tensors1, TensorList
                                                                                              \
   std::vector<Tensor> result;                                                                \
   result.reserve(tensors1.size());                                                           \
-  for (int i = 0; i < tensors1.size(); i++) {                                                \
+  for (size_t i = 0; i < tensors1.size(); i++) {                                             \
     result.emplace_back(at::NAME(tensors1[i], tensors2[i]));                                 \
   }                                                                                          \
                                                                                              \

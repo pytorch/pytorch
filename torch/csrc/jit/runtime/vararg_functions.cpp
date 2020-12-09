@@ -204,7 +204,10 @@ void namedTupleConstruct(
       c10::ivalue::Tuple::createNamed(std::move(elems), std::move(type)));
 }
 
-void listConstruct(Stack& stack, at::ListTypePtr type, size_t num_inputs) {
+void listConstruct(
+    Stack& stack,
+    const at::ListTypePtr& type,
+    size_t num_inputs) {
   c10::List<IValue> vals(type->getElementType());
   vals.reserve(num_inputs);
   for (size_t i = stack.size() - num_inputs; i < stack.size(); ++i) {
@@ -214,7 +217,10 @@ void listConstruct(Stack& stack, at::ListTypePtr type, size_t num_inputs) {
   push(stack, std::move(vals));
 }
 
-void dictConstruct(Stack& stack, at::DictTypePtr type, size_t num_inputs) {
+void dictConstruct(
+    Stack& stack,
+    const at::DictTypePtr& type,
+    size_t num_inputs) {
   at::TypePtr key_type = type->getKeyType();
   at::TypePtr value_type = type->getValueType();
   auto vals = c10::impl::GenericDict(key_type, value_type);
@@ -231,7 +237,7 @@ void dictConstruct(Stack& stack, at::DictTypePtr type, size_t num_inputs) {
   push(stack, std::move(vals));
 }
 
-void createObject(Stack& stack, at::ClassTypePtr type) {
+void createObject(Stack& stack, const at::ClassTypePtr& type) {
   auto userObj = c10::ivalue::Object::create(
       c10::StrongTypePtr(type->compilation_unit(), type),
       type->numAttributes());
@@ -267,19 +273,19 @@ void dequantize(Stack& stack) {
     auto elems = tuple->elements();
     std::vector<IValue> output_elems;
     output_elems.reserve(elems.size());
-    for (size_t i = 0; i < elems.size(); ++i) {
-      if (elems[i].isTensor()) {
-        output_elems.emplace_back(at::dequantize(elems[i].toTensor()));
+    for (const auto& elem : elems) {
+      if (elem.isTensor()) {
+        output_elems.emplace_back(at::dequantize(elem.toTensor()));
       } else {
-        output_elems.emplace_back(elems[i]);
+        output_elems.emplace_back(elem);
       }
     }
     push(stack, c10::ivalue::Tuple::create(std::move(output_elems)));
   } else if (iv.isTensorList()) {
     auto elems = iv.toTensorList();
     auto output_list = c10::impl::GenericList(elems.elementType());
-    for (size_t i = 0; i < elems.size(); ++i) {
-      output_list.emplace_back(at::dequantize(elems[i]));
+    for (auto&& elem : elems) {
+      output_list.emplace_back(at::dequantize(elem));
     }
     push(stack, std::move(output_list));
   } else {

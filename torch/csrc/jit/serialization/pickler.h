@@ -2,6 +2,7 @@
 
 #include <ATen/core/qualified_name.h>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <ATen/core/ivalue.h>
@@ -120,16 +121,16 @@ class TORCH_API Pickler {
 
  public:
   Pickler(std::function<void(const char*, size_t)> writer)
-      : Pickler(writer, nullptr, nullptr, nullptr) {}
+      : Pickler(std::move(writer), nullptr, nullptr, nullptr) {}
 
   Pickler(
       std::function<void(const char*, size_t)> writer,
       std::vector<at::Tensor>* tensor_table,
       std::function<c10::QualifiedName(const c10::ClassTypePtr&)> type_renamer,
       std::vector<c10::ClassTypePtr>* memorized_class_types)
-      : writer_(writer),
+      : writer_(std::move(writer)),
         tensor_table_(tensor_table),
-        type_renamer_(type_renamer),
+        type_renamer_(std::move(type_renamer)),
         memorized_class_types_(memorized_class_types) {}
   ~Pickler();
 
@@ -208,7 +209,7 @@ class TORCH_API Pickler {
   // the left of a '::', its type cannot be deduced by the compiler so one must
   // explicitly instantiate the template, i.e. push<int>(int) works, push(int)
   // does not)
-  static constexpr size_t kBufferSize = 256;
+  static CONSTEXPR_EXCEPT_WIN_CUDA size_t kBufferSize = 256;
   template <typename T>
   void push(typename std::common_type<T>::type value) {
     const char* begin = reinterpret_cast<const char*>(&value);
