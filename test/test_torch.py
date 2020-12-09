@@ -341,6 +341,9 @@ class AbstractTestCases:
             self.assertEqual(90, cuda90.index)
 
             self.assertRaises(RuntimeError, lambda: torch.device('cpu:-1'))
+            self.assertRaises(RuntimeError, lambda: torch.device('cpu:1'))
+            self.assertRaises(RuntimeError, lambda: torch.device('cpu', -1))
+            self.assertRaises(RuntimeError, lambda: torch.device('cpu', 1))
             self.assertRaises(RuntimeError, lambda: torch.device('cuda:-1'))
             self.assertRaises(RuntimeError, lambda: torch.device('cuda:2 '))
             self.assertRaises(RuntimeError, lambda: torch.device('cuda: 2'))
@@ -353,6 +356,7 @@ class AbstractTestCases:
             self.assertRaises(RuntimeError, lambda: torch.device('cuda:2 cuda:3'))
             self.assertRaises(RuntimeError, lambda: torch.device('cuda:2+cuda:3'))
             self.assertRaises(RuntimeError, lambda: torch.device('cuda:2cuda:3'))
+            self.assertRaises(RuntimeError, lambda: torch.device('cuda', -1))
             self.assertRaises(RuntimeError, lambda: torch.device(-1))
 
             self.assertRaises(RuntimeError, lambda: torch.device('other'))
