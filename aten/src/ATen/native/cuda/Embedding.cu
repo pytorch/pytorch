@@ -263,7 +263,7 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
                 static_cast<int>(num_indices),
                 static_cast<int64_t>(stride),
                 static_cast<int>(padding_idx));
-            TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
            });
          });
        });
@@ -370,7 +370,7 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
           static_cast<accscalar_t>(max_norm),
           static_cast<accscalar_t>(norm_type),
           dim, self.stride(0), self.stride(1));
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
     });
   });

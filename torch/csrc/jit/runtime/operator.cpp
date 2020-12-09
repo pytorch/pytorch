@@ -230,6 +230,7 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::ConstantChunk, // optimization pass adds it
       prim::DifferentiableGraph, // optimization pass adds it,
       prim::FunctionalGraph, // optimization pass adds it,
+      prim::ReductionSizes, // optimization pass (fuser) adds it
       prim::BroadcastSizes, // optimization pass (fuser) adds it
       prim::ChunkSizes, // optimization pass (fuser) adds it
       prim::Drop, // used in interpreter only
