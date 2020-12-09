@@ -352,10 +352,9 @@ class TestPostTrainingStatic(QuantizationTestCase):
             with override_quantized_engine(qengine):
                 qconfig = torch.quantization.get_default_qconfig(qengine)
                 model = ResNetBase().float().eval()
+                model.fuse_model()
                 model = QuantWrapper(model)
                 model.qconfig = qconfig
-                fuse_list = ['module.conv1', 'module.bn1', 'module.relu1']
-                fuse_modules(model, fuse_list, inplace=True)
                 model = prepare(model)
                 self.checkObservers(model)
                 test_only_eval_fn(model, self.img_data_2d)
@@ -365,6 +364,8 @@ class TestPostTrainingStatic(QuantizationTestCase):
                     self.assertEqual(type(model.module.conv1), nn.intrinsic.quantized.ConvReLU2d)
                     self.assertEqual(type(model.module.myop), nn.quantized.QFunctional)
                     self.assertEqual(type(model.module.avgpool), nn.AdaptiveAvgPool2d)
+                    self.assertEqual(type(model.module.fc), nnq.Linear)
+
                     test_only_eval_fn(model, self.img_data_2d)
                     self.checkNoQconfig(model)
 
