@@ -417,18 +417,7 @@ class Vec256<ComplexFlt> {
   }
 
   Vec256<ComplexFlt> sqrt() const {
-    //   sqrt(a + bi)
-    // = sqrt(2)/2 * [sqrt(sqrt(a**2 + b**2) + a) + sgn(b)*sqrt(sqrt(a**2 +
-    // b**2) - a)i] = sqrt(2)/2 * [sqrt(abs() + a) + sgn(b)*sqrt(abs() - a)i]
-
-    auto sign = *this & isign_mask;
-    auto factor = sign | sqrt2_2;
-    auto a_a = el_mergee();
-    // a_a.dump();
-    a_a = a_a ^ isign_mask; // a -a
-    auto res_re_im =
-        (abs_() + a_a).elwise_sqrt(); // sqrt(abs + a) sqrt(abs - a)
-    return factor.elwise_mult(res_re_im);
+    return map(std::sqrt);  
   }
 
   Vec256<ComplexFlt> reciprocal() const {
