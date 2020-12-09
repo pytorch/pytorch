@@ -13,7 +13,7 @@ from torch.distributions.utils import tril_matrix_to_vec, vec_to_tril_matrix
 def test_tril_matrix_to_vec(shape):
     mat = torch.randn(shape)
     n = mat.shape[-1]
-    for diag in range(-n + 1, n):
+    for diag in range(-n, n):
         actual = mat.tril(diag)
         vec = tril_matrix_to_vec(actual, diag)
         tril_mat = vec_to_tril_matrix(vec, diag)
