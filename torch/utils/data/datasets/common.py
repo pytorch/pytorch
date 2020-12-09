@@ -30,9 +30,10 @@ class StreamWrapper:
     def seekable(self):
         return hasattr(self.stream, "seekable") and self.stream.seekable()
 
-    def seek(self, offset):
+    def seek(self, *args, **kw):
         # call seakable() first to make sure this stream support seek()
-        self.stream.seek(offset)
+        # put type ignore here to avoid mypy complaining too many args
+        self.stream.seek(*args, **kw)  # type: ignore
 
 
 def match_masks(name : str, masks : Union[str, List[str]]) -> bool:
