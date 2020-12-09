@@ -2896,6 +2896,7 @@ t2.start()
     def test_to_numpy(self):
         self.assertRaises(TypeError, lambda: torch.empty(1, device="cuda").numpy())
 
+    @skipIfRocm
     @unittest.skipIf((not TEST_CUDA) or int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     def test_graph_capture_simple(self):
         s1 = torch.cuda.Stream()
@@ -2914,6 +2915,7 @@ t2.start()
 
         self.assertTrue(a.sum().item() == 3000.)
 
+    @skipIfRocm
     @unittest.skipIf((not TEST_CUDA) or int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     def test_graph_rng_functional(self):
         # The caching allocator isn't yet graph-safe.
@@ -2990,6 +2992,7 @@ t2.start()
         for op, kwargs in ops_with_kwargs:
             run(op, kwargs)
 
+    @skipIfRocm
     @unittest.skipIf((not TEST_CUDA) or int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     def test_graph_rng_distributions(self):
         # The caching allocator isn't yet graph-safe.

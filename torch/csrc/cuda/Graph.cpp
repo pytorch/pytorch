@@ -36,19 +36,14 @@ void THCPGraph_init(PyObject *module) {
       .def("replay",
            &::at::cuda::CUDAGraph::replay,
            py::call_guard<py::gil_scoped_release>(),
-           R"(``replay`` replays the Cuda graph captured by this instance.)");
-      // As a possible alternative to the throwing destructor
-      //
-      //   CUDAGraph::~CUDAGraph () {
-      //     ...
-      //     AT_CUDA_CHECK(cudaGraphExecDestroy(graph_exec_);
-      //   }
-      //
-      // I could call the following method in __del__ on the Python side:
-      //
-      // .def("drop_graph",
-      //      &::at::cuda::CUDAGraph::drop_graph,
-      //      py::call_guard<py::gil_scoped_release>(),
-      //      R"(``drop_graph`` deletes the graph currently held by this instance.)");
-      // But stackoverflow appears to hate __del__ as much as throwing in destructors.
+           R"(``replay`` replays the Cuda graph captured by this instance.)")
+      // reset is called in __del__ on the Python side.i
+      // Stackoverflow does not like __del__: for one thing, a user-defined __del__ prevents
+      // instances from EVER being garbage collected if they participate in a reference cycle.
+      // However, afaict my only alternative to Python-side __del__ is calling reset in ~CUDAGraph.
+      // Reset may throw, and at least one CI build refuses to compile with a throwing destructor.
+      .def("reset",
+           &::at::cuda::CUDAGraph::reset,
+           py::call_guard<py::gil_scoped_release>(),
+           R"(``reset`` deletes the graph currently held by this instance.)");
 }

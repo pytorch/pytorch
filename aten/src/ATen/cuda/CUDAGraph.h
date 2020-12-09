@@ -8,11 +8,12 @@ namespace cuda {
 
 struct TORCH_CUDA_API CUDAGraph {
   CUDAGraph();
-  ~CUDAGraph();
+  ~CUDAGraph() = default;
 
   void capture_begin();
   void capture_end();
   void replay();
+  void reset();
 
   protected:
 #if CUDA_VERSION >= 11000

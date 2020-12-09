@@ -203,4 +203,6 @@ class Event(torch._C._CudaEventBase):
         else:
             return '<torch.cuda.Event uninitialized>'
 
-Graph = torch._C._CudaGraphBase
+class Graph(torch._C._CudaGraphBase):
+    def __del__(self):
+        super(Graph, self).reset()

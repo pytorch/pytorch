@@ -133,13 +133,7 @@ void CUDAGraph::replay() {
 #endif
 }
 
-// This can throw, but my only alternative idea is to have a Python-side
-// wrapper with a __del__ method on the Python side that calls e.g.
-// void CUDAGraph::drop_graph() {
-//   AT_CUDA_CHECK(cudaGraphExecDestroy(graph_exec_));
-// }
-// Stackoverflow appears to hate __del__ as much as throwing in destructors.
-CUDAGraph::~CUDAGraph() {
+void CUDAGraph::reset() {
 #if CUDA_VERSION >= 11000
   // these checks reduce (but can't eliminate) the chance of throwing an exception.
   if (has_graph_) {
