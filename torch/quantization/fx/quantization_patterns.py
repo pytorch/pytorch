@@ -492,7 +492,7 @@ class Embedding(QuantizeHandler):
             load_arg(quantized=False)(emb_node.args),
             load_arg(quantized=False)(emb_node.kwargs))
 
-# TODO: merge with embedding quantize handler
+# TODO (maybe): merge with embedding quantize handler
 @register_quant_pattern(torch.nn.GRUCell)
 @register_quant_pattern(torch.nn.LSTMCell)
 @register_quant_pattern(torch.nn.RNNCell)
