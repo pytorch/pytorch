@@ -129,7 +129,6 @@ bool SelectSmoothL1LossOp<float, CUDAContext>::RunOnDevice() {
     M, Y_hat.data<float>(), Y.data<float>(),
     L.data<float>(), buff_.mutable_data<float>(),
     S.data<float>(), beta_);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // Sum of all losses
   // al := sum_i l_i
@@ -176,7 +175,6 @@ bool SelectSmoothL1LossGradientOp<float, CUDAContext>::RunOnDevice() {
     D, H, W, M, Y_hat.data<float>(), Y.data<float>(),
     L.data<float>(), d_Y_hat->mutable_data<float>(),
     d_avg_loss.data<float>(), scale_, S.data<float>(), beta_);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return true;
 }
