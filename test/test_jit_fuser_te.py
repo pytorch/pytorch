@@ -1270,11 +1270,6 @@ class TestTEFuser(JitTestCase):
             mod = torch.jit.freeze(torch.jit.script(mod.eval()))
             warmup_forward(mod.forward, x)
             self.assertEqual(ref, mod.forward(x))
-
-            # these op pairings are disabled in the fuser
-            if (dtype == torch.float64 and output_dtype == torch.float16) or \
-                    (dtype in [torch.float16, torch.float32, torch.float64] and output_dtype == torch.bool):
-                continue
             self.assertLastGraphAllFused()
 
     def test_nan_to_num(self):
@@ -1339,11 +1334,11 @@ class TestTEFuser(JitTestCase):
                 )
 
     def test_isnan(self):
+        x = torch.rand([4])
+        x[0] = float('nan')
         inputs = [
-            torch.tensor([2., 4., float('nan')]),
-            torch.tensor([2, 4]),
-            torch.rand([4, 4]).fill_(float('nan')),
-            torch.rand([4, 4])
+            x,
+            torch.tensor([float('nan'), .5])
         ]
         dtypes = [
             torch.int8,

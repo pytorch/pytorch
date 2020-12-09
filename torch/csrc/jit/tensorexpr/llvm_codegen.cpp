@@ -829,13 +829,19 @@ void LLVMCodeGenImpl::visit(const BoolImm* v) {
   value_ = llvm::ConstantInt::get(BoolTy_, v->value());
 }
 
+llvm::Type* llvmTypeToVec(llvm::Type* type, int lanes) {
+  if (lanes > 1) {
+    return llvm::VectorType::get(type, ElementCount(lanes));
+  } else {
+    return type;
+  }
+}
+
 void LLVMCodeGenImpl::visit(const Cast* v) {
   v->src_value()->accept(this);
 
-  llvm::Type* dstType = dtypeToLLVM(v->dtype());
-  if (v->dtype().lanes() > 1) {
-    dstType = llvm::VectorType::get(dstType, ElementCount(v->dtype().lanes()));
-  }
+  llvm::Type* dstType =
+      llvmTypeToVec(dtypeToLLVM(v->dtype()), v->dtype().lanes());
   llvm::Type* srcType = dtypeToLLVM(v->src_value()->dtype());
 
   if (srcType == dstType) {
@@ -849,8 +855,28 @@ void LLVMCodeGenImpl::visit(const Cast* v) {
   // Scalar casts
   if (srcType->isFPOrFPVectorTy()) {
     if (dstType->isFPOrFPVectorTy()) {
+      // as with eager, convert from Double -> Half by Converting to Float then
+      // Half
+      // TODO: __truncdfhf2
+      if (v->dtype().scalar_type() == ScalarType::Half &&
+          v->src_value()->dtype().scalar_type() == ScalarType::Double) {
+        value_ = irb_.CreateFPCast(
+            value_, llvmTypeToVec(FloatTy_, v->dtype().lanes()));
+      }
       value_ = irb_.CreateFPCast(value_, dstType);
     } else if (dstType->isIntOrIntVectorTy()) {
+      // Strictly casting from Float -> i8 doesnt give correct results
+      // set one bit true if the input float is not 0
+      if (v->dtype().scalar_type() == ScalarType::Bool) {
+        llvm::Value* zero =
+            toVec(llvm::ConstantFP::get(srcType, 0.), v->dtype().lanes());
+        value_ = irb_.CreateFCmp(llvm::FCmpInst::FCMP_UNO, value_, zero);
+        value_ = irb_.CreateICmpEQ(
+            value_, llvm::ConstantInt::get(value_->getType(), 0));
+        value_ = irb_.CreateIntCast(value_, dstType, !destUnsigned);
+        return;
+      }
+
       if (destUnsigned) {
         value_ = irb_.CreateFPToUI(value_, dstType);
       } else {
@@ -1325,17 +1351,14 @@ llvm::Value* LLVMCodeGenImpl::toVec(llvm::Value* v, int lanes) {
 
 void LLVMCodeGenImpl::emitIsNan(const Intrinsics* v) {
   v->param(0)->accept(this);
-  llvm::Type* dstType = dtypeToLLVM(v->dtype());
+  llvm::Type* dstType =
+      llvmTypeToVec(dstType, ElementCount(v->dtype().lanes()));
   if (!v->param(0)->dtype().is_floating_point()) {
-    value_ = toVec(llvm::ConstantInt::get(dstType, 0), v->dtype().lanes());
+    value_ = llvm::ConstantInt::get(dstType, 0);
   } else {
     TORCH_INTERNAL_ASSERT(v->dtype().scalar_type() == ScalarType::Int);
     auto is_nan = irb_.CreateFCmpUNO(
         value_, llvm::ConstantFP::get(value_->getType(), 0.));
-    if (v->dtype().lanes() > 1) {
-      dstType =
-          llvm::VectorType::get(dstType, ElementCount(v->dtype().lanes()));
-    }
     value_ = irb_.CreateIntCast(is_nan, dstType, /*isSigned*/ false);
   }
 }

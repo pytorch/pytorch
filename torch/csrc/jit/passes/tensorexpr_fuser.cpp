@@ -786,25 +786,6 @@ class TensorExprFuser {
         return false;
       }
 
-      // https://github.com/pytorch/pytorch/issues/49063
-      auto maybe_input_dtype =
-          node->input(0)->type()->expect<TensorType>()->scalarType();
-      auto maybe_output_dtype =
-          node->output(0)->type()->expect<TensorType>()->scalarType();
-      if (!maybe_input_dtype || !maybe_output_dtype) {
-        return false;
-      }
-      auto input_dtype = *maybe_input_dtype;
-      auto output_dtype = *maybe_output_dtype;
-
-      if (input_dtype == at::ScalarType::Double &&
-          output_dtype == at::ScalarType::Half) {
-        return false;
-      }
-      if (isFloatingType(input_dtype) && output_dtype == at::ScalarType::Bool) {
-        return false;
-      }
-
       // all non-Tensor arguments must be constant
       for (size_t i = 1; i < node->inputs().size(); i++) {
         if (node->inputs().at(i)->node()->kind() != prim::Constant) {

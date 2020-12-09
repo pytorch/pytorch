@@ -290,7 +290,7 @@ void CudaPrinter::visit(const Intrinsics* v) {
   if (v->op_type() == IntrinsicsOp::kFabs && is_integral(returnType)) {
     func_name = "abs";
   }
-  if (v->op_type() == IntrinsicsOps::kIsNan) {
+  if (v->op_type() == IntrinsicsOp::kIsNan) {
     func_name = "isnan";
   }
 
