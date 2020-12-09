@@ -2322,20 +2322,22 @@ def gaussian_nll_loss(input, target, var, eps=1e-8, full=False, reduction='mean'
     See :class:`~torch.nn.GaussianNLLLoss` for details.
 
     Args:
-	input: tensor of shape=(N, *).
-	target: tensor with same shape as input.
-	var: tensor of positive variance(s), shape = (N, 1) or same shape as input.
-	eps: value added to var, for stability.
-	full: True/Falsei (bool), include the constant term in the loss calculation.
-	    Default: False.
-	reduction: specifies the reduction to apply to the output:
+        input: tensor of shape=(N, *).
+        target: tensor with same shape as input.
+        var: tensor of positive variance(s), shape = (N, 1)
+            or same shape as input.
+        eps: value added to var, for stability.
+        full: True/False (bool), include the constant term in the loss
+            calculation. Default: False.
+        reduction: specifies the reduction to apply to the output:
 	    'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
 	    'mean': the sum of the output will be divided by the number of
-	    elements in the output, 'sum': the output will be summed.
+            elements in the output, 'sum': the output will be summed.
 	    Default: 'mean'.
 
     Output:
-	loss: scalar by default. If reduction is 'none', then (N, *), same shape as input.
+	loss: scalar by default. If reduction is 'none', then (N, *), same
+            shape as input.
 
     """
 
