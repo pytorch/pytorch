@@ -93,11 +93,11 @@ struct ConstantTableValue : public SugaredValue {
 struct SourceImporterImpl : public Resolver,
                             std::enable_shared_from_this<SourceImporterImpl> {
   SourceImporterImpl(
-      const std::shared_ptr<CompilationUnit> cu,
+      std::shared_ptr<CompilationUnit> cu,
       const std::vector<at::IValue>* constant_table,
       SourceLoader source_loader,
       size_t version)
-      : cu_(cu), source_loader_(std::move(source_loader)) {
+      : cu_(std::move(cu)), source_loader_(std::move(source_loader)) {
     env_ = {
         {"torch", std::make_shared<BuiltinModule>("aten", version)},
         {"ops", std::make_shared<OpsValue>(version)},

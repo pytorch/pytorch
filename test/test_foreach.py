@@ -53,6 +53,9 @@ class TestForeach(TestCase):
         (torch._foreach_log1p, torch._foreach_log1p_, torch.log1p, True, False),
         (torch._foreach_round, torch._foreach_round_, torch.round, False, False),
         (torch._foreach_frac, torch._foreach_frac_, torch.frac, False, False),
+        (torch._foreach_reciprocal, torch._foreach_reciprocal_, torch.reciprocal, True, True),
+        (torch._foreach_sigmoid, torch._foreach_sigmoid_, torch.sigmoid, True, False),
+        (torch._foreach_trunc, torch._foreach_trunc_, torch.trunc, False, False),
 
         # See test_abs
         # (torch._foreach_abs, torch._foreach_abs_, torch.abs, True, True),
@@ -173,7 +176,7 @@ class TestForeach(TestCase):
                 control_dtype = torch.float32 if (self.device_type == 'cuda' and
                                                   (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
 
-                if self.device_type == 'cpu' and dtype == torch.half and torch_op not in [torch.neg, torch.frac]:
+                if self.device_type == 'cpu' and dtype == torch.half and torch_op not in [torch.neg, torch.frac, torch.reciprocal]:
                     with self.assertRaisesRegex(RuntimeError, r"not implemented for \'Half\'"):
                         expected = [torch_op(tensors1[i]) for i in range(N)]
 
@@ -191,13 +194,14 @@ class TestForeach(TestCase):
                         break
 
                 if dtype in [torch.complex64, torch.complex128] and not support_complex:
-                    # not using assertRaisesRegex due to different error messages
-                    with self.assertRaises(RuntimeError):
-                        expected = [torch_op(tensors1[i]) for i in range(N)]
+                    if not (self.device_type == 'cpu' and torch_op in [torch.sigmoid]):
+                        # not using assertRaisesRegex due to different error messages
+                        with self.assertRaises(RuntimeError):
+                            expected = [torch_op(tensors1[i]) for i in range(N)]
 
-                    with self.assertRaises(RuntimeError):
-                        res = fe_op(tensors1)
-                    break
+                        with self.assertRaises(RuntimeError):
+                            res = fe_op(tensors1)
+                        break
 
                 expected = [torch_op(tensors1[i].to(dtype=control_dtype)).to(dtype=dtype) for i in range(N)]
                 res = fe_op(tensors1)
