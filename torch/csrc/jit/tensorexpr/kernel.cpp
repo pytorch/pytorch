@@ -727,6 +727,7 @@ Tensor* TensorExprKernel::computeFourOperand(
             tensorOrConstant(n->inputs()[2], indices),
             tensorOrConstant(n->inputs()[3], indices),
         };
+
         if (promote_inputs) {
           promoteInputs(inputs);
         }
@@ -937,20 +938,23 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
             if (!input.dtype().is_floating_point()) {
               return input;
             }
-            auto pos_inf_val = maximumVal(input.dtype().scalar_type());
-            if (node->inputs().at(2)->type() != NoneType::get()) {
-              auto const_inp = constant_as<double>(node->input(2));
-              TORCH_INTERNAL_ASSERT(const_inp);
-              double val = *const_inp;
-              pos_inf_val = Cast::make(input.dtype(), FloatImm::make(val));
-            }
-            auto neg_inf_val = minimumVal(input.dtype().scalar_type());
-            if (node->inputs().at(3)->type() != NoneType::get()) {
-              auto const_inp = constant_as<double>(node->input(3));
-              TORCH_INTERNAL_ASSERT(const_inp);
-              double val = *const_inp;
-              neg_inf_val = Cast::make(input.dtype(), FloatImm::make(val));
-            }
+            auto value_or_default_at_index =
+                [&](size_t index, ExprHandle val, ExprHandle default_v) {
+                  if (node->inputs().at(index)->type() == NoneType::get()) {
+                    return default_v;
+                  } else {
+                    TORCH_INTERNAL_ASSERT(
+                        !node->input(index)->type()->cast<OptionalType>());
+                    return val;
+                  }
+                };
+            auto nan_val = value_or_default_at_index(
+                1, nan, Cast::make(input.dtype(), DoubleImm::make(0.)));
+            auto pos_inf_val = value_or_default_at_index(
+                2, pos_inf, maximumVal(input.dtype().scalar_type()));
+            auto neg_inf_val = value_or_default_at_index(
+                3, neg_inf, minimumVal(input.dtype().scalar_type()));
+
             auto positive_infinity = infinityVal(input.dtype().scalar_type());
             auto negative_infinity =
                 negInfinityVal(input.dtype().scalar_type());
@@ -958,11 +962,11 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
                 CompareSelect::make(input, positive_infinity, kEQ),
                 pos_inf_val,
                 input);
-            auto inf_replaced = ifThenElse(
+            auto infs_replaced = ifThenElse(
                 CompareSelect::make(input, negative_infinity, kEQ),
                 neg_inf_val,
                 pos_inf_replaced);
-            return ifThenElse(isnan(input), nan, inf_replaced);
+            return ifThenElse(isnan(input), nan_val, infs_replaced);
           });
     }
 

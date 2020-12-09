@@ -121,6 +121,7 @@ bool isSupported(Node* node) {
       "aten::trunc(Tensor self) -> Tensor",
       "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
       "aten::masked_fill.Scalar(Tensor self, Tensor mask, Scalar value) -> Tensor",
+      "aten::masked_fill.Tensor(Tensor self, Tensor mask, Tensor value) -> Tensor",
       "aten::nan_to_num(Tensor self, float? nan=None, float? posinf=None, float? neginf=None) -> Tensor",
       "aten::remainder.Scalar(Tensor self, Scalar other) -> Tensor",
       "aten::remainder.Tensor(Tensor self, Tensor other) -> Tensor",
@@ -188,6 +189,14 @@ bool isSupported(Node* node) {
       }
       if (!device || device->is_cpu()) {
         return false;
+      }
+    }
+
+    if (node->kind() == aten::nan_to_num) {
+      for (Value* v : node->inputs()) {
+        if (v->type()->cast<OptionalType>()) {
+          return false;
+        }
       }
     }
 
@@ -530,12 +539,13 @@ class TensorExprFuser {
   }
 
   // No Ops in eager shouldn't be outputs of Fusion Groups
-  static bool unexecutedEagerOp(Node * n)  {
+  static bool unexecutedEagerOp(Node* n) {
     if (n->kind() != aten::to) {
       return false;
     }
 
-    return *n->input(0)->type()->expect<TensorType>() == *n->output()->type()->expect<TensorType>();
+    return *n->input(0)->type()->expect<TensorType>() ==
+        *n->output()->type()->expect<TensorType>();
   }
 
   std::pair<graph_node_list::iterator, bool> scanNode(Node* n) {
@@ -776,9 +786,28 @@ class TensorExprFuser {
         return false;
       }
 
-      if (auto index = node->schema().argumentIndexWithName("non_blocking")) {
-        // non_blocking must be constant false input
-        if (constant_as<bool>(node->input(*index)).value_or(true)) {
+      // https://github.com/pytorch/pytorch/issues/49063
+      auto maybe_input_dtype =
+          node->input(0)->type()->expect<TensorType>()->scalarType();
+      auto maybe_output_dtype =
+          node->output(0)->type()->expect<TensorType>()->scalarType();
+      if (!maybe_input_dtype || !maybe_output_dtype) {
+        return false;
+      }
+      auto input_dtype = *maybe_input_dtype;
+      auto output_dtype = *maybe_output_dtype;
+
+      if (input_dtype == at::ScalarType::Double &&
+          output_dtype == at::ScalarType::Half) {
+        return false;
+      }
+      if (isFloatingType(input_dtype) && output_dtype == at::ScalarType::Bool) {
+        return false;
+      }
+
+      // all non-Tensor arguments must be constant
+      for (size_t i = 1; i < node->inputs().size(); i++) {
+        if (node->inputs().at(i)->node()->kind() != prim::Constant) {
           return false;
         }
       }

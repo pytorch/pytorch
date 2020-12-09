@@ -1211,6 +1211,133 @@ class TestTEFuser(JitTestCase):
         else:
             return v.to(dtype)
 
+    def test_torch_to(self):
+        # test no op
+        @torch.jit.script
+        def foo(x):
+            return x.to(torch.float)
+
+        foo(torch.tensor([3.], dtype=torch.float))
+        foo(torch.tensor([3.], dtype=torch.float))
+        FileCheck().check_not("TensorExpr").run(torch.jit.last_executed_optimized_graph())
+
+        # test not fusing non-const inputs
+        @torch.jit.script
+        def foo(x, dtype: int):
+            return x.to(dtype)
+
+        foo(torch.tensor([3.], dtype=torch.float), torch.int)
+        foo(torch.tensor([3.], dtype=torch.float), torch.int)
+        FileCheck().check_not("TensorExpr").run(torch.jit.last_executed_optimized_graph())
+
+        # test across-device not supported
+        if torch.cuda.is_available():
+            @torch.jit.script
+            def foo(x):
+                return x.to(device="cuda")
+
+            foo(torch.tensor([3.], dtype=torch.float))
+            foo(torch.tensor([3.], dtype=torch.float))
+            FileCheck().check_not("TensorExpr").run(torch.jit.last_executed_optimized_graph())
+
+        sizes = [(1, 4), (4, 4)]
+        # reuses cast impl, smaller dtype set for faster test
+        dtypes = [
+            torch.bool,
+            torch.int,
+            torch.float16,
+            torch.float32,
+            torch.float64,
+        ]
+
+        class MyMod(torch.nn.Module):
+            def __init__(self, dtype):
+                super(MyMod, self).__init__()
+                self.dtype = dtype
+
+            def forward(self, x):
+                return x.to(self.dtype)
+
+        bad_dtypes = []
+        for dtype, output_dtype, device, size in product(dtypes, dtypes, self.devices, sizes):
+            if dtype == output_dtype:
+                continue
+
+            x = self.data_for(dtype, device, size=size)
+            mod = MyMod(output_dtype)
+            ref = mod.forward(x)
+            # use freezing to make non-Tensor args to `to` constant
+            mod = torch.jit.freeze(torch.jit.script(mod.eval()))
+            warmup_forward(mod.forward, x)
+            self.assertEqual(ref, mod.forward(x))
+
+            # these op pairings are disabled in the fuser
+            if (dtype == torch.float64 and output_dtype == torch.float16) or \
+                    (dtype in [torch.float16, torch.float32, torch.float64] and output_dtype == torch.bool):
+                continue
+            self.assertLastGraphAllFused()
+
+    def test_nan_to_num(self):
+        nan_vals = torch.tensor([float('nan'), float('inf'), -float('inf'), 3.14])
+        sizes = [(1, 4), (4, 4)]
+        dtypes = [
+            torch.int,
+            torch.float16,
+            torch.float32,
+            torch.float64,
+        ]
+        for dtype, device, size in product(dtypes, self.devices, sizes):
+            x = self.data_for(dtype, device, size=size)
+            x[0] = nan_vals.to(dtype)
+
+            def fn(x):
+                return torch.nan_to_num(x), torch.nan_to_num(x, 1., 2., 3.)
+            ref = fn(x)
+            try:
+                t = torch.jit.trace(fn, (x,))
+                self.assertEqual(ref, t(x))
+                self.assertAllFused(t.graph_for(x))
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), "torch.nan_to_num", device, str(size)])
+                )
+
+    def test_masked_fill(self):
+        dtypes = [
+            torch.int8,
+            torch.uint8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.float16,
+            torch.float32,
+            torch.float64,
+            torch.bool,
+        ]
+        sizes = [(2,), (4, 4)]
+        for self_dtype, mask_dtype, device, size in product(dtypes, dtypes, self.devices, sizes):
+            try:
+                input_v = self.data_for(self_dtype, device, size=size)
+                val = self.data_for(val_dtype, device, size=size)
+                mask = self.data_for(torch.bool, device, size=size)
+
+                def fn(input_v, val, mask):
+                    return torch.masked_fill(input_v, mask, val)
+                ref = fn(input_v, val, mask)
+            except Exception:
+                # If eager mode doesn't support a dtype/op/device combo,
+                # neither does the fuser.  Catch everything to avoid needing to
+                # guess what errors might be thrown by eager.
+                continue
+            try:
+                t = torch.jit.trace(fn, (input_v, val, mask))
+                torch.testing.assert_allclose(ref, t((input_v, val, mask)))
+                self.assertAllFused(t.graph_for(x))
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), op.__name__, device, str(size)])
+                )
+
     def test_isnan(self):
         inputs = [
             torch.tensor([2., 4., float('nan')]),

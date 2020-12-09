@@ -175,7 +175,6 @@ class LLVMCodeGenImpl : public IRVisitor {
   void visit(const Let* v) override;
   void visit(const Cond* v) override;
 
-  void emitCast(llvm::Value* src, llvm::Type* dstType);
   void emitIsNan(const Intrinsics* v);
 
   llvm::Value* emitUnmaskedLoad(llvm::Value* addr, llvm::Value* idx);
@@ -422,14 +421,6 @@ class LLVMIntrinsicsExpander : public GenericIntrinsicsExpander {
       }
     }
 #endif
-    // if (v->op_type() == kIsNan) {
-    //   if (!v->param(0)->dtype().is_floating_point()) {
-    //     return expr_to_vec(IntImm::make(0), v->dtype().lanes()).node();
-    //   }
-    //   auto inp = v->param(0)->accept_mutator(this);
-    //   auto handle =  ExprHandle(inp);
-    //   return (!(handle == handle)).node();
-    // }
     // TODO: fast exp
     // TODO: fast erf
     // TODO: fast sigmoid
@@ -509,8 +500,11 @@ void LLVMCodeGenImpl::emitKernel(
   irb_.SetInsertPoint(bb_);
 
   // Maybe expand some of the intrinsics.
+#ifdef USE_FAST_CPU_INTRINSICS
   LLVMIntrinsicsExpander intrinsics_expander;
-  stmt = stmt->accept_mutator(&intrinsics_expander);
+#else
+  GenericIntrinsicsExpander intrinsics_expander;
+#endif
 
   // Compile the kernel.
   stmt->accept(this);
@@ -834,10 +828,6 @@ void LLVMCodeGenImpl::visit(const HalfImm* v) {
 
 void LLVMCodeGenImpl::visit(const BoolImm* v) {
   value_ = llvm::ConstantInt::get(BoolTy_, v->value());
-}
-
-void LLVMCodeGenImpl::emitCast(llvm::Value* v, llvm::Type* dstType) {
-  //
 }
 
 void LLVMCodeGenImpl::visit(const Cast* v) {
@@ -1335,18 +1325,20 @@ llvm::Value* LLVMCodeGenImpl::toVec(llvm::Value* v, int lanes) {
 }
 
 void LLVMCodeGenImpl::emitIsNan(const Intrinsics* v) {
-  if (!v->param(0)->dtype().is_floating_point()) {
-    value_ = toVec(
-        llvm::ConstantInt::get(dtypeToLLVM(v->dtype()), 0), v->dtype().lanes());
-  }
   v->param(0)->accept(this);
-  auto out =
-      irb_.CreateFCmpUNO(value_, llvm::ConstantFP::get(value_->getType(), 0.));
   llvm::Type* dstType = dtypeToLLVM(v->dtype());
-  if (v->dtype().lanes() > 1) {
-    dstType = llvm::VectorType::get(dstType, ElementCount(v->dtype().lanes()));
+  if (!v->param(0)->dtype().is_floating_point()) {
+    value_ = toVec(llvm::ConstantInt::get(dstType, 0), v->dtype().lanes());
+  } else {
+    TORCH_INTERNAL_ASSERT(v->dtype().scalar_type() == ScalarType::Int);
+    auto is_nan = irb_.CreateFCmpUNO(
+        value_, llvm::ConstantFP::get(value_->getType(), 0.));
+    if (v->dtype().lanes() > 1) {
+      dstType =
+          llvm::VectorType::get(dstType, ElementCount(v->dtype().lanes()));
+    }
+    value_ = irb_.CreateIntCast(is_nan, dstType, /*isSigned*/ false);
   }
-  value_ = irb_.CreateIntCast(out, dstType, false);
 }
 
 void LLVMCodeGenImpl::visit(const Intrinsics* v) {
@@ -1355,8 +1347,7 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
   bool call_simd_sleef = false;
 
   if (v->op_type() == kIsNan) {
-    emitIsNan(v);
-    return;
+    return emitIsNan(v);
   }
 
   if (v->dtype().scalar_type() == ScalarType::Float) {
