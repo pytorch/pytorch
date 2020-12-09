@@ -1041,10 +1041,10 @@ class TestCase(expecttest.TestCase):
 
     # Construct assert messages basd on internal debug message and user provided message.
     def _get_assert_msg(self, msg, debug_msg=None):
-        if debug_msg is None:
-            return msg
+        if msg is None:
+            return debug_msg
         else:
-            return f"\n{debug_msg}" if msg is None else f"{msg}\n{debug_msg}"
+            return f"\n{msg}" if debug_msg is None else f"{debug_msg}\n{msg}"
 
     def assertEqualIgnoreType(self, *args, **kwargs) -> None:
         # If you are seeing this function used, that means test is written wrongly

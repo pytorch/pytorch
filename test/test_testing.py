@@ -434,9 +434,9 @@ class TestTesting(TestCase):
 
     def test_assert_messages(self, device):
         self.assertIsNone(self._get_assert_msg(msg=None))
-        self.assertEqual("no_debug_msg", self._get_assert_msg("no_debug_msg"))
-        self.assertEqual("\nno_user_msg", self._get_assert_msg(msg=None, debug_msg="no_user_msg"))
-        self.assertEqual("user_msg\ndebug_msg", self._get_assert_msg(msg="user_msg", debug_msg="debug_msg"))
+        self.assertEqual("\nno_debug_msg", self._get_assert_msg("no_debug_msg"))
+        self.assertEqual("no_user_msg", self._get_assert_msg(msg=None, debug_msg="no_user_msg"))
+        self.assertEqual("debug_msg\nuser_msg", self._get_assert_msg(msg="user_msg", debug_msg="debug_msg"))
 
 instantiate_device_type_tests(TestTesting, globals())
 
