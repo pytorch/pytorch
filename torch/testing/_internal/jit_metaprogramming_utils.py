@@ -229,8 +229,15 @@ def the_method({}):
     return {}
 '''
 
+def value_to_literal(value):
+    if isinstance(value, str):
+        # Quotes string and escapes special characters
+        return ascii(value)
+    else:
+        return str(value)
+
 def get_call(method_name, func_type, args, kwargs):
-    kwargs_str = ', '.join([k + '=' + str(v) for k, v in kwargs.items()])
+    kwargs_str = ', '.join([k + '=' + value_to_literal(v) for k, v in kwargs.items()])
     self_arg = args[0]
     if(func_type == 'method'):
         args = args[1:]
@@ -461,12 +468,12 @@ def create_script_module(self, nn_module, constructor_args, *args, **kwargs):
         return module
     return script_module
 
-def check_alias_annotation(method_name, args, kwargs):
+def check_alias_annotation(method_name, args, kwargs, *, aten_name, func_type='method'):
     formals, tensors, actuals = get_script_args(args)
-    call = get_call(method_name, 'method', actuals, kwargs)
+    call = get_call(method_name, func_type, actuals, kwargs)
     script = script_template.format(', '.join(formals), call)
     CU = torch.jit.CompilationUnit(script)
-    torch._C._jit_check_alias_annotation(CU.the_method.graph, tuple(tensors), method_name)
+    torch._C._jit_check_alias_annotation(CU.the_method.graph, tuple(tensors), aten_name)
 
 def get_nn_module_name_from_kwargs(**kwargs):
     if 'module_name' in kwargs:
