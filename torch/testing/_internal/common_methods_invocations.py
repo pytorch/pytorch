@@ -205,7 +205,7 @@ def sample_inputs_unary(self, device, dtype, requires_grad):
                                     requires_grad=requires_grad)),)
 
 
-def _sample_sparse_inputs(self, device, dtype, requires_grad, **kwargs):
+def sample_sparse_inputs_unary(self, device, dtype, requires_grad, **kwargs):
     is_coalesced = kwargs.get("coalesced", True)
 
     t1 = torch.sparse_coo_tensor(
