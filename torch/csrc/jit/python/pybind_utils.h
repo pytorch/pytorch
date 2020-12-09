@@ -280,8 +280,8 @@ inline TypedIValue toDictKeyIValue(py::handle key) {
 }
 
 inline c10::optional<TypePtr> unifyOrInitializeType(
-    TypePtr accum,
-    TypePtr unify) {
+    const TypePtr& accum,
+    const TypePtr& unify) {
   if (!accum) {
     return unify;
   }
@@ -499,7 +499,7 @@ inline InferredType tryToInferContainerType(py::handle input) {
   }
 }
 
-inline bool isTraceableType(TypePtr type) {
+inline bool isTraceableType(const TypePtr& type) {
   if (type->isSubtypeOf(TensorType::get())) {
     return true;
   }
@@ -512,7 +512,9 @@ inline bool isTraceableType(TypePtr type) {
     return std::all_of(
         tuple_type->elements().begin(),
         tuple_type->elements().end(),
-        [](TypePtr element_type) { return isTraceableType(element_type); });
+        [](const TypePtr& element_type) {
+          return isTraceableType(element_type);
+        });
   }
 
   if (auto dict_type = type->cast<DictType>()) {
@@ -545,13 +547,13 @@ inline Stack toTraceableStack(const py::tuple& inputs) {
 inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
   auto elems = c10::impl::GenericList(elem_type);
   for (auto elem : obj) {
-    elems.push_back(toIValue(std::move(elem), elem_type));
+    elems.push_back(toIValue(elem, elem_type));
   }
   return IValue(std::move(elems));
 }
 
 inline IValue createGenericDict(
-    py::dict obj,
+    const py::dict& obj,
     const TypePtr& key_type,
     const TypePtr& value_type) {
   c10::impl::GenericDict elems(key_type, value_type);
@@ -747,7 +749,7 @@ inline IValue toIValue(
               "a TorchScript compatible type, did you forget to",
               "turn it into a user defined TorchScript class?"));
         }
-        res = toIValue(std::move(obj), classType);
+        res = toIValue(obj, classType);
       }
       // check if the classType conform with the interface or not
       std::stringstream why_not;
@@ -1074,9 +1076,9 @@ inline Stack createStackForSchema(
     push(stack, std::move(*self));
   }
   // First push all positional args.
-  for (size_t i = 0; i < args.size(); ++i) {
+  for (const auto& arg : args) {
     // Use the type information from the schema to convert the PyObject.
-    push(stack, argumentToIValue(schema, stack.size(), args[i]));
+    push(stack, argumentToIValue(schema, stack.size(), arg));
   }
 
   // Now for every remaining non-positional argument in the schema, look for it
@@ -1153,15 +1155,16 @@ inline Stack evilDeprecatedBadCreateStackDoNotUse(
 // tracing graph.
 inline py::object runAndInsertCall(
     Function& callee,
-    tuple_slice args,
-    py::kwargs kwargs,
+    const tuple_slice& args,
+    const py::kwargs& kwargs,
     c10::optional<IValue> self,
     // Lambda that tells this function how to insert `callee` into the graph if
     // we're tracing.
-    std::function<Value*(Graph&, const MatchedSchema& match)> callInserter) {
-  auto stack = createStackForSchema(
-      callee.getSchema(), std::move(args), std::move(kwargs), std::move(self));
-  auto tracing_state = tracer::getTracingState();
+    const std::function<Value*(Graph&, const MatchedSchema& match)>&
+        callInserter) {
+  auto stack =
+      createStackForSchema(callee.getSchema(), args, kwargs, std::move(self));
+  const auto& tracing_state = tracer::getTracingState();
   if (!tracing_state) {
     pybind11::gil_scoped_release no_gil_guard;
     // If we're not tracing, just run the callee as normal.
@@ -1211,8 +1214,8 @@ inline py::object runAndInsertCall(
 
 inline py::object invokeScriptFunctionFromPython(
     Function& callee,
-    tuple_slice args,
-    py::kwargs kwargs) {
+    const tuple_slice& args,
+    const py::kwargs& kwargs) {
   return runAndInsertCall(
       callee,
       args,
@@ -1225,8 +1228,8 @@ inline py::object invokeScriptFunctionFromPython(
 
 inline py::object invokeScriptMethodFromPython(
     Method& callee,
-    tuple_slice args,
-    py::kwargs kwargs) {
+    const tuple_slice& args,
+    const py::kwargs& kwargs) {
   auto self = callee.owner()._ivalue();
   return runAndInsertCall(
       callee.function(),
@@ -1241,14 +1244,14 @@ inline py::object invokeScriptMethodFromPython(
 inline py::object invokeOperatorFromPython(
     const std::vector<std::shared_ptr<Operator>>& operations,
     py::args args,
-    py::kwargs kwargs) {
+    const py::kwargs& kwargs) {
   Stack stack;
 
   if (operations.size() == 1) {
     const Operator& op = *operations.at(0);
     // Create a stack full of the arguments and keyword arguments.
     stack = createStackForSchema(
-        op.schema(), std::move(args), std::move(kwargs), c10::nullopt);
+        op.schema(), std::move(args), kwargs, c10::nullopt);
 
     pybind11::gil_scoped_release no_gil_guard;
     op.getOperation()(&stack);
