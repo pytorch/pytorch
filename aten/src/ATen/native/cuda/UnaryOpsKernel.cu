@@ -104,10 +104,10 @@ void sigmoid_kernel_cuda(TensorIterator& iter) {
 }
 
 void sinc_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "sinc", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.common_dtype(), "sinc_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       scalar_t product = scalar_t(M_PI) * a;
-      return a == scalar_t(0) ? scalar_t(1) : std::sin(product) / product;
+      return a == scalar_t(0) ? scalar_t(1) : static_cast<scalar_t>(std::sin(product) / product);
     });
   });
 }

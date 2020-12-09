@@ -343,6 +343,10 @@ Tensor& cos_out(Tensor& result, const Tensor& self) { return unary_op_impl_float
 Tensor cos(const Tensor& self) { return unary_op_impl_float(self, cos_stub); }
 Tensor& cos_(Tensor& self) { return unary_op_impl_(self, at::cos_out); }
 
+Tensor& sinc_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, sinc_stub); }
+Tensor sinc(const Tensor& self) { return unary_op_impl_float(self, sinc_stub); }
+Tensor& sinc_(Tensor& self) { return unary_op_impl_(self, at::sinc_out); }
+
 Tensor& sinh_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, sinh_stub); }
 Tensor sinh(const Tensor& self) { return unary_op_impl_float(self, sinh_stub); }
 Tensor& sinh_(Tensor& self) { return unary_op_impl_(self, at::sinh_out); }
@@ -637,16 +641,6 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   args = args.add(self.unsqueeze(-1));
   return self.copy_(args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.));
 }
-
-Tensor& sinc_out(Tensor& result, const Tensor& self) {
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()),
-              "sinc is not implemented for ", self.scalar_type());
-  auto iter = TensorIterator::unary_op(result, self);
-  sinc_stub(iter.device_type(), iter);
-  return result;
-}
-Tensor sinc(const Tensor& self) { return unary_op_impl(self, at::sinc_out); }
-Tensor& sinc_(Tensor& self) { return unary_op_impl_(self, at::sinc_out); }
 
 // NB: If you use this macro, you may also need to add a CUDA forwarding
 // stub in CUDAUnaryOps
