@@ -1273,11 +1273,11 @@ class TestTEFuser(JitTestCase):
                 )
 
     def test_isnan(self):
+        x = torch.rand([4])
+        x[0] = float('nan')
         inputs = [
-            torch.tensor([2., 4., float('nan')]),
-            torch.tensor([2, 4]),
-            torch.rand([4, 4]).fill_(float('nan')),
-            torch.rand([4, 4])
+            x,
+            torch.tensor([float('nan'), .5])
         ]
         dtypes = [
             torch.int8,
