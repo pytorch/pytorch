@@ -24,7 +24,7 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
     // These copies are all shared_ptr copies, so slightly more expensive.
     // Do them here instead of in the init list in case data is undefined.
     data_ = variable.tensor_data();
-    auto fw_grad = variable.fw_grad(/* level */ 0);
+    const auto& fw_grad = variable.fw_grad(/* level */ 0);
     if (fw_grad.defined()) {
       fw_grad_ = std::make_shared<ForwardGrad>();
       fw_grad_->set_value(fw_grad, /* level */ 0);

@@ -1117,7 +1117,7 @@ def match_declarations_with_differentiability_info(
                     var_name="self",
                     var_type=fw_info.var_type,
                     required_inputs_fw_grad=fw_info.required_inputs_fw_grad,
-                    required_inputs_primal=fw_info.required_inputs_primal),]
+                    required_inputs_primal=fw_info.required_inputs_primal), ]
         else:
             fw_info = []
 

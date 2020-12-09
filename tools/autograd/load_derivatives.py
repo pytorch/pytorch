@@ -142,13 +142,13 @@ def postprocess_forward_derivatives(
         if formula == "auto_element_wise":
             if (not len(args_with_derivatives) == 1) or len(forward_derivatives) > 1:
                 raise RuntimeError(f"Derivative definition of {defn_name} in derivatives.yaml defines the "
-                                    "forward definition of gradient as element_wise but this only "
-                                    "works for functions with a single differentiable input and a "
-                                    "single differentiable output.")
+                                   "forward definition of gradient as element_wise but this only "
+                                   "works for functions with a single differentiable input and a "
+                                   "single differentiable output.")
             if not len(derivatives) == 1:
                 raise RuntimeError(f"Derivative definition of {defn_name} in derivatives.yaml defines the "
-                                    "forward definition of gradient as element_wise but it does not "
-                                    "defines the gradient formula for its argument which is required.")
+                                   "forward definition of gradient as element_wise but it does not "
+                                   "defines the gradient formula for its argument which is required.")
 
             backward_formula = derivatives[0].original_formula
             input_name = args_with_derivatives[0].name
@@ -162,8 +162,8 @@ def postprocess_forward_derivatives(
         elif formula == "auto_linear":
             if len(forward_derivatives) > 1:
                 raise RuntimeError(f"Derivative definition of {defn_name} in derivatives.yaml defines the "
-                                    "forward definition of gradient as linear but this only works "
-                                    "for functions with a single differentiable output.")
+                                   "forward definition of gradient as linear but this only works "
+                                   "for functions with a single differentiable output.")
 
             diff_arg_names = [arg.name for arg in args_with_derivatives]
             assert len(diff_arg_names) > 0
@@ -309,8 +309,8 @@ def create_differentiability_info(
         args_with_derivatives = [a for a in cpp_arguments(f) if a.name in args_with_derivatives_set]
 
         # Postprocess forward derivatives definitions now that we know the differentiable arguments
-        forward_derivatives = postprocess_forward_derivatives(f, defn_name,
-            all_arg_names, derivatives, forward_derivatives, args_with_derivatives)
+        forward_derivatives = postprocess_forward_derivatives(f, defn_name, all_arg_names, derivatives,
+                                                              forward_derivatives, args_with_derivatives)
 
         # Test to see if the use of 'grads' makes sense.
         check_grad_usage(defn_name, derivatives)
@@ -349,8 +349,8 @@ def create_differentiability_info(
 
     if 'result' in (a.name for a in cpp_arguments(canonical)):
         raise RuntimeError(f"Schema for {defn_name} has an argument named result, "
-                            "but this is only allowed for outputs."
-                            "Please use a different name in native_functions.yaml.")
+                           "but this is only allowed for outputs."
+                           "Please use a different name in native_functions.yaml.")
 
     derivatives, forward_derivatives, args_with_derivatives, non_differentiable_arg_names = set_up_derivatives(canonical)
 
