@@ -272,5 +272,7 @@ class C10_API SizesAndStrides {
 
 };
 
+constexpr int SizesAndStrides::MAX_INLINE_SIZE;
+
 } // namespace impl
 } // namespace c10
