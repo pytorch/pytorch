@@ -11,8 +11,8 @@ from torch.utils.data.datasets import (
     ReadFilesFromZipIterableDataset)
 
 def create_temp_dir_and_files():
-    # Note: The temp dir and files within it will be released and deleted in tearDown().
-    #       adding `noqa: P201` to avoid mypy's warning on not releasing the dir handle within this function.
+    # The temp dir and files within it will be released and deleted in tearDown().
+    # Adding `noqa: P201` to avoid mypy's warning on not releasing the dir handle within this function.
     temp_dir = tempfile.TemporaryDirectory()  # noqa: P201
     temp_dir_path = temp_dir.name
     with tempfile.NamedTemporaryFile(dir=temp_dir_path, delete=False) as f:
