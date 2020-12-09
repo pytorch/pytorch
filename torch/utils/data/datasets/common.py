@@ -74,7 +74,6 @@ def get_file_pathnames_from_root(
     for path, dirs, files in os.walk(root, onerror=onerror):
         if abspath:
             path = os.path.abspath(path)
-        files.sort()
         for f in files:
             if match_masks(f, masks):
                 yield os.path.join(path, f)
