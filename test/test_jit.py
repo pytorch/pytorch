@@ -343,7 +343,10 @@ class TestJit(JitTestCase):
         self.checkScript(fn, ())
 
         with self.assertRaisesRegex(RuntimeError, ""):
-            with self.assertRaisesRegex(AssertionError, "Expected Dict type annotation for dict comprehension, found Tuple[int, str]"):
+            with self.assertRaisesRegex(AssertionError, "Expected Dict "
+                                        "type annotation for dict "
+                                        "comprehension, found "
+                                        "Tuple[int, str]"):
                 @torch.jit.script
                 def fn():
                     d: Tuple[int, str] = {i : chr(i + 65) for i in range(4)}
