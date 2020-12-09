@@ -95,7 +95,7 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
   return std::make_tuple(det_sign, abslogdet_val);
 }
 
-Tensor linalg_pinv(const Tensor& input, double rcond, bool hermitian) {
+Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
   TORCH_CHECK((at::isFloatingType(input.scalar_type()) || at::isComplexType(input.scalar_type())) && input.dim() >= 2,
               "linalg_pinv(", input.scalar_type(), "{", input.sizes(), "}): expected a tensor with 2 or more dimensions "
               "of floating types");
@@ -130,11 +130,16 @@ Tensor linalg_pinv(const Tensor& input, double rcond, bool hermitian) {
     // computes U @ diag(S_pseudoinv) @ U.conj().T
     return at::matmul(U * S_pseudoinv.unsqueeze(-2), U.conj().transpose(-2, -1));
   }
+}
 
+Tensor linalg_pinv(const Tensor& input, double rcond, bool hermitian) {
+  ScalarType real_dtype = toValueType(input.scalar_type());
+  Tensor rcond_tensor = at::full({}, rcond, input.options().dtype(real_dtype));
+  return at::linalg_pinv(input, rcond_tensor, hermitian);
 }
 
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
-Tensor& linalg_pinv_out(Tensor& result, const Tensor& input, double rcond, bool hermitian) {
+Tensor& linalg_pinv_out(Tensor& result, const Tensor& input, const Tensor& rcond, bool hermitian) {
   TORCH_CHECK(result.scalar_type() == input.scalar_type(),
     "result dtype ", result.scalar_type(), " does not match the expected dtype ", input.scalar_type());
 
@@ -142,6 +147,12 @@ Tensor& linalg_pinv_out(Tensor& result, const Tensor& input, double rcond, bool 
   at::native::resize_output(result, result_tmp.sizes());
   result.copy_(result_tmp);
   return result;
+}
+
+Tensor& linalg_pinv_out(Tensor& result, const Tensor& input, double rcond, bool hermitian) {
+  ScalarType real_dtype = toValueType(input.scalar_type());
+  Tensor rcond_tensor = at::full({}, rcond, input.options().dtype(real_dtype));
+  return at::linalg_pinv_out(result, input, rcond_tensor, hermitian);
 }
 
 Tensor pinverse(const Tensor& self, double rcond) {
