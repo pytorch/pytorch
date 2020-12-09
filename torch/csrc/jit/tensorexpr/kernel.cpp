@@ -938,16 +938,20 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
             if (!input.dtype().is_floating_point()) {
               return input;
             }
+
+            // we dont use default promoteTypes logic, 
+            // because we cast the non-input types to the input dtype
             auto value_or_default_at_index =
                 [&](size_t index, ExprHandle val, ExprHandle default_v) {
                   if (node->inputs().at(index)->type() == NoneType::get()) {
-                    return default_v;
+                    return Cast::make(input.dtype(), default_v);
                   } else {
                     TORCH_INTERNAL_ASSERT(
                         !node->input(index)->type()->cast<OptionalType>());
-                    return val;
+                    return Cast::make(input.dtype(), val);
                   }
                 };
+
             auto nan_val = value_or_default_at_index(
                 1, nan, Cast::make(input.dtype(), DoubleImm::make(0.)));
             auto pos_inf_val = value_or_default_at_index(
@@ -967,7 +971,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
                 neg_inf_val,
                 pos_inf_replaced);
             return ifThenElse(isnan(input), nan_val, infs_replaced);
-          });
+          }, /*promote_inputs*/false);
     }
 
     case aten::clamp: {
