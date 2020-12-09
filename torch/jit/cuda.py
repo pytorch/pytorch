@@ -13,7 +13,7 @@ from typing import Optional, Any
 from torch import device as _device
 
 def get_current_device_index():
-    if torch.cuda._getDeviceCount() > 0:
+    if torch.cuda.device_count() > 0:
         return torch.cuda._current_device()
     return -1
 
@@ -31,7 +31,7 @@ def get_device_index(device: Optional[_device] = None, optional: bool = False, a
     if isinstance(device, torch.device):
         if not allow_cpu and device.type == 'cpu':
             raise ValueError('Expected a non cpu device, but got: {}'.format(device))
-        device_index = -1 if device.type == 'cpu' else torch.cuda._getDeviceIndex(device)
+        device_index = -1 if device.type == 'cpu' else torch.cuda.device_index(device)
 
     if isinstance(device, int):
         device_index = device

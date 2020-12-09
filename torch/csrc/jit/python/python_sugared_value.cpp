@@ -228,8 +228,8 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
                                              "default_stream",
                                              "_current_device",
                                              "_set_device",
-                                             "_getDeviceIndex",
-                                             "_getDeviceCount",
+                                             "device_index",
+                                             "device_count",
                                              "set_stream"};
 
   if (cuda_ops.find(field) != cuda_ops.end()) {

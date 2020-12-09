@@ -48,7 +48,7 @@ RegisterOperators reg({
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "cuda::_getDeviceIndex(Device device) -> int",
+        "cuda::device_index(Device device) -> int",
         [](Stack* stack) {
             auto device = pop(stack);
             auto idx = device.toDevice().index();
@@ -56,7 +56,7 @@ RegisterOperators reg({
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "cuda::_getDeviceCount() -> int",
+        "cuda::device_count() -> int",
         [](Stack* stack) { push(stack, at::cuda::device_count()); },
         aliasAnalysisFromSchema()),
     Operator(
