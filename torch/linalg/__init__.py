@@ -500,7 +500,7 @@ Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` datatypes.
 Args:
     input (Tensor): the input matrix of size :math:`(m, n)` or the batch of matrices of size :math:`(*, m, n)`
                     where `*` is one or more batch dimensions.
-    rcond (float, optional): the tolerance value to determine the cutoff for small singular values. Default: 1e-15
+    rcond (float, Tensor, optional): the tolerance value to determine the cutoff for small singular values. Default: 1e-15
     hermitian(bool, optional): indicates whether :attr:`input` is Hermitian. Default: ``False``
 
 Examples::
