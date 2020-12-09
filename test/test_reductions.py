@@ -815,15 +815,11 @@ class TestReductions(TestCase):
         self.assertEqual(res1, res2)
 
     def test_prod_bool(self, device):
-        tests = [
-            ([True, True], True),
-            ([True, False], False),
-            ([False, False], False)
-        ]
-
-        for val, exp in tests:
-            tensor = torch.tensor(val, device=device)
-            self.assertEqual(torch.prod(tensor, dtype=torch.bool), torch.tensor(exp, device=device))
+        vals = [[True, True], [True, False], [False, False], []]
+        for val in vals:
+            result = torch.prod(torch.tensor(val, device=device), dtype=torch.bool)
+            expect = torch.tensor(np.prod(np.array(val), dtype=np.bool), device=device)
+            self.assertEqual(result, expect)
 
     @onlyCPU
     def test_max_mixed_devices(self, device):
