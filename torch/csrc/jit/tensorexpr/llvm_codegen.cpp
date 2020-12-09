@@ -522,7 +522,7 @@ void LLVMCodeGenImpl::emitKernel(
   if (is_enabled(__FILE__, ::torch::jit::JitLoggingLevels::GRAPH_DEBUG)) {
     module_->print(asmStream, nullptr);
   }
-  GRAPH_DEBUG(asmStream.str().str(), "\n");
+  GRAPH_DEBUG("\nLLVM module before optimizations\n\n", asmStream.str().str(), "\n");
 
   optimize(*module_);
 
@@ -532,13 +532,13 @@ void LLVMCodeGenImpl::emitKernel(
     module_->print(asmStream, nullptr);
     llvm::legacy::PassManager PM;
     TM_->addPassesToEmitFile(
-      PM,
-      asmStream,
-      nullptr,
-      llvm::TargetMachine::CodeGenFileType::CGFT_AssemblyFile);
+        PM,
+        asmStream,
+        nullptr,
+        llvm::TargetMachine::CodeGenFileType::CGFT_AssemblyFile);
     PM.run(*module_);
   }
-  GRAPH_DEBUG("\n after optimization\n\n", asmStream.str().str(), "\n");
+  GRAPH_DEBUG("\nLLVM module after optimizations\n\n", asmStream.str().str(), "\n");
 }
 
 // TODO: The binary ops are copypasta.
