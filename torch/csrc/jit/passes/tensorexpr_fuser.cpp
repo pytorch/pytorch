@@ -117,6 +117,7 @@ bool isSupported(Node* node) {
       "aten::trunc(Tensor self) -> Tensor",
       "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
       "aten::masked_fill.Scalar(Tensor self, Tensor mask, Scalar value) -> Tensor",
+      "aten::masked_fill.Tensor(Tensor self, Tensor mask, Tensor value) -> Tensor",
       "aten::nan_to_num(Tensor self, float? nan=None, float? posinf=None, float? neginf=None) -> Tensor",
       "aten::remainder.Scalar(Tensor self, Scalar other) -> Tensor",
       "aten::remainder.Tensor(Tensor self, Tensor other) -> Tensor",
@@ -184,6 +185,14 @@ bool isSupported(Node* node) {
       }
       if (!device || device->is_cpu()) {
         return false;
+      }
+    }
+
+    if (node->kind() == aten::nan_to_num) {
+      for (Value* v : node->inputs()) {
+        if (v->type()->cast<OptionalType>()) {
+          return false;
+        }
       }
     }
 
