@@ -1283,7 +1283,7 @@ class DistributedTest:
                 self.assertEqual(result, [_build_tensor(src + 1, expected_value)])
             self._barrier()
 
-        def call_dist_op(self, profiling_title_postfix, is_async, op, *args, expect_event=False, secondary_op_call=None, **kwargs):
+        def call_dist_op(self, profiling_title_postfix, is_async, op, *args, expect_event=True, secondary_op_call=None, **kwargs):
             op_calls = [lambda: op(*args, **kwargs)]
             if secondary_op_call is not None:
                 op_calls.append(secondary_op_call)

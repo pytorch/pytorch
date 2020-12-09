@@ -148,26 +148,7 @@ class Graph:
             %topk_1 : [#users=1] = call_function[target=<built-in method topk of type object at 0x7ff2da9dc300>](args = (%sum_1, 3), kwargs = {}) # noqa: B950
             return topk_1
 
-    The Node semantics are as follows:
-
-    - ``placeholder`` represents a function input. The ``name`` attribute specifies the name this value will take on.
-      ``target`` is similarly the name of the argument. ``args`` holds either: 1) nothing, or 2) a single argument
-      denoting the default parameter of the function input. ``kwargs`` is don't-care. Placeholders correspond to
-      the function parameters (e.g. ``x``) in the graph printout.
-    - ``get_attr`` retrieves a parameter from the module hierarchy. ``name`` is similarly the name the result of the
-      fetch is assigned to. ``target`` is the fully-qualified name of the parameter's position in the module hierarchy.
-      ``args`` and ``kwargs`` are don't-care
-    - ``call_function`` applies a free function to some values. ``name`` is similarly the name of the value to assign
-      to. ``target`` is the function to be applied. ``args`` and ``kwargs`` represent the arguments to the function,
-      following the Python calling convention
-    - ``call_module`` applies a module in the module hierarchy's ``forward()`` method to given arguments. ``name`` is
-      as previous. ``target`` is the fully-qualified name of the module in the module hierarchy to call.
-      ``args`` and ``kwargs`` represent the arguments to invoke the module on, *including the self argument*.
-    - ``call_method`` calls a method on a value. ``name`` is as similar. ``target`` is the string name of the method
-      to apply to the ``self`` argument. ``args`` and ``kwargs`` represent the arguments to invoke the module on,
-      *including the self argument*
-    - ``output`` contains the output of the traced function in its ``args[0]`` attribute. This corresponds to the "return" statement
-      in the Graph printout.
+    For the semantics of operations represented in the ``Graph``, please see :class:`Node`.
     """
     def __init__(self):
         """
