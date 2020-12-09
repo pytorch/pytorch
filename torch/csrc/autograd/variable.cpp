@@ -619,7 +619,7 @@ void AutogradMeta::set_fw_grad(Variable& new_grad, const Variable& self, uint64_
           Tensor new_base_fw_grad;
           if (has_same_meta(new_grad, base)) {
             // TODO extend this special case to when the underlying storage of new_grad
-            // can be re-used. 
+            // can be re-used.
             new_base_fw_grad = new_grad;
           } else {
             new_base_fw_grad = new_with_same_meta(base);
@@ -639,6 +639,12 @@ void AutogradMeta::set_fw_grad(Variable& new_grad, const Variable& self, uint64_
           base.set_fw_grad(new_base_fw_grad, level, /* is_inplace_op */ false);
         }
       }
+    }
+
+    if (!has_same_meta(new_grad, self)) {
+      Tensor new_grad_with_meta = new_with_same_meta(self);
+      new_grad_with_meta.copy_(new_grad);
+      new_grad = new_grad_with_meta;
     }
 
     fw_grad_->set_value(new_grad, level);
