@@ -316,8 +316,7 @@ class ProcessGroupNCCL : public ProcessGroup {
 
       (*cudaEvents_)[0].block(*futureNCCLCallbackStream_);
       // Use the dedicated callback stream to run callback.
-      c10::OptionalStreamGuard streamGuard{
-          c10::Stream(*futureNCCLCallbackStream_)};
+      c10::StreamGuard streamGuard{*futureNCCLCallbackStream_};
       callback();
     }
 
@@ -352,7 +351,8 @@ class ProcessGroupNCCL : public ProcessGroup {
               fut->markCompleted(at::IValue(cb()));
               // In case of chained then callback calls, thenFutCudaEvents
               // records callback's stream.
-              (*thenFutCudaEvents)[0].record(*futureNCCLCallbackStream_);
+              (*thenFutCudaEvents)[0].record(
+                  at::cuda::getCurrentCUDAStream(deviceIndex_));
             } catch (const std::exception& e) {
               fut->setError(std::current_exception());
             }
