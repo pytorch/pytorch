@@ -12,7 +12,7 @@ class RoutedDecoderIterableDataset(IterableDataset):
     IterableDataset to decode binary streams from input iterables,
     yield pathname and decoded binary stream in a tuple.
     args:
-        dataset: Iterable dataset that provides pathname and zip binary stream in tuples
+        dataset: Iterable dataset that provides pathname and binary stream in tuples
         decoders: user defined decoders, if None, basic and image decoders will be set as default
         length: a nominal length of the dataset
     """
