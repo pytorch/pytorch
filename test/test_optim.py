@@ -6,7 +6,6 @@ from copy import deepcopy
 import torch
 from torch._six import inf
 import torch.optim as optim
-import torch.optim._multi_tensor as optim_mt
 import torch.nn.functional as F
 from torch.optim import SGD
 from torch.autograd import Variable
@@ -250,199 +249,120 @@ class TestOptim(TestCase):
         return [dict(params=bias, **kwargs)]
 
     def test_sgd(self):
-        for optimizer in [optim.SGD, optim_mt.SGD]:
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict_single(weight, bias, lr=1e-2),
-                    lr=1e-3)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict_single(weight, bias, lr=1e-2))
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3),
-                [lambda opt: StepLR(opt, gamma=0.9, step_size=10)]
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3),
-                [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-                 lambda opt: ReduceLROnPlateau(opt)]
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3),
-                [lambda opt: StepLR(opt, gamma=0.99, step_size=10),
-                 lambda opt: ExponentialLR(opt, gamma=0.99),
-                 lambda opt: ReduceLROnPlateau(opt)]
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, momentum=1)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, momentum=1, weight_decay=1)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], nesterov=True, lr=1e-3, momentum=1, weight_decay=1)
-            )
-            with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
-                optimizer(None, lr=1e-2, momentum=-0.5)
+        self._test_basic_cases(
+            lambda weight, bias: optim.SGD([weight, bias], lr=1e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.SGD(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=1e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.SGD(
+                self._build_params_dict_single(weight, bias, lr=1e-2),
+                lr=1e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.SGD(
+                self._build_params_dict_single(weight, bias, lr=1e-2))
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.SGD([weight, bias], lr=1e-3),
+            [lambda opt: StepLR(opt, gamma=0.9, step_size=10)]
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.SGD([weight, bias], lr=1e-3),
+            [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
+             lambda opt: ReduceLROnPlateau(opt)]
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.SGD([weight, bias], lr=1e-3),
+            [lambda opt: StepLR(opt, gamma=0.99, step_size=10),
+             lambda opt: ExponentialLR(opt, gamma=0.99),
+             lambda opt: ReduceLROnPlateau(opt)]
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.SGD([weight, bias], lr=1e-3, momentum=1)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.SGD([weight, bias], lr=1e-3, momentum=1, weight_decay=1)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.SGD([weight, bias], nesterov=True, lr=1e-3, momentum=1, weight_decay=1)
+        )
+        with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
+            optim.SGD(None, lr=1e-2, momentum=-0.5)
 
     def test_sgd_sparse(self):
-        for optimizer in [optim.SGD, optim_mt.SGD]:
-            self._test_rosenbrock_sparse(
-                lambda params: optimizer(params, lr=5e-3)
-            )
-            self._test_rosenbrock_sparse(
-                lambda params: optimizer(params, lr=0.005),
-                [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)]
-            )
-
-    @skipIfRocm
-    def test_multi_tensor_optimizers(self):
-        if not torch.cuda.is_available():
-            return
-
-        optimizer_pairs_with_flags = [
-            ((optim.Adam, optim._multi_tensor.Adam), dict(weight_decay=1., amsgrad=True)),
-            ((optim.Adam, optim._multi_tensor.Adam), dict(weight_decay=1., amsgrad=False)),
-            ((optim.Adam, optim._multi_tensor.Adam), dict(weight_decay=0., amsgrad=True)),
-            ((optim.Adam, optim._multi_tensor.Adam), dict(weight_decay=0., amsgrad=False)),
-            ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=1., amsgrad=True)),
-            ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=1., amsgrad=False)),
-            ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=0., amsgrad=True)),
-            ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=0., amsgrad=False)),
-            ((optim.SGD, optim._multi_tensor.SGD), dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True)),
-            ((optim.SGD, optim._multi_tensor.SGD), dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False)),
-            ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=1, centered=True)),
-            ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=0, centered=True)),
-            ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=1, centered=False)),
-            ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=0, momentum=1, centered=False)),
-            ((optim.Rprop, optim._multi_tensor.Rprop), dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50))),
-            ((optim.ASGD, optim._multi_tensor.ASGD), dict(weight_decay=0)),
-            ((optim.ASGD, optim._multi_tensor.ASGD), dict(weight_decay=1)),
-            ((optim.Adamax, optim._multi_tensor.Adamax), dict(weight_decay=0)),
-            ((optim.Adamax, optim._multi_tensor.Adamax), dict(weight_decay=1)),
-            ((optim.Adadelta, optim._multi_tensor.Adadelta), dict(weight_decay=0)),
-            ((optim.Adadelta, optim._multi_tensor.Adadelta), dict(weight_decay=1)),
-        ]
-
-        kIterations = 11
-        device = 'cuda'
-
-        for optimizers, params in optimizer_pairs_with_flags:
-            res = []
-            for opt in optimizers:
-                weight = torch.tensor([[-0.2109, -0.4976], [-0.1413, -0.3420], [-0.2524, 0.6976]], 
-                                      dtype=torch.float64, device=device, requires_grad=True)
-                bias = torch.tensor([-0.1085, -0.2979, 0.6892], dtype=torch.float64, device=device, requires_grad=True)
-                weight2 = torch.tensor([[-0.0508, -0.3941, -0.2843]], 
-                                       dtype=torch.float64, device=device, requires_grad=True)
-                bias2 = torch.tensor([-0.0711], dtype=torch.float64, device=device, requires_grad=True)
-                input = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=torch.float64, device=device).reshape(3, 2)
-
-                model = torch.nn.Sequential(torch.nn.Linear(2, 3), 
-                                            torch.nn.Sigmoid(),
-                                            torch.nn.Linear(3, 1),
-                                            torch.nn.Sigmoid())
-                model.to(torch.float64).to(device)
-
-                pretrained_dict = model.state_dict()
-                pretrained_dict['0.weight'] = weight
-                pretrained_dict['0.bias'] = bias
-                pretrained_dict['2.weight'] = weight2
-                pretrained_dict['2.bias'] = bias2
-                model.load_state_dict(pretrained_dict)
-
-                optimizer = opt(model.parameters(), **params)
-
-                for _ in range(kIterations): 
-                    optimizer.zero_grad()
-                    output = model(input)
-                    loss = output.sum()
-                    loss.backward()
-
-                    if iter == 0:
-                        model.parameters().__next__().grad = None
-
-                    optimizer.step()
-
-                res.append(model.parameters())
-
-            for p1, p2 in zip(res[0], res[1]):
-                self.assertEqual(p1, p2)
-
+        self._test_rosenbrock_sparse(
+            lambda params: optim.SGD(params, lr=5e-3)
+        )
+        self._test_rosenbrock_sparse(
+            lambda params: optim.SGD(params, lr=0.005),
+            [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)]
+        )
 
     def test_adam(self):
-        for optimizer in [optim.Adam, optim_mt.Adam]:
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, amsgrad=True)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=0.1)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3, amsgrad=True)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3),
-                [lambda opt: ExponentialLR(opt, gamma=0.9)]
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, amsgrad=True),
-                [lambda opt: ExponentialLR(opt, gamma=0.9),
-                 lambda opt: ReduceLROnPlateau(opt)]
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3, amsgrad=True),
-                [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-                 lambda opt: ReduceLROnPlateau(opt)]
-            )
-            with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
-                optimizer(None, lr=1e-2, betas=(1.0, 0.0))
+        self._test_basic_cases(
+            lambda weight, bias: optim.Adam([weight, bias], lr=1e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.Adam(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=1e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.Adam([weight, bias], lr=1e-3, amsgrad=True)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.Adam([weight, bias], lr=1e-3, weight_decay=0.1)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.Adam(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=1e-3, amsgrad=True)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.Adam(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=1e-3),
+            [lambda opt: ExponentialLR(opt, gamma=0.9)]
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.Adam([weight, bias], lr=1e-3, amsgrad=True),
+            [lambda opt: ExponentialLR(opt, gamma=0.9),
+             lambda opt: ReduceLROnPlateau(opt)]
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.Adam(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=1e-3, amsgrad=True),
+            [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
+             lambda opt: ReduceLROnPlateau(opt)]
+        )
+        with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
+            optim.Adam(None, lr=1e-2, betas=(1.0, 0.0))
 
-            with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
-                optimizer(None, lr=1e-2, weight_decay=-1)
+        with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
+            optim.Adam(None, lr=1e-2, weight_decay=-1)
 
     def test_adamw(self):
-        for optimizer in [optim.AdamW, optim_mt.AdamW]:
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=1)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=1, amsgrad=True)
-            )
-            with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
-                optimizer(None, lr=1e-2, weight_decay=-1)
+        self._test_basic_cases(
+            lambda weight, bias: optim.AdamW([weight, bias], lr=1e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.AdamW(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=1e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.AdamW([weight, bias], lr=1e-3, weight_decay=1)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.AdamW([weight, bias], lr=1e-3, weight_decay=1, amsgrad=True)
+        )
+        with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
+            optim.AdamW(None, lr=1e-2, weight_decay=-1)
 
     def test_sparse_adam(self):
         self._test_rosenbrock_sparse(
@@ -460,25 +380,24 @@ class TestOptim(TestCase):
     # ROCm precision is too low to pass this test
     @skipIfRocm
     def test_adadelta(self):
-        for optimizer in [optim.Adadelta, optim_mt.Adadelta]:
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias])
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, rho=0.95))
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, rho=0.95)),
-                [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-                 lambda opt: ReduceLROnPlateau(opt)]
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], weight_decay=1)
-            )
-            with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
-                optimizer(None, lr=1e-2, rho=1.1)
+        self._test_basic_cases(
+            lambda weight, bias: optim.Adadelta([weight, bias])
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.Adadelta(
+                self._build_params_dict(weight, bias, rho=0.95))
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.Adadelta(
+                self._build_params_dict(weight, bias, rho=0.95)),
+            [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
+             lambda opt: ReduceLROnPlateau(opt)]
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.Adadelta([weight, bias], weight_decay=1)
+        )
+        with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
+            optim.Adadelta(None, lr=1e-2, rho=1.1)
 
     def test_adagrad(self):
         self._test_basic_cases(
@@ -520,84 +439,80 @@ class TestOptim(TestCase):
         )
 
     def test_adamax(self):
-        for optimizer in [optim.Adamax, optim_mt.Adamax]:
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-1)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-1)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-1, weight_decay=1)
-            )
-            with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 1: 1.0"):
-                optimizer(None, lr=1e-2, betas=(0.0, 1.0))
+        self._test_basic_cases(
+            lambda weight, bias: optim.Adamax([weight, bias], lr=1e-1)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.Adamax(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=1e-1)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.Adamax([weight, bias], lr=1e-1, weight_decay=1)
+        )
+        with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 1: 1.0"):
+            optim.Adamax(None, lr=1e-2, betas=(0.0, 1.0))
 
     def test_rmsprop(self):
-        for optimizer in [optim.RMSprop, optim_mt.RMSprop]:
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-2)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2, centered=True)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2, centered=True, momentum=0.1)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2, momentum=0.1)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2, momentum=0.1, weight_decay=1)
-            )
-            with self.assertRaisesRegex(ValueError, "Invalid momentum value: -1.0"):
-                optimizer(None, lr=1e-2, momentum=-1.0)
+        self._test_basic_cases(
+            lambda weight, bias: optim.RMSprop([weight, bias], lr=1e-2)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.RMSprop(
+                self._build_params_dict(weight, bias, lr=1e-3),
+                lr=1e-2)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.RMSprop(
+                self._build_params_dict(weight, bias, lr=1e-3),
+                lr=1e-2, centered=True)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.RMSprop(
+                self._build_params_dict(weight, bias, lr=1e-3),
+                lr=1e-2, centered=True, momentum=0.1)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.RMSprop(
+                self._build_params_dict(weight, bias, lr=1e-3),
+                lr=1e-2, momentum=0.1)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.RMSprop(
+                self._build_params_dict(weight, bias, lr=1e-3),
+                lr=1e-2, momentum=0.1, weight_decay=1)
+        )
+        with self.assertRaisesRegex(ValueError, "Invalid momentum value: -1.0"):
+            optim.RMSprop(None, lr=1e-2, momentum=-1.0)
 
     def test_asgd(self):
-        for optimizer in [optim.ASGD, optim_mt.ASGD]:
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, t0=100)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3, t0=100)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-3),
-                    lr=1e-2, weight_decay=1)
-            )
-            with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
-                optimizer(None, lr=1e-2, weight_decay=-0.5)
+        self._test_basic_cases(
+            lambda weight, bias: optim.ASGD([weight, bias], lr=1e-3, t0=100)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.ASGD(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=1e-3, t0=100)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.ASGD(
+                self._build_params_dict(weight, bias, lr=1e-3),
+                lr=1e-2, weight_decay=1)
+        )
+        with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
+            optim.ASGD(None, lr=1e-2, weight_decay=-0.5)
 
     def test_rprop(self):
-        for optimizer in [optim.Rprop, optim_mt.Rprop]:
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3)
-            )
-            with self.assertRaisesRegex(ValueError, "Invalid eta values: 1.0, 0.5"):
-                optimizer(None, lr=1e-2, etas=(1.0, 0.5))
+        self._test_basic_cases(
+            lambda weight, bias: optim.Rprop([weight, bias], lr=1e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.Rprop(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=1e-3)
+        )
+        with self.assertRaisesRegex(ValueError, "Invalid eta values: 1.0, 0.5"):
+            optim.Rprop(None, lr=1e-2, etas=(1.0, 0.5))
 
     def test_lbfgs(self):
         self._test_basic_cases(

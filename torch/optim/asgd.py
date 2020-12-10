@@ -45,40 +45,48 @@ class ASGD(Optimizer):
             with torch.enable_grad():
                 loss = closure()
 
+        grads = []
+        params_with_grad = []
+        states = []
+
         for group in self.param_groups:
             for p in group['params']:
-                if p.grad is None:
-                    continue
-                grad = p.grad
-                if grad.is_sparse:
-                    raise RuntimeError('ASGD does not support sparse gradients')
-                state = self.state[p]
+                if p.grad is not None:
+                    if p.grad.is_sparse:
+                        raise RuntimeError('ASGD does not support sparse gradients')
 
-                # State initialization
-                if len(state) == 0:
-                    state['step'] = 0
-                    state['eta'] = group['lr']
-                    state['mu'] = 1
-                    state['ax'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    grads.append(p.grad)
+                    params_with_grad.append(p)
+                    state = self.state[p]
 
-                state['step'] += 1
+                    # State initialization
+                    if len(state) == 0:
+                        state['step'] = 0
+                        state['eta'] = group['lr']
+                        state['mu'] = 1
+                        state['ax'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
-                if group['weight_decay'] != 0:
-                    grad = grad.add(p, alpha=group['weight_decay'])
+                    state['step'] += 1
+                    states.append(state)
 
-                # decay term
-                p.mul_(1 - group['lambd'] * state['eta'])
+            if group['weight_decay'] != 0:
+                torch._foreach_add_(grads, params_with_grad, alpha=group['weight_decay'])
 
-                # update parameter
-                p.add_(grad, alpha=-state['eta'])
+            # decay term
+            torch._foreach_mul_(params_with_grad, 1 - group['lambd'] * state['eta'])
 
-                # averaging
-                if state['mu'] != 1:
-                    state['ax'].add_(p.sub(state['ax']).mul(state['mu']))
+            # update parameter
+            torch._foreach_add_(params_with_grad, grads, alpha=-state['eta'])
+
+            # averaging
+            for i in range(len(states)):
+                if states[i]['mu'] != 1:
+                    states[i]['ax'].add_(params_with_grad[i].sub(states[i]['ax']).mul(states[i]['mu']))
                 else:
-                    state['ax'].copy_(p)
+                    states[i]['ax'].copy_(params_with_grad[i])
 
-                # update eta and mu
+            # update eta and mu
+            for state in states:
                 state['eta'] = (group['lr'] /
                                 math.pow((1 + group['lambd'] * group['lr'] * state['step']), group['alpha']))
                 state['mu'] = 1 / max(1, state['step'] - group['t0'])

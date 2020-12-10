@@ -50,41 +50,56 @@ class Adamax(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
+            grads = []
+            params_with_grad = []
+            states = []
+            exp_avgs = []
+            exp_infs = []
+
+            beta1, beta2 = group['betas']
+            eps = group['eps']
+
             for p in group['params']:
-                if p.grad is None:
-                    continue
-                grad = p.grad
-                if grad.is_sparse:
-                    raise RuntimeError('Adamax does not support sparse gradients')
-                state = self.state[p]
+                if p.grad is not None:
+                    if p.grad.is_sparse:
+                        raise RuntimeError('Adamax does not support sparse gradients')
 
-                # State initialization
-                if len(state) == 0:
-                    state['step'] = 0
-                    state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    state['exp_inf'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    grads.append(p.grad)
+                    params_with_grad.append(p)
 
-                exp_avg, exp_inf = state['exp_avg'], state['exp_inf']
-                beta1, beta2 = group['betas']
-                eps = group['eps']
+                    state = self.state[p]
 
-                state['step'] += 1
+                    # State initialization
+                    if len(state) == 0:
+                        state['step'] = 0
+                        state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                        state['exp_inf'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
-                if group['weight_decay'] != 0:
-                    grad = grad.add(p, alpha=group['weight_decay'])
+                    exp_avgs.append(state['exp_avg'])
+                    exp_infs.append(state['exp_inf'])
 
-                # Update biased first moment estimate.
-                exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
-                # Update the exponentially weighted infinity norm.
+                    state['step'] += 1
+                    states.append(state)
+
+            if group['weight_decay'] != 0:
+                torch._foreach_add_(grads, params_with_grad, alpha=group['weight_decay'])
+
+            # Update biased first moment estimate.
+            torch._foreach_mul_(exp_avgs, beta1)
+            torch._foreach_add_(exp_avgs, grads, alpha=1 - beta1)
+
+            # Update the exponentially weighted infinity norm.
+            torch._foreach_mul_(exp_infs, beta2)
+
+            for exp_inf, grad in zip(exp_infs, grads):
                 norm_buf = torch.cat([
-                    exp_inf.mul_(beta2).unsqueeze(0),
+                    exp_inf.unsqueeze(0),
                     grad.abs().add_(eps).unsqueeze_(0)
                 ], 0)
-                torch.amax(norm_buf, 0, keepdim=False, out=exp_inf)
+                torch.max(norm_buf, 0, keepdim=False, out=(exp_inf, exp_inf.new().long()))
 
-                bias_correction = 1 - beta1 ** state['step']
-                clr = group['lr'] / bias_correction
-
-                p.addcdiv_(exp_avg, exp_inf, value=-clr)
+            bias_corrections = [1 - beta1 ** state['step'] for state in states]
+            clr = [-1 * (group['lr'] / bias_correction) for bias_correction in bias_corrections]
+            torch._foreach_addcdiv_(params_with_grad, exp_avgs, exp_infs, clr)
 
         return loss
