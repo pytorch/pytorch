@@ -701,7 +701,7 @@ def signature(f: NativeFunction, *, method: bool = False, pyi: bool = False) -> 
         tensor_options_args.append(PythonArgument(
             name='layout',
             type=OptionalType(BaseType(BaseTy.Layout)),
-            default='torch.strided',
+            default='strided' if pyi else 'torch.strided',
             default_init='layout_from_backend(self.options().backend())' if is_like_or_new_function else None,
         ))
         tensor_options_args.append(PythonArgument(
