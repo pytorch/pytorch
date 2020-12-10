@@ -3,23 +3,28 @@ import tarfile
 import zipfile
 import warnings
 import os
+import numpy as np
+from PIL import Image
 
 from torch.testing._internal.common_utils import (TestCase, run_tests)
+from torch.utils.data.datasets.decoder import (
+    basichandlers as decoder_basichandlers,
+    imagehandler as decoder_imagehandler)
 
 from torch.utils.data.datasets import (
     ListDirFilesIterableDataset, LoadFilesFromDiskIterableDataset, ReadFilesFromTarIterableDataset,
-    ReadFilesFromZipIterableDataset)
+    ReadFilesFromZipIterableDataset, RoutedDecoderIterableDataset)
 
 def create_temp_dir_and_files():
     # The temp dir and files within it will be released and deleted in tearDown().
     # Adding `noqa: P201` to avoid mypy's warning on not releasing the dir handle within this function.
     temp_dir = tempfile.TemporaryDirectory()  # noqa: P201
     temp_dir_path = temp_dir.name
-    with tempfile.NamedTemporaryFile(dir=temp_dir_path, delete=False) as f:
+    with tempfile.NamedTemporaryFile(dir=temp_dir_path, delete=False, suffix='.txt') as f:
         temp_file1_name = f.name
-    with tempfile.NamedTemporaryFile(dir=temp_dir_path, delete=False) as f:
+    with tempfile.NamedTemporaryFile(dir=temp_dir_path, delete=False, suffix='.byte') as f:
         temp_file2_name = f.name
-    with tempfile.NamedTemporaryFile(dir=temp_dir_path, delete=False) as f:
+    with tempfile.NamedTemporaryFile(dir=temp_dir_path, delete=False, suffix='.empty') as f:
         temp_file3_name = f.name
 
     with open(temp_file1_name, 'w') as f1:
@@ -94,6 +99,25 @@ class TestIterableDatasetBasic(TestCase):
 
         os.remove(temp_zipfile_pathname)
 
+    def test_routeddecoder_iterable_dataset(self):
+        temp_dir = self.temp_dir.name
+        temp_pngfile_pathname = os.path.join(temp_dir, "test_png.png")
+        img = Image.new('RGB', (2, 2), color='red')
+        img.save(temp_pngfile_pathname)
+        dataset1 = ListDirFilesIterableDataset(temp_dir, ['*.png', '*.txt'])
+        dataset2 = LoadFilesFromDiskIterableDataset(dataset1)
+        dataset3 = RoutedDecoderIterableDataset(dataset2, decoders=[decoder_imagehandler('rgb')])
+        dataset3.add_decoder(decoder_basichandlers)
+
+        for rec in dataset3:
+            ext = os.path.splitext(rec[0])[1]
+            if ext == '.png':
+                expected = np.array([[[1., 0., 0.], [1., 0., 0.]], [[1., 0., 0.], [1., 0., 0.]]], dtype=np.single)
+                self.assertTrue(np.array_equal(rec[1], expected))
+            else:
+                self.assertTrue(rec[1] == open(rec[0], 'rb').read().decode('utf-8'))
+
+        os.remove(temp_pngfile_pathname)
 
 if __name__ == '__main__':
     run_tests()
