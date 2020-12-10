@@ -23,6 +23,7 @@ static bool checkIfFold(Node* node, bool dynamic_axes) {
   if (cast_node->kind() != onnx::Cast)
     return false;
   auto prev_node = cast_node->input()->node();
+  
   Node* compare_node;
   if (prev_node->kind() == onnx::Not || prev_node->kind() == onnx::Identity) {
     compare_node = prev_node->input()->node();
@@ -200,6 +201,7 @@ static void foldIfNode(Block* b, bool dynamic_axes) {
       }
     }
   }
+}
 
   void FoldIfONNX(Block * b, bool dynamic_axes) {
     foldIfNode(b, dynamic_axes);
