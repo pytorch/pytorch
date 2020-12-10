@@ -2308,6 +2308,7 @@ def gather(g, self, dim, index, sparse_grad=False):
 def _var_mean(g, input, dim, unbiased, keepdim):
     if dim is None:
         mean = g.op("ReduceMean", input, keepdims_i=0)
+        t_mean = mean
         num_elements = numel(g, input)
     else:
         mean = g.op("ReduceMean", input, axes_i=dim, keepdims_i=keepdim)
