@@ -2254,8 +2254,26 @@ def is_floating_point(g, self):
     return g.op("Constant", value_t=torch.BoolTensor([0]))
 
 
+def __isnot_(g, self, other):
+    if sym_help._is_none(other):
+        if sym_help._is_none(self):
+            return g.op("Constant", value_t=torch.BoolTensor([1]))
+        return g.op("Constant", value_t=torch.BoolTensor([0]))
+    return ne(g, self, other)
+
+
+# exists to refine the type of the Value
+# if x is an optional Tensor, unchecked_cast will cast
+# x to Tensor, so the rest of the graph knows that x is a Tensor
+# this doesn't do anything in runtime and is a noop in ONNX
+def prim_unchecked_cast(g, self):
+    return self
+
+
 def prim_dtype(g, self):
     dtype = sym_help._try_get_scalar_type(self)
+    if dtype is None:
+        dtype = "Float"
     dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
     return g.op("Constant", value_t=torch.IntTensor([dtype]))
 

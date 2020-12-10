@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/onnx/fold_if_node.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
 #include <torch/csrc/jit/serialization/export.h>
@@ -324,9 +325,33 @@ void ConvertGraphToONNXProto(
   }
 }
 
+bool checkOutputType(Node* n) {
+  auto then_block = n->blocks()[0];
+  auto else_block = n->blocks()[1];
+  for (size_t i = 0; i < n->outputs().size(); i++) {
+    // check the type
+    if (then_block->outputs()[i]->type()->cast<TensorType>()->scalarType() !=
+        else_block->outputs()[i]->type()->cast<TensorType>()->scalarType()) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Any additional post process that are specific to individual node kind.
 void SpecialPostProcess(Node* n) {
   switch (n->kind()) {
+    case ::c10::onnx::If: {
+      if (!checkOutputType(n) && CheckFoldONNX(n)) {
+        auto cond = FoldConditionONNX(n);
+        int condition = 1 - (int)cond;
+        for (size_t i = 0; i < n->outputs().size(); i++) {
+          n->outputs()[i]->setType(
+              n->blocks()[condition]->outputs()[i]->type());
+        }
+      }
+      break;
+    }
     case ::c10::onnx::SequenceInsert: {
       // Special case when input sequence to SequenceInsert is empty.
       // onnx Sequence type requires element type to be set.
