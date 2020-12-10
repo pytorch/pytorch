@@ -253,17 +253,7 @@ class ProcessGroupNCCL : public ProcessGroup {
         throw *error_;
       }
 
-      for (at::cuda::CUDAEvent& cudaEvent : *cudaEvents_) {
-        cudaEvent.block(
-            at::cuda::getCurrentCUDAStream(cudaEvent.device_index()));
-      }
-
-      for (const at::DataPtr& data_ptr : extractDataPtrs(value_)) {
-        if (data_ptr.device().is_cuda()) {
-          c10::cuda::CUDACachingAllocator::recordStream(
-              data_ptr, at::cuda::getCurrentCUDAStream(data_ptr.device().index()));
-        }
-      }
+      postWaitHook();
     }
 
     // If FutureNCCL was created by FutureNCCL::then, its value would be empty
@@ -277,22 +267,7 @@ class ProcessGroupNCCL : public ProcessGroup {
           "outputs or the return value of the callback.");
       value_ = std::move(value);
 
-      TORCH_INTERNAL_ASSERT(cudaEvents_ == nullptr);
-      std::vector<bool> isCudaDeviceUsed(c10::cuda::device_count(), false);
-      for (const at::DataPtr& data_ptr : extractDataPtrs(value_)) {
-        if (data_ptr.device().is_cuda()) {
-          isCudaDeviceUsed[data_ptr.device().index()] = true;
-        }
-      }
-
-      cudaEvents_ = std::make_shared<std::vector<at::cuda::CUDAEvent>>();
-      for (c10::DeviceIndex idx = 0; idx < isCudaDeviceUsed.size(); idx++) {
-        if (isCudaDeviceUsed[idx]) {
-          at::cuda::CUDAEvent cudaEvent;
-          cudaEvent.record(at::cuda::getCurrentCUDAStream(idx));
-          (*cudaEvents_).push_back(std::move(cudaEvent));
-        }
-      }
+      postMarkCompletedHook();
     }
 
     // Just returns FutureNCCL's value after wait returns.
@@ -313,38 +288,9 @@ class ProcessGroupNCCL : public ProcessGroup {
     // this callback. This new FutureNCCL's cudaEvents will record the
     // callback's stream and will have the result value of the callback.
     void addCallback(std::function<void(void)> callback) override {
-      // We'd love to get a stream for all devices, even those that are not used
-      // by the value, because the callback could use those other devices, but
-      // unfortunately this could cause a deadlock with NCCL. See
-      // https://github.com/pytorch/pytorch/pull/48500#issuecomment-735395414
-      // In general, if some devices haven't been used yet, by getting a stream
-      // for them we'd initialize them, and in addition to causing NCCL to
-      // misbehaving this also ends up using memory on those devices, which the
-      // user might not want.
-      std::vector<at::cuda::CUDAStream> streams;
-      for (at::cuda::CUDAEvent& cudaEvent : *cudaEvents_) {
-        c10::DeviceIndex idx = cudaEvent.device_index();
-        // FIXME Should we find a way to allow to change the priority of
-        // streams?
-        at::cuda::CUDAStream stream =
-            at::cuda::getStreamFromPool(/*isHighPriority=*/false, idx);
-        cudaEvent.block(stream);
-        streams.push_back(stream);
-      }
-
-      // Use the dedicated callback stream to run callback.
-      at::cuda::CUDAMultiStreamGuard streamGuard(streams);
-
-      // Do not free the underlying data storage of value_ before its
-      // usage on the stream finishes.
-      for (const at::DataPtr& data_ptr : extractDataPtrs(value_)) {
-        if (data_ptr.device().is_cuda()) {
-          c10::cuda::CUDACachingAllocator::recordStream(
-              data_ptr, at::cuda::getCurrentCUDAStream(data_ptr.device().index()));
-        }
-      }
-
-      callback();
+      std::function<void(void)> wrappedCallback =
+          wrapCallback(std::move(callback));
+      wrappedCallback();
     }
 
     // Adds a callback to FutureNCCL, and returns another FutureNCCL to hold
@@ -388,6 +334,77 @@ class ProcessGroupNCCL : public ProcessGroup {
     void setDataPtrExtractor(DataPtrExtractor dataPtrExtractor) override {
       std::unique_lock<std::mutex> lock(dataPtrExtractorMutex_);
       dataPtrExtractor_ = std::move(dataPtrExtractor);
+    }
+
+   protected:
+    void postMarkCompletedHook() {
+      TORCH_INTERNAL_ASSERT(cudaEvents_ == nullptr);
+      std::vector<bool> isCudaDeviceUsed(c10::cuda::device_count(), false);
+      for (const at::DataPtr& data_ptr : extractDataPtrs(value_)) {
+        if (data_ptr.device().is_cuda()) {
+          isCudaDeviceUsed[data_ptr.device().index()] = true;
+        }
+      }
+
+      cudaEvents_ = std::make_shared<std::vector<at::cuda::CUDAEvent>>();
+      for (c10::DeviceIndex idx = 0; idx < isCudaDeviceUsed.size(); idx++) {
+        if (isCudaDeviceUsed[idx]) {
+          at::cuda::CUDAEvent cudaEvent;
+          cudaEvent.record(at::cuda::getCurrentCUDAStream(idx));
+          (*cudaEvents_).push_back(std::move(cudaEvent));
+        }
+      }
+    }
+
+    std::function<void(void)> wrapCallback(std::function<void(void)> callback) {
+      return [this, callback{std::move(callback)}]() {
+        // We'd love to get a stream for all devices, even those that are not used
+        // by the value, because the callback could use those other devices, but
+        // unfortunately this could cause a deadlock with NCCL. See
+        // https://github.com/pytorch/pytorch/pull/48500#issuecomment-735395414
+        // In general, if some devices haven't been used yet, by getting a stream
+        // for them we'd initialize them, and in addition to causing NCCL to
+        // misbehaving this also ends up using memory on those devices, which the
+        // user might not want.
+        std::vector<at::cuda::CUDAStream> streams;
+        for (at::cuda::CUDAEvent& cudaEvent : *cudaEvents_) {
+          c10::DeviceIndex idx = cudaEvent.device_index();
+          // FIXME Should we find a way to allow to change the priority of
+          // streams?
+          at::cuda::CUDAStream stream =
+              at::cuda::getStreamFromPool(/*isHighPriority=*/false, idx);
+          cudaEvent.block(stream);
+          streams.push_back(stream);
+        }
+
+        // Use the dedicated callback stream to run callback.
+        at::cuda::CUDAMultiStreamGuard streamGuard(streams);
+
+        // Do not free the underlying data storage of value_ before its
+        // usage on the stream finishes.
+        for (const at::DataPtr& data_ptr : extractDataPtrs(value_)) {
+          if (data_ptr.device().is_cuda()) {
+            c10::cuda::CUDACachingAllocator::recordStream(
+                data_ptr, at::cuda::getCurrentCUDAStream(data_ptr.device().index()));
+          }
+        }
+
+        callback();
+      };
+    }
+
+    void postWaitHook() {
+      for (at::cuda::CUDAEvent& cudaEvent : *cudaEvents_) {
+        cudaEvent.block(
+            at::cuda::getCurrentCUDAStream(cudaEvent.device_index()));
+      }
+
+      for (const at::DataPtr& data_ptr : extractDataPtrs(value_)) {
+        if (data_ptr.device().is_cuda()) {
+          c10::cuda::CUDACachingAllocator::recordStream(
+              data_ptr, at::cuda::getCurrentCUDAStream(data_ptr.device().index()));
+        }
+      }
     }
 
    private:
