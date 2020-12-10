@@ -213,17 +213,17 @@ template<class Arg> constexpr bool is_out_argument_() {
 }
 template<class Arg> using is_out_argument = guts::bool_constant<is_out_argument_<Arg>()>;
 
-template<class OutTensorArgIndices, class KernelFunc>
+template<size_t NumOutParameters, class KernelFunc>
 struct with_out_arguments_reordered_impl final {
 private:
     // For an example op
-    //   > aten::example(Tensor a, int64_t b, Tensor(a!) out_c, int64_t d, Tensor(b!) out_e) -> (Tensor(a!), Tensor(b!))
+    //   > aten::example(Tensor a, int64_t b, int64_t c, Tensor(a!) out_d, Tensor(b!) out_e) -> (Tensor(a!), Tensor(b!))
     // we get a KernelFunc
-    //   > KernelFunc = std::tuple<Tensor, Tensor> example(Tensor& out_c, Tensor& out_e, const Tensor& a, int64_t b, int64_t d)
-    //   > OutTensorArgIndices = [2, 4]
+    //   > KernelFunc = std::tuple<Tensor, Tensor> example(Tensor& out_d, Tensor& out_e, const Tensor& a, int64_t b, int64_t c)
+    //   > NumOutParameters = 2
     // with the out arguments at the front and OutTensorArgIndices represents the indices of the out
     // arguments in the schema, and reorder that into
-    //   > std::tuple<Tensor, Tensor> example(const Tensor& a, int64_t b, Tensor& out_c, int64_t d, Tensor& out_e)
+    //   > std::tuple<Tensor, Tensor> example(const Tensor& a, int64_t b, int64_t c, Tensor& out_d, Tensor& out_e)
     // where the out arguments are in the back.
 
     using kernel_signature_traits = guts::infer_function_traits_t<typename KernelFunc::FuncType>;
@@ -232,18 +232,21 @@ private:
             is_out_argument,
             guts::typelist::take_t<
                 typename kernel_signature_traits::parameter_types,
-                OutTensorArgIndices::size()
+                NumOutParameters
             >
         >::value,
         "The kernel function has the wrong number of leading Tensor& arguments to match the out arguments in the JIT signature"
     );
     static constexpr size_t num_parameters = guts::typelist::size<typename kernel_signature_traits::parameter_types>::value;
+    static constexpr size_t num_nonout_parameters = num_parameters - NumOutParameters;
+
+    using out_parameter_indices = guts::iseq::drop_t<std::make_index_sequence<num_parameters>, num_nonout_parameters>;
 
     // schema_nonout_arg_indices is a list of all argument indices in the schema function
     // that aren't out arguments.
     // In the aten::example op mentioned above, this would be
-    //   > schema_nonout_arg_indices = [0, 1, 3]
-    using schema_nonout_arg_indices = guts::iseq::remove_all_by_index_t<std::make_index_sequence<num_parameters>, guts::iseq::reverse_t<OutTensorArgIndices>>;
+    //   > schema_nonout_arg_indices = [0, 1, 2]
+    using schema_nonout_arg_indices = std::make_index_sequence<num_nonout_parameters>;
 
     // kernel_to_schema_permutation then contains a mapping from argument index in KernelFunc to the corresponding
     // argument index in the schema.
@@ -255,7 +258,7 @@ private:
     //  - argument 2 in KernelFunc maps to argument 0 in the schema,
     //  - ...
     // We can use this as a permutation function to reorder types or values correspondingly
-    using kernel_to_schema_permutation_indices = guts::iseq::concat_t<OutTensorArgIndices, schema_nonout_arg_indices>;
+    using kernel_to_schema_permutation_indices = guts::iseq::concat_t<out_parameter_indices, schema_nonout_arg_indices>;
     using kernel_to_schema_permutation = guts::iseq::permutation<kernel_to_schema_permutation_indices>;
 
     // We also need the inverse permutation because parameters (i.e. types) and arguments (i.e. values)
@@ -286,19 +289,19 @@ public:
 
 /**
  * Take a kernel function that has a number of `Tensor`, `const Tensor&` or `Tensor&` arguments
- * where all `Tensor&` arguments are at the beginning, and take a `std::index_sequence OutTensorArgIndices`.
- * Create a wrapper function that has `Tensor&` arguments at the indices given by `OutTensorArgIndices`
+ * where all `Tensor&` arguments are at the beginning, and take NumOutParameters.
+ * Create a wrapper function that has `NumOutParameters` `Tensor&` arguments at the end
  * and calls through the underlying kernel function by reordering them to the front.
  */
-template<class OutTensorArgIndices, class KernelFunc, std::enable_if_t<(OutTensorArgIndices::size() > 0), int> = 0>
+template<size_t NumOutParameters, class KernelFunc, std::enable_if_t<(NumOutParameters > 0), int> = 0>
 constexpr auto with_out_arguments_reordered(KernelFunc kernel_func) {
     // SFINAE case for kernels that have out tensor arguments.
     // Wrap them and reorder the arguments.
-    using impl = with_out_arguments_reordered_impl<OutTensorArgIndices, KernelFunc>;
+    using impl = with_out_arguments_reordered_impl<NumOutParameters, KernelFunc>;
     return TORCH_FN((&impl::wrapper::call));
 }
 
-template<class OutTensorArgIndices, class KernelFunc, std::enable_if_t<(OutTensorArgIndices::size() == 0), int> = 0>
+template<size_t NumOutParameters, class KernelFunc, std::enable_if_t<(NumOutParameters == 0), int> = 0>
 constexpr auto with_out_arguments_reordered(KernelFunc kernel_func) {
     // SFINAE case for kernels that don't have out tensor arguments.
     // Don't wrap them but just use the kernel directly.
@@ -307,10 +310,10 @@ constexpr auto with_out_arguments_reordered(KernelFunc kernel_func) {
 
 }
 
-template<class TargetSignature, class OutTensorArgIndices, class FuncPtr>
+template<class TargetSignature, size_t NumOutParameters, class FuncPtr>
 constexpr auto hacky_wrapper_for_legacy_signatures(FuncPtr kernel_func) {
     auto with_scattered_tensor_options = detail::with_scattered_tensor_options(kernel_func);
-    auto with_out_arguments_reordered = detail::with_out_arguments_reordered<OutTensorArgIndices>(with_scattered_tensor_options);
+    auto with_out_arguments_reordered = detail::with_out_arguments_reordered<NumOutParameters>(with_scattered_tensor_options);
     auto result = detail::with_explicit_optional_tensors<TargetSignature>(with_out_arguments_reordered);
     static_assert(std::is_same<TargetSignature, typename decltype(result)::FuncType>::value, "Generated signature doesn't match the expected one.");
     return result;

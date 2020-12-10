@@ -342,7 +342,8 @@ class RegisterDispatchKey:
                     payload = f"""
 c10::impl::hacky_wrapper_for_legacy_signatures<
     {dispatcher_sig.type()},
-    std::index_sequence<{', '.join(mutable_argument_indices(f.func))}>>(TORCH_FN({sig.name()}))
+    {len(f.func.arguments.out)}
+>(TORCH_FN({sig.name()}))
 """
                 else:
                     assert local.use_c10_dispatcher() is UseC10Dispatcher.with_codegenerated_unboxing_wrapper
@@ -437,7 +438,8 @@ c10::impl::hacky_wrapper_for_legacy_signatures<
                     payload = f"""
 c10::impl::hacky_wrapper_for_legacy_signatures<
     {dispatcher_sig.type()},
-    std::index_sequence<{', '.join(mutable_argument_indices(f.func))}>>(TORCH_FN({name}))
+    {len(f.func.arguments.out)}
+>(TORCH_FN({name}))
 """
                 else:
                     assert local.use_c10_dispatcher() is UseC10Dispatcher.with_codegenerated_unboxing_wrapper
@@ -446,11 +448,6 @@ c10::impl::hacky_wrapper_for_legacy_signatures<
                 return f'm.impl("{f.func.name}",\n{payload});\n'
         else:
             assert_never(self.target)
-
-def mutable_argument_indices(func: FunctionSchema) -> Iterable[str]:
-    first_out_arg = len(func.arguments.positional) + len(func.arguments.kwarg_only)
-    last_out_arg = first_out_arg + len(func.arguments.out)
-    return (str(i) for i in range(first_out_arg, last_out_arg))
 
 # Generates Function.cpp and Function.h.  These files provide the
 # functional public C++ API, and the scaffolding to call into
