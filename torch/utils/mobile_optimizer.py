@@ -39,6 +39,18 @@ def optimize_for_mobile(
     if preserved_methods is None:
         preserved_methods = []
 
+    bundled_inputs_methods = ['get_all_bundled_inputs', 'get_num_bundled_inputs', 'run_on_bundled_input']
+    if all([hasattr(script_module, method) for method in bundled_inputs_methods]):
+        preserved_methods = list(set(preserved_methods + bundled_inputs_methods))
+
+    non_exist_methods = []
+    for method in preserved_methods:
+        if not hasattr(script_module, method):
+            non_exist_methods.append(method)
+    if non_exist_methods:
+        raise AttributeError(
+            'The following methods to preserve do not exist in script_module: {}'.format(', '.join(non_exist_methods)))
+
     backend = backend.lower()
     if backend == 'cpu':
         optimized_cpp_module = torch._C._jit_pass_optimize_for_mobile(script_module._c, optimization_blocklist, preserved_methods)
