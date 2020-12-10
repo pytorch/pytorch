@@ -76,8 +76,8 @@ using typelist_to_iseq_t = typename typelist_to_iseq<TypeList>::type;
  * Example:
  *  std::index_sequence<5, 8> == take_t<2, std::index_sequence<5, 8, 3, 5, 6>>
  */
-template<class ISeq, size_t N>
-using take_t = typelist_to_iseq_t<typelist::take_t<iseq_to_typelist_t<ISeq>, N>>;
+// template<class ISeq, size_t N>
+// using take_t = typelist_to_iseq_t<typelist::take_t<iseq_to_typelist_t<ISeq>, N>>;
 
 /**
  * Drop the first n elements from an integer_sequence/index_sequence.
@@ -87,19 +87,19 @@ using take_t = typelist_to_iseq_t<typelist::take_t<iseq_to_typelist_t<ISeq>, N>>
 template<class ISeq, size_t N>
 using drop_t = typelist_to_iseq_t<typelist::drop_t<iseq_to_typelist_t<ISeq>, N>>;
 
-/**
- * Make an index_sequence representing a range of values.
- * Begin is inclusive, end is exclusive.
- * Example:
- *  range_t<3, 8> == std::index_sequence<3, 4, 5, 6, 7>
- */
-template<size_t begin, size_t end>
-struct range {
-    static_assert(end >= begin, "end must be larger than begin");
-    using type = drop_t<std::make_index_sequence<end>, begin>;
-};
-template<size_t begin, size_t end>
-using range_t = typename range<begin, end>::type;
+// /**
+//  * Make an index_sequence representing a range of values.
+//  * Begin is inclusive, end is exclusive.
+//  * Example:
+//  *  range_t<3, 8> == std::index_sequence<3, 4, 5, 6, 7>
+//  */
+// template<size_t begin, size_t end>
+// struct range {
+//     static_assert(end >= begin, "end must be larger than begin");
+//     using type = drop_t<std::make_index_sequence<end>, begin>;
+// };
+// template<size_t begin, size_t end>
+// using range_t = typename range<begin, end>::type;
 
 
 /**
@@ -108,9 +108,9 @@ using range_t = typename range<begin, end>::type;
  *   insert_t<std::index_sequence<5, 8, 3, 5, 6>, 2, 4>
  *     == std::index_sequence<5, 8, 4, 3, 5, 6>
  */
-template<class ISeq, size_t Pos, typename ISeq::value_type Value>
-using insert_t = typelist_to_iseq_t<
-    typelist::insert_t<iseq_to_typelist_t<ISeq>, Pos, CompileTimeInteger<typename ISeq::value_type, Value>>>;
+// template<class ISeq, size_t Pos, typename ISeq::value_type Value>
+// using insert_t = typelist_to_iseq_t<
+//     typelist::insert_t<iseq_to_typelist_t<ISeq>, Pos, CompileTimeInteger<typename ISeq::value_type, Value>>>;
 
 /**
  * Insert a list of integers at given positions.
@@ -120,20 +120,20 @@ using insert_t = typelist_to_iseq_t<
  *   insert_all_t<std::index_sequence<5, 8, 3>, typelist<index_sequence<2, 4>, index_sequence<1, 10>>>
  *     == std::index_sequence<5, 10, 8, 4, 3>
  */
-template<class ISeq, class Insertions>
-struct insert_all {
-    static_assert(false_t<ISeq>::value, "In iseq::insert_all_t<ISeq, Insertions>, the Insertions must be a typelist of 2-element index sequences [Pos, Value].");
-};
-template<class ISeq>
-struct insert_all<ISeq, typelist::typelist<>> {
-    using type = ISeq;
-};
-template<class ISeq, typename ISeq::value_type HeadInsertionPos, typename ISeq::value_type HeadInsertionValue, class... TailInsertions>
-struct insert_all<ISeq, typelist::typelist<std::integer_sequence<typename ISeq::value_type, HeadInsertionPos, HeadInsertionValue>, TailInsertions...>> {
-    using type = typename insert_all<insert_t<ISeq, HeadInsertionPos, HeadInsertionValue>, typelist::typelist<TailInsertions...>>::type;
-};
-template<class ISeq, class Insertions>
-using insert_all_t = typename insert_all<ISeq, Insertions>::type;
+// template<class ISeq, class Insertions>
+// struct insert_all {
+//     static_assert(false_t<ISeq>::value, "In iseq::insert_all_t<ISeq, Insertions>, the Insertions must be a typelist of 2-element index sequences [Pos, Value].");
+// };
+// template<class ISeq>
+// struct insert_all<ISeq, typelist::typelist<>> {
+//     using type = ISeq;
+// };
+// template<class ISeq, typename ISeq::value_type HeadInsertionPos, typename ISeq::value_type HeadInsertionValue, class... TailInsertions>
+// struct insert_all<ISeq, typelist::typelist<std::integer_sequence<typename ISeq::value_type, HeadInsertionPos, HeadInsertionValue>, TailInsertions...>> {
+//     using type = typename insert_all<insert_t<ISeq, HeadInsertionPos, HeadInsertionValue>, typelist::typelist<TailInsertions...>>::type;
+// };
+// template<class ISeq, class Insertions>
+// using insert_all_t = typename insert_all<ISeq, Insertions>::type;
 
 /**
  * Removes an integer at a given position.
@@ -141,8 +141,8 @@ using insert_all_t = typename insert_all<ISeq, Insertions>::type;
  *  remove_by_index_t<std::index_sequence<5, 8, 3, 5, 6>, 2>
  *    == std::index_sequence<5, 8, 5, 6>
  */
-template<class ISeq, size_t Pos>
-using remove_by_index_t = typelist_to_iseq_t<typelist::remove_by_index_t<iseq_to_typelist_t<ISeq>, Pos>>;
+// template<class ISeq, size_t Pos>
+// using remove_by_index_t = typelist_to_iseq_t<typelist::remove_by_index_t<iseq_to_typelist_t<ISeq>, Pos>>;
 
 /**
  * Remove a list of indices from the list.
@@ -154,20 +154,20 @@ using remove_by_index_t = typelist_to_iseq_t<typelist::remove_by_index_t<iseq_to
  *   remove_all_by_index_t<std::index_sequence<5, 8, 3, 5, 6>, std::index_sequence<2, 3, 1>>
  *     == std::index_sequence<5, 5>
  */
- template<class ISeq, class IndicesToRemove>
- struct remove_all_by_index {
-     static_assert(false_t<ISeq>::value, "In iseq::remove_all_by_index_t<ISeq, IndicesToRemove>, both ISeq and the Insertions must be a std::index_sequence.");
- };
- template<class ISeq>
- struct remove_all_by_index<ISeq, std::index_sequence<>> {
-     using type = ISeq;
- };
- template<class ISeq, size_t HeadIndexToRemove, size_t... TailIndicesToRemove>
- struct remove_all_by_index<ISeq, std::index_sequence<HeadIndexToRemove, TailIndicesToRemove...>> {
-     using type = typename remove_all_by_index<remove_by_index_t<ISeq, HeadIndexToRemove>, std::index_sequence<TailIndicesToRemove...>>::type;
- };
- template<class ISeq, class IndicesToRemove>
- using remove_all_by_index_t = typename remove_all_by_index<ISeq, IndicesToRemove>::type;
+//  template<class ISeq, class IndicesToRemove>
+//  struct remove_all_by_index {
+//      static_assert(false_t<ISeq>::value, "In iseq::remove_all_by_index_t<ISeq, IndicesToRemove>, both ISeq and the Insertions must be a std::index_sequence.");
+//  };
+//  template<class ISeq>
+//  struct remove_all_by_index<ISeq, std::index_sequence<>> {
+//      using type = ISeq;
+//  };
+//  template<class ISeq, size_t HeadIndexToRemove, size_t... TailIndicesToRemove>
+//  struct remove_all_by_index<ISeq, std::index_sequence<HeadIndexToRemove, TailIndicesToRemove...>> {
+//      using type = typename remove_all_by_index<remove_by_index_t<ISeq, HeadIndexToRemove>, std::index_sequence<TailIndicesToRemove...>>::type;
+//  };
+//  template<class ISeq, class IndicesToRemove>
+//  using remove_all_by_index_t = typename remove_all_by_index<ISeq, IndicesToRemove>::type;
 
 /**
  * Concatenate multiple integer sequences
