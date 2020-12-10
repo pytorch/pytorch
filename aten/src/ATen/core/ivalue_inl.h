@@ -417,12 +417,34 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     return fut;
   }
 
-  // Since this file cannot import CUDA depedency, the type of the seocond arg
-  // in the callback is c10::Stream instead of at::cuda::CUDAStream, and
-  // CUDAStream is constructed on the fly. The default implementation
-  // is a no-op, since it does not deal with any CUDA streams.
-  virtual void setRecordStreamCallback(
-      std::function<void(const at::IValue&, const c10::Stream&)> record_stream_cb) {}
+  // Some subclasses deal with CUDA tensors and must inform the CUDA caching
+  // allocator of which CUDA streams each DataPtr is used in. If the value held
+  // by the future is a Python object we need to acquire the GIL when extracting
+  // these DataPtrs. Since this file cannot depend on Python, we allow users to
+  // provide a "custom" extractor. Look for example at the PythonFutureWrapper.
+  using DataPtrExtractor =
+      std::function<std::vector<std::reference_wrapper<const at::DataPtr>>(
+          const at::IValue&)>;
+  virtual void setDataPtrExtractor(DataPtrExtractor data_ptr_extractor) {}
+
+  // Expose the default implementation so that external ones can defer to it.
+  static std::vector<std::reference_wrapper<const at::DataPtr>>
+  defaultDataPtrExtractor(const at::IValue& value) {
+    // FIXME Should we support more types than just tensors and tensor lists?
+    TORCH_INTERNAL_ASSERT(
+        value.isTensorList() || value.isTensor(),
+        "the future value must be either a tensor list or a tensor.");
+    at::Tensor tensor;
+    if (value.isTensorList()) {
+      const auto tensors = value.toTensorVector();
+      TORCH_INTERNAL_ASSERT(tensors.size() == 1, "expected exactly 1 tensor");
+      tensor = tensors[0];
+    } else {
+      tensor = value.toTensor();
+    }
+
+    return {tensor.storage().data_ptr()};
+  };
 
   // Tries to retrieve the error message from std::exception_ptr.
   std::string tryRetrieveErrorMessage() {

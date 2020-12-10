@@ -314,28 +314,9 @@ class ProcessGroupNCCL : public ProcessGroup {
 
       // Do not free the underlying data storage of value_ before its
       // usage on futureNCCLCallbackStream_ finish.
-      if (record_stream_cb_ != nullptr) {
-        // If a Python communication hook is used, record_stream_cb_ will be
-        // set in torch/csrc/jit/python/pybind_utils.h, which allows Python
-        // dependency to be imported.
-        record_stream_cb_(value_, futureNCCLCallbackStream_->unwrap());
-      } else {
-        // If a C++ communication hook is used, create and set a record stream
-        // callback.
-        TORCH_INTERNAL_ASSERT(
-            value_.isTensorList() || value_.isTensor(),
-            "the future value must be either a tensor list or a tensor.");
-        at::Tensor tensor;
-        if (value_.isTensorList()) {
-          const auto tensors = value_.toTensorVector();
-          TORCH_INTERNAL_ASSERT(
-              tensors.size() == 1, "expected exactly 1 tensor");
-          tensor = tensors[0];
-        } else {
-          tensor = value_.toTensor();
-        }
+      for (const at::DataPtr& data_ptr : extractDataPtrs(value_)) {
         c10::cuda::CUDACachingAllocator::recordStream(
-            tensor.storage().data_ptr(), *futureNCCLCallbackStream_);
+            data_ptr, *futureNCCLCallbackStream_);
       }
 
       // Use the dedicated callback stream to run callback.
@@ -372,10 +353,9 @@ class ProcessGroupNCCL : public ProcessGroup {
       return !value_.isNone();
     }
 
-    void setRecordStreamCallback(
-        std::function<void(const at::IValue&, const c10::Stream&)>
-            record_stream_cb) override {
-      record_stream_cb_ = std::move(record_stream_cb);
+    void setDataPtrExtractor(DataPtrExtractor dataPtrExtractor) override {
+      std::unique_lock<std::mutex> lock(dataPtrExtractorMutex_);
+      dataPtrExtractor_ = std::move(dataPtrExtractor);
     }
 
    private:
@@ -383,9 +363,26 @@ class ProcessGroupNCCL : public ProcessGroup {
     c10::DeviceIndex deviceIndex_;
     std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents_;
     std::shared_ptr<at::cuda::CUDAStream> futureNCCLCallbackStream_;
-    std::function<void(const at::IValue&, const c10::Stream&)>
-        record_stream_cb_;
+    DataPtrExtractor dataPtrExtractor_;
+    std::mutex dataPtrExtractorMutex_;
     c10::optional<FutureError> error_;
+
+    std::vector<std::reference_wrapper<const at::DataPtr>> extractDataPtrs(
+        const at::IValue& value) {
+      std::unique_lock<std::mutex> lock(dataPtrExtractorMutex_);
+      std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
+      if (dataPtrExtractor_ != nullptr) {
+        // If a Python communication hook is used, dataPtrExtractor_ will be
+        // set in torch/csrc/jit/python/pybind_utils.h, which allows Python
+        // dependency to be imported.
+        data_ptrs = dataPtrExtractor_(value);
+      } else {
+        // If a C++ communication hook is used, use the default extractor.
+        data_ptrs = at::ivalue::Future::defaultDataPtrExtractor(value);
+      }
+      TORCH_INTERNAL_ASSERT(data_ptrs.size() == 1, "expected exactly 1 tensor");
+      return data_ptrs;
+    }
   };
 
   // If you wish to create multiple process groups, each with a potentially
