@@ -51,7 +51,6 @@ static bool checkIfFold(Node* node, bool dynamic_axes) {
   return false;
 }
 
-// TODO: needs refactoring
 static bool constantFoldingValue(Node* node) {
   auto cast_node = node->input()->node();
   auto prev_node = cast_node->input()->node();
@@ -88,8 +87,7 @@ static bool constantFoldingValue(Node* node) {
     if (input_node->kind() == onnx::Constant) {
       auto val = input_node->t(attr::value);
       inputs.push_back(val);
-    } else { // input_node is either onnx::Size or onnx::ReduceProd -verify if
-             // there are more cases.
+    } else { // input_node is either onnx::Size or onnx::ReduceProd
       auto shape_node = input_node->input()->node();
       auto shape =
           shape_node->input()->type()->cast<TensorType>()->symbolic_sizes();
@@ -98,8 +96,7 @@ static bool constantFoldingValue(Node* node) {
       if (input_node->kind() == onnx::Size) {
         auto rank = shape.rank();
         val = c10::scalar_to_tensor(
-            (int64_t)*rank); // figure out to what it should be cast to (int,
-                             // in64_t, etc...)
+            (int64_t)*rank);
       } else if (input_node->kind() == onnx::ReduceProd) {
         auto sizes = shape.sizes();
         int64_t prod = 1;
@@ -109,13 +106,11 @@ static bool constantFoldingValue(Node* node) {
         }
         val = c10::scalar_to_tensor(prod);
       }
-      // Probably some check is needed here
+
       inputs.push_back(val);
     }
   }
 
-  // std::cout << "compare node  " << compare_node->owningGraph()->toString() <<
-  // std::endl;
   if (compare_node->kind() == onnx::Equal) {
     if (prev_node->kind() == onnx::Not)
       return !(at::equal(inputs[0], inputs[1]));
