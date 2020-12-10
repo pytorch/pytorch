@@ -24,15 +24,7 @@ def get_torch_version(sha=None):
             version += '.post' + str(build_number)
     elif sha != 'Unknown':
         version += '+' + sha[:7]
-
-    first_non_numeric = min(i for i, c in enumerate(version) if c not in "0123456789.")
-    version_suffix = version[first_non_numeric:]
-    version_info = tuple(
-        [int(part) for part in version[:first_non_numeric].split(".")]
-        + version_suffix.split("+")
-    )
-
-    return version, version_info
+    return version
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate torch/version.py from build and environment metadata.")
@@ -49,11 +41,10 @@ if __name__ == "__main__":
     pytorch_root = Path(__file__).parent.parent
     version_path = pytorch_root / "torch" / "version.py"
     sha = get_sha()
-    version, version_info = get_torch_version(sha)
+    version = get_torch_version(sha)
 
     with open(version_path, 'w') as f:
         f.write("__version__ = '{}'\n".format(version))
-        f.write("version_info = {}\n".format(version_info))
         # NB: This is not 100% accurate, because you could have built the
         # library code with DEBUG, but csrc without DEBUG (in which case
         # this would claim to be a release build when it's not.)
