@@ -4402,8 +4402,8 @@ class TestFunctors(TestCase):
         self.assertEqual(actual_jac, expected_jac)
 
     def test_cat_event_dim(self):
-        t1 = AffineTransform(0, 2*torch.ones(2), event_dim=1)
-        t2 = AffineTransform(0, 2*torch.ones(2), event_dim=1)
+        t1 = AffineTransform(0, 2 * torch.ones(2), event_dim=1)
+        t2 = AffineTransform(0, 2 * torch.ones(2), event_dim=1)
         dim = 1
         bs = 16
         x1 = torch.randn(bs, 2)
