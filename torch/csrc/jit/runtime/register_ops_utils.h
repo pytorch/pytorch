@@ -179,7 +179,7 @@ void setItem(const c10::List<T>& list, int64_t idx, T&& value) {
   if (normalized_idx < 0 || normalized_idx >= list_size) {
     throw std::out_of_range("list index out of range");
   }
-  list.set(normalized_idx, std::move(value));
+  list.set(normalized_idx, std::forward<T>(value));
 }
 
 void listAppend(Stack* stack);

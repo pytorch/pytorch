@@ -213,6 +213,9 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("igamma", CppFunction::makeFallthrough());
   m.impl("igamma.out", CppFunction::makeFallthrough());
   m.impl("igamma_", CppFunction::makeFallthrough());
+  m.impl("igammac", CppFunction::makeFallthrough());
+  m.impl("igammac.out", CppFunction::makeFallthrough());
+  m.impl("igammac_", CppFunction::makeFallthrough());
   m.impl("imag", CppFunction::makeFallthrough());
   m.impl("index_fill.Dimname_Scalar", CppFunction::makeFallthrough());
   m.impl("index_fill.Dimname_Tensor", CppFunction::makeFallthrough());

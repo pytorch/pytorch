@@ -2,12 +2,13 @@ import json
 import os
 import re
 import textwrap
+import timeit
 from typing import Any, List, Tuple
 import unittest
 
 import torch
 import torch.utils.benchmark as benchmark_utils
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS, slowTest
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_SANDCASTLE, IS_WINDOWS, slowTest
 from torch.testing._internal import expecttest
 import numpy as np
 
@@ -161,6 +162,18 @@ class TestBenchmarkUtils(TestCase):
                     x = x + 1.0""",
         ).timeit(5).median
         self.assertIsInstance(sample, float)
+
+    @slowTest
+    @unittest.skipIf(IS_SANDCASTLE, "C++ timing is OSS only.")
+    def test_cpp_timer(self):
+        timer = benchmark_utils.Timer(
+            "torch::Tensor y = x + 1;",
+            setup="torch::Tensor x = torch::empty({1});",
+            timer=timeit.default_timer,
+            language=benchmark_utils.Language.CPP,
+        )
+        t = timer.timeit(10)
+        self.assertIsInstance(t.median, float)
 
     class _MockTimer:
         _seed = 0
@@ -438,6 +451,7 @@ class TestBenchmarkUtils(TestCase):
 
     @slowTest
     @unittest.skipIf(IS_WINDOWS, "Valgrind is not supported on Windows.")
+    @unittest.skipIf(IS_SANDCASTLE, "Valgrind is OSS only.")
     def test_collect_callgrind(self):
         with self.assertRaisesRegex(
             ValueError,
@@ -493,6 +507,32 @@ class TestBenchmarkUtils(TestCase):
             wrapper_singleton()._bindings_module,
             "JIT'd bindings are only for back testing."
         )
+
+    @slowTest
+    @unittest.skipIf(IS_WINDOWS, "Valgrind is not supported on Windows.")
+    @unittest.skipIf(IS_SANDCASTLE, "Valgrind is OSS only.")
+    def test_collect_cpp_callgrind(self):
+        timer = benchmark_utils.Timer(
+            "x += 1;",
+            setup="torch::Tensor x = torch::ones({1});",
+            timer=timeit.default_timer,
+            language="c++",
+        )
+        stats = [
+            timer.collect_callgrind()
+            for _ in range(3)
+        ]
+        counts = [s.counts() for s in stats]
+
+        self.assertGreater(
+            min(counts), 0, "No stats were collected")
+        self.assertEqual(
+            min(counts), max(counts), "C++ Callgrind should be deterministic")
+
+        for s in stats:
+            self.assertEqual(
+                s.counts(denoise=True), s.counts(denoise=False),
+                "De-noising should not apply to C++.")
 
     def test_manipulate_callgrind_stats(self):
         stats_no_data, stats_with_data = load_callgrind_artifacts()

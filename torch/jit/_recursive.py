@@ -285,10 +285,12 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         # to infer the type.
         attr_py_type = type(value)
         ignored_builtin_classes = (torch.nn.Module, tuple, list, Exception)
-        if torch._jit_internal.can_compile_class(attr_py_type) and not issubclass(attr_py_type, ignored_builtin_classes) and not issubclass(attr_py_type, Enum):
+        if torch._jit_internal.can_compile_class(attr_py_type) and \
+            not issubclass(attr_py_type, ignored_builtin_classes) and \
+                not issubclass(attr_py_type, Enum):
             try:
                 torch.jit.script(type(value))
-            except:
+            except Exception as _:
                 pass
 
         attr_type = infer_type(name, value)
@@ -441,7 +443,8 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
             if attr_type.is_class_type():
                 qual_name = qualified_name = _jit_internal._qualified_name(type(orig_value))
                 if _get_script_class(qualified_name):
-                    orig_value = orig_value if isinstance(orig_value, torch.jit.RecursiveScriptClass) else create_script_class(orig_value)
+                    orig_value = orig_value if isinstance(orig_value, torch.jit.RecursiveScriptClass) \
+                        else create_script_class(orig_value)
 
             cpp_module.setattr(name, orig_value)
 

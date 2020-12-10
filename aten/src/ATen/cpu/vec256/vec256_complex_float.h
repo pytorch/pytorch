@@ -293,6 +293,9 @@ public:
   Vec256<c10::complex<float>> igamma(const Vec256<c10::complex<float>> &x) const {
     AT_ERROR("not supported for complex numbers");
   }
+  Vec256<c10::complex<float>> igammac(const Vec256<c10::complex<float>> &x) const {
+    AT_ERROR("not supported for complex numbers");
+  }
   Vec256<c10::complex<float>> neg() const {
     auto zero = _mm256_setzero_ps();
     return _mm256_sub_ps(zero, values);

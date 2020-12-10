@@ -148,11 +148,12 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::
 }
 
 void RequestCallbackImpl::processScriptCall(
-    ScriptCall& scriptCall,
+    RpcCommandBase& rpc,
     const std::function<void(Message)>& markComplete,
-    std::vector<at::IValue>& stack,
     const int64_t messageId,
     const std::shared_ptr<FutureMessage>& responseFuture) const {
+  auto& scriptCall = static_cast<ScriptCall&>(rpc);
+  auto& stack = scriptCall.stackRef();
   if (processScriptCallOp(scriptCall, markComplete, stack)) {
     return;
   }

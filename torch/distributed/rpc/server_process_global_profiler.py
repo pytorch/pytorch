@@ -103,7 +103,7 @@ class _server_process_global_profile(profile):
         if not self.enabled:
             return
 
-        if self.entered:
+        if self.entered:  # type: ignore[has-type]
             raise RuntimeError("autograd profiler traces are not reentrant")
         self.entered = True
 
@@ -145,13 +145,13 @@ class _server_process_global_profile(profile):
         process_global_function_events = []
         for thread_local_events in process_global_events:
             # Parse from ``Event``s to ``FunctionEvent``s.
-            thread_local_function_events = torch.autograd.profiler.parse_event_records(
+            thread_local_function_events = torch.autograd.profiler.parse_legacy_records(
                 thread_local_events
             )
             thread_local_function_events.sort(
                 key=lambda function_event: [
-                    function_event.cpu_interval.start,
-                    -(function_event.cpu_interval.end),
+                    function_event.time_range.start,
+                    -(function_event.time_range.end),
                 ]
             )
             process_global_function_events.append(thread_local_function_events)
@@ -164,6 +164,7 @@ class _server_process_global_profile(profile):
             use_cuda=self.use_cuda,
             profile_memory=self.profile_memory,
         )
+        self.function_events._build_tree()
 
         self.process_global_function_events = process_global_function_events
 

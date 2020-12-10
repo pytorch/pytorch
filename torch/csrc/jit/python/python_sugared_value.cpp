@@ -92,12 +92,12 @@ FunctionSchema PythonValue::getSchema(
 
     auto types_it = arg_types.begin();
     for (; types_it != arg_types.end(); ++types_it, ++names_it) {
-      args.push_back(Argument(
+      args.emplace_back(
           /*name=*/*names_it,
           /*type=*/std::move(*types_it),
           /*N=*/c10::nullopt,
           /*default_value=*/c10::nullopt,
-          /*kwarg_only=*/false));
+          /*kwarg_only=*/false);
     }
     rets.push_back(Argument("0", std::move(ret_type), {}, {}, false));
   }
@@ -293,7 +293,7 @@ SugaredValuePtr ModuleValue::getitem(
 void checkInterface(
     const SourceRange& loc,
     Function& m,
-    std::shared_ptr<ModuleValue> self,
+    const std::shared_ptr<ModuleValue>& self,
     const std::string& field) {
   if (self->asValue(loc, m)->type()->cast<InterfaceType>()) {
     throw ErrorReport(loc)
@@ -307,7 +307,7 @@ void recurseThroughNestedModules(
     Function& m,
     std::vector<SugaredValuePtr>& keys,
     std::vector<SugaredValuePtr>& values,
-    std::shared_ptr<ModuleValue> self,
+    std::shared_ptr<ModuleValue>& self,
     const std::string& prefix,
     const std::string& field) {
   auto prefix_value =

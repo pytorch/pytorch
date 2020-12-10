@@ -5,6 +5,10 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/Functions.h>
 
+// TODO: try to remove this
+// There is some back story, see https://github.com/pytorch/pytorch/issues/48684
+#include <ATen/NativeFunctions.h>
+
 namespace at {
 namespace indexing {
 
@@ -224,7 +228,7 @@ static inline Tensor boolToIndexingTensorCPUOrCUDA(const Tensor& self, bool valu
   if (value) {
     return at::native::zeros({1}, {}, self.options().dtype(kLong));
   } else {
-    return at::native::empty({0}, {}, self.options().dtype(kLong));
+    return at::empty({0}, {}, self.options().dtype(kLong));
   }
 }
 

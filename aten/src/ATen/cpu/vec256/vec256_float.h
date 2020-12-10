@@ -203,6 +203,16 @@ public:
     }
     return loadu(tmp);
   }
+  Vec256<float> igammac(const Vec256<float> &x) const {
+    __at_align32__ float tmp[size()];
+    __at_align32__ float tmp_x[size()];
+    store(tmp);
+    x.store(tmp_x);
+    for (int64_t i = 0; i < size(); i++) {
+      tmp[i] = calc_igammac(tmp[i], tmp_x[i]);
+    }
+    return loadu(tmp);
+  }
   Vec256<float> neg() const {
     return _mm256_xor_ps(_mm256_set1_ps(-0.f), values);
   }

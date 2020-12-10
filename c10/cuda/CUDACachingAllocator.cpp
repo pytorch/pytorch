@@ -202,6 +202,13 @@ class DeviceCachingAllocator {
   // outstanding cuda events
   std::deque<std::pair<cudaEvent_t, Block*>> cuda_events;
 
+  // record used memory.
+  size_t total_allocated_memory = 0;
+
+  size_t allowed_memory_maximum = 0;
+
+  bool set_fraction = false;
+
  public:
 
   DeviceCachingAllocator() :
@@ -241,10 +248,16 @@ class DeviceCachingAllocator {
         size_t device_free;
         size_t device_total;
         C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
+        std::string allowed_info;
+
+        if (set_fraction) {
+          allowed_info = format_size(allowed_memory_maximum) + " allowed; ";
+        }
 
         stats.num_ooms += 1;
 
         // "total capacity": total global memory on GPU
+        // "allowed": memory is allowed to use, which set by fraction.
         // "already allocated": memory allocated by the program using the
         //                      caching allocator
         // "free": free memory as reported by the CUDA API
@@ -268,6 +281,7 @@ class DeviceCachingAllocator {
           format_size(stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current),
           " already allocated; ",
           format_size(device_free), " free; ",
+          allowed_info,
           format_size(stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current),
           " reserved in total by PyTorch)");
       } else {
@@ -371,6 +385,15 @@ class DeviceCachingAllocator {
       return;
     }
     block->stream_uses.insert(stream);
+  }
+
+  /** set memory fraction to limit maximum allocated memory **/
+  void setMemoryFraction(double fraction) {
+    size_t device_free;
+    size_t device_total;
+    C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
+    allowed_memory_maximum = static_cast<size_t>(fraction * device_total);
+    set_fraction = true;
   }
 
   /** returns cached blocks to the system allocator **/
@@ -630,14 +653,19 @@ class DeviceCachingAllocator {
     if (isRetry) {
       stats.num_alloc_retries += 1;
     }
+    if (set_fraction && total_allocated_memory + size > allowed_memory_maximum) {
+      p.err = cudaErrorMemoryAllocation;
+    } else {
+      p.err = cudaMalloc(&ptr, size);
+    }
 
-    p.err = cudaMalloc(&ptr, size);
     if (p.err != cudaSuccess) {
       if (!isRetry || p.err == cudaErrorMemoryAllocation)
         cudaGetLastError();  // clear CUDA error
       return false;
     }
 
+    total_allocated_memory += size;
     p.block = new Block(p.device(), p.stream(), size, p.pool, (char*)ptr);
     update_stat_array(stats.segment, 1, p.stat_types);
     update_stat_array(stats.reserved_bytes, size, p.stat_types);
@@ -665,6 +693,7 @@ class DeviceCachingAllocator {
       Block* block = *it;
       if (!block->prev && !block->next) {
         C10_CUDA_CHECK(cudaFree((void*)block->ptr));
+        total_allocated_memory -= block->size;
 
         StatTypes stat_types;
         stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
@@ -846,6 +875,25 @@ class THCCachingAllocator {
     device_allocator[block->device]->free(block);
   }
 
+  void setMemoryFraction(double fraction, int device) {
+    TORCH_INTERNAL_ASSERT(
+        0 <= device && device < device_allocator.size(),
+        "Allocator not initialized for device ",
+        device,
+        ": did you call init?");
+    TORCH_INTERNAL_ASSERT(
+        0 <= fraction  && fraction <= 1,
+        "invalid fraction:",
+        fraction,
+        ". Please set within (0, 1).");
+    int activated_device;
+    cudaGetDevice (&activated_device);
+    if (activated_device != device) {
+        cudaSetDevice(device);
+    }
+    device_allocator[device]->setMemoryFraction(fraction);
+  }
+
   void emptyCache() {
     int count = device_allocator.size();
     for (int i = 0; i < count; i++)
@@ -940,6 +988,10 @@ Allocator* get(void)
 
 void init(int device_count) {
   caching_allocator.init(device_count);
+}
+
+void setMemoryFraction(double fraction, int device) {
+  caching_allocator.setMemoryFraction(fraction, device);
 }
 
 void emptyCache(void) {

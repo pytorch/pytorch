@@ -9,7 +9,7 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/Reduction.h>
-#include <ATen/DimVector.h>
+#include <ATen/BatchedTensorImpl.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ScalarOps.h>
 
@@ -1022,13 +1022,58 @@ Tensor log_softmax_double_backward(const Tensor & grad, const Tensor & grad_outp
   return z * grad_output.sum(dim, true) * ((grad * z).sum(dim, true) - grad);
 }
 
+// See NOTE: [vmap-incompatible in-place operations] for what it means for an
+// in-place operation to be incompatible with vmap.
+//
+// If an in-place operation used in a backward formula is vmap-incompatible,
+// then as developers we have the following options:
+//
+// - If the in-place operation directly followed the creation of a tensor with
+//   a factory function like at::zeros(...), we should replace the factory with a
+//   corresponding grad.new_zeros(...) call. The grad.new_zeros(...) call
+//   propagates the batch dims to the resulting tensor.
+//   For example:
+//     Before: at::zeros(input.sizes(), grad.options()).copy_(grad)
+//     After:  grad.new_zeros(input.sizes()).copy_(grad)
+//
+// - If the in-place operation followed some sequence of operations, if the
+//   we want to be able to vmap over the backward formula as-is (this is
+//   usually the case for simple (<15loc) backward formulas), then use
+//   inplace_is_vmap_compatible to guard the operation. For example:
+//             c = a * b
+//     Before: c.mul_(grad)
+//     After:  c = inplace_is_vmap_compatible(c, grad) ? c.mul_(grad) : c * grad
+//
+// - If we don't want to vmap directly over the backward formula (e.g., if the
+//   backward formula is too complicated or has a lot of vmap-incompatible
+//   operations, then register the backward formula as an operator and eventually
+//   write a batching rule for it.
+static bool inplace_is_vmap_compatible(const Tensor& self, const Tensor& other) {
+  const auto* other_batched = at::maybeGetBatchedImpl(other);
+  if (!other_batched) {
+    return true;
+  }
+  const auto* self_batched = at::maybeGetBatchedImpl(self);
+  if (!self_batched) {
+    // self is not batched but other is batched
+    return false;
+  }
+  auto self_levels = at::createVmapLevelsBitset(self_batched->bdims());
+  auto other_levels = at::createVmapLevelsBitset(other_batched->bdims());
+  return self_levels == (self_levels | other_levels);
+}
+
 Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Tensor & grad, const Tensor & input, const Tensor & target, const c10::optional<Tensor>& weight, int64_t reduction) {
   auto eps = 1e-12;
   auto inp_pl_eps = input + eps;
   auto one_m_inp_pl_eps = 1 - input + eps;
   // gradient wrt input
   auto gI = (input * input - 2 * input * target + target) / (inp_pl_eps.pow(2) * one_m_inp_pl_eps.pow(2));
-  gI *= (grad * grad_output);
+  if (inplace_is_vmap_compatible(gI, grad)) {
+    gI *= (grad * grad_output);
+  } else {
+    gI = gI * (grad * grad_output);
+  }
 
   if (isDefined(weight)) {
     gI *= *weight;
@@ -1045,7 +1090,11 @@ Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad, con
   auto eps = 1e-12;
   // gradient wrt grad_output
   auto ggO = (input - target) / ((input + eps) * (1 - input + eps));
-  ggO *= grad;
+  if (inplace_is_vmap_compatible(ggO, grad)) {
+    ggO *= grad;
+  } else {
+    ggO = ggO * grad;
+  }
 
   if (isDefined(weight)) {
     ggO *= *weight;
@@ -1925,23 +1974,29 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
   auto glambda = grads[0];
   auto gv = grads[1];
 
-  auto vt = v.transpose(-2, -1);
+  auto vh = v.conj().transpose(-2, -1);
 
   Tensor result;
   if (gv.defined()) {
       Tensor F = lambda.unsqueeze(-2) - lambda.unsqueeze(-1);
       F.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(INFINITY);
       F.pow_(-1);
-      F.mul_(at::matmul(vt, gv));
-      result = at::matmul(v, at::matmul(F, vt));
+      result = at::matmul(v, at::matmul(F * at::matmul(vh, gv), vh));
   } else {
       result = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   if (glambda.defined()) {
-      result.add_(at::matmul(at::matmul(v, at::diag_embed(glambda, /*offset=*/0, /*dim1=*/-2, /*dim2=*/-1)), vt));
+    glambda = glambda.to(self.dtype());
+    // computes v @ diag(glambda) @ vh
+    Tensor glambda_term = at::matmul(v * glambda.unsqueeze(-2), vh);
+    if (inplace_is_vmap_compatible(result, glambda_term)) {
+      result.add_(glambda_term);
+    } else {
+      result = result + glambda_term;
+    }
   }
-  return result.add(result.transpose(-2, -1)).mul_(0.5);
+  return result.add(result.conj().transpose(-2, -1)).mul_(0.5);
 }
 
 Tensor qr_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
@@ -2257,8 +2312,8 @@ std::tuple<Tensor, Tensor> cholesky_solve_backward(
   if (grad_x.defined()) {
     grad_self = grad_x.cholesky_solve(input2, /*upper=*/upper);
 
-    Tensor common_term = at::matmul(grad_self, result.transpose(-2, -1));
-    common_term = common_term + common_term.transpose(-2, -1);
+    Tensor common_term = at::matmul(grad_self, result.conj().transpose(-2, -1));
+    common_term = common_term + common_term.conj().transpose(-2, -1);
 
     if (upper) {
       grad_input2 = -at::matmul(input2, common_term);
@@ -2355,6 +2410,72 @@ Tensor fft_backward(const Tensor& self, const Tensor& grad, int64_t signal_ndim,
                         self.sizes());
   }
   return gI;
+}
+
+Tensor fft_c2r_backward(const Tensor& grad, IntArrayRef dim, int64_t normalization) {
+  // Forward is C2R (onesided)
+  // Think of onesided C2R irfft as
+  //    1. fill the other half by conjugate symmetry
+  //    2. inverse C2C ifft
+  //    3. discard the complex dimension
+  // So backward is
+  //    1. R2C rfft (essentially add dummy complex dimension, and dft)
+  //    2. accumulate gradient by conjugate symmetry
+  //       since rfft results follow conjugate symmetry, we only need to
+  //       double some entries from onesided rfft results, i.e., the ones with
+  //       their reflected indices also landing out of the onesided range. So
+  //       consider the index of last dim:
+  //           i.   idx = 0.
+  //                Reflected to (N - 0) % N = 0. Not doubled.
+  //           ii   0 < idx < floor(N/2) (last).
+  //                N > N - idx > ceil(N/2)
+  //                Reflected to ()
+  //           iii. idx = floor(N/2) = N/2 (last) when N even.
+  //                Reflected to (N - N/2) % N = N/2. Not doubled.
+  //           iv.  idx = floor(N/2) = (N-1)/2 (last) when N odd.
+  //                Reflected to (N - (N-1)/2) % N = (N+1)/2. Doubled.
+  //       Therefore, needs to double
+  //           idx = 1, 2, ..., N/2 - 1     when N even
+  //           idx = 1, 2, ..., (N-1)/2     when N odd
+  //       that is
+  //           idx = 1, 2, ..., N - (floor(N/2) + 1)
+  //               = 1, 2, ..., N - onesided_length
+  auto gI = at::_fft_r2c(grad, dim, normalization, /*onesided=*/true);
+
+  auto double_length = grad.size(dim.back()) - gI.size(dim.back());
+  if (double_length > 0) {  // also covers case when signal size is zero
+    gI.narrow(dim.back(), 1, double_length).mul_(2);
+  }
+  return gI;
+}
+
+Tensor fft_r2c_backward(const Tensor& grad, IntArrayRef dim, int64_t normalization,
+                        bool onesided, int64_t last_dim_size) {
+  if (!onesided) {
+    return at::real(at::_fft_c2c(grad, dim, normalization, /*forward=*/false));
+  }
+
+  // Forward is R2C (onesided)
+  // Think of onesided R2C rfft as
+  //     1. view as complex numbers (fill complex dim with zeros)
+  //     2. C2C fft
+  //     3. discard half of results
+  // So backward is
+  //     1. fill the other half with zeros (with `zero_grad_shape` below)
+  //        (C2C ifft only take twosided inputs so we need to fill here)
+  //     2. inverse C2C ifft
+  //     3. discard the complex dim
+  auto half_sizes = grad.sizes();
+  at::DimVector new_grad_shape(half_sizes.begin(), half_sizes.end());
+  const auto last_dim = at::maybe_wrap_dim(dim.back(), half_sizes.size());
+  new_grad_shape[last_dim] = last_dim_size;
+
+  const auto zero_length = last_dim_size - grad.size(dim.back());
+  auto complex_full_grad = zero_length > 0 ? at::zeros(new_grad_shape, grad.options()) : grad;
+  if (zero_length > 0) {
+    complex_full_grad.slice(last_dim, 0, half_sizes[last_dim]).copy_(grad);
+  }
+  return at::real(at::_fft_c2c(complex_full_grad, dim, normalization, /*forward=*/false));
 }
 
 // Helper for batchnorm_double_backward

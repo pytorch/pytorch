@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <ATen/core/interned_strings.h>
+#include <c10/core/CPUAllocator.h>
 #include <caffe2/core/scope_guard.h>
 #include <caffe2/core/timer.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
@@ -7,6 +8,7 @@
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
+#include <torch/csrc/jit/runtime/static/passes.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 namespace torch {
@@ -19,6 +21,8 @@ void OptimizeGraph(std::shared_ptr<torch::jit::Graph>& graph) {
   Canonicalize(graph);
   ConstantPropagation(graph);
   RemoveTensorMutation(graph);
+  ConstantPropagation(graph);
+  FuseInferenceOpsForSparseNN(graph);
   ConstantPropagation(graph);
 }
 
@@ -159,23 +163,30 @@ LivenessMap(const std::shared_ptr<torch::jit::Graph>& graph) {
 
 std::unordered_set<Value*> GetOptimizableValues(
     const std::shared_ptr<torch::jit::Graph>& graph) {
-  std::unordered_set<Value*> is_out_of_place;
-  std::unordered_set<Value*> is_not_out_of_place;
+  std::unordered_set<Value*> can_reuse;
+  // values used by unsupported ops (as either inputs or outputs)
+  // these need to be removed from "can_reuse" after analyzing all nodes
+  std::unordered_set<Value*> cannot_reuse;
   for (const auto& n : graph->nodes()) {
-    for (const auto& container : {n->inputs(), n->outputs()}) {
-      for (const auto& v : container) {
-        if (canRunOutOfPlace(n)) {
-          is_out_of_place.insert(v);
-        } else {
-          is_not_out_of_place.insert(v);
-        }
+    for (const auto& v : n->inputs()) {
+      if (canRunOutOfPlace(n) && canReuseInputs(n)) {
+        can_reuse.insert(v);
+      } else {
+        cannot_reuse.insert(v);
+      }
+    }
+    for (const auto& v : n->outputs()) {
+      if (canRunOutOfPlace(n) && canReuseOutputs(n)) {
+        can_reuse.insert(v);
+      } else {
+        cannot_reuse.insert(v);
       }
     }
   }
-  for (auto v : is_not_out_of_place) {
-    is_out_of_place.erase(v);
+  for (auto v : cannot_reuse) {
+    can_reuse.erase(v);
   }
-  return is_out_of_place;
+  return can_reuse;
 }
 
 size_t AssignRegisters(
@@ -584,12 +595,14 @@ void StaticRuntime::deallocate_registers(const std::vector<size_t>& internals) {
   // they will be re-created in the next iteration regardless
   for (auto i : internals) {
     if (reg_[i].isTensor()) {
-      if (reg_[i].toTensor().storage().nbytes() > 0) {
-        reg_[i] = IValue();
+      // If the tensor has no storage, we can keep it around. We
+      // implement by moving out of the register (leaving behind an
+      // empty IValue for free!) and possibly moving back.
+      at::Tensor asTensor = std::move(reg_[i]).toTensor();
+      if (asTensor.storage().nbytes() == 0) {
+        reg_[i] = std::move(asTensor);
       }
     } else {
-      // TensorLists and Tuples
-      // TODO: cache the List and Tuple objects but release what's inside
       reg_[i] = IValue();
     }
   }
@@ -645,7 +658,7 @@ size_t MemoryPlanner::compute_aligned_tensor_size(size_t nbytes) {
 }
 
 at::DataPtr MemoryPlanner::allocate_buffer(size_t size) {
-  at::Allocator* allocator = c10::GetCPUAllocator();
+  at::Allocator* allocator = c10::GetCPUCachingAllocator();
   return allocator->allocate(size);
 }
 
@@ -733,20 +746,23 @@ ProcessedNode::ProcessedNode(
     std::ostringstream ss;
     node->print(ss, 0, nullptr, false);
     VLOG(1) << "Switch to out variant for node: " << ss.str();
-  }
-  if (canRunNatively(node)) {
+  } else if (canRunNatively(node)) {
     native_fn_ = getNativeOperation(node);
     std::ostringstream ss;
     node->print(ss, 0, nullptr, false);
     VLOG(1) << "Switch to native impl for node: " << ss.str();
+  } else {
+    std::ostringstream ss;
+    node->print(ss, 0, nullptr, false);
+    VLOG(1) << "Fallback interpreter for node: " << ss.str();
   }
 }
 
 void ProcessedNode::run(std::vector<IValue>& reg) const {
   if (fn_) {
-    fn_->operator()(this, reg);
+    fn_(this, reg);
   } else if (native_fn_) {
-    native_fn_->operator()(this, reg);
+    native_fn_(this, reg);
   } else {
     std::vector<IValue> stack;
     const size_t size = node_->inputs().size();
@@ -754,32 +770,10 @@ void ProcessedNode::run(std::vector<IValue>& reg) const {
     for (size_t i = 0; i < size; i++) {
       stack.emplace_back(Input(i, reg));
     }
-    if (op_) {
-      op_->operator()(&stack);
-    } else {
-      if (node_->kind() == prim::ListConstruct) {
-        listConstruct(
-            stack,
-            node_->output()->type()->expect<ListType>(),
-            node_->inputs().size());
-      } else if (node_->kind() == prim::TupleConstruct) {
-        bool named =
-            node_->output()->type()->expect<TupleType>()->name().has_value();
-        if (named) {
-          namedTupleConstruct(
-              stack,
-              node_->output()->type()->expect<TupleType>(),
-              node_->inputs().size());
-        } else {
-          tupleConstruct(stack, node_->inputs().size());
-        }
-      } else if (node_->kind() == prim::ListUnpack) {
-        size_t num_outputs = node_->outputs().size();
-        listUnpack(stack, num_outputs);
-      } else {
-        TORCH_CHECK(0, "Unhandled operation!", node_->kind().toQualString());
-      }
-    }
+
+    DCHECK(op_);
+    op_->operator()(&stack);
+
     DCHECK_EQ(stack.size(), node_->outputs().size());
     for (auto i = 0; i < node_->outputs().size(); i++) {
       Output(i, reg) = std::move(stack[i]);
