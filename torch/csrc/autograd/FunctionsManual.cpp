@@ -88,12 +88,6 @@ int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim) {
   return size;
 }
 
-static Tensor wrapped_scalar_tensor(Scalar scalar) {
-  auto tensor = scalar_to_tensor(scalar);
-  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
-  return tensor;
-}
-
 Tensor handle_r_to_c(ScalarType self_st, Tensor gradient_result) {
   if (!at::isComplexType(self_st) && gradient_result.is_complex()) {
     // R -> C
