@@ -1,6 +1,6 @@
 import torch
 from torch.utils.data import IterableDataset
-from torch.utils.data.datasets import (CollateDataset)
+from torch.utils.data.datasets import (CollateDataset, BatchDataset)
 from torch.testing._internal.common_utils import (TestCase, run_tests)
 
 
@@ -51,6 +51,42 @@ class TestFunctionalIterableDataset(TestCase):
         for x in collate_ds_nolen:
             y = next(ds_nolen_iter)
             self.assertEqual(x, torch.tensor(y))
+
+    def test_batch_dataset(self):
+        arrs = range(10)
+        ds = IterDatasetWithLen(arrs)
+        with self.assertRaises(AssertionError):
+            batch_ds0 = BatchDataset(ds, batch_size=0)
+
+        # Default not drop the last batch
+        batch_ds1 = BatchDataset(ds, batch_size=3)
+        self.assertEqual(len(batch_ds1), 4)
+        batch_iter = iter(batch_ds1)
+        value = 0
+        for i in range(len(batch_ds1)):
+            batch = next(batch_iter)
+            if i == 3:
+                self.assertEqual(len(batch), 1)
+                self.assertEqual(batch, [9])
+            else:
+                self.assertEqual(len(batch), 3)
+                for x in batch:
+                    self.assertEqual(x, value)
+                    value += 1
+
+        # Drop the last batch
+        batch_ds2 = BatchDataset(ds, batch_size=3, drop_last=True)
+        self.assertEqual(len(batch_ds2), 3)
+        value = 0
+        for batch in batch_ds2:
+            self.assertEqual(len(batch), 3)
+            for x in batch:
+                self.assertEqual(x, value)
+                value += 1
+
+        batch_ds3 = BatchDataset(ds, batch_size=2)
+        batch_ds4 = BatchDataset(ds, batch_size=2, drop_last=True)
+        self.assertEqual(len(batch_ds3), len(batch_ds4))
 
 
 if __name__ == '__main__':
