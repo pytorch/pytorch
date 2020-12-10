@@ -1042,12 +1042,14 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
                 return 'toDimnameListOptional'
 
     elif isinstance(t, ListType):
-        if str(t.elem) == 'Tensor' or str(t.elem) == 'Tensor?':
+        if str(t.elem) == 'Tensor':
             # accept and use definite size
             if t.size is not None:
                 return f'tensorlist_n<{t.size}>'
             else:
                 return 'tensorlist'
+        elif str(t.elem) == 'Tensor?':
+            return 'list_of_optional_tensors'
         elif str(t.elem) == 'Dimname':
             # accept definite size
             return 'dimnamelist'
@@ -1127,7 +1129,7 @@ def dispatch_lambda_exprs(
             # [old codegen]
             # TODO: make this part of something more general, or get rid of it.
             # optional<ArrayRef<T>> are special. The PythonArgParser returns an
-            # optional<vector<T>>, which cannot be implicitly converted to
+            # optional<c<T>>, which cannot be implicitly converted to
             # optional<ArrayRef<T>>. One needs to unwrap the optional and rewrap.
             inits.extend([
                 f'auto __{name} = {arg_parser_expr};',
