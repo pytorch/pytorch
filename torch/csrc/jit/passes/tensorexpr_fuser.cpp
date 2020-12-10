@@ -786,10 +786,20 @@ class TensorExprFuser {
       if (!device || !output_device || *device != *output_device) {
         return false;
       }
+      // non_blocking only applies in cross-device conversion, which we bail on
+      // copy arg only applies if op is a no-op, which we dont start fusion
+      // group from memory format is separately handled in NNC output
 
       // all non-Tensor arguments must be constant
       for (size_t i = 1; i < node->inputs().size(); i++) {
         if (node->inputs().at(i)->node()->kind() != prim::Constant) {
+          return false;
+        }
+      }
+      // cant support non-constant pin_memory or pin_memory = True
+      if (auto index = node->schema().argumentIndexWithName("pin_memory")) {
+        auto inp = node->inputs(*index);
+        if (inp->type() != NoneType::get() && constant_as<bool>(node->inputs(*index).value_or(True)) {
           return false;
         }
       }
