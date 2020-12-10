@@ -45,6 +45,12 @@ inline at::Tensor scalar_to_tensor(Scalar s, const Device device = at::kCPU) {
   }
 }
 
+inline at::Tensor wrapped_scalar_tensor(Scalar scalar) {
+  auto tensor = scalar_to_tensor(scalar);
+  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
+  return tensor;
+}
+
 // The above function is useful for type promotion
 // in Binary Ops where one argument is `Tensor` and other is `Scalar`.
 // In the above function, we generate wrapped tensor to type with highest

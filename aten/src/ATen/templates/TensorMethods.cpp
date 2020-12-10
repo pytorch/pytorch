@@ -12,6 +12,7 @@
 #include <ATen/core/op_registration/hacky_wrapper_for_legacy_signatures.h>
 #include <ATen/quantized/Quantizer.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <ATen/ScalarOps.h>
 
 namespace at {
 
@@ -52,6 +53,15 @@ TensorOptions Tensor::options() const {
                         .device(device())
                         .layout(layout());
 }
+
+Tensor Tensor::add(Scalar other, Scalar alpha) const {
+  return add(wrapped_scalar_tensor(other), alpha);
+}
+
+Tensor& Tensor::add_(Scalar other, Scalar alpha) const {
+  return add_(wrapped_scalar_tensor(other), alpha);
+}
+
 
 ${tensor_method_definitions}
 

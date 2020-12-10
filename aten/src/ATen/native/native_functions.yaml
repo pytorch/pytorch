@@ -409,19 +409,6 @@
   dispatch:
     CPU: add_relu_out
 
-# For C++ only, until we have conversion from C++ numbers to Tensor
-- func: add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-  dispatch:
-    DefaultBackend: add
-
-- func: add_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)
-  use_c10_dispatcher: full
-  variants: method
-  dispatch:
-    DefaultBackend: add_
-
 - func: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
   variants: function, method

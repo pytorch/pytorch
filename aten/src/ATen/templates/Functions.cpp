@@ -23,6 +23,10 @@ std::tuple<Tensor,Tensor> std_mean(const Tensor& self, int dim) {
   return at::std_mean(self, IntArrayRef{dim});
 }
 
+Tensor add(const Tensor& self, Scalar other, Scalar alpha) {
+  return at::add(self, wrapped_scalar_tensor(other), alpha);
+}
+
 ${function_definitions}
 
 }

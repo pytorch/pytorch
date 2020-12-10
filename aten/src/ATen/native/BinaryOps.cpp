@@ -63,12 +63,6 @@ DEFINE_DISPATCH(nextafter_stub);
 DEFINE_DISPATCH(heaviside_stub);
 DEFINE_DISPATCH(copysign_stub);
 
-static Tensor wrapped_scalar_tensor(Scalar scalar) {
-  auto tensor = scalar_to_tensor(scalar);
-  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
-  return tensor;
-}
-
 TORCH_IMPL_FUNC(add_out) (
   Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha
 ) {
@@ -446,17 +440,6 @@ static void check_convert(Scalar scalar, ScalarType scalarType) {
 static Tensor wrapped_scalar_tensor_and_check_convert(Scalar scalar, Tensor tensor) {
   check_convert(scalar, tensor.scalar_type());
   return wrapped_scalar_tensor(scalar);
-}
-
-// TODO: Make this structured to undo the perf regression from native:: removal
-// in call here
-
-Tensor add(const Tensor& self, Scalar other, Scalar alpha) {
-  return at::add(self, wrapped_scalar_tensor(other), alpha);
-}
-
-Tensor& add_(Tensor& self, Scalar other, Scalar alpha) {
-  return self.add_(wrapped_scalar_tensor(other), alpha);
 }
 
 Tensor remainder(const Tensor& self, Scalar other) {
