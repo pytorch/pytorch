@@ -4712,6 +4712,15 @@ else:
             self.assertEqual(expected_value[0], actual_value[0], atol=self.precision, rtol=self.precision)
             self.assertEqual(expected_value[1], actual_value[1], atol=self.precision, rtol=self.precision)
 
+            # test out=variant
+            sign_out = torch.empty_like(actual_value[0])
+            logabsdet_out = torch.empty_like(actual_value[1])
+            ans = torch.linalg.slogdet(full_tensor, out=(sign_out, logabsdet_out))
+            self.assertEqual(ans[0], sign_out)
+            self.assertEqual(ans[1], logabsdet_out)
+            self.assertEqual(sign_out, actual_value[0])
+            self.assertEqual(logabsdet_out, actual_value[1])
+
         for matsize, batchdims in itertools.product([3, 5], [(3,), (5, 3)]):
             run_test(matsize, batchdims, mat_chars=['hermitian_pd'])
             run_test(matsize, batchdims, mat_chars=['singular'])

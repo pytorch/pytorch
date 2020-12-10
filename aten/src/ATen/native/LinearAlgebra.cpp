@@ -97,11 +97,13 @@ std::tuple<Tensor, Tensor> linalg_slogdet(const Tensor& self) {
   return std::make_tuple(det_sign, abslogdet_val);
 }
 
+// TODO: implement _out variant avoiding copy and using already allocated storage directly
 std::tuple<Tensor&, Tensor&> linalg_slogdet_out(Tensor& sign, Tensor& logabsdet, const Tensor& input) {
   TORCH_CHECK(sign.scalar_type() == input.scalar_type(),
     "sign dtype ", sign.scalar_type(), " does not match input dtype ", input.scalar_type());
-  TORCH_CHECK(logabsdet.scalar_type() == input.scalar_type(),
-    "logabsdet dtype ", logabsdet.scalar_type(), " does not match input dtype ", input.scalar_type());
+  ScalarType real_dtype = toValueType(typeMetaToScalarType(input.dtype()));
+  TORCH_CHECK(logabsdet.scalar_type() == real_dtype,
+    "logabsdet dtype ", logabsdet.scalar_type(), " does not match the expected dtype ", real_dtype);
 
   Tensor sign_tmp, logabsdet_tmp;
   std::tie(sign_tmp, logabsdet_tmp) = at::linalg_slogdet(input);
