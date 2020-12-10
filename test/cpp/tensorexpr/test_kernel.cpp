@@ -619,7 +619,6 @@ TEST(Kernel, SumMultipleAxes) {
         env.d("dim2", dim2);
         env.d("keepdim", keepdim);
         env.s("dtype", dtypeConstant(ScalarType::None));
-
         auto o = at::empty({}, TensorOptions(kCPU));
         auto ref = a.sum(IntArrayRef{dim1, dim2}, /*keepdim=*/keepdim);
 
@@ -690,7 +689,6 @@ TEST(Kernel, Softmax2D) {
       auto other_dim = (softmax_dim + 1) % a.dim();
       auto ref =
           log_softmax ? a.log_softmax(softmax_dim) : a.softmax(softmax_dim);
-
       KernelScope kernel_scope;
       TemplateEnv env;
       env.d("dim", softmax_dim);
