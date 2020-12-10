@@ -525,10 +525,10 @@ class RNNDynamic(QuantizeHandler):
             return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
         module = quantizer.modules[node.target]
-        qmodule = get_dynamic_quant_module_class(type(module))
-        quantized = qmodule.from_float(module)
+        qmodule_cls = get_dynamic_quant_module_class(type(module))
+        qmodule = qmodule_cls.from_float(module)
         parent_name, name = _parent_name(node.target)
-        setattr(quantizer.modules[parent_name], name, quantized)
+        setattr(quantizer.modules[parent_name], name, qmodule)
         return quantizer.quantized_graph.create_node(
             'call_module',
             node.target,

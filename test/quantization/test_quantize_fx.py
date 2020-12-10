@@ -2132,6 +2132,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             model_graph = prepare_fx(model_graph, graph_qconfig_dict)
             model_graph = convert_fx(model_graph)
             self.assertEqual(model_eager(sample_input), model_graph(sample_input))
+            self.checkScriptable(model_graph, [[sample_input]], True)
 
     def test_rnn_cell(self):
         qconfigs = [per_channel_dynamic_qconfig, default_dynamic_qconfig, float16_dynamic_qconfig]
