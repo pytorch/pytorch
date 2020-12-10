@@ -251,7 +251,7 @@ void adaptive_max_pool2d_out_cuda_template(
                                     indices_data,
                                     isizeH, isizeW, osizeH, osizeW,
                                     istrideD, istrideH, istrideW);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     );
   } else {
@@ -287,7 +287,7 @@ void adaptive_max_pool2d_out_cuda_template(
                                     indices_data,
                                     isizeH, isizeW, osizeH, osizeW,
                                     istrideD, istrideH, istrideW);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     );
   }
@@ -344,7 +344,7 @@ void adaptive_max_pool2d_backward_out_cuda_template(
                                               gradInput_data, gradOutput_data,
                                               indices_data,
                                               isizeH, isizeW, osizeH, osizeW);
-          TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
         }
         else
         {
@@ -353,7 +353,7 @@ void adaptive_max_pool2d_backward_out_cuda_template(
                                               gradInput_data, gradOutput_data,
                                               indices_data,
                                               isizeH, isizeW, osizeH, osizeW);
-          TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
         }
       }
     );
@@ -391,7 +391,7 @@ void adaptive_max_pool2d_backward_out_cuda_template(
                                               gradInput_data, gradOutput_data,
                                               indices_data,
                                               isizeH, isizeW, osizeH, osizeW);
-          TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
         }
         else
         {
@@ -400,7 +400,7 @@ void adaptive_max_pool2d_backward_out_cuda_template(
                                               gradInput_data, gradOutput_data,
                                               indices_data,
                                               isizeH, isizeW, osizeH, osizeW);
-          TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
         }
       }
     );

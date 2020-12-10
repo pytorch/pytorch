@@ -18,7 +18,7 @@ Shader::Layout::Factory::Factory(const GPU& gpu)
 
 Shader::Layout::Factory::Handle Shader::Layout::Factory::operator()(
     const Descriptor& descriptor) const {
-  c10::SmallVector<VkDescriptorSetLayoutBinding, 8u> bindings;
+  c10::SmallVector<VkDescriptorSetLayoutBinding, 6u> bindings;
 
   uint32_t binding = 0u;
   for (const VkDescriptorType type : descriptor.signature) {

@@ -7,9 +7,9 @@ template_rule(
     out = "include/dnnl_version.h",
     substitutions = {
         "@DNNL_VERSION_MAJOR@": "1",
-        "@DNNL_VERSION_MINOR@": "5",
+        "@DNNL_VERSION_MINOR@": "7",
         "@DNNL_VERSION_PATCH@": "0",
-        "@DNNL_VERSION_HASH@": "e2ac1fac44c5078ca927cb9b90e1b3066a0b2ed0",
+        "@DNNL_VERSION_HASH@": "2e4732679f0211bb311780d0f383cf2dce9baca7",
     },
 )
 
@@ -30,6 +30,8 @@ cc_library(
     srcs = glob([
         "src/common/*.cpp",
         "src/cpu/**/*.cpp",
+    ], exclude=[
+        "src/cpu/aarch64/*.cpp",
     ]),
     hdrs = glob([
         "include/*.h",
@@ -38,7 +40,8 @@ cc_library(
         "src/cpu/**/*.hpp",
         "src/cpu/**/*.h",
         "src/common/*.hpp",
-        "src/cpu/rnn/*.hpp",
+    ], exclude=[
+        "src/cpu/aarch64/*.hpp",
     ]) + [
         "include/dnnl_version.h",
         "include/dnnl_config.h",

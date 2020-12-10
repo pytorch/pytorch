@@ -465,7 +465,7 @@ struct CAFFE2_API SymbolicShape {
   }
 
   // Mix of known and unknown ranks
-  SymbolicShape(const std::vector<c10::optional<int64_t>> dims) {
+  SymbolicShape(const std::vector<c10::optional<int64_t>>& dims) {
     std::vector<ShapeSymbol> shape_symbols;
     shape_symbols.reserve(dims.size());
     for(c10::optional<int64_t> dim: dims) {
@@ -478,7 +478,7 @@ struct CAFFE2_API SymbolicShape {
     dims_ = shape_symbols;
   }
 
-  SymbolicShape(const std::vector<ShapeSymbol> dims) : dims_(dims) {}
+  SymbolicShape(std::vector<ShapeSymbol> dims) : dims_(std::move(dims)) {}
 
   SymbolicShape(c10::IntArrayRef dims) {
     std::vector<ShapeSymbol> shape_symbols;
@@ -730,7 +730,7 @@ struct CAFFE2_API TensorType : public Type {
 
   TensorTypePtr withSymbolicShapes(SymbolicShape ssizes) const {
     auto cloned = clone();
-    cloned->sizes_ = ssizes;
+    cloned->sizes_ = std::move(ssizes);
     return cloned;
   }
 
