@@ -1046,8 +1046,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::expm1: {
-      return computeOneOperand(
-          "aten_expm1", v, [](const ExprHandle& a) { return expm1(a); });
+      return computeOneOperand("aten_expm1", v, [](const ExprHandle& a) {
+        return expm1(promoteIntegerToDefaultType(a));
+      });
     } break;
 
     case aten::erf: {

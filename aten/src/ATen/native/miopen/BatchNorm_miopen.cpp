@@ -62,7 +62,6 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
             running_mean{ running_mean_t, "running_mean", 4 },
             running_var{ running_var_t, "running_var", 5 };
   CheckedFrom c = "miopen_batch_norm";
-  setMIOpenStreamToCurrent();
 
   checkAllDefined(c, {input, weight, bias});
   if (!training) {
@@ -151,7 +150,6 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
             save_mean{ save_mean_t, "save_mean", 4 },
             save_var{ save_var_t, "save_var", 5 };
   CheckedFrom c = "miopen_batch_norm_backward";
-  setMIOpenStreamToCurrent();
 
   checkAllDefined(c, {input, grad_output, weight, save_mean, save_var});
   checkAllSameGPU(c, {input, grad_output, weight, save_mean, save_var});
