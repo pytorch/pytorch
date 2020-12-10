@@ -125,7 +125,7 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
                     params_dict=None, use_new_jit_passes=True, dynamic_axes=None, input_names=None):
     # Inline everything
     torch._C._jit_pass_inline(graph)
-    print(graph)
+
     # Remove fork/wait nodes
     torch._C._jit_pass_inline_fork_wait(graph)
     torch._C._jit_pass_lint(graph)
