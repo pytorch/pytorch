@@ -669,7 +669,7 @@ Tensor* TensorExprKernel::computeThreeOperand(
     const std::function<
         ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>&
         innerExpr,
-        bool promote_inputs) {
+    bool promote_inputs) {
   auto const& n = v->node();
   std::vector<std::vector<ExprHandle>> shapes;
   for (size_t idx = 0; idx < 3; idx++) {
