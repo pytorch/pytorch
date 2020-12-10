@@ -91,20 +91,18 @@ Alias of :func:`torch.det`.
 slogdet = _add_docstr(_linalg.linalg_slogdet, r"""
 linalg.slogdet(input) -> (Tensor, Tensor)
 
-Calculates the sign and log absolute value of the determinant(s) of a square matrix or batches of square matrices.
+Calculates the sign and log absolute value of the determinant(s) of a square matrix or
+batches of square matrices :attr:`input`.
 
-.. note::
-    If ``input`` has zero determinant, this returns ``(0, -inf)``.
+Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` datatypes.
 
-.. note::
-    Backward through :math:`slogdet` internally uses SVD results when :attr:`input`
-    is not invertible. In this case, double backward through :math:`slogdet`
-    will be unstable in when :attr:`input` doesn't have distinct singular values.
-    See :math:`~torch.svd` for details.
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+.. note:: If ``input`` has zero determinant, this returns ``(0, -inf)``.
 
 Arguments:
-    input (Tensor): the input tensor of size ``(*, n, n)`` where ``*`` is zero or more
-                batch dimensions.
+    input (Tensor): the input matrix of size :math:`(n, n)` or the batch of matrices of size :math:`(*, n, n)`
+                    where `*` is one or more batch dimensions.
 
 Returns:
     A namedtuple (sign, logabsdet) containing the sign of the determinant, and the log
