@@ -2184,6 +2184,7 @@
   use_c10_dispatcher: full
 
 - func: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
   dispatch:
     CPU, CUDA: index
@@ -2211,6 +2212,7 @@
   variants: function, method
 
 - func: index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: function, method
   dispatch:
     DefaultBackend: index_put_
@@ -2221,9 +2223,11 @@
   # - Tensor & Tensor::index_put_(std::initializer_list<TensorIndex> indices, Scalar v)
 
 - func: index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: _index_put_impl_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False, bool unsafe=False) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: function
   dispatch:
     CPU, CUDA: _index_put_impl_

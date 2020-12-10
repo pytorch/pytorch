@@ -328,7 +328,10 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim){
 
   Tensor values;
   if (self.dim() > 0) {
-    std::vector<Tensor> ix = indices.chunk(indices.size(0), 0);
+    torch::List<c10::optional<Tensor>> ix;
+    for (Tensor a : indices.chunk(indices.size(0), 0)) {
+      ix.push_back(std::move(a));
+    }
     values = self.index(ix).squeeze(0).clone(at::MemoryFormat::Preserve);
   } else {
     AT_ASSERT(nz.sizes().equals({0, 1}));

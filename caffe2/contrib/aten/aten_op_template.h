@@ -21,7 +21,7 @@ using at::Half; // for AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, ...)
 namespace internal {
 CAFFE2_API at::Tensor index_with_uint8_handling(
     const at::Tensor& self,
-    at::TensorList indices);
+    torch::List<c10::optional<Tensor>> indices);
 }
 
 template <class Context>

@@ -2141,15 +2141,21 @@ Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) 
       return nonsingular_case_backward(grad, self, det);
     }
   } else {
-    auto nonzero_det_indices = at::where(det);
+    torch::List<c10::optional<Tensor>> nonzero_det_indices;
+    for (Tensor t : at::where(det)) {
+      nonzero_det_indices.push_back(std::move(t));
+    }
 
-    if (nonzero_det_indices[0].size(0) == det.numel()) {  // all determinants are nonzero (non-singular)
+    if (static_cast<optional<Tensor>>(nonzero_det_indices[0])->size(0) == det.numel()) {  // all determinants are nonzero (non-singular)
       return nonsingular_case_backward(grad, self, det);
     }
 
-    auto zero_det_indices = at::where(det == 0);
+    torch::List<c10::optional<Tensor>> zero_det_indices;
+    for (Tensor t: at::where(det == 0)) {
+      zero_det_indices.push_back(std::move(t));
+    }
 
-    if (zero_det_indices[0].size(0) == det.numel()) {  // all determinants are zero (singular)
+    if (static_cast<optional<Tensor>>(zero_det_indices[0])->size(0) == det.numel()) {  // all determinants are zero (singular)
       return singular_case_backward(grad, self, det);
     }
 
@@ -2191,15 +2197,21 @@ Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& lo
       return singular_case_backward(grad, self);
     }
   } else {
-    auto finite_logdet_indices = at::where(logdet != -INFINITY);
+    torch::List<c10::optional<Tensor>> finite_logdet_indices;
+    for (Tensor t : at::where(logdet != -INFINITY)) {
+      finite_logdet_indices.push_back(std::move(t));
+    }
 
-    if (finite_logdet_indices[0].size(0) == logdet.numel()) {  // all log determinants are finite (non-singular)
+    if (static_cast<optional<Tensor>>(finite_logdet_indices[0])->size(0) == logdet.numel()) {  // all log determinants are finite (non-singular)
       return nonsingular_case_backward(grad, self);
     }
 
-    auto neginf_logdet_indices = at::where(logdet == -INFINITY);
+    torch::List<c10::optional<Tensor>> neginf_logdet_indices;
+    for (Tensor t : at::where(logdet == -INFINITY)) {
+      neginf_logdet_indices.push_back(std::move(t));
+    }
 
-    if (neginf_logdet_indices[0].size(0) == logdet.numel()) {  // all log determinants are -inf (singular)
+    if (static_cast<optional<Tensor>>(neginf_logdet_indices[0])->size(0) == logdet.numel()) {  // all log determinants are -inf (singular)
       return singular_case_backward(grad, self);
     }
 
@@ -2243,15 +2255,21 @@ Tensor slogdet_backward(const Tensor& grad_logabsdet,
       return nonsingular_case_backward(grad_logabsdet, self);
     }
   } else {
-    auto nonzero_signdet_indices = at::where(signdet);
+    torch::List<c10::optional<Tensor>> nonzero_signdet_indices;
+    for (Tensor t: at::where(signdet)) {
+      nonzero_signdet_indices.push_back(std::move(t));
+    }
 
-    if (nonzero_signdet_indices[0].size(0) == logabsdet.numel()) {  // all log determinants are finite (non-singular)
+    if (static_cast<optional<Tensor>>(nonzero_signdet_indices[0])->size(0) == logabsdet.numel()) {  // all log determinants are finite (non-singular)
       return nonsingular_case_backward(grad_logabsdet, self);
     }
 
-    auto zero_signdet_indices = at::where(signdet == 0);
+    torch::List<c10::optional<Tensor>> zero_signdet_indices;
+    for (Tensor t: at::where(signdet == 0)) {
+      zero_signdet_indices.push_back(std::move(t));
+    }
 
-    if (zero_signdet_indices[0].size(0) == logabsdet.numel()) {  // all log determinants are -inf (singular)
+    if (static_cast<optional<Tensor>>(zero_signdet_indices[0])->size(0) == logabsdet.numel()) {  // all log determinants are -inf (singular)
       return singular_case_backward(grad_logabsdet, self);
     }
 
@@ -2802,7 +2820,7 @@ Tensor constant_pad_nd_backward(const Tensor& grad, IntArrayRef pad) {
 }
 
 Tensor embedding_dense_double_backward(const Tensor & grad, const Tensor & indices, int64_t padding_idx) {
-  // since first backward takes care of scaling by frequency, 
+  // since first backward takes care of scaling by frequency,
   // we don't need to worry about it here.
   auto gg_weight = grad.index_select(0, indices.reshape(-1));
 
@@ -2816,7 +2834,7 @@ Tensor embedding_dense_double_backward(const Tensor & grad, const Tensor & indic
   return gg_weight.view(size);
 }
 
-Tensor index_backward(Tensor zeros_like_self, TensorList indices, const Tensor& grad) {
+Tensor index_backward(Tensor zeros_like_self, torch::List<c10::optional<Tensor>> indices, const Tensor& grad) {
    return at::_index_put_impl_(zeros_like_self, indices, grad, true, true);
 }
 

@@ -68,7 +68,8 @@ Tensor embedding_sparse_backward(
   Tensor indices = indices_;
   Tensor grad = grad_;
   if (padding_idx != -1) {
-    auto c = indices != padding_idx;
+    torch::List<c10::optional<Tensor>> c;
+    c.push_back(indices != padding_idx);
     indices = indices.index(c);
     grad = grad.index(c);
   }

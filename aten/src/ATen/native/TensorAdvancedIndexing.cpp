@@ -206,7 +206,7 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
   }
 }
 
-static AdvancedIndex make_info(Tensor self, TensorList orig) {
+static AdvancedIndex make_info(Tensor self, torch::List<c10::optional<at::Tensor>> orig) {
   checkIndexTensorTypes(orig);
   // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
   auto indices = expandTensors(self, orig);
@@ -281,7 +281,7 @@ static TensorIterator make_index_out_iterator(const AdvancedIndex& info, Tensor&
   return config.build();
 }
 
-Tensor index(const Tensor & self, TensorList indices) {
+Tensor index(const Tensor & self, torch::List<c10::optional<Tensor>> indices) {
   TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
 
   auto info = make_info(self, indices);
@@ -290,7 +290,7 @@ Tensor index(const Tensor & self, TensorList indices) {
   return iter.output();
 }
 
-Tensor& index_out(Tensor& result, const Tensor & self, TensorList indices) {
+Tensor& index_out(Tensor& result, const Tensor & self, torch::List<c10::optional<Tensor>> indices) {
   TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   at::assert_no_internal_overlap(result);
 
@@ -300,11 +300,11 @@ Tensor& index_out(Tensor& result, const Tensor & self, TensorList indices) {
   return result;
 }
 
-Tensor index_put(const Tensor & self, TensorList indices, const Tensor & value, bool accumulate) {
+Tensor index_put(const Tensor & self, torch::List<c10::optional<Tensor>> indices, const Tensor & value, bool accumulate) {
   return self.clone(at::MemoryFormat::Preserve).index_put_(indices, value, accumulate);
 }
 
-Tensor & _index_put_impl_(Tensor & self, TensorList indices, const Tensor & value, const bool accumulate, const bool unsafe) {
+Tensor & _index_put_impl_(Tensor & self, torch::List<c10::optional<Tensor>> indices, const Tensor & value, const bool accumulate, const bool unsafe) {
     TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   if (accumulate && self.device().type() == kCUDA) {
       TORCH_CHECK(value.device() == self.device(), "expected device ", self.device(), " but got device ",
@@ -328,7 +328,7 @@ Tensor & _index_put_impl_(Tensor & self, TensorList indices, const Tensor & valu
 }
 
 
-Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & value, const bool accumulate) {
+Tensor & index_put_(Tensor & self, torch::List<c10::optional<Tensor>> indices, const Tensor & value, const bool accumulate) {
   return at::_index_put_impl_(self, indices, value, accumulate, /*unsafe=*/false);
 }
 

@@ -102,9 +102,11 @@ def argumenttype_type(t: Type, *, mutable: bool) -> str:
             return "TensorList"
         elif str(t.elem) == 'Dimname':
             return "DimnameList"
-        # TODO: do something reasonable about lists of optional tensors
-        elif (not local.use_c10_dispatcher().dispatcher_uses_new_style()) and str(t.elem) == 'Tensor?':
-            return "TensorList"
+        elif str(t.elem) == 'Tensor?':
+            if local.use_c10_dispatcher().dispatcher_uses_new_style():
+                return "c10::List<c10::optional<Tensor>>"
+            else:
+                return "TensorList"
         elem = argumenttype_type(t.elem, mutable=mutable)
         # TODO: explicitly qualify namespace here
         return f"ArrayRef<{elem}>"

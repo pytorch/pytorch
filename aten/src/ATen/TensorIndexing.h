@@ -9,6 +9,8 @@
 // There is some back story, see https://github.com/pytorch/pytorch/issues/48684
 #include <ATen/NativeFunctions.h>
 
+#include <ATen/core/List.h>
+
 namespace at {
 namespace indexing {
 
@@ -264,14 +266,15 @@ static inline void recordTensorIndex(const Tensor& tensor, std::vector<Tensor>& 
   (*dim_ptr)++;
 };
 
-static inline std::vector<Tensor> typeConvertIndices(const Tensor& self, std::vector<Tensor>&& indices) {
-  std::vector<Tensor> converted_inds(indices.size());
+static inline c10::List<c10::optional<Tensor>> typeConvertIndices(const Tensor& self, std::vector<Tensor>&& indices) {
+  c10::List<c10::optional<Tensor>> converted_inds;
+  converted_inds.reserve(indices.size());
   for (size_t i = 0; i < indices.size(); ++i) {
     const auto &ind = indices[i];
     if (ind.defined()) {
-      converted_inds[i] = ind.to(ind.options().device(self.device()));
+      converted_inds.push_back(ind.to(ind.options().device(self.device())));
     } else {
-      converted_inds[i] = std::move(indices[i]);
+      converted_inds.push_back(std::move(indices[i]));
     }
   }
   return converted_inds;

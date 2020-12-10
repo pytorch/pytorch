@@ -27,6 +27,7 @@ class Tensor;
 }
 namespace c10{
 struct TensorOptions;
+template<class T> class List;
 }
 namespace at {
 struct Generator;
