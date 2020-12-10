@@ -1008,15 +1008,15 @@ std::vector<at::Tensor> ProcessGroupNCCL::WorkNCCL::result() {
 
 c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
     getFuture() {
-  TORCH_INTERNAL_ASSERT(
-      outputs_->size() == 1,
-      "WorkNCCL's getFuture API is only supported for single-process single-device mode.");
-  auto deviceIndex = (*outputs_)[0].device().index();
-  // Create a new FutureNCCL object after checking for single-process
-  // single-device mode.
+  std::vector<c10::DeviceIndex> deviceIndices;
+  for (const c10::Device& device : devices_) {
+    TORCH_INTERNAL_ASSERT(device.is_cuda());
+    deviceIndices.push_back(device.index());
+  }
+
   return c10::make_intrusive<FutureNCCL>(
       at::IValue(*outputs_),
-      deviceIndex,
+      std::move(deviceIndices),
       cudaEvents_);
 }
 
