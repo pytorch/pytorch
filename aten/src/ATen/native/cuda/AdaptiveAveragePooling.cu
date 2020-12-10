@@ -520,7 +520,7 @@ namespace {
                 sizeB, sizeC, isizeH, isizeW, osizeH, osizeW,
                 kernel_stride_C, kernel_size_C,
                 istrideB, istrideC, istrideH, istrideW);
-              TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
             }
           );
         break;
@@ -563,7 +563,7 @@ namespace {
                 input_data, output_data,
                 isizeH, isizeW, osizeH, osizeW,
                 istrideD, istrideH, istrideW);
-              TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
             }
           );
         break;
@@ -666,7 +666,7 @@ namespace {
                 sizeB, sizeC, isizeH, isizeW, osizeH, osizeW,
                 kernel_stride_C, kernel_size_C,
                 ostrideB, ostrideC, ostrideH, ostrideW);
-              TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
             }
           );
         break;
@@ -703,7 +703,7 @@ namespace {
                 atomic_adaptive_average_gradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
                   gradInput_data, gradOutput_data,
                   isizeH, isizeW, osizeH, osizeW);
-                TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
               }
               else
               {
@@ -711,7 +711,7 @@ namespace {
                 adaptive_average_gradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
                   gradInput_data, gradOutput_data,
                   isizeH, isizeW, osizeH, osizeW);
-                TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
               }
             }
           );

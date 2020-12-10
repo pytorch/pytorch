@@ -1300,6 +1300,17 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(vmap(lambda t: op(t, 4, 1), in_dims=2)),
              (torch.rand(B1, 2, B0, 64, B2),), in_dims=2)
 
+    def test_clamp(self):
+        clamp_cases = (
+            (lambda t: t.clamp(min=-0.5), TensorFactory.randn),
+            (lambda t: t.clamp(max=0.5), TensorFactory.randn),
+            (lambda t: t.clamp(min=-0.5, max=0.5), TensorFactory.randn),
+            (lambda t: t.clamp_min(min=-0.5), TensorFactory.randn),
+            (lambda t: t.clamp_max(max=0.5), TensorFactory.randn),
+        )
+        for op, getter in clamp_cases:
+            self._test_unary(op, getter, 'cpu')
+
     def test_diagonal(self):
         tensor = torch.randn(3, 5, 7, 11, 13)
         test = self._vmap_view_test

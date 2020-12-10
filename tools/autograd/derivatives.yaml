@@ -1832,6 +1832,15 @@
 - name: _fft_with_size.norm_modes(Tensor self, int signal_ndim, bool complex_input, bool complex_output, bool inverse, int[] checked_signal_sizes, int normalization, bool onesided, int[] output_sizes) -> Tensor
   self: fft_backward(self, grad, signal_ndim, complex_input, complex_output, inverse, checked_signal_sizes, normalization, onesided, output_sizes)
 
+- name: _fft_r2c(Tensor self, int[] dim, int normalization, bool onesided) -> Tensor
+  self: fft_r2c_backward(grad, dim, normalization, onesided, self.size(dim.back()))
+
+- name: _fft_c2r(Tensor self, int[] dim, int normalization, int last_dim_size) -> Tensor
+  self: fft_c2r_backward(grad, dim, normalization)
+
+- name: _fft_c2c(Tensor self, int[] dim, int normalization, bool forward) -> Tensor
+  self: _fft_c2c(grad, dim, normalization, !forward)
+
 - name: unbind.int(Tensor(a) self, int dim=0) -> Tensor(a)[]
   self: unbind_backward(grads, dim)
 

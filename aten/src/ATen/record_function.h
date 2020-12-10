@@ -98,7 +98,10 @@ struct TORCH_API RecordFunction {
       F fn,
       const std::vector<c10::IValue>* args,
       int64_t current_sequence_nr = -1) {
-    inputs_ = *args;
+    if (!isActive()) {
+      return;
+    }
+    state_->inputs_ = *args;
     before(fn, current_sequence_nr);
   }
 
@@ -109,22 +112,26 @@ struct TORCH_API RecordFunction {
   RecordFunction& operator=(const RecordFunction&) = delete;
 
   inline const StringView& name() const {
-    return name_;
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called name() on inactive RecordFunction");
+    return state_->name_;
   }
 
   inline int64_t seqNr() const {
-    return sequence_nr_;
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called seqNr() on inactive RecordFunction");
+    return state_->sequence_nr_;
   }
 
   const std::vector<c10::IValue>& inputs() const {
-    return inputs_;
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called inputs() on inactive RecordFunction");
+    return state_->inputs_;
   }
 
   // Retrieves the thread_id that this RecordFunction ran start callbacks with.
   // Useful for writing thread safe end callbacks that may be potentially
   // executed in a different thread (async ops)
   inline uint64_t threadId() const {
-    return thread_id_;
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called threadId() on inactive RecordFunction");
+    return state_->thread_id_;
   }
 
   // For backward functions - thread id of the corresponding forward function,
@@ -132,15 +139,18 @@ struct TORCH_API RecordFunction {
   // used alongside with sequence number to correlate backward functions with
   // the forward ones
   inline uint64_t forwardThreadId() const {
-    return fwd_thread_id_;
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called forwardThreadId() on inactive RecordFunction");
+    return state_->fwd_thread_id_;
   }
 
   inline void setForwardThreadId(uint64_t thread_id) {
-    fwd_thread_id_ = thread_id;
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called setForwardThreadId() on inactive RecordFunction");
+    state_->fwd_thread_id_ = thread_id;
   }
 
   inline RecordScope scope() const {
-    return scope_;
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called scope() on inactive RecordFunction");
+    return state_->scope_;
   }
 
   // Returns logical thread_id for the current thread
@@ -165,7 +175,10 @@ struct TORCH_API RecordFunction {
       F fn,
       c10::ArrayRef<c10::IValue> args,
       int64_t current_sequence_nr = -1) {
-    inputs_ = args.vec();
+    if (!isActive()) {
+      return;
+    }
+    state_->inputs_ = args.vec();
     before(fn, current_sequence_nr);
   }
 
@@ -174,75 +187,91 @@ struct TORCH_API RecordFunction {
       F fn,
       std::vector<c10::IValue>&& args,
       int64_t current_sequence_nr = -1) {
-    inputs_ = std::move(args);
+    if (!isActive()) {
+      return;
+    }
+    state_->inputs_ = std::move(args);
     before(fn, current_sequence_nr);
   }
 
-  // Calls end callbacks
+  // Calls end callbacks. After end(), accessors will no longer provide useful results.
   void end();
 
   inline RecordFunctionHandle handle() const {
-    return handle_;
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called handle() on inactive RecordFunction");
+    return state_->handle_;
   }
 
   inline c10::optional<OperatorName> operator_name() const {
-    return operator_name_;
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called operator_name() on inactive RecordFunction");
+    return state_->operator_name_;
   }
 
   inline void setHandle(RecordFunctionHandle handle) {
-    handle_ = handle;
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called setHandle() on inactive RecordFunction");
+    state_->handle_ = handle;
   }
 
+  // Whether this RecordFunction runs any callbacks.
   bool isActive() const {
-    return active_;
+    return state_ != nullptr;
   }
 
-  // Whether any of the picked callbacks require inputs
-  bool needs_inputs = false;
+  bool needsInputs() const {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called needsInputs() on inactive RecordFunction");
+    return state_->needs_inputs;
+  }
 
  private:
-  // Whether this RecordFunction runs any callbacks
-  bool active_ = false;
 
   // Allows the modification of some internal states for callbacks.
   friend class CallbackManager;
 
-  // Used internally to keep track of thread local and global callbacks
-  // that were picked to run; must be sorted;
-  CallbackHandles sorted_active_tls_handles_;
-  CallbackHandles sorted_active_global_handles_;
+  struct State {
+    explicit State(RecordScope scope) : scope_(scope) {}
 
-  // Stores various ObserverContext objects with event metadata for thread local
-  // callbacks.
-  ObserverContextList tls_ctx_;
+    // Whether any of the picked callbacks require inputs
+    bool needs_inputs = false;
 
-  // Stores various ObserverContext objects with event metadata for global
-  // callbacks.
-  ObserverContextList global_ctx_;
+    // In cases when RecordFunction might be active but we chose not to
+    // use the observers (e.g. operator is not observed), this boolean
+    // flag is used to check whether the start callbacks were called
+    bool called_start_callbacks_ = false;
 
-  // In cases when RecordFunction might be active but we chose not to
-  // use the observers (e.g. operator is not observed), this boolean
-  // flag is used to check whether the start callbacks were called
-  bool called_start_callbacks_ = false;
+    // Used internally to keep track of thread local and global callbacks
+    // that were picked to run; must be sorted;
+    CallbackHandles sorted_active_tls_handles_;
+    CallbackHandles sorted_active_global_handles_;
 
-  StringView name_;
-  int64_t sequence_nr_ = -1;
-  std::vector<c10::IValue> inputs_;
+    // Stores various ObserverContext objects with event metadata for thread local
+    // callbacks.
+    ObserverContextList tls_ctx_;
 
-  c10::optional<c10::OperatorName> operator_name_;
+    // Stores various ObserverContext objects with event metadata for global
+    // callbacks.
+    ObserverContextList global_ctx_;
 
-  // Kind of scope this RecordFunction is observing
-  const RecordScope scope_;
+    StringView name_;
+    int64_t sequence_nr_ = -1;
+    std::vector<c10::IValue> inputs_;
 
-  // The logical thread_id that this RecordFunction was created with
-  uint64_t thread_id_ = 0;
+    c10::optional<c10::OperatorName> operator_name_;
 
-  // For backward functions - thread id of the the forward function
-  uint64_t fwd_thread_id_ = 0;
+    // Kind of scope this RecordFunction is observing
+    const RecordScope scope_;
 
-  // Unique id for this RecordFunction, used in callbacks to track start
-  // and end of ranges
-  RecordFunctionHandle handle_ {0};
+    // The logical thread_id that this RecordFunction was created with
+    uint64_t thread_id_ = 0;
+
+    // For backward functions - thread id of the the forward function
+    uint64_t fwd_thread_id_ = 0;
+
+    // Unique id for this RecordFunction, used in callbacks to track start
+    // and end of ranges
+    RecordFunctionHandle handle_ {0};
+  };
+
+  std::unique_ptr<State> state_;
 };
 
 //
@@ -321,8 +350,8 @@ class TORCH_API RecordFunctionCallback {
   }
 
   RecordFunctionCallback& setShouldRun(
-      std::function<bool(const RecordFunctionCallback&)> should_run) {
-    should_run_ = std::move(should_run);
+      bool(*should_run)(const RecordFunctionCallback&)) {
+    should_run_ = should_run;
     return *this;
   }
 
@@ -350,17 +379,15 @@ class TORCH_API RecordFunctionCallback {
     return end_;
   }
 
-  // whether the callbacks should run in the given scope
-  bool shouldRun(RecordScope scope) const;
-
  private:
+  friend class CallbackManager;
   std::function<std::unique_ptr<ObserverContext>(const RecordFunction&)> start_;
   std::function<void(const RecordFunction&, ObserverContext*)> end_;
-  std::function<bool(const RecordFunctionCallback&)> should_run_;
-  bool needs_inputs_ = false;
-  bool needs_ids_ = false;
+  bool(*should_run_)(const RecordFunctionCallback&) = nullptr;
   double sampling_prob_ = 1.0;
   std::array<bool, static_cast<size_t>(RecordScope::NUM_SCOPES)> scopes_ = {};
+  bool needs_inputs_ = false;
+  bool needs_ids_ = false;
 };
 
 // Using macro to minimize inputs copies,
@@ -368,7 +395,7 @@ class TORCH_API RecordFunctionCallback {
 #define RECORD_FUNCTION_WITH_SCOPE(scope, fn, inputs, ...) \
   at::RecordFunction guard(scope); \
   if (guard.isActive()) {          \
-    if (guard.needs_inputs) { \
+    if (guard.needsInputs()) {                 \
       guard.before(fn, inputs, ##__VA_ARGS__); \
     } else { \
       guard.before(fn, ##__VA_ARGS__); \
@@ -388,6 +415,11 @@ class TORCH_API RecordFunctionCallback {
 #define RECORD_USER_SCOPE(fn) \
   RECORD_FUNCTION_WITH_SCOPE( \
     at::RecordScope::USER_SCOPE, fn, {})
+
+// RECORD_USER_SCOPE with inputs
+#define RECORD_USER_SCOPE_WITH_INPUTS(fn, inputs) \
+  RECORD_FUNCTION_WITH_SCOPE( \
+    at::RecordScope::USER_SCOPE, fn, inputs)
 
 // Notes:
 //  - two types of callbacks are provided: thread local and global

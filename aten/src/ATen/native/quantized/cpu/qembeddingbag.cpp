@@ -31,10 +31,18 @@ at::Tensor embedding_bag_4bit_impl(
   // Get compressed indices for pruned_weights op.
   int32_t* compressed_indices_mapping_data = nullptr;
   int compressed_index_size = 0;
+  bool fallback_to_no_sparse = false;
   if (pruned_weights) {
     compressed_index_size = compressed_indices_mapping.value().numel();
     compressed_indices_mapping_data =
         compressed_indices_mapping.value().data_ptr<int32_t>();
+
+    // if compressed_indices_mapping is [0], it is a indicator that
+    // we should fallback to non sparse embedding look up kernel.
+    if ((compressed_index_size == 1 &&
+         compressed_indices_mapping_data[0] == 0)) {
+      fallback_to_no_sparse = true;
+    }
   }
 
   const int64_t N = weight.size(0);
@@ -69,7 +77,7 @@ at::Tensor embedding_bag_4bit_impl(
   constexpr int prefetch_distance = 16;
 
 #ifdef USE_FBGEMM
-  if (!pruned_weights) {
+  if (!pruned_weights || fallback_to_no_sparse) {
     // Generate the fbgemm kernel
     auto kernel = fbgemm::GenerateEmbeddingSpMDMNBit<IndexType, OffsetType>(
         /*bit rate=*/4,
@@ -209,10 +217,18 @@ at::Tensor embedding_bag_byte_impl(
   // Get compressed indices for pruned_weights.
   int32_t* compressed_indices_mapping_data = nullptr;
   int compressed_index_size = 0;
+  bool fallback_to_no_sparse = false;
   if (pruned_weights) {
     compressed_index_size = compressed_indices_mapping.value().numel();
     compressed_indices_mapping_data =
         compressed_indices_mapping.value().data_ptr<int32_t>();
+
+    // if compressed_indices_mapping is [0], it is a indicator that
+    // we should fallback to non sparse embedding look up kernel.
+    if ((compressed_index_size == 1 &&
+         compressed_indices_mapping_data[0] == 0)) {
+      fallback_to_no_sparse = true;
+    }
   }
 
   const int64_t N = weight.size(0);
@@ -247,7 +263,7 @@ at::Tensor embedding_bag_byte_impl(
 
   const int index_size = indices.numel();
 #ifdef USE_FBGEMM
-  if (!pruned_weights) {
+  if (!pruned_weights || fallback_to_no_sparse) {
     auto kernel_i8 =
         fbgemm::GenerateEmbeddingSpMDM<uint8_t, IndexType, OffsetType>(
             /*block_size=*/D,
@@ -353,12 +369,16 @@ at::Tensor embedding_bag_byte_helper(
       "Expect 32 or 64 bit offsets, but found ",
       offsets.scalar_type(),
       " instead.");
+  TORCH_CHECK(
+      weight.is_contiguous() && indices.is_contiguous() &&
+          offsets.is_contiguous(),
+      "Expect weight, indices, and offsets to be contiguous.");
 
   // Using helper function to support different type combination without the
   // need to cast, which can be additional performance overhead
   if (indices.scalar_type() == at::kInt && offsets.scalar_type() == at::kInt) {
     return embedding_bag_byte_impl<int, int>(
-        weight.contiguous(),
+        weight,
         indices,
         offsets,
         pruned_weights,
@@ -369,7 +389,7 @@ at::Tensor embedding_bag_byte_helper(
   } else if (
       indices.scalar_type() == at::kInt && offsets.scalar_type() == at::kLong) {
     return embedding_bag_byte_impl<int, int64_t>(
-        weight.contiguous(),
+        weight,
         indices,
         offsets,
         pruned_weights,
@@ -380,7 +400,7 @@ at::Tensor embedding_bag_byte_helper(
   } else if (
       indices.scalar_type() == at::kLong && offsets.scalar_type() == at::kInt) {
     return embedding_bag_byte_impl<int64_t, int>(
-        weight.contiguous(),
+        weight,
         indices,
         offsets,
         pruned_weights,
@@ -392,7 +412,7 @@ at::Tensor embedding_bag_byte_helper(
 
   // default case given the TORCH_CHECK above
   return embedding_bag_byte_impl<int64_t, int64_t>(
-      weight.contiguous(),
+      weight,
       indices,
       offsets,
       pruned_weights,
@@ -442,12 +462,16 @@ at::Tensor embedding_bag_4bit_helper(
       "Expect 32 or 64 bit offsets, but found ",
       offsets.scalar_type(),
       " instead.");
+  TORCH_CHECK(
+      weight.is_contiguous() && indices.is_contiguous() &&
+          offsets.is_contiguous(),
+      "Expect weight, indices, and offsets to be contiguous.");
 
   // Using helper function to support different type combination without the
   // need to cast, which can be additional performance overhead
   if (indices.scalar_type() == at::kInt && offsets.scalar_type() == at::kInt) {
     return embedding_bag_4bit_impl<int, int>(
-        weight.contiguous(),
+        weight,
         indices,
         offsets,
         pruned_weights,
@@ -457,7 +481,7 @@ at::Tensor embedding_bag_4bit_helper(
   } else if (
       indices.scalar_type() == at::kInt && offsets.scalar_type() == at::kLong) {
     return embedding_bag_4bit_impl<int, int64_t>(
-        weight.contiguous(),
+        weight,
         indices,
         offsets,
         pruned_weights,
@@ -467,7 +491,7 @@ at::Tensor embedding_bag_4bit_helper(
   } else if (
       indices.scalar_type() == at::kLong && offsets.scalar_type() == at::kInt) {
     return embedding_bag_4bit_impl<int64_t, int>(
-        weight.contiguous(),
+        weight,
         indices,
         offsets,
         pruned_weights,
@@ -476,7 +500,7 @@ at::Tensor embedding_bag_4bit_helper(
         include_last_offset);
   }
   return embedding_bag_4bit_impl<int64_t, int64_t>(
-      weight.contiguous(),
+      weight,
       indices,
       offsets,
       pruned_weights,
@@ -495,7 +519,7 @@ at::Tensor PackedEmbeddingBagWeight::embeddingbag_byte(
     bool include_last_offset,
     bool is_embedding_op) {
   return embedding_bag_byte_helper(
-      packed_w.contiguous(),
+      packed_w,
       indices,
       offsets_in,
       pruned_weights,
@@ -522,7 +546,7 @@ at::Tensor PackedEmbeddingBagWeight::embeddingbag_4bit(
   }
 
   return embedding_bag_4bit_helper(
-      packed_w.contiguous(),
+      packed_w,
       indices,
       offsets_in,
       pruned_weights,
@@ -548,7 +572,7 @@ Tensor embedding_bag_byte_rowwise_offsets(
     const c10::optional<Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
   return embedding_bag_byte_helper(
-      weight.contiguous(),
+      weight,
       indices,
       offsets_in,
       pruned_weights,
@@ -578,7 +602,7 @@ Tensor embedding_bag_4bit_rowwise_offsets(
   }
 
   return embedding_bag_4bit_helper(
-      weight.contiguous(),
+      weight,
       indices,
       offsets_in,
       pruned_weights,
@@ -613,12 +637,12 @@ class QEmbeddingBag final {
           false /* is_embedding_op */);
     } else if (bit_rate == 4) {
       return packed_weight->embeddingbag_4bit(
-        indices,
-        offsets,
-        pruned_weights,
-        per_sample_weights_,
-        compressed_indices_mapping,
-        include_last_offset);
+          indices,
+          offsets,
+          pruned_weights,
+          per_sample_weights_,
+          compressed_indices_mapping,
+          include_last_offset);
     } else {
       TORCH_INTERNAL_ASSERT(
           "Currently only support 8-bit embedding_bag quantization");
