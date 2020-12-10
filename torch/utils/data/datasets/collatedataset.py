@@ -1,6 +1,5 @@
 from collections.abc import Sized
 from torch.utils.data import IterableDataset, _utils
-from types import MethodType
 from typing import TypeVar, Callable, Iterator
 
 

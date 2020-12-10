@@ -228,7 +228,7 @@ class TestFFT(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected a real input tensor"):
             torch.fft.rfft(t)
 
-        with self.assertRaisesRegex(RuntimeError, "Expected a real input tensor"):
+        with self.assertRaisesRegex(RuntimeError, "rfftn expects a real-valued input tensor"):
             torch.fft.rfftn(t)
 
         with self.assertRaisesRegex(RuntimeError, "Expected a real input tensor"):
@@ -479,7 +479,7 @@ class TestFFT(TestCase):
                 func(a, s=(10, 10, 10, 10))
 
         c = torch.complex(a, a)
-        with self.assertRaisesRegex(RuntimeError, "Expected a real input"):
+        with self.assertRaisesRegex(RuntimeError, "rfftn expects a real-valued input"):
             torch.fft.rfftn(c)
 
     # 2d-fft tests
@@ -591,7 +591,7 @@ class TestFFT(TestCase):
                 func(a, dim=(2, 3))
 
         c = torch.complex(a, a)
-        with self.assertRaisesRegex(RuntimeError, "Expected a real input"):
+        with self.assertRaisesRegex(RuntimeError, "rfftn expects a real-valued input"):
             torch.fft.rfft2(c)
 
     # Helper functions
