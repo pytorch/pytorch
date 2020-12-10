@@ -237,8 +237,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     }
 
    private:
-    FutureNCCL()
-        : at::ivalue::Future(c10::ListType::create(c10::TensorType::get())) {}
+    FutureNCCL(at::TypePtr type) : at::ivalue::Future(std::move(type)) {}
     // We need this because it will be the ::make() static method that actually
     // creates the instance. This is a brittle approach and the passkey idiom
     // would be a more robust solution. However, this will go away in #48505.
@@ -353,8 +352,8 @@ class ProcessGroupNCCL : public ProcessGroup {
     // stream that runs this callback.
     c10::intrusive_ptr<Future> then(
         std::function<at::IValue(void)> callback,
-        at::TypePtr /* unused */) override {
-      auto fut = c10::make_intrusive<FutureNCCL>();
+        at::TypePtr type) override {
+      auto fut = c10::make_intrusive<FutureNCCL>(std::move(type));
       // The new future needs the DataPtr extractor when it gets marked complete
       // but this might happen immediately inline or in parallel by another
       // thread. In both these cases this would/might happen before the user has
@@ -411,7 +410,6 @@ class ProcessGroupNCCL : public ProcessGroup {
         // If a C++ communication hook is used, use the default extractor.
         data_ptrs = at::ivalue::Future::defaultDataPtrExtractor(value);
       }
-      TORCH_INTERNAL_ASSERT(data_ptrs.size() == 1, "expected exactly 1 tensor");
       return data_ptrs;
     }
   };
