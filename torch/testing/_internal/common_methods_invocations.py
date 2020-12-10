@@ -27,6 +27,14 @@ from torch.testing._internal.common_utils import \
 if TEST_SCIPY:
     import scipy.special
 
+
+def versiontuple(v):
+    """
+    Helper function to compare versions.
+    Reference: https://stackoverflow.com/a/11887825/5602957
+    """
+    return tuple(map(int, (v.split("."))))
+
 class SkipInfo(object):
     """Describes which test, or type of tests, should be skipped when testing
        an operator. Any test that matches all provided arguments will be skipped.
@@ -872,6 +880,9 @@ if TEST_SCIPY:
                        handles_large_floats=False,
                        domain=(-1, 1),
                        skips=(
+                           # Reference: https://github.com/pytorch/pytorch/pull/49155#issuecomment-742664611
+                           SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                    active_if=versiontuple(scipy.__version__) < versiontuple("1.4.0")),
                            # RuntimeError: "pow" not implemented for 'BFloat16'
                            SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                     dtypes=[torch.bfloat16]),),)
