@@ -87,9 +87,9 @@ void setConvolutionParams(
   params->dataType = dataType;
   // ASSERT(weight.dim() == input.dim())
   for (int i = 0; i != input.dim(); ++i) {
-    params->input_size[i] = (int) input.size(i);
-    params->input_stride[i] = (int) input.stride(i);
-    params->weight_size[i] = (int) weight.size(i);
+    params->input_size[i] = (int) input.sizes()[i];
+    params->input_stride[i] = (int) input.strides()[i];
+    params->weight_size[i] = (int) weight.sizes()[i];
   }
   // ASSERT(padding.size() == stride.size())
   // ASSERT(padding.size() == dilation.size())
@@ -238,13 +238,16 @@ Tensor cudnn_convolution_forward(
   checkAllSameType(c, {input, weight});
   checkAllSameGPU(c, {input, weight});
 
-  auto layout = cudnn_conv_use_channels_last(*input, *weight) ?
+  auto memory_format = cudnn_conv_use_channels_last(*input, *weight) ?
       at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
-  auto output_t = at::empty(
+  auto output_t = at::native::empty_cuda(
                     conv_output_size(input->sizes(), weight->sizes(),
                                      padding, stride, dilation),
-                    input->options(),
-                    layout);
+                    /*dtype=*/input->scalar_type(),
+                    /*layout=*/c10::nullopt,
+                    /*device=*/kCUDA,
+                    /*pin_memory=*/c10::nullopt,
+                    /*memory_format=*/memory_format);
 
   if (output_t.numel() == 0) {
     return output_t;
@@ -255,11 +258,11 @@ Tensor cudnn_convolution_forward(
   convolution_shape_check(c, input, weight, output, padding, stride, dilation, groups);
 
   // See #4500
-  Tensor weight_contig = weight->contiguous(layout);
+  Tensor weight_contig = weight->contiguous(memory_format);
   // Make sure that NC11 strides follow formula
-  weight_contig.resize_(weight_contig.sizes(), layout);
-  Tensor input_contig = input->contiguous(layout);
-  input_contig.resize_(input_contig.sizes(), layout);
+  weight_contig.resize_(weight_contig.sizes(), memory_format);
+  Tensor input_contig = input->contiguous(memory_format);
+  input_contig.resize_(input_contig.sizes(), memory_format);
 
   raw_cudnn_convolution_forward_out(
       *output, input_contig, weight_contig,
