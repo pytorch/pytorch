@@ -198,7 +198,8 @@ class TORCH_API TensorExprKernel {
   std::vector<TypePtr> inputTypes_;
   std::shared_ptr<Graph> graph_;
   Code code_;
-  bool fallback_{false};
+  bool allow_fallback_{false};
+  bool use_fallback_{false};
   bool hasRandom_{false};
   bool hasBroadcast_{false};
   std::unordered_map<const torch::jit::Value*, std::vector<ExprHandle>>
