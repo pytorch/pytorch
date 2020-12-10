@@ -1393,6 +1393,16 @@ def all_gather_object(object_list, obj, group=group.WORLD):
         known to be insecure. It is possible to construct malicious pickle data
         which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
+
+    Example::
+        >>> # Note: Process group initialization omitted on each rank.
+        >>> import torch.distributed as dist
+        >>> # Assumes world_size of 3.
+        >>> gather_objects = ["foo", 12, {1: 2}] # any picklable object
+        >>> output = [None for _ in gather_objects]
+        >>> dist.all_gather_object(output, gather_objects[dist.get_rank()])
+        >>> output
+        ['foo', 12, {1: 2}]
     """
     if _rank_not_in_group(group):
         return
@@ -1467,6 +1477,21 @@ def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
         known to be insecure. It is possible to construct malicious pickle data
         which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
+
+    Example::
+        >>> # Note: Process group initialization omitted on each rank.
+        >>> import torch.distributed as dist
+        >>> # Assumes world_size of 3.
+        >>> gather_objects = ["foo", 12, {1: 2}] # any picklable object
+        >>> output = [None for _ in gather_objects]
+        >>> dist.gather_object(
+                gather_objects[dist.get_rank()],
+                output if dist.get_rank() == 0 else None,
+                dst=0
+            )
+        >>> # On rank 0
+        >>> output
+        ['foo', 12, {1: 2}]
     """
     if _rank_not_in_group(group):
         return
@@ -1556,6 +1581,18 @@ def broadcast_object_list(object_list, src, group=group.WORLD):
         is known to be insecure. It is possible to construct malicious pickle
         data which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
+
+    Example::
+        >>> # Note: Process group initialization omitted on each rank.
+        >>> import torch.distributed as dist
+        >>> if dist.get_rank() == 0:
+        >>>     # Assumes world_size of 3.
+        >>>     objects = ["foo", 12, {1: 2}] # any picklable object
+        >>> else:
+        >>>     objects = [None, None, None]
+        >>> dist.broadcast_object_list(objects, src=0)
+        >>> broadcast_objects
+        ['foo', 12, {1: 2}]
     """
     if _rank_not_in_group(group):
         return
@@ -1634,6 +1671,21 @@ def scatter_object_list(
         is known to be insecure. It is possible to construct malicious pickle
         data which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
+
+    Example::
+        >>> # Note: Process group initialization omitted on each rank.
+        >>> import torch.distributed as dist
+        >>> if dist.get_rank() == 0:
+        >>>     # Assumes world_size of 3.
+        >>>     objects = ["foo", 12, {1: 2}] # any picklable object
+        >>> else:
+        >>>     # Can be any list on non-src ranks, elements are not used.
+        >>>     objects = [None, None, None]
+        >>> output_list = [None]
+        >>> dist.scatter_object_list(output_list, objects, src=0)
+        >>> # Rank i gets objects[i]. For example, on rank 2:
+        >>> output_list
+        [{1: 2}]
     """
     if _rank_not_in_group(group):
         return
@@ -2296,6 +2348,17 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
     processes that are part of the distributed job) enter this function, even
     if they are not going to be members of the group. Additionally, groups
     should be created in the same order in all processes.
+
+    .. warning::
+        Using multiple process groups with the ``NCCL`` backend concurrently
+        is not safe and the user should perform explicit synchronization in
+        their application to ensure only one process group is used at a time.
+        This means collectives from one process group should have completed
+        execution on the device (not just enqueued since CUDA execution is
+        async) before collectives from another process group are enqueued.
+        See `Using multiple NCCL communicators concurrently <https://docs.nvid
+        ia.com/deeplearning/nccl/user-guide/docs/usage/communicators.html#using
+        -multiple-nccl-communicators-concurrently>`_ for more details.
 
     Arguments:
         ranks (list[int]): List of ranks of group members. If ``None``, will be
