@@ -434,45 +434,42 @@ ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
   return scalars_.at(v->unique());
 }
 
-ExprHandle promoteIntegerToFloat(const ExprHandle& e) {
+ExprHandle promoteIntegerToDefaultType(const ExprHandle& e) {
   auto scalarType = static_cast<c10::ScalarType>(e.dtype().scalar_type());
   if (!c10::isIntegralType(scalarType, /*includeBool*/ true)) {
     return e;
   }
-  auto defaultType = static_cast<tensorexpr::ScalarType>(
-      c10::typeMetaToScalarType(c10::get_default_dtype()));
-  return Cast::make(Dtype(defaultType, e.dtype().lanes()), e);
+
+  auto defaultType = c10::typeMetaToScalarType(c10::get_default_dtype());
+
+  // We intend to promote Integers to floating-point types
+  TORCH_INTERNAL_ASSERT(
+      !c10::isIntegralType(defaultType, /*includeBool*/ true));
+
+  return Cast::make(
+      Dtype(
+          static_cast<tensorexpr::ScalarType>(defaultType), e.dtype().lanes()),
+      e);
 }
 
-ExprHandle promoteHalfAndIntegerToFloat(const ExprHandle& e) {
+ExprHandle promoteHalfToFloat(const ExprHandle& e) {
   auto scalarType = static_cast<c10::ScalarType>(e.dtype().scalar_type());
-  auto defaultType = c10::typeMetaToScalarType(c10::get_default_dtype());
-  if (c10::isIntegralType(scalarType, /*includeBool*/ true) ||
-      (c10::isFloatingType(scalarType) &&
-       c10::elementSize(scalarType) < c10::elementSize(defaultType))) {
+  auto floatType = static_cast<c10::ScalarType>(tensorexpr::ScalarType::Float);
+  if (c10::isFloatingType(scalarType) &&
+      (c10::elementSize(scalarType) < c10::elementSize(floatType))) {
     return Cast::make(
-        Dtype(
-            static_cast<tensorexpr::ScalarType>(defaultType),
-            e.dtype().lanes()),
-        e);
+        Dtype(tensorexpr::ScalarType::Float, e.dtype().lanes()), e);
   } else {
     return e;
   }
 }
 
-ExprHandle promoteHalfToFloat(const ExprHandle& e) {
+ExprHandle promoteHalfToFloatAndIntegerToDefaultType(const ExprHandle& e) {
   auto scalarType = static_cast<c10::ScalarType>(e.dtype().scalar_type());
-  auto defaultType = c10::typeMetaToScalarType(c10::get_default_dtype());
-
-  if (c10::isFloatingType(scalarType) &&
-      (c10::elementSize(scalarType) < c10::elementSize(defaultType))) {
-    return Cast::make(
-        Dtype(
-            static_cast<tensorexpr::ScalarType>(defaultType),
-            e.dtype().lanes()),
-        e);
+  if (c10::isIntegralType(scalarType, /*includeBool*/ true)) {
+    return promoteIntegerToDefaultType(e);
   } else {
-    return e;
+    return promoteHalfToFloat(e);
   }
 }
 
@@ -848,7 +845,8 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::div: {
       return computeTwoOperand(
           "aten_div", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return promoteIntegerToFloat(lhs) / promoteIntegerToFloat(rhs);
+            return promoteIntegerToDefaultType(lhs) /
+                promoteIntegerToDefaultType(rhs);
           });
     } break;
 
@@ -995,7 +993,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
 
     case aten::sigmoid: {
       return computeOneOperand("aten_sigmoid", v, [](const ExprHandle& a) {
-        return sigmoid(promoteIntegerToFloat(a));
+        return sigmoid(promoteIntegerToDefaultType(a));
       });
     } break;
 
@@ -1020,25 +1018,25 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
 
     case aten::log: {
       return computeOneOperand("aten_log", v, [](const ExprHandle& a) {
-        return log(promoteIntegerToFloat(a));
+        return log(promoteIntegerToDefaultType(a));
       });
     } break;
 
     case aten::log10: {
       return computeOneOperand("aten_log10", v, [](const ExprHandle& a) {
-        return log10(promoteIntegerToFloat(a));
+        return log10(promoteIntegerToDefaultType(a));
       });
     } break;
 
     case aten::log1p: {
       return computeOneOperand("aten_log1p", v, [](const ExprHandle& a) {
-        return log1p(promoteIntegerToFloat(a));
+        return log1p(promoteIntegerToDefaultType(a));
       });
     } break;
 
     case aten::log2: {
       return computeOneOperand("aten_log2", v, [](const ExprHandle& a) {
-        return log2(promoteIntegerToFloat(a));
+        return log2(promoteIntegerToDefaultType(a));
       });
     } break;
 
@@ -1054,31 +1052,31 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
 
     case aten::erf: {
       return computeOneOperand("aten_erf", v, [](const ExprHandle& a) {
-        return erf(promoteIntegerToFloat(a));
+        return erf(promoteIntegerToDefaultType(a));
       });
     } break;
 
     case aten::erfc: {
       return computeOneOperand("aten_erfc", v, [](const ExprHandle& a) {
-        return erfc(promoteIntegerToFloat(a));
+        return erfc(promoteIntegerToDefaultType(a));
       });
     } break;
 
     case aten::cos: {
       return computeOneOperand("aten_cos", v, [](const ExprHandle& a) {
-        return cos(promoteIntegerToFloat(a));
+        return cos(promoteIntegerToDefaultType(a));
       });
     } break;
 
     case aten::sin: {
       return computeOneOperand("aten_sin", v, [](const ExprHandle& a) {
-        return sin(promoteIntegerToFloat(a));
+        return sin(promoteIntegerToDefaultType(a));
       });
     } break;
 
     case aten::tan: {
       return computeOneOperand("aten_tan", v, [](const ExprHandle& a) {
-        return tan(promoteIntegerToFloat(a));
+        return tan(promoteIntegerToDefaultType(a));
       });
     } break;
 
@@ -1191,13 +1189,13 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
 
     case aten::acos: {
       return computeOneOperand("aten_acos", v, [](const ExprHandle& a) {
-        return acos(promoteIntegerToFloat(a));
+        return acos(promoteIntegerToDefaultType(a));
       });
     } break;
 
     case aten::asin: {
       return computeOneOperand("aten_asin", v, [](const ExprHandle& a) {
-        return asin(promoteIntegerToFloat(a));
+        return asin(promoteIntegerToDefaultType(a));
       });
     } break;
 
@@ -1207,13 +1205,14 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::sinh: {
-      return computeOneOperand(
-          "aten_sinh", v, [](const ExprHandle& a) { return sinh(a); });
+      return computeOneOperand("aten_sinh", v, [](const ExprHandle& a) {
+        return sinh(promoteIntegerToDefaultType(a));
+      });
     } break;
 
     case aten::atan: {
       return computeOneOperand("aten_atan", v, [](const ExprHandle& a) {
-        return atan(promoteIntegerToFloat(a));
+        return atan(promoteIntegerToDefaultType(a));
       });
     } break;
 
@@ -1221,19 +1220,20 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
       return computeTwoOperand(
           "aten_atan2", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return atan2(
-                promoteIntegerToFloat(lhs), promoteIntegerToFloat(rhs));
+                promoteIntegerToDefaultType(lhs),
+                promoteIntegerToDefaultType(rhs));
           });
     } break;
 
     case aten::tanh: {
       return computeOneOperand("aten_tanh", v, [](const ExprHandle& a) {
-        return tanh(promoteIntegerToFloat(a));
+        return tanh(promoteIntegerToDefaultType(a));
       });
     } break;
 
     case aten::sqrt: {
       return computeOneOperand("aten_sqrt", v, [](const ExprHandle& a) {
-        return sqrt(promoteIntegerToFloat(a));
+        return sqrt(promoteIntegerToDefaultType(a));
       });
     } break;
 
@@ -1247,7 +1247,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
           "aten_abs",
           v,
           [](const ExprHandle& a) {
-            return fabs(promoteHalfAndIntegerToFloat(a));
+            return fabs(promoteHalfToFloatAndIntegerToDefaultType(a));
           },
           kIntegralTypes | kFloatingPointTypes | kBoolType);
     } break;

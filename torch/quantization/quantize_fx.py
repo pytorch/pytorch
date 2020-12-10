@@ -254,7 +254,7 @@ def prepare_fx(
     ```
     """
     torch._C._log_api_usage_once("quantization_api.quantize_fx.prepare_fx")
-    assert not model.training, 'prepare_fx only works for models in' + \
+    assert not model.training, 'prepare_fx only works for models in ' + \
         'eval mode'
     return _prepare_fx(model, qconfig_dict, prepare_custom_config_dict)
 
@@ -291,7 +291,7 @@ def prepare_qat_fx(
     ```
     """
     torch._C._log_api_usage_once("quantization_api.quantize_fx.prepare_qat_fx")
-    assert model.training, 'prepare_qat_fx only works for models in ' + \
+    assert model.training, 'prepare_qat_fx only works for models in  ' + \
         'train mode'
     return _prepare_fx(model, qconfig_dict, prepare_custom_config_dict)
 
