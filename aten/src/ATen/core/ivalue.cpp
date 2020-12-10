@@ -76,6 +76,8 @@ TypePtr IValue::type() const {
       return NoneType::get();
     case Tag::Tensor:
       return TensorType::create(toTensor());
+    case Tag::Storage:
+      return StorageType::get();
     case Tag::Double:
       return FloatType::get();
     case Tag::Int:
@@ -260,6 +262,8 @@ IValue IValue::equals(const IValue& rhs) const {
         return false;
       }
       return lhs.toTensor().eq(rhs.toTensor());
+    case Tag::Storage:
+      return rhs.isStorage() && lhs.toStorage().unsafeGetStorageImpl() == rhs.toStorage().unsafeGetStorageImpl();
     case Tag::Double:
       return rhs.isDouble() && lhs.toDouble() == rhs.toDouble();
     case Tag::Int:
@@ -309,6 +313,8 @@ size_t IValue::hash(const IValue& v) {
     case Tag::Tensor:
       // Tensor __hash__ is equivalent to `id()`, so take the pointer value of
       // the tensor to emulate it
+      return c10::get_hash(v.payload.as_int);
+    case Tag::Storage:
       return c10::get_hash(v.payload.as_int);
     case Tag::Int:
       return c10::get_hash(v.payload.as_int);
@@ -647,6 +653,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << v.toNone();
     case IValue::Tag::Tensor:
       return out << v.toTensor();
+    case IValue::Tag::Storage:
+      return out << v.toStorage().unsafeGetStorageImpl();
     case IValue::Tag::Double: {
       double d = v.toDouble();
       int c = std::fpclassify(d);

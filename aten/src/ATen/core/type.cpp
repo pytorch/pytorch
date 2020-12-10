@@ -134,6 +134,10 @@ BoolTypePtr BoolType::get() {
   static auto value = BoolType::create();
   return value;
 }
+StorageTypePtr StorageType::get() {
+  static auto value = StorageType::create();
+  return value;
+}
 NoneTypePtr NoneType::get() {
   static auto value = NoneType::create();
   return value;
