@@ -66,8 +66,8 @@ def verify_module(module: nn.Sequential) -> None:
         raise ValueError("module with duplicate children is not supported")
 
 
-def verify_splitting(
-    module: nn.Sequential, partitions: List[nn.Sequential], balance: Iterable[int], devices: List[torch.device]
+def _verify_splitting(
+    module: nn.Sequential, partitions: List[nn.Sequential], devices: List[torch.device]
 ) -> None:
     num_parameters = len(list(module.parameters()))
     num_child_parameters = sum(len(list(child.parameters())) for child in module.children())
@@ -90,66 +90,46 @@ class BalanceError(ValueError):
     pass
 
 
-def split_module(
-    module: nn.Sequential, balance: Iterable[int], devices: List[torch.device],
-) -> Tuple[List[nn.Sequential], List[int], List[torch.device]]:
-    """Splits a module into multiple partitions.
+def _retrieve_device(module: nn.Module) -> torch.device:
+    """Validates all parameters in the Module have the same device and returns
+    the appropriate device.
+
+    Arguments:
+        An ``nn.Module`` to process.
 
     Returns:
-        A tuple of (partitions, balance, devices).
-
-        Partitions are represented as a :class:`~torch.nn.ModuleList` whose
-        item is a partition. All layers in a partition are placed in the
-        same device.
+        ``torch.Device`` for the entire module.
 
     Raises:
-        BalanceError:
-            wrong balance
-        IndexError:
-            the number of devices is fewer than the number of partitions.
-
+        ValueError:
+            If devices for ``nn.Module`` parameters are not all same.
     """
-    balance = list(balance)
 
-    if len(module) != sum(balance):
-        raise BalanceError(
-            "module and sum of balance have different length "
-            f"(module: {len(module)}, sum of balance: {sum(balance)})"
-        )
+    device = None
+    for parameter in module.parameters():
+        if device is None:
+            device = parameter.device
+        elif device != parameter.device:
+            raise ValueError(
+                'nn.Module: {}, should have all parameters on a single device,'
+                ' please use .to() to place the module on a single device'.format(module))
 
-    if any(x <= 0 for x in balance):
-        raise BalanceError(f"all balance numbers must be positive integer (balance: {balance})")
+    return device if device is not None else torch.device("cpu")
 
-    if len(balance) > len(devices):
-        raise IndexError(
-            "too few devices to hold given partitions " f"(devices: {len(devices)}, partitions: {len(balance)})"
-        )
-
-    j = 0
+def _split_module(modules: nn.Sequential) -> Tuple[List[nn.Sequential], List[torch.device]]:
     partitions = []
-    layers: NamedModules = OrderedDict()
-
-    for name, layer in module.named_children():
-        layers[name] = layer
-
-        if len(layers) == balance[j]:
-            # Group buffered layers as a partition.
-            partition = nn.Sequential(layers)
-
-            device = devices[j]
-            partition.to(device)
-
-            partitions.append(partition)
-
-            # Prepare for the next partition.
-            layers.clear()
-            j += 1
+    devices = []
+    for name, module in modules.named_children():
+        devices.append(_retrieve_device(module))
+        if isinstance(module, nn.Sequential):
+            partition = module
+        else:
+            partition = nn.Sequential(OrderedDict([(name, module)]))
+        partitions.append(partition)
 
     partitions = cast(List[nn.Sequential], nn.ModuleList(partitions))
-    del devices[j:]
 
-    return partitions, balance, devices
-
+    return partitions, devices
 
 MOVING_DENIED = TypeError("denied to move parameters and buffers, " "because Pipe should manage device placement")
 
@@ -161,28 +141,27 @@ class Pipe(Module):
     ::
 
         model = nn.Sequential(a, b, c, d)
-        model = Pipe(model, balance=[1, 1, 1, 1], chunks=8)
+        model = Pipe(model, chunks=8)
         output = model(input)
 
-    .. _Pipe: https://arxiv.org/abs/1811.06965
+    .. _Pipe: https://arxiv.org/abs/2004.09910
 
     Pipe combines pipeline parallelism with checkpointing to reduce peak
     memory required to train while minimizing device under-utilization.
 
-    You should determine the balance when defining a :class:`Pipe` module, as
-    balancing will not be done automatically. The module will be partitioned
-    into multiple devices according to the given balance. You may rely on
-    heuristics to find your own optimal configuration.
+    You should place all the modules on the appropriate devices before passing
+    them to this API and wrap them into an ``nn.Sequential`` module defining the
+    desired order of execution.
 
     Args:
-        module (torch.nn.Sequential):
-            sequential module to be parallelized
-        balance (ints):
-            list of number of layers in each partition
+        module (``torch.nn.Sequential``):
+            Sequential module to be parallelized using pipelining. Each module
+            in the sequence has to have all of its parameters on a single
+            device. Each module in the sequence has to either be an nn.Module
+            or ``nn.Sequential`` (to combine multiple sequential modules on a single
+            device)
 
     Keyword Args:
-        devices (iterable of devices):
-            devices to use (default: all CUDA devices)
         chunks (int):
             number of micro-batches (default: ``1``)
         checkpoint (str):
@@ -197,32 +176,11 @@ class Pipe(Module):
         TypeError:
             the module is not a :class:`nn.Sequential <torch.nn.Sequential>`.
         ValueError:
-            invalid arguments, or wrong balance
+            invalid arguments
         IndexError:
             the number of devices is fewer than the number of partitions.
 
     """
-
-    #: The number of layers in each partition.
-    balance: List[int] = []
-    #                    ^^
-    # The default value [] required for Sphinx's autoattribute.
-
-    #: The devices mapped to each partition.
-    #:
-    #: ``devices[-1]`` refers to the device of the last partition, which means
-    #: it is the output device. Probably, you need to use it to transfer the
-    #: target to calculate the loss without a device mismatch
-    #: :exc:`RuntimeError`. For example::
-    #:
-    #:     out_device = pipe.devices[-1]
-    #:
-    #:     for input, target in loader:
-    #:         target = target.to(out_device, non_blocking=True)
-    #:         output = pipe(input)
-    #:         loss = F.cross_entropy(output, target)
-    #:
-    devices: List[torch.device] = []
 
     #: The number of micro-batches.
     chunks: int = 1
@@ -234,9 +192,6 @@ class Pipe(Module):
     def __init__(
         self,
         module: nn.Sequential,
-        balance: Optional[Iterable[int]] = None,
-        *,
-        devices: Optional[Devices] = None,
         chunks: int = chunks,
         checkpoint: str = checkpoint,
         deferred_batch_norm: bool = False,
@@ -246,8 +201,6 @@ class Pipe(Module):
         chunks = int(chunks)
         checkpoint = str(checkpoint)
 
-        if balance is None:
-            raise ValueError(recommend_auto_balance("balance is required"))
         if chunks <= 0:
             raise ValueError("number of chunks must be positive integer")
         if checkpoint not in ["always", "except_last", "never"]:
@@ -265,17 +218,8 @@ class Pipe(Module):
         if deferred_batch_norm:
             module = DeferredBatchNorm.convert_deferred_batch_norm(module, chunks)
 
-        if devices is None:
-            devices = range(torch.cuda.device_count())
-        devices = [torch.device(d) for d in devices]
-        devices = cast(List[torch.device], devices)
-
-        try:
-            self.partitions, self.balance, self.devices = split_module(module, balance, devices)
-        except BalanceError as exc:
-            raise ValueError(recommend_auto_balance(str(exc)))
-
-        verify_splitting(module, self.partitions, self.balance, self.devices)
+        self.partitions, self.devices = _split_module(module)
+        _verify_splitting(module, self.partitions, self.devices)
 
         self._copy_streams: List[List[AbstractStream]] = []
         self._skip_layout = inspect_skip_layout(self.partitions)

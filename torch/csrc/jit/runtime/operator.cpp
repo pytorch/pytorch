@@ -230,6 +230,7 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::ConstantChunk, // optimization pass adds it
       prim::DifferentiableGraph, // optimization pass adds it,
       prim::FunctionalGraph, // optimization pass adds it,
+      prim::ReductionSizes, // optimization pass (fuser) adds it
       prim::BroadcastSizes, // optimization pass (fuser) adds it
       prim::ChunkSizes, // optimization pass (fuser) adds it
       prim::Drop, // used in interpreter only
@@ -244,6 +245,7 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::Store, // used in interpreter only
       prim::profile, // used in interpreter only
       prim::profile_optional, // used in interpreter only
+      prim::profile_ivalue, // used in interpreter only
       prim::TypeCheck, // used in interpreter only
       prim::FallbackGraph, // converted into prim::CallFunction
 
@@ -302,6 +304,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::SetAttr,
       prim::profile,
       prim::profile_optional,
+      prim::profile_ivalue,
       prim::TypeCheck,
       prim::Print,
       prim::CallFunction,

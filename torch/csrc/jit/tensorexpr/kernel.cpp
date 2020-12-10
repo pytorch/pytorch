@@ -50,6 +50,15 @@ bool fallbackEnforced() {
   return false;
 }
 
+bool dontUseLLVMFlag() {
+  static const char* enable_c_str =
+      std::getenv("PYTORCH_TENSOREXPR_DONT_USE_LLVM");
+  if (!enable_c_str) {
+    return false;
+  }
+  return std::string(enable_c_str) == "1";
+}
+
 int& getTECudaPointwiseLoopLevels() {
   return te_cuda_pointwise_loop_levels;
 }
@@ -926,8 +935,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::sigmoid: {
-      return computeOneOperand(
-          "aten_sigmoid", v, [](const ExprHandle& a) { return sigmoid(a); });
+      return computeOneOperand("aten_sigmoid", v, [](const ExprHandle& a) {
+        return sigmoid(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::reciprocal: {
@@ -962,8 +972,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::log1p: {
-      return computeOneOperand(
-          "aten_log1p", v, [](const ExprHandle& a) { return log1p(a); });
+      return computeOneOperand("aten_log1p", v, [](const ExprHandle& a) {
+        return log1p(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::log2: {
@@ -978,18 +989,21 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::expm1: {
-      return computeOneOperand(
-          "aten_expm1", v, [](const ExprHandle& a) { return expm1(a); });
+      return computeOneOperand("aten_expm1", v, [](const ExprHandle& a) {
+        return expm1(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::erf: {
-      return computeOneOperand(
-          "aten_erf", v, [](const ExprHandle& a) { return erf(a); });
+      return computeOneOperand("aten_erf", v, [](const ExprHandle& a) {
+        return erf(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::erfc: {
-      return computeOneOperand(
-          "aten_erfc", v, [](const ExprHandle& a) { return erfc(a); });
+      return computeOneOperand("aten_erfc", v, [](const ExprHandle& a) {
+        return erfc(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::cos: {
@@ -1124,18 +1138,21 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::asin: {
-      return computeOneOperand(
-          "aten_asin", v, [](const ExprHandle& a) { return asin(a); });
+      return computeOneOperand("aten_asin", v, [](const ExprHandle& a) {
+        return asin(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::cosh: {
-      return computeOneOperand(
-          "aten_cosh", v, [](const ExprHandle& a) { return cosh(a); });
+      return computeOneOperand("aten_cosh", v, [](const ExprHandle& a) {
+        return cosh(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::sinh: {
-      return computeOneOperand(
-          "aten_sinh", v, [](const ExprHandle& a) { return sinh(a); });
+      return computeOneOperand("aten_sinh", v, [](const ExprHandle& a) {
+        return sinh(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::atan: {
@@ -1531,7 +1548,7 @@ TensorExprKernel::BackendType TensorExprKernel::inferBackendTypeFromDevice(
     backendType = kBlockCodeGen;
   } else if (device.type() == at::kCPU) {
 #ifdef TORCH_ENABLE_LLVM
-    backendType = kLLVMCodeGen;
+    backendType = dontUseLLVMFlag() ? kSimpleIREval : kLLVMCodeGen;
 #else
     backendType = kSimpleIREval;
 #endif

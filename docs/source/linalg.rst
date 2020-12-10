@@ -13,10 +13,12 @@ Functions
 ---------
 
 .. autofunction:: cholesky
+.. autofunction:: cond
 .. autofunction:: det
 .. autofunction:: slogdet
 .. autofunction:: eigh
 .. autofunction:: eigvalsh
+.. autofunction:: matrix_rank
 .. autofunction:: norm
 .. autofunction:: tensorinv
 .. autofunction:: tensorsolve

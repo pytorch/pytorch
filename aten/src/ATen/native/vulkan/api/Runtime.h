@@ -44,8 +44,8 @@ class Runtime final {
  private:
   class Debug final {
    public:
-    explicit Debug(VkInstance instance);
-    void operator()(VkDebugReportCallbackEXT debug_report_callback) const;
+    explicit Debug(VkInstance);
+    void operator()(VkDebugReportCallbackEXT) const;
 
    private:
     VkInstance instance_;
