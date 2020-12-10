@@ -7,11 +7,9 @@ namespace torch {
 namespace jit {
 
 class CUDAEvent;
-/*
-* The CUDAStream is a custom class designed to add support for CUDAStreams in JIT
-* The class wraps all the CUDA Stream operations of c10::cuda::CUDAStream
-* For more details , please refer c10/cuda/CUDAStream.h
-*/
+// This class is a wrapper around c10::cuda::CUDAStream.
+// It is needed because TorchBind does not support all of the argument types
+// for c10::cuda::CUDAStream. For more details, please refer to c10/cuda/CUDAStream.h.
 class CUDAStream final : public CustomClassHolder {
  public:
   CUDAStream(int64_t device = -1, int64_t priority = 0) {
