@@ -1,6 +1,7 @@
 import operator
 import unittest
 import contextlib
+import re
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -1212,77 +1213,6 @@ class TestTEFuser(JitTestCase):
             return v.to(dtype)
 
     @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")
-    def test_unary_ops(self):
-        def apply(fn):
-            return lambda x: fn(x)
-
-        dtypes = [
-            torch.int8,
-            torch.uint8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
-            torch.float16,
-            torch.float32,
-            torch.float64,
-            torch.bool,
-        ]
-        unary_ops = [
-            torch.lgamma,
-            torch.sigmoid,
-            torch.reciprocal,
-            torch.neg,
-            torch.relu,
-            torch.log,
-            torch.log10,
-            torch.log1p,
-            torch.log2,
-            torch.exp,
-            torch.expm1,
-            torch.erf,
-            torch.erfc,
-            torch.cos,
-            torch.sin,
-            torch.tan,
-            torch.acos,
-            torch.asin,
-            torch.cosh,
-            torch.sinh,
-            torch.atan,
-            torch.tanh,
-            torch.sqrt,
-            torch.rsqrt,
-            # FIXME: Fails in IR Eval: torch.int8 abs cpu (1,)
-            torch.abs,
-            torch.ceil,
-            torch.floor,
-            torch.round,
-            torch.trunc,
-            torch.frac,
-            lambda x: torch.threshold(x, 0, -10),
-            lambda x: torch.clamp(x, -10, 10),
-        ]
-        sizes = [(1,), (2,), (4, 4)]
-        for dtype, op, device, size in product(dtypes, unary_ops, self.devices, sizes):
-            try:
-                x = self.data_for(dtype, device, size=size)
-                fn = apply(op)
-                ref = fn(x)
-            except Exception:
-                # If eager mode doesn't support a dtype/op/device combo,
-                # neither does the fuser.  Catch everything to avoid needing to
-                # guess what errors might be thrown by eager.
-                continue
-            try:
-                t = torch.jit.trace(fn, (x,))
-                torch.testing.assert_allclose(ref, t(x))
-                self.assertAllFused(t.graph_for(x))
-            except Exception as e:
-                raise RuntimeError(
-                    " ".join(["Failed:", str(dtype), op.__name__, device, str(size)])
-                )
-
-    @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")
     def test_binary_ops(self):
         def apply(fn):
             return lambda x, y: fn(x, y)
@@ -1731,6 +1661,96 @@ class TestTEFuser(JitTestCase):
         self.assertAllFused(script.graph_for(a, s))
         script = self.checkScript(eager_st, (s, b))
         self.assertAllFused(script.graph_for(s, b))
+
+    @staticmethod
+    def add_unary_op_tests():
+        def apply(fn):
+            return lambda x: fn(x)
+
+        def test_name(opname, dtype, device, size):
+            name = "test_unary_{}_{}_{}_{}".format(
+                opname,
+                str(dtype)[6:],
+                device,
+                "x".join(str(s) for s in size))
+            return re.sub("[^a-zA-Z0-9_]", "_", name)
+
+        dtypes = [
+            torch.int8,
+            torch.uint8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.float16,
+            torch.float32,
+            torch.float64,
+            torch.bool,
+        ]
+        unary_ops = [
+            torch.lgamma,
+            torch.sigmoid,
+            torch.reciprocal,
+            torch.neg,
+            torch.relu,
+            torch.log,
+            torch.log10,
+            torch.log1p,
+            torch.log2,
+            torch.exp,
+            torch.expm1,
+            torch.erf,
+            torch.erfc,
+            torch.cos,
+            torch.sin,
+            torch.tan,
+            torch.acos,
+            torch.asin,
+            torch.cosh,
+            torch.sinh,
+            torch.atan,
+            torch.tanh,
+            torch.sqrt,
+            torch.rsqrt,
+            # FIXME: Fails in IR Eval: torch.int8 abs cpu (1,)
+            torch.abs,
+            torch.ceil,
+            torch.floor,
+            torch.round,
+            torch.trunc,
+            torch.frac,
+            (torch.threshold, lambda x: torch.threshold(x, 0, -10)),
+            (torch.clamp, lambda x: torch.clamp(x, -10, 10)),
+        ]
+        sizes = [(1,), (2,), (4, 4)]
+        devices = ["cpu"] if not torch.cuda.is_available() else ["cpu", "cuda"]
+
+        for dtype, op, device, size in product(dtypes, unary_ops, devices, sizes):
+            if isinstance(op, tuple):
+                opname, opfn = op[0].__name__, op[1]
+            else:
+                opname, opfn = op.__name__, op
+
+            def inner_test(self):
+                try:
+                    x = self.data_for(dtype, device, size=size)
+                    fn = apply(opfn)
+                    ref = fn(x)
+                except Exception:
+                    # If eager mode doesn't support a dtype/op/device combo,
+                    # neither does the fuser.  Catch everything to avoid needing to
+                    # guess what errors might be thrown by eager.
+                    return
+                try:
+                    t = torch.jit.trace(fn, (x,))
+                    torch.testing.assert_allclose(ref, t(x))
+                    self.assertAllFused(t.graph_for(x))
+                except Exception as e:
+                    raise RuntimeError(
+                        " ".join(["Failed:", str(dtype), opname, device, str(size)])
+                    )
+            setattr(TestTEFuser, test_name(opname, dtype, device, size), inner_test)
+
+TestTEFuser.add_unary_op_tests()
 
 if __name__ == '__main__':
     run_tests()
