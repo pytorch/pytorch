@@ -3112,7 +3112,12 @@ class TestSparseUnaryUfuncs(TestCase):
                         with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
                             op.inplace_variant(sparse_tensor)
                     else:
-                        self.assertEqual(expected_output, op.inplace_variant(sparse_tensor).to_dense())
+                        sparse_tensor_copy = sparse_tensor.clone()
+                        self.assertEqual(expected_output, op.inplace_variant(sparse_tensor_copy).to_dense())
+
+            if op.operator_variant is not None:
+                sparse_tensor_copy = sparse_tensor.clone()
+                self.assertEqual(expected_output, op.operator_variant(sparse_tensor_copy).to_dense())
 
     @ops([op for op in unary_ufuncs if op.supports_sparse])
     def test_sparse_unary_ops(self, device, dtype, op):

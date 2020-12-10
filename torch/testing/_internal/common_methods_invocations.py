@@ -1,6 +1,7 @@
 from functools import reduce, wraps
 from operator import mul, itemgetter
 import collections
+import operator
 
 import torch
 import numpy as np
@@ -142,9 +143,10 @@ class OpInfo(object):
         if autodiff_nonfusible_nodes is None:
             self.autodiff_nonfusible_nodes = ['aten::' + self.name]
         else:
-            self.autodiff_nonfusible_nodes = autodiff_nonfusible_nodes
+            self.autodiff_nonfusible_nodes = autodiff_nonfusible_nodes        
         self.supports_sparse = supports_sparse
         self.sparse_op_info = sparse_op_info if sparse_op_info is not None else {}
+        self.operator_variant = getattr(operator, name, None)
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
@@ -165,6 +167,12 @@ class OpInfo(object):
         Returns None if the operator has no inplace variant.
         """
         return self.inplace_variant
+
+    def get_operator_variant(self):
+        """Returns operator variant of the operator, e.g. operator.neg
+        Returns None if the operator has no operator variant.
+        """
+        return self.operator_variant
 
     def sample_inputs(self, device, dtype, requires_grad=False):
         """Returns an iterable of SampleInputs."""
@@ -257,8 +265,12 @@ class UnaryUfuncInfo(OpInfo):
                  handles_large_floats=True,  # whether the op correctly handles large float values (like 1e20)
                  handles_extremals=True,  # whether the op correctly handles extremal values (like inf)
                  handles_complex_extremals=True,  # whether the op correct handles complex extremals (like inf -infj)
-                 sample_inputs_func=sample_inputs_unary,                 
+                 sample_inputs_func=sample_inputs_unary,
+                 aliases=[],  # list of aliases, e.g. torch.absolute -> torch.abs            
                  **kwargs):
+
+        args_kwargs = locals()
+        
         super(UnaryUfuncInfo, self).__init__(name,
                                              dtypes=dtypes,
                                              dtypesIfCPU=dtypesIfCPU,
@@ -275,6 +287,13 @@ class UnaryUfuncInfo(OpInfo):
         # Epsilon to ensure grad and gradgrad checks don't test values
         #   outside a function's domain.
         self._domain_eps = 1e-5
+
+        args_kwargs.update(args_kwargs["kwargs"])
+        kwargs = {k: v for k, v in args_kwargs.items() if not (k.startswith("_") or k in ["self", "name", "aliases", "kwargs"])}
+        self.aliases = [
+            UnaryUfuncInfo(a, **kwargs)
+            for a in aliases
+        ]
 
     def sample_sparse_inputs(self, device, dtype, requires_grad=False, **kwargs):
         """Returns an iterable of SampleInputs."""
@@ -505,6 +524,7 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestSparseUnaryUfuncs', 'test_sparse_unary_ops',
                                 dtypes=[torch.cfloat, torch.cdouble, torch.bool, torch.bfloat16]),
                    ),
+                   aliases=['arcsin', ],
                    supports_sparse=True),
     # NOTE: derivative for inplace asinh is not implemented
     UnaryUfuncInfo('asinh',
@@ -747,7 +767,8 @@ op_db: List[OpInfo] = [
                                      torch.cfloat, torch.cdouble, 
                                      torch.bool, torch.bfloat16, torch.float16
                                  ]),
-                   ),                   
+                   ),
+                   aliases=['negative', ],
                    supports_sparse=True,
                    sparse_op_info={"supports_inplace_on_uncoalesced": True}),
     UnaryUfuncInfo('sin',
@@ -883,6 +904,7 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestSparseUnaryUfuncs', 'test_sparse_unary_ops',
                                 dtypes=[torch.cfloat, torch.cdouble, torch.bool, torch.bfloat16]),
                    ),
+                   aliases=['absolute', ],
                    supports_sparse=False),  # Temporary disabled until https://github.com/pytorch/pytorch/pull/43330
     UnaryUfuncInfo('sign',
                    ref=np.sign,

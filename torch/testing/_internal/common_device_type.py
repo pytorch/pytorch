@@ -306,6 +306,12 @@ class DeviceTypeTestBase(TestCase):
                                             test=test,
                                             dtype=dtype,
                                             op=op)
+                    for alias_op in op.aliases:
+                        instantiate_test_helper(cls,
+                                                name,
+                                                test=test,
+                                                dtype=dtype,
+                                                op=alias_op)
         else:
             # Handles tests that don't use the ops decorator
             dtypes = cls._get_dtypes(test)
