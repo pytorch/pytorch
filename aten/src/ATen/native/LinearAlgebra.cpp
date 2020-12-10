@@ -88,11 +88,12 @@ std::tuple<Tensor, Tensor> linalg_slogdet(const Tensor& self) {
 
   Tensor det_P, diag_U;
   std::tie(det_P, diag_U) = _lu_det_P_diag_U(self);
-  auto det_sign = diag_U.sign().prod(-1).mul_(det_P);
+  auto det_sign = diag_U.sgn().prod(-1).mul_(det_P);
   // abslogdet_val is -inf if U is singular, in which case diag_U.abs_().log_().sum(-1) will return -inf.
   // U is singular when U(i, i) = 0 for some i in [1, self.size(-1)].
   // Since abslogdet_val cannot take nan, no special case handling is required.
-  auto abslogdet_val = diag_U.abs_().log_().sum(-1);
+  // in-place abs is not supported for complex tensors
+  auto abslogdet_val = diag_U.abs().log_().sum(-1);
   return std::make_tuple(det_sign, abslogdet_val);
 }
 

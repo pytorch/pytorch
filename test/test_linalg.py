@@ -4676,6 +4676,49 @@ else:
         with self.assertRaisesRegex(RuntimeError, "chain_matmul: Expected one or more matrices"):
             torch.chain_matmul()
 
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
+                        torch.float64: 1e-8, torch.complex128: 1e-8})
+    def test_slogdet(self, device, dtype):
+        from torch.testing._internal.common_utils import (random_hermitian_matrix, random_hermitian_psd_matrix,
+                                                          random_hermitian_pd_matrix, random_square_matrix_of_rank)
+
+        # mat_chars denotes matrix characteristics
+        # possible values are: sym, sym_psd, sym_pd, sing, non_sym
+        def run_test(matsize, batchdims, mat_chars):
+            num_matrices = reduce(lambda x, y: x * y, batchdims, 1)
+            list_of_matrices = []
+
+            for idx in range(num_matrices):
+                mat_type = idx % len(mat_chars)
+                if mat_chars[mat_type] == 'hermitian':
+                    list_of_matrices.append(random_hermitian_matrix(matsize, dtype=dtype, device=device))
+                elif mat_chars[mat_type] == 'hermitian_psd':
+                    list_of_matrices.append(random_hermitian_psd_matrix(matsize, dtype=dtype, device=device))
+                elif mat_chars[mat_type] == 'hermitian_pd':
+                    list_of_matrices.append(random_hermitian_pd_matrix(matsize, dtype=dtype, device=device))
+                elif mat_chars[mat_type] == 'singular':
+                    list_of_matrices.append(torch.ones(matsize, matsize, dtype=dtype, device=device))
+                elif mat_chars[mat_type] == 'non_singular':
+                    list_of_matrices.append(random_square_matrix_of_rank(matsize, matsize, dtype=dtype, device=device))
+            full_tensor = torch.stack(list_of_matrices, dim=0).reshape(batchdims + (matsize, matsize))
+            # Scaling adapted from `get_random_mat_scale` in _test_det_logdet_slogdet
+            full_tensor *= (math.factorial(matsize - 1) ** (-1.0 / (2 * matsize)))
+
+            actual_value = torch.linalg.slogdet(full_tensor)
+            expected_value = np.linalg.slogdet(full_tensor.cpu().numpy())
+            self.assertEqual(expected_value[0], actual_value[0], atol=self.precision, rtol=self.precision)
+            self.assertEqual(expected_value[1], actual_value[1], atol=self.precision, rtol=self.precision)
+
+        for matsize, batchdims in itertools.product([3, 5], [(3,), (5, 3)]):
+            run_test(matsize, batchdims, mat_chars=['hermitian_pd'])
+            run_test(matsize, batchdims, mat_chars=['singular'])
+            run_test(matsize, batchdims, mat_chars=['non_singular'])
+            run_test(matsize, batchdims, mat_chars=['hermitian', 'hermitian_pd', 'hermitian_psd'])
+            run_test(matsize, batchdims, mat_chars=['singular', 'non_singular'])
+
     @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
