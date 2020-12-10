@@ -177,7 +177,7 @@ Tensor& arctan_(Tensor& self) { return self.atan_(); }
 // complex input. This makes sense mathematically since the absolute value
 // and angle of a complex number has no imaginary part.
 Tensor& abs_out(Tensor& result, const Tensor& self) {
-  return unary_op_impl_with_complex_to_float_out(result, self, abs_stub, false);
+  return unary_op_impl_with_complex_to_float_out(result, self, abs_stub, /*promotes_integer_to_float=*/false);
 }
 Tensor abs(const Tensor& self) {
   return unary_op_impl_with_complex_to_float(self, at::abs_out);
@@ -199,7 +199,7 @@ Tensor& absolute_(Tensor& self) {
 }
 
 Tensor& angle_out(Tensor& result, const Tensor& self) {
-  return unary_op_impl_with_complex_to_float_out(result, self, angle_stub, true);
+  return unary_op_impl_with_complex_to_float_out(result, self, angle_stub, /*promotes_integer_to_float=*/true);
 }
 Tensor angle(const Tensor& self) {
   if (self.is_complex()) {
