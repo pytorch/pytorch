@@ -11,7 +11,10 @@ class Tensor;
 namespace impl {
 
 struct MetaBase {
-  virtual void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) = 0;
+  virtual void set_output(
+      int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options,
+      DimnameList names,
+      c10::optional<TensorAdditionalOptions> additional_options = c10::nullopt) = 0;
   void set_output(IntArrayRef sizes, TensorOptions options) {
     set_output(0, sizes, {}, options, {});
   }

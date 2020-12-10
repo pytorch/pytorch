@@ -691,9 +691,27 @@ inline DeviceType computeDeviceType(DispatchKey tid) {
     return DeviceType::Vulkan;
   } else if (tid == DispatchKey::Metal) {
     return DeviceType::Metal;
+  } else if (tid == DispatchKey::QuantizedCPU) {
+    return DeviceType::CPU;
   } else {
     AT_ASSERTM(false, "Unknown DispatchKey: ", tid);
   }
 }
+
+// This is a holder struct for additional options which are not supported
+// by factory constuction functions, and so are undesirable to put into
+// TensorOptions.
+// TODO(before land): make more efficient
+struct C10_API TensorAdditionalOptions {
+  // quantization scale for per-Tensor quantization schemes
+  c10::optional<double> q_scale;
+  // quantization zero_point for per-Tensor quantization schemes
+  c10::optional<int64_t> q_zero_point;
+  // TODO(future PR): per-channel quantization parameters
+
+  TensorAdditionalOptions(
+      c10::optional<double> q_scale, c10::optional<int64_t> q_zero_point
+      ) : q_scale(q_scale), q_zero_point(q_zero_point) {}
+};
 
 } // namespace c10

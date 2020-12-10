@@ -557,6 +557,47 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
     }                                                                       \
   }()
 
+#define AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND_QINT_AND3(                    \
+    SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, TYPE, NAME, ...)                 \
+  [&] {                                                                     \
+    const auto& the_type = TYPE;                                            \
+    /* don't use TYPE again in case it is an expensive or side-effect op */ \
+    at::ScalarType _st = ::detail::scalar_type(the_type);                   \
+    switch (_st) {                                                          \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Byte, uint8_t, __VA_ARGS__)      \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Char, int8_t, __VA_ARGS__)       \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Double, double, __VA_ARGS__)     \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Float, float, __VA_ARGS__)       \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Int, int32_t, __VA_ARGS__)       \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Long, int64_t, __VA_ARGS__)      \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Short, int16_t, __VA_ARGS__)     \
+      AT_PRIVATE_CASE_TYPE(                                                 \
+          at::ScalarType::ComplexFloat, c10::complex<float>, __VA_ARGS__)   \
+      AT_PRIVATE_CASE_TYPE(                                                 \
+          at::ScalarType::ComplexDouble, c10::complex<double>, __VA_ARGS__) \
+      AT_QINT_PRIVATE_CASE_TYPE(                                            \
+          at::kQInt8, at::qint8, at::kChar, int8_t, __VA_ARGS__)            \
+      AT_QINT_PRIVATE_CASE_TYPE(                                            \
+          at::kQUInt8, at::quint8, at::kByte, uint8_t, __VA_ARGS__)         \
+      AT_QINT_PRIVATE_CASE_TYPE(                                            \
+          at::kQInt32, at::qint32, at::kInt, int, __VA_ARGS__)              \
+      AT_PRIVATE_CASE_TYPE(                                                 \
+          SCALARTYPE1,                                                      \
+          decltype(c10::impl::ScalarTypeToCPPType<SCALARTYPE1>::t),         \
+          __VA_ARGS__)                                                      \
+      AT_PRIVATE_CASE_TYPE(                                                 \
+          SCALARTYPE2,                                                      \
+          decltype(c10::impl::ScalarTypeToCPPType<SCALARTYPE2>::t),         \
+          __VA_ARGS__)                                                      \
+      AT_PRIVATE_CASE_TYPE(                                                 \
+          SCALARTYPE3,                                                      \
+          decltype(c10::impl::ScalarTypeToCPPType<SCALARTYPE3>::t),         \
+          __VA_ARGS__)                                                      \
+      default:                                                              \
+        AT_ERROR(#NAME, " not implemented for '", TYPE, "'");               \
+    }                                                                       \
+  }()
+
 #define AT_DISPATCH_INDEX_TYPES(TYPE, NAME, ...)                            \
   [&] {                                                                     \
     const auto& the_index_type = TYPE;                                      \
