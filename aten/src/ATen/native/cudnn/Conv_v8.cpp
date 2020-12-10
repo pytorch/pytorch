@@ -1,7 +1,6 @@
-// See note [cuDNN convolution v7 and v8 API]
-// Additional note:
-// This file is currently at a very early stage. It contains code copy-pasted
-// from "conv_sample.cpp", and compiles successfully. But it is not used anywhere yet.
+#include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
+
+#if AT_CUDNN_ENABLED() && defined(CUDNN_VERSION) && CUDNN_VERSION >= 8000
 
 #include <cudnn_frontend.h>
 #include <ATen/ATen.h>
@@ -201,3 +200,5 @@ Tensor _cudnn_convolution_v8(
 }
 
 }}
+
+#endif  // AT_CUDNN_ENABLED and CUDNN_VERSION

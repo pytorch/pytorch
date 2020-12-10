@@ -1484,6 +1484,49 @@ TEST(LoopNest, ScheduleInlineThreeMixedSplit) {
   ASSERT_THROWS_WITH(l.computeInline(a->buf()), "compound indices");
 }
 
+// Check that inlining works for output tensors too
+TEST(LoopNest, ScheduleInlineOutputTensors) {
+  KernelScope kernel_scope;
+  const int M = 4;
+  const int N = 5;
+  const int K = 6;
+
+  Tensor* x = Compute(
+      "x",
+      {{M, "m1"}, {N, "n1"}, {K, "k1"}},
+      [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
+        return m * n * k;
+      });
+  Tensor* y = Compute(
+      "y",
+      {{M, "m2"}, {N, "n2"}, {K, "k2"}},
+      [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
+        return x->call(m, n, k) + m;
+      });
+
+  LoopNest l1({x, y});
+  l1.computeInline(x->buf());
+
+  // would normally compare results but Rand isn't implemented in the
+  // SimpleIREvaluator, even if we could seed it.
+  Stmt* stmt1 = IRSimplifier::simplify(l1.root_stmt());
+  std::ostringstream oss;
+  oss << *stmt1;
+
+  // Check the IR we produced
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int m1 = 0; m1 < 4; m1++)
+# CHECK:   for (int n1 = 0; n1 < 5; n1++)
+# CHECK:     for (int k1 = 0; k1 < 6; k1++)
+# CHECK:       x[m1, n1, k1] = (n1 * m1) * k1;
+# CHECK: for (int m2 = 0; m2 < 4; m2++)
+# CHECK:   for (int n2 = 0; n2 < 5; n2++)
+# CHECK:     for (int k2 = 0; k2 < 6; k2++)
+# CHECK:       y[m2, n2, k2] = (n2 * m2) * k2 + m2;)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
 TEST(LoopNest, ScheduleFuserStyle) {
   KernelScope kernel_scope;
   const int kVectorSize = 8;
@@ -3496,6 +3539,114 @@ TEST(LoopNest, CacheWritesSimple) {
 
   assertAllEqual(b_data, b_ref);
   assertAllEqual(c_data, c_ref);
+}
+
+TEST(LoopNest, DeadStoreElimination) {
+  KernelScope kernel_scope;
+  VarHandle y("y", kInt);
+  VarHandle x("x_tail", kInt);
+  BufHandle f("f", {26, 5}, kFloat);
+  BufHandle g("g", {26, 5}, kFloat);
+  ExprHandle x_outer_end = 5;
+  ExprHandle x_2 = x + x_outer_end * 4;
+  For* stmt1 = For::make(
+      x,
+      0,
+      5,
+      For::make(
+          y,
+          0,
+          5,
+          Block::make({
+              Store::make(f, {x_2, y}, (x_2 + y), 1),
+              Store::make(g, {x_2, y}, (x_2 * y), 1),
+          })));
+  Stmt* stmt = Block::make({stmt1});
+
+  // Will eliminate if not used by an output.
+  LoopNest loop(stmt, {f.node()}, {}, {});
+  loop.eliminateDeadStores();
+
+  std::ostringstream oss;
+  oss << *loop.root_stmt();
+
+  const std::string& expected_ir =
+      R"IR(
+#CHECK:     f[x_tail + 5 * 4, y]
+#CHECK-NOT: g[x_tail + 5 * 4, y]
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  // But won't eliminate if used by different outputs.
+  LoopNest loop2(stmt, {f.node(), g.node()}, {}, {});
+  loop2.eliminateDeadStores();
+
+  oss.clear();
+  oss << *loop2.root_stmt();
+
+  const std::string& expected_ir2 =
+      R"IR(
+#CHECK:     f[x_tail + 5 * 4, y]
+#CHECK:     g[x_tail + 5 * 4, y]
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir2, oss.str());
+}
+
+TEST(LoopNest, DeadStoreEliminationWithIntermediates) {
+  KernelScope kernel_scope;
+  VarHandle x("x", kInt);
+  VarHandle y("y", kInt);
+  VarHandle z("z", kInt);
+  BufHandle f("f", {26 * 5}, kFloat);
+  BufHandle g("g", {26 * 5}, kFloat);
+  BufHandle h("h", {26, 5}, kFloat);
+  ExprHandle x_outer_end = 5;
+  ExprHandle x_2 = x + x_outer_end * 4;
+  For* stmt1 = For::make(x, 0, 26 * 5, Store::make(f, {x}, x));
+  For* stmt2 = For::make(z, 0, 26 * 5, Store::make(g, {z}, z + 1));
+  For* stmt3 = For::make(
+      x,
+      0,
+      5,
+      For::make(
+          y,
+          0,
+          5,
+          Block::make({
+              Store::make(h, {x, y}, Load::make(f, {x * y}, 1), 1),
+          })));
+  Stmt* stmt = Block::make({stmt1, stmt2, stmt3});
+
+  // Will eliminate the write to g, but not f since it used by the producer of
+  // h.
+  LoopNest loop(stmt, {h.node()}, {}, {});
+  loop.eliminateDeadStores();
+
+  std::ostringstream oss;
+  oss << *loop.root_stmt();
+
+  const std::string& expected_ir =
+      R"IR(
+  #CHECK:     f[x] = x;
+  #CHECK-NOT: g[z] =
+  #CHECK:     h[x, y] = f[x * y];
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  // Sanity check won't eliminate if g is an output.
+  LoopNest loop2(stmt, {h.node(), g.node()}, {}, {});
+  loop2.eliminateDeadStores();
+
+  oss.clear();
+  oss << *loop2.root_stmt();
+
+  const std::string& expected_ir2 =
+      R"IR(
+  #CHECK:     f[x] = x;
+  #CHECK:     g[z] = z + 1;
+  #CHECK:     h[x, y] = f[x * y];
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir2, oss.str());
 }
 
 } // namespace jit
