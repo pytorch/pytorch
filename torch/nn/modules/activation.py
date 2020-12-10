@@ -950,7 +950,7 @@ class MultiheadAttention(Module):
           with the zero positions will be unchanged. If a BoolTensor is provided, the positions with the
           value of ``True`` will be ignored while the position with the value of ``False`` will be unchanged.
         - attn_mask: 2D mask :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
-          3D mask :math:`(N*num_heads, L, S)` where N is the batch size, L is the target sequence length,
+          3D mask :math:`(N*\text{num_heads}, L, S)` where N is the batch size, L is the target sequence length,
           S is the source sequence length. attn_mask ensure that position i is allowed to attend the unmasked
           positions. If a ByteTensor is provided, the non-zero positions are not allowed to attend
           while the zero positions will be unchanged. If a BoolTensor is provided, positions with ``True``

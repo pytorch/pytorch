@@ -343,12 +343,12 @@ Tensor& cos_out(Tensor& result, const Tensor& self) { return unary_op_impl_float
 Tensor cos(const Tensor& self) { return unary_op_impl_float(self, cos_stub); }
 Tensor& cos_(Tensor& self) { return unary_op_impl_(self, at::cos_out); }
 
-Tensor& sinh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sinh_stub); }
-Tensor sinh(const Tensor& self) { return unary_op_impl(self, at::sinh_out); }
+Tensor& sinh_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, sinh_stub); }
+Tensor sinh(const Tensor& self) { return unary_op_impl_float(self, sinh_stub); }
 Tensor& sinh_(Tensor& self) { return unary_op_impl_(self, at::sinh_out); }
 
-Tensor& cosh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, cosh_stub); }
-Tensor cosh(const Tensor& self) { return unary_op_impl(self, at::cosh_out); }
+Tensor& cosh_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, cosh_stub); }
+Tensor cosh(const Tensor& self) { return unary_op_impl_float(self, cosh_stub); }
 Tensor& cosh_(Tensor& self) { return unary_op_impl_(self, at::cosh_out); }
 
 Tensor& acosh_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, acosh_stub); }
@@ -385,8 +385,8 @@ Tensor& sqrt_(Tensor& self) { return unary_op_impl_(self, at::sqrt_out); }
 Tensor square(const Tensor& self) { return at::pow(self, 2); }
 Tensor& square_(Tensor& self) { return at::pow_out(self, self, 2); }
 
-Tensor& sigmoid_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sigmoid_stub);  }
-Tensor sigmoid(const Tensor& self) { return unary_op_impl(self, at::sigmoid_out);  }
+Tensor& sigmoid_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, sigmoid_stub);  }
+Tensor sigmoid(const Tensor& self) { return unary_op_impl_float(self, sigmoid_stub);  }
 Tensor& sigmoid_(Tensor& self) { return unary_op_impl_(self, at::sigmoid_out);  }
 
 Tensor& logit_out(

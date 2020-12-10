@@ -12,18 +12,18 @@ namespace at { namespace native {
 
 void maximum_kernel_cuda(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Bool) {
-    gpu_kernel(iter, []GPU_LAMBDA(bool a, bool b) -> bool {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(bool a, bool b) -> bool {
       return a || b;
     });
   } else if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "max_elementwise_cuda", [&]() {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return ::max(a, b);
       });
     });
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "max_elementwise_cuda", [&]() {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         if (a != a) {
           return a;
         } else if (b != b) {
@@ -38,18 +38,18 @@ void maximum_kernel_cuda(TensorIterator& iter) {
 
 void minimum_kernel_cuda(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Bool) {
-    gpu_kernel(iter, []GPU_LAMBDA(bool a, bool b) -> bool {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(bool a, bool b) -> bool {
       return a && b;
     });
   } else if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "minimum_cuda", [&]() {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return ::min(a, b);
       });
     });
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "min_elementwise_cuda", [&]() {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         if (a != a) {
           return a;
         } else if (b != b) {

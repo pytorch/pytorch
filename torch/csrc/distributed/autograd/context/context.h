@@ -147,7 +147,7 @@ using ContextPtr = std::shared_ptr<DistAutogradContext>;
 // doesn't know the current context. It's just a util class.
 class TORCH_API ThreadLocalDistAutogradContext {
  public:
-  // Store 'new_context' to the thread local varaible maintained by this class.
+  // Store 'new_context' to the thread local variable maintained by this class.
   explicit ThreadLocalDistAutogradContext(ContextPtr&& new_context);
   ~ThreadLocalDistAutogradContext();
 
