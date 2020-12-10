@@ -39,8 +39,10 @@ void gpu_kernel_with_index(at::Tensor &output, func_t f) {
   using scalar_t = typename function_traits<func_t>::result_type;
   if (N <= std::numeric_limits<int>::max()) {
     elementwise_kernel_with_index<int><<<grid, num_threads, 0, stream>>>(N, f, output.data_ptr<scalar_t>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     elementwise_kernel_with_index<int64_t><<<grid, num_threads, 0, stream>>>(N, f, output.data_ptr<scalar_t>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
 
@@ -105,7 +107,6 @@ Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, c10::optiona
     result.copy_(r);
   }
 
-  AT_CUDA_CHECK(cudaGetLastError());
   return result;
 }
 
@@ -164,7 +165,6 @@ Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, c10::optiona
     result.copy_(r);
   }
 
-  AT_CUDA_CHECK(cudaGetLastError());
   return result;
 }
 
@@ -201,7 +201,6 @@ Tensor& range_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
 
   });
 
-  AT_CUDA_CHECK(cudaGetLastError());
   return result;
 }
 
@@ -263,7 +262,6 @@ Tensor& arange_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
     }
   });
 
-  AT_CUDA_CHECK(cudaGetLastError());
   return result;
 }
 
