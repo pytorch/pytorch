@@ -452,7 +452,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       ncclCommCounter_(0),
       terminateProcessGroup_(false),
       opTimeout_(options->opTimeout),
-      futureNCCLCallbackStreams_(c10::cuda::device_count()),
       isHighPriorityStream_(options->isHighPriorityStream) {
   TORCH_CHECK(at::cuda::getNumGPUs() != 0,
     "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
@@ -867,15 +866,6 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
 
     // Creates the NCCL streams
     streamVal.push_back(at::cuda::getStreamFromPool(isHighPriorityStream_));
-
-    // If not set before, get a dedicated stream for the device to run
-    // FutureNCCL then callbacks.
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (futureNCCLCallbackStreams_[deviceIndex] == nullptr) {
-      futureNCCLCallbackStreams_[deviceIndex] =
-          std::make_shared<at::cuda::CUDAStream>(
-              at::cuda::getStreamFromPool(isHighPriorityStream_));
-    }
   }
 
   // [Note 2 ]
@@ -1027,8 +1017,7 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
   return c10::make_intrusive<FutureNCCL>(
       at::IValue(*outputs_),
       deviceIndex,
-      cudaEvents_,
-      futureNCCLCallbackStreams_[deviceIndex]);
+      cudaEvents_);
 }
 
 void ProcessGroupNCCL::workEnqueue(
@@ -1066,10 +1055,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   bool can_profile = outputs.size() == 1;
   auto work = initWork(devices, rank_, opType, can_profile ? profilingTitle : nullptr);
 
-  // Store references to outputs and futureNCCLCallbackStream to be used by
-  // WorkNCCL::getFuture.
+  // Store references to outputs to be used by WorkNCCL::getFuture.
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
-  work->futureNCCLCallbackStreams_ = futureNCCLCallbackStreams_;
 
   if (work->recordFunctionEndCallback_) {
     // recordFunctionEndCallback_ is normally called in fininsh() function by
@@ -1152,10 +1139,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
   auto work = initWork(devices, rank_, opType);
 
   if (opType == OpType::RECV) {
-    // Store references to outputs and futureNCCLCallbackStream to be used by
-    // WorkNCCL::getFuture.
+    // Store references to outputs to be used by WorkNCCL::getFuture.
     work->outputs_ = std::make_shared<std::vector<at::Tensor>>(tensors);
-    work->futureNCCLCallbackStreams_ = futureNCCLCallbackStreams_;
   }
 
   at::cuda::OptionalCUDAGuard gpuGuard;
