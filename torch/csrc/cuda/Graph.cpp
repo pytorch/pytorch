@@ -37,11 +37,8 @@ void THCPGraph_init(PyObject *module) {
            &::at::cuda::CUDAGraph::replay,
            py::call_guard<py::gil_scoped_release>(),
            R"(``replay`` replays the Cuda graph captured by this instance.)")
-      // reset is called in __del__ on the Python side.i
-      // Stackoverflow does not like __del__: for one thing, a user-defined __del__ prevents
-      // instances from EVER being garbage collected if they participate in a reference cycle.
-      // However, afaict my only alternative to Python-side __del__ is calling reset in ~CUDAGraph.
-      // Reset may throw, and at least one CI build refuses to compile with a throwing destructor.
+      // reset is called in __del__ on the Python side
+      // (see class Graph in torch/cuda/streams.py for reasons and caveats)
       .def("reset",
            &::at::cuda::CUDAGraph::reset,
            py::call_guard<py::gil_scoped_release>(),

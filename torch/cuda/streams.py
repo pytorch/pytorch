@@ -204,5 +204,16 @@ class Event(torch._C._CudaEventBase):
             return '<torch.cuda.Event uninitialized>'
 
 class Graph(torch._C._CudaGraphBase):
+    # __del__ calls reset() to avoid leaking cudaGraph_t and cudaGraphExec_t
+    # objects owned by the underlying at::cuda::CUDAGraph.
+    #
+    # Stackoverflow does not like user-defined __del__.
+    # For one thing, __del__ prevents Graph instances from EVER being garbage
+    # collected if they participate in a reference cycle.
+    # For another, exceptions thrown in __del__ will only print a warning.
+    #
+    # However, afaict my only alternative is to call CUDAGraph::reset() in ~CUDAGraph
+    # in C++. reset may throw, and at least one CI build refuses to compile with a
+    # throwing destructor, so I'm using __del__.
     def __del__(self):
         super(Graph, self).reset()
