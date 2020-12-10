@@ -318,12 +318,12 @@ def generate_tensor_like_torch_implementations():
     for namespace, funcs in get_overridable_functions().items():
         for func in funcs:
             if func not in testing_overrides:
-                untested_funcs.append("{}.{}".format(namespace, func.__name__))
+                untested_funcs.append("{}.{}".format(namespace.__name__, func.__name__))
     msg = (
-        "The following functions are not tested for __torch_function__ "
-        "support, please ensure there is an entry in the dict returned by "
-        "torch._overrides.get_testing_overrides for this function or if a "
-        "__torch_function__ override does not make sense, add an entry to "
+        "The following functions are not tested for __torch_function__ \n"
+        "support, please ensure there is an entry in the dict returned by \n"
+        "torch._overrides.get_testing_overrides for this function or if a \n"
+        "__torch_function__ override does not make sense, add an entry to \n"
         "the tuple returned by torch._overrides.get_ignored_functions.\n\n{}"
     )
     assert len(untested_funcs) == 0, msg.format(pprint.pformat(untested_funcs))
