@@ -281,6 +281,32 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad):
                                     low=None, high=None,
                                     requires_grad=False))),)
 
+def sample_inputs_slogdet(op_info, device, dtype, requires_grad):
+    from torch.testing._internal.common_utils import (random_hermitian_matrix, random_hermitian_psd_matrix,
+                                                      random_hermitian_pd_matrix, random_square_matrix_of_rank)
+
+    # tests cases are copied from 'method_tests'
+    test_inputs = (
+        torch.randn(1, 1, dtype=dtype, device=device),  # '1x1_pos_det'
+        torch.randn(1, 1, dtype=dtype, device=device),  # '1x1_neg_det'
+        torch.randn(S, S, dtype=dtype, device=device),  # 'pos_det'
+        torch.randn(S, S, dtype=dtype, device=device),  # 'neg_det'
+        random_hermitian_matrix(S, dtype=dtype, device=device),  # 'hermitian'
+        random_hermitian_pd_matrix(S, dtype=dtype, device=device),  # 'hermitian_pd'
+        random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device),  # 'distinct_singular_values'
+        torch.randn(3, 3, 1, 1, dtype=dtype, device=device),  # 'batched_1x1_neg_det'
+        torch.randn(3, 3, S, S, dtype=dtype, device=device),  # 'batched_pos_det'
+        random_hermitian_matrix(S, 3, dtype=dtype, device=device), # 'batched_hermitian'
+        random_hermitian_pd_matrix(S, 3, dtype=dtype, device=device),  # 'batched_hermitian_pd'
+        random_fullrank_matrix_distinct_singular_value(S, 3, dtype=dtype, device=device),  # 'batched_distinct_singular_values'
+    )
+    out = []
+    for a in test_inputs:
+        a.requires_grad = requires_grad
+        out.append(SampleInput(a))
+    return out
+
+
 def np_unary_ufunc_integer_promotion_wrapper(fn):
     # Wrapper that passes PyTorch's default scalar
     #   type as an argument to the wrapped NumPy
@@ -808,6 +834,16 @@ op_db: List[OpInfo] = [
                    promotes_integers_to_float=True,
                    handles_complex_extremals=False,
                    test_complex_grad=False),
+    # TODO: Make this test pass
+    # OpInfo('linalg.slogdet',
+    #        aten_name='linalg_slogdet',
+    #        op=torch.linalg.slogdet,
+    #        dtypes=floating_and_complex_types(),
+    #        test_inplace_grad=False,
+    #        supports_tensor_out=False,
+    #        sample_inputs_func=sample_inputs_slogdet,
+    #        output_func=itemgetter(1),
+    #        decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
 ]
 
 if TEST_SCIPY:
