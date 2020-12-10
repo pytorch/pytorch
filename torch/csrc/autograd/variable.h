@@ -449,7 +449,7 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
 // Differentiable view. Track history with DifferentiableViewMeta.
 inline Variable make_variable_differentiable_view(
     Variable base,
-    at::Tensor& data,
+    const at::Tensor& data,
     CreationMeta creation_meta,
     c10::optional<std::function<at::Tensor(const at::Tensor&)>> view_func = c10::nullopt) {
   if (data.defined()) {
@@ -458,18 +458,18 @@ inline Variable make_variable_differentiable_view(
     // we have to use shallow_copy_and_detach to create a new TensorImpl to avoid
     // moving leaf node into graph interior. This guarantees only 1 TensorImpl
     // allocation happens in view ops.
-    if (data.getIntrusivePtr().use_count() == 1 && data.getIntrusivePtr()->unique_version()) {
-      auto data_impl = data.unsafeGetTensorImpl();
+    if (data.getIntrusivePtr().unique() && data.getIntrusivePtr()->unique_version()) {
+      at::TensorImpl* data_impl = data.unsafeGetTensorImpl();
       data_impl->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
         data_impl, std::move(base), std::move(view_func), creation_meta));
-      return Variable(data);
+      return data;
     } else {
-      auto data_impl = data.getIntrusivePtr()->shallow_copy_and_detach(
+      c10::intrusive_ptr<at::TensorImpl> data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
         /*version_counter=*/0,
         /*allow_tensor_metadata_change=*/true);
-      data_impl->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
-        data_impl.get(), std::move(base), std::move(view_func), creation_meta));
-      return Variable(data_impl);
+      data_impl_copy->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
+        data_impl_copy.get(), std::move(base), std::move(view_func), creation_meta));
+      return Variable(data_impl_copy);
     }
   }
   return Variable();
