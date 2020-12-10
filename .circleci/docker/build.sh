@@ -274,19 +274,19 @@ case "$image" in
     VISION=yes
     KATEX=yes
     ;;
-  pytorch-linux-bionic-rocm3.8-py3.6)
-    ANACONDA_PYTHON_VERSION=3.6
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ROCM_VERSION=3.8
-    ;;
   pytorch-linux-bionic-rocm3.9-py3.6)
     ANACONDA_PYTHON_VERSION=3.6
     PROTOBUF=yes
     DB=yes
     VISION=yes
     ROCM_VERSION=3.9
+    ;;
+  pytorch-linux-bionic-rocm3.10-py3.6)
+    ANACONDA_PYTHON_VERSION=3.6
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM_VERSION=3.10
     ;;
   *)
     # Catch-all for builds that are not hardcoded.

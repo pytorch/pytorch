@@ -268,6 +268,7 @@ core_sources_full_mobile = [
 core_sources_full = core_sources_full_mobile + [
     "torch/csrc/jit/runtime/static/impl.cpp",
     "torch/csrc/jit/runtime/static/ops.cpp",
+    "torch/csrc/jit/runtime/static/passes.cpp",
 ]
 
 libtorch_core_sources = sorted(core_sources_common + core_sources_full + core_trainer_sources)
@@ -525,6 +526,7 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/passes/onnx/constant_fold.cpp",
     "torch/csrc/jit/passes/onnx/eliminate_unused_items.cpp",
     "torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.cpp",
+    "torch/csrc/jit/passes/onnx/list_model_parameters.cpp",
     "torch/csrc/jit/passes/onnx/function_substitution.cpp",
     "torch/csrc/jit/passes/onnx/helper.cpp",
     "torch/csrc/jit/passes/onnx/peephole.cpp",

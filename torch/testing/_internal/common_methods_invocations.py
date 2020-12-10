@@ -1,4 +1,4 @@
-from functools import reduce
+from functools import reduce, wraps
 from operator import mul, itemgetter
 import collections
 
@@ -10,18 +10,19 @@ from torch.autograd import Variable
 from typing import List, Tuple, Dict, Any
 
 from torch.testing import \
-    (make_non_contiguous, _dispatch_dtypes,
-     floating_types, floating_types_and, floating_and_complex_types,
-     floating_and_complex_types_and, all_types_and_complex_and, all_types_and)
+    (make_non_contiguous, _dispatch_dtypes, floating_types, floating_types_and,
+     floating_and_complex_types, floating_and_complex_types_and,
+     all_types_and_complex_and, all_types_and)
 from torch.testing._internal.common_device_type import \
-    (skipCUDAIfNoMagma, skipCPUIfNoLapack,
+    (skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfRocm,
      expectedAlertNondeterministic, precisionOverride)
 from torch.testing._internal.common_utils import \
     (prod_single_zero, random_square_matrix_of_rank,
      random_symmetric_matrix, random_symmetric_psd_matrix,
      random_symmetric_pd_matrix, make_nonzero_det,
      random_fullrank_matrix_distinct_singular_value, set_rng_seed,
-     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY)
+     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
+     torch_to_numpy_dtype_dict, TEST_WITH_SLOW)
 
 if TEST_SCIPY:
     import scipy.special
@@ -53,6 +54,23 @@ class SampleInput(object):
         self.kwargs = kwargs if kwargs is not None else {}
 
 
+_NOTHING = object()  # Unique value to distinguish default from anything else
+
+
+# Extension of getattr to support qualified names
+# e.g. _getattr_qual(torch, 'linalg.norm') -> torch.linalg.norm
+def _getattr_qual(obj, name, default=_NOTHING):
+    try:
+        for path in name.split('.'):
+            obj = getattr(obj, path)
+        return obj
+    except AttributeError:
+        if default is not _NOTHING:
+            return default
+        else:
+            raise
+
+
 # Classes and methods for the operator database
 class OpInfo(object):
     """Operator information and helper functions for acquiring it."""
@@ -69,27 +87,30 @@ class OpInfo(object):
                                             # with the dtypes support on the tested device
                  test_inplace_grad=True,  # whether to gradcheck and gradgradcheck the inplace variant
                  test_complex_grad=True,  # whether to gradcheck and gradgradcheck for complex dtypes
-                 skip_bfloat16_grad=False,  # whether to skip grad and gradgradcheck for bfloat16 dtype 
+                 skip_bfloat16_grad=False,  # whether to skip grad and gradgradcheck for bfloat16 dtype
                  assert_autodiffed=False,  # if a op's aten::node is expected to be symbolically autodiffed
-                 autodiff_nonfusible_nodes=None,  # a list of strings with node names that are expected to be in a 
-                                                  # DifferentiableGraph when autodiffed. Ex: ['aten::add', 'aten::mm'], 
+                 autodiff_nonfusible_nodes=None,  # a list of strings with node names that are expected to be in a
+                                                  # DifferentiableGraph when autodiffed. Ex: ['aten::add', 'aten::mm'],
                                                   # default is populated to be ['aten::(name of Python operator)']
                  autodiff_fusible_nodes=None,  # a list of strings with node names that are expected to be in FusionGroups
-                                               # inside of DifferentiableGraphs when this operation is autodiffed. 
-                                               # Ex: ['aten::add', 'aten::mm'], defaults to an empty list  
-                                               # Note: currently no ops use fusible nodes 
-                 output_func=lambda x: x,  # fn mapping output to part that should be gradcheck'ed 
+                                               # inside of DifferentiableGraphs when this operation is autodiffed.
+                                               # Ex: ['aten::add', 'aten::mm'], defaults to an empty list
+                                               # Note: currently no ops use fusible nodes
+                 output_func=lambda x: x,  # fn mapping output to part that should be gradcheck'ed
                  supports_tensor_out=True,  # whether the op supports the out kwarg, returning a Tensor
                  skips=tuple(),  # information about which tests to skip
                  decorators=None,  # decorators to apply to generated tests
                  promotes_integers_to_float=False,  # whether op promotes unary output to float or not
-                 sample_inputs_func=None):  # function to generate sample inputs
+                 sample_inputs_func=None,  # function to generate sample inputs
+                 aten_name=None,  # name of the corresponding aten:: operator
+                 ):
 
         # Validates the dtypes are generated from the dispatch-related functions
         for dtype_list in (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM):
             assert isinstance(dtype_list, (_dispatch_dtypes, type(None)))
 
         self.name = name
+        self.aten_name = aten_name if aten_name is not None else name
 
         self.dtypes = set(dtypes)
         self.dtypesIfCPU = set(dtypesIfCPU) if dtypesIfCPU is not None else self.dtypes
@@ -98,12 +119,10 @@ class OpInfo(object):
         self._default_test_dtypes = set(default_test_dtypes) if default_test_dtypes is not None else None
 
         # NOTE: if the op is unspecified it is assumed to be under the torch namespace
-        if op is None:
-            assert hasattr(torch, self.name), f"Can't find torch.{self.name}"
-        self.op = op if op else getattr(torch, self.name)
-        self.method_variant = getattr(torch.Tensor, name) if hasattr(torch.Tensor, name) else None
+        self.op = op if op else _getattr_qual(torch, self.name)
+        self.method_variant = getattr(torch.Tensor, name, None)
         inplace_name = name + "_"
-        self.inplace_variant = getattr(torch.Tensor, inplace_name) if hasattr(torch.Tensor, name) else None
+        self.inplace_variant = getattr(torch.Tensor, inplace_name, None)
         self.skip_bfloat16_grad = skip_bfloat16_grad
 
         self.test_inplace_grad = test_inplace_grad
@@ -147,10 +166,7 @@ class OpInfo(object):
 
     def sample_inputs(self, device, dtype, requires_grad=False):
         """Returns an iterable of SampleInputs."""
-        if self.sample_inputs:
-            return self.sample_inputs_func(self, device, dtype, requires_grad)
-        else:
-            return tuple()
+        return self.sample_inputs_func(self, device, dtype, requires_grad)
 
     # Returns True if the test should be skipped and False otherwise
     def should_skip(self, cls_name, test_name, device_type, dtype):
@@ -195,14 +211,17 @@ M = 10
 S = 5
 
 
-def sample_inputs_unary(self, device, dtype, requires_grad):
-    low, high = self.domain
-    low = low if low is None else low + self._domain_eps
-    high = high if high is None else high - self._domain_eps
+def sample_inputs_unary(op_info, device, dtype, requires_grad):
+    low, high = op_info.domain
+    low = low if low is None else low + op_info._domain_eps
+    high = high if high is None else high - op_info._domain_eps
 
     return (SampleInput(make_tensor((L,), device, dtype,
                                     low=low, high=high,
-                                    requires_grad=requires_grad)),)
+                                    requires_grad=requires_grad)),
+            SampleInput(make_tensor((), device, dtype,
+                                    low=low, high=high,
+                                    requires_grad=requires_grad)))
 
 # Metadata class for unary "universal functions (ufuncs)" that accept a single
 # tensor and have common properties like:
@@ -251,20 +270,108 @@ class UnaryUfuncInfo(OpInfo):
         self._domain_eps = 1e-5
 
 
-def sample_inputs_addmm(self, device, dtype, requires_grad):
+def sample_inputs_addmm(op_info, device, dtype, requires_grad):
     return (SampleInput((make_tensor((S, S), device, dtype,
-                                     low=None, high=None, 
-                                     requires_grad=requires_grad), 
-                        make_tensor((S, S), device, dtype, 
-                                    low=None, high=None, 
-                                    requires_grad=requires_grad), 
-                        make_tensor((S, S), device, dtype, 
-                                    low=None, high=None, 
-                                    requires_grad=False))),) 
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                        make_tensor((S, S), device, dtype,
+                                    low=None, high=None,
+                                    requires_grad=requires_grad),
+                        make_tensor((S, S), device, dtype,
+                                    low=None, high=None,
+                                    requires_grad=False))),)
+
+def np_unary_ufunc_integer_promotion_wrapper(fn):
+    # Wrapper that passes PyTorch's default scalar
+    #   type as an argument to the wrapped NumPy
+    #   unary ufunc when given an integer input.
+    #   This mimicks PyTorch's integer->floating point
+    #   type promotion.
+    #
+    # This is necessary when NumPy promotes
+    #   integer types to double, since PyTorch promotes
+    #   integer types to the default scalar type.
+
+    # Helper to determine if promotion is needed
+    def is_integral(dtype):
+        return dtype in [np.bool, np.uint8, np.int8, np.int16, np.int32, np.int64]
+
+    # NOTE: Promotion in PyTorch is from integer types to the default dtype
+    np_dtype = torch_to_numpy_dtype_dict[torch.get_default_dtype()]
+
+    @wraps(fn)
+    def wrapped_fn(x):
+        if is_integral(x.dtype):
+            return fn(x, dtype=np_dtype)
+        return fn(x)
+
+    return wrapped_fn
+
+
+# Metadata class for Fast Fourier Transforms in torch.fft.
+class SpectralFuncInfo(OpInfo):
+    """Operator information for torch.fft transforms. """
+
+    def __init__(self,
+                 name,  # the string name of the function
+                 *,
+                 ref=None,  # Reference implementation (probably in np.fft namespace)
+                 dtypes=floating_and_complex_types(),
+                 dtypesIfCPU=None,
+                 dtypesIfCUDA=None,
+                 dtypesIfROCM=None,
+                 ndimensional: bool,  # Whether dim argument can be a tuple
+                 skips=None,
+                 decorators=None,
+                 **kwargs):
+        dtypesIfCPU = dtypesIfCPU if dtypesIfCPU is not None else dtypes
+        dtypesIfCUDA = dtypesIfCUDA if dtypesIfCUDA is not None else dtypes
+        dtypesIfROCM = dtypesIfROCM if dtypesIfROCM is not None else dtypes
+
+        # gradgrad is quite slow
+        if not TEST_WITH_SLOW:
+            skips = skips if skips is not None else []
+            skips.append(SkipInfo('TestGradients', 'test_fn_gradgrad'))
+
+        decorators = decorators if decorators is not None else []
+        decorators += [skipCPUIfNoMkl, skipCUDAIfRocm]
+
+        super().__init__(name=name,
+                         dtypes=dtypes,
+                         dtypesIfCPU=dtypesIfCPU,
+                         dtypesIfCUDA=dtypesIfCUDA,
+                         dtypesIfROCM=dtypesIfROCM,
+                         skips=skips,
+                         decorators=decorators,
+                         **kwargs)
+        self.ref = ref if ref is not None else _getattr_qual(np, name)
+        self.ndimensional = ndimensional
+
+
+    def sample_inputs(self, device, dtype, requires_grad=False):
+        tensor = make_tensor((L, M), device, dtype,
+                             low=None, high=None,
+                             requires_grad=requires_grad)
+        if self.ndimensional:
+            return [
+                SampleInput(tensor),
+                SampleInput(tensor, kwargs=dict(dim=(-2,))),
+                SampleInput(tensor, kwargs=dict(norm='ortho')),
+                SampleInput(tensor, kwargs=dict(s=(10, 15))),
+                SampleInput(tensor, kwargs=dict(s=10, dim=1, norm='ortho')),
+            ]
+        else:
+            return [
+                SampleInput(tensor),
+                SampleInput(tensor, kwargs=dict(dim=-2)),
+                SampleInput(tensor, kwargs=dict(norm='ortho')),
+                SampleInput(tensor, kwargs=dict(n=15)),
+                SampleInput(tensor, kwargs=dict(n=10, dim=1, norm='ortho')),
+            ]
 
 
 # Operator database (sorted alphabetically)
-op_db: List[Any] = [
+op_db: List[OpInfo] = [
     # NOTE: CPU complex acos produces incorrect outputs (https://github.com/pytorch/pytorch/issues/42952)
     UnaryUfuncInfo('acos',
                    ref=np.arccos,
@@ -411,10 +518,15 @@ op_db: List[Any] = [
                                 dtypes=[torch.float], active_if=TEST_WITH_ROCM),
                    )),
     UnaryUfuncInfo('cosh',
-                   ref=np.cosh,
-                   dtypesIfCPU=floating_and_complex_types(),
+                   ref=np_unary_ufunc_integer_promotion_wrapper(np.cosh),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+                   promotes_integers_to_float=True,
                    assert_autodiffed=True,
                    skips=(
+                       # Reference: https://github.com/pytorch/pytorch/issues/48641
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cpu', dtypes=[torch.int8]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics', device_type='cpu',
@@ -422,6 +534,89 @@ op_db: List[Any] = [
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 device_type='cuda', dtypes=[torch.float16]),
                    )),
+    SpectralFuncInfo('fft.fft',
+                     aten_name='fft_fft',
+                     ref=np.fft.fft,
+                     ndimensional=False,
+                     dtypes=all_types_and_complex_and(torch.bool),
+                     default_test_dtypes=floating_and_complex_types(),
+                     supports_tensor_out=False,
+                     test_inplace_grad=False,),
+    SpectralFuncInfo('fft.fftn',
+                     aten_name='fft_fftn',
+                     ref=np.fft.fftn,
+                     ndimensional=True,
+                     dtypes=all_types_and_complex_and(torch.bool),
+                     default_test_dtypes=floating_and_complex_types(),
+                     supports_tensor_out=False,
+                     test_inplace_grad=False,
+                     decorators=[precisionOverride(
+                         {torch.float: 1e-4, torch.cfloat: 1e-4})],),
+    SpectralFuncInfo('fft.hfft',
+                     aten_name='fft_hfft',
+                     ref=np.fft.hfft,
+                     ndimensional=False,
+                     dtypes=all_types_and_complex_and(torch.bool),
+                     default_test_dtypes=floating_and_complex_types(),
+                     supports_tensor_out=False,
+                     test_inplace_grad=False,),
+    SpectralFuncInfo('fft.rfft',
+                     aten_name='fft_rfft',
+                     ref=np.fft.rfft,
+                     ndimensional=False,
+                     dtypes=all_types_and(torch.bool),
+                     default_test_dtypes=floating_and_complex_types(),
+                     supports_tensor_out=False,
+                     test_inplace_grad=False,),
+    SpectralFuncInfo('fft.rfftn',
+                     aten_name='fft_rfftn',
+                     ref=np.fft.rfftn,
+                     ndimensional=True,
+                     dtypes=all_types_and(torch.bool),
+                     default_test_dtypes=floating_and_complex_types(),
+                     supports_tensor_out=False,
+                     test_inplace_grad=False,
+                     decorators=[precisionOverride({torch.float: 1e-4})],),
+    SpectralFuncInfo('fft.ifft',
+                     aten_name='fft_ifft',
+                     ref=np.fft.ifft,
+                     ndimensional=False,
+                     dtypes=all_types_and_complex_and(torch.bool),
+                     default_test_dtypes=floating_and_complex_types(),
+                     supports_tensor_out=False,
+                     test_inplace_grad=False,),
+    SpectralFuncInfo('fft.ifftn',
+                     aten_name='fft_ifftn',
+                     ref=np.fft.ifftn,
+                     ndimensional=True,
+                     dtypes=all_types_and_complex_and(torch.bool),
+                     default_test_dtypes=floating_and_complex_types(),
+                     supports_tensor_out=False,
+                     test_inplace_grad=False,),
+    SpectralFuncInfo('fft.ihfft',
+                     aten_name='fft_ihfft',
+                     ref=np.fft.ihfft,
+                     ndimensional=False,
+                     dtypes=all_types_and(torch.bool),
+                     default_test_dtypes=floating_types(),
+                     supports_tensor_out=False,
+                     test_inplace_grad=False,),
+    SpectralFuncInfo('fft.irfft',
+                     aten_name='fft_irfft',
+                     ref=np.fft.irfft,
+                     ndimensional=False,
+                     dtypes=all_types_and_complex_and(torch.bool),
+                     default_test_dtypes=floating_and_complex_types(),
+                     supports_tensor_out=False,
+                     test_inplace_grad=False,),
+    SpectralFuncInfo('fft.irfftn',
+                     aten_name='fft_irfftn',
+                     ref=np.fft.irfftn,
+                     ndimensional=True,
+                     dtypes=all_types_and_complex_and(torch.bool),
+                     default_test_dtypes=floating_and_complex_types(),
+                     supports_tensor_out=False,
+                     test_inplace_grad=False,),
     UnaryUfuncInfo('log',
                    ref=np.log,
                    domain=(0, float('inf')),
@@ -508,8 +703,10 @@ op_db: List[Any] = [
                                 dtypes=[torch.float], active_if=TEST_WITH_ROCM),
                    )),
     UnaryUfuncInfo('sinh',
-                   ref=np.sinh,
-                   dtypesIfCPU=floating_and_complex_types(),
+                   ref=np_unary_ufunc_integer_promotion_wrapper(np.sinh),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+                   promotes_integers_to_float=True,
                    assert_autodiffed=True,
                    decorators=(precisionOverride({torch.float16: 1e-2}),),
                    skips=(
@@ -519,6 +716,9 @@ op_db: List[Any] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble],
                                 active_if=IS_WINDOWS),
+                       # Reference: https://github.com/pytorch/pytorch/issues/48641
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cpu', dtypes=[torch.int8]),
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 device_type='cuda', dtypes=[torch.float16]),
                    )),
@@ -599,9 +799,9 @@ op_db: List[Any] = [
                        SkipInfo('TestGradients', 'test_inplace_gradgrad',
                                 dtypes=[torch.cdouble]),
                        SkipInfo('TestCommon', 'test_variant_consistency_eager',
-                                dtypes=[torch.cfloat, torch.cdouble]), 
+                                dtypes=[torch.cfloat, torch.cdouble]),
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                                dtypes=[torch.cfloat, torch.cdouble])), 
+                                dtypes=[torch.cfloat, torch.cdouble])),
                    promotes_integers_to_float=True,
                    handles_complex_extremals=False),
 ]
@@ -613,7 +813,7 @@ if TEST_SCIPY:
             return (1 / (1 + np.exp(-x)))
         return scipy.special.expit(x)
 
-    op_db_scipy_reference = [
+    op_db_scipy_reference: List[OpInfo] = [
         UnaryUfuncInfo('sigmoid',
                        ref=reference_sigmoid,
                        decorators=(precisionOverride({torch.float16: 1e-2,
@@ -664,6 +864,7 @@ if TEST_SCIPY:
 
 # Common operator groupings
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
+spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -767,8 +968,6 @@ def ident(x):
 def method_tests():
     set_rng_seed(0)
     return [
-        ('acosh', torch.rand(S, S, S).add(1), NO_ARGS, ''),
-        ('acosh', torch.rand(tuple()).add(1), NO_ARGS, 'scalar'),
         ('add', (S, S, S), ((S, S, S),), '', (True,)),
         ('add', (S, S, S), ((S, S),), 'broadcast_rhs', (True,)),
         ('add', (S, S), ((S, S, S),), 'broadcast_lhs', (True,)),
@@ -779,10 +978,6 @@ def method_tests():
         ('add', (S, S, S), (3.14,), 'constant', (True,)),
         ('add', (), (3.14,), 'scalar_constant', (True,)),
         ('add', (S, S, S), (3.14j,), 'complex_scalar_constant', (True,)),
-        ('asinh', (S, S, S), NO_ARGS, ''),
-        ('asinh', (), NO_ARGS, 'scalar'),
-        ('atanh', torch.rand(S, S, S), NO_ARGS, ''),
-        ('atanh', torch.rand(tuple()), NO_ARGS, 'scalar'),
         ('__radd__', (S, S, S), (3.14,), 'constant', (True, 'aten::add')),
         ('__radd__', (), (3.14,), 'scalar_constant', (True, 'aten::add')),
         ('sub', (S, S, S), ((S, S, S),), '', (True,)),
@@ -929,42 +1124,14 @@ def method_tests():
         ('expand_as', (S, 1, 1), (torch.rand(S, S, S),), '', (False,)),
         ('exp', (S, S, S), NO_ARGS, '', (True,)),
         ('exp', (), NO_ARGS, 'scalar', (True,)),
-        ('exp2', (S, S, S), NO_ARGS, '', (False,)),
-        ('exp2', (), NO_ARGS, 'scalar', (False,)),
         ('expm1', (S, S, S), NO_ARGS, '', (True,)),
         ('expm1', (), NO_ARGS, 'scalar', (True,)),
-        ('erf', torch.rand(S, S, S), NO_ARGS, '', (True,)),
-        ('erf', uniform_scalar(requires_grad=True), NO_ARGS, 'scalar', (True,)),
-        ('erfc', torch.rand(S, S, S), NO_ARGS, '', (True,)),
-        ('erfc', uniform_scalar(requires_grad=True), NO_ARGS, 'scalar', (True,)),
         ('erfinv', torch.rand(S, S, S).clamp(-0.9, 0.9), NO_ARGS),
         ('erfinv', normal_scalar_clamp(-0.9, 0.9, requires_grad=True), NO_ARGS, 'scalar'),
-        ('log', torch.rand(S, S, S) + 1e-2, NO_ARGS, '', (True,)),
-        ('log', uniform_scalar(1e-2, requires_grad=True), NO_ARGS, 'scalar', (True,)),
-        ('log10', torch.rand(S, S, S) + 1e-2, NO_ARGS, '', (True,)),
-        ('log10', uniform_scalar(1e-2, requires_grad=True), NO_ARGS, 'scalar', (True,)),
-        ('log1p', torch.rand(S, S, S), NO_ARGS, '', (True,)),
-        ('log1p', uniform_scalar(requires_grad=True), NO_ARGS, 'scalar', (True,)),
-        ('log2', torch.rand(S, S, S) + 1e-2, NO_ARGS, '', (True,)),
-        ('log2', uniform_scalar(1e-2, requires_grad=True), NO_ARGS, 'scalar', (True,)),
-        ('log', torch.randn(S, S, S, dtype=torch.cdouble) + 1e-2, NO_ARGS, 'complex', (True,)),
-        ('log', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
-        ('log10', torch.randn(S, S, S, dtype=torch.cdouble) + 1e-2, NO_ARGS, 'complex', (True,)),
-        ('log10', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
-        ('log2', torch.randn(S, S, S, dtype=torch.cdouble) + 1e-2, NO_ARGS, 'complex', (True,)),
-        ('log2', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
-        ('tanh', (S, S, S), NO_ARGS, '', (True,)),
-        ('tanh', (), NO_ARGS, 'scalar', (True,)),
-        ('sigmoid', (S, S, S), NO_ARGS, '', (True,)),
-        ('sigmoid', (), NO_ARGS, 'scalar', (True,)),
         ('logit', torch.randn(S, S, S).clamp(0.1, 0.9).requires_grad_(True), NO_ARGS, ''),
         ('logit', torch.randn(S, S, S).clamp(0.1, 0.9).requires_grad_(True), (0.2,), 'eps'),
         ('logit', uniform_scalar().clamp(0.1, 0.9).requires_grad_(True), NO_ARGS, 'scalar'),
         ('logit', uniform_scalar().clamp(0.1, 0.9).requires_grad_(True), (0.2,), 'scalar_eps'),
-        ('sinh', (S, S, S), NO_ARGS, '', (True,)),
-        ('sinh', (), NO_ARGS, 'scalar', (True,)),
-        ('cosh', (S, S, S), NO_ARGS, '', (True,)),
-        ('cosh', (), NO_ARGS, 'scalar', (True,)),
         ('conj', (S, S, S), NO_ARGS),
         ('copysign', (S, S, S), ((S, S, S),), '', (False,)),
         ('copysign', (S, S, S), ((S, S),), 'broadcast_rhs', (False,)),
@@ -991,18 +1158,6 @@ def method_tests():
         ('clamp', (), (None, 0.5), 'min_scalar', (True,)),
         ('clamp', (), (0.5, None), 'max_scalar', (True,)),
         ('clamp', (S, S), (), 'max_scalar_kwarg', (True,), (), (), ident, {'max': 1}),
-        ('sqrt', torch.rand(S, S, S) + 5e-4, NO_ARGS, '', (True,)),
-        ('sqrt', uniform_scalar(5e-4, requires_grad=True), NO_ARGS, 'scalar', (True,)),
-        ('sin', (S, S, S), NO_ARGS, '', (True,)),
-        ('sin', (), NO_ARGS, 'scalar', (True,)),
-        ('cos', (S, S, S), NO_ARGS, '', (True,)),
-        ('cos', (), NO_ARGS, 'scalar', (True,)),
-        ('tan', torch.randn(S, S, S).clamp(-1, 1), NO_ARGS, '', (True,)),
-        ('tan', (S, S, S), NO_ARGS, 'complex', (True,)),
-        ('asin', torch.randn(S, S, S).clamp(-0.9, 0.9), NO_ARGS, '', (True,)),
-        ('acos', torch.randn(S, S, S).clamp(-0.9, 0.9), NO_ARGS, '', (True,)),
-        ('atan', (S, S, S), NO_ARGS, '', (True,)),
-        ('atan', (), NO_ARGS, 'scalar', (True,)),
         ('atan2', (S, S, S), ((S, S, S),)),
         ('atan2', (), ((),), 'scalar'),
         ('atan2', (S, S, S), ((S,),), 'broadcast_rhs'),
@@ -1721,6 +1876,7 @@ def method_tests():
         ('sort', (), NO_ARGS, 'scalar'),
         ('sort', (), (0,), 'dim_scalar'),
         ('sort', (), (0, True), 'dim_desc_scalar'),
+        ('msort', (S, M, S), NO_ARGS),
         ('topk', (S, M, S), (3,)),
         ('topk', (S, M, S), (3, 1), 'dim', (), [1]),
         ('topk', (S, M, S), (3, 1, True), 'dim_desc', (), [1]),

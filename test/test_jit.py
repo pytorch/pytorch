@@ -15815,8 +15815,8 @@ def add_autograd_test(
                                                     check_types=check_types)
 
                 # alias annotation testing
-                if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
-                    check_alias_annotation(name, (self_variable,) + args_variable, kwargs_variable)
+                if not is_magic_method and test_name not in EXCLUDE_SCRIPT and not exclude_tensor_method(name, test_name):
+                    check_alias_annotation(name, (self_variable,) + args_variable, kwargs_variable, aten_name=name)
 
             check(name)
             inplace_name = name + '_'
