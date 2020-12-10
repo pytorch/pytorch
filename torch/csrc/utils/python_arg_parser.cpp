@@ -349,7 +349,7 @@ bool is_tensor_and_append_overloaded(PyObject* obj, std::vector<py::handle>* ove
   return false;
 }
 
-bool is_scalar_list_and_append_overloaded(PyObject* obj, int argnum) {
+bool is_scalar_list(PyObject* obj) {
   auto tuple = six::isTuple(obj);
   if (!(tuple || PyList_Check(obj))) {
     return false;
@@ -470,7 +470,7 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
     case ParameterType::STRING: return THPUtils_checkString(obj);
     default: throw std::runtime_error("unknown parameter type");
     case ParameterType::SCALAR_LIST: {
-      return is_scalar_list_and_append_overloaded(obj, argnum);
+      return is_scalar_list(obj);
     }
   }
 }
@@ -1068,9 +1068,17 @@ at::Tensor PythonArgs::tensor_slow(int i) {
   return tensor;
 }
 
+at::Scalar PythonArgs::scalar_slow(int i) {
+  if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
+    auto& var = THPVariable_Unpack(args[i]);
+    jit::tracer::ArgumentStash::stashValue(
+        signature.params[i].name, idx, var, jit::NumberType::get());
+  }
 
-template <typename T>
-at::Scalar PythonArgs::get_scalar(T arg) {
+  return scalar_slow(args[i]);
+}
+
+at::Scalar PythonArgs::scalar_slow(PyObject* arg) {
   // Zero-dim tensors are converted to Scalars as-is. Note this doesn't currently
   // handle most NumPy scalar types except np.float64.
   if (THPVariable_Check(arg)) {
@@ -1089,20 +1097,6 @@ at::Scalar PythonArgs::get_scalar(T arg) {
     return at::Scalar(THPUtils_unpackComplexDouble(arg));
   }
   return at::Scalar(THPUtils_unpackDouble(arg));
-}
-
-at::Scalar PythonArgs::scalar_slow(int i) {
-  if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
-    auto& var = THPVariable_Unpack(args[i]);
-    jit::tracer::ArgumentStash::stashValue(
-        signature.params[i].name, idx, var, jit::NumberType::get());
-  }
-
-  return get_scalar(args[i]);
-}
-
-at::Scalar PythonArgs::scalar_slow(PyObject* arg) {
-  return get_scalar(arg);
 }
 
 } // namespace torch
