@@ -1468,7 +1468,7 @@ class TestLinalg(TestCase):
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
-    @dtypes(torch.double, torch.float)
+    @dtypes(*floating_and_complex_types())
     def test_eig_basic(self, device, dtype):
         a = torch.tensor([[1.96, 0.00, 0.00, 0.00, 0.00],
                           [-6.49, 3.80, 0.00, 0.00, 0.00],
