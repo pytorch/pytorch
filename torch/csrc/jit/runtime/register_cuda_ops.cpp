@@ -72,11 +72,11 @@ RegisterOperators reg({
         [](Stack* stack) {
             auto v = pop(stack);
             auto s = v.toCustomClass<torch::jit::CUDAStream>();
-            // To set the CUDA Stream , the jit stream needs to be converted to
-            // c10::cuda::CUDAStream. This can be achieved by packing and unpacking
-            // the stream to uint64_t representation. Pack converts the stream to uint64_t
-            // representation and then unpacked to using c10::cuda::CUDAStream::unpack
-            // The unpacked stream is used to set the current CUDA Stream.
+            // To set the current CUDA stream using c10::cuda::setCurrentCUDAStream, the jit::CUDAStream 
+            // object needs to be converted to c10::cuda::CUDAStream. Since the latter cannot be returned 
+            // from a class registered via TorchBind, this can only be achieved by packing the c10::cuda::CUDAStream
+            // instance contained inside the jit::CUDAStream object to a uint64_t representation, and unpacking it inside
+            // this operator. The unpacked stream is then used to set the current CUDA stream.
             auto packed = s->pack();
             auto unpacked = c10::cuda::CUDAStream::unpack(packed);
             c10::cuda::setCurrentCUDAStream(unpacked);
