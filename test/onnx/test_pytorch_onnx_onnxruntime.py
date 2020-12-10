@@ -18,6 +18,12 @@ from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_S
 from typing import List
 import model_defs.word_language_model as word_language_model
 import torchvision
+from torchvision import ops
+from torchvision.models.detection.image_list import ImageList
+from torchvision.models.detection.transform import GeneralizedRCNNTransform
+from torchvision.models.detection.rpn import AnchorGenerator, RPNHead, RegionProposalNetwork
+from torchvision.models.detection.roi_heads import RoIHeads
+from torchvision.models.detection.faster_rcnn import FastRCNNPredictor, TwoMLPHead
 import onnx
 
 def to_numpy(tensor):
@@ -5544,7 +5550,7 @@ class TestONNXRuntime(unittest.TestCase):
         input = torch.rand(3, 10, 20)
         input_test = torch.rand(3, 100, 150)
         self.run_model(TransformModule(), [(input,), (input_test,)],
-                       input_names=["input1"], dynamic_axes={"input1": [0, 1, 2, 3]})
+                       input_names=["input1"], dynamic_axes={"input1": [0, 1, 2]})
 
     def test_transform_images(self):
 
@@ -5702,8 +5708,8 @@ class TestONNXRuntime(unittest.TestCase):
                 proposals, _ = self.rpn(images, features)
                 detections, _ = self.roi_heads(features, proposals, images.image_sizes)
                 detections = self.transform.postprocess(detections,
-                                                               images.image_sizes,
-                                                               original_image_sizes)
+                                                        images.image_sizes,
+                                                        original_image_sizes)
                 return detections
 
         images = torch.rand(2, 3, 100, 100)
