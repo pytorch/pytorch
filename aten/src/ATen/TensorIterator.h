@@ -418,7 +418,7 @@ struct CAFFE2_API TensorIterator final : public TensorIteratorBase {
   void set_output(
       int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options,
       DimnameList names,
-      c10::optional<TensorAdditionalOptions> additional_options = c10::nullopt) override;
+      c10::optional<TensorQuantizationOptions> quant_options = c10::nullopt) override;
 };
 
 class CAFFE2_API TensorIteratorConfig final {
