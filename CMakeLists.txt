@@ -678,7 +678,7 @@ if(USE_ASAN)
     string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fsanitize=address")
 endif()
 
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
   include(CheckCSourceCompiles)
   check_c_source_compiles("#include <arm_neon.h>
 int main() {
@@ -695,7 +695,7 @@ int main() {
   endif()
 endif()
 
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
   include(CheckCSourceCompiles)
   check_c_source_compiles("#include <arm_neon.h>
 int main() {
