@@ -65,11 +65,9 @@ class CUDAStream final : public CustomClassHolder {
   friend class CUDAEvent;
 };
 
-/*
-* The CUDAEvent class is a custom class designed to add support for CUDA Events in JIT
-* The class wraps all the CUDA Event operations of c10::cuda::CUDAEvent.
-* For more details , please refer aten/src/ATen/cuda/CUDAEvent.h
-*/
+// This class is a wrapper around at::cuda::CUDAStream.
+// It is needed because TorchBind does not support all of the argument types
+// for at::cuda::CUDAEvent. For more details, please refer to aten/src/ATen/cuda/CUDAEvent.h.
 class CUDAEvent final : public CustomClassHolder {
  public:
   CUDAEvent(
