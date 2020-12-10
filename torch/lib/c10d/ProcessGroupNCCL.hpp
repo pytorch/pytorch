@@ -231,19 +231,9 @@ class ProcessGroupNCCL : public ProcessGroup {
     }
 
    private:
-    // This constructor is used by then callback, it skips setting the value at
-    // the beginning. Later, the value will be set using markCompleted with the
-    // return value of callback.
-    explicit FutureNCCL(
-        c10::DeviceIndex deviceIndex,
-        std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents)
+    explicit FutureNCCL(c10::DeviceIndex deviceIndex)
         : at::ivalue::Future(c10::ListType::create(c10::TensorType::get())),
-          deviceIndex_(deviceIndex),
-          cudaEvents_(std::move(cudaEvents)) {
-      TORCH_INTERNAL_ASSERT(
-          cudaEvents_->size() == 1,
-          "FutureNCCL only supports single-process single-device mode.");
-    }
+          deviceIndex_(deviceIndex) {}
     // We need this because it will be the ::make() static method that actually
     // creates the instance. This is a brittle approach and the passkey idiom
     // would be a more robust solution. However, this will go away in #48505.
@@ -275,6 +265,14 @@ class ProcessGroupNCCL : public ProcessGroup {
         TORCH_INTERNAL_ASSERT(data_ptr.device().index() == deviceIndex_);
       }
       value_ = std::move(value);
+
+      TORCH_INTERNAL_ASSERT(cudaEvents_ == nullptr);
+      // Create a new cudaEvents object of size 1 that will record the current
+      // stream after callback and will be passed to the new FutureNCCL.
+      cudaEvents_ = std::make_shared<std::vector<at::cuda::CUDAEvent>>(1);
+      // In case of chained then callback calls, cudaEvents
+      // records callback's stream.
+      (*cudaEvents_)[0].record(at::cuda::getCurrentCUDAStream(deviceIndex_));
     }
 
     // Just returns FutureNCCL's value after wait returns.
@@ -317,13 +315,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     c10::intrusive_ptr<Future> then(
         std::function<at::IValue(void)> callback,
         at::TypePtr /* unused */) override {
-      // Create a new cudaEvents object of size 1 that will record the current
-      // stream after callback and will be passed to the new FutureNCCL.
-      auto thenFutCudaEvents =
-          std::make_shared<std::vector<at::cuda::CUDAEvent>>(1);
-      // Create a FutureNCCL without setting a value.
-      auto fut = c10::make_intrusive<FutureNCCL>(
-          deviceIndex_, thenFutCudaEvents);
+      auto fut = c10::make_intrusive<FutureNCCL>(deviceIndex_);
       // The new future needs the DataPtr extractor when it gets marked complete
       // but this might happen immediately inline or in parallel by another
       // thread. In both these cases this would/might happen before the user has
@@ -339,10 +331,6 @@ class ProcessGroupNCCL : public ProcessGroup {
           [&](std::function<at::IValue(void)> cb) {
             try {
               fut->markCompleted(at::IValue(cb()));
-              // In case of chained then callback calls, thenFutCudaEvents
-              // records callback's stream.
-              (*thenFutCudaEvents)[0].record(
-                  at::cuda::getCurrentCUDAStream(deviceIndex_));
             } catch (const std::exception& e) {
               fut->setError(std::current_exception());
             }
