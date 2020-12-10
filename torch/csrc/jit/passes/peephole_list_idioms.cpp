@@ -25,8 +25,9 @@ c10::optional<size_t> normalizeIndex(int64_t index, size_t len) {
 // so we first use the Alias Db to collect the set of list values
 // which we shouldn't optimize.
 struct PeepholeOptimizeListIdiomsImpl {
-  PeepholeOptimizeListIdiomsImpl(const std::shared_ptr<Graph>& graph)
-      : graph_(graph), aliasDb_(torch::make_unique<AliasDb>(graph_)) {
+  PeepholeOptimizeListIdiomsImpl(std::shared_ptr<Graph> graph)
+      : graph_(std::move(graph)),
+        aliasDb_(torch::make_unique<AliasDb>(graph_)) {
     collectMutatedLists(graph_->block());
     run(graph_->block());
   }
@@ -96,7 +97,8 @@ struct PeepholeOptimizeListIdiomsImpl {
             continue;
           }
           for (size_t i = 0; i < node->outputs().size(); ++i) {
-            node->output(i)->replaceAllUsesWith(list_creation_node->inputs().at(i));
+            node->output(i)->replaceAllUsesWith(
+                list_creation_node->inputs().at(i));
           }
         }
       } else if (node->kind() == aten::add) {
@@ -106,18 +108,20 @@ struct PeepholeOptimizeListIdiomsImpl {
         auto second_input = node->inputs().at(1);
         // already checked first, need to check second
         if (mutated_lists_.count(second_input)) {
-         continue;
+          continue;
         }
-        if (first_input->node()->kind() != prim::ListConstruct || second_input->node()->kind() != prim::ListConstruct) {
+        if (first_input->node()->kind() != prim::ListConstruct ||
+            second_input->node()->kind() != prim::ListConstruct) {
           continue;
         }
         WithInsertPoint guard(node);
-        auto list_construct = graph_->insertNode(graph_->create(prim::ListConstruct));
+        auto list_construct =
+            graph_->insertNode(graph_->create(prim::ListConstruct));
         list_construct->output()->setType(node->output()->type());
-        for (Value * v: first_input->node()->inputs()) {
+        for (Value* v : first_input->node()->inputs()) {
           list_construct->addInput(v);
         }
-        for (Value * v: second_input->node()->inputs()) {
+        for (Value* v : second_input->node()->inputs()) {
           list_construct->addInput(v);
         }
         node->output()->replaceAllUsesWith(list_construct->output());

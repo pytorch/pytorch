@@ -1,4 +1,3 @@
-
 import torch
 from torch.nn.modules.pooling import MaxPool2d
 

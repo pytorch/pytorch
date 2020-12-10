@@ -1924,7 +1924,7 @@ class TestMixTracingScripting(JitTestCase):
         @torch.jit.script
         def bar(x):
             y = int(foo(x))
-            if True:
+            if 1 == 1:
                 y = 7
             return y + 1
 

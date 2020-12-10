@@ -1,8 +1,13 @@
-from pickle import _Pickler, _getattribute, whichmodule, _extension_registry, _compat_pickle  # type: ignore
+from pickle import Pickler, _Pickler, _getattribute, whichmodule, _extension_registry, _compat_pickle  # type: ignore
 from pickle import GLOBAL, STACK_GLOBAL, EXT1, EXT2, EXT4, PicklingError
+from types import FunctionType
 from struct import pack
+import importlib
+
 
 class CustomImportPickler(_Pickler):
+    dispatch = _Pickler.dispatch.copy()
+
     def __init__(self, import_module, *args, **kwargs):
         self.import_module = import_module
         super().__init__(*args, **kwargs)
@@ -76,3 +81,26 @@ class CustomImportPickler(_Pickler):
                     "pickle protocol %i" % (module, name, self.proto)) from None
 
         self.memoize(obj)
+    dispatch[FunctionType] = save_global
+
+def import_module_from_importers(module_name, importers):
+    last_err = None
+    for import_module in importers:
+        try:
+            return import_module(module_name)
+        except ModuleNotFoundError as err:
+            last_err = err
+
+    if last_err is not None:
+        raise last_err
+    else:
+        raise ModuleNotFoundError(module_name)
+
+def create_custom_import_pickler(data_buf, importers):
+    if importers == [importlib.import_module]:
+        # if we are using the normal import library system, then
+        # we can use the C implementation of pickle which is faster
+        return Pickler(data_buf, protocol=3)
+    else:
+        return CustomImportPickler(lambda mod: import_module_from_importers(mod, importers),
+                                   data_buf, protocol=3)

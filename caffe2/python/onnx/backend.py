@@ -705,7 +705,13 @@ class Caffe2Backend(Backend):
             else:
                 opset_version = 1
 
-        model = onnx.shape_inference.infer_shapes(model)
+        # Prior to onnx version update to onnx-1.8.0, errors caused by failures in
+        # in the onnx shape inference call were being supressed. Hence a try-catch block
+        # is added around the infer_shapes call to avoid these failures and preserve status
+        try:
+            model = onnx.shape_inference.infer_shapes(model)
+        except RuntimeError:
+            warnings.warn("ShapeInferenceWarning: Inferred shape and existing shape differ in rank")
 
         ws = Workspace()
         device_option = get_device_option(Device(device))
@@ -873,7 +879,13 @@ class Caffe2Backend(Backend):
     def _onnx_model_to_caffe2_net(cls, onnx_model, device, opset_version, include_initializers):
         device_option = get_device_option(Device(device))
 
-        onnx_model = onnx.utils.polish_model(onnx_model)
+        # Prior to onnx version update to onnx-1.8.0, errors caused by failures in
+        # in the onnx shape inference call were being supressed. Hence a try-catch block
+        # is added around the infer_shapes call to avoid these failures and preserve status
+        try:
+            onnx_model = onnx.utils.polish_model(onnx_model)
+        except RuntimeError:
+            warnings.warn("ShapeInferenceWarning: Inferred shape and existing shape differ in rank")
         init_model = cls.optimize_onnx(onnx_model, init=True)
         pred_model = cls.optimize_onnx(onnx_model, predict=True)
 

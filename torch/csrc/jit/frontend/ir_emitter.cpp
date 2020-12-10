@@ -43,7 +43,7 @@ using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
 struct Refinement {
   Refinement(std::string identifier, TypePtr type)
-      : identifier_(std::move(identifier)), type_(type) {}
+      : identifier_(std::move(identifier)), type_(std::move(type)) {}
   const std::string& identifier() const {
     return identifier_;
   }
@@ -71,7 +71,7 @@ struct RefinementSet {
       : RefinementSet(
             Refinements({std::move(single_true)}),
             Refinements({std::move(single_false)})) {}
-  RefinementSet() {} // empty
+  RefinementSet() = default; // empty
   RefinementSet And(const RefinementSet& rhs) const {
     // if the result of an AND is true, both a & b had to be true,
     // so we take the union of a.true_refinements and b.true_refinements.
@@ -245,7 +245,7 @@ struct Environment {
     while (runner->next) {
       runner = runner->next.get();
     }
-    runner->error_messages[name] = msg;
+    runner->error_messages[name] = std::move(msg);
   }
 
   // see if type error has been set for a variable
@@ -281,7 +281,7 @@ struct Environment {
       TypePtr type) {
     auto g = b->owningGraph();
     g->insertNode(g->createStore(name, v))->setSourceRange(loc);
-    type_table[name] = type;
+    type_table[name] = std::move(type);
   }
 
   SugaredValuePtr findInThisFrame(const std::string& name) {
@@ -404,7 +404,7 @@ struct Environment {
             << " but is being assigned to a value of type "
             << as_simple_value->type()->repr_str();
       }
-      insertStore(name, loc, std::move(as_simple_value), annotated_type);
+      insertStore(name, loc, as_simple_value, annotated_type);
     } else {
       value_table[name] = std::move(value);
     }
@@ -945,43 +945,45 @@ struct to_ir {
   }
 
   void emitDelete(const Delete& stmt) {
-    if (stmt.expr().kind() == TK_SUBSCRIPT) {
-      Subscript subscript(stmt.expr());
-      const List<Expr>& subscript_exprs = subscript.subscript_exprs();
-      if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
-        throw ErrorReport(stmt.range())
-            << "del statements only support deletion at a single index, "
-               "slicing is not supported"
-               " (see https://github.com/pytorch/pytorch/issues/31430)";
-      }
-      const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
-      const SourceRange& val_range = subscript.value().range();
-      Value* idx = emitExpr(subscript_exprs[0]);
-      Value* val = sv->asValue(val_range, method);
-
-      // If val is a class instance, this is a method call to a type-specific
-      // implementation of del defined in a __delitem__ method.
-      if (auto cls = val->type()->cast<ClassType>()) {
-        if (!cls->findMethod("__delitem__")) {
-          throw ErrorReport(stmt.range())
-              << "Class does not define __delitem__";
+    for (const auto& target : stmt.targets()) {
+      if (target.kind() == TK_SUBSCRIPT) {
+        Subscript subscript(target);
+        const List<Expr>& subscript_exprs = subscript.subscript_exprs();
+        if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
+          throw ErrorReport(target.range())
+              << "del statements only support deletion at a single index, "
+                 "slicing is not supported"
+                 " (see https://github.com/pytorch/pytorch/issues/31430)";
         }
+        const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
+        const SourceRange& val_range = subscript.value().range();
+        Value* idx = emitExpr(subscript_exprs[0]);
+        Value* val = sv->asValue(val_range, method);
 
-        // Use MethodValue to call the method to handle recursion.
-        MethodValue(val, "__delitem__")
-            .call(stmt.range(), method, {idx}, {}, 0);
+        // If val is a class instance, this is a method call to a type-specific
+        // implementation of del defined in a __delitem__ method.
+        if (auto cls = val->type()->cast<ClassType>()) {
+          if (!cls->findMethod("__delitem__")) {
+            throw ErrorReport(target.range())
+                << "Class does not define __delitem__";
+          }
+
+          // Use MethodValue to call the method to handle recursion.
+          MethodValue(val, "__delitem__")
+              .call(stmt.range(), method, {idx}, {}, 0);
+        } else {
+          auto node = graph->create(aten::Delete, {val, idx}, 0)
+                          ->setSourceRange(target.range());
+          graph->insertNode(node);
+        }
+      } else if (target.kind() == TK_VAR) {
+        Var var(target);
+        environment_stack->removeVar(var.name(), /*check_if_removed=*/true);
       } else {
-        auto node = graph->create(aten::Delete, {val, idx}, 0)
-                        ->setSourceRange(stmt.range());
-        graph->insertNode(node);
+        throw ErrorReport(target.range())
+            << "del statements are only supported for deleting"
+               " list and dict items and variables";
       }
-    } else if (stmt.expr().kind() == TK_VAR) {
-      Var var(stmt.expr());
-      environment_stack->removeVar(var.name(), /*check_if_removed=*/true);
-    } else {
-      throw ErrorReport(stmt.range())
-          << "del statements are only supported for deleting"
-             " list and dict items and variables";
     }
   }
 
@@ -1105,9 +1107,9 @@ struct to_ir {
   }
 
   RefinementSet findIsNoneRefinements(
-      Expr lhs,
+      const Expr& lhs,
       Value* lhs_value,
-      Expr rhs,
+      const Expr& rhs,
       Value* rhs_value,
       int tok) {
     if (rhs.kind() != TK_NONE && lhs.kind() == TK_NONE) {
@@ -1223,6 +1225,10 @@ struct to_ir {
         c10::optional<bool> static_if = c10::nullopt;
         if (expr_out->node()->kind() == aten::is_scripting) {
           static_if = true;
+        }
+        // MetaCompile on boolean literals and constants
+        if (auto maybe_ivalue = toIValue(expr_out)) {
+          static_if = maybe_ivalue->toBool();
         }
         return CondValue(expr_out, RefinementSet({}), static_if);
       } break;
@@ -1357,8 +1363,8 @@ struct to_ir {
   Value* emitIfExpr(
       const SourceRange& range,
       const CondValue& cond_value,
-      std::function<Value*()> true_expr,
-      std::function<Value*()> false_expr) {
+      const std::function<Value*()>& true_expr,
+      const std::function<Value*()>& false_expr) {
     Node* n = graph->insertNode(create(prim::If, range, 0));
     n->addInput(cond_value.value());
     auto* true_block = n->addBlock();
@@ -1367,7 +1373,7 @@ struct to_ir {
     auto emit_if_expr = [this, &range](
                             Block* b,
                             const RefinementSet& refinements,
-                            std::function<Value*()> expr_value) {
+                            const std::function<Value*()>& expr_value) {
       pushFrame(b);
       WithInsertPoint guard(b);
       insertRefinements(range, refinements);
@@ -1376,9 +1382,8 @@ struct to_ir {
       popFrame();
     };
 
-    emit_if_expr(true_block, cond_value.refinements(), std::move(true_expr));
-    emit_if_expr(
-        false_block, cond_value.refinements().Not(), std::move(false_expr));
+    emit_if_expr(true_block, cond_value.refinements(), true_expr);
+    emit_if_expr(false_block, cond_value.refinements().Not(), false_expr);
 
     auto true_type = true_block->outputs().at(0)->type();
     auto false_type = false_block->outputs().at(0)->type();
@@ -1598,7 +1603,7 @@ struct to_ir {
     // category checks: tuple_check = true, types = {float, int}
     struct GatheredTypes {
       GatheredTypes(ScriptTypeParser parser) : typeParser_(std::move(parser)) {}
-      void gather(Expr classinfo) {
+      void gather(const Expr& classinfo) {
         if (classinfo.kind() == TK_TUPLE_LITERAL) {
           for (Expr e : TupleLiteral(classinfo).inputs()) {
             gather(e);
@@ -1691,7 +1696,7 @@ struct to_ir {
   // semantics specified at
   // https://github.com/onnx/onnx/blob/master/docs/Operators.md#Loop
   void emitLoopCommon(
-      SourceRange range,
+      const SourceRange& range,
       const std::function<void()>& emit_body,
       const SugaredValuePtr& iter_val,
       c10::optional<List<Expr>> targets,
@@ -1756,7 +1761,7 @@ struct to_ir {
   void emitUnrolledLoop(
       const SourceRange& loc,
       const std::function<void()>& emit_body,
-      SugaredValuePtr iterable,
+      const SugaredValuePtr& iterable,
       const List<Expr>& targets) {
     auto static_len = iterable->staticLen();
     TORCH_INTERNAL_ASSERT(
@@ -3069,8 +3074,8 @@ struct to_ir {
     // through RPC in TorchScript,
     // Ideally, function value in JIT IR is first-class citizen and
     // The RPC C++ entry API can take c10::Function directly.
-    auto rpcMinInputs = 2;
-    auto rpcMaxInputs = 5; // NOLINT
+    size_t rpcMinInputs = 2;
+    size_t rpcMaxInputs = 5; // NOLINT
     std::string op_name = rpc_op.toUnqualString();
     if (apply.inputs().size() < rpcMinInputs ||
         apply.inputs().size() > rpcMaxInputs) {

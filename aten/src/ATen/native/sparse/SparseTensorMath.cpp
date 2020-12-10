@@ -42,6 +42,12 @@ namespace {
     return csr;
   }
 
+  inline SparseTensor get_result_tensor_for_unary_op(const SparseTensor& input) {
+    if (c10::isIntegralType(input.scalar_type(), /*includeBool=*/true)) {
+      return at::empty_like(input, input.options().dtype(c10::get_default_dtype()));
+    }
+    return at::empty_like(input);
+  }
 }
 
 // --------------------------------------------------------------------
@@ -102,6 +108,10 @@ SparseTensor& mul_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scal
 SparseTensor& log1p_out_sparse(SparseTensor& r, const SparseTensor& t) {
   TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
   TORCH_CHECK(t.is_sparse(), "Tensor should be sparse");
+  TORCH_CHECK(
+      !c10::isIntegralType(r.scalar_type(), /*includeBool=*/true),
+      "log1p: result type cannot be Integral, got:",
+      r.scalar_type());
 
   if (is_same_tensor(r, t)) {
     // don't have in-place log1p for uncoalesced input because coalesce() is not in-place
@@ -112,6 +122,11 @@ SparseTensor& log1p_out_sparse(SparseTensor& r, const SparseTensor& t) {
   }
   r._values().log1p_();
   return r;
+}
+
+SparseTensor log1p_sparse(const SparseTensor& t) {
+  auto result = get_result_tensor_for_unary_op(t);
+  return log1p_out_sparse(result, t);
 }
 
 SparseTensor& log1p_sparse_(SparseTensor& t) {
@@ -147,6 +162,10 @@ SparseTensor& neg_sparse_(SparseTensor& t) {
 SparseTensor& asin_out_sparse(SparseTensor& r, const SparseTensor& t) {
   TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
   TORCH_CHECK(t.is_sparse(), "Tensor should be sparse");
+  TORCH_CHECK(
+      !c10::isIntegralType(r.scalar_type(), /*includeBool=*/true),
+      "asin: result type cannot be Integral, got:",
+      r.scalar_type());
 
   if (is_same_tensor(r, t)) {
     // don't have in-place asin for uncoalesced input because coalesce() is not in-place, see above comment
@@ -156,6 +175,11 @@ SparseTensor& asin_out_sparse(SparseTensor& r, const SparseTensor& t) {
   }
   r._values().asin_();
   return r;
+}
+
+SparseTensor asin_sparse(const SparseTensor& t) {
+  auto result = get_result_tensor_for_unary_op(t);
+  return asin_out_sparse(result, t);
 }
 
 SparseTensor& asin_sparse_(SparseTensor& t) {
@@ -217,7 +241,7 @@ static SparseTensor& coalesce_(SparseTensor& tensor) {
 // values=[1., 1.] (after truncation), which sum to 2.f instead of 3.f.
 // To perform floor division the sparse tensor must be coalesced first.
 
-SparseTensor& div_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, const Tensor& value) {
+SparseTensor& div_out_sparse_zerodim(const SparseTensor& t, const Tensor& value, SparseTensor& r) {
   TORCH_CHECK(value.dim() == 0, "Sparse division requires a scalar or ",
     "zero-dim dense tensor divisor (got shape ", value.sizes(), " for divisor)");
   TORCH_CHECK(!value.is_sparse(), "Sparse division requires a scalar or ",
@@ -255,15 +279,15 @@ Tensor div_sparse(const Tensor& self, const Tensor& value) {
     commonDtype = typeMetaToScalarType(at::get_default_dtype());
   }
   Tensor result = at::empty({0}, self.options().dtype(commonDtype));
-  return div_out_sparse_zerodim(result, self, value);
+  return div_out_sparse_zerodim(self, value, result);
 }
 
 Tensor& div_sparse_(Tensor& self, const Tensor& value) {
-  return div_out_sparse_zerodim(self, self, value);
+  return div_out_sparse_zerodim(self, value, self);
 }
 
 SparseTensor& div_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scalar value) {
-  return div_out_sparse_zerodim(r, t, wrapped_scalar_tensor(value));
+  return div_out_sparse_zerodim(t, wrapped_scalar_tensor(value), r);
 }
 
 // --------------------------------------------------------------------
@@ -1084,7 +1108,7 @@ SparseTensor& _sspaddmm_out_cpu(
       "sspaddmm: Argument #1: Expected dim 1 size ", dim_k, ", got ", t.size(1));
 
   int64_t nnz        = sparse._nnz();
-  // We have to make indices contiguous as we use indices.data_ptr in _to_csr which assumes row-contiguous storage  
+  // We have to make indices contiguous as we use indices.data_ptr in _to_csr which assumes row-contiguous storage
   LongTensor indices = sparse._indices().contiguous();
   Tensor values      = sparse._values();
 
