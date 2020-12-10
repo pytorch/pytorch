@@ -90,6 +90,13 @@ class WindowsJob:
             if self.cuda_version
             else "cpu"
         )
+        
+        props_dict["cuda_complete_version"] = (
+            miniutils.quote(str(self.cuda_version))
+            if self.cuda_version
+            else "cpu"
+        )
+        
         props_dict["name"] = "_".join(name_parts)
 
         return [{key_name: props_dict}]
