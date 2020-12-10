@@ -251,9 +251,9 @@ private:
     // kernel_to_schema_permutation then contains a mapping from argument index in KernelFunc to the corresponding
     // argument index in the schema.
     // For the aten::example op, that'll be
-    //  > kernel_to_schema_permutation_indices = [2, 4, 0, 1, 3]
+    //  > kernel_to_schema_permutation_indices = [3, 4, 0, 1, 2]
     // Interpreted as a mapping, this means
-    //  - argument 0 in KernelFunc maps to argument 2 in the schema,
+    //  - argument 0 in KernelFunc maps to argument 3 in the schema,
     //  - argument 1 in KernelFunc maps to argument 4 in the schema,
     //  - argument 2 in KernelFunc maps to argument 0 in the schema,
     //  - ...
