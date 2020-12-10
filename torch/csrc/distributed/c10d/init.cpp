@@ -480,15 +480,14 @@ and :meth:`~torch.distributed.store.add` since one key is used to coordinate all
 the workers using the store.
 
 .. warning::
-    The ``num_keys`` API is only supported by the :class:`~torch.distributed.TCPStore` and :class:`~torch.distributed.HashStore`. Using this API
-    with the :class:`~torch.distributed.FileStore` will result in an exception.
+    When used with the :class:`~torch.distributed.TCPStore`, ``num_keys`` returns the number of keys written to the underlying file. If the store is destructed and another store is created with the same file, the original keys will be retained.
 
 Returns:
     The number of keys present in the store.
 
 Example::
     >>> import torch.distributed as dist
-    >>> # Using TCPStore as an example, HashStore can also be used
+    >>> # Using TCPStore as an example, other store types can also be used
     >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
     >>> store.set("first_key", "first_value")
     >>> # This should return 2
