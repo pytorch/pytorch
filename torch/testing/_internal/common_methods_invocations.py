@@ -250,6 +250,7 @@ class UnaryUfuncInfo(OpInfo):
                  handles_large_floats=True,  # whether the op correctly handles large float values (like 1e20)
                  handles_extremals=True,  # whether the op correctly handles extremal values (like inf)
                  handles_complex_extremals=True,  # whether the op correct handles complex extremals (like inf -infj)
+                 supports_complex_to_float=False,  # op supports casting from complex input to real output safely eg. angle
                  sample_inputs_func=sample_inputs_unary,
                  **kwargs):
         super(UnaryUfuncInfo, self).__init__(name,
@@ -264,6 +265,7 @@ class UnaryUfuncInfo(OpInfo):
         self.handles_large_floats = handles_large_floats
         self.handles_extremals = handles_extremals
         self.handles_complex_extremals = handles_complex_extremals
+        self.supports_complex_to_float = supports_complex_to_float
 
         # Epsilon to ensure grad and gradgrad checks don't test values
         #   outside a function's domain.
@@ -808,6 +810,20 @@ op_db: List[OpInfo] = [
                    promotes_integers_to_float=True,
                    handles_complex_extremals=False,
                    test_complex_grad=False),
+    UnaryUfuncInfo('angle',
+                   ref=np.angle,
+                   dtypes=all_types_and_complex_and(torch.bool),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool),
+                   decorators=(precisionOverride({torch.float16: 1e-2,
+                                                  torch.bfloat16: 1e-2}),),
+                   skips=(
+                       # RuntimeError: "isfinite" not implemented for 'BFloat16'
+                       SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                dtypes=[torch.bfloat16]),),
+                   promotes_integers_to_float=True,
+                   supports_complex_to_float=True,
+                   test_inplace_grad=False),
 ]
 
 if TEST_SCIPY:
