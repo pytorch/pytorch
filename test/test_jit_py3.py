@@ -393,7 +393,7 @@ class TestScriptPy3(JitTestCase):
 
         raises_regex_with_highlight = self.assertRaisesRegexWithHighlight(
             Exception,
-            "Static functions in NamedTuples are currently not supporte",
+            "Static functions in NamedTuples are currently not supported",
             "NamedTupleWithMethods",
         )
 

@@ -111,6 +111,8 @@ struct PythonResolver : public Resolver {
     }
 
     if (isNamedTupleClass(obj)) {
+      // If obj is a NamedTuple, check that it meets requirements for JIT compilation.
+      py::module::import("torch._jit_internal").attr("check_can_compile_named_tuple")(obj, loc);
       return registerNamedTuple(obj, loc);
     }
 
