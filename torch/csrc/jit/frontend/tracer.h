@@ -258,6 +258,10 @@ TORCH_API void addInputs(
 TORCH_API void addInputs(
     Node* n,
     const char* name,
+    List<c10::optional<at::Tensor>> value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
     ArrayRef<c10::intrusive_ptr<c10::ivalue::Object>> value,
     const ClassTypePtr& class_type);
 TORCH_API void addInputs(Node* n, const char* name, ArrayRef<double> value);
