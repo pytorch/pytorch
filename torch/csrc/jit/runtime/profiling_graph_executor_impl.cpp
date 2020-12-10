@@ -30,8 +30,6 @@
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 
-C10_DECLARE_bool();
-
 C10_DEFINE_bool(
     torch_jit_enable_new_executor,
     true,

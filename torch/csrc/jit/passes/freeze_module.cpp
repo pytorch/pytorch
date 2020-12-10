@@ -442,7 +442,9 @@ class AttributePropagator {
             if (!isEval || preserveParameters_) {
               auto type = attrModule.type();
               auto slot = *type->findAttributeSlot(name);
-              if (type->is_parameter(slot) || type->is_buffer(slot)) {
+              if (type->is_parameter(slot) || type->is_buffer(slot) ||
+                  (attr.isObject() &&
+                   !attr.toObjectRef().type()->is_module())) {
                 continue;
               } else {
                 attr = overrideGradient(attr);

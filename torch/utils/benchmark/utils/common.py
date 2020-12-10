@@ -48,7 +48,7 @@ class TaskSpec:
 
     def setup_str(self) -> str:
         return (
-            "" if self.setup == "pass"
+            "" if (self.setup == "pass" or not self.setup)
             else f"setup:\n{textwrap.indent(self.setup, '  ')}" if "\n" in self.setup
             else f"setup: {self.setup}"
         )

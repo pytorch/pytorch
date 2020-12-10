@@ -137,7 +137,7 @@ def format_trace_inputs(f: NativeFunction) -> str:
     if f.func.is_out_fn():
         # for *_out functions, handle the result argument differently for inplace/outplace.
         # For inplace: just add the input to the end to confirm with the JIT schema
-        name = f.func.out_arguments[0].name  # TODO: old codegen behavior - should fix
+        name = f.func.arguments.out[0].name  # TODO: old codegen behavior - should fix
         inplace = ADD_TRACE_INPUT.substitute(name=name, input=name)
 
         # for outplace: do nothing, except if the function is a factory.
@@ -145,7 +145,7 @@ def format_trace_inputs(f: NativeFunction) -> str:
         # take an extra TensorOptions argument, which is missing in the _out function
         has_tensor_return = any(r.type.is_tensor_like() for r in f.func.returns)
         has_tensor_input_arg = any(a.type.is_tensor_like()
-                                   for a in itertools.chain(f.func.arguments, f.func.kwarg_only_arguments))
+                                   for a in itertools.chain(f.func.arguments.positional, f.func.arguments.kwarg_only))
         is_factory_method = f.category_override == 'factory' or (has_tensor_return and not has_tensor_input_arg)
 
         # HACK: preserve old codegen behavior - the old codegen set the `is_factory_method`
@@ -251,7 +251,7 @@ def format_prerecord_trace(f: NativeFunction) -> str:
         add_trace_inputs=format_trace_inputs(f) + additional_inputs,
         inplace_guard=INPLACE_GUARD.substitute(
             name=cpp.name(f.func),
-            mutable_input=f.func.out_arguments[0].name if f.func.out_arguments else 'self',
+            mutable_input=f.func.arguments.out[0].name if f.func.arguments.out else 'self',
         ) if is_inplace else '',
     )
 
@@ -269,7 +269,7 @@ def format_postrecord_trace(f: NativeFunction) -> str:
     # For outplacing ops, *_out overloads require special handling to move the
     # output *argument* to a return value
     if f.func.is_out_fn():
-        output_names_outplace = [arg.name for arg in f.func.out_arguments]
+        output_names_outplace = [arg.name for arg in f.func.arguments.out]
         output_names_inplace = cpp.return_names(f)
 
         # Code size optimization: the common case is that the return value is

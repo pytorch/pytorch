@@ -1,11 +1,12 @@
 import torch
+import numpy as np
 
 import random
 from torch._six import nan
 from itertools import product
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests)
+    (TestCase, run_tests, make_tensor)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyOnCPUAndCUDA,
      skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA)
@@ -111,6 +112,33 @@ class TestSortAndSelect(TestCase):
         torch.sort(x, out=(res2val, res2ind), descending=True)
         self.assertIsOrdered('descending', x, res2val, res2ind,
                              'random with NaNs')
+
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    def test_msort(self, device, dtype):
+        def test(shape):
+            tensor = make_tensor(shape, device, dtype, low=-9, high=9)
+            if tensor.size() != torch.Size([]):
+                expected = torch.from_numpy(np.msort(tensor.cpu().numpy()))
+            else:
+                expected = tensor  # numpy.msort() does not support empty shapes tensor
+
+            result = torch.msort(tensor)
+            self.assertEqual(result, expected)
+
+            out = torch.empty_like(result)
+            torch.msort(tensor, out=out)
+            self.assertEqual(out, expected)
+
+        shapes = (
+            [],
+            [0, ],
+            [20, ],
+            [1, 20],
+            [30, 30],
+            [10, 20, 30]
+        )
+        for shape in shapes:
+            test(shape)
 
     def test_topk(self, device):
         def topKViaSort(t, k, dim, dir):
