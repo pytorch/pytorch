@@ -9,6 +9,8 @@ import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.qat as nnqat
 
+from typing import Optional, Dict, Set, Callable
+
 from .stubs import QuantStub, DeQuantStub
 from .fake_quantize import (
     default_affine_fixed_qparams_fake_quant,
@@ -106,12 +108,14 @@ DEFAULT_MODULE_TO_ACT_POST_PROCESS = {
     nn.Tanh: default_symmetric_fixed_qparams_fake_quant,
 }
 
-def get_default_static_quant_module_mappings():
+def get_default_static_quant_module_mappings() -> Dict[Callable, Callable]:
     ''' Get module mapping for post training static quantization
     '''
     return DEFAULT_STATIC_QUANT_MODULE_MAPPINGS
 
-def get_static_quant_module_class(float_module_class, additional_static_quant_mapping=None):
+def get_static_quant_module_class(
+        float_module_class: Callable,
+        additional_static_quant_mapping: Optional[Dict[Callable, Callable]] = None) -> Callable:
     r"""n Get the statically quantized module class corresponding to
     the floating point module class
     """
@@ -124,7 +128,9 @@ def get_static_quant_module_class(float_module_class, additional_static_quant_ma
         " does not have a corresponding quantized module class"
     return static_quant_module_class
 
-def get_dynamic_quant_module_class(float_module_class, additional_dynamic_quant_mapping=None):
+def get_dynamic_quant_module_class(
+        float_module_class: Callable,
+        additional_dynamic_quant_mapping: Dict[Callable, Callable] = None) -> Callable:
     r"""n Get the dynamically quantized module class corresponding to
     the floating point module class
     """
@@ -137,17 +143,17 @@ def get_dynamic_quant_module_class(float_module_class, additional_dynamic_quant_
         " does not have a corresponding quantized module class"
     return dynamic_quant_module_class
 
-def get_default_qat_module_mappings():
+def get_default_qat_module_mappings() -> Dict[Callable, Callable]:
     ''' Get default module mapping for quantization aware training
     '''
     return DEFAULT_QAT_MODULE_MAPPINGS
 
-def get_default_dynamic_quant_module_mappings():
+def get_default_dynamic_quant_module_mappings() -> Dict[Callable, Callable]:
     ''' Get module mapping for post training dynamic quantization
     '''
     return DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS
 
-def get_default_qconfig_propagation_list():
+def get_default_qconfig_propagation_list() -> Set[Callable]:
     ''' Get the default list of module types that we'll attach qconfig
     attribute to in prepare
     '''
@@ -160,7 +166,7 @@ def get_default_qconfig_propagation_list():
     )
     return QCONFIG_PROPAGATE_MODULE_CLASS_LIST
 
-def get_default_compare_output_module_list():
+def get_default_compare_output_module_list() -> Set[Callable]:
     ''' Get list of module class types that we will record output
     in numeric suite
     '''
@@ -176,7 +182,7 @@ def get_default_compare_output_module_list():
     return NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_MODULE_LIST
 
 # TODO: merge with get_static_quant_module_class
-def get_quantized_operator(float_op):
+def get_quantized_operator(float_op: Callable) -> Callable:
     ''' Get the quantized operator corresponding to the float operator
     '''
     quantized_op = DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS.get(float_op, None)
@@ -184,7 +190,7 @@ def get_quantized_operator(float_op):
         'Operator {} does not have corresponding quantized op'.format(str(float_op))
     return quantized_op
 
-def _get_special_act_post_process(module):
+def _get_special_act_post_process(module: torch.nn.Module) -> Optional[Callable]:
     r""" Get the special activation post process for `module`, this has
     higher priority than the activation post process in `qconfig`
     e.g.
@@ -193,5 +199,5 @@ def _get_special_act_post_process(module):
     """
     return DEFAULT_MODULE_TO_ACT_POST_PROCESS.get(type(module), None)
 
-def _has_special_act_post_process(module):
+def _has_special_act_post_process(module: torch.nn.Module) -> bool:
     return module.training and type(module) in DEFAULT_MODULE_TO_ACT_POST_PROCESS
