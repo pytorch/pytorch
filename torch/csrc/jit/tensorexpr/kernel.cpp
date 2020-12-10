@@ -776,6 +776,8 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::to: {
+      // see handling of aten::to in tensorexpr_fuser.cpp for why we only
+      // need to handle the first input
       auto node = v->node();
       return computeOneOperand("aten_to", v, [node](const ExprHandle& a) {
         auto output_dtype = findDtypeForValue(node->output());

@@ -797,9 +797,12 @@ class TensorExprFuser {
         }
       }
       // cant support non-constant pin_memory or pin_memory = True
-      if (auto index = node->schema().argumentIndexWithName("pin_memory")) {
-        auto inp = node->inputs(*index);
-        if (inp->type() != NoneType::get() && constant_as<bool>(node->inputs(*index).value_or(True)) {
+      if (auto maybe_index =
+              node->schema().argumentIndexWithName("pin_memory")) {
+        int index = *maybe_index;
+        auto inp = node->input(index);
+        if (inp->type() != NoneType::get() &&
+            constant_as<bool>(inp).value_or(true)) {
           return false;
         }
       }

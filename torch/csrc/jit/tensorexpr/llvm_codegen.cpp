@@ -1350,14 +1350,17 @@ llvm::Value* LLVMCodeGenImpl::toVec(llvm::Value* v, int lanes) {
 
 void LLVMCodeGenImpl::emitIsNan(const Intrinsics* v) {
   v->param(0)->accept(this);
-  llvm::Type* dstType =
-      llvmTypeToVec(dstType, ElementCount(v->dtype().lanes()));
+  llvm::Type* dstType = dtypeToLLVM(v->dtype());
   if (!v->param(0)->dtype().is_floating_point()) {
-    value_ = llvm::ConstantInt::get(dstType, 0);
+    value_ = toVec(llvm::ConstantInt::get(dstType, 0), v->dtype().lanes());
   } else {
     TORCH_INTERNAL_ASSERT(v->dtype().scalar_type() == ScalarType::Int);
     auto is_nan = irb_.CreateFCmpUNO(
         value_, llvm::ConstantFP::get(value_->getType(), 0.));
+    if (v->dtype().lanes() > 1) {
+      dstType =
+          llvm::VectorType::get(dstType, ElementCount(v->dtype().lanes()));
+    }
     value_ = irb_.CreateIntCast(is_nan, dstType, /*isSigned*/ false);
   }
 }
