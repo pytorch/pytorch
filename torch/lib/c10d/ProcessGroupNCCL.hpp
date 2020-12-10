@@ -231,8 +231,16 @@ class ProcessGroupNCCL : public ProcessGroup {
       TORCH_INTERNAL_ASSERT(
           cudaEvents_->size() == 1,
           "FutureNCCL only supports single-process single-device mode.");
+      for (const at::cuda::CUDAEvent& event : *cudaEvents_) {
+        TORCH_INTERNAL_ASSERT(event.isCreated());
+        TORCH_INTERNAL_ASSERT(event.device_index() == deviceIndex_);
+      }
+      for (const at::DataPtr& data_ptr : extractDataPtrs(value_)) {
+        TORCH_INTERNAL_ASSERT(data_ptr.device().index() == deviceIndex_);
+      }
     }
 
+   private:
     // This constructor is used by then callback, it skips setting the value at
     // the beginning. Later, the value will be set using markCompleted with the
     // return value of callback.
@@ -248,7 +256,12 @@ class ProcessGroupNCCL : public ProcessGroup {
           cudaEvents_->size() == 1,
           "FutureNCCL only supports single-process single-device mode.");
     }
+    // We need this because it will be the ::make() static method that actually
+    // creates the instance. This is a brittle approach and the passkey idiom
+    // would be a more robust solution. However, this will go away in #48505.
+    friend c10::intrusive_ptr<FutureNCCL>;
 
+   public:
     // Gets the current stream of the device and synchronizes recorded streams
     // with that. It will return after synchronizing the correct GPU streams to
     // ensure we can have async CUDA execution and it does not wait for the
@@ -270,6 +283,9 @@ class ProcessGroupNCCL : public ProcessGroup {
           "Attempting to set value of a FutureNCCL which has a value."
           "FutureNCCL's value was internally set to NCCL collective's "
           "outputs or the return value of the callback.");
+      for (const at::DataPtr& data_ptr : extractDataPtrs(value)) {
+        TORCH_INTERNAL_ASSERT(data_ptr.device().index() == deviceIndex_);
+      }
       value_ = std::move(value);
     }
 
@@ -311,6 +327,13 @@ class ProcessGroupNCCL : public ProcessGroup {
       // Create a FutureNCCL without setting a value.
       auto fut = c10::make_intrusive<FutureNCCL>(
           deviceIndex_, thenFutCudaEvents, futureNCCLCallbackStream_);
+      // The new future needs the DataPtr extractor when it gets marked complete
+      // but this might happen immediately inline or in parallel by another
+      // thread. In both these cases this would/might happen before the user has
+      // time to set their own DataPtr extractor, which might lead to failures
+      // if the default extractor can't handle some of the user's types.
+      // Therefore we propagate our extractor.
+      fut->setDataPtrExtractor(dataPtrExtractor_);
 
       // Do not free the underlying data storage of value_ before its
       // usage on futureNCCLCallbackStream_ finish.
