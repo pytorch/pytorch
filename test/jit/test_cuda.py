@@ -116,44 +116,44 @@ class TestCUDA(JitTestCase):
         self.assertTrue(test_simple_stream(), "Could not create Stream!")
 
         # The test aims at checking different stream proporties.
-        @torch.jit.script
-        def test_get_stream():
-            device_index = torch.cuda._current_device()
-            current_stream = torch.cuda.current_stream(device_index)
-            default_stream = torch.cuda.default_stream(device_index)
-            user_stream = torch.jit.cuda.Stream(device_index, 0)
+        class test_get_stream(torch.nn.Module):
+            def forward(self):
+                device_index = torch.cuda._current_device()
+                current_stream = torch.cuda.current_stream(device_index)
+                default_stream = torch.cuda.default_stream(device_index)
+                user_stream = torch.jit.cuda.Stream(device_index, 0)
 
-            # Check if the current and default streams are the same on the device
-            is_current_and_default_stream_same = current_stream.id() == default_stream.id()
-            # Check if user stream and default stream are not the same on the device
-            is_default_and_user_stream_not_same = default_stream.id() != user_stream.id()
+                # Check if the current and default streams are the same on the device
+                is_current_and_default_stream_same = current_stream.id() == default_stream.id()
+                # Check if user stream and default stream are not the same on the device
+                is_default_and_user_stream_not_same = default_stream.id() != user_stream.id()
 
-            with torch.jit.cuda.stream(user_stream):
-                is_stream_set = torch.cuda.current_stream(device_index).id() == user_stream.id()
+                with torch.jit.cuda.stream(user_stream):
+                    is_stream_set = torch.cuda.current_stream(device_index).id() == user_stream.id()
 
-            # Check if the stream was reset to current_stream
-            is_stream_reset = torch.cuda.current_stream(device_index).id() == current_stream.id()
+                # Check if the stream was reset to current_stream
+                is_stream_reset = torch.cuda.current_stream(device_index).id() == current_stream.id()
 
-            tensor1 = torch.rand(10000, 10000, device = "cuda")
-            tensor2 = torch.mm(tensor1, tensor1).to("cuda")
-            default_stream.synchronize()
-            default_stream_query = default_stream.query()
+                tensor1 = torch.rand(10000, 10000, device = "cuda")
+                tensor2 = torch.mm(tensor1, tensor1).to("cuda")
+                default_stream.synchronize()
+                default_stream_query = default_stream.query()
 
-            return tensor1, tensor2, is_current_and_default_stream_same, is_default_and_user_stream_not_same, \
-            is_stream_set, is_stream_reset, default_stream_query, default_stream.id(), user_stream.id()
+                return tensor1, tensor2, is_current_and_default_stream_same, is_default_and_user_stream_not_same, \
+                is_stream_set, is_stream_reset, default_stream_query, default_stream.id(), user_stream.id()
 
-        tensor1, tensor2, is_current_and_default_stream_same, is_default_and_user_stream_not_same, \
-        is_stream_set, is_stream_reset, default_stream_query, \
-        default_stream_id, user_stream_id = test_get_stream()
+        model = test_get_stream()
+        script_model = torch.jit.script(model)
+        result = script_model() # The results are stored in a Tuple
 
-        self.assertEqual(torch.matmul(tensor1, tensor1), tensor2)
-        self.assertEqual(is_current_and_default_stream_same, True)
-        self.assertEqual(is_default_and_user_stream_not_same, True)
-        self.assertEqual(is_stream_set, True)
-        self.assertEqual(is_stream_reset, True)
-        self.assertEqual(default_stream_id, 0) # Check if the default stream ID is always 0
-        self.assertNotEqual(user_stream_id, 0) # Check if the user stream is always non zero
-        self.assertTrue(default_stream_query)
+        self.assertEqual(torch.matmul(result[0], result[0]), result[1])
+        self.assertTrue(result[2])
+        self.assertTrue(result[3])
+        self.assertTrue(result[4])
+        self.assertTrue(result[5])
+        self.assertTrue(result[6])
+        self.assertEqual(result[7], 0) # Check if the default stream ID is always 0
+        self.assertNotEqual(result[8], 0) # Check if the user stream is always non zero
 
         # Test the stream context manager. This test checks if the stream is switched
         # to the user stream on using the stream context manager.
@@ -224,20 +224,22 @@ class TestCUDA(JitTestCase):
 
         # Test multiple streams waiting on each other for the operations to be completed.
         @torch.jit.script
-        def test_multiple_stream_2():
+        def test_data_dependency_between_streams():
             device_index = torch.cuda._current_device()
             prev_current_stream = torch.cuda.current_stream(device_index)
             s1 = torch.jit.cuda.Stream(0, 0)
             s2 = torch.jit.cuda.Stream(0, 0)
+            event = torch.jit.cuda.Event(False, False, False)
 
             A = torch.rand(1000, 1000, device = "cuda")
             with torch.jit.cuda.stream(s1):
                 is_stream_s1 = torch.cuda.current_stream(device_index).id() == s1.id()
                 B = torch.mm(A, A).to("cuda")
-            # Wait for B to be computed
-            s1.synchronize()
+            s1.record_event(event)
             # Check if the current_stream is reset
             is_current_stream_1 = torch.cuda.current_stream(device_index).id() == prev_current_stream.id()
+            #Wait for ops on s1 to be computed
+            s2.wait_event(event)
             with torch.jit.cuda.stream(s2):
                 is_stream_s2 = torch.cuda.current_stream(device_index).id() == s2.id()
                 C = torch.mm(B, B).to("cuda")
@@ -249,7 +251,7 @@ class TestCUDA(JitTestCase):
             check_stream = is_current_stream_1 and is_current_stream_2 and is_stream_s1 and is_stream_s2
             return A, B, C, check_stream
 
-        A, B, C, check_stream = test_multiple_stream_2()
+        A, B, C, check_stream = test_data_dependency_between_streams()
         self.assertEqual(torch.matmul(A, A), B)
         self.assertEqual(torch.matmul(B, B), C)
         self.assertTrue(check_stream)
@@ -417,7 +419,7 @@ class TestCUDA(JitTestCase):
         self.assertTrue(is_stream_s)
         self.assertEqual(torch.cat((a, b), 0), c)
 
-        # Save and Load scripted model
+        # Save and load scripted model
         load_model = self.getExportImportCopy(script_model)
         is_stream_s, a_load, b_load, c_load = load_model()
         self.assertTrue(is_stream_s)
