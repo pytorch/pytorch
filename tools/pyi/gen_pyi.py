@@ -36,16 +36,6 @@ There are a number of type hints which we've special-cased;
 read gen_pyi for the gory details.
 """
 
-# TODO: consider waiting to group by base name until we actually need to
-# (after computing type hint signatures, when adding @overload directives)
-def group_by_base_name(python_funcs: Sequence[PythonSignatureNativeFunctionPair]) -> Mapping[str, List[PythonSignatureGroup]]:
-    groups = group_overloads(python_funcs)
-    d = collections.defaultdict(list)
-    for g in groups:
-        name = g.signature.name
-        d[name].append(g)
-    return d
-
 def get_py_torch_functions(
         python_funcs: Sequence[PythonSignatureNativeFunctionPair],
         method: bool = False,
@@ -175,19 +165,6 @@ def sig_for_ops(opname: str) -> List[str]:
         return ['def {}(self) -> {}: ...'.format(opname, tname)]
     else:
         raise Exception("unknown op", opname)
-
-def generate_named_tuples(sig_group: PythonSignatureGroup, namedtuples: Dict[str, str]) -> None:
-    # deprecated signatures are not used when computing named tuples
-    if sig_group.signature.deprecated:
-        return
-    named_tuple = sig_group.signature.returns.named_tuple_pyi()
-    if named_tuple is None:
-        return
-    tuple_name, tuple_def = named_tuple
-    if tuple_name in namedtuples:
-        assert namedtuples[tuple_name] == tuple_def
-    else:
-        namedtuples[tuple_name] = tuple_def
 
 def generate_type_hints(sig_group: PythonSignatureGroup) -> List[str]:
     type_hints = []
@@ -369,7 +346,15 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, out: str) -> None:
     for group in sorted(sig_groups, key=lambda g: g.signature.name):
         name = group.signature.name
         unsorted_function_hints[name] += generate_type_hints(group)
-        generate_named_tuples(group, namedtuples)
+
+        named_tuple = group.signature.returns.named_tuple_pyi()
+        if named_tuple is not None and not group.signature.deprecated:
+            # deprecated namedtuples are currently not included for torch functions
+            tuple_name, tuple_def = named_tuple
+            if tuple_name in namedtuples:
+                assert namedtuples[tuple_name] == tuple_def
+            else:
+                namedtuples[tuple_name] = tuple_def
 
     function_hints = []
     for name, hints in sorted(unsorted_function_hints.items()):
@@ -482,7 +467,15 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, out: str) -> None:
     for group in sorted(tensor_method_sig_groups, key=lambda g: g.signature.name):
         name = group.signature.name
         unsorted_tensor_method_hints[name] += generate_type_hints(group)
-        generate_named_tuples(group, namedtuples)
+
+        named_tuple = group.signature.returns.named_tuple_pyi()
+        if named_tuple is not None and not group.signature.deprecated:
+            # deprecated namedtuples are currently not included for torch functions
+            tuple_name, tuple_def = named_tuple
+            if tuple_name in namedtuples:
+                assert namedtuples[tuple_name] == tuple_def
+            else:
+                namedtuples[tuple_name] = tuple_def
 
     for op in all_ops:
         name = '__{}__'.format(op)
