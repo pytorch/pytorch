@@ -78,6 +78,7 @@ python test/distributed/test_c10d.py
 
 # Run distributed tests, including tests for Distributed Data Parallel
 python test/run_test.py --verbose -i distributed/test_distributed_fork
+python test/run_test.py --verbose -i distributed/test_distributed_spawn
 
 # Run the RPC test suite for the TensorPipeAgent.
 python test/distributed/rpc/test_tensorpipe_agent.py
