@@ -6339,6 +6339,21 @@ class TestAutogradForwardMode(TestCase):
             self.assertEqual(p, foo * 2)
             self.assertEqual(t, bar * 2)
 
+    def test_view_detach(self):
+        foo = torch.rand(1)
+        bar = torch.ones(1)
+        baz = torch.rand(2)
+
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(foo, bar)
+
+            baz_detach = baz.detach()
+            baz_view = baz_detach.narrow(0, 0, 1)
+            baz_view *= dual
+
+            self.assertIsNotNone(fwAD.unpack_dual(baz)[1])
+            self.assertIsNotNone(fwAD.unpack_dual(baz_detach)[1])
+            self.assertIsNotNone(fwAD.unpack_dual(baz_view)[1])
 
     def test_view_inplace(self):
         foo = torch.rand(2)
