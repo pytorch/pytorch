@@ -95,8 +95,7 @@ static bool constantFoldingValue(Node* node) {
       at::Tensor val;
       if (input_node->kind() == onnx::Size) {
         auto rank = shape.rank();
-        val = c10::scalar_to_tensor(
-            (int64_t)*rank);
+        val = c10::scalar_to_tensor((int64_t)*rank);
       } else if (input_node->kind() == onnx::ReduceProd) {
         auto sizes = shape.sizes();
         int64_t prod = 1;
