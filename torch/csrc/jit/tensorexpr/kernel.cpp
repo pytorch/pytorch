@@ -1200,8 +1200,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::cosh: {
-      return computeOneOperand(
-          "aten_cosh", v, [](const ExprHandle& a) { return cosh(a); });
+      return computeOneOperand("aten_cosh", v, [](const ExprHandle& a) {
+        return cosh(promoteIntegerToDefaultType(a));
+      });
     } break;
 
     case aten::sinh: {
@@ -1233,7 +1234,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
 
     case aten::sqrt: {
       return computeOneOperand("aten_sqrt", v, [](const ExprHandle& a) {
-        return sqrt(promoteIntegerToDefaultType(a));
+        return tensorexpr::sqrt(promoteIntegerToDefaultType(a));
       });
     } break;
 
