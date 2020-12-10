@@ -221,12 +221,14 @@ private:
     // we get a KernelFunc
     //   > KernelFunc = std::tuple<Tensor, Tensor> example(Tensor& out_d, Tensor& out_e, const Tensor& a, int64_t b, int64_t c)
     //   > NumOutParameters = 2
-    // with the out arguments at the front and OutTensorArgIndices represents the indices of the out
-    // arguments in the schema, and reorder that into
+    // with the out arguments at the front, and reorder that into
     //   > std::tuple<Tensor, Tensor> example(const Tensor& a, int64_t b, int64_t c, Tensor& out_d, Tensor& out_e)
     // where the out arguments are in the back.
 
     using kernel_signature_traits = guts::infer_function_traits_t<typename KernelFunc::FuncType>;
+
+    // Assert that the KernelFunc is what we expect. The following block is
+    // not strictly necessary for the metaprogramming here, it's just a check.
     static_assert(
         guts::typelist::all<
             is_out_argument,
@@ -237,18 +239,11 @@ private:
         >::value,
         "The kernel function has the wrong number of leading Tensor& arguments to match the out arguments in the JIT signature"
     );
-    static constexpr size_t num_parameters = guts::typelist::size<typename kernel_signature_traits::parameter_types>::value;
+
+    static constexpr size_t num_parameters = kernel_signature_traits::number_of_parameters;
     static constexpr size_t num_nonout_parameters = num_parameters - NumOutParameters;
 
-    using out_parameter_indices = guts::iseq::drop_t<std::make_index_sequence<num_parameters>, num_nonout_parameters>;
-
-    // schema_nonout_arg_indices is a list of all argument indices in the schema function
-    // that aren't out arguments.
-    // In the aten::example op mentioned above, this would be
-    //   > schema_nonout_arg_indices = [0, 1, 2]
-    using schema_nonout_arg_indices = std::make_index_sequence<num_nonout_parameters>;
-
-    // kernel_to_schema_permutation then contains a mapping from argument index in KernelFunc to the corresponding
+    // kernel_to_schema_permutation_indices contains a mapping from argument index in KernelFunc to the corresponding
     // argument index in the schema.
     // For the aten::example op, that'll be
     //  > kernel_to_schema_permutation_indices = [3, 4, 0, 1, 2]
@@ -258,32 +253,34 @@ private:
     //  - argument 2 in KernelFunc maps to argument 0 in the schema,
     //  - ...
     // We can use this as a permutation function to reorder types or values correspondingly
-    using kernel_to_schema_permutation_indices = guts::iseq::concat_t<out_parameter_indices, schema_nonout_arg_indices>;
-    using kernel_to_schema_permutation = guts::iseq::permutation<kernel_to_schema_permutation_indices>;
+    using kernel_to_schema_permutation_indices = guts::iseq::concat_t<
+        guts::iseq::drop_t<std::make_index_sequence<num_parameters>, num_nonout_parameters>,
+        std::make_index_sequence<num_nonout_parameters>
+    >;
 
-    // We also need the inverse permutation because parameters (i.e. types) and arguments (i.e. values)
+    // For types, we need the inverse permutation because parameters (i.e. types) and arguments (i.e. values)
     // need to be mapped in inverted directions. For types, we generate the schema order types from
     // the KernelFunction types, but for arguments we get schema order arguments and need to generate
     // the KernelFunction arguments.
-    using schema_to_kernel_permutation = typename kernel_to_schema_permutation::inverted_t;
+    // That's why in this reordering, we use NumOutParameters instead of the num_nonout_parameters we used above.
+    using target_signature_parameters = guts::typelist::concat_t<
+        guts::typelist::drop_t<typename kernel_signature_traits::parameter_types, NumOutParameters>,
+        guts::typelist::take_t<typename kernel_signature_traits::parameter_types, NumOutParameters>
+    >;
 
-    using target_signature_parameters = typename schema_to_kernel_permutation::template apply_to_typelist_t<
-        typename kernel_signature_traits::parameter_types>;
-
-    template<class Return, class ParameterList>
+    template<class Return, class ParameterList, class IndexPermutation>
     struct wrapper_;
-    template<class Return, class... Parameters>
-    struct wrapper_<Return, guts::typelist::typelist<Parameters...>> {
+    template<class Return, class... Parameters, size_t... Indices>
+    struct wrapper_<Return, guts::typelist::typelist<Parameters...>, std::index_sequence<Indices...>> {
         static Return call(Parameters... args) {
             // call through to KernelFunc but reorder arguments as determined
             // by the permutation we calculated above.
-            return guts::apply(KernelFunc::func_ptr(),
-                kernel_to_schema_permutation::apply_to_tuple(std::tuple<Parameters...>(std::forward<Parameters>(args)...)));
+            return (*KernelFunc::func_ptr())(std::get<Indices>(std::tuple<Parameters...>(std::forward<Parameters>(args)...))...);
         }
     };
 
 public:
-    using wrapper = wrapper_<typename kernel_signature_traits::return_type, target_signature_parameters>;
+    using wrapper = wrapper_<typename kernel_signature_traits::return_type, target_signature_parameters, kernel_to_schema_permutation_indices>;
 };
 
 
