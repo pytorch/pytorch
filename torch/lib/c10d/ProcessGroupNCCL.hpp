@@ -339,15 +339,8 @@ class ProcessGroupNCCL : public ProcessGroup {
       return fut;
     }
 
-    // Checks cudaEventQuery with cudaEvents. Returns true if a FutureError was
-    // recorded or the entire operation is completed on the GPU.
     bool completed() const override {
-      if (error_) {
-        return true;
-      }
-      // Checking the work's corresponding CUDA events' status
-      auto ret = cudaEventQuery((*cudaEvents_)[0]);
-      return ret != cudaErrorNotReady || ret == cudaSuccess;
+      return true;
     }
 
     bool hasValue() const override {
