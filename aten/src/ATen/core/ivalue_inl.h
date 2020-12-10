@@ -137,6 +137,15 @@ inline at::Tensor IValue::toTensor() const& {
   AT_ASSERT(isTensor(), "Expected Tensor but got ", tagKind());
   return at::Tensor(toIntrusivePtr<at::TensorImpl, at::UndefinedTensorImpl>());
 }
+inline c10::Storage IValue::toStorage() && {
+  AT_ASSERT(isStorage(), "Expected Storage but got ", tagKind());
+  return c10::Storage(
+      moveToIntrusivePtr<at::StorageImpl>());
+}
+inline c10::Storage IValue::toStorage() const& {
+  AT_ASSERT(isStorage(), "Expected Storage but got ", tagKind());
+  return c10::Storage(toIntrusivePtr<at::StorageImpl>());
+}
 inline c10::Stream IValue::toStream() && {
   return c10::Stream::unpack(payload.as_int);
 }
@@ -679,6 +688,7 @@ inline const ivalue::Object& IValue::toObjectRef() const {
     return this->method_name();            \
   }
 DEFINE_TO(at::Tensor, toTensor)
+DEFINE_TO(at::Storage, toStorage)
 DEFINE_TO(c10::Stream, toStream)
 DEFINE_TO(float, toDouble)
 DEFINE_TO(double, toDouble)

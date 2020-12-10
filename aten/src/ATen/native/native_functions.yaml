@@ -5402,12 +5402,14 @@
 # wrappers for legacy TH methods
 
 - func: set_.source_Storage(Tensor(a!) self, Storage source) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: method
   device_guard: False
   dispatch:
     CPU, CUDA: set_
 
 - func: set_.source_Storage_storage_offset(Tensor(a!) self, Storage source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: method
   device_guard: False
   dispatch:
