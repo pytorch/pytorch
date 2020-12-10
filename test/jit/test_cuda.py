@@ -3,7 +3,7 @@ import sys
 import unittest
 
 import torch
-from io import BytesIO
+from typing import NamedTuple
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.common_utils import skipIfRocm, skipCUDANonDefaultStreamIf
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
@@ -115,45 +115,58 @@ class TestCUDA(JitTestCase):
 
         self.assertTrue(test_simple_stream(), "Could not create Stream!")
 
+        # Class used to store results for the test: test_get_stream.
+        class Result(NamedTuple):
+            t1 : torch.Tensor
+            t2 : torch.Tensor
+            is_current_and_default_stream_same : bool
+            is_default_and_user_stream_not_same : bool
+            is_stream_set : bool
+            is_stream_reset : bool
+            default_stream_query : bool
+            default_stream_id : int
+            user_stream_id : int
+
         # The test aims at checking different stream proporties.
-        class test_get_stream(torch.nn.Module):
-            def forward(self):
-                device_index = torch.cuda._current_device()
-                current_stream = torch.cuda.current_stream(device_index)
-                default_stream = torch.cuda.default_stream(device_index)
-                user_stream = torch.jit.cuda.Stream(device_index, 0)
+        @torch.jit.script
+        def test_get_stream():
+            device_index = torch.cuda._current_device()
+            current_stream = torch.cuda.current_stream(device_index)
+            default_stream = torch.cuda.default_stream(device_index)
+            user_stream = torch.jit.cuda.Stream(device_index, 0)
 
-                # Check if the current and default streams are the same on the device
-                is_current_and_default_stream_same = current_stream.id() == default_stream.id()
-                # Check if user stream and default stream are not the same on the device
-                is_default_and_user_stream_not_same = default_stream.id() != user_stream.id()
+            # Check if the current and default streams are the same on the device
+            is_current_and_default_stream_same = current_stream.id() == default_stream.id()
+            # Check if user stream and default stream are not the same on the device
+            is_default_and_user_stream_not_same = default_stream.id() != user_stream.id()
 
-                with torch.jit.cuda.stream(user_stream):
-                    is_stream_set = torch.cuda.current_stream(device_index).id() == user_stream.id()
+            with torch.jit.cuda.stream(user_stream):
+                is_stream_set = torch.cuda.current_stream(device_index).id() == user_stream.id()
 
-                # Check if the stream was reset to current_stream
-                is_stream_reset = torch.cuda.current_stream(device_index).id() == current_stream.id()
+            # Check if the stream was reset to current_stream
+            is_stream_reset = torch.cuda.current_stream(device_index).id() == current_stream.id()
 
-                tensor1 = torch.rand(10000, 10000, device = "cuda")
-                tensor2 = torch.mm(tensor1, tensor1).to("cuda")
-                default_stream.synchronize()
-                default_stream_query = default_stream.query()
+            tensor1 = torch.rand(10000, 10000, device = "cuda")
+            tensor2 = torch.mm(tensor1, tensor1).to("cuda")
+            default_stream.synchronize()
+            default_stream_query = default_stream.query()
 
-                return tensor1, tensor2, is_current_and_default_stream_same, is_default_and_user_stream_not_same, \
-                is_stream_set, is_stream_reset, default_stream_query, default_stream.id(), user_stream.id()
+            # Capture all the results in the class Result
+            res = Result(tensor1, tensor2, is_current_and_default_stream_same, \
+                        is_default_and_user_stream_not_same, is_stream_set, \
+                        is_stream_reset, default_stream_query, default_stream.id(), user_stream.id())
+            return res
 
-        model = test_get_stream()
-        script_model = torch.jit.script(model)
-        result = script_model() # The results are stored in a Tuple
+        result = test_get_stream()
 
-        self.assertEqual(torch.matmul(result[0], result[0]), result[1])
-        self.assertTrue(result[2])
-        self.assertTrue(result[3])
-        self.assertTrue(result[4])
-        self.assertTrue(result[5])
-        self.assertTrue(result[6])
-        self.assertEqual(result[7], 0) # Check if the default stream ID is always 0
-        self.assertNotEqual(result[8], 0) # Check if the user stream is always non zero
+        self.assertEqual(torch.matmul(result.t1, result.t1), result.t2)
+        self.assertTrue(result.is_current_and_default_stream_same)
+        self.assertTrue(result.is_default_and_user_stream_not_same)
+        self.assertTrue(result.is_stream_set)
+        self.assertTrue(result.is_stream_reset)
+        self.assertTrue(result.default_stream_query)
+        self.assertEqual(result.default_stream_id, 0) # Check if the default stream ID is always 0
+        self.assertNotEqual(result.user_stream_id, 0) # Check if the user stream is always non zero
 
         # Test the stream context manager. This test checks if the stream is switched
         # to the user stream on using the stream context manager.
@@ -238,7 +251,7 @@ class TestCUDA(JitTestCase):
             s1.record_event(event)
             # Check if the current_stream is reset
             is_current_stream_1 = torch.cuda.current_stream(device_index).id() == prev_current_stream.id()
-            #Wait for ops on s1 to be computed
+            # Wait for ops on s1 to be computed
             s2.wait_event(event)
             with torch.jit.cuda.stream(s2):
                 is_stream_s2 = torch.cuda.current_stream(device_index).id() == s2.id()
