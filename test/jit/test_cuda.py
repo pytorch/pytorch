@@ -417,7 +417,7 @@ class TestCUDA(JitTestCase):
         self.assertTrue(is_stream_s)
         self.assertEqual(torch.cat((a, b), 0), c)
 
-        # Save and Load scripted model
+        # Save and load scripted model
         load_model = self.getExportImportCopy(script_model)
         is_stream_s, a_load, b_load, c_load = load_model()
         self.assertTrue(is_stream_s)
