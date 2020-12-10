@@ -32,6 +32,7 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(AnyEnumType)            \
   _(TensorType)             \
   _(StorageType)            \
+  _(QuantizerPtrType)     \
   _(TupleType)              \
   _(ListType)               \
   _(DictType)               \
@@ -1429,6 +1430,29 @@ struct CAFFE2_API StorageType : public Type {
   StorageType() : Type(TypeKind::StorageType) {}
 };
 
+struct QuantizerPtrType;
+using QuantizerPtrTypePtr = std::shared_ptr<QuantizerPtrType>;
+struct CAFFE2_API QuantizerPtrType : public Type {
+  static QuantizerPtrTypePtr create() {
+    return QuantizerPtrTypePtr(new QuantizerPtrType()); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return annotation_str();
+  }
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    return "QuantizerPtr";
+  }
+  static const TypeKind Kind = TypeKind::QuantizerPtrType;
+  // global singleton
+  static QuantizerPtrTypePtr get();
+
+ private:
+  QuantizerPtrType() : Type(TypeKind::QuantizerPtrType) {}
+};
+
 struct FunctionType;
 using FunctionTypePtr = std::shared_ptr<FunctionType>;
 struct CAFFE2_API FunctionType : public NamedType {
@@ -1777,6 +1801,12 @@ template <>
 struct getTypePtr_<c10::Storage> final {
   static TypePtr call() {
     return StorageType::get();
+  }
+};
+template <>
+struct getTypePtr_<at::QuantizerPtr> final {
+  static TypePtr call() {
+    return QuantizerPtrType::get();
   }
 };
 template <>
