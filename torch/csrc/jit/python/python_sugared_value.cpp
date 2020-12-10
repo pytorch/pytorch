@@ -966,8 +966,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   if (auto callee = as_function(obj)) {
     return std::make_shared<FunctionValue>(callee->function_);
   } else if (py::isinstance<py::module>(obj)) {
-    std::string obj_name = py::cast<py::str>(py::getattr(obj, "__name__"));
     #ifdef USE_CUDA
+    std::string obj_name = py::cast<py::str>(py::getattr(obj, "__name__"));
     if (obj_name.compare("torch.cuda") == 0) {
       return std::make_shared<CUDAPythonModuleValue>(obj);
     }
