@@ -1260,8 +1260,7 @@ class TestTEFuser(JitTestCase):
             torch.trunc,
             torch.frac,
             lambda x: torch.threshold(x, 0, -10),
-            # FIXME: fails on cpu with dtype=uint8
-            # lambda x: torch.clamp(x, -10, 10),
+            lambda x: torch.clamp(x, -10, 10),
         ]
         sizes = [(1,), (2,), (4, 4)]
         for dtype, op, device, size in product(dtypes, unary_ops, self.devices, sizes):

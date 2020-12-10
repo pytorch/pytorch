@@ -668,7 +668,8 @@ Tensor* TensorExprKernel::computeThreeOperand(
     const torch::jit::Value* v,
     const std::function<
         ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>&
-        innerExpr) {
+        innerExpr,
+        bool promote_inputs) {
   auto const& n = v->node();
   std::vector<std::vector<ExprHandle>> shapes;
   for (size_t idx = 0; idx < 3; idx++) {
@@ -679,7 +680,7 @@ Tensor* TensorExprKernel::computeThreeOperand(
   return Compute(
       name,
       c10::fmap<DimArg>(shape),
-      [this, v, innerExpr](const std::vector<VarHandle>& axes) {
+      [this, v, innerExpr, promote_inputs](const std::vector<VarHandle>& axes) {
         auto const& n = v->node();
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
@@ -688,7 +689,9 @@ Tensor* TensorExprKernel::computeThreeOperand(
             tensorOrConstant(n->inputs()[2], indices),
         };
 
-        promoteInputs(inputs);
+        if (promote_inputs) {
+          promoteInputs(inputs);
+        }
         ExprHandle compute = innerExpr(inputs[0], inputs[1], inputs[2]);
         return demoteOutput(compute, n->output());
       });
@@ -917,21 +920,25 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
               const ExprHandle& in,
               const ExprHandle& min,
               const ExprHandle& max) {
+            auto cast = [&](const ExprHandle& e) {
+              return Cast::make(in.dtype(), e);
+            };
+
             if (noMin && noMax) {
               return in;
             } else if (noMin) {
-              return CompareSelect::make(in, max, max, in, kGT);
+              auto cmax = cast(max);
+              return CompareSelect::make(in, cmax, cmax, in, kGT);
             } else if (noMax) {
-              return CompareSelect::make(in, min, min, in, kLT);
+              auto cmin = cast(min);
+              return CompareSelect::make(in, cmin, cmin, in, kLT);
             } else {
-              return CompareSelect::make(
-                  in,
-                  min,
-                  min,
-                  CompareSelect::make(in, max, max, in, kGT),
-                  kLT);
+              auto cmax = cast(max);
+              auto cmin = cast(min);
+              return Min::make(Max::make(in, cmin, true), cmax, true);
             }
-          });
+          },
+          false /* promote_inputs */);
     } break;
 
     case aten::sigmoid: {
