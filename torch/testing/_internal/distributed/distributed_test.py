@@ -1308,7 +1308,7 @@ class DistributedTest:
                 self.assertEqual(len(events), len(op_calls))
                 for e in events:
                     self.assertEqual(e.count, 1)
-                    self.assertGreater(e.cpu_time, 0)
+                    self.assertGreaterEqual(e.cpu_time, 0)
 
         # ALL REDUCE
         def _test_all_reduce_helper(
