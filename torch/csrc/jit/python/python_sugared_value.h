@@ -91,7 +91,7 @@ struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
 };
 
 #ifdef USE_CUDA
-// Represents all the CUDA JIT modules. All the CUDA API's with torch.cuda.*
+// Used for desugaring uses of the torch.cuda module. All the CUDA APIs with torch.cuda.*
 // are resolved to CUDAPythonModuleValue.
 struct VISIBILITY_HIDDEN CUDAPythonModuleValue : public PythonValue {
   explicit CUDAPythonModuleValue(py::object mod)
