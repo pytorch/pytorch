@@ -587,6 +587,10 @@ def istft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
             can either be complex (``channel``, ``fft_size``, ``n_frame``), or real
             (``channel``, ``fft_size``, ``n_frame``, 2) where the ``channel``
             dimension is optional.
+
+            .. deprecated:: 1.8.0
+               Real input is deprecated, use complex inputs as returned by
+               ``stft(..., return_complex=True)`` instead.
         n_fft (int): Size of Fourier transform
         hop_length (Optional[int]): The distance between neighboring sliding window frames.
             (Default: ``n_fft // 4``)
