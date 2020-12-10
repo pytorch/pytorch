@@ -228,7 +228,7 @@ static inline Tensor boolToIndexingTensorCPUOrCUDA(const Tensor& self, bool valu
   if (value) {
     return at::empty({1}, {}, self.options().dtype(kLong)).fill_(0.);
   } else {
-    return at::native::empty({0}, {}, self.options().dtype(kLong));
+    return at::empty({0}, {}, self.options().dtype(kLong));
   }
 }
 
