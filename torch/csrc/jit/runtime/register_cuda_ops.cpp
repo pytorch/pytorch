@@ -1,11 +1,6 @@
 #ifdef USE_CUDA
 
-/*
-* This file registers the custom cuda class operators for JIT.
-* These custom CUDA operators are wrappers around operators defined in
-* c10::cuda namespace. Please refer c10::cuda for more details on the
-* operators.
-*/
+// This file registers special JIT operators used to implement the CUDA PyTorch API in TorchScript.
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/api/include/torch/utils.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
