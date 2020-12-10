@@ -13,9 +13,9 @@ import itertools
 #   - No tensor returns; instead we return a TensorMeta describing
 #     the tensor in question
 
-def name(f: FunctionSchema) -> str:
-    assert f.name.overload_name == ""
-    return str(f.name.name)
+def name(g: StructuredNativeFunctions) -> str:
+    # use the overload name from the functional version
+    return str(g.functional.func.name).replace('.', '_')
 
 def argument_type(a: Argument) -> str:
     assert not a.is_write
