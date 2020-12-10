@@ -154,14 +154,6 @@ class Vectorizer : public IRMutator {
     });
   }
 
-  const Expr* mutate(const BitCast* v) override {
-    std::vector<const Expr*> inputs = {v->src_value()};
-    return try_vectorize(v, inputs, [&]() {
-      return BitCast::make(
-          Dtype(v->dtype().scalar_type(), lanes_), ExprHandle(inputs[0]));
-    });
-  }
-
   const Expr* mutate(const Cast* v) override {
     std::vector<const Expr*> inputs = {v->src_value()};
     return try_vectorize(v, inputs, [&]() {
