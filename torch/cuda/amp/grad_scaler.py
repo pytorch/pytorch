@@ -4,6 +4,7 @@ from torch._six import container_abcs
 import warnings
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
+from .common import cuda_or_xla_gpu_available
 
 
 class _MultiDeviceReplicator(object):
@@ -11,7 +12,7 @@ class _MultiDeviceReplicator(object):
     Lazily serves copies of a tensor to requested devices.  Copies are cached per-device.
     """
     def __init__(self, master_tensor: torch.Tensor) -> None:
-        assert master_tensor.is_cuda
+        assert master_tensor.is_cuda or master_tensor.device.type == 'xla'
         self.master = master_tensor
         self._per_device_tensors: Dict[torch.device, torch.Tensor] = {}
 
@@ -111,7 +112,7 @@ class GradScaler(object):
                  backoff_factor=0.5,
                  growth_interval=2000,
                  enabled=True):
-        if enabled and not torch.cuda.is_available():
+        if enabled and not cuda_or_xla_gpu_available():
             warnings.warn("torch.cuda.amp.GradScaler is enabled, but CUDA is not available.  Disabling.")
             self._enabled = False
         else:
@@ -140,8 +141,8 @@ class GradScaler(object):
 
     def _lazy_init_scale_growth_tracker(self, dev):
         assert self._growth_tracker is None, "_growth_tracker initialized before _scale"
-        self._scale = torch.full((1,), self._init_scale, dtype=torch.float32, device=dev)
-        self._growth_tracker = torch.full((1,), self._init_growth_tracker, dtype=torch.int32, device=dev)
+        self._scale = torch.full((), self._init_scale, dtype=torch.float32, device=dev)
+        self._growth_tracker = torch.full((), self._init_growth_tracker, dtype=torch.int32, device=dev)
 
     def scale(self, outputs):
         """
@@ -158,7 +159,7 @@ class GradScaler(object):
 
         # Short-circuit for the common case.
         if isinstance(outputs, torch.Tensor):
-            assert outputs.is_cuda
+            assert outputs.is_cuda or outputs.device.type == 'xla'
             if self._scale is None:
                 self._lazy_init_scale_growth_tracker(outputs.device)
             assert self._scale is not None
@@ -169,7 +170,7 @@ class GradScaler(object):
 
         def apply_scale(val):
             if isinstance(val, torch.Tensor):
-                assert val.is_cuda
+                assert val.is_cuda or val.device.type == 'xla'
                 if len(stash) == 0:
                     if self._scale is None:
                         self._lazy_init_scale_growth_tracker(val.device)
@@ -274,10 +275,16 @@ class GradScaler(object):
         # FP32 division can be imprecise for certain compile options, so we carry out the reciprocal in FP64.
         assert self._scale is not None
         inv_scale = self._scale.double().reciprocal().float()
-        found_inf = torch.full((1,), 0.0, dtype=torch.float32, device=self._scale.device)
+        found_inf = torch.full((), 0.0, dtype=torch.float32, device=self._scale.device)
 
         optimizer_state["found_inf_per_device"] = self._unscale_grads_(optimizer, inv_scale, found_inf, False)
         optimizer_state["stage"] = OptState.UNSCALED
+
+    def _maybe_opt_step(self, optimizer, optimizer_state, *args, **kwargs):
+        retval = None
+        if not sum(v.item() for v in optimizer_state["found_inf_per_device"].values()):
+            retval = optimizer.step(*args, **kwargs)
+        return retval
 
     def step(self, optimizer, *args, **kwargs):
         """
@@ -329,8 +336,7 @@ class GradScaler(object):
 
         assert len(optimizer_state["found_inf_per_device"]) > 0, "No inf checks were recorded for this optimizer."
 
-        if not sum(v.item() for v in optimizer_state["found_inf_per_device"].values()):
-            retval = optimizer.step(*args, **kwargs)
+        retval = self._maybe_opt_step(optimizer, optimizer_state, *args, **kwargs)
 
         optimizer_state["stage"] = OptState.STEPPED
 
@@ -361,7 +367,7 @@ class GradScaler(object):
         if new_scale is not None:
             # Accept a new user-defined scale.
             if isinstance(new_scale, float):
-                self._scale = torch.full((1,), new_scale, dtype=torch.float32, device=_scale.device)
+                self._scale = torch.full((), new_scale, dtype=torch.float32, device=_scale.device)
             else:
                 reason = "new_scale should be a float or a 1-element torch.cuda.FloatTensor with requires_grad=False."
                 assert isinstance(new_scale, torch.cuda.FloatTensor), reason  # type: ignore[attr-defined]
@@ -524,8 +530,8 @@ class GradScaler(object):
     def _check_inf_per_device(self, optimizer):
         _scale, _ = self._check_scale_growth_tracker("_check_inf_per_device")
 
-        dummy_inv_scale = torch.full((1,), 1.0, dtype=torch.float32, device=_scale.device)
-        found_inf = torch.full((1,), 0.0, dtype=torch.float32, device=_scale.device)
+        dummy_inv_scale = torch.full((), 1.0, dtype=torch.float32, device=_scale.device)
+        found_inf = torch.full((), 0.0, dtype=torch.float32, device=_scale.device)
 
         self._per_optimizer_states[id(optimizer)]["found_inf_per_device"] = \
             self._unscale_grads_(optimizer, dummy_inv_scale, found_inf, True)
