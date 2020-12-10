@@ -715,13 +715,19 @@ inline IValue toIValue(
           c10::StrongTypePtr(cu, classType), numAttrs);
 
       // 2. copy all the contained types
-      for (size_t slot = 0; slot < numAttrs; slot++) {
-        const auto& attrType = classType->getAttribute(slot);
-        const auto& attrName = classType->getAttributeName(slot);
+        for (size_t slot = 0; slot < numAttrs; slot++) {
+          const auto& attrType = classType->getAttribute(slot);
+          const auto& attrName = classType->getAttributeName(slot);
 
-        const auto& contained = py::getattr(obj, attrName.c_str());
-        userObj->setSlot(slot, toIValue(contained, attrType));
-      }
+          if (!py::hasattr(obj, attrName.c_str())) {
+            throw py::cast_error(c10::str(
+                "Tried to cast object to type ", type->repr_str(), " but object",
+                " was missing attribute ", attrName));
+          }
+
+          const auto& contained = py::getattr(obj, attrName.c_str());
+          userObj->setSlot(slot, toIValue(contained, attrType));
+        }
       return userObj;
     }
     case TypeKind::InterfaceType: {
