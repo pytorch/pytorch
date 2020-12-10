@@ -53,11 +53,19 @@ Val::Val(ValType _vtype, DataType _dtype, bool register_val)
   }
 }
 
+// NOTE: we don't clone the definition_ and uses_ here
+//  since they may introduce cloning cycles. Instead, we copy
+//  the original pointers and we'll fix them up later part of the
+//  Fusion copy
+//
 Val::Val(const Val* src, IrCloner* ir_cloner)
     : Statement(src, ir_cloner),
       vtype_(src->vtype_),
       dtype_(src->dtype_),
-      definition_(ir_cloner->clone(src->definition())) {}
+      is_fusion_input_(src->is_fusion_input_),
+      is_fusion_output_(src->is_fusion_output_),
+      definition_(src->definition_),
+      uses_(src->uses_) {}
 
 namespace {
 

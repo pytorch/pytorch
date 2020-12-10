@@ -9,7 +9,6 @@
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
 #include <cstdint>
-#include <deque>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -214,7 +213,7 @@ class TORCH_CUDA_API Val : public Statement {
     return definition_;
   }
 
-  const std::deque<Expr*>& uses() const {
+  const auto& uses() const {
     return uses_;
   }
 
@@ -272,7 +271,7 @@ class TORCH_CUDA_API Val : public Statement {
     is_fusion_output_ = is_fusion_output;
   }
 
-  void setUses(std::deque<Expr*> uses) {
+  void setUses(const std::vector<Expr*>& uses) {
     uses_ = uses;
   }
 
@@ -282,7 +281,7 @@ class TORCH_CUDA_API Val : public Statement {
   bool is_fusion_output_ = false;
 
   Expr* definition_ = nullptr;
-  std::deque<Expr*> uses_;
+  std::vector<Expr*> uses_;
 };
 
 //!  A Expr represents a "computation." These are functions that takes inputs

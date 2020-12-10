@@ -71,7 +71,7 @@ std::unordered_map<IterDomain*, IterDomain*> PairwiseRootDomainMap::map(
   TORCH_INTERNAL_ASSERT(producer_tv_->domain() == producer);
   TORCH_INTERNAL_ASSERT(consumer_tv_->domain() == consumer);
 
-  if (consumer_tv_->getOrigin()->isA<TransposeOp>()) {
+  if (consumer_tv_->definition()->isA<TransposeOp>()) {
     return mapTranspose(
         producer, consumer, root_dims_to_map, producer_to_consumer);
   }
@@ -126,7 +126,7 @@ std::unordered_map<IterDomain*, IterDomain*> PairwiseRootDomainMap::
 
   std::unordered_map<IterDomain*, IterDomain*> dom_map;
 
-  TransposeOp* top = dynamic_cast<TransposeOp*>(consumer_tv_->getOrigin());
+  TransposeOp* top = dynamic_cast<TransposeOp*>(consumer_tv_->definition());
   TORCH_INTERNAL_ASSERT(top != nullptr);
 
   const auto& new2old = top->new2old();

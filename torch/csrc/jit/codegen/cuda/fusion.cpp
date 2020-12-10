@@ -72,25 +72,18 @@ Fusion::Fusion(const Fusion& other) {
     val_set_.insert(ir_cloner.clone(val));
   }
 
+  for (auto expr : other.expr_set_) {
+    expr_set_.insert(ir_cloner.clone(expr));
+  }
+
   for (auto val : other.val_deque_) {
     val_deque_.push_back(ir_cloner.clone(val));
   }
 
-  for (auto old_expr : other.expr_set_) {
-    auto new_expr = ir_cloner.clone(old_expr);
-    expr_set_.insert(new_expr);
-
-    // ir_cloner doesn't go through registerStmt, so we need to "Register Expr"
-    // we would similarly need to do to val if there was in that pass that is
-    // also not covered here.
-    for (Val* input : new_expr->inputs()) {
-      auto uses_copy = input->uses();
-      if (std::find(uses_copy.begin(), uses_copy.end(), new_expr) ==
-          uses_copy.end()) {
-        uses_copy.push_back(new_expr);
-        input->setUses(uses_copy);
-      }
-    }
+  // Fixup potentially cyclic pointers
+  for (auto val : val_set_) {
+    val->definition_ = ir_cloner.clone(val->definition_);
+    val->uses_ = ir_cloner.clone(val->uses_);
   }
 
   val_type_name_map_ = other.val_type_name_map_;
@@ -98,15 +91,6 @@ Fusion::Fusion(const Fusion& other) {
 
   inputs_ = ir_cloner.clone(other.inputs_);
   outputs_ = ir_cloner.clone(other.outputs_);
-
-  for (auto inp : inputs_) {
-    inp->setIsFusionInput(true);
-  }
-  for (auto out : outputs_) {
-    out->setIsFusionOutput(true);
-  }
-
-  resetTvUses();
 }
 
 Fusion::Fusion(Fusion&& other) noexcept {
@@ -421,16 +405,16 @@ void Fusion::resetTvUses() {
   // remove dead exprs, this could reinsert them. getExprs is also boundeds by
   // inputs as registered inputs will return nullptr as their definition.
   const auto all_tvs = ir_utils::filterByType<TensorView>(val_set_);
-  auto used_exprs = ExprSort::getExprs(this);
+  const auto used_exprs = ExprSort::getExprs(this);
 
   for (auto tv : all_tvs) {
-    tv->setUses(std::deque<Expr*>());
+    tv->setUses({});
   }
 
   // Same as in register expr
   for (auto expr : used_exprs) {
     for (Val* input : expr->inputs()) {
-      std::deque<Expr*> uses_copy = input->uses();
+      auto uses_copy = input->uses();
       if (std::find(uses_copy.begin(), uses_copy.end(), expr) ==
           uses_copy.end()) {
         uses_copy.push_back(expr);
