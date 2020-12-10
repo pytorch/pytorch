@@ -191,7 +191,7 @@ def powerSGD_hook(
         return [
             dist.all_reduce(q, group=group_to_use, async_op=True)
             .get_future()
-            .value()[0]
+            .wait()[0]
         ]
 
     def decompress(fut):
