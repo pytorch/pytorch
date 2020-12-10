@@ -196,26 +196,26 @@ namespace test_zip_with_index {
 //                         typelist<integer_sequence<int8_t, 0, 4>, integer_sequence<int8_t, 2, -5>>>>::value, "");
 // }
 
-namespace test_remove_by_index {
-    static_assert(std::is_same<index_sequence<>, remove_by_index_t<index_sequence<100>, 0>>::value, "");
-    static_assert(std::is_same<index_sequence<2>, remove_by_index_t<index_sequence<100, 2>, 0>>::value, "");
-    static_assert(std::is_same<index_sequence<2>, remove_by_index_t<index_sequence<2, 100>, 1>>::value, "");
-    static_assert(std::is_same<index_sequence<2, 5>, remove_by_index_t<index_sequence<100, 2, 5>, 0>>::value, "");
-    static_assert(std::is_same<index_sequence<2, 5>, remove_by_index_t<index_sequence<2, 100, 5>, 1>>::value, "");
-    static_assert(std::is_same<index_sequence<2, 5>, remove_by_index_t<index_sequence<2, 5, 100>, 2>>::value, "");
+// namespace test_remove_by_index {
+//     static_assert(std::is_same<index_sequence<>, remove_by_index_t<index_sequence<100>, 0>>::value, "");
+//     static_assert(std::is_same<index_sequence<2>, remove_by_index_t<index_sequence<100, 2>, 0>>::value, "");
+//     static_assert(std::is_same<index_sequence<2>, remove_by_index_t<index_sequence<2, 100>, 1>>::value, "");
+//     static_assert(std::is_same<index_sequence<2, 5>, remove_by_index_t<index_sequence<100, 2, 5>, 0>>::value, "");
+//     static_assert(std::is_same<index_sequence<2, 5>, remove_by_index_t<index_sequence<2, 100, 5>, 1>>::value, "");
+//     static_assert(std::is_same<index_sequence<2, 5>, remove_by_index_t<index_sequence<2, 5, 100>, 2>>::value, "");
 
-    static_assert(std::is_same<integer_sequence<int8_t, 2, 5>, remove_by_index_t<integer_sequence<int8_t, 2, 100, 5>, 1>>::value, "");
-}
+//     static_assert(std::is_same<integer_sequence<int8_t, 2, 5>, remove_by_index_t<integer_sequence<int8_t, 2, 100, 5>, 1>>::value, "");
+// }
 
-namespace test_remove_all_by_index {
-    static_assert(std::is_same<index_sequence<>, remove_all_by_index_t<index_sequence<>, index_sequence<>>>::value, "");
-    static_assert(std::is_same<index_sequence<3>, remove_all_by_index_t<index_sequence<3>, index_sequence<>>>::value, "");
-    static_assert(std::is_same<index_sequence<>, remove_all_by_index_t<index_sequence<3>, index_sequence<0>>>::value, "");
-    static_assert(std::is_same<index_sequence<>, remove_all_by_index_t<index_sequence<4, 3, 5>, index_sequence<2, 0, 0>>>::value, "");
-    static_assert(std::is_same<index_sequence<3>, remove_all_by_index_t<index_sequence<4, 3, 5>, index_sequence<2, 0>>>::value, "");
+// namespace test_remove_all_by_index {
+//     static_assert(std::is_same<index_sequence<>, remove_all_by_index_t<index_sequence<>, index_sequence<>>>::value, "");
+//     static_assert(std::is_same<index_sequence<3>, remove_all_by_index_t<index_sequence<3>, index_sequence<>>>::value, "");
+//     static_assert(std::is_same<index_sequence<>, remove_all_by_index_t<index_sequence<3>, index_sequence<0>>>::value, "");
+//     static_assert(std::is_same<index_sequence<>, remove_all_by_index_t<index_sequence<4, 3, 5>, index_sequence<2, 0, 0>>>::value, "");
+//     static_assert(std::is_same<index_sequence<3>, remove_all_by_index_t<index_sequence<4, 3, 5>, index_sequence<2, 0>>>::value, "");
 
-    static_assert(std::is_same<integer_sequence<int8_t, -5>, remove_all_by_index_t<integer_sequence<int8_t, 4, 3, -5>, index_sequence<0, 0>>>::value, "");
-}
+//     static_assert(std::is_same<integer_sequence<int8_t, -5>, remove_all_by_index_t<integer_sequence<int8_t, 4, 3, -5>, index_sequence<0, 0>>>::value, "");
+// }
 
 namespace test_concat {
     static_assert(std::is_same<index_sequence<>, concat_t<>>::value, "");
