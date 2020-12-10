@@ -24,11 +24,38 @@ using namespace at::sparse;
 
 namespace {
 
-  inline SparseTensor get_result_tensor_for_unary_op(const SparseTensor& input) {
-    if (c10::isIntegralType(input.scalar_type(), /*includeBool=*/true)) {
+  template <bool promotes_integer_to_float = false>
+  inline SparseTensor get_result_tensor_for_unary_op(const SparseTensor& input){
+    if (c10::isIntegralType(input.scalar_type(), /*includeBool=*/true) && promotes_integer_to_float) {
       return at::empty_like(input, input.options().dtype(c10::get_default_dtype()));
     }
     return at::empty_like(input);
+  }
+
+  // --------------------------------------------------------------------
+  // helper function for sanity check of input and output tensors
+  // this functions also inits the output tensor
+  // this helper function is for unary ops
+  // --------------------------------------------------------------------
+  template <bool promotes_integer_to_float = false, bool is_linear_map = false>
+  inline void sparse_unary_op_check_and_init(const SparseTensor& self, SparseTensor& result){
+    TORCH_CHECK(result.is_sparse(), "Tensor should be sparse");
+    TORCH_CHECK(self.is_sparse(), "Tensor should be sparse");
+    TORCH_CHECK(self.get_device() == result.get_device(),
+        "Both tensors should be on the same device");
+
+    if (promotes_integer_to_float && c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)){
+      TORCH_CHECK(result.scalar_type() == c10::get_default_dtype(), "the result's dtype must be ", c10::get_default_dtype());
+    } else{
+      TORCH_CHECK(result.scalar_type() == self.scalar_type(), "the expected dtype is ", self.scalar_type(),
+          "found ", result.scalar_type());
+    }
+
+    if (is_same_tensor(result, self) && !is_linear_map){
+      TORCH_CHECK(self.is_coalesced(), "inplace variant on uncoalesced is not supported");
+    } else{
+      copy_sparse_to_sparse_(result, (is_linear_map ? self : self.coalesce()));
+    }
   }
 }
 
@@ -101,7 +128,7 @@ SparseTensor& log1p_out_sparse(const SparseTensor& t, SparseTensor& r) {
 }
 
 SparseTensor log1p_sparse(const SparseTensor& t) {
-  auto result = get_result_tensor_for_unary_op(t);
+  auto result = get_result_tensor_for_unary_op<true>(t);
   return log1p_out_sparse(t, result);
 }
 
@@ -160,7 +187,7 @@ SparseTensor& asin_out_sparse(const SparseTensor& t, SparseTensor& r) {
 }
 
 SparseTensor asin_sparse(const SparseTensor& t) {
-  auto result = get_result_tensor_for_unary_op(t);
+  auto result = get_result_tensor_for_unary_op<true>(t);
   return asin_out_sparse(t, result);
 }
 
@@ -174,28 +201,45 @@ SparseTensor& asin_sparse_(SparseTensor& t) {
 
 // TODO: add in-place variant
 
-SparseTensor& sqrt_out_sparse(const SparseTensor& t_, SparseTensor& r) {
-  TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
-  TORCH_CHECK(t_.is_sparse(), "Tensor should be sparse");
 
-  // This coalesce is why we can't easily provide an inplace variant
-  SparseTensor t = t_.coalesce();
-
-  r.resize_as_(t);
-  auto indices = r._indices();
-  indices.resize_as_(t._indices());
-  indices.copy_(t._indices());
-  Tensor r_values = r._values();
-  at::sqrt_out(r_values, t._values());
-  get_sparse_impl(r)->set_nnz_and_narrow(t._nnz());
-  return r._coalesced_(t.is_coalesced());
+SparseTensor& sqrt_out_sparse(const SparseTensor& t, SparseTensor& r) {
+  sparse_unary_op_check_and_init<true>(t, r);
+  r._values().sqrt_();
+  return r;
 }
 
 SparseTensor sqrt_sparse(const SparseTensor& t) {
-  SparseTensor r = get_result_tensor_for_unary_op(t);
-  sqrt_out_sparse(t, r);
+  SparseTensor result = get_result_tensor_for_unary_op<true>(t);
+  return sqrt_out_sparse(t, result);
+}
+
+SparseTensor& sqrt_sparse_(SparseTensor& t) {
+  return sqrt_out_sparse(t, t);
+}
+
+// --------------------------------------------------------------------
+// asinh(SparseTensor)
+// --------------------------------------------------------------------
+
+// In-place asinh on uncoalesced tensors is not supported since the operation is
+// not a linear map. Values of uncoalesced tensor corresponding to the same
+// indices are summed and asinh(v1 + v2) != asinh(v1) + asinh(v2)
+
+SparseTensor& asinh_out_sparse(const SparseTensor& t, SparseTensor& r) {
+  sparse_unary_op_check_and_init<true>(t, r);
+  r._values().asinh_();
   return r;
 }
+
+SparseTensor asinh_sparse(const SparseTensor& t) {
+  auto result = get_result_tensor_for_unary_op<true>(t);
+  return asinh_out_sparse(t, result);
+}
+
+SparseTensor& asinh_sparse_(SparseTensor& t) {
+  return asinh_out_sparse(t, t);
+}
+
 // --------------------------------------------------------------------
 // pow(SparseTensor, Scalar)
 // --------------------------------------------------------------------

@@ -3396,35 +3396,66 @@ class TestSparseOneOff(TestCase):
         with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a CUDA tensor, but got a CPU tensor"):
             x + sparse_y
 
-class TestSparseUnaryUfuncs(TestCase):
+class TestSparseFuncs(TestCase):
     exact_dtype = True
 
+    # TODO - Need to extend for non-unary functions
     @ops(sparse_unary_ufuncs)
     def test_sparse_consistency(self, device, dtype, op):
-        unsupportedTypes = [torch.bfloat16, torch.cfloat, torch.cdouble]
+        unsupportedTypes = [torch.bfloat16, torch.cfloat, torch.cdouble, torch.bool]
         if dtype in unsupportedTypes:
             self.skipTest('Skipped! Unsupported dtypes for Sparse')
 
-        samples = op.sample_inputs(device, dtype)
+        samples = op.sample_sparse_inputs(device, dtype)
 
         if len(samples) == 0:
             self.skipTest("Skipped! No sample inputs!")
 
-        sample = samples[0]
+        for sample in samples:
+            sample = sample.input
+            assert isinstance(sample, torch.Tensor)
+            expected = op(sample.to_dense())
+            assert torch.is_tensor(expected)
+            output = op(sample)
+            assert torch.is_tensor(output)
+            self.assertEqual(output.to_dense(), expected)
 
-        assert isinstance(sample.input, torch.Tensor)
+    # TODO - Need to extend for non-unary functions
+    @ops(sparse_unary_ufuncs)
+    def test_sparse_inplace_consistency(self, device, dtype, op):
+        unsupportedTypes = [torch.bfloat16, torch.cfloat, torch.cdouble, torch.bool]
+        if dtype in unsupportedTypes:
+            self.skipTest('Skipped! Unsupported dtypes for Sparse')
 
-        expected = op(sample.input)
-        assert torch.is_tensor(expected)
-        output = op(sample.input.to_sparse())
-        assert torch.is_tensor(output)
-        self.assertEqual(output.to_dense(), expected)
+        inplace_variant = op.get_inplace()
 
-# e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
-instantiate_device_type_tests(TestSparseUnaryUfuncs, globals())
+        if inplace_variant is not None:
+            samples = op.sample_sparse_inputs(device, dtype)
+            if len(samples) == 0:
+                self.skipTest("Skipped! No sample inputs!")
+
+            for sample in samples:
+                # TODO - extend this logic for Binary Operations
+                sample = sample.input
+                sample_copy = sample.clone()
+                expected = op(sample.to_dense())
+
+                if torch.can_cast(expected.dtype, sample.dtype) and (
+                        sample.is_coalesced() or op.is_linear_map):
+                    inplace_variant(sample)
+                    self.assertEqual(expected, sample.to_dense())
+                    op(sample_copy, out=sample_copy)
+                    self.assertEqual(sample, sample_copy)
+                else:
+                    with self.assertRaises(RuntimeError):
+                        inplace_variant(sample)
+                        op(sample_copy, out=sample_copy)
 
 # e.g., TestSparseCPU and TestSparseCUDA
 instantiate_device_type_tests(TestSparse, globals())
+
+# e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
+instantiate_device_type_tests(TestSparseFuncs, globals())
 
 if __name__ == '__main__':
     run_tests()

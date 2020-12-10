@@ -545,16 +545,21 @@
 - func: asinh(Tensor self) -> Tensor
   variants: function, method
   structured_delegate: asinh.out
+  dispatch:
+    SparseCPU, SparseCUDA: asinh_sparse
 
 - func: asinh_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   structured_delegate: asinh.out
+  dispatch:
+    SparseCPU, SparseCUDA: asinh_sparse_
 
 - func: asinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: asinh_out
+    SparseCPU, SparseCUDA: asinh_out_sparse
 
 # arcsinh, alias for asinh
 - func: arcsinh(Tensor self) -> Tensor
@@ -3765,6 +3770,8 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: sqrt.out
   variants: function, method
+  dispatch:
+    SparseCPU, SparseCUDA: sqrt_sparse_
 
 - func: sqrt.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
