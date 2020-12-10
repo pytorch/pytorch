@@ -343,21 +343,27 @@ Tensor cudnn_convolution_backward_input(
   checkAllSameType(c, {grad_output, weight});
   checkAllSameGPU(c, {grad_output, weight});
 
-  auto layout = cudnn_conv_use_channels_last(*grad_output, *weight) ?
+  auto memory_format = cudnn_conv_use_channels_last(*grad_output, *weight) ?
       at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
-  auto grad_input_t = at::empty(input_size, grad_output->options(), layout);
+  auto grad_input_t = at::native::empty_cuda(
+                    input_size,
+                    /*dtype=*/grad_output->scalar_type(),
+                    /*layout=*/c10::nullopt,
+                    /*device=*/kCUDA,
+                    /*pin_memory=*/c10::nullopt,
+                    /*memory_format=*/memory_format);
 
   // Avoid "grad_input" when this is being used as transposed convolution
   TensorArg grad_input{ grad_input_t, "result", 0 };
   convolution_shape_check(c, grad_input, weight, grad_output, padding, stride, dilation, groups);
 
   // See #4500
-  Tensor weight_contig = weight->contiguous(layout);
+  Tensor weight_contig = weight->contiguous(memory_format);
   // Make sure that NC11 strides follow formula
-  weight_contig.resize_(weight_contig.sizes(), layout);
+  weight_contig.resize_(weight_contig.sizes(), memory_format);
 
-  Tensor grad_output_contig = grad_output->contiguous(layout);
-  grad_output_contig.resize_(grad_output_contig.sizes(), layout);
+  Tensor grad_output_contig = grad_output->contiguous(memory_format);
+  grad_output_contig.resize_(grad_output_contig.sizes(), memory_format);
 
   raw_cudnn_convolution_backward_input_out(
       *grad_input, grad_output_contig, weight_contig,
