@@ -138,6 +138,10 @@ StorageTypePtr StorageType::get() {
   static auto value = StorageType::create();
   return value;
 }
+QuantizerPtrTypePtr QuantizerPtrType::get() {
+  static auto value = QuantizerPtrType::create();
+  return value;
+}
 NoneTypePtr NoneType::get() {
   static auto value = NoneType::create();
   return value;

@@ -46,7 +46,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"QScheme", QSchemeType::get()},
       {"Quantizer", QuantizerType::get()},
       {"ConstQuantizerPtr",
-       IntType::get()}, // TODO This type should be removed from the schema
+       at::QuantizerPtrType::get()}, // TODO This type should be removed from the schema
                         // parser, it should use the custom class mechanism
                         // instead. @jerryzh
       {"Device", DeviceObjType::get()},
