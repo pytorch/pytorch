@@ -31,7 +31,7 @@ inline constexpr bool should_include_kernel_dtype(
  * passing in -c pt.enable_record_kernel_dtype=1 when building the tracer
  * binary.
  */
-#if defined ENABLED_RECORD_KERNEL_FUNCTION_DTYPE
+#if defined ENABLE_RECORD_KERNEL_FUNCTION_DTYPE
 #define RECORD_KERNEL_FUNCTION_DTYPE(NAME, enum_type)                      \
   {RECORD_FUNCTION_WITH_SCOPE(                                             \
     at::RecordScope::KERNEL_FUNCTION_DTYPE,                                \
