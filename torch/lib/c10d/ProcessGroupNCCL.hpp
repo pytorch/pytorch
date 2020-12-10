@@ -171,10 +171,6 @@ class ProcessGroupNCCL : public ProcessGroup {
     // Store a reference to NCCL collective's outputs to be used by getFuture.
     std::shared_ptr<std::vector<at::Tensor>> outputs_;
 
-    // Store streams that run FutureNCCL then callbacks.
-    std::vector<std::shared_ptr<at::cuda::CUDAStream>>
-        futureNCCLCallbackStreams_;
-
     friend class ProcessGroupNCCL;
   };
 
@@ -200,10 +196,8 @@ class ProcessGroupNCCL : public ProcessGroup {
   // or NCCL's barrier().
   //
   // If created by WorkNCCL's getFuture API, FutureNCCL has a reference to
-  // WorkNCCL's cudaEvents, NCCL collective's outputs, device index of
-  // outputs' device, and the ProcesGroupNCCL's dedicated
-  // futureNCCLCallbackStream for outputs' device that runs all the then
-  // callbacks called from this FutureNCCL. Its value is NCCL collective's
+  // WorkNCCL's cudaEvents, NCCL collective's outputs, and the device index of
+  // outputs' device. Its value is NCCL collective's
   // outputs. FutureNCCL only supports single-process single-device mode where
   // the size of outputs is equal to 1.
   //
@@ -213,21 +207,17 @@ class ProcessGroupNCCL : public ProcessGroup {
   // own cudaEvents with the stream that runs the callback. This design
   // enables synchronizing the appropriate streams and avoids stalling PyTorch's
   // default stream while running the callback. In case of multiple then
-  // callbacks, the design will work like a chain such that FutureNCCL n will
-  // wait on the cudaEvents from FutureNCCL n - 1. All callbacks are executed on
-  // outputs' device's dedicated futureNCCLCallbackStream.
+  // callbacks, each will be executed on its own fresh stream.
   struct FutureNCCL : at::ivalue::Future {
    public:
     explicit FutureNCCL(
         at::IValue value,
         c10::DeviceIndex deviceIndex,
-        std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents,
-        std::shared_ptr<at::cuda::CUDAStream> futureNCCLCallbackStream)
+        std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents)
         : at::ivalue::Future(c10::ListType::create(c10::TensorType::get())),
           value_(std::move(value)),
           deviceIndex_(deviceIndex),
-          cudaEvents_(cudaEvents),
-          futureNCCLCallbackStream_(futureNCCLCallbackStream) {
+          cudaEvents_(std::move(cudaEvents)) {
       TORCH_INTERNAL_ASSERT(
           cudaEvents_->size() == 1,
           "FutureNCCL only supports single-process single-device mode.");
@@ -246,12 +236,10 @@ class ProcessGroupNCCL : public ProcessGroup {
     // return value of callback.
     explicit FutureNCCL(
         c10::DeviceIndex deviceIndex,
-        std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents,
-        std::shared_ptr<at::cuda::CUDAStream> futureNCCLCallbackStream)
+        std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents)
         : at::ivalue::Future(c10::ListType::create(c10::TensorType::get())),
           deviceIndex_(deviceIndex),
-          cudaEvents_(cudaEvents),
-          futureNCCLCallbackStream_(futureNCCLCallbackStream) {
+          cudaEvents_(std::move(cudaEvents)) {
       TORCH_INTERNAL_ASSERT(
           cudaEvents_->size() == 1,
           "FutureNCCL only supports single-process single-device mode.");
@@ -307,16 +295,19 @@ class ProcessGroupNCCL : public ProcessGroup {
     // this callback. This new FutureNCCL's cudaEvents will record the
     // callback's stream and will have the result value of the callback.
     void addCallback(std::function<void(void)> callback) override {
+      // FIXME Should we find a way to allow to change the priority of streams?
+      at::cuda::CUDAStream stream =
+          at::cuda::getStreamFromPool(/*isHighPriority=*/false, deviceIndex_);
+
       // Do not free the underlying data storage of value_ before its
-      // usage on futureNCCLCallbackStream_ finish.
+      // usage on the stream finishes.
       for (const at::DataPtr& data_ptr : extractDataPtrs(value_)) {
-        c10::cuda::CUDACachingAllocator::recordStream(
-            data_ptr, *futureNCCLCallbackStream_);
+        c10::cuda::CUDACachingAllocator::recordStream(data_ptr, stream);
       }
 
-      (*cudaEvents_)[0].block(*futureNCCLCallbackStream_);
+      (*cudaEvents_)[0].block(stream);
       // Use the dedicated callback stream to run callback.
-      c10::StreamGuard streamGuard{*futureNCCLCallbackStream_};
+      c10::StreamGuard streamGuard{stream};
       callback();
     }
 
@@ -326,14 +317,13 @@ class ProcessGroupNCCL : public ProcessGroup {
     c10::intrusive_ptr<Future> then(
         std::function<at::IValue(void)> callback,
         at::TypePtr /* unused */) override {
-      // Create a new cudaEvents object of size 1 that will record
-      // futureNCCLCallbackStream_ after callback and will be passed to the new
-      // FutureNCCL.
+      // Create a new cudaEvents object of size 1 that will record the current
+      // stream after callback and will be passed to the new FutureNCCL.
       auto thenFutCudaEvents =
           std::make_shared<std::vector<at::cuda::CUDAEvent>>(1);
       // Create a FutureNCCL without setting a value.
       auto fut = c10::make_intrusive<FutureNCCL>(
-          deviceIndex_, thenFutCudaEvents, futureNCCLCallbackStream_);
+          deviceIndex_, thenFutCudaEvents);
       // The new future needs the DataPtr extractor when it gets marked complete
       // but this might happen immediately inline or in parallel by another
       // thread. In both these cases this would/might happen before the user has
@@ -385,7 +375,6 @@ class ProcessGroupNCCL : public ProcessGroup {
     at::IValue value_;
     c10::DeviceIndex deviceIndex_;
     std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents_;
-    std::shared_ptr<at::cuda::CUDAStream> futureNCCLCallbackStream_;
     DataPtrExtractor dataPtrExtractor_;
     std::mutex dataPtrExtractorMutex_;
     c10::optional<FutureError> error_;
@@ -742,16 +731,6 @@ class ProcessGroupNCCL : public ProcessGroup {
   // for this map since only the watchdog thread accesses this set. The
   // set contains the string representation of ncclUniqueId.
   std::unordered_set<std::string> abortedComms_;
-
-  // In single-process single-device mode, WorkNCCL::getFuture is supported.
-  // Depending on the device index of collective outputs, WorkNCCL will pass
-  // the corresponding device's then callback stream to FutureNCCL.
-  // We just inititalize futureNCCLCallbackStreams_ inside the constructor and
-  // set its size to the total number of available devices and depending on the
-  // device of the NCCL collective's outputs, we later set the callback stream
-  // of the corresponding device inside ProcessGroupNCCL::getNCCLComm if not set
-  // before.
-  std::vector<std::shared_ptr<at::cuda::CUDAStream>> futureNCCLCallbackStreams_;
 
   // Schedule NCCL operations on high priority CUDA streams.
   bool isHighPriorityStream_ = false;
