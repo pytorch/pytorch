@@ -791,6 +791,9 @@ struct CodeImpl {
     } else if (node->cast<ProfileOptionalOp>()) {
       profile_function_table_.push_back(
           node->cast<ProfileOptionalOp>()->getCallback());
+    } else if (node->cast<ProfileIValueOp>()) {
+      profile_function_table_.push_back(
+          node->cast<ProfileIValueOp>()->getCallback());
     } else {
       TORCH_INTERNAL_ASSERT(false);
     }
@@ -945,6 +948,7 @@ struct CodeImpl {
       case prim::BailOut:
         emitBailOut(node);
         break;
+      case prim::profile_ivalue:
       case prim::profile_optional:
       case prim::profile:
         emitProfile(node);
@@ -1607,11 +1611,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   static void checkAndStartRecordFunction(Frame& frame, Stack& stack) {
-    bool pre_sampled = false;
     if (!frame.record_function && at::hasCallbacks() &&
-        at::shouldRunRecordFunction(&pre_sampled)) {
+        at::isRecordFunctionEnabled()) {
       auto rec_fn = std::make_unique<at::RecordFunction>(
-          at::RecordScope::TORCHSCRIPT_FUNCTION, pre_sampled);
+          at::RecordScope::TORCHSCRIPT_FUNCTION);
       if (rec_fn->isActive()) {
         if (rec_fn->needsInputs()) {
           rec_fn->before(

@@ -1495,8 +1495,8 @@ class TestLinalg(TestCase):
         self.assertEqual(ee[:, 1], torch.zeros(ee.shape[0], dtype=dtype))  # imaginary part
         self.assertEqual(vv, np_v)
 
-    @onlyCPU
     @skipCPUIfNoLapack
+    @skipCUDAIfNoMagma
     @dtypes(torch.double, torch.float)
     def test_eig_reuse(self, device, dtype):
         X = torch.randn(4, 4, dtype=dtype, device=device)
@@ -1512,15 +1512,15 @@ class TestLinalg(TestCase):
             atol = 1e-8
             rtol = 0
         self.assertEqual(X, Xhat, atol=atol, rtol=rtol, msg='VeV\' wrong')
-        self.assertFalse(v.is_contiguous(), 'V is contiguous')
+        self.assertTrue(v.is_contiguous(), 'V is not contiguous')
 
         torch.eig(X, True, out=(e, v))
         Xhat = torch.mm(v, torch.mm(e.select(1, 0).diag(), v.t()))
         self.assertEqual(X, Xhat, atol=atol, rtol=rtol, msg='VeV\' wrong')
-        self.assertFalse(v.is_contiguous(), 'V is contiguous')
+        self.assertTrue(v.is_contiguous(), 'V is not contiguous')
 
-    @onlyCPU
     @skipCPUIfNoLapack
+    @skipCUDAIfNoMagma
     @dtypes(torch.double, torch.float)
     def test_eig_non_contiguous(self, device, dtype):
         X = torch.randn(4, 4, dtype=dtype, device=device)
@@ -1546,19 +1546,19 @@ class TestLinalg(TestCase):
         # test invalid input
         self.assertRaisesRegex(
             RuntimeError,
-            'A should be 2 dimensional',
+            'input should be 2 dimensional',
             lambda: torch.eig(torch.ones((2))))
         self.assertRaisesRegex(
             RuntimeError,
-            'A should be square',
+            'input should be square',
             lambda: torch.eig(torch.ones((2, 3))))
         self.assertRaisesRegex(
             RuntimeError,
-            'A should not contain infs or NaNs',
+            'input should not contain infs or NaNs',
             lambda: torch.eig(np.inf * torch.ones((2, 2))))
         self.assertRaisesRegex(
             RuntimeError,
-            'A should not contain infs or NaNs',
+            'input should not contain infs or NaNs',
             lambda: torch.eig(np.nan * torch.ones((2, 2))))
 
     @skipCUDAIfNoMagma
