@@ -7,7 +7,7 @@ from ._custom_import_pickler import create_custom_import_pickler, import_module_
 from ._importlib import _normalize_path
 import types
 import importlib
-from typing import List, Any, Callable, Dict, Tuple, Union
+from typing import List, Any, Callable, Dict, Tuple, Union, Iterable
 from distutils.sysconfig import get_python_lib
 from pathlib import Path
 import linecache
@@ -303,7 +303,7 @@ node [shape=box];
         filename = self._filename(package, resource)
         self._write(filename, binary)
 
-    def mock(self, include: 'GlobPattern', *, exclude: 'GlobPattern' = []):
+    def mock(self, include: 'GlobPattern', *, exclude: 'GlobPattern' = ()):
         """Replace some required modules with a mock implementation.  Mocked modules will return a fake
         object for any attribute accessed from it. Because we copy file-by-file, the dependency resolution will sometimes
         find files that are imported by model files but whose functionality is never used
@@ -326,7 +326,7 @@ node [shape=box];
         """
         self.patterns.append((_GlobGroup(include, exclude), self.save_mock_module))
 
-    def extern(self, include: 'GlobPattern', *, exclude: 'GlobPattern' = []):
+    def extern(self, include: 'GlobPattern', *, exclude: 'GlobPattern' = ()):
         """Include `module` in the list of external modules the package can import.
         This will prevent dependency discover from saving
         it in the package. The importer will load an external module directly from the standard import system.
@@ -460,7 +460,7 @@ def _read_file(filename: str) -> str:
         b = f.read()
         return b.decode('utf-8')
 
-GlobPattern = Union[str, List[str]]
+GlobPattern = Union[str, Iterable[str]]
 
 
 class _GlobGroup:
