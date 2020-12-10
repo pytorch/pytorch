@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
+#include <ATen/TensorGeometry.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
@@ -7,6 +8,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <ATen/ExpandUtils.h>
 
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
@@ -989,8 +991,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::expm1: {
-      return computeOneOperand(
-          "aten_expm1", v, [](const ExprHandle& a) { return expm1(a); });
+      return computeOneOperand("aten_expm1", v, [](const ExprHandle& a) {
+        return expm1(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::erf: {
@@ -1143,8 +1146,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::cosh: {
-      return computeOneOperand(
-          "aten_cosh", v, [](const ExprHandle& a) { return cosh(a); });
+      return computeOneOperand("aten_cosh", v, [](const ExprHandle& a) {
+        return cosh(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::sinh: {
@@ -1874,6 +1878,88 @@ std::vector<int64_t> TensorExprKernel::getReductionAxes(
   return axes;
 }
 
+template <typename T>
+std::vector<size_t> reverse_sort_indices(const std::vector<T>& v) {
+  // initialize original index locations
+  std::vector<size_t> idx(v.size());
+  iota(idx.begin(), idx.end(), 0);
+
+  std::sort(idx.begin(), idx.end(), [&v](size_t i1, size_t i2) {
+    return v[i1] > v[i2];
+  });
+  return idx;
+}
+
+bool denseAndNonOverlapping(
+    at::ArrayRef<int64_t> sizes,
+    at::ArrayRef<int64_t> strides) {
+  return (strides == at::infer_dense_strides(sizes, strides));
+}
+
+Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
+  const TensorTypePtr& tt = v->type()->expect<TensorType>();
+  TORCH_INTERNAL_ASSERT(tensors_.count(v->unique()));
+  Tensor* tensor = tensors_[v->unique()];
+
+  TORCH_INTERNAL_ASSERT(tt->sizes().concrete_sizes());
+  const auto sizes = *tt->sizes().concrete_sizes();
+  std::vector<int64_t> default_strides = TensorType::contiguousStridesOf(sizes);
+  TORCH_INTERNAL_ASSERT(tt->strides().concrete_sizes());
+  const std::vector<int64_t> strides = *tt->strides().concrete_sizes();
+  // All Tensors in NNC are layed out in default, contiguous layout.
+  // If the output is also default contiguous we don't need to do anything
+  if (strides == default_strides) {
+    return tensor;
+  }
+  // If the tensor is not dense or overlaps, we have
+  // no way of matching the profiled striding
+  if (!denseAndNonOverlapping(sizes, strides)) {
+    return tensor;
+  }
+
+  auto dims = dimsFromSizes(sizesForValue(v));
+  // We need to convert the output tensor so that its values are layed
+  // so that whene viewed from the output strides the values are correct.
+  // A contiguous Tensor of size(2, 3) with values 0-5 is layed out as:
+  // [0] [1] [2] [3] [4] [5]
+  // The same valued tensor with strides (2, 1) would be layed out like
+  // [0] [3] [1] [4] [2] [5]
+  // When we are doing the re-ordering of values into the output tensor,
+  // we are iterating per-element of the input, ad we are fixed
+  // in indexing in to the output tensor at [i, j] = val
+  // `val` we want here is equal to the indices for the output
+  // tensor that would have given the same position as the output
+  // The position is equal to the sum of stride[i] * index[i],
+  // and we can can calculate the equivalent indices in the
+  // output tensor strides by iteratively computing the index of
+  // the biggest stride:
+  // absolute = ...
+  // for stride in strides_from_largest_to_smallest:
+  //     cur_idx = absolute // stride
+  //     absolute = absolute % stride
+
+  return Compute(
+      "output_1", dims, [&](const std::vector<VarHandle>& axes_input) {
+        std::vector<ExprHandle> axes(axes_input.begin(), axes_input.end());
+        auto absolute_position = IntImm::make(0);
+        for (size_t i = 0; i < axes.size(); ++i) {
+          absolute_position =
+              absolute_position + (IntImm::make(default_strides[i]) * axes[i]);
+        }
+        std::vector<size_t> sorted_stride_indices =
+            reverse_sort_indices(strides);
+        std::vector<ExprHandle> new_axes(sorted_stride_indices.size());
+        for (size_t stride_index : sorted_stride_indices) {
+          auto stride = strides[stride_index];
+          auto index = Div::make(absolute_position, IntImm::make(stride));
+          absolute_position =
+              Mod::make(absolute_position, IntImm::make(stride));
+          new_axes[stride_index] = index;
+        }
+        return tensor->call(new_axes);
+      });
+}
+
 void TensorExprKernel::compile() {
   KernelScope kernelScope(&kernelArena_);
   GRAPH_DUMP("TensorExprKernel graph:", graph_);
@@ -1901,16 +1987,38 @@ void TensorExprKernel::compile() {
     }
   }
 
+  device_ = *pickDeviceType(graph_->inputs());
+
   // Move output operands from `tensors_` to `tensorOutputs_`
   for (const auto& output : graph_->outputs()) {
     if (!tensors_.count(output->unique())) {
       throw malformed_input("cannot find output Tensor");
     }
+    // The "strided" tensor will be incorrect if used in NNC,
+    // since NNC views it as contiguous. Only convert it to the right
+    // strides at the end of the kernel (if already contiguous it's a no-op)
+    Tensor* properly_strided_output = convertOutputToCorrectStrides(output);
+    tensors_[output->unique()] = properly_strided_output;
+    const auto& tt = output->type()->expect<TensorType>();
+    auto sizes = *tt->sizes().concrete_sizes();
+    tensorOutputSizes_.push_back(sizes);
+    auto strides = *tt->strides().concrete_sizes();
+
+    // If the tensor is not dense or overlaps, we have
+    // no way of matching the profiled striding
+    if (denseAndNonOverlapping(sizes, strides)) {
+      tensorOutputStrides_.push_back(*tt->strides().concrete_sizes());
+    } else {
+      tensorOutputStrides_.push_back(TensorType::contiguousStridesOf(sizes));
+    }
+
     tensorOutputs_.emplace_back(tensors_.at(output->unique()));
+    tensorOutputTensorOptions_.push_back(
+        c10::TensorOptions(tensorType(tensors_[output->unique()]))
+            .device(device_));
     tensors_.erase(output->unique());
   }
 
-  device_ = *pickDeviceType(graph_->inputs());
   BackendType backendType = inferBackendTypeFromDevice(device_);
   Stmt* stmt = generateStmt(backendType);
   // Set up formal params (inputs, then outputs) for kernel.
@@ -1927,36 +2035,34 @@ void TensorExprKernel::compile() {
 
 TensorExprKernel::TensorExprKernel(const std::shared_ptr<Graph>& subgraph)
     : graph_(subgraph), code_(subgraph, "") {
-  if (!fallbackAllowed()) {
+  allow_fallback_ = fallbackAllowed();
+  if (!allow_fallback_) {
     compile();
+    return;
+  }
+
+  use_fallback_ = fallbackEnforced();
+  if (use_fallback_) {
     return;
   }
 
   try {
     compile();
   } catch (...) {
-    fallback_ = true;
+    use_fallback_ = true;
   }
 }
 
 void TensorExprKernel::run(Stack& stack) {
-  if (fallbackEnforced()) {
-    fallback(stack);
-    return;
-  }
-  if (!fallbackAllowed()) {
+  if (!use_fallback_ && !allow_fallback_) {
     runKernel(stack);
-    return;
-  }
-
-  if (fallback_) {
-    fallback(stack);
-    return;
-  }
-  try {
-    runKernel(stack);
-  } catch (...) {
-    fallback_ = true;
+  } else if (!use_fallback_ && allow_fallback_) {
+    try {
+      runKernel(stack);
+    } catch (...) {
+      fallback(stack);
+    }
+  } else {
     fallback(stack);
   }
 }
@@ -1964,47 +2070,26 @@ void TensorExprKernel::run(Stack& stack) {
 std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
     const at::ArrayRef<IValue>& inputs,
     std::vector<at::Tensor>& outputs) {
-  std::map<const Expr*, int32_t> varToSize;
-
   std::vector<CodeGen::CallArg> runArgs;
-  for (size_t i = 0; i < inputs.size(); i++) {
+  runArgs.reserve(inputs.size() + tensorOutputs_.size());
+
+  for (size_t i = 0, e = inputs.size(); i < e; i++) {
     auto const& input = inputs[i];
     if (input.isInt()) {
       runArgs.emplace_back((int32_t)input.toInt());
     } else if (input.isDouble()) {
       runArgs.emplace_back((float)input.toDouble());
     } else if (input.isTensor()) {
-      auto const& tensor = input.toTensor();
-      runArgs.emplace_back(tensor.data_ptr());
-      for (auto const& size : kernelArgs_[i].sizes()) {
-        int32_t s = tensor.sizes()[size.idx];
-        runArgs.emplace_back(s);
-        varToSize[size.var.node()] = s;
-      }
-      for (auto const& stride : kernelArgs_[i].strides()) {
-        int32_t s = tensor.strides()[stride.idx];
-        runArgs.emplace_back(s);
-      }
+      runArgs.emplace_back(input.toTensor().data_ptr());
     }
   }
 
-  for (auto& o : tensorOutputs_) {
-    std::vector<int64_t> tensorSize;
-    for (const Expr* dim : o->dims()) {
-      auto it = varToSize.find(dim);
-      if (it != varToSize.end()) {
-        tensorSize.push_back(it->second);
-      } else {
-        const IntImm* s = dynamic_cast<const IntImm*>(dim);
-        if (!s) {
-          throw malformed_input("output expected Int", dim);
-        }
-        tensorSize.push_back(s->value());
-      }
-    }
-
-    outputs.push_back(at::empty(
-        tensorSize, c10::TensorOptions(tensorType(o)).device(device_)));
+  for (size_t i = 0, e = tensorOutputs_.size(); i < e; ++i) {
+    auto t = at::empty_strided(
+        tensorOutputSizes_[i],
+        tensorOutputStrides_[i],
+        tensorOutputTensorOptions_[i]);
+    outputs.push_back(t);
     runArgs.emplace_back(outputs.back().data_ptr());
   }
   return runArgs;

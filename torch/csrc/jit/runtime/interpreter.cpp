@@ -791,6 +791,9 @@ struct CodeImpl {
     } else if (node->cast<ProfileOptionalOp>()) {
       profile_function_table_.push_back(
           node->cast<ProfileOptionalOp>()->getCallback());
+    } else if (node->cast<ProfileIValueOp>()) {
+      profile_function_table_.push_back(
+          node->cast<ProfileIValueOp>()->getCallback());
     } else {
       TORCH_INTERNAL_ASSERT(false);
     }
@@ -945,6 +948,7 @@ struct CodeImpl {
       case prim::BailOut:
         emitBailOut(node);
         break;
+      case prim::profile_ivalue:
       case prim::profile_optional:
       case prim::profile:
         emitProfile(node);
@@ -1412,10 +1416,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               auto t = input.toTensor();
               const TypePtr& expected = frame.function->type_table_[inst.X + i];
               auto expected_type = expected->cast<TensorType>();
-              if (t.defined() &&
-                  (!frames.back().symbols2dims.bindSymbolicShapes(
-                       t.sizes(), expected_type->symbolic_sizes()) ||
-                   !expected_type->matchTensor(t))) {
+              if (t.defined() && !expected_type->matchTensor(t)) {
                 push(stack, false);
                 break;
               }
