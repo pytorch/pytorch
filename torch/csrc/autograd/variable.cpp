@@ -402,7 +402,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
     auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(self));
 
     // See NOTE [ View + Inplace detection ]
-    if (diff_view_meta->has_bw_view() && diff_view_meta->get_creation_meta() != CreationMeta::MULTI_OUTPUT_SAFE) {
+    if (diff_view_meta->get_creation_meta() != CreationMeta::MULTI_OUTPUT_SAFE) {
       std::lock_guard<std::mutex> lock(diff_view_meta->mutex_);
       auto view_info = diff_view_meta->get_backward_view();
       if (!diff_view_meta->grad_fn_ && !view_info.base_.requires_grad()) {

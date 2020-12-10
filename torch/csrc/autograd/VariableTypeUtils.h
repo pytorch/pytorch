@@ -142,7 +142,7 @@ inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_dif
   c10::optional<ViewInfo> new_fw_info = c10::nullopt;
 
   if (is_bw_differentiable) {
-    if (base.is_view() && static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base))->has_bw_view()) {
+    if (base.is_view()) {
       auto diff_view_meta = static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base));
       auto base_bw_info = diff_view_meta->get_backward_view();
       new_bw_info = base_bw_info.chain(base, tensor, view_func);
@@ -155,7 +155,9 @@ inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_dif
   }
 
   if (is_fw_differentiable) {
-    if (base.is_view() && static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base))->has_fw_view()) {
+    // Check if base is a forward differentiabble view
+    auto is_view = torch::autograd::impl::get_autograd_meta(base) && torch::autograd::impl::get_autograd_meta(base)->is_view_;
+    if (is_view && static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base))->has_fw_view()) {
       auto diff_view_meta = static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base));
       auto base_fw_info = diff_view_meta->get_forward_view();
       new_fw_info = base_fw_info.chain(base, tensor, view_func);
@@ -178,13 +180,31 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tens
   c10::optional<ViewInfo> new_fw_info = c10::nullopt;
 
   if (is_bw_differentiable) {
-    new_bw_info = ViewInfo(base, c10::nullopt);
+    if (base.is_view()) {
+      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base));
+      auto base_bw_info = diff_view_meta->get_backward_view();
+      TORCH_CHECK(!base_bw_info.has_view_fn(), "Using a function that returns multiple view with an input that is "
+                                               "either a non-strided Tensor or a cross-dtype view is not allowed.");
+      new_bw_info = base_bw_info.chain(base, Tensor(), c10::nullopt);
+    } else {
+      new_bw_info = ViewInfo(base, c10::nullopt);
+    }
   } else {
     TORCH_CHECK(creation_meta == CreationMeta::DEFAULT,
                 "Non-backward differentiable views must have creation_meta=CreationMeta::DEFAULT");
   }
   if (is_fw_differentiable) {
-    new_fw_info = ViewInfo(base, c10::nullopt);
+    // Check if base is a forward differentiabble view
+    auto is_view = torch::autograd::impl::get_autograd_meta(base) && torch::autograd::impl::get_autograd_meta(base)->is_view_;
+    if (is_view && static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base))->has_fw_view()) {
+      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base));
+      auto base_fw_info = diff_view_meta->get_forward_view();
+      TORCH_CHECK(!base_fw_info.has_view_fn(), "Using a function that returns multiple view with an input that is "
+                                               "either a non-strided Tensor or a cross-dtype view is not allowed.");
+      new_fw_info = base_fw_info.chain(base, Tensor(), c10::nullopt);
+    } else {
+      new_fw_info = ViewInfo(base, c10::nullopt);
+    }
   }
 
   for(Tensor &tensor : tensors) {
