@@ -60,8 +60,7 @@ def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments]) -> Sequen
             argument=a.argument,
         )]
     elif isinstance(a, TensorOptionsArguments):
-        if local.use_c10_dispatcher() in [UseC10Dispatcher.hacky_wrapper_for_legacy_signatures,
-                                          UseC10Dispatcher.with_codegenerated_unboxing_wrapper]:
+        if local.use_c10_dispatcher() == UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
             # TODO: expunge this logic entirely
             default = None
             if all(x.default == "None" for x in a.all()):

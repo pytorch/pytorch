@@ -156,19 +156,6 @@ ${return_type} ${type_wrapper_name}(${formals}) {
 }
 """)
 
-# NOTE[UnboxedOnly] Many of our codegen templates currently exist twice, once
-# in an _UNBOXEDONLY_ variant and once without _UNBOXEDONLY_. This is because
-# ops that are `use_c10_dispatcher: full` need different c++ code than ops
-# that aren't `use_c10_dispatcher: full` yet. The _UNBOXEDONLY_ variants
-# are for ops that aren't `use_c10_dispatcher: full` yet and those code templates
-# can be deleted once all ops are `use_c10_dispatcher: full`.
-# If you update one of the templates, you likely also have to update the other.
-
-# See NOTE[UnboxedOnly]
-UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
-m.impl_UNBOXED("${unqual_operator_name_with_overload}", &${class_type}::${type_wrapper_name});
-""")
-
 WRAPPER_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
        TORCH_FN(${class_type}::${type_wrapper_name})
@@ -352,11 +339,7 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
     wrapper_registrations = []
 
     for declaration in aten_declarations:
-        if declaration['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']:
-            formals = declaration['schema_order_formals']
-        else:
-            assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
-            formals = declaration['formals']
+        formals = declaration['schema_order_formals']
         type_declarations.append(METHOD_DECLARATION.substitute(declaration, formals=formals))
         strategy = dispatch_strategy(declaration)
         if declaration['name'] not in MANUAL_AUTOGRAD and strategy == 'use_derived':
@@ -364,13 +347,8 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
 
             type_definitions.append(METHOD_DEFINITION.substitute(
                 declaration, type_definition_body=body, formals=formals))
-            if declaration['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']:
-                wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
-                    declaration, class_type='VariableType'))
-            else:
-                assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
-                wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
-                    declaration, class_type='VariableType'))
+            wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
+                declaration, class_type='VariableType'))
 
         # See Note [Manual Backend kernels]
         assert (declaration['name'] in MANUAL_BACKEND) == declaration['manual_kernel_registration']
@@ -614,11 +592,7 @@ def emit_body(declaration):
     def emit_dispatch_call(api_name, input_base, unpacked_args):
         """ Dispatch call via function in a namespace or method on Tensor."""
         if 'namespace' in declaration['method_of']:
-            if declaration['use_c10_dispatcher'] in ['hacky_wrapper_for_legacy_signatures', 'full']:
-                dispatcher_api_name = make_out_api_name_faithful(api_name)
-            else:
-                assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
-                dispatcher_api_name = api_name
+            dispatcher_api_name = make_out_api_name_faithful(api_name)
             call = CALL_DISPATCH_VIA_NAMESPACE.substitute(
                 api_name=dispatcher_api_name,
                 unpacked_args=unpacked_args)
@@ -836,11 +810,7 @@ def unpack_args(env, declaration):
     body = []
     unpacked_args = []
     unpacked_args_simple_type = {}
-    if declaration['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']:
-        arguments = declaration['schema_order_arguments']
-    else:
-        assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
-        arguments = declaration['arguments']
+    arguments = declaration['schema_order_arguments']
     for i, arg in enumerate(arguments):
         if not requires_unpack(arg):
             unpacked_args.append(arg['name'])
@@ -848,24 +818,17 @@ def unpack_args(env, declaration):
             continue
 
         dynamic_type = arg['dynamic_type']
-        if 'TensorOptions' not in dynamic_type:
-            is_nullable = arg.get('is_nullable', False)
-            ref = (not is_nullable) and dynamic_type not in ['TensorList']
-            suffix = '_opt' if is_nullable and dynamic_type != 'TensorList' else ''
+        assert 'TensorOptions' not in dynamic_type, "VariableKernel shouldn't take TensorOptions"
+        is_nullable = arg.get('is_nullable', False)
+        ref = (not is_nullable) and dynamic_type not in ['TensorList']
+        suffix = '_opt' if is_nullable and dynamic_type != 'TensorList' else ''
 
-            body.append(UNPACK_TENSOR.substitute(
-                arg_name=arg['name'],
-                arg_pos=i,
-                suffix=suffix,
-                ref='&' if ref else '',
-            ))
-        else:
-            # Okay, we are abusing the definition of 'unpack' here a bit,
-            # although it's still getting the non-variable from the variable
-            # (in this case via TensorOptions rather than Variable/Tensor).
-            assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper', \
-                "VariableKernel shouldn't take TensorOptions if the op is c10-full"
-            body.append(LEGACY_WRAP_OPTIONS.substitute(arg_name=arg['name']))
+        body.append(UNPACK_TENSOR.substitute(
+            arg_name=arg['name'],
+            arg_pos=i,
+            suffix=suffix,
+            ref='&' if ref else '',
+        ))
 
         unpacked_args.append(arg['name'] + '_')
         unpacked_args_simple_type[arg['name'] + '_'] = arg['simple_type']

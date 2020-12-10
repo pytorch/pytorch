@@ -88,10 +88,7 @@ def argumenttype_type(t: Type, *, mutable: bool) -> str:
             if mutable:
                 return 'Tensor &'  # TODO: fix this discrepancy
             else:
-                if local.use_c10_dispatcher().dispatcher_uses_new_style():
-                    return 'const c10::optional<Tensor>&'
-                else:
-                    return 'const Tensor &'
+                return 'const c10::optional<Tensor>&'
         elem = argumenttype_type(t.elem, mutable=mutable)
         return f"c10::optional<{elem}>"
     elif isinstance(t, ListType):
@@ -103,10 +100,7 @@ def argumenttype_type(t: Type, *, mutable: bool) -> str:
         elif str(t.elem) == 'Dimname':
             return "DimnameList"
         elif str(t.elem) == 'Tensor?':
-            if local.use_c10_dispatcher().dispatcher_uses_new_style():
-                return "c10::List<c10::optional<Tensor>>"
-            else:
-                return "TensorList"
+            return "c10::List<c10::optional<Tensor>>"
         elem = argumenttype_type(t.elem, mutable=mutable)
         # TODO: explicitly qualify namespace here
         return f"ArrayRef<{elem}>"
