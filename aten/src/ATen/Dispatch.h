@@ -27,6 +27,11 @@ inline constexpr bool should_include_kernel_dtype(
 }
 }
 
+/**
+ * In the Facebook internal build (using BUCK), this macro is enabled by
+ * passing in -c pt.enable_record_kernel_dtype=1 when building the tracer
+ * binary.
+ */
 #if defined ENABLED_RECORD_KERNEL_FUNCTION_DTYPE
 #define RECORD_KERNEL_FUNCTION_DTYPE(NAME, enum_type)                      \
   {RECORD_FUNCTION_WITH_SCOPE(                                             \
@@ -181,6 +186,21 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
 // 4. Should complex be supported?  The answer is almost always no,
 //    unless you are working on "generic" code that should work on
 //    all dtypes.
+//
+// Parameters:
+// -----------
+//
+// 1. The NAME argument is a "tag" that is used to trace and then
+//    conditionally compile fragments of the case statements such
+//    that the kernel functions are specialized only for the dtypes
+//    that are needed. The NAME parameter *must* be a build time
+//    cons char* (can't be std::string, etc...)
+//
+// Please ensure that the NAME is unique for every implementation
+// or you run the risk of over-including code for the kernel
+// functions. There is no risk of missing out on any code, so
+// it's mostly a risk of a Type-2 error, and not a Type-1 error.
+//
 
 // NB: the the_type variable is not used, but we have kept it for
 // backwards compatibility.  It's probably not used by anyone though;
