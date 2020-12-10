@@ -152,6 +152,11 @@ void gpu_kernel_with_scalars(TensorIteratorBase& iter, const func_t& f) {
   if (iter.is_cpu_scalar(1)) {
     AUnaryFunctor<func_t> af(f, iter.scalar_value<arg1_t>(1));
     iter.remove_operand(1);
+    // TODO: When all kernels that use gpu_kernel_with_scalars are
+    // ported to structured, this device guard can be deleted.  This
+    // works around incorrect device guard generation for pre-structured
+    // kernels device guards, but structured kernels do it right and
+    // we can assume the device is already set correctly
     const OptionalDeviceGuard device_guard(device_of(iter.tensor(1)));
     gpu_kernel(iter, af);
   } else if (iter.is_cpu_scalar(2)) {
