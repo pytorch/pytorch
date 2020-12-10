@@ -39,3 +39,8 @@ class RoutedDecoderIterableDataset(IterableDataset):
             pathname = data[0]
             result = self.decoder(data)
             yield (pathname, result[pathname])
+
+    def __len__(self):
+        if self.length == -1:
+            raise NotImplementedError
+        return self.length
