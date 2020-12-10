@@ -41,6 +41,8 @@ class TestBundledInputs(TestCase):
             (torch.ones(4, 8, 32, 32).contiguous(memory_format=torch.channels_last),),
             # Special encoding of random tensor.
             (torch.utils.bundled_inputs.bundle_randn(1 << 16),),
+            # Quantized uniform tensor.
+            (torch.quantize_per_tensor(torch.zeros(4, 8, 32, 32), 0, 1, torch.qint8),),
         ]
         torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
             sm, samples, get_expr)
