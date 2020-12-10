@@ -1,6 +1,7 @@
 import warnings
 import importlib
 from inspect import getmembers, isfunction
+from typing import Dict, Tuple, Any, Union
 
 # The symbolic registry "_registry" is a dictionary that maps operators
 # (for a specific domain and opset version) to their symbolic functions.
@@ -8,9 +9,9 @@ from inspect import getmembers, isfunction
 # The keys are tuples (domain, version), (where domain is a string, and version is an int),
 # and the operator's name (string).
 # The map's entries are as follows : _registry[(domain, version)][op_name] = op_symbolic
-_registry = {}
+_registry: Dict[Tuple[str, int], Dict] = {}
 
-_symbolic_versions = {}
+_symbolic_versions: Dict[Union[int, str], Any] = {}
 from torch.onnx.symbolic_helper import _onnx_stable_opsets
 for opset_version in _onnx_stable_opsets:
     module = importlib.import_module('torch.onnx.symbolic_opset{}'.format(opset_version))
