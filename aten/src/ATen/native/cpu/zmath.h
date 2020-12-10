@@ -35,7 +35,10 @@ inline double zabs <c10::complex<double>, double> (c10::complex<double> z) {
 
 template <typename SCALAR_TYPE, typename VALUE_TYPE=SCALAR_TYPE>
 inline VALUE_TYPE angle_impl (SCALAR_TYPE z) {
-  return 0;
+  if (at::_isnan(z)) {
+    return z;
+  }
+  return z < 0 ? M_PI : 0;
 }
 
 template<>
