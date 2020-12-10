@@ -293,6 +293,10 @@ Tensor index(const Tensor & self, TensorList indices) {
 Tensor& index_out(Tensor& result, const Tensor & self, TensorList indices) {
   TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   at::assert_no_internal_overlap(result);
+  at::assert_no_overlap(result, self);
+  for (auto& index: indices) {
+    at::assert_no_overlap(result, index);
+  }
 
   auto info = make_info(self, indices);
   auto iter = make_index_out_iterator(info, result);
@@ -305,21 +309,24 @@ Tensor index_put(const Tensor & self, TensorList indices, const Tensor & value, 
 }
 
 Tensor & _index_put_impl_(Tensor & self, TensorList indices, const Tensor & value, const bool accumulate, const bool unsafe) {
-    TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
-  if (accumulate && self.device().type() == kCUDA) {
-      TORCH_CHECK(value.device() == self.device(), "expected device ", self.device(), " but got device ",
-      value.device(), " for value tensor");
-      index_put_accum_stub(self.device().type(), self, indices, value, unsafe);
-      return self;
-  }
-
+  TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   if (at::has_internal_overlap(self) == MemOverlap::YES) {
     TORCH_WARN(
       "Use of index_put_ on expanded tensors is deprecated. "
       "Please clone() the tensor before performing this operation. "
       "This also applies to advanced indexing e.g. tensor[indices] = tensor");
   }
-  at::assert_no_partial_overlap(self, value);
+  at::assert_no_overlap(self, value);
+  for (auto& index: indices) {
+    at::assert_no_overlap(self, index);
+  }
+
+  if (accumulate && self.device().type() == kCUDA) {
+      TORCH_CHECK(value.device() == self.device(), "expected device ", self.device(), " but got device ",
+      value.device(), " for value tensor");
+      index_put_accum_stub(self.device().type(), self, indices, value, unsafe);
+      return self;
+  }
 
   auto info = make_info(self, indices);
   auto iter = make_index_put_iterator(info, value);
@@ -333,9 +340,15 @@ Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & value, con
 }
 
 Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  // See note [Writing Nondeterministic Operations]
+  // Nondeterministic when index contains duplicate entries
+  at::globalContext().alertNotDeterministic("index_copy");
   dim = maybe_wrap_dim(dim, self.dim());
 
   TORCH_CHECK_INDEX(index.dim() < 2, "index_copy_(): Index should have dimension 1 or 0 (got ", index.dim(), ")");
+  at::assert_no_internal_overlap(self);
+  at::assert_no_overlap(self, index);
+  at::assert_no_overlap(self, source);
 
   int64_t numIndices = index.numel();
   if (source.dim() == 0 && numIndices != 1) {
@@ -391,8 +404,8 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
               "index_add_(): Number of indices should be equal to self.size(dim)");
 
   at::assert_no_internal_overlap(self);
-  at::assert_no_partial_overlap(self, index);
-  at::assert_no_partial_overlap(self, source);
+  at::assert_no_overlap(self, index);
+  at::assert_no_overlap(self, source);
 
   auto index_contig = index.contiguous();
 
@@ -469,6 +482,8 @@ Tensor & index_select_out_cpu_(Tensor & result, const Tensor & self, int64_t dim
   TORCH_CHECK(dim == 0 || dim < self.dim(),
               "index_select(): Indexing dim ", dim, " is out of bounds of tensor");
   at::assert_no_internal_overlap(result);
+  at::assert_no_overlap(result, self);
+  at::assert_no_overlap(result, index);
 
   auto result_size = self.sizes().vec();
   if (self.dim() > 0) {
@@ -605,6 +620,9 @@ Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, const 
 
 Tensor & gather_out_cpu_cuda(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
   result.resize_(index.sizes());
+  at::assert_no_internal_overlap(result);
+  at::assert_no_overlap(result, self);
+  at::assert_no_partial_overlap(result, index);
   gather_stub(result.device().type(), result, self, dim, index);
   return result;
 }
@@ -624,6 +642,9 @@ Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, cons
 Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
   TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
                     "scatter_(): Expected dtype int64 for index.");
+  at::assert_no_internal_overlap(self);
+  at::assert_no_overlap(self, source);
+  at::assert_no_overlap(self, index);
   scatter_stub(self.device().type(), self, dim, index, source);
   return self;
 }
@@ -631,6 +652,8 @@ Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, const Tensor
 Tensor & scatter_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar source) {
   TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
                     "scatter_(): Expected dtype int64 for index.");
+  at::assert_no_internal_overlap(self);
+  at::assert_no_overlap(self, index);
   scatter_fill_stub(self.device().type(), self, dim, index, source);
   return self;
 }
@@ -654,6 +677,8 @@ Tensor& scatter_scalar_reduce_(Tensor& self, const int64_t dim, const Tensor& in
                     "scatter_(): Expected dtype int64 for index.");
   TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
               "scatter_(): Expected floating or complex type for self.");
+  at::assert_no_internal_overlap(self);
+  at::assert_no_overlap(self, index);
   SCATTER_GATHER_OP op = get_operator_enum(reduce);
   scatter_scalar_reduce_stub(self.device().type(), self, dim, index, value, op);
   return self;
@@ -665,6 +690,9 @@ Tensor & scatter_reduce_(Tensor & self, const int64_t dim, const Tensor & index,
                     "scatter_(): Expected dtype int64 for index");
   TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
               "scatter_(): Expected floating or complex type for self.");
+  at::assert_no_internal_overlap(self);
+  at::assert_no_overlap(self, index);
+  at::assert_no_overlap(self, src);
   SCATTER_GATHER_OP op = get_operator_enum(reduce);
   scatter_reduce_stub(self.device().type(), self, dim, index, src, op);
   return self;
@@ -681,6 +709,9 @@ Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, Scalar so
 Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
   TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
                     "scatter_(): Expected dtype int64 for index.");
+  at::assert_no_internal_overlap(self);
+  at::assert_no_overlap(self, index);
+  at::assert_no_overlap(self, src);
   scatter_add_stub(self.device().type(), self, dim, index, src);
   return self;
 }
@@ -777,8 +808,8 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
               "masked_select(): self and result must have the same scalar type");
 
   at::assert_no_internal_overlap(result);
-  at::assert_no_partial_overlap(result, self);
-  at::assert_no_partial_overlap(result, mask);
+  at::assert_no_overlap(result, self);
+  at::assert_no_overlap(result, mask);
 
   if (mask.dtype() == at::ScalarType::Byte) {
     TORCH_WARN("masked_select received a mask with dtype torch.uint8, this behavior is now deprecated," \
@@ -892,6 +923,9 @@ void take_out_cpu_template(
     auto index_continuous = index.contiguous();
     bool is_contiguous = input.is_contiguous();
     auto input_size = input.numel();
+    at::assert_no_internal_overlap(output);
+    at::assert_no_partial_overlap(output, index);
+    at::assert_no_overlap(output, input);
 
     AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half, input.scalar_type(), "take_cpu", [&] {
         auto output_data = output_contiguous.data_ptr<scalar_t>();

@@ -440,7 +440,7 @@ struct TORCH_API Node {
   // instructions lowered by the interpreter and not run in the optimized graph
   bool notExecutedOp() const {
     return kind_ == prim::Constant || kind_ == prim::profile ||
-        kind_ == prim::profile_optional;
+        kind_ == prim::profile_optional || kind_ == prim::profile_ivalue;
   }
 
   // Graphs
@@ -1326,7 +1326,7 @@ inline const Graph* Value::owningGraph() const {
 
 /************* All nodes not required to be defined before Graph **************/
 struct ProfileOp : public Node {
-  static CONSTEXPR_EXCEPT_WIN_CUDA Symbol Kind = ::c10::prim::profile;
+  static const Symbol Kind;
   ProfileOp(Graph* graph, std::function<void(std::vector<IValue>&)> callback)
       : Node(graph, ::c10::prim::profile), callback_(std::move(callback)) {}
 
@@ -1346,7 +1346,7 @@ struct ProfileOp : public Node {
 };
 
 struct TORCH_API ProfileOptionalOp : public Node {
-  static CONSTEXPR_EXCEPT_WIN_CUDA Symbol Kind = ::c10::prim::profile_optional;
+  static const Symbol Kind;
   ProfileOptionalOp(
       Graph* graph,
       std::function<void(std::vector<IValue>&)> callback)
@@ -1362,6 +1362,28 @@ struct TORCH_API ProfileOptionalOp : public Node {
 
   void setCallback(std::function<void(std::vector<IValue>&)> callback) {
     callback_ = std::move(callback);
+  }
+
+ private:
+  std::function<void(std::vector<IValue>&)> callback_;
+};
+
+struct TORCH_API ProfileIValueOp : public Node {
+  static const Symbol Kind;
+  ProfileIValueOp(
+      Graph* graph,
+      std::function<void(std::vector<IValue>&)> callback)
+      : Node(graph, ::c10::prim::profile_ivalue), callback_(callback) {}
+
+  void cloneFrom(Node* other_) override;
+  Node* allocNewInstance(Graph* g) override;
+
+  const std::function<void(std::vector<IValue>&)>& getCallback() const {
+    return callback_;
+  }
+
+  void setCallback(std::function<void(std::vector<IValue>&)> callback) {
+    callback_ = callback;
   }
 
  private:
