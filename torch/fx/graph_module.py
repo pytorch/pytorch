@@ -55,7 +55,12 @@ def deserialize_graphmodule(body : dict) -> torch.nn.Module:
             super().__init__()
             self.__dict__ = body
 
-    CodeOnlyModule.forward = _forward_from_src(body['code'])
+    try:
+        CodeOnlyModule.forward = _forward_from_src(body['_code'])
+    except KeyError:
+        # BC: attribute name was changed from `code` to `_code` to facilitate
+        # making `code` into a property and adding a docstring to it
+        CodeOnlyModule.forward = _forward_from_src(body['code'])
 
     from .symbolic_trace import Tracer
 
@@ -112,17 +117,17 @@ def _assign_attr(from_obj: Any, to_module: torch.nn.Module, target: str):
 
 class GraphModule(torch.nn.Module):
     """
-    GraphModule is an nn.Module generated from an fx.Graph. GraphModule has
-    important attributes:
+    GraphModule is an nn.Module generated from an fx.Graph. Graphmodule has a
+    ``graph`` attribute, as well as ``code`` and ``forward`` attributes generated
+    from that ``graph``.
 
-        graph : The graph from which this GraphModule was generated
-        code : The Python source code for the function generated from `graph`
-        forward : The Python method generated from `graph`
+    .. warning::
 
-    Note that when `graph` is reassigned, `code` and `forward` will be automatically
-    regenerated. However, if you edit the contents of the `graph` without reassigning
-    the `graph` attribute itself, you must call `recompile()` to update the generated
-    code.
+        When ``graph`` is reassigned, ``code`` and ``forward`` will be automatically
+        regenerated. However, if you edit the contents of the ``graph`` without reassigning
+        the ``graph`` attribute itself, you must call ``recompile()`` to update the generated
+        code.
+
     """
     def __new__(cls: 'Type[GraphModule]', *args, **kwargs):
         # each instance of a graph module needs its own forward method
@@ -137,14 +142,20 @@ class GraphModule(torch.nn.Module):
     def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph):
         """
         Construct a GraphModule.
-        root - `root` can either be an nn.Module instance or a Dict mapping strings to any attribute type.
-               - In the case that `root` is a Module, any references to Module-based objects (via qualified
-                 name) in the Graph's Nodes' `target` field will be copied over from the respective place
-                 within `root`'s Module hierarchy into the GraphModule's module hierarchy.
-               - In the case that `root` is a dict, the qualified name found in a Node's `target` will be
-                 looked up directly in the dict's keys. The object mapped to by the Dict will be copied
-                 over into the appropriate place within the GraphModule's module hierarchy.
-        graph - `graph` contains the nodes this GraphModule should use for code generation
+
+        Args:
+
+            root (Union[torch.nn.Module, Dict[str, Any]):
+                ``root`` can either be an nn.Module instance or a Dict mapping strings to any attribute type.
+                In the case that ``root`` is a Module, any references to Module-based objects (via qualified
+                name) in the Graph's Nodes' ``target`` field will be copied over from the respective place
+                within ``root``'s Module hierarchy into the GraphModule's module hierarchy.
+                In the case that ``root`` is a dict, the qualified name found in a Node's ``target`` will be
+                looked up directly in the dict's keys. The object mapped to by the Dict will be copied
+                over into the appropriate place within the GraphModule's module hierarchy.
+
+            graph (Graph): ``graph`` contains the nodes this GraphModule should use for code generation
+
         """
         super().__init__()
         if isinstance(root, torch.nn.Module):
@@ -161,14 +172,14 @@ class GraphModule(torch.nn.Module):
                     assert isinstance(node.target, str)
                     if node.target not in root:
                         raise RuntimeError('Node ' + str(node) + ' referenced target ' + node.target +
-                                           ' but that target was not provided in `root`!')
+                                           ' but that target was not provided in ``root``!')
                     targets_to_copy.append(node.target)
             # Sort targets in ascending order of the # of atoms.
             # This will ensure that less deeply nested attributes are assigned
             # before more deeply nested attributes. For example, foo.bar
             # will be assigned before foo.bar.baz. Otherwise, we might assign
-            # the user-provided `foo.bar` and wipe out the previously-assigned
-            # `foo.bar.baz`
+            # the user-provided ``foo.bar`` and wipe out the previously-assigned
+            # ``foo.bar.baz``
             targets_to_copy.sort(key=lambda t: t.count('.'))
             for target_to_copy in targets_to_copy:
                 _assign_attr(root[target_to_copy], self, target_to_copy)
@@ -183,26 +194,32 @@ class GraphModule(torch.nn.Module):
     __jit_unused_properties__ = ['graph']
 
     @property
-    def graph(self):
+    def graph(self) -> Graph:
         """
-        Return the `Graph` underlying this `GraphModule`
+        Return the ``Graph`` underlying this ``GraphModule``
         """
         return self._graph
 
     @graph.setter
     def graph(self, g) -> None:
         """
-        Set the underlying `Graph` for this `GraphModule`. This will internally
-        recompile the `GraphModule` so that the generated `forward()` function
-        corresponds to `g`
+        Set the underlying ``Graph`` for this ``GraphModule``. This will internally
+        recompile the ``GraphModule`` so that the generated ``forward()`` function
+        corresponds to ``g``
         """
         self._graph = g
         self.recompile()
 
-
-    def to_folder(self, folder: Union[str, os.PathLike], module_name="FxModule"):
+    def to_folder(self, folder: Union[str, os.PathLike], module_name : str = "FxModule"):
         """Dumps out module to ``folder`` with ``module_name`` so that it can be
         imported with ``from <folder> import <module_name>``
+
+        Args:
+
+            folder (Union[str, os.PathLike]): The folder to write the code out to
+
+            module_name (str): Top-level name to use for the ``Module`` while
+                writing out the code
         """
         folder = Path(folder)
         Path(folder).mkdir(exist_ok=True)
@@ -253,15 +270,25 @@ class {module_name}(torch.nn.Module):
             warnings.warn("Was not able to save the following children modules as reprs -"
                           f"saved as pickled files instead: {blobified_modules}")
 
+    @property
+    def code(self) -> str:
+        """
+        Return the Python code generated from the ``Graph`` underlying this
+        ``GraphModule``.
+        """
+        if not hasattr(self, '_code'):
+            raise RuntimeError('Code has not been generated! Please report a bug to PyTorch')
+        return self._code
+
     def recompile(self) -> None:
         """
-        Recompile this GraphModule from its `graph` attribute. This should be
-        called after editing the contained `graph`, otherwise the generated
-        code of this `GraphModule` will be out of date.
+        Recompile this GraphModule from its ``graph`` attribute. This should be
+        called after editing the contained ``graph``, otherwise the generated
+        code of this ``GraphModule`` will be out of date.
         """
-        self.code = self._graph.python_code(root_module='self')
+        self._code = self._graph.python_code(root_module='self')
         cls = type(self)
-        cls.forward = _forward_from_src(self.code)
+        cls.forward = _forward_from_src(self._code)
 
         cls_call = cls.__call__
 
@@ -280,10 +307,10 @@ class {module_name}(torch.nn.Module):
     def __reduce__(self):
         """
         Serialization of GraphModule. We serialize only the generated code, not
-        the underlying `Graph`. This is because `Graph` does not have on-disk
+        the underlying ``Graph``. This is because ``Graph`` does not have on-disk
         backward-compatibility guarantees, whereas Python source code does.
         On the deserialization side, we symbolically trace through the generated
-        code to regenerate the underlying `Graph`
+        code to regenerate the underlying ``Graph``
         """
         dict_without_graph = self.__dict__.copy()
         del dict_without_graph['_graph']
@@ -302,7 +329,7 @@ class {module_name}(torch.nn.Module):
 
     def __str__(self) -> str:
         orig_str = super().__str__()
-        return '\n'.join([orig_str, self.code])
+        return '\n'.join([orig_str, self._code])
 
 # workarounds for issues in __torch_function__
 
