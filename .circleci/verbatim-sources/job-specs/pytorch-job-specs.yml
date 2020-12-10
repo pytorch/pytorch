@@ -238,6 +238,9 @@ jobs:
       cuda_version:
         type: string
         default: "10"
+      cuda_complete_version:
+        type: string
+        default: "101"
       python_version:
         type: string
         default: "3.6"
