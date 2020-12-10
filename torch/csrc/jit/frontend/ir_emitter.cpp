@@ -1250,11 +1250,14 @@ struct to_ir {
     return graph->create(kind, n_outputs)->setSourceRange(loc);
   }
 
-  Value* emitTernaryIf(const TernaryIf& expr, TypePtr type_hint = nullptr) {
+  Value* emitTernaryIf(
+      const TernaryIf& expr,
+      const TypePtr& type_hint = nullptr) {
     CondValue cond_value = emitCondExpr(expr.cond());
     auto true_expr = [&] { return emitExpr(expr.true_expr()); };
     auto false_expr = [&] { return emitExpr(expr.false_expr()); };
-    return emitIfExpr(expr.range(), cond_value, true_expr, false_expr, type_hint);
+    return emitIfExpr(
+        expr.range(), cond_value, true_expr, false_expr, type_hint);
   }
 
   Value* emitListComprehension(const ListComp& lc, const TypePtr& type_hint) {
@@ -1365,7 +1368,7 @@ struct to_ir {
       const CondValue& cond_value,
       const std::function<Value*()>& true_expr,
       const std::function<Value*()>& false_expr,
-      TypePtr type_hint = nullptr) {
+      const TypePtr& type_hint = nullptr) {
     Node* n = graph->insertNode(create(prim::If, range, 0));
     n->addInput(cond_value.value());
     auto* true_block = n->addBlock();
