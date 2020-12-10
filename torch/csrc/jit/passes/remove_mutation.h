@@ -21,8 +21,8 @@ TORCH_API void RemoveDictMutation(const std::shared_ptr<Graph>& graph);
 
 
 struct MutationRemover {
-  MutationRemover(const std::shared_ptr<Graph>& graph)
-      : aliasDb_(nullptr), graph_(graph) {
+  MutationRemover(std::shared_ptr<Graph> graph)
+      : aliasDb_(nullptr), graph_(std::move(graph)) {
     aliasDb_ = torch::make_unique<AliasDb>(graph_);
   }
 

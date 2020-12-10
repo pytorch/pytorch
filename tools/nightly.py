@@ -135,7 +135,7 @@ def logging_rotate() -> None:
 @contextlib.contextmanager
 def logging_manager(*, debug: bool = False) -> Iterator[None]:
     """Setup logging. If a failure starts here we won't
-    be able to save the user ina  reasonable way.
+    be able to save the user in a reasonable way.
 
     Logging structure: there is one logger (the root logger)
     and in processes all events.  There are two handlers:
@@ -210,7 +210,7 @@ def check_branch(subcommand, branch):
 
 @contextlib.contextmanager
 def timer(logger, prefix):
-    """Timed conetxt manager"""
+    """Timed context manager"""
     start_time = time.time()
     yield
     logger.info(f"{prefix} took {time.time() - start_time:.3f} [s]")

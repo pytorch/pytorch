@@ -63,6 +63,24 @@ class _InternalRPCPickler:
     def _rref_reducer(self, rref):
         return self._py_rref_reducer(rref)
 
+    @classmethod
+    def _script_module_receiver(cls, script_module_serialized):
+        """
+        Given a serialized representation of a ScriptModule created with torch.jit.save,
+        loads and returns the ScriptModule.
+        """
+        f = io.BytesIO(script_module_serialized)
+        m = torch.jit.load(f)
+        return m
+
+    def _script_module_reducer(self, script_module):
+        """
+        Serializes a ScriptModule.
+        """
+        f = io.BytesIO()
+        torch.jit.save(script_module, f)
+        return (_InternalRPCPickler._script_module_receiver, (f.getvalue(),))
+
     def serialize(self, obj):
         r"""
         Serialize non tensor data into binary string, tensor data into
@@ -86,6 +104,10 @@ class _InternalRPCPickler:
         # An RRef created locally by RRef Python constructor is type of `rpc.RRef`.
         # Ignore type error because dispatch_table is defined in third-party package
         p.dispatch_table[dist.rpc.RRef] = self._rref_reducer  # type: ignore[index]
+        # Add dispatch pickling for ScriptModule if needed.
+        if isinstance(obj, torch.jit.ScriptModule):
+            # Ignore type error because dispatch_table is defined in third-party package
+            p.dispatch_table[obj.__class__] = self._script_module_reducer  # type: ignore[index]
 
         # save _thread_local_tensor_tables.send_tables if it is in nested call
         global _thread_local_tensor_tables

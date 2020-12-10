@@ -6,29 +6,26 @@ layout(std430) uniform;
 
 /* Qualifiers: layout - storage - precision - memory */
 
-layout(set = 0, binding = 0, rgba32f) uniform PRECISION restrict writeonly image3D   uOutput;
+layout(set = 0, binding = 0, rgba16f) uniform PRECISION restrict writeonly image3D   uOutput;
 layout(set = 0, binding = 1)          uniform PRECISION                    sampler3D uInput;
 layout(set = 0, binding = 2)          uniform PRECISION restrict           Block {
-  ivec2 kernel;
+  ivec4 size;
+  ivec2 isize;
   ivec2 stride;
   ivec2 padding;
+  ivec2 kernel;
 } uBlock;
 
-layout(local_size_x_id = 1, local_size_y_id = 2, local_size_z_id = 3) in;
+layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
 
 void main() {
   const ivec3 pos = ivec3(gl_GlobalInvocationID);
 
-  /* Dynamically Uniform */
-  const ivec3 size = imageSize(uOutput);
-  const ivec3 isize = textureSize(uInput, 0);
-  const float range = uBlock.kernel.x * uBlock.kernel.y;
-
-  if (all(lessThan(pos, size))) {
+  if (all(lessThan(pos, uBlock.size.xyz))) {
     const ivec2 ipos = pos.xy * uBlock.stride - uBlock.padding;
 
     const ivec2 start = max(ivec2(0), ipos);
-    const ivec2 end = min(ipos + uBlock.kernel, isize.xy);
+    const ivec2 end = min(ipos + uBlock.kernel, uBlock.isize);
 
     vec4 sum = vec4(0);
 
@@ -41,6 +38,6 @@ void main() {
     imageStore(
         uOutput,
         pos,
-        sum / range);
+        sum / uBlock.size.w);
   }
 }

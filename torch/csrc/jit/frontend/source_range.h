@@ -14,7 +14,7 @@ struct SourceRange;
 // Source represents a code segment. It keeps track of:
 //  - text : the text of the code segment
 //  - filename (optional) : if present, represents the name of the file from
-//                          which the code semgemnt originated.
+//                          which the code segment originated.
 //  - starting_line_no : represents the line in the original file where the
 //                       code segment started.
 struct Source {

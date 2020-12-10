@@ -25,7 +25,8 @@ class TestProfiler(JitTestCase):
         self.default_dtype = torch.get_default_dtype()
         self.old_reduction_enabled = torch._C._jit_set_texpr_reductions_enabled(True)
         torch.set_default_dtype(torch.double)
-
+        self.old_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
+        torch._C._debug_set_fusion_group_inlining(False)
 
     def tearDown(self):
         torch._C._jit_set_profiling_executor(self.prev_exec)
@@ -35,6 +36,7 @@ class TestProfiler(JitTestCase):
         torch._C._jit_override_can_fuse_on_cpu(self.can_fuse_on_cpu)
         torch.set_default_dtype(self.default_dtype)
         torch._C._jit_set_texpr_reductions_enabled(self.old_reduction_enabled)
+        torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
 
     def test_tensor_type_not_determined_by_inputs(self):
         @torch.jit.script
@@ -137,6 +139,25 @@ class TestProfiler(JitTestCase):
         self.assertEqual(len(list(g.findAllNodes("prim::TypeCheck"))), 2)
         FileCheck().check("TensorExpr").check("aten::add_").check("TensorExpr").run(g)
 
+    def test_use_not_profiled(self):
+        def foo(t1, t2, t3, t4, t: float):
+            h = t1 + t2 + t3 + t4
+            if t > 0.5:
+                # Putting a use of t1 in a never-executed conditional prevents
+                return t1 + 1
+            return h
+
+        t = torch.rand(8, dtype=torch.float)
+
+        foo_script = torch.jit.script(foo)
+        for _ in range(torch._C._jit_get_num_profiled_runs() + 1):
+            foo_script(t, t, t, t, 0.1)
+
+        self.assertEqual(foo(t, t, t, t, 0.1), foo_script(t, t, t, t, 0.1))
+        g = torch.jit.last_executed_optimized_graph()
+        # all adds fused
+        FileCheck().check("graph").check_not("aten::add").check("prim::If").run(g)
+
     def test_not_fusing_scalar_ops(self):
         @torch.jit.script
         def foo(x: int, y: int):
@@ -192,6 +213,19 @@ class TestProfiler(JitTestCase):
 
         g = torch.jit.last_executed_optimized_graph()
         FileCheck().check("fallback_function").check_next("CallFunction").run(g)
+
+    def test_tensor_constant(self):
+        def foo(a, b):
+            return a + b + torch.tensor([2])
+
+        x = torch.ones(1, requires_grad=False)
+        foo_script = torch.jit.script(foo)
+        foo_script(x, x)
+        foo_script(x, x)
+
+        self.assertEqual(foo_script(x, x), foo(x, x))
+        g = torch.jit.last_executed_optimized_graph()
+        FileCheck().check_count("aten::add", 2, exactly=True).run(g)
 
     def test_iterative_fusion(self):
         @torch.jit.script

@@ -742,8 +742,8 @@ class QuantizationTestCase(TestCase):
         self.assertTrue(expected_name in str(q_embeddingbag))
 
 
-# Below are a series of neural net models to use in testing quantization
-# Single layer models
+# Below are a series of toy models to use in testing quantization
+
 class SingleLayerLinearModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1350,7 +1350,7 @@ class ResNetBase(torch.nn.Module):
         self.downsample = torch.nn.Identity()
         self.myop = nn.quantized.FloatFunctional()
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-
+        self.fc = torch.nn.Linear(inplanes, 1)
 
     def forward(self, x):
         out = self.conv1(x)
@@ -1360,7 +1360,12 @@ class ResNetBase(torch.nn.Module):
         out = self.myop.add(out, identity)
         out = self.relu2(out)
         out = self.avgpool(out)
+        out = torch.flatten(out, 1)
+        out = self.fc(out)
         return out
+
+    def fuse_model(self):
+        torch.quantization.fuse_modules(self, [['conv1', 'bn1', 'relu1']], inplace=True)
 
 class ModelMultipleOps(torch.nn.Module):
     def __init__(self):

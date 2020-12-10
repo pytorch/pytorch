@@ -44,6 +44,9 @@ struct OnnxifiTransformerOptions final : public BackendTransformOptions {
 
   // Inference timeout
   int timeout{0};
+
+  // Mapping of batch sizes to shape infos
+  std::unordered_map<int, ShapeInfoMap> shape_hints_per_bs;
 };
 
 class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
@@ -69,13 +72,21 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
       const std::unordered_set<std::string>& weights_in_ws,
       Workspace* ws,
       onnx::OnnxExporter* exporter,
-      ShapeInfoMap* shape_hints);
+      ShapeInfoMap* shape_hints_max_bs,
+      const std::unordered_map<int, ShapeInfoMap> &shape_hints_per_bs);
 
   // Convert a cutoff subgraph net to an Onnxifi op
   caffe2::NetDef SubnetToOnnxifiOpViaC2(
       const caffe2::NetDef& net,
       const std::unordered_set<std::string>& weights_in_ws,
-      const ShapeInfoMap& shape_hints);
+      const ShapeInfoMap& shape_hints_max_bs,
+      const std::unordered_map<int, ShapeInfoMap> &shape_hints_per_bs);
+
+  // Check that output shape hints are present to ensure we can pass them to
+  // OnnxifiOp
+  bool canPassOutputShapeHintsPerBs(
+      const OperatorDef& op,
+      const std::unordered_map<int, ShapeInfoMap>& shape_hints_per_bs) const;
 
   // We already have all the ops and external inputs and outputs!
   OperatorDef buildOnnxifiOp(
@@ -83,14 +94,16 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
       const std::unordered_set<std::string>& initialization_list,
       const std::vector<std::string>& external_inputs,
       const std::vector<std::string>& external_outputs,
-      const std::unordered_map<std::string, ShapeInfo>& shape_hints);
+      const ShapeInfoMap& shape_hints_max_bs,
+      const std::unordered_map<int, ShapeInfoMap> &shape_hints_per_bs);
 
   // Transform by passing C2 proto to backend
   NetDef TransformViaC2(
       NetDef* pred_net,
       const std::unordered_set<std::string>& weights,
       const std::unordered_set<int>& blocklisted_ops,
-      const ShapeInfoMap& shape_hints);
+      const ShapeInfoMap& shape_hints_max_bs,
+      const std::unordered_map<int, ShapeInfoMap> &shape_hints_per_bs);
 
   // Transform by passing ONNX proto to backend
   NetDef TransformViaOnnx(
@@ -98,7 +111,8 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
       NetDef* pred_net,
       const std::unordered_set<std::string>& weights,
       const std::unordered_set<int>& blocklisted_ops,
-      ShapeInfoMap* shape_hints);
+      ShapeInfoMap* shape_hints_max_bs,
+      const std::unordered_map<int, ShapeInfoMap> &shape_hints_per_bs);
 
   // Query whether an operator is supported by passing C2 protobuf
   bool supportOpC2(

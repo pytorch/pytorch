@@ -67,3 +67,21 @@ TEST(MathKernelTest, NativeLayerNorm) {
   }
 }
 
+TEST(MathKernelTest, Addr) {
+  const auto vec1 = arange(1., 4.);
+  const auto vec2 = arange(1., 3.);
+  const auto M = zeros({3, 2});
+
+  for (float beta: {1., 1.2, 0.}) {
+    // nans and infs are not propagated to the output when beta == 0
+    if (beta == 0) {
+      M[0][0] = std::numeric_limits<float>::infinity();
+      M[2][0] = std::numeric_limits<float>::quiet_NaN();
+    }
+    for (float alpha: {1., 2., 0.}) {
+      auto out = at::native::addr(M, vec1, vec2, beta, alpha);
+      auto math_out = at::native::math_addr(M, vec1, vec2, beta, alpha);
+      ASSERT_ALLCLOSE_TOLERANCES(out, math_out, 1e-4, 1e-6);
+    }
+  }
+}
