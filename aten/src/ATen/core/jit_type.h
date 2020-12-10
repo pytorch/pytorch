@@ -630,8 +630,7 @@ struct CAFFE2_API TensorType : public Type {
       const SymbolicShape& sizes,
       const VaryingShape<Stride>& stride_,
       c10::optional<bool> requires_grad,
-      c10::optional<bool> undefined = false,
-      bool is_inferred = false);
+      c10::optional<bool> undefined = false);
 
   static TensorTypePtr create(
       c10::optional<at::ScalarType> scalar_type,
@@ -776,10 +775,13 @@ struct CAFFE2_API TensorType : public Type {
 
   static TensorTypePtr getInferred() {
     static auto valueInferred = TensorType::create(
-      /*scalar_type=*/{}, /*device=*/{},
-      /*sizes=*/SymbolicShape(),
-      /*stride=*/VaryingShape<Stride>{}, /*requires_grad=*/{},
-      /*undefined=*/false, /*is_inferred=*/true);
+        /*scalar_type=*/{},
+        /*device=*/{},
+        /*sizes=*/SymbolicShape(),
+        /*stride=*/VaryingShape<Stride>{},
+        /*requires_grad=*/{},
+        /*undefined=*/false);
+    valueInferred->is_inferred_ = true;
     return valueInferred;
   }
 
