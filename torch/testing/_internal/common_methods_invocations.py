@@ -103,6 +103,8 @@ class OpInfo(object):
                  promotes_integers_to_float=False,  # whether op promotes unary output to float or not
                  sample_inputs_func=None,  # function to generate sample inputs
                  aten_name=None,  # name of the corresponding aten:: operator
+                 supports_sparse=False,  # whether the op correctly handles sparse input
+                 sparse_op_info=None,  # sparse specific op info as dict, e.g. can add a flag that op supports inplace on uncoalesced
                  ):
 
         # Validates the dtypes are generated from the dispatch-related functions
@@ -141,8 +143,8 @@ class OpInfo(object):
             self.autodiff_nonfusible_nodes = ['aten::' + self.name]
         else:
             self.autodiff_nonfusible_nodes = autodiff_nonfusible_nodes
-
-
+        self.supports_sparse = supports_sparse
+        self.sparse_op_info = sparse_op_info if sparse_op_info is not None else {}
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
@@ -167,6 +169,10 @@ class OpInfo(object):
     def sample_inputs(self, device, dtype, requires_grad=False):
         """Returns an iterable of SampleInputs."""
         return self.sample_inputs_func(self, device, dtype, requires_grad)
+
+    def sample_sparse_inputs(self, device, dtype, requires_grad=False, **kwargs):
+        """Returns an iterable of SampleInputs."""
+        raise NotImplementedError("This method should be overriden in derived class")
 
     # Returns True if the test should be skipped and False otherwise
     def should_skip(self, cls_name, test_name, device_type, dtype):
@@ -224,34 +230,6 @@ def sample_inputs_unary(op_info, device, dtype, requires_grad):
                                     requires_grad=requires_grad)))
 
 
-def sample_sparse_inputs_unary(self, device, dtype, requires_grad, **kwargs):
-    is_coalesced = kwargs.get("coalesced", True)
-
-    t1 = torch.sparse_coo_tensor(
-        indices=torch.tensor([[0], [1], [2]]).transpose(1, 0),
-        values=torch.tensor([3.0, 4.0, 5.0]),
-        size=[3, ],
-        device=device,
-        dtype=dtype,
-    )
-    # hybrid sparse input
-    t2 = torch.sparse_coo_tensor(
-        indices=torch.tensor([[1, 3], [2, 4]]),
-        values=torch.tensor([[1.0, 3.0], [5.0, 7.0]]),
-        size=[4, 5, 2],
-        device=device,
-        dtype=dtype
-    )
-
-    if is_coalesced:
-        t1 = t1.coalesce()
-        t2 = t2.coalesce()
-
-    return (
-        SampleInput(t1),
-        SampleInput(t2),
-    )
-
 # Metadata class for unary "universal functions (ufuncs)" that accept a single
 # tensor and have common properties like:
 class UnaryUfuncInfo(OpInfo):
@@ -279,8 +257,7 @@ class UnaryUfuncInfo(OpInfo):
                  handles_large_floats=True,  # whether the op correctly handles large float values (like 1e20)
                  handles_extremals=True,  # whether the op correctly handles extremal values (like inf)
                  handles_complex_extremals=True,  # whether the op correct handles complex extremals (like inf -infj)
-                 sample_inputs_func=sample_inputs_unary,
-                 supports_sparse=False,  # whether the op correctly handles sparse input
+                 sample_inputs_func=sample_inputs_unary,                 
                  **kwargs):
         super(UnaryUfuncInfo, self).__init__(name,
                                              dtypes=dtypes,
@@ -293,12 +270,53 @@ class UnaryUfuncInfo(OpInfo):
         self.domain = domain
         self.handles_large_floats = handles_large_floats
         self.handles_extremals = handles_extremals
-        self.handles_complex_extremals = handles_complex_extremals
-        self.supports_sparse = supports_sparse
+        self.handles_complex_extremals = handles_complex_extremals        
 
         # Epsilon to ensure grad and gradgrad checks don't test values
         #   outside a function's domain.
         self._domain_eps = 1e-5
+
+    def sample_sparse_inputs(self, device, dtype, requires_grad=False, **kwargs):
+        """Returns an iterable of SampleInputs."""
+        if not self.supports_sparse:
+            raise RuntimeError("This op does not support sparse input")
+
+        low, high = self.domain
+        low = -10 if low is None else low + self._domain_eps
+        high = 10 if high is None else high - self._domain_eps
+        is_coalesced = kwargs.get("is_coalesced", False)
+
+        numel = 10
+        t1 = torch.sparse_coo_tensor(
+            indices=torch.arange(numel).unsqueeze(0),
+            values=torch.linspace(low, high, steps=numel),
+            size=[numel, ],
+            device=device,
+            dtype=dtype,
+        )
+        # hybrid sparse input
+        size = [10, 12, 4]
+        numel = 8
+        i1 = torch.randint(0, size[0], size=(numel, ))
+        i2 = torch.randint(0, size[1], size=(numel, ))
+        indices = torch.stack([i1, i2], dim=0)
+        values = torch.linspace(low, high, steps=numel * size[2]).reshape(numel, -1)
+        t2 = torch.sparse_coo_tensor(
+            indices=indices,
+            values=values,
+            size=size,
+            device=device,
+            dtype=dtype
+        )
+
+        if is_coalesced:
+            t1 = t1.coalesce()
+            t2 = t2.coalesce()
+
+        return (
+            SampleInput(t1),
+            SampleInput(t2),
+        )
 
 
 def sample_inputs_addmm(op_info, device, dtype, requires_grad):
@@ -484,6 +502,8 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble],
                                 active_if=IS_WINDOWS),
+                       SkipInfo('TestSparseUnaryUfuncs', 'test_sparse_unary_ops',
+                                dtypes=[torch.cfloat, torch.cdouble, torch.bool, torch.bfloat16]),
                    ),
                    supports_sparse=True),
     # NOTE: derivative for inplace asinh is not implemented
@@ -693,6 +713,10 @@ op_db: List[OpInfo] = [
                    promotes_integers_to_float=True,
                    assert_autodiffed=True,
                    skip_bfloat16_grad=True,
+                   skips=(
+                        SkipInfo('TestSparseUnaryUfuncs', 'test_sparse_unary_ops',
+                                 dtypes=[torch.cfloat, torch.cdouble, torch.bool, torch.bfloat16]),
+                   ),
                    supports_sparse=True),
     UnaryUfuncInfo('log2',
                    ref=np.log2,
@@ -717,7 +741,15 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
                    assert_autodiffed=True,
-                   supports_sparse=True),
+                   skips=(
+                        SkipInfo('TestSparseUnaryUfuncs', 'test_sparse_unary_ops',
+                                 dtypes=[
+                                     torch.cfloat, torch.cdouble, 
+                                     torch.bool, torch.bfloat16, torch.float16
+                                 ]),
+                   ),                   
+                   supports_sparse=True,
+                   sparse_op_info={"supports_inplace_on_uncoalesced": True}),
     UnaryUfuncInfo('sin',
                    ref=np.sin,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -848,8 +880,10 @@ op_db: List[OpInfo] = [
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        SkipInfo('TestUnaryUfuncs', 'test_variant_consistency',
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestSparseUnaryUfuncs', 'test_sparse_unary_ops',
+                                dtypes=[torch.cfloat, torch.cdouble, torch.bool, torch.bfloat16]),
                    ),
-                   supports_sparse=True),
+                   supports_sparse=False),  # Temporary disabled until https://github.com/pytorch/pytorch/pull/43330
     UnaryUfuncInfo('sign',
                    ref=np.sign,
                    dtypesIfCPU=floating_types_and(torch.half),
@@ -859,8 +893,10 @@ op_db: List[OpInfo] = [
                                 device_type='cpu', dtypes=[torch.float16, torch.float, torch.double]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cuda', dtypes=[torch.float16, torch.float, torch.double]),
+                       SkipInfo('TestSparseUnaryUfuncs', 'test_sparse_unary_ops',
+                                dtypes=[torch.cfloat, torch.cdouble, torch.bfloat16, torch.float16]),
                    ),
-                   supports_sparse=True),
+                   supports_sparse=False),  # Temporary disabled until https://github.com/pytorch/pytorch/pull/43330
 ]
 
 if TEST_SCIPY:
