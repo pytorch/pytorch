@@ -91,11 +91,25 @@ void quick_select_template(
   } while (true);
 }
 
+void copy_quantile_result(Tensor &out,
+                          const Tensor &result,
+                          const Tensor &q) {
+  if (q.dim() == 0) {
+    // If q is scalar, remove last dim to match out shape
+    result.squeeze_(-1);
+  } else {
+    // Move quantiles to first dim to match out shape
+    result.unsqueeze_(0).transpose_(0, -1).squeeze_(-1);
+  }
+  out.copy_(result);
+}
+
 void quantile_impl(
     Tensor& out,
     const Tensor& self,
     const Tensor& q,
     optional<int64_t> _dim,
+    const std::string interpolation,
     bool keepdim,
     bool ignore_nan) {
   int64_t dim = at::maybe_wrap_dim(_dim.value_or(0), self.dim(), true);
@@ -117,6 +131,12 @@ void quantile_impl(
   TORCH_CHECK(
       self.device() == out.device(),
       "quantile() out tensor must be on the same device as the input tensor");
+  std::vector <string> interpolations{
+      "linear", "lower", "higher", "midpoint", "nearest"};
+  TORCH_CHECK(
+      std::find(interpolations.begin(), interpolations.end(), interpolation) != interpolations.end(),
+      "quantile() interpolation should only be ",
+      c10::Join(", ", interpolations), ".");
 
   // Compute output shape: q_size + reduced_size
   std::vector<int64_t> out_shape;
@@ -186,23 +206,32 @@ void quantile_impl(
         at::broadcast_tensors({q * last_index, sorted.isnan().any(-1, true)});
     ranks = at::masked_fill(tl[0], tl[1], last_index);
   }
-  Tensor ranks_below = ranks.toType(kLong);
-  Tensor weights = ranks - ranks_below;
-  Tensor ranks_above = ranks.ceil_().toType(kLong);
 
+  // adjust ranks based on the interpolation mode
+  if (interpolation == "lower") {
+    ranks.floor_();
+  } else if (interpolation == "higher") {
+    ranks.ceil_();
+  } else if (interpolation == "nearest") {
+    ranks.round_();
+  }
+
+  Tensor ranks_below = ranks.toType(kLong);
   Tensor values_below = sorted.gather(-1, ranks_below);
+  if (interpolation != "linear" && interpolation != "midpoint") {
+    copy_quantile_result(out, values_below, q);
+    return;
+  }
+
+  // calculate weights for linear and midpoint
+  Tensor weights = interpolation == "midpoint" ? at::full_like(ranks, 0.5) : ranks - ranks_below;
+
+  Tensor ranks_above = ranks.ceil_().toType(kLong);
   Tensor values_above = sorted.gather(-1, ranks_above);
 
   // Interpolate to compute quantiles and copy to out tensor
   values_below.lerp_(values_above, weights);
-  if (q.dim() == 0) {
-    // If q is scalar, remove last dim to match out shape
-    values_below.squeeze_(-1);
-  } else {
-    // Move quantiles to first dim to match out shape
-    values_below.unsqueeze_(0).transpose_(0, -1).squeeze_(-1);
-  }
-  out.copy_(values_below);
+  copy_quantile_result(out, values_below, q);
 }
 
 std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
@@ -413,8 +442,9 @@ Tensor& quantile_out(
     const Tensor& self,
     const Tensor& q,
     optional<int64_t> _dim,
+    const std::string interpolation,
     bool keepdim) {
-  quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/false);
+  quantile_impl(out, self, q, std::move(_dim), interpolation, keepdim, /*ignore_nan=*/false);
   return out;
 }
 
@@ -423,6 +453,7 @@ Tensor& quantile_out(
     const Tensor& self,
     double q,
     optional<int64_t> _dim,
+    const std::string interpolation,
     bool keepdim) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
@@ -431,6 +462,7 @@ Tensor& quantile_out(
       self,
       at::scalar_tensor(q, self.options()),
       std::move(_dim),
+      interpolation,
       keepdim);
 }
 
@@ -438,9 +470,10 @@ Tensor quantile(
     const Tensor& self,
     const Tensor& q,
     optional<int64_t> _dim,
+    const std::string interpolation,
     bool keepdim) {
   Tensor out = at::empty({0}, self.options());
-  quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/false);
+  quantile_impl(out, self, q, std::move(_dim), interpolation, keepdim, /*ignore_nan=*/false);
   return out;
 }
 
@@ -448,11 +481,12 @@ Tensor quantile(
     const Tensor& self,
     double q,
     optional<int64_t> _dim,
+    const std::string interpolation,
     bool keepdim) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::quantile(
-      self, at::scalar_tensor(q, self.options()), std::move(_dim), keepdim);
+      self, at::scalar_tensor(q, self.options()), std::move(_dim), interpolation, keepdim);
 }
 
 Tensor& nanquantile_out(
@@ -460,8 +494,9 @@ Tensor& nanquantile_out(
     const Tensor& self,
     const Tensor& q,
     optional<int64_t> _dim,
+    const std::string interpolation,
     bool keepdim) {
-  quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/true);
+  quantile_impl(out, self, q, std::move(_dim), interpolation, keepdim, /*ignore_nan=*/true);
   return out;
 }
 
@@ -470,6 +505,7 @@ Tensor& nanquantile_out(
     const Tensor& self,
     double q,
     optional<int64_t> _dim,
+    const std::string interpolation,
     bool keepdim) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
@@ -478,6 +514,7 @@ Tensor& nanquantile_out(
       self,
       at::scalar_tensor(q, self.options()),
       std::move(_dim),
+      interpolation,
       keepdim);
 }
 
@@ -485,9 +522,10 @@ Tensor nanquantile(
     const Tensor& self,
     const Tensor& q,
     optional<int64_t> _dim,
+    const std::string interpolation,
     bool keepdim) {
   Tensor out = at::empty({0}, self.options());
-  quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/true);
+  quantile_impl(out, self, q, std::move(_dim), interpolation, keepdim, /*ignore_nan=*/true);
   return out;
 }
 
@@ -495,11 +533,12 @@ Tensor nanquantile(
     const Tensor& self,
     double q,
     optional<int64_t> _dim,
+    const std::string interpolation,
     bool keepdim) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::nanquantile(
-      self, at::scalar_tensor(q, self.options()), std::move(_dim), keepdim);
+      self, at::scalar_tensor(q, self.options()), std::move(_dim), interpolation, keepdim);
 }
 
 std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(

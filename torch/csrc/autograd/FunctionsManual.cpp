@@ -153,15 +153,15 @@ Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Sc
   if (p == 0.0) {
     return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else if (p == 1.0) {
-    return self.sign() * grad;
+    return self.sgn() * grad;
   } else if (p == 2.0) {
     self_scaled = self;
     scale_v = grad / norm;
   } else if (std::isinf(p)) {
-    self_scaled = self.sign() * (self.abs() == norm).type_as(self);
+    self_scaled = self.sgn() * (self.abs() == norm).type_as(self);
     scale_v = grad.clone(at::MemoryFormat::Preserve);
   } else if (p < 2.0) {
-    self_scaled = self.sign() * self.abs().pow(p - 1);
+    self_scaled = self.sgn() * self.abs().pow(p - 1);
     scale_v = grad / norm.pow(p - 1);
   } else {
     self_scaled = self * self.abs().pow(p - 2);
@@ -2410,6 +2410,72 @@ Tensor fft_backward(const Tensor& self, const Tensor& grad, int64_t signal_ndim,
                         self.sizes());
   }
   return gI;
+}
+
+Tensor fft_c2r_backward(const Tensor& grad, IntArrayRef dim, int64_t normalization) {
+  // Forward is C2R (onesided)
+  // Think of onesided C2R irfft as
+  //    1. fill the other half by conjugate symmetry
+  //    2. inverse C2C ifft
+  //    3. discard the complex dimension
+  // So backward is
+  //    1. R2C rfft (essentially add dummy complex dimension, and dft)
+  //    2. accumulate gradient by conjugate symmetry
+  //       since rfft results follow conjugate symmetry, we only need to
+  //       double some entries from onesided rfft results, i.e., the ones with
+  //       their reflected indices also landing out of the onesided range. So
+  //       consider the index of last dim:
+  //           i.   idx = 0.
+  //                Reflected to (N - 0) % N = 0. Not doubled.
+  //           ii   0 < idx < floor(N/2) (last).
+  //                N > N - idx > ceil(N/2)
+  //                Reflected to ()
+  //           iii. idx = floor(N/2) = N/2 (last) when N even.
+  //                Reflected to (N - N/2) % N = N/2. Not doubled.
+  //           iv.  idx = floor(N/2) = (N-1)/2 (last) when N odd.
+  //                Reflected to (N - (N-1)/2) % N = (N+1)/2. Doubled.
+  //       Therefore, needs to double
+  //           idx = 1, 2, ..., N/2 - 1     when N even
+  //           idx = 1, 2, ..., (N-1)/2     when N odd
+  //       that is
+  //           idx = 1, 2, ..., N - (floor(N/2) + 1)
+  //               = 1, 2, ..., N - onesided_length
+  auto gI = at::_fft_r2c(grad, dim, normalization, /*onesided=*/true);
+
+  auto double_length = grad.size(dim.back()) - gI.size(dim.back());
+  if (double_length > 0) {  // also covers case when signal size is zero
+    gI.narrow(dim.back(), 1, double_length).mul_(2);
+  }
+  return gI;
+}
+
+Tensor fft_r2c_backward(const Tensor& grad, IntArrayRef dim, int64_t normalization,
+                        bool onesided, int64_t last_dim_size) {
+  if (!onesided) {
+    return at::real(at::_fft_c2c(grad, dim, normalization, /*forward=*/false));
+  }
+
+  // Forward is R2C (onesided)
+  // Think of onesided R2C rfft as
+  //     1. view as complex numbers (fill complex dim with zeros)
+  //     2. C2C fft
+  //     3. discard half of results
+  // So backward is
+  //     1. fill the other half with zeros (with `zero_grad_shape` below)
+  //        (C2C ifft only take twosided inputs so we need to fill here)
+  //     2. inverse C2C ifft
+  //     3. discard the complex dim
+  auto half_sizes = grad.sizes();
+  at::DimVector new_grad_shape(half_sizes.begin(), half_sizes.end());
+  const auto last_dim = at::maybe_wrap_dim(dim.back(), half_sizes.size());
+  new_grad_shape[last_dim] = last_dim_size;
+
+  const auto zero_length = last_dim_size - grad.size(dim.back());
+  auto complex_full_grad = zero_length > 0 ? at::zeros(new_grad_shape, grad.options()) : grad;
+  if (zero_length > 0) {
+    complex_full_grad.slice(last_dim, 0, half_sizes[last_dim]).copy_(grad);
+  }
+  return at::real(at::_fft_c2c(complex_full_grad, dim, normalization, /*forward=*/false));
 }
 
 // Helper for batchnorm_double_backward
