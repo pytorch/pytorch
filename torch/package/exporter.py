@@ -1,5 +1,5 @@
 import torch
-from torch.serialization import normalize_storage_type, location_tag, _should_read_directly
+from torch.serialization import normalize_storage_type, location_tag
 import io
 import pickletools
 from .find_file_dependencies import find_files_source_depends_on
@@ -304,21 +304,27 @@ node [shape=box];
         self._write(filename, binary)
 
     def mock(self, include: 'GlobPattern', *, exclude: 'GlobPattern' = []):
-        """Replace the code for `module_name` in the package with a fake implementation. This module will return a fake
+        """Replace some required modules with a mock implementation.  Mocked modules will return a fake
         object for any attribute accessed from it. Because we copy file-by-file, the dependency resolution will sometimes
         find files that are imported by model files but whose functionality is never used
         (e.g. custom serialization code or training helpers).
         Use this function to mock this functionality out without having to modify the original code.
 
         Args:
-            module_name (str): e.g. "my_package.my_subpackage" the name of the module to be mocked out.
-                The module_name can also be a glob-style pattern string that may match multiple modules.
-                Any required dependencies that match this pattern string will be mocked out automatically.
+            include (Union[List[str], str]): A string e.g. "my_package.my_subpackage", or list of strings
+                for the names of the modules to be mocked out. Strings can also be a glob-style pattern
+                string that may match multiple modules. Any required dependencies that match this pattern
+                string will be mocked out automatically.
+
                 Examples:
-                  'torch.**' -- matches all submodules of torch, e.g. 'torch.nn' and torch.nn.functional'
+                  'torch.**' -- matches torch and all submodules of torch, e.g. 'torch.nn' and torch.nn.functional'
                   'torch.*' -- matches 'torch.nn' or 'torch.functional', but not 'torch.nn.functional'
+
+            exclude (Union[List[str], str]): An optional pattern that excludes some patterns that match the include string.
+                e.g. include='torch.**', exclude='torch.foo' will mock all torch packages except 'torch.foo' Default: []
+
         """
-        self.patterns.append( (_GlobGroup(include, exclude), self.save_mock_module) )
+        self.patterns.append((_GlobGroup(include, exclude), self.save_mock_module))
 
     def extern(self, include: 'GlobPattern', *, exclude: 'GlobPattern' = []):
         """Include `module` in the list of external modules the package can import.
@@ -327,10 +333,13 @@ node [shape=box];
         Code for extern modules must also exist in the process loading the package.
 
         Args:
-            module_name (str): e.g. "my_package.my_subpackage" the name of the external module.
-                This can also be a glob-style pattern, as described in :meth:`mock_module`
+            include (Union[List[str], str]): A string e.g. "my_package.my_subpackage", or list of strings
+                for the names of the modules to be externed. This can also be a glob-style pattern, as described in :meth:`mock`
+
+            exclude (Union[List[str], str]): An optional pattern that excludes some patterns that match the include string.
+
         """
-        self.patterns.append( (_GlobGroup(include, exclude), self.save_extern_module) )
+        self.patterns.append((_GlobGroup(include, exclude), self.save_extern_module))
 
     def save_extern_module(self, module_name: str):
         """Add `module_name` to the list of external modules, regardless of whether it is
