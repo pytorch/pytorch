@@ -140,6 +140,100 @@ class TestFreezing(JitTestCase):
         output_f = mf.forward(input)
         self.assertEqual(output_s, output_f)
 
+    def test_freeze_module_with_setstate(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.tensor = torch.randn(2, 2)
+
+            @torch.jit.export
+            def __getstate__(self):
+                return (self.tensor, self.training)
+
+            @torch.jit.export
+            def __setstate__(self, state):
+                self.tensor = 2 * state[0]
+                self.training = state[1]
+
+            def forward(self, x):
+                return x + self.tensor
+
+        m = torch.jit.script(M())
+        m.eval()
+        with self.assertRaisesRegex(RuntimeError, "cannot freeze a module that has __set_state__"):
+            mf = torch.jit.freeze(m)
+
+    def test_freeze_module_with_submodule_setstate(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.tensor = torch.randn(2, 2)
+
+            @torch.jit.export
+            def __getstate__(self):
+                return (self.tensor, self.training)
+
+            @torch.jit.export
+            def __setstate__(self, state):
+                self.tensor = 2 * state[0]
+                self.training = state[1]
+
+            def forward(self, x):
+                return x + self.tensor
+
+        class TestModule(nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.sub = M()
+                self.a = torch.randn(2, 2)
+                self.b = 4
+
+            def forward(self, x):
+                return self.sub(x) + self.a
+
+        m = torch.jit.script(TestModule())
+        m.eval()
+        input = torch.randn(2, 2)
+        output_s = m.forward(input)
+        mf = torch.jit.freeze(m)
+
+        output_f = mf.forward(input)
+        buffer = io.BytesIO()
+        torch.jit.save(mf._c, buffer)
+        buffer.seek(0)
+        loaded = torch.jit.load(buffer)
+        output_l = loaded.forward(input)
+
+        # Check if frozen module looks as below:
+        # module m {
+        #   attributes {
+        #     sub = ...
+        #   }
+        #   ...
+        #   submodule {
+        #     module m {
+        #       attributes {
+        #         training = 
+        #         tensor = ...
+        #       }
+        #       ...
+        #     }
+        #   }
+        # }
+        mf = mf._c
+        self.assertFalse(mf.hasattr('a'))
+        self.assertTrue(mf.hasattr('sub'))
+        self.assertTrue(mf.sub.hasattr('tensor'))
+        self.assertTrue(mf.sub.hasattr('training'))
+
+        # __setstate__ is executed cloning the module for freezing
+        self.assertEqual(mf.sub.tensor, 2 * m.sub.tensor)
+        self.assertEqual(output_s + m.sub.tensor , output_f)
+
+        # __setstate__ is execuded loading frozen module
+        self.assertEqual(loaded.sub.tensor, 2 * mf.sub.tensor)
+        self.assertEqual(output_l, mf.sub.tensor + output_f)
+
     def test_freeze_module_with_fork(self):
         class SubModule(nn.Module):
             def __init__(self):

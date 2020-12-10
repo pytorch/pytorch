@@ -131,6 +131,12 @@ class NativeFunction:
     # in terms of the out kernel referenced by the string here.
     structured_delegate: Optional['OperatorName']
 
+    # Only valid for structured kernels.  Specifies alternative of what
+    # to inherit from when defining the meta class for the structured
+    # operator.  This will usually be TensorIteratorBase.  This also
+    # changes the semantics of set_output to call the parent class.
+    structured_inherits: Optional[str]
+
     # Note [Abstract ATen methods]
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # An abstract ATen method is one whose dispatch differs between
@@ -203,6 +209,9 @@ class NativeFunction:
         if structured_delegate_s is not None:
             structured_delegate = OperatorName.parse(structured_delegate_s)
 
+        structured_inherits = e.pop('structured_inherits', None)
+        assert structured_inherits is None or isinstance(structured_inherits, str), f'not a str: {structured_inherits}'
+
         python_module = e.pop('python_module', None)
         assert python_module is None or isinstance(python_module, str), f'not a str: {python_module}'
 
@@ -238,6 +247,7 @@ class NativeFunction:
             variants=variants,
             structured=structured,
             structured_delegate=structured_delegate,
+            structured_inherits=structured_inherits,
             manual_kernel_registration=manual_kernel_registration,
             manual_cpp_binding=manual_cpp_binding,
             python_module=python_module,
@@ -271,9 +281,11 @@ class NativeFunction:
         if self.structured:
             assert self.func.kind() == SchemaKind.out, "Put structured field on the out= " \
                 "variant of a function; did you mean structured_delegate?"
+            assert self.device_guard, "device_guard: False is not respected by structured kernels"
         if self.structured_delegate:
             assert self.func.kind() != SchemaKind.out, "structured_delegate field not allowed " \
                 "on out= functions; did you mean structured?"
+            assert self.device_guard, "device_guard: False is not respected by structured kernels"
         # Technically, with the asserts above, this assert is impossible to
         # happen
         assert not (self.structured and self.structured_delegate), \
