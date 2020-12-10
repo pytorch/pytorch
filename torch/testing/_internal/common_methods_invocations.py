@@ -76,6 +76,20 @@ def _getattr_qual(obj, name, default=_NOTHING):
 class OpInfo(object):
     """Operator information and helper functions for acquiring it."""
 
+    class AliasInfo(object):
+        """Placeholder for aliases. For example, torch.abs -> 
+        torch.absolute, torch.Tensor.absolute, torch.Tensor.absolute_
+        """
+
+        def __init__(self, alias_name):
+            self.op = _getattr_qual(torch, alias_name)
+            self.method_variant = getattr(torch.Tensor, alias_name, None)
+            self.inplace_variant = getattr(torch.Tensor, alias_name + "_", None)
+            self.operator_variant = getattr(operator, alias_name, None)
+
+        def __call__(self, *args, **kwargs):
+            return self.op(*args, **kwargs)
+
     def __init__(self,
                  name,  # the string name of the function
                  *,
@@ -104,6 +118,7 @@ class OpInfo(object):
                  promotes_integers_to_float=False,  # whether op promotes unary output to float or not
                  sample_inputs_func=None,  # function to generate sample inputs
                  aten_name=None,  # name of the corresponding aten:: operator
+                 aliases=None,  # list of aliases, e.g. torch.absolute -> torch.abs
                  supports_sparse=False,  # whether the op correctly handles sparse input
                  sparse_op_info=None,  # sparse op info as dict, e.g. flag that op supports inplace on uncoalesced
                  ):
@@ -146,7 +161,10 @@ class OpInfo(object):
             self.autodiff_nonfusible_nodes = autodiff_nonfusible_nodes        
         self.supports_sparse = supports_sparse
         self.sparse_op_info = sparse_op_info if sparse_op_info is not None else {}
-        self.operator_variant = getattr(operator, name, None)
+        self.operator_variant = getattr(operator, name, None)        
+        self.aliases = []
+        if aliases is not None:
+            self.aliases = [OpInfo.AliasInfo(a) for a in aliases]
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
@@ -266,7 +284,6 @@ class UnaryUfuncInfo(OpInfo):
                  handles_extremals=True,  # whether the op correctly handles extremal values (like inf)
                  handles_complex_extremals=True,  # whether the op correct handles complex extremals (like inf -infj)
                  sample_inputs_func=sample_inputs_unary,
-                 aliases=None,  # list of aliases, e.g. torch.absolute -> torch.abs            
                  **kwargs):
 
         args_kwargs = locals()
@@ -287,13 +304,6 @@ class UnaryUfuncInfo(OpInfo):
         # Epsilon to ensure grad and gradgrad checks don't test values
         #   outside a function's domain.
         self._domain_eps = 1e-5
-
-        args_kwargs.update(args_kwargs["kwargs"])
-        kwargs = {k: v for k, v in args_kwargs.items() if not (k.startswith("_") or k in ["self", "name", "aliases", "kwargs"])}
-        self.aliases = [
-            UnaryUfuncInfo(a, **kwargs)
-            for a in aliases
-        ] if aliases is not None else []
 
     def sample_sparse_inputs(self, device, dtype, requires_grad=False, **kwargs):
         """Returns an iterable of SampleInputs."""
@@ -907,29 +917,37 @@ op_db: List[OpInfo] = [
                    test_complex_grad=False),
     UnaryUfuncInfo('abs',
                    ref=np.abs,
+                   dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
+                   dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
-                       SkipInfo('TestUnaryUfuncs', 'test_variant_consistency',
-                                device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
-                       SkipInfo('TestUnaryUfuncs', 'test_variant_consistency',
-                                device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                                dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                dtypes=[torch.cfloat, torch.cdouble, torch.bfloat16]),
                        SkipInfo('TestSparseUnaryUfuncs', 'test_sparse_unary_ops',
                                 dtypes=[torch.cfloat, torch.cdouble, torch.bool, torch.bfloat16]),
                    ),
+                   test_inplace_grad=False,
+                   assert_autodiffed=True,
                    aliases=['absolute', ],
                    supports_sparse=False),  # Temporary disabled until https://github.com/pytorch/pytorch/pull/43330
     UnaryUfuncInfo('sign',
                    ref=np.sign,
-                   dtypesIfCPU=floating_types_and(torch.half),
-                   dtypesIfCUDA=floating_types_and(torch.half),
+                   dtypes=all_types_and(torch.bool, torch.half),
+                   dtypesIfCPU=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cpu', dtypes=[torch.float16, torch.float, torch.double]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cuda', dtypes=[torch.float16, torch.float, torch.double]),
+                       SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                dtypes=[torch.bfloat16, ]),
                        SkipInfo('TestSparseUnaryUfuncs', 'test_sparse_unary_ops',
                                 dtypes=[torch.cfloat, torch.cdouble, torch.bfloat16, torch.float16]),
                    ),

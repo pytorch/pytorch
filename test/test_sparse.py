@@ -2863,46 +2863,54 @@ class TestSparseOneOff(TestCase):
 
 class TestSparseUnaryUfuncs(TestCase):
 
-    def _common_test_sparse_unary_ops(self, sparse_inputs, device, dtype, op):
+    def _test_sparse_unary_op_on_input(self, sparse_tensor, device, dtype, op):
+        dense_tensor = sparse_tensor.to_dense()
+        expected_output = op(dense_tensor)
+        out_dtype = expected_output.dtype
+
+        sparse_tensor_copy = sparse_tensor.clone()
+        self.assertEqual(expected_output, op(sparse_tensor_copy).to_dense())
+
+        sparse_tensor_copy = sparse_tensor.clone()
+        self.assertEqual(expected_output, op.method_variant(sparse_tensor_copy).to_dense())
+
+        if op.supports_tensor_out:
+            sparse_tensor_out = torch.zeros_like(sparse_tensor).to(dtype=out_dtype)
+            op(sparse_tensor, out=sparse_tensor_out)
+            self.assertEqual(expected_output, sparse_tensor_out.to_dense())
+
+        if op.inplace_variant is not None and out_dtype == sparse_tensor.dtype:
+            if op.sparse_op_info.get("supports_inplace_on_uncoalesced", False) or sparse_tensor.is_coalesced():
+                sparse_tensor_copy = sparse_tensor.clone()
+                op.inplace_variant(sparse_tensor_copy)
+                self.assertEqual(expected_output, sparse_tensor_copy.to_dense())
+            else:
+                with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
+                    op.inplace_variant(sparse_tensor)
+
+        if op.operator_variant is not None:
+            sparse_tensor_copy = sparse_tensor.clone()
+            self.assertEqual(expected_output, op.operator_variant(sparse_tensor_copy).to_dense())
+
+    def _test_sparse_unary_op(self, sparse_inputs, device, dtype, op):
         for sparse_input in sparse_inputs:
             sparse_tensor = sparse_input.input[0]
-            dense_tensor = sparse_tensor.to_dense()
-            expected_output = op(dense_tensor)
-            out_dtype = expected_output.dtype
+            self._test_sparse_unary_op_on_input(sparse_tensor, device, dtype, op)
 
-            sparse_tensor_copy = sparse_tensor.clone()
-            self.assertEqual(expected_output, op(sparse_tensor_copy).to_dense())
-
-            sparse_tensor_copy = sparse_tensor.clone()
-            self.assertEqual(expected_output, op.method_variant(sparse_tensor_copy).to_dense())
-
-            if op.supports_tensor_out:
-                sparse_tensor_out = torch.zeros_like(sparse_tensor).to(dtype=out_dtype)
-                op(sparse_tensor, out=sparse_tensor_out)
-                self.assertEqual(expected_output, sparse_tensor_out.to_dense())
-
-            if op.inplace_variant is not None and out_dtype == sparse_tensor.dtype:
-                if not op.sparse_op_info.get("supports_inplace_on_uncoalesced", False):
-                    # test in-place op on uncoalesced input
-                    with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
-                        op.inplace_variant(sparse_tensor)
-                else:
-                    sparse_tensor_copy = sparse_tensor.clone()
-                    op.inplace_variant(sparse_tensor_copy)
-                    self.assertEqual(expected_output, sparse_tensor_copy.to_dense())
-
-            if op.operator_variant is not None:
-                sparse_tensor_copy = sparse_tensor.clone()
-                self.assertEqual(expected_output, op.operator_variant(sparse_tensor_copy).to_dense())
+            for a_op in op.aliases:
+                # Add required attributes from base op
+                a_op.supports_tensor_out = op.supports_tensor_out
+                a_op.sparse_op_info = op.sparse_op_info
+                self._test_sparse_unary_op_on_input(sparse_tensor, device, dtype, a_op)
 
     @ops([op for op in unary_ufuncs if op.supports_sparse])
     def test_sparse_unary_ops(self, device, dtype, op):
         # op is common_methods_invocations.UnaryUfuncInfo
         sparse_inputs = op.sample_sparse_inputs(device, dtype)
-        self._common_test_sparse_unary_ops(sparse_inputs, device, dtype, op)
+        self._test_sparse_unary_op(sparse_inputs, device, dtype, op)
 
         sparse_inputs = op.sample_sparse_inputs(device, dtype, is_coalesced=True)
-        self._common_test_sparse_unary_ops(sparse_inputs, device, dtype, op)
+        self._test_sparse_unary_op(sparse_inputs, device, dtype, op)
 
 
 instantiate_device_type_tests(TestSparseUnaryUfuncs, globals())
