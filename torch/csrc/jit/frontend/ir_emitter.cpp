@@ -433,7 +433,6 @@ struct Environment {
       const SourceRange& range,
       bool required = true) {
     auto retval = findInAnyFrame(ident);
-
     if (!retval) {
       static std::unordered_map<std::string, SugaredValuePtr> globals = {
           {"print", std::make_shared<PrintValue>()},
@@ -988,8 +987,8 @@ struct to_ir {
   }
 
   void emitReturn(const Return& stmt) {
-    Value* result = emitExpr(stmt.expr());
     TypePtr result_type = def_stack_.back().declared_return_type_;
+    Value* result = emitExpr(stmt.expr(), result_type);
     // result type is annotated, every return must convert to that type
     if (result_type) {
       // this guard skips implicit conversion from None -> Tensor for the return
@@ -1250,11 +1249,11 @@ struct to_ir {
     return graph->create(kind, n_outputs)->setSourceRange(loc);
   }
 
-  Value* emitTernaryIf(const TernaryIf& expr) {
+  Value* emitTernaryIf(const TernaryIf& expr, TypePtr type_hint = nullptr) {
     CondValue cond_value = emitCondExpr(expr.cond());
     auto true_expr = [&] { return emitExpr(expr.true_expr()); };
     auto false_expr = [&] { return emitExpr(expr.false_expr()); };
-    return emitIfExpr(expr.range(), cond_value, true_expr, false_expr);
+    return emitIfExpr(expr.range(), cond_value, true_expr, false_expr, type_hint);
   }
 
   Value* emitListComprehension(const ListComp& lc, const TypePtr& type_hint) {
@@ -1364,13 +1363,14 @@ struct to_ir {
       const SourceRange& range,
       const CondValue& cond_value,
       const std::function<Value*()>& true_expr,
-      const std::function<Value*()>& false_expr) {
+      const std::function<Value*()>& false_expr,
+      TypePtr type_hint = nullptr) {
     Node* n = graph->insertNode(create(prim::If, range, 0));
     n->addInput(cond_value.value());
     auto* true_block = n->addBlock();
     auto* false_block = n->addBlock();
 
-    auto emit_if_expr = [this, &range](
+    auto emit_if_expr = [this, &range, &type_hint](
                             Block* b,
                             const RefinementSet& refinements,
                             const std::function<Value*()>& expr_value) {
@@ -1378,6 +1378,9 @@ struct to_ir {
       WithInsertPoint guard(b);
       insertRefinements(range, refinements);
       Value* out_val = expr_value();
+      if (type_hint == AnyType::get() && out_val->type() != AnyType::get()) {
+	out_val = graph->insertUncheckedCast(out_val, type_hint);
+      }
       b->registerOutput(out_val);
       popFrame();
     };
@@ -3288,7 +3291,7 @@ struct to_ir {
         return graph->insertConstant(IValue(), tree->range());
       } break;
       case TK_IF_EXPR: {
-        return emitTernaryIf(TernaryIf(tree));
+        return emitTernaryIf(TernaryIf(tree), type_hint);
       } break;
       case TK_STRINGLITERAL: {
         return emitStringLiteral(StringLiteral(tree));
