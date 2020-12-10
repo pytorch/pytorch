@@ -2342,7 +2342,7 @@ def prim_dtype(g, self):
     if dtype is None:
         dtype = "Float"
     dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
-    return g.op("Constant", value_t=torch.IntTensor([dtype]))
+    return g.op("Constant", value_t=torch.tensor(dtype))
 
 
 # tolist is currently supported only for 1D input tensors.
