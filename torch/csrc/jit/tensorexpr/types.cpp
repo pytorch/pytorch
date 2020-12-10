@@ -21,7 +21,7 @@ bool is_integral(const ScalarType& type) {
 
 bool is_floating_point(const ScalarType& type) {
   return is_c10_type(type)
-      ? c10::isFloatingType(static_cast<c10::ScalarType>(type), true)
+      ? c10::isFloatingType(static_cast<c10::ScalarType>(type))
       : false;
 }
 
