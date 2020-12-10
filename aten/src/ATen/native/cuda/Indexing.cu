@@ -446,6 +446,10 @@ Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const 
   TORCH_CHECK(index.numel() == (source.dim() == 0 ? 1 : source.size(dim)),
               "index_add_(): Number of indices should be equal to self.size(dim)");
 
+  at::assert_no_internal_overlap(self);
+  at::assert_no_overlap(self, index);
+  at::assert_no_overlap(self, source);
+
   // Scalars are treated as 1-d tensor
   Tensor self_ = (self.dim() == 0) ? self.view(1) : self;
   Tensor source_ = (source.dim() == 0) ? source.view(1) : source;
@@ -828,6 +832,8 @@ Tensor& index_select_out_cuda(Tensor& out, const Tensor& self, int64_t dim,
   TORCH_CHECK(at::cuda::check_device({out, self, index}),
               "Input, output and indices must be on the current device");
   at::assert_no_internal_overlap(out);
+  at::assert_no_overlap(out, self);
+  at::assert_no_overlap(out, index);
 
   dim = at::maybe_wrap_dim(dim, self);
   TORCH_CHECK(self.dim() <= MAX_TENSORINFO_DIMS, DIM_WARNING);
