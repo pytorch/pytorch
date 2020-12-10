@@ -433,6 +433,7 @@ struct Environment {
       const SourceRange& range,
       bool required = true) {
     auto retval = findInAnyFrame(ident);
+
     if (!retval) {
       static std::unordered_map<std::string, SugaredValuePtr> globals = {
           {"print", std::make_shared<PrintValue>()},
@@ -1379,7 +1380,7 @@ struct to_ir {
       insertRefinements(range, refinements);
       Value* out_val = expr_value();
       if (type_hint == AnyType::get() && out_val->type() != AnyType::get()) {
-	out_val = graph->insertUncheckedCast(out_val, type_hint);
+        out_val = graph->insertUncheckedCast(out_val, type_hint);
       }
       b->registerOutput(out_val);
       popFrame();
