@@ -3541,5 +3541,113 @@ TEST(LoopNest, CacheWritesSimple) {
   assertAllEqual(c_data, c_ref);
 }
 
+TEST(LoopNest, DeadStoreElimination) {
+  KernelScope kernel_scope;
+  VarHandle y("y", kInt);
+  VarHandle x("x_tail", kInt);
+  BufHandle f("f", {26, 5}, kFloat);
+  BufHandle g("g", {26, 5}, kFloat);
+  ExprHandle x_outer_end = 5;
+  ExprHandle x_2 = x + x_outer_end * 4;
+  For* stmt1 = For::make(
+      x,
+      0,
+      5,
+      For::make(
+          y,
+          0,
+          5,
+          Block::make({
+              Store::make(f, {x_2, y}, (x_2 + y), 1),
+              Store::make(g, {x_2, y}, (x_2 * y), 1),
+          })));
+  Stmt* stmt = Block::make({stmt1});
+
+  // Will eliminate if not used by an output.
+  LoopNest loop(stmt, {f.node()}, {}, {});
+  loop.eliminateDeadStores();
+
+  std::ostringstream oss;
+  oss << *loop.root_stmt();
+
+  const std::string& expected_ir =
+      R"IR(
+#CHECK:     f[x_tail + 5 * 4, y]
+#CHECK-NOT: g[x_tail + 5 * 4, y]
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  // But won't eliminate if used by different outputs.
+  LoopNest loop2(stmt, {f.node(), g.node()}, {}, {});
+  loop2.eliminateDeadStores();
+
+  oss.clear();
+  oss << *loop2.root_stmt();
+
+  const std::string& expected_ir2 =
+      R"IR(
+#CHECK:     f[x_tail + 5 * 4, y]
+#CHECK:     g[x_tail + 5 * 4, y]
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir2, oss.str());
+}
+
+TEST(LoopNest, DeadStoreEliminationWithIntermediates) {
+  KernelScope kernel_scope;
+  VarHandle x("x", kInt);
+  VarHandle y("y", kInt);
+  VarHandle z("z", kInt);
+  BufHandle f("f", {26 * 5}, kFloat);
+  BufHandle g("g", {26 * 5}, kFloat);
+  BufHandle h("h", {26, 5}, kFloat);
+  ExprHandle x_outer_end = 5;
+  ExprHandle x_2 = x + x_outer_end * 4;
+  For* stmt1 = For::make(x, 0, 26 * 5, Store::make(f, {x}, x));
+  For* stmt2 = For::make(z, 0, 26 * 5, Store::make(g, {z}, z + 1));
+  For* stmt3 = For::make(
+      x,
+      0,
+      5,
+      For::make(
+          y,
+          0,
+          5,
+          Block::make({
+              Store::make(h, {x, y}, Load::make(f, {x * y}, 1), 1),
+          })));
+  Stmt* stmt = Block::make({stmt1, stmt2, stmt3});
+
+  // Will eliminate the write to g, but not f since it used by the producer of
+  // h.
+  LoopNest loop(stmt, {h.node()}, {}, {});
+  loop.eliminateDeadStores();
+
+  std::ostringstream oss;
+  oss << *loop.root_stmt();
+
+  const std::string& expected_ir =
+      R"IR(
+  #CHECK:     f[x] = x;
+  #CHECK-NOT: g[z] =
+  #CHECK:     h[x, y] = f[x * y];
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  // Sanity check won't eliminate if g is an output.
+  LoopNest loop2(stmt, {h.node(), g.node()}, {}, {});
+  loop2.eliminateDeadStores();
+
+  oss.clear();
+  oss << *loop2.root_stmt();
+
+  const std::string& expected_ir2 =
+      R"IR(
+  #CHECK:     f[x] = x;
+  #CHECK:     g[z] = z + 1;
+  #CHECK:     h[x, y] = f[x * y];
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir2, oss.str());
+}
+
 } // namespace jit
 } // namespace torch
