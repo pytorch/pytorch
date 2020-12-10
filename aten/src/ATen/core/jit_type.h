@@ -810,6 +810,17 @@ struct CAFFE2_API TensorType : public Type {
 
   static const TypeKind Kind = TypeKind::TensorType;
 
+  static std::vector<int64_t> contiguousStridesOf(at::IntArrayRef sizes) {
+    std::vector<int64_t> strides(sizes.size());
+    if (sizes.empty()) // zero-dim case
+      return strides;
+    strides.back() = 1;
+    for (size_t i = strides.size() - 1; i > 0; i--) {
+      strides[i - 1] = strides[i] * sizes[i];
+    }
+    return strides;
+  }
+
  private:
   TensorType(
       c10::optional<at::ScalarType> scalar_type,
@@ -822,17 +833,6 @@ struct CAFFE2_API TensorType : public Type {
   TensorTypePtr clone() const {
     return TensorTypePtr(new TensorType(
         scalar_type_, device_, sizes_, strides_, requires_grad_, undefined_));
-  }
-
-  static std::vector<int64_t> contiguousStridesOf(at::IntArrayRef sizes) {
-    std::vector<int64_t> strides(sizes.size());
-    if (sizes.empty()) // zero-dim case
-      return strides;
-    strides.back() = 1;
-    for (size_t i = strides.size() - 1; i > 0; i--) {
-      strides[i - 1] = strides[i] * sizes[i];
-    }
-    return strides;
   }
 
   static VaryingShape<Stride> computeStrideProps(

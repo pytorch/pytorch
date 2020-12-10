@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
+#include <ATen/TensorGeometry.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
@@ -7,6 +8,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <ATen/ExpandUtils.h>
 
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
@@ -1876,6 +1878,88 @@ std::vector<int64_t> TensorExprKernel::getReductionAxes(
   return axes;
 }
 
+template <typename T>
+std::vector<size_t> reverse_sort_indices(const std::vector<T>& v) {
+  // initialize original index locations
+  std::vector<size_t> idx(v.size());
+  iota(idx.begin(), idx.end(), 0);
+
+  std::sort(idx.begin(), idx.end(), [&v](size_t i1, size_t i2) {
+    return v[i1] > v[i2];
+  });
+  return idx;
+}
+
+bool denseAndNonOverlapping(
+    at::ArrayRef<int64_t> sizes,
+    at::ArrayRef<int64_t> strides) {
+  return (strides == at::infer_dense_strides(sizes, strides));
+}
+
+Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
+  const TensorTypePtr& tt = v->type()->expect<TensorType>();
+  TORCH_INTERNAL_ASSERT(tensors_.count(v->unique()));
+  Tensor* tensor = tensors_[v->unique()];
+
+  TORCH_INTERNAL_ASSERT(tt->sizes().concrete_sizes());
+  const auto sizes = *tt->sizes().concrete_sizes();
+  std::vector<int64_t> default_strides = TensorType::contiguousStridesOf(sizes);
+  TORCH_INTERNAL_ASSERT(tt->strides().concrete_sizes());
+  const std::vector<int64_t> strides = *tt->strides().concrete_sizes();
+  // All Tensors in NNC are layed out in default, contiguous layout.
+  // If the output is also default contiguous we don't need to do anything
+  if (strides == default_strides) {
+    return tensor;
+  }
+  // If the tensor is not dense or overlaps, we have
+  // no way of matching the profiled striding
+  if (!denseAndNonOverlapping(sizes, strides)) {
+    return tensor;
+  }
+
+  auto dims = dimsFromSizes(sizesForValue(v));
+  // We need to convert the output tensor so that its values are layed
+  // so that whene viewed from the output strides the values are correct.
+  // A contiguous Tensor of size(2, 3) with values 0-5 is layed out as:
+  // [0] [1] [2] [3] [4] [5]
+  // The same valued tensor with strides (2, 1) would be layed out like
+  // [0] [3] [1] [4] [2] [5]
+  // When we are doing the re-ordering of values into the output tensor,
+  // we are iterating per-element of the input, ad we are fixed
+  // in indexing in to the output tensor at [i, j] = val
+  // `val` we want here is equal to the indices for the output
+  // tensor that would have given the same position as the output
+  // The position is equal to the sum of stride[i] * index[i],
+  // and we can can calculate the equivalent indices in the
+  // output tensor strides by iteratively computing the index of
+  // the biggest stride:
+  // absolute = ...
+  // for stride in strides_from_largest_to_smallest:
+  //     cur_idx = absolute // stride
+  //     absolute = absolute % stride
+
+  return Compute(
+      "output_1", dims, [&](const std::vector<VarHandle>& axes_input) {
+        std::vector<ExprHandle> axes(axes_input.begin(), axes_input.end());
+        auto absolute_position = IntImm::make(0);
+        for (size_t i = 0; i < axes.size(); ++i) {
+          absolute_position =
+              absolute_position + (IntImm::make(default_strides[i]) * axes[i]);
+        }
+        std::vector<size_t> sorted_stride_indices =
+            reverse_sort_indices(strides);
+        std::vector<ExprHandle> new_axes(sorted_stride_indices.size());
+        for (size_t stride_index : sorted_stride_indices) {
+          auto stride = strides[stride_index];
+          auto index = Div::make(absolute_position, IntImm::make(stride));
+          absolute_position =
+              Mod::make(absolute_position, IntImm::make(stride));
+          new_axes[stride_index] = index;
+        }
+        return tensor->call(new_axes);
+      });
+}
+
 void TensorExprKernel::compile() {
   KernelScope kernelScope(&kernelArena_);
   GRAPH_DUMP("TensorExprKernel graph:", graph_);
@@ -1910,15 +1994,24 @@ void TensorExprKernel::compile() {
     if (!tensors_.count(output->unique())) {
       throw malformed_input("cannot find output Tensor");
     }
-    auto tensor_sizes = output->type()->expect<TensorType>()->sizes();
-    std::vector<int64_t> size;
-    TORCH_INTERNAL_ASSERT(
-        tensor_sizes.sizes().has_value(), "Expected output size: ", output);
-    for (const auto& elem : *tensor_sizes.sizes()) {
-      TORCH_INTERNAL_ASSERT(elem, "expected all output values defined");
-      size.push_back(*elem);
+    // The "strided" tensor will be incorrect if used in NNC,
+    // since NNC views it as contiguous. Only convert it to the right
+    // strides at the end of the kernel (if already contiguous it's a no-op)
+    Tensor* properly_strided_output = convertOutputToCorrectStrides(output);
+    tensors_[output->unique()] = properly_strided_output;
+    const auto& tt = output->type()->expect<TensorType>();
+    auto sizes = *tt->sizes().concrete_sizes();
+    tensorOutputSizes_.push_back(sizes);
+    auto strides = *tt->strides().concrete_sizes();
+
+    // If the tensor is not dense or overlaps, we have
+    // no way of matching the profiled striding
+    if (denseAndNonOverlapping(sizes, strides)) {
+      tensorOutputStrides_.push_back(*tt->strides().concrete_sizes());
+    } else {
+      tensorOutputStrides_.push_back(TensorType::contiguousStridesOf(sizes));
     }
-    tensorOutputSizes_.push_back(size);
+
     tensorOutputs_.emplace_back(tensors_.at(output->unique()));
     tensorOutputTensorOptions_.push_back(
         c10::TensorOptions(tensorType(tensors_[output->unique()]))
@@ -1992,8 +2085,11 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
   }
 
   for (size_t i = 0, e = tensorOutputs_.size(); i < e; ++i) {
-    outputs.push_back(
-        at::empty(tensorOutputSizes_[i], tensorOutputTensorOptions_[i]));
+    auto t = at::empty_strided(
+        tensorOutputSizes_[i],
+        tensorOutputStrides_[i],
+        tensorOutputTensorOptions_[i]);
+    outputs.push_back(t);
     runArgs.emplace_back(outputs.back().data_ptr());
   }
   return runArgs;

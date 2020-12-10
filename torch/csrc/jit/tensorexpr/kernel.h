@@ -137,6 +137,8 @@ class TORCH_API TensorExprKernel {
 
   void bindInput(const torch::jit::Value* input);
 
+  Tensor* convertOutputToCorrectStrides(torch::jit::Value* v);
+
   // Captures the information for reduction operation nodes.
   struct ReductionInfo {
     std::vector<DimArg> reductionDims;
@@ -190,6 +192,7 @@ class TORCH_API TensorExprKernel {
   int64_t nInputs_ = 0;
   std::vector<KernelArg> kernelArgs_;
   std::vector<std::vector<int64_t>> tensorOutputSizes_;
+  std::vector<std::vector<int64_t>> tensorOutputStrides_;
   std::vector<c10::TensorOptions> tensorOutputTensorOptions_;
   std::vector<Tensor*> tensorOutputs_;
   std::unordered_map<int64_t, Tensor*> tensors_;
