@@ -6,14 +6,13 @@ torch.set_default_dtype(torch.double)
 
 import itertools
 import functools
-import operator
 import random
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, TEST_WITH_ROCM, IS_WINDOWS
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from torch.testing._internal.common_methods_invocations import unary_ufuncs
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, ops, dtypes
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, ops
 from numbers import Number
 from torch.autograd.gradcheck import gradcheck
 from typing import Dict, Any

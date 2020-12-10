@@ -282,7 +282,7 @@ class UnaryUfuncInfo(OpInfo):
         self.domain = domain
         self.handles_large_floats = handles_large_floats
         self.handles_extremals = handles_extremals
-        self.handles_complex_extremals = handles_complex_extremals        
+        self.handles_complex_extremals = handles_complex_extremals
 
         # Epsilon to ensure grad and gradgrad checks don't test values
         #   outside a function's domain.
