@@ -21,7 +21,7 @@ Tensor _bincount_cpu_template(
   if (self.dim() == 1 && self.numel() == 0) {
     return native::zeros({minlength}, kLong);
   }
-  if (self.dim() != 1 || *self.min().data_ptr<input_t>() < 0) {
+  if (self.dim() != 1 || self.min().item<input_t>() < 0) {
     AT_ERROR("bincount only supports 1-d non-negative integral inputs.");
   }
 
@@ -32,7 +32,7 @@ Tensor _bincount_cpu_template(
 
   Tensor output;
   int64_t self_size = self.size(0);
-  int64_t nbins = static_cast<int64_t>(*self.max().data_ptr<input_t>()) + 1L;
+  int64_t nbins = static_cast<int64_t>(self.max().item<input_t>()) + 1L;
   nbins = std::max(nbins, minlength); // at least minlength # of bins
 
   const input_t* self_p = self.data_ptr<input_t>();

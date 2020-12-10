@@ -127,14 +127,19 @@ Tensor flip_cuda(const Tensor& self, IntArrayRef dims) {
     }
   }
 
+  flip_dims_t = flip_dims_t.cuda();
+  strides_t = strides_t.cuda();
+  stride_contiguous = stride_contiguous.cuda();
+  shape_t = shape_t.cuda();
+
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, kBFloat16, in_tensor.scalar_type(), "flip_cuda", [&] {
     flip_cuda_kernel<<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
       in_tensor.data_ptr<scalar_t>(), out_tensor.data_ptr<scalar_t>(), N,
-      flip_dims_t.cuda().data_ptr<int64_t>(),
+      flip_dims_t.data_ptr<int64_t>(),
       flip_dims_size,
-      strides_t.cuda().data_ptr<int64_t>(),
-      stride_contiguous.cuda().data_ptr<int64_t>(),
-      shape_t.cuda().data_ptr<int64_t>(),
+      strides_t.data_ptr<int64_t>(),
+      stride_contiguous.data_ptr<int64_t>(),
+      shape_t.data_ptr<int64_t>(),
       total_dims);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   });

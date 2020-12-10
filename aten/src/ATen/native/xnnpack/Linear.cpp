@@ -85,15 +85,14 @@ ContextLinear create(
 
   xnn_operator_t linear_op{};
 
+  Tensor bias_contig = bias && bias->defined() ? bias->contiguous() : Tensor();
   const xnn_status create_status = xnn_create_fully_connected_nc_f32(
       weight_contig.size(Layout::Filter::input),                        // input_channels
       weight_contig.size(Layout::Filter::output),                       // output_channels
       weight_contig.size(Layout::Filter::input),                        // input_pixel_stride
       weight_contig.size(Layout::Filter::output),                       // output_pixel_stride
       weight_contig.data_ptr<float>(),                                  // kernel
-      (bias && bias->defined()) ?
-          bias->contiguous().data_ptr<float>() :
-          nullptr,                                                      // bias
+      bias_contig.defined() ? bias_contig.data_ptr<float>() : nullptr,  // bias
       output_min,                                                     // output_min
       output_max,                                                     // output_max
       0u,                                                             // flags

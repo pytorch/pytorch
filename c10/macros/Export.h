@@ -87,6 +87,7 @@
 // This one is being used by libc10.so
 #ifdef C10_BUILD_MAIN_LIB
 #define C10_API C10_EXPORT
+#define TORCH_BUILD_ANY_MAIN_LIB
 #else
 #define C10_API C10_IMPORT
 #endif
@@ -94,6 +95,7 @@
 // This one is being used by libtorch.so
 #ifdef CAFFE2_BUILD_MAIN_LIB
 #define TORCH_API C10_EXPORT
+#define TORCH_BUILD_ANY_MAIN_LIB
 #else
 #define TORCH_API C10_IMPORT
 #endif
@@ -117,6 +119,7 @@
 // libtorch_cuda_cu.so
 #ifdef TORCH_CUDA_CU_BUILD_MAIN_LIB
 #define TORCH_CUDA_CU_API C10_EXPORT
+#define TORCH_BUILD_ANY_MAIN_LIB
 #elif defined(BUILD_SPLIT_CUDA)
 #define TORCH_CUDA_CU_API C10_IMPORT
 #endif
@@ -124,6 +127,7 @@
 // libtorch_cuda_cpp.so
 #ifdef TORCH_CUDA_CPP_BUILD_MAIN_LIB
 #define TORCH_CUDA_CPP_API C10_EXPORT
+#define TORCH_BUILD_ANY_MAIN_LIB
 #elif defined(BUILD_SPLIT_CUDA)
 #define TORCH_CUDA_CPP_API C10_IMPORT
 #endif
@@ -133,6 +137,7 @@
 #ifdef TORCH_CUDA_BUILD_MAIN_LIB
 #define TORCH_CUDA_CPP_API C10_EXPORT
 #define TORCH_CUDA_CU_API C10_EXPORT
+#define TORCH_BUILD_ANY_MAIN_LIB
 #elif !defined(BUILD_SPLIT_CUDA)
 #define TORCH_CUDA_CPP_API C10_IMPORT
 #define TORCH_CUDA_CU_API C10_IMPORT
@@ -140,6 +145,7 @@
 
 #if defined(TORCH_HIP_BUILD_MAIN_LIB)
 #define TORCH_HIP_API C10_EXPORT
+#define TORCH_BUILD_ANY_MAIN_LIB
 #else
 #define TORCH_HIP_API C10_IMPORT
 #endif

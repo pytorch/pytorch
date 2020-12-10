@@ -208,6 +208,7 @@ ContextConv2D create(
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   std::array<int64_t, 4> weight_sizes;
 
+  Tensor bias_contig = bias && bias->defined() ? bias->contiguous() : Tensor();
   if (transposed) {
     const Tensor weight_reordered = reorder_weights_for_transpose_conv(weight_nhwc, groups);
     for (int i = 0; i < 4; i++) {
@@ -230,9 +231,7 @@ ContextConv2D create(
       weight_reordered.size(Layout::Filter::output),                  // input_pixel_stride
       weight_reordered.size(Layout::Filter::input) * groups,          // output_pixel_stride
       weight_reordered.data_ptr<float>(),                             // kernel
-      (bias && bias->defined())
-          ? bias->contiguous().data_ptr<float>()
-          : nullptr,                                                  // bias
+      bias_contig.defined() ? bias_contig.data_ptr<float>() : nullptr,// bias
       output_min,                                                     // output_min
       output_max,                                                     // output_max
       0u,                                                             // flags
@@ -258,9 +257,7 @@ ContextConv2D create(
       weight_nhwc.size(Layout::Filter::input) * groups,               // input_pixel_stride
       weight_nhwc.size(Layout::Filter::output),                       // output_pixel_stride
       weight_nhwc.data_ptr<float>(),                                  // kernel
-      (bias && bias->defined())
-          ? bias->contiguous().data_ptr<float>()
-          : nullptr,                                                  // bias
+      bias_contig.defined() ? bias_contig.data_ptr<float>() : nullptr,// bias
       output_min,                                                     // output_min
       output_max,                                                     // output_max
       0u,                                                             // flags

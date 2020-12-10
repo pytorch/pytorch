@@ -425,4 +425,16 @@ __host__ __device__
 #endif
 #endif
 
+// This controls whether some questionable behaviors in C++ codebase should
+// raise errors. We don't want to enable them by default to avoid breaking
+// 3rd party extensions. But unless specified explicitly, we're going to
+// be strict within PyTorch itself
+#ifndef C10_STRICT_WARNING_AS_ERRORS
+#ifdef TORCH_BUILD_ANY_MAIN_LIB
+#define C10_STRICT_WARNING_AS_ERRORS 1
+#else
+#define C10_STRICT_WARNING_AS_ERRORS 0
+#endif
+#endif
+
 #endif // C10_MACROS_MACROS_H_

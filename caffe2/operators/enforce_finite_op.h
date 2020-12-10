@@ -58,7 +58,7 @@ class EnforceFiniteOp final : public Operator<Context> {
         if (blob != nullptr && blob->IsType<Tensor>()) {
           Tensor* c2Tensor = blob->GetMutable<Tensor>();
           const at::Tensor& tensor = static_cast<at::Tensor>(*c2Tensor);
-          bool blob_finite = tensor.sum().isfinite().cpu().data_ptr<bool>()[0];
+          bool blob_finite = tensor.sum().isfinite().cpu().item<bool>();
           LOG(INFO) << "blob " << blob_name << " isfinite=" << (blob_finite ? "true" : "false");
         }
       } catch (const std::exception& ex) {

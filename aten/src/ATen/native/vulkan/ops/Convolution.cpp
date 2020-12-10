@@ -479,7 +479,8 @@ vTensor pack_biases(
   Future::Payload v_bias_payload = v_bias_future.wait();
 
   if (bias) {
-    const float* const src_bias_ptr = bias->contiguous().data_ptr<float>();
+    auto bias_contig = bias->expect_contiguous();
+    const float* const src_bias_ptr = bias_contig.data_ptr<float>();
     float* const dst_bias_ptr = v_bias_payload.get();
 
     memset(dst_bias_ptr, 0, v_bias.nbytes());

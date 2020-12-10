@@ -189,8 +189,8 @@ bool ProcessGroupAgent::hasPendingMessage() {
     for (int to = 0; to < worldSize; ++to) {
       // peerCounts[x][0] is recv counts, and peerCounts[x][1] is send counts
 
-      const auto& sentCnt = peerCounts[from][1][to].data_ptr<int64_t>()[0];
-      const auto& recvCnt = peerCounts[to][0][from].data_ptr<int64_t>()[0];
+      const auto& sentCnt = peerCounts[from][1][to].item<int64_t>();
+      const auto& recvCnt = peerCounts[to][0][from].item<int64_t>();
       // NB: we cannot throw an error when sentCnt < recvCnt here. Because, send
       // and recv counts on different workers are read in a distributed manner.
       // It is possible that the sender reads its send count before sending, but

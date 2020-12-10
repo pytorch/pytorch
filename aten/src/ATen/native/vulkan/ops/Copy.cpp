@@ -67,9 +67,10 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
 
         Future::Payload v_self_payload = v_self_future.wait();
 
+        auto cpu_src_contig = cpu_src.contiguous();
         memcpy(
             v_self_payload.get(),
-            cpu_src.contiguous().data_ptr<float>(),
+            cpu_src_contig.data_ptr<float>(),
             std::min(src.nbytes(), self.nbytes()));
       }
     }
