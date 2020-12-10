@@ -53,48 +53,48 @@ namespace test_typelist_to_iseq {
         >::value, "");
 }
 
-namespace test_take {
-    static_assert(std::is_same<
-        index_sequence<>,
-        take_t<index_sequence<>, 0>
-        >::value, "");
-    static_assert(std::is_same<
-        index_sequence<>, // if we go to zero elements, then IntType cannot be preserved and it goes to index_sequence
-        take_t<integer_sequence<int8_t>, 0>
-        >::value, "");
-    static_assert(std::is_same<
-        index_sequence<>,
-        take_t<index_sequence<1>, 0>
-        >::value, "");
-    static_assert(std::is_same<
-        index_sequence<>, // if we go to zero elements, then IntType cannot be preserved and it goes to index_sequence
-        take_t<integer_sequence<int8_t, 1>, 0>
-        >::value, "");
-    static_assert(std::is_same<
-        index_sequence<>,
-        take_t<index_sequence<1, 5>, 0>
-        >::value, "");
-    static_assert(std::is_same<
-        index_sequence<>, // if we go to zero elements, then IntType cannot be preserved and it goes to index_sequence
-        take_t<integer_sequence<int8_t, 1, 5>, 0>
-        >::value, "");
-    static_assert(std::is_same<
-        index_sequence<1, 5>,
-        take_t<index_sequence<1, 5, 3, 4>, 2>
-        >::value, "");
-    static_assert(std::is_same<
-        integer_sequence<int8_t, 1, 5>,
-        take_t<integer_sequence<int8_t, 1, 5, 3, 4>, 2>
-        >::value, "");
-    static_assert(std::is_same<
-        index_sequence<1, 5>,
-        take_t<index_sequence<1, 5>, 2>
-        >::value, "");
-    static_assert(std::is_same<
-        integer_sequence<int8_t, 1, 5>,
-        take_t<integer_sequence<int8_t, 1, 5>, 2>
-        >::value, "");
-}
+// namespace test_take {
+//     static_assert(std::is_same<
+//         index_sequence<>,
+//         take_t<index_sequence<>, 0>
+//         >::value, "");
+//     static_assert(std::is_same<
+//         index_sequence<>, // if we go to zero elements, then IntType cannot be preserved and it goes to index_sequence
+//         take_t<integer_sequence<int8_t>, 0>
+//         >::value, "");
+//     static_assert(std::is_same<
+//         index_sequence<>,
+//         take_t<index_sequence<1>, 0>
+//         >::value, "");
+//     static_assert(std::is_same<
+//         index_sequence<>, // if we go to zero elements, then IntType cannot be preserved and it goes to index_sequence
+//         take_t<integer_sequence<int8_t, 1>, 0>
+//         >::value, "");
+//     static_assert(std::is_same<
+//         index_sequence<>,
+//         take_t<index_sequence<1, 5>, 0>
+//         >::value, "");
+//     static_assert(std::is_same<
+//         index_sequence<>, // if we go to zero elements, then IntType cannot be preserved and it goes to index_sequence
+//         take_t<integer_sequence<int8_t, 1, 5>, 0>
+//         >::value, "");
+//     static_assert(std::is_same<
+//         index_sequence<1, 5>,
+//         take_t<index_sequence<1, 5, 3, 4>, 2>
+//         >::value, "");
+//     static_assert(std::is_same<
+//         integer_sequence<int8_t, 1, 5>,
+//         take_t<integer_sequence<int8_t, 1, 5, 3, 4>, 2>
+//         >::value, "");
+//     static_assert(std::is_same<
+//         index_sequence<1, 5>,
+//         take_t<index_sequence<1, 5>, 2>
+//         >::value, "");
+//     static_assert(std::is_same<
+//         integer_sequence<int8_t, 1, 5>,
+//         take_t<integer_sequence<int8_t, 1, 5>, 2>
+//         >::value, "");
+// }
 
 namespace test_drop {
     static_assert(std::is_same<
@@ -139,27 +139,27 @@ namespace test_drop {
         >::value, "");
 }
 
-namespace range_test {
-    // empty
-    static_assert(std::is_same<
-        index_sequence<>,
-        range_t<0, 0>
-    >::value, "");
-    static_assert(std::is_same<
-        index_sequence<>,
-        range_t<5, 5>
-    >::value, "");
+// namespace range_test {
+//     // empty
+//     static_assert(std::is_same<
+//         index_sequence<>,
+//         range_t<0, 0>
+//     >::value, "");
+//     static_assert(std::is_same<
+//         index_sequence<>,
+//         range_t<5, 5>
+//     >::value, "");
 
-    // non-empty
-    static_assert(std::is_same<
-        index_sequence<5>,
-        range_t<5, 6>
-    >::value, "");
-    static_assert(std::is_same<
-        index_sequence<5, 6, 7, 8, 9>,
-        range_t<5, 10>
-    >::value, "");
-}
+//     // non-empty
+//     static_assert(std::is_same<
+//         index_sequence<5>,
+//         range_t<5, 6>
+//     >::value, "");
+//     static_assert(std::is_same<
+//         index_sequence<5, 6, 7, 8, 9>,
+//         range_t<5, 10>
+//     >::value, "");
+// }
 
 namespace test_zip_with_index {
     using typelist::typelist;
@@ -171,30 +171,30 @@ namespace test_zip_with_index {
     static_assert(std::is_same<typelist<integer_sequence<int8_t, 0, 3>, integer_sequence<int8_t, 1, -95>, integer_sequence<int8_t, 2, 20>>, zip_with_index_t<integer_sequence<int8_t, 3, -95, 20>>>::value, "");
 }
 
-namespace test_insert {
-    static_assert(std::is_same<index_sequence<100>, insert_t<index_sequence<>, 0, 100>>::value, "");
-    static_assert(std::is_same<index_sequence<100, 2>, insert_t<index_sequence<2>, 0, 100>>::value, "");
-    static_assert(std::is_same<index_sequence<2, 100>, insert_t<index_sequence<2>, 1, 100>>::value, "");
-    static_assert(std::is_same<index_sequence<100, 2, 5>, insert_t<index_sequence<2, 5>, 0, 100>>::value, "");
-    static_assert(std::is_same<index_sequence<2, 100, 5>, insert_t<index_sequence<2, 5>, 1, 100>>::value, "");
-    static_assert(std::is_same<index_sequence<2, 5, 100>, insert_t<index_sequence<2, 5>, 2, 100>>::value, "");
+// namespace test_insert {
+//     static_assert(std::is_same<index_sequence<100>, insert_t<index_sequence<>, 0, 100>>::value, "");
+//     static_assert(std::is_same<index_sequence<100, 2>, insert_t<index_sequence<2>, 0, 100>>::value, "");
+//     static_assert(std::is_same<index_sequence<2, 100>, insert_t<index_sequence<2>, 1, 100>>::value, "");
+//     static_assert(std::is_same<index_sequence<100, 2, 5>, insert_t<index_sequence<2, 5>, 0, 100>>::value, "");
+//     static_assert(std::is_same<index_sequence<2, 100, 5>, insert_t<index_sequence<2, 5>, 1, 100>>::value, "");
+//     static_assert(std::is_same<index_sequence<2, 5, 100>, insert_t<index_sequence<2, 5>, 2, 100>>::value, "");
 
-    static_assert(std::is_same<integer_sequence<int8_t, 2, 100, 5>, insert_t<integer_sequence<int8_t, 2, 5>, 1, 100>>::value, "");
-}
+//     static_assert(std::is_same<integer_sequence<int8_t, 2, 100, 5>, insert_t<integer_sequence<int8_t, 2, 5>, 1, 100>>::value, "");
+// }
 
-namespace test_insert_all {
-    using typelist::typelist;
-    static_assert(std::is_same<index_sequence<>, insert_all_t<index_sequence<>, typelist<>>>::value, "");
-    static_assert(std::is_same<index_sequence<3>, insert_all_t<index_sequence<3>, typelist<>>>::value, "");
-    static_assert(std::is_same<index_sequence<3>, insert_all_t<index_sequence<>, typelist<index_sequence<0, 3>>>>::value, "");
-    static_assert(std::is_same<index_sequence<4, 3, 5>, insert_all_t<index_sequence<>,
-                        typelist<index_sequence<0, 3>, index_sequence<0, 4>, index_sequence<2, 5>>>>::value, "");
-    static_assert(std::is_same<index_sequence<4, 3, 5>, insert_all_t<index_sequence<3>,
-                        typelist<index_sequence<0, 4>, index_sequence<2, 5>>>>::value, "");
+// namespace test_insert_all {
+//     using typelist::typelist;
+//     static_assert(std::is_same<index_sequence<>, insert_all_t<index_sequence<>, typelist<>>>::value, "");
+//     static_assert(std::is_same<index_sequence<3>, insert_all_t<index_sequence<3>, typelist<>>>::value, "");
+//     static_assert(std::is_same<index_sequence<3>, insert_all_t<index_sequence<>, typelist<index_sequence<0, 3>>>>::value, "");
+//     static_assert(std::is_same<index_sequence<4, 3, 5>, insert_all_t<index_sequence<>,
+//                         typelist<index_sequence<0, 3>, index_sequence<0, 4>, index_sequence<2, 5>>>>::value, "");
+//     static_assert(std::is_same<index_sequence<4, 3, 5>, insert_all_t<index_sequence<3>,
+//                         typelist<index_sequence<0, 4>, index_sequence<2, 5>>>>::value, "");
 
-    static_assert(std::is_same<integer_sequence<int8_t, 4, 3, -5>, insert_all_t<integer_sequence<int8_t, 3>,
-                        typelist<integer_sequence<int8_t, 0, 4>, integer_sequence<int8_t, 2, -5>>>>::value, "");
-}
+//     static_assert(std::is_same<integer_sequence<int8_t, 4, 3, -5>, insert_all_t<integer_sequence<int8_t, 3>,
+//                         typelist<integer_sequence<int8_t, 0, 4>, integer_sequence<int8_t, 2, -5>>>>::value, "");
+// }
 
 namespace test_remove_by_index {
     static_assert(std::is_same<index_sequence<>, remove_by_index_t<index_sequence<100>, 0>>::value, "");
