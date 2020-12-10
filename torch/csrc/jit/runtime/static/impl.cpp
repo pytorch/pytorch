@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/interned_strings.h>
 #include <c10/core/CPUAllocator.h>
 #include <caffe2/core/scope_guard.h>
@@ -418,6 +419,12 @@ std::vector<at::Tensor> StaticRuntime::run(
 c10::IValue StaticRuntime::run(
     const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
+  // We assume inference workloads, so we do not need
+  // autograd. Enabling this is a significant win on dispatcher
+  // overhead because it saves a round of dispatch for at least some
+  // functions, such as resize_ and resize_as_.
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+
   if (planner_) {
     planner_->allocate();
   }
@@ -528,6 +535,10 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     const int warmup_runs,
     const int main_runs) {
   TORCH_CHECK(warmup_runs >= 0 && main_runs >= 1);
+
+  // See comment on above use of AutoNonVariableTypeMode for
+  // explanation.
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
 
   IndividualMetrics results;
   results.total_time = 0.0;
