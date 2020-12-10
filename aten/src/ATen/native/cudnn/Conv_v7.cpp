@@ -589,6 +589,8 @@ if (args.params.dataType == CUDNN_DATA_FLOAT) {                                 
 //
 // ---------------------------------------------------------------------
 
+#if defined(CUDNN_VERSION) && CUDNN_VERSION < 8000
+
 void raw_cudnn_convolution_forward_out_32bit(
     const Tensor& output, const Tensor& input, const Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
@@ -639,6 +641,8 @@ void raw_cudnn_convolution_forward_out(
     bool benchmark, bool deterministic, bool allow_tf32) {
   split_batch_dim_to_32bit_out(output, input, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32, 1024 * 1024 * 256, raw_cudnn_convolution_forward_out_32bit);
 }
+
+#endif // CUDNN_VERSION < 8000
 
 // ---------------------------------------------------------------------
 //

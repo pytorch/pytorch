@@ -1,4 +1,5 @@
 #include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
+#include <ATen/cudnn/cudnn-wrapper.h>
 
 #if AT_CUDNN_ENABLED() && defined(CUDNN_VERSION) && CUDNN_VERSION >= 8000
 
@@ -7,6 +8,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/native/cudnn/ConvShared.h>
 #include <ATen/cudnn/Handle.h>
 #include <ATen/TensorUtils.h>
 
@@ -95,35 +97,14 @@ struct ConvolutionCalculator final {
   ScalarType dtype;
   MemoryFormat layout;
 
-  ConvolutionCalculator(const Tensor &input, const Tensor &weight,
+  ConvolutionCalculator(const Tensor &output, const Tensor &input, const Tensor &weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation):
+    output(output), input(input), weight(weight),
     padding(padding), stride(stride), dilation(dilation)
   {
-    check_inputs();
-
     dtype = input.scalar_type();
     layout = cudnn_conv_use_channels_last(input, weight) ?
       at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
-
-    // Make sure tensors are contiguous (#4500) and NC11 strides follow formula
-    this->weight = weight.contiguous(layout).resize_(weight.sizes(), layout);
-    this->input = input.contiguous(layout).resize_(input.sizes(), layout);
-
-    allocate_output();
-  }
-
-  void allocate_output() {
-    auto output_size = conv_output_size(input.sizes(), weight.sizes(), padding, stride, dilation);
-    output = at::empty(output_size, input.options(), layout);
-  }
-
-  void check_inputs() {
-    TensorArg input_  { input,  "input",  1 },
-              weight_ { weight, "weight", 2 };
-
-    CheckedFrom c = "cudnn_convolution";
-    checkAllSameType(c, {input_, weight_});
-    checkAllSameGPU(c, {input_, weight_});
   }
 
   Tensor run(bool benchmark, bool deterministic, bool allow_tf32) {
@@ -190,13 +171,13 @@ struct ConvolutionCalculator final {
   }
 };
 
-Tensor _cudnn_convolution_v8(
-  const Tensor &input, const Tensor &weight,
-  IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
-  bool benchmark, bool deterministic, bool allow_tf32)
+void raw_cudnn_convolution_forward_out(
+    const Tensor& output, const Tensor& input, const Tensor& weight,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic, bool allow_tf32)
 {
   TORCH_CHECK(!benchmark, "not supported yet");
-  return ConvolutionCalculator(input, weight, padding, stride, dilation).run(benchmark, deterministic, allow_tf32);
+  ConvolutionCalculator(output, input, weight, padding, stride, dilation).run(benchmark, deterministic, allow_tf32);
 }
 
 }}
