@@ -2734,9 +2734,6 @@ class TestLinalg(TestCase):
                 ops.append(torch.rand(sizes, device=device, dtype=dtype))
             equation = equation[:-1]
 
-            print(equation)
-            print([op.shape for op in ops])
-
             # Test with implicit output
             check(equation, *ops)
 
