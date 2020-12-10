@@ -527,10 +527,15 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.float], active_if=TEST_WITH_ROCM),
                    )),
     UnaryUfuncInfo('cosh',
-                   ref=np.cosh,
-                   dtypesIfCPU=floating_and_complex_types(),
+                   ref=np_unary_ufunc_integer_promotion_wrapper(np.cosh),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+                   promotes_integers_to_float=True,
                    assert_autodiffed=True,
                    skips=(
+                       # Reference: https://github.com/pytorch/pytorch/issues/48641
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cpu', dtypes=[torch.int8]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics', device_type='cpu',
