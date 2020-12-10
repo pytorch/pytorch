@@ -424,12 +424,12 @@ TensorView* ceilDiv(TensorView* v1, TensorView* v2) {
 // andOp
 Val* andOp(Val* v1, Val* v2) {
   TORCH_CHECK(
-      v1->getDataType().value() == DataType::Bool,
-      "Input1 should be of type bool, not ",
+      !isFloatingPointType(v1->getDataType().value()),
+      "Input1 should not be a floating point type, but received: ",
       v1->getDataType().value());
   TORCH_CHECK(
-      v2->getDataType().value() == DataType::Bool,
-      "Input2 should be of type bool, not ",
+      !isFloatingPointType(v2->getDataType().value()),
+      "Input2 should not be a floating point type, but received: ",
       v2->getDataType().value());
   return binaryOp(BinaryOpType::And, v1, v2);
 }
