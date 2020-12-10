@@ -124,14 +124,6 @@ inline c10::Half div_value(c10::Half lhs, c10::Half rhs) {
   return lhs / rhs;
 }
 
-template <typename To, typename From>
-constexpr To raw_bitcast(const From& from) noexcept {
-  TORCH_CHECK(sizeof(To) == sizeof(From), "Invalid bitcast invocation");
-  To ret;
-  memcpy(&ret, &from, sizeof(From));
-  return ret;
-}
-
 class SimpleIREvaluator : public CodeGen, public IRVisitor {
  public:
   template <typename... Ts>
@@ -572,55 +564,6 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
 #define SRC_TYPE_CASE(Type, Name)                      \
   case ScalarType::Name:                               \
     doCastFromSrc<Type>(src_dtype, dst_dtype, value_); \
-    break;
-        AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, SRC_TYPE_CASE);
-#undef SRC_TYPE_CASE
-        default:
-          throw unsupported_dtype();
-      }
-    }
-  }
-
-  template <typename SrcType, typename DstType>
-  std::vector<DstType> bitcastValues(const Dtype& src_dtype, const Value& v) {
-    const std::vector<SrcType>& src_values = v.as_vec<SrcType>();
-    std::vector<DstType> dst_values(src_values.size());
-    for (int i = 0; i < src_dtype.lanes(); ++i) {
-      dst_values[i] = raw_bitcast<DstType>(src_values[i]);
-    }
-    return dst_values;
-  }
-
-  template <typename SrcType>
-  void doBitCastFromSrc(
-      const Dtype& src_dtype,
-      const Dtype& dst_dtype,
-      const Value& v) {
-    switch (dst_dtype.scalar_type()) {
-#define DST_TYPE_CASE(Type, Name)                                     \
-  case ScalarType::Name:                                              \
-    this->value_ = Value(bitcastValues<SrcType, Type>(src_dtype, v)); \
-    break;
-      AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, DST_TYPE_CASE);
-#undef DST_TYPE_CASE
-      default:
-        throw unsupported_dtype();
-    }
-  }
-
-  TORCH_API void visit(const BitCast* v) override {
-    const Expr* src_value = v->src_value();
-    src_value->accept(this);
-    Dtype dst_dtype = v->dtype();
-    Dtype src_dtype = src_value->dtype();
-    if (src_dtype.byte_size() != dst_dtype.byte_size()) {
-      throw malformed_input("lane mismatch in Cast", v);
-    }
-    if (src_dtype != dst_dtype) {
-      switch (src_dtype.scalar_type()) {
-#define SRC_TYPE_CASE(Type, Name)                         \
-  case ScalarType::Name:                                  \
-    doBitCastFromSrc<Type>(src_dtype, dst_dtype, value_); \
     break;
         AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, SRC_TYPE_CASE);
 #undef SRC_TYPE_CASE
