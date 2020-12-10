@@ -211,40 +211,28 @@ class ProcessGroupNCCL : public ProcessGroup {
    public:
     explicit FutureNCCL(
         at::IValue value,
-        std::vector<c10::DeviceIndex> deviceIndices,
         std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents)
         : at::ivalue::Future(c10::ListType::create(c10::TensorType::get())),
           value_(std::move(value)),
-          deviceIndices_(std::move(deviceIndices)),
           cudaEvents_(std::move(cudaEvents)) {
       // Check that the device indices are distinct
       std::unordered_set<c10::DeviceIndex> uniqueDeviceIndices;
-      for (const auto& deviceIndex : deviceIndices_) {
-        uniqueDeviceIndices.insert(deviceIndex);
-      }
-      TORCH_INTERNAL_ASSERT(
-        deviceIndices_.size() == uniqueDeviceIndices.size(),
-        "Got ", deviceIndices_.size(), " devices, but only ",
-        uniqueDeviceIndices.size(), " distinct ones");
-      TORCH_INTERNAL_ASSERT(
-        cudaEvents_->size() == deviceIndices_.size(),
-        "The device indices and the events must be paired up. Got ",
-        deviceIndices_.size(), " devices and ", cudaEvents_->size(),
-        " events.");
       for (const at::cuda::CUDAEvent& event : *cudaEvents_) {
         TORCH_INTERNAL_ASSERT(event.isCreated());
-        TORCH_INTERNAL_ASSERT(
-            std::find(
-                deviceIndices_.begin(),
-                deviceIndices_.end(),
-                event.device_index()) != deviceIndices_.end());
+        uniqueDeviceIndices.insert(event.device_index());
       }
+      TORCH_INTERNAL_ASSERT(
+        cudaEvents_->size() == uniqueDeviceIndices.size(),
+        "Got ", cudaEvents_->size(), " events, but only ",
+        uniqueDeviceIndices.size(), " distinct devices");
       for (const at::DataPtr& data_ptr : extractDataPtrs(value_)) {
         TORCH_INTERNAL_ASSERT(
-            std::find(
-                deviceIndices_.begin(),
-                deviceIndices_.end(),
-                data_ptr.device().index()) != deviceIndices_.end());
+            std::find_if(
+                cudaEvents_->begin(),
+                cudaEvents_->end(),
+                [&](const at::cuda::CUDAEvent& ev) {
+                  return ev.device_index() == data_ptr.device().index();
+                }) != cudaEvents_->end());
       }
     }
 
@@ -266,9 +254,9 @@ class ProcessGroupNCCL : public ProcessGroup {
         throw *error_;
       }
 
-      for (int i = 0; i < deviceIndices_.size(); i++) {
-        (*cudaEvents_)[i].block(
-            at::cuda::getCurrentCUDAStream(deviceIndices_[i]));
+      for (at::cuda::CUDAEvent& cudaEvent : *cudaEvents_) {
+        cudaEvent.block(
+            at::cuda::getCurrentCUDAStream(cudaEvent.device_index()));
       }
 
       for (const at::DataPtr& data_ptr : extractDataPtrs(value_)) {
@@ -303,7 +291,6 @@ class ProcessGroupNCCL : public ProcessGroup {
         if (isCudaDeviceUsed[idx]) {
           at::cuda::CUDAEvent cudaEvent;
           cudaEvent.record(at::cuda::getCurrentCUDAStream(idx));
-          deviceIndices_.push_back(idx);
           (*cudaEvents_).push_back(std::move(cudaEvent));
         }
       }
@@ -336,13 +323,13 @@ class ProcessGroupNCCL : public ProcessGroup {
       // misbehaving this also ends up using memory on those devices, which the
       // user might not want.
       std::vector<at::cuda::CUDAStream> streams;
-      for (int i = 0; i < deviceIndices_.size(); i++) {
-        c10::DeviceIndex idx = deviceIndices_[i];
+      for (at::cuda::CUDAEvent& cudaEvent : *cudaEvents_) {
+        c10::DeviceIndex idx = cudaEvent.device_index();
         // FIXME Should we find a way to allow to change the priority of
         // streams?
         at::cuda::CUDAStream stream =
             at::cuda::getStreamFromPool(/*isHighPriority=*/false, idx);
-        (*cudaEvents_)[i].block(stream);
+        cudaEvent.block(stream);
         streams.push_back(stream);
       }
 
@@ -406,7 +393,6 @@ class ProcessGroupNCCL : public ProcessGroup {
 
    private:
     at::IValue value_;
-    std::vector<c10::DeviceIndex> deviceIndices_;
     std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents_;
     DataPtrExtractor dataPtrExtractor_;
     std::mutex dataPtrExtractorMutex_;
