@@ -328,13 +328,24 @@ class UnaryUfuncInfo(OpInfo):
             dtype=dtype
         )
 
+        # empty sparse tensor
+        t3 = torch.sparse_coo_tensor(
+            indices=torch.zeros([2, 0]),
+            values=torch.zeros([0, 5, 5, 5, 5, 5, 5, 0]),
+            size=[0, 0, 5, 5, 5, 5, 5, 5, 0],
+            device=device,
+            dtype=dtype
+        )
+
         if is_coalesced:
             t1 = t1.coalesce()
             t2 = t2.coalesce()
+            t3 = t3.coalesce()
 
         return (
             SampleInput(t1),
             SampleInput(t2),
+            SampleInput(t3),
         )
 
 
