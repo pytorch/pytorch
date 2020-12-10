@@ -843,7 +843,7 @@ std::shared_ptr<PythonClassValue> createPythonClassValue(
   return nullptr;
 }
 
-bool isScriptClassWrapper(py::object obj) {
+bool isScriptClassWrapper(const py::object& obj) {
   auto script_class_wrapper_obj =
       py::module::import("torch.jit._script").attr("ScriptClassWrapper");
   py::bool_ is_script_class_wrapper =
