@@ -87,7 +87,8 @@ def main():
 
     measurements.sort(key=time_fn)
 
-    template = f"{{:>6}}{' ' * 16}   Shape{' ' * 20}sparsity{' ' * 4}sparse_dim{' ' * 4}dense_dim{' ' * 4}hybrid{' ' * 4}coalesced\n{'-' * 108}"
+    template = f"{{:>6}}{' ' * 16}   Shape{' ' * 20}sparsity{' ' * 4}\
+                sparse_dim{' ' * 4}dense_dim{' ' * 4}hybrid{' ' * 4}coalesced\n{'-' * 108}"
     print(template.format("Best:"))
     for m in measurements[:10]:
         print(f"{time_fn(m) * 1e9:>5.2f} ns / element     {m.description}")
