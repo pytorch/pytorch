@@ -2678,6 +2678,7 @@ class TestLinalg(TestCase):
         check("ii", H)                      # trace
         check("ii->i", H)                   # diagonal
         check('iji->j', I)                  # non-contiguous trace
+        check('ngrg...->nrg...', torch.rand((2, 1, 3, 1, 4), device=device, dtype=dtype))
 
         # Test ellipsis
         check("i...->...", H)
@@ -2695,6 +2696,59 @@ class TestLinalg(TestCase):
 
         # with strided tensors
         check("bn,anm,bm->ba", l[:, ::2], w[:, ::2, ::2], r[:, ::2])
+
+    @dtypes(torch.double)
+    def test_einsum_random(self, device, dtype):
+        def check(equation, *operands):
+            ref = np.einsum(equation, *[op.cpu().numpy() for op in operands])
+            res = torch.einsum(equation, operands)
+            self.assertEqual(res.cpu(), torch.from_numpy(np.array(ref)))
+
+        for _ in range(20):
+            # Create a random number of input operands, each with a random
+            # number of dimensions randomly labeled.
+            op_labels = []
+            valid_labels = set()
+            for _ in range(random.randint(1, 3)):
+                labels = np.random.randint(0, 10, random.randint(1, 5))
+                op_labels.append(labels)
+                valid_labels.update(labels)
+            label_size = np.random.randint(1, 5, 10)
+            ell_sizes = np.random.randint(1, 5, 3)
+
+            # Build equation and tensors from input operand labels.
+            ops = []
+            equation = ''
+            for labels in op_labels:
+                sizes = [label_size[label] for label in labels]
+                labels = [chr(ord('a') + label) for label in labels]
+
+                # Add ellipsis dimensions at random
+                ell_num_dim = random.randint(0, 3)
+                if ell_num_dim > 0:
+                    ell_index = random.randint(0, len(labels))
+                    sizes[ell_index:ell_index] = ell_sizes[-ell_num_dim:]
+                    labels.insert(ell_index, "...")
+
+                equation += ''.join(labels) + ','
+                ops.append(torch.rand(sizes, device=device, dtype=dtype))
+            equation = equation[:-1]
+
+            print(equation)
+            print([op.shape for op in ops])
+
+            # Test with implicit output
+            check(equation, *ops)
+
+            # Randomly choose some labels to be part of the output
+            out_labels = np.unique(np.random.choice(list(valid_labels), random.randint(1, len(valid_labels))))
+            out_labels = [chr(ord('a') + label) for label in out_labels]
+            ell_index = random.randint(0, len(out_labels))
+            out_labels.insert(ell_index, '...')
+            equation += '->' + ''.join(out_labels)
+
+            # Randomly test the output
+            check(equation, *ops)
 
     def test_einsum_corner_cases(self, device):
         def check(equation, *operands, expected_output):
