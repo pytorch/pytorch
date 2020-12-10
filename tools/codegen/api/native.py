@@ -105,4 +105,5 @@ def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments]) -> Sequen
         assert_never(a)
 
 def arguments(func: FunctionSchema) -> Tuple[NativeArgument, ...]:
-    return tuple(i for arg in cpp.group_arguments(func, method=False) for i in argument(arg))
+    args = cpp.group_arguments(func, method=False, faithful=local.use_c10_dispatcher() is UseC10Dispatcher.full)
+    return tuple(i for arg in args for i in argument(arg))

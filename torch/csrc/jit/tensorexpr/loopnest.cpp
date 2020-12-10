@@ -542,8 +542,10 @@ Stmt* LoopNest::lowerToStmt(Tensor* t) {
 
 class FunctionInliner : public IRMutator {
  public:
-  FunctionInliner(Store* producer)
-      : buf_(producer->buf()), producer_(producer) {
+  FunctionInliner(Store* producer, std::unordered_set<const Buf*> outputs)
+      : buf_(producer->buf()),
+        producer_(producer),
+        outputs_(std::move(outputs)) {
     for (auto* i : producer->indices()) {
       const Var* index_var = dynamic_cast<const Var*>(i);
       if (index_var == nullptr) {
@@ -631,7 +633,9 @@ class FunctionInliner : public IRMutator {
 
   // Remove the buffer write from the inlined function.
   Stmt* mutate(const Store* v) override {
-    if (v == producer_) {
+    // If the buf_ is in the outputs set, keep its statement intact. Otherwise,
+    // remove it.
+    if (v == producer_ && !outputs_.count(buf_)) {
       in_producer_ = true;
       producer_ = dynamic_cast<const Store*>(IRMutator::mutate(v));
       TORCH_INTERNAL_ASSERT(producer_ != nullptr);
@@ -696,6 +700,7 @@ class FunctionInliner : public IRMutator {
   // In the producer's scope - we need to bind any calls to rand().
   bool in_producer_ = false;
   std::unordered_map<Let*, std::unordered_set<const Var*>> random_bindings_;
+  std::unordered_set<const Buf*> outputs_;
 };
 
 bool LoopNest::computeInline(Stmt* s) {
@@ -707,11 +712,6 @@ bool LoopNest::computeInline(Stmt* s) {
 }
 
 bool LoopNest::computeInline(const Buf* b) {
-  if (output_bufs_.count(b)) {
-    // Cannot inline producers of output Tensors
-    return false;
-  }
-
   // Find producers.
   Store* relevant_store{nullptr};
   auto stores = NodeFinder<Store>::find(root_stmt_);
@@ -731,7 +731,7 @@ bool LoopNest::computeInline(const Buf* b) {
   }
   TORCH_INTERNAL_ASSERT(relevant_store);
 
-  FunctionInliner inliner(relevant_store);
+  FunctionInliner inliner(relevant_store, output_bufs_);
   root_stmt_ = root_stmt_->accept_mutator(&inliner);
 
   // No longer computing this intermediate tensor, so don't alloc it.
@@ -745,6 +745,7 @@ void LoopNest::inlineIntermediateBufs() {
   // erased from the set 'intermediate_bufs_' in that function.
   std::unordered_set<const Buf*> bufs_to_inline(
       intermediate_bufs_.begin(), intermediate_bufs_.end());
+  bufs_to_inline.insert(output_bufs_.begin(), output_bufs_.end());
   for (auto b : bufs_to_inline) {
     computeInline(b);
   }
