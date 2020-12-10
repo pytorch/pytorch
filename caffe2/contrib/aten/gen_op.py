@@ -294,6 +294,12 @@ if __name__ == '__main__':
                 env['statements'].append(
                     'auto {} = peekSlice({}, InputSize() - {}, InputSize());'
                     .format(arg['name'], real_inputs, static_tensor_inputs))
+            elif arg['type'] == 'c10::List<c10::optional<Tensor>>':
+                # NOTE: do not advance real_inputs here. After this we will
+                # switch to indexing the "stack" from the end as if we only had
+                env['statements'].append(
+                    'auto {} = peekSliceOptionals({}, InputSize() - {}, InputSize());'
+                    .format(arg['name'], real_inputs, static_tensor_inputs))
             elif value_is_tensor_type(arg):
                 # load tensor inputs from Caffe2
                 env['statements'].append(

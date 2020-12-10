@@ -34,7 +34,7 @@ def argumenttype_type(t: Type, *, mutable: bool) -> str:
         else:
             return 'const Tensor &'
     elif str(t) == 'Tensor?[]':
-        return 'TensorList'
+        return 'c10::List<c10::optional<Tensor>>'
     return cpp.argumenttype_type(t, mutable=mutable)
 
 def returns_type(rs: Sequence[Return]) -> str:

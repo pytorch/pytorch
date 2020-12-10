@@ -112,9 +112,8 @@ def format_trace_inputs(f: NativeFunction) -> str:
             ]
         else:
             name = arg.name
-            # XXX: For arg that have type of Tensor?[], tracer will pass allow_undefined to addInputs
             if str(arg.type) == 'Tensor?[]':
-                return [f'jit::tracer::addInputs(node, "{name}", {name}, true);']
+                return [f'jit::tracer::addInputs(node, "{name}", {name});']
             else:
                 return [ADD_TRACE_INPUT.substitute(name=name, input=name)]
 
