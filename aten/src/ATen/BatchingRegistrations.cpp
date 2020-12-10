@@ -233,6 +233,32 @@ Tensor unsqueeze_batching_rule(const Tensor& self, int64_t dim) {
   return self_physical.newLogicalFromPhysical(result);
 }
 
+Tensor& fill_inplace_scalar_batching_rule(Tensor& self, Scalar value) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  self_physical.tensor().fill_(value);
+  return self;
+}
+
+Tensor& fill_inplace_tensor_batching_rule(Tensor& self, const Tensor& value) {
+  auto value_batched = isBatchedTensor(value);
+
+  if (value_batched) {
+    auto physical_args =
+      BroadcastingVmapTransform::logicalToPhysical({self, value});
+    physical_args[0].tensor().copy_(physical_args[1].tensor());
+  } else {
+    auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+    self_physical.tensor().fill_(value);
+  }
+  return self;
+}
+
+Tensor& zero_inplace_batching_rule(Tensor &self) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  self_physical.tensor().zero_();
+  return self;
+}
+
 Tensor squeeze_batching_rule(const Tensor& self) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto physical_sizes = self_physical.tensor().sizes();
@@ -970,6 +996,11 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl_UNBOXED("sum.dim_IntList", sum_batching_rule);
   m.impl("is_complex", native::is_complex);
   m.impl("conj", native::conj);
+
+  // inplace operations
+  m.impl("fill_.Scalar", fill_inplace_scalar_batching_rule);
+  m.impl("fill_.Tensor", fill_inplace_tensor_batching_rule);
+  m.impl("zero_", zero_inplace_batching_rule);
 
   // view operations
   m.impl("as_strided", as_strided_batching_rule);
