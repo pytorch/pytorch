@@ -5435,12 +5435,12 @@ class TestONNXRuntime(unittest.TestCase):
 
     def test_resize_images(self):
         class TransformModule(torch.nn.Module):
-            def __init__(self_module):
-                super(TransformModule, self_module).__init__()
-                self_module.transform = self._init_test_generalized_rcnn_transform()
+            def __init__(self):
+                super(TransformModule, self).__init__()
+                self.transform = self._init_test_generalized_rcnn_transform()
 
-            def forward(self_module, images):
-                return self_module.transform.resize(images, None)[0]
+            def forward(self, images):
+                return self.transform.resize(images, None)[0]
 
         input = torch.rand(3, 10, 20)
         input_test = torch.rand(3, 100, 150)
@@ -5450,12 +5450,12 @@ class TestONNXRuntime(unittest.TestCase):
     def test_transform_images(self):
 
         class TransformModule(torch.nn.Module):
-            def __init__(self_module):
-                super(TransformModule, self_module).__init__()
-                self_module.transform = self._init_test_generalized_rcnn_transform()
+            def __init__(self):
+                super(TransformModule, self).__init__()
+                self.transform = self._init_test_generalized_rcnn_transform()
 
-            def forward(self_module, images):
-                return self_module.transform(images)[0].tensors
+            def forward(self, images):
+                return self.transform(images)[0].tensors
 
         input = torch.rand(3, 100, 200), torch.rand(3, 200, 200)
         input_test = torch.rand(3, 100, 200), torch.rand(3, 200, 200)
@@ -5541,13 +5541,13 @@ class TestONNXRuntime(unittest.TestCase):
 
     def test_rpn(self):
         class RPNModule(torch.nn.Module):
-            def __init__(self_module):
-                super(RPNModule, self_module).__init__()
-                self_module.rpn = self._init_test_rpn()
+            def __init__(self):
+                super(RPNModule, self).__init__()
+                self.rpn = self._init_test_rpn()
 
-            def forward(self_module, images, features):
+            def forward(self, images, features):
                 images = ImageList(images, [i.shape[-2:] for i in images])
-                return self_module.rpn(images, features)
+                return self.rpn(images, features)
 
         images = torch.rand(2, 3, 150, 150)
         features = self.get_features(images)
@@ -5591,18 +5591,18 @@ class TestONNXRuntime(unittest.TestCase):
 
     def test_roi_heads(self):
         class RoiHeadsModule(torch.nn.Module):
-            def __init__(self_module):
-                super(RoiHeadsModule, self_module).__init__()
-                self_module.transform = self._init_test_generalized_rcnn_transform()
-                self_module.rpn = self._init_test_rpn()
-                self_module.roi_heads = self._init_test_roi_heads_faster_rcnn()
+            def __init__(self):
+                super(RoiHeadsModule, self).__init__()
+                self.transform = self._init_test_generalized_rcnn_transform()
+                self.rpn = self._init_test_rpn()
+                self.roi_heads = self._init_test_roi_heads_faster_rcnn()
 
-            def forward(self_module, images, features):
+            def forward(self, images, features):
                 original_image_sizes = [img.shape[-2:] for img in images]
                 images = ImageList(images, [i.shape[-2:] for i in images])
-                proposals, _ = self_module.rpn(images, features)
-                detections, _ = self_module.roi_heads(features, proposals, images.image_sizes)
-                detections = self_module.transform.postprocess(detections,
+                proposals, _ = self.rpn(images, features)
+                detections, _ = self.roi_heads(features, proposals, images.image_sizes)
+                detections = self.transform.postprocess(detections,
                                                                images.image_sizes,
                                                                original_image_sizes)
                 return detections
