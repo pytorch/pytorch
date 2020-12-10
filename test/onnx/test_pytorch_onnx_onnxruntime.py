@@ -24,6 +24,7 @@ from torchvision.models.detection.transform import GeneralizedRCNNTransform
 from torchvision.models.detection.rpn import AnchorGenerator, RPNHead, RegionProposalNetwork
 from torchvision.models.detection.roi_heads import RoIHeads
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor, TwoMLPHead
+from collections import OrderedDict
 import onnx
 
 def to_numpy(tensor):
@@ -5470,6 +5471,7 @@ class TestONNXRuntime(unittest.TestCase):
         [np.testing.assert_allclose(ort_out1, ort_out2, atol=1e-7, rtol=0.001) for ort_out1, ort_out2 in
          zip(ort_outs1, ort_outs2)]
 
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_nms(self):
         boxes = torch.rand(5, 4)
         boxes[:, 2:] += torch.rand(5, 2)
@@ -5481,6 +5483,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         self.run_model(Module(), [(boxes, scores)])
 
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_clip_boxes_to_image(self):
         boxes = torch.randn(5, 4) * 500
         boxes[:, 2:] += boxes[:, :2]
@@ -5496,12 +5499,14 @@ class TestONNXRuntime(unittest.TestCase):
                        input_names=["boxes", "size"],
                        dynamic_axes={"size": [0, 1]})
 
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_roi_align(self):
         x = torch.rand(1, 1, 10, 10, dtype=torch.float32)
         single_roi = torch.tensor([[0, 0, 0, 4, 4]], dtype=torch.float32)
         model = ops.RoIAlign((5, 5), 1, 2)
         self.run_model(model, [(x, single_roi)])
 
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_roi_align_aligned(self):
         x = torch.rand(1, 1, 10, 10, dtype=torch.float32)
         single_roi = torch.tensor([[0, 1.5, 1.5, 3, 3]], dtype=torch.float32)
@@ -5523,13 +5528,7 @@ class TestONNXRuntime(unittest.TestCase):
         model = ops.RoIAlign((2, 2), 2.5, 0, aligned=True)
         self.run_model(model, [(x, single_roi)])
 
-    @unittest.skip  # Issue in exporting ROIAlign with aligned = True for malformed boxes
-    def test_roi_align_malformed_boxes(self):
-        x = torch.randn(1, 1, 10, 10, dtype=torch.float32)
-        single_roi = torch.tensor([[0, 2, 0.3, 1.5, 1.5]], dtype=torch.float32)
-        model = ops.RoIAlign((5, 5), 1, 1, aligned=True)
-        self.run_model(model, [(x, single_roi)])
-
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_roi_pool(self):
         x = torch.rand(1, 1, 10, 10, dtype=torch.float32)
         rois = torch.tensor([[0, 0, 0, 4, 4]], dtype=torch.float32)
@@ -5538,29 +5537,31 @@ class TestONNXRuntime(unittest.TestCase):
         model = ops.RoIPool((pool_h, pool_w), 2)
         self.run_model(model, [(x, rois)])
 
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_resize_images(self):
         class TransformModule(torch.nn.Module):
-            def __init__(self):
-                super(TransformModule, self).__init__()
-                self.transform = self._init_test_generalized_rcnn_transform()
+            def __init__(self_module):
+                super(TransformModule, self_module).__init__()
+                self_module.transform = self._init_test_generalized_rcnn_transform()
 
-            def forward(self, images):
-                return self.transform.resize(images, None)[0]
+            def forward(self_module, images):
+                return self_module.transform.resize(images, None)[0]
 
         input = torch.rand(3, 10, 20)
         input_test = torch.rand(3, 100, 150)
         self.run_model(TransformModule(), [(input,), (input_test,)],
                        input_names=["input1"], dynamic_axes={"input1": [0, 1, 2]})
 
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_transform_images(self):
 
         class TransformModule(torch.nn.Module):
-            def __init__(self):
-                super(TransformModule, self).__init__()
-                self.transform = self._init_test_generalized_rcnn_transform()
+            def __init__(self_module):
+                super(TransformModule, self_module).__init__()
+                self_module.transform = self._init_test_generalized_rcnn_transform()
 
-            def forward(self, images):
-                return self.transform(images)[0].tensors
+            def forward(self_module, images):
+                return self_module.transform(images)[0].tensors
 
         input = torch.rand(3, 100, 200), torch.rand(3, 200, 200)
         input_test = torch.rand(3, 100, 200), torch.rand(3, 200, 200)
@@ -5644,15 +5645,16 @@ class TestONNXRuntime(unittest.TestCase):
         features = OrderedDict(features)
         return features
 
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_rpn(self):
         class RPNModule(torch.nn.Module):
-            def __init__(self):
-                super(RPNModule, self).__init__()
-                self.rpn = self._init_test_rpn()
+            def __init__(self_module):
+                super(RPNModule, self_module).__init__()
+                self_module.rpn = self._init_test_rpn()
 
-            def forward(self, images, features):
+            def forward(self_module, images, features):
                 images = ImageList(images, [i.shape[-2:] for i in images])
-                return self.rpn(images, features)
+                return self_module.rpn(images, features)
 
         images = torch.rand(2, 3, 150, 150)
         features = self.get_features(images)
@@ -5669,6 +5671,7 @@ class TestONNXRuntime(unittest.TestCase):
                                      "input3": [0, 1, 2, 3], "input4": [0, 1, 2, 3],
                                      "input5": [0, 1, 2, 3], "input6": [0, 1, 2, 3]})
 
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_multi_scale_roi_align(self):
 
         class TransformModule(torch.nn.Module):
@@ -5694,22 +5697,23 @@ class TestONNXRuntime(unittest.TestCase):
 
         self.run_model(TransformModule(), [(i, [boxes],), (i1, [boxes1],)])
 
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_roi_heads(self):
         class RoiHeadsModule(torch.nn.Module):
-            def __init__(self):
-                super(RoiHeadsModule, self).__init__()
-                self.transform = self._init_test_generalized_rcnn_transform()
-                self.rpn = self._init_test_rpn()
-                self.roi_heads = self._init_test_roi_heads_faster_rcnn()
+            def __init__(self_module):
+                super(RoiHeadsModule, self_module).__init__()
+                self_module.transform = self._init_test_generalized_rcnn_transform()
+                self_module.rpn = self._init_test_rpn()
+                self_module.roi_heads = self._init_test_roi_heads_faster_rcnn()
 
-            def forward(self, images, features):
+            def forward(self_module, images, features):
                 original_image_sizes = [img.shape[-2:] for img in images]
                 images = ImageList(images, [i.shape[-2:] for i in images])
-                proposals, _ = self.rpn(images, features)
-                detections, _ = self.roi_heads(features, proposals, images.image_sizes)
-                detections = self.transform.postprocess(detections,
-                                                        images.image_sizes,
-                                                        original_image_sizes)
+                proposals, _ = self_module.rpn(images, features)
+                detections, _ = self_module.roi_heads(features, proposals, images.image_sizes)
+                detections = self_module.transform.postprocess(detections,
+                                                               images.image_sizes,
+                                                               original_image_sizes)
                 return detections
 
         images = torch.rand(2, 3, 100, 100)
