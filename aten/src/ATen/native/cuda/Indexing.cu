@@ -160,7 +160,7 @@ computeLinearIndex(const Tensor & src, TensorList indices, bool check_range) {
 }
 
 
-static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t>> makeLinearIndex(Tensor self, TensorList orig, bool check_range) {
+static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t>> makeLinearIndex(Tensor self, c10::List<c10::optional<at::Tensor>> orig, bool check_range) {
   checkIndexTensorTypes(orig);
   // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
   auto indices = expandTensors(self, orig);
@@ -184,7 +184,7 @@ static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t
 
 
 namespace {
-void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & value, bool unsafe) {
+void index_put_accum_kernel(Tensor & self, c10::List<c10::optional<Tensor>> indices, const Tensor & value, bool unsafe) {
   if (indices.size() > (size_t)self.dim()) {
     TORCH_CHECK_INDEX(false, "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   }
@@ -445,6 +445,10 @@ Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const 
               "index_add_(): Indexing dim ", dim, " is out of bounds of tensor");
   TORCH_CHECK(index.numel() == (source.dim() == 0 ? 1 : source.size(dim)),
               "index_add_(): Number of indices should be equal to self.size(dim)");
+
+  at::assert_no_internal_overlap(self);
+  at::assert_no_overlap(self, index);
+  at::assert_no_overlap(self, source);
 
   // Scalars are treated as 1-d tensor
   Tensor self_ = (self.dim() == 0) ? self.view(1) : self;
@@ -828,6 +832,8 @@ Tensor& index_select_out_cuda(Tensor& out, const Tensor& self, int64_t dim,
   TORCH_CHECK(at::cuda::check_device({out, self, index}),
               "Input, output and indices must be on the current device");
   at::assert_no_internal_overlap(out);
+  at::assert_no_overlap(out, self);
+  at::assert_no_overlap(out, index);
 
   dim = at::maybe_wrap_dim(dim, self);
   TORCH_CHECK(self.dim() <= MAX_TENSORINFO_DIMS, DIM_WARNING);

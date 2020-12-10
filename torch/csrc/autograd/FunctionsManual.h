@@ -160,6 +160,9 @@ Tensor fft_backward(const Tensor& self, const Tensor& grad, int64_t signal_ndim,
                     bool inverse, IntArrayRef checked_signal_sizes,
                     int64_t normalization, bool onesided,
                     IntArrayRef output_sizes);
+Tensor fft_r2c_backward(const Tensor& grad, IntArrayRef dim, int64_t normalization,
+                        bool onesided, int64_t last_dim_size);
+Tensor fft_c2r_backward(const Tensor& grad, IntArrayRef dim, int64_t normalization);
 Tensor constant_pad_nd_backward(const Tensor& grad, IntArrayRef pad);
 std::tuple<Tensor, Tensor> cholesky_solve_backward(
     const Tensor& grad_x, const Tensor& self,

@@ -9,6 +9,7 @@
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/ExpandUtils.h>
+#include <ATen/MemoryOverlap.h>
 #include <THC/THCTensorInfo.cuh>
 
 namespace at { namespace native {
@@ -189,7 +190,7 @@ static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self
   Tensor _mask = (mask.dim() == 0) ? mask.unsqueeze(0) : mask;
   Tensor _self = (self.dim() == 0) ? self.unsqueeze(0) : self;
   std::tie(_mask, _self) = expand_outplace(_mask, _self);
-  at::native::index_out(result, _self, _mask);
+  at::native::index_out(result, _self, c10::List<c10::optional<at::Tensor>>({_mask}));
 
   return result;
 }
@@ -228,6 +229,10 @@ void take_out_cuda_template(Tensor& output, const Tensor& input, const Tensor& i
   TORCH_CHECK(index.dim() < MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
 
   TORCH_CHECK(!(input.numel() == 0 && index.numel() != 0), "tried to take from an empty tensor");
+
+  at::assert_no_internal_overlap(output);
+  at::assert_no_partial_overlap(output, index);
+  at::assert_no_overlap(output, input);
 
   output.resize_(index.sizes());
 
