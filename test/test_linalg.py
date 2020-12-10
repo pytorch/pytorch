@@ -4691,6 +4691,7 @@ else:
             det = M.det()
             logdet = M.logdet()
             sdet, logabsdet = M.slogdet()
+            linalg_sdet, linalg_logabsdet = torch.linalg.slogdet(M)
 
             # Test det
             self.assertEqual(det, target_sdet * target_logabsdet.exp(),
@@ -4701,6 +4702,8 @@ else:
             # precision issues when det is near zero.
             self.assertEqual(sdet * logabsdet.exp(), target_sdet * target_logabsdet.exp(),
                              atol=1e-7, rtol=0, msg='{} (slogdet)'.format(desc))
+            self.assertEqual(linalg_sdet * linalg_logabsdet.exp(), target_sdet * target_logabsdet.exp(),
+                             atol=1e-7, rtol=0, msg='{} (linalg_slogdet)'.format(desc))
 
             # Test logdet
             # Compare logdet against our own pytorch slogdet because they should
@@ -4874,13 +4877,13 @@ else:
             # Scaling adapted from `get_random_mat_scale` in _test_det_logdet_slogdet
             full_tensor *= (math.factorial(matsize - 1) ** (-1.0 / (2 * matsize)))
 
-            for fn in [torch.det, torch.logdet, torch.slogdet]:
+            for fn in [torch.det, torch.logdet, torch.slogdet, torch.linalg.slogdet]:
                 expected_value = []
                 actual_value = fn(full_tensor)
                 for full_idx in itertools.product(*map(lambda x: list(range(x)), batchdims)):
                     expected_value.append(fn(full_tensor[full_idx]))
 
-                if fn == torch.slogdet:
+                if fn == torch.slogdet or fn == torch.linalg.slogdet:
                     sign_value = torch.stack([tup[0] for tup in expected_value], dim=0).reshape(batchdims)
                     expected_value = torch.stack([tup[1] for tup in expected_value], dim=0).reshape(batchdims)
                     self.assertEqual(sign_value, actual_value[0])
