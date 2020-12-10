@@ -7,7 +7,7 @@ import argparse
 
 from tools.codegen.model import *
 from tools.codegen.api.python import *
-from typing import Sequence, List, Mapping, Dict
+from typing import Sequence, List, Dict
 
 from ..autograd.utils import CodeTemplate, write
 from ..autograd.gen_python_functions import should_generate_py_binding, load_signatures, group_overloads
