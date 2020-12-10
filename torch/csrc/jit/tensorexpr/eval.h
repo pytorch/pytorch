@@ -765,7 +765,14 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   TORCH_API void visit(const Intrinsics* v) override {
     auto ty = v->dtype().scalar_type();
     if (v->op_type() == kIsNan) {
-      visit_intrinsics_helper<int, float>(v);
+      auto inp_dtype = v->params().at(0)->dtype().scalar_type();
+      if (inp_dtype == ScalarType::Float) {
+        visit_intrinsics_helper<int, float>(v);
+      } else if (inp_dtype == ScalarType::Double) {
+        visit_intrinsics_helper<int, double>(v);
+      } else if (inp_dtype == ScalarType::Half) {
+        throw unsupported_dtype(); // TODO
+      }
     } else if (ty == ScalarType::Float) {
       visit_intrinsics_helper<float, float>(v);
     } else if (ty == ScalarType::Double) {
