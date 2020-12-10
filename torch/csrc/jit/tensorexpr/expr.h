@@ -31,7 +31,6 @@ enum IRNodeType {
   kCompareSelect,
   kLet,
   kCast,
-  kBitCast,
   kBroadcast,
   kRamp,
   kPolynomial,
