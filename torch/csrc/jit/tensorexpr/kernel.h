@@ -189,6 +189,8 @@ class TORCH_API TensorExprKernel {
 
   int64_t nInputs_ = 0;
   std::vector<KernelArg> kernelArgs_;
+  std::vector<std::vector<int64_t>> tensorOutputSizes_;
+  std::vector<c10::TensorOptions> tensorOutputTensorOptions_;
   std::vector<Tensor*> tensorOutputs_;
   std::unordered_map<int64_t, Tensor*> tensors_;
   std::unordered_map<int64_t, VarHandle> scalars_;
