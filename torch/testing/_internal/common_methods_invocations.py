@@ -922,9 +922,13 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
+                                dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestUnaryUfuncs', 'test_variant_consistency',
+                                dtypes=[torch.cfloat, torch.cdouble]),
+                       # TODO: Fix test_out_arg_all_dtypes as torch.empty_like(expected_output) where expected_output=op(input) 
+                       # We can break the logic of the loop over all possible types but it is OK.
+                       SkipInfo('TestUnaryUfuncs', 'test_out_arg_all_dtypes',
+                                dtypes=[torch.cfloat, torch.cdouble]),
                        SkipInfo('TestCommon', 'test_variant_consistency_eager',
                                 dtypes=[torch.cfloat, torch.cdouble]),
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
@@ -943,13 +947,16 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                device_type='cpu', dtypes=[torch.float16, torch.float, torch.double]),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                device_type='cuda', dtypes=[torch.float16, torch.float, torch.double]),
-                       SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                dtypes=[torch.bool, torch.float16, torch.bfloat16, torch.float, torch.double]),
+                       # Reference: https://github.com/pytorch/pytorch/issues/49206
+                       SkipInfo('TestUnaryUfuncs', 'test_non_contig',
                                 dtypes=[torch.bfloat16, ]),
+                       SkipInfo('TestUnaryUfuncs', 'test_contig_vs_every_other',
+                                dtypes=[torch.bfloat16, ]),
+                       SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                dtypes=[torch.bfloat16, ]),                                
                        SkipInfo('TestSparseUnaryUfuncs', 'test_sparse_unary_ops',
-                                dtypes=[torch.cfloat, torch.cdouble, torch.bfloat16, torch.float16]),
+                                dtypes=[torch.cfloat, torch.cdouble, torch.bfloat16, torch.float16]),                        
                    ),
                    supports_sparse=False),  # Temporary disabled until https://github.com/pytorch/pytorch/pull/43330
 ]
