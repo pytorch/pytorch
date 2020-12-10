@@ -2882,17 +2882,14 @@ class TestSparseUnaryUfuncs(TestCase):
                 self.assertEqual(expected_output, sparse_tensor_out.to_dense())
 
             if op.inplace_variant is not None and out_dtype == sparse_tensor.dtype:
-                sparse_tensor_copy = sparse_tensor.clone().coalesce()
-                self.assertEqual(expected_output, op.inplace_variant(sparse_tensor_copy).to_dense())
-
-                if not sparse_tensor.is_coalesced():
-                    if not op.sparse_op_info.get("supports_inplace_on_uncoalesced", False):
-                        # test in-place op on uncoalesced input
-                        with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
-                            op.inplace_variant(sparse_tensor)
-                    else:
-                        sparse_tensor_copy = sparse_tensor.clone()
-                        self.assertEqual(expected_output, op.inplace_variant(sparse_tensor_copy).to_dense())
+                if not op.sparse_op_info.get("supports_inplace_on_uncoalesced", False):
+                    # test in-place op on uncoalesced input
+                    with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
+                        op.inplace_variant(sparse_tensor)
+                else:
+                    sparse_tensor_copy = sparse_tensor.clone()
+                    op.inplace_variant(sparse_tensor_copy)
+                    self.assertEqual(expected_output, sparse_tensor_copy.to_dense())
 
             if op.operator_variant is not None:
                 sparse_tensor_copy = sparse_tensor.clone()

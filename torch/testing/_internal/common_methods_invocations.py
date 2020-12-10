@@ -105,7 +105,7 @@ class OpInfo(object):
                  sample_inputs_func=None,  # function to generate sample inputs
                  aten_name=None,  # name of the corresponding aten:: operator
                  supports_sparse=False,  # whether the op correctly handles sparse input
-                 sparse_op_info=None,  # sparse specific op info as dict, e.g. can add a flag that op supports inplace on uncoalesced
+                 sparse_op_info=None,  # sparse op info as dict, e.g. flag that op supports inplace on uncoalesced
                  ):
 
         # Validates the dtypes are generated from the dispatch-related functions
@@ -266,11 +266,11 @@ class UnaryUfuncInfo(OpInfo):
                  handles_extremals=True,  # whether the op correctly handles extremal values (like inf)
                  handles_complex_extremals=True,  # whether the op correct handles complex extremals (like inf -infj)
                  sample_inputs_func=sample_inputs_unary,
-                 aliases=[],  # list of aliases, e.g. torch.absolute -> torch.abs            
+                 aliases=None,  # list of aliases, e.g. torch.absolute -> torch.abs            
                  **kwargs):
 
         args_kwargs = locals()
-        
+
         super(UnaryUfuncInfo, self).__init__(name,
                                              dtypes=dtypes,
                                              dtypesIfCPU=dtypesIfCPU,
@@ -293,7 +293,7 @@ class UnaryUfuncInfo(OpInfo):
         self.aliases = [
             UnaryUfuncInfo(a, **kwargs)
             for a in aliases
-        ]
+        ] if aliases is not None else []
 
     def sample_sparse_inputs(self, device, dtype, requires_grad=False, **kwargs):
         """Returns an iterable of SampleInputs."""
@@ -745,8 +745,8 @@ op_db: List[OpInfo] = [
                    assert_autodiffed=True,
                    skip_bfloat16_grad=True,
                    skips=(
-                        SkipInfo('TestSparseUnaryUfuncs', 'test_sparse_unary_ops',
-                                 dtypes=[torch.cfloat, torch.cdouble, torch.bool, torch.bfloat16]),
+                       SkipInfo('TestSparseUnaryUfuncs', 'test_sparse_unary_ops',
+                                dtypes=[torch.cfloat, torch.cdouble, torch.bool, torch.bfloat16]),
                    ),
                    supports_sparse=True),
     UnaryUfuncInfo('log2',
@@ -773,11 +773,11 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    skips=(
-                        SkipInfo('TestSparseUnaryUfuncs', 'test_sparse_unary_ops',
-                                 dtypes=[
-                                     torch.cfloat, torch.cdouble, 
-                                     torch.bool, torch.bfloat16, torch.float16
-                                 ]),
+                       SkipInfo('TestSparseUnaryUfuncs', 'test_sparse_unary_ops',
+                                dtypes=[
+                                    torch.cfloat, torch.cdouble, 
+                                    torch.bool, torch.bfloat16, torch.float16
+                                ]),
                    ),
                    aliases=['negative', ],
                    supports_sparse=True,
