@@ -36,8 +36,9 @@ class BatchDataset(IterableDataset[T_co]):
             if len(batch) == self.batch_size:
                 yield batch
                 batch.clear()
-        if len(batch) == self.batch_size or not self.drop_last:
-            yield batch
+        if len(batch) > 0:
+            if not self.drop_last:
+                yield batch
             batch.clear()
 
     def __len__(self) -> int:
