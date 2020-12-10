@@ -8,7 +8,7 @@ namespace cuda {
 
 struct TORCH_CUDA_API CUDAGraph {
   CUDAGraph();
-  ~CUDAGraph() = default;
+  ~CUDAGraph();
 
   void capture_begin();
   void capture_end();

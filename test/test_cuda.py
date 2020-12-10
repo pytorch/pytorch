@@ -2905,7 +2905,7 @@ t2.start()
         with torch.cuda.stream(s1):
             a = torch.zeros((1000,), device="cuda")
             a += 1
-            g = torch.cuda.Graph()
+            g = torch.cuda._Graph()
             g.capture_begin()
             a += 1
             g.capture_end()
@@ -2960,7 +2960,7 @@ t2.start()
                 torch.cuda.manual_seed(5)
 
                 refs = ()
-                g = torch.cuda.Graph()
+                g = torch.cuda._Graph()
                 g.capture_begin()
                 graph_out = graph_in
                 for _ in range(2):
@@ -3050,7 +3050,7 @@ t2.start()
             with torch.cuda.stream(stream):
                 torch.cuda.manual_seed(5)
 
-                g = torch.cuda.Graph()
+                g = torch.cuda._Graph()
                 if (module == "torch"):
                     g.capture_begin()
                     t1 = getattr(torch, op)(*args, **kwargs)

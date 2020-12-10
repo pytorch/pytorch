@@ -135,14 +135,33 @@ void CUDAGraph::replay() {
 
 void CUDAGraph::reset() {
 #if CUDA_VERSION >= 11000
-  // these checks reduce (but can't eliminate) the chance of throwing an exception.
+  // I'd prefer these checks throw exceptions, not print warnings,
+  // but the destructor calls reset(), and at least one CI build
+  // refuses to compile with a throwing destructor.
+  //
+  // Instead of calling reset() in the destructor to clean up, I could
+  // call reset() in the __del__ method of a thin Python wrapper,
+  // in which case reset would be allowed to throw exceptions.
+  // But Stackoverflow does not like user-defined __del__.
+  // __del__ prevents Graph instances from EVER being garbage collected
+  // if they participate in a reference cycle.
+  // And exceptions thrown in __del__ only print a warning anyway.
+  //
+  // Calling reset() in the C++ destructor, with warnings instead of exceptions
+  // if calls fail, is the compromise we chose.
   if (has_graph_) {
-    AT_CUDA_CHECK(cudaGraphDestroy(graph_));
+    C10_CUDA_CHECK_WARN(cudaGraphDestroy(graph_));
   }
   if (has_graph_exec_) {
-    AT_CUDA_CHECK(cudaGraphExecDestroy(graph_exec_));
+    C10_CUDA_CHECK_WARN(cudaGraphExecDestroy(graph_exec_));
   }
+#else
+  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0");
 #endif
+}
+
+CUDAGraph::~CUDAGraph() {
+  reset();
 }
 
 } // namespace cuda

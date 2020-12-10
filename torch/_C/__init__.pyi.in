@@ -737,7 +737,6 @@ class _CudaEventBase:
 
 # Defined in torch/csrc/cuda/Graph.cpp
 class _CudaGraphBase:
-    def reset(self) -> None: ...
     ...
 
 # Defined in torch/csrc/DataLoader.cpp
