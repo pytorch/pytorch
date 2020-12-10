@@ -275,7 +275,7 @@ def check_can_compile_named_tuple(cls, loc):
 
         if inspect.isfunction(value):
             raise FrontendError(loc, "User-defined methods in NamedTuples are currently not supported")
-        elif  inspect.isroutine(value) and is_static_fn(cls, name):
+        elif inspect.isroutine(value) and is_static_fn(cls, name):
             raise FrontendError(loc, "Static functions in NamedTuples are currently not supported")
 
 
