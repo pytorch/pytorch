@@ -1221,6 +1221,10 @@ class TestTEFuser(JitTestCase):
             torch.float64,
         ]
         for dtype, device, size in product(dtypes, self.devices, sizes):
+            # TODO
+            if dtype == torch.float16 and not LLVM_ENABLED:
+                continue
+
             x = self.data_for(dtype, device, size=size)
             x[0] = nan_vals.to(dtype)
 
@@ -1306,6 +1310,10 @@ class TestTEFuser(JitTestCase):
         ]
 
         for inp, device, dtype in product(inputs, self.devices, dtypes):
+            # TODO
+            if dtype == torch.float16 and not LLVM_ENABLED:
+                continue
+
             inp = inp.to(device=device, dtype=dtype)
             f = torch.jit.trace(lambda x: x.isnan(), (inp,))
             warmup_forward(f, inp)
