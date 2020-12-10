@@ -417,12 +417,9 @@ class StmtBuilder(Builder):
 
     @staticmethod
     def build_Delete(ctx, stmt):
-        if len(stmt.targets) > 1:
-            source_range = ctx.make_range(stmt.lineno, stmt.col_offset,
-                                          stmt.col_offset + len("del"))
-            raise NotSupportedError(
-                source_range, 'del with more than one operand is not supported')
-        return Delete(build_expr(ctx, stmt.targets[0]))
+        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("del"))
+
+        return Delete(r, [build_expr(ctx, target) for target in stmt.targets])
 
     @staticmethod
     def build_Return(ctx, stmt):
@@ -723,9 +720,7 @@ class ExprBuilder(Builder):
             if isinstance(expr.slice.value, ast.Tuple):
                 # N-dimensional indexing using Tuple: x[(i, j, k)] is equivalent to x[i, j, k]
                 # XXX: Indexing using a list is **different**! It triggers advanced indexing.
-                indices = []
-                for index_expr in expr.slice.value.elts:
-                    indices.append(build_expr(ctx, index_expr))
+                indices = [build_expr(ctx, index_expr) for index_expr in expr.slice.value.elts]
                 return Subscript(base, indices)
             else:
                 return Subscript(base, [build_expr(ctx, expr.slice.value)])
@@ -733,6 +728,17 @@ class ExprBuilder(Builder):
             return Subscript(base, [build_SliceExpr(ctx, base, expr.slice)])
         elif sub_type is ast.ExtSlice:
             return Subscript(base, build_ExtSlice(ctx, base, expr.slice))
+        elif sys.version_info >= (3, 9):  # In Python3.9 array indicies are not wrapped in ast.Index
+            if sub_type is ast.Tuple:
+                # N-dimensional indexing using Tuple: x[(i, j, k)] is equivalent to x[i, j, k]
+                indices = []
+                for index_expr in expr.slice.elts:
+                    if isinstance(index_expr, ast.Slice):
+                        indices.append(build_SliceExpr(ctx, base, index_expr))
+                    else:
+                        indices.append(build_expr(ctx, index_expr))
+                return Subscript(base, indices)
+            return Subscript(base, [build_expr(ctx, expr.slice)])
         else:  # Ellipsis (can only happen in Python 2)
             raise NotSupportedError(base.range(), "ellipsis is not supported")
 

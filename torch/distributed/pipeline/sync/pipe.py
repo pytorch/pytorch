@@ -137,7 +137,9 @@ MOVING_DENIED = TypeError("denied to move parameters and buffers, " "because Pip
 
 class Pipe(Module):
     """Wraps an arbitrary :class:`nn.Sequential <torch.nn.Sequential>` module
-    to train on using synchronous pipeline parallelism. If the module requires lots of memory and doesn't fit on a single GPU, pipeline parallelism is a useful technique to employ for training.
+    to train on using synchronous pipeline parallelism. If the module requires
+    lots of memory and doesn't fit on a single GPU, pipeline parallelism is a
+    useful technique to employ for training.
 
     The implementation is based on the torchgpipe_ paper.
 
@@ -146,7 +148,8 @@ class Pipe(Module):
     Pipe combines pipeline parallelism with checkpointing to reduce peak
     memory required to train while minimizing device under-utilization.
 
-    You should place all the modules on the appropriate devices and wrap them into an :class:`nn.Sequential <torch.nn.Sequential>` module defining the
+    You should place all the modules on the appropriate devices and wrap them
+    into an :class:`nn.Sequential <torch.nn.Sequential>` module defining the
     desired order of execution.
 
     Arguments:
@@ -154,16 +157,21 @@ class Pipe(Module):
             sequential module to be parallelized using pipelining. Each module
             in the sequence has to have all of its parameters on a single
             device. Each module in the sequence has to either be an nn.Module
-            or :class:`nn.Sequential <torch.nn.Sequential>` (to combine multiple sequential modules on a single
-            device)
+            or :class:`nn.Sequential <torch.nn.Sequential>` (to combine multiple
+            sequential modules on a single device)
         chunks (int):
             number of micro-batches (default: ``1``)
         checkpoint (str):
             when to enable checkpointing, one of ``'always'``,
-            ``'except_last'``, or ``'never'`` (default: ``'except_last'``). ``'never'`` disables checkpointing completely, ``'except_last'`` enables checkpointing for all micro-batches except the last one and ``'always'`` enables checkpointing for all micro-batches.
+            ``'except_last'``, or ``'never'`` (default: ``'except_last'``).
+            ``'never'`` disables checkpointing completely, ``'except_last'``
+            enables checkpointing for all micro-batches except the last one
+            and ``'always'`` enables checkpointing for all micro-batches.
         deferred_batch_norm (bool):
-            whether to use deferred BatchNorm moving statistics (default:
-            :data:`False`). If set to :data:`True`, we track statistics across multiple micro-batches to update the running statistics per mini-batch.
+            whether to use deferred ``BatchNorm`` moving statistics (default:
+            :data:`False`). If set to :data:`True`, we track statistics across
+            multiple micro-batches to update the running statistics per
+            mini-batch.
 
     Raises:
         TypeError:
@@ -325,6 +333,12 @@ class Pipe(Module):
         :class:`~torch.Tensor` or a sequence of tensors. This restriction is
         applied at partition boundaries too.
 
+        The input tensor is split into multiple micro-batches based on the
+        ``chunks`` parameter used to initialize :class:`Pipe`. The batch size
+        is assumed to be the first dimension of the tensor and if the batch
+        size is less than ``chunks``, the number of micro-batches is equal to
+        the batch size.
+
         Arguments:
             input (torch.Tensor or sequence of :class:`~torch.Tensor`): input mini-batch
 
@@ -339,7 +353,7 @@ class Pipe(Module):
 
         if not self.devices:
             # Empty sequential module is not illegal.
-            return input
+            return RRef(input)
 
         # Divide a mini-batch into micro-batches.
         batches = microbatch.scatter(input, self.chunks)

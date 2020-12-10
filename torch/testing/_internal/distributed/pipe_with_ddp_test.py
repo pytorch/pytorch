@@ -12,7 +12,7 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
-from torch.distributed._pipeline.sync import Pipe
+from torch.distributed.pipeline.sync import Pipe
 import unittest
 
 class PipeWithDDPTest(RpcAgentTestFixture):

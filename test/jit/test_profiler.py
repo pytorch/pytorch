@@ -137,6 +137,25 @@ class TestProfiler(JitTestCase):
         self.assertEqual(len(list(g.findAllNodes("prim::TypeCheck"))), 2)
         FileCheck().check("TensorExpr").check("aten::add_").check("TensorExpr").run(g)
 
+    def test_use_not_profiled(self):
+        def foo(t1, t2, t3, t4, t: float):
+            h = t1 + t2 + t3 + t4
+            if t > 0.5:
+                # Putting a use of t1 in a never-executed conditional prevents
+                return t1 + 1
+            return h
+
+        t = torch.rand(8, dtype=torch.float)
+
+        foo_script = torch.jit.script(foo)
+        for _ in range(torch._C._jit_get_num_profiled_runs() + 1):
+            foo_script(t, t, t, t, 0.1)
+
+        self.assertEqual(foo(t, t, t, t, 0.1), foo_script(t, t, t, t, 0.1))
+        g = torch.jit.last_executed_optimized_graph()
+        # all adds fused
+        FileCheck().check("graph").check_not("aten::add").check("prim::If").run(g)
+
     def test_not_fusing_scalar_ops(self):
         @torch.jit.script
         def foo(x: int, y: int):
