@@ -211,7 +211,6 @@ static void foldIfNode(Block* b, bool dynamic_axes) {
 
 void FoldIfONNX(Block* b, bool dynamic_axes) {
   foldIfNode(b, dynamic_axes);
-  return;
 }
 
 bool FoldConditionONNX(Node* n) {
