@@ -5641,11 +5641,8 @@ class TestONNXRuntime(unittest.TestCase):
             ('3', torch.rand(2, 256, s0 // 32, s1 // 32)),
             ('4', torch.rand(2, 256, s0 // 64, s1 // 64)),
         ]
-        features_temp = OrderedDict(features)
-        if features_temp is None:
-            return features
-        else:
-            return features_temp
+        features = OrderedDict(features)
+        return features
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_rpn(self):
@@ -5663,15 +5660,16 @@ class TestONNXRuntime(unittest.TestCase):
         images2 = torch.rand(2, 3, 80, 80)
         test_features = self.get_features(images2)
 
-        model = RPNModule()
-        model.eval()
-        model(images, features)
+        if features is not None and test_features is not None:
+            model = RPNModule()
+            model.eval()
+            model(images, features)
 
-        self.run_model(model, [(images, features), (images2, test_features)], tolerate_small_mismatch=True,
-                       input_names=["input1", "input2", "input3", "input4", "input5", "input6"],
-                       dynamic_axes={"input1": [0, 1, 2, 3], "input2": [0, 1, 2, 3],
-                                     "input3": [0, 1, 2, 3], "input4": [0, 1, 2, 3],
-                                     "input5": [0, 1, 2, 3], "input6": [0, 1, 2, 3]})
+            self.run_model(model, [(images, features), (images2, test_features)], tolerate_small_mismatch=True,
+                           input_names=["input1", "input2", "input3", "input4", "input5", "input6"],
+                           dynamic_axes={"input1": [0, 1, 2, 3], "input2": [0, 1, 2, 3],
+                                         "input3": [0, 1, 2, 3], "input4": [0, 1, 2, 3],
+                                         "input5": [0, 1, 2, 3], "input6": [0, 1, 2, 3]})
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_multi_scale_roi_align(self):
@@ -5723,14 +5721,15 @@ class TestONNXRuntime(unittest.TestCase):
         images2 = torch.rand(2, 3, 150, 150)
         test_features = self.get_features(images2)
 
-        model = RoiHeadsModule()
-        model.eval()
-        model(images, features)
+        if features is not None and test_features is not None:
+            model = RoiHeadsModule()
+            model.eval()
+            model(images, features)
 
-        self.run_model(model, [(images, features), (images2, test_features)], tolerate_small_mismatch=True,
-                       input_names=["input1", "input2", "input3", "input4", "input5", "input6"],
-                       dynamic_axes={"input1": [0, 1, 2, 3], "input2": [0, 1, 2, 3], "input3": [0, 1, 2, 3],
-                                     "input4": [0, 1, 2, 3], "input5": [0, 1, 2, 3], "input6": [0, 1, 2, 3]})
+            self.run_model(model, [(images, features), (images2, test_features)], tolerate_small_mismatch=True,
+                           input_names=["input1", "input2", "input3", "input4", "input5", "input6"],
+                           dynamic_axes={"input1": [0, 1, 2, 3], "input2": [0, 1, 2, 3], "input3": [0, 1, 2, 3],
+                                         "input4": [0, 1, 2, 3], "input5": [0, 1, 2, 3], "input6": [0, 1, 2, 3]})
 
 
 def make_test(name, base, layer, bidirectional, initial_state,
