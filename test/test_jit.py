@@ -331,7 +331,7 @@ class TestJit(JitTestCase):
             def dot(points, query, dim):
                 return (points * query).sum(dim)
 
-    def test_dict_comprehension_foo(self):
+    def test_dict_comprehension(self):
         def fn():
             return {i : chr(i + 65) for i in range(4)}
         self.checkScript(fn, ())

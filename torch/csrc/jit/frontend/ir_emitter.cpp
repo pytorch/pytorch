@@ -1306,12 +1306,9 @@ struct to_ir {
     const auto targets_list = List<Expr>::create(dc.range(), {dc.target()});
     const auto itrs = List<Expr>::create(dc.range(), {dc.iter()});
 
-    // If 1) there is no type hint, and 2) we emit this Value over an unrolled
-    // iterable of length 0, then we emit a Dict[Tensor, Tensor]
     Value* dict_value =
         graph->insertNode(graph->create(prim::DictConstruct, 1))
-            ->output()
-            ->setType(DictType::create(TensorType::get(), TensorType::get()));
+            ->output();
     bool type_set = false;
     if (type_hint) {
       if (!type_hint->cast<DictType>()) {
