@@ -192,7 +192,7 @@ node [shape=box];
         if result is None:
             extra = ''
             if self.verbose:
-                extra = f' See the dependency graph for more info: {self._write_dep_graph(module.__name__)}'
+                extra = f' See the dependency graph for more info: \n{self._write_dep_graph(module.__name__)}'
             raise ValueError(f'cannot save source for module "{module.__name__}" because '
                              f'its source file "{filename}" could not be found.{extra}')
         return ''.join(result)
@@ -411,7 +411,7 @@ node [shape=box];
                 ...
         """
         if self.verbose:
-            print(f"Dependency graph for exported package: {self._write_dep_graph()}")
+            print(f"Dependency graph for exported package: \n{self._write_dep_graph()}")
 
         # Write each tensor to a file named tensor/the_tensor_key in the zip archive
         for key in sorted(self.serialized_storages.keys()):
