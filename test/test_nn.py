@@ -6499,12 +6499,18 @@ class TestNN(NNTestCase):
                               bidirectional=bidirectional,
                               batch_first=batch_first,
                               proj_size=proj_size).to(dtype)
-
-            outputs_gpu = forward_backward(
-                True, rnn_gpu, input_val, grad_output, rnn.all_weights,
-                hx_val, grad_hy, cx_val, grad_cy)
-
-            compare_cpu_gpu(outputs_cpu, outputs_gpu)
+            # LSTM with projections is not supported with MIOpen
+            if TEST_WITH_ROCM:
+                with self.assertRaisesRegex(RuntimeError,
+                                            "LSTM with projections is not supported with MIOpen"):
+                    outputs_gpu = forward_backward(
+                        True, rnn_gpu, input_val, grad_output, rnn.all_weights,
+                        hx_val, grad_hy, cx_val, grad_cy)
+            else:
+                outputs_gpu = forward_backward(
+                    True, rnn_gpu, input_val, grad_output, rnn.all_weights,
+                    hx_val, grad_hy, cx_val, grad_cy)
+                compare_cpu_gpu(outputs_cpu, outputs_gpu)
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_RNN_cpu_vs_cudnn_no_dropout(self):
@@ -12908,7 +12914,7 @@ class TestNNDeviceType(NNTestCase):
             for p1, p2 in zip(lstm.parameters(), lstm2.parameters()):
                 prec = dtype2prec_DONTUSE[dtype]
                 if dtype == torch.float16:
-                    prec = 2e-2
+                    prec = 4e-2
                 self.assertEqual(p1.grad, p2.grad, atol=prec, rtol=0)
 
         tests = [
@@ -12920,10 +12926,16 @@ class TestNNDeviceType(NNTestCase):
             [False, [2, 1, 3, 2, 10, 5, 3]],
         ]
 
+        rocm_error_msg = "LSTM with projections is not supported with MIOpen"
         for enforce_sorted, seq_lens, in tests:
             for use_default_hiddens in (True, False):
                 for proj_size in [0, 2]:
-                    check_lengths(seq_lens, enforce_sorted, use_default_hiddens, proj_size)
+                    # LSTM with projections is not supported with MIOpen
+                    if TEST_WITH_ROCM and proj_size > 0:
+                        with self.assertRaisesRegex(RuntimeError, rocm_error_msg):
+                            check_lengths(seq_lens, enforce_sorted, use_default_hiddens, proj_size)
+                    else:
+                        check_lengths(seq_lens, enforce_sorted, use_default_hiddens, proj_size)
 
     def _test_batchnorm_update_stats(self, device, dtype=torch.float):
         module = nn.BatchNorm1d(3).to(device, dtype)
