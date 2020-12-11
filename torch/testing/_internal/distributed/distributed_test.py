@@ -2508,24 +2508,17 @@ class DistributedTest:
             expected_value,
         ):
             for src in group:
+                tensor_value = master_value if rank == src else worker_value
+                tensors = [
+                    _build_tensor(src + 1, tensor_value).cuda(device=i)
+                    for i in rank_to_GPU[rank]
+                ]
+                self.call_dist_op(
+                    "reduce", False, dist.reduce_multigpu, tensors, src, op, group_id,
+                    expect_event=len(tensors) == 1)
                 if rank == src:
-                    tensors = [
-                        _build_tensor(src + 1, master_value).cuda(device=i)
-                        for i in rank_to_GPU[rank]
-                    ]
-                    self.call_dist_op(
-                        "reduce", False, dist.reduce_multigpu, tensors, src, op, group_id,
-                        expect_event=len(tensors) == 1)
                     expected_tensor = _build_tensor(src + 1, expected_value)
                     self.assertEqual(tensors[0], expected_tensor)
-                else:
-                    tensors = [
-                        _build_tensor(src + 1, worker_value).cuda(device=i)
-                        for i in rank_to_GPU[rank]
-                    ]
-                    self.call_dist_op(
-                        "reduce", False, dist.reduce_multigpu, tensors, src, op, group_id,
-                        expect_event=len(tensors) == 1)
 
             self._barrier()
 
