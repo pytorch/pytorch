@@ -451,16 +451,27 @@ struct {class_name} final : public {parent_class} {{
 """
 
             elif self.target is Target.REGISTRATION:
+                dispatcher_sig = DispatcherSignature.from_schema(f.func)
+
                 if local.use_c10_dispatcher() is UseC10Dispatcher.full:
-                    payload = f'TORCH_FN({sig.name()})'
+                    payload = f"TORCH_FN({sig.name()})"
+                elif local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
+                    payload = f"""
+c10::impl::hacky_wrapper_for_legacy_signatures<
+    {dispatcher_sig.type()},
+    {len(f.func.arguments.out)}
+>(TORCH_FN({sig.name()}))
+"""
                 else:
-                    payload = f'torch::CppFunction::makeUnboxedOnly({sig.name()})'
+                    assert local.use_c10_dispatcher() is UseC10Dispatcher.with_codegenerated_unboxing_wrapper
+                    payload = f"torch::CppFunction::makeUnboxedOnly(&{sig.name()})"
                 return f'm.impl("{f.func.name}", {payload});'
             else:
                 assert_never(self.target)
 
         return list(mapMaybe(gen_one, g.functions()))
 
+    @method_with_native_function
     def gen_unstructured(self, f: NativeFunction) -> Optional[str]:
         # for mypy type refinement; would be fixed by TODO on target
         assert self.target is not Target.DECLARATION
@@ -486,11 +497,15 @@ struct {class_name} final : public {parent_class} {{
 
             cuda_guard = ""
             if is_generic_dispatch_key(self.dispatch_key) or is_cuda_dispatch_key(self.dispatch_key):
-                self_args = (a for a in f.func.arguments.positional if a.name == "self")
+                self_arg = [f.func.arguments.self_arg.argument] if f.func.arguments.self_arg is not None else []
 
                 # There is precedence for which argument we use to do
                 # device guard.  This describes the precedence order.
-                candidate_args = itertools.chain(self_args, f.func.arguments.out, f.func.arguments.positional)
+                candidate_args = itertools.chain(
+                    self_arg,
+                    f.func.arguments.out,
+                    f.func.arguments.flat_positional
+                )
 
                 # Only tensor like arguments are eligible
                 device_of = next((f'{a.name}' for a in candidate_args if a.type.is_tensor_like()), None)
@@ -542,9 +557,12 @@ struct {class_name} final : public {parent_class} {{
                 if local.use_c10_dispatcher() is UseC10Dispatcher.full:
                     payload = f"TORCH_FN({name})"
                 elif local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
-                    payload = "c10::impl::hacky_wrapper_for_legacy_signatures<" \
-                        f"{dispatcher_sig.type()}>(TORCH_FN({name}))"
-
+                    payload = f"""
+c10::impl::hacky_wrapper_for_legacy_signatures<
+    {dispatcher_sig.type()},
+    {len(f.func.arguments.out)}
+>(TORCH_FN({name}))
+"""
                 else:
                     assert local.use_c10_dispatcher() is UseC10Dispatcher.with_codegenerated_unboxing_wrapper
                     payload = f"torch::CppFunction::makeUnboxedOnly(&{name})"
@@ -569,7 +587,7 @@ class ComputeFunction:
 
         name = cpp.name(f.func)
 
-        sig_group = CppSignatureGroup.from_schema(f.func, method=False)
+        sig_group = CppSignatureGroup.from_schema(f.func, method=False, fallback_binding=f.manual_cpp_binding)
 
         if self.target is Target.DECLARATION:
             result = f"CAFFE2_API {sig_group.signature.decl()};\n"
@@ -619,12 +637,11 @@ class ComputeTensorMethod:
             return None
 
         assert not f.func.is_out_fn()
-        assert len(f.func.arguments.positional) > 0
-        assert sum(a.name == 'self' for a in f.func.arguments.positional) == 1
+        assert f.func.arguments.self_arg is not None
 
         name = cpp.name(f.func)
 
-        sig_group = CppSignatureGroup.from_schema(f.func, method=True)
+        sig_group = CppSignatureGroup.from_schema(f.func, method=True, fallback_binding=f.manual_cpp_binding)
 
         if self.target is Target.DECLARATION:
             result = f"{sig_group.signature.decl()} const;\n"
@@ -992,10 +1009,10 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
 
     # These sets are used to conveniently test if an argument is a
     # kwarg-only or out argument
-    kwarg_only_set = set(a.name for a in f.func.arguments.kwarg_only)
+    kwarg_only_set = set(a.name for a in f.func.arguments.flat_kwarg_only)
     out_arg_set = set(a.name for a in f.func.arguments.out)
 
-    sig_group = CppSignatureGroup.from_schema(f.func, method=False)
+    sig_group = CppSignatureGroup.from_schema(f.func, method=False, fallback_binding=False)
     cpp_args = sig_group.signature.arguments()
     arguments = [
         compute_cpp_argument_yaml(
@@ -1014,7 +1031,8 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
     ]
 
     cpp_schema_order_types = [
-        cpp.argument(a).type for a in schema_order_jit_arguments
+        # NB: method here doesn't matter
+        cpp.argument(a, method=False).type for a in schema_order_jit_arguments
     ]
 
     cpp_returns = cpp.returns_type(f.func.returns)
