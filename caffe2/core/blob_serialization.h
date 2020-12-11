@@ -17,6 +17,17 @@ C10_DECLARE_int(caffe2_tensor_chunk_size);
 C10_DECLARE_int(caffe2_max_tensor_serializer_threads);
 C10_DECLARE_bool(caffe2_serialize_fp16_as_bytes);
 
+#ifdef _MSC_VER
+// It's MSVC, so we just have to guess ... and allow an override
+#ifdef FOLLY_ENDIAN_BE
+constexpr auto kIsLittleEndian = false;
+#else
+constexpr auto kIsLittleEndian = true;
+#endif
+#else
+constexpr auto kIsLittleEndian = __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__;
+#endif
+
 namespace caffe2 {
 
 constexpr auto kTensorBlobType = "Tensor";
@@ -238,6 +249,14 @@ inline std::string SerializeBlobProtoAsString_EnforceCheck(
     const BlobProto& blob) {
   return SerializeAsString_EnforceCheck(blob, blob.name().c_str());
 }
+
+int64_t NumelFromTensorProto(const TensorProto& tensor_proto);
+
+std::vector<int64_t> DimsFromTensorProto(const TensorProto& proto);
+
+TypeMeta GetDataType(const TensorProto& tensor_proto);
+
+std::unique_ptr<BaseContext> ContextFromProto(const TensorProto& tensor_proto);
 
 }  // namespace caffe2
 
