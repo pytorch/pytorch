@@ -1966,7 +1966,7 @@ class TestSparse(TestCase):
         for data_type in (torch.float, torch.double, torch.float64):
             if not self.is_uncoalesced:
                 input_coalesced = torch.sparse_coo_tensor(
-                    indices=torch.tensor([[0, 2,   4,    6,    8,    10]]),
+                    indices=torch.tensor([[0, 2, 4, 6, 8, 10]]),
                     values=torch.tensor([2.3, 3.8, 5.5, -2.3, -3.8, -5.5]),
                     size=[11, ],
                     device=device,
@@ -2085,7 +2085,7 @@ class TestSparse(TestCase):
         for data_type in (torch.float, torch.double, torch.float64):
             if not self.is_uncoalesced:
                 input_coalesced = torch.sparse_coo_tensor(
-                    indices=torch.tensor([[0, 2,    4,    6]]),
+                    indices=torch.tensor([[0, 2, 4, 6]]),
                     values=torch.tensor([2.3, 3.8, -2.3, -3.8]),
                     size=[7, ],
                     device=device,
@@ -2143,7 +2143,7 @@ class TestSparse(TestCase):
         for data_type in (torch.float, torch.double, torch.float64):
             if not self.is_uncoalesced:
                 input_coalesced = torch.sparse_coo_tensor(
-                    indices=torch.tensor([[0, 2,   4,    6,    8,    10]]),
+                    indices=torch.tensor([[0, 2, 4, 6, 8, 10]]),
                     values=torch.tensor([2.3, 3.8, 5.5, -2.3, -3.8, -5.5]),
                     size=[11, ],
                     device=device,
