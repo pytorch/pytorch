@@ -254,8 +254,8 @@ class AbstractTestCases:
             height = 5
             width = 5
             for device in torch.testing.get_all_device_types():
-                for dt1 in torch.testing.get_all_dtypes(include_half=True, include_bfloat16=True):
-                    for dt2 in torch.testing.get_all_dtypes(include_half=True, include_bfloat16=True):
+                for dt1 in torch.testing.get_all_dtypes():
+                    for dt2 in torch.testing.get_all_dtypes():
                         for contiguous in [True, False]:
                             x1 = get_tensor((height, width), dt1, device, contiguous)
                             x2 = get_tensor((height, width), dt2, device, contiguous)
@@ -6174,7 +6174,7 @@ class TestTorchDeviceType(TestCase):
         return False
 
     @onlyOnCPUAndCUDA
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=True) +
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes() +
               torch.testing.get_all_complex_dtypes()))
     def test_where_scalar_invalid_combination_raises(self, device, dtype):
 
@@ -6186,7 +6186,7 @@ class TestTorchDeviceType(TestCase):
 
         self._test_where_scalar_template(device, dtype, checkRaises)
 
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=True) +
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes() +
               torch.testing.get_all_complex_dtypes()))
     def test_where_scalar_valid_combination(self, device, dtype):
 
