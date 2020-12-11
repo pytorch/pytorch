@@ -2,7 +2,6 @@
 
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
-#include <c10/util/IntegerSequence.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/CompileTimeFunctionPointer.h>
 #include <ATen/Tensor.h>
@@ -253,8 +252,8 @@ private:
     //  - argument 2 in KernelFunc maps to argument 0 in the schema,
     //  - ...
     // We can use this as a permutation function to reorder types or values correspondingly
-    using kernel_to_schema_permutation_indices = guts::iseq::concat_t<
-        guts::iseq::drop_t<std::make_index_sequence<num_parameters>, num_nonout_parameters>,
+    using kernel_to_schema_permutation_indices = guts::concat_iseq_t<
+        guts::make_offset_index_sequence<num_nonout_parameters, NumOutParameters>,
         std::make_index_sequence<num_nonout_parameters>
     >;
 
