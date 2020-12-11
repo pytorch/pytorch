@@ -495,6 +495,20 @@ class profile(object):
             return self.function_events.export_chrome_trace(path)
     export_chrome_trace.__doc__ = EventList.export_chrome_trace.__doc__
 
+    def export_to_tensorboard(self, dir_name, worker_name=None):
+        import os, time, socket
+        if not os.path.isdir(dir_name):
+            try:
+                os.makedirs(dir_name)
+            except Exception as e:
+                raise RuntimeError("Can't create directory: " + dir_name)
+
+        if worker_name is None:
+            worker_name = "{}_{}".format(socket.gethostname(), str(os.getpid()))
+        file_name = "{}_{}.pt.trace.json".format(worker_name, str(int(time.time()*1000)))
+
+        self.export_chrome_trace(os.path.join(dir_name, file_name))
+
     def key_averages(self, group_by_input_shape=False, group_by_stack_n=0):
         self._check_finish()
         assert self.function_events is not None

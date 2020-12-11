@@ -2884,6 +2884,19 @@ class TestAutograd(TestCase):
             # Now validate the json
             json.load(f)
 
+        import os
+        device = torch.device("cuda:0")
+        t1, t2 = torch.ones(1, device=device), torch.ones(1, device=device)
+        with torch.autograd.profiler.profile(use_cuda=True, use_kineto=kineto_available()) as prof:
+            torch.add(t1, t2)
+
+        tempdir = os.path.join(tempfile.gettempdir(), "tensorboard_logdir{}".format(str(int(time.time()*1000))))
+        prof.export_to_tensorboard(tempdir)
+        assert os.path.exists(tempdir)
+        for file_name in os.listdir(tempdir):
+            with open(os.path.join(tempdir, file_name), 'r') as f:
+                json.load(f)
+
     def test_profiler(self):
         x = torch.randn(10, 10)
 
