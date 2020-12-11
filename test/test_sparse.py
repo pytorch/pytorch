@@ -2015,8 +2015,7 @@ class TestSparse(TestCase):
             torch.ceil, torch.Tensor.ceil, torch.Tensor.ceil_,
         )
         for op in ops:
-            sparse_tensor_copy = sparse_tensor.clone()
-            self.assertEqual(expected_output, op(sparse_tensor_copy).to_dense())
+            self.assertEqual(expected_output, op(sparse_tensor).to_dense())
 
 
     def test_ceil(self):
@@ -2075,8 +2074,7 @@ class TestSparse(TestCase):
             torch.floor, torch.Tensor.floor, torch.Tensor.floor_,
         )
         for op in ops:
-            sparse_tensor_copy = sparse_tensor.clone()
-            self.assertEqual(expected_output, op(sparse_tensor_copy).to_dense())
+            self.assertEqual(expected_output, op(sparse_tensor).to_dense())
 
 
     def test_floor(self):
@@ -2135,8 +2133,7 @@ class TestSparse(TestCase):
             torch.trunc, torch.Tensor.trunc, torch.Tensor.trunc_,
         )
         for op in ops:
-            sparse_tensor_copy = sparse_tensor.clone()
-            self.assertEqual(expected_output, op(sparse_tensor_copy).to_dense())
+            self.assertEqual(expected_output, op(sparse_tensor).to_dense())
 
     def test_trunc(self):
 
