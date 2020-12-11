@@ -35,6 +35,11 @@
 
 using namespace torch::jit::tensorexpr;
 
+C10_DEFINE_bool(
+    torch_jit_llvm_use_fast_intrinsics,
+    false,
+    "Use fast (but slightly less accurate) implementations of tanh and sigmoid");
+
 DEFINE_TRIGGER(llvm_codegen_created);
 DEFINE_TRIGGER(llvm_codegen_executed);
 
@@ -496,12 +501,13 @@ void LLVMCodeGenImpl::emitKernel(
   irb_.SetInsertPoint(bb_);
 
   // Maybe expand some of the intrinsics.
-#ifdef USE_FAST_CPU_INTRINSICS
-  LLVMIntrinsicsExpander intrinsics_expander;
-#else
-  GenericIntrinsicsExpander intrinsics_expander;
-#endif
-  stmt = stmt->accept_mutator(&intrinsics_expander);
+  if (FLAGS_torch_jit_llvm_use_fast_intrinsics) {
+    LLVMIntrinsicsExpander intrinsics_expander;
+    stmt = stmt->accept_mutator(&intrinsics_expander);
+  } else {
+    GenericIntrinsicsExpander intrinsics_expander;
+    stmt = stmt->accept_mutator(&intrinsics_expander);
+  }
 
   // Compile the kernel.
   stmt->accept(this);
