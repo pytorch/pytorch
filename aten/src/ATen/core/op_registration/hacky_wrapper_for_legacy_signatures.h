@@ -2,7 +2,6 @@
 
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
-#include <c10/util/IntegerSequence.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/CompileTimeFunctionPointer.h>
 #include <ATen/Tensor.h>
