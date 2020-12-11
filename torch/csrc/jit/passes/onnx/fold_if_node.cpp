@@ -14,25 +14,16 @@ using namespace ::c10::onnx;
 }
 
 static bool checkIfFold(Node* node, bool dynamic_axes) {
-  if (node->kind() != onnx::If)
-    return false;
-
   auto cast_node = node->input()->node();
-  // assumes that Cast node is always before If node,
-  // but sometimes that is not the case.
   if (cast_node->kind() != onnx::Cast)
-    return false;
+    cast_node = node;
   auto prev_node = cast_node->input()->node();
 
-  Node* compare_node = nullptr;
-  if (prev_node->kind() == onnx::Not || prev_node->kind() == onnx::Identity) {
-    compare_node = prev_node->input()->node();
-  } else {
-    compare_node = cast_node->input()->node();
-  }
-  if (compare_node->kind() == onnx::If) {
-    return checkIfFold(compare_node, dynamic_axes);
-  }
+  if (prev_node->kind() == onnx::Not || prev_node->kind() == onnx::Identity ||
+      prev_node->kind() == onnx::If)
+    return checkIfFold(prev_node, dynamic_axes);
+
+  auto compare_node = prev_node;
   if (compare_node->kind() == onnx::Equal ||
       compare_node->kind() == onnx::Greater ||
       compare_node->kind() == onnx::Less) {
