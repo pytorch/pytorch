@@ -234,6 +234,7 @@ class ProcessGroupNCCL : public ProcessGroup {
                   return ev.device_index() == data_ptr.device().index();
                 }) != cudaEvents->end());
       }
+      currentDevice_ = c10::cuda::current_device();
       cudaEvents_ = std::move(cudaEvents);
       dataPtrs_ = std::move(dataPtrs);
       markCompleted(std::move(value));
