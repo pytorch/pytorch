@@ -189,6 +189,8 @@ allow_list = [
     ("aten::rfft", datetime.date(2021, 1, 31)),
     ("aten::quantile", datetime.date(2021, 1, 31)),
     ("aten::nanquantile", datetime.date(2021, 1, 31)),
+    ("aten::native_layer_norm", datetime.date(2021, 1, 31)),
+    ("aten::native_layer_norm_backward", datetime.date(2021, 1, 31)),
 ]
 
 def allow_listed(schema, allow_list):
