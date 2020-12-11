@@ -748,12 +748,14 @@ class TensorExprFuser {
           return false;
         }
 
-        // Byte tensors introduce too many corner cases in type promotion. Better not to try to handle them.
+        // Byte tensors introduce too many corner cases in type promotion.
+        // Better not to try to handle them.
         if (*st == c10::ScalarType::Byte) {
           return false;
         }
 
-        // These operators only support floats, because integer divisors need to raise ZeroDivisionError.
+        // These operators only support floats, because integer divisors need to
+        // raise ZeroDivisionError.
         if (node->isMemberOf(float_only_operator_set) && !isFloatingType(*st)) {
           return false;
         }
