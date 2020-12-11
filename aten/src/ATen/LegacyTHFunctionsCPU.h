@@ -38,8 +38,6 @@ Tensor & _th_histc_out(Tensor & result, const Tensor & self, int64_t bins, Scala
 Tensor _th_histc(const Tensor & self, int64_t bins, Scalar min, Scalar max);
 std::tuple<Tensor &,Tensor &> _th_gels_out(Tensor & res1, Tensor & res2, const Tensor & self, const Tensor & A);
 std::tuple<Tensor,Tensor> _th_gels(const Tensor & self, const Tensor & A);
-std::tuple<Tensor &,Tensor &> _th_eig_out(Tensor & res1, Tensor & res2, const Tensor & self, bool eigenvectors);
-std::tuple<Tensor,Tensor> _th_eig(const Tensor & self, bool eigenvectors);
 Tensor & _th_potri_out(Tensor & output, const Tensor & self, bool upper);
 Tensor _th_potri(const Tensor & self, bool upper);
 std::tuple<Tensor &,Tensor &> _th_geqrf_out(Tensor & res1, Tensor & res2, const Tensor & self);
