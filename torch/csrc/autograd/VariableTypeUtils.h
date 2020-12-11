@@ -183,9 +183,11 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tens
     if (base.is_view()) {
       auto diff_view_meta = static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base));
       auto base_bw_info = diff_view_meta->get_backward_view();
-      TORCH_CHECK(!base_bw_info.has_view_fn(), "Using a function that returns multiple view with an input that is "
-                                               "either a non-strided Tensor or a cross-dtype view is not allowed.");
-      new_bw_info = base_bw_info.chain(base, Tensor(), c10::nullopt);
+      TORCH_INTERNAL_ASSERT(creation_meta == CreationMeta::MULTI_OUTPUT_NODE || creation_meta == CreationMeta::MULTI_OUTPUT_SAFE,
+                            "Functions that result multiple view must have a creation meta reflecting this behavior.");
+      // It is ok to create a ViewInfo where only the base is correct in this case as inplace operations on such views are
+      // not allowed
+      new_bw_info = ViewInfo(base_bw_info.base_, c10::nullopt);
     } else {
       new_bw_info = ViewInfo(base, c10::nullopt);
     }
@@ -199,9 +201,11 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tens
     if (is_view && static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base))->has_fw_view()) {
       auto diff_view_meta = static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base));
       auto base_fw_info = diff_view_meta->get_forward_view();
-      TORCH_CHECK(!base_fw_info.has_view_fn(), "Using a function that returns multiple view with an input that is "
-                                               "either a non-strided Tensor or a cross-dtype view is not allowed.");
-      new_fw_info = base_fw_info.chain(base, Tensor(), c10::nullopt);
+      TORCH_INTERNAL_ASSERT(creation_meta == CreationMeta::MULTI_OUTPUT_NODE || creation_meta == CreationMeta::MULTI_OUTPUT_SAFE,
+                            "Functions that result multiple view must have a creation meta reflecting this behavior.");
+      // It is ok to create a ViewInfo where only the base is correct in this case as inplace operations on such views are
+      // not allowed
+      new_fw_info = ViewInfo(base_fw_info.base_, c10::nullopt);
     } else {
       new_fw_info = ViewInfo(base, c10::nullopt);
     }

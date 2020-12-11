@@ -5169,6 +5169,26 @@ class TestAutogradComplex(TestCase):
 
         self.assertEqual(x.grad, y.grad)
 
+    def test_view_with_multi_output(self):
+        x = torch.randn(2, 2, 2, dtype=torch.double)
+
+        x1 = torch.view_as_complex(x)
+        # Taking an invalid view should always be allowed as long as it is not
+        # modified inplace
+        res = x1.unbind(0)
+
+        with self.assertRaisesRegex(RuntimeError, "output of a function that returns multiple views"):
+            res[0] += torch.rand(2, requires_grad=True)
+
+        x.requires_grad_(True)
+        x1 = torch.view_as_complex(x)
+        # Taking an invalid view should always be allowed as long as it is not
+        # modified inplace
+        res = x1.unbind(0)
+
+        with self.assertRaisesRegex(RuntimeError, "output of a function that returns multiple views"):
+            res[0] += torch.rand(2, requires_grad=True)
+
     def as_identity(self):
         # view_as_real and view_as_complex behavior should be like an identity
         def func(z):
