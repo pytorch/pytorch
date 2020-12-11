@@ -197,16 +197,27 @@ def insert_observer_for_output_of_the_node(
             assert matched_nodes is not None
             input_node = matched_nodes[-1]  # first node in the sequence
 
-            def input_is_observed(arg):
-                return (isinstance(arg, Node) and
-                        arg.name in observed_node_names_set)
-            # This is checking if one of the argument of add/mul
-            # is an observed node
-            # If both of the inputs are number,
-            # we will not consider the output to be observed
-            if (input_is_observed(input_node.args[0]) or
-                    input_is_observed(input_node.args[1])):
-                observed_node_names_set.add(node.name)
+            if not model.training:
+                # for post-training quantization, we only observe the output
+                # if one the inputs is observed
+                def input_is_observed(arg):
+                    return (isinstance(arg, Node) and
+                            arg.name in observed_node_names_set)
+                # This is checking if one of the argument of add/mul
+                # is an observed node
+                # If both of the inputs are number,
+                # we will not consider the output to be observed
+                if (input_is_observed(input_node.args[0]) or
+                        input_is_observed(input_node.args[1])):
+                    observed_node_names_set.add(node.name)
+            else:
+                # for QAT, we always insert a fake_quant after add/mul
+                new_observer = qconfig.activation()
+                insert_observer(
+                    node, new_observer,
+                    model, activation_post_process_map, env, observed_graph,
+                    load_arg, observed_node_names_set)
+
         elif isinstance(quantize_handler,
                         StandaloneModuleQuantizeHandler):
             # output is observed in the standalone module
