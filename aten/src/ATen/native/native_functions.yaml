@@ -3572,8 +3572,9 @@
 
 - func: size.int(Tensor self, int dim) -> int
   use_c10_dispatcher: full
-  variants: function, method
+  variants: function
   device_guard: False
+  manual_cpp_binding: True
 
 - func: size.Dimname(Tensor self, Dimname dim) -> int
   variants: function, method
@@ -3735,8 +3736,9 @@
 
 - func: stride.int(Tensor self, int dim) -> int
   use_c10_dispatcher: full
-  variants: function, method
+  variants: function
   device_guard: False
+  manual_cpp_binding: True
 
 - func: stride.Dimname(Tensor self, Dimname dim) -> int
   variants: function, method
