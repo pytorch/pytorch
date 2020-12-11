@@ -596,6 +596,11 @@ std::string to_string(const Tensor* t) {
     return "(null tensor)\n";
   }
   std::ostringstream oss;
+  if (!t->body()) {
+    oss << "Tensor " << t->buf()->name_hint() << " = " << *t->ElementStmt()
+        << "\n";
+    return oss.str();
+  }
   oss << "Tensor " << t->buf()->name_hint() << "(";
   for (size_t i = 0; i < t->ndim(); i++) {
     if (i != 0) {
