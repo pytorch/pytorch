@@ -248,9 +248,12 @@ class Node:
 
 def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
     """ Apply fn to each Node appearing arg. arg may be a list, tuple, slice, or dict with string keys. """
-    if isinstance(a, tuple):
+    if isinstance(a, tuple) and hasattr(a, '_fields'):
+        elements = tuple(map_arg(elem, fn) for elem in a)
+        return type(a)(*elements)  # type: ignore
+    elif isinstance(a, tuple):
         return tuple(map_arg(elem, fn) for elem in a)
-    if isinstance(a, list):
+    elif isinstance(a, list):
         return immutable_list(map_arg(elem, fn) for elem in a)
     elif isinstance(a, dict):
         return immutable_dict((k, map_arg(v, fn)) for k, v in a.items())
