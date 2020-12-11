@@ -64,7 +64,7 @@ static bool constantFoldingValue(Node* node) {
   }
 
   if (prev_node->kind() == onnx::Constant) {
-    const at::Tensor val = prev_node->t(attr::value);
+    const at::Tensor& val = prev_node->t(attr::value);
     return at::is_nonzero(val);
   }
 
@@ -86,7 +86,7 @@ static bool constantFoldingValue(Node* node) {
   for (size_t i = 0; i < compare_node->inputs().size(); i++) {
     auto input_node = compare_node->inputs()[i]->node();
     if (input_node->kind() == onnx::Constant) {
-      const at::Tensor val = input_node->t(attr::value);
+      const at::Tensor& val = input_node->t(attr::value);
       inputs.push_back(val);
     } else { // input_node is either onnx::Size or onnx::ReduceProd
       auto shape_node = input_node->input()->node();
