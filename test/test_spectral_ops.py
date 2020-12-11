@@ -332,6 +332,32 @@ class TestFFT(TestCase):
                 args = args[1:]
                 self._fft_grad_check_helper(fname, input, args)
 
+    @skipCPUIfNoMkl
+    @skipCUDAIfRocm
+    @onlyOnCPUAndCUDA
+    def test_fft_invalid_out_types(self, device):
+
+        complex_fft_funcs = [torch.fft.fft, torch.fft.ifft, torch.fft.fftn, torch.fft.ifftn,
+                             torch.fft.rfft, torch.fft.rfftn, torch.fft.ihfft]
+        real_fft_funcs = [torch.fft.irfft, torch.fft.irfftn, torch.fft.hfft]
+        fft_funcs = complex_fft_funcs + real_fft_funcs
+
+        # Test errors on invalid out dtypes
+        x = torch.rand(10, device=device, dtype=torch.float32)
+        for out_dtype in (torch.int16, torch.float32, torch.complex64):
+            if out_dtype.is_floating_point:
+                funcs = complex_fft_funcs
+            elif out_dtype.is_complex:
+                funcs = real_fft_funcs
+            else:
+                funcs = fft_funcs
+
+            out = torch.empty((), device=device, dtype=out_dtype)
+
+            for func in funcs:
+                with self.assertRaisesRegex(RuntimeError, "expects a .* output tensor"):
+                    func(x, out=out)
+
     # nd-fft tests
 
     @skipCPUIfNoMkl
@@ -622,6 +648,19 @@ class TestFFT(TestCase):
                 expected = numpy_fn(*args)
                 actual = torch_fn(*args, device=device, dtype=dtype)
                 self.assertEqual(actual, expected, exact_dtype=False)
+
+    @skipCPUIfNoMkl
+    @skipCUDAIfRocm
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float, torch.double)
+    def test_fftfreq_out(self, device, dtype):
+        for func in (torch.fft.fftfreq, torch.fft.rfftfreq):
+            expect = func(n=100, d=.5, device=device, dtype=dtype)
+            actual = torch.empty((), device=device, dtype=dtype)
+            with self.assertWarnsRegex(UserWarning, "out tensor will be resized"):
+                func(n=100, d=.5, out=actual)
+            self.assertEqual(actual, expect)
+
 
     @skipCPUIfNoMkl
     @skipCUDAIfRocm
