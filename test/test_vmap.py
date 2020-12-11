@@ -2330,19 +2330,17 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self._batched_grad_test(lambda x: x.diagonal(0, -1, -2), (x,))
 
     @allowVmapFallbackUsage
-    def test_clone_with_differentiable_v(self, device):
-        x = torch.randn(3, requires_grad=True)
-        y = x.clone()
-        gy = torch.randn(3, requires_grad=True)
-        gx, = torch.autograd.grad(y, x, gy)
-        B0 = 2
-        ggx = torch.randn(B0, *gx.shape)
+    def test_unrelated_output(self, device):
+        B0 = 3
+        x = torch.randn([], requires_grad=True)
+        y = torch.randn([], requires_grad=True)
+        gy = torch.randn(B0, requires_grad=True)
 
         def vjp(v):
-            res, = torch.autograd.grad(gx, x, v, allow_unused=True)
+            res, = torch.autograd.grad(y, x, v, allow_unused=True)
             return torch.zeros_like(x) if res is None else res
 
-        result = vmap(vjp)(ggx)
+        result = vmap(vjp)(gy)
         self.assertEqual(result, torch.zeros(B0, *x.shape, device=device))
 
 instantiate_device_type_tests(
