@@ -18,9 +18,9 @@ template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
 void THCPGraph_init(PyObject *module) {
-  // Some places in pytorch use "py::module". Pybind11 patch notes
-  // say "module_" is more up-to-date syntax.
-  auto torch_C_m = py::handle(module).cast<py::module_>();
+  // Pybind11 patch notes say "py::module_" is more up-to-date syntax,
+  // but CI linter and some builds prefer "module".
+  auto torch_C_m = py::handle(module).cast<py::module>();
 
   shared_ptr_class_<::at::cuda::CUDAGraph>(module, "_CudaGraphBase")
       .def(py::init<>())
