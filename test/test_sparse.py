@@ -1956,8 +1956,8 @@ class TestSparse(TestCase):
             torch.round, torch.Tensor.round, torch.Tensor.round_,
         )
         for op in ops:
-            sparse_tensor_copy = sparse_tensor.clone()
-            self.assertEqual(expected_output, op(sparse_tensor_copy).to_dense())
+            self.assertEqual(expected_output, op(sparse_tensor).to_dense())
+
 
     def test_round(self):
         device = 'cuda' if self.is_cuda else 'cpu'
@@ -1966,9 +1966,9 @@ class TestSparse(TestCase):
         for data_type in (torch.float, torch.double, torch.float64):
             if not self.is_uncoalesced:
                 input_coalesced = torch.sparse_coo_tensor(
-                    indices=torch.tensor([[0, 1, 2]]),
-                    values=torch.tensor([3.0, -4.0, 5.0]),
-                    size=[3, ],
+                    indices=torch.tensor([[0, 2,   4,    6,    8,    10]]),
+                    values=torch.tensor([2.3, 3.8, 5.5, -2.3, -3.8, -5.5]),
+                    size=[11, ],
                     device=device,
                     dtype=data_type
                 ).coalesce()
@@ -1977,7 +1977,7 @@ class TestSparse(TestCase):
                 # hybrid sparse input
                 input_coalesced = torch.sparse_coo_tensor(
                     indices=torch.tensor([[1, 3], [2, 4]]),
-                    values=torch.tensor([[-1.0, 3.0], [-5.0, 7.0]]),
+                    values=torch.tensor([[-1.3, 3.4], [-5.6, 7.9]]),
                     size=[4, 5, 2],
                     device=device,
                     dtype=data_type
@@ -1988,7 +1988,7 @@ class TestSparse(TestCase):
                 # test uncoalesced input
                 input_uncoalesced = torch.sparse_coo_tensor(
                     indices=torch.tensor([[0], [1], [2], [0], [1], [2]]).transpose(1, 0),
-                    values=torch.tensor([2.0, -3.0, -4.0, 1.0, -1.0, 1.5]),
+                    values=torch.tensor([2.1, -3.2, -4.7, 1.3, -1.3, 1.5]),
                     size=[3, ],
                     device=device,
                     dtype=data_type
@@ -2027,9 +2027,9 @@ class TestSparse(TestCase):
         for data_type in (torch.float, torch.double, torch.float64):
             if not self.is_uncoalesced:
                 input_coalesced = torch.sparse_coo_tensor(
-                    indices=torch.tensor([[0, 1, 2]]),
-                    values=torch.tensor([3.0, -4.0, 5.0]),
-                    size=[3, ],
+                    indices=torch.tensor([[0, 2,    4,    6]]),
+                    values=torch.tensor([2.3, 3.8, -2.3, -3.8]),
+                    size=[7, ],
                     device=device,
                     dtype=data_type
                 ).coalesce()
@@ -2038,7 +2038,7 @@ class TestSparse(TestCase):
                 # hybrid sparse input
                 input_coalesced = torch.sparse_coo_tensor(
                     indices=torch.tensor([[1, 3], [2, 4]]),
-                    values=torch.tensor([[-1.0, 3.0], [-5.0, 7.0]]),
+                    values=torch.tensor([[-1.1, 3.4], [-5.9, 7.5]]),
                     size=[4, 5, 2],
                     device=device,
                     dtype=data_type
@@ -2049,7 +2049,7 @@ class TestSparse(TestCase):
                 # test uncoalesced input
                 input_uncoalesced = torch.sparse_coo_tensor(
                     indices=torch.tensor([[0], [1], [2], [0], [1], [2]]).transpose(1, 0),
-                    values=torch.tensor([2.0, -3.0, -4.0, 1.0, -1.0, 1.5]),
+                    values=torch.tensor([2.1, -3.2, -4.7, 1.3, -1.3, 1.5]),
                     size=[3, ],
                     device=device,
                     dtype=data_type
@@ -2087,9 +2087,9 @@ class TestSparse(TestCase):
         for data_type in (torch.float, torch.double, torch.float64):
             if not self.is_uncoalesced:
                 input_coalesced = torch.sparse_coo_tensor(
-                    indices=torch.tensor([[0, 1, 2]]),
-                    values=torch.tensor([3.0, -4.0, 5.0]),
-                    size=[3, ],
+                    indices=torch.tensor([[0, 2,    4,    6]]),
+                    values=torch.tensor([2.3, 3.8, -2.3, -3.8]),
+                    size=[7, ],
                     device=device,
                     dtype=data_type
                 ).coalesce()
@@ -2109,7 +2109,7 @@ class TestSparse(TestCase):
                 # test uncoalesced input
                 input_uncoalesced = torch.sparse_coo_tensor(
                     indices=torch.tensor([[0], [1], [2], [0], [1], [2]]).transpose(1, 0),
-                    values=torch.tensor([2.0, -3.0, -4.0, 1.0, -1.0, 1.5]),
+                    values=torch.tensor([2.1, -3.2, -4.7, 1.3, -1.3, 1.5]),
                     size=[3, ],
                     device=device,
                     dtype=data_type
@@ -2146,9 +2146,9 @@ class TestSparse(TestCase):
         for data_type in (torch.float, torch.double, torch.float64):
             if not self.is_uncoalesced:
                 input_coalesced = torch.sparse_coo_tensor(
-                    indices=torch.tensor([[0, 1, 2]]),
-                    values=torch.tensor([3.0, -4.0, 5.0]),
-                    size=[3, ],
+                    indices=torch.tensor([[0, 2,   4,    6,    8,    10]]),
+                    values=torch.tensor([2.3, 3.8, 5.5, -2.3, -3.8, -5.5]),
+                    size=[11, ],
                     device=device,
                     dtype=data_type
                 ).coalesce()
@@ -2157,7 +2157,7 @@ class TestSparse(TestCase):
                 # hybrid sparse input
                 input_coalesced = torch.sparse_coo_tensor(
                     indices=torch.tensor([[1, 3], [2, 4]]),
-                    values=torch.tensor([[-1.0, 3.0], [-5.0, 7.0]]),
+                    values=torch.tensor([[-1.3, 3.4], [-5.6, 7.9]]),
                     size=[4, 5, 2],
                     device=device,
                     dtype=data_type
@@ -2168,7 +2168,7 @@ class TestSparse(TestCase):
                 # test uncoalesced input
                 input_uncoalesced = torch.sparse_coo_tensor(
                     indices=torch.tensor([[0], [1], [2], [0], [1], [2]]).transpose(1, 0),
-                    values=torch.tensor([2.0, -3.0, -4.0, 1.0, -1.0, 1.5]),
+                    values=torch.tensor([2.1, -3.2, -4.7, 1.3, -1.3, 1.5]),
                     size=[3, ],
                     device=device,
                     dtype=data_type
