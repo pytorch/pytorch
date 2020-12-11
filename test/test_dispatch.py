@@ -3,7 +3,6 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 
 from collections import namedtuple
 import itertools
-import unittest
 import re
 
 # TODO: Expand the dispatcher API to be a generic API for interfacing with
@@ -672,7 +671,9 @@ AutogradXLA: fn_autograd [autograd kernel]
         ]
         self.assertExpectedInline(
             self.commute("foo", ops, expect_raises=True).state,
-            '''Tried to register an operator (test::foo(Tensor x, Tensor y) -> (Tensor)) with the same name and overload name multiple times. Each overload's schema should only be registered with a single call to def(). Duplicate registration: registered at /dev/null:0. Original registration: registered at /dev/null:0'''
+            '''Tried to register an operator (test::foo(Tensor x, Tensor y) -> (Tensor)) with the same name and overload '''
+            '''name multiple times. Each overload's schema should only be registered with a single call to def(). '''
+            '''Duplicate registration: registered at /dev/null:0. Original registration: registered at /dev/null:0'''
         )
 
     def test_def_with_explicit_alias(self):
@@ -700,7 +701,9 @@ alias analysis kind: PURE_FUNCTION
         ]
         self.assertExpectedInline(
             self.commute("foo", ops, expect_raises=True).state,
-            '''Tried to register an operator (test::foo(Tensor x) -> (Tensor)) with the same name and overload name multiple times. Each overload's schema should only be registered with a single call to def(). Duplicate registration: registered at /dev/null:0. Original registration: registered at /dev/null:0'''
+            '''Tried to register an operator (test::foo(Tensor x) -> (Tensor)) with the same name and overload '''
+            '''name multiple times. Each overload's schema should only be registered with a single call to def(). '''
+            '''Duplicate registration: registered at /dev/null:0. Original registration: registered at /dev/null:0'''
         )
 
     def test_multiple_def_alias_mismatch(self):
@@ -714,7 +717,9 @@ alias analysis kind: PURE_FUNCTION
         ]
         self.assertExpectedInline(
             self.commute("foo", ops, expect_raises=True).state,
-            '''Tried to register an operator (test::foo(Tensor x) -> (Tensor)) with the same name and overload name multiple times. Each overload's schema should only be registered with a single call to def(). Duplicate registration: registered at /dev/null:0. Original registration: registered at /dev/null:0'''  # noqa
+            '''Tried to register an operator (test::foo(Tensor x) -> (Tensor)) with the same name and overload '''
+            '''name multiple times. Each overload's schema should only be registered with a single call to def(). '''
+            '''Duplicate registration: registered at /dev/null:0. Original registration: registered at /dev/null:0'''  # noqa
         )
 
     def test_multiple_fallback(self):
@@ -725,7 +730,8 @@ alias analysis kind: PURE_FUNCTION
         except RuntimeError as e:
             self.assertExpectedInline(
                 str(e),
-                '''Tried to register multiple backend fallbacks for the same dispatch key XLA; previous registration registered at /dev/null:0, new registration registered at /dev/null:0'''  # noqa
+                '''Tried to register multiple backend fallbacks for the same dispatch key XLA; previous registration '''
+                '''registered at /dev/null:0, new registration registered at /dev/null:0'''  # noqa
             )
         else:
             self.assertTrue(False)
