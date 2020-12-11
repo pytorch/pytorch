@@ -126,11 +126,17 @@ def format_trace_inputs(f: NativeFunction) -> str:
         args = [cpp_args.argument for cpp_args in sig_group.signature.arguments()]
 
     if f.func.is_out_fn():
-        # *_out functions take the result as a first argument, but they are the
-        # last argument in the JIT schema.
+        # *_out functions take the result as a separate argument, but we don't want to
+        # trace that argument directly. Instead, we trace its TensorOptions.
+        # So first, we need to remove the out argument from the list of arguments to trace.
         # TODO: byte-for-byte compatible with old codegen behavior - it's incorrect to assume
         # there is only one output argument.
-        args = args[1:]
+        if f.use_c10_dispatcher.dispatcher_uses_new_style():
+            # for c10-full ops, the out argument is in the end
+            args = args[:-1]
+        else:
+            # for legacy ops, the out argument is in the beginning.
+            args = args[1:]
 
     trace_inputs = itertools.chain.from_iterable(dispatch_trace_input(arg) for arg in args)
 
@@ -144,8 +150,7 @@ def format_trace_inputs(f: NativeFunction) -> str:
         # Factories are a bit special because their out-of-place overloads
         # take an extra TensorOptions argument, which is missing in the _out function
         has_tensor_return = any(r.type.is_tensor_like() for r in f.func.returns)
-        has_tensor_input_arg = any(a.type.is_tensor_like()
-                                   for a in itertools.chain(f.func.arguments.positional, f.func.arguments.kwarg_only))
+        has_tensor_input_arg = any(a.type.is_tensor_like() for a in f.func.arguments.flat_non_out)
         is_factory_method = f.category_override == 'factory' or (has_tensor_return and not has_tensor_input_arg)
 
         # HACK: preserve old codegen behavior - the old codegen set the `is_factory_method`
