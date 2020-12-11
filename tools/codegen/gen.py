@@ -714,7 +714,7 @@ struct CAFFE2_API structured_{n} : public at::meta::{meta_name} {{
                 if is_structured_dispatch_key(k):
                     continue
                 seen.add(n)
-                if f.func.is_out_fn():
+                if f.func.is_out_fn() and local.use_c10_dispatcher() is UseC10Dispatcher.full:
                     # out overloads don't get default arguments because
                     # defaulted arguments would be before the out argument
                     # in the argument list and that doesn't work.
