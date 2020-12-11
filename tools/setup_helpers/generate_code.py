@@ -30,7 +30,6 @@ def generate_code(ninja_global=None,
                   operator_selector=None):
     from tools.autograd.gen_autograd import gen_autograd, gen_autograd_python
     from tools.autograd.gen_annotated_fn_args import gen_annotated
-    from tools.jit.gen_unboxing_wrappers import gen_unboxing_wrappers
     from tools.codegen.selective_build.selector import SelectiveBuilder
 
 
@@ -70,13 +69,6 @@ def generate_code(ninja_global=None,
             disable_autograd=disable_autograd,
             operator_selector=operator_selector,
         )
-        gen_unboxing_wrappers(
-            declarations_path or DECLARATIONS_PATH,
-            jit_gen_dir,
-            tools_jit_templates,
-            disable_autograd=disable_autograd,
-            operator_selector=operator_selector,
-            force_schema_registration=force_schema_registration)
 
     if subset == "python" or not subset:
         gen_annotated(

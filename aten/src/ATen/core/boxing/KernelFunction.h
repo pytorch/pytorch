@@ -173,12 +173,6 @@ public:
   // For testing internal invariants only
   bool _equalsBoxedAndUnboxed(const KernelFunction&) const;
 
-  // This function is a temporary hack that allows generated_unboxing_wrappers.cpp to register its codegen'ed
-  // unboxing wrapper for aten operators. We still need those for some operators because not all work
-  // with the templated unboxing logic yet.
-  // TODO Delete setManuallyBoxedKernel_ once all operators work with the templated boxing logic. This can be done once https://github.com/pytorch/pytorch/issues/32366 is fixed.
-  void setManuallyBoxedKernel_(InternalBoxedKernelFunction* func);
-
 private:
 
   explicit KernelFunction(std::unique_ptr<OperatorKernel> functor, InternalBoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func);

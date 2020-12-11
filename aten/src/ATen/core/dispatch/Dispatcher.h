@@ -182,12 +182,6 @@ public:
    */
   RegistrationHandleRAII registerLibrary(std::string ns, std::string debug);
 
-  // This function is a temporary hack that allows generated_unboxing_wrappers.cpp to register its codegen'ed
-  // unboxing wrapper for aten operators. We still need those for some operators because not all work
-  // with the templated unboxing logic yet.
-  // TODO Delete setBoxedKernelFor_ once all operators work with the templated boxing logic
-  void setManuallyBoxedKernelFor_(const OperatorHandle& op, KernelFunction::InternalBoxedKernelFunction* func);
-
   // ------------------------------------------------------------------------
   //
   // Listeners on registrations

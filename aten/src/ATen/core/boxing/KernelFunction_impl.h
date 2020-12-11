@@ -168,14 +168,4 @@ inline std::enable_if_t<!guts::is_stateless_lambda<std::decay_t<Lambda>>::value,
     );
 }
 
-inline void KernelFunction::setManuallyBoxedKernel_(InternalBoxedKernelFunction* func) {
-    if (boxed_kernel_func_ == &fallthrough_kernel) {
-      // special case no-op
-      return;
-    }
-    TORCH_INTERNAL_ASSERT(boxed_kernel_func_ == nullptr, "Tried to set a manually boxed kernel for a kernel that already has a boxed kernel set.");
-    TORCH_INTERNAL_ASSERT(unboxed_kernel_func_ != nullptr, "Tried to set a manually boxed kernel for an invalid KernelFunction.");
-    boxed_kernel_func_ = func;
-}
-
 }
