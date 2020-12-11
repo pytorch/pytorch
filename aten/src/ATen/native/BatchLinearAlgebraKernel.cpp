@@ -21,7 +21,6 @@ void apply_eig(const Tensor& self, bool eigenvectors, Tensor& vals_, Tensor& vec
 
   auto vals_data = vals_.data_ptr<scalar_t>();
   scalar_t* wr = vals_data;
-  scalar_t* wi = vals_data + n;
 
   scalar_t* vecs_data = eigenvectors ? vecs_.data_ptr<scalar_t>() : nullptr;
   int ldvr = eigenvectors ? n : 1;
@@ -30,13 +29,13 @@ void apply_eig(const Tensor& self, bool eigenvectors, Tensor& vals_, Tensor& vec
     // call lapackEig once to get the optimal size for work data
     scalar_t wkopt;
     int info;
-    lapackEig<scalar_t>('N', jobvr, n, self_data, n, wr, wi,
+    lapackEig<scalar_t>('N', jobvr, n, self_data, n, wr,
       nullptr, 1, vecs_data, ldvr, &wkopt, -1, &info);
     int lwork = static_cast<int>(wkopt);
 
     // call again to do the actual work
     Tensor work = at::empty({lwork}, self.dtype());
-    lapackEig<scalar_t>('N', jobvr, n, self_data, n, wr, wi,
+    lapackEig<scalar_t>('N', jobvr, n, self_data, n, wr,
       nullptr, 1, vecs_data, ldvr, work.data_ptr<scalar_t>(), lwork, &info);
     *info_ptr = info;
   }
