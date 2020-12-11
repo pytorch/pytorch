@@ -1787,17 +1787,14 @@ class TestReductions(TestCase):
             numpy_op = getattr(np, op)
 
             # Compute quantile along every dimension and flattened tensor
-            interpolations = ('linear', 'lower', 'higher', 'midpoint', 'nearest')
-            for interpolation, dim in product(interpolations,
-                                              [None] + list(range(a.ndim))):
-                result = torch_op(a, q, dim, interpolation, keepdim)
-                expected = numpy_op(a.cpu().numpy(), q.cpu().numpy(), dim,
-                                    interpolation=interpolation, keepdims=keepdim)
+            for dim in [None] + list(range(a.ndim)):
+                result = torch_op(a, q, dim, keepdim)
+                expected = numpy_op(a.cpu().numpy(), q.cpu().numpy(), dim, keepdims=keepdim)
                 self.assertEqual(result.cpu(), torch.from_numpy(np.array(expected)).type(result.type()))
 
                 # Test out variation
                 out = torch.empty_like(result)
-                torch_op(a, q, dim, interpolation, keepdim, out=out)
+                torch_op(a, q, dim, keepdim, out=out)
                 self.assertEqual(out.cpu(), result.cpu())
 
     def test_quantile_backward(self, device):
@@ -1831,8 +1828,6 @@ class TestReductions(TestCase):
         check([1.], 1.1, [], {}, r'q must be in the range \[0, 1\] but got 1.1')
         check([1.], 0.5, [], {'out': torch.empty([], dtype=torch.float64, device=device)},
               r'out tensor must be same dtype as the input tensor')
-        check([1.], [1.], [], {'interpolation': 'random_mode'},
-              r"interpolation should only be linear, lower, higher, midpoint, nearest.")
 
         if self.device_type == "cpu":
             check([1.], [0.5, 1.1, -1], [], {}, r'q values must be in the range \[0, 1\]')
