@@ -80,6 +80,12 @@ The corresponding implementation is chosen automatically based on the PyTorch bu
 Quantization API Summary
 ---------------------------------------
 
+PyTorch provides two different modes of quantization: Eager Mode Quantization and FX Graph Mode Quantization.
+
+Eager Mode Quantization is a beta feature. User needs to do fusion and specify where quantization and dequantization happens manually, also it only supports modules and not functionals.
+
+FX Graph Mode Quantization is a new automated quantization framework in PyTorch, and currently it's a prototype feature. It improves upon Eager Mode Quantization by adding support for functionals and automating the quantization process. Although people might need to refactor the model a bit to make the model compatible with FX Graph Mode Quantization (symbolically traceable with torch.fx).
+
 Eager Mode Quantization
 ^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -335,7 +341,7 @@ To learn more about quantization aware training, please see the `QAT
 tutorial
 <https://pytorch.org/tutorials/advanced/static_quantization_tutorial.html>`_.
 
-FX Graph Mode Quantization
+(Prototype) FX Graph Mode Quantization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 Quantization types supported by FX Graph Mode can be classified in two ways:
 
@@ -358,14 +364,7 @@ The supported quantization types in FX Graph Mode Quantization are:
 - Quantization Aware Training
   - Static Quantization
 
-
-We have the following APIs in FX Graph Mode Quantization:
-- `prepare_fx`: prepares a model for post training quantization
-- `prepare_qat_fx`: prepares a model for quantization aware training
-- `convert_fx`: converts a prepared (and calibrated/trained) model to a quantized model
-- `fuse_fx`: This is not a function that automatically fuses module calls like Conv - BatchNorm into Conv. Currently only supports eval model.
-
-There are multiple quantization types in post training quantization (weight only, dynamic and static) and the configuration is done through `qconfig_dict` (an argument of the `prepare_fx` function), and mixed quantization type is also supported with the api (e.g. quantize the conv modules statically and quantize the linear module dynamically).
+There are multiple quantization types in post training quantization (weight only, dynamic and static) and the configuration is done through `qconfig_dict` (an argument of the `prepare_fx` function).
 
 API Example::
 

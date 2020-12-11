@@ -105,7 +105,7 @@ Fused modules are provided for common patterns in CNNs. Combining several
 operations together (like convolution and relu) allows for better quantization
 accuracy
 
-    
+
 * `torch.nn.intrinsic` — float versions of the modules, can be swapped with
   quantized version 1 to 1:
 
@@ -171,10 +171,11 @@ Layers for the quantization-aware training
     used by the :func:`torch.quantization.quantize`
   * :func:`~torch.quantization.fuse_modules`
 
-* Functions for graph mode quantization:
-
-  * :func:`~torch.quantization.quantize_jit` - Function for graph mode post training static quantization
-  * :func:`~torch.quantization.quantize_dynamic_jit` - Function for graph mode post training dynamic quantization
+* Functions for FX Graph Mode Quantization:
+  * :func:`~torch.quantization.quantize_fx.prepare_fx`: prepares a model for post training quantization
+  * :func:`~torch.quantization.quantize_fx.prepare_qat_fx`: prepares a model for quantization aware training
+  * :func:`~torch.quantization.quantize_fx.convert_fx`: converts a prepared (and calibrated/trained) model to a quantized model
+  * :func:`~torch.quantization.quantize_fx.fuse_fx`: This is not a function that automatically fuses module calls like Conv - BatchNorm into Conv. Currently only supports eval model.
 
 * Quantization configurations
     * :class:`~torch.quantization.QConfig` — Quantization configuration class
@@ -322,5 +323,3 @@ Quantized dtypes and quantization schemes
   * :attr:`torch.quint8` — 8-bit unsigned integer
   * :attr:`torch.qint8` — 8-bit signed integer
   * :attr:`torch.qint32` — 32-bit signed integer
-
-
