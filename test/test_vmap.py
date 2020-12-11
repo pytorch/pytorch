@@ -2343,6 +2343,21 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         result = vmap(vjp)(gy)
         self.assertEqual(result, torch.zeros(B0, *x.shape, device=device))
 
+    @allowVmapFallbackUsage
+    def test_unrelated_output_multiple_grad(self, device):
+        B0 = 3
+        x = torch.randn([], requires_grad=True)
+        y = torch.randn([], requires_grad=True)
+        gy = torch.randn(B0, requires_grad=True)
+
+        def vjp(v):
+            res, = torch.autograd.grad(y, x, v, allow_unused=True)
+            return torch.zeros_like(x) if res is None else res
+
+        _ = vjp(gy[0])
+        result = vmap(vjp)(gy)
+        self.assertEqual(result, torch.zeros(B0, *x.shape, device=device))
+
 instantiate_device_type_tests(
     TestVmapBatchedGradient,
     globals(),
