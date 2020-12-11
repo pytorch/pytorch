@@ -623,7 +623,7 @@ class Graph:
             nodes_to_delete = user_to_last_uses.get(user, [])
             if len(nodes_to_delete):
                 to_delete_str = ' = '.join([n.name for n in nodes_to_delete] + ['None'])
-                body.append(f'; {to_delete_str}\n')
+                body.append(f';  {to_delete_str}\n')
             else:
                 body.append('\n')
 
