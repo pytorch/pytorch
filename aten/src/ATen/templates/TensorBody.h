@@ -194,10 +194,6 @@ class CAFFE2_API Tensor {
   Tensor& operator=(const Tensor&) &&;
   Tensor& operator=(Tensor&&) &&;
 
-  #ifdef _MSC_VER
-  #pragma warning( pop )
-  #endif
-
   bool is_same(const Tensor& other) const noexcept {
     return impl_ == other.impl_;
   }
@@ -729,6 +725,10 @@ protected:
   void enforce_invariants();
   c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> impl_;
 };
+
+#ifdef _MSC_VER
+#pragma warning( pop )
+#endif
 
 int64_t get_device(Tensor self);
 
