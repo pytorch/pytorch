@@ -30,11 +30,7 @@ RegisterCodeGenList::StmtFactoryMethod RegisterCodeGenList::
 void RegisterCodeGenList::AddStmtFactoryMethod(
     const std::string& name,
     const StmtFactoryMethod& stmt_factory_method) {
-  auto insert_ret =
-      stmt_factory_methods_.insert(std::make_pair(name, stmt_factory_method));
-  if (!insert_ret.second) {
-    throw std::runtime_error("Duplicated CodeGen names: " + name);
-  }
+  stmt_factory_methods_[name] = stmt_factory_method;
 }
 
 std::unique_ptr<CodeGen> CreateCodeGen(
