@@ -2,6 +2,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/cpu/zmath.h>
 
 #include <TH/TH.h>  // for USE_LAPACK
 
@@ -15,6 +16,8 @@ void apply_eig(const Tensor& self, bool eigenvectors, Tensor& vals_, Tensor& vec
   TORCH_CHECK(false, "Calling torch.eig on a CPU tensor requires compiling ",
     "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
+
   char jobvr = eigenvectors ? 'V' : 'N';
   int64_t n = self.size(-1);
   auto self_data = self.data_ptr<scalar_t>();
@@ -24,19 +27,20 @@ void apply_eig(const Tensor& self, bool eigenvectors, Tensor& vals_, Tensor& vec
 
   scalar_t* vecs_data = eigenvectors ? vecs_.data_ptr<scalar_t>() : nullptr;
   int ldvr = eigenvectors ? n : 1;
+  value_t* rwork = nullptr; // XXX: remember to malloc() it for complex
 
   if (n > 0) {
     // call lapackEig once to get the optimal size for work data
     scalar_t wkopt;
     int info;
-    lapackEig<scalar_t>('N', jobvr, n, self_data, n, wr,
-      nullptr, 1, vecs_data, ldvr, &wkopt, -1, &info);
-    int lwork = static_cast<int>(wkopt);
+    lapackEig<scalar_t, value_t>('N', jobvr, n, self_data, n, wr,
+      nullptr, 1, vecs_data, ldvr, &wkopt, -1, rwork, &info);
+    int lwork = static_cast<int>(real_impl<scalar_t, value_t>(wkopt));
 
     // call again to do the actual work
     Tensor work = at::empty({lwork}, self.dtype());
-    lapackEig<scalar_t>('N', jobvr, n, self_data, n, wr,
-      nullptr, 1, vecs_data, ldvr, work.data_ptr<scalar_t>(), lwork, &info);
+    lapackEig<scalar_t, value_t>('N', jobvr, n, self_data, n, wr,
+      nullptr, 1, vecs_data, ldvr, work.data_ptr<scalar_t>(), lwork, rwork, &info);
     *info_ptr = info;
   }
 #endif
@@ -60,7 +64,7 @@ std::tuple<Tensor, Tensor> eig_kernel_impl(const Tensor& self, bool& eigenvector
                  : Tensor();
 
   int64_t info;
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "eig_cpu", [&]{
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "eig_cpu", [&]{
     apply_eig<scalar_t>(self_, eigenvectors, vals_, vecs_, &info);
   });
   singleCheckErrors(info, "eig_cpu");

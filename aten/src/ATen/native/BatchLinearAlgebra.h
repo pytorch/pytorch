@@ -12,8 +12,8 @@ namespace at { namespace native {
 // Define per-batch functions to be used in the implementation of batched
 // linear algebra operations
 
-template<class scalar_t>
-void lapackEig(char jobvl, char jobvr, int n, scalar_t *a, int lda, scalar_t *w, scalar_t* vl, int ldvl, scalar_t *vr, int ldvr, scalar_t *work, int lwork, int *info);
+template<class scalar_t, class value_t=scalar_t>
+void lapackEig(char jobvl, char jobvr, int n, scalar_t *a, int lda, scalar_t *w, scalar_t* vl, int ldvl, scalar_t *vr, int ldvr, scalar_t *work, int lwork, value_t *rwork, int *info);
 
 #endif
 
