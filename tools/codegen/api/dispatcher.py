@@ -2,8 +2,6 @@ from tools.codegen.model import *
 
 from tools.codegen.api.types import *
 import tools.codegen.api.cpp as cpp
-import tools.codegen.api.native as native
-import tools.codegen.local as local
 
 import itertools
 from typing import Sequence, Optional, Tuple, List, Union
