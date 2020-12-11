@@ -373,7 +373,7 @@ class TestScriptPy3(JitTestCase):
 
         raises_regex_with_highlight = self.assertRaisesRegexWithHighlight(
             Exception,
-            "User-defined functions in NamedTuples are currently not supported",
+            "User-defined methods in NamedTuples are currently not supported",
             "NamedTupleWithMethods",
         )
 
