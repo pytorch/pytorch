@@ -3052,11 +3052,9 @@ class TestDistributionShapes(TestCase):
         self.scalar_sample = 1
         self.tensor_sample_1 = torch.ones(3, 2)
         self.tensor_sample_2 = torch.ones(3, 2, 3)
-        Distribution.set_default_validate_args(True)
 
     def tearDown(self):
         super(TestDistributionShapes, self).tearDown()
-        Distribution.set_default_validate_args(False)
 
     def test_entropy_shape(self):
         for Dist, params in EXAMPLES:
@@ -3533,12 +3531,15 @@ class TestKL(TestCase):
                                                          [0.2, 0.7, 0.1],
                                                          [0.33, 0.33, 0.34],
                                                          [0.2, 0.2, 0.6]])
-        pareto = pairwise(Pareto, [2.5, 4.0, 2.5, 4.0], [2.25, 3.75, 2.25, 3.75])
+        pareto = (Pareto(torch.tensor([2.5, 4.0, 2.5, 4.0]).expand(4, 4),
+                         torch.tensor([2.25, 3.75, 2.25, 3.75]).expand(4, 4)),
+                  Pareto(torch.tensor([2.25, 3.75, 2.25, 3.8]).expand(4, 4),
+                         torch.tensor([2.25, 3.75, 2.25, 3.75]).expand(4, 4)))
         poisson = pairwise(Poisson, [0.3, 1.0, 5.0, 10.0])
-        uniform_within_unit = pairwise(Uniform, [0.15, 0.95, 0.2, 0.8], [0.1, 0.9, 0.25, 0.75])
+        uniform_within_unit = pairwise(Uniform, [0.1, 0.9, 0.2, 0.75], [0.15, 0.95, 0.25, 0.8])
         uniform_positive = pairwise(Uniform, [1, 1.5, 2, 4], [1.2, 2.0, 3, 7])
         uniform_real = pairwise(Uniform, [-2., -1, 0, 2], [-1., 1, 1, 4])
-        uniform_pareto = pairwise(Uniform, [6.5, 8.5, 6.5, 8.5], [7.5, 7.5, 9.5, 9.5])
+        uniform_pareto = pairwise(Uniform, [6.5, 7.5, 6.5, 8.5], [7.5, 8.5, 9.5, 9.5])
         continuous_bernoulli = pairwise(ContinuousBernoulli, [0.1, 0.2, 0.5, 0.9])
 
         # These tests should pass with precision = 0.01, but that makes tests very expensive.
@@ -4150,8 +4151,8 @@ class TestLazyLogitsInitialization(TestCase):
                 probs = param.pop('probs')
                 param['logits'] = probs_to_logits(probs)
                 dist = Dist(**param)
-                shape = (1,) if not dist.event_shape else dist.event_shape
-                dist.log_prob(torch.ones(shape))
+                # Create new instance to generate a valid sample
+                dist.log_prob(Dist(**param).sample())
                 message = 'Failed for {} example 0/{}'.format(Dist.__name__, len(params))
                 self.assertFalse('probs' in vars(dist), msg=message)
                 try:
@@ -4441,7 +4442,6 @@ class TestFunctors(TestCase):
 class TestValidation(TestCase):
     def setUp(self):
         super(TestCase, self).setUp()
-        Distribution.set_default_validate_args(True)
 
     def test_valid(self):
         for Dist, params in EXAMPLES:
@@ -4461,7 +4461,6 @@ class TestValidation(TestCase):
 
     def tearDown(self):
         super(TestValidation, self).tearDown()
-        Distribution.set_default_validate_args(False)
 
 
 class TestJit(TestCase):
