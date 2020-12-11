@@ -152,6 +152,24 @@ SparseTensor& neg_sparse_(SparseTensor& t) {
 }
 
 // --------------------------------------------------------------------
+// reciprocal(SparseTensor)
+// --------------------------------------------------------------------
+
+SparseTensor& reciprocal_out_sparse(SparseTensor& r, const SparseTensor& t) {
+   TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
+   TORCH_CHECK(t.is_sparse(), "Tensor should be sparse");
+   Tensor t_tmp = t;
+   // copy_sparse_ does not perform the copy if it is the same tensor
+   copy_sparse_to_sparse_(r, t.coalesce());
+   r._values().reciprocal_();
+   return r;
+}
+
+SparseTensor& reciprocal_sparse_(SparseTensor& t) {
+   return reciprocal_out_sparse(t, t);
+}
+
+// --------------------------------------------------------------------
 // asin(SparseTensor)
 // --------------------------------------------------------------------
 

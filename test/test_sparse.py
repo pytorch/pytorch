@@ -1948,6 +1948,65 @@ class TestSparse(TestCase):
             )
             self._test_neg_negative(input_uncoalesced)
 
+
+    def _test_reciprocal(self, sparse_tensor):
+        dense_tensor = sparse_tensor.to_dense()
+        expected_output = dense_tensor.reciprocal()
+
+        ops = (
+            torch.reciprocal, torch.Tensor.reciprocal, torch.Tensor.reciprocal_,
+        )
+        for op in ops:
+            self.assertEqual(expected_output, op(sparse_tensor).to_dense())
+
+    def test_reciprocal(self):
+
+        device = 'cuda' if self.is_cuda else 'cpu'
+        data_type = [torch.float, torch.double, torch.float64]
+
+        for data_type in (torch.float, torch.double, torch.float64):
+            if not self.is_uncoalesced:
+                input_coalesced = torch.sparse_coo_tensor(
+                    indices=torch.tensor([[0, 2,    4,    6]]),
+                    values=torch.tensor([2.3, 0.38, -2.3, -0.38]),
+                    size=[7, ],
+                    device=device,
+                    dtype=data_type
+                ).coalesce()
+                self._test_reciprocal(input_coalesced)
+
+                # hybrid sparse input
+                input_coalesced = torch.sparse_coo_tensor(
+                    indices=torch.tensor([[1, 3], [2, 4]]),
+                    values=torch.tensor([[-1.0, 3.0], [-0.5, 0.7]]),
+                    size=[4, 5, 2],
+                    device=device,
+                    dtype=data_type
+                ).coalesce()
+                self._test_floor(input_coalesced)
+
+            if self.is_uncoalesced:
+                # test uncoalesced input
+                input_uncoalesced = torch.sparse_coo_tensor(
+                   indices=torch.tensor([[0], [1], [2], [0], [1], [2]]).transpose(1, 0),
+                    values=torch.tensor([2.1, -3.2, -4.7, 1.3, -1.3, 4.5]),
+                    size=[3, ],
+                    device=device,
+                    dtype=data_type
+                )
+                self._test_reciprocal(input_uncoalesced)
+
+                # test on empty sparse tensor
+                input_uncoalesced = torch.sparse_coo_tensor(
+                    indices=torch.zeros([2, 0]),
+                    values=torch.zeros([0, 5, 5, 5, 5, 5, 5, 0]),
+                    size=[0, 0, 5, 5, 5, 5, 5, 5, 0],
+                    device=device,
+                    dtype=data_type
+                )
+                self._test_reciprocal(input_uncoalesced)
+
+
     def _test_asin_arcsin(self, sparse_tensor):
         def is_integral(dtype):
             return dtype in torch.testing.get_all_int_dtypes()

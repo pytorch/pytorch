@@ -3253,11 +3253,13 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: reciprocal_
+    CPU, CUDA: reciprocal_
+    SparseCPU, SparseCUDA: reciprocal_sparse_
 
 - func: reciprocal.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: reciprocal_out
+    SparseCPU, SparseCUDA: reciprocal_out_sparse
 
 - func: neg(Tensor self) -> Tensor
   use_c10_dispatcher: full
