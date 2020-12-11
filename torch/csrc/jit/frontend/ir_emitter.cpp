@@ -1307,8 +1307,7 @@ struct to_ir {
     const auto itrs = List<Expr>::create(dc.range(), {dc.iter()});
 
     Value* dict_value =
-        graph->insertNode(graph->create(prim::DictConstruct, 1))
-            ->output();
+        graph->insertNode(graph->create(prim::DictConstruct, 1))->output();
     bool type_set = false;
     if (type_hint) {
       if (!type_hint->cast<DictType>()) {
