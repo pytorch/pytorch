@@ -3913,6 +3913,11 @@ class TestTorchDeviceType(TestCase):
                                              [0, 0, 0],
                                              [1, 2, 3]]))
 
+        # Check that the exclusive flag works correctly
+        c = torch.tensor([1, 2, 3, 4], device=device)
+        ex_cumsum = torch.cumsum(c, 0, exclusive=True)
+        self.assertEqual(aRes, torch.tensor([0, 1, 3, 6]))
+
         # Check that cummulative sum over a zero length dimension doesn't crash on backprop.
         # Also check that cumsum over other dimensions in a tensor with a zero-length
         # dimensiuon also works

@@ -378,7 +378,7 @@ def cumsum(g, input, dim, dtype, exclusive=False):
             return _unimplemented(name, "dtype")
         csum = g.op("ATen", input, operator_s="cumsum", dim_i=dim)
         if exclusive:
-            return torch.cat((torch.zeros(1), csum), dim=dim)
+            return torch.cat((torch.zeros(1), csum[:-1]), dim=dim)
         else:
             return csum
     else:

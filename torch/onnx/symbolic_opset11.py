@@ -350,7 +350,7 @@ def cumsum(g, self, dim, dtype=None, exclusive=False):
         cast = self
     csum = g.op("CumSum", cast, dim_tensor)
     if exclusive:
-        return torch.cat((torch.zeros(1), csum), dim=dim)
+        return torch.cat((torch.zeros(1), csumcsum[:-1]), dim=dim)
     return csum
 
 
