@@ -9,7 +9,7 @@ import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.qat as nnqat
 
-from typing import Optional, Dict, Set, Callable
+from typing import Optional, Dict, List, Set, Callable
 
 from .stubs import QuantStub, DeQuantStub
 from .fake_quantize import (
@@ -19,7 +19,7 @@ from .fake_quantize import (
 from .utils import get_combined_dict
 
 # Default map for swapping float module to quantized ones
-DEFAULT_STATIC_QUANT_MODULE_MAPPINGS = {
+DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Callable] = {
     QuantStub: nnq.Quantize,
     DeQuantStub: nnq.DeQuantize,
     nn.BatchNorm2d: nnq.BatchNorm2d,
@@ -62,7 +62,7 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS = {
 }
 
 # Default map for swapping float module to qat modules
-DEFAULT_QAT_MODULE_MAPPINGS = {
+DEFAULT_QAT_MODULE_MAPPINGS : Dict[Callable, Callable] = {
     nn.Conv2d: nnqat.Conv2d,
     nn.Linear: nnqat.Linear,
     # Intrinsic modules:
@@ -75,7 +75,7 @@ DEFAULT_QAT_MODULE_MAPPINGS = {
 }
 
 # Default map for swapping dynamic modules
-DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS = {
+DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Callable] = {
     nn.GRUCell: nnqd.GRUCell,
     nn.Linear: nnqd.Linear,
     nn.LSTM: nnqd.LSTM,
@@ -84,16 +84,16 @@ DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS = {
 }
 
 # Whitelist for propagating the qconfig
-_EXCLUDE_QCONFIG_PROPAGATE_LIST = {
+_EXCLUDE_QCONFIG_PROPAGATE_LIST : List[Callable] = {
     DeQuantStub,
 }
-_INCLUDE_QCONFIG_PROPAGATE_LIST = {
+_INCLUDE_QCONFIG_PROPAGATE_LIST : List[Callable] = {
     nn.Sequential,
 }
 
 # Default mapping from floating point function or torch ops to quantized ops
 # TODO: merge with default static mapping
-DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS = {
+DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS : Dict[Callable, Callable] = {
     F.elu: torch._ops.ops.quantized.elu,
     F.hardswish: torch._ops.ops.quantized.hardswish,
     F.instance_norm: torch._ops.ops.quantized.instance_norm,
@@ -102,7 +102,7 @@ DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS = {
 }
 
 # mapping from module to output activation post process class
-DEFAULT_MODULE_TO_ACT_POST_PROCESS = {
+DEFAULT_MODULE_TO_ACT_POST_PROCESS : Dict[Callable, Callable] = {
     nn.Hardsigmoid: default_affine_fixed_qparams_fake_quant,
     nn.Sigmoid: default_affine_fixed_qparams_fake_quant,
     nn.Tanh: default_symmetric_fixed_qparams_fake_quant,
