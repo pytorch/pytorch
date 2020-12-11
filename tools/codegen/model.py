@@ -1,7 +1,7 @@
 import re
 
 from dataclasses import dataclass
-from typing import List, Dict, Optional, Iterator, Tuple, Set, NoReturn, Sequence, Callable
+from typing import List, Dict, Optional, Iterator, Tuple, Set, NoReturn, Sequence, Callable, Union
 from enum import Enum
 import itertools
 
@@ -925,6 +925,31 @@ class Arguments:
         ret.extend(self.pre_tensor_options_kwarg_only)
         if self.tensor_options is not None:
             ret.extend(self.tensor_options.all())
+        ret.extend(self.post_tensor_options_kwarg_only)
+        return ret
+
+    @property
+    def non_out(self) -> Sequence[Union[Argument, SelfArgument, TensorOptionsArguments]]:
+        ret: List[Union[Argument, SelfArgument, TensorOptionsArguments]] = []
+        ret.extend(self.positional)
+        ret.extend(self.kwarg_only)
+        return ret
+
+    @property
+    def positional(self) -> Sequence[Union[Argument, SelfArgument]]:
+        ret: List[Union[Argument, SelfArgument]] = []
+        ret.extend(self.pre_self_positional)
+        if self.self_arg is not None:
+            ret.append(self.self_arg)
+        ret.extend(self.post_self_positional)
+        return ret
+
+    @property
+    def kwarg_only(self) -> Sequence[Union[Argument, TensorOptionsArguments]]:
+        ret: List[Union[Argument, TensorOptionsArguments]] = []
+        ret.extend(self.pre_tensor_options_kwarg_only)
+        if self.tensor_options is not None:
+            ret.append(self.tensor_options)
         ret.extend(self.post_tensor_options_kwarg_only)
         return ret
 

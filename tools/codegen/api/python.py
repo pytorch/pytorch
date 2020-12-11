@@ -581,8 +581,7 @@ def _cpp_signature(f: NativeFunction, *, method: bool = False) -> CppSignature:
     return CppSignatureGroup.from_schema(f.func, method=method).signature
 
 def has_tensor_options(f: NativeFunction) -> bool:
-    return any(filter(lambda a: isinstance(a, TensorOptionsArguments),
-                      cpp.group_arguments(f.func, method=False, faithful=True)))
+    return f.func.arguments.tensor_options is not None
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -726,12 +725,17 @@ def argument_type_str_pyi(t: Type, *, pyi_out_arg: bool = False) -> str:
 
 # Generates a PythonSignature that can be used for either .pyi or PythonArgParser codegen
 def signature(f: NativeFunction, *, method: bool = False, pyi: bool = False) -> PythonSignature:
-    # Use cpp api to gather TensorOptions fields from kwargs.
+    args: List[Argument] = []
+    args.extend(f.func.arguments.pre_self_positional)
     # Skip SelfArgument if this is method.
-    # Skip TensorOptionsArguments in C++ signature. Python side TensorOptions
+    if not method and f.func.arguments.self_arg is not None:
+        args.append(f.func.arguments.self_arg.argument)
+    args.extend(f.func.arguments.post_self_positional)
+    args.extend(f.func.arguments.pre_tensor_options_kwarg_only)
+    # Skip TensorOptionsArguments. Python side TensorOptions
     # arguments are created based on different rules - see below.
-    cpp_args = cpp.group_arguments(f.func, method=method, faithful=True)
-    args = tuple(a for a in cpp_args if isinstance(a, Argument))
+    args.extend(f.func.arguments.post_tensor_options_kwarg_only)
+    args.extend(f.func.arguments.out)
 
     input_arg_set = set(a.name for a in f.func.arguments.flat_positional)
     kwarg_only_set = set(a.name for a in f.func.arguments.flat_kwarg_only)
