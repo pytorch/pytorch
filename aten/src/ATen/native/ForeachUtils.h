@@ -72,13 +72,9 @@ void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2, Te
 // - Resulting tensor must have the same dtype as the input one
 
 // Check if all tensors have the same device, layout, strides and are not overlapping and dense
-bool has_same_attributes(Device expected_device, caffe2::TypeMeta expected_dtype, TensorList tensors) {
+bool has_same_attributes(Device expected_device, TensorList tensors) {
   auto expected_strides = tensors[0].strides();
   for (const auto& t : tensors) {
-    if (t.dtype() != expected_dtype) {
-      return false;
-    }
-
     if (t.device() != expected_device) {
       return false;
     }
@@ -134,10 +130,9 @@ bool can_use_fast_route(TensorList tensors) {
   return false;
 #else
   auto expected_device = tensors[0].device();
-  auto expected_dtype = tensors[0].dtype();
 
   for (auto t : tensors) {
-    if (!has_same_attributes(expected_device, expected_dtype, {t})) {
+    if (!has_same_attributes(expected_device, {t})) {
       return false;
     }
   }
@@ -151,10 +146,9 @@ bool can_use_fast_route(TensorList tensors, Scalar scalar, bool division_op = fa
   return false;
 #else
   auto expected_device = tensors[0].device();
-  auto expected_dtype = tensors[0].dtype();
 
   for (auto t : tensors) {
-    if (!has_same_attributes(expected_device, expected_dtype, {t})) {
+    if (!has_same_attributes(expected_device, {t})) {
       return false;
     }
 
@@ -191,10 +185,9 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, bool division_
   return false;
 #else
   auto expected_device = tensors1[0].device();
-  auto expected_dtype = tensors1[0].dtype();
 
   for (int64_t i = 0; i < tensors1.size(); i++) {
-    if (!has_same_attributes(expected_device, expected_dtype, {tensors1[i], tensors2[i]})) {
+    if (!has_same_attributes(expected_device, {tensors1[i], tensors2[i]})) {
       return false;
     }
 
@@ -215,10 +208,9 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, Scalar scalar)
   return false;
 #else
   auto expected_device = tensors1[0].device();
-  auto expected_dtype = tensors1[0].dtype();
 
   for (int64_t i = 0; i < tensors1.size(); i++) {
-    if (!has_same_attributes(expected_device, expected_dtype, {tensors1[i], tensors2[i]})) {
+    if (!has_same_attributes(expected_device, {tensors1[i], tensors2[i]})) {
       return false;
     }
 
@@ -236,10 +228,9 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList ten
   return false;
 #else
   auto expected_device = tensors1[0].device();
-  auto expected_dtype = tensors1[0].dtype();
 
   for (int64_t i = 0; i < tensors1.size(); i++) {
-    if (!has_same_attributes(expected_device, expected_dtype, {tensors1[i], tensors2[i], tensors3[i]})) {
+    if (!has_same_attributes(expected_device, {tensors1[i], tensors2[i], tensors3[i]})) {
       return false;
     }
   }
@@ -253,10 +244,9 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList ten
   return false;
 #else
   auto expected_device = tensors1[0].device();
-  auto expected_dtype = tensors1[0].dtype();
 
   for (int64_t i = 0; i < tensors1.size(); i++) {
-    if (!has_same_attributes(expected_device, expected_dtype, {tensors1[i], tensors2[i], tensors3[i]})) {
+    if (!has_same_attributes(expected_device, {tensors1[i], tensors2[i], tensors3[i]})) {
       return false;
     }
 

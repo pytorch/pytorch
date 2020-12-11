@@ -689,7 +689,7 @@ class TestForeach(TestCase):
         tensors = [torch.tensor([1.1], dtype=torch.float, device=device),
                    torch.tensor([1], dtype=torch.long, device=device)]
         self.assertRaises(RuntimeError, lambda: torch._foreach_add(tensors, 1))
-    
+
     #
     # Ops with list
     #
