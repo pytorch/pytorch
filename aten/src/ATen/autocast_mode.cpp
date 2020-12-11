@@ -240,12 +240,12 @@ Therefore, for the moment, this is all copy pasted in from VariableTypeEverythin
     &WrapFunction<CastPolicy::POLICY, SIGNATURE, SIGNATURE, &FUNC>::type::call);
 
 #define KERNEL_UNBOXED_ONLY(FUNC, REGISTER_NAME, SIGNATURE, POLICY) \
-  m.impl_UNBOXED(TORCH_SELECTIVE_NAME("aten::" REGISTER_NAME), \
+  m.impl(TORCH_SELECTIVE_NAME("aten::" REGISTER_NAME), \
     &WrapFunction<CastPolicy::POLICY, SIGNATURE, SIGNATURE, &FUNC>::type::call);
 
 // Less-common but still useful case: redispatching to a function with a new signature (e.g. appending a dtype)
 #define KERNEL_UNBOXED_ONLY_DIFFERENT_REDISPATCH_SIGNATURE(REDISPATCH_FUNC, REGISTER_NAME, REGISTER_SIGNATURE, REDISPATCH_SIGNATURE, POLICY) \
-  m.impl_UNBOXED(TORCH_SELECTIVE_NAME("aten::" REGISTER_NAME), \
+  m.impl(TORCH_SELECTIVE_NAME("aten::" REGISTER_NAME), \
     &WrapFunction<CastPolicy::POLICY, REGISTER_SIGNATURE, REDISPATCH_SIGNATURE, &REDISPATCH_FUNC>::type::call);
 
 /*****************************************

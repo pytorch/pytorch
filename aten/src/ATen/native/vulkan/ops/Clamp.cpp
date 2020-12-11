@@ -167,10 +167,10 @@ Tensor& relu_(Tensor& self) {
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("clamp", TORCH_FN(clamp));
   m.impl("clamp_", TORCH_FN(clamp_));
-  m.impl_UNBOXED("hardtanh", hardtanh);
-  m.impl_UNBOXED("hardtanh_", hardtanh_);
-  m.impl_UNBOXED("relu", relu);
-  m.impl_UNBOXED("relu_", relu_);
+  m.impl("hardtanh", hardtanh);
+  m.impl("hardtanh_", hardtanh_);
+  m.impl("relu", relu);
+  m.impl("relu_", relu_);
 }
 
 #endif /* USE_VULKAN_API */

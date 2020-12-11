@@ -548,7 +548,7 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("view", TORCH_FN(at::native::vulkan::aten::reshape));
   m.impl("select.int", TORCH_FN(at::native::vulkan::aten::select));
   m.impl("transpose.int", TORCH_FN(at::native::vulkan::aten::transpose));
-  m.impl_UNBOXED("transpose_", at::native::vulkan::aten::transpose_);
+  m.impl("transpose_", at::native::vulkan::aten::transpose_);
   m.impl("view", TORCH_FN(at::native::vulkan::aten::view));
   m.impl("unsqueeze", TORCH_FN(at::native::vulkan::aten::unsqueeze));
   m.impl("empty.memory_format", at::native::vulkan::aten::empty);
@@ -569,11 +569,11 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("_cat", TORCH_FN(at::native::vulkan::aten::cat));
   m.impl("mul.Scalar", TORCH_FN(at::native::vulkan::aten::mul_scalar));
   m.impl("add.Scalar", TORCH_FN(at::native::vulkan::aten::add_scalar));
-  m.impl_UNBOXED(
+  m.impl(
       "convolution_overrideable", at::native::vulkan::aten::convolution);
   m.impl("hardtanh_", at::native::vulkan::aten::hardtanh_);
   m.impl("relu_", at::native::vulkan::aten::relu_);
-  m.impl_UNBOXED("add_.Tensor", at::native::vulkan::aten::add_);
+  m.impl("add_.Tensor", at::native::vulkan::aten::add_);
 }
 
 #endif /* USE_VULKAN_API */

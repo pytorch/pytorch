@@ -54,9 +54,9 @@ size_t getInstanceCount() {
 }
 
 TORCH_LIBRARY_IMPL(aten, CustomRNGKeyId, m) {
-  m.impl_UNBOXED("aten::random_.from",                 random_from_to);
-  m.impl_UNBOXED("aten::random_.to",                   random_to);
-  m.impl_UNBOXED("aten::random_",                      random_);
+  m.impl("aten::random_.from",                 random_from_to);
+  m.impl("aten::random_.to",                   random_to);
+  m.impl("aten::random_",                      random_);
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {

@@ -1909,7 +1909,7 @@ TEST(NewOperatorRegistrationTest, CppFunction) {
   m.def("fn3", [](const Tensor& x) { return x; });
   // These require explicit schema
   m.def("fn4(Tensor x) -> Tensor", CppFunction::makeFallthrough());
-  m.def("fn5(Tensor x) -> Tensor", CppFunction::makeUnboxedOnly(dummy_fn));
+  m.def("fn5(Tensor x) -> Tensor", CppFunction::makeFromUnboxedFunction(dummy_fn));
   m.def("fn6(Tensor x) -> Tensor", CppFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
 }
 

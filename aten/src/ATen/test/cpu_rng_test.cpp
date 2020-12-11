@@ -127,30 +127,30 @@ Tensor& bernoulli_out(Tensor& result, const Tensor& self, c10::optional<Generato
 
 TORCH_LIBRARY_IMPL(aten, CustomRNGKeyId, m) {
   // Random
-  m.impl_UNBOXED("random_.from",             random_from_to);
-  m.impl_UNBOXED("random_.to",               random_to);
-  m.impl_UNBOXED("random_",                  random_);
+  m.impl("random_.from",             random_from_to);
+  m.impl("random_.to",               random_to);
+  m.impl("random_",                  random_);
   // Normal
-  m.impl_UNBOXED("normal_",                  normal_);
-  m.impl_UNBOXED("normal.Tensor_float_out",  normal_Tensor_float_out);
-  m.impl_UNBOXED("normal.float_Tensor_out",  normal_float_Tensor_out);
-  m.impl_UNBOXED("normal.Tensor_Tensor_out", normal_Tensor_Tensor_out);
-  m.impl_UNBOXED("normal.Tensor_float",      normal_Tensor_float);
-  m.impl_UNBOXED("normal.float_Tensor",      normal_float_Tensor);
-  m.impl_UNBOXED("normal.Tensor_Tensor",     normal_Tensor_Tensor);
-  m.impl_UNBOXED("uniform_",                 uniform_);
+  m.impl("normal_",                  normal_);
+  m.impl("normal.Tensor_float_out",  normal_Tensor_float_out);
+  m.impl("normal.float_Tensor_out",  normal_float_Tensor_out);
+  m.impl("normal.Tensor_Tensor_out", normal_Tensor_Tensor_out);
+  m.impl("normal.Tensor_float",      normal_Tensor_float);
+  m.impl("normal.float_Tensor",      normal_float_Tensor);
+  m.impl("normal.Tensor_Tensor",     normal_Tensor_Tensor);
+  m.impl("uniform_",                 uniform_);
   // Cauchy
-  m.impl_UNBOXED("cauchy_",                  cauchy_);
+  m.impl("cauchy_",                  cauchy_);
   // LogNormal
-  m.impl_UNBOXED("log_normal_",              log_normal_);
+  m.impl("log_normal_",              log_normal_);
   // Geometric
-  m.impl_UNBOXED("geometric_",               geometric_);
+  m.impl("geometric_",               geometric_);
   // Exponential
-  m.impl_UNBOXED("exponential_",             exponential_);
+  m.impl("exponential_",             exponential_);
   // Bernoulli
-  m.impl_UNBOXED("bernoulli.out",            bernoulli_out);
-  m.impl_UNBOXED("bernoulli_.Tensor",        bernoulli_Tensor);
-  m.impl_UNBOXED("bernoulli_.float",         bernoulli_float);
+  m.impl("bernoulli.out",            bernoulli_out);
+  m.impl("bernoulli_.Tensor",        bernoulli_Tensor);
+  m.impl("bernoulli_.float",         bernoulli_float);
 }
 
 class RNGTest : public ::testing::Test {

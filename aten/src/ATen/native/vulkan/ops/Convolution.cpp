@@ -639,7 +639,7 @@ Tensor convolution(
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl_UNBOXED("convolution_overrideable", convolution);
+  m.impl("convolution_overrideable", convolution);
 }
 
 #endif /* USE_VULKAN_API */
