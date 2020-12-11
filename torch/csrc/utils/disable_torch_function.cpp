@@ -128,7 +128,7 @@ PyObject* THPModule_disable_torch_function(PyObject *self, PyObject *a) {
 }
 
 // Makes sure that we don't check for __torch_function__ on basic Python types
-static bool _is_basic_python_type(PyTypeObject *tp)
+static bool is_basic_python_type(PyTypeObject *tp)
 {
   return (
     /* Basic number types */
@@ -162,6 +162,7 @@ static bool _is_basic_python_type(PyTypeObject *tp)
 inline bool has_torch_function_attr(PyObject* obj) {
   auto attr = PyObject_GetAttrString(obj, "__torch_function__");
   return (
+    // NOLINTNEXTLINE(modernize-use-nullptr)
     attr != NULL &&
     attr != torch::disabled_torch_function);
 }
@@ -176,7 +177,7 @@ inline bool sequence_has_torch_function(PyObject* args) {
     PyObject* obj = PySequence_Fast_GET_ITEM(args, i);
     PyTypeObject *tp = Py_TYPE(obj);
     if (!THPVariable_CheckExact(tp) &&
-        !_is_basic_python_type(tp) &&
+        !is_basic_python_type(tp) &&
         has_torch_function_attr(obj))
       return true;
   }
@@ -190,9 +191,9 @@ auto check_has_torch_function(PyObject* obj) -> bool
   PyTypeObject *tp = Py_TYPE(obj);
   return (
     !THPVariable_CheckExact(tp) &&
-    !_is_basic_python_type(tp) &&
+    !is_basic_python_type(tp) &&
     torch::torch_function_enabled() &&
-    PyObject_GetAttrString(obj, "__torch_function__") != torch::disabled_torch_function
+    has_torch_function_attr(obj)
   );
 }
 } // namespace torch
