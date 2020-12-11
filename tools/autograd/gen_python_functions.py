@@ -228,8 +228,6 @@ def load_deprecated_signatures(
         opname = str(f.func.name.name.base)
         if f.func.is_out_fn():
             opname += '_out'
-        # TODO: remove HACK
-        # I think we want to differentiate inplace functions here.. but we currently don't for the arg parser
         if f.func.name.name.inplace and pyi:
             opname += '_'
         args = CppSignatureGroup.from_schema(f.func, method=False).signature.arguments()
