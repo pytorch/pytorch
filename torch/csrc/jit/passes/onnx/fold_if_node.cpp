@@ -45,12 +45,15 @@ static bool checkIfFold(Node* node, bool dynamic_axes) {
 
 static bool constantFoldingValue(Node* node) {
   auto cast_node = node->input()->node();
+  if (cast_node->kind() != onnx::Cast)
+    cast_node = node;
   auto prev_node = cast_node->input()->node();
   if (prev_node->kind() == onnx::If) {
     int cond = 1 - (int)constantFoldingValue(prev_node);
     Block* block = prev_node->blocks()[cond];
-    // we are assuming that the node will be Constant and
-    // that number of block outputs is 1.
+    // we are assuming that the number of block outputs is 1.
+    // TODO: make this more general by supporting the case
+    // of multiple outputs
     prev_node = block->outputs()[0]->node();
   }
 
