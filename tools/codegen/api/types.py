@@ -1,6 +1,6 @@
 from tools.codegen.model import *
 from dataclasses import dataclass
-from typing import Optional, Union, Sequence, Tuple, TypeVar
+from typing import Optional, Union, Sequence, Tuple, TypeVar, List
 
 _T = TypeVar('_T')
 
@@ -167,21 +167,25 @@ class CppSignature:
     # high-level structure of the arguments so you may find it easier to do
     # translations working with this representation.
     def argument_packs(self) -> Sequence[CppArgumentPack]:
-        grouped_args = cpp.group_arguments(self.func, method=self.method, faithful=self.faithful)
+        arguments: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
         if self.faithful:
-            # Faithful signatures will ungroup arguments into argument
-            # packs.
-            #
+            arguments.extend(self.func.arguments.non_out)
+            arguments.extend(self.func.arguments.out)
+        else:
+            arguments.extend(self.func.arguments.out)
+            arguments.extend(self.func.arguments.non_out)
+
+        if self.faithful:
             # After this, manually do overload disambiguation, by
             # dropping defaults from the faithful signature.  In
             # principle, we should be able to do this at some later
             # point in time with other overload disambiguation
             argument_packs = tuple(
-                cpp.argument_faithful(a).no_default() for a in grouped_args
+                cpp.argument_faithful(a, method=self.method).no_default() for a in arguments
             )
         else:
             argument_packs = tuple(
-                cpp.argument(a) for a in grouped_args
+                cpp.argument(a, method=self.method) for a in arguments
             )
         return argument_packs
 

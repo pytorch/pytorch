@@ -83,6 +83,9 @@ struct TORCH_API InferenceModule {
   void init();
 };
 
+TORCH_API void PrepareGraphForStaticRuntime(
+    std::shared_ptr<torch::jit::Graph> g);
+
 inline TORCH_API std::shared_ptr<InferenceModule> PrepareForStaticRuntime(
     const torch::jit::Module& m,
     InferenceModuleOptions opts = InferenceModuleOptions()) {

@@ -266,6 +266,7 @@ core_sources_full_mobile = [
 ]
 
 core_sources_full = core_sources_full_mobile + [
+    "torch/csrc/jit/runtime/static/fusion.cpp",
     "torch/csrc/jit/runtime/static/impl.cpp",
     "torch/csrc/jit/runtime/static/ops.cpp",
     "torch/csrc/jit/runtime/static/passes.cpp",
