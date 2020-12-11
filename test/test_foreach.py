@@ -724,7 +724,7 @@ class TestForeach(TestCase):
                         else:
                             if foreach_bin_op == torch._foreach_sub:
                                 with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bo"):
-                                   expected = [torch_bin_op(t, s) for t, s in zip(tensors, scalars)]
+                                    expected = [torch_bin_op(t, s) for t, s in zip(tensors, scalars)]
 
                                 res = foreach_bin_op(tensors, scalars)
                                 foreach_bin_op_(tensors, scalars)
