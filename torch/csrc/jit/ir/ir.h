@@ -1122,7 +1122,11 @@ struct Graph {
       Value* tup,
       Value* idx,
       const TypePtr& output_type);
-  TORCH_API Node* createTupleSlice(Value* tup, int64_t beg, int64_t end);
+  TORCH_API Node* createTupleSlice(
+      Value* tup,
+      int64_t beg,
+      int64_t step_size,
+      int64_t num_values);
   TORCH_API Node* createEnumName(Value* e);
   TORCH_API Node* createEnumValue(Value* e);
   TORCH_API Node* createList(
