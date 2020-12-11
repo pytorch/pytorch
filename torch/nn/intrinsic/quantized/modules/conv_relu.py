@@ -16,7 +16,7 @@ class ConvReLU1d(nnq.Conv1d):
         Same as torch.nn.quantized.Conv1d
 
     """
-    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU1d
+    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU1d  # type: ignore[assignment]
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
@@ -55,7 +55,7 @@ class ConvReLU2d(nnq.Conv2d):
         Same as torch.nn.quantized.Conv2d
 
     """
-    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU2d
+    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU2d  # type: ignore[assignment]
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
@@ -94,7 +94,7 @@ class ConvReLU3d(nnq.Conv3d):
     Attributes: Same as torch.nn.quantized.Conv3d
 
     """
-    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU3d
+    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU3d  # type: ignore[assignment]
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
