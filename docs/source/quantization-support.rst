@@ -172,10 +172,10 @@ Layers for the quantization-aware training
   * :func:`~torch.quantization.fuse_modules`
 
 * Functions for FX Graph Mode Quantization:
-  * :func:`~torch.quantization.quantize_fx.prepare_fx`: prepares a model for post training quantization
-  * :func:`~torch.quantization.quantize_fx.prepare_qat_fx`: prepares a model for quantization aware training
+  * :func:`~torch.quantization.quantize_fx.prepare_fx`: prepares a model in eval mode for post training quantization
+  * :func:`~torch.quantization.quantize_fx.prepare_qat_fx`: prepares a model in train mode for quantization aware training
   * :func:`~torch.quantization.quantize_fx.convert_fx`: converts a prepared (and calibrated/trained) model to a quantized model
-  * :func:`~torch.quantization.quantize_fx.fuse_fx`: This is not a function that automatically fuses module calls like Conv - BatchNorm into Conv. Currently only supports eval model.
+  * :func:`~torch.quantization.quantize_fx.fuse_fx`: This is a function that automatically fuses module calls like Conv - BatchNorm into Conv. Currently only supports eval model.
 
 * Quantization configurations
     * :class:`~torch.quantization.QConfig` — Quantization configuration class
