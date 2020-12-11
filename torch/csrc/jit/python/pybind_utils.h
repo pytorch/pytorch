@@ -715,8 +715,11 @@ inline IValue toIValue(
 
         if (!py::hasattr(obj, attrName.c_str())) {
           throw py::cast_error(c10::str(
-              "Tried to cast object to type ", type->repr_str(), " but object",
-              " was missing attribute ", attrName));
+              "Tried to cast object to type ",
+              type->repr_str(),
+              " but object",
+              " was missing attribute ",
+              attrName));
         }
 
         const auto& contained = py::getattr(obj, attrName.c_str());
