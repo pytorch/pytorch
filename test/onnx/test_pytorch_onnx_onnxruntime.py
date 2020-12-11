@@ -5632,7 +5632,7 @@ class TestONNXRuntime(unittest.TestCase):
         input_test = torch.rand(3, 100, 200), torch.rand(3, 200, 200)
         self.run_model(TransformModule(), [(input,), (input_test,)])
 
-    def get_features(images):
+    def get_features(self, images):
         s0, s1 = images.shape[-2:]
         features = [
             ('0', torch.rand(2, 256, s0 // 4, s1 // 4)),
