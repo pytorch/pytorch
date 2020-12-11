@@ -1463,14 +1463,13 @@ Tensor matrix_power(const Tensor& a, int64_t n) {
 }
 
 Tensor frobenius_norm(const Tensor& self) {
-  TORCH_CHECK(!self.is_complex(), "frobenius norm not supported for complex tensors");
   return at::norm(self);
 }
 
 Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
   // NOTE: As frobenius_norm_out is currently implemented, it will always produce a
   //    strided tensor result, even if the input is sparse.
-  auto options = self.options().layout(c10::Layout::Strided);
+  auto options = self.options().layout(c10::Layout::Strided).dtype(toValueType(self.scalar_type()));
   Tensor result = at::empty({0}, options);
   return at::native::frobenius_norm_out(result, self, dim, keepdim);
 }
@@ -1480,7 +1479,6 @@ Tensor &frobenius_norm_out(
     const Tensor& self,
     IntArrayRef dim,
     bool keepdim) {
-  TORCH_CHECK(!self.is_complex(), "frobenius norm not supported for complex tensors");
   TORCH_CHECK(
       dim.size() <= 2,
       "Expected at most 2 dimensions, but got ",
@@ -1524,7 +1522,7 @@ Tensor &nuclear_norm_out(Tensor& result, const Tensor& self, bool keepdim) {
 }
 
 Tensor nuclear_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
-  Tensor result = at::empty({0}, self.options());
+  Tensor result = at::empty({0}, self.options().dtype(toValueType(self.scalar_type())));
   return at::native::nuclear_norm_out(result, self, dim, keepdim);
 }
 
@@ -1679,7 +1677,7 @@ static Tensor& _linalg_norm_vector_out(Tensor& result, const Tensor& self, optio
       // when the input contains extreme values (like nan or +/-inf) or if the input
       // size is degenerate (like size(0), size(0, N), etc)
       case_was_overridden = true;
-      self_ = self.abs();
+      self_ = self_.abs();
       result_ = _norm_min_max(self_, ord, dim[0], keepdim);
     } else if ((self_.numel() == 0) && (ord < 0)) {
       // For negative orders with degenerate input sizes, at::norm's result does not
@@ -1698,7 +1696,7 @@ static Tensor& _linalg_norm_vector_out(Tensor& result, const Tensor& self, optio
   }
   if (!case_was_overridden) {
     if (opt_dtype.has_value()) {
-      result_ = at::norm(self, opt_ord, dim, keepdim, opt_dtype.value());
+      result_ = at::norm(self.to(opt_dtype.value()), opt_ord, dim, keepdim);
     } else {
       result_ = at::norm(self, opt_ord, dim, keepdim);
     }
@@ -1749,14 +1747,14 @@ static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, optional
 
 // Numerical or None norms
 Tensor linalg_norm(const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type()).device(self.device());
+  auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : toValueType(self.scalar_type())).device(self.device());
   Tensor result = at::empty({0}, options);
   return at::native::linalg_norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
 // Frobenius and nuclear norms
 Tensor linalg_norm(const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type()).device(self.device());
+  auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : toValueType(self.scalar_type())).device(self.device());
   Tensor result = at::empty({0}, options);
   return at::native::linalg_norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
 }
@@ -1781,7 +1779,8 @@ Tensor _linalg_cond_exception_helper(const Tensor& self) {
       "linalg_cond does not support yet this case.");
   }
   auto result_shape = IntArrayRef(self.sizes().cbegin(), self.sizes().cend()-2);
-  Tensor result = at::full(result_shape, INFINITY, self.options());
+  TensorOptions options = self.options().dtype(toValueType(self.scalar_type()));
+  Tensor result = at::full(result_shape, INFINITY, options);
   return result;
 }
 
@@ -1816,7 +1815,8 @@ Tensor _linalg_cond_helper(const Tensor& self, c10::variant<Scalar, std::string>
 // Return zero for each matrix in the batch
 Tensor _linalg_cond_empty_matrix(const Tensor& self, c10::ScalarType dtype) {
   auto result_shape = IntArrayRef(self.sizes().cbegin(), self.sizes().cend()-2);
-  return at::zeros(result_shape, self.options().dtype(dtype));
+  TensorOptions options = self.options().dtype(toValueType(self.scalar_type()));
+  return at::zeros(result_shape, options);
 }
 
 void _linalg_cond_check_ord(c10::variant<Scalar, std::string> ord_variant) {
@@ -1849,8 +1849,7 @@ Tensor linalg_cond(const Tensor& self, optional<Scalar> opt_ord) {
   // NumPy doesn't define the condition number for 0x0 matrices, we return 0.0 for such input
   if (self.numel() == 0) {
     auto real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
-    auto expected_dtype = std::abs(ord.toDouble()) == 2.0 ? real_dtype : self.scalar_type();
-    return _linalg_cond_empty_matrix(self, expected_dtype);
+    return _linalg_cond_empty_matrix(self, real_dtype);
   }
 
   // If ord == None or ord == ±2
@@ -1883,10 +1882,9 @@ Tensor& linalg_cond_out(Tensor& result, const Tensor& self, optional<Scalar> opt
   // the result is always real-valued, for other cases it is complex-valued for the complex-valued input.
   ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
   Scalar ord = opt_ord.has_value() ? opt_ord.value() : 2;
-  auto expected_dtype = std::abs(ord.toDouble()) == 2.0 ? real_dtype : self.scalar_type();
 
-  TORCH_CHECK(result.scalar_type() == expected_dtype,
-    "result dtype ", result.scalar_type(), " does not match the expected dtype ", expected_dtype);
+  TORCH_CHECK(result.scalar_type() == real_dtype,
+    "result dtype ", result.scalar_type(), " does not match the expected dtype ", real_dtype);
 
   Tensor result_tmp = at::linalg_cond(self, opt_ord);
   at::native::resize_output(result, result_tmp.sizes());
@@ -1916,8 +1914,9 @@ Tensor linalg_cond(const Tensor& self, std::string ord) {
 
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
 Tensor& linalg_cond_out(Tensor& result, const Tensor& self, std::string ord) {
-  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
-    "result dtype ", result.scalar_type(), " does not match the expected dtype ", self.scalar_type());
+  ScalarType real_type = toValueType(self.scalar_type());
+  TORCH_CHECK(result.scalar_type() == real_type,
+    "result dtype ", result.scalar_type(), " does not match the expected dtype ", real_type);
 
   Tensor result_tmp = at::linalg_cond(self, ord);
   at::native::resize_output(result, result_tmp.sizes());
