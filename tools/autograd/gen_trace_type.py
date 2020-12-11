@@ -126,11 +126,17 @@ def format_trace_inputs(f: NativeFunction) -> str:
         args = [cpp_args.argument for cpp_args in sig_group.signature.arguments()]
 
     if f.func.is_out_fn():
-        # *_out functions take the result as a first argument, but they are the
-        # last argument in the JIT schema.
+        # *_out functions take the result as a separate argument, but we don't want to
+        # trace that argument directly. Instead, we trace its TensorOptions.
+        # So first, we need to remove the out argument from the list of arguments to trace.
         # TODO: byte-for-byte compatible with old codegen behavior - it's incorrect to assume
         # there is only one output argument.
-        args = args[1:]
+        if f.use_c10_dispatcher.dispatcher_uses_new_style():
+            # for c10-full ops, the out argument is in the end
+            args = args[:-1]
+        else:
+            # for legacy ops, the out argument is in the beginning.
+            args = args[1:]
 
     trace_inputs = itertools.chain.from_iterable(dispatch_trace_input(arg) for arg in args)
 

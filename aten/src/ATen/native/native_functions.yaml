@@ -1485,6 +1485,7 @@
     SparseCPU, SparseCUDA: div_sparse_
 
 - func: div.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: full
   dispatch:
     CPU, CUDA: div_out
     SparseCPU, SparseCUDA: div_out_sparse_zerodim
@@ -6253,15 +6254,13 @@
 
 - func: eig.e(Tensor self, bool eigenvectors=False, *, Tensor(a!) e, Tensor(b!) v) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
   dispatch:
-    CPU: legacy::cpu::_th_eig_out
-    CUDA: eig_cuda_out
+    DefaultBackend: eig_out
 
 - func: eig(Tensor self, bool eigenvectors=False) -> (Tensor eigenvalues, Tensor eigenvectors)
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_eig
-    CUDA: eig_cuda
+    DefaultBackend: eig
 
 - func: svd.U(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
   dispatch:
@@ -6753,27 +6752,27 @@
   use_c10_dispatcher: full
   variants: method, function
 
-- func: quantile.scalar_out(Tensor self, float q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: quantile.scalar_out(Tensor self, float q, int? dim=None, str interpolation='linear', bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: quantile.scalar(Tensor self, float q, int? dim=None, bool keepdim=False) -> Tensor
+- func: quantile.scalar(Tensor self, float q, int? dim=None, str interpolation='linear', bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
 
-- func: quantile.out(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: quantile.out(Tensor self, Tensor q, int? dim=None, str interpolation='linear', bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: quantile(Tensor self, Tensor q, int? dim=None, bool keepdim=False) -> Tensor
+- func: quantile(Tensor self, Tensor q, int? dim=None, str interpolation='linear', bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
 
-- func: nanquantile.scalar_out(Tensor self, float q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: nanquantile.scalar_out(Tensor self, float q, int? dim=None, str interpolation='linear', bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: nanquantile.scalar(Tensor self, float q, int? dim=None, bool keepdim=False) -> Tensor
+- func: nanquantile.scalar(Tensor self, float q, int? dim=None, str interpolation='linear', bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
 
-- func: nanquantile.out(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: nanquantile.out(Tensor self, Tensor q, int? dim=None, str interpolation='linear', bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: nanquantile(Tensor self, Tensor q, int? dim=None, bool keepdim=False) -> Tensor
+- func: nanquantile(Tensor self, Tensor q, int? dim=None, str interpolation='linear', bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
 
