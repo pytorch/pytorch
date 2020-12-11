@@ -1380,11 +1380,9 @@ class TestTEFuser(JitTestCase):
             torch.mul,
             torch.eq,
             torch.ne,
-
-            # FIXME: fails with dtype=uint8, scalar=-1
-            # torch.ge,
-            # torch.lt,
-            # torch.gt,
+            torch.ge,
+            torch.lt,
+            torch.gt,
 
             # FIXME: segfaults on CPU backend
             # operator.__rshift__,
