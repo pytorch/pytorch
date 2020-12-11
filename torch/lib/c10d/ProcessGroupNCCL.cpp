@@ -1049,15 +1049,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   // Store references to outputs to be used by WorkNCCL::getFuture.
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
 
-  if (work->recordFunctionEndCallback_) {
-    // recordFunctionEndCallback_ is normally called in fininsh() function by
-    // base class, but since finish is not called by WorkNCCL, we run this
-    // function now.
-    // Note when can_profile is false, profilingTitle is not provided and so,
-    // recordFunctionEndCallback_ is not set.
-    work->recordFunctionEndCallback_();
-  }
-
   at::cuda::OptionalCUDAGuard gpuGuard;
 
   pre(ncclStreams_[key]);
@@ -1101,6 +1092,17 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   work->blockingWait_ = blockingWait_;
   work->opTimeout_ = opTimeout_;
   work->store_ = store_;
+
+  if (work->recordFunctionEndCallback_) {
+    // recordFunctionEndCallback_ is normally called in fininsh() function by
+    // base class, but since finish is not called by WorkNCCL, we schedule this
+    // function to be run when work is done. Note that addCallback() onto the
+    // Work's futureNCCL is not useful here, as it would just run the callback
+    // inline.
+    // Note when can_profile is false, profilingTitle is not provided and so,
+    // recordFunctionEndCallback_ is not set.
+    work->recordFunctionEndCallback_();
+  }
 
   if (asyncErrorHandling_) {
     workEnqueue(work);
