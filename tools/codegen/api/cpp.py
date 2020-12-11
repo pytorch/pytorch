@@ -23,10 +23,14 @@ from typing import Optional, Sequence, Union, List
 # BTW: policy on name collisions: we try not to have types with
 # collisions, but functions are fair game to collide
 
-def name(func: FunctionSchema) -> str:
+def name(func: FunctionSchema, *, faithful_name_for_out_overloads: bool = False) -> str:
     name = str(func.name.name)
     if func.is_out_fn():
-        name += '_out'
+        if faithful_name_for_out_overloads:
+            name += '_outf'
+        else:
+            name += '_out'
+
     return name
 
 # Translation of "value types" in JIT schema to C++ API type.  Value
@@ -252,14 +256,21 @@ def argument_not_this(
 
 def argument(
     a: Union[Argument, TensorOptionsArguments, SelfArgument],
+    *,
+    method: bool,
 ) -> Union[CppSingleArgumentPack, CppThisArgumentPack]:
     if isinstance(a, SelfArgument):
-        return CppThisArgumentPack(argument=a, type=argument_type(a.argument))
+        if method:
+            return CppThisArgumentPack(argument=a, type=argument_type(a.argument))
+        else:
+            return CppSingleArgumentPack(argument_not_this(a.argument))
     else:
         return CppSingleArgumentPack(argument_not_this(a))
 
 def argument_faithful(
     a: Union[Argument, TensorOptionsArguments, SelfArgument],
+    *,
+    method: bool,
 ) -> CppArgumentPack:
     if isinstance(a, TensorOptionsArguments):
         return CppTensorOptionsArgumentPack(
@@ -270,22 +281,4 @@ def argument_faithful(
             pin_memory=argument_not_this(a.pin_memory),
         )
     else:
-        return argument(a)
-
-def group_arguments(
-    func: FunctionSchema, *, method: bool
-) -> Sequence[Union[Argument, TensorOptionsArguments, SelfArgument]]:
-    args: List[Union[Argument, SelfArgument, TensorOptionsArguments]] = []
-    args.extend(func.arguments.out)
-    args.extend(func.arguments.pre_self_positional)
-    if func.arguments.self_arg is not None:
-        if method:
-            args.append(func.arguments.self_arg)
-        else:
-            args.append(func.arguments.self_arg.argument)
-    args.extend(func.arguments.post_self_positional)
-    args.extend(func.arguments.pre_tensor_options_kwarg_only)
-    if func.arguments.tensor_options is not None:
-        args.append(func.arguments.tensor_options)
-    args.extend(func.arguments.post_tensor_options_kwarg_only)
-    return args
+        return argument(a, method=method)
