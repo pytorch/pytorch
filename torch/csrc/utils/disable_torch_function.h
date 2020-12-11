@@ -9,7 +9,7 @@ namespace torch {
   bool torch_function_enabled();
   PyObject* disabled_torch_function_impl();
   void set_disabled_torch_function_impl(PyObject* value);
-  bool fast_has_torch_function(PyObject *obj);
+  bool check_has_torch_function(PyObject* obj);
 }
 
 PyObject* THPModule_isEnabledTorchFunction(PyObject* self, PyObject *unused);

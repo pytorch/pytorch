@@ -4,22 +4,31 @@
 #include <caffe2/core/scope_guard.h>
 #include <caffe2/core/timer.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
+#include <torch/csrc/jit/runtime/static/passes.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 namespace torch {
 namespace jit {
 
-namespace {
-void OptimizeGraph(std::shared_ptr<torch::jit::Graph>& graph) {
+void PrepareGraphForStaticRuntime(std::shared_ptr<torch::jit::Graph> graph) {
   Inline(*graph);
   ConstantPropagation(graph);
   Canonicalize(graph);
   ConstantPropagation(graph);
   RemoveTensorMutation(graph);
+  ConstantPropagation(graph);
+  EliminateDeadCode(graph);
+}
+
+namespace {
+void OptimizeGraph(std::shared_ptr<torch::jit::Graph>& graph) {
+  PrepareGraphForStaticRuntime(graph);
+  FuseInferenceOpsForSparseNN(graph);
   ConstantPropagation(graph);
 }
 
@@ -160,23 +169,30 @@ LivenessMap(const std::shared_ptr<torch::jit::Graph>& graph) {
 
 std::unordered_set<Value*> GetOptimizableValues(
     const std::shared_ptr<torch::jit::Graph>& graph) {
-  std::unordered_set<Value*> is_out_of_place;
-  std::unordered_set<Value*> is_not_out_of_place;
+  std::unordered_set<Value*> can_reuse;
+  // values used by unsupported ops (as either inputs or outputs)
+  // these need to be removed from "can_reuse" after analyzing all nodes
+  std::unordered_set<Value*> cannot_reuse;
   for (const auto& n : graph->nodes()) {
-    for (const auto& container : {n->inputs(), n->outputs()}) {
-      for (const auto& v : container) {
-        if (canRunOutOfPlace(n)) {
-          is_out_of_place.insert(v);
-        } else {
-          is_not_out_of_place.insert(v);
-        }
+    for (const auto& v : n->inputs()) {
+      if (canRunOutOfPlace(n) && canReuseInputs(n)) {
+        can_reuse.insert(v);
+      } else {
+        cannot_reuse.insert(v);
+      }
+    }
+    for (const auto& v : n->outputs()) {
+      if (canRunOutOfPlace(n) && canReuseOutputs(n)) {
+        can_reuse.insert(v);
+      } else {
+        cannot_reuse.insert(v);
       }
     }
   }
-  for (auto v : is_not_out_of_place) {
-    is_out_of_place.erase(v);
+  for (auto v : cannot_reuse) {
+    can_reuse.erase(v);
   }
-  return is_out_of_place;
+  return can_reuse;
 }
 
 size_t AssignRegisters(

@@ -127,46 +127,43 @@ PyObject* THPModule_disable_torch_function(PyObject *self, PyObject *a) {
   END_HANDLE_TH_ERRORS
 }
 
-/*
- * Reference: https://github.com/numpy/numpy/blob/f4c497c768e0646df740b647782df463825bfd27/numpy/core/src/common/get_attr_string.h#L42
- *
- * Specialized, stripped down version of PyObject_FastGetAttrString, which is
- * itself a stripped down version of PyObject_GetAttrString.
- */
+// Makes sure that we don't check for __torch_function__ on basic Python types
+static bool _is_basic_python_type(PyTypeObject *tp)
+{
+  return (
+    /* Basic number types */
+    tp == &PyBool_Type ||
+
+    tp == &PyLong_Type ||
+    tp == &PyFloat_Type ||
+    tp == &PyComplex_Type ||
+
+    /* Basic sequence types */
+    tp == &PyList_Type ||
+    tp == &PyTuple_Type ||
+    tp == &PyDict_Type ||
+    tp == &PySet_Type ||
+    tp == &PyFrozenSet_Type ||
+    tp == &PyUnicode_Type ||
+    tp == &PyBytes_Type ||
+
+    /* other builtins */
+    tp == &PySlice_Type ||
+    tp == Py_TYPE(Py_None) ||
+    tp == Py_TYPE(Py_Ellipsis) ||
+    tp == Py_TYPE(Py_NotImplemented) ||
+
+    PyModule_Check(tp) ||
+    /* sentinel to swallow trailing || */
+    false
+  );
+}
+
 inline bool has_torch_function_attr(PyObject* obj) {
-  constexpr char* name = "__torch_function__";
-  PyTypeObject *tp = Py_TYPE(obj);
-
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  PyObject *res = (PyObject *)NULL;
-
-  /* Attribute referenced by (char *)name */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  if (tp->tp_getattr != NULL) {
-      res = (*tp->tp_getattr)(obj, name);
-      // NOLINTNEXTLINE(modernize-use-nullptr)
-      if (res == NULL) {
-        PyErr_Clear();
-      }
-  }
-  /* Attribute referenced by (PyObject *)name */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  else if (tp->tp_getattro != NULL) {
-      PyObject *w = THPUtils_internString(name);
-      // NOLINTNEXTLINE(modernize-use-nullptr)
-      if (w != NULL) {
-        res = (*tp->tp_getattro)(obj, w);
-        // NOLINTNEXTLINE(modernize-use-nullptr)
-        if (res == NULL) {
-          PyErr_Clear();
-        }
-      }
-      Py_DECREF(w);
-  }
-
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  return (res != NULL &&
-          res != torch::disabled_torch_function);
+  auto attr = PyObject_GetAttrString(obj, "__torch_function__");
+  return (
+    attr != NULL &&
+    attr != torch::disabled_torch_function);
 }
 
 inline bool sequence_has_torch_function(PyObject* args) {
@@ -177,15 +174,28 @@ inline bool sequence_has_torch_function(PyObject* args) {
   Py_ssize_t n = PySequence_Fast_GET_SIZE(args);
   for (Py_ssize_t i = 0; i < n; i++) {
     PyObject* obj = PySequence_Fast_GET_ITEM(args, i);
-    if (!THPVariable_CheckExact(obj) &&
-        !PyFloat_CheckExact(obj) &&
-        !PyLong_CheckExact(obj) &&
+    PyTypeObject *tp = Py_TYPE(obj);
+    if (!THPVariable_CheckExact(tp) &&
+        !_is_basic_python_type(tp) &&
         has_torch_function_attr(obj))
       return true;
   }
 
   return false;
 }
+
+namespace torch {
+auto check_has_torch_function(PyObject* obj) -> bool
+{
+  PyTypeObject *tp = Py_TYPE(obj);
+  return (
+    !THPVariable_CheckExact(tp) &&
+    !_is_basic_python_type(tp) &&
+    torch::torch_function_enabled() &&
+    PyObject_GetAttrString(obj, "__torch_function__") != torch::disabled_torch_function
+  );
+}
+} // namespace torch
 
 PyObject* THPModule_has_torch_function(PyObject*, PyObject *arg) {
   if (PyTuple_CheckExact(arg) || PyList_CheckExact(arg)) {
@@ -210,14 +220,8 @@ PyObject* THPModule_has_torch_function(PyObject*, PyObject *arg) {
 
 PyObject* THPModule_object_has_torch_function(PyObject*, PyObject *obj) {
   // Special case `THPModule_has_torch_function` for the single arg case.
-
-  if (
-    !THPVariable_CheckExact(obj) &&
-    !PyFloat_CheckExact(obj) &&
-    !PyLong_CheckExact(obj) &&
-    torch::torch_function_enabled() &&
-    PyObject_GetAttrString(obj, "__torch_function__") != torch::disabled_torch_function
-  ) Py_RETURN_TRUE;
+  if (torch::check_has_torch_function(obj))
+    Py_RETURN_TRUE;
 
   Py_RETURN_FALSE;
 }
