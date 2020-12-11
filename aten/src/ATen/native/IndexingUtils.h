@@ -20,7 +20,9 @@ static std::vector<Tensor> expandTensors(const Tensor & self, torch::List<c10::o
   // If indices come in as ByteTensor or BoolTensor (masks), expand them into the equivalent indexing by LongTensors
   std::vector<Tensor> result;
   for (c10::optional<Tensor> index : indices) {
-    if (index->scalar_type() == kByte || index->scalar_type() == kBool) {
+    if (!index.has_value()) {
+      result.emplace_back();
+    } else if (index->scalar_type() == kByte || index->scalar_type() == kBool) {
       if (index->scalar_type() == kByte) {
         TORCH_WARN("indexing with dtype torch.uint8 is now deprecated," \
         " please use a dtype torch.bool instead.");

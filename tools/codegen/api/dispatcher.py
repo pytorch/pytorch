@@ -6,7 +6,7 @@ import tools.codegen.api.native as native
 import tools.codegen.local as local
 
 import itertools
-from typing import Sequence, Optional, Tuple
+from typing import Sequence, Optional, Tuple, List, Union
 
 # This file describes the translation of JIT schema to the dispatcher
 # API, the *unboxed* calling convention by which invocations through
@@ -52,7 +52,11 @@ def name(func: FunctionSchema) -> str:
     return cpp.name(func)
 
 def arguments(func: FunctionSchema) -> Tuple[DispatcherArgument, ...]:
-    return tuple(map(argument, itertools.chain(func.arguments.positional, func.arguments.kwarg_only, func.arguments.out)))
+    return tuple(map(argument, itertools.chain(
+        func.arguments.flat_positional,
+        func.arguments.flat_kwarg_only,
+        func.arguments.out
+    )))
 
 # Given a set of CppArguments in scope, return a sequence of dispatcher
 # expressions that translate the cpp API into dispatcher API
@@ -102,15 +106,17 @@ def cppargument_exprs(
         assert_never(a)
 
 def cpparguments_exprs(func: FunctionSchema, * , method: bool, api_is_faithful: bool) -> Sequence[DispatcherExpr]:
-    arguments = cpp.group_arguments(func, method=method, faithful=True)
+    arguments: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
+    arguments.extend(func.arguments.non_out)
+    arguments.extend(func.arguments.out)
 
     if api_is_faithful:
         argument_packs = tuple(
-            cpp.argument_faithful(a) for a in arguments
+            cpp.argument_faithful(a, method=method) for a in arguments
         )
     else:
         argument_packs = tuple(
-            cpp.argument(a) for a in arguments
+            cpp.argument(a, method=method) for a in arguments
         )
 
     return _cpparguments_exprs(argument_packs)
