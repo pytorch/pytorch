@@ -496,11 +496,15 @@ c10::impl::hacky_wrapper_for_legacy_signatures<
 
             cuda_guard = ""
             if is_generic_dispatch_key(self.dispatch_key) or is_cuda_dispatch_key(self.dispatch_key):
-                self_args = (a for a in f.func.arguments.positional if a.name == "self")
+                self_arg = [f.func.arguments.self_arg.argument] if f.func.arguments.self_arg is not None else []
 
                 # There is precedence for which argument we use to do
                 # device guard.  This describes the precedence order.
-                candidate_args = itertools.chain(self_args, f.func.arguments.out, f.func.arguments.positional)
+                candidate_args = itertools.chain(
+                    self_arg,
+                    f.func.arguments.out,
+                    f.func.arguments.flat_positional
+                )
 
                 # Only tensor like arguments are eligible
                 device_of = next((f'{a.name}' for a in candidate_args if a.type.is_tensor_like()), None)
@@ -632,8 +636,7 @@ class ComputeTensorMethod:
             return None
 
         assert not f.func.is_out_fn()
-        assert len(f.func.arguments.positional) > 0
-        assert sum(a.name == 'self' for a in f.func.arguments.positional) == 1
+        assert f.func.arguments.self_arg is not None
 
         name = cpp.name(f.func)
 
@@ -1005,7 +1008,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
 
     # These sets are used to conveniently test if an argument is a
     # kwarg-only or out argument
-    kwarg_only_set = set(a.name for a in f.func.arguments.kwarg_only)
+    kwarg_only_set = set(a.name for a in f.func.arguments.flat_kwarg_only)
     out_arg_set = set(a.name for a in f.func.arguments.out)
 
     sig_group = CppSignatureGroup.from_schema(f.func, method=False)
@@ -1027,7 +1030,8 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
     ]
 
     cpp_schema_order_types = [
-        cpp.argument(a).type for a in schema_order_jit_arguments
+        # NB: method here doesn't matter
+        cpp.argument(a, method=False).type for a in schema_order_jit_arguments
     ]
 
     cpp_returns = cpp.returns_type(f.func.returns)
