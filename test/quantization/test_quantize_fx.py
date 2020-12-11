@@ -28,6 +28,7 @@ from torch.quantization import (
     default_qconfig,
     default_dynamic_qconfig,
     default_qat_qconfig,
+    per_channel_dynamic_qconfig,
     float16_dynamic_qconfig,
     float_qparams_weight_only_qconfig,
     get_default_qconfig,
@@ -36,6 +37,7 @@ from torch.quantization import (
     prepare,
     prepare_qat,
     convert,
+    quantize_dynamic,
     default_placeholder_observer,
     PerChannelMinMaxObserver,
     QConfigDynamic,
@@ -57,6 +59,8 @@ from torch.testing._internal.common_quantization import (
 from torch.testing._internal.common_quantization import (
     LinearModelWithSubmodule,
     ResNetBase,
+    RNNDynamicModel,
+    RNNCellDynamicModel,
 )
 
 from torch.testing._internal.common_quantized import (
@@ -2106,6 +2110,49 @@ class TestQuantizeFxOps(QuantizationTestCase):
             self.checkGraphModuleNodes(m, expected_node=ns.call_module(nn.EmbeddingBag))
             # make sure it runs
             m(*inputs)
+
+    def _test_rnn_impl(self, qconfigs, M, module_type_strs, module_types, sample_input):
+        options = itertools.product(qconfigs, module_type_strs)
+        for qconfig, module_type_str in options:
+            model_eager = M(module_type_str).eval()
+            model_graph = copy.deepcopy(model_eager)
+            if torch.backends.quantized.engine == 'qnnpack' and \
+               qconfig is float16_dynamic_qconfig:
+                continue
+                # fp16 dynamic quant is not supported for qnnpack
+
+            eager_qconfig_dict = {x : qconfig for x in module_types}
+            model_eager = quantize_dynamic(model_eager, qconfig_spec=eager_qconfig_dict)
+
+            graph_qconfig_dict = {
+                "object_type": [
+                    (x, qconfig) for x in module_types
+                ]
+            }
+            model_graph = prepare_fx(model_graph, graph_qconfig_dict)
+            model_graph = convert_fx(model_graph)
+            self.assertEqual(model_eager(sample_input), model_graph(sample_input))
+            self.checkScriptable(model_graph, [[sample_input]], True)
+
+    def test_rnn_cell(self):
+        qconfigs = [per_channel_dynamic_qconfig, default_dynamic_qconfig, float16_dynamic_qconfig]
+        module_type_strs = ['LSTMCell', 'GRUCell', 'RNNTanh', 'RNNReLU']
+        module_types = [torch.nn.LSTMCell, torch.nn.GRUCell, torch.nn.RNNCell]
+        sample_input = torch.tensor([[100, -155],
+                                     [-155, 100],
+                                     [100, -155]], dtype=torch.float)
+        self._test_rnn_impl(qconfigs, RNNCellDynamicModel, module_type_strs, module_types, sample_input)
+
+    def test_rnn(self):
+        qconfigs = [per_channel_dynamic_qconfig, default_dynamic_qconfig, float16_dynamic_qconfig]
+        module_type_strs = ['LSTM']
+        module_types = [torch.nn.LSTM]
+        niter = 10
+        sample_input = torch.tensor([[100, -155],
+                                     [-155, 100],
+                                     [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1)
+        self._test_rnn_impl(qconfigs, RNNDynamicModel, module_type_strs, module_types, sample_input)
+
 
 class TestQuantizeFxModels(QuantizationTestCase):
     def _test_model_impl(
