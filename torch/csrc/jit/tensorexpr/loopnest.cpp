@@ -398,7 +398,11 @@ class DepTracker : public IRVisitor {
  public:
   std::vector<Tensor*> findUsedTensors(Tensor* tensor) {
     used_tensors.clear();
-    tensor->body()->accept(this);
+    if (tensor->body()) {
+      tensor->body()->accept(this);
+    } else {
+      tensor->ElementStmt()->accept(this);
+    }
     return used_tensors;
   }
 
@@ -504,6 +508,11 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
 
 Stmt* LoopNest::lowerToStmt(Tensor* t) {
   Stmt* body = t->ElementStmt();
+
+  // If this Tensor has no functional body, it already has its axes expanded.
+  if (nullptr == t->body()) {
+    return body;
+  }
 
   if (t->ndim() == 0 && t->reduce_ndim() == 0) {
     return body;
@@ -866,6 +875,63 @@ Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
   }
 
   return b;
+}
+
+class StmtDeleter : public IRMutator {
+ public:
+  StmtDeleter(const std::unordered_set<const Stmt*>& targets)
+      : targets_(targets) {}
+
+ private:
+  Stmt* mutate(const Block* v) override {
+    std::vector<Stmt*> stmts;
+
+    for (auto* s : v->stmts()) {
+      if (targets_.count(s) == 0) {
+        Stmt* ns = s->accept_mutator(this);
+        if (ns) {
+          stmts.push_back(Stmt::clone(ns));
+        }
+      }
+    }
+
+    return Block::make(stmts);
+  }
+
+  const std::unordered_set<const Stmt*>& targets_;
+};
+
+void LoopNest::eliminateDeadStores() {
+  using namespace analysis;
+  MemDependencyChecker checker(getInputBufs(), getOutputBufs());
+  root_stmt_->accept(&checker);
+
+  std::unordered_set<const Stmt*> deadStores;
+  std::vector<std::shared_ptr<AccessInfo>> outputAccesses;
+  for (auto* o : getOutputBufs()) {
+    outputAccesses.push_back(checker.output(o));
+  }
+
+  for (auto& info : checker.getHistory()) {
+    if (!info->isWrite()) {
+      continue;
+    }
+    bool found = false;
+
+    for (auto& output : outputAccesses) {
+      if (checker.dependsIndirectly(output, info)) {
+        found = true;
+        break;
+      }
+    }
+
+    if (!found) {
+      deadStores.insert(info->stmt());
+    }
+  }
+
+  StmtDeleter deleter(deadStores);
+  root_stmt_ = root_stmt_->accept_mutator(&deleter);
 }
 
 void LoopNest::prepareForCodegen() {

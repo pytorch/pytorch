@@ -79,6 +79,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'take', 'fill_',
     'exp', 'nonzero', 'mean', 'inverse', 'solve', 'linalg_cholesky', 'addcmul', 'addcdiv',
     'matrix_exp', 'linalg_eigh', 'cholesky_solve',
+    '_fft_c2c', '_fft_r2c',
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
@@ -702,8 +703,9 @@ def emit_body(declaration):
                         creation_meta = "CreationMeta::MULTI_OUTPUT_SAFE"
                     else:
                         creation_meta = "CreationMeta::MULTI_OUTPUT_NODE"
-                    rhs_value = ("as_view(/* base */ {}, /* output */ {}, /* is_differentiable */ true, "
-                                 "/* creation_meta */ {})").format(view_info, var, creation_meta)
+                    call += ("as_view(/* base */ {}, /* output */ {}, /* is_differentiable */ true, "
+                             "/* creation_meta */ {});\n").format(view_info, var, creation_meta)
+                    rhs_value = 'std::move({})'.format(var)
                 else:
                     call += emit_view_lambda()
                     creation_meta = "GradMode::is_enabled() ? CreationMeta::DEFAULT: CreationMeta::NO_GRAD_MODE"

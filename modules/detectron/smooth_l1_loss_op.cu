@@ -102,6 +102,7 @@ bool SmoothL1LossOp<float, CUDAContext>::RunOnDevice() {
      context_.cuda_stream()>>>(
           buff_.size(), buff_.data<float>(), buff_.mutable_data<float>(),
           beta_);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // Element-wise weighted smooth l1 loss (can be used to specify a per-element
   // loss weight)
@@ -164,6 +165,8 @@ bool SmoothL1LossGradientOp<float, CUDAContext>::RunOnDevice() {
      context_.cuda_stream()>>>(
          buff_.size(), buff_.data<float>(), d_Y_hat->mutable_data<float>(),
          d_avg_loss.data<float>(), scale_ / N, beta_);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   // Element-wise scale by alpha_in and alpha_out
   math::Mul<float, CUDAContext>(
       d_Y_hat->size(), d_Y_hat->data<float>(), alpha_in.data<float>(),
