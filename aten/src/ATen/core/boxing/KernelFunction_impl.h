@@ -31,7 +31,10 @@ inline bool KernelFunction::isFallthrough() const {
 }
 
 inline void KernelFunction::callBoxed(const OperatorHandle& opHandle, Stack* stack) const {
-    checkBoxedKernel(opHandle);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        boxed_kernel_func_ != nullptr,
+        "Tried to call KernelFunction::callBoxed() on an uninitialized KernelFunction."
+    );
     (*boxed_kernel_func_)(functor_.get(), opHandle, stack);
 }
 

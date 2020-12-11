@@ -501,7 +501,7 @@ public:
 
   template <typename Name, typename Func>
   Library& impl_UNBOXED(Name name, Func* raw_f) & {
-    static_assert(c10::guts::false_t<Name>(), ".impl_UNBOXED(...) was removed. Please use .impl(...) instead.");
+    static_assert(c10::guts::false_t<Func>(), ".impl_UNBOXED(...) was removed. Please use .impl(...) instead.");
   }
 
   // These overloads cover cases when a SelectiveStr (see Note [Selective build])
@@ -522,6 +522,10 @@ public:
   Library& impl(detail::SelectiveStr<false>, Func&& raw_f) & { return *this; }
   template <typename Dispatch, typename Func>
   Library& impl(detail::SelectiveStr<false>, Dispatch&& key, Func&& raw_f) & { return *this; }
+  template <typename Func>
+  Library& impl_UNBOXED(detail::SelectiveStr<false> name, Func* raw_f) & {
+    static_assert(c10::guts::false_t<Func>(), ".impl_UNBOXED(...) was removed. Please use .impl(...) instead.");
+  }
 
   template <typename Func>
   Library& impl(detail::SelectiveStr<true> name, Func&& raw_f) & {
@@ -530,6 +534,10 @@ public:
   template <typename Dispatch, typename Func>
   Library& impl(detail::SelectiveStr<true> name, Dispatch&& key, Func&& raw_f) & {
     return impl(name.operator const char*(), std::forward<Dispatch>(key), std::forward<Func>(raw_f));
+  }
+  template <typename Func>
+  Library& impl_UNBOXED(detail::SelectiveStr<true> name, Func* raw_f) & {
+    static_assert(c10::guts::false_t<Func>(), ".impl_UNBOXED(...) was removed. Please use .impl(...) instead.");
   }
 
   /// Register a fallback implementation for all operators which will be used
