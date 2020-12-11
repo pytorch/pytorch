@@ -231,8 +231,12 @@ class TestONNXRuntime(unittest.TestCase):
         model.eval()
 
         onnx_io = io.BytesIO()
+        if isinstance(inputs_list[0][-1], dict):
+            torch_onnx_input = inputs_list[0] + ({},)
+        else:
+            torch_onnx_input = inputs_list[0]
         # export to onnx with the first input
-        torch.onnx.export(model, inputs_list[0], onnx_io,
+        torch.onnx.export(model, torch_onnx_input, onnx_io,
                           do_constant_folding=do_constant_folding, opset_version=self.opset_version,
                           dynamic_axes=dynamic_axes, input_names=input_names, output_names=output_names)
         # validate the exported model with onnx runtime
@@ -5660,16 +5664,15 @@ class TestONNXRuntime(unittest.TestCase):
         images2 = torch.rand(2, 3, 80, 80)
         test_features = self.get_features(images2)
 
-        if features is not None and test_features is not None:
-            model = RPNModule()
-            model.eval()
-            model(images, features)
+        model = RPNModule()
+        model.eval()
+        model(images, features)
 
-            self.run_model(model, [(images, features), (images2, test_features)], tolerate_small_mismatch=True,
-                           input_names=["input1", "input2", "input3", "input4", "input5", "input6"],
-                           dynamic_axes={"input1": [0, 1, 2, 3], "input2": [0, 1, 2, 3],
-                                         "input3": [0, 1, 2, 3], "input4": [0, 1, 2, 3],
-                                         "input5": [0, 1, 2, 3], "input6": [0, 1, 2, 3]})
+        self.run_model(model, [(images, features), (images2, test_features)], tolerate_small_mismatch=True,
+                        input_names=["input1", "input2", "input3", "input4", "input5", "input6"],
+                        dynamic_axes={"input1": [0, 1, 2, 3], "input2": [0, 1, 2, 3],
+                                        "input3": [0, 1, 2, 3], "input4": [0, 1, 2, 3],
+                                        "input5": [0, 1, 2, 3], "input6": [0, 1, 2, 3]})
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_multi_scale_roi_align(self):
@@ -5721,15 +5724,14 @@ class TestONNXRuntime(unittest.TestCase):
         images2 = torch.rand(2, 3, 150, 150)
         test_features = self.get_features(images2)
 
-        if features is not None and test_features is not None:
-            model = RoiHeadsModule()
-            model.eval()
-            model(images, features)
+        model = RoiHeadsModule()
+        model.eval()
+        model(images, features)
 
-            self.run_model(model, [(images, features), (images2, test_features)], tolerate_small_mismatch=True,
-                           input_names=["input1", "input2", "input3", "input4", "input5", "input6"],
-                           dynamic_axes={"input1": [0, 1, 2, 3], "input2": [0, 1, 2, 3], "input3": [0, 1, 2, 3],
-                                         "input4": [0, 1, 2, 3], "input5": [0, 1, 2, 3], "input6": [0, 1, 2, 3]})
+        self.run_model(model, [(images, features), (images2, test_features)], tolerate_small_mismatch=True,
+                        input_names=["input1", "input2", "input3", "input4", "input5", "input6"],
+                        dynamic_axes={"input1": [0, 1, 2, 3], "input2": [0, 1, 2, 3], "input3": [0, 1, 2, 3],
+                                        "input4": [0, 1, 2, 3], "input5": [0, 1, 2, 3], "input6": [0, 1, 2, 3]})
 
 
 def make_test(name, base, layer, bidirectional, initial_state,
