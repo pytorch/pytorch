@@ -180,6 +180,14 @@ class Node:
         self._update_args_kwargs(self._args, map_arg(k, lambda x: x))  # type: ignore
 
     @property
+    def uses(self) -> Dict['Node', None]:
+        """
+        Return an ordered set (dict with Node keys and "don't care"
+        values) reperesenting this node's uses in the graph.
+        """
+        return self._uses
+
+    @property
     def all_input_nodes(self) -> List['Node']:
         """
         Return all Nodes that are inputs to this Node. This is equivalent to
@@ -228,7 +236,7 @@ class Node:
 
             The list of Nodes on which this change was made.
         """
-        to_process = list(self.users)
+        to_process = list(self.users) + list(self.uses)
         for use_node in to_process:
             def maybe_replace_node(n : Node) -> Node:
                 if n == self:
