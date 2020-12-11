@@ -1,4 +1,3 @@
-import itertools
 from dataclasses import dataclass
 from typing import Optional, Union, Sequence, Set, List, Tuple, Dict
 
@@ -582,8 +581,7 @@ def _cpp_signature(f: NativeFunction, *, method: bool = False) -> CppSignature:
     return CppSignatureGroup.from_schema(f.func, method=method).signature
 
 def has_tensor_options(f: NativeFunction) -> bool:
-    return any(filter(lambda a: isinstance(a, TensorOptionsArguments),
-                      cpp.group_arguments(f.func, method=False, faithful=True)))
+    return f.func.arguments.tensor_options is not None
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -727,15 +725,20 @@ def argument_type_str_pyi(t: Type, *, pyi_out_arg: bool = False) -> str:
 
 # Generates a PythonSignature that can be used for either .pyi or PythonArgParser codegen
 def signature(f: NativeFunction, *, method: bool = False, pyi: bool = False) -> PythonSignature:
-    # Use cpp api to gather TensorOptions fields from kwargs.
+    args: List[Argument] = []
+    args.extend(f.func.arguments.pre_self_positional)
     # Skip SelfArgument if this is method.
-    # Skip TensorOptionsArguments in C++ signature. Python side TensorOptions
+    if not method and f.func.arguments.self_arg is not None:
+        args.append(f.func.arguments.self_arg.argument)
+    args.extend(f.func.arguments.post_self_positional)
+    args.extend(f.func.arguments.pre_tensor_options_kwarg_only)
+    # Skip TensorOptionsArguments. Python side TensorOptions
     # arguments are created based on different rules - see below.
-    cpp_args = cpp.group_arguments(f.func, method=method, faithful=True)
-    args = tuple(a for a in cpp_args if isinstance(a, Argument))
+    args.extend(f.func.arguments.post_tensor_options_kwarg_only)
+    args.extend(f.func.arguments.out)
 
-    input_arg_set = set(a.name for a in f.func.arguments.positional)
-    kwarg_only_set = set(a.name for a in f.func.arguments.kwarg_only)
+    input_arg_set = set(a.name for a in f.func.arguments.flat_positional)
+    kwarg_only_set = set(a.name for a in f.func.arguments.flat_kwarg_only)
     out_arg_set = set(a.name for a in f.func.arguments.out)
 
     input_args = tuple(map(argument, filter(lambda a: a.name in input_arg_set, args)))
@@ -750,8 +753,7 @@ def signature(f: NativeFunction, *, method: bool = False, pyi: bool = False) -> 
     # to the original versions in the yaml, this recreation is a potential
     # source of drift between eager and JIT. Pull this logic out to a shared place.
 
-    has_tensor_input_arg = any(a.type.is_tensor_like()
-                               for a in itertools.chain(f.func.arguments.positional, f.func.arguments.kwarg_only))
+    has_tensor_input_arg = any(a.type.is_tensor_like() for a in f.func.arguments.flat_non_out)
     if any(a.name == 'requires_grad' for a in f.func.schema_order_arguments()):
         raise ValueError('argument named requires_grad is reserved, should not explicitly add it in the schema')
 
