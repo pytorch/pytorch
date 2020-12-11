@@ -819,12 +819,7 @@ class TestBinaryUfuncs(TestCase):
                 if a == 0:
                     continue
 
-                if a_t.is_floating_point():
-                    self.assertEqual(5 / a, scripted_rdiv_scalar(a_t))
-                else:
-                    with self.assertRaises(RuntimeError):
-                        scripted_rdiv_scalar(a_t)
-
+                self.assertEqual(5 / a, scripted_rdiv_scalar(a_t))
 
                 # Handles Issue 45199 (see comment above)
                 if a_t.is_floating_point():

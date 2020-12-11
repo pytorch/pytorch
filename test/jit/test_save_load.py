@@ -360,16 +360,11 @@ class TestSaveLoad(JitTestCase):
                 else:
                     fn_result = self._try_fn(fn, a, b)
 
-                if not a.is_floating_point():
-                    # NOTE: Torchscript rewrites the module forward into
-                    #   torch.reciprocal(a) * b, but torch.reciprocal is
-                    #   implemented for integer dtypes.
-                    self.assertTrue(m_result, Exception)
-                    self.assertTrue('"reciprocal_cpu" not implemented for' in str(m_result))
-                elif isinstance(m_result, Exception):
-                    self.assertTrue(fn_result, Exception)
+                if isinstance(m_result, Exception):
+                    self.assertTrue(isinstance(fn_result, Exception))
                 else:
-                    self.assertEqual(m_result, fn_result)
+                    if fn is torch.div or a.is_floating_point():
+                        self.assertEqual(m_result, fn_result)
 
             if isinstance(b, float):
                 _helper(v3_module_float, historic_div_scalar_float_reciprocal)
