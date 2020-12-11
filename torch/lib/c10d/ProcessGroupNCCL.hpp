@@ -110,7 +110,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     bool finishedGPUExecution();
 
     // Get a Future object that will be marked as completed internally.
-    // It actually returns a FutureNCCL object which is a sub class Future.
+    // It actually returns a CUDAFuture object which is a sub class of Future.
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
     // Helper function that sets an exception_ptr on the WorkNCCL object.
