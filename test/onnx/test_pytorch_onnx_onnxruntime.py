@@ -5669,10 +5669,10 @@ class TestONNXRuntime(unittest.TestCase):
         model(images, features)
 
         self.run_model(model, [(images, features), (images2, test_features)], tolerate_small_mismatch=True,
-                        input_names=["input1", "input2", "input3", "input4", "input5", "input6"],
-                        dynamic_axes={"input1": [0, 1, 2, 3], "input2": [0, 1, 2, 3],
-                                        "input3": [0, 1, 2, 3], "input4": [0, 1, 2, 3],
-                                        "input5": [0, 1, 2, 3], "input6": [0, 1, 2, 3]})
+                       input_names=["input1", "input2", "input3", "input4", "input5", "input6"],
+                       dynamic_axes={"input1": [0, 1, 2, 3], "input2": [0, 1, 2, 3],
+                                     "input3": [0, 1, 2, 3], "input4": [0, 1, 2, 3],
+                                     "input5": [0, 1, 2, 3], "input6": [0, 1, 2, 3]})
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_multi_scale_roi_align(self):
@@ -5729,9 +5729,9 @@ class TestONNXRuntime(unittest.TestCase):
         model(images, features)
 
         self.run_model(model, [(images, features), (images2, test_features)], tolerate_small_mismatch=True,
-                        input_names=["input1", "input2", "input3", "input4", "input5", "input6"],
-                        dynamic_axes={"input1": [0, 1, 2, 3], "input2": [0, 1, 2, 3], "input3": [0, 1, 2, 3],
-                                        "input4": [0, 1, 2, 3], "input5": [0, 1, 2, 3], "input6": [0, 1, 2, 3]})
+                       input_names=["input1", "input2", "input3", "input4", "input5", "input6"],
+                       dynamic_axes={"input1": [0, 1, 2, 3], "input2": [0, 1, 2, 3], "input3": [0, 1, 2, 3],
+                                     "input4": [0, 1, 2, 3], "input5": [0, 1, 2, 3], "input6": [0, 1, 2, 3]})
 
 
 def make_test(name, base, layer, bidirectional, initial_state,
