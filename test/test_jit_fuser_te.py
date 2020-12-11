@@ -490,7 +490,8 @@ class TestTEFuser(JitTestCase):
             try:
                 t = torch.jit.trace(fn, (x, y, z))
                 self.assertEqual(ref, t(x, y, z))
-                self.assertAllFused(t.graph_for(x, y, z))
+                if dtype != torch.uint8:
+                    self.assertAllFused(t.graph_for(x, y, z))
             except Exception as e:
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), op.__name__, device])
@@ -528,7 +529,8 @@ class TestTEFuser(JitTestCase):
             try:
                 t = torch.jit.trace(fn, (x, y, z))
                 self.assertEqual(ref, t(x, y, z))
-                self.assertAllFused(t.graph_for(x, y, z))
+                if dtype != torch.uint8:
+                    self.assertAllFused(t.graph_for(x, y, z))
             except Exception as e:
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), op.__name__, device])
@@ -1275,7 +1277,8 @@ class TestTEFuser(JitTestCase):
             try:
                 t = torch.jit.trace(fn, (x,))
                 torch.testing.assert_allclose(ref, t(x))
-                self.assertAllFused(t.graph_for(x))
+                if dtype != torch.uint8:
+                    self.assertAllFused(t.graph_for(x))
             except Exception as e:
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), op.__name__, device, str(size)])
@@ -1344,7 +1347,8 @@ class TestTEFuser(JitTestCase):
                 t = torch.jit.trace(fn, (x, y))
                 self.assertEqual(ref, t(x, y))
                 if op not in fp_only or dtype.is_floating_point:
-                    self.assertAllFused(t.graph_for(x, y))
+                    if dtype != torch.uint8:
+                        self.assertAllFused(t.graph_for(x, y))
             except Exception as e:
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), op.__name__, device])
@@ -1403,7 +1407,8 @@ class TestTEFuser(JitTestCase):
             try:
                 t = torch.jit.trace(fn, (x))
                 self.assertEqual(ref, t(x))
-                self.assertAllFused(t.graph_for(x))
+                if dtype != torch.uint8:
+                    self.assertAllFused(t.graph_for(x))
             except Exception as e:
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), op.__name__, device])
@@ -1487,7 +1492,8 @@ class TestTEFuser(JitTestCase):
             try:
                 t = torch.jit.trace(fn, (x))
                 self.assertEqual(ref, t(x))
-                self.assertAllFused(t.graph_for(x))
+                if dtype != torch.uint8:
+                    self.assertAllFused(t.graph_for(x))
             except Exception as e:
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), op.__name__, device])
@@ -1529,7 +1535,8 @@ class TestTEFuser(JitTestCase):
             try:
                 t = torch.jit.trace(fn, (x, y, z))
                 self.assertEqual(ref, t(x, y, z))
-                self.assertAllFused(t.graph_for(x, y, z))
+                if dtype != torch.uint8:
+                    self.assertAllFused(t.graph_for(x, y, z))
             except Exception as e:
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), op.__name__, device])
@@ -1570,7 +1577,8 @@ class TestTEFuser(JitTestCase):
             try:
                 t = torch.jit.trace(fn, (x, y, z))
                 self.assertEqual(ref, t(x, y, z))
-                self.assertAllFused(t.graph_for(x, y, z))
+                if dtype != torch.uint8:
+                    self.assertAllFused(t.graph_for(x, y, z))
             except Exception as e:
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), op.__name__, device])
@@ -1612,7 +1620,8 @@ class TestTEFuser(JitTestCase):
             try:
                 t = torch.jit.trace(fn, (cond, x, y))
                 self.assertEqual(ref, t(cond, x, y))
-                self.assertAllFused(t.graph_for(cond, x, y))
+                if dtype != torch.uint8:
+                    self.assertAllFused(t.graph_for(cond, x, y))
             except Exception as e:
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), op.__name__, device])
@@ -1624,6 +1633,7 @@ class TestTEFuser(JitTestCase):
             return x * x + x
 
         unsupported_dtypes = [
+            torch.uint8,
             torch.bfloat16,
             torch.complex32,
             torch.complex64,
