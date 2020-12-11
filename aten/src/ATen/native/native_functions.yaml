@@ -230,6 +230,7 @@
     DefaultBackend: abs_
 
 - func: abs.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: abs_out
 
@@ -367,6 +368,7 @@
 
 - func: add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
+  structured_delegate: add.out
   variants: function, method
   dispatch:
     CPU, CUDA: add
@@ -376,12 +378,15 @@
 - func: add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
+  structured_delegate: add.out
   dispatch:
     CPU, CUDA: add_
     SparseCPU, SparseCUDA: add_sparse_
     MkldnnCPU: mkldnn_add_
 
 - func: add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: add_out
     SparseCPU: add_out_sparse_cpu
@@ -1115,6 +1120,7 @@
 - func: contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> Tensor(a)
   use_c10_dispatcher: full
   variants: method
+  manual_cpp_binding: True
 
 - func: convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -1481,6 +1487,7 @@
     SparseCPU, SparseCUDA: div_sparse_
 
 - func: div.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: full
   dispatch:
     CPU, CUDA: div_out
     SparseCPU, SparseCUDA: div_out_sparse_zerodim
@@ -2057,6 +2064,30 @@
   dispatch:
     CPU: _fft_mkl
     CUDA: _fft_cufft
+
+# Real to complex forward FFT
+- func: _fft_r2c(Tensor self, int[] dim, int normalization, bool onesided) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: _fft_r2c_mkl
+    CUDA: _fft_r2c_cufft
+
+# Complex to real inverse FFT
+- func: _fft_c2r(Tensor self, int[] dim, int normalization, int last_dim_size) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: _fft_c2r_mkl
+    CUDA: _fft_c2r_cufft
+
+# Standard complex to complex FFT (forward or backward)
+- func: _fft_c2c(Tensor self, int[] dim, int normalization, bool forward) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: _fft_c2c_mkl
+    CUDA: _fft_c2c_cufft
 
 - func: _cufft_get_plan_cache_size(int device_index) -> int
   use_c10_dispatcher: full
@@ -6225,15 +6256,13 @@
 
 - func: eig.e(Tensor self, bool eigenvectors=False, *, Tensor(a!) e, Tensor(b!) v) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
   dispatch:
-    CPU: legacy::cpu::_th_eig_out
-    CUDA: eig_cuda_out
+    DefaultBackend: eig_out
 
 - func: eig(Tensor self, bool eigenvectors=False) -> (Tensor eigenvalues, Tensor eigenvectors)
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_eig
-    CUDA: eig_cuda
+    DefaultBackend: eig
 
 - func: svd.U(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
   dispatch:
@@ -6725,27 +6754,27 @@
   use_c10_dispatcher: full
   variants: method, function
 
-- func: quantile.scalar_out(Tensor self, float q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: quantile.scalar_out(Tensor self, float q, int? dim=None, str interpolation='linear', bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: quantile.scalar(Tensor self, float q, int? dim=None, bool keepdim=False) -> Tensor
+- func: quantile.scalar(Tensor self, float q, int? dim=None, str interpolation='linear', bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
 
-- func: quantile.out(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: quantile.out(Tensor self, Tensor q, int? dim=None, str interpolation='linear', bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: quantile(Tensor self, Tensor q, int? dim=None, bool keepdim=False) -> Tensor
+- func: quantile(Tensor self, Tensor q, int? dim=None, str interpolation='linear', bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
 
-- func: nanquantile.scalar_out(Tensor self, float q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: nanquantile.scalar_out(Tensor self, float q, int? dim=None, str interpolation='linear', bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: nanquantile.scalar(Tensor self, float q, int? dim=None, bool keepdim=False) -> Tensor
+- func: nanquantile.scalar(Tensor self, float q, int? dim=None, str interpolation='linear', bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
 
-- func: nanquantile.out(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: nanquantile.out(Tensor self, Tensor q, int? dim=None, str interpolation='linear', bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: nanquantile(Tensor self, Tensor q, int? dim=None, bool keepdim=False) -> Tensor
+- func: nanquantile(Tensor self, Tensor q, int? dim=None, str interpolation='linear', bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
 
