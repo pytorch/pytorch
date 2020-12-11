@@ -24,7 +24,7 @@ static bool checkIfFold(Node* node, bool dynamic_axes) {
     return false;
   auto prev_node = cast_node->input()->node();
   
-  Node* compare_node;
+  Node* compare_node = nullptr;
   if (prev_node->kind() == onnx::Not || prev_node->kind() == onnx::Identity) {
     compare_node = prev_node->input()->node();
   } else {
@@ -64,7 +64,7 @@ static bool constantFoldingValue(Node* node) {
   }
 
   if (prev_node->kind() == onnx::Constant) {
-    const auto val = prev_node->t(attr::value);
+    const at::Tensor val = prev_node->t(attr::value);
     return at::is_nonzero(val);
   }
 
@@ -74,19 +74,19 @@ static bool constantFoldingValue(Node* node) {
     return at::is_nonzero(val);
   }
 
-  Node* compare_node;
+  Node* compare_node = nullptr;
   if (prev_node->kind() == onnx::Not) {
     compare_node = prev_node->input()->node();
   } else if (cast_node->inputs().size() > 0) {
     compare_node = cast_node->input()->node();
   }
-
+  TORCH_INTERNAL_ASSERT(compare_node != nullptr);
   ScalarTypeAnalysisNodeForONNX(compare_node);
   std::vector<at::Tensor> inputs;
   for (size_t i = 0; i < compare_node->inputs().size(); i++) {
     auto input_node = compare_node->inputs()[i]->node();
     if (input_node->kind() == onnx::Constant) {
-      const auto val = input_node->t(attr::value);
+      const at::Tensor val = input_node->t(attr::value);
       inputs.push_back(val);
     } else { // input_node is either onnx::Size or onnx::ReduceProd
       auto shape_node = input_node->input()->node();
@@ -179,29 +179,29 @@ static void foldIfNode(Block* b, bool dynamic_axes) {
         Block* then_block = it->blocks()[0];
         Block* else_block = it->blocks()[1];
         Block* block = else_block;
-        if (constantFoldingValue(if_node)) {
+        if (constantFoldingValue(if_node))
           block = then_block;
 
-          std::vector<Node*> nodes_in_valid_path;
-          for (auto* valid_node : block->nodes()) {
-            nodes_in_valid_path.push_back(valid_node);
-          }
-          Node* cur = if_node;
-          for (auto* valid_node : nodes_in_valid_path) {
-            valid_node->moveAfter(cur);
-            cur = valid_node;
-          }
-          for (size_t i = 0; i < block->return_node()->inputs().size(); ++i) {
-            if_node->outputs()[i]->replaceAllUsesWith(
-                block->return_node()->inputs()[i]);
-          }
-          it->removeAllInputs();
-          it.destroyCurrent();
+        std::vector<Node*> nodes_in_valid_path;
+        for (auto* valid_node : block->nodes()) {
+          nodes_in_valid_path.push_back(valid_node);
         }
+        Node* cur = if_node;
+        for (auto* valid_node : nodes_in_valid_path) {
+          valid_node->moveAfter(cur);
+          cur = valid_node;
+        }
+        for (size_t i = 0; i < block->return_node()->inputs().size(); ++i) {
+          if_node->outputs()[i]->replaceAllUsesWith(
+              block->return_node()->inputs()[i]);
+        }
+        it->removeAllInputs();
+        it.destroyCurrent();
       }
     }
   }
 }
+
 
   void FoldIfONNX(Block * b, bool dynamic_axes) {
     foldIfNode(b, dynamic_axes);
