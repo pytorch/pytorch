@@ -73,7 +73,7 @@ class NativeFunction:
     func: 'FunctionSchema'
 
     # Corresponds to the 'use_c10_dispatcher' field.  The default
-    # is 'with_codegenerated_unboxing_wrapper'
+    # is 'full'
     use_c10_dispatcher: UseC10Dispatcher
 
     # Whether or not to omit automatic generation of a DeviceGuard
