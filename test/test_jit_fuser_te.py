@@ -1211,7 +1211,6 @@ class TestTEFuser(JitTestCase):
         else:
             return v.to(dtype)
 
-    @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")
     def test_unary_ops(self):
         def apply(fn):
             return lambda x: fn(x)
@@ -1694,13 +1693,14 @@ class TestTEFuser(JitTestCase):
         t = torch.rand(8, dtype=torch.float, device='cuda')
         scripted = self.checkScript(eager, (t, t, t, t, 0.1))
 
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_chunk_mul_one(self):
-        def eager(x):
-            z, y, w = torch.chunk(x, 3, -1)
-            return z * 3, y, w
-        x = torch.rand(64, 1, 3072, dtype=torch.float, device='cuda')
-        script = self.checkScript(eager, (x,))
+        for device in self.devices:
+            def eager(x):
+                z, y, w = torch.chunk(x, 3, -1)
+                return z * 3, y, w
+            x = torch.rand(64, 1, 3072, dtype=torch.float, device=device)
+            z, y, w = eager(x)
+            script = self.checkScript(eager, (x,))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_eq_unsqueeze_type_as(self):
