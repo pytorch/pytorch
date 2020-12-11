@@ -129,6 +129,71 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                 ort_outs = run_ort(ort_sess, test_input)
                 ort_compare_with_pytorch(ort_outs, output, rtol, atol)
 
+def _init_test_generalized_rcnn_transform():
+    min_size = 100
+    max_size = 200
+    image_mean = [0.485, 0.456, 0.406]
+    image_std = [0.229, 0.224, 0.225]
+    transform = GeneralizedRCNNTransform(min_size, max_size, image_mean, image_std)
+    return transform
+
+def _init_test_rpn():
+    anchor_sizes = ((32,), (64,), (128,), (256,), (512,))
+    aspect_ratios = ((0.5, 1.0, 2.0),) * len(anchor_sizes)
+    rpn_anchor_generator = AnchorGenerator(anchor_sizes, aspect_ratios)
+    out_channels = 256
+    rpn_head = RPNHead(out_channels, rpn_anchor_generator.num_anchors_per_location()[0])
+    rpn_fg_iou_thresh = 0.7
+    rpn_bg_iou_thresh = 0.3
+    rpn_batch_size_per_image = 256
+    rpn_positive_fraction = 0.5
+    rpn_pre_nms_top_n = dict(training=2000, testing=1000)
+    rpn_post_nms_top_n = dict(training=2000, testing=1000)
+    rpn_nms_thresh = 0.7
+
+    rpn = RegionProposalNetwork(
+        rpn_anchor_generator, rpn_head,
+        rpn_fg_iou_thresh, rpn_bg_iou_thresh,
+        rpn_batch_size_per_image, rpn_positive_fraction,
+        rpn_pre_nms_top_n, rpn_post_nms_top_n, rpn_nms_thresh)
+    return rpn
+
+def _init_test_roi_heads_faster_rcnn():
+    out_channels = 256
+    num_classes = 91
+
+    box_fg_iou_thresh = 0.5
+    box_bg_iou_thresh = 0.5
+    box_batch_size_per_image = 512
+    box_positive_fraction = 0.25
+    bbox_reg_weights = None
+    box_score_thresh = 0.05
+    box_nms_thresh = 0.5
+    box_detections_per_img = 100
+
+    box_roi_pool = ops.MultiScaleRoIAlign(
+        featmap_names=['0', '1', '2', '3'],
+        output_size=7,
+        sampling_ratio=2)
+
+    resolution = box_roi_pool.output_size[0]
+    representation_size = 1024
+    box_head = TwoMLPHead(
+        out_channels * resolution ** 2,
+        representation_size)
+
+    representation_size = 1024
+    box_predictor = FastRCNNPredictor(
+        representation_size,
+        num_classes)
+
+    roi_heads = RoIHeads(
+        box_roi_pool, box_head, box_predictor,
+        box_fg_iou_thresh, box_bg_iou_thresh,
+        box_batch_size_per_image, box_positive_fraction,
+        bbox_reg_weights,
+        box_score_thresh, box_nms_thresh, box_detections_per_img)
+    return roi_heads
 
 class TestONNXRuntime(unittest.TestCase):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
@@ -5540,12 +5605,12 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_resize_images(self):
         class TransformModule(torch.nn.Module):
-            def __init__(self_module):
-                super(TransformModule, self_module).__init__()
-                self_module.transform = self._init_test_generalized_rcnn_transform()
+            def __init__(self):
+                super(TransformModule, self).__init__()
+                self.transform = _init_test_generalized_rcnn_transform()
 
-            def forward(self_module, images):
-                return self_module.transform.resize(images, None)[0]
+            def forward(self, images):
+                return self.transform.resize(images, None)[0]
 
         input = torch.rand(3, 10, 20)
         input_test = torch.rand(3, 100, 150)
@@ -5556,84 +5621,18 @@ class TestONNXRuntime(unittest.TestCase):
     def test_transform_images(self):
 
         class TransformModule(torch.nn.Module):
-            def __init__(self_module):
-                super(TransformModule, self_module).__init__()
-                self_module.transform = self._init_test_generalized_rcnn_transform()
+            def __init__(self):
+                super(TransformModule, self).__init__()
+                self.transform = _init_test_generalized_rcnn_transform()
 
-            def forward(self_module, images):
-                return self_module.transform(images)[0].tensors
+            def forward(self, images):
+                return self.transform(images)[0].tensors
 
         input = torch.rand(3, 100, 200), torch.rand(3, 200, 200)
         input_test = torch.rand(3, 100, 200), torch.rand(3, 200, 200)
         self.run_model(TransformModule(), [(input,), (input_test,)])
 
-    def _init_test_generalized_rcnn_transform(self):
-        min_size = 100
-        max_size = 200
-        image_mean = [0.485, 0.456, 0.406]
-        image_std = [0.229, 0.224, 0.225]
-        transform = GeneralizedRCNNTransform(min_size, max_size, image_mean, image_std)
-        return transform
-
-    def _init_test_rpn(self):
-        anchor_sizes = ((32,), (64,), (128,), (256,), (512,))
-        aspect_ratios = ((0.5, 1.0, 2.0),) * len(anchor_sizes)
-        rpn_anchor_generator = AnchorGenerator(anchor_sizes, aspect_ratios)
-        out_channels = 256
-        rpn_head = RPNHead(out_channels, rpn_anchor_generator.num_anchors_per_location()[0])
-        rpn_fg_iou_thresh = 0.7
-        rpn_bg_iou_thresh = 0.3
-        rpn_batch_size_per_image = 256
-        rpn_positive_fraction = 0.5
-        rpn_pre_nms_top_n = dict(training=2000, testing=1000)
-        rpn_post_nms_top_n = dict(training=2000, testing=1000)
-        rpn_nms_thresh = 0.7
-
-        rpn = RegionProposalNetwork(
-            rpn_anchor_generator, rpn_head,
-            rpn_fg_iou_thresh, rpn_bg_iou_thresh,
-            rpn_batch_size_per_image, rpn_positive_fraction,
-            rpn_pre_nms_top_n, rpn_post_nms_top_n, rpn_nms_thresh)
-        return rpn
-
-    def _init_test_roi_heads_faster_rcnn(self):
-        out_channels = 256
-        num_classes = 91
-
-        box_fg_iou_thresh = 0.5
-        box_bg_iou_thresh = 0.5
-        box_batch_size_per_image = 512
-        box_positive_fraction = 0.25
-        bbox_reg_weights = None
-        box_score_thresh = 0.05
-        box_nms_thresh = 0.5
-        box_detections_per_img = 100
-
-        box_roi_pool = ops.MultiScaleRoIAlign(
-            featmap_names=['0', '1', '2', '3'],
-            output_size=7,
-            sampling_ratio=2)
-
-        resolution = box_roi_pool.output_size[0]
-        representation_size = 1024
-        box_head = TwoMLPHead(
-            out_channels * resolution ** 2,
-            representation_size)
-
-        representation_size = 1024
-        box_predictor = FastRCNNPredictor(
-            representation_size,
-            num_classes)
-
-        roi_heads = RoIHeads(
-            box_roi_pool, box_head, box_predictor,
-            box_fg_iou_thresh, box_bg_iou_thresh,
-            box_batch_size_per_image, box_positive_fraction,
-            bbox_reg_weights,
-            box_score_thresh, box_nms_thresh, box_detections_per_img)
-        return roi_heads
-
-    def get_features(self, images):
+    def get_features(images):
         s0, s1 = images.shape[-2:]
         features = [
             ('0', torch.rand(2, 256, s0 // 4, s1 // 4)),
@@ -5648,13 +5647,13 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_rpn(self):
         class RPNModule(torch.nn.Module):
-            def __init__(self_module):
-                super(RPNModule, self_module).__init__()
-                self_module.rpn = self._init_test_rpn()
+            def __init__(self):
+                super(RPNModule, self).__init__()
+                self.rpn = _init_test_rpn()
 
-            def forward(self_module, images, features):
+            def forward(self, images, features):
                 images = ImageList(images, [i.shape[-2:] for i in images])
-                return self_module.rpn(images, features)
+                return self.rpn(images, features)
 
         images = torch.rand(2, 3, 150, 150)
         features = self.get_features(images)
@@ -5700,20 +5699,20 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_roi_heads(self):
         class RoiHeadsModule(torch.nn.Module):
-            def __init__(self_module):
-                super(RoiHeadsModule, self_module).__init__()
-                self_module.transform = self._init_test_generalized_rcnn_transform()
-                self_module.rpn = self._init_test_rpn()
-                self_module.roi_heads = self._init_test_roi_heads_faster_rcnn()
+            def __init__(self):
+                super(RoiHeadsModule, self).__init__()
+                self.transform = _init_test_generalized_rcnn_transform()
+                self.rpn = _init_test_rpn()
+                self.roi_heads = _init_test_roi_heads_faster_rcnn()
 
-            def forward(self_module, images, features):
+            def forward(self, images, features):
                 original_image_sizes = [img.shape[-2:] for img in images]
                 images = ImageList(images, [i.shape[-2:] for i in images])
-                proposals, _ = self_module.rpn(images, features)
-                detections, _ = self_module.roi_heads(features, proposals, images.image_sizes)
-                detections = self_module.transform.postprocess(detections,
-                                                               images.image_sizes,
-                                                               original_image_sizes)
+                proposals, _ = self.rpn(images, features)
+                detections, _ = self.roi_heads(features, proposals, images.image_sizes)
+                detections = self.transform.postprocess(detections,
+                                                        images.image_sizes,
+                                                        original_image_sizes)
                 return detections
 
         images = torch.rand(2, 3, 100, 100)
