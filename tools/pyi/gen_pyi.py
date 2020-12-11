@@ -39,7 +39,7 @@ read gen_pyi for the gory details.
 # TODO: consider waiting to group by base name until we actually need to
 # (after computing type hint signatures, when adding @overload directives)
 def group_by_base_name(python_funcs: Sequence[PythonSignatureNativeFunctionPair]) -> Mapping[str, List[PythonSignatureGroup]]:
-    groups = group_overloads(python_funcs, sort=False)
+    groups = group_overloads(python_funcs)
     d = collections.defaultdict(list)
     for g in groups:
         name = g.signature.name
