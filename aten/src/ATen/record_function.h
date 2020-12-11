@@ -23,6 +23,8 @@ enum class C10_API_ENUM RecordScope : uint8_t {
   BACKWARD_FUNCTION,
   // TorchScript functions, methods
   TORCHSCRIPT_FUNCTION,
+  // Kernel Function dtype Tag
+  KERNEL_FUNCTION_DTYPE,
   // User defined scope (e.g. with record_function())
   USER_SCOPE,
   NUM_SCOPES, // must be the last in the list
