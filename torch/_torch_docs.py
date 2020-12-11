@@ -1132,19 +1132,14 @@ Example:
 
 add_docstr(torch.broadcast_to,
            r"""
-broadcast_to(input, size) -> Tensor
+broadcast_to(input, shape) -> Tensor
 
-Broadcasts the input tensor to a new shape according to :ref:`broadcasting-semantics`.
-
-.. warning::
-    More than one element of a broadcasted tensor may refer to a single
-    memory location. As a result, in-place operations (especially ones that
-    are vectorized) may result in incorrect behavior. If you need to write
-    to the tensors, please clone them first.
+Broadcasts :attr:`input` to the :attr:`shape`.
+Equivalent to calling ``input.expand(shape)``. See :meth:`~Tensor.expand` for details.
 
 Args:
     {input}
-    size (tuple): a tuple defining the shape of the output tensor.
+    shape (list, tuple, or :class:`torch.Size`): the new shape.
 
 Example::
 

@@ -25,6 +25,7 @@ import socket
 import subprocess
 import time
 from collections import OrderedDict
+from collections.abc import Sequence
 from contextlib import contextmanager
 from functools import wraps
 from itertools import product
@@ -1768,6 +1769,14 @@ def do_test_empty_full(self, dtypes, layout, device):
                                             dtype=int64_dtype, layout=layout, device=device, requires_grad=False),
                             int64_dtype, layout, device, fv + 5, False)
 
+# this helper method is to clone the input of test function
+# for the test file such as `test_ops.py` and `test_op_aliases.py`
+def clone_input_helper(input):
+    if isinstance(input, Sequence):
+        # use torch.clone for tensor, copy.deepcopy otherwise
+        return list(map(lambda x: torch.clone(x) if isinstance(x, torch.Tensor) else deepcopy(x),
+                        input))
+    return torch.clone(input)
 
 
 

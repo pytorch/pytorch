@@ -281,6 +281,22 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad):
                                     low=None, high=None,
                                     requires_grad=False))),)
 
+def sample_inputs_broadcast_to(op_info, device, dtype, requires_grad):
+    test_cases = (
+        ((S, 1, 1), (S, S, S)),
+        ((S, 1, S), (S, S, S)),
+        ((S, 1), (S, S, S)),
+        ((1,), (S, S, S)),
+        ((1, S), (1, 1, S)),
+        ((), ()),
+        ((), (1, 3, 2)),
+    )
+
+    return [SampleInput((make_tensor(size, device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                         shape)) for size, shape in test_cases]
+
 def np_unary_ufunc_integer_promotion_wrapper(fn):
     # Wrapper that passes PyTorch's default scalar
     #   type as an argument to the wrapped NumPy
@@ -499,6 +515,17 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 device_type='cuda', dtypes=[torch.bfloat16]),
                    )),
+    OpInfo('broadcast_to',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           assert_autodiffed=False,
+           supports_tensor_out=False,
+           test_inplace_grad=False,
+           sample_inputs_func=sample_inputs_broadcast_to,
+           skips=(
+               # RuntimeError: "isfinite" not implemented for 'BFloat16'
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=[torch.bfloat16]),
+           )),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -1109,13 +1136,6 @@ def method_tests():
         ('view_as', (S, S, S), (non_differentiable(torch.rand(S * S, S)),)),
         ('view_as', (), (non_differentiable(torch.tensor(5.5)),), 'scalar'),
         ('view_as', (), (non_differentiable(torch.rand(1, 1)),), 'scalar_to_dims'),
-        ('broadcast_to', (S, 1, 1), (dont_convert((S, S, S)),), '', (False,)),
-        ('broadcast_to', (torch.Size([S, 1, S]),), (dont_convert((S, S, S)),), 'size', (False,)),
-        ('broadcast_to', (S, 1), (dont_convert((S, S, S)),), 'new_dim', (False,)),
-        ('broadcast_to', (1,), (dont_convert((S, S, S)),), '1_element', (False,)),
-        ('broadcast_to', (1, S), (dont_convert((1, 1, S)),), 'new_dim_front_old_front_1', (False,)),
-        ('broadcast_to', (), (dont_convert(()),), 'scalar_to_scalar'),
-        ('broadcast_to', (), (dont_convert((1, 3, 2)),), 'scalar_to_dims', (False,)),
         ('expand', (S, 1, 1), (S, S, S), '', (False,)),
         ('expand', (torch.Size([S, 1, S]),), (S, S, S), 'size', (False,)),
         ('expand', (S, 1), (S, S, S), 'new_dim', (False,)),

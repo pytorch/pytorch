@@ -771,7 +771,7 @@ In-place version of :meth:`~Tensor.bitwise_xor`
 
 add_docstr_all('broadcast_to',
                r"""
-broadcast_to(input, size) -> Tensor
+broadcast_to(shape) -> Tensor
 
 See :func:`torch.broadcast_to`.
 """)
