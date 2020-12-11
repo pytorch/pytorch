@@ -203,7 +203,7 @@ def get_analytical_jacobian(input, output, nondet_tol=0.0, grad_out=1.0):
 
     return jacobian, reentrant, correct_grad_sizes, correct_grad_types
 
-def test_batched_grad(input, output):
+def test_batched_grad(fail_test, input, output):
     diff_input_list = list(iter_tensors(input, True))
     grad = functools.partial(torch.autograd.grad, output, diff_input_list, retain_graph=True, allow_unused=True)
 
@@ -432,7 +432,7 @@ def gradcheck(
 
         if check_batched_grad:
             assert reentrant
-            test_batched_grad(tupled_inputs, o)
+            test_batched_grad(fail_test, tupled_inputs, o)
 
     # check if the backward multiplies by grad_output
     output = _differentiable_outputs(func(*tupled_inputs))
