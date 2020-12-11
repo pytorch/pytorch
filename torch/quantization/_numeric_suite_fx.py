@@ -3,19 +3,12 @@ from typing import Any, Dict
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
-import torch.nn.quantized.dynamic as nnqd
 from torch.fx import GraphModule  # type: ignore
 from torch.fx import map_arg  # type: ignore
 from torch.fx.graph import Graph
+from torch.quantization.quantize_fx import prepare_fx
 from torch.quantization.fx.quantize import _remove_qconfig, is_activation_post_process
-
-
-NON_LEAF_MODULE_TO_ADD_OBSERVER_ALLOW_LIST = {
-    nnqd.Linear,
-    nnq.Linear,
-    nnqd.LSTM,
-    nn.LSTM,
-}
+from torch.quantization.fx.quantization_patterns import NumericSuiteQuantizeHandler
 
 
 def remove_qconfig_observer_fx(model):
@@ -138,6 +131,7 @@ def compare_weights_fx(float_dict, quantized_dict):
 
     return weight_dict
 
+
 def _get_logger_dict_helper(mod, target_dict, prefix=""):
     r"""This is the helper function for get_logger_dict
 
@@ -211,6 +205,18 @@ class ShadowLogger(Logger):
             y = y[0]
         self.stats["quantized"].append(x.detach())
         self.stats["float"].append(y.detach())
+
+
+class OutputLogger(Logger):
+    r"""Class used to log the outputs of the module"""
+
+    def __init__(self):
+        super(OutputLogger, self).__init__()
+        self.stats["tensor_val"] = []
+
+    def forward(self, x):
+        self.stats["tensor_val"].append(x)
+        return x
 
 
 def _convert_tuple_to_list(t):
@@ -338,3 +344,105 @@ def compare_model_stub_fx(
     q_model(*data)
     ob_dict = get_logger_dict(q_model)
     return ob_dict
+
+
+def get_matching_activations_fx(float_module, q_module):
+    r"""Find the matching activation between float and quantized modules.
+
+    Args:
+        float_module: float module used to generate the q_module
+        q_module: module quantized from float_module
+
+    Return:
+        act_dict: dict with key corresponding to quantized module names and each
+        entry being a dictionary with two keys 'float' and 'quantized', containing
+        the matching float and quantized activations
+    """
+    torch._C._log_api_usage_once(
+        "quantization_api._numeric_suite.get_matching_activations_fx"
+    )
+    float_dict = get_logger_dict(float_module)
+    quantized_dict = get_logger_dict(q_module)
+    act_dict: Dict[str, Dict] = {}
+    for key in quantized_dict:
+        match_key = _find_match(sorted(float_dict, reverse=True), key, "stats")
+        if match_key is not None:
+            act_dict[key] = {}
+            act_dict[key]["float"] = float_dict[match_key]["tensor_val"]
+            act_dict[key]["quantized"] = quantized_dict[key]["tensor_val"]
+    return act_dict
+
+
+def prepare_model_outputs_fx(
+    float_module, q_module, Logger=OutputLogger, allow_list=None
+):
+    r"""Prepare the model by attaching the logger to both float module
+    and quantized module if they are in the allow_list.
+
+    Args:
+        float_module: float module used to generate the q_module
+        q_module: module quantized from float_module
+        Logger: type of logger to be attached to float_module and q_module
+        allow_list: list of module types to attach logger
+    """
+    torch._C._log_api_usage_once(
+        "quantization_api._numeric_suite.prepare_model_outputs_fx"
+    )
+    if allow_list is None:
+        allow_list = get_default_compare_output_module_list()
+
+    float_module = remove_qconfig_observer_fx(float_module)
+
+    qconfig_debug = torch.quantization.QConfig(activation=Logger, weight=None)
+    qconfig_dict = {"": qconfig_debug}
+
+    additional_quant_patterns = {}
+
+    for module in allow_list:
+        additional_quant_patterns[module] = NumericSuiteQuantizeHandler
+
+    prepare_custom_config_dict = {"additional_quant_pattern": additional_quant_patterns}
+
+    float_module = prepare_fx(float_module, qconfig_dict, prepare_custom_config_dict)
+    q_module = prepare_fx(q_module, qconfig_dict, prepare_custom_config_dict)
+
+    return float_module, q_module
+
+
+def compare_model_outputs_fx(
+    float_model, q_model, *data, Logger=OutputLogger, allow_list=None
+):
+    r"""Compare output activations between float and quantized models at
+    corresponding locations for the same input. Return a dict with key corresponding
+    to quantized module names and each entry being a dictionary with two keys
+    'float' and 'quantized', containing the activations of quantized model and
+    float model at matching locations. This dict can be used to compare and
+    compute the propagation quantization error.
+
+    Example usage:
+        act_compare_dict = compare_model_outputs_fx(float_model, qmodel, data)
+        for key in act_compare_dict:
+            print(key, compute_error(act_compare_dict[key]['float'], act_compare_dict[key]['quantized'].dequantize()))
+
+    Args:
+        float_model: float model used to generate the q_model
+        q_model: model quantized from float_model
+        data: input data used to run the prepared float_model and q_model
+        Logger: type of logger to be attached to float_module and q_module
+        allow_list: list of module types to attach logger
+
+    Return:
+        act_compare_dict: dict with key corresponding to quantized module names
+        and each entry being a dictionary with two keys 'float' and 'quantized',
+        containing the matching float and quantized activations
+    """
+    torch._C._log_api_usage_once(
+        "quantization_api._numeric_suite.compare_model_outputs_fx"
+    )
+    if allow_list is None:
+        allow_list = get_default_compare_output_module_list()
+    prepare_model_outputs_fx(float_model, q_model, Logger, allow_list)
+    float_model(*data)
+    q_model(*data)
+    act_compare_dict = get_matching_activations_fx(float_model, q_model)
+    return act_compare_dict

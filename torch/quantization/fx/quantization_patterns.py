@@ -717,3 +717,14 @@ class StandaloneModuleQuantizeHandler(QuantizeHandler):
         quantizer.modules[node.target] = quantized_standalone_module
         # standalone module takes float input
         return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+
+class NumericSuiteQuantizeHandler(QuantizeHandler):
+    """ QuantizeHanlder used for float and qunantized module for numeric suite
+    """
+    def __init__(self, quantizer: QuantizerCls, node: Node):
+        super().__init__(quantizer, node)
+
+    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
+                debug: bool = False,
+                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+        return NotImplemented
