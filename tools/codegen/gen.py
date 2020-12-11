@@ -574,7 +574,7 @@ class ComputeFunction:
 
         name = cpp.name(f.func)
 
-        sig_group = CppSignatureGroup.from_schema(f.func, method=False)
+        sig_group = CppSignatureGroup.from_native_function(f, method=False)
 
         if self.target is Target.DECLARATION:
             result = f"CAFFE2_API {sig_group.signature.decl()};\n"
@@ -628,7 +628,7 @@ class ComputeTensorMethod:
 
         name = cpp.name(f.func)
 
-        sig_group = CppSignatureGroup.from_schema(f.func, method=True)
+        sig_group = CppSignatureGroup.from_native_function(f, method=True)
 
         if self.target is Target.DECLARATION:
             result = f"{sig_group.signature.decl()} const;\n"
@@ -1003,7 +1003,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
     kwarg_only_set = set(a.name for a in f.func.arguments.flat_kwarg_only)
     out_arg_set = set(a.name for a in f.func.arguments.out)
 
-    sig_group = CppSignatureGroup.from_schema(f.func, method=False)
+    sig_group = CppSignatureGroup.from_native_function(f, method=False)
     cpp_args = sig_group.signature.arguments()
     arguments = [
         compute_cpp_argument_yaml(

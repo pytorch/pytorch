@@ -48,7 +48,7 @@ def process_function(f: NativeFunction) -> Optional[str]:
     if Variant.function not in f.variants or not is_factory:
         return None
 
-    sig = CppSignatureGroup.from_schema(f.func, method=False).signature
+    sig = CppSignatureGroup.from_native_function(f, method=False).signature
     formals: List[str] = []
     exprs: List[str] = []
     requires_grad = 'false'

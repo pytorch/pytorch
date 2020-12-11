@@ -232,7 +232,7 @@ def load_deprecated_signatures(
         # I think we want to differentiate inplace functions here.. but we currently don't for the arg parser
         if f.func.name.name.inplace and pyi:
             opname += '_'
-        args = CppSignatureGroup.from_schema(f.func, method=False).signature.arguments()
+        args = CppSignatureGroup.from_native_function(f, method=False).signature.arguments()
         # Simply ignore TensorOptionsArguments as it does not exist in deprecated.yaml.
         types = ', '.join(argument_type_str(a.argument.type)
                           for a in args if isinstance(a.argument, Argument))
