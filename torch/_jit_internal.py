@@ -260,22 +260,13 @@ def check_can_compile_named_tuple(cls, loc):
         "_source",
     }
 
-    # Unfortunately, there are some NamedTuples already being used that do have methods that are never
-    # called. Allow these to compile for now.
-    can_compile_allowlist = {
-        torch.nn.utils.rnn.PackedSequence,
-    }
-
-    if cls in can_compile_allowlist:
-        return True
-
     for name, value in cls.__dict__.items():
         if name in allowed_methods:
             continue
 
-        if inspect.isfunction(value):
+        if inspect.isfunction(value) and not is_ignored_fn(value):
             raise FrontendError(loc, "User-defined methods in NamedTuples are currently not supported")
-        elif inspect.isroutine(value) and is_static_fn(cls, name):
+        elif inspect.isroutine(value) and is_static_fn(cls, name) and not is_ignored_fn(value):
             raise FrontendError(loc, "Static functions in NamedTuples are currently not supported")
 
 

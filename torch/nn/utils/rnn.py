@@ -3,7 +3,7 @@ import warnings
 
 import torch
 from ... import _VF
-from ..._jit_internal import Optional
+from ..._jit_internal import Optional, ignore
 
 
 PackedSequence_ = namedtuple('PackedSequence',
@@ -56,6 +56,7 @@ class PackedSequence(PackedSequence_):
         (i.e., they only pass in tensors conforming to this constraint).
 
     """
+    @ignore
     def __new__(cls, data, batch_sizes=None, sorted_indices=None, unsorted_indices=None):
         return super(PackedSequence, cls).__new__(
             cls,
@@ -66,6 +67,7 @@ class PackedSequence(PackedSequence_):
     #
     # See the note above in doc string (starting with ":attr:`data` can be on
     # arbitrary device...").
+    @ignore
     def pin_memory(self):
         # Why not convert `batch_sizes`?
         # See NOTE [ device and dtype of a PackedSequence ]
@@ -73,6 +75,7 @@ class PackedSequence(PackedSequence_):
                           bind(self.sorted_indices, lambda t: t.pin_memory()),
                           bind(self.unsorted_indices, lambda t: t.pin_memory()))
 
+    @ignore
     def cuda(self, *args, **kwargs):
         # Tests to see if 'cuda' should be added to kwargs
         ex = torch.tensor((), dtype=self.data.dtype, device=self.data.device).to(*args, **kwargs)
@@ -80,6 +83,7 @@ class PackedSequence(PackedSequence_):
             return self.to(*args, **kwargs)
         return self.to(*args, device='cuda', **kwargs)
 
+    @ignore
     def cpu(self, *args, **kwargs):
 
         ex = torch.tensor((), dtype=self.data.dtype, device=self.data.device).to(*args, **kwargs)
@@ -87,30 +91,39 @@ class PackedSequence(PackedSequence_):
             return self.to(*args, **kwargs)
         return self.to(*args, device='cpu', **kwargs)
 
+    @ignore
     def double(self):
         return self.to(dtype=torch.double)
 
+    @ignore
     def float(self):
         return self.to(dtype=torch.float)
 
+    @ignore
     def half(self):
         return self.to(dtype=torch.half)
 
+    @ignore
     def long(self):
         return self.to(dtype=torch.long)
 
+    @ignore
     def int(self):
         return self.to(dtype=torch.int)
 
+    @ignore
     def short(self):
         return self.to(dtype=torch.short)
 
+    @ignore
     def char(self):
         return self.to(dtype=torch.int8)
 
+    @ignore
     def byte(self):
         return self.to(dtype=torch.uint8)
 
+    @ignore
     def to(self, *args, **kwargs):
         r"""Performs dtype and/or device conversion on `self.data`.
 
@@ -142,6 +155,7 @@ class PackedSequence(PackedSequence_):
         r"""Returns true if `self.data` stored on a gpu"""
         return self.data.is_cuda
 
+    @ignore
     def is_pinned(self):
         r"""Returns true if `self.data` stored on in pinned memory"""
         return self.data.is_pinned()
