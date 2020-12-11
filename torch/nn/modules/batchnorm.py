@@ -434,9 +434,9 @@ class SyncBatchNorm(_BatchNorm):
         >>> # With Learnable Parameters
         >>> m = nn.SyncBatchNorm(100)
         >>> # creating process group (optional)
-        >>> # process_ids is a list of int identifying rank ids.
-        >>> process_ids = list(range(8))
-        >>> r1, r2 = process_ids[:4], process_ids[4:] 
+        >>> # ranks is a list of int identifying rank ids.
+        >>> ranks = list(range(8))
+        >>> r1, r2 = ranks[:4], ranks[4:] 
         >>> # Note: every rank calls into new_group for every
         >>> # process group created, even if that rank is not
         >>> # part of the group.
@@ -570,9 +570,9 @@ class SyncBatchNorm(_BatchNorm):
             >>>            torch.nn.BatchNorm1d(100),
             >>>          ).cuda()
             >>> # creating process group (optional)
-            >>> # process_ids is a list of int identifying rank ids.
-            >>> process_ids = list(range(8))
-            >>> r1, r2 = process_ids[:4], process_ids[4:] 
+            >>> # ranks is a list of int identifying rank ids.
+            >>> ranks = list(range(8))
+            >>> r1, r2 = ranks[:4], ranks[4:] 
             >>> # Note: every rank calls into new_group for every
             >>> # process group created, even if that rank is not
             >>> # part of the group.
