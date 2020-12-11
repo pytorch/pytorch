@@ -516,8 +516,8 @@ class TestONNXRuntime(unittest.TestCase):
         images = self.get_test_images()
         self.run_test(model, (images,), rtol=1e-3, atol=1e-5)
         self.run_test(model, (images,), input_names=["images_tensors"], output_names=["boxes", "labels", "scores", "masks"],
-                      dynamic_axes={"images_tensors": [0, 1, 2, 3], "boxes": [0, 1], "labels": [0],
-                                    "scores": [0], "masks": [0, 1, 2, 3]}, rtol=1e-3, atol=1e-5)
+                      dynamic_axes={"images_tensors": [0, 1, 2], "boxes": [0, 1], "labels": [0],
+                                    "scores": [0], "masks": [0, 1, 2]}, rtol=1e-3, atol=1e-5)
 
     def test_heatmaps_to_keypoints(self):
         # disable profiling
@@ -552,7 +552,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (images,), rtol=1e-3, atol=1e-5)
         self.run_test(model, (images,), input_names=["images_tensors"],
                       output_names=["outputs1", "outputs2", "outputs3", "outputs4"],
-                      dynamic_axes={"images_tensors": [0, 1, 2, 3]},
+                      dynamic_axes={"images_tensors": [0, 1, 2]},
                       rtol=1e-3, atol=1e-5)
 
     @disableScriptTest()
@@ -5641,8 +5641,11 @@ class TestONNXRuntime(unittest.TestCase):
             ('3', torch.rand(2, 256, s0 // 32, s1 // 32)),
             ('4', torch.rand(2, 256, s0 // 64, s1 // 64)),
         ]
-        features = OrderedDict(features)
-        return features
+        features_temp = OrderedDict(features)
+        if features_temp is None:
+            return features
+        else:
+            return features_temp
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_rpn(self):
