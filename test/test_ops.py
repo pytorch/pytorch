@@ -205,7 +205,9 @@ class TestCommon(JitCommonTestCase):
                 if (variant is inplace and op.promotes_integers_to_float and
                         dtype in (torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)):
                     try:
-                        variant_forward = variant(*(clone_input_helper(input) for input in sample.input), *sample.args, **sample.kwargs)
+                        variant_forward = variant(*(clone_input_helper(input) for input in sample.input),
+                                                  *sample.args,
+                                                  **sample.kwargs)
                     except Exception as e:
                         continue
                     self.fail("Inplace operation on integer tensor that should be promoted to float didn't fail!")
