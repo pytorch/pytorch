@@ -112,7 +112,7 @@ void CUDAGeneratorImpl::set_current_seed(uint64_t seed) {
 uint64_t CUDAGeneratorImpl::current_seed() const {
   // Debatable if current_seed() should be allowed in captured regions.
   // Conservatively disallow it for now.
-  at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::set_current_seed");
+  at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::current_seed");
   return seed_;
 }
 
