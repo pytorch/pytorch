@@ -82,6 +82,15 @@ extern "C" void ssyevd_(char *jobz, char *uplo, int *n, float *a, int *lda, floa
 // geev
 extern "C" void dgeev_(char *jobvl, char *jobvr, int *n, double *a, int *lda, double *wr, double *wi, double* vl, int *ldvl, double *vr, int *ldvr, double *work, int *lwork, int *info);
 extern "C" void sgeev_(char *jobvl, char *jobvr, int *n, float *a, int *lda, float *wr, float *wi, float* vl, int *ldvl, float *vr, int *ldvr, float *work, int *lwork, int *info);
+extern "C" void cgeev_(char *jobvl, char *jobvr, int *n,
+             std::complex<float> *a, int *lda,
+             std::complex<float> *w,
+             std::complex<float> *vl, int *ldvl,
+             std::complex<float> *vr, int *ldvr,
+             std::complex<float> *work, int *lwork,
+             float *rwork,
+             int *info);
+
 
 // gesdd
 extern "C" void zgesdd_(char *jobz, int *m, int *n, std::complex<double> *a, int *lda,
@@ -328,14 +337,19 @@ template<> void lapackEig<float>(char jobvl, char jobvr, int n, float *a, int ld
   sgeev_(&jobvl, &jobvr, &n, a, &lda, wr, wi, vl, &ldvl, vr, &ldvr, work, &lwork, info);
 }
 
-template<> void lapackEig<c10::complex<float>, float>(char jobvl, char jobvr, int n, c10::complex<float> *a, int lda, c10::complex<float> *w, c10::complex<float> *vl, int ldvl, c10::complex<float> *vr, int ldvr, c10::complex<float> *work, int lwork, float *rwork, int *info) {
-  AT_ERROR("lapackEig<complex<float>>");
-}
-
 template<> void lapackEig<c10::complex<double>, double>(char jobvl, char jobvr, int n, c10::complex<double> *a, int lda, c10::complex<double> *w, c10::complex<double> *vl, int ldvl, c10::complex<double> *vr, int ldvr, c10::complex<double> *work, int lwork, double *rwork, int *info) {
   AT_ERROR("lapackEig<complex<double>>");
 }
 
+template<> void lapackEig<c10::complex<float>, float>(char jobvl, char jobvr, int n, c10::complex<float> *a, int lda, c10::complex<float> *w, c10::complex<float> *vl, int ldvl, c10::complex<float> *vr, int ldvr, c10::complex<float> *work, int lwork, float *rwork, int *info) {
+  cgeev_(&jobvl, &jobvr, &n,
+         reinterpret_cast<std::complex<float>*>(a), &lda,
+         reinterpret_cast<std::complex<float>*>(w),
+         reinterpret_cast<std::complex<float>*>(vl), &ldvl,
+         reinterpret_cast<std::complex<float>*>(vr), &ldvr,
+         reinterpret_cast<std::complex<float>*>(work), &lwork,
+         rwork, info);
+}
 
 template<> void lapackSvd<c10::complex<double>, double>(char jobz, int m, int n, c10::complex<double> *a, int lda,
                                   double *s, c10::complex<double> *u, int ldu, c10::complex<double> *vt, int ldvt, c10::complex<double> *work, int lwork, double *rwork, int *iwork, int *info) {

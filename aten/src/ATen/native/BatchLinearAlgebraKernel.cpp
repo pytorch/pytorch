@@ -27,20 +27,28 @@ void apply_eig(const Tensor& self, bool eigenvectors, Tensor& vals_, Tensor& vec
 
   scalar_t* vecs_data = eigenvectors ? vecs_.data_ptr<scalar_t>() : nullptr;
   int ldvr = eigenvectors ? n : 1;
-  value_t* rwork = nullptr; // XXX: remember to malloc() it for complex
+
+  Tensor rwork;
+  value_t* rwork_data = nullptr;
+  if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
+    ScalarType dtype = toValueType(typeMetaToScalarType(self.dtype()));
+    // XXX: I would like a double/float dtype, not a complex dtype
+    rwork = at::empty({n*2}, self.options().dtype(dtype));
+    rwork_data = rwork.data_ptr<value_t>();
+  }
 
   if (n > 0) {
     // call lapackEig once to get the optimal size for work data
     scalar_t wkopt;
     int info;
     lapackEig<scalar_t, value_t>('N', jobvr, n, self_data, n, wr,
-      nullptr, 1, vecs_data, ldvr, &wkopt, -1, rwork, &info);
+      nullptr, 1, vecs_data, ldvr, &wkopt, -1, rwork_data, &info);
     int lwork = static_cast<int>(real_impl<scalar_t, value_t>(wkopt));
 
     // call again to do the actual work
     Tensor work = at::empty({lwork}, self.dtype());
     lapackEig<scalar_t, value_t>('N', jobvr, n, self_data, n, wr,
-      nullptr, 1, vecs_data, ldvr, work.data_ptr<scalar_t>(), lwork, rwork, &info);
+      nullptr, 1, vecs_data, ldvr, work.data_ptr<scalar_t>(), lwork, rwork_data, &info);
     *info_ptr = info;
   }
 #endif
