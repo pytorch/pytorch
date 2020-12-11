@@ -1559,6 +1559,11 @@ class TestUnaryUfuncs(TestCase):
         a.sign_()
         self.assertEqual(a, a_target, msg='sign_ device={} dtype={}'.format(device, dtype))
 
+        if dtype == torch.bfloat16:
+            a = tensor.rand(5, 8, device=device).to(torch.bfloat16)
+            b = tensor.rand(5, 8, device=device)
+            self.assertEqual(a.sign(), b.sign(), msg='sign_ device={} dtype={}'.format(device, dtype))
+
     @dtypes(*(torch.testing.torch.testing.get_all_fp_dtypes()))
     def test_signbit_float(self, device, dtype):
         t = torch.randn(5, 5, device=device)
