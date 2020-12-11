@@ -4,7 +4,6 @@ from tools.codegen.api.types import MetaArgument
 import tools.codegen.api.dispatcher as dispatcher
 
 from typing import Sequence
-import itertools
 
 # Follows dispatcher calling convention, but:
 #   - Mutable arguments not allowed.  Meta functions are always
@@ -29,4 +28,4 @@ def argument(a: Argument) -> MetaArgument:
 
 def arguments(func: FunctionSchema) -> Sequence[MetaArgument]:
     assert not func.arguments.out
-    return list(map(argument, itertools.chain(func.arguments.positional, func.arguments.kwarg_only)))
+    return list(map(argument, func.arguments.flat_non_out))
