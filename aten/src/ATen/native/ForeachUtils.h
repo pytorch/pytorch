@@ -87,19 +87,25 @@ bool has_same_attributes(Device expected_device, TensorList tensors) {
 bool will_promote_tensor(const Tensor& tensor, Scalar scalar) {
   // complex scalar + integral or boolean tensor will result in complex tensor
   if (scalar.isComplex() && at::isIntegralType(tensor.scalar_type(), /*includeBool*/ true)) {
-    return false;
+    return true;
+  }
+
+  // complex scalar + float tensor will result in complex tensor
+  if (scalar.isComplex() && at::isFloatingType(tensor.scalar_type())) {
+    return true;
   }
 
   // float scalar + integral or boolean tensor will result in float tensor
   if (scalar.isFloatingPoint() && at::isIntegralType(tensor.scalar_type(), /*includeBool*/ true)) {
-    return false;
+    return true;
   }
 
   // integral scalar + boolean tensor will result in integral tensor
   if (scalar.isIntegral(/*includeBool*/ false) && tensor.dtype() == at::kBool) {
-    return false;
+    return true;
   }
-  return true;
+
+  return false;
 }
 
 bool can_use_fast_route(TensorList tensors) {
@@ -128,7 +134,7 @@ bool can_use_fast_route(TensorList tensors, Scalar scalar) {
       return false;
     }
 
-    if (!will_promote_tensor(t, scalar)) {
+    if (will_promote_tensor(t, scalar)) {
       return false;
     }
   }
@@ -138,7 +144,17 @@ bool can_use_fast_route(TensorList tensors, Scalar scalar) {
 }
 
 bool can_use_fast_route(TensorList tensors, ArrayRef<Scalar> scalars) {
-  return can_use_fast_route(tensors);
+#ifdef __HIP_PLATFORM_HCC__
+  return false;
+#else
+  for (int i = 0; i < tensors.size(); i++) {
+    if (will_promote_tensor(tensors[i], scalars[i])) {
+      return false;
+    }
+  }
+
+  return true;
+#endif
 }
 
 bool can_use_fast_route(TensorList tensors1, TensorList tensors2) {
@@ -166,7 +182,7 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, Scalar scalar)
       return false;
     }
 
-    if (!will_promote_tensor(tensors1[i], scalar)) {
+    if (will_promote_tensor(tensors1[i], scalar)) {
       return false;
     }
   }
@@ -200,7 +216,7 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList ten
       return false;
     }
 
-    if (!will_promote_tensor(tensors1[i], scalar)) {
+    if (will_promote_tensor(tensors1[i], scalar)) {
       return false;
     }
   }
