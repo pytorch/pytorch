@@ -1847,3 +1847,14 @@ dtype2prec_DONTUSE = {torch.float: 1e-5,
                       torch.double: 1e-5,
                       torch.half: 1e-2,
                       torch.bfloat16: 1e-1}
+
+# Returns True if version is at least required version, False otherwise
+def version_at_least(version, required_version):
+    def versiontuple(v):
+        """
+        Helper function to compare versions.
+        Reference: https://stackoverflow.com/a/11887825/5602957
+        """
+        return tuple(map(int, (v.split("."))))
+
+    return versiontuple(version) >= versiontuple(required_version)

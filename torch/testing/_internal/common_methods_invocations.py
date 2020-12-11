@@ -22,18 +22,10 @@ from torch.testing._internal.common_utils import \
      random_symmetric_pd_matrix, make_nonzero_det,
      random_fullrank_matrix_distinct_singular_value, set_rng_seed,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
-     torch_to_numpy_dtype_dict, TEST_WITH_SLOW)
+     torch_to_numpy_dtype_dict, TEST_WITH_SLOW, version_atleast)
 
 if TEST_SCIPY:
     import scipy.special
-
-
-def versiontuple(v):
-    """
-    Helper function to compare versions.
-    Reference: https://stackoverflow.com/a/11887825/5602957
-    """
-    return tuple(map(int, (v.split("."))))
 
 class SkipInfo(object):
     """Describes which test, or type of tests, should be skipped when testing
@@ -886,7 +878,7 @@ if TEST_SCIPY:
                        skips=(
                            # Reference: https://github.com/pytorch/pytorch/pull/49155#issuecomment-742664611
                            SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                    active_if=versiontuple(scipy.__version__) < versiontuple("1.4.0")),
+                                    active_if=version_atleast(scipy.__version__, "1.4.0")),
                            # RuntimeError: "pow" not implemented for 'BFloat16'
                            SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                     dtypes=[torch.bfloat16]),),)
