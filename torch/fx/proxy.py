@@ -50,7 +50,13 @@ class TracerBase:
         Can be override to support more trace-specific types.
         """
         # aggregates
-        if isinstance(a, (tuple, list)):
+        if isinstance(a, tuple) and hasattr(a, '_fields'):
+            # NamedTuple constructors don't seem to like getting a generator
+            # expression as an argument to their constructor, so build this
+            # intermediate tuple and unpack it into the NamedTuple constructor
+            args = tuple(self.create_arg(elem) for elem in a)
+            return type(a)(*args)  # type: ignore
+        elif isinstance(a, (tuple, list)):
             return type(a)(self.create_arg(elem) for elem in a)
         elif isinstance(a, dict):
             r = {}
