@@ -21,6 +21,7 @@
 #include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/runtime/slice_indices_adjust.h>
 #include <torch/csrc/jit/testing/hooks_for_testing.h>
 
 #include <torch/csrc/jit/ir/constants.h>
@@ -3443,7 +3444,25 @@ struct to_ir {
     } else {
       AT_ASSERT(!sliceable->type()->isSubtypeOf(TensorType::get()));
     }
+    // TODO for now let's deal with TupleType first. Ideally all list, tensor,
+    // string, and tuple slicing should be same (tugsbayasgalan)
+    if (sliceable->type()->cast<TupleType>()) {
+      std::vector<at::optional<NamedValue>> tuple_args;
+      // since we are only dealing with tuple slicing for now, we try to keep
+      // tuple args seperate for now
+      tuple_args.reserve(3);
 
+      start ? tuple_args.emplace_back(start)
+            : tuple_args.emplace_back(c10::nullopt);
+      end ? tuple_args.emplace_back(end)
+          : tuple_args.emplace_back(c10::nullopt);
+      step ? tuple_args.emplace_back(step)
+           : tuple_args.emplace_back(c10::nullopt);
+
+      return emitTupleSlice(loc, args[0], tuple_args);
+    }
+
+    // TODO this needs to be cleaned for list slicing
     // Default value for start is 0.
     if (!start) {
       start = graph->insertConstant(0, loc);
@@ -3452,19 +3471,6 @@ struct to_ir {
 
     if (end) {
       args.emplace_back(loc, "end", end);
-    }
-    if (sliceable->type()->cast<TupleType>()) {
-      if (step) {
-        // TODO: add support for slicing tuples with a step
-        throw ErrorReport(loc)
-            << "Unsupported operation: slicing tuples with a step isn't supported";
-      }
-
-      if (end) {
-        return emitTupleSlice(loc, args[0], args[1], /*end*/ args[2]);
-      } else {
-        return emitTupleSlice(loc, args[0], args[1], c10::nullopt);
-      }
     }
 
     if (!step) {
@@ -3828,28 +3834,37 @@ struct to_ir {
   Value* emitTupleSlice(
       const SourceRange& loc,
       const NamedValue& tuple_val,
-      const NamedValue& beg_val,
-      const at::optional<NamedValue>& end_val) {
+      const std::vector<at::optional<NamedValue>>& tuple_args) {
     auto tuple_type = tuple_val.value(*graph)->type()->expect<TupleType>();
-    int64_t beg = getAdjTupleIndex(
-        loc,
-        tuple_type,
-        getSliceInd(beg_val.value(*graph), loc),
-        /*allow_out_of_bounds*/ true);
-    int64_t end;
     int64_t tuple_len = tuple_type->elements().size();
+    auto beg_val = tuple_args[0];
+    auto end_val = tuple_args[1];
+    auto step = tuple_args[2];
+
+    int64_t step_size = 1;
+    if (step) {
+      auto val = toIValue(step->value(*graph));
+      TORCH_CHECK(val->isInt(), "Step size should always be an integer");
+      step_size = val->to<int64_t>();
+    }
+
+    int64_t beg = std::numeric_limits<int64_t>::max();
+    if (beg_val) {
+      beg = getAdjTupleIndex(
+          loc, tuple_type, getSliceInd(beg_val->value(*graph), loc), true);
+    }
+
+    int64_t end = std::numeric_limits<int64_t>::max();
     if (end_val) {
       end = getAdjTupleIndex(
           loc, tuple_type, getSliceInd(end_val->value(*graph), loc), true);
-    } else {
-      end = tuple_len;
     }
-    // slicing does not throw out of bounds errors
-    end = std::min(std::max((int64_t)0, end), tuple_len);
-    beg = std::min(std::max((int64_t)0, beg), tuple_len);
+
+    int64_t num_values = slice_indices_adjust(tuple_len, &beg, &end, step_size);
 
     return graph
-        ->insertNode(graph->createTupleSlice(tuple_val.value(*graph), beg, end))
+        ->insertNode(graph->createTupleSlice(
+            tuple_val.value(*graph), beg, step_size, num_values))
         ->output();
   }
 
@@ -3873,19 +3888,25 @@ struct to_ir {
         auto s_tuple_val =
             sv->asTupleValue(val_range, method)->asValue(val_range, method);
         const SliceExpr& slice = SliceExpr(subscript_exprs[0]);
+        std::vector<at::optional<NamedValue>> tuple_args;
+        tuple_args.reserve(3);
         auto begin =
             NamedValue(val_range, "begin", emitExpr(Expr(slice.startOr(0))));
+        tuple_args.emplace_back(begin);
         if (slice.end().present()) {
           auto end =
               NamedValue(val_range, "end", emitExpr(Expr(slice.end().get())));
-          auto tupleSliceValue =
-              emitTupleSlice(val_range, s_tuple_val, begin, end);
-          return std::make_shared<SimpleValue>(tupleSliceValue);
+          tuple_args.emplace_back(end);
+
         } else {
-          auto tupleSliceValue =
-              emitTupleSlice(val_range, s_tuple_val, begin, c10::nullopt);
-          return std::make_shared<SimpleValue>(tupleSliceValue);
+          tuple_args.emplace_back(c10::nullopt);
         }
+        // pushing step_size to match the tuple_args
+        tuple_args.emplace_back(c10::nullopt);
+
+        auto tupleSliceValue =
+            emitTupleSlice(val_range, s_tuple_val, tuple_args);
+        return std::make_shared<SimpleValue>(tupleSliceValue);
       } else {
         return std::make_shared<SimpleValue>(emitBasicSlice(
             range, sv->asValue(val_range, method), subscript_exprs));
