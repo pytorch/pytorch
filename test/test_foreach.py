@@ -416,7 +416,9 @@ class TestForeach(TestCase):
                     foreach_bin_op_(tensors, scalars)
                     return
                 else:
-                    if foreach_bin_op_ == torch._foreach_div_ and dtype in torch.testing.integral_types() and self.device_type == 'cpu':
+                    if foreach_bin_op_ == torch._foreach_div_ and \
+                       dtype in torch.testing.integral_types() and \
+                       self.device_type == 'cpu':
                         with self.assertRaisesRegex(RuntimeError, "can't be cast to the desired output type"):
                             foreach_bin_op_(tensors, scalars)
                     else:
@@ -721,7 +723,7 @@ class TestForeach(TestCase):
                                 self.assertEqual(tensors, expected)
                         else:
                             if foreach_bin_op == torch._foreach_sub:
-                                with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor is not supported."):
+                                with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bo"):
                                    expected = [torch_bin_op(t, s) for t, s in zip(tensors, scalars)]
 
                                 res = foreach_bin_op(tensors, scalars)
