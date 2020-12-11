@@ -31,4 +31,4 @@ class CudaVersion(MultiPartVersion):
         super().__init__([self.major, self.minor], "cuda")
 
     def __str__(self):
-        return f"{self.major}{self.minor}"
+        return f"{self.major}.{self.minor}"

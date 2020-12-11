@@ -240,7 +240,7 @@ jobs:
         default: "10"
       cuda_complete_version:
         type: string
-        default: "101"
+        default: "10.1"
       python_version:
         type: string
         default: "3.6"

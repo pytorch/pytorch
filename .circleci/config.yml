@@ -326,6 +326,9 @@ pytorch_windows_params: &pytorch_windows_params
     cuda_version:
       type: string
       default: "10"
+    cuda_complete_version:
+      type: string
+      default: "10.1"
     python_version:
       type: string
       default: "3.6"
@@ -345,6 +348,7 @@ pytorch_windows_params: &pytorch_windows_params
     BUILD_ENVIRONMENT: <<parameters.build_environment>>
     SCCACHE_BUCKET: "ossci-compiler-cache"
     CUDA_VERSION: <<parameters.cuda_version>>
+    CUDA_COMPLETE_VERSION: <<parameters.cuda_complete_version>>
     PYTHON_VERSION: <<parameters.python_version>>
     VC_VERSION: <<parameters.vc_version>>
     VC_YEAR: <<parameters.vc_year>>
@@ -678,7 +682,7 @@ jobs:
         default: "10"
       cuda_complete_version:
         type: string
-        default: "101"
+        default: "10.1"
       python_version:
         type: string
         default: "3.6"
@@ -8080,7 +8084,7 @@ workflows:
                 - postnightly
       - pytorch_windows_build:
           build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
-          cuda_complete_version: "101"
+          cuda_complete_version: "10.1"
           cuda_version: "10"
           name: pytorch_windows_vs2019_py36_cuda10.1_build
           python_version: "3.6"
@@ -8116,7 +8120,7 @@ workflows:
           vc_year: "2019"
       - pytorch_windows_build:
           build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
-          cuda_complete_version: "111"
+          cuda_complete_version: "11.1"
           cuda_version: "11"
           name: pytorch_windows_vs2019_py36_cuda11.1_build
           python_version: "3.6"
