@@ -630,8 +630,7 @@ class TestForeach(TestCase):
 
             if dtype in [torch.half] and self.device_type == 'cpu' or \
                dtype in [torch.complex64, torch.complex128] or \
-               dtype in [torch.bfloat16] and self.device_type == 'cuda' or \
-               dtype in torch.testing.integral_types_and(torch.bool):
+               dtype in [torch.bfloat16] and self.device_type == 'cuda':
                 with self.assertRaisesRegex(RuntimeError, "not implemented"):
                     expected = [torch.expm1(tensors[i]) for i in range(N)]
 
