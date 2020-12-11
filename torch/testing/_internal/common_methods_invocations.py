@@ -878,7 +878,7 @@ if TEST_SCIPY:
                        skips=(
                            # Reference: https://github.com/pytorch/pytorch/pull/49155#issuecomment-742664611
                            SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                    active_if=version_atleast(scipy.__version__, "1.4.0")),
+                                    active_if=version_atleast(scipy.__version__, required_version="1.4.0")),
                            # RuntimeError: "pow" not implemented for 'BFloat16'
                            SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                     dtypes=[torch.bfloat16]),),)
