@@ -11,6 +11,18 @@
 #include <torch/library.h>
 
 namespace at {
+namespace meta {
+
+TORCH_META_FUNC2(add, Tensor) (
+  const Tensor& self, const Tensor& other, Scalar alpha
+) {
+  build_binary_op(maybe_get_output(), self, other);
+  native::alpha_check(dtype(), alpha);
+}
+
+} // namespace meta
+
+
 namespace native {
 
 DEFINE_DISPATCH(add_stub);
@@ -57,24 +69,11 @@ static Tensor wrapped_scalar_tensor(Scalar scalar) {
   return tensor;
 }
 
-Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
-  auto iter = TensorIterator::binary_op(result, self, other);
-  alpha_check(iter.dtype(), alpha);
-  add_stub(iter.device_type(), iter, alpha);
-  TORCH_INTERNAL_ASSERT(result.scalar_type() == iter.output().dtype());
-  return result;
-}
-
-Tensor add(const Tensor& self, const Tensor& other, Scalar alpha) {
-  Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, other);
-  alpha_check(iter.dtype(), alpha);
-  add_stub(iter.device_type(), iter, alpha);
-  return iter.output();
-}
-
-Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
-  return native::add_out(self, self, other, alpha);
+TORCH_IMPL_FUNC(add_out) (
+  Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha
+) {
+  add_stub(device_type(), *this, alpha);
+  TORCH_INTERNAL_ASSERT(result.scalar_type() == output().dtype());
 }
 
 Tensor& add_relu_impl(
@@ -449,12 +448,15 @@ static Tensor wrapped_scalar_tensor_and_check_convert(Scalar scalar, Tensor tens
   return wrapped_scalar_tensor(scalar);
 }
 
+// TODO: Make this structured to undo the perf regression from native:: removal
+// in call here
+
 Tensor add(const Tensor& self, Scalar other, Scalar alpha) {
-  return native::add(self, wrapped_scalar_tensor(other), alpha);
+  return at::add(self, wrapped_scalar_tensor(other), alpha);
 }
 
 Tensor& add_(Tensor& self, Scalar other, Scalar alpha) {
-  return native::add_(self, wrapped_scalar_tensor(other), alpha);
+  return self.add_(wrapped_scalar_tensor(other), alpha);
 }
 
 Tensor remainder(const Tensor& self, Scalar other) {
@@ -1097,38 +1099,6 @@ Tensor ldexp(const Tensor& self, const Tensor& other) {
 
 Tensor& ldexp_(Tensor& self, const Tensor& other) {
   return at::ldexp_out(self, self, other);
-}
-
-// TODO: Deduplicate this with the TensorIterator logic.  This would
-// also fix the TODOs below.
-Tensor binary_op_meta(const Tensor& self, const Tensor& other) {
-  // TODO: Doesn't do type promotion correctly
-  // TODO: Doesn't do strides correctly
-  int64_t dim = std::max(self.dim(), other.dim());
-  std::vector<int64_t> sizes(dim);
-  for (int64_t i = 0; i < dim; i++) {
-    int64_t j = -1 - i;
-    if (i >= self.dim() || self.size(j) == 1) {
-      sizes[dim + j] = other.size(j);
-    } else if (i >= other.dim() || self.size(i) == 1) {
-      sizes[dim + j] = self.size(j);
-    } else {
-      TORCH_CHECK(
-        self.size(j) == other.size(j),
-        "Expected self.size(", j, ") == other.size(", j, "), but got ", self.size(j), " != ", other.size(j)
-      );
-      sizes[dim + j] = self.size(j);
-    }
-  }
-  return at::empty_meta(sizes, self.options());
-}
-
-Tensor binary_op_with_scalar_meta(const Tensor& self, const Tensor& other, Scalar x) {
-  return binary_op_meta(self, other);
-}
-
-TORCH_LIBRARY_IMPL(aten, Meta, m) {
-  m.impl("add.Tensor", binary_op_with_scalar_meta);
 }
 
 } // namespace native
