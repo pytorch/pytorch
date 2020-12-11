@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
+#include <ATen/ExpandUtils.h>
 #include <ATen/TensorGeometry.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -8,7 +9,6 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
-#include <ATen/ExpandUtils.h>
 
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
