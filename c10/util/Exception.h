@@ -194,7 +194,7 @@ C10_API std::string GetExceptionString(const std::exception& e);
 namespace detail {
 
 // Return x if it is non-empty; otherwise return y.
-inline std::string if_empty_then(std::string x, std::string y) {
+inline std::string if_empty_then(const std::string& x, const std::string& y) {
   if (x.empty()) {
     return y;
   } else {
@@ -324,27 +324,45 @@ inline std::string if_empty_then(std::string x, std::string y) {
   TORCH_CHECK_WITH_MSG(error_t, cond, "", __VA_ARGS__)
 
 #ifdef STRIP_ERROR_MESSAGES
-#define TORCH_CHECK_WITH_MSG(error_t, cond, type, ...)  \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {                 \
-    C10_THROW_ERROR(Error,                              \
-        #cond #type " CHECK FAILED at "                 \
-        C10_STRINGIZE(__FILE__)                         \
-    );                                                  \
+#define TORCH_CHECK_MSG(cond, type, ...)                \
+  (#cond #type " CHECK FAILED at "                      \
+   C10_STRINGIZE(__FILE__))
+#define TORCH_CHECK_WITH_MSG(error_t, cond, type, ...)     \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                    \
+    C10_THROW_ERROR(Error,                                 \
+        TORCH_CHECK_MSG(cond, type, __VA_ARGS__)           \
+    );                                                     \
   }
 #else
+#define TORCH_CHECK_MSG(cond, type, ...)                              \
+  ::c10::detail::if_empty_then(                                       \
+      ::c10::str(__VA_ARGS__),                                        \
+      "Expected " #cond " to be true, but got false.  "               \
+      "(Could this error message be improved?  If so, "               \
+      "please report an enhancement request to PyTorch.)"             \
+  )
 #define TORCH_CHECK_WITH_MSG(error_t, cond, type, ...)                \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {                               \
     C10_THROW_ERROR(error_t,                                          \
-      ::c10::detail::if_empty_then(                                   \
-        ::c10::str(__VA_ARGS__),                                      \
-        "Expected " #cond " to be true, but got false.  "             \
-        "(Could this error message be improved?  If so, "             \
-        "please report an enhancement request to PyTorch.)"           \
-      )                                                               \
+        TORCH_CHECK_MSG(cond, type, __VA_ARGS__)                      \
     );                                                                \
   }
 #endif
-#define TORCH_CHECK(cond, ...) TORCH_CHECK_WITH(Error, cond, __VA_ARGS__)
+
+namespace c10 {
+namespace detail {
+
+[[noreturn]] void torchCheckFail(const char *func, const char *file, uint32_t line, const std::string& msg);
+
+} // namespace detail
+} // namespace 10
+
+#define TORCH_CHECK(cond, ...)                                          \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                                 \
+    ::c10::detail::torchCheckFail(                                      \
+        __func__, __FILE__, static_cast<uint32_t>(__LINE__),            \
+        TORCH_CHECK_MSG(cond, "", __VA_ARGS__));                        \
+  }
 
 // An utility macro that does what `TORCH_CHECK` does if compiled in the host code,
 // otherwise does nothing. Supposed to be used in the code shared between host and
