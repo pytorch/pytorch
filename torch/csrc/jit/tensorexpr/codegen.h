@@ -82,7 +82,7 @@ class CodeGen::BufferArg {
   BufferArg(const Placeholder& buffer)
       : var_(buffer.data()->base_handle()), dtype_(buffer.dtype()) {}
   BufferArg(Tensor* tensor)
-      : var_(tensor->buf()->base_handle()), dtype_(tensor->body()->dtype()) {}
+      : var_(tensor->buf()->base_handle()), dtype_(tensor->buf()->dtype()) {}
   BufferArg(const VarHandle& var)
       : var_(var.node()), dtype_(var.dtype()), isVar_(true) {}
 
