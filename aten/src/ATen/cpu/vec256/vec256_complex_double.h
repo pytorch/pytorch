@@ -278,7 +278,7 @@ public:
     return _mm256_round_pd(values, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
   }
   Vec256<c10::complex<double>> sqrt() const {
-    return map(std::sqrt);
+    return map(c10::sqrt);
   }
   Vec256<c10::complex<double>> reciprocal() const;
   Vec256<c10::complex<double>> rsqrt() const {
