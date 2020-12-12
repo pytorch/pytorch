@@ -467,8 +467,8 @@ def init_process_group(backend,
             group_name=group_name,
             timeout=timeout))
 
-    _pg_group_ranks[GroupMember.WORLD] = {i: i for i in range(GroupMember.WORLD.size())}
-    _backend = _pg_map[GroupMember.WORLD][0]
+    _pg_group_ranks[GroupMember.WORLD] = {i: i for i in range(GroupMember.WORLD.size())}  # type: ignore
+    _backend = _pg_map[GroupMember.WORLD][0]  # type: ignore
     _default_pg_init_method = init_method
 
     # barrier at the end to ensure that once we return from this method, all
@@ -686,7 +686,7 @@ def isend(tensor,
     if _rank_not_in_group(group):
         return
 
-    if group is None:
+    if group is None or group is GroupMember.WORLD:
         default_pg = _get_default_group()
         return default_pg.send([tensor], dst, tag)
     else:
@@ -717,7 +717,7 @@ def irecv(tensor,
     if _rank_not_in_group(group):
         return
 
-    if group is None:
+    if group is None or group is GroupMember.WORLD:
         default_pg = _get_default_group()
         return default_pg.recv([tensor], src, tag)
     else:
@@ -744,7 +744,7 @@ def send(tensor,
     if _rank_not_in_group(group):
         return
 
-    if group is None:
+    if group is None or group is GroupMember.WORLD:
         default_pg = _get_default_group()
         default_pg.send([tensor], dst, tag).wait()
     else:
@@ -934,7 +934,7 @@ def broadcast_multigpu(tensor_list,
     opts.rootRank = src
     opts.rootTensor = src_tensor
 
-    if group is None:
+    if group is None or group is GroupMember.WORLD:
         default_pg = _get_default_group()
         work = default_pg.broadcast(tensor_list, opts)
     else:
@@ -978,7 +978,7 @@ def broadcast(tensor,
     opts.rootRank = src
     opts.rootTensor = 0
 
-    if group is None:
+    if group is None or group is GroupMember.WORLD:
         default_pg = _get_default_group()
         work = default_pg.broadcast([tensor], opts)
     else:
@@ -1223,7 +1223,7 @@ def reduce_multigpu(tensor_list,
     opts.rootRank = dst
     opts.rootTensor = dst_tensor
 
-    if group is None:
+    if group is None or group is GroupMember.WORLD:
         default_pg = _get_default_group()
         work = default_pg.reduce(tensor_list, opts)
     else:
@@ -1271,7 +1271,7 @@ def reduce(tensor,
     opts.reduceOp = op
     opts.rootRank = dst
 
-    if group is None:
+    if group is None or group is GroupMember.WORLD:
         default_pg = _get_default_group()
         work = default_pg.reduce([tensor], opts)
     else:
@@ -1398,6 +1398,16 @@ def all_gather_object(object_list, obj, group=None):
         known to be insecure. It is possible to construct malicious pickle data
         which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
+
+    Example::
+        >>> # Note: Process group initialization omitted on each rank.
+        >>> import torch.distributed as dist
+        >>> # Assumes world_size of 3.
+        >>> gather_objects = ["foo", 12, {1: 2}] # any picklable object
+        >>> output = [None for _ in gather_objects]
+        >>> dist.all_gather_object(output, gather_objects[dist.get_rank()])
+        >>> output
+        ['foo', 12, {1: 2}]
     """
     if _rank_not_in_group(group):
         return
@@ -1422,7 +1432,7 @@ def all_gather_object(object_list, obj, group=None):
     ]
     # Allgather tensor sizes
     all_gather(object_size_list, local_size, group=group)
-    max_object_size = int(max(object_size_list).item())
+    max_object_size = int(max(object_size_list).item())  # type: ignore
     # Resize tensor to max size across all ranks.
     input_tensor.resize_(max_object_size)
     coalesced_output_tensor = torch.empty(
@@ -1472,6 +1482,21 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
         known to be insecure. It is possible to construct malicious pickle data
         which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
+
+    Example::
+        >>> # Note: Process group initialization omitted on each rank.
+        >>> import torch.distributed as dist
+        >>> # Assumes world_size of 3.
+        >>> gather_objects = ["foo", 12, {1: 2}] # any picklable object
+        >>> output = [None for _ in gather_objects]
+        >>> dist.gather_object(
+                gather_objects[dist.get_rank()],
+                output if dist.get_rank() == 0 else None,
+                dst=0
+            )
+        >>> # On rank 0
+        >>> output
+        ['foo', 12, {1: 2}]
     """
     if _rank_not_in_group(group):
         return
@@ -1498,7 +1523,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
     # gather, since each rank needs to broadcast a tensor of the same (maximal)
     # size.
     all_gather(object_size_list, local_size, group=group)
-    max_object_size = int(max(object_size_list).item())
+    max_object_size = int(max(object_size_list).item())  # type: ignore
     # Resize tensor to max size across all ranks.
     input_tensor.resize_(max_object_size)
     # Avoid populating output tensors if the result won't be gathered on this rank.
@@ -1561,6 +1586,18 @@ def broadcast_object_list(object_list, src, group=None):
         is known to be insecure. It is possible to construct malicious pickle
         data which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
+
+    Example::
+        >>> # Note: Process group initialization omitted on each rank.
+        >>> import torch.distributed as dist
+        >>> if dist.get_rank() == 0:
+        >>>     # Assumes world_size of 3.
+        >>>     objects = ["foo", 12, {1: 2}] # any picklable object
+        >>> else:
+        >>>     objects = [None, None, None]
+        >>> dist.broadcast_object_list(objects, src=0)
+        >>> broadcast_objects
+        ['foo', 12, {1: 2}]
     """
     if _rank_not_in_group(group):
         return
@@ -1604,6 +1641,105 @@ def broadcast_object_list(object_list, src, group=None):
             obj_view = obj_view.type(torch.ByteTensor)  # type: ignore[call-overload]
             offset += obj_size
             object_list[i] = _tensor_to_object(obj_view, obj_size)
+
+
+def scatter_object_list(
+    scatter_object_output_list, scatter_object_input_list, src=0, group=group.WORLD
+):
+    """
+    Scatters picklable objects in ``scatter_object_input_list`` to the whole
+    group. Similar to :func:`scatter`, but Python objects can be passed in. On
+    each rank, the scattered object will be stored as the first element of
+    ``scatter_object_output_list``. Note that all objects in
+    ``scatter_object_input_list`` must be picklable in order to be scattered.
+
+    Arguments:
+        scatter_object_output_list (List[Any]): Non-empty list whose first
+            element will store the object scattered to this rank.
+        scatter_object_input_list (List[Any]): List of input objects to scatter.
+            Each object must be picklable. Only objects on the ``src`` rank will
+            be scattered, and the argument can be ``None`` for non-src ranks.
+        src (int): Source rank from which to scatter
+            ``scatter_object_input_list``.
+        group: (ProcessGroup, optional): The process group to work on.
+
+    Returns:
+        ``None``. If rank is part of the group, ``scatter_object_output_list``
+        will have its first element set to the scattered object for this rank.
+
+    .. note:: Note that this API differs slightly from the scatter collective
+        since it does not provide an ``async_op`` handle and thus will be a
+        blocking call.
+
+    .. warning::
+        :func:`scatter_object_list` uses ``pickle`` module implicitly, which
+        is known to be insecure. It is possible to construct malicious pickle
+        data which will execute arbitrary code during unpickling. Only call this
+        function with data you trust.
+
+    Example::
+        >>> # Note: Process group initialization omitted on each rank.
+        >>> import torch.distributed as dist
+        >>> if dist.get_rank() == 0:
+        >>>     # Assumes world_size of 3.
+        >>>     objects = ["foo", 12, {1: 2}] # any picklable object
+        >>> else:
+        >>>     # Can be any list on non-src ranks, elements are not used.
+        >>>     objects = [None, None, None]
+        >>> output_list = [None]
+        >>> dist.scatter_object_list(output_list, objects, src=0)
+        >>> # Rank i gets objects[i]. For example, on rank 2:
+        >>> output_list
+        [{1: 2}]
+    """
+    if _rank_not_in_group(group):
+        return
+
+    if (
+        not isinstance(scatter_object_output_list, list)
+        or len(scatter_object_output_list) < 1
+    ):
+        raise RuntimeError(
+            "Expected argument scatter_object_output_list to be a list of size at least 1."
+        )
+
+    my_rank = get_rank(group)
+    if my_rank == src:
+        tensor_list, tensor_sizes = zip(
+            *[_object_to_tensor(obj) for obj in scatter_object_input_list]
+        )
+        tensor_list, tensor_sizes = list(tensor_list), list(tensor_sizes)
+
+    obj_tensor_size = torch.LongTensor([0])
+    # Src rank broadcasts the maximum tensor size. This is because all ranks are
+    # expected to call into scatter() with equal-sized tensors.
+    if my_rank == src:
+        max_tensor_size = max(tensor_sizes)
+        for tensor in tensor_list:
+            tensor.resize_(max_tensor_size)
+    else:
+        max_tensor_size = torch.LongTensor([0])
+    broadcast(max_tensor_size, src=src, group=group)
+
+    # Scatter actual serialized objects
+    output_tensor = torch.ByteTensor(max_tensor_size.item())
+    scatter(
+        output_tensor,
+        scatter_list=None if my_rank != src else tensor_list,
+        src=src,
+        group=group,
+    )
+
+    # Scatter per-object sizes to trim tensors when deserializing back to object
+    scatter(
+        obj_tensor_size,
+        scatter_list=None if my_rank != src else tensor_sizes,
+        src=src,
+        group=group,
+    )
+
+    # Deserialize back to object
+    scatter_object_output_list[0] = _tensor_to_object(output_tensor, obj_tensor_size)
 
 
 def all_gather(tensor_list,
@@ -1804,7 +1940,7 @@ def gather(tensor,
     opts = GatherOptions()
     opts.rootRank = dst
 
-    if group is None:
+    if group is None or group is GroupMember.WORLD:
         default_pg = _get_default_group()
         work = default_pg.gather(output_tensors, input_tensors, opts)
     else:
@@ -1871,7 +2007,7 @@ def scatter(tensor,
     opts = ScatterOptions()
     opts.rootRank = src
 
-    if group is None:
+    if group is None or group is GroupMember.WORLD:
         default_pg = _get_default_group()
         work = default_pg.scatter(output_tensors, input_tensors, opts)
     else:
@@ -2226,6 +2362,17 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
     processes that are part of the distributed job) enter this function, even
     if they are not going to be members of the group. Additionally, groups
     should be created in the same order in all processes.
+
+    .. warning::
+        Using multiple process groups with the ``NCCL`` backend concurrently
+        is not safe and the user should perform explicit synchronization in
+        their application to ensure only one process group is used at a time.
+        This means collectives from one process group should have completed
+        execution on the device (not just enqueued since CUDA execution is
+        async) before collectives from another process group are enqueued.
+        See `Using multiple NCCL communicators concurrently <https://docs.nvid
+        ia.com/deeplearning/nccl/user-guide/docs/usage/communicators.html#using
+        -multiple-nccl-communicators-concurrently>`_ for more details.
 
     Arguments:
         ranks (list[int]): List of ranks of group members. If ``None``, will be

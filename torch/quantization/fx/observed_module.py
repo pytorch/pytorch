@@ -32,14 +32,6 @@ def is_observed_module(module):
     return isinstance(module, ObservedGraphModule)
 
 class ObservedStandaloneGraphModule(ObservedGraphModule):
-
-    def get_preserved_attr_names(self):
-        return ['_activation_post_process_map',
-                '_patterns',
-                '_qconfig_map',
-                '_standalone_module_observed_input_idxs',
-                '_output_is_observed']
-
     def __deepcopy__(self, memo):
         fake_mod = torch.nn.Module()
         fake_mod.__dict__ = copy.deepcopy(self.__dict__)

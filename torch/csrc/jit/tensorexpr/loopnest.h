@@ -107,6 +107,7 @@ class TORCH_API LoopNest {
       For* f,
       const std::unordered_map<std::string, const Buf*>& map);
 
+  void eliminateDeadStores();
   void prepareForCodegen();
 
   // Find the inner-most loops and vectorize them. Currently, this only works

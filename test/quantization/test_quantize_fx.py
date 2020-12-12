@@ -14,14 +14,21 @@ from torch.quantization.quantize_fx import (
     prepare_qat_fx,
 )
 
+from torch.quantization.fx.pattern_utils import (
+    is_match,
+    MatchAllNode,
+)
+
 from torch.quantization import (
     QuantType,
     QuantStub,
     DeQuantStub,
+    QuantWrapper,
     quant_type_to_str,
     default_qconfig,
     default_dynamic_qconfig,
     default_qat_qconfig,
+    per_channel_dynamic_qconfig,
     float16_dynamic_qconfig,
     float_qparams_weight_only_qconfig,
     get_default_qconfig,
@@ -30,6 +37,7 @@ from torch.quantization import (
     prepare,
     prepare_qat,
     convert,
+    quantize_dynamic,
     default_placeholder_observer,
     PerChannelMinMaxObserver,
     QConfigDynamic,
@@ -44,7 +52,15 @@ from torch.testing._internal.common_quantization import (
     skip_if_no_torchvision,
     train_one_epoch,
     run_ddp,
+    test_only_eval_fn,
+    test_only_train_fn,
+)
+
+from torch.testing._internal.common_quantization import (
     LinearModelWithSubmodule,
+    ResNetBase,
+    RNNDynamicModel,
+    RNNCellDynamicModel,
 )
 
 from torch.testing._internal.common_quantized import (
@@ -186,6 +202,31 @@ class TestFuseFx(QuantizationTestCase):
 
 @skipIfNoFBGEMM
 class TestQuantizeFx(QuantizationTestCase):
+    def test_pattern_match(self):
+        """ test MatchAllNode with
+            conv - bn - add - relu pattern
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(1, 1, 1)
+                self.bn = nn.BatchNorm2d(1)
+                self.relu = nn.ReLU()
+
+            def forward(self, x, y):
+                x = self.conv(x)
+                x = self.bn(x)
+                x = x + y
+                x = self.relu(x)
+                return x
+
+        pattern = (nn.ReLU, (operator.add, (nn.BatchNorm2d, nn.Conv2d), MatchAllNode))
+        m = torch.fx.symbolic_trace(M())
+        modules = dict(m.named_modules())
+        for n in m.graph.nodes:
+            if n.op == 'call_module' and type(modules[n.target]) == nn.ReLU:
+                self.assertTrue(is_match(modules, n, pattern))
+
     def _get_conv_linear_test_cases(self):
         ''' Returns a list of test cases, with format:
         is_dynamic, ModuleClass, module_constructor_inputs,
@@ -550,9 +591,9 @@ class TestQuantizeFx(QuantizationTestCase):
                 ns.call_module(torch.quantization.MinMaxObserver): 2
             }
             self.checkGraphModuleNodes(m, expected_node_occurrence=count_check)
-            # for output of conv in the standalone module
+            # for input and output of conv in the standalone module
             count_check = {
-                ns.call_module(torch.quantization.MinMaxObserver): 1
+                ns.call_module(torch.quantization.MinMaxObserver): 2
             }
             self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=count_check)
 
@@ -565,11 +606,11 @@ class TestQuantizeFx(QuantizationTestCase):
             }
             self.checkGraphModuleNodes(m, expected_node_occurrence=count_check)
             count_check = {
-                # quantization of input happens in parent module
-                # quantization of output happens in the quantized conv module
-                ns.call_function(torch.quantize_per_tensor) : 0,
-                # dequantization for output happens in parent module
-                ns.call_method('dequantize') : 0,
+                # standalone module will take float as input and output
+                # so we'll see quantize and dequantize in the modoule
+                ns.call_function(torch.quantize_per_tensor) : 1,
+                ns.call_module(nnq.Conv2d): 1,
+                ns.call_method('dequantize') : 1,
             }
             self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=count_check)
             res = m(data)
@@ -2070,6 +2111,49 @@ class TestQuantizeFxOps(QuantizationTestCase):
             # make sure it runs
             m(*inputs)
 
+    def _test_rnn_impl(self, qconfigs, M, module_type_strs, module_types, sample_input):
+        options = itertools.product(qconfigs, module_type_strs)
+        for qconfig, module_type_str in options:
+            model_eager = M(module_type_str).eval()
+            model_graph = copy.deepcopy(model_eager)
+            if torch.backends.quantized.engine == 'qnnpack' and \
+               qconfig is float16_dynamic_qconfig:
+                continue
+                # fp16 dynamic quant is not supported for qnnpack
+
+            eager_qconfig_dict = {x : qconfig for x in module_types}
+            model_eager = quantize_dynamic(model_eager, qconfig_spec=eager_qconfig_dict)
+
+            graph_qconfig_dict = {
+                "object_type": [
+                    (x, qconfig) for x in module_types
+                ]
+            }
+            model_graph = prepare_fx(model_graph, graph_qconfig_dict)
+            model_graph = convert_fx(model_graph)
+            self.assertEqual(model_eager(sample_input), model_graph(sample_input))
+            self.checkScriptable(model_graph, [[sample_input]], True)
+
+    def test_rnn_cell(self):
+        qconfigs = [per_channel_dynamic_qconfig, default_dynamic_qconfig, float16_dynamic_qconfig]
+        module_type_strs = ['LSTMCell', 'GRUCell', 'RNNTanh', 'RNNReLU']
+        module_types = [torch.nn.LSTMCell, torch.nn.GRUCell, torch.nn.RNNCell]
+        sample_input = torch.tensor([[100, -155],
+                                     [-155, 100],
+                                     [100, -155]], dtype=torch.float)
+        self._test_rnn_impl(qconfigs, RNNCellDynamicModel, module_type_strs, module_types, sample_input)
+
+    def test_rnn(self):
+        qconfigs = [per_channel_dynamic_qconfig, default_dynamic_qconfig, float16_dynamic_qconfig]
+        module_type_strs = ['LSTM']
+        module_types = [torch.nn.LSTM]
+        niter = 10
+        sample_input = torch.tensor([[100, -155],
+                                     [-155, 100],
+                                     [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1)
+        self._test_rnn_impl(qconfigs, RNNDynamicModel, module_type_strs, module_types, sample_input)
+
+
 class TestQuantizeFxModels(QuantizationTestCase):
     def _test_model_impl(
             self, mode, name, model, eager_quantizable_model,
@@ -2103,15 +2187,14 @@ class TestQuantizeFxModels(QuantizationTestCase):
         original_out = model(input_value)
         is_not_tuple_out = not isinstance(original_out, tuple)
         script_out = script(input_value)
-        self.assertEqual(
-            (original_out - script_out).abs().max(), 0,
-            'Reslut of original graph module and script module does not match')
 
         # set to train just before quantization
+        prepare_fx_fn = prepare_fx
         if mode != 'static':
             model.train()
+            prepare_fx_fn = prepare_qat_fx
 
-        prepared = prepare_fx(model, qconfig_dict)
+        prepared = prepare_fx_fn(model, qconfig_dict)
 
         if mode == 'ddp':
             mp.spawn(run_ddp,
@@ -2190,6 +2273,58 @@ class TestQuantizeFxModels(QuantizationTestCase):
                                      ' should match. Mode: ' + mode +
                                      ' diff:' + str(diff_from_eager[mode][name]))
 
+    def _test_building_block(self, quant_type, BB):
+        eager = BB().float()
+        graph = copy.deepcopy(eager)
+
+        if quant_type == QuantType.STATIC:
+            qconfig = default_qconfig
+            eager_prepare = prepare
+            graph_prepare = prepare_fx
+            eager.eval()
+            graph.eval()
+            calibrate_or_train = test_only_eval_fn
+            data = self.img_data_2d
+        else:
+            assert quant_type == QuantType.QAT
+            qconfig = default_qat_qconfig
+            eager_prepare = prepare_qat
+            graph_prepare = prepare_qat_fx
+            eager.train()
+            graph.train()
+            calibrate_or_train = test_only_train_fn
+            data = self.img_data_2d_train
+
+        if hasattr(eager, "fuse_model"):
+            eager.fuse_model()
+        eager = QuantWrapper(eager)
+        eager.qconfig = qconfig
+        eager = eager_prepare(eager)
+
+        qconfig_dict = {"": qconfig}
+        graph = graph_prepare(graph, qconfig_dict)
+
+        eager_out = eager(data[0][0])
+        graph_out = graph(data[0][0])
+        self.assertEqual(eager_out, graph_out)
+
+        calibrate_or_train(eager, data)
+        calibrate_or_train(graph, data)
+
+        eager = convert(eager)
+        graph = convert_fx(graph)
+
+        eager_out = eager(data[0][0])
+        graph_out = graph(data[0][0])
+        self.assertEqual(eager_out, graph_out)
+
+    @override_qengines
+    def test_resnet_base(self):
+        models = [ResNetBase]
+        options = itertools.product(self.static_quant_types, models)
+        for quant_type, M in options:
+            self._test_building_block(quant_type, M)
+
     @skip_if_no_torchvision
     @skipIfNoFBGEMM
     @unittest.skip("skip for now since tbb failed")
@@ -2207,15 +2342,11 @@ class TestQuantizeFxModels(QuantizationTestCase):
         quantized_model_list = set(quantized_model_list) - no_pretrained_model
         # test eager and graph consistency
         model_list = quantized_model_list
-        # slice need to be fixed in symbolic tracing(https://github.com/pytorch/pytorch/issues/43511)
-        model_list = set(model_list) - {'googlenet', 'inception_v3'}
-        # getattr should not be used as node name(https://github.com/pytorch/pytorch/issues/43522)
-        model_list -= {'shufflenet_v2_x1_0', 'mobilenet_v2'}
-
+        # inception_v3 is not symbolically traceable: https://github.com/pytorch/pytorch/issues/48813
+        model_list = set(model_list) - {'inception_v3'}
         # mobilenet: dropout error RuntimeError: "bernoulli_scalar_cpu_" not implemented for 'QUInt8'
         # incpetion_v3: looks like there is some problem with AuxLogits
-        quantized_not_working = [('qat', 'mobilenet_v2'),
-                                 ('qat', 'inception_v3'),
+        quantized_not_working = [('qat', 'inception_v3'),
                                  ('static', 'inception_v3')]
 
         fx_eager_not_matching = ['googlenet',  # because _transform_input is not quantized in eager
@@ -2257,7 +2388,6 @@ class TestQuantizeFxModels(QuantizationTestCase):
     @skip_if_no_torchvision
     @skip_if_not_multigpu
     @skipIfNoFBGEMM
-    @unittest.skip('TODO: not working yet due to https://github.com/pytorch/pytorch/issues/43513')
     def test_resnet18_ddp(self):
         from torchvision import models
         from torchvision.models import quantization as quantized_models
