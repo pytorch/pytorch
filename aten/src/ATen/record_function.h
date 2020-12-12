@@ -23,6 +23,8 @@ enum class C10_API_ENUM RecordScope : uint8_t {
   BACKWARD_FUNCTION,
   // TorchScript functions, methods
   TORCHSCRIPT_FUNCTION,
+  // Kernel Function dtype Tag
+  KERNEL_FUNCTION_DTYPE,
   // User defined scope (e.g. with record_function())
   USER_SCOPE,
   NUM_SCOPES, // must be the last in the list
@@ -379,10 +381,8 @@ class TORCH_API RecordFunctionCallback {
     return end_;
   }
 
-  // whether the callbacks should run in the given scope
-  bool shouldRun(RecordScope scope) const;
-
  private:
+  friend class CallbackManager;
   std::function<std::unique_ptr<ObserverContext>(const RecordFunction&)> start_;
   std::function<void(const RecordFunction&, ObserverContext*)> end_;
   bool(*should_run_)(const RecordFunctionCallback&) = nullptr;

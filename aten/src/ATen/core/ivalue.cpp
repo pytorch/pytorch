@@ -309,7 +309,7 @@ size_t IValue::hash(const IValue& v) {
     case Tag::Tensor:
       // Tensor __hash__ is equivalent to `id()`, so take the pointer value of
       // the tensor to emulate it
-      return c10::get_hash(v.payload.as_int);
+      return c10::get_hash(v.payload.as_tensor.unsafeGetTensorImpl());
     case Tag::Int:
       return c10::get_hash(v.payload.as_int);
     case Tag::String:

@@ -233,6 +233,32 @@ Tensor unsqueeze_batching_rule(const Tensor& self, int64_t dim) {
   return self_physical.newLogicalFromPhysical(result);
 }
 
+Tensor& fill_inplace_scalar_batching_rule(Tensor& self, Scalar value) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  self_physical.tensor().fill_(value);
+  return self;
+}
+
+Tensor& fill_inplace_tensor_batching_rule(Tensor& self, const Tensor& value) {
+  auto value_batched = isBatchedTensor(value);
+
+  if (value_batched) {
+    auto physical_args =
+      BroadcastingVmapTransform::logicalToPhysical({self, value});
+    physical_args[0].tensor().copy_(physical_args[1].tensor());
+  } else {
+    auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+    self_physical.tensor().fill_(value);
+  }
+  return self;
+}
+
+Tensor& zero_inplace_batching_rule(Tensor &self) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  self_physical.tensor().zero_();
+  return self;
+}
+
 Tensor squeeze_batching_rule(const Tensor& self) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto physical_sizes = self_physical.tensor().sizes();
@@ -941,8 +967,8 @@ Tensor new_empty_strided_batching_rule(
         size.size(), ") must match dimensionality of strides (",
         stride.size(), ")");
   auto storage_size = native::storage_size_for(size, stride);
-  for (int64_t idx = 0; idx < physical_strides.size(); ++idx) {
-    physical_strides[idx] *= storage_size;
+  for (auto& physical_stride : physical_strides) {
+    physical_stride *= storage_size;
   }
 
   // physical_strides = [B1 * B2 * S, B2 * S, S] + strides
@@ -970,6 +996,11 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl_UNBOXED("sum.dim_IntList", sum_batching_rule);
   m.impl("is_complex", native::is_complex);
   m.impl("conj", native::conj);
+
+  // inplace operations
+  m.impl("fill_.Scalar", fill_inplace_scalar_batching_rule);
+  m.impl("fill_.Tensor", fill_inplace_tensor_batching_rule);
+  m.impl("zero_", zero_inplace_batching_rule);
 
   // view operations
   m.impl("as_strided", as_strided_batching_rule);
