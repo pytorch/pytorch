@@ -92,6 +92,8 @@ Tensor& elu_out(
     Scalar alpha,
     Scalar scale,
     Scalar input_scale) {
+  TORCH_CHECK(alpha.to<double>() >= 0,
+      "Alpha cannot be negative.");
   auto iter = TensorIterator::unary_op(result, self);
   elu_stub(iter.device_type(), iter, alpha, scale, input_scale);
   return result;
@@ -103,6 +105,8 @@ Tensor elu(
     Scalar scale,
     Scalar input_scale) {
   Tensor result;
+  TORCH_CHECK(alpha.to<double>() >= 0,
+      "Alpha cannot be negative.");
   auto iter = TensorIterator::unary_op(result, self);
   elu_stub(iter.device_type(), iter, alpha, scale, input_scale);
   return iter.output();
