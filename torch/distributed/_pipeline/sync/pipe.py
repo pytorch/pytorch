@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Iterable, List, Optional, Tuple, Union, c
 
 import torch
 from torch import Tensor, nn
+from torch.distributed.rpc import RRef
 import torch.autograd
 import torch.cuda
 
@@ -305,7 +306,7 @@ class Pipe(Module):
 
         return self._copy_streams
 
-    def forward(self, input: TensorOrTensors) -> TensorOrTensors:  # type: ignore
+    def forward(self, input: TensorOrTensors) -> RRef[TensorOrTensors]:  # type: ignore
         """:class:`Pipe` is a fairly transparent module wrapper. It doesn't
         modify the input and output signature of the underlying module. But
         there's type restriction. Input and output have to be a
@@ -313,10 +314,10 @@ class Pipe(Module):
         applied at partition boundaries too.
 
         Args:
-            input (torch.Tensor or tensors): input mini-batch
+            input (torch.Tensor or Tuple[torch.Tensor, ...]): input mini-batch
 
         Returns:
-            tensor or tensors: output mini-batch
+            :class:`~torch.distributed.rpc.RRef` to the output of the mini-batch
 
         Raises:
             TypeError: input is not a tensor or tensors.
@@ -326,7 +327,7 @@ class Pipe(Module):
 
         if not self.devices:
             # Empty sequential module is not illegal.
-            return input
+            return RRef(input)
 
         # Divide a mini-batch into micro-batches.
         batches = microbatch.scatter(input, self.chunks)
@@ -336,4 +337,4 @@ class Pipe(Module):
 
         # Merge the micro-batches into one mini-batch.
         output = microbatch.gather(batches)
-        return output
+        return RRef(output)
