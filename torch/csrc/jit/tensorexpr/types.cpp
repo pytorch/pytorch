@@ -14,39 +14,21 @@ static bool is_c10_type(const ScalarType& type) {
 }
 
 bool is_integral(const ScalarType& type) {
-  switch (type) {
-    case ScalarType::Bool:
-    case ScalarType::Byte:
-    case ScalarType::Char:
-    case ScalarType::Short:
-    case ScalarType::Int:
-    case ScalarType::Long:
-      return true;
-    default:
-      return false;
-  }
-
-  return false;
+  return is_c10_type(type)
+      ? c10::isIntegralType(static_cast<c10::ScalarType>(type), true)
+      : false;
 }
 
 bool is_floating_point(const ScalarType& type) {
-  switch (type) {
-    case ScalarType::Half:
-    case ScalarType::Float:
-    case ScalarType::Double:
-      return true;
-    default:
-      return false;
-  }
-
-  return false;
+  return is_c10_type(type)
+      ? c10::isFloatingType(static_cast<c10::ScalarType>(type))
+      : false;
 }
 
 bool is_signed(const ScalarType& type) {
-  if (is_c10_type(type)) {
-    return c10::isSignedType(static_cast<c10::ScalarType>(type));
-  }
-  return false;
+  return is_c10_type(type)
+      ? c10::isSignedType(static_cast<c10::ScalarType>(type))
+      : false;
 }
 
 Dtype Dtype::scalar_dtype() const {
