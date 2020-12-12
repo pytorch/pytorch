@@ -11,12 +11,12 @@ from torch import nn
 from torch.distributed._pipeline.sync import Pipe
 
 
-def test_inplace_on_requires_grad():
+def test_inplace_on_requires_grad(setup_rpc):
     model = nn.Sequential(nn.Linear(1, 1), nn.ReLU(inplace=True))
     model = Pipe(model, checkpoint="always")
 
     x = torch.rand(1)
-    y = model(x)
+    y = model(x).local_value()
 
     message = r"a leaf Variable that requires grad .* used in an in-place operation."
     with pytest.raises(RuntimeError, match=message):
@@ -24,14 +24,14 @@ def test_inplace_on_requires_grad():
 
 
 @pytest.mark.xfail(strict=True)
-def test_inplace_on_not_requires_grad():
+def test_inplace_on_not_requires_grad(setup_rpc):
     # In-place operation on a tensor not requiring grad doesn't cause a
     # RuntimeError. Currently, we cannot detect this case.
     model = nn.Sequential(nn.ReLU(inplace=True))
     model = Pipe(model, [1], devices=["cpu"], checkpoint="always")
 
     x = torch.rand(1)
-    y = model(x)
+    y = model(x).local_value()
     del model
 
     message = r"a leaf Variable that requires grad .* used in an in-place operation."
@@ -40,7 +40,7 @@ def test_inplace_on_not_requires_grad():
 
 
 @pytest.mark.xfail(strict=True)
-def test_inplace_incorrect_grad():
+def test_inplace_incorrect_grad(setup_rpc):
     class M(nn.Module):
         def forward(self, foo_bar):
             # 'foo' requires grad but 'bar' does not. In-place operation on
@@ -62,7 +62,7 @@ def test_inplace_incorrect_grad():
     foo = torch.tensor([1.0], requires_grad=True)
     bar = torch.tensor([1.0])
 
-    output = model((foo, bar))
+    output = model((foo, bar)).local_value()
     del model
     output.backward()
 
