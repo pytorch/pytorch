@@ -90,6 +90,24 @@ void Optimizer::add_param_group(const OptimizerParamGroup& param_group) {
     TORCH_CHECK(state_.count(c10::guts::to_string(p.unsafeGetTensorImpl())) == 0,
       "some parameters appear in more than one parameter group");
   }
+  bool has_duplicate_params = false;
+  auto& parameters = param_group_.params();
+  for (auto it_out = parameters.begin(); it_out != parameters.end() - 1; ++it_out) {
+    Tensor param_out = *it_out;
+    for (auto it_in = it_out + 1; it_in != parameters.end(); ++it_in) {
+      Tensor param_in = *it_in;
+      if (param_out.is_same(param_in)) {
+        has_duplicate_params = true;
+        break;
+      }
+    }
+  }
+  if (has_duplicate_params) {
+    TORCH_WARN(
+      "optimizer contains a parameter group with duplicate parameters; "
+      "in future, this will cause an error; "
+      "see github.com/pytorch/pytorch/issues/40967 for more information");
+  }
   param_groups_.emplace_back(std::move(param_group_));
 }
 

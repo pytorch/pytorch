@@ -172,6 +172,13 @@ TEST(OptimTest, OptimizerAccessors) {
   const auto& params_2 = optimizer_.param_groups();
   // test for state() with const reference return
   optimizer_.state();
+
+  // test for duplicate parameters in the same parameter group
+  torch::Tensor t = torch::randn(10);
+  std::vector<torch::Tensor> params_with_duplicate_param = {t, t};
+  torch::test::WarningCapture warnings;
+  optimizer.add_param_group(OptimizerParamGroup(params_with_duplicate_param));
+  ASSERT_EQ(count_substr_occurrences(warnings.str(), "optimizer contains a parameter group with duplicate parameters"), 1);
 }
 
 #define OLD_INTERFACE_WARNING_CHECK(func)       \
