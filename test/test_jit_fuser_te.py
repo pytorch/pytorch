@@ -477,7 +477,9 @@ class TestTEFuser(JitTestCase):
         binary_ops = [
             operator.__and__,
             operator.__or__,
-            operator.__xor__
+            operator.__xor__,
+            operator.__lshift__,
+            operator.__rshift__,
         ]
         devices = self.devices
         for dtype, op, device in product(self.int_dtypes, binary_ops, devices):
@@ -1292,11 +1294,6 @@ class TestTEFuser(JitTestCase):
             torch.lt,
             torch.fmod,
             torch.remainder,
-
-            # FIXME: segfaults on CPU backend
-            # operator.__rshift__,
-            # operator.__lshift__,
-
             lambda x, y: y.type_as(x),
         ]
         fp_only = [
@@ -1343,10 +1340,6 @@ class TestTEFuser(JitTestCase):
             torch.ge,
             torch.lt,
             torch.gt,
-
-            # FIXME: segfaults on CPU backend
-            # operator.__rshift__,
-            # operator.__lshift__,
         ]
         devices = self.devices
         # Maybe we should split this into separate tests to speed it up by

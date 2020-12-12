@@ -737,6 +737,12 @@ class TensorExprFuser {
       "aten::remainder.Scalar(Tensor self, Scalar other) -> Tensor",
       "aten::remainder.Tensor(Tensor self, Tensor other) -> Tensor",
     };
+    static const OperatorSet int_only_operator_set{
+      "aten::__lshift__.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::__lshift__.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::__rshift__.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::__rshift__.Tensor(Tensor self, Tensor other) -> Tensor",
+    };
     // clang-format on
 
     for (const Value* v : node->inputs()) {
@@ -757,6 +763,11 @@ class TensorExprFuser {
         // These operators only support floats, because integer divisors need to
         // raise ZeroDivisionError.
         if (node->isMemberOf(float_only_operator_set) && !isFloatingType(*st)) {
+          return false;
+        }
+
+        // These operators have complicated casting rules for floats.
+        if (node->isMemberOf(int_only_operator_set) && isFloatingType(*st)) {
           return false;
         }
       }
