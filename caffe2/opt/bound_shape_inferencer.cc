@@ -322,6 +322,12 @@ void BoundShapeInferencer::InferGivenTensorFill(const OperatorDef& op) {
   if (it != shape_info_.end()) {
     it->second.setDimType(std::vector<TensorBoundShape::DimType>(
         it->second.shape.dims_size(), TensorBoundShape_DimType_CONSTANT));
+    if (op.type() == "ConstantFill" && op.input_size() >= 1) {
+        auto it_input = shape_info_.find(op.input(0));
+        if (it_input != shape_info_.end()) {
+          it->second.setDimType(it_input->second.getDimType());
+        }
+    }
   }
 }
 
