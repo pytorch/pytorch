@@ -1775,13 +1775,18 @@ namespace detail {
 template <typename T>
 struct getTypePtr_ final {
   static TypePtr call() {
-    TORCH_CHECK(
-        isCustomClassRegistered<T>(),
-        "Type ",
-        c10::util::get_fully_qualified_type_name<T>(),
-        " could not be converted to any of the known types."
-    );
-    auto res = getCustomClassType<T>();
+    TypePtr res = []() {
+      try {
+        return getCustomClassType<T>();
+      } catch(const c10::Error&) {
+        TORCH_CHECK(
+            false,
+            "Type ",
+            c10::util::get_fully_qualified_type_name<T>(),
+            " could not be converted to any of the known types."
+        );
+      }
+    }();
     return std::dynamic_pointer_cast<Type>(std::move(res));
   }
 };
