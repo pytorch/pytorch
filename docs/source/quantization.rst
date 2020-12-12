@@ -358,11 +358,15 @@ These two ways of classification are independent, so theoretically we can have 6
 
 The supported quantization types in FX Graph Mode Quantization are:
 - Post Training Quantization
+
   - Weight Only Quantization
   - Dynamic Quantization
   - Static Quantization
+
 - Quantization Aware Training
+
   - Static Quantization
+
 
 There are multiple quantization types in post training quantization (weight only, dynamic and static) and the configuration is done through `qconfig_dict` (an argument of the `prepare_fx` function).
 
