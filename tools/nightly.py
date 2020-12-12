@@ -325,9 +325,7 @@ def _site_packages(dirname, platform):
         template = os.path.join(dirname, "Lib", "site-packages")
     else:
         template = os.path.join(dirname, "lib", "python*.*", "site-packages")
-    print(template)
     spdir = glob.glob(template)[0]
-    print(spdir)
     return spdir
 
 
