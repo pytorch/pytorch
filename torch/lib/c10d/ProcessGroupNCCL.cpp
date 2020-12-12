@@ -1008,7 +1008,7 @@ std::vector<at::Tensor> ProcessGroupNCCL::WorkNCCL::result() {
 
 c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
     getFuture() {
-  return c10::make_intrusive<FutureNCCL>(at::IValue(*outputs_), cudaEvents_);
+  return future_;
 }
 
 void ProcessGroupNCCL::workEnqueue(
@@ -1046,7 +1046,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   bool can_profile = outputs.size() == 1;
   auto work = initWork(devices, rank_, opType, can_profile ? profilingTitle : nullptr);
 
-  // Store references to outputs to be used by WorkNCCL::getFuture.
+  // Store references to outputs to be used by WorkNCCL::result and operator<<.
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
 
   at::cuda::OptionalCUDAGuard gpuGuard;
@@ -1088,6 +1088,13 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     work->ncclComms_[i] = ncclComms[i];
   }
 
+  {
+    at::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams_[key]);
+    work->future_ = c10::make_intrusive<at::cuda::CUDAFuture>(
+        c10::ListType::create(c10::TensorType::get()));
+    work->future_->markCompleted(at::IValue(*work->outputs_));
+  }
+
   // Set appropriate work parameters.
   work->blockingWait_ = blockingWait_;
   work->opTimeout_ = opTimeout_;
@@ -1097,7 +1104,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     // recordFunctionEndCallback_ is normally called in fininsh() function by
     // base class, but since finish is not called by WorkNCCL, we schedule this
     // function to be run when work is done. Note that addCallback() onto the
-    // Work's futureNCCL is not useful here, as it would just run the callback
+    // Work's CUDAFuture is not useful here, as it would just run the callback
     // inline.
     // Note when can_profile is false, profilingTitle is not provided and so,
     // recordFunctionEndCallback_ is not set.
@@ -1132,7 +1139,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
   auto work = initWork(devices, rank_, opType);
 
   if (opType == OpType::RECV) {
-    // Store references to outputs to be used by WorkNCCL::getFuture.
+    // Store references to outputs to be used by WorkNCCL::result and operator<<.
     work->outputs_ = std::make_shared<std::vector<at::Tensor>>(tensors);
   }
 
@@ -1176,6 +1183,13 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
     work->blockingWait_ = blockingWait_;
     work->opTimeout_ = opTimeout_;
     work->store_ = store_;
+  }
+
+  if (opType == OpType::RECV) {
+    at::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams_[key]);
+    work->future_ = c10::make_intrusive<at::cuda::CUDAFuture>(
+        c10::ListType::create(c10::TensorType::get()));
+    work->future_->markCompleted(at::IValue(*work->outputs_));
   }
 
   return work;
