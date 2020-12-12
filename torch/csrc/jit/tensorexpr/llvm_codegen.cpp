@@ -721,7 +721,8 @@ void LLVMCodeGenImpl::visit(const Max* v) {
   auto rhs = this->value_;
 
   if (v->dtype().is_integral()) {
-    auto icmp = irb_.CreateICmpSGT(lhs, rhs);
+    auto icmp = v->dtype().is_signed() ? irb_.CreateICmpSGT(lhs, rhs)
+                                       : irb_.CreateICmpUGT(lhs, rhs);
     value_ = irb_.CreateSelect(icmp, lhs, rhs);
     return;
   }
@@ -742,7 +743,8 @@ void LLVMCodeGenImpl::visit(const Min* v) {
   v->rhs()->accept(this);
   auto rhs = this->value_;
   if (v->dtype().is_integral()) {
-    auto icmp = irb_.CreateICmpSLT(lhs, rhs);
+    auto icmp = v->dtype().is_signed() ? irb_.CreateICmpSLT(lhs, rhs)
+                                       : irb_.CreateICmpULT(lhs, rhs);
     value_ = irb_.CreateSelect(icmp, lhs, rhs);
     return;
   }

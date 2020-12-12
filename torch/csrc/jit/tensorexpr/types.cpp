@@ -9,6 +9,10 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+static bool is_c10_type(const ScalarType& type) {
+  return type < ScalarType::Undefined;
+}
+
 bool is_integral(const ScalarType& type) {
   switch (type) {
     case ScalarType::Bool:
@@ -35,6 +39,13 @@ bool is_floating_point(const ScalarType& type) {
       return false;
   }
 
+  return false;
+}
+
+bool is_signed(const ScalarType& type) {
+  if (is_c10_type(type)) {
+    return c10::isSignedType(static_cast<c10::ScalarType>(type));
+  }
   return false;
 }
 
