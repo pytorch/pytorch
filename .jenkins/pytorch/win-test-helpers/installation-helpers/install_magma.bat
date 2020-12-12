@@ -1,5 +1,5 @@
-rem remove dot in cuda_complete_version, fox example 11.1 to 111
-set VERSION_SUFFIX=%CUDA_COMPLETE_VERSION:.=%
+rem remove dot in cuda_version, fox example 11.1 to 111
+set VERSION_SUFFIX=%CUDA_VERSION:.=%
 set CUDA_SUFFIX=cuda%VERSION_SUFFIX%
 
 if "%CUDA_SUFFIX%" == "" (

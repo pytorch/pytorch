@@ -86,17 +86,10 @@ class WindowsJob:
                 props_dict["executor"] = "windows-with-nvidia-gpu"
 
         props_dict["cuda_version"] = (
-            miniutils.quote(str(self.cuda_version.major))
+            miniutils.quote(str(self.cuda_version))
             if self.cuda_version
             else "cpu"
         )
-
-        if base_phase == "build":
-            props_dict["cuda_complete_version"] = (
-                miniutils.quote(str(self.cuda_version))
-                if self.cuda_version
-                else "cpu"
-            )
 
         props_dict["name"] = "_".join(name_parts)
 

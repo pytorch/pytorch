@@ -42,7 +42,7 @@ if not "%USE_CUDA%"=="1" goto cuda_build_end
 set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_COMPLETE_VERSION%
 
 rem version transformer, for example 10.1 to 10_1.
-set VERSION_SUFFIX=%CUDA_COMPLETE_VERSION:.=_%
+set VERSION_SUFFIX=%CUDA_VERSION:.=_%
 set CUDA_PATH_V%VERSION_SUFFIX%=%CUDA_PATH%
 
 set CUDNN_LIB_DIR=%CUDA_PATH%\lib\x64

@@ -59,9 +59,6 @@ pytorch_windows_params: &pytorch_windows_params
       default: ""
     cuda_version:
       type: string
-      default: "10"
-    cuda_complete_version:
-      type: string
       default: "10.1"
     python_version:
       type: string
@@ -82,7 +79,6 @@ pytorch_windows_params: &pytorch_windows_params
     BUILD_ENVIRONMENT: <<parameters.build_environment>>
     SCCACHE_BUCKET: "ossci-compiler-cache"
     CUDA_VERSION: <<parameters.cuda_version>>
-    CUDA_COMPLETE_VERSION: <<parameters.cuda_complete_version>>
     PYTHON_VERSION: <<parameters.python_version>>
     VC_VERSION: <<parameters.vc_version>>
     VC_YEAR: <<parameters.vc_year>>
