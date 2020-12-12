@@ -674,10 +674,10 @@ def get_static_fn(cls, fn):
 
 
 def get_torchscript_modifier(fn):
-    if not callable(fn):
-        return None
     if hasattr(fn, '__func__'):
         fn = fn.__func__
+    if not callable(fn):
+        return None
     return getattr(fn, '_torchscript_modifier', FunctionModifiers.DEFAULT)
 
 def copy_torchscript_modifier(orig, new):
