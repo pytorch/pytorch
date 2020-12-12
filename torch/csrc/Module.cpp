@@ -154,6 +154,7 @@ static PyObject * THPModule_crashIfCsrcASAN(PyObject *module, PyObject *arg) {
   //NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
   volatile char x[3];
   x[THPUtils_unpackInt(arg)] = 0;
+  //NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
   return THPUtils_packInt32(x[0]);
 }
 
