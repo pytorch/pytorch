@@ -29,8 +29,8 @@ IMAGE_NAMES = [
     "pytorch-linux-xenial-py3.6-gcc5.4",  # this one is used in doc builds
     "pytorch-linux-xenial-py3.6-gcc7.2",
     "pytorch-linux-xenial-py3.6-gcc7",
-    "pytorch-linux-bionic-rocm3.8-py3.6",
     "pytorch-linux-bionic-rocm3.9-py3.6",
+    "pytorch-linux-bionic-rocm3.10-py3.6",
 ]
 
 

@@ -47,14 +47,18 @@ struct tagged_capsule {
 template <class T, class NullType>
 c10::intrusive_ptr<T, NullType> IValue::moveToIntrusivePtr() {
   auto t = c10::intrusive_ptr<T, NullType>::reclaim(
-      static_cast<T*>(payload.as_intrusive_ptr));
+      payload.as_intrusive_ptr == c10::UndefinedTensorImpl::singleton()
+      ? NullType::singleton()
+      : static_cast<T*>(payload.as_intrusive_ptr));
   clearToNone();
   return t;
 }
 template <typename T, class NullType>
 c10::intrusive_ptr<T, NullType> IValue::toIntrusivePtr() const {
   auto r = c10::intrusive_ptr<T, NullType>::reclaim(
-      static_cast<T*>(payload.as_intrusive_ptr));
+      payload.as_intrusive_ptr == c10::UndefinedTensorImpl::singleton()
+      ? NullType::singleton()
+      : static_cast<T*>(payload.as_intrusive_ptr));
   auto p = r;
   r.release();
   return p;
@@ -304,10 +308,14 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   /**
    * Wait on the future until it completes.
    */
-  virtual void wait() {
+  void wait() {
     std::unique_lock<std::mutex> lock(mutex_);
     while (!completed_) {
       finished_cv_.wait(lock);
+    }
+
+    if (!eptr_) {
+      postWaitHook(value_);
     }
   }
 
@@ -315,7 +323,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
    * Wait on the future until it completes and throw an
    * exception if an error exists.
    */
-  virtual void waitAndThrow() {
+  void waitAndThrow() {
     std::unique_lock<std::mutex> lock(mutex_);
     while (!completed_) {
       finished_cv_.wait(lock);
@@ -324,12 +332,14 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     if (eptr_) {
       std::rethrow_exception(eptr_);
     }
+
+    postWaitHook(value_);
   }
 
   /**
    * Explicitly mark the future as completed with the output value.
    */
-  virtual void markCompleted(IValue value) {
+  void markCompleted(IValue value) {
     std::unique_lock<std::mutex> lock(mutex_);
     TORCH_CHECK(
         !completed(),
@@ -337,6 +347,8 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
         "a Future can only be marked completed once.");
     completed_ = true;
     value_ = std::move(value);
+
+    postMarkCompletedHook(value_);
 
     std::vector<std::function<void(void)>> cbs;
     cbs.swap(callbacks_);
@@ -373,7 +385,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   }
 
   // Get the result of the current future.
-  virtual IValue value() {
+  IValue value() {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
     if (eptr_) {
@@ -384,7 +396,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
 
   // This accessor should only be used if we know that the future is
   // completed() with no error.
-  virtual const IValue& constValue() {
+  const IValue& constValue() {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
     AT_ASSERT(!eptr_);
@@ -397,8 +409,9 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
    * If the future has already completed,
    * this function will execute the callback immediately.
    */
-  virtual void addCallback(std::function<void(void)> callback) {
+  void addCallback(std::function<void(void)> callback) {
     std::unique_lock<std::mutex> lock(mutex_);
+    callback = wrapCallback(std::move(callback));
     if (completed()) {
       lock.unlock();
       callback();
@@ -412,31 +425,47 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
    * value of the callback. This is necessary when the callback provider needs
    * to know for sure when the callback has finished.
    */
-  virtual c10::intrusive_ptr<Future> then(
+  c10::intrusive_ptr<Future> then(
       std::function<IValue(void)> callback,
       TypePtr type) {
-    auto fut = c10::make_intrusive<Future>(type);
-    // Cannot move capture std::function in lambda, because it cannot deduce
-    // the template type for std::function. Hence use std::bind to explicitly
-    // specify types.
-    addCallback(std::bind(
-        [fut](std::function<IValue(void)> cb) {
+    auto fut = createInstance(std::move(type));
+    addCallback(
+        [fut, cb = std::move(callback)]() {
           try {
             fut->markCompleted(cb());
-          } catch (std::exception& e) {
+          } catch (std::exception&) {
             fut->setError(std::current_exception());
           }
-        },
-        std::move(callback)));
+        });
     return fut;
   }
 
-  // Since this file cannot import CUDA depedency, the type of the seocond arg
-  // in the callback is c10::Stream instead of at::cuda::CUDAStream, and
-  // CUDAStream is constructed on the fly. The default implementation
-  // is a no-op, since it does not deal with any CUDA streams.
-  virtual void setRecordStreamCallback(
-      std::function<void(const at::IValue&, const c10::Stream&)> record_stream_cb) {}
+  // Some subclasses deal with CUDA tensors and must inform the CUDA caching
+  // allocator of which CUDA streams each DataPtr is used in. If the value held
+  // by the future is a Python object we need to acquire the GIL when extracting
+  // these DataPtrs. Since this file cannot depend on Python, we allow users to
+  // provide a "custom" extractor. Look for example at the PythonFutureWrapper.
+  using DataPtrExtractor =
+      std::function<std::vector<std::reference_wrapper<const at::DataPtr>>(
+          const at::IValue&)>;
+  virtual void setDataPtrExtractor(DataPtrExtractor data_ptr_extractor) {}
+
+  // Expose the default implementation so that external ones can defer to it.
+  static std::vector<std::reference_wrapper<const at::DataPtr>>
+  defaultDataPtrExtractor(const at::IValue& value) {
+    at::IValue::HashAliasedIValues sub_values;
+    // Prefer getSubValues() over visit() as the latter is a silent no-op for
+    // some unsupported types, whereas the former at least fails loudly.
+    value.getSubValues(sub_values);
+
+    std::vector<std::reference_wrapper<const at::DataPtr>> res;
+    for (const at::IValue& sub_value : sub_values) {
+      if (sub_value.isTensor()) {
+        res.emplace_back(sub_value.toTensor().storage().data_ptr());
+      }
+    }
+    return res;
+  };
 
   // Tries to retrieve the error message from std::exception_ptr.
   std::string tryRetrieveErrorMessage() {
@@ -446,11 +475,11 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   }
 
   // Check if the current future has completed
-  virtual bool completed() const {
+  bool completed() const {
     return completed_;
   }
 
-  virtual bool hasValue() const {
+  bool hasValue() const {
     std::unique_lock<std::mutex> lock(mutex_);
     return completed_ && !eptr_;
   }
@@ -473,6 +502,43 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     return type_;
   }
 
+ protected:
+  // This hook is called by this class's then() method when it prepares the
+  // instance it returns to the caller. It should be overridden by subclasses so
+  // that they can produce an instace of their own type.
+  virtual c10::intrusive_ptr<Future> createInstance(at::TypePtr type) {
+    return c10::make_intrusive<Future>(type);
+  }
+
+  // This hook will be called by this class (the superclass) when the future is
+  // marked completed _with a value_ (hence not in case of error). This is done
+  // right away, while the mutex is still held, before any callbacks are run.
+  // It allows subclasses to further update their state if they so need. For
+  // example the CUDAFuture subclass uses it to determine what devices the value
+  // resides on and record an event in those devices' current streams.
+  virtual void postMarkCompletedHook(const at::IValue& value) {}
+
+  // This hook will be called by the addCallback() and the then() methods before
+  // storing the callback for later execution (or before running it inline if
+  // the future is already complete). Note that this method could thus be called
+  // while the future is _not_ yet complete. By default this method does nothing
+  // but subclasses can override this method to add functionality. For example
+  // the CUDAFuture subclass ensures the callback runs with CUDA streams which
+  // are synchronized with the events recorded in the I/O streams.
+  virtual std::function<void(void)> wrapCallback(
+      std::function<void(void)> callback) {
+    return callback;
+  }
+
+  // This hook will be called by this class after a user thread has completed
+  // waiting on a successful future. It will thus not be called if the future
+  // completes with an error. It will also not be called if the user accesses
+  // the future's value without synchronization. Subclasses can override this
+  // to add some synchronization to the wait. For example, the CUDAFuture
+  // subclass ensures the user's current CUDA streams synchronize with the I/O
+  // events stored by the future.
+  virtual void postWaitHook(const at::IValue& value) {}
+
  private:
   void setErrorInternal(
       std::exception_ptr eptr,
@@ -480,6 +546,8 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     AT_ASSERT(!completed());
     completed_ = true;
     eptr_ = std::move(eptr);
+
+    // Do not call postMarkCompletedHook() here as there isn't any value.
 
     std::vector<std::function<void(void)>> cbs;
     cbs.swap(callbacks_);
@@ -676,6 +744,7 @@ using _guarded_unsigned_long = std::conditional_t<
 
 inline const ivalue::Object& IValue::toObjectRef() const {
   AT_ASSERT(isObject(), "Expected Object but got ", tagKind());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(payload.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(), "Attempted to create null reference");
   return *static_cast<const c10::ivalue::Object*>(payload.as_intrusive_ptr);
 }
 
@@ -923,6 +992,9 @@ inline c10::List<int64_t> IValue::toIntList() const& {
 }
 inline std::vector<int64_t> IValue::toIntVector() const {
   AT_ASSERT(isIntList(), "Expected IntList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      payload.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
+      "called toIntVector on null intrusive_ptr IValue");
   return createVectorFromList<int64_t>(
       static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr));
 }
@@ -936,6 +1008,9 @@ inline c10::List<double> IValue::toDoubleList() const& {
 }
 inline std::vector<double> IValue::toDoubleVector() const {
   AT_ASSERT(isDoubleList(), "Expected DoubleList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      payload.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
+      "called toDoubleVector on null intrusive_ptr IValue");
   return createVectorFromList<double>(
       static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr));
 }
@@ -957,6 +1032,9 @@ inline c10::List<at::Tensor> IValue::toTensorList() const& {
 }
 inline std::vector<at::Tensor> IValue::toTensorVector() const {
   AT_ASSERT(isTensorList(), "Expected TensorList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      payload.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
+      "called toTensorVector on null intrusive_ptr IValue");
   return createVectorFromList<at::Tensor>(
       static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr));
 }
@@ -970,6 +1048,9 @@ inline c10::List<IValue> IValue::toList() const& {
 }
 inline c10::ArrayRef<IValue> IValue::toListRef() const {
   AT_ASSERT(isList(), "Expected GenericList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      payload.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
+      "called toListRef on null intrusive_ptr IValue");
   return static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr)
       ->list;
 }
@@ -992,7 +1073,7 @@ inline c10::intrusive_ptr<ivalue::Tuple> IValue::toTuple() const& {
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Tuple> v)
     : tag(Tag::Tuple), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release();
+  payload.as_intrusive_ptr = v.release() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
 }
 template <
     typename... Args,
@@ -1008,14 +1089,14 @@ inline IValue::IValue(const std::tuple<Args...>& t)
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::ConstantString> v)
     : tag(Tag::String), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release();
+  payload.as_intrusive_ptr = v.release() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
 }
 inline IValue::IValue(std::string v)
     : IValue(ivalue::ConstantString::create(std::move(v))) {}
 
 inline IValue::IValue(c10::impl::GenericList v)
     : tag(Tag::GenericList), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.impl_.release();
+  payload.as_intrusive_ptr = v.impl_.release() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
 }
 
 template <class T, IValue::enable_if_ivalue_constructible<T>>
@@ -1047,7 +1128,7 @@ inline IValue::IValue(std::array<T, N> v) : IValue(c10::List<T>()) {
 
 inline IValue::IValue(c10::impl::GenericDict v)
     : tag(Tag::GenericDict), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.impl_.release();
+  payload.as_intrusive_ptr = v.impl_.release() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
 }
 template <class Key, class Value>
 inline IValue::IValue(c10::Dict<Key, Value> v)
@@ -1074,17 +1155,17 @@ inline IValue::IValue(c10::nullopt_t) : IValue() {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Object> v)
     : tag(Tag::Object), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release();
+  payload.as_intrusive_ptr = v.release() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
 }
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::PyObjectHolder> v)
     : tag(Tag::PyObject), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release();
+  payload.as_intrusive_ptr = v.release() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
 }
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::EnumHolder> v)
     : tag(Tag::Enum), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release();
+  payload.as_intrusive_ptr = v.release() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
 }
 
 inline IValue IValue::make_capsule(
@@ -1092,7 +1173,7 @@ inline IValue IValue::make_capsule(
   IValue iv;
   iv.tag = Tag::Capsule;
   iv.is_intrusive_ptr = true;
-  iv.payload.as_intrusive_ptr = blob.release();
+  iv.payload.as_intrusive_ptr = blob.release() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
   return iv;
 }
 
@@ -1110,28 +1191,31 @@ IValue::IValue(c10::intrusive_ptr<T> custom_class) {
   auto ivalue_obj = c10::ivalue::Object::create(
       c10::StrongTypePtr(nullptr, classType), /*num_slots=*/1);
   ivalue_obj->setSlot(0, IValue::make_capsule(std::move(custom_class)));
-  payload.as_intrusive_ptr = ivalue_obj.release();
+  payload.as_intrusive_ptr = ivalue_obj.release() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
   tag = Tag::Object;
   is_intrusive_ptr = true;
 }
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
     : tag(Tag::Future), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release();
+  payload.as_intrusive_ptr = v.release() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
 }
 
 inline IValue::IValue(c10::intrusive_ptr<c10::RRefInterface> v)
     : tag(Tag::RRef), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release();
+  payload.as_intrusive_ptr = v.release() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
 }
 
 inline IValue::IValue(c10::intrusive_ptr<at::Quantizer> v)
     : tag(Tag::Quantizer), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release();
+  payload.as_intrusive_ptr = v.release() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
 }
 
 inline const std::string& IValue::toStringRef() const {
   AT_ASSERT(isString(), "Expected String but got ", tagKind());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      payload.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
+      "called toStringRef on null intrusive_ptr IValue");
   return static_cast<const c10::ivalue::ConstantString*>(
              payload.as_intrusive_ptr)
       ->string();
@@ -1142,6 +1226,9 @@ inline c10::optional<std::reference_wrapper<const std::string>> IValue::
     return c10::nullopt;
   }
   AT_ASSERT(isString(), "Expected optional<string> but got ", tagKind());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      payload.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
+      "called toOptionalStringRef on null intrusive_ptr IValue");
   return std::reference_wrapper<const std::string>(
       static_cast<const c10::ivalue::ConstantString*>(payload.as_intrusive_ptr)
           ->string());
@@ -1197,13 +1284,13 @@ inline bool IValue::isSameIdentity(const IValue& rhs) const {
   } else if (this->isTensor() && rhs.isTensor()) {
     // for tensor type, just check the as_intrusive_ptr since is_intrusive_ptr
     // is false for undefined tensor
-    return this->payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
+    return this->payload.as_tensor.is_same(rhs.payload.as_tensor);
   } else if (this->isTensor() && rhs.isNone()) {
     // special case: undefined tensor and None are the same identity
-    return !this->is_intrusive_ptr;
+    return !this->payload.as_tensor.defined();
   } else if (this->isNone() && rhs.isTensor()) {
     // special case: undefined tensor and None are the same identity
-    return !rhs.is_intrusive_ptr;
+    return !rhs.payload.as_tensor.defined();
   } else if (this->isInt() && rhs.isInt()) {
     return this->toInt() == rhs.toInt();
   } else if (this->isDouble() && rhs.isDouble()) {
