@@ -1,9 +1,11 @@
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/interned_strings.h>
 #include <c10/core/CPUAllocator.h>
 #include <caffe2/core/scope_guard.h>
 #include <caffe2/core/timer.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
@@ -14,14 +16,19 @@
 namespace torch {
 namespace jit {
 
-namespace {
-void OptimizeGraph(std::shared_ptr<torch::jit::Graph>& graph) {
+void PrepareGraphForStaticRuntime(std::shared_ptr<torch::jit::Graph> graph) {
   Inline(*graph);
   ConstantPropagation(graph);
   Canonicalize(graph);
   ConstantPropagation(graph);
   RemoveTensorMutation(graph);
   ConstantPropagation(graph);
+  EliminateDeadCode(graph);
+}
+
+namespace {
+void OptimizeGraph(std::shared_ptr<torch::jit::Graph>& graph) {
+  PrepareGraphForStaticRuntime(graph);
   FuseInferenceOpsForSparseNN(graph);
   ConstantPropagation(graph);
 }
@@ -163,23 +170,30 @@ LivenessMap(const std::shared_ptr<torch::jit::Graph>& graph) {
 
 std::unordered_set<Value*> GetOptimizableValues(
     const std::shared_ptr<torch::jit::Graph>& graph) {
-  std::unordered_set<Value*> is_out_of_place;
-  std::unordered_set<Value*> is_not_out_of_place;
+  std::unordered_set<Value*> can_reuse;
+  // values used by unsupported ops (as either inputs or outputs)
+  // these need to be removed from "can_reuse" after analyzing all nodes
+  std::unordered_set<Value*> cannot_reuse;
   for (const auto& n : graph->nodes()) {
-    for (const auto& container : {n->inputs(), n->outputs()}) {
-      for (const auto& v : container) {
-        if (canRunOutOfPlace(n)) {
-          is_out_of_place.insert(v);
-        } else {
-          is_not_out_of_place.insert(v);
-        }
+    for (const auto& v : n->inputs()) {
+      if (canRunOutOfPlace(n) && canReuseInputs(n)) {
+        can_reuse.insert(v);
+      } else {
+        cannot_reuse.insert(v);
+      }
+    }
+    for (const auto& v : n->outputs()) {
+      if (canRunOutOfPlace(n) && canReuseOutputs(n)) {
+        can_reuse.insert(v);
+      } else {
+        cannot_reuse.insert(v);
       }
     }
   }
-  for (auto v : is_not_out_of_place) {
-    is_out_of_place.erase(v);
+  for (auto v : cannot_reuse) {
+    can_reuse.erase(v);
   }
-  return is_out_of_place;
+  return can_reuse;
 }
 
 size_t AssignRegisters(
@@ -411,6 +425,12 @@ std::vector<at::Tensor> StaticRuntime::run(
 c10::IValue StaticRuntime::run(
     const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
+  // We assume inference workloads, so we do not need
+  // autograd. Enabling this is a significant win on dispatcher
+  // overhead because it saves a round of dispatch for at least some
+  // functions, such as resize_ and resize_as_.
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+
   if (planner_) {
     planner_->allocate();
   }
@@ -521,6 +541,10 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     const int warmup_runs,
     const int main_runs) {
   TORCH_CHECK(warmup_runs >= 0 && main_runs >= 1);
+
+  // See comment on above use of AutoNonVariableTypeMode for
+  // explanation.
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
 
   IndividualMetrics results;
   results.total_time = 0.0;
