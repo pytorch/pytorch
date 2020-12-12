@@ -172,7 +172,7 @@ inline at::Generator IValue::toGenerator() const& {
 namespace ivalue {
 
 void CAFFE2_API
-checkCustomClassType(TypePtr expected_type, TypePtr actual_type);
+checkCustomClassType(const Type* expected_type, const Type* actual_type);
 
 template <typename T>
 using Shared = c10::intrusive_ptr<T>;
@@ -820,8 +820,8 @@ c10::intrusive_ptr<T> IValue::toCustomClass() && {
       obj->slots().size() == 1,
       "Tried to cast IValue to custom class but it did "
       "not contain a custom class!");
-  auto expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>();
-  ivalue::checkCustomClassType(expected_type, type());
+  const Type* expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>().get();
+  ivalue::checkCustomClassType(expected_type, type().get());
   auto userObj =
       c10::static_intrusive_pointer_cast<T>(obj->getSlot(0).toCapsule());
   return userObj;
@@ -838,8 +838,8 @@ c10::intrusive_ptr<T> IValue::toCustomClass() const& {
       obj->slots().size() == 1,
       "Tried to cast IValue to custom class but it did "
       "not contain a custom class!");
-  auto expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>();
-  ivalue::checkCustomClassType(expected_type, type());
+  const Type* expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>().get();
+  ivalue::checkCustomClassType(expected_type, type().get());
   auto userObj =
       c10::static_intrusive_pointer_cast<T>(obj->getSlot(0).toCapsule());
   return userObj;
@@ -1169,13 +1169,16 @@ template <
     typename T,
     std::enable_if_t<std::is_base_of<torch::CustomClassHolder, T>::value, int>>
 IValue::IValue(c10::intrusive_ptr<T> custom_class) {
-  if (!c10::isCustomClassRegistered<c10::intrusive_ptr<T>>()) {
-    throw c10::Error(
-        "Trying to instantiate a class that isn't a registered custom class: " +
-            std::string(c10::util::get_fully_qualified_type_name<T>()),
-        "");
-  }
-  auto classType = c10::getCustomClassType<c10::intrusive_ptr<T>>();
+  TypePtr classType = []() {
+    try {
+      return c10::getCustomClassType<c10::intrusive_ptr<T>>();
+    } catch (const c10::Error&) {
+      throw c10::Error(
+          "Trying to instantiate a class that isn't a registered custom class: " +
+          std::string(c10::util::get_fully_qualified_type_name<T>()),
+          "");
+    }
+  }();
   auto ivalue_obj = c10::ivalue::Object::create(
       c10::StrongTypePtr(nullptr, classType), /*num_slots=*/1);
   ivalue_obj->setSlot(0, IValue::make_capsule(std::move(custom_class)));
