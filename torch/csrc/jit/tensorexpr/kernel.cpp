@@ -466,15 +466,6 @@ ExprHandle promoteHalfToFloat(const ExprHandle& e) {
   }
 }
 
-ExprHandle promoteHalfToFloatAndIntegerToDefaultType(const ExprHandle& e) {
-  auto scalarType = static_cast<c10::ScalarType>(e.dtype().scalar_type());
-  if (c10::isIntegralType(scalarType, /*includeBool*/ true)) {
-    return promoteIntegerToDefaultType(e);
-  } else {
-    return promoteHalfToFloat(e);
-  }
-}
-
 bool TensorExprKernel::checkTypes(
     const ScalarType highType,
     const int typeConstraints) {
@@ -1250,9 +1241,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
       return computeOneOperand(
           "aten_abs",
           v,
-          [](const ExprHandle& a) {
-            return fabs(promoteHalfToFloatAndIntegerToDefaultType(a));
-          },
+          [](const ExprHandle& a) { return abs(promoteHalfToFloat(a)); },
           kIntegralTypes | kFloatingPointTypes | kBoolType);
     } break;
 

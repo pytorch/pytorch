@@ -302,9 +302,9 @@ TEST(Expr, IntrinsicsDtypes) {
   std::vector<double> b_ref(N, 10.0);
 
   VarHandle i("i", kInt);
-  auto fabs_expr = For::make(i, 0, N, b.store({i}, fabs(a.load(i))));
+  auto abs_expr = For::make(i, 0, N, b.store({i}, abs(a.load(i))));
 
-  SimpleIREvaluator ir_eval(fabs_expr, a, b);
+  SimpleIREvaluator ir_eval(abs_expr, a, b);
   ir_eval(a_buffer, b_buffer);
 
   ASSERT_EQ(a_buffer.size(), N);
@@ -377,7 +377,7 @@ TEST(Expr, UnaryMath01) {
        [](float v) { return std::tanh(v); }},
       {[](const ExprHandle& v) { return exp(v); },
        [](float v) { return std::exp(v); }},
-      {[](const ExprHandle& v) { return fabs(v); },
+      {[](const ExprHandle& v) { return abs(v); },
        [](float v) { return std::fabs(v); }},
       {[](const ExprHandle& v) { return log(v); },
        [](float v) { return std::log(v); }},
