@@ -342,7 +342,7 @@ tutorial
 <https://pytorch.org/tutorials/advanced/static_quantization_tutorial.html>`_.
 
 (Prototype) FX Graph Mode Quantization
-^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Quantization types supported by FX Graph Mode can be classified in two ways:
 
 1.
