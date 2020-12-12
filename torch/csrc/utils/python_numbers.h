@@ -66,7 +66,7 @@ inline int64_t THPUtils_unpackLong(PyObject* obj) {
 }
 
 inline uint32_t THPUtils_unpackUInt32(PyObject* obj) {
-  unsigned long long value = PyLong_AsUnsignedLong(obj);
+  unsigned long value = PyLong_AsUnsignedLong(obj);
   if (PyErr_Occurred()) {
     throw python_error();
   }
