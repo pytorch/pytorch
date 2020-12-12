@@ -352,7 +352,7 @@ inline std::string if_empty_then(const std::string& x, const std::string& y) {
 namespace c10 {
 namespace detail {
 
-[[noreturn]] void torchCheckFail(const char *func, const char *file, uint32_t line, const std::string& msg);
+[[noreturn]] C10_API void torchCheckFail(const char *func, const char *file, uint32_t line, const std::string& msg);
 
 } // namespace detail
 } // namespace 10
