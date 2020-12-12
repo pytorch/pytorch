@@ -11,8 +11,16 @@
 // largest integer that can be represented consecutively in a double
 const int64_t DOUBLE_INT_MAX = 9007199254740992;
 
+inline PyObject* THPUtils_packInt32(int32_t value) {
+  return PyLong_FromLong(value);
+}
+
 inline PyObject* THPUtils_packInt64(int64_t value) {
   return PyLong_FromLongLong(value);
+}
+
+inline PyObject* THPUtils_packUInt32(uint32_t value) {
+  return PyLong_FromUnsignedLong(value);
 }
 
 inline PyObject* THPUtils_packUInt64(uint64_t value) {
@@ -33,6 +41,18 @@ inline bool THPUtils_checkLong(PyObject* obj) {
   return PyLong_Check(obj) && !PyBool_Check(obj);
 }
 
+inline int32_t THPUtils_unpackInt(PyObject* obj) {
+  int overflow;
+  long value = PyLong_AsLongAndOverflow(obj, &overflow);
+  if (value == -1 && PyErr_Occurred()) {
+    throw python_error();
+  }
+  if (overflow != 0) {
+    throw std::runtime_error("Overflow when unpacking long");
+  }
+  return (int32_t)value;
+}
+
 inline int64_t THPUtils_unpackLong(PyObject* obj) {
   int overflow;
   long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
@@ -43,6 +63,14 @@ inline int64_t THPUtils_unpackLong(PyObject* obj) {
     throw std::runtime_error("Overflow when unpacking long");
   }
   return (int64_t)value;
+}
+
+inline uint32_t THPUtils_unpackUInt32(PyObject* obj) {
+  unsigned long long value = PyLong_AsUnsignedLong(obj);
+  if (PyErr_Occurred()) {
+    throw python_error();
+  }
+  return (uint32_t)value;
 }
 
 inline uint64_t THPUtils_unpackUInt64(PyObject* obj) {

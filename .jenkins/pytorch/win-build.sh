@@ -39,15 +39,15 @@ fi
 export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
 
 set +ex
-grep -E -R 'PyLong_(From|As)(Unsigned|)Long\(' torch/
+grep -E -R 'PyLong_(From|As)(Unsigned|)Long\(' --exclude=python_numbers.h torch/
 PYLONG_API_USED=$?
-if [[ PYLONG_API_USED != 0 ]]; then
+if [[ $PYLONG_API_USED != 0 ]]; then
   echo "Usage of PyLong_{From,As}{Unsigned}Long API may lead to potential errors on Windows."
   echo "Please include \"torch/csrc/python_numbers.h\" and use the correspoding APIs instead."
-  echo "PyLong_FromLong -> THPUtils_packInt64"
-  echo "PyLong_AsLong -> THPUtils_unpackLong"
-  echo "PyLong_FromUnsignedLong -> THPUtils_packUInt64"
-  echo "PyLong_AsUnsignedLong -> THPUtils_unpackUInt64"
+  echo "PyLong_FromLong -> THPUtils_packInt32 / THPUtils_packInt64"
+  echo "PyLong_AsLong -> THPUtils_unpackInt / THPUtils_packLong"
+  echo "PyLong_FromUnsignedLong -> THPUtils_packUInt32 / THPUtils_packUInt64"
+  echo "PyLong_AsUnsignedLong -> THPUtils_unpackUInt32 / THPUtils_unpackUInt64"
   exit 1
 fi
 set -ex
