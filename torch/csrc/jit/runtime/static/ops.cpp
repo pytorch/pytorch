@@ -60,7 +60,8 @@ struct static_add final : public at::native::structured_add_out {
       at::IntArrayRef strides,
       at::TensorOptions options,
       at::DimnameList names,
-      c10::optional<c10::TensorQuantizationOptions> quant_options = c10::nullopt) override {
+      c10::optional<c10::TensorQuantizationOptions> quant_options =
+          c10::nullopt) override {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(output_idx == 0);
     // NB: do NOT use resize_output as it will complain if not zero sized.
     at::native::resize_(output_, sizes);
