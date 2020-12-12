@@ -111,12 +111,16 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
     const Tensor& weight,
     const Tensor& bias,
     double eps) {
+  auto inputs = _prepare_layer_norm_inputs(input, normalized_shape, weight, bias);
+  auto X = std::get<0>(inputs);
+  auto gamma = std::get<1>(inputs);
+  auto beta = std::get<2>(inputs);
+  auto M = std::get<3>(inputs);
+  auto N = std::get<4>(inputs);
   auto input_shape = input.sizes();
   const auto input_ndim = input.dim();
   const int normalized_ndim = normalized_shape.size();
   const int axis = input_ndim - normalized_ndim;
-  auto M = prod_intlist(input_shape.cbegin(), input_shape.cbegin()+ axis);
-  auto N = prod_intlist(input_shape.cbegin() + axis, input_shape.cend());
   at::Tensor input_reshaped = input.view({1, M, -1});
   // Unlike Batch Normalization, which applies scalar scale and bias for each
   // entire channel/plane with the affine option, Layer Normalization applies
