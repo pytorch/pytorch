@@ -115,6 +115,14 @@ class CAFFE2_API Tensor {
     return impl_->storage_offset();
   }
 
+  Tensor contiguous(MemoryFormat memory_format=MemoryFormat::Contiguous) const {
+    if (is_contiguous(memory_format)) {
+      return *this;
+    } else {
+      return __dispatch_contiguous(memory_format);
+    }
+  }
+
   TensorImpl * unsafeGetTensorImpl() const {
     return impl_.get();
   }

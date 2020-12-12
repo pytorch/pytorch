@@ -617,10 +617,15 @@ class Graph:
             not used in the remainder of the code are freed and the memory usage
             of the code is optimal.
             """
+            if user.op == 'output':
+                body.append('\n')
+                return
             nodes_to_delete = user_to_last_uses.get(user, [])
             if len(nodes_to_delete):
                 to_delete_str = ' = '.join([n.name for n in nodes_to_delete] + ['None'])
-                body.append(f'{to_delete_str}\n')
+                body.append(f';  {to_delete_str}\n')
+            else:
+                body.append('\n')
 
         def emit_node(node : Node):
             if node.op == 'placeholder':
@@ -630,20 +635,20 @@ class Graph:
                 free_vars.append(f'{node.target}{maybe_type_annotation}{maybe_default_arg}')
                 raw_name = node.target.replace('*', '')
                 if raw_name != node.name:
-                    body.append(f'{node.name} = {raw_name}\n')
+                    body.append(f'{node.name} = {raw_name}')
                 return
             elif node.op == 'call_method':
                 assert isinstance(node.target, str)
                 body.append(
                     f'{node.name} = {_format_target(repr(node.args[0]), node.target)}'
-                    f'({_format_args(node.args[1:], node.kwargs)})\n')
+                    f'({_format_args(node.args[1:], node.kwargs)})')
                 return
             elif node.op == 'call_function':
                 assert callable(node.target)
                 # pretty print operators
                 if node.target.__module__ == '_operator' and node.target.__name__ in magic_methods:
                     assert isinstance(node.args, tuple)
-                    body.append(f'{node.name} = {magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}\n')
+                    body.append(f'{node.name} = {magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}')
                     return
                 qualified_name = get_qualified_name(node.target)
                 register_modules_used(qualified_name)
@@ -652,26 +657,28 @@ class Graph:
                    isinstance(node.args[1], str) and \
                    node.args[1].isidentifier():
                     # pretty print attribute access
-                    body.append(f'{node.name} = {_format_target(repr(node.args[0]), node.args[1])}\n')
+                    body.append(f'{node.name} = {_format_target(repr(node.args[0]), node.args[1])}')
                     return
-                body.append(f'{node.name} = {qualified_name}({_format_args(node.args, node.kwargs)})\n')
+                body.append(f'{node.name} = {qualified_name}({_format_args(node.args, node.kwargs)})')
                 return
             elif node.op == 'call_module':
                 assert isinstance(node.target, str)
-                body.append(f'{node.name} = {_format_target(root_module, node.target)}({_format_args(node.args, node.kwargs)})\n')
+                body.append(f'{node.name} = {_format_target(root_module, node.target)}({_format_args(node.args, node.kwargs)})')
                 return
             elif node.op == 'get_attr':
                 assert isinstance(node.target, str)
-                body.append(f'{node.name} = {_format_target(root_module, node.target)}\n')
+                body.append(f'{node.name} = {_format_target(root_module, node.target)}')
                 return
             elif node.op == 'output':
                 if node.type is not None:
                     maybe_return_annotation = f" -> {type_repr(node.type)}"
-                body.append(f'return {repr(node.args[0])}\n')
+                body.append(f'return {repr(node.args[0])}')
                 return
             raise NotImplementedError(f'node: {node.op} {node.target}')
 
         for node in self.nodes:
+            # NOTE: emit_node does not emit a string with newline. It depends
+            # on delete_unused_values to append one
             emit_node(node)
             delete_unused_values(node)
 
