@@ -178,7 +178,8 @@ TEST(OptimTest, OptimizerAccessors) {
   std::vector<torch::Tensor> params_with_duplicate_param = {t, t};
   torch::test::WarningCapture warnings;
   optimizer.add_param_group(OptimizerParamGroup(params_with_duplicate_param));
-  ASSERT_EQ(count_substr_occurrences(warnings.str(), "optimizer contains a parameter group with duplicate parameters"), 1);
+  ASSERT_EQ(
+    torch::test::count_substr_occurrences(warnings.str(), "optimizer contains a parameter group with duplicate parameters"), 1);
 }
 
 #define OLD_INTERFACE_WARNING_CHECK(func)       \
