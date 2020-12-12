@@ -19,7 +19,7 @@
 #include <sstream>
 #include <sys/wait.h>
 
-#include <inttypes.h> 
+#include <cinttypes> 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <fmt/format.h>
