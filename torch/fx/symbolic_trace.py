@@ -165,7 +165,7 @@ class Tracer(TracerBase):
         This method can be overridden to--for example--create nested traced
         GraphModules, or any other behavior you would want while tracing across
         ``Module`` boundaries.
-         ``Module`` boundaries.
+        ``Module`` boundaries.
 
         Args:
 
@@ -189,7 +189,7 @@ class Tracer(TracerBase):
         """
         Create ``placeholder`` nodes corresponding to the signature of the ``root``
         Module. This method introspects root's signature and emits those
-        nodes accordingly, also supporting *args and **kwargs.
+        nodes accordingly, also supporting ``*args`` and ``**kwargs``.
         """
         # In some cases, a function or method has been decorated with a wrapper
         # defined via ``functools.wraps``. In this case, the outer code object

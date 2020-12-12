@@ -164,6 +164,7 @@ class LLVMCodeGenImpl : public IRVisitor {
 #undef IMM_VISIT_DECLARE
 
   void visit(const Cast* v) override;
+  void visit(const BitCast* v) override;
   void visit(const Var* v) override;
   void visit(const Ramp* v) override;
   void visit(const Load* v) override;
@@ -886,6 +887,25 @@ void LLVMCodeGenImpl::visit(const Cast* v) {
   } else {
     throw unimplemented_lowering(v);
   }
+}
+
+void LLVMCodeGenImpl::visit(const BitCast* v) {
+  v->src_value()->accept(this);
+
+  llvm::Type* dstType = dtypeToLLVM(v->dtype());
+  if (v->dtype().lanes() > 1) {
+    dstType = llvm::VectorType::get(dstType, ElementCount(v->dtype().lanes()));
+  }
+  llvm::Type* srcType = dtypeToLLVM(v->src_value()->dtype());
+
+  if (srcType == dstType) {
+    // do nothing.
+    return;
+  }
+
+  TORCH_CHECK(llvm::CastInst::isBitCastable(
+      srcType->getScalarType(), dstType->getScalarType()));
+  value_ = irb_.CreateBitOrPointerCast(value_, dstType);
 }
 
 void LLVMCodeGenImpl::visit(const Var* v) {
