@@ -466,9 +466,12 @@ c10::impl::hacky_wrapper_for_legacy_signatures<
                 return f'm.impl("{f.func.name}", {payload});'
             else:
                 assert_never(self.target)
+                # Silence mypy's "Missing return statement" error
+                return None
 
         return list(mapMaybe(gen_one, g.functions()))
 
+    @method_with_native_function
     def gen_unstructured(self, f: NativeFunction) -> Optional[str]:
         # for mypy type refinement; would be fixed by TODO on target
         assert self.target is not Target.DECLARATION
