@@ -110,7 +110,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     bool finishedGPUExecution();
 
     // Get a Future object that will be marked as completed internally.
-    // It actually returns a FutureNCCL object which is a sub class Future.
+    // It actually returns a CUDAFuture object which is a sub class of Future.
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
     // Helper function that sets an exception_ptr on the WorkNCCL object.
@@ -170,8 +170,12 @@ class ProcessGroupNCCL : public ProcessGroup {
     // to the store.
     c10::intrusive_ptr<Store> store_;
 
-    // Store a reference to NCCL collective's outputs to be used by getFuture.
+    // Store a reference to NCCL collective's outputs, used by result and to
+    // give a more descriptive message when representing the Work as a string.
     std::shared_ptr<std::vector<at::Tensor>> outputs_;
+
+    // The future returned by getFuture.
+    c10::intrusive_ptr<at::cuda::CUDAFuture> future_;
 
     friend class ProcessGroupNCCL;
   };
@@ -188,62 +192,6 @@ class ProcessGroupNCCL : public ProcessGroup {
 
     std::chrono::milliseconds opTimeout;
     bool isHighPriorityStream;
-  };
-
-  // FutureNCCL is a subclass of ivalue's Future. The goal is to use
-  // this class in getFuture API of WorkNCCL. This Future is mostly a
-  // wrapper to synchronize streams appropriately and it mostly enables
-  // the async programming model of CUDA while trying to adhere to the
-  // Future interface. FutureNCCL does not support NCCL_BLOCKING_WAIT flag
-  // or NCCL's barrier().
-  //
-  // If created by WorkNCCL's getFuture API, FutureNCCL has a reference to
-  // WorkNCCL's cudaEvents, NCCL collective's outputs, and the device indices of
-  // outputs' devices. Its value is NCCL collective's outputs.
-  //
-  // If created by FutureNCCL's then callback, its value becomes the value of
-  // callback() and its cudaEvents will record the NCCL stream that runs that
-  // callback. Before invoking the callback, FutureNCCL will synchronize its
-  // own cudaEvents with the stream that runs the callback. This design
-  // enables synchronizing the appropriate streams and avoids stalling PyTorch's
-  // default stream while running the callback. In case of multiple then
-  // callbacks, each will be executed on its own fresh stream.
-  struct FutureNCCL : at::cuda::CUDAFuture {
-   public:
-    FutureNCCL(
-        at::IValue value,
-        std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents)
-        : at::cuda::CUDAFuture(c10::ListType::create(c10::TensorType::get())){
-      // Check that the device indices are distinct
-      std::unordered_set<c10::DeviceIndex> uniqueDeviceIndices;
-      for (const at::cuda::CUDAEvent& event : *cudaEvents) {
-        TORCH_INTERNAL_ASSERT(event.isCreated());
-        uniqueDeviceIndices.insert(event.device_index());
-      }
-      TORCH_INTERNAL_ASSERT(
-        cudaEvents->size() == uniqueDeviceIndices.size(),
-        "Got ", cudaEvents->size(), " events, but only ",
-        uniqueDeviceIndices.size(), " distinct devices");
-      auto dataPtrs = extractDataPtrs(value);
-      for (const at::DataPtr& data_ptr : dataPtrs) {
-        TORCH_INTERNAL_ASSERT(
-            std::find_if(
-                cudaEvents->begin(),
-                cudaEvents->end(),
-                [&](const at::cuda::CUDAEvent& ev) {
-                  return ev.device_index() == data_ptr.device().index();
-                }) != cudaEvents->end());
-      }
-      currentDevice_ = c10::cuda::current_device();
-      cudaEvents_ = std::move(cudaEvents);
-      dataPtrs_ = std::move(dataPtrs);
-      markCompleted(std::move(value));
-    }
-
-   protected:
-    void postMarkCompletedHook(const at::IValue& value) override {
-      // Do nothing because the constructor already stored the events.
-    }
   };
 
   // If you wish to create multiple process groups, each with a potentially
