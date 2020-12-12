@@ -21,7 +21,7 @@
 
 namespace at { namespace cuda {
 
-struct TORCH_CUDA_API CUDAFuture : at::ivalue::Future {
+struct TORCH_CUDA_API CUDAFuture final : at::ivalue::Future {
  public:
   using at::ivalue::Future::Future;
 
@@ -56,12 +56,11 @@ struct TORCH_CUDA_API CUDAFuture : at::ivalue::Future {
       }
     }
 
-    cudaEvents_ = std::make_shared<std::vector<at::cuda::CUDAEvent>>();
     for (c10::DeviceIndex idx = 0; idx < isCudaDeviceUsed.size(); idx++) {
       if (isCudaDeviceUsed[idx]) {
         at::cuda::CUDAEvent cudaEvent;
         cudaEvent.record(at::cuda::getCurrentCUDAStream(idx));
-        (*cudaEvents_).push_back(std::move(cudaEvent));
+        cudaEvents_.push_back(std::move(cudaEvent));
       }
     }
   }
@@ -78,7 +77,7 @@ struct TORCH_CUDA_API CUDAFuture : at::ivalue::Future {
       // misbehaving this also ends up using memory on those devices, which the
       // user might not want.
       std::vector<at::cuda::CUDAStream> streams;
-      for (at::cuda::CUDAEvent& cudaEvent : *cudaEvents_) {
+      for (at::cuda::CUDAEvent& cudaEvent : cudaEvents_) {
         c10::DeviceIndex idx = cudaEvent.device_index();
         // FIXME Should we find a way to allow to change the priority of
         // streams?
@@ -107,7 +106,7 @@ struct TORCH_CUDA_API CUDAFuture : at::ivalue::Future {
   }
 
   void postWaitHook(const at::IValue& value) override {
-    for (at::cuda::CUDAEvent& cudaEvent : *cudaEvents_) {
+    for (at::cuda::CUDAEvent& cudaEvent : cudaEvents_) {
       cudaEvent.block(
           at::cuda::getCurrentCUDAStream(cudaEvent.device_index()));
     }
@@ -120,12 +119,7 @@ struct TORCH_CUDA_API CUDAFuture : at::ivalue::Future {
     }
   }
 
-  // FIXME This field is protected (rather than private) and wrapped in a
-  // shared_ptr in order to support the FutureNCCL subclass, which wants to set
-  // the events on its own in order to use the same ones as its WorkNCCL class.
-  // Once WorkNCCL is gone (as part of the Future and Work merge) this should be
-  // fixed.
- protected:
+ private:
   // The device that was current when markCompleted was called, which we'll
   // restore when invoking callbacks.
   c10::DeviceIndex currentDevice_;
@@ -134,19 +128,15 @@ struct TORCH_CUDA_API CUDAFuture : at::ivalue::Future {
   // are recorded on the appropriate streams when the future is marked completed
   // and can then be queried/waited/blocked on. There is one event for each
   // distinct device on which the value's tensors reside.
-  std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents_;
+  std::vector<at::cuda::CUDAEvent> cudaEvents_;
 
   // A cached version of the data ptrs extracted from the value when the future
   // is first marked completed.
   std::vector<std::reference_wrapper<const at::DataPtr>> dataPtrs_;
 
- private:
   DataPtrExtractor dataPtrExtractor_;
   std::mutex dataPtrExtractorMutex_;
 
-  // FIXME This too is protected so that it can be used by FutureNCCL. Please
-  // undo that once FutureNCCL is dropped in favor of a "vanilla" CUDAFuture.
- protected:
   std::vector<std::reference_wrapper<const at::DataPtr>> extractDataPtrs(
       const at::IValue& value) {
     std::unique_lock<std::mutex> lock(dataPtrExtractorMutex_);
