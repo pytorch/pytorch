@@ -3,7 +3,7 @@ set VERSION_SUFFIX=%CUDA_VERSION:.=%
 set CUDA_SUFFIX=cuda%VERSION_SUFFIX%
 
 if "%CUDA_SUFFIX%" == "" (
-  echo unknown CUDA version, please set `CUDA_COMPLETE_VERSION` higher than 9.2
+  echo unknown CUDA version, please set `CUDA_VERSION` higher than 9.2
   exit /b 1
 )
 

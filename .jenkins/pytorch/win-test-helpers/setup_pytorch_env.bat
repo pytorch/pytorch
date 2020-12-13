@@ -47,7 +47,6 @@ if %errorlevel% neq 0 ( exit /b %errorlevel% )
 set DISTUTILS_USE_SDK=1
 
 if not "%USE_CUDA%"=="1" goto cuda_build_end
-goto cuda_build_end
 
 set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION%
 
