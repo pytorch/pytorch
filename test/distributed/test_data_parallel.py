@@ -30,7 +30,7 @@ class TestDataParallel(TestCase):
                 self.register_buffer('t_not_rg', t.clone().detach())
 
             def forward(self, x):
-                return x * self.t_rg + self.t_not_rg
+                return x * self.t_rg + self.t_not_rgdistributed/test_data_parallel.py
 
         m = TestModule(torch.randn(100, device='cuda', requires_grad=True))
         self.assertTrue(m.t_rg.requires_grad)
@@ -824,8 +824,8 @@ class TestDataParallel(TestCase):
 
         model_copy = deepcopy(model)
         model_copy.load_state_dict(dp_model.state_dict(), is_parallel=True)
-        self.assertEqual(model.state_dict().keys(), model_copy.state_dict.keys())
-        self.assertEqual(model.state_dict()._metadata.keys(), model_copy.state_dict._metadata.keys())
+        self.assertEqual(model.state_dict().keys(), model_copy.state_dict().keys())
+        self.assertEqual(model.state_dict()._metadata.keys(), model_copy.state_dict()._metadata.keys())
 
 
 if __name__ == '__main__':
