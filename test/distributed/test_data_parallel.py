@@ -30,7 +30,7 @@ class TestDataParallel(TestCase):
                 self.register_buffer('t_not_rg', t.clone().detach())
 
             def forward(self, x):
-                return x * self.t_rg + self.t_not_rgdistributed/test_data_parallel.py
+                return x * self.t_rg + self.t_not_rg
 
         m = TestModule(torch.randn(100, device='cuda', requires_grad=True))
         self.assertTrue(m.t_rg.requires_grad)
