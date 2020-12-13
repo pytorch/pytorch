@@ -6925,17 +6925,20 @@
   variants: method, function
   dispatch:
     CPU, CUDA: erfinv
+    SparseCPU, SparseCUDA: erfinv_sparse
 
 - func: erfinv_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
   dispatch:
     CPU, CUDA: erfinv_
+    SparseCPU, SparseCUDA: erfinv_sparse_
 
 - func: erfinv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: erfinv_out
+    SparseCPU, SparseCUDA: erfinv_out_sparse
 
 - func: i0(Tensor self) -> Tensor
   use_c10_dispatcher: full

@@ -1128,6 +1128,7 @@ if TEST_SCIPY:
                        promotes_integers_to_float=True),
         UnaryUfuncInfo('erfinv',
                        ref=scipy.special.erfinv,
+                       supports_sparse=True,
                        decorators=(precisionOverride({torch.float16: 1e-2,
                                                       torch.bfloat16: 1e-2,
                                                       torch.float32: 1e-4}),),
