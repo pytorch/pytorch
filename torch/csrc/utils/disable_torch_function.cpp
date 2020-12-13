@@ -160,11 +160,10 @@ static bool is_basic_python_type(PyTypeObject *tp)
 }
 
 inline bool has_torch_function_attr(PyObject* obj) {
-  auto attr = PyObject_GetAttrString(obj, "__torch_function__");
+  auto attr = PyObject_FastGetAttrString(obj, "__torch_function__");
   return (
-    // NOLINTNEXTLINE(modernize-use-nullptr)
-    attr != NULL &&
-    attr != torch::disabled_torch_function);
+    attr.ptr() != nullptr &&
+    attr.ptr() != torch::disabled_torch_function);
 }
 
 inline bool sequence_has_torch_function(PyObject* args) {
