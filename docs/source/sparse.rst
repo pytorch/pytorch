@@ -436,6 +436,8 @@ tensors <sparse-coo-docs>`:
 :meth:`~torch.Tensor.asin_`
 :meth:`~torch.Tensor.arcsin`
 :meth:`~torch.Tensor.arcsin_`
+:meth:`~torch.Tensor.atan`
+:meth:`~torch.Tensor.atan_`
 :meth:`~torch.Tensor.bmm`
 :meth:`~torch.Tensor.clone`
 :meth:`~torch.Tensor.deg2rad`

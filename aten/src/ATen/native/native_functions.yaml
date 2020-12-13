@@ -730,18 +730,21 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: atan
+    CPU, CUDA: atan
+    SparseCPU, SparseCUDA: atan_sparse
 
 - func: atan_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: atan_
+    CPU, CUDA: atan_
+    SparseCPU, SparseCUDA: atan_sparse_
 
 - func: atan.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: atan_out
+    SparseCPU, SparseCUDA: atan_out_sparse
 
 # arctan, alias of atan
 - func: arctan(Tensor self) -> Tensor

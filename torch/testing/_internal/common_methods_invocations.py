@@ -648,6 +648,7 @@ op_db: List[OpInfo] = [
                    )),
     UnaryUfuncInfo('atan',
                    ref=np.arctan,
+                   supports_sparse=True,
                    dtypes=all_types_and_complex_and(torch.bool),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
