@@ -664,6 +664,7 @@ op_db: List[OpInfo] = [
                    )),
     UnaryUfuncInfo('atanh',
                    ref=np.arctanh,
+                   supports_sparse=True,
                    domain=(-1, 1),
                    dtypes=all_types_and(torch.bool),
                    dtypesIfCPU=all_types_and(torch.bool),
