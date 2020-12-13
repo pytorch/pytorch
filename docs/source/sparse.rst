@@ -445,6 +445,8 @@ tensors <sparse-coo-docs>`:
 :meth:`~torch.Tensor.dim`
 :meth:`~torch.Tensor.div`
 :meth:`~torch.Tensor.div_`
+:meth:`~torch.Tensor.erf`
+:meth:`~torch.Tensor.erf_`
 :meth:`~torch.Tensor.floor_divide`
 :meth:`~torch.Tensor.floor_divide_`
 :meth:`~torch.Tensor.get_device`

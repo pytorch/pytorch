@@ -1841,18 +1841,21 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: erf
+    CPU, CUDA: erf
+    SparseCPU, SparseCUDA: erf_sparse
 
 - func: erf_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: erf_
+    CPU, CUDA: erf_
+    SparseCPU, SparseCUDA: erf_sparse_
 
 - func: erf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: erf_out
+    SparseCPU, SparseCUDA: erf_out_sparse
 
 - func: erfc(Tensor self) -> Tensor
   use_c10_dispatcher: full
