@@ -122,7 +122,6 @@ blocklist = [
     'floor_divide', 'floor_divide_', 'floor_divide_out',
 ]
 
-
 binary_ops = ('add', 'sub', 'mul', 'div', 'pow', 'lshift', 'rshift', 'mod', 'truediv',
               'matmul', 'floordiv',
               'radd', 'rsub', 'rmul', 'rtruediv', 'rfloordiv', 'rpow',          # reverse arithmetic
