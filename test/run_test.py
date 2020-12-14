@@ -28,6 +28,7 @@ TESTS = [
     'test_cpp_extensions_aot_no_ninja',
     'test_cpp_extensions_aot_ninja',
     'test_cpp_extensions_jit',
+    'test_dispatch'
     'distributed/test_c10d',
     'distributed/test_jit_c10d',
     'distributed/test_c10d_spawn',
