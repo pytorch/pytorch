@@ -299,7 +299,7 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False, fw_mode=False):
             Defaults to ``False``.
         fw_mode (bool, optional): If ``True``, forward mode AD will be used to
             compute the jvp, otherwise, the backward of backward is used (sometimes
-            called the double backwards trick).
+            called the double backwards trick) but it will be significantly slower.
 
     Returns:
         jvp (tuple of Tensors or Tensor): result of the dot product with
@@ -346,23 +346,18 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False, fw_mode=False):
             v = (torch.ones_like(inputs[0]),)
 
         with fwAD.dual_level():
-            inputs_dual = []
-            for el_inp, el_v in zip(inputs, v):
-                inputs_dual.append(fwAD.make_dual(el_inp, el_v))
+            inputs_dual = [fwAD.make_dual(el_inp, el_v) for el_inp, el_v in zip(inputs, v)]
 
             outputs_dual = func(*inputs_dual)
             is_outputs_tuple, outputs_dual = _as_tuple(outputs_dual, "outputs of the user-provided function", "jvp")
 
-            outputs, grad_res = [], []
-            for o_dual in outputs_dual:
-                o_primal, o_dual = fwAD.unpack_dual(o_dual)
-                outputs.append(o_primal)
-                grad_res.append(o_dual)
+            outputs, grad_res = zip(*[fwAD.unpack_dual(o_dual) for o_dual in outputs_dual])
 
-        for i, g in enumerate(grad_res):
-            if g is None and strict:
-                raise RuntimeError("The output of the user-provided function is independent of "
-                                   "input {}. This is not allowed in strict mode.".format(i))
+        if strict:
+            for i, g in enumerate(grad_res):
+                if g is None:
+                    raise RuntimeError("The output of the user-provided function is independent of "
+                                       "input {}. This is not allowed in strict mode.".format(i))
 
     else:
         outputs = func(*inputs)

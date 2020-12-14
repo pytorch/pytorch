@@ -232,7 +232,7 @@ def get_analytical_jacobian_fw(fn, input, output):
                 if res is None:
                     jacobian[i][lin_idx].zero_()
                 else:
-                    jacobian[i][lin_idx].copy_(res.contiguous().view(-1))
+                    jacobian[i][lin_idx].copy_(res.reshape(-1))
                 fw_grad[grad_idx] = 0
     return jacobian
 
@@ -450,6 +450,8 @@ def gradcheck(
                 fw_analytical = get_analytical_jacobian_fw(fn, tupled_inputs, o)
             except RuntimeError as e:
                 msg = str(e)
+                # If the jvp formula isn't implemented, then we will warn the user. Otherwise, if the formula is
+                # implemented, then we check the result for correctness
                 if "Trying to use forward prop with" in msg:
                     warnings.warn("Failed to compute gradcheck using fw mode: {}".format(msg), stacklevel=stacklevel)
                     continue
@@ -457,7 +459,7 @@ def gradcheck(
                     raise e
 
             if fw_analytical is None:
-                # Test was aborded while computing the jacobian
+                # Test was aborted while computing the jacobian
                 continue
 
             for j, (a, n) in enumerate(zip(fw_analytical, numerical)):

@@ -5044,6 +5044,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
             params = tuple(x for x in module.parameters())
             num_inputs = len(input_tuple)
             # These modules don't actually take the arguments as inputs so forward check will fail for these
+            # We will be able to re-enable this when https://github.com/pytorch/pytorch/issues/49171 is done
             check_forward = len(params) == 0
             _assertGradAndGradgradChecks(
                 test_case, lambda *args, **kw: test_case._forward(module, args[:num_inputs]), input_tuple + params,
