@@ -265,7 +265,8 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 
 struct TORCH_API ViewInfo {
   /// The base `Variable`
-  /// This cannot be a view of the same type as this one.
+  /// If this ViewInfo represents a forward (respectively backward) AD gradient,
+  /// then this Tensor cannot be a forward (respectively backward) view.
   Variable base_;
 
   /// By default we use as_strided to recover views which is more efficient.
@@ -273,6 +274,7 @@ struct TORCH_API ViewInfo {
   /// If view_fn has value, we use it to recover views in backward.
   c10::optional<std::function<Variable(const Variable&)>> view_fn_;
 
+  /// Accessors for the view function
   bool has_view_fn() const {
     return view_fn_.has_value();
   }
@@ -282,6 +284,14 @@ struct TORCH_API ViewInfo {
     return view_fn_.value();
   }
 
+  /// The chain function can be used to build a new ViewInfo for a differentiable view
+  /// function. It will return a new view info that accurately represents how "tensor" is
+  /// a view of this instance's "base_".
+  /// The "base" and "tensor" are respectively the input and output of the differentiable
+  /// view function that happened. They are required to properly set the optional
+  /// view_fn_ when it is not provided.
+  /// The "view_func", if provided, should be a function that allows to re-do the view
+  /// between "base" and "tensor".
   ViewInfo chain(const Variable & base, const Variable & tensor,
     c10::optional<std::function<Variable(const Variable&)>> view_func=c10::nullopt);
 
@@ -314,12 +324,12 @@ struct TORCH_API ViewInfo {
 /// These views can have different base as non-differentiable view for forward
 /// and backward mode AD are not the same.
 ///
-/// - Forward Mode View
-/// Views for forward mode AD are only used when inplace operations modify in a
-/// differentiable manner a Tensor that did not had gradient. This means that
-/// such view only needs to be tracked for forward differentiable view when the
-/// Tensor does NOT has a forward grad. In all other cases, this tracking can be
-/// skipped (this is left as future optimization).
+/// Most function are either both forward and backward differentiable views (for
+/// example: view, select, narrow, transpose, etc) or both not forward and not
+/// backward differentiable views (for example: indices, values, eq, lt, etc).
+/// But there are also functions that are forward but not backward differentiable
+/// views (only detach for now) or functions that are backward but not forward
+/// differentiable view (only make_dual and unpack dual for now).
 ///
 /// - Backward Mode View
 /// Differentiable views are the view variables where you want gradients to flow
@@ -347,6 +357,30 @@ struct TORCH_API ViewInfo {
 ///     torch.autograd.grad(view.sum(), var)  <- should return a tensor with
 ///                                              var[1] filled with all ones and
 ///                                              zeros everywhere else
+///
+/// - Forward Mode View
+/// Forward differentiable views follow the same semantic as backward ones but
+/// show up differently as they are computed along with the forward evaluation.
+/// The hard examples above are thus very similar
+///
+///   (1) in-place operation on view, e.g.,
+///
+///     # Have:
+///     #   base is a regular Tensor
+///     #   var is a dual Tensor whose tangent is all ones
+///     base[1] = var  # i.e., base[1].copy_(var)
+///     _, fw_grad = fwAD.unpack_dual(base) <- fw_grad should be a tensor with
+///                                              fw_grad[1] filled with all ones and
+///                                              zeros everywhere else
+///
+///   (2) in-place operation on base after view is created, e.g.,
+///
+///     # Have:
+///     #   base is a regular Tensor
+///     #   var is a dual Tensor whose tangent is all ones
+///     view = base[1]
+///     base.copy_(var)
+///     _, fw_grad = fwAD.unpack_dual(view) <- fw_grad should be an all ones tensor
 ///
 /// DifferentiableViewMeta is created to support gradient tracking of
 /// such **in-place** operations. In particular,
@@ -525,20 +559,32 @@ public:
 // See NOTE [ Autograd View Variables ] for details.
 // Differentiable view. Track history with DifferentiableViewMeta.
 inline Variable make_variable_differentiable_view(
-    at::Tensor data,
+    const at::Tensor& data,
     c10::optional<ViewInfo> backward_info,
     c10::optional<ViewInfo> forward_info,
     CreationMeta creation_meta,
     bool allow_tensor_metadata_change = true) {
   if (data.defined()) {
-    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
-      /*version_counter=*/0,
-      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-
-    data_impl_copy->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
+    // If we already did a TensorImpl allocation for data, just reuse it.
+    // Otherwise(e.g tensor.swapdim(0, 0) when we return the same tensor as input),
+    // we have to use shallow_copy_and_detach to create a new TensorImpl to avoid
+    // moving leaf node into graph interior. This guarantees only 1 TensorImpl
+    // allocation happens in view ops.
+    if (data.getIntrusivePtr().unique() && data.getIntrusivePtr()->unique_version()) {
+      at::TensorImpl* data_impl = data.unsafeGetTensorImpl();
+      data_impl->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
+      data_impl, std::move(backward_info), std::move(forward_info),
+      creation_meta));
+      return data;
+    } else {
+      c10::intrusive_ptr<at::TensorImpl> data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
+        /*version_counter=*/0,
+        /*allow_tensor_metadata_change=*/true);
+      data_impl_copy->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
       data_impl_copy.get(), std::move(backward_info), std::move(forward_info),
       creation_meta));
-    return Variable(data_impl_copy);
+      return Variable(data_impl_copy);
+    }
   }
   return Variable();
 }
@@ -547,9 +593,12 @@ inline Variable make_variable_differentiable_view(
 // Non-differentiable view. Just share version counter.
 inline Variable make_variable_non_differentiable_view(
     Variable base,
-    at::Tensor data,
+    const at::Tensor& data,
     bool allow_tensor_metadata_change = true) {
   if (data.defined()) {
+    // Currently all of non-differentiable view ops(detach/_indices/_values)
+    // share the same TensorImpl as their base Tensor. Thus a new TensorImpl
+    // allocation here is required.
     auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
       /*version_counter=*/impl::version_counter(base),
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
