@@ -451,16 +451,29 @@ struct {class_name} final : public {parent_class} {{
 """
 
             elif self.target is Target.REGISTRATION:
+                dispatcher_sig = DispatcherSignature.from_schema(f.func)
+
                 if local.use_c10_dispatcher() is UseC10Dispatcher.full:
-                    payload = f'TORCH_FN({sig.name()})'
+                    payload = f"TORCH_FN({sig.name()})"
+                elif local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
+                    payload = f"""
+c10::impl::hacky_wrapper_for_legacy_signatures<
+    {dispatcher_sig.type()},
+    {len(f.func.arguments.out)}
+>(TORCH_FN({sig.name()}))
+"""
                 else:
-                    payload = f'torch::CppFunction::makeUnboxedOnly({sig.name()})'
+                    assert local.use_c10_dispatcher() is UseC10Dispatcher.with_codegenerated_unboxing_wrapper
+                    payload = f"torch::CppFunction::makeUnboxedOnly(&{sig.name()})"
                 return f'm.impl("{f.func.name}", {payload});'
             else:
                 assert_never(self.target)
+                # Silence mypy's "Missing return statement" error
+                return None
 
         return list(mapMaybe(gen_one, g.functions()))
 
+    @method_with_native_function
     def gen_unstructured(self, f: NativeFunction) -> Optional[str]:
         # for mypy type refinement; would be fixed by TODO on target
         assert self.target is not Target.DECLARATION
@@ -546,9 +559,12 @@ struct {class_name} final : public {parent_class} {{
                 if local.use_c10_dispatcher() is UseC10Dispatcher.full:
                     payload = f"TORCH_FN({name})"
                 elif local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
-                    payload = "c10::impl::hacky_wrapper_for_legacy_signatures<" \
-                        f"{dispatcher_sig.type()}>(TORCH_FN({name}))"
-
+                    payload = f"""
+c10::impl::hacky_wrapper_for_legacy_signatures<
+    {dispatcher_sig.type()},
+    {len(f.func.arguments.out)}
+>(TORCH_FN({name}))
+"""
                 else:
                     assert local.use_c10_dispatcher() is UseC10Dispatcher.with_codegenerated_unboxing_wrapper
                     payload = f"torch::CppFunction::makeUnboxedOnly(&{name})"
@@ -573,7 +589,7 @@ class ComputeFunction:
 
         name = cpp.name(f.func)
 
-        sig_group = CppSignatureGroup.from_schema(f.func, method=False)
+        sig_group = CppSignatureGroup.from_schema(f.func, method=False, fallback_binding=f.manual_cpp_binding)
 
         if self.target is Target.DECLARATION:
             result = f"CAFFE2_API {sig_group.signature.decl()};\n"
@@ -627,7 +643,7 @@ class ComputeTensorMethod:
 
         name = cpp.name(f.func)
 
-        sig_group = CppSignatureGroup.from_schema(f.func, method=True)
+        sig_group = CppSignatureGroup.from_schema(f.func, method=True, fallback_binding=f.manual_cpp_binding)
 
         if self.target is Target.DECLARATION:
             result = f"{sig_group.signature.decl()} const;\n"
@@ -804,12 +820,8 @@ DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::mult
 }}
 """
         elif self.target is Target.REGISTRATION:
-            if local.use_c10_dispatcher() is UseC10Dispatcher.full:
+            if local.use_c10_dispatcher().dispatcher_uses_new_style():
                 return f"""m.impl("aten::{f.func.name}", TORCH_FN({name}));"""
-            elif local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
-                return f"""m.impl("aten::{f.func.name}",
-          c10::impl::hacky_wrapper_for_legacy_signatures<{dispatcher_sig.type()}>(
-            TORCH_FN({name})));"""
             else:
                 assert local.use_c10_dispatcher() is UseC10Dispatcher.with_codegenerated_unboxing_wrapper
                 return f"""m.impl_UNBOXED("aten::{f.func.name}", {name});"""
@@ -1002,7 +1014,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
     kwarg_only_set = set(a.name for a in f.func.arguments.flat_kwarg_only)
     out_arg_set = set(a.name for a in f.func.arguments.out)
 
-    sig_group = CppSignatureGroup.from_schema(f.func, method=False)
+    sig_group = CppSignatureGroup.from_schema(f.func, method=False, fallback_binding=False)
     cpp_args = sig_group.signature.arguments()
     arguments = [
         compute_cpp_argument_yaml(
