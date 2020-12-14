@@ -137,6 +137,22 @@ template<typename... Args> inline variable_list flatten_tensor_args(Args&&... ar
 inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_differentiable,
         bool is_fw_differentiable, c10::optional<std::function<Tensor(const Tensor&)>> view_func=c10::nullopt,
         CreationMeta creation_meta=CreationMeta::DEFAULT, bool allow_tensor_metadata_change=true) {
+  if (!isForwardADEnabled()) {
+    // Fast codepath for backward only code
+    if (is_bw_differentiable) {
+      if (base.is_view()) {
+        auto diff_view_meta = static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base));
+        auto base_bw_info = diff_view_meta->get_backward_view();
+        return make_variable_differentiable_view(std::move(tensor), base_bw_info.chain(base, tensor, view_func),
+                                                 c10::nullopt, creation_meta, allow_tensor_metadata_change);
+      } else {
+        return make_variable_differentiable_view(std::move(tensor), ViewInfo(base, view_func),
+                                                 c10::nullopt, creation_meta, allow_tensor_metadata_change);
+      }
+    } else {
+      return make_variable_non_differentiable_view(base, std::move(tensor), allow_tensor_metadata_change);
+    }
+  }
   // Create both the forward and backward info that are needed
   c10::optional<ViewInfo> new_bw_info = c10::nullopt;
   c10::optional<ViewInfo> new_fw_info = c10::nullopt;
@@ -167,7 +183,8 @@ inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_dif
   }
 
   if (is_fw_differentiable || is_bw_differentiable) {
-    return make_variable_differentiable_view(std::move(tensor), new_bw_info, new_fw_info, creation_meta, allow_tensor_metadata_change);
+    return make_variable_differentiable_view(std::move(tensor), std::move(new_bw_info), std::move(new_fw_info),
+                                             creation_meta, allow_tensor_metadata_change);
   } else {
     return make_variable_non_differentiable_view(base, std::move(tensor), allow_tensor_metadata_change);
   }
@@ -195,7 +212,7 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& ten
     TORCH_CHECK(creation_meta == CreationMeta::DEFAULT,
                 "Non-backward differentiable views must have creation_meta=CreationMeta::DEFAULT");
   }
-  if (is_fw_differentiable) {
+  if (isForwardADEnabled() && is_fw_differentiable) {
     // Check if base is a forward differentiabble view
     auto is_view = torch::autograd::impl::get_autograd_meta(base) && torch::autograd::impl::get_autograd_meta(base)->is_view_;
     if (is_view && static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base))->has_fw_view()) {

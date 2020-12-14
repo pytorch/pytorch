@@ -191,9 +191,11 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   std::string name_;
 
   Variable grad_;
-  std::shared_ptr<ForwardGrad> fw_grad_;
   std::shared_ptr<Node> grad_fn_;
   std::weak_ptr<Node> grad_accumulator_;
+
+  // This field is lazily initialized
+  std::shared_ptr<ForwardGrad> fw_grad_;
 
   std::vector<std::shared_ptr<FunctionPreHook>> hooks_;
   std::shared_ptr<hooks_list> cpp_hooks_list;
@@ -250,7 +252,6 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
     retains_grad_ = false;
     is_view_ = false;
     output_nr_ = gradient_edge.input_nr;
-    fw_grad_ = std::make_shared<ForwardGrad>();
 
     // set_requires_grad also checks error conditions.
     if (requires_grad) {
@@ -295,9 +296,9 @@ struct TORCH_API ViewInfo {
   ViewInfo chain(const Variable & base, const Variable & tensor,
     c10::optional<std::function<Variable(const Variable&)>> view_func=c10::nullopt);
 
-  ViewInfo(Variable base, c10::optional<std::function<Variable(const Variable&)>> view_fn) {
-    base_ = std::move(base);
-    view_fn_ = std::move(view_fn);
+  ViewInfo(Variable base, c10::optional<std::function<Variable(const Variable&)>> view_fn) :
+    base_(std::move(base)),
+    view_fn_(std::move(view_fn)) {
     TORCH_CHECK(base_.defined(), "base is undefined");
   }
 };
