@@ -1,6 +1,7 @@
 import torch
 from torch.utils.data import IterableDataset
-from torch.utils.data.datasets import (CollateIterableDataset, BatchIterableDataset)
+from torch.utils.data.datasets import (CollateIterableDataset, BatchIterableDataset,
+        SamplerIterableDataset)
 from torch.testing._internal.common_utils import (TestCase, run_tests)
 
 
@@ -93,6 +94,21 @@ class TestFunctionalIterableDataset(TestCase):
         batch_ds_nolen = BatchIterableDataset(ds_nolen, batch_size=5)
         with self.assertRaises(NotImplementedError):
             len(batch_ds_nolen)
+
+    def test_sampler_dataset(self):
+        arrs = range(10)
+        ds = IterDatasetWithLen(arrs)
+        sampled_ds = SamplerIterableDataset(ds)
+        self.assertEqual(len(sampled_ds), 10)
+        i = 0
+        for x in sampled_ds:
+            self.assertEqual(x, i)
+            i += 1
+
+        ds_nolen = IterDatasetWithoutLen(arrs)
+        sampled_ds = SamplerIterableDataset(ds_nolen)
+        with self.assertRaises(NotImplementedError):
+            len(sampled_ds)
 
 
 if __name__ == '__main__':
