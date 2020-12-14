@@ -97,8 +97,6 @@ class TestIterableDatasetBasic(TestCase):
             self.assertTrue(file_pathname in self.temp_files)
             self.assertTrue(rec[1].read() == open(file_pathname, 'rb').read())
 
-        os.remove(temp_zipfile_pathname)
-
     def test_routeddecoder_iterable_dataset(self):
         temp_dir = self.temp_dir.name
         temp_pngfile_pathname = os.path.join(temp_dir, "test_png.png")
@@ -117,7 +115,6 @@ class TestIterableDatasetBasic(TestCase):
             else:
                 self.assertTrue(rec[1] == open(rec[0], 'rb').read().decode('utf-8'))
 
-        os.remove(temp_pngfile_pathname)
 
     def test_groupbyfilename_iterable_dataset(self):
         temp_dir = self.temp_dir.name
