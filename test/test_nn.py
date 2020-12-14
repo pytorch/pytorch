@@ -6500,7 +6500,7 @@ class TestNN(NNTestCase):
                               batch_first=batch_first,
                               proj_size=proj_size).to(dtype)
             # LSTM with projections is not supported with MIOpen
-            if TEST_WITH_ROCM:
+            if TEST_WITH_ROCM and dtype == torch.float:
                 with self.assertRaisesRegex(RuntimeError,
                                             "LSTM with projections is not supported with MIOpen"):
                     outputs_gpu = forward_backward(
@@ -12931,7 +12931,7 @@ class TestNNDeviceType(NNTestCase):
             for use_default_hiddens in (True, False):
                 for proj_size in [0, 2]:
                     # LSTM with projections is not supported with MIOpen
-                    if TEST_WITH_ROCM and proj_size > 0:
+                    if device != 'cpu' and dtype == torch.float32 and TEST_WITH_ROCM and proj_size > 0:
                         with self.assertRaisesRegex(RuntimeError, rocm_error_msg):
                             check_lengths(seq_lens, enforce_sorted, use_default_hiddens, proj_size)
                     else:
