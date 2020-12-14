@@ -388,6 +388,7 @@ struct {class_name} final : public {parent_class} {{
         @with_native_function
         def gen_one(f: NativeFunction) -> Optional[str]:
             assert self.target is not Target.DECLARATION
+            assert not f.manual_kernel_registration
 
             # TODO: put this into StructuredNativeFunctions itself
             functional_func = g.out.func.signature()
@@ -480,6 +481,8 @@ c10::impl::hacky_wrapper_for_legacy_signatures<
         assert self.target is not Target.DECLARATION
 
         if self.dispatch_key not in f.dispatch:
+            return None
+        if f.manual_kernel_registration:
             return None
 
         op_name = f"aten::{f.func.name}"
@@ -583,8 +586,6 @@ class ComputeFunction:
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
-        if f.manual_kernel_registration:
-            return None
         if Variant.function not in f.variants:
             return None
 
