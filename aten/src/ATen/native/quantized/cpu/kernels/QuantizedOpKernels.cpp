@@ -2097,7 +2097,8 @@ void fake_quantize_learnable_tensor_grad_kernel_cpu(
     float inv_scale,
     int64_t zero_point,
     int64_t quant_min,
-    int64_t quant_max) {
+    int64_t quant_max,
+    float grad_factor) {
   float dscale_small = quant_min - zero_point;
   float dscale_big = quant_max - zero_point;
   iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
@@ -2126,14 +2127,14 @@ void fake_quantize_learnable_tensor_grad_kernel_cpu(
       int64_t xqi = std::nearbyint(zero_point + (*XInput) * inv_scale);
       *dXOutput = (*dYInput) * (xqi >= quant_min && xqi <= quant_max);
       // Calculate gradients for scale and zero point.
-      xqi = std::max(std::min(xqi, quant_max), quant_min);
-      float xfqi = static_cast<float>((xqi - zero_point) * scale);
-      if (xqi == quant_min || xqi == quant_max) {
-        *dZeroPointOutput = (*dYInput) * (-1) * scale;
-        *dScaleOutput = (xqi == quant_min) ? ((*dYInput) * dscale_small) : ((*dYInput) * dscale_big);
+      float xfqi = static_cast<float>((std::max(std::min(xqi, quant_max), quant_min) - zero_point) * scale);
+      // Calculate gradients according to the gradient of the clamp function.
+      if (xqi < quant_min || xqi > quant_max) {
+        *dZeroPointOutput = (*dYInput) * (-1) * scale * grad_factor;
+        *dScaleOutput = ((xqi < quant_min) ? ((*dYInput) * dscale_small) : ((*dYInput) * dscale_big)) * grad_factor;
       } else {
         *dZeroPointOutput = 0;
-        *dScaleOutput = (*dYInput) * (xfqi - (*XInput)) * inv_scale;
+        *dScaleOutput = (*dYInput) * (xfqi - (*XInput)) * inv_scale * grad_factor;
       }
     }
   });
@@ -2172,7 +2173,8 @@ void fake_quant_grad_per_channel_cpu(
 void fake_quantize_learnable_channel_grad_kernel_cpu(
     TensorIterator& iter,
     int64_t quant_min,
-    int64_t quant_max) {
+    int64_t quant_max,
+    float grad_factor) {
   iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
     /*  To see how the input and outputs are referenced and assigned,
         please see the implemenetation of
@@ -2194,14 +2196,13 @@ void fake_quantize_learnable_channel_grad_kernel_cpu(
       int64_t xqi = std::nearbyint((*zero_point_input) + (*x_input) * inv_scale);
       *dx_output = (*dy_input) * (xqi >= quant_min && xqi <= quant_max);
       // Calculate gradients for scale and zero point.
-      xqi = std::max(std::min(xqi, quant_max), quant_min);
-      float xfqi = static_cast<float>((xqi - (*zero_point_input)) * (*scale_input));
-      if (xqi == quant_min || xqi == quant_max) {
-        *dzero_point_output = (*dy_input) * (-1) * (*scale_input);
-        *dscale_output = (xqi == quant_min) ? ((*dy_input) * dscale_small) : ((*dy_input) * dscale_big);
+      float xfqi = static_cast<float>((std::max(std::min(xqi, quant_max), quant_min) - (*zero_point_input)) * (*scale_input));
+      if (xqi < quant_min || xqi > quant_max) {
+        *dzero_point_output = (*dy_input) * (-1) * (*scale_input) * grad_factor;
+        *dscale_output = ((xqi < quant_min) ? ((*dy_input) * dscale_small) : ((*dy_input) * dscale_big)) * grad_factor;
       } else {
         *dzero_point_output = 0;
-        *dscale_output = (*dy_input) * (xfqi - (*x_input)) * inv_scale;
+        *dscale_output = (*dy_input) * (xfqi - (*x_input)) * inv_scale * grad_factor;
       }
     }
   });
