@@ -120,14 +120,6 @@ namespace impl {
   };
 
   template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_input_type<std::vector<T>, AllowDeprecatedTypes>
-  : assert_is_valid_input_type<T, AllowDeprecatedTypes> {
-    static_assert(!std::is_same<T, at::Scalar>::value,
-      "You tried to register a kernel with an unsupported input type: std::vector<Scalar>. Please use List<int64_t>, List<double> or Tensor instead.");
-    // TODO static_assert(AllowDeprecatedTypes, "You tried to register a kernel with an unsupported input type: std::vector<T>. Please use List<T> instead.");
-  };
-
-  template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_input_type<c10::ArrayRef<T>, AllowDeprecatedTypes>
   : assert_is_valid_input_type<T, AllowDeprecatedTypes> {
     static_assert(!std::is_same<T, at::Scalar>::value,
