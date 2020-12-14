@@ -1,4 +1,4 @@
-from .batchdataset import BatchDataset
-from .collatedataset import CollateDataset
+from .batchdataset import BatchIterableDataset
+from .collatedataset import CollateIterableDataset
 
-__all__ = ['BatchDataset', 'CollateDataset']
+__all__ = ['BatchIterableDataset', 'CollateIterableDataset']

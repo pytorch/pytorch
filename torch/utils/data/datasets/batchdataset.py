@@ -5,8 +5,8 @@ T_co = TypeVar('T_co', covariant=True)
 S_co = TypeVar('S_co', covariant=True)
 
 
-class BatchDataset(IterableDataset[T_co]):
-    r""" Prototype of :class:`BatchDataset`.
+class BatchIterableDataset(IterableDataset[T_co]):
+    r""" Prototype of :class:`BatchIterableDataset`.
 
     IterableDataset to create batches of data. An outer dimension will be added as
     `batch_size` if `drop_last` is set to `True`, or `length % batch_size` for the
@@ -23,7 +23,7 @@ class BatchDataset(IterableDataset[T_co]):
                  drop_last: bool = False,
                  ) -> None:
         assert batch_size > 0, "Batch size is required to be larger than 0!"
-        super(BatchDataset, self).__init__()
+        super(BatchIterableDataset, self).__init__()
         self.dataset = dataset
         self.batch_size = batch_size
         self.drop_last = drop_last
