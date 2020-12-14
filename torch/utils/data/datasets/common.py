@@ -85,11 +85,9 @@ def extract_files_from_pathname_binaries(pathname_binaries : Iterable, extract_f
 def extract_files_from_single_tar_pathname_binary(
         pathname : str,
         binary_stream : Any):
-    # test whether binary_stream is seekable (eg. PIPE stream from webdata is not seekable)
-    seekable = hasattr(binary_stream, "seekable") and binary_stream.seekable()
 
     try:
-        with tarfile.open(fileobj=binary_stream, mode="r|*") as tar:
+        with tarfile.open(fileobj=binary_stream, mode="r:*") as tar:
             for tarinfo in tar:
                 if not tarinfo.isfile():
                     continue
@@ -101,17 +99,9 @@ def extract_files_from_single_tar_pathname_binary(
 
                 inner_pathname = os.path.normpath(os.path.join(pathname, tarinfo.name))
                 yield (inner_pathname, extract_fobj)
-            return
     except tarfile.TarError as e:
-        # Note: We have no way to verify whether a non-seekable stream (eg. PIPE stream) is tar without
-        #       changing stream handle position, however, there is no way to move such stream's handle back.
-        #       So the entire tar extraction process will be aborted if a non-seekable stream is not tar exactable.
-        if not seekable:
-            warnings.warn("Unable to reset the non-tarfile stream {}, abort!".format(pathname))
-            raise e
-        binary_stream.seek(0)
-    # yield original pathname binary tuple if the binary stream is not a tar stream
-    yield (pathname, binary_stream)
+        warnings.warn("Unable to extract files from corrupted tarfile stream {}, abort!".format(pathname))
+        raise e
 
 
 def extract_files_from_single_zip_pathname_binary(
