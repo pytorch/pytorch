@@ -155,9 +155,7 @@ graph(%a, %b):
     rewriter.RegisterRewritePattern(pattern, replacement);
 
     auto g = graph->copy();
-    g->dump();
     rewriter.runOnGraph(g);
-    g->dump();
     FileCheck().check("ab::ababab")->check("ab::ababab")->run(*g);
   }
   {
@@ -204,9 +202,7 @@ graph(%a, %b):
     rewriter.RegisterRewritePattern(pattern, replacement);
 
     auto g = graph->copy();
-    g->dump();
     rewriter.runOnGraph(g);
-    g->dump();
     FileCheck().check("ab::ababab")->check("ab::ababab")->run(*g);
   }
   {
@@ -241,9 +237,7 @@ graph(%a, %b):
     rewriter.RegisterRewritePattern(pattern, replacement);
 
     auto g = graph->copy();
-    g->dump();
     rewriter.runOnGraph(g);
-    g->dump();
     // We should not perform the replacement on the given graph due to data
     // dependency constraints: the output %b is used in %e, which precedes one
     // def of the input %c.
