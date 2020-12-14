@@ -556,6 +556,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/transform_rfactor.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/type.cpp
       ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/cuda_codegen.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/runtime/register_cuda_ops.cpp
     )
   endif()
 

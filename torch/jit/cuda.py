@@ -62,8 +62,7 @@ class device(object):
         device (torch.device or int): device index to select. It's a no-op if
             this argument is a negative integer or ``None``.
     """
-
-    def __init__(self, device: _device):
+    def __init__(self, device: Optional[_device]):
         self.idx = -1
         self.prev_idx = -1
         self.device = device
@@ -93,37 +92,50 @@ class StreamContext(object):
         current device, this function will also change the current device to
         match the stream.
     """
-
-    def __init__(self, stream: 'torch.classes.cuda.Stream'):
+    cur_stream : Optional['torch.classes.cuda.Stream']
+    def __init__(self, stream: Optional['torch.classes.cuda.Stream']):
         self.idx = -1
-        self.cur_stream = stream
-        self.src_prev_stream = stream
-        self.dst_prev_stream = stream
+        self.stream = stream
+        # Initialize the below streams to default stream on the current device
+        self.device_index = get_current_device_index()
+        self.src_prev_stream = torch.cuda.default_stream(self.device_index)
+        self.dst_prev_stream = torch.cuda.default_stream(self.device_index)
 
     def __enter__(self):
         self.idx = get_device_index(device=None, optional=True)
-
+        # If there is no CUDA device available, return
         if self.idx == -1:
+            return
+
+        # Local cur_stream variable for type refinement
+        cur_stream = self.stream
+        # Return if stream is None
+        if cur_stream is None:
             return
         self.src_prev_stream = torch.cuda.current_stream(self.idx)
         # If the stream is not on the current device, then change the device
         # and set the current stream on the device
-        if self.src_prev_stream.device_index() != self.cur_stream.device_index():
-            with device(self.cur_stream.device()):
-                self.dst_prev_stream = torch.cuda.current_stream(self.cur_stream.device_index())
-            torch.cuda._set_device(self.cur_stream.device_index())
-        torch.cuda.set_stream(self.cur_stream)
+        if self.src_prev_stream.device_index() != cur_stream.device_index():
+            with device(cur_stream.device()):
+                self.dst_prev_stream = torch.cuda.current_stream(cur_stream.device_index())
+            torch.cuda._set_device(cur_stream.device_index())
+        torch.cuda.set_stream(cur_stream)
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
+        # Local cur_stream variable for type refinement
+        cur_stream = self.stream
+        # If stream is None or no CUDA device available, return
+        if cur_stream is None or self.idx == -1:
+            return
         # If the stream was not on the current device, restore the previous stream on
         # the destination device and also reset the current device to the previous device.
         # Set the current stream on the device to the src_prev_stream
-        if self.src_prev_stream.device_index() != self.cur_stream.device_index():
+        if self.src_prev_stream.device_index() != cur_stream.device_index():
             torch.cuda.set_stream(self.dst_prev_stream)
             torch.cuda._set_device(self.idx)
         torch.cuda.set_stream(self.src_prev_stream)
 
-def stream(stream: 'torch.classes.cuda.Stream') -> StreamContext:
+def stream(stream: Optional['torch.classes.cuda.Stream']) -> StreamContext:
     r"""Wrapper around the Context-manager that selects a given stream.
     All CUDA kernels queued within its context will be enqueued on a selected
     stream.
@@ -131,8 +143,6 @@ def stream(stream: 'torch.classes.cuda.Stream') -> StreamContext:
         stream (Stream): selected stream. This manager is a no-op if it's
             ``None``.
     """
-    if stream is None:
-        return
     return StreamContext(stream)
 
 def Stream(device:int = -1, priority:int = 0) -> 'torch.classes.cuda.Stream':

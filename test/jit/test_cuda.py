@@ -42,6 +42,7 @@ class TestCUDA(JitTestCase):
     A suite of tests for the CUDA API in TorchScript.
     """
     @skipIfRocm
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_current_stream(self):
         # Test current stream on the device and check if the stream device index
         # matches with the device ID
@@ -63,6 +64,7 @@ class TestCUDA(JitTestCase):
         self.assertEqual(d0, d2)
 
     @skipIfRocm
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     @skipCUDANonDefaultStreamIf(True)
     def test_default_stream(self):
         # This test checks for the default stream ID is set to 0 on the device
@@ -100,6 +102,44 @@ class TestCUDA(JitTestCase):
         self.assertTrue(check_d0)
         self.assertTrue(check_d1)
         self.assertTrue(is_device_d0)
+
+    @skipIfRocm
+    @skipCUDANonDefaultStreamIf(True)
+    def test_set_none_stream(self):
+        # This test checks if the Stream Context manager is a no op
+        # when the stream is none for `with torch.jit.cuda.stream`
+        @torch.jit.script
+        def fn():
+            device_index = torch.cuda._current_device()
+            current_stream = torch.cuda.current_stream(device_index)
+            default_stream = torch.cuda.default_stream(device_index)
+
+            # When stream is none, check if this operation is a no-op
+            with torch.jit.cuda.stream(None):
+                cur_device_index = torch.cuda._current_device()
+                is_device_index_same =  cur_device_index == device_index
+                is_current_stream_same = torch.cuda.current_stream(cur_device_index).id() == current_stream.id()
+                is_default_stream_same = torch.cuda.default_stream(device_index).id() == default_stream.id()
+
+            # check if the device index, current stream and default streams have not changed
+            are_streams_same = is_device_index_same and is_current_stream_same and is_default_stream_same
+            return are_streams_same
+        self.assertTrue(fn())
+
+    @skipIfRocm
+    @skipCUDANonDefaultStreamIf(True)
+    def test_set_device_none(self):
+        # This test checks if the Device Context manager is a no op
+        # when the device is none for `with torch.jit.cuda.device`
+        @torch.jit.script
+        def fn():
+            device_index = torch.cuda._current_device()
+            # When device is none, check if this operation is a no-op
+            with torch.jit.cuda.device(None):
+                # Check if the current device is the same
+                is_device_same = torch.cuda._current_device() == device_index
+            return is_device_same
+        self.assertTrue(fn())
 
     @skipIfRocm
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")

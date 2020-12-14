@@ -1,5 +1,3 @@
-#ifdef USE_CUDA
-
 // This file registers special JIT operators used to implement the PyTorch CUDA API in TorchScript.
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/api/include/torch/utils.h>
@@ -67,8 +65,8 @@ RegisterOperators reg({
         [](Stack* stack) {
             auto v = pop(stack);
             auto s = v.toCustomClass<torch::jit::CUDAStream>();
-            // To set the current CUDA stream using c10::cuda::setCurrentCUDAStream, the jit::CUDAStream 
-            // object needs to be converted to c10::cuda::CUDAStream. Since the latter cannot be returned 
+            // To set the current CUDA stream using c10::cuda::setCurrentCUDAStream, the jit::CUDAStream
+            // object needs to be converted to c10::cuda::CUDAStream. Since the latter cannot be returned
             // from a class registered via TorchBind, this can only be achieved by packing the c10::cuda::CUDAStream
             // instance contained inside the jit::CUDAStream object to a uint64_t representation, and unpacking it inside
             // this operator. The unpacked stream is then used to set the current CUDA stream.
@@ -81,4 +79,3 @@ RegisterOperators reg({
 } // namespace
 } // namespace jit
 } // namespace torch
-#endif

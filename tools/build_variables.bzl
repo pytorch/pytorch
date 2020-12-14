@@ -387,6 +387,7 @@ libtorch_cuda_sources = [
     "torch/csrc/jit/codegen/cuda/transform_rfactor.cpp",
     "torch/csrc/jit/codegen/cuda/type.cpp",
     "torch/csrc/jit/tensorexpr/cuda_codegen.cpp",
+    "torch/csrc/jit/runtime/register_cuda_ops.cpp",
 ]
 
 torch_cpp_srcs = [
@@ -457,7 +458,6 @@ libtorch_python_cuda_core_sources = [
     "torch/csrc/cuda/shared/cudart.cpp",
     "torch/csrc/cuda/shared/nvtx.cpp",
     "torch/csrc/cuda/utils.cpp",
-    "torch/csrc/jit/runtime/register_cuda_ops.cpp",
 ]
 
 libtorch_python_cuda_sources = libtorch_python_cuda_core_sources + [

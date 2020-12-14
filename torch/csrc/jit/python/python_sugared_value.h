@@ -90,7 +90,6 @@ struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
       const std::string& field) override;
 };
 
-#ifdef USE_CUDA
 // Used for desugaring uses of the torch.cuda module. All the CUDA APIs with torch.cuda.*
 // are resolved using CUDAPythonModuleValue.
 struct VISIBILITY_HIDDEN CUDAPythonModuleValue : public PythonValue {
@@ -102,7 +101,6 @@ struct VISIBILITY_HIDDEN CUDAPythonModuleValue : public PythonValue {
       Function& m,
       const std::string& field) override;
 };
-#endif
 
 // Represents all the parameters of a module as a List[Tensor]
 struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
