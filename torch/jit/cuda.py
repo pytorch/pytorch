@@ -37,7 +37,7 @@ def get_device_index(device: Optional[_device] = None, optional: bool = False, a
 class device(object):
     r"""Context-manager that changes the selected device.
     This is similar to device (torch.device or int), but has been
-    introduced for jit compatibility
+    introduced for JIT compatibility.
     Arguments:
         device (torch.device or int): device index to select. It's a no-op if
             this argument is a negative integer or ``None``.
