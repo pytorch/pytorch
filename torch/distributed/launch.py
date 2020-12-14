@@ -288,7 +288,6 @@ def main():
             be written to {stdout_name}, {stderr_name} respectively.""")
 
         sig_names = {2: "SIGINT", 15: "SIGTERM"}
-        # pass SIGINT/SIGTERM to children if the parent is being terminated
         last_return_code = None
 
         def sigkill_handler(signum, frame):
@@ -301,9 +300,10 @@ def main():
             if last_return_code is not None:
                 raise subprocess.CalledProcessError(returncode=last_return_code, cmd=cmd)
             if signum in sig_names:
-                print(f"Parent got kill signal={sig_names[signum]}, exiting")
+                print(f"Main process received {sig_names[signum]}, exiting")
             sys.exit(1)
 
+        # pass SIGINT/SIGTERM to children if the parent is being terminated
         signal.signal(signal.SIGINT, sigkill_handler)
         signal.signal(signal.SIGTERM, sigkill_handler)
 
