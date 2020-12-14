@@ -242,6 +242,7 @@ void prepareProfiler(
 
   if (!libkineto::api().isProfilerRegistered()) {
     libkineto_init();
+    libkineto::api().suppressLogMessages();
   }
 
   if (!libkineto::api().isProfilerInitialized()) {

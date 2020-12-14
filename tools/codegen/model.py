@@ -100,7 +100,7 @@ class NativeFunction:
 
     # Whether or not to skip generating TensorMethod/Functions bindings
     # for this kernel.  Technically, this doesn't actually skip generating
-    # the binding; instead, the binding gets generated to _slow_{funcname}
+    # the binding; instead, the binding gets generated to __dispatch_{funcname}
     # so you can make use of the normal binding if you need it.
     manual_cpp_binding: bool
 
@@ -1029,7 +1029,7 @@ class Arguments:
         Input: 'int x, int y, int z'
         """
 
-        # We do this in two phases.  First we parse into three 
+        # We do this in two phases.  First we parse into three
         # main categories: positional, kwarg_only, out.
         # Then, we reparse positional and kwarg_only to separate
         # out the self argument and tensor options arguments.
