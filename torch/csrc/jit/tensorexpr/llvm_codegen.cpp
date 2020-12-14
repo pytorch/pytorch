@@ -1418,7 +1418,7 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
         SIMD_UNARY_MATH_CASE(kCos, "cosf", FloatTy_)
         SIMD_UNARY_MATH_CASE(kSin, "sinf", FloatTy_)
         SIMD_UNARY_MATH_CASE(kSqrt, "sqrtf", FloatTy_)
-        SIMD_UNARY_MATH_CASE(kFabs, "fabsf", FloatTy_)
+        SIMD_UNARY_MATH_CASE(kAbs, "fabsf", FloatTy_)
         SIMD_UNARY_MATH_CASE(kFloor, "floorf", FloatTy_)
         SIMD_UNARY_MATH_CASE(kCeil, "ceilf", FloatTy_)
         SIMD_UNARY_MATH_CASE(kTrunc, "truncf", FloatTy_)
@@ -1566,7 +1566,7 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
       SIMD_UNARY_MATH_CASE(kCos, "cos", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kSin, "sin", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kSqrt, "sqrt", DoubleTy_)
-      SIMD_UNARY_MATH_CASE(kFabs, "fabs", DoubleTy_)
+      SIMD_UNARY_MATH_CASE(kAbs, "fabs", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kFloor, "floor", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kCeil, "ceil", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kTrunc, "trunc", DoubleTy_)
@@ -1668,7 +1668,7 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
         throw unimplemented_lowering(v);
       } break;
     }
-  } else if (v->dtype().is_integral() && v->op_type() == kFabs) {
+  } else if (v->dtype().is_integral() && v->op_type() == kAbs) {
     // abs is only intrinsic defined for integer inputs in pytorch eager
     v->params().front()->accept(this);
     if (is_unsigned_integral(v->dtype().scalar_type())) {

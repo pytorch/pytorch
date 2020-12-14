@@ -829,7 +829,16 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     } else if (ty == ScalarType::Double) {
       visit_intrinsics_helper<double>(v);
     } else {
-      throw unsupported_dtype();
+      switch (ty) {
+#define TYPE_CASE(Type, Name)         \
+  case ScalarType::Name:              \
+    visit_intrinsics_helper<Type>(v); \
+    break;
+        AT_FORALL_SCALAR_TYPES(TYPE_CASE);
+#undef TYPE_CASE
+        default:
+          throw unsupported_dtype();
+      }
     }
   }
 
@@ -915,8 +924,8 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
         return std::tanh(v);
       case kExp:
         return std::exp(v);
-      case kFabs:
-        return std::fabs(v);
+      case kAbs:
+        return std::abs(v);
       case kExpm1:
         return std::expm1(v);
       case kLog:
@@ -946,7 +955,8 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       case kLgamma:
         return std::lgamma(v);
       case kFrac:
-        T intpart;
+        using X = std::conditional_t<std::is_integral<T>::value, float, T>;
+        X intpart;
         return std::modf(v, &intpart);
       default:
         throw std::runtime_error("Invalid op_type: " + c10::to_string(op_type));

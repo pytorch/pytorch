@@ -180,7 +180,7 @@ TEST(Simplify, ConstantFoldIntrinsics) {
   ExprHandle modHandle = Intrinsics::make(kFmod, c, sinHandle);
   ExprHandle logHandle = Intrinsics::make(kLog10, modHandle);
   ExprHandle rndHandle = Intrinsics::make(kRound, logHandle);
-  ExprHandle fn = Intrinsics::make(kFabs, rndHandle);
+  ExprHandle fn = Intrinsics::make(kAbs, rndHandle);
 
   ExprHandle newF = IRSimplifier::simplify(fn);
   ASSERT_NE(newF.AsNode<FloatImm>(), nullptr);

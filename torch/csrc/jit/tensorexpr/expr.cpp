@@ -124,8 +124,8 @@ ExprHandle expm1(const ExprHandle& v) {
   return Intrinsics::make(kExpm1, v);
 }
 
-ExprHandle fabs(const ExprHandle& v) {
-  return Intrinsics::make(kFabs, v);
+ExprHandle abs(const ExprHandle& v) {
+  return Intrinsics::make(kAbs, v);
 }
 
 ExprHandle log(const ExprHandle& v) {
