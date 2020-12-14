@@ -352,13 +352,17 @@ static StrongFunctionPtr script_compile_overloaded_function(
   auto new_def = implementation_def.withDecl(adjusted_decl);
   auto cu = get_python_cu();
   auto defined_functions = cu->define(
+      nullptr,
       QualifiedName(name.prefix()),
-      /*properties=*/{},
-      /*propResolvers=*/{},
       {new_def},
       {pythonResolver(std::move(rcb))},
-      nullptr,
-      true);
+      /*properties=*/{},
+      /*propResolvers=*/{},
+      /*hooks=*/{},
+      /*hookResolvers=*/{},
+      /*preHooks=*/{},
+      /*preHookResolvers=*/{},
+      /*shouldMangle=*/true);
   TORCH_INTERNAL_ASSERT(defined_functions.size() == 1);
   auto& defined = defined_functions[0];
   FunctionDefaults updated_defaults = calcOverloadedFunctionDefaults(
@@ -380,13 +384,17 @@ static StrongFunctionPtr script_compile_function(
     ResolutionCallback rcb) {
   auto cu = get_python_cu();
   auto defined_functions = cu->define(
+      nullptr,
       QualifiedName(name.prefix()),
-      /*properties=*/{},
-      /*propResolvers=*/{},
       {def},
       {pythonResolver(std::move(rcb))},
-      nullptr,
-      true);
+      /*properties=*/{},
+      /*propResolvers=*/{},
+      /*hooks=*/{},
+      /*hookResolvers=*/{},
+      /*preHooks=*/{},
+      /*preHookResolvers=*/{},
+      /*shouldMangle=*/true);
   TORCH_INTERNAL_ASSERT(defined_functions.size() == 1);
   auto& defined = defined_functions[0];
   defined->setSchema(getSchemaWithNameAndDefaults(
@@ -1338,7 +1346,7 @@ void initJitScriptBindings(PyObject* module) {
         }
 
         const auto self = SimpleSelf(classType);
-        cu->define(classname, props, propRcbs, methodDefs, methodRcbs, &self);
+        cu->define(&self, classname, methodDefs, methodRcbs, props, propRcbs);
 
         // Stitch in default arguments for methods. Properties don't need to be
         // considered since there is no way to invoke setters without passing in
@@ -1572,6 +1580,9 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "add_builtin_function",
           &ConcreteModuleTypeBuilder::addBuiltinFunction)
+      .def("add_forward_hook", &ConcreteModuleTypeBuilder::addForwardHook)
+      .def(
+          "add_forward_pre_hook", &ConcreteModuleTypeBuilder::addForwardPreHook)
       .def("add_module", &ConcreteModuleTypeBuilder::addModule)
       .def("add_overload", &ConcreteModuleTypeBuilder::addOverload)
       .def("set_poisoned", &ConcreteModuleTypeBuilder::setPoisoned)
@@ -1633,11 +1644,19 @@ void initJitScriptBindings(PyObject* module) {
              const std::vector<ResolutionCallback>& propertyRcbs,
              const std::vector<Def>& methodDefs,
              const std::vector<ResolutionCallback>& methodRcbs,
-             const std::vector<FunctionDefaults>& defaults) {
+             const std::vector<FunctionDefaults>& methodDefaults,
+             const std::vector<Def>& hookDefs,
+             const std::vector<ResolutionCallback>& hookRcbs,
+             const std::vector<FunctionDefaults>& hookDefaults,
+             const std::vector<Def>& preHookDefs,
+             const std::vector<ResolutionCallback>& preHookRcbs,
+             const std::vector<FunctionDefaults>& preHookDefaults) {
             TORCH_INTERNAL_ASSERT(methodDefs.size() == methodRcbs.size());
             TORCH_INTERNAL_ASSERT(properties.size() == propertyRcbs.size());
+            TORCH_INTERNAL_ASSERT(hookDefs.size() == hookRcbs.size());
+            TORCH_INTERNAL_ASSERT(preHookDefs.size() == preHookRcbs.size());
 
-            std::vector<ResolverPtr> methodResolvers, propertyResolvers;
+            std::vector<ResolverPtr> methodResolvers, propertyResolvers, hookResolvers, preHookResolvers;
             methodResolvers.reserve(methodRcbs.size());
             for (auto& callback : methodRcbs) {
               methodResolvers.push_back(pythonResolver(callback));
@@ -1648,20 +1667,35 @@ void initJitScriptBindings(PyObject* module) {
               propertyResolvers.push_back(pythonResolver(callback));
             }
 
+            hookResolvers.reserve(hookRcbs.size());
+            for (auto& callback : hookRcbs) {
+              hookResolvers.push_back(pythonResolver(callback));
+            }
+
+            preHookResolvers.reserve(preHookRcbs.size());
+            for (auto& callback : preHookRcbs) {
+              preHookResolvers.push_back(pythonResolver(callback));
+            }
+
             const auto& selfType =
                 concreteType->getJitType()->expect<ClassType>();
             const auto& prefix = selfType->name().value();
             const auto self = ModuleSelf(std::move(concreteType));
             auto cu = selfType->compilation_unit();
             cu->define(
+                &self,
                 prefix,
-                properties,
-                propertyResolvers,
                 methodDefs,
                 methodResolvers,
-                &self);
-            // Stitch in default arguments for each Def if provided
-            auto defaults_it = defaults.begin();
+                properties,
+                propertyResolvers,
+                hookDefs,
+                hookResolvers,
+                preHookDefs,
+                preHookResolvers
+              );
+            // Stitch in default arguments for each method Def if provided
+            auto defaults_it = methodDefaults.begin();
             auto defs_it = methodDefs.begin();
             while (defs_it != methodDefs.end()) {
               const auto method_name =
@@ -1694,6 +1728,24 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def(
       "_run_emit_module_hook", [](const Module& m) { didFinishEmitModule(m); });
+
+  m.def(
+      "_get_forward_hooks",
+      [](const Module& m) {
+        std::vector<StrongFunctionPtr> funcs;
+        for(auto& hook : m.type()->getForwardHooks()){
+          funcs.emplace_back(StrongFunctionPtr(m.type()->compilation_unit(), hook));
+        }
+        return funcs;
+      });
+  m.def("_get_forward_pre_hooks",
+      [](const Module& m) {
+        std::vector<StrongFunctionPtr> funcs;
+        for(auto& pre_hook : m.type()->getForwardPreHooks()){
+          funcs.emplace_back(StrongFunctionPtr(m.type()->compilation_unit(), pre_hook));
+        }
+        return funcs;
+      });
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<logging::LoggerBase, std::shared_ptr<logging::LoggerBase>>(

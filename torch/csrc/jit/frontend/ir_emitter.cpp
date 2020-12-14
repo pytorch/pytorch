@@ -4024,7 +4024,8 @@ std::unique_ptr<Function> CompilationUnit::define(
     const ResolverPtr& resolver,
     const Self* self,
     const std::unordered_map<std::string, Function*>& function_table,
-    bool shouldMangle) const {
+    bool shouldMangle,
+    CompilationUnit::FunctionType type) const {
   TORCH_INTERNAL_ASSERT(resolver);
   auto _resolver = resolver;
   if (!self) {
@@ -4044,6 +4045,7 @@ std::unique_ptr<Function> CompilationUnit::define(
       TORCH_INTERNAL_ASSERT(atoms.size() >= 2);
       call_name = atoms.at(atoms.size() - 2) + "." + atoms.at(atoms.size() - 1);
     }
+    std::cout << "calling to_ir on: " << call_name << std::endl;
     ErrorReport::CallStack call(call_name, def.range());
     to_ir(def, _resolver, self, method);
   };
@@ -4059,22 +4061,42 @@ std::unique_ptr<Function> CompilationUnit::define(
   auto fn = torch::make_unique<GraphFunction>(
       std::move(name), std::make_shared<Graph>(), creator);
   if (self) {
+    // make sure there are no name collisions
+    std::cout << "defining: " << fn->name() << std::endl;
+    TORCH_CHECK(
+      self->getClassType()->findCallable(fn->name()) == nullptr,
+      "Can't redefine callable: ",
+      fn->name(),
+      " on class: ",
+      self->getClassType()->repr_str());
     // Register this as a method on `self`'s type
-    self->getClassType()->addMethod(fn.get());
+    if(CompilationUnit::FunctionType::hook == type) {
+      self->getClassType()->addForwardHook(fn.get());
+    } else if (CompilationUnit::FunctionType::pre_hook == type) { 
+      self->getClassType()->addForwardPreHook(fn.get());
+    } else {
+      self->getClassType()->addMethod(fn.get()); 
+    }
   }
   return fn;
 }
 
 std::vector<Function*> CompilationUnit::define(
+    const Self* self,
     const c10::optional<c10::QualifiedName>& prefix,
+    const std::vector<Def>& methodDefs,
+    const std::vector<ResolverPtr>& methodResolvers,
     const std::vector<Property>& properties,
     const std::vector<ResolverPtr>& propResolvers,
-    const std::vector<Def>& definitions,
-    const std::vector<ResolverPtr>& defResolvers,
-    const Self* self,
+    const std::vector<Def>& hookDefs,
+    const std::vector<ResolverPtr>& hookResolvers,
+    const std::vector<Def>& preHookDefs,
+    const std::vector<ResolverPtr>& preHookResolvers,
     bool shouldMangle) {
-  TORCH_INTERNAL_ASSERT(definitions.size() == defResolvers.size());
   TORCH_INTERNAL_ASSERT(properties.size() == propResolvers.size());
+  TORCH_INTERNAL_ASSERT(methodDefs.size() == methodResolvers.size());
+  TORCH_INTERNAL_ASSERT(hookDefs.size() == hookResolvers.size());
+  TORCH_INTERNAL_ASSERT(preHookDefs.size() == preHookResolvers.size());
   std::vector<Function*> functions;
   std::unordered_map<std::string, Function*> function_table;
 
@@ -4106,17 +4128,62 @@ std::vector<Function*> CompilationUnit::define(
     }
   }
 
-  for (size_t i = 0; i < definitions.size(); i++) {
+  for (size_t i = 0; i < methodDefs.size(); i++) {
     auto fn = define(
         prefix,
-        definitions[i],
-        defResolvers[i],
+        methodDefs[i],
+        methodResolvers[i],
         self,
         function_table,
         shouldMangle);
 
     record_function(std::move(fn));
   }
+
+  for (size_t i = 0; i < hookDefs.size(); i++) {
+    auto name = prefix ? QualifiedName(*prefix, hookDefs[i].name().name())
+                     : QualifiedName(hookDefs[i].name().name());
+    auto existing_fn = function_table.find(name.name());
+    if (existing_fn != function_table.end()){
+        self->getClassType()->addForwardHook(existing_fn->second);
+        continue;
+    } 
+    auto fn = define(
+        prefix,
+        hookDefs[i],
+        hookResolvers[i],
+        self,
+        function_table,
+        shouldMangle,
+        CompilationUnit::FunctionType::hook);
+
+    function_table[fn->name()] = fn.get();
+    functions.emplace_back(fn.get());
+    this->register_function(std::move(fn));
+  }
+
+  for (size_t i = 0; i < preHookDefs.size(); i++) {
+    auto name = prefix ? QualifiedName(*prefix, preHookDefs[i].name().name())
+                     : QualifiedName(preHookDefs[i].name().name());
+    auto existing_fn = function_table.find(name.name());
+    if (existing_fn != function_table.end()){
+        self->getClassType()->addForwardPreHook(existing_fn->second);
+        continue;
+    } 
+    auto fn = define(
+        prefix,
+        preHookDefs[i],
+        preHookResolvers[i],
+        self,
+        function_table,
+        shouldMangle,
+        CompilationUnit::FunctionType::pre_hook);
+
+    function_table[fn->name()] = fn.get();
+    functions.emplace_back(fn.get());
+    this->register_function(std::move(fn));
+  }
+
 
   // We need to compile `__init__` first, since it can determine what attributes
   // are available to other methods. So reorder the definitions accordingly.
@@ -4147,12 +4214,10 @@ std::vector<Function*> CompilationUnit::define(
     resolvers.push_back(resolver);
   }
   return define(
+      self,
       prefix,
-      /*properties=*/{},
-      /*propResolvers=*/{},
       definitions,
-      resolvers,
-      self);
+      resolvers);
 }
 
 void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {

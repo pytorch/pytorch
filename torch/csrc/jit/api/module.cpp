@@ -118,6 +118,45 @@ IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs) {
   return (*function_)(std::move(stack), kwargs);
 }
 
+IValue Module::operator()(std::vector<IValue> inputs) {
+  const auto& pre_forward_hooks = type()->getForwardPreHooks();
+  const auto& forward_hooks = type()->getForwardHooks();
+
+  // Let's go over each forward pre_hook and call them
+  for (const auto& pre_hook : pre_forward_hooks) {
+    auto tuple_input = c10::ivalue::Tuple::create(inputs);
+    std::vector<IValue> pre_hook_inputs;
+    pre_hook_inputs.emplace_back(tuple_input);
+
+    // Make the actual call
+    IValue result = Method(_ivalue(), pre_hook)(pre_hook_inputs); // TODO wrap inputs with a std::move??
+    
+    // Check the result
+    if (!result.isNone() && result.isTuple()) {
+      inputs = result.toTuple()->elements();
+    }
+  }
+
+  // Now let's call forward
+  auto outputs = forward(inputs);
+
+  // It is now time for the forward hooks
+  for (const auto& hook : forward_hooks) {
+    auto tuple_input = c10::ivalue::Tuple::create(inputs);
+    std::vector<IValue> hook_inputs;
+    hook_inputs.emplace_back(tuple_input);
+    hook_inputs.emplace_back(outputs);
+
+    Kwargs output_param;
+    output_param["outputs"] = outputs;
+    auto hook_result = Method(_ivalue(), hook)(hook_inputs); // TODO wrap inputs with a std::move??
+    if (!hook_result.isNone()) {
+      outputs = hook_result;
+    }
+  }
+  return outputs; // TODO does this need to be de-tupled? 
+}
+
 void Module::clone_method(
     const Module& orig,
     const Function& method,

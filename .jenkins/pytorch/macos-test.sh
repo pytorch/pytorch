@@ -141,16 +141,16 @@ test_custom_script_ops() {
 
 
 if [ -z "${BUILD_ENVIRONMENT}" ] || [[ "${BUILD_ENVIRONMENT}" == *-test ]]; then
-  test_python_all
-  test_libtorch
+  #test_python_all
+  #test_libtorch
   test_custom_script_ops
-  test_custom_backend
+  #test_custom_backend
 else
   if [[ "${BUILD_ENVIRONMENT}" == *-test1 ]]; then
     test_python_all
   elif [[ "${BUILD_ENVIRONMENT}" == *-test2 ]]; then
-    test_libtorch
+    #test_libtorch
     test_custom_script_ops
-    test_custom_backend
+    #test_custom_backend
   fi
 fi

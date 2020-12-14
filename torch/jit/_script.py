@@ -12,7 +12,7 @@ import inspect
 import copy
 import pickle
 import warnings
-from typing import Any, Dict
+from typing import Any, Dict, Callable
 
 
 import torch
@@ -711,6 +711,8 @@ if _enabled:
         "extra_repr",
         "_slow_forward",
         "_tracing_name",
+        "register_forward_pre_hook",
+        "register_forward_hook",
         "eval",
         "train",
     }

@@ -151,7 +151,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     }
   } else if (auto classType = value_->type()->cast<ClassType>()) {
     // This is a class, emit the proper attribute lookup
-    if (auto method = classType->findMethod(field)) {
+    if (auto method = classType->findCallable(field)) {
       return std::make_shared<MethodValue>(getValue(), field);
     }
     if (classType->hasAttribute(field)) {

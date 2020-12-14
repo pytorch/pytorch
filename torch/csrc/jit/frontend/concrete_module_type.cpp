@@ -111,7 +111,9 @@ bool ConcreteModuleTypeBuilder::equals(
       attributes_ == other.attributes_ &&
       overloads_ == other.overloads_ &&
       functionAttributes_ == other.functionAttributes_ &&
-      builtinFunctions_ == other.builtinFunctions_;
+      builtinFunctions_ == other.builtinFunctions_ &&
+      forward_hook_ids == other.forward_hook_ids &&
+      forward_pre_hook_ids == other.forward_pre_hook_ids;
   // clang-format on
   if (!equal) {
     return false;
@@ -274,6 +276,14 @@ void ConcreteModuleTypeBuilder::addModule(
       ConcreteModuleTypeBuilder::ModuleInfo{std::move(name), std::move(meta)});
 }
 
+void ConcreteModuleTypeBuilder::addForwardHook(uint64_t hook_python_id) {
+  forward_hook_ids.push_back(hook_python_id);
+} 
+
+void ConcreteModuleTypeBuilder::addForwardPreHook(uint64_t pre_hook_python_id) {
+  forward_pre_hook_ids.push_back(pre_hook_python_id);
+}
+
 void ConcreteModuleTypeBuilder::addOverload(
     std::string methodName,
     std::vector<std::string> overloadedMethodNames) {
@@ -306,6 +316,14 @@ void ConcreteModuleType::dump() const {
   for (const auto& info : data_.modules_) {
     std::cout << "\t" << info.name_ << ": "
               << info.meta_->getJitType()->annotation_str() << "\n";
+  }
+  std::cout << "\nForward PreHooks: \n";
+  for (const auto& pre_hook_python_id : data_.forward_pre_hook_ids) {
+    std::cout << "\t" << "python object: " << pre_hook_python_id << "\n";
+  }
+  std::cout << "\nForward Hooks: \n";
+  for (const auto& hook_python_id : data_.forward_hook_ids) {
+    std::cout << "\t" << "python object: " << hook_python_id << "\n";
   }
   std::cout << "\nOverloads: \n";
   for (const auto& pr : data_.overloads_) {

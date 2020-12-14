@@ -457,7 +457,7 @@ struct MethodValue : public SugaredValue {
     std::vector<const FunctionSchema*> schemas;
     for (const std::string& method_name : method_names_) {
       if (auto class_type = self_->type()->cast<ClassType>()) {
-        Function& method = class_type->getMethod(method_name);
+        Function& method = class_type->getCallable(method_name);
         try {
           method.ensure_defined();
         } catch (const RecursiveMethodCallError&) {
@@ -473,7 +473,9 @@ struct MethodValue : public SugaredValue {
             false, "method constructed that is not a class or interface");
       }
     }
+    std::cout << "matching schema" << std::endl;
     auto match = matchSchemas(schemas, loc, *f.graph(), argsWithSelf, kwargs);
+    std::cout << "matched schema" << std::endl;
     Value* output =
         f.graph()->insertMethodCall(method_names_[match.first], match.second);
     output->node()->setSourceRange(loc);
