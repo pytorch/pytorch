@@ -4686,7 +4686,7 @@ else:
                                                           random_hermitian_pd_matrix, random_square_matrix_of_rank)
 
         # mat_chars denotes matrix characteristics
-        # possible values are: sym, sym_psd, sym_pd, sing, non_sym
+        # possible values are: hermitian, hermitian_psd, hermitian_pd, singular, non_singular
         def run_test(matsize, batchdims, mat_chars):
             num_matrices = reduce(lambda x, y: x * y, batchdims, 1)
             list_of_matrices = []
