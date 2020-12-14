@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <torch/csrc/jit/runtime/static/fusion.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include "deep_wide_pt.h"
 #include "test_scripts.h"
@@ -249,3 +250,34 @@ TEST(StaticRuntime, CleanUpMemory) {
     }
   }
 }
+
+TEST(StaticRuntime, FusionPass) {
+  const int embedding_size = 32;
+  const int num_features = 50;
+  for (int batch_size : {1, 8, 32}) {
+    for (int i = 0; i < 2; ++i) {
+      torch::jit::Module module = getDeepAndWideSciptModel();
+      auto ad_emb_packed = torch::randn({batch_size, 1, embedding_size});
+      auto user_emb = torch::randn({batch_size, 1, embedding_size});
+      auto wide = torch::randn({batch_size, num_features});
+
+      // run jit graph executor
+      std::vector<at::IValue> inputs({ad_emb_packed, user_emb, wide});
+      auto output_1 = getTensor(module.forward(inputs));
+
+      Method method = module.get_method("forward");
+      auto graph = method.graph();
+      fuseStaticSubgraphs(graph);
+      bool hit = false;
+      for (const auto& n : module.get_method("forward").graph()->nodes()) {
+        if (n->kind() == torch::jit::prim::StaticSubgraph) {
+        hit = true;
+        }
+      }
+      EXPECT_TRUE(hit);
+      auto output_2 = getTensor(module.forward(inputs));
+      EXPECT_TRUE(output_1.equal(output_2));
+    }
+  }
+}
+
