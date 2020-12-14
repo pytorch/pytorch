@@ -2291,6 +2291,7 @@ class TestQuantizedOps(TestCase):
             self.assertTrue(x_q.dtype == x_q_s1.dtype)
             self.assertTrue(x_q.q_scale() == x_q_s1.q_scale())
             self.assertTrue(x_q.q_zero_point() == x_q_s1.q_zero_point())
+            self.assertEqual(x_q.int_repr()[:, [0], :, :], x_q_s1.int_repr())
 
             # multiple dim, single index
             x_q_s2 = x_q[:, [0], [2], :]
