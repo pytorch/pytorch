@@ -603,7 +603,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
-             "aten::slice.t(t[] l, int? start, int? end=9223372036854775807, int? step=1) -> t[]"),
+             "aten::slice.t(t[] l, int? start=None, int? end=None, int? step=None) -> t[]"),
          listSlice,
          aliasAnalysisFromSchema()),
      OperatorGenerator(
