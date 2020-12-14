@@ -23,6 +23,7 @@ static void compute_cuda(int64_t *repeat_ptr, int64_t *cumsum_ptr, int64_t *resu
     int64_t grid = std::min<int64_t>((size + warps_per_block - 1) / warps_per_block, 2048L);
 
     compute_cuda_kernel<<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(repeat_ptr, cumsum_ptr, result_ptr, size);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 namespace at { namespace native {

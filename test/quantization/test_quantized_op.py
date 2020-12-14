@@ -2279,34 +2279,40 @@ class TestQuantizedOps(TestCase):
         Verifies that the x[:, [0], :, :] syntax works for quantized tensors.
         """
         for dtype in (torch.qint8, torch.quint8, torch.qint32):
+            scale = 0.1
+            zp = 0
             x_q = torch.quantize_per_tensor(
-                torch.randn(1, 4, 4, 4), 0.1, 0, dtype)
+                torch.randn(1, 4, 4, 4), scale, zp, dtype)
             # reference
             x_fp32 = x_q.dequantize()
 
             # single dim, single index
             x_q_s1 = x_q[:, [0], :, :]
             x_fp32_s1 = x_fp32[:, [0], :, :]
-            self.assertTrue(torch.allclose(x_fp32_s1, x_q_s1.dequantize()))
-            self.assertTrue(x_q.dtype == x_q_s1.dtype)
-            self.assertTrue(x_q.q_scale() == x_q_s1.q_scale())
-            self.assertTrue(x_q.q_zero_point() == x_q_s1.q_zero_point())
-            self.assertEqual(x_q.int_repr()[:, [0], :, :], x_q_s1.int_repr())
+            x_fp32_s1_ref = \
+                torch.quantize_per_tensor(x_fp32_s1, scale, zp, dtype)
+            self.assertEqual(x_q_s1, x_fp32_s1_ref)
 
             # multiple dim, single index
             x_q_s2 = x_q[:, [0], [2], :]
             x_fp32_s2 = x_fp32[:, [0], [2], :]
-            self.assertTrue(torch.allclose(x_fp32_s2, x_q_s2.dequantize()))
+            x_fp32_s2_ref = \
+                torch.quantize_per_tensor(x_fp32_s2, scale, zp, dtype)
+            self.assertEqual(x_q_s2, x_fp32_s2_ref)
 
             # single dim, multiple indices
             x_q_s3 = x_q[:, [2, 0, 1], :, :]
             x_fp32_s3 = x_fp32[:, [2, 0, 1], :, :]
-            self.assertTrue(torch.allclose(x_fp32_s3, x_q_s3.dequantize()))
+            x_fp32_s3_ref = \
+                torch.quantize_per_tensor(x_fp32_s3, scale, zp, dtype)
+            self.assertEqual(x_q_s3, x_fp32_s3_ref)
 
             # multiple dim, multiple indices
             x_q_s4 = x_q[:, [2, 0, 1], :, [1]]
             x_fp32_s4 = x_fp32[:, [2, 0, 1], :, [1]]
-            self.assertTrue(torch.allclose(x_fp32_s4, x_q_s4.dequantize()))
+            x_fp32_s4_ref = \
+                torch.quantize_per_tensor(x_fp32_s4, scale, zp, dtype)
+            self.assertEqual(x_q_s4, x_fp32_s4_ref)
 
 
 class TestDynamicQuantizedLinear(TestCase):
