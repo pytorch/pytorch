@@ -167,6 +167,40 @@ SparseTensor& asin_sparse_(SparseTensor& t) {
 }
 
 // --------------------------------------------------------------------
+// sinh(SparseTensor)
+// --------------------------------------------------------------------
+
+SparseTensor& sinh_out_sparse(SparseTensor& r, const SparseTensor& t) {
+  TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
+  TORCH_CHECK(t.is_sparse(), "Tensor should be sparse");
+  TORCH_CHECK(
+      !c10::isIntegralType(r.scalar_type(), /*includeBool=*/true),
+      "sinh: result type cannot be Integral, got:",
+      r.scalar_type());
+
+  if (is_same_tensor(r, t)) {
+    // don't have in-place asin for uncoalesced input because coalesce() is not
+    // in-place, see above comment
+    TORCH_CHECK(
+        r.is_coalesced(),
+        "sinh: in-place on uncoalesced tensors is not supported");
+  } else {
+    copy_sparse_to_sparse_(r, t.coalesce());
+  }
+  r._values().sinh_();
+  return r;
+}
+
+SparseTensor sinh_sparse(const SparseTensor& t) {
+  auto result = get_result_tensor_for_unary_op(t);
+  return sinh_out_sparse(result, t);
+}
+
+SparseTensor& sinh_sparse_(SparseTensor& t) {
+  return sinh_out_sparse(t, t);
+}
+
+// --------------------------------------------------------------------
 // pow(SparseTensor, Scalar)
 // --------------------------------------------------------------------
 
