@@ -27,10 +27,10 @@ class StorageWeakRef(object):
         self.cdata = storage._weak_ref()
         # Save a direct reference to _free_weak_ref because the `torch` module
         # might be cleared during Python shutdown before this module is cleared.
-        self._free_weak_ref = torch.Storage._free_weak_ref
+        self._free_weak_ref = torch.Storage._free_weak_ref  # type: ignore[attr-defined]
 
     def expired(self):
-        return torch.Storage._expired(self.cdata)
+        return torch.Storage._expired(self.cdata)  # type: ignore[attr-defined]
 
     def __del__(self):
         self._free_weak_ref(self.cdata)
@@ -322,7 +322,7 @@ def reduce_storage(storage):
         df = multiprocessing.reduction.DupFd(fd)
         cache_key = fd_id(fd)
         metadata = (df, size)
-        rebuild = rebuild_storage_fd
+        rebuild = rebuild_storage_fd  # type: ignore[assignment]
 
     shared_cache[cache_key] = StorageWeakRef(storage)
     return (rebuild, (type(storage),) + metadata)

@@ -17,6 +17,7 @@ from typing import (
     List,
     Optional,
     Set,
+    Sequence,
     Tuple,
     Type,
     TypeVar,
@@ -33,13 +34,14 @@ from .tracker import current_skip_tracker
 __all__ = ["skippable", "stash", "pop", "verify_skippables"]
 
 
-Tensors = Tuple[Tensor, ...]
+Tensors = Sequence[Tensor]
 TensorOrTensors = Union[Tensor, Tensors]
 
 StashPop = Union["stash", "pop"]
 StashPopGenerator = Generator[StashPop, Optional[Tensor], TensorOrTensors]
 if TYPE_CHECKING:
-    SkippableModule = nn.Module[Union[StashPopGenerator, TensorOrTensors]]
+    # Typechecking: nn.Module is not a Generic
+    SkippableModule = nn.Module[Union[StashPopGenerator, TensorOrTensors]]  # type: ignore[type-arg]
 else:
     SkippableModule = nn.Module
 

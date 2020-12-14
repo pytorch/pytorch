@@ -2097,8 +2097,8 @@ TEST_F(ModulesTest, TripletMarginWithDistanceLossDefaultParity) {
 
   for (auto& reduction : reductions) {
     for (auto& margin : margins) {
-      for (const auto& swap : swaps) {
-        auto anchor = 
+      for (const auto swap : swaps) {
+        auto anchor =
             torch::randn({100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
         auto positive =
             torch::randn({100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -2158,7 +2158,7 @@ TEST_F(ModulesTest, TripletMarginWithDistanceLossFunctionalParity) {
   for (auto& function : distance_functions) {
     for (auto& reduction : reductions) {
       for (auto& margin : margins) {
-        for (const auto& swap : swaps) {
+        for (const auto swap : swaps) {
           auto moduleOptions =
               TripletMarginWithDistanceLossOptions()
                   .distance_function(function)

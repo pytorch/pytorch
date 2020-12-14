@@ -5,57 +5,53 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 
-#include "test/cpp/jit/test_utils.h"
+#include <test/cpp/jit/test_utils.h>
 
+#include <torch/csrc/autograd/engine.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/codegen/fuser/interface.h>
+#include <torch/csrc/jit/frontend/code_template.h>
+#include <torch/csrc/jit/frontend/ir_emitter.h>
+#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/ir/attributes.h>
+#include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/ir/scope.h>
 #include <torch/csrc/jit/ir/type_hashing.h>
+#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
-#include "torch/csrc/autograd/generated/variable_factories.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/codegen/fuser/interface.h"
-#include "torch/csrc/jit/frontend/code_template.h"
-#include "torch/csrc/jit/frontend/tracer.h"
-#include "torch/csrc/jit/ir/alias_analysis.h"
-#include "torch/csrc/jit/ir/attributes.h"
-#include "torch/csrc/jit/ir/irparser.h"
-#include "torch/csrc/jit/ir/scope.h"
-#include "torch/csrc/jit/jit_log.h"
-#include "torch/csrc/jit/passes/bailout_graph.h"
-#include "torch/csrc/jit/passes/common_subexpression_elimination.h"
-#include "torch/csrc/jit/passes/constant_propagation.h"
-#include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/jit/passes/graph_fuser.h"
-#include "torch/csrc/jit/passes/guard_elimination.h"
-#include "torch/csrc/jit/passes/inline_autodiff_subgraphs.h"
-#include "torch/csrc/jit/passes/insert_guards.h"
-#include "torch/csrc/jit/passes/liveness.h"
-#include "torch/csrc/jit/passes/loop_unrolling.h"
-#include "torch/csrc/jit/passes/lower_grad_of.h"
-#include "torch/csrc/jit/passes/lower_tuples.h"
-#include "torch/csrc/jit/passes/pass_manager.h"
-#include "torch/csrc/jit/passes/requires_grad_analysis.h"
-#include "torch/csrc/jit/passes/shape_analysis.h"
-#include "torch/csrc/jit/passes/utils/subgraph_utils.h"
-#include "torch/csrc/jit/runtime/argument_spec.h"
-#include "torch/csrc/jit/runtime/autodiff.h"
-#include "torch/csrc/jit/runtime/custom_operator.h"
-#include "torch/csrc/jit/runtime/interpreter.h"
-#include "torch/csrc/jit/runtime/symbolic_script.h"
-#include "torch/csrc/jit/serialization/import.h"
-
-#include "torch/csrc/autograd/engine.h"
-#include "torch/csrc/autograd/variable.h"
-
+#include <torch/csrc/jit/passes/common_subexpression_elimination.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/graph_fuser.h>
+#include <torch/csrc/jit/passes/guard_elimination.h>
+#include <torch/csrc/jit/passes/inline_autodiff_subgraphs.h>
+#include <torch/csrc/jit/passes/insert_guards.h>
+#include <torch/csrc/jit/passes/liveness.h>
+#include <torch/csrc/jit/passes/loop_unrolling.h>
+#include <torch/csrc/jit/passes/lower_grad_of.h>
+#include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/passes/pass_manager.h>
+#include <torch/csrc/jit/passes/requires_grad_analysis.h>
+#include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
+#include <torch/csrc/jit/runtime/argument_spec.h>
+#include <torch/csrc/jit/runtime/autodiff.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/jit/runtime/profiling_record.h>
+#include <torch/csrc/jit/runtime/symbolic_script.h>
+#include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/testing/file_check.h>
+#include <torch/jit.h>
 #include <torch/script.h>
 
-#include "torch/csrc/jit/api/module.h"
-#include "torch/csrc/jit/frontend/ir_emitter.h"
-#include "torch/csrc/jit/runtime/profiling_record.h"
-#include "torch/jit.h"
-
-#include "onnx/onnx_pb.h"
+#include <onnx/onnx_pb.h>
 
 #include <c10/util/Exception.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
@@ -65,6 +61,7 @@
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -367,6 +364,10 @@ TEST(ATenNativeBatchNormTest, Basic) {
 }
 
 TEST(CustomFusionTest, Basic) {
+#if defined(FBCODE_CAFFE2)
+  return;
+#endif
+
   auto graph_string = R"IR(
     graph(%0 : Float(2, 3, 4),
           %1 : Float(2, 3, 4)):
@@ -401,6 +402,10 @@ TEST(CustomFusionTest, Basic) {
 }
 
 TEST(CustomFusionTest, NestedBlocks) {
+#if defined(FBCODE_CAFFE2)
+  return;
+#endif
+
   auto graph_string = R"IR(
   graph(%0 : Float(2, 3, 4),
         %1 : Float(2, 3, 4),
@@ -778,6 +783,12 @@ void checkScopeCallbacks() {
   TORCH_CHECK(found_user_scope);
 }
 
+static bool should_run = false;
+
+static bool shouldRunCallback(const RecordFunctionCallback&) {
+  return should_run;
+}
+
 TEST(RecordFunctionTest, Basic) {
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
@@ -1057,14 +1068,11 @@ TEST(RecordFunctionTest, Basic) {
   // test should_run
 
   bool ran = false;
-  bool should_run = false;
-  addGlobalCallback(
-      RecordFunctionCallback(
-          [&ran](const RecordFunction& fn) { ran = true; },
-          [](const RecordFunction&) {})
-          .setShouldRun([&should_run](const RecordFunctionCallback&) {
-            return should_run;
-          }));
+  should_run = false;
+  addGlobalCallback(RecordFunctionCallback(
+                        [&ran](const RecordFunction& fn) { ran = true; },
+                        [](const RecordFunction&) {})
+                        .setShouldRun(shouldRunCallback));
 
   { RECORD_USER_SCOPE("test"); }
 
@@ -1118,6 +1126,33 @@ TEST(RecordFunctionTest, Basic) {
   clearCallbacks();
 }
 
+TEST(RecordFunctionTest, OperatorNameOverload) {
+  std::set<std::string> operator_names;
+
+  at::addGlobalCallback(at::RecordFunctionCallback(
+                            [&operator_names](const at::RecordFunction& fn) {
+                              c10::optional<c10::OperatorName> op_name =
+                                  fn.operator_name();
+                              if (op_name.has_value()) {
+                                operator_names.insert(c10::toString(*op_name));
+                              } else {
+                                operator_names.insert("No Operator Name");
+                              }
+                            })
+                            .scopes({at::RecordScope::FUNCTION}));
+  auto t = torch::randn({1, 2, 3}, at::kCPU);
+  t.set_requires_grad(false);
+  auto t2 = t.pow(2);
+
+  at::clearCallbacks();
+  EXPECT_TRUE(operator_names.count("No Operator Name") == 0)
+      << "Expected that all traced operators had an associated OperatorName object";
+  EXPECT_TRUE(operator_names.count("aten::randn") == 1)
+      << "Expected aten::randn to have been called and recorded, but it was not";
+  EXPECT_TRUE(operator_names.count("aten::pow.Tensor_Scalar") == 1)
+      << "Expected aten::pow.Tensor_Scalar to have been called and recorded, but it was not";
+}
+
 class TestThreadLocalDebugInfo : public c10::DebugInfoBase {
  public:
   int getModelId() const {
@@ -1135,10 +1170,9 @@ class TestThreadLocalDebugInfo : public c10::DebugInfoBase {
 };
 
 void checkDebugInfo(c10::DebugInfoKind kind, int model_id) {
-  auto debug_info = c10::ThreadLocalDebugInfo::get(kind);
+  auto* debug_info = c10::ThreadLocalDebugInfo::get(kind);
   TORCH_CHECK(debug_info != nullptr);
-  auto* test_debug_info =
-      dynamic_cast<TestThreadLocalDebugInfo*>(debug_info.get());
+  auto* test_debug_info = dynamic_cast<TestThreadLocalDebugInfo*>(debug_info);
   TORCH_CHECK(test_debug_info != nullptr);
   TORCH_CHECK(test_debug_info->getModelId() == model_id);
 }
@@ -1811,7 +1845,7 @@ def foo(x):
           ASSERT_TRUE(n->callstack());
           auto callstack_vector = (*n->callstack())->vec();
           ASSERT_EQ(callstack_vector.size(), 1);
-          ASSERT_EQ(callstack_vector[0].first, &cu->get_function("bar"));
+          ASSERT_EQ(std::get<0>(callstack_vector[0]), &cu->get_function("bar"));
           break;
         }
         case 7: {
@@ -1821,8 +1855,8 @@ def foo(x):
           ASSERT_TRUE(n->callstack());
           auto callstack_vector = (*n->callstack())->vec();
           ASSERT_EQ(callstack_vector.size(), 2);
-          ASSERT_EQ(callstack_vector[0].first, &cu->get_function("baz"));
-          ASSERT_EQ(callstack_vector[1].first, &cu->get_function("ham"));
+          ASSERT_EQ(std::get<0>(callstack_vector[0]), &cu->get_function("baz"));
+          ASSERT_EQ(std::get<0>(callstack_vector[1]), &cu->get_function("ham"));
           break;
         }
         case 11: {
@@ -1851,7 +1885,7 @@ def foo(x):
       ASSERT_TRUE(n->callstack());
       auto callstack_vector = (*n->callstack())->vec();
       ASSERT_EQ(callstack_vector.size(), 1);
-      ASSERT_EQ(callstack_vector[0].first, &cu->get_function("ham"));
+      ASSERT_EQ(std::get<0>(callstack_vector[0]), &cu->get_function("ham"));
     }
   }
 }
@@ -2127,7 +2161,7 @@ TEST(TLSFutureCallbacksTest, Basic) {
   // test running callbacks with propagation of TLS state.
   {
     // Enable the profiler in this thread
-    torch::autograd::profiler::enableProfiler(
+    torch::autograd::profiler::enableProfilerLegacy(
         torch::autograd::profiler::ProfilerConfig(
             torch::autograd::profiler::ProfilerState::CPU, false, false));
     auto s1 = c10::make_intrusive<Future>(IntType::get());
@@ -2136,12 +2170,12 @@ TEST(TLSFutureCallbacksTest, Basic) {
     // Since we join here, we can ensure that all callbacks corresponding to
     // markCompleted() have finished.
     t.join();
-    torch::autograd::profiler::disableProfiler();
+    torch::autograd::profiler::disableProfilerLegacy();
   }
   // then() with TLS State
   {
     // Enable the profiler in this thread
-    torch::autograd::profiler::enableProfiler(
+    torch::autograd::profiler::enableProfilerLegacy(
         torch::autograd::profiler::ProfilerConfig(
             torch::autograd::profiler::ProfilerState::CPU, false, false));
     auto s1 = c10::make_intrusive<Future>(IntType::get());
@@ -2154,7 +2188,7 @@ TEST(TLSFutureCallbacksTest, Basic) {
     std::thread t([s1 = std::move(s1)]() { s1->markCompleted(); });
     t.join();
     s2->wait();
-    torch::autograd::profiler::disableProfiler();
+    torch::autograd::profiler::disableProfilerLegacy();
   }
 }
 
@@ -2163,7 +2197,7 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
   auto profilerEnabledCb = []() {
     ASSERT_TRUE(torch::autograd::profiler::profilerEnabled());
   };
-  torch::autograd::profiler::enableProfiler(
+  torch::autograd::profiler::enableProfilerLegacy(
       torch::autograd::profiler::ProfilerConfig(
           torch::autograd::profiler::ProfilerState::CPU, false, false));
   auto s1 = c10::make_intrusive<Future>(IntType::get());
@@ -2176,10 +2210,10 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
     // Don't cleanup TLSState, and just consolidate.
     auto opts = torch::autograd::profiler::ProfilerDisableOptions(false, true);
     auto thread_event_lists =
-        torch::autograd::profiler::disableProfiler(std::move(opts));
+        torch::autograd::profiler::disableProfilerLegacy(std::move(opts));
     // Ensure that the events from this thread are still profiled and we obtain
     // the expected in events in our consolidated list when calling
-    // disableProfiler().
+    // disableProfilerLegacy().
     bool found_ones = false;
     bool found_add = false;
     for (const auto& li : thread_event_lists) {
@@ -2201,13 +2235,13 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
   s1->addCallback(verifyProfilerCb);
   // Disable the profiler, but do not consolidate results in the main thread.
   auto opts = torch::autograd::profiler::ProfilerDisableOptions(true, false);
-  torch::autograd::profiler::disableProfiler(std::move(opts));
+  torch::autograd::profiler::disableProfilerLegacy(std::move(opts));
   std::thread t([s1 = std::move(s1)]() { s1->markCompleted(at::IValue(1)); });
   t.join();
 
   // Similar to above test, but verifies correctness in the case where
   // continuation runs on the main thread.
-  torch::autograd::profiler::enableProfiler(
+  torch::autograd::profiler::enableProfilerLegacy(
       torch::autograd::profiler::ProfilerConfig(
           torch::autograd::profiler::ProfilerState::CPU, false, false));
   s1 = c10::make_intrusive<Future>(IntType::get());
@@ -2215,7 +2249,7 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
   // Runs callback inline
   s1->markCompleted(at::IValue(1));
   opts = torch::autograd::profiler::ProfilerDisableOptions(true, false);
-  torch::autograd::profiler::disableProfiler(std::move(opts));
+  torch::autograd::profiler::disableProfilerLegacy(std::move(opts));
 }
 
 TEST(IValueKWargsTest, Basic) {

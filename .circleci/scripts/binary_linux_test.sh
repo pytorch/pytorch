@@ -5,12 +5,13 @@ cat >/home/circleci/project/ci_test_script.sh <<EOL
 # =================== The following code will be executed inside Docker container ===================
 set -eux -o pipefail
 
+python_nodot="\$(echo $DESIRED_PYTHON | tr -d m.u)"
+
 # Set up Python
 if [[ "$PACKAGE_TYPE" == conda ]]; then
   retry conda create -qyn testenv python="$DESIRED_PYTHON"
   source activate testenv >/dev/null
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
-  python_nodot="\$(echo $DESIRED_PYTHON | tr -d m.u)"
   python_path="/opt/python/cp\$python_nodot-cp\${python_nodot}"
   # Prior to Python 3.8 paths were suffixed with an 'm'
   if [[ -d  "\${python_path}/bin" ]]; then
@@ -18,6 +19,11 @@ elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   elif [[ -d "\${python_path}m/bin" ]]; then
     export PATH="\${python_path}m/bin:\$PATH"
   fi
+fi
+
+EXTRA_CONDA_FLAGS=""
+if [[ "\$python_nodot" = *39* ]]; then
+  EXTRA_CONDA_FLAGS="-c=conda-forge"
 fi
 
 # Install the package
@@ -28,11 +34,11 @@ fi
 #   conda build scripts themselves. These should really be consolidated
 pkg="/final_pkgs/\$(ls /final_pkgs)"
 if [[ "$PACKAGE_TYPE" == conda ]]; then
-  conda install -y "\$pkg" --offline
+  conda install \${EXTRA_CONDA_FLAGS} -y "\$pkg" --offline
   if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
-    retry conda install -y cpuonly -c pytorch
+    retry conda install \${EXTRA_CONDA_FLAGS} -y cpuonly -c pytorch
   fi
-  retry conda install -yq future numpy protobuf six
+  retry conda install \${EXTRA_CONDA_FLAGS} -yq future numpy protobuf six
   if [[ "$DESIRED_CUDA" != 'cpu' ]]; then
     # DESIRED_CUDA is in format cu90 or cu102
     if [[ "${#DESIRED_CUDA}" == 4 ]]; then
@@ -40,7 +46,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
     else
       cu_ver="${DESIRED_CUDA:2:2}.${DESIRED_CUDA:4}"
     fi
-    retry conda install -yq -c nvidia -c pytorch "cudatoolkit=\${cu_ver}"
+    retry conda install \${EXTRA_CONDA_FLAGS} -yq -c nvidia -c pytorch "cudatoolkit=\${cu_ver}"
   fi
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   pip install "\$pkg"

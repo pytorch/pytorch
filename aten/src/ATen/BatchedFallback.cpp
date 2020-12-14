@@ -114,6 +114,7 @@ void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::j
       continue;
     }
 
+    // NOTE: [vmap-incompatible in-place operations]
     // In-place operations on `self` are not possible if there exists some vmap
     // level `l` such that `self` is not being vmapped on that level but another
     // argument is. For example, let B0 be a batch dim inside vmap and consider
@@ -121,8 +122,9 @@ void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::j
     // - self is torch.ones(3) and does not participate in this vmap
     // - other is BatchedTensor(torch.ones(B0, 3))
     // There's no way to do self.add_(other) because `other` has more elements
-    // elements than `self` due to being vmapped over. We should error out
-    // when we detect this.
+    // elements than `self` due to being vmapped over.
+    //
+    // In the vmap fallback, we should error out when we detect this.
     auto other_vmap_levels = createVmapLevelsBitset(batched->bdims());
     if (self_vmap_levels != (self_vmap_levels | other_vmap_levels)) {
       // Find one vmap level to complain about
@@ -156,11 +158,7 @@ void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::j
   auto first_physical_view_sizes = input_physical_views.front().tensor().sizes();
   auto batch_sizes = ArrayRef<int64_t>(
       first_physical_view_sizes.begin(), first_physical_view_sizes.begin() + num_batch_dims);
-  auto num_batches = std::accumulate(
-      batch_sizes.begin(),
-      batch_sizes.end(),
-      1,
-      std::multiplies<int64_t>());
+  const auto num_batches = prod_intlist(batch_sizes);
   // Without a shape-checking API, we're unable to compute the correct shape of
   // the output so we just error out.
   TORCH_CHECK(num_batches > 0,
@@ -293,11 +291,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
   auto num_batch_dims = input_physical_views.front().numBatchDims();
   auto some_sizes = input_physical_views.front().tensor().sizes();
   auto batch_sizes = ArrayRef<int64_t>(some_sizes.begin(), some_sizes.begin() + num_batch_dims);
-  auto num_batches = std::accumulate(
-      batch_sizes.begin(),
-      batch_sizes.end(),
-      1,
-      std::multiplies<int64_t>());
+  const auto num_batches = prod_intlist(batch_sizes);
   // Without a shape-checking API, we're unable to compute the correct shape of
   // the output so we just error out.
   TORCH_CHECK(num_batches > 0,

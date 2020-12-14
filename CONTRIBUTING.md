@@ -313,6 +313,8 @@ pip install -r requirements.txt
 # npm install -g katex
 # Or if you prefer an uncontaminated global executable environment or do not want to go through the node configuration:
 # npm install katex && export PATH="$PATH:$(pwd)/node_modules/.bin"
+# If you're a Facebook employee using a devserver, yarn may be more convenient:
+# yarn global add katex
 ```
 
 3. Generate the documentation HTML files. The generated files will be in `docs/build/html`.
@@ -353,7 +355,7 @@ information on the documentation syntax.
 
 We run Doxygen in CI (Travis) to verify that you do not use invalid Doxygen
 commands. To run this check locally, run `./check-doxygen.sh` from inside
-`docs/cpp`.
+`docs/cpp/source`.
 
 To build the documentation, follow the same steps as above, but run them from
 `docs/cpp` instead of `docs`.
@@ -377,6 +379,14 @@ et my_machine -t="8000:8000"
 ```
 
 Then navigate to `localhost:8000` in your web browser.
+
+Alternatively, you can run `rsync` on your local machine to copy the files from
+your remote machine:
+```bash
+mkdir -p build cpp/build
+rsync -az me@my_machine:/path/to/pytorch/docs/build/html build
+rsync -az me@my_machine:/path/to/pytorch/docs/cpp/build/html cpp/build
+```
 
 #### Submitting changes for review
 
@@ -664,7 +674,7 @@ ccache -M 25Gi
 ```
 
 To check this is working, do two clean builds of pytorch in a row. The second
-build should be substantially and noticeably faster than the first build.
+build should be substantially and noticeably faster than the first build. If this doesn't seem to be the case, check that each of the symlinks above actually link to your installation of `ccache`. For example, if you followed the first option and installed `ccache` from source on a Linux machine, running `readlink -e $(which g++)` should return `~/ccache/bin/ccache`.
 
 
 #### Use a faster linker
@@ -881,7 +891,7 @@ which is in PyTorch's `requirements.txt`.
 ## Pre-commit tidy/linting hook
 
 We use clang-tidy and flake8 (installed with flake8-bugbear,
-flake8-comprehensions, flake8-mypy, and flake8-pyi) to perform additional
+flake8-comprehensions, flake8-pyi, and others) to perform additional
 formatting and semantic checking of code. We provide a pre-commit git hook for
 performing these checks, before a commit is created:
 

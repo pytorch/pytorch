@@ -6,6 +6,7 @@ import sys
 import tempfile
 
 import torch
+from typing import Optional
 from torch.distributed.nn.jit.templates.remote_module_template import (
     REMOTE_MODULE_TEMPLATE,
 )
@@ -37,11 +38,12 @@ def get_arg_return_types_from_interface(module_interface):
 
     arg_str_list = []
     arg_type_str_list = []
+    assert method_schema is not None
     for argument in method_schema.arguments:
         arg_str_list.append(argument.name)
 
         if argument.has_default_value():
-            default_value_str = " = {}".format(argument.default)
+            default_value_str = " = {}".format(argument.default_value)
         else:
             default_value_str = ""
         arg_type_str = "{name}: {type}{default_value}".format(
@@ -63,6 +65,7 @@ def get_arg_return_types_from_interface(module_interface):
 
 
 def _write(out_path, text):
+    old_text: Optional[str]
     try:
         with open(out_path, "r") as f:
             old_text = f.read()

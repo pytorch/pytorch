@@ -21,9 +21,8 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
       const std::shared_ptr<FutureMessage>& responseFuture) const override;
 
   void processScriptCall(
-      ScriptCall& scriptCall,
+      RpcCommandBase& rpc,
       const std::function<void(Message)>& markComplete,
-      std::vector<at::IValue>& stack,
       const int64_t messageId,
       const std::shared_ptr<FutureMessage>& responseFuture) const override;
 
@@ -56,6 +55,11 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
       const std::shared_ptr<FutureMessage>& responseFuture) const override;
 
   bool cudaAvailable() const override;
+
+  void processRRefBackward(
+      RpcCommandBase& rpc,
+      const int64_t messageId,
+      const std::shared_ptr<FutureMessage>& responseFuture) const override;
 };
 
 } // namespace rpc

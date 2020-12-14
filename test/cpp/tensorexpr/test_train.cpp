@@ -1,6 +1,8 @@
-#include "test/cpp/tensorexpr/test_train.h"
+#include <gtest/gtest.h>
+
 #include "test/cpp/tensorexpr/padded_buffer.h"
 #include "test/cpp/tensorexpr/test_base.h"
+#include "test/cpp/tensorexpr/test_train.h"
 #include "test/cpp/tensorexpr/test_utils.h"
 #include "torch/csrc/jit/tensorexpr/eval.h"
 #include "torch/csrc/jit/tensorexpr/ir.h"
@@ -46,7 +48,7 @@ struct T {
   }
 };
 
-void testTrainBasic() {
+TEST(Train, TrainBasic) {
   {
     VGraph graph;
     auto A = graph.create_tensor({"K"});

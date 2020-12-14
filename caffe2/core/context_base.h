@@ -104,7 +104,7 @@ class CAFFE2_API BaseContext {
   }
 
   void CopyItemsSameDevice(
-      const caffe2::TypeMeta& meta,
+      const caffe2::TypeMeta meta,
       size_t n,
       const void* src,
       void* dst) {
@@ -117,7 +117,7 @@ class CAFFE2_API BaseContext {
   }
 
   void CopyItemsFromCPU(
-      const caffe2::TypeMeta& meta,
+      const caffe2::TypeMeta meta,
       size_t n,
       const void* src,
       void* dst) {
@@ -130,7 +130,7 @@ class CAFFE2_API BaseContext {
   }
 
   void CopyItemsToCPU(
-      const caffe2::TypeMeta& meta,
+      const caffe2::TypeMeta meta,
       size_t n,
       const void* src,
       void* dst) {

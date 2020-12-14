@@ -115,10 +115,12 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
     // this creates offset for latter slice and select nodes.
     auto dim = node->get(attr::dim)->toInt();
     if (dim < 0) {
-      auto input_type = node->input(0)->type()->expect<TensorType>();
+      auto input_type = orig_data->type()->expect<TensorType>();
       if (input_type->dim().has_value()) {
         auto rank = input_type->dim().value();
-        dim = dim + rank;
+        // Rank of original tensor to index on.
+        // Minus the offset created by select operators.
+        dim = dim + rank - dim_offset;
       } else {
         std::cerr
             << "Error: ONNX Remove Inplace Ops - Cannot export ellipsis indexing for input "

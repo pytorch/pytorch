@@ -335,8 +335,7 @@ c10::optional<std::vector<int64_t>> computeStride(
   // we use the stride as if it were computed via resize.
   // This could perhaps be combined with the below code, but the complexity
   // didn't seem worth it.
-  int64_t numel = std::accumulate(oldshape.begin(), oldshape.end(), 1,
-                                  std::multiplies<int64_t>());
+  const int64_t numel = prod_intlist(oldshape);
   if (numel == 0 && oldshape.equals(newshape)) {
     return oldstride.vec();
   }

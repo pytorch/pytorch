@@ -9,7 +9,7 @@
 
 /* stuff for mapped files */
 #ifdef _WIN32
-#include <windows.h>
+#include <c10/util/win32-headers.h>
 #endif
 
 #if defined(HAVE_MMAP)
@@ -288,6 +288,7 @@ THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, 
 
     if (base_ptr_ == MAP_FAILED) {
       base_ptr_ = nullptr; /* let's be sure it is NULL */
+      AT_ERROR("unable to mmap ", size_, " bytes from file <", filename_, ">: ", strerror(errno), " (", errno, ")");
     }
 
     if (flags_ & TH_ALLOCATOR_MAPPED_KEEPFD) {
@@ -332,7 +333,7 @@ typedef struct{
   HANDLE handle;
   HANDLE wait;
 } ReleaseContext;
-static VOID CALLBACK WaitForReleaseHandle(PVOID lpParam, BOOLEAN TimerOrWaitFired)
+static void CALLBACK WaitForReleaseHandle(PVOID lpParam, BOOLEAN TimerOrWaitFired)
 {
   if (lpParam) {
     ReleaseContext *ctx = (ReleaseContext *)lpParam;

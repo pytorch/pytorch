@@ -114,6 +114,13 @@ is needed, users can disable TF32 by:
   torch.backends.cuda.matmul.allow_tf32 = False
   torch.backends.cudnn.allow_tf32 = False
 
+To toggle the TF32 flags off in C++, you can do
+
+.. code:: C++
+
+  at::globalContext().setAllowTF32CuBLAS(false);
+  at::globalContext().setAllowTF32CuDNN(false);
+
 For more information about TF32, see:
 
 - `TensorFloat-32`_
@@ -259,7 +266,7 @@ cuFFT plan cache
 ----------------
 
 For each CUDA device, an LRU cache of cuFFT plans is used to speed up repeatedly
-running FFT methods (e.g., :func:`torch.fft`) on CUDA tensors of same geometry
+running FFT methods (e.g., :func:`torch.fft.fft`) on CUDA tensors of same geometry
 with same configuration. Because some cuFFT plans may allocate GPU memory,
 these caches have a maximum capacity.
 

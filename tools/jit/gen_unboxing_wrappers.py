@@ -49,6 +49,7 @@ TYPE_MAP = {
     'std::string': 'str',
     'std::string?': 'str?',
     'Scalar': 'Scalar',
+    'ScalarList': 'Scalar[]',
     'MemoryFormat': 'MemoryFormat',
     'MemoryFormat?': 'MemoryFormat?',
     'QScheme': 'QScheme',
@@ -131,6 +132,7 @@ FROM_IVALUE = {
     'Tensor?': 'toOptionalTensor({})',
     'Tensor?[]': 'toListOfOptionalTensor({})',
     'TensorList': '{}.toTensorVector()',
+    'ScalarList': '{}.toScalarVector()',
     'bool': '{}.toBool()',
     'bool?': '{}.toOptional<bool>()',
     'double': '{}.toDouble()',
@@ -535,7 +537,8 @@ def main():
     parser.add_argument('template_path', metavar='TEMPLATE_PATH',
                         help='path to templates directory')
     args = parser.parse_args()
-    gen_unboxing_wrappers(args.declarations, args.out, args.template_path)
+    gen_unboxing_wrappers(args.declarations, args.out, args.template_path,
+                          SelectiveBuilder.get_nop_selector())
 
 
 if __name__ == '__main__':

@@ -12,7 +12,7 @@ std::string fromVec(const std::vector<char>& vec) {
 
 FaultyProcessGroupAgent::FaultyProcessGroupAgent(
     std::string workerName,
-    std::shared_ptr<c10d::ProcessGroup> pg,
+    c10::intrusive_ptr<::c10d::ProcessGroup> pg,
     int numSendRecvThreads,
     std::chrono::milliseconds rpcTimeout,
     const std::vector<std::string>& messagesToFail,

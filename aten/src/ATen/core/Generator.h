@@ -13,6 +13,12 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
+
+// For the record I don't think this is a correct pimpl idiom.
+// Including Impl header in interface header defeats the purpose
+// because you can't change Impl private members without forcing
+// everything that included the interface to rebuild.
+// Impl should be forward-declared in the interface header instead.
 #include <c10/core/GeneratorImpl.h>
 
 /**
@@ -31,7 +37,6 @@
  *
  * By default, there is one generator per device, and a device's generator is
  * lazily created. A user can use the torch.Generator() api to create their own generator.
- * Currently torch.Generator() can only create a CPUGeneratorImpl.
  */
 
 /**
@@ -43,7 +48,7 @@
  * Please use the public mutex_ when using any methods from these classes, except for the
  * read-only methods. You can learn about the usage by looking into the unittests
  * (aten/src/ATen/cpu_generator_test.cpp) and other places where we have used lock_guard.
- * 
+ *
  * TODO: Look into changing the threading semantics of Generators in ATen (e.g., making
  * them non-thread safe and instead making the generator state splittable, to accommodate
  * forks into other threads).
@@ -126,4 +131,3 @@ Generator make_generator(Args&&... args) {
 }
 
 } // namespace at
-

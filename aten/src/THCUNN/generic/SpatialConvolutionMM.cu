@@ -163,10 +163,12 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
   // Define a buffer of ones, for bias accumulation
   // Note: this buffer can be shared with other modules, it only ever gets increased,
   // and always contains ones.
-  if (ones->dim() != 2 || ones->size(0)*ones->size(1) < outputHeight*outputWidth) {
-    // Resize plane and fill with ones...
-    THCTensor_(resize2d)(state, ones, outputHeight, outputWidth);
-    THCTensor_(fill)(state, ones, ScalarConvert<int, scalar_t>::to(1));
+  if (bias) {
+    if (ones->dim() != 2 || ones->size(0)*ones->size(1) < outputHeight*outputWidth) {
+      // Resize plane and fill with ones...
+      THCTensor_(resize2d)(state, ones, outputHeight, outputWidth);
+      THCTensor_(fill)(state, ones, ScalarConvert<int, scalar_t>::to(1));
+    }
   }
 
   // Helpers

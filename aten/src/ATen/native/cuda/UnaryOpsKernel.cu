@@ -41,7 +41,7 @@ void exp_kernel_cuda(TensorIterator& iter) {
 }
 
 void exp2_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "exp2_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "exp2_cuda", [&]() {
     gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ::exp2(a);
     });
@@ -49,7 +49,7 @@ void exp2_kernel_cuda(TensorIterator& iter) {
 }
 
 void expm1_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "expm1_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "expm1_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ::expm1(a);
     });
@@ -78,7 +78,7 @@ __host__ __device__ static inline c10::complex<T> rsqrt_wrapper(c10::complex<T> 
 }
 
 void rsqrt_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "rsqrt_cuda", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.common_dtype(), "rsqrt_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       // In CUDA, ::rsqrt is overloaded for float and at::Half here is implicitly cast to float.
       return rsqrt_wrapper(a);
@@ -87,7 +87,7 @@ void rsqrt_kernel_cuda(TensorIterator& iter) {
 }
 
 void sqrt_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "sqrt_cuda", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "sqrt_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ::sqrt(a);
     });
@@ -95,7 +95,7 @@ void sqrt_kernel_cuda(TensorIterator& iter) {
 }
 
 void sigmoid_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "sigmoid_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "sigmoid_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       scalar_t one = scalar_t(1);
       return  one / (one + std::exp(- a));
@@ -131,7 +131,7 @@ void logit_kernel_cuda(TensorIterator& iter, Scalar eps_scalar) {
 }
 
 void erf_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "erf_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "erf_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ::erf(a);
     });
@@ -139,7 +139,7 @@ void erf_kernel_cuda(TensorIterator& iter) {
 }
 
 void erfc_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "erfc_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "erfc_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ::erfc(a);
     });

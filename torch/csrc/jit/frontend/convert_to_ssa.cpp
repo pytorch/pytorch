@@ -5,19 +5,20 @@
 #include <torch/csrc/jit/frontend/mini_environment.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/ir_views.h>
-#include <torch/csrc/jit/passes/inline_forked_closures.h>
 
 namespace torch {
 namespace jit {
 
 // At the beginning of the pass the Graph has already undergone type checking,
 // and writes or reads to a variable are emitted as Loads and Stores in the
-// graph. a = 1 print(a) is represented as:
-//
-// %a.1 : int = prim::Constant[value=1]()
-// prim::Store[name="a"](%a.1)
-// %a : int = prim::Load[name="a"]()
-// prim::Print(%a)
+// graph.
+//     a = 1
+//     print(a)
+// is represented as:
+//     %a.1 : int = prim::Constant[value=1]()
+//     prim::Store[name="a"](%a.1)
+//     %a : int = prim::Load[name="a"]()
+//     prim::Print(%a)
 //
 // First, this pass recursively adds the Loads & Stores to control flow nodes
 // Then the graph is converted to SSA form.
@@ -149,7 +150,7 @@ struct ControlFlowLoadStores {
         case prim::Loop: {
           addLoopLoadStores(n);
         } break;
-        case prim::Function: {
+        case prim::Closure: {
           for (auto b : n->blocks()) {
             addControlFlowLoadStores(b);
           }
@@ -157,7 +158,7 @@ struct ControlFlowLoadStores {
         case prim::Store: {
           environment_stack->setVar(n->s(attr::name), n->input()->type());
         } break;
-        case prim::LocalVariableScope: {
+        case prim::ListComprehensionScope: {
           addControlFlowLoadStores(n->blocks().at(0));
         } break;
       }
@@ -204,7 +205,7 @@ struct EraseLoadStores {
           n->output()->replaceAllUsesWith(var);
           n->destroy();
         } break;
-        case prim::LocalVariableScope: {
+        case prim::ListComprehensionScope: {
           // writes within a local variable scope do not leak into
           // the rest of the graph
           auto body = n->blocks().at(0);
@@ -279,7 +280,7 @@ struct LoopContinuations {
           assignExitContinuations(n->blocks().at(0));
           assignExitContinuations(n->blocks().at(1));
         } break;
-        case prim::Function: {
+        case prim::Closure: {
           LoopContinuations closure_block;
           closure_block.run(n->blocks().at(0));
         } break;

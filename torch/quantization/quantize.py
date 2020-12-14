@@ -1,29 +1,26 @@
-
 import copy
 import itertools
 import warnings
 
 import torch
 import torch.nn as nn
-import torch.nn.intrinsic as nni
 import torch.nn.quantized as nnq
-import torch.nn.intrinsic.qat as nniqat
+from torch.nn.intrinsic import _FusedModule
 
 from .quantization_mappings import (
     get_default_dynamic_quant_module_mappings,
     get_default_static_quant_module_mappings,
     get_default_qat_module_mappings,
     get_default_qconfig_propagation_list,
-    has_special_act_post_process,
-    get_default_special_act_post_process,
+    _has_special_act_post_process,
+    _get_special_act_post_process,
 )
 
 from .stubs import DeQuantStub, QuantWrapper
-from .qconfig import default_dynamic_qconfig, float16_dynamic_qconfig, float_qparams_dynamic_qconfig
+from .qconfig import default_dynamic_qconfig, float16_dynamic_qconfig, float_qparams_weight_only_qconfig
 
 def is_activation_post_process(module):
     return (isinstance(module, torch.quantization.ObserverBase) or
-            isinstance(module, torch.quantization.FakeQuantize) or
             isinstance(module, torch.quantization.FakeQuantizeBase))
 
 def _propagate_qconfig_helper(module, qconfig_dict, allow_list=None,
@@ -138,14 +135,19 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
             m._forward_hooks.move_to_end(handle.id, last=False)
 
     for name, child in module.named_children():
-        if type(child) == nnq.FloatFunctional or type(child) == nnq.QFunctional:
+        if type(child) in [nnq.FloatFunctional, nnq.QFunctional]:
             if needs_observation(child):
                 child.activation_post_process = get_activation_post_process(child.qconfig, device)
-        elif has_special_act_post_process(type(child)):
-            special_act_post_process = get_default_special_act_post_process(type(child))
+        elif isinstance(child, _FusedModule):
+            # activation_post_process are now added directly to nn.Sequentail/_FusedModule
+            if needs_observation(child):
+                insert_activation_post_process(child)
+        elif _has_special_act_post_process(child):
+            special_act_post_process = _get_special_act_post_process(child)
             insert_activation_post_process(child, special_act_post_process)
         elif non_leaf_module_list is not None and type(child) in non_leaf_module_list:
-            insert_activation_post_process(child)
+            if needs_observation(child):
+                insert_activation_post_process(child)
         elif needs_observation(child) and type(child) in custom_module_class_mapping:
             observed_child = custom_module_class_mapping[type(child)].from_float(child)
             setattr(module, name, observed_child)
@@ -293,7 +295,7 @@ def quantize(model, run_fn, run_args, mapping=None, inplace=False):
         model = copy.deepcopy(model)
     model.eval()
     prepare(model, inplace=True)
-    run_fn(model, run_args)
+    run_fn(model, *run_args)
     convert(model, mapping, inplace=True)
     return model
 
@@ -349,7 +351,7 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
             }
         elif dtype == torch.quint8:
             qconfig_spec = {
-                nn.EmbeddingBag : float_qparams_dynamic_qconfig,
+                nn.EmbeddingBag : float_qparams_weight_only_qconfig,
             }
         else:
             raise ValueError(
@@ -360,7 +362,7 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
         elif dtype is torch.float16:
             default_qconfig = float16_dynamic_qconfig
         elif dtype is torch.quint8:
-            default_qconfig = float_qparams_dynamic_qconfig
+            default_qconfig = float_qparams_weight_only_qconfig
         else:
             raise RuntimeError('Unknown dtype specified for quantize_dynamic: ', str(dtype))
         qconfig_spec = dict(zip(qconfig_spec, itertools.repeat(default_qconfig)))
@@ -420,7 +422,7 @@ def quantize_qat(model, run_fn, run_args, inplace=False):
         model = copy.deepcopy(model)
     model.train()
     prepare_qat(model, inplace=True)
-    run_fn(model, run_args)
+    run_fn(model, *run_args)
     convert(model, inplace=True)
     return model
 
@@ -487,26 +489,10 @@ def _convert(
     if not inplace:
         module = copy.deepcopy(module)
     reassign = {}
-    # TODO(jerryzh): remove after deciding on the impl of intrinsic modules
-    # This is required because intrinsic modules right now are implemented as
-    # nn.Sequential and we don't want to swap their constituents
-    SWAPPABLE_MODULES = (nni.ConvBn2d,
-                         nni.ConvBnReLU2d,
-                         nni.LinearReLU,
-                         nni.BNReLU2d,
-                         nni.BNReLU3d,
-                         nni.ConvBn1d,
-                         nni.ConvReLU1d,
-                         nni.ConvBnReLU1d,
-                         nni.ConvReLU2d,
-                         nni.ConvReLU3d,
-                         nniqat.ConvBn2d,
-                         nniqat.ConvBnReLU2d)
-
     for name, mod in module.named_children():
-        # both swappable modules and observed custom modules are
+        # both fused modules and observed custom modules are
         # swapped as one unit
-        if type(mod) not in SWAPPABLE_MODULES and \
+        if not isinstance(mod, _FusedModule) and \
            type(mod) not in custom_module_class_mapping:
             _convert(mod, mapping, True,  # inplace
                      custom_module_class_mapping)

@@ -155,10 +155,10 @@ CAFFE2_API void propagate_names_for_addmv(
 CAFFE2_API void check_names_for_dot(TensorImpl* vec1, TensorImpl* vec2);
 
 CAFFE2_API std::vector<Dimname> compute_baddbmm_outnames(
-    TensorImpl* result,
-    TensorImpl* self,
-    TensorImpl* other,
-    TensorImpl* bias);
+    Tensor& result,
+    const Tensor& self,
+    const Tensor& other,
+    const Tensor& bias);
 
 CAFFE2_API bool are_names_equal(TensorImpl* self, TensorImpl* other);
 

@@ -49,8 +49,7 @@ void foreach_binary_op_(TensorList tensors, at::ArrayRef<double> scalars) {
 
 #define FOREACH_BINARY_OP_SCALARLIST(NAME, OP)                                                                           \
 void foreach_tensor_##NAME##_scalarlist_kernel_cuda_(TensorList tensors, at::ArrayRef<double> scalars) {                 \
-    check_foreach_api_restrictions(tensors);                                                                             \
-                                                                                                                         \
+    check_foreach_api_restrictions(tensors, scalars);                                                                    \
     if (!can_use_fast_route(tensors, scalars)) {                                                                         \
         return at::native::foreach_tensor_##NAME##_scalarlist_kernel_slow_(tensors, scalars);                            \
     }                                                                                                                    \
@@ -59,8 +58,7 @@ void foreach_tensor_##NAME##_scalarlist_kernel_cuda_(TensorList tensors, at::Arr
 }                                                                                                                        \
                                                                                                                          \
 std::vector<Tensor> foreach_tensor_##NAME##_scalarlist_kernel_cuda(TensorList tensors, at::ArrayRef<double> scalars) {   \
-    check_foreach_api_restrictions(tensors);                                                                             \
-                                                                                                                         \
+    check_foreach_api_restrictions(tensors, scalars);                                                                    \
     if (!can_use_fast_route(tensors, scalars)) {                                                                         \
         return at::native::foreach_tensor_##NAME##_scalarlist_kernel_slow(tensors, scalars);                             \
     }                                                                                                                    \

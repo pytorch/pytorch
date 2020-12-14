@@ -22,7 +22,7 @@ namespace ivalue {
 
 // This is in ivalue.cpp because we need to access Type::annotation_str, which
 // is declared in jit_type.h
-void checkCustomClassType(TypePtr expected_type, TypePtr actual_type) {
+void checkCustomClassType(const Type* expected_type, const Type* actual_type) {
   // NB: doing pointer comparison here
   // If in the future there ever arises a need to call operator== on custom class
   // Type's, this needs to be changed!
@@ -273,7 +273,7 @@ IValue IValue::equals(const IValue& rhs) const {
     case Tag::Tuple:
       return rhs.isTuple() && *lhs.toTuple() == *rhs.toTuple();
     case Tag::Stream:
-      return rhs.isStream() && lhs.toStream() == lhs.toStream();
+      return rhs.isStream() && lhs.toStream() == rhs.toStream();
     case Tag::Device:
       return rhs.isDevice() && lhs.toDevice() == rhs.toDevice();
     case Tag::GenericList:
@@ -468,12 +468,16 @@ std::ostream& IValue::repr(
       if ((c == FP_NORMAL || c == FP_ZERO ) && std::abs(d) < 1e10) {
         int64_t i = int64_t(d);
         if (double(i) == d) {
+          // -0.0 (signed zero) needs to be parsed as -0.
+          if (i == 0 && std::signbit(d)) {
+            return out << "-" << i << ".";
+          }
           return out << i << ".";
         }
       }
       auto orig_prec = out.precision();
       return out << std::setprecision(std::numeric_limits<double>::max_digits10)
-                 << v.toDouble() << std::setprecision(orig_prec);
+                 << d << std::setprecision(orig_prec);
     }
     case IValue::Tag::Int:
       return out << v.toInt();
@@ -503,6 +507,9 @@ std::ostream& IValue::repr(
       auto enum_holder = v.toEnumHolder();
       return out << enum_holder->qualifiedClassName() << "." <<
           enum_holder->name();
+    }
+    case IValue::Tag::Object: {
+      TORCH_INTERNAL_ASSERT(false, "repr() not defined on: ", v.tagKind(), ". Perhaps you've frozen a module with custom classes?");
     }
     default:
       TORCH_INTERNAL_ASSERT(false, "repr() not defined on: ", v.tagKind());

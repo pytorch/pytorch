@@ -1,5 +1,5 @@
 #pragma once
-
+#include <math.h>
 // workaround for Python 2 issue: https://bugs.python.org/issue17120
 // NOTE: It looks like this affects Python 3 as well.
 #pragma push_macro("_XOPEN_SOURCE")

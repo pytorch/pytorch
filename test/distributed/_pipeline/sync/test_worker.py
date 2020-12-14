@@ -13,6 +13,7 @@ import torch
 from torch.distributed._pipeline.sync.microbatch import Batch
 from torch.distributed._pipeline.sync.stream import CPUStream
 from torch.distributed._pipeline.sync.worker import Task, spawn_workers
+from torch.testing._internal.common_utils import TEST_WITH_TSAN
 
 
 class fake_device:
@@ -24,6 +25,7 @@ class fake_device:
     index = None
 
 
+@pytest.mark.skipif(TEST_WITH_TSAN, reason="False positive in TSAN")
 def test_join_running_workers():
     count = 0
 
@@ -47,6 +49,7 @@ def test_join_running_workers():
     assert count == 10
 
 
+@pytest.mark.skipif(TEST_WITH_TSAN, reason="False positive in TSAN")
 def test_join_running_workers_with_exception():
     class ExpectedException(Exception):
         pass

@@ -85,9 +85,9 @@ static PyObject * THPModule_initNames(PyObject *self, PyObject *arg)
   THPObjectPtr types(PySequence_Fast(arg, "expected a sequence"));
   if (!types) return nullptr;
 
-  int num_classes = PySequence_Fast_GET_SIZE(types.get());
+  auto num_classes = PySequence_Fast_GET_SIZE(types.get());
   names.reserve(names.size() + num_classes);
-  for (size_t i = 0; i < num_classes; i++) {
+  for (Py_ssize_t i = 0; i < num_classes; i++) {
     PyObject* obj = PySequence_Fast_GET_ITEM(types.get(), i);
     THPUtils_assert(PyType_Check(obj), "expected a PyTypeObject");
     PyTypeObject* type = (PyTypeObject*)obj;
@@ -332,6 +332,13 @@ static PyObject *THPModule_showConfig(PyObject *module, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   return THPUtils_packString(at::show_config());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject *THPModule_cxxFlags(PyObject *module, PyObject *noargs)
+{
+  HANDLE_TH_ERRORS
+  return THPUtils_packString(at::get_cxx_flags());
   END_HANDLE_TH_ERRORS
 }
 
@@ -584,6 +591,7 @@ static PyMethodDef TorchMethods[] = {
   {"_crash_if_csrc_ubsan", THPModule_crashIfCsrcUBSAN, METH_O, nullptr},
   {"_crash_if_aten_asan", THPModule_crashIfATenASAN, METH_O, nullptr},
   {"_show_config",    THPModule_showConfig, METH_NOARGS, nullptr},
+  {"_cxx_flags", THPModule_cxxFlags, METH_NOARGS, nullptr},
   {"_parallel_info",    THPModule_parallelInfo, METH_NOARGS, nullptr},
   {"_set_backcompat_broadcast_warn", THPModule_setBackcompatBroadcastWarn, METH_O, nullptr},
   {"_get_backcompat_broadcast_warn", THPModule_getBackcompatBroadcastWarn, METH_NOARGS, nullptr},
@@ -638,6 +646,7 @@ bool THCPComplexFloatStorage_init(PyObject *module);
 
 void THCPStream_init(PyObject *module);
 void THCPEvent_init(PyObject *module);
+void THCPGraph_init(PyObject *module);
 
 #ifdef USE_CUDA
 PyMethodDef* THCPModule_methods();
@@ -778,6 +787,7 @@ PyObject* initModule() {
 
   THCPStream_init(module);
   THCPEvent_init(module);
+  THCPGraph_init(module);
 #endif
 
   auto set_module_attr = [&](const char* name, PyObject* v, bool incref = true) {
@@ -864,7 +874,30 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", Py_False));
 #endif
 
-  auto defaultGenerator = at::detail::getDefaultCPUGenerator();
+// See note [Pybind11 ABI constants]
+#define SET_STR_DEFINE(name) \
+  ASSERT_TRUE(set_module_attr("_" # name, THPUtils_packString(name)))
+
+#ifdef PYBIND11_COMPILER_TYPE
+  SET_STR_DEFINE(PYBIND11_COMPILER_TYPE);
+#else
+  ASSERT_TRUE(set_module_attr("_" C10_STRINGIZE(PYBIND11_COMPILER_TYPE), Py_None));
+#endif
+
+#ifdef PYBIND11_STDLIB
+  SET_STR_DEFINE(PYBIND11_STDLIB);
+#else
+  ASSERT_TRUE(set_module_attr("_" C10_STRINGIZE(PYBIND11_STDLIB), Py_None));
+#endif
+
+#ifdef PYBIND11_BUILD_ABI
+  SET_STR_DEFINE(PYBIND11_BUILD_ABI);
+#else
+  ASSERT_TRUE(set_module_attr("_" C10_STRINGIZE(PYBIND11_BUILD_ABI), Py_None));
+#endif
+#undef SET_STR_DEFINE
+
+  const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();
   THPDefaultCPUGenerator = (THPGenerator*)THPGenerator_initDefaultGenerator(defaultGenerator);
   // This reference is meant to be given away, so no need to incref here.
   ASSERT_TRUE(set_module_attr("default_generator", (PyObject*)THPDefaultCPUGenerator, /* incref= */ false));
