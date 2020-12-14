@@ -290,6 +290,7 @@ def main():
         sig_names = {2: "SIGINT", 15: "SIGTERM"}
         # pass SIGINT/SIGTERM to children if the parent is being terminated
         last_return_code = None
+
         def sigkill_handler(signum, frame):
             for process in processes:
                 print(f"Killing subprocess {process.pid}")
@@ -317,14 +318,14 @@ def main():
             finished_processes = []
             for process in alive_processes:
                 print(f"POLLING FOR {process.pid}")
-                if process.poll() == None:
+                if process.poll() is None:
                     # the process is still running
                     continue
                 else:
                     print(f"process {process.pid} is no more")
                     if process.returncode != 0:
-                        last_return_code = process.returncode # for sigkill_handler
-                        sigkill_handler(signal.SIGTERM, None) # not coming back
+                        last_return_code = process.returncode  # for sigkill_handler
+                        sigkill_handler(signal.SIGTERM, None)  # not coming back
                     else:
                         # exited cleanly
                         finished_processes.append(process)
