@@ -1260,6 +1260,8 @@ struct Graph {
   TORCH_API void freeBlock(Block* b);
 };
 
+TORCH_API bool isPointwiseOp(Node* n);
+
 /** \brief An utility class for setting temporary insertion points.
  *
  * When an object of this class is created, it stores the current insertion

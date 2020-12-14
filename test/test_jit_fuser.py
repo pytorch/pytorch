@@ -430,6 +430,7 @@ class TestFuser(JitTestCase):
         graph = ge_weight_tensor.graph_for(start, end)
         self.assertAllFused(graph)
 
+
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_concat_cuda(self):
         hx = torch.randn(3, 20, dtype=torch.float, device='cuda')

@@ -14,6 +14,7 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <iostream>
 #include <sstream>
 #include <utility>
@@ -336,6 +337,7 @@ void initPythonIRBindings(PyObject* module_) {
           "Find Node",
           py::arg("kind"),
           py::arg("recurse") = true)
+
       .def(
           "findAllNodes",
           [](Graph& g, const std::string& kind, bool recurse) {
@@ -546,6 +548,28 @@ void initPythonIRBindings(PyObject* module_) {
       .NS(addOutput)
       .NS(scopeName)
       .NS(isNondeterministic)
+      .def("isPointwiseOP", [](Node &n) {
+        return torch::jit::isPointwiseOp(&n);
+      })
+      .def("isMatmulOp", [](Node& n) {
+        switch (n.kind()) {
+          case aten::mm:
+          case aten::matmul:
+          case aten::bmm:
+          case aten::addmm:
+          case aten::baddbmm:
+            return true;
+          default: {
+            std::string s(n.kind().toQualString());
+            for (const auto s2 : {"aten::addmm_", "fbgemm"}) {
+              if (s.find(s2) != std::string::npos) {
+                return true;
+              }
+            }
+            return false;
+          }
+        }
+      })
       .def(
           "blocks",
           [](Node& n) {

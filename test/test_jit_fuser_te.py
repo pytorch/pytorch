@@ -433,6 +433,22 @@ class TestTEFuser(JitTestCase):
             ge = self.checkTrace(f, (x, y, z), inputs_require_grads=False)
             self.assertAllFused(ge.graph_for(x, y, z))
 
+    def test_elias(self):
+        @torch.jit.script
+        def foo(b, d):
+            x = d.unsqueeze(1)
+            y = x * 42.
+            z = b + y
+            r = z / 42.
+            return r
+
+        inputs = (torch.rand(20, 28, device='cpu'), torch.rand(20))
+        foo(*inputs)
+        foo(*inputs)
+        # scripted = self.checkScript(foo, inputs)
+        print(torch.jit.last_executed_optimized_graph())
+        # self.assertAllFused(scripted.graph_for(*inputs))
+
     def test_mul_bool(self):
         for device in self.devices:
             def f(x, y, z):
