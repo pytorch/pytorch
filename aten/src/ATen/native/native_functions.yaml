@@ -3798,18 +3798,21 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: sin
+    CPU, CUDA: sin
+    SparseCPU, SparseCUDA: sin_sparse
 
 - func: sin_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: sin_
+    CPU, CUDA: sin_
+    SparseCPU, SparseCUDA: sin_sparse_
 
 - func: sin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: sin_out
+    SparseCPU, SparseCUDA: sin_out_sparse
 
 - func: sinc(Tensor self) -> Tensor
   use_c10_dispatcher: full

@@ -864,6 +864,7 @@ op_db: List[OpInfo] = [
                    assert_autodiffed=True,),
     UnaryUfuncInfo('sin',
                    ref=np.sin,
+                   supports_sparse=True,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
