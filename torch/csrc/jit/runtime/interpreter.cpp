@@ -320,6 +320,7 @@ struct CanEmitInline {
         // by the later BailOut in createBailoutBlock and its jf_index
         // will become invalid.
         v->node()->kind() != prim::TensorExprGroup &&
+        v->node()->kind() != prim::StaticSubgraph &&
         v->node()->kind() != prim::CudaFusionGroup &&
         v->node()->kind() != prim::FusionGroup &&
         v->node()->kind() != prim::BailOut && v->uses().size() == 1 &&
@@ -1608,10 +1609,11 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   static void checkAndStartRecordFunction(Frame& frame, Stack& stack) {
+    bool pre_sampled = false;
     if (!frame.record_function && at::hasCallbacks() &&
-        at::isRecordFunctionEnabled()) {
+        at::shouldRunRecordFunction(&pre_sampled)) {
       auto rec_fn = std::make_unique<at::RecordFunction>(
-          at::RecordScope::TORCHSCRIPT_FUNCTION);
+          at::RecordScope::TORCHSCRIPT_FUNCTION, pre_sampled);
       if (rec_fn->isActive()) {
         if (rec_fn->needsInputs()) {
           rec_fn->before(
