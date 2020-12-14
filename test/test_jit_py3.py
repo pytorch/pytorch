@@ -364,6 +364,28 @@ class TestScriptPy3(JitTestCase):
                 tup = MyCoolNamedTuple(c=[1, 2, 3], b=3.5, a=9)  # noqa
                 return tup
 
+    def test_named_tuple_ignored_methods(self):
+        class NamedTupleWithIgnored(NamedTuple):
+            a: int
+
+            @torch.jit.ignore
+            def get_a(self) -> int:
+                return self.a
+
+            @staticmethod
+            @torch.jit.ignore
+            def from_tuple(tup: Tuple[int]) -> 'NamedTupleWithIgnored':
+                return NamedTupleWithMethods(a=tup[0])
+
+
+        @torch.jit.script
+        def foo():
+            tup = NamedTupleWithIgnored(1)
+            return tup
+
+        tup = foo()
+        self.assertEqual(tup.a, 1)
+
     def test_named_tuple_methods_error(self):
         class NamedTupleWithMethods(NamedTuple):
             a: int
