@@ -137,6 +137,8 @@ will not pass ``--local_rank`` when you specify this flag.
 """
 
 
+import time
+import signal
 import sys
 import subprocess
 import os
@@ -285,17 +287,50 @@ def main():
             print(f"""Note: Stdout and stderr for node {node_rank} rank {local_rank} will
             be written to {stdout_name}, {stderr_name} respectively.""")
 
+        sig_names = {2: "SIGINT", 15: "SIGTERM"}
+        # pass SIGINT/SIGTERM to children if the parent is being terminated
+        last_return_code = None
+        def sigkill_handler(signum, frame):
+            for process in processes:
+                print(f"Killing subprocess {process.pid}")
+                try:
+                    process.kill()
+                except Exception as e:
+                    pass
+            if last_return_code is not None:
+                raise subprocess.CalledProcessError(returncode=last_return_code, cmd=cmd)
+            if signum in sig_names:
+                print(f"Parent got kill signal={sig_names[signum]}, exiting")
+            sys.exit(1)
+
+        signal.signal(signal.SIGINT, sigkill_handler)
+        signal.signal(signal.SIGTERM, sigkill_handler)
+
         stdout_handle = None if not subprocess_file_handles else subprocess_file_handles[local_rank][0]
         stderr_handle = None if not subprocess_file_handles else subprocess_file_handles[local_rank][1]
         process = subprocess.Popen(cmd, env=current_env, stdout=stdout_handle, stderr=stderr_handle)
         processes.append(process)
 
     try:
-        for process in processes:
-            process.wait()
-            if process.returncode != 0:
-                raise subprocess.CalledProcessError(returncode=process.returncode,
-                                                    cmd=cmd)
+        alive_processes = processes
+        while len(alive_processes):
+            finished_processes = []
+            for process in alive_processes:
+                print(f"POLLING FOR {process.pid}")
+                if process.poll() == None:
+                    # the process is still running
+                    continue
+                else:
+                    print(f"process {process.pid} is no more")
+                    if process.returncode != 0:
+                        last_return_code = process.returncode # for sigkill_handler
+                        sigkill_handler(signal.SIGTERM, None) # not coming back
+                    else:
+                        # exited cleanly
+                        finished_processes.append(process)
+            alive_processes = set(alive_processes) - set(finished_processes)
+
+            time.sleep(1)
     finally:
         # close open file descriptors
         for (stdout_handle, stderr_handle) in subprocess_file_handles:
