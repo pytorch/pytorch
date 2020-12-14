@@ -428,14 +428,13 @@ void listMulIntRight(Stack* stack) {
 }
 
 void listSlice(Stack* stack) {
-
   auto step_val = pop(stack);
   auto end_val = pop(stack);
   auto start_val = pop(stack);
 
-  int64_t step = step_val.isInt()? step_val.to<int64_t>() : 1;
-  int64_t end = end_val.isInt()? end_val.to<int64_t>() : INT64_MAX;
-  int64_t start = start_val.isInt()? start_val.to<int64_t>() : INT64_MAX;
+  int64_t step = step_val.isInt() ? step_val.to<int64_t>() : 1;
+  int64_t end = end_val.isInt() ? end_val.to<int64_t>() : INT64_MAX;
+  int64_t start = start_val.isInt() ? start_val.to<int64_t>() : INT64_MAX;
 
   c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
 
