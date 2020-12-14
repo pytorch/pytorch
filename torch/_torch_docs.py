@@ -7457,7 +7457,7 @@ add_docstr(torch.sinc,
            r"""
 sinc(input, *, out=None) -> Tensor
 
-Returns a new tensor with the normalized sinc of the elements of :attr:`input`.
+Computes the normalized sinc of :attr:`input.`
 
 .. math::
     \text{out}_{i} =

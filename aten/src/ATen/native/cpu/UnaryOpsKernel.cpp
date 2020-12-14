@@ -307,8 +307,12 @@ static void sinc_kernel(TensorIterator& iter) {
     cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t {
-          scalar_t product = scalar_t(M_PI) * a;
-          return a == scalar_t(0) ? scalar_t(1) : std::sin(product) / product;
+          if (a == scalar_t(0)) {
+            return scalar_t(1);
+          } else {
+            scalar_t product = scalar_t(M_PI) * a;
+            return std::sin(product) / product;
+          }
         });
   });
 }
