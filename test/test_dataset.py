@@ -92,8 +92,6 @@ class TestIterableDatasetBasic(TestCase):
             self.assertTrue(file_pathname in self.temp_files)
             self.assertTrue(rec[1].read() == open(file_pathname, 'rb').read())
 
-        os.remove(temp_zipfile_pathname)
-
 
 if __name__ == '__main__':
     run_tests()
