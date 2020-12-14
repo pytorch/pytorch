@@ -959,6 +959,26 @@ class TestClassType(JitTestCase):
             # Make sure class constant is accessible from module
             self.assertEqual(m.w, m_loaded.w)
 
+    def test_py_class_to_ivalue_missing_attribute(self):
+        global Foo  # see [local resolution in python]
+
+        class Foo(object):
+            i : int
+            f : float
+
+            def __init__(self, i : int, f : float):
+                self.i = i
+                self.f = f
+
+        @torch.jit.script
+        def test_fn(x : Foo) -> float:
+            return x.i + x.f
+
+        test_fn(Foo(3, 4.0))
+
+        with self.assertRaisesRegex(RuntimeError, 'missing attribute i'):
+            test_fn(torch.rand(3, 4))
+
     def test_unused_method(self):
         """
         Test unused methods on scripted classes.
@@ -1350,11 +1370,31 @@ class TestClassType(JitTestCase):
             a = A()
             return a.i([3])
 
-        def call_o():
+        def call_j():
             a = A()
             return a.j([torch.device("cpu"), torch.device("cpu")])
 
-        for fn in [call_f, call_g, call_i, call_o]:
+        for fn in [call_f, call_g, call_i, call_j]:
             self.checkScript(fn, ())
             s = self.getExportImportCopy(torch.jit.script(fn))
             self.assertEqual(s(), fn())
+
+    def test_recursive_script_module_builtin_type_resolution(self):
+        """
+        Test resolution of built-in torch types(e.g. torch.Tensor, torch.device) when a class is recursively compiled
+        when compiling a module.
+        """
+        class Wrapper():
+            def __init__(self, t):
+                self.t = t
+
+            def to(self, l: List[torch.device], device: Optional[torch.device] = None):
+                return self.t.to(device=device)
+
+
+        class A(nn.Module):
+            def forward(self):
+                return Wrapper(torch.rand(4, 4))
+
+        scripted = torch.jit.script(A())
+        self.getExportImportCopy(scripted)

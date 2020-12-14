@@ -23,6 +23,19 @@ GENERATED_CPP = [
     "autograd/generated/python_variable_methods.cpp",
 ]
 
+# NVFuser runtime library
+libtorch_nvfuser_runtime_sources = [
+    "torch/csrc/jit/codegen/cuda/runtime/block_reduction.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/broadcast.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/fp16_support.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/grid_reduction.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/helpers.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/random_numbers.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/tensor.cu",
+]
+
+libtorch_nvfuser_generated_headers = ["{}.h".format(name[36:-3]) for name in libtorch_nvfuser_runtime_sources]
+
 def libtorch_generated_sources(gencode_pattern):
     return [gencode_pattern.format(name) for name in [
         "autograd/generated/Functions.cpp",
@@ -83,6 +96,7 @@ core_sources_common = [
     "torch/csrc/jit/runtime/jit_exception.cpp",
     "torch/csrc/jit/runtime/operator.cpp",
     "torch/csrc/jit/runtime/print_handler.cpp",
+    "torch/csrc/jit/runtime/slice_indices_adjust.cpp",
     "torch/csrc/jit/runtime/register_ops_utils.cpp",
     "torch/csrc/jit/runtime/vararg_functions.cpp",
     "torch/csrc/jit/serialization/unpickler.cpp",
@@ -162,7 +176,6 @@ core_sources_full_mobile = [
     "torch/csrc/jit/passes/erase_number_types.cpp",
     "torch/csrc/jit/passes/fixup_trace_scope_blocks.cpp",
     "torch/csrc/jit/passes/freeze_module.cpp",
-    "torch/csrc/jit/passes/reconstruct_scopes.cpp",
     "torch/csrc/jit/passes/fuse_linear.cpp",
     "torch/csrc/jit/passes/fuse_relu.cpp",
     "torch/csrc/jit/passes/graph_fuser.cpp",
@@ -253,8 +266,10 @@ core_sources_full_mobile = [
 ]
 
 core_sources_full = core_sources_full_mobile + [
+    "torch/csrc/jit/runtime/static/fusion.cpp",
     "torch/csrc/jit/runtime/static/impl.cpp",
     "torch/csrc/jit/runtime/static/ops.cpp",
+    "torch/csrc/jit/runtime/static/passes.cpp",
 ]
 
 libtorch_core_sources = sorted(core_sources_common + core_sources_full + core_trainer_sources)
@@ -507,6 +522,7 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/passes/onnx/constant_fold.cpp",
     "torch/csrc/jit/passes/onnx/eliminate_unused_items.cpp",
     "torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.cpp",
+    "torch/csrc/jit/passes/onnx/list_model_parameters.cpp",
     "torch/csrc/jit/passes/onnx/function_substitution.cpp",
     "torch/csrc/jit/passes/onnx/helper.cpp",
     "torch/csrc/jit/passes/onnx/peephole.cpp",

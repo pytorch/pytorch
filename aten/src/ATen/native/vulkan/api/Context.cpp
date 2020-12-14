@@ -111,7 +111,7 @@ Context::~Context() {
 }
 
 void Context::flush() {
-  VK_CHECK(vkDeviceWaitIdle(device()));
+  VK_CHECK(vkQueueWaitIdle(queue()));
 
   resource().pool.purge();
   descriptor().pool.purge();

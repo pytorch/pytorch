@@ -15,7 +15,8 @@ from torch.testing._internal.common_utils import (
     torch_to_numpy_dtype_dict, make_tensor)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, onlyCPU, dtypes, dtypesIfCUDA,
-    dtypesIfCPU, deviceCountAtLeast, precisionOverride, onlyOnCPUAndCUDA)
+    dtypesIfCPU, deviceCountAtLeast, precisionOverride, onlyOnCPUAndCUDA,
+    skipCUDAIfRocm)
 
 # TODO: remove this
 def _generate_input(shape, dtype, device, with_extremal):
@@ -158,36 +159,64 @@ class TestBinaryUfuncs(TestCase):
     # TODO: update to work on CUDA, too
     @onlyCPU
     def test_comparison_ops_check_for_scalar_overflow(self, device):
+        s = 1 << 20
+        t = torch.tensor([1 << 5], dtype=torch.uint8)
         with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
-            torch.tensor([1 << 5], dtype=torch.uint8) < (1 << 20)   # noqa: B015
-            (1 << 20) < torch.tensor([1 << 5], dtype=torch.uint8)   # noqa: B015
-            torch.tensor([1 << 5], dtype=torch.uint8) <= (1 << 20)  # noqa: B015
-            (1 << 20) <= torch.tensor([1 << 5], dtype=torch.uint8)  # noqa: B015
-            torch.tensor([1 << 5], dtype=torch.uint8) > (1 << 20)   # noqa: B015
-            (1 << 20) > torch.tensor([1 << 5], dtype=torch.uint8)   # noqa: B015
-            torch.tensor([1 << 5], dtype=torch.uint8) >= (1 << 20)  # noqa: B015
-            (1 << 20) >= torch.tensor([1 << 5], dtype=torch.uint8)  # noqa: B015
-            torch.tensor([1 << 5], dtype=torch.uint8) == (1 << 20)  # noqa: B015
-            (1 << 20) == torch.tensor([1 << 5], dtype=torch.uint8)  # noqa: B015
-            torch.tensor([1 << 5], dtype=torch.uint8) != (1 << 20)  # noqa: B015
-            (1 << 20) != torch.tensor([1 << 5], dtype=torch.uint8)  # noqa: B015
+            self.assertTrue(t < s)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(s < t)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(t <= s)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(s <= t)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(t > s)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(s > t)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(t >= s)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(s >= t)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(t == s)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(s == t)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(t != s)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(s != t)
 
     # TODO: update to work on CUDA, too
     @onlyCPU
     def test_comparison_ops_check_for_zerodim_tensor_overflow(self, device):
+        t1 = torch.tensor([1 << 5], dtype=torch.uint8)
+        t2 = torch.tensor([1 << 30], dtype=torch.int32)
+        ts1 = torch.tensor(1 << 20, dtype=torch.int32)
+        ts2 = torch.tensor(1 << 40, dtype=torch.int64)
         with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
-            torch.tensor([1 << 5], dtype=torch.uint8) < torch.tensor(1 << 20, dtype=torch.int32)    # noqa: B015
-            torch.tensor(1 << 40, dtype=torch.int64) < torch.tensor([1 << 30], dtype=torch.int32)   # noqa: B015
-            torch.tensor([1 << 5], dtype=torch.uint8) <= torch.tensor(1 << 20, dtype=torch.int32)   # noqa: B015
-            torch.tensor(1 << 40, dtype=torch.int64) <= torch.tensor([1 << 30], dtype=torch.int32)  # noqa: B015
-            torch.tensor([1 << 5], dtype=torch.uint8) > torch.tensor(1 << 20, dtype=torch.int32)    # noqa: B015
-            torch.tensor(1 << 40, dtype=torch.int64) > torch.tensor([1 << 30], dtype=torch.int32)   # noqa: B015
-            torch.tensor([1 << 5], dtype=torch.uint8) >= torch.tensor(1 << 20, dtype=torch.int32)   # noqa: B015
-            torch.tensor(1 << 40, dtype=torch.int64) >= torch.tensor([1 << 30], dtype=torch.int32)  # noqa: B015
-            torch.tensor([1 << 5], dtype=torch.uint8) == torch.tensor(1 << 20, dtype=torch.int32)   # noqa: B015
-            torch.tensor(1 << 40, dtype=torch.int64) == torch.tensor([1 << 30], dtype=torch.int32)  # noqa: B015
-            torch.tensor([1 << 5], dtype=torch.uint8) != torch.tensor(1 << 20, dtype=torch.int32)   # noqa: B015
-            torch.tensor(1 << 40, dtype=torch.int64) != torch.tensor([1 << 30], dtype=torch.int32)  # noqa: B015
+            self.assertTrue(t1 < ts1)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(ts2 < t2)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(t1 <= ts1)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(ts2 <= t2)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(t1 > ts1)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(ts2 > t2)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(t1 >= ts1)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(ts2 >= t2)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(t1 == ts1)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(ts2 == t2)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(t1 != ts1)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(ts2 != t2)
 
     # TODO: update to work on CUDA, too
     @onlyCPU
@@ -1049,6 +1078,37 @@ class TestBinaryUfuncs(TestCase):
                 torch_op(torch.ones(1, device=device, dtype=dtypes[1]),
                          torch.ones(1, device=device, dtype=dtypes[0]))
 
+    @onlyCUDA
+    def test_maximum_minimum_cross_device(self, device):
+        a = torch.tensor((1, 2, -1))
+        b = torch.tensor((3, 0, 4), device=device)
+        ops = (torch.maximum, torch.minimum)
+
+        for torch_op in ops:
+            with self.assertRaisesRegex(RuntimeError, 
+                                        "Expected all tensors to be on the same device"):
+                torch_op(a, b)
+
+            with self.assertRaisesRegex(RuntimeError, 
+                                        "Expected all tensors to be on the same device"):
+                torch_op(b, a) 
+
+        # test cuda tensor and cpu scalar
+        ops = ((torch.maximum, np.maximum), (torch.minimum, np.minimum))
+        a_np = np.array(1)
+        b_np = np.array([3, 0, 4])
+
+        for torch_op, numpy_op in ops:
+            a_tensor = torch.from_numpy(a_np)
+            b_tensor = torch.from_numpy(b_np).to(device=device)
+            tensor_result_1 = torch_op(a_tensor, b_tensor)
+            numpy_result_1 = numpy_op(a_np, b_np)
+            tensor_result_2 = torch_op(b_tensor, a_tensor)
+            numpy_result_2 = numpy_op(b_np, a_np)
+
+            self.assertEqual(tensor_result_1, numpy_result_1)
+            self.assertEqual(tensor_result_2, numpy_result_2)
+
     # TODO: tests like this should be generic
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
@@ -1298,27 +1358,136 @@ class TestBinaryUfuncs(TestCase):
         z = torch.tensor([30 / v.item() for v in x], device=device)
         self.assertEqual(y, z, exact_dtype=False)
 
-    @onlyCPU
+    @dtypes(*torch.testing.get_all_fp_dtypes(include_bfloat16=False))
+    def test_fmod_by_zero_float(self, device, dtype):
+        # check floating-point tensor fmod to zero is nan on both CPU and GPU
+        x = make_tensor((10, 10), device=device, dtype=dtype, low=-9, high=9)
+        zero = torch.zeros_like(x)
+
+        self.assertTrue(torch.all(x.fmod(0.0).isnan()))
+        self.assertTrue(torch.all(x.fmod(zero).isnan()))
+        # out
+        out = torch.empty(0, device=device, dtype=dtype)
+        torch.fmod(x, zero, out=out)
+        self.assertEqual(out.size(), torch.Size([10, 10]))
+        self.assertTrue(torch.all(out.isnan()))
+        # in-place
+        x.fmod_(zero)
+        self.assertTrue(torch.all(x.isnan()))
+
+    @onlyOnCPUAndCUDA  # Check Issue https://github.com/pytorch/pytorch/issues/48130
+    @skipCUDAIfRocm  # Error happens on both ROCM and XLA
+    @dtypes(*torch.testing.get_all_int_dtypes())
+    def test_fmod_by_zero_integral(self, device, dtype):
+        # check integral tensor fmod to zero
+        x = make_tensor((10, 10), device=device, dtype=dtype, low=-9, high=9)
+        zero = torch.zeros_like(x)
+        # out
+        out = torch.empty(0, device=device, dtype=dtype)
+        # In-place
+        x_ = x.clone()
+        # RuntimeError on CPU
+        if device == 'cpu':
+            with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
+                x.fmod(zero)
+            with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
+                torch.fmod(x, zero, out=out)
+            with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
+                x.fmod_(zero)
+        # Different value for different dtype on GPU
+        else:
+            if dtype == torch.int64:
+                self.assertEqual(x.fmod(zero) == 4294967295, x >= 0)
+                self.assertEqual(x.fmod(zero) == -1, x < 0)
+                # out
+                torch.fmod(x, zero, out=out)
+                self.assertEqual(out == 4294967295, x >= 0)
+                self.assertEqual(out == -1, x < 0)
+                self.assertEqual(out.size(), torch.Size([10, 10]))
+                # in-place
+                x_.fmod_(zero)
+                self.assertEqual(x_ == 4294967295, x >= 0)
+                self.assertEqual(x_ == -1, x < 0)
+            else:
+                value = 255 if dtype == torch.uint8 else -1
+                self.assertTrue(torch.all(x.fmod(zero) == value))
+                # out
+                torch.fmod(x, zero, out=out)
+                self.assertTrue(torch.all(out == value))
+                self.assertEqual(out.size(), torch.Size([10, 10]))
+                # in-place
+                x_.fmod_(zero)
+                self.assertTrue(torch.all(x_ == value))
+
     @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=False))
     def test_fmod(self, device, dtype):
-        m1 = torch.Tensor(10, 10).uniform_(-10., 10.).to(dtype=dtype, device=device)
-        res1 = m1.clone()
-        q = 3
-        res1[:, 3].fmod_(q)
-        res2 = m1.clone()
-        for i in range(m1.size(1)):
-            res2[i, 3] = math.fmod(res2[i, 3], q)
-        self.assertEqual(res1, res2)
+        # Use numpy as reference
+        def _reference_implementation(x, mod):
+            np_x = x.cpu().numpy()
+            np_mod = 0
+            # No type promotion
+            # Issue #47779: https://github.com/pytorch/pytorch/issues/47779
+            if torch.is_tensor(mod):
+                np_mod = mod.cpu().numpy()
+            else:
+                np_mod = mod
+                # Non XLA platform needs to cast to int
+                if dtype in torch.testing.get_all_int_dtypes() and self.device_type in ['cpu', 'cuda']:
+                    np_mod = int(np_mod)
+            exp = np.fmod(np_x, np_mod)
+            exp = torch.from_numpy(exp)
 
-        zero = torch.zeros_like(m1)
+            res = torch.fmod(x, mod)
+            res = res.to(exp.dtype)
+            self.assertEqual(res, exp)
+            # out
+            out = torch.empty(0, device=device, dtype=dtype)
+            torch.fmod(x, mod, out=out)
+            out.to(exp.dtype)
+            self.assertEqual(out, exp)
+            self.assertEqual(out.size(), torch.Size([10, 10]))
+            # in-place
+            x.fmod_(mod)
+            x.to(exp.dtype)
+            self.assertEqual(out, exp)
+
+        x = make_tensor((10, 10), device=device, dtype=dtype, low=-9, high=9)
+        # Exclude 0
+        # mod with same dtype as x
+        mod = make_tensor((10, 10), device=device, dtype=dtype, low=1, high=9)
+        # mod with floating-point dtype
+        mod_float = make_tensor((10, 10), device=device,
+                                dtype=torch.float if dtype in torch.testing.get_all_int_dtypes() else dtype,
+                                low=1, high=9)
+        # non-contiguous
+        x_nc = x.t()
+        mod_nc = mod.t()
+
+        # Mods: Integer, Float, Tensor, Non-contiguous Tensor
+        mods = [3, 2.3, mod, mod_nc]
+        for m in mods:
+            _reference_implementation(x, m)
+            _reference_implementation(x_nc, m)
+
+        # Integral Tensor fmod to floating-point Tensor
+        # Can not cast floating-point result to original integral Tensor without type promotion
         if dtype in torch.testing.get_all_int_dtypes():
-            with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
-                m1.fmod(0)
-            with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
-                m1.fmod(zero)
+            res = torch.fmod(x, mod_float)
+            exp = np.fmod(x.cpu().numpy(), mod_float.cpu().numpy())
+            exp = torch.from_numpy(exp)
+            res = res.to(exp.dtype)
+            self.assertEqual(res, exp)
+            with self.assertRaisesRegex(RuntimeError, "result type (Half|Float|Double) "
+                                                      "can't be cast to the desired "
+                                                      "output type (Byte|Char|Short|Int|Long)"):
+                out = torch.empty(0, device=device, dtype=dtype)
+                torch.fmod(x, mod_float, out=out)
+            with self.assertRaisesRegex(RuntimeError, "result type (Half|Float|Double) "
+                                                      "can't be cast to the desired "
+                                                      "output type (Byte|Char|Short|Int|Long)"):
+                x.fmod_(mod_float)
         else:
-            self.assertTrue(torch.all(m1.fmod(0).isnan()))
-            self.assertTrue(torch.all(m1.fmod(zero).isnan()))
+            _reference_implementation(x, mod_float)
 
     @onlyCPU
     @dtypes(torch.float, torch.long)
@@ -1536,11 +1705,6 @@ class TestBinaryUfuncs(TestCase):
     @dtypes(torch.float)
     def test_cdiv(self, device, dtype):
         self._test_cop(torch.div, lambda x, y: x / y, dtype, device)
-
-    @onlyCPU
-    @dtypes(torch.float)
-    def test_cfmod(self, device, dtype):
-        self._test_cop(torch.fmod, math.fmod, dtype, device)
 
     @onlyCPU
     @dtypes(torch.float)

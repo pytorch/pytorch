@@ -30,12 +30,22 @@
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 
-C10_DECLARE_bool();
-
 C10_DEFINE_bool(
     torch_jit_enable_new_executor,
     true,
     "If this flag is set to false TorchScript will be using the legacy/original executor");
+
+constexpr size_t kDefaultNumProfiledRuns = 1;
+constexpr size_t kDefaultBailoutDepth = 20;
+
+C10_DEFINE_int64(
+    torch_jit_num_profiled_runs,
+    kDefaultNumProfiledRuns,
+    "Number of profiling runs");
+C10_DEFINE_int64(
+    torch_jit_bailout_depth,
+    kDefaultBailoutDepth,
+    "Number of re-specializations");
 
 namespace torch {
 namespace jit {
@@ -48,21 +58,32 @@ static std::atomic<bool> executor_mode{true};
 static std::atomic<bool> profiling_mode{true};
 #endif
 
-static std::atomic<size_t> num_profiled_runs{1};
-static std::atomic<size_t> bailout_depth{20}; // NOLINT
+static std::atomic<size_t> num_profiled_runs{kDefaultNumProfiledRuns};
+static std::atomic<size_t> bailout_depth{kDefaultBailoutDepth};
 
 std::atomic<bool>& getProfilingMode() {
   return profiling_mode;
 }
+
 std::atomic<bool>& getExecutorMode() {
   return executor_mode;
 }
 
 std::atomic<size_t>& getNumProfiledRuns() {
+  // Initialize num_profiled_runs from command-line flag.
+  static const size_t init = []() {
+    return num_profiled_runs = FLAGS_torch_jit_num_profiled_runs;
+  }();
+  (void)init; // Silence clang-tidy.
   return num_profiled_runs;
 }
 
 std::atomic<size_t>& getBailoutDepth() {
+  // Initialize bailout_depth from command-line flag.
+  static const size_t init = []() {
+    return bailout_depth = FLAGS_torch_jit_bailout_depth;
+  }();
+  (void)init; // Silence clang-tidy.
   return bailout_depth;
 }
 

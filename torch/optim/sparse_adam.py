@@ -32,6 +32,8 @@ class SparseAdam(Optimizer):
         if not 0.0 <= betas[1] < 1.0:
             raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
 
+        params = list(params)
+
         sparse_params = []
         for index, param in enumerate(params):
             if isinstance(param, dict):

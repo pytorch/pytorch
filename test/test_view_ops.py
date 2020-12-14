@@ -535,11 +535,12 @@ class TestViewOps(TestCase):
                 out[idx_1, idx_2] = random.random()
                 self.assertEqual(t[idx_2, idx_1], out[idx_1, idx_2])
 
-        op = partial(torch.movedim, source=(0, 1), destination=(1, 0))
-        run_test(device, op)
+        for fn in [torch.movedim, torch.moveaxis]:
+            op = partial(fn, source=(0, 1), destination=(1, 0))
+            run_test(device, op)
 
-        op = partial(torch.movedim, source=0, destination=1)
-        run_test(device, op)
+            op = partial(fn, source=0, destination=1)
+            run_test(device, op)
 
 class TestOldViewOps(TestCase):
     def test_ravel(self, device):
@@ -1020,6 +1021,23 @@ class TestOldViewOps(TestCase):
         self.assertTrue(y0.size() == expected_size)
         self.assertTrue(y1.size() == expected_size)
         self.assertTrue(y2.size() == expected_size)
+
+
+    @onlyCPU
+    def test_broadcast_shapes(self, device):
+        examples = [(), (1,), (2,), (1, 1), (3, 1), (3, 2), (4, 1, 1), (4, 3, 2)]
+        for s0 in examples:
+            x0 = torch.randn(s0)
+            expected = torch.broadcast_tensors(x0)[0].shape
+            actual = torch.broadcast_shapes(s0)
+            self.assertEqual(expected, actual)
+
+            for s1 in examples:
+                x1 = torch.randn(s1)
+                expected = torch.broadcast_tensors(x0, x1)[0].shape
+                actual = torch.broadcast_shapes(s0, s1)
+                self.assertEqual(expected, actual)
+
 
     def test_view(self, device):
         tensor = torch.rand(15, device=device)

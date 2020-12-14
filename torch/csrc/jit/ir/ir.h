@@ -440,7 +440,7 @@ struct TORCH_API Node {
   // instructions lowered by the interpreter and not run in the optimized graph
   bool notExecutedOp() const {
     return kind_ == prim::Constant || kind_ == prim::profile ||
-        kind_ == prim::profile_optional;
+        kind_ == prim::profile_optional || kind_ == prim::profile_ivalue;
   }
 
   // Graphs
@@ -936,14 +936,14 @@ struct Block {
     return owning_node_;
   }
 
-  Value* addInput(std::string name = "") {
+  Value* addInput(const std::string& name = "") {
     Value* v = input_->addOutput();
-    v->setDebugName(std::move(name));
+    v->setDebugName(name);
     return v;
   }
-  Value* insertInput(size_t i, std::string name = "") {
+  Value* insertInput(size_t i, const std::string& name = "") {
     Value* v = input_->insertOutput(i);
-    v->setDebugName(std::move(name));
+    v->setDebugName(name);
     return v;
   }
   void eraseInput(size_t i) {
@@ -1087,11 +1087,11 @@ struct Graph {
     current_scope_ = std::move(scope);
   }
 
-  Value* addInput(std::string name = "") {
-    return block_->addInput(std::move(name));
+  Value* addInput(const std::string& name = "") {
+    return block_->addInput(name);
   }
-  Value* insertInput(size_t i, std::string name = "") {
-    return block_->insertInput(i, std::move(name));
+  Value* insertInput(size_t i, const std::string& name = "") {
+    return block_->insertInput(i, name);
   }
   void eraseInput(size_t i) {
     block_->eraseInput(i);
@@ -1122,7 +1122,11 @@ struct Graph {
       Value* tup,
       Value* idx,
       const TypePtr& output_type);
-  TORCH_API Node* createTupleSlice(Value* tup, int64_t beg, int64_t end);
+  TORCH_API Node* createTupleSlice(
+      Value* tup,
+      int64_t beg,
+      int64_t step_size,
+      int64_t num_values);
   TORCH_API Node* createEnumName(Value* e);
   TORCH_API Node* createEnumValue(Value* e);
   TORCH_API Node* createList(
@@ -1326,9 +1330,9 @@ inline const Graph* Value::owningGraph() const {
 
 /************* All nodes not required to be defined before Graph **************/
 struct ProfileOp : public Node {
-  static constexpr Symbol Kind = ::c10::prim::profile;
+  static const Symbol Kind;
   ProfileOp(Graph* graph, std::function<void(std::vector<IValue>&)> callback)
-      : Node(graph, ::c10::prim::profile), callback_(callback) {}
+      : Node(graph, ::c10::prim::profile), callback_(std::move(callback)) {}
 
   void cloneFrom(Node* other_) override;
   Node* allocNewInstance(Graph* g) override;
@@ -1338,7 +1342,7 @@ struct ProfileOp : public Node {
   }
 
   void setCallback(std::function<void(std::vector<IValue>&)> callback) {
-    callback_ = callback;
+    callback_ = std::move(callback);
   }
 
  private:
@@ -1346,11 +1350,34 @@ struct ProfileOp : public Node {
 };
 
 struct TORCH_API ProfileOptionalOp : public Node {
-  static constexpr Symbol Kind = ::c10::prim::profile_optional;
+  static const Symbol Kind;
   ProfileOptionalOp(
       Graph* graph,
       std::function<void(std::vector<IValue>&)> callback)
-      : Node(graph, ::c10::prim::profile_optional), callback_(callback) {}
+      : Node(graph, ::c10::prim::profile_optional),
+        callback_(std::move(callback)) {}
+
+  void cloneFrom(Node* other_) override;
+  Node* allocNewInstance(Graph* g) override;
+
+  const std::function<void(std::vector<IValue>&)>& getCallback() const {
+    return callback_;
+  }
+
+  void setCallback(std::function<void(std::vector<IValue>&)> callback) {
+    callback_ = std::move(callback);
+  }
+
+ private:
+  std::function<void(std::vector<IValue>&)> callback_;
+};
+
+struct TORCH_API ProfileIValueOp : public Node {
+  static const Symbol Kind;
+  ProfileIValueOp(
+      Graph* graph,
+      std::function<void(std::vector<IValue>&)> callback)
+      : Node(graph, ::c10::prim::profile_ivalue), callback_(callback) {}
 
   void cloneFrom(Node* other_) override;
   Node* allocNewInstance(Graph* g) override;

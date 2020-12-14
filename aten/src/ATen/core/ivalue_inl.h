@@ -172,7 +172,7 @@ inline at::Generator IValue::toGenerator() const& {
 namespace ivalue {
 
 void CAFFE2_API
-checkCustomClassType(TypePtr expected_type, TypePtr actual_type);
+checkCustomClassType(const Type* expected_type, const Type* actual_type);
 
 template <typename T>
 using Shared = c10::intrusive_ptr<T>;
@@ -290,10 +290,14 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   /**
    * Wait on the future until it completes.
    */
-  virtual void wait() {
+  void wait() {
     std::unique_lock<std::mutex> lock(mutex_);
     while (!completed_) {
       finished_cv_.wait(lock);
+    }
+
+    if (!eptr_) {
+      postWaitHook(value_);
     }
   }
 
@@ -301,7 +305,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
    * Wait on the future until it completes and throw an
    * exception if an error exists.
    */
-  virtual void waitAndThrow() {
+  void waitAndThrow() {
     std::unique_lock<std::mutex> lock(mutex_);
     while (!completed_) {
       finished_cv_.wait(lock);
@@ -310,12 +314,14 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     if (eptr_) {
       std::rethrow_exception(eptr_);
     }
+
+    postWaitHook(value_);
   }
 
   /**
    * Explicitly mark the future as completed with the output value.
    */
-  virtual void markCompleted(IValue value) {
+  void markCompleted(IValue value) {
     std::unique_lock<std::mutex> lock(mutex_);
     TORCH_CHECK(
         !completed(),
@@ -323,6 +329,8 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
         "a Future can only be marked completed once.");
     completed_ = true;
     value_ = std::move(value);
+
+    postMarkCompletedHook(value_);
 
     std::vector<std::function<void(void)>> cbs;
     cbs.swap(callbacks_);
@@ -359,7 +367,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   }
 
   // Get the result of the current future.
-  virtual IValue value() {
+  IValue value() {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
     if (eptr_) {
@@ -370,7 +378,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
 
   // This accessor should only be used if we know that the future is
   // completed() with no error.
-  virtual const IValue& constValue() {
+  const IValue& constValue() {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
     AT_ASSERT(!eptr_);
@@ -383,8 +391,9 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
    * If the future has already completed,
    * this function will execute the callback immediately.
    */
-  virtual void addCallback(std::function<void(void)> callback) {
+  void addCallback(std::function<void(void)> callback) {
     std::unique_lock<std::mutex> lock(mutex_);
+    callback = wrapCallback(std::move(callback));
     if (completed()) {
       lock.unlock();
       callback();
@@ -398,31 +407,47 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
    * value of the callback. This is necessary when the callback provider needs
    * to know for sure when the callback has finished.
    */
-  virtual c10::intrusive_ptr<Future> then(
+  c10::intrusive_ptr<Future> then(
       std::function<IValue(void)> callback,
       TypePtr type) {
-    auto fut = c10::make_intrusive<Future>(type);
-    // Cannot move capture std::function in lambda, because it cannot deduce
-    // the template type for std::function. Hence use std::bind to explicitly
-    // specify types.
-    addCallback(std::bind(
-        [fut](std::function<IValue(void)> cb) {
+    auto fut = createInstance(std::move(type));
+    addCallback(
+        [fut, cb = std::move(callback)]() {
           try {
             fut->markCompleted(cb());
-          } catch (std::exception& e) {
+          } catch (std::exception&) {
             fut->setError(std::current_exception());
           }
-        },
-        std::move(callback)));
+        });
     return fut;
   }
 
-  // Since this file cannot import CUDA depedency, the type of the seocond arg
-  // in the callback is c10::Stream instead of at::cuda::CUDAStream, and
-  // CUDAStream is constructed on the fly. The default implementation
-  // is a no-op, since it does not deal with any CUDA streams.
-  virtual void setRecordStreamCallback(
-      std::function<void(const at::IValue&, const c10::Stream&)> record_stream_cb) {}
+  // Some subclasses deal with CUDA tensors and must inform the CUDA caching
+  // allocator of which CUDA streams each DataPtr is used in. If the value held
+  // by the future is a Python object we need to acquire the GIL when extracting
+  // these DataPtrs. Since this file cannot depend on Python, we allow users to
+  // provide a "custom" extractor. Look for example at the PythonFutureWrapper.
+  using DataPtrExtractor =
+      std::function<std::vector<std::reference_wrapper<const at::DataPtr>>(
+          const at::IValue&)>;
+  virtual void setDataPtrExtractor(DataPtrExtractor data_ptr_extractor) {}
+
+  // Expose the default implementation so that external ones can defer to it.
+  static std::vector<std::reference_wrapper<const at::DataPtr>>
+  defaultDataPtrExtractor(const at::IValue& value) {
+    at::IValue::HashAliasedIValues sub_values;
+    // Prefer getSubValues() over visit() as the latter is a silent no-op for
+    // some unsupported types, whereas the former at least fails loudly.
+    value.getSubValues(sub_values);
+
+    std::vector<std::reference_wrapper<const at::DataPtr>> res;
+    for (const at::IValue& sub_value : sub_values) {
+      if (sub_value.isTensor()) {
+        res.emplace_back(sub_value.toTensor().storage().data_ptr());
+      }
+    }
+    return res;
+  };
 
   // Tries to retrieve the error message from std::exception_ptr.
   std::string tryRetrieveErrorMessage() {
@@ -432,11 +457,11 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   }
 
   // Check if the current future has completed
-  virtual bool completed() const {
+  bool completed() const {
     return completed_;
   }
 
-  virtual bool hasValue() const {
+  bool hasValue() const {
     std::unique_lock<std::mutex> lock(mutex_);
     return completed_ && !eptr_;
   }
@@ -459,6 +484,43 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     return type_;
   }
 
+ protected:
+  // This hook is called by this class's then() method when it prepares the
+  // instance it returns to the caller. It should be overridden by subclasses so
+  // that they can produce an instace of their own type.
+  virtual c10::intrusive_ptr<Future> createInstance(at::TypePtr type) {
+    return c10::make_intrusive<Future>(type);
+  }
+
+  // This hook will be called by this class (the superclass) when the future is
+  // marked completed _with a value_ (hence not in case of error). This is done
+  // right away, while the mutex is still held, before any callbacks are run.
+  // It allows subclasses to further update their state if they so need. For
+  // example the CUDAFuture subclass uses it to determine what devices the value
+  // resides on and record an event in those devices' current streams.
+  virtual void postMarkCompletedHook(const at::IValue& value) {}
+
+  // This hook will be called by the addCallback() and the then() methods before
+  // storing the callback for later execution (or before running it inline if
+  // the future is already complete). Note that this method could thus be called
+  // while the future is _not_ yet complete. By default this method does nothing
+  // but subclasses can override this method to add functionality. For example
+  // the CUDAFuture subclass ensures the callback runs with CUDA streams which
+  // are synchronized with the events recorded in the I/O streams.
+  virtual std::function<void(void)> wrapCallback(
+      std::function<void(void)> callback) {
+    return callback;
+  }
+
+  // This hook will be called by this class after a user thread has completed
+  // waiting on a successful future. It will thus not be called if the future
+  // completes with an error. It will also not be called if the user accesses
+  // the future's value without synchronization. Subclasses can override this
+  // to add some synchronization to the wait. For example, the CUDAFuture
+  // subclass ensures the user's current CUDA streams synchronize with the I/O
+  // events stored by the future.
+  virtual void postWaitHook(const at::IValue& value) {}
+
  private:
   void setErrorInternal(
       std::exception_ptr eptr,
@@ -466,6 +528,8 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     AT_ASSERT(!completed());
     completed_ = true;
     eptr_ = std::move(eptr);
+
+    // Do not call postMarkCompletedHook() here as there isn't any value.
 
     std::vector<std::function<void(void)>> cbs;
     cbs.swap(callbacks_);
@@ -756,8 +820,8 @@ c10::intrusive_ptr<T> IValue::toCustomClass() && {
       obj->slots().size() == 1,
       "Tried to cast IValue to custom class but it did "
       "not contain a custom class!");
-  auto expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>();
-  ivalue::checkCustomClassType(expected_type, type());
+  const Type* expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>().get();
+  ivalue::checkCustomClassType(expected_type, type().get());
   auto userObj =
       c10::static_intrusive_pointer_cast<T>(obj->getSlot(0).toCapsule());
   return userObj;
@@ -774,8 +838,8 @@ c10::intrusive_ptr<T> IValue::toCustomClass() const& {
       obj->slots().size() == 1,
       "Tried to cast IValue to custom class but it did "
       "not contain a custom class!");
-  auto expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>();
-  ivalue::checkCustomClassType(expected_type, type());
+  const Type* expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>().get();
+  ivalue::checkCustomClassType(expected_type, type().get());
   auto userObj =
       c10::static_intrusive_pointer_cast<T>(obj->getSlot(0).toCapsule());
   return userObj;
@@ -1085,13 +1149,16 @@ template <
     typename T,
     std::enable_if_t<std::is_base_of<torch::CustomClassHolder, T>::value, int>>
 IValue::IValue(c10::intrusive_ptr<T> custom_class) {
-  if (!c10::isCustomClassRegistered<c10::intrusive_ptr<T>>()) {
-    throw c10::Error(
-        "Trying to instantiate a class that isn't a registered custom class: " +
-            std::string(c10::util::get_fully_qualified_type_name<T>()),
-        "");
-  }
-  auto classType = c10::getCustomClassType<c10::intrusive_ptr<T>>();
+  TypePtr classType = []() {
+    try {
+      return c10::getCustomClassType<c10::intrusive_ptr<T>>();
+    } catch (const c10::Error&) {
+      throw c10::Error(
+          "Trying to instantiate a class that isn't a registered custom class: " +
+          std::string(c10::util::get_fully_qualified_type_name<T>()),
+          "");
+    }
+  }();
   auto ivalue_obj = c10::ivalue::Object::create(
       c10::StrongTypePtr(nullptr, classType), /*num_slots=*/1);
   ivalue_obj->setSlot(0, IValue::make_capsule(std::move(custom_class)));

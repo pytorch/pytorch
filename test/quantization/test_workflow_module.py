@@ -1172,15 +1172,13 @@ class TestFakeQuantize(TestCase):
 
             fq_module(X)
             scripted_module(X)
-            self.assertEqual(fq_module.calculate_qparams(),
-                            scripted_module.calculate_qparams())
+            self.assertEqual(fq_module.calculate_qparams(), scripted_module.calculate_qparams())
 
             buf = io.BytesIO()
             torch.jit.save(scripted_module, buf)
             buf.seek(0)
             loaded_module = torch.jit.load(buf)
-            self.assertEqual(fq_module.calculate_qparams(),
-                            loaded_module.calculate_qparams())
+            self.assertEqual(fq_module.calculate_qparams(), loaded_module.calculate_qparams())
 
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),

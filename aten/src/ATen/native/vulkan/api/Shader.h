@@ -4,6 +4,7 @@
 
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Cache.h>
+#include <ATen/native/vulkan/api/Utils.h>
 #include <c10/util/hash.h>
 
 namespace at {
@@ -44,7 +45,7 @@ struct Shader final {
       Signature
     */
 
-    typedef c10::SmallVector<VkDescriptorType, 8u> Signature;
+    typedef c10::SmallVector<VkDescriptorType, 6u> Signature;
 
     /*
       Descriptor
@@ -112,7 +113,7 @@ struct Shader final {
   // Work Group
   //
 
-  typedef VkExtent3D WorkGroup;
+  typedef utils::uvec3 WorkGroup;
 
   /*
     Descriptor
@@ -224,9 +225,9 @@ inline void Shader::Layout::Cache::purge() {
 inline bool operator==(
     const Shader::WorkGroup& _1,
     const Shader::WorkGroup& _2) {
-  return (_1.width == _2.width) &&
-         (_1.height == _2.height) &&
-         (_1.depth == _2.depth);
+  return (_1.data[0u] == _2.data[0u]) &&
+         (_1.data[1u] == _2.data[1u]) &&
+         (_1.data[2u] == _2.data[2u]);
 }
 
 inline Shader::Descriptor::Descriptor(const char* const glsl)
