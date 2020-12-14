@@ -96,12 +96,12 @@ def create_derivative(f: NativeFunction, formula: str, var_names: Tuple[str, ...
 
 def find_required_inputs_fw_grads(formula: str) -> Tuple[str, ...]:
     FW_GRAD_REGEX = r'(\w+).fw_grad'
-    return re.findall(FW_GRAD_REGEX, formula)
+    return tuple(re.findall(FW_GRAD_REGEX, formula))
 
-def create_forward_derivative(f: NativeFunction, formula: str, names: Tuple[str, ...]):
+def create_forward_derivative(f: NativeFunction, formula: str, names: Tuple[str, ...]) -> ForwardDerivative:
     assert len(names) == 1, "Forward derivatives can define gradients for only one output at a time"
     var_name = names[0]
-    var_type = None
+    var_type: Optional[Type] = None
     for r in f.func.returns:
         if r.name == var_name:
             var_type = r.type
@@ -128,13 +128,13 @@ def create_forward_derivative(f: NativeFunction, formula: str, names: Tuple[str,
 def postprocess_forward_derivatives(
     f: NativeFunction,
     defn_name: str,
-    all_arg_names: Tuple[str, ...],
-    derivatives: Tuple[Derivative, ...],
-    forward_derivatives: Tuple[ForwardDerivative, ...],
+    all_arg_names: List[str],
+    derivatives: List[Derivative],
+    forward_derivatives: List[ForwardDerivative],
     args_with_derivatives: Sequence[CppArgument]
-) -> Tuple[ForwardDerivative, ...]:
+) -> List[ForwardDerivative]:
 
-    updated_derivatives: Tuple[ForwardDerivative, ...] = []
+    updated_derivatives: List[ForwardDerivative] = []
 
     for defn in forward_derivatives:
         formula = defn.formula
@@ -153,11 +153,11 @@ def postprocess_forward_derivatives(
             backward_formula = derivatives[0].original_formula
             input_name = args_with_derivatives[0].name
 
-            def repl(m):
+            def repl(m: Any) -> str:
                 return f"{m.group(1)}{input_name}_fw_grad{m.group(2)}"
             fw_formula = re.sub(IDENT_REGEX.format("grad"), repl, backward_formula)
 
-            required_inputs = all_arg_names
+            required_inputs = tuple(all_arg_names)
             formula = fw_formula
         elif formula == "auto_linear":
             if len(forward_derivatives) > 1:
@@ -181,7 +181,7 @@ def postprocess_forward_derivatives(
                 assert Variant.method in f.variants
                 fw_formula = "{}.{}({})".format(new_args[0], defn_name, ", ".join(new_args[1:]))
 
-            required_inputs = diff_arg_names
+            required_inputs = tuple(diff_arg_names)
             formula = fw_formula
 
         # During forward formula, we use the primal instead of the input Tensors
@@ -192,7 +192,7 @@ def postprocess_forward_derivatives(
                 continue
             arg_name = arg.name
 
-            def repl(m):
+            def repl(m: Any) -> str:
                 required_inputs_primal.add(arg_name)
                 return "{}{}_primal{}".format(m.group(1), arg_name, m.group(2))
             formula = re.sub(IDENT_REGEX.format(arg_name), repl, formula)
@@ -202,11 +202,11 @@ def postprocess_forward_derivatives(
             var_name=defn.var_name,
             var_type=defn.var_type,
             required_inputs_fw_grad=required_inputs,
-            required_inputs_primal=required_inputs_primal))
+            required_inputs_primal=tuple(required_inputs_primal)))
 
     return updated_derivatives
 
-def is_forward_derivative_definition(all_arg_names: Tuple[str, ...], names: Tuple[str, ...]) -> bool:
+def is_forward_derivative_definition(all_arg_names: List[str], names: Tuple[str, ...]) -> bool:
     if len(names) > 1:
         # Forward definition are always for a single output at a time
         return False
