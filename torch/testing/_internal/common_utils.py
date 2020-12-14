@@ -1794,7 +1794,11 @@ def clone_input_helper(input):
         # use torch.clone for tensor, copy.deepcopy otherwise
         return list(map(lambda x: torch.clone(x) if isinstance(x, torch.Tensor) else deepcopy(x),
                         input))
-    return torch.clone(input)
+
+    if isinstance(input, torch.Tensor):
+        return torch.clone(input)
+    else:
+        return deepcopy(input)
 
 
 
