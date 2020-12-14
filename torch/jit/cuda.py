@@ -4,15 +4,11 @@ This is similar to API's available in the eager mode
 :ref:`cuda-semantics` has more details about working with CUDA.
 """
 
-import contextlib
-import os
 import torch
-import traceback
-import warnings
 from typing import Optional, Any
 from torch import device as _device
 
-def get_current_device_index():
+def get_current_device_index() -> int:
     if torch.cuda.device_count() > 0:
         return torch.cuda._current_device()
     return -1
@@ -23,14 +19,14 @@ def get_device_index(device: Optional[_device] = None, optional: bool = False, a
             return get_current_device_index()
         else:
             raise ValueError('Expected a torch.device with a specified index '
-                             'or an integer, but got:{}'.format(device))
+                             f'or an integer, but got: {device}')
     device_index = -1
     if isinstance(device, str):
         device = torch.device(device)
 
     if isinstance(device, torch.device):
         if not allow_cpu and device.type == 'cpu':
-            raise ValueError('Expected a non cpu device, but got: {}'.format(device))
+            raise ValueError(f'Expected a non cpu device, but got: {device}')
         device_index = -1 if device.type == 'cpu' else torch.cuda.device_index(device)
 
     if isinstance(device, int):
@@ -82,12 +78,10 @@ class StreamContext(object):
         self.dst_prev_stream = stream
 
     def __enter__(self):
-        if self.idx == -1:
-            return
         self.src_prev_stream = torch.cuda.current_stream(self.idx)
         # If the stream is not on the current device, then change the device
         # and set the current stream on the device
-        if self.idx != self.cur_stream.device_index():
+        if self.src_prev_stream.device_index() != self.cur_stream.device_index():
             with device(self.cur_stream.device()):
                 self.dst_prev_stream = torch.cuda.current_stream(self.cur_stream.device_index())
             torch.cuda._set_device(self.cur_stream.device_index())
@@ -102,7 +96,7 @@ class StreamContext(object):
             torch.cuda._set_device(self.idx)
         torch.cuda.set_stream(self.src_prev_stream)
 
-def stream(stream: 'torch.classes.cuda.Stream') -> 'torch.jit.cuda.StreamContext':
+def stream(stream: 'torch.classes.cuda.Stream') -> StreamContext:
     r"""Wrapper around the Context-manager that selects a given stream.
     All CUDA kernels queued within its context will be enqueued on a selected
     stream.
