@@ -118,12 +118,16 @@ void quantile_impl(
   TORCH_CHECK(
       self.device() == out.device(),
       "quantile() out tensor must be on the same device as the input tensor");
-  const std::vector <string> interpolations{
+  const std::vector<string> interpolations{
       "linear", "lower", "higher", "midpoint", "nearest"};
   TORCH_CHECK(
-      std::find(interpolations.begin(), interpolations.end(), interpolation) != interpolations.end(),
+      std::find(interpolations.begin(), interpolations.end(), interpolation) !=
+          interpolations.end(),
       "quantile() interpolation should be one of ",
-      c10::Join(", ", interpolations), ".");
+      c10::Join(", ", interpolations),
+      " but got ",
+      interpolation,
+      ".");
 
   // Compute output shape: q_size + reduced_size
   std::vector<int64_t> out_shape;
@@ -437,7 +441,7 @@ Tensor& quantile_out(
     const Tensor& q,
     optional<int64_t> _dim,
     bool keepdim) {
-  TORCH_WARN(
+  TORCH_WARN_ONCE(
       "torch.quantile(input, q, dim=None, keepdim=False, *, out=None) is deprecated "
       "in favor of the new signature torch.quantile(input, q, dim=None, interpolation='linear', "
       "keepdim=False, *, out=None) with interpolation parameter.");
@@ -458,7 +462,7 @@ Tensor& quantile_out(
     double q,
     optional<int64_t> _dim,
     bool keepdim) {
-  TORCH_WARN(
+  TORCH_WARN_ONCE(
       "torch.quantile(input, q, dim=None, keepdim=False, *, out=None) is deprecated "
       "in favor of the new signature torch.quantile(input, q, dim=None, interpolation='linear', "
       "keepdim=False, *, out=None) with interpolation parameter.");
@@ -469,6 +473,7 @@ Tensor& quantile_out(
       self,
       at::scalar_tensor(q, self.options()),
       std::move(_dim),
+      /*interpolation=*/"linear",
       keepdim);
 }
 
@@ -477,7 +482,7 @@ Tensor quantile(
     const Tensor& q,
     optional<int64_t> _dim,
     bool keepdim) {
-  TORCH_WARN(
+  TORCH_WARN_ONCE(
       "torch.quantile(input, q, dim=None, keepdim=False) is deprecated "
       "in favor of the new signature torch.quantile(input, q, dim=None, interpolation='linear', "
       "keepdim=False) with interpolation parameter.");
@@ -498,14 +503,18 @@ Tensor quantile(
     double q,
     optional<int64_t> _dim,
     bool keepdim) {
-  TORCH_WARN(
+  TORCH_WARN_ONCE(
       "torch.quantile(input, q, dim=None, keepdim=False) is deprecated "
       "in favor of the new signature torch.quantile(input, q, dim=None, interpolation='linear', "
       "keepdim=False) with interpolation parameter.");
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::quantile(
-      self, at::scalar_tensor(q, self.options()), std::move(_dim), keepdim);
+      self,
+      at::scalar_tensor(q, self.options()),
+      std::move(_dim),
+      /*interpolation=*/"linear",
+      keepdim);
 }
 
 Tensor& nanquantile_out(
@@ -514,7 +523,7 @@ Tensor& nanquantile_out(
     const Tensor& q,
     optional<int64_t> _dim,
     bool keepdim) {
-  TORCH_WARN(
+  TORCH_WARN_ONCE(
       "torch.nanquantile(input, q, dim=None, keepdim=False, *, out=None) is deprecated "
       "in favor of the new signature torch.nanquantile(input, q, dim=None, interpolation='linear', "
       "keepdim=False, *, out=None) with interpolation parameter.");
@@ -535,7 +544,7 @@ Tensor& nanquantile_out(
     double q,
     optional<int64_t> _dim,
     bool keepdim) {
-  TORCH_WARN(
+  TORCH_WARN_ONCE(
       "torch.nanquantile(input, q, dim=None, keepdim=False, *, out=None) is deprecated "
       "in favor of the new signature torch.nanquantile(input, q, dim=None, interpolation='linear', "
       "keepdim=False, *, out=None) with interpolation parameter.");
@@ -546,6 +555,7 @@ Tensor& nanquantile_out(
       self,
       at::scalar_tensor(q, self.options()),
       std::move(_dim),
+      /*interpolation=*/"linear",
       keepdim);
 }
 
@@ -554,7 +564,7 @@ Tensor nanquantile(
     const Tensor& q,
     optional<int64_t> _dim,
     bool keepdim) {
-  TORCH_WARN(
+  TORCH_WARN_ONCE(
       "torch.nanquantile(input, q, dim=None, keepdim=False) is deprecated "
       "in favor of the new signature torch.nanquantile(input, q, dim=None, interpolation='linear', "
       "keepdim=False) with interpolation parameter.");
@@ -575,14 +585,18 @@ Tensor nanquantile(
     double q,
     optional<int64_t> _dim,
     bool keepdim) {
-  TORCH_WARN(
+  TORCH_WARN_ONCE(
       "torch.nanquantile(input, q, dim=None, keepdim=False) is deprecated "
       "in favor of the new signature torch.nanquantile(input, q, dim=None, interpolation='linear', "
       "keepdim=False) with interpolation parameter.");
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::nanquantile(
-      self, at::scalar_tensor(q, self.options()), std::move(_dim), keepdim);
+      self,
+      at::scalar_tensor(q, self.options()),
+      std::move(_dim),
+      /*interpolation=*/"linear",
+      keepdim);
 }
 
 Tensor& quantile_out(
