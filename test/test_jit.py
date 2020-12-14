@@ -1282,56 +1282,6 @@ graph(%Ra, %Rb):
 
         FileCheck().check("my::matched_conv_bn").run(m._c._get_method("forward").graph)
 
-    def test_reconstruct_scopes(self):
-        class SubModule(torch.nn.Module):
-            def __init__(self):
-                super(SubModule, self).__init__()
-
-            def bar(self, x):
-                return x + x
-
-            def forward(self, x):
-                return x * self.bar(x)
-
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super(MyModule, self).__init__()
-                self.sub = SubModule()
-
-            def forward(self, x):
-                return self.sub(x) + x
-
-        traced = torch.jit.trace(MyModule(), torch.zeros(1))
-        g = traced.graph
-        torch._C._jit_pass_inline(g)
-        torch._C._jit_pass_reconstruct_scopes(traced._c, g)
-        FileCheck().check("scope: top(MyModule).sub(SubModule).forward").run(g)
-
-    def test_reconstruct_scopes_duplicated_class_types(self):
-        class SubModule(torch.nn.Module):
-            def __init__(self):
-                super(SubModule, self).__init__()
-
-            def forward(self, x):
-                return x + 2
-
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super(MyModule, self).__init__()
-                self.sub1 = SubModule()
-                self.sub2 = SubModule()
-
-            def forward(self, x):
-                return self.sub1(x) + self.sub2(x)
-
-        traced = torch.jit.trace(MyModule(), torch.zeros(1))
-        g = traced.graph
-        torch._C._jit_pass_inline(g)
-        torch._C._jit_pass_reconstruct_scopes(traced._c, g)
-        FileCheck().check_dag("scope: top(MyModule).sub1(SubModule).forward")  \
-                   .check_dag("scope: top(MyModule).sub2(SubModule).forward")  \
-                   .run(g)
-
     def test_expand_quantlint(self):
         pass
 
@@ -12162,10 +12112,10 @@ dedent """
         scripted_fn = torch.jit.script(tuple_slice)
         self.assertEqual(scripted_fn(torch.tensor(1)), (2, 3))
         tuple_graph = scripted_fn.graph
-        slices = tuple_graph.findAllNodes("prim::TupleSlice")
+        slices = tuple_graph.findAllNodes("prim::TupleConstruct")
         num_outputs = set(len(x.output().type().elements()) for x in slices)
-        # one tuple slice should have an output with 2 elements, other 4
-        self.assertTrue(num_outputs == {2, 4})
+        # there should be only one tupleSlice with length of 2
+        self.assertTrue(num_outputs == {2})
         self.run_pass('lower_all_tuples', tuple_graph)
         self.assertTrue('Tuple' not in str(tuple_graph))
 
@@ -12175,6 +12125,26 @@ dedent """
             return c[2:10]
 
         self.assertEqual(test_indexing_end_out_of_bounds(), ())
+
+    def test_stepped_tuple_slicing(self):
+
+        def check_slicing_tuple(slicing, tuple_type, tuple):
+            template = dedent("""
+            def func(x):
+                # type: ({}) -> Any
+                return x{}
+            """)
+            self._check_code(template.format(tuple_type, slicing), "func", [tuple])
+
+        check_slicing_tuple("[-3:3:2]", "Tuple[int, int, int]", (0, 1, 2))
+        check_slicing_tuple("[::55]", "Tuple[int, int, int, int, int]", (0, 1, 2, 3, 4))
+        check_slicing_tuple("[:4:4]", "Tuple[int, int, int, int, int]", (0, 1, 2, 3, 4))
+        check_slicing_tuple("[::-1]", "Tuple[int, int, int, int, int, int, int]", (0, 1, 2, 3, 4, 5, 6))
+        check_slicing_tuple("[7:5:2]", "Tuple[int, int, int, int, int, int, int]", (0, 1, 2, 3, 4, 5, 6))
+        check_slicing_tuple("[5:7:-2]", "Tuple[int, int, int, int, int, int, int]", (0, 1, 2, 3, 4, 5, 6))
+        check_slicing_tuple("[::-2]", "Tuple[int, int, int, int, int]", (0, 1, 2, 3, 4))
+        check_slicing_tuple("[:4:-3]", "Tuple[int, int, int, int, int, int]", (0, 1, 2, 3, 4, 5))
+        check_slicing_tuple("[3::-2]", "Tuple[int, int, int, int, int]", (0, 1, 2, 3, 4))
 
     def test_lower_nested_tuples(self):
         @torch.jit.script
