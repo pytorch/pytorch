@@ -1,5 +1,5 @@
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
-#include "jit/runtime/slice_indices_adjust.h"
+#include <jit/runtime/slice_indices_adjust.h>
 
 namespace torch {
 namespace jit {
