@@ -6,7 +6,7 @@
 # LICENSE file in the root directory of this source tree.
 """The Pipe interface."""
 from collections import OrderedDict
-from typing import TYPE_CHECKING, Any, Iterable, List, Optional, Tuple, Union, cast
+from typing import TYPE_CHECKING, Any, Iterable, List, Optional, Tuple, Union, cast, Sequence
 
 import torch
 from torch import Tensor, nn
@@ -27,7 +27,7 @@ __all__ = ["Pipe"]
 Device = Union[torch.device, int, str]
 Devices = Union[Iterable[Device], List[Device]]
 
-Tensors = Tuple[Tensor, ...]
+Tensors = Sequence[Tensor]
 TensorOrTensors = Union[Tensor, Tensors]
 
 if TYPE_CHECKING:
@@ -310,11 +310,11 @@ class Pipe(Module):
         """:class:`Pipe` is a fairly transparent module wrapper. It doesn't
         modify the input and output signature of the underlying module. But
         there's type restriction. Input and output have to be a
-        :class:`~torch.Tensor` or a tuple of tensors. This restriction is
+        :class:`~torch.Tensor` or a sequence of tensors. This restriction is
         applied at partition boundaries too.
 
         Args:
-            input (torch.Tensor or Tuple[torch.Tensor, ...]): input mini-batch
+            input (torch.Tensor or Sequence[torch.Tensor]): input mini-batch
 
         Returns:
             :class:`~torch.distributed.rpc.RRef` to the output of the mini-batch

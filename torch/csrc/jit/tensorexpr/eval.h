@@ -824,21 +824,15 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
 
   TORCH_API void visit(const Intrinsics* v) override {
     auto ty = v->dtype().scalar_type();
-    if (ty == ScalarType::Float) {
-      visit_intrinsics_helper<float>(v);
-    } else if (ty == ScalarType::Double) {
-      visit_intrinsics_helper<double>(v);
-    } else {
-      switch (ty) {
+    switch (ty) {
 #define TYPE_CASE(Type, Name)         \
   case ScalarType::Name:              \
     visit_intrinsics_helper<Type>(v); \
     break;
-        AT_FORALL_SCALAR_TYPES(TYPE_CASE);
+      AT_FORALL_SCALAR_TYPES(TYPE_CASE);
 #undef TYPE_CASE
-        default:
-          throw unsupported_dtype();
-      }
+      default:
+        throw unsupported_dtype();
     }
   }
 
