@@ -91,11 +91,18 @@ struct TORCH_API ForwardGrad : std::enable_shared_from_this<ForwardGrad> {
         return content_.empty();
     }
 
+    static const at::Tensor& undef_grad();
+
 
 private:
     std::unordered_map<uint64_t, at::Tensor> content_;
     mutable std::mutex mutex_;
 
 };
+
+// Temporary functions to disable forward AD
+// TODO(alband) remove these when perf issues are solved
+bool TORCH_API isForwardADEnabled();
+void TORCH_API setForwardADEnabled(bool value);
 
 }} // namespace torch::autograd

@@ -31,9 +31,10 @@ DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl,
   c10::optional<ViewInfo> backward_info,
   c10::optional<ViewInfo> forward_info,
   CreationMeta creation_meta)
-    : AutogradMeta(self_impl), creation_meta(creation_meta),
+    : AutogradMeta(self_impl),
       backward_info_(std::move(backward_info)),
-      forward_info_(std::move(forward_info)) {
+      forward_info_(std::move(forward_info)),
+      creation_meta(creation_meta) {
   is_view_ = true;
   if (backward_info_.has_value()) {
     self_impl->set_version_counter(impl::version_counter(backward_info_.value().base_));
@@ -594,6 +595,10 @@ namespace {
 // This function is will ensure that the fw_grad_ is properly a view of the base for inplace ops on
 // Tensors that do not have forward grad originally.
 void AutogradMeta::set_fw_grad(Variable& new_grad, const Variable& self, uint64_t level, bool is_inplace_op) {
+  if (!fw_grad_) {
+    // Lazy initialization
+    fw_grad_ = std::make_shared<ForwardGrad>();
+  }
   if (fw_grad_->contains(level)) {
     // Setting the forward grad again is only allowed if it is a no-op.
     // We do allow this case to simplify writing codegen for inplace ops.
@@ -652,18 +657,21 @@ void AutogradMeta::set_fw_grad(Variable& new_grad, const Variable& self, uint64_
 }
 
 const Variable& AutogradMeta::fw_grad(uint64_t level, const Variable& self) const {
-  const auto& val = fw_grad_->value(level);
-  if (!val.defined() && is_view_) {
+  bool has_no_direct_fw_grad = !(fw_grad_ && fw_grad_->value(level).defined());
+  if (has_no_direct_fw_grad && is_view_) {
     // For view that don't have a forward grad, check if their base has one that
     // has been defined by an inplace operation.
     // See [Forward Grad View] for more details.
-    const auto this_view_meta = static_cast<const DifferentiableViewMeta*>(this);
+    auto this_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(self));
     if (this_view_meta->has_fw_view()) {
       auto view_info = this_view_meta->get_forward_view();
       const auto& base = view_info.base_;
 
       const auto& base_val = base.fw_grad(level);
       if (base_val.defined()) {
+        // Lazy initialization
+        this_view_meta->fw_grad_ = std::make_shared<ForwardGrad>();
+
         Variable new_val;
         if (view_info.has_view_fn()) {
           new_val = view_info.view_fn()(base_val);
@@ -671,14 +679,16 @@ const Variable& AutogradMeta::fw_grad(uint64_t level, const Variable& self) cons
           new_val = base_val.as_strided(self.sizes(), self.strides(), self.storage_offset());
         }
 
-        fw_grad_->set_value(new_val, level);
-        return fw_grad_->value(level);
-      } else {
-        return val;
+        this_view_meta->fw_grad_->set_value(new_val, level);
+        return this_view_meta->fw_grad_->value(level);
       }
     }
   }
-  return val;
+  if (fw_grad_) {
+    return fw_grad_->value(level);
+  } else {
+    return ForwardGrad::undef_grad();
+  }
 }
 
 }} // namespace torch::autograd
