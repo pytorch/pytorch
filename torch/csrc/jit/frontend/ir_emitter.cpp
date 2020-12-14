@@ -2956,9 +2956,10 @@ struct to_ir {
     // Push the source range of a call in case compiling this function
     // triggers an error
     ErrorReport::CallStack::update_pending_range(tree.range());
-    Value* out_val = emitSugaredExpr(tree, 1, type_hint)->asValue(tree.range(), method);
+    Value* out_val =
+        emitSugaredExpr(tree, 1, type_hint)->asValue(tree.range(), method);
     if (type_hint == AnyType::get() && out_val->type() != AnyType::get()) {
-        out_val = graph->insertUncheckedCast(out_val, type_hint);
+      out_val = graph->insertUncheckedCast(out_val, type_hint);
     }
     return out_val;
   }
