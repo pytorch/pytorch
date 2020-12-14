@@ -119,5 +119,26 @@ class TestIterableDatasetBasic(TestCase):
 
         os.remove(temp_pngfile_pathname)
 
+    def test_groupbyfilename_iterable_dataset(self):
+        temp_dir = self.temp_dir.name
+        temp_tarfile_pathname = os.path.join(temp_dir, "test_tar.tar")
+        file_list = [
+            "a.png", "b.png", "c.json", "a.json", "c.png", "b.json", "d.png",
+            "d.json", "e.png", "f.json", "g.png", "f.png", "g.json", "e.json"]
+        with tarfile.open(temp_tarfile_pathname, "w:gz") as tar:
+            for file_name in file_list:
+                file_pathname = os.path.join(temp_dir, file_name)
+                with open(file_pathname, 'w') as f:
+                    f.write('12345abcde')
+                tar.add(file_pathname)
+
+        dataset1 = ListDirFilesIterableDataset(temp_dir, '*.tar')
+        dataset2 = LoadFilesFromDiskIterableDataset(dataset1)
+        dataset3 = ReadFilesFromTarIterableDataset(dataset2)
+        dataset4 = GroupByFilenameIterableDataset(dataset3)
+
+        for rec in dataset4:
+            print(rec)
+
 if __name__ == '__main__':
     run_tests()
