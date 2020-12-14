@@ -12,7 +12,7 @@ namespace torch {
 namespace jit {
 
 struct TORCH_API InferenceModuleOptions {
-  bool optimize_memory{true}; // TODO remove when logic moves to runtime
+  bool optimize_memory{false}; // TODO remove when logic moves to runtime
 };
 
 struct TORCH_API StaticRuntimeOptions {
@@ -158,6 +158,8 @@ class TORCH_API StaticRuntime {
   const std::vector<IValue>& get_registers() {
     return reg_;
   }
+
+  size_t num_outputs() const;
 
  private:
   // Static runtime states
