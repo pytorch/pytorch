@@ -770,6 +770,11 @@ class TensorExprFuser {
         if (node->isMemberOf(int_only_operator_set) && isFloatingType(*st)) {
           return false;
         }
+      } else if (node->isMemberOf(float_only_operator_set)) {
+        // Check scalar operands of float-only ops.
+        if (!v->type()->cast<FloatType>()) {
+          return false;
+        }
       }
     }
 
