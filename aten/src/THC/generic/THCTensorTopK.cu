@@ -20,6 +20,9 @@ void THCTensor_(topk)(THCState* state,
 
   THArgCheck(dim >= 0 && dim < numDims, 6, "dim not in range");
 
+  if (k == 0) {
+    return;
+  }
   int64_t sliceSize = THCTensor_(sizeLegacyNoScalars)(state, input_, dim);
   THArgCheck(k >= 0 && k <= sliceSize, 5, "k not in range for dimension");
 
