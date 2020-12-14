@@ -373,6 +373,7 @@ if TEST_NUMPY:
 
     # Dict of torch dtype -> NumPy dtype
     torch_to_numpy_dtype_dict = {value : key for (key, value) in numpy_to_torch_dtype_dict.items()}
+    torch_to_numpy_dtype_dict[torch.bfloat16] = np.float32
 
 ALL_TENSORTYPES = [torch.float,
                    torch.double,
@@ -912,12 +913,10 @@ class TestCase(expecttest.TestCase):
     # NOTE: both torch_fn and np_fn should be functions that take a single
     #   tensor (array). If the torch and/or NumPy function require additional
     #   arguments then wrap the function in a lambda or pass a partial function.
-    # TODO: support bfloat16 comparisons
     # TODO: add args/kwargs for passing to assertEqual (e.g. rtol, atol)
     def compare_with_numpy(self, torch_fn, np_fn, tensor_like,
                            device=None, dtype=None, **kwargs):
         assert TEST_NUMPY
-        assert dtype is not torch.bfloat16
 
         if isinstance(tensor_like, torch.Tensor):
             assert device is None
@@ -939,6 +938,8 @@ class TestCase(expecttest.TestCase):
                 # NOTE: copying an array before conversion is necessary when,
                 #   for example, the array has negative strides.
                 np_result = torch.from_numpy(np_result.copy())
+            if dtype is torch.bfloat16 and np_result.dtype is torch.float:
+                np_result = np_result.bfloat16()
 
         self.assertEqual(np_result, torch_result, **kwargs)
 
