@@ -87,7 +87,7 @@ class StreamContext(object):
         self.src_prev_stream = torch.cuda.current_stream(self.idx)
         # If the stream is not on the current device, then change the device
         # and set the current stream on the device
-        if self.idx != self.cur_stream.device_index():
+        if self.src_prev_stream.device_index() != self.cur_stream.device_index():
             with device(self.cur_stream.device()):
                 self.dst_prev_stream = torch.cuda.current_stream(self.cur_stream.device_index())
             torch.cuda._set_device(self.cur_stream.device_index())
