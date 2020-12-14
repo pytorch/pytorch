@@ -174,7 +174,7 @@ inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_dif
 }
 
 // See NOTE [ Autograd View Variables ] for details.
-inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tensors, bool is_bw_differentiable,
+inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& tensors, bool is_bw_differentiable,
                                    bool is_fw_differentiable, CreationMeta creation_meta=CreationMeta::DEFAULT) {
   c10::optional<ViewInfo> new_bw_info = c10::nullopt;
   c10::optional<ViewInfo> new_fw_info = c10::nullopt;
@@ -213,9 +213,9 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tens
 
   for(Tensor &tensor : tensors) {
     if (is_fw_differentiable || is_bw_differentiable) {
-      tensor = make_variable_differentiable_view(std::move(tensor), new_bw_info, new_fw_info, creation_meta);
+      tensor = make_variable_differentiable_view(tensor, new_bw_info, new_fw_info, creation_meta);
     } else {
-      tensor = make_variable_non_differentiable_view(base, std::move(tensor));
+      tensor = make_variable_non_differentiable_view(base, tensor);
     }
   }
   return tensors;

@@ -60,13 +60,13 @@ class ForwardDerivative:
 
     # Type of the output argument for which this formula calculates forward
     # derivatives
-    var_type: str
+    var_type: Type
 
     # Inputs for which the forward derivatives are required for this formula
     required_inputs_fw_grad: Tuple[str, ...]
 
     # Inputs for which the primal is required for this formula
-    required_inputs_primal: Tuple[str, ...]
+    required_inputs_primal: Optional[Tuple[str, ...]]
 
 # Represents differentiability info for a NativeFunction.
 @dataclass(frozen=True)

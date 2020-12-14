@@ -229,8 +229,6 @@ def load_deprecated_signatures(
         opname = str(f.func.name.name.base)
         if f.func.is_out_fn():
             opname += '_out'
-        # TODO: remove HACK
-        # I think we want to differentiate inplace functions here.. but we currently don't for the arg parser
         if f.func.name.name.inplace and pyi:
             opname += '_'
         args = CppSignatureGroup.from_schema(f.func, method=False).signature.arguments()
@@ -640,8 +638,6 @@ def method_def(
 
 def group_overloads(
     overloads: Sequence[PythonSignatureNativeFunctionPair],
-    *,
-    sort: bool = True,
 ) -> Sequence[PythonSignatureGroup]:
     bases: Dict[str, PythonSignatureNativeFunctionPair] = {}
     outplaces: Dict[str, PythonSignatureNativeFunctionPair] = {}
@@ -690,9 +686,7 @@ def group_overloads(
             outplace=outplace.function if outplace is not None else None,
         ))
 
-    # TODO: unconditionally sort
-    # maintaining byte-for-byte compatibility for pyi codegen for now
-    return grouped if not sort else sort_overloads(grouped)
+    return sort_overloads(grouped)
 
 # This function declares a partial order on declarations, and sorts them according
 # to its linear extension. This is necessary, because there's some ambiguity in the
