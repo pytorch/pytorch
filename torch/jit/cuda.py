@@ -26,7 +26,7 @@ def get_device_index(device: Optional[_device] = None, optional: bool = False, a
 
     if isinstance(device, torch.device):
         if not allow_cpu and device.type == 'cpu':
-            raise ValueError('Expected a non cpu device, but got: {}'.format(device))
+            raise ValueError(f'Expected a non cpu device, but got: {device}')
         device_index = -1 if device.type == 'cpu' else torch.cuda.device_index(device)
 
     if isinstance(device, int):
