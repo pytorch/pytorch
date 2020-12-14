@@ -4208,18 +4208,21 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: tan
+    CPU, CUDA: tan
+    SparseCPU, SparseCUDA: tan_sparse
 
 - func: tan_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: tan_
+    CPU, CUDA: tan_
+    SparseCPU, SparseCUDA: tan_sparse_
 
 - func: tan.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: tan_out
+    SparseCPU, SparseCUDA: tan_out_sparse
 
 - func: tanh(Tensor self) -> Tensor
   use_c10_dispatcher: full
