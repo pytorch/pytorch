@@ -4,11 +4,7 @@ This is similar to API's available in the eager mode
 :ref:`cuda-semantics` has more details about working with CUDA.
 """
 
-import contextlib
-import os
 import torch
-import traceback
-import warnings
 from typing import Optional, Any
 from torch import device as _device
 
