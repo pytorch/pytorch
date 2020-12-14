@@ -62,12 +62,6 @@ bool patternGraphIsValid(const Graph& pattern) {
     }
   }
 
-  // Verify that pattern graph returns only one value.
-//   const Node* bottom_node = *(pattern.nodes().end());
-//   if (bottom_node->inputs().size() != 1) {
-//     return false;
-//   }
-
   // TODO: Verify that nodes in the pattern don't alias.
   return true;
 }

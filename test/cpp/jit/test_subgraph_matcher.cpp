@@ -484,9 +484,10 @@ TEST(SubgraphMatcherTest, BadPattern) {
   Graph graph, pattern1, pattern2;
   parseIR(
       R"IR(
-graph(%0):
-  %a = a::aaa(%0)
-  return (%a))IR",
+graph(%x):
+  %y = my::op1(%x)
+  %z = my::op2(%x)
+  return (%y, %z))IR",
       &graph);
 
   parseIR(
@@ -498,16 +499,18 @@ graph(%x):
       -> (%z)
   return (%y))IR",
       &pattern1);
+  // No support for patterns with subblocks
   ASSERT_ANY_THROW(findPatternMatches(pattern1, graph));
 
-//   parseIR(
-//       R"IR(
-// graph(%x):
-//   %y = my::op1(%x)
-//   %z = my::op2(%x)
-//   return (%y, %z))IR",
-//       &pattern2);
-//   ASSERT_ANY_THROW(findPatternMatches(pattern2, graph));
+  parseIR(
+      R"IR(
+graph(%x):
+  %y = my::op1(%x)
+  %z = my::op2(%x)
+  return (%y, %z))IR",
+      &pattern2);
+  // Not supported multi-output pattern
+  ASSERT_ANY_THROW(findPatternMatches(pattern2, graph));
 }
 
 TEST(SubgraphMatcherTest, MultiOutput) {

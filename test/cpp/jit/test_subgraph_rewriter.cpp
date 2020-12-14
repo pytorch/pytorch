@@ -126,6 +126,7 @@ TEST(SubgraphRewriterTest, MultiOutput) {
   {
     auto graph = std::make_shared<Graph>();
 
+    // Basic multi-output pattern rewriting
     parseIR(
         R"IR(
 graph(%0, %1):
@@ -162,6 +163,7 @@ graph(%a, %b):
   {
     auto graph = std::make_shared<Graph>();
 
+    // Mimic a real model case
     parseIR(
         R"IR(
     graph(%k, %m, %x1, %x2, %x3, %x4, %y1, %y2, %y3, %y4):
@@ -206,6 +208,46 @@ graph(%a, %b):
     rewriter.runOnGraph(g);
     g->dump();
     FileCheck().check("ab::ababab")->check("ab::ababab")->run(*g);
+  }
+  {
+    auto graph = std::make_shared<Graph>();
+
+    // A case where no rewriting should occur due to data dependencies
+    parseIR(
+        R"IR(
+    graph(%x, %y):
+      %a = aa::aaa(%x)
+      %b = bb::bbb(%a)
+      %e = ee::eee(%b)
+      %c = cc::ccc(%y)
+      %d = dd::ddd(%b, %c)
+      %f = ff::fff(%b, %d)
+      return (%f)
+      )IR",
+        graph.get());
+
+    std::string pattern = R"IR(
+    graph(%a, %c):
+        %b = bb::bbb(%a)
+        %d = dd::ddd(%b, %c)
+        return (%d, %b))IR";
+
+    std::string replacement = R"IR(
+    graph(%a, %c):
+      %d, %b = db::fused(%a, %c)
+      return (%d, %b))IR";
+
+    SubgraphRewriter rewriter;
+    rewriter.RegisterRewritePattern(pattern, replacement);
+
+    auto g = graph->copy();
+    g->dump();
+    rewriter.runOnGraph(g);
+    g->dump();
+    // We should not perform the replacement on the given graph due to data
+    // dependency constraints: the output %b is used in %e, which precedes one
+    // def of the input %c.
+    FileCheck().check_not("db::fused")->run(*g);
   }
 }
 } // namespace jit

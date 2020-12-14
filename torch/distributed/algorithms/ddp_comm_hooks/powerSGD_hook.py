@@ -47,6 +47,8 @@ class PowerSGDState(object):
         random_seed=0,
     ):
         self.process_group = process_group
+        # The low rank for matrix approximation.
+        # Typically only 1 or 2 is used. See https://arxiv.org/pdf/1905.13727.pdf.
         self.matrix_approximation_rank = matrix_approximation_rank
         # Error feedback is usually crucial for both for convergence and generalization,
         # because PowerSGD is a biased compressor,
@@ -97,8 +99,6 @@ def powerSGD_hook(
         bucket (dist._GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
             Note that since DDP comm hook only supports single process single device mode at this time,
             only exactly one tensor is stored in this bucket.
-        matrix_approximation_rank (int): The low rank for matrix approximation.
-            Typically only 1 or 2 is used. See https://arxiv.org/pdf/1905.13727.pdf.
 
     Returns:
         Future handler of the communication, which updates the gradients in place.
@@ -162,11 +162,17 @@ def powerSGD_hook(
                 # only fork on CPU and then move the generated tensor to the CUDA device.
                 torch.manual_seed(rng.randint(1_000_000_000))
                 return torch.randn(
-                    square_side_length, state.matrix_approximation_rank, device="cpu"
+                    square_side_length,
+                    state.matrix_approximation_rank,
+                    device="cpu",
+                    dtype=input_tensor.dtype,
                 ).to(device)
         else:
             return torch.empty(
-                square_side_length, state.matrix_approximation_rank, device=device
+                square_side_length,
+                state.matrix_approximation_rank,
+                device=device,
+                dtype=input_tensor.dtype,
             )
 
     p = create_low_rank_tensor(fill_random_values=False, rng=state.rng)
@@ -185,7 +191,7 @@ def powerSGD_hook(
         return [
             dist.all_reduce(q, group=group_to_use, async_op=True)
             .get_future()
-            .value()[0]
+            .wait()[0]
         ]
 
     def decompress(fut):

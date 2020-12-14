@@ -96,6 +96,7 @@ core_sources_common = [
     "torch/csrc/jit/runtime/jit_exception.cpp",
     "torch/csrc/jit/runtime/operator.cpp",
     "torch/csrc/jit/runtime/print_handler.cpp",
+    "torch/csrc/jit/runtime/slice_indices_adjust.cpp",
     "torch/csrc/jit/runtime/register_ops_utils.cpp",
     "torch/csrc/jit/runtime/vararg_functions.cpp",
     "torch/csrc/jit/serialization/unpickler.cpp",
@@ -175,7 +176,6 @@ core_sources_full_mobile = [
     "torch/csrc/jit/passes/erase_number_types.cpp",
     "torch/csrc/jit/passes/fixup_trace_scope_blocks.cpp",
     "torch/csrc/jit/passes/freeze_module.cpp",
-    "torch/csrc/jit/passes/reconstruct_scopes.cpp",
     "torch/csrc/jit/passes/fuse_linear.cpp",
     "torch/csrc/jit/passes/fuse_relu.cpp",
     "torch/csrc/jit/passes/graph_fuser.cpp",
@@ -266,8 +266,10 @@ core_sources_full_mobile = [
 ]
 
 core_sources_full = core_sources_full_mobile + [
+    "torch/csrc/jit/runtime/static/fusion.cpp",
     "torch/csrc/jit/runtime/static/impl.cpp",
     "torch/csrc/jit/runtime/static/ops.cpp",
+    "torch/csrc/jit/runtime/static/passes.cpp",
 ]
 
 libtorch_core_sources = sorted(core_sources_common + core_sources_full + core_trainer_sources)
