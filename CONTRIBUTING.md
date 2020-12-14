@@ -910,7 +910,8 @@ CI reports `flake8` errors, you can run the check locally in your PR branch with
   flake8 $(git diff --name-only $(git merge-base --fork-point master))
   ```
 
-fix the code until no errors are reported and then commit the fix.
+fix the code so that no errors are reported when you re-run the above check again, 
+and then commit the fix.
 
 ## Building PyTorch with ASAN
 
