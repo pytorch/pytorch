@@ -282,8 +282,7 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad):
                                     requires_grad=False))),)
 
 def sample_inputs_slogdet(op_info, device, dtype, requires_grad):
-    from torch.testing._internal.common_utils import (random_hermitian_matrix, random_hermitian_psd_matrix,
-                                                      random_hermitian_pd_matrix, random_square_matrix_of_rank)
+    from torch.testing._internal.common_utils import random_hermitian_matrix, random_hermitian_pd_matrix
 
     # tests cases are copied from 'method_tests'
     test_inputs = (
@@ -296,7 +295,7 @@ def sample_inputs_slogdet(op_info, device, dtype, requires_grad):
         random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device),  # 'distinct_singular_values'
         torch.randn(3, 3, 1, 1, dtype=dtype, device=device),  # 'batched_1x1_neg_det'
         torch.randn(3, 3, S, S, dtype=dtype, device=device),  # 'batched_pos_det'
-        random_hermitian_matrix(S, 3, dtype=dtype, device=device), # 'batched_hermitian'
+        random_hermitian_matrix(S, 3, dtype=dtype, device=device),  # 'batched_hermitian'
         random_hermitian_pd_matrix(S, 3, dtype=dtype, device=device),  # 'batched_hermitian_pd'
         random_fullrank_matrix_distinct_singular_value(S, 3, dtype=dtype, device=device),  # 'batched_distinct_singular_values'
     )

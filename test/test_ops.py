@@ -77,6 +77,7 @@ class TestGradients(TestCase):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
         for sample in samples:
             partial_fn = partial(variant, **sample.kwargs)
+
             def fn(*inputs):
                 output = partial_fn(*inputs)
                 return op.output_func(output)
