@@ -20,7 +20,7 @@ from .hipify.hipify_python import get_hip_file_path, GeneratedFileCleaner
 from typing import List, Optional
 
 from setuptools.command.build_ext import build_ext
-from pkg_resources import packaging
+from pkg_resources import packaging  # type: ignore
 
 
 IS_WINDOWS = sys.platform == 'win32'
