@@ -32,23 +32,22 @@ class _DecoratorContextManager:
         @functools.wraps(func)
         def generator_context(*args, **kwargs):
             gen = func(*args, **kwargs)
-            grad_mode_context = type(self)()
+            cls = type(self)
             try:
-                with grad_mode_context:
+                with cls():
                     response = gen.send(None)
                 while True:
                     try:
                         request = yield response
                     except GeneratorExit:
-                        with grad_mode_context:
+                        with cls():
                             gen.close()
                         raise
                     except BaseException:
-                        typ, val, tb = sys.exc_info()
-                        with grad_mode_context:
-                            response = gen.throw(typ, val, tb.tb_next)
+                        with cls():
+                            response = gen.throw(*sys.exc_info())
                     else:
-                        with grad_mode_context:
+                        with cls():
                             response = gen.send(request)
             except StopIteration as e:
                 return e.value
