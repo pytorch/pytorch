@@ -1426,7 +1426,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     }
     // recompute contiguous flag, as currently NHWC/NCHW flags are not mutually
     // exclusive see #24090
-    refresh_contiguous();
+    refresh_contiguous(memory_format);
   }
 
   bool is_strides_like_channels_last() const {
@@ -1540,6 +1540,7 @@ protected:
    * or strides.
    */
   void refresh_contiguous() {
+    // NOTE: Make sure to keep the other overload in sync with this implementation!
     is_contiguous_ = compute_contiguous();
     // Note:
     // Dim 0, 1, 2 will never be a channels last 2d/3d format
@@ -1570,6 +1571,42 @@ protected:
         is_channels_last_ = false;
         is_channels_last_3d_ = false;
         is_non_overlapping_and_dense_ = is_contiguous_ || compute_non_overlapping_and_dense();
+    }
+  }
+
+  /**
+   * Faster implementation of refresh_contiguous() that can be used if
+   * we know the current MemoryFormat.
+   */
+  void refresh_contiguous(MemoryFormat memory_format) {
+    // NOTE: Make sure to keep the other overload in sync with this implementation!
+    is_contiguous_ = memory_format == MemoryFormat::Contiguous || compute_contiguous();
+    switch (memory_format) {
+      case MemoryFormat::Contiguous:
+        is_channels_last_contiguous_ = false;
+        is_channels_last_contiguous_ = false;
+        is_channels_last_3d_contiguous_ = false;
+        is_channels_last_ = false;
+        is_channels_last_3d_ = false;
+        is_non_overlapping_and_dense_ = true;
+        break;
+      case MemoryFormat::ChannelsLast:
+        is_channels_last_contiguous_ = compute_channels_last_contiguous_2d();
+        is_channels_last_ = true;
+        is_channels_last_3d_ = false;
+        is_channels_last_3d_contiguous_ = false;
+        is_non_overlapping_and_dense_ = is_contiguous_ || is_channels_last_contiguous_ || compute_non_overlapping_and_dense();
+        break;
+      case MemoryFormat::ChannelsLast3d:
+        is_channels_last_contiguous_ = false;
+        is_channels_last_ = false;
+        is_channels_last_3d_ = true;
+        is_channels_last_3d_contiguous_ = compute_channels_last_contiguous_3d();
+        is_non_overlapping_and_dense_ = is_contiguous_ || compute_non_overlapping_and_dense();
+        break;
+      case MemoryFormat::Preserve:
+        // Is this case even possible?
+        refresh_contiguous();
     }
   }
 
