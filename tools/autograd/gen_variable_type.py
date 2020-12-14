@@ -207,10 +207,14 @@ grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """)
 
 CALL_DISPATCH_VIA_NAMESPACE = CodeTemplate("""\
-at::${api_name}(${unpacked_args})""")
+c10::Dispatcher::singleton()
+  .redispatch<${ret_and_arg_types}>(${redispatch_args})""")
+# at::${api_name}(${unpacked_args})""")
 
 CALL_DISPATCH_VIA_METHOD = CodeTemplate("""\
-${var}.${api_name}(${unpacked_method_args})""")
+c10::Dispatcher::singleton()
+  .redispatch<${ret_and_arg_types}>(${redispatch_args})""")
+# ${var}.${api_name}(${unpacked_method_args})""")
 
 # If the non-variable operation has return values, we use the `tmp` variable to hold the
 # values temporarily and pass the values to the return variables outside of the
@@ -218,6 +222,9 @@ ${var}.${api_name}(${unpacked_method_args})""")
 DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES = CodeTemplate("""\
 auto tmp = ([&]() {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
+  static auto op = c10::Dispatcher::singleton()
+    .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
+    .typed<${arg_types}>();
   return ${base_type_call};
 })();
 """)
@@ -243,6 +250,9 @@ if (${is_view_with_metadata_change} || !self.unsafeGetTensorImpl()->support_as_s
 
 REPLAY_VIEW_LAMBDA_FUNC = CodeTemplate("""\
 func = [=](const at::Tensor& ${input_base}) {
+  static auto op = c10::Dispatcher::singleton()
+    .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
+    .typed<${arg_types}>();
   return ${replay_view_call};
 };
 """)
@@ -250,6 +260,9 @@ func = [=](const at::Tensor& ${input_base}) {
 DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES = CodeTemplate("""\
 {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
+  static auto op = c10::Dispatcher::singleton()
+    .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
+    .typed<${arg_types}>();
   ${base_type_call};
 }
 """)
@@ -576,7 +589,7 @@ def emit_body(declaration):
 
     def save_variables(
         saved_variables: Sequence[SavedAttribute],
-        is_output: bool,
+          is_output: bool,
         guard_for: Callable[[SavedAttribute], Optional[str]] = lambda name: None,
     ) -> Sequence[str]:
         # assign the saved variables to the generated grad_fn
@@ -662,8 +675,22 @@ def emit_body(declaration):
             else:
                 updated_unpacked_args.append(arg)
 
-        replay_view_call = emit_dispatch_call(combined['api_name'], input_base, updated_unpacked_args)
+        # replay_view_call = emit_dispatch_call(combined['api_name'], input_base, updated_unpacked_args)
+
+        args = combined['schema_order_arguments'] \
+            if any([a['simple_type'] == 'TensorOptions' for a in combined['arguments']]) \
+            else combined['arguments']
+        arg_types = [a['type'] for a in args]
+        ret_and_arg_types = ', '.join([combined['return_type']] + arg_types)
+        replay_view_call = CALL_DISPATCH_VIA_NAMESPACE.substitute(
+            ret_and_arg_types=ret_and_arg_types,
+            # TODO: something less hacky than AutogradOther?
+            redispatch_args=['op', 'c10::DispatchKey::AutogradOther'] + updated_unpacked_args)
+        type_signature = f"{combined['return_type']} ({', '.join(arg_types)})"
         replay_view_func += REPLAY_VIEW_LAMBDA_FUNC.substitute(
+            operator_name=combined['operator_name'],
+            overload_name=combined['overload_name'],
+            arg_types=type_signature,
             input_base=input_base,
             replay_view_call=replay_view_call)
 
@@ -750,14 +777,30 @@ def emit_body(declaration):
         # the baseType operations still dispatch to non-Variable type, even if the arguments passed
         # in are now Variables.
         # See NOTE [ Treating Variables as non-Variables in type dispatch ] for details.
-        base_type_call = emit_dispatch_call(combined['api_name'], 'self_', combined['unpacked_args'])
+        # base_type_call = emit_dispatch_call(combined['api_name'], 'self_', combined['unpacked_args'])
+        args = combined['schema_order_arguments'] \
+            if any([a['simple_type'] == 'TensorOptions' for a in combined['arguments']]) \
+            else combined['arguments']
+        arg_types = [a['type'] for a in args]
+        ret_and_arg_types = ', '.join([combined['return_type']] + arg_types)
+        base_type_call = CALL_DISPATCH_VIA_NAMESPACE.substitute(
+            ret_and_arg_types=ret_and_arg_types,
+            # TODO: something less hacky than AutogradOther?
+            redispatch_args=['op', 'c10::DispatchKey::AutogradOther'] + combined['unpacked_args'])
+        type_signature = f"{combined['return_type']} ({', '.join(arg_types)})"
         if not modifies_arguments and not returns_void:
             call = DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES.substitute(
+                operator_name=combined['operator_name'],
+                overload_name=combined['overload_name'],
+                arg_types=type_signature,
                 base_type_call=base_type_call)
 
             call += wrap_output(tie_return_values, 'tmp')
         else:
             call = DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
+                operator_name=combined['operator_name'],
+                overload_name=combined['overload_name'],
+                arg_types=type_signature,
                 base_type_call=base_type_call)
         call = enforce_same_tensorimpl_and_storage(env, call)
         return call
