@@ -362,9 +362,12 @@ class TestSaveLoad(JitTestCase):
 
                 if isinstance(m_result, Exception):
                     self.assertTrue(isinstance(fn_result, Exception))
+                elif fn is torch.div or a.is_floating_point():
+                    self.assertEqual(m_result, fn_result)
                 else:
-                    if fn is torch.div or a.is_floating_point():
-                        self.assertEqual(m_result, fn_result)
+                    # Skip when fn is not torch.div and a is integral because
+                    # historic_div_scalar_int performs floored division
+                    pass
 
             if isinstance(b, float):
                 _helper(v3_module_float, historic_div_scalar_float_reciprocal)

@@ -791,13 +791,15 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=None,
                    assert_autodiffed=True,
                    skip_bfloat16_grad=True,
+                   promotes_integers_to_float=True,
                    skips=(
+                       # Reference: https://github.com/pytorch/pytorch/issues/45690
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.cfloat, torch.cdouble]),
+                       # Reference: https://github.com/pytorch/pytorch/pull/49102#issuecomment-744604601
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.bfloat16]),
-                    ),
-                   promotes_integers_to_float=True),
+                    )),
     UnaryUfuncInfo('sqrt',
                    ref=np.sqrt,
                    domain=(0, float('inf')),

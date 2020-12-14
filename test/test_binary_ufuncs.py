@@ -786,10 +786,7 @@ class TestBinaryUfuncs(TestCase):
         def _wrapped_div_scalar(a):
             return a / 5
 
-        # NOTE: this will fail when given an integer input, since
-        #   the JIT implements division as
-        #   torch.reciprocal(a) * 5, and reciprocal is only
-        #   implemented for float types.
+        # NOTE: the JIT implements division as torch.reciprocal(a) * 5
         def _wrapped_rdiv_scalar(a):
             return 5 / a
 

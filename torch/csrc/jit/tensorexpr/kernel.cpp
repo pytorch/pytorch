@@ -942,7 +942,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
 
     case aten::reciprocal: {
       return computeOneOperand("aten_reciprocal", v, [](const ExprHandle& a) {
-        return ExprHandle(1.0f) / promoteIntegerToFloat(a);
+        return ExprHandle(1.0f) / a;
       });
     } break;
 

@@ -251,7 +251,7 @@ static void reciprocal_kernel(TensorIterator& iter) {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) __ubsan_ignore_float_divide_by_zero__ -> scalar_t { return static_cast<scalar_t>(1.0) / a; },
-        [=](Vec256<scalar_t> a) { return a.reciprocal(); });
+        [=](Vec256<scalar_t> a) __ubsan_ignore_float_divide_by_zero__ { return a.reciprocal(); });
   });
 }
 
