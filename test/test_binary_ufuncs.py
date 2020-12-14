@@ -1065,6 +1065,7 @@ class TestBinaryUfuncs(TestCase):
             if alias is not None:
                 alias_result = alias(a_tensor, b_tensor)
                 self.assertEqual(alias_result, tensor_result)
+
             if dtype == torch.bfloat16:
                 self.assertEqual(tensor_result, numpy_result, exact_dtype=False)
                 self.assertEqual(out, numpy_result, exact_dtype=False)

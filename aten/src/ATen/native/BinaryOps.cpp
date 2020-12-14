@@ -848,16 +848,20 @@ Tensor max(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& fmax_out(Tensor& result, const Tensor& self, const Tensor& other) {
-    auto both_nan = self.isnan().logical_and_(other.isnan());
+    auto self_isnan = self.isnan();
+    auto other_isnan = other.isnan();
+    auto both_nan = self_isnan.logical_and(other_isnan);
     return at::maximum_out(result,
-                           at::where(self.isnan()  == both_nan, self, other.to(self.dtype())),
-                           at::where(other.isnan() == both_nan, other, self.to(other.dtype())));
+                           at::where(self_isnan == both_nan, self, other.to(self.dtype())),
+                           at::where(other_isnan == both_nan, other, self.to(other.dtype())));
 }
 
 Tensor fmax(const Tensor& self, const Tensor& other) {
-    auto both_nan = self.isnan().logical_and_(other.isnan());
-    return at::maximum(at::where(self.isnan()  == both_nan, self, other.to(self.dtype())),
-                       at::where(other.isnan() == both_nan, other, self.to(other.dtype())));
+    auto self_isnan = self.isnan();
+    auto other_isnan = other.isnan();
+    auto both_nan = self_isnan.logical_and(other_isnan);
+    return at::maximum(at::where(self_isnan == both_nan, self, other.to(self.dtype())),
+                       at::where(other_isnan == both_nan, other, self.to(other.dtype())));
 }
 
 Tensor& minimum_out(Tensor& result, const Tensor& self, const Tensor& other) {
@@ -883,16 +887,20 @@ Tensor min(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& fmin_out(Tensor& result, const Tensor& self, const Tensor& other) {
-    auto both_nan = self.isnan().logical_and_(other.isnan());
+    auto self_isnan = self.isnan();
+    auto other_isnan = other.isnan();
+    auto both_nan = self_isnan.logical_and(other_isnan);
     return at::minimum_out(result,
-                           at::where(self.isnan()  == both_nan, self, other.to(self.dtype())),
-                           at::where(other.isnan() == both_nan, other, self.to(other.dtype())));
+                           at::where(self_isnan == both_nan, self, other.to(self.dtype())),
+                           at::where(other_isnan == both_nan, other, self.to(other.dtype())));
 }
 
 Tensor fmin(const Tensor& self, const Tensor& other) {
-    auto both_nan = self.isnan().logical_and_(other.isnan());
-    return at::minimum(at::where(self.isnan()  == both_nan, self, other.to(self.dtype())),
-                       at::where(other.isnan() == both_nan, other, self.to(other.dtype())));
+    auto self_isnan = self.isnan();
+    auto other_isnan = other.isnan();
+    auto both_nan = self_isnan.logical_and(other_isnan);
+    return at::minimum(at::where(self_isnan == both_nan, self, other.to(self.dtype())),
+                       at::where(other_isnan == both_nan, other, self.to(other.dtype())));
 }
 
 Tensor floor_divide(const Tensor& self, Scalar other) {
