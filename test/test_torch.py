@@ -254,8 +254,8 @@ class AbstractTestCases:
             height = 5
             width = 5
             for device in torch.testing.get_all_device_types():
-                for dt1 in torch.testing.get_all_dtypes(include_half=device.startswith('cuda'), include_bfloat16=False):
-                    for dt2 in torch.testing.get_all_dtypes(include_half=device.startswith('cuda'), include_bfloat16=False):
+                for dt1 in torch.testing.get_all_dtypes():
+                    for dt2 in torch.testing.get_all_dtypes():
                         for contiguous in [True, False]:
                             x1 = get_tensor((height, width), dt1, device, contiguous)
                             x2 = get_tensor((height, width), dt2, device, contiguous)
@@ -341,9 +341,6 @@ class AbstractTestCases:
             self.assertEqual(90, cuda90.index)
 
             self.assertRaises(RuntimeError, lambda: torch.device('cpu:-1'))
-            self.assertRaises(RuntimeError, lambda: torch.device('cpu:1'))
-            self.assertRaises(RuntimeError, lambda: torch.device('cpu', -1))
-            self.assertRaises(RuntimeError, lambda: torch.device('cpu', 1))
             self.assertRaises(RuntimeError, lambda: torch.device('cuda:-1'))
             self.assertRaises(RuntimeError, lambda: torch.device('cuda:2 '))
             self.assertRaises(RuntimeError, lambda: torch.device('cuda: 2'))
@@ -356,7 +353,6 @@ class AbstractTestCases:
             self.assertRaises(RuntimeError, lambda: torch.device('cuda:2 cuda:3'))
             self.assertRaises(RuntimeError, lambda: torch.device('cuda:2+cuda:3'))
             self.assertRaises(RuntimeError, lambda: torch.device('cuda:2cuda:3'))
-            self.assertRaises(RuntimeError, lambda: torch.device('cuda', -1))
             self.assertRaises(RuntimeError, lambda: torch.device(-1))
 
             self.assertRaises(RuntimeError, lambda: torch.device('other'))
@@ -6174,7 +6170,7 @@ class TestTorchDeviceType(TestCase):
         return False
 
     @onlyOnCPUAndCUDA
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes() +
               torch.testing.get_all_complex_dtypes()))
     def test_where_scalar_invalid_combination_raises(self, device, dtype):
 
@@ -6186,7 +6182,7 @@ class TestTorchDeviceType(TestCase):
 
         self._test_where_scalar_template(device, dtype, checkRaises)
 
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes() +
               torch.testing.get_all_complex_dtypes()))
     def test_where_scalar_valid_combination(self, device, dtype):
 

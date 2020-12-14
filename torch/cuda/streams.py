@@ -8,6 +8,7 @@ if not hasattr(torch._C, '_CudaStreamBase'):
     # Define dummy base classes
     torch._C.__dict__['_CudaStreamBase'] = _dummy_type('_CudaStreamBase')
     torch._C.__dict__['_CudaEventBase'] = _dummy_type('_CudaEventBase')
+    torch._C.__dict__['_CudaGraphBase'] = _dummy_type('_CudaGraphBase')
 
 class Stream(torch._C._CudaStreamBase):
     r"""Wrapper around a CUDA stream.
@@ -20,7 +21,7 @@ class Stream(torch._C._CudaStreamBase):
         device(torch.device or int, optional): a device on which to allocate
             the stream. If :attr:`device` is ``None`` (default) or a negative
             integer, this will use the current device.
-        priority(int, optional): priority of the stream. Can be either 
+        priority(int, optional): priority of the stream. Can be either
             -1 (high priority) or 0 (low priority). By default, streams have
             priority 0.
 
@@ -201,3 +202,5 @@ class Event(torch._C._CudaEventBase):
             return '<torch.cuda.Event {0:#x}>'.format(self._as_parameter_.value)
         else:
             return '<torch.cuda.Event uninitialized>'
+
+_Graph = torch._C._CudaGraphBase
