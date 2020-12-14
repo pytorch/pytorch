@@ -799,7 +799,7 @@ op_db: List[OpInfo] = [
                        # Reference: https://github.com/pytorch/pytorch/pull/49102#issuecomment-744604601
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.bfloat16]),
-                    )),
+                   )),
     UnaryUfuncInfo('sqrt',
                    ref=np.sqrt,
                    domain=(0, float('inf')),
