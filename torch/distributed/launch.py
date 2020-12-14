@@ -143,7 +143,7 @@ import sys
 import subprocess
 import os
 from argparse import ArgumentParser, REMAINDER
-from typing import Optional, IO
+from typing import Optional, IO, List, Any
 
 node_local_rank_stdout_filename = "node_{}_local_rank_{}_stdout"
 node_local_rank_stderr_filename = "node_{}_local_rank_{}_stderr"
@@ -224,7 +224,7 @@ def main():
     current_env["MASTER_PORT"] = str(args.master_port)
     current_env["WORLD_SIZE"] = str(dist_world_size)
 
-    processes = []
+    processes: List[Any] = []
 
     if 'OMP_NUM_THREADS' not in os.environ and args.nproc_per_node > 1:
         current_env["OMP_NUM_THREADS"] = str(1)
@@ -313,7 +313,7 @@ def main():
         processes.append(process)
 
     try:
-        alive_processes = processes
+        alive_processes = set(processes)
         while len(alive_processes):
             finished_processes = []
             for process in alive_processes:
