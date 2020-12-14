@@ -231,7 +231,24 @@ class C10_API SizesAndStrides {
     return strides_data()[idx];
   }
 
-  void resize(size_t newSize);
+  void resize(size_t newSize) {
+    const auto oldSize = size();
+    if (newSize == oldSize) {
+      return;
+    }
+    if (C10_LIKELY(newSize <= MAX_INLINE_SIZE && isInline())) {
+      if (oldSize < newSize) {
+        const auto bytesToZero = (newSize - oldSize) * sizeof(inlineStorage_[0]);
+        memset(&inlineStorage_[oldSize], 0, bytesToZero);
+        memset(&inlineStorage_[MAX_INLINE_SIZE + oldSize], 0, bytesToZero);
+      }
+      size_ = newSize;
+    } else {
+      resizeSlowPath(newSize, oldSize);
+    }
+  }
+
+  void resizeSlowPath(size_t newSize, size_t oldSize);
 
  private:
   bool isInline() const noexcept {
@@ -271,8 +288,6 @@ class C10_API SizesAndStrides {
   };
 
 };
-
-constexpr int SizesAndStrides::MAX_INLINE_SIZE;
 
 } // namespace impl
 } // namespace c10
