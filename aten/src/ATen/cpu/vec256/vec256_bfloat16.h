@@ -25,7 +25,7 @@ static inline void cvtbf16_fp32(const __m256i& a, __m256& o1, __m256& o2) {
 static inline __m256i cvtfp32_bf16(const __m256& a, const __m256& b) {
   __m256i lo = _mm256_castps_si256(a);
   __m256i hi = _mm256_castps_si256(b);
-  __m256i nan = _mm256_set1_epi32(0x7fc0);
+  __m256i nan = _mm256_set1_epi32(0xffff);
   __m256i mask_lo = _mm256_castps_si256(_mm256_cmp_ps(a, a, _CMP_ORD_Q));
   __m256i mask_hi = _mm256_castps_si256(_mm256_cmp_ps(b, b, _CMP_ORD_Q));
   __m256i ones = _mm256_set1_epi32(0x1);
