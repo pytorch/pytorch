@@ -51,11 +51,15 @@ from .utils import (
     _parent_name,
     quantize_node,
     get_custom_module_class_keys,
+    get_new_attr_name_with_prefix,
+    collect_producer_nodes,
+    graph_module_from_producer_nodes,
+    assert_and_get_unique_device,
 )
 
-from collections import OrderedDict
+from .qconfig_utils import *
+
 import warnings
-import re
 
 from typing import Optional, Dict, Any, List, Union, Tuple, Set, Callable
 
@@ -70,183 +74,9 @@ MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,
 # Helper Functions
 # ------------------------
 
-# Returns a function that can get a new attribute name for module with given
-# prefix, for example,
-# >> get_new_observer_name = get_new_attr_name_with_prefix('_observer')
-# >> new_name = get_new_observer_name(module)
-# new_name will be an unused attribute name on module, e.g. `_observer_1`
-def get_new_attr_name_with_prefix(prefix: str) -> Callable:
-    def get_new_attr_name(module: torch.nn.Module):
-        def get_attr_name(i: int):
-            return prefix + str(i)
-        i = 0
-        attr_name = get_attr_name(i)
-        while hasattr(module, attr_name):
-            i += 1
-            attr_name = get_attr_name(i)
-        return attr_name
-    return get_new_attr_name
-
-def collect_producer_nodes(node: Node) -> Optional[List[Node]]:
-    r''' Starting from a target node, trace back until we hit inpu or
-    getattr node. This is used to extract the chain of operators
-    starting from getattr to the target node, for example
-    def forward(self, x):
-      observed = self.observer(self.weight)
-      return F.linear(x, observed)
-    collect_producer_nodes(observed) will either return a list of nodes that
-    produces the observed node or None if we can't extract a self contained
-    graph without free variables(inputs of the forward function).
-    '''
-    nodes = [node]
-    frontier = [node]
-    while frontier:
-        node = frontier.pop()
-        all_args = list(node.args) + list(node.kwargs.values())
-        for arg in all_args:
-            if not isinstance(arg, Node):
-                continue
-            if arg.op == 'placeholder':
-                # hit input, can't fold in this case
-                return None
-            nodes.append(arg)
-            if not (arg.op == 'call_function' and arg.target == getattr):
-                frontier.append(arg)
-    return nodes
-
-def graph_module_from_producer_nodes(
-        root: GraphModule, producer_nodes: List[Node]) -> GraphModule:
-    r''' Construct a graph module from extracted producer nodes
-    from `collect_producer_nodes` function
-    Args:
-      root: the root module for the original graph
-      producer_nodes: a list of nodes we use to construct the graph
-    Return:
-      A graph module constructed from the producer nodes
-    '''
-    assert len(producer_nodes) > 0, 'list of producer nodes can not be empty'
-    # since we traced back from node to getattrr
-    producer_nodes.reverse()
-    graph = Graph()
-    env: Dict[Any, Any] = {}
-
-    def load_arg(a):
-        return map_arg(a, lambda node: env[node])
-    for producer_node in producer_nodes:
-        env[producer_node] = graph.node_copy(producer_node, load_arg)
-    graph.output(load_arg(producer_nodes[-1]))
-    graph_module = GraphModule(root, graph)
-    return graph_module
-
-def assert_and_get_unique_device(module: torch.nn.Module) -> Any:
-    """
-    Returns the unique device for a module, or None if no device is found.
-    Throws an error if multiple devices are detected.
-    """
-    devices = {p.device for p in module.parameters()} | \
-        {p.device for p in module.buffers()}
-    assert len(devices) <= 1, (
-        "prepare only works with cpu or single-device CUDA modules, "
-        "but got devices {}".format(devices)
-    )
-    device = next(iter(devices)) if len(devices) > 0 else None
-    return device
-
-def is_observed_standalone_module_node(
-        node: Node, modules: Dict[str, torch.nn.Module]) -> bool:
-    return node.op == 'call_module' and \
-        is_observed_standalone_module(modules[node.target])  # type: ignore
-
-
-def get_flattened_qconfig_dict(qconfig_dict):
-    """ flatten the global, object_type and module_name qconfig
-    to the same qconfig_dict so that it can be used by
-    propagate_qconfig_ function.
-    "module_name_regex" is ignored for now since it's not supported
-    in propagate_qconfig_, but it can be fixed later.
-
-    For example:
-    Input: {
-      "": qconfig,
-      "object_type": [
-        (torch.add, qconfig)
-      ],
-      "module_name": [
-        ("conv", qconfig)
-      ]
-    }
-
-    Output: {
-      "": qconfig,
-      torch.add: qconfig,
-      "conv": qconfig
-    }
-    """
-    flattened = dict()
-    if '' in qconfig_dict:
-        flattened[''] = qconfig_dict['']
-
-    def flatten_key(key):
-        if key in qconfig_dict:
-            for obj, qconfig in qconfig_dict[key]:
-                flattened[obj] = qconfig
-
-    flatten_key('object_type')
-    flatten_key('module_name')
-    return flattened
-
-def convert_dict_to_ordered_dict(qconfig_dict):
-    """ Convert dict in qconfig_dict to ordered dict
-    """
-    # convert a qconfig list for a type to OrderedDict
-    def _convert_to_ordered_dict(key, qconfig_dict):
-        qconfig_dict[key] = OrderedDict(qconfig_dict.get(key, []))
-
-    _convert_to_ordered_dict('object_type', qconfig_dict)
-    _convert_to_ordered_dict('module_name_regex', qconfig_dict)
-    _convert_to_ordered_dict('module_name', qconfig_dict)
-
-def get_module_type_qconfig(qconfig_dict, module_type, fallback_qconfig):
-    return qconfig_dict['object_type'].get(
-        module_type, fallback_qconfig)
-
-def get_function_qconfig(qconfig_dict, function, fallback_qconfig):
-    return qconfig_dict['object_type'].get(function, fallback_qconfig)
-
-def get_module_name_regex_qconfig(qconfig_dict, module_name, fallback_qconfig):
-    for regex_pattern, qconfig in \
-            qconfig_dict['module_name_regex'].items():
-        if re.match(regex_pattern, module_name):
-            # first match wins
-            return qconfig
-    return fallback_qconfig
-
-def get_module_name_qconfig(qconfig_dict, module_name, fallback_qconfig):
-    if module_name == '':
-        # module name qconfig not found
-        return fallback_qconfig
-    if module_name in qconfig_dict['module_name']:
-        return qconfig_dict['module_name'][module_name]
-    else:
-        parent, _ = _parent_name(module_name)
-        return get_module_name_qconfig(qconfig_dict, parent, fallback_qconfig)
-
-# get qconfig for module_name,
-# fallback to module_name_regex_qconfig, module_type_qconfig,
-# global_qconfig if necessary
-def get_qconfig(modules, qconfig_dict, module_name, global_qconfig):
-    assert modules is not None
-    module_type_qconfig = get_module_type_qconfig(
-        qconfig_dict, type(modules[module_name]), global_qconfig)
-    module_name_regex_qconfig = get_module_name_regex_qconfig(
-        qconfig_dict, module_name, module_type_qconfig)
-    module_name_qconfig = get_module_name_qconfig(
-        qconfig_dict, module_name, module_name_regex_qconfig)
-    return module_name_qconfig
-
 def insert_observer(
         node: Node, observer: torch.quantization.ObserverBase,
-        model_device: Any, model: torch.nn.Module,
+        model: torch.nn.Module,
         activation_post_process_map: Dict[str, torch.quantization.ObserverBase],
         env: Dict[Any, Any], observed_graph: Graph, load_arg: Callable,
         observed_node_names_set: Set[str]):
@@ -257,6 +87,7 @@ def insert_observer(
          observer: observer/fake_quantize module instance
     """
     # respect device affinity when adding observers
+    model_device = assert_and_get_unique_device(model)
     if model_device:
         observer.to(model_device)
     # add observer module as attribute
@@ -313,7 +144,6 @@ def insert_observer_for_output_of_the_node(
         modules: Dict[str, torch.nn.Module],
         model: torch.nn.Module,
         pattern: Any,
-        model_device: Any,
         activation_post_process_map: Dict[str, torch.quantization.ObserverBase],
         env: Dict[Any, Any],
         observed_graph: Graph,
@@ -338,7 +168,7 @@ def insert_observer_for_output_of_the_node(
                 "activation_post_process constructor not provided " + \
                 "for pattern:" + str(pattern)
             insert_observer(
-                node, activation_post_process_ctr(), model_device,
+                node, activation_post_process_ctr(),
                 model, activation_post_process_map, env, observed_graph,
                 load_arg, observed_node_names_set)
         elif (isinstance(quantize_handler,
@@ -386,13 +216,13 @@ def insert_observer_for_output_of_the_node(
             # observer for outputs
             new_observer = qconfig.activation()
             insert_observer(
-                node, new_observer, model_device, model,
+                node, new_observer, model,
                 activation_post_process_map, env, observed_graph,
                 load_arg, observed_node_names_set)
 
 def insert_observer_for_input_arg_of_observed_node(
         node: Node, observed_node_names_set: Set[str], quants: Dict[str, Any],
-        model_device: Any, model: torch.nn.Module,
+        model: torch.nn.Module,
         activation_post_process_map: Dict[str, torch.quantization.ObserverBase],
         env: Dict[str, str], observed_graph: Graph,
         load_arg: Callable):
@@ -401,7 +231,7 @@ def insert_observer_for_input_arg_of_observed_node(
         if activation_post_process_ctr is not None:
             insert_observer(
                 node, activation_post_process_ctr(),
-                model_device, model, activation_post_process_map,
+                model, activation_post_process_map,
                 env, observed_graph, load_arg, observed_node_names_set)
 
 # A dictionary for querying the weight index for a given op
@@ -565,7 +395,6 @@ class Quantizer:
 
         get_new_observer_name = get_new_attr_name_with_prefix(
             'activation_post_process_')
-        model_device = assert_and_get_unique_device(model)
 
         result_node : Optional[Node] = None
         for node in model.graph.nodes:
@@ -591,14 +420,14 @@ class Quantizer:
                         node)
                     insert_observer_for_output_of_the_node(
                         node, obj, qconfig, self.modules, model, pattern,
-                        model_device, self.activation_post_process_map, env,
+                        self.activation_post_process_map, env,
                         observed_graph, load_arg, observed_node_names_set,
                         matched_nodes)
             else:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
             insert_observer_for_input_arg_of_observed_node(
                 node, observed_node_names_set, quants,
-                model_device, model, self.activation_post_process_map, env,
+                model, self.activation_post_process_map, env,
                 observed_graph, load_arg)
 
 
@@ -852,8 +681,11 @@ class Quantizer:
                     quantized = False
                 else:
                     assert obj is not None
-                    is_standalone_module_node = is_observed_standalone_module_node(
-                        node, self.modules)
+                    is_standalone_module_node = (
+                        node.op == 'call_module' and
+                        is_observed_standalone_module(
+                            self.modules[node.target])  # type: ignore
+                    )
                     result = obj.convert(
                         self, node, load_arg, debug=debug,
                         convert_custom_config_dict=convert_custom_config_dict)
