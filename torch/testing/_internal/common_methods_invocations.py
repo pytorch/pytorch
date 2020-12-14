@@ -493,12 +493,7 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    promotes_integers_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
-                   test_inplace_grad=False,
-                   skips=(
-                       # RuntimeError: "isfinite" not implemented for 'BFloat16'
-                       SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                                device_type='cuda', dtypes=[torch.bfloat16]),
-                   )),
+                   test_inplace_grad=False),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -774,9 +769,6 @@ op_db: List[OpInfo] = [
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/pull/48926#issuecomment-739734774
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                device_type='cpu', dtypes=[torch.bfloat16]),
-                       # RuntimeError: "isfinite" not implemented for 'BFloat16'
-                       SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 device_type='cpu', dtypes=[torch.bfloat16]),
                    )),
     UnaryUfuncInfo('nan_to_num',
