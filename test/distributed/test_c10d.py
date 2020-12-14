@@ -3270,6 +3270,20 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
+    def test_pass_default_pg(self):
+        dist.init_process_group(
+            "nccl",
+            init_method=f"file://{self.file_name}",
+            world_size=self.world_size,
+            rank=self.rank,
+        )
+
+        default_pg = c10d.distributed_c10d._get_default_group()
+        dist.destroy_process_group(default_pg)
+        self.assertFalse(dist.is_initialized())
+
+    @requires_nccl()
+    @skip_if_not_multigpu
     def test_save_load_checkpoint(self):
         dist.init_process_group(
             "gloo",

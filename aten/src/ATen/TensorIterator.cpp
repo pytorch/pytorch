@@ -485,10 +485,12 @@ void TensorIteratorBase::allocate_or_resize_outputs() {
         // At the moment, quantized kernels mostly handle output Tensor
         // construction manually, this path is an edge case. So, only support
         // the single input case for now.
+        /*
         TORCH_INTERNAL_ASSERT(
             operands_.size() == num_outputs_ + 1,
             "Advanced indexing of quantized Tensors with multiple inputs is not "
             "supported yet.");
+            */
         // get the first input and copy its quantization parameters
         const auto& first_input = operands_[num_outputs_];
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(first_input.tensor.is_quantized());
