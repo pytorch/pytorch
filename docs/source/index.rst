@@ -14,7 +14,7 @@ Features described in this documentation are classified by release status:
 
   *Stable:*  These features will be maintained long-term and there should generally
   be no major performance limitations or gaps in documentation.
-  We also expect to maintain backwards compatibility (although
+  We also expect to maintain backward compatibility (although
   breaking changes can happen and notice will be given one release ahead
   of time).
 
@@ -22,7 +22,7 @@ Features described in this documentation are classified by release status:
   user feedback, because the performance needs to improve, or because
   coverage across operators is not yet complete. For Beta features, we are
   committing to seeing the feature through to the Stable classification.
-  We are not, however, committing to backwards compatibility.
+  However, we are not, committing to backward compatibility.
 
   *Prototype:*  These features are typically not available as part of
   binary distributions like PyPI or Conda, except sometimes behind run-time
