@@ -1120,11 +1120,11 @@ struct Delete : public Stmt {
   explicit Delete(const TreeRef& tree) : Stmt(tree) {
     tree_->match(TK_DELETE);
   }
-  Expr expr() const {
-    return Expr(subtree(0));
+  List<Expr> targets() const {
+    return subtree(0);
   }
-  static Delete create(const Expr& value) {
-    return Delete(Compound::create(TK_DELETE, value.range(), {value}));
+  static Delete create(const SourceRange& range, const List<Expr>& targets) {
+    return Delete(Compound::create(TK_DELETE, range, {targets}));
   }
 };
 

@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
+#include "jit/runtime/slice_indices_adjust.h"
 
 namespace torch {
 namespace jit {
@@ -425,60 +426,6 @@ void listMulIntRight(Stack* stack) {
 
   push(stack, std::move(ret));
 }
-// "Copyright (c) 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010,
-// 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020 Python Software
-// Foundation; All Rights Reserved" Stolen (with appropriate modifications) from
-// cpython repo Objects/sliceobject.c with comment: this is harder to get right
-// than you might think
-//
-// This adjusts indexes according to python list semantics and returns number
-// of elements in the resulting list.
-static int64_t PySlice_AdjustIndices(
-    int64_t length,
-    int64_t* start,
-    int64_t* stop,
-    int64_t step) {
-  TORCH_CHECK(step != 0, "List slice should have non-zero step")
-  TORCH_CHECK(step >= -INT64_MAX, "List slice step is out of bounds")
-
-  // Comes from PySlice_Unpack.
-  if (*start == INT64_MAX) {
-    *start = (step < 0) ? INT64_MAX : 0;
-  }
-  if (*stop == INT64_MAX) {
-    *stop = (step < 0) ? INT64_MIN : INT64_MAX;
-  }
-
-  // Comes from PySlice_AdjustIndices.
-  if (*start < 0) {
-    *start += length;
-    if (*start < 0) {
-      *start = (step < 0) ? -1 : 0;
-    }
-  } else if (*start >= length) {
-    *start = (step < 0) ? length - 1 : length;
-  }
-
-  if (*stop < 0) {
-    *stop += length;
-    if (*stop < 0) {
-      *stop = (step < 0) ? -1 : 0;
-    }
-  } else if (*stop >= length) {
-    *stop = (step < 0) ? length - 1 : length;
-  }
-
-  if (step < 0) {
-    if (*stop < *start) {
-      return (*start - *stop - 1) / (-step) + 1;
-    }
-  } else {
-    if (*start < *stop) {
-      return (*stop - *start - 1) / step + 1;
-    }
-  }
-  return 0;
-}
 
 void listSlice(Stack* stack) {
   int64_t step = pop(stack).to<int64_t>();
@@ -490,7 +437,7 @@ void listSlice(Stack* stack) {
 
   c10::List<IValue> sliced_list = make_result_list<IValue>(list.elementType());
   const int64_t num_values =
-      PySlice_AdjustIndices(list_size, &start, &end, step);
+      slice_indices_adjust(list_size, &start, &end, step);
   sliced_list.reserve(num_values);
 
   int i = start;

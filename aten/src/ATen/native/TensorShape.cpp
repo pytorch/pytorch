@@ -1085,9 +1085,9 @@ Tensor slice(
   auto strides = self.strides().vec();
 
   // handle optinal parameters
-  int64_t start_val = start.has_value() ? start.value() : INT64_MAX;
+  int64_t start_val = start.has_value() ? start.value() : 0;
   int64_t end_val = end.has_value() ? end.value() : INT64_MAX;
-  int64_t step_val = step.has_value() ? step.value() : INT64_MAX;
+  int64_t step_val = step.has_value() ? step.value() : 1;
 
   // TODO: support negative strides
   TORCH_CHECK(step_val > 0, "slice step must be positive");

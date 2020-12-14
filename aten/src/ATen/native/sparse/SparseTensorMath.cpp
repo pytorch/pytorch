@@ -241,7 +241,7 @@ static SparseTensor& coalesce_(SparseTensor& tensor) {
 // values=[1., 1.] (after truncation), which sum to 2.f instead of 3.f.
 // To perform floor division the sparse tensor must be coalesced first.
 
-SparseTensor& div_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, const Tensor& value) {
+SparseTensor& div_out_sparse_zerodim(const SparseTensor& t, const Tensor& value, SparseTensor& r) {
   TORCH_CHECK(value.dim() == 0, "Sparse division requires a scalar or ",
     "zero-dim dense tensor divisor (got shape ", value.sizes(), " for divisor)");
   TORCH_CHECK(!value.is_sparse(), "Sparse division requires a scalar or ",
@@ -279,15 +279,15 @@ Tensor div_sparse(const Tensor& self, const Tensor& value) {
     commonDtype = typeMetaToScalarType(at::get_default_dtype());
   }
   Tensor result = at::empty({0}, self.options().dtype(commonDtype));
-  return div_out_sparse_zerodim(result, self, value);
+  return div_out_sparse_zerodim(self, value, result);
 }
 
 Tensor& div_sparse_(Tensor& self, const Tensor& value) {
-  return div_out_sparse_zerodim(self, self, value);
+  return div_out_sparse_zerodim(self, value, self);
 }
 
 SparseTensor& div_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scalar value) {
-  return div_out_sparse_zerodim(r, t, wrapped_scalar_tensor(value));
+  return div_out_sparse_zerodim(t, wrapped_scalar_tensor(value), r);
 }
 
 // --------------------------------------------------------------------
@@ -1108,7 +1108,7 @@ SparseTensor& _sspaddmm_out_cpu(
       "sspaddmm: Argument #1: Expected dim 1 size ", dim_k, ", got ", t.size(1));
 
   int64_t nnz        = sparse._nnz();
-  // We have to make indices contiguous as we use indices.data_ptr in _to_csr which assumes row-contiguous storage  
+  // We have to make indices contiguous as we use indices.data_ptr in _to_csr which assumes row-contiguous storage
   LongTensor indices = sparse._indices().contiguous();
   Tensor values      = sparse._values();
 
