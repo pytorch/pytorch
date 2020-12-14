@@ -526,7 +526,7 @@ class CosineAnnealingLR(_LRScheduler):
                 for base_lr in self.base_lrs]
 
 
-class ReduceLROnPlateau(object):
+class ReduceLROnPlateau(_LRScheduler):
     """Reduce learning rate when a metric has stopped improving.
     Models often benefit from reducing the learning rate by a factor
     of 2-10 once learning stagnates. This scheduler reads a metrics
@@ -577,17 +577,11 @@ class ReduceLROnPlateau(object):
 
     def __init__(self, optimizer, mode='min', factor=0.1, patience=10,
                  threshold=1e-4, threshold_mode='rel', cooldown=0,
-                 min_lr=0, eps=1e-8, verbose=False):
+                 min_lr=0, eps=1e-8, last_epoch=-1, verbose=False):
 
         if factor >= 1.0:
             raise ValueError('Factor should be < 1.0.')
         self.factor = factor
-
-        # Attach optimizer
-        if not isinstance(optimizer, Optimizer):
-            raise TypeError('{} is not an Optimizer'.format(
-                type(optimizer).__name__))
-        self.optimizer = optimizer
 
         if isinstance(min_lr, list) or isinstance(min_lr, tuple):
             if len(min_lr) != len(optimizer.param_groups):
@@ -598,7 +592,6 @@ class ReduceLROnPlateau(object):
             self.min_lrs = [min_lr] * len(optimizer.param_groups)
 
         self.patience = patience
-        self.verbose = verbose
         self.cooldown = cooldown
         self.cooldown_counter = 0
         self.mode = mode
@@ -608,10 +601,10 @@ class ReduceLROnPlateau(object):
         self.num_bad_epochs = None
         self.mode_worse = None  # the worse value for the chosen mode
         self.eps = eps
-        self.last_epoch = 0
         self._init_is_better(mode=mode, threshold=threshold,
                              threshold_mode=threshold_mode)
         self._reset()
+        super(ReduceLROnPlateau, self).__init__(optimizer, last_epoch, verbose)
 
     def _reset(self):
         """Resets num_bad_epochs counter and cooldown counter."""
@@ -619,15 +612,18 @@ class ReduceLROnPlateau(object):
         self.cooldown_counter = 0
         self.num_bad_epochs = 0
 
-    def step(self, metrics, epoch=None):
+    def step(self, metrics=None, epoch=None):
+        if metrics is None:
+            if self._step_count > 0:
+                warnings.warn(
+                    "Detected call of `ReduceLROnPlateau.step()` without a metrics "
+                    "argument. This scheduler compares the validation metrics and "
+                    "reduces the learning rate on a configured plateau. Please "
+                    "provide a metrics scalar that will be used to evaluate the "
+                    "current training progress.", UserWarning)
+            metrics = self.mode_worse
         # convert `metrics` to float, in case it's a zero-dim Tensor
         current = float(metrics)
-        if epoch is None:
-            epoch = self.last_epoch + 1
-        else:
-            warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
-        self.last_epoch = epoch
-
         if self.is_better(current, self.best):
             self.best = current
             self.num_bad_epochs = 0
@@ -638,12 +634,16 @@ class ReduceLROnPlateau(object):
             self.cooldown_counter -= 1
             self.num_bad_epochs = 0  # ignore any bad epochs in cooldown
 
+        if self._step_count < 1:
+            self.num_bad_epochs = 0
+
         if self.num_bad_epochs > self.patience:
             self._reduce_lr(epoch)
             self.cooldown_counter = self.cooldown
             self.num_bad_epochs = 0
 
         self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
+        super(ReduceLROnPlateau, self).step(epoch)
 
     def _reduce_lr(self, epoch):
         for i, param_group in enumerate(self.optimizer.param_groups):
@@ -651,9 +651,13 @@ class ReduceLROnPlateau(object):
             new_lr = max(old_lr * self.factor, self.min_lrs[i])
             if old_lr - new_lr > self.eps:
                 param_group['lr'] = new_lr
-                if self.verbose:
-                    print('Epoch {:5d}: reducing learning rate'
-                          ' of group {} to {:.4e}.'.format(epoch, i, new_lr))
+                self.print_lr(self.verbose, i, new_lr, epoch)
+
+    def get_lr(self):
+        if not self._get_lr_called_within_step:
+            warnings.warn("To get the last learning rate computed by the scheduler, "
+                          "please use `get_last_lr()`.", UserWarning)
+        return [group['lr'] for group in self.optimizer.param_groups]
 
     @property
     def in_cooldown(self):
@@ -689,11 +693,8 @@ class ReduceLROnPlateau(object):
         self.threshold = threshold
         self.threshold_mode = threshold_mode
 
-    def state_dict(self):
-        return {key: value for key, value in self.__dict__.items() if key != 'optimizer'}
-
     def load_state_dict(self, state_dict):
-        self.__dict__.update(state_dict)
+        super(ReduceLROnPlateau, self).load_state_dict(state_dict)
         self._init_is_better(mode=self.mode, threshold=self.threshold, threshold_mode=self.threshold_mode)
 
 
