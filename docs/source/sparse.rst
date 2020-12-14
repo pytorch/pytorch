@@ -474,6 +474,8 @@ tensors <sparse-coo-docs>`:
 :meth:`~torch.Tensor.sub_`
 :meth:`~torch.Tensor.t`
 :meth:`~torch.Tensor.t_`
+:meth:`~torch.Tensor.tanh`
+:meth:`~torch.Tensor.tanh_`
 :meth:`~torch.Tensor.transpose`
 :meth:`~torch.Tensor.transpose_`
 :meth:`~torch.Tensor.zero_`

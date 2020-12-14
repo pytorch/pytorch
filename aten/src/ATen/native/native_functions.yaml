@@ -4227,17 +4227,20 @@
   dispatch:
     CPU, CUDA: tanh
     QuantizedCPU: tanh_quantized_cpu
+    SparseCPU, SparseCUDA: tanh_sparse
 
 - func: tanh_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: tanh_
+    CPU, CUDA: tanh_
+    SparseCPU, SparseCUDA: tanh_sparse_
 
 - func: tanh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: tanh_out
+    SparseCPU, SparseCUDA: tanh_out_sparse
 
 - func: tensordot(Tensor self, Tensor other, int[] dims_self, int[] dims_other) -> Tensor
   use_c10_dispatcher: full

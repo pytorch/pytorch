@@ -941,6 +941,7 @@ op_db: List[OpInfo] = [
                    )),
     UnaryUfuncInfo('tanh',
                    ref=np.tanh,
+                   supports_sparse=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    dtypes=all_types_and_complex_and(torch.bool),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
