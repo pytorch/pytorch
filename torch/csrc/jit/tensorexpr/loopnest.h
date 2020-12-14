@@ -51,8 +51,9 @@ class TORCH_API LoopNest {
 
   void vectorize(Stmt*);
 
-  void computeInline(Stmt* s);
-  void computeInline(const Buf* b);
+  bool computeInline(Stmt* s);
+  bool computeInline(const Buf* b);
+  void inlineIntermediateBufs();
 
   static void splitWithTail(For* f, int factor);
   static void splitWithTail(
@@ -106,11 +107,19 @@ class TORCH_API LoopNest {
       For* f,
       const std::unordered_map<std::string, const Buf*>& map);
 
+  void eliminateDeadStores();
   void prepareForCodegen();
 
   // Find the inner-most loops and vectorize them. Currently, this only works
   // for the LLVM backend, when no reductions are involved.
   void vectorizeInnerLoops();
+
+  const std::unordered_set<const Buf*> getInputBufs() {
+    return input_bufs_;
+  }
+  const std::unordered_set<const Buf*> getOutputBufs() {
+    return output_bufs_;
+  }
 
  private:
   std::vector<Tensor*> findAllNeededTensors(
@@ -120,6 +129,7 @@ class TORCH_API LoopNest {
 
   Stmt* root_stmt_;
 
+  std::unordered_set<const Buf*> input_bufs_;
   std::unordered_set<const Buf*> output_bufs_;
   std::unordered_set<const Buf*> intermediate_bufs_;
   // Holds the initializer Expr of buffers that have been initialized.

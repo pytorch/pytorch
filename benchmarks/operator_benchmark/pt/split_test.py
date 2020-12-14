@@ -30,12 +30,14 @@ split_configs_long = op_bench.cross_product_configs(
 
 class SplitBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, parts, device):
-        self.input_one = torch.rand(M, N, device=device)
-        self.split_size = int(M * N / parts)
+        self.inputs = {
+            "input": torch.rand(M, N, device=device),
+            "split_size": int(M * N / parts)
+        }
         self.set_module_name('split')
 
-    def forward(self):
-        return torch.split(self.input_one, self.split_size)
+    def forward(self, input, split_size: int):
+        return torch.split(input, split_size)
 
 
 op_bench.generate_pt_test(split_configs_short + split_configs_long,

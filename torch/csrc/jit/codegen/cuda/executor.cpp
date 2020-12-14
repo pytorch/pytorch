@@ -175,17 +175,18 @@ at::Tensor inferAndAlloc(
   }
 
   auto at_type = data_type_to_aten(tv->getDataType().value());
-  auto tensor_options =
-      at::TensorOptions().dtype(at_type).device(options.device);
 
   if (zero_init) {
+    auto tensor_options =
+        at::TensorOptions().dtype(at_type).device(options.device);
     c10::IntArrayRef isizes(sizes);
     return at::zeros(isizes, tensor_options);
   } else {
     c10::IntArrayRef isizes(sizes);
     // Non Variable type guard for empty_cuda call
     at::AutoNonVariableTypeMode non_variable_type_mode;
-    return at::native::empty_cuda(isizes, tensor_options);
+    return at::native::empty_cuda(
+        isizes, at_type, c10::nullopt, options.device, c10::nullopt);
   }
 }
 
@@ -411,18 +412,20 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
       // take the short-cut for launch if we see a recorded input set again;
       launch_params = executor_entry->launch_params;
       for (size_t i = 0; i < executor_entry->output_sizes.size(); i++) {
-        auto tensor_options = at::TensorOptions()
-                                  .dtype(executor_entry->output_types[i])
-                                  .device(options_.device);
         alloced_outputs.push_back(at::native::empty_cuda(
-            executor_entry->output_sizes[i], tensor_options));
+            executor_entry->output_sizes[i],
+            executor_entry->output_types[i],
+            c10::nullopt,
+            options_.device,
+            c10::nullopt));
       }
       for (size_t i = 0; i < executor_entry->empty_buffer_sizes.size(); i++) {
-        auto tensor_options = at::TensorOptions()
-                                  .dtype(executor_entry->empty_buffer_types[i])
-                                  .device(options_.device);
         global_buffers.empty_buffers.push_back(at::native::empty_cuda(
-            executor_entry->empty_buffer_sizes[i], tensor_options));
+            executor_entry->empty_buffer_sizes[i],
+            executor_entry->empty_buffer_types[i],
+            c10::nullopt,
+            options_.device,
+            c10::nullopt));
       }
     }
     for (size_t i = 0; i < executor_entry->zero_buffer_sizes.size(); i++) {

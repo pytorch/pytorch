@@ -46,6 +46,25 @@ TEST(LiteInterpreterTest, UpsampleNearest2d) {
   ASSERT_TRUE(resd.equal(refd));
 }
 
+TEST(LiteInterpreterTest, CheckAttrAccess) {
+  Module m("m");
+  m.register_attribute("mobile_optimized", BoolType::get(), true);
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  bool mobile_optimized = bc.attr("mobile_optimized", false).toBool();
+
+  AT_ASSERT(mobile_optimized);
+  m.setattr("mobile_optimized", false);
+  ss = std::stringstream();
+  m._save_for_mobile(ss);
+  bc = _load_for_mobile(ss);
+  mobile_optimized = bc.attr("mobile_optimized", false).toBool();
+
+  AT_ASSERT(!mobile_optimized);
+}
+
 TEST(LiteInterpreterTest, Add) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
@@ -504,6 +523,29 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
     }
   }
 
+  // class A(nn.Module):
+  //   def __init__(self):
+  //     super(A, self).__init__()
+
+  //   def forward(self, x):
+  //     return x + 1
+
+  // class B(nn.Module):
+  //   def __init__(self):
+  //     super(B, self).__init__()
+
+  //   def forward(self, x):
+  //     return x + 2
+
+  // class C(nn.Module):
+  //   def __init__(self):
+  //     super(C, self).__init__()
+  //     self.A0 = A()
+  //     self.B0 = B()
+
+  //   def forward(self, x):
+  //     return self.A0.forward(self.B0.forward(x))
+
   std::unordered_set<std::string> expected_result(
       {"top(C).A0(A).forward", "top(C).B0(B).forward"});
   AT_ASSERT(module_debug_info_set == expected_result);
@@ -549,9 +591,11 @@ TEST(LiteInterpreterTest, HierarchyModuleInfo) {
   // There are 3 module information strings here.
   // "top(C).forward": for the add operator in top.
   // "top(C).B0(B).forward": for the add operator in B0.
-  // "top(C).B0(B).A0(A).forward": for the add operator in A0.
+  // "top(C).B0(B).forward.A0(A).forward": for the add operator in A0.
   std::unordered_set<std::string> expected_result(
-      {"top(C).forward", "top(C).B0(B).forward", "top(C).B0(B).A0(A).forward"});
+      {"top(C).forward",
+       "top(C).B0(B).forward",
+       "top(C).B0(B).forward.A0(A).forward"});
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
@@ -587,11 +631,29 @@ TEST(LiteInterpreterTest, DuplicatedClassTypeModuleInfo) {
     }
   }
 
-  // The current approach is not able to distinguish between A0 and A1,
-  // which have the same class type. Hence, it only records module
-  // information for A1.
+  // class A(nn.Module):
+  //   def __init__(self):
+  //     super(A, self).__init__()
+
+  //   def forward(self, x):
+  //     return x + 5
+
+  // class B(nn.Module):
+  //   def __init__(self):
+  //     super(B, self).__init__()
+  //     self.A0 = A()
+  //     self.A1 = A()
+
+  //   def forward(self, x):
+  //     return self.A0.forward(x) + self.A1.forward(x)
+
+  // There are 3 module information strings here.
+  // "top(B).forward": for the add operator in top.
+  // "top(B).A0(A).forward": for the add operator in A0.
+  // "top(B).A1(A).forward": for the add operator in A1.
+
   std::unordered_set<std::string> expected_result(
-      {"top(B).forward", "top(B).A1(A).forward"});
+      {"top(B).forward", "top(B).A0(A).forward", "top(B).A1(A).forward"});
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
@@ -693,6 +755,31 @@ TEST(LiteInterpreterTest, RunMethodVariadic) {
   auto resd = res.toTensor().item<float>();
   auto refd = ref.toTensor().item<float>();
   AT_ASSERT(resd == refd);
+}
+
+TEST(LiteInterpreterTest, ExtraFiles) {
+  const auto script = R"JIT(
+    def forward(self):
+        x = torch.rand(5, 5)
+        x = x.mm(x)
+        return x
+  )JIT";
+
+  auto module =
+      std::make_shared<Module>("Module", std::make_shared<CompilationUnit>());
+  module->define(script);
+  std::ostringstream oss;
+  std::unordered_map<std::string, std::string> extra_files;
+  extra_files["metadata.json"] = "abc";
+  module->_save_for_mobile(oss, extra_files);
+
+  std::istringstream iss(oss.str());
+  caffe2::serialize::IStreamAdapter adapter{&iss};
+  std::unordered_map<std::string, std::string> loaded_extra_files;
+  loaded_extra_files["metadata.json"] = "";
+  auto loaded_module =
+      torch::jit::_load_for_mobile(iss, torch::kCPU, loaded_extra_files);
+  ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
 }
 
 namespace {

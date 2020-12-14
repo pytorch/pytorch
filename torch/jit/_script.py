@@ -443,7 +443,7 @@ if _enabled:
             Returns a string representation of the internal graph for the
             ``forward`` method. See :ref:`interpreting-graphs` for details.
             """
-            return self.forward.graph
+            return self._c._get_method("forward").graph
 
         @property
         def inlined_graph(self):

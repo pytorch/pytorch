@@ -26,12 +26,13 @@ void onnxifi(
     const std::vector<std::string>& output_names,
     const std::vector<std::string>& weight_names,
     const std::unordered_set<int>& blacklist,
-    const ShapeInfoMap& shape_hints,
+    const ShapeInfoMap& shape_hints_max_bs,
     bool use_onnx,
     size_t max_batch_size = 0,
     size_t max_seq_size = 0,
     bool load_model_by_blob = false,
-    bool predictor_net_ssa_rewritten = false);
+    bool predictor_net_ssa_rewritten = false,
+    const std::unordered_map<int, ShapeInfoMap> &shape_hints_per_bs = {});
 
 std::unordered_set<int> ParseNetPositionList(const std::string& str);
 std::unordered_set<std::string> ParseBlackListOps(const std::string& str);

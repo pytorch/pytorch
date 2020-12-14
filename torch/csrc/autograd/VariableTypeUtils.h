@@ -39,29 +39,35 @@ using namespace torch::autograd::generated;
 
 namespace torch { namespace autograd {
 
-inline void check_inplace(const Tensor& tensor) {
-  auto& var = static_cast<const Variable&>(tensor);
-  if (var.requires_grad() && GradMode::is_enabled()) {
-    if (var.is_view()) {
+// The requires_grad argument is used to know if the inplace operation needs
+// gradient to be setup for it.
+// In particular, we can have tensor.requires_grad() != requires_grad when writing
+// a Tensor that requires gradients inplace into a Tensor that does not require gradients:
+// a = torch.rand(2)
+// b = torch.rand(2, requires_grad=True)
+// a.copy_(b)
+inline void check_inplace(const Tensor& tensor, bool requires_grad) {
+  if (requires_grad && GradMode::is_enabled()) {
+    if (tensor.is_view()) {
       // NB: is_view() ==> get_autograd_meta()
-      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(var));
+      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(tensor));
       // This can throw or warn
       handle_view_on_rebase(diff_view_meta);
-      if (tensor._base().is_leaf()) {
+      if (tensor.requires_grad() && tensor._base().is_leaf()) {
           AT_ERROR(
             "a view of a leaf Variable that requires grad is being used in an in-place operation.");
       }
     }
-    if (var.is_leaf()) {
+    if (tensor.requires_grad() && tensor.is_leaf()) {
       AT_ERROR(
         "a leaf Variable that requires grad is being used in an in-place operation.");
     }
   }
 }
 
-inline void check_inplace(const TensorList tensors) {
+inline void check_inplace(const TensorList tensors, bool requires_grad) {
   for (const auto& tensor : tensors) {
-    check_inplace(tensor);
+    check_inplace(tensor, requires_grad);
   }
 }
 
@@ -128,7 +134,7 @@ template<typename... Args> inline variable_list flatten_tensor_args(Args&&... ar
 }
 
 // See NOTE [ Autograd View Variables ] for details.
-inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable,
+inline Tensor as_view(const Tensor & base, const Tensor& tensor, bool is_differentiable,
         c10::optional<std::function<Tensor(const Tensor&)>> view_func=c10::nullopt,
         CreationMeta creation_meta=CreationMeta::DEFAULT) {
   auto base_var = Variable(base);
@@ -188,16 +194,16 @@ inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable
     base_var = base_var._base();
   }
   if (is_differentiable) {
-    return make_variable_differentiable_view(std::move(base_var), std::move(tensor), creation_meta, std::move(view_func));
+    return make_variable_differentiable_view(std::move(base_var), tensor, creation_meta, std::move(view_func));
   } else {
     TORCH_CHECK(creation_meta == CreationMeta::DEFAULT,
                 "Non-differentiable views must have creation_meta=CreationMeta::DEFAULT");
-    return make_variable_non_differentiable_view(std::move(base_var), std::move(tensor));
+    return make_variable_non_differentiable_view(std::move(base_var), tensor);
   }
 }
 
 // See NOTE [ Autograd View Variables ] for details.
-inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tensors, bool is_differentiable,
+inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& tensors, bool is_differentiable,
                                    CreationMeta creation_meta=CreationMeta::DEFAULT) {
   auto base_var = Variable(base);
   if (base_var.is_view()) {
@@ -205,11 +211,11 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tens
   }
   for(Tensor &tensor : tensors) {
     if (is_differentiable) {
-      tensor = make_variable_differentiable_view(base_var, std::move(tensor), creation_meta);
+      tensor = make_variable_differentiable_view(base_var, tensor, creation_meta);
     } else {
       TORCH_CHECK(creation_meta == CreationMeta::DEFAULT,
                   "Non-differentiable views must have creation_meta=CreationMeta::DEFAULT");
-      tensor = make_variable_non_differentiable_view(base_var, std::move(tensor));
+      tensor = make_variable_non_differentiable_view(base_var, tensor);
     }
   }
   return tensors;

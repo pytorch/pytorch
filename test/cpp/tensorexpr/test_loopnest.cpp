@@ -1,3 +1,5 @@
+#include <gtest/gtest.h>
+
 #include <test/cpp/tensorexpr/test_base.h>
 #include <memory>
 #include <sstream>
@@ -20,7 +22,7 @@ namespace jit {
 
 using namespace torch::jit::tensorexpr;
 
-void testExprSimple01() {
+TEST(LoopNest, ExprSimple01) {
   KernelScope kernel_scope;
   Tensor* tensor = Compute(
       "f", {{16, "X"}, {5, "y"}}, [](const VarHandle& x, const VarHandle& y) {
@@ -39,7 +41,7 @@ void testExprSimple01() {
   l.splitWithTail(x_outer, 2, &x_2, &x_1, &x_tail_2);
 }
 
-void testExprLower01() {
+TEST(LoopNest, ExprLower01) {
   KernelScope kernel_scope;
   Tensor* tensor = Compute(
       "f", {{16, "x"}, {5, "y"}}, [](const VarHandle& x, const VarHandle& y) {
@@ -53,7 +55,7 @@ void testExprLower01() {
   ASSERT_LT(oss.str().size(), 200);
 }
 
-void testExprSimple02() {
+TEST(LoopNest, ExprSimple02) {
   KernelScope kernel_scope;
   auto func = [](const ExprHandle& x, const ExprHandle& y) {
     return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
@@ -149,7 +151,7 @@ void assertForRanges(
   }
 }
 
-void testExprSliceHeadWithLoopOptions() {
+TEST(LoopNest, ExprSliceHeadWithLoopOptions) {
   KernelScope kernel_scope;
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
@@ -171,7 +173,7 @@ void testExprSliceHeadWithLoopOptions() {
   ASSERT_TRUE(head->loop_options().isDefault());
 }
 
-void testExprSliceTailWithLoopOptions() {
+TEST(LoopNest, ExprSliceTailWithLoopOptions) {
   KernelScope kernel_scope;
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
@@ -198,7 +200,7 @@ void testExprSliceTailWithLoopOptions() {
   ASSERT_TRUE(tail_tail->loop_options().isDefault());
 }
 
-void testExprSliceHeadWhenFactorEqualsSize() {
+TEST(LoopNest, ExprSliceHeadWhenFactorEqualsSize) {
   // When factor equals the For loop's original size, keep using the original
   // For loop.
   KernelScope kernel_scope;
@@ -219,7 +221,7 @@ void testExprSliceHeadWhenFactorEqualsSize() {
   assertForRanges(body, {{0, 10}});
 }
 
-void testExprSliceHeadWhenFactorLargerThanSize() {
+TEST(LoopNest, ExprSliceHeadWhenFactorLargerThanSize) {
   KernelScope kernel_scope;
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
@@ -238,7 +240,7 @@ void testExprSliceHeadWhenFactorLargerThanSize() {
   assertForRanges(body, {{0, 10}});
 }
 
-void testExprSliceHead() {
+TEST(LoopNest, ExprSliceHead) {
   KernelScope kernel_scope;
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
@@ -259,7 +261,7 @@ void testExprSliceHead() {
   assertForRanges(body, {{0, 4}, {4, 10}});
 }
 
-void testExprSliceHeadWithNonZeroStart() {
+TEST(LoopNest, ExprSliceHeadWithNonZeroStart) {
   KernelScope kernel_scope;
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
@@ -284,7 +286,7 @@ void testExprSliceHeadWithNonZeroStart() {
   assertForRanges(body, {{0, 6}, {6, 8}, {8, 10}});
 }
 
-void testExprSliceTailWhenFactorEqualsSize() {
+TEST(LoopNest, ExprSliceTailWhenFactorEqualsSize) {
   // When factor equals the For loop's original size, keep using the original
   // For loop.
   KernelScope kernel_scope;
@@ -305,7 +307,7 @@ void testExprSliceTailWhenFactorEqualsSize() {
   assertForRanges(body, {{0, 10}});
 }
 
-void testExprSliceTailWhenFactorLargerThanSize() {
+TEST(LoopNest, ExprSliceTailWhenFactorLargerThanSize) {
   // When factor equals the For loop's original size, keep using the original
   // For loop.
   KernelScope kernel_scope;
@@ -326,7 +328,7 @@ void testExprSliceTailWhenFactorLargerThanSize() {
   assertForRanges(body, {{0, 10}});
 }
 
-void testExprSliceTail() {
+TEST(LoopNest, ExprSliceTail) {
   KernelScope kernel_scope;
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
@@ -347,7 +349,7 @@ void testExprSliceTail() {
   assertForRanges(body, {{0, 6}, {6, 10}});
 }
 
-void testExprSplitAndSlice() {
+TEST(LoopNest, ExprSplitAndSlice) {
   // 0: splitWithTail
   // 1: sliceTail on inner loop
   // 2: sliceHead on outer loop
@@ -406,7 +408,7 @@ void testExprSplitAndSlice() {
   assertForRanges(loop->body(), {{0, 19}, {19, 21}});
 }
 
-void testExprSliceAndNormalize() {
+TEST(LoopNest, ExprSliceAndNormalize) {
   // 0: sliceHead
   // 1: normalize tail
   KernelScope kernel_scope;
@@ -437,7 +439,7 @@ T evalExpr(const ExprHandle& expr, const VarHandle& var, T value) {
   return eval.value<T>(value);
 }
 
-void testExprSliceWithVariableDimension() {
+TEST(LoopNest, ExprSliceWithVariableDimension) {
   auto testWithDimension =
       [](int dimension,
          const std::vector<std::pair<int, int>>& expected_for_ranges) {
@@ -476,7 +478,7 @@ void testExprSliceWithVariableDimension() {
   testWithDimension(10, {{0, 2}, {2, 8}, {8, 10}});
 }
 
-void testExprSplitWithTail() {
+TEST(LoopNest, ExprSplitWithTail) {
   KernelScope kernel_scope;
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
@@ -511,7 +513,7 @@ void testExprSplitWithTail() {
   assertForRange(loop, 0, 12);
 }
 
-void testExprSplitWithTailNone() {
+TEST(LoopNest, ExprSplitWithTailNone) {
   KernelScope kernel_scope;
   auto func = [](const ExprHandle& x, const ExprHandle& y) {
     return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
@@ -571,7 +573,7 @@ void testExprSplitWithTailNone() {
   }
 }
 
-void testExprSplitWithMask01() {
+TEST(LoopNest, ExprSplitWithMask01) {
   KernelScope kernel_scope;
   const int M = 26;
   const int N = 5;
@@ -609,7 +611,7 @@ void testExprSplitWithMask01() {
 
 // Tests the case where we split a loop cleanly multiple times, we should not
 // insert any masks.
-void testExprSplitWithMaskRepeatedNoMask() {
+TEST(LoopNest, ExprSplitWithMaskRepeatedNoMask) {
   KernelScope kernel_scope;
   const int M = 64;
   Placeholder a_buf("a", kFloat, {M});
@@ -641,7 +643,7 @@ void testExprSplitWithMaskRepeatedNoMask() {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
-void testSplitWithTailWithLoopOptions() {
+TEST(LoopNest, SplitWithTailWithLoopOptions) {
   KernelScope kernel_scope;
   const int M = 21;
   Placeholder a_buf("a", kFloat, {M});
@@ -671,7 +673,7 @@ void testSplitWithTailWithLoopOptions() {
   ASSERT_TRUE(tail->loop_options().isDefault());
 }
 
-void testSplitWithMaskWithLoopOptions() {
+TEST(LoopNest, SplitWithMaskWithLoopOptions) {
   KernelScope kernel_scope;
   const int M = 21;
   Placeholder a_buf("a", kFloat, {M});
@@ -694,7 +696,7 @@ void testSplitWithMaskWithLoopOptions() {
   ASSERT_TRUE(inner->loop_options().isDefault());
 }
 
-void testScheduleBroadcastAddBuffer() {
+TEST(LoopNest, ScheduleBroadcastAddBuffer) {
   KernelScope kernel_scope;
   const int M = 4;
   const int N = 5;
@@ -743,7 +745,7 @@ void testScheduleBroadcastAddBuffer() {
   ExpectAllNear(c_v, c_ref, 1e-5);
 }
 
-void testScheduleFunctionCall01() {
+TEST(LoopNest, ScheduleFunctionCall01) {
   KernelScope kernel_scope;
   const int M = 4;
   const int N = 5;
@@ -800,7 +802,7 @@ void testScheduleFunctionCall01() {
   ExpectAllNear(d_v, d_ref, 1e-5);
 }
 
-void testScheduleInlineSimple() {
+TEST(LoopNest, ScheduleInlineSimple) {
   KernelScope kernel_scope;
   const int M = 4;
   const int N = 5;
@@ -991,7 +993,7 @@ void InlineFunc01Helper(const std::vector<std::string>& inline_order) {
   }
 }
 
-void testScheduleInlineFunc01() {
+TEST(LoopNest, ScheduleInlineFunc01) {
   InlineFunc01Helper({"x", "y"});
   InlineFunc01Helper({"y", "x"});
   InlineFunc01Helper({"x"});
@@ -1000,7 +1002,7 @@ void testScheduleInlineFunc01() {
 }
 
 // Make sure we cache random vars if we should.
-void testScheduleInlineRandom() {
+TEST(LoopNest, ScheduleInlineRandom) {
   KernelScope kernel_scope;
   const int M = 4;
   const int N = 5;
@@ -1040,7 +1042,7 @@ void testScheduleInlineRandom() {
 }
 
 // Make sure we don't cache random vars that are not being inlined.
-void testScheduleInlineRandomUnrelated() {
+TEST(LoopNest, ScheduleInlineRandomUnrelated) {
   KernelScope kernel_scope;
   const int M = 4;
   const int N = 5;
@@ -1081,7 +1083,7 @@ void testScheduleInlineRandomUnrelated() {
 
 // Make sure we generate the right number of random values == the dimensionality
 // of the production tensor.
-void testScheduleInlineRandomLowerDimensions() {
+TEST(LoopNest, ScheduleInlineRandomLowerDimensions) {
   KernelScope kernel_scope;
   const int M = 4;
   const int N = 5;
@@ -1118,7 +1120,7 @@ void testScheduleInlineRandomLowerDimensions() {
 }
 
 // Make sure we don't screw up intrinsics thinking they're rand.
-void testScheduleInlineIntrinsics() {
+TEST(LoopNest, ScheduleInlineIntrinsics) {
   KernelScope kernel_scope;
   const int M = 4;
   const int N = 5;
@@ -1179,7 +1181,7 @@ void testScheduleInlineIntrinsics() {
 }
 
 // Make sure we can handle rand and non-rand intrinsics.
-void testScheduleInlineRandWithIntrinsics() {
+TEST(LoopNest, ScheduleInlineRandWithIntrinsics) {
   KernelScope kernel_scope;
   const int M = 4;
   const int N = 5;
@@ -1218,7 +1220,7 @@ void testScheduleInlineRandWithIntrinsics() {
 }
 
 // Split a Compute then inline it into another compute.
-void testScheduleSplitAThenInline() {
+TEST(LoopNest, ScheduleSplitAThenInline) {
   KernelScope kernel_scope;
   Tensor* a =
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
@@ -1237,7 +1239,7 @@ void testScheduleSplitAThenInline() {
 }
 
 // Split a Compute then inline another Compute into it.
-void testScheduleSplitBThenInline() {
+TEST(LoopNest, ScheduleSplitBThenInline) {
   KernelScope kernel_scope;
   Tensor* a =
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
@@ -1266,7 +1268,7 @@ void testScheduleSplitBThenInline() {
 }
 
 // Split a Compute twice then inline it.
-void testScheduleSplitTwiceThenInline() {
+TEST(LoopNest, ScheduleSplitTwiceThenInline) {
   KernelScope kernel_scope;
   Tensor* a =
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
@@ -1286,7 +1288,7 @@ void testScheduleSplitTwiceThenInline() {
 }
 
 // Inline a Compute, then split.
-void testScheduleInlineThenSplit() {
+TEST(LoopNest, ScheduleInlineThenSplit) {
   KernelScope kernel_scope;
   Tensor* a =
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
@@ -1315,7 +1317,7 @@ void testScheduleInlineThenSplit() {
 }
 
 // Split a Compute, inline it, then split the result.
-void testScheduleSplitInlineThenSplit() {
+TEST(LoopNest, ScheduleSplitInlineThenSplit) {
   KernelScope kernel_scope;
   Tensor* a =
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
@@ -1346,7 +1348,7 @@ void testScheduleSplitInlineThenSplit() {
 }
 
 // Oversplit a loop that is simplified out after inlining.
-void testScheduleSplitInlineSimplify() {
+TEST(LoopNest, ScheduleSplitInlineSimplify) {
   KernelScope kernel_scope;
   Tensor* a = Compute("a", {{18, "i"}}, [&](const VarHandle& i) {
     return ExprHandle(4) * i - ExprHandle(2) * i;
@@ -1366,7 +1368,7 @@ void testScheduleSplitInlineSimplify() {
 }
 
 // Inline a Compute with two consumers.
-void testScheduleInlineThreeMixedOnce() {
+TEST(LoopNest, ScheduleInlineThreeMixedOnce) {
   KernelScope kernel_scope;
   Tensor* a =
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
@@ -1396,7 +1398,7 @@ void testScheduleInlineThreeMixedOnce() {
 }
 
 // Inline Compute A into B, then inline B into C.
-void testScheduleInlineThreeMixedTwice() {
+TEST(LoopNest, ScheduleInlineThreeMixedTwice) {
   KernelScope kernel_scope;
   Tensor* a =
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
@@ -1427,7 +1429,7 @@ void testScheduleInlineThreeMixedTwice() {
 }
 
 // Inline a Compute that is both a producer and consumer.
-void testScheduleInlineThreeMixedInner() {
+TEST(LoopNest, ScheduleInlineThreeMixedInner) {
   KernelScope kernel_scope;
   Tensor* a =
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
@@ -1457,7 +1459,7 @@ void testScheduleInlineThreeMixedInner() {
 }
 
 // Split 3 Computes, then inline the first two into the last.
-void testScheduleInlineThreeMixedSplit() {
+TEST(LoopNest, ScheduleInlineThreeMixedSplit) {
   KernelScope kernel_scope;
   Tensor* a =
       Compute("a", {{18, "i"}}, [&](const VarHandle& i) { return i * i; });
@@ -1482,7 +1484,50 @@ void testScheduleInlineThreeMixedSplit() {
   ASSERT_THROWS_WITH(l.computeInline(a->buf()), "compound indices");
 }
 
-void testScheduleFuserStyle() {
+// Check that inlining works for output tensors too
+TEST(LoopNest, ScheduleInlineOutputTensors) {
+  KernelScope kernel_scope;
+  const int M = 4;
+  const int N = 5;
+  const int K = 6;
+
+  Tensor* x = Compute(
+      "x",
+      {{M, "m1"}, {N, "n1"}, {K, "k1"}},
+      [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
+        return m * n * k;
+      });
+  Tensor* y = Compute(
+      "y",
+      {{M, "m2"}, {N, "n2"}, {K, "k2"}},
+      [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
+        return x->call(m, n, k) + m;
+      });
+
+  LoopNest l1({x, y});
+  l1.computeInline(x->buf());
+
+  // would normally compare results but Rand isn't implemented in the
+  // SimpleIREvaluator, even if we could seed it.
+  Stmt* stmt1 = IRSimplifier::simplify(l1.root_stmt());
+  std::ostringstream oss;
+  oss << *stmt1;
+
+  // Check the IR we produced
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int m1 = 0; m1 < 4; m1++)
+# CHECK:   for (int n1 = 0; n1 < 5; n1++)
+# CHECK:     for (int k1 = 0; k1 < 6; k1++)
+# CHECK:       x[m1, n1, k1] = (n1 * m1) * k1;
+# CHECK: for (int m2 = 0; m2 < 4; m2++)
+# CHECK:   for (int n2 = 0; n2 < 5; n2++)
+# CHECK:     for (int k2 = 0; k2 < 6; k2++)
+# CHECK:       y[m2, n2, k2] = (n2 * m2) * k2 + m2;)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(LoopNest, ScheduleFuserStyle) {
   KernelScope kernel_scope;
   const int kVectorSize = 8;
   const int kVectorCount = 128;
@@ -1515,7 +1560,7 @@ void testScheduleFuserStyle() {
   }
 }
 
-void testScheduleFuserThreeArg() {
+TEST(LoopNest, ScheduleFuserThreeArg) {
   KernelScope kernel_scope;
   const int kVectorSize = 8;
   const int kVectorCount = 128;
@@ -1554,7 +1599,7 @@ void testScheduleFuserThreeArg() {
   }
 }
 
-void testScheduleDynamicShape2D() {
+TEST(LoopNest, ScheduleDynamicShape2D) {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t M, int32_t N) {
     VarHandle m("m", kInt);
@@ -1579,7 +1624,7 @@ void testScheduleDynamicShape2D() {
   testWithSize(37, 11);
 }
 
-void testLoopNestComputeAt_1() {
+TEST(LoopNest, LoopNestComputeAt_1) {
   // Verify that compute_at works on the following example:
   //
   // for (int i_a = 0; i_a < N; i_a++) {
@@ -1632,7 +1677,7 @@ void testLoopNestComputeAt_1() {
   assertAllEqual(b_data, b_ref);
 }
 
-void testLoopNestComputeAt_2() {
+TEST(LoopNest, LoopNestComputeAt_2) {
   // Verify that compute_at works on the following example:
   //
   // for (int py = 0; py < H+1; py++) {
@@ -1734,7 +1779,7 @@ void testLoopNestComputeAt_2() {
   }
 }
 
-void testLoopNestComputeAt_3() {
+TEST(LoopNest, LoopNestComputeAt_3) {
   // Verify that compute_at works on the following example:
   //
   // A(x,y) = x*y
@@ -1852,7 +1897,7 @@ void testLoopNestComputeAt_3() {
   }
 }
 
-void testLoopNestComputeAt_4() {
+TEST(LoopNest, LoopNestComputeAt_4) {
   // TODO: Verify that computeAt works with reduction axis
 }
 
@@ -1872,7 +1917,7 @@ class LoopOrderHelper : public IRVisitor {
   }
 };
 
-void testLoopNestReorderAxis1() {
+TEST(LoopNest, LoopNestReorderAxis1) {
   KernelScope kernel_scope;
   Tensor* tensor = Compute(
       "f", {{2, "x"}, {3, "y"}}, [](const VarHandle& x, const VarHandle& y) {
@@ -1921,7 +1966,7 @@ void testLoopNestReorderAxis1() {
   ASSERT_EQ(oss1.str(), oss2.str());
 }
 
-void testLoopNestReorderPartialAxes() {
+TEST(LoopNest, LoopNestReorderPartialAxes) {
   KernelScope kernel_scope;
   Tensor* tensor = Compute(
       "f",
@@ -1969,7 +2014,7 @@ void testLoopNestReorderPartialAxes() {
   }
 }
 
-void testLoopNestReorderInternalAxis() {
+TEST(LoopNest, LoopNestReorderInternalAxis) {
   KernelScope kernel_scope;
   Tensor* tensor = Compute(
       "f",
@@ -2006,7 +2051,7 @@ void testLoopNestReorderInternalAxis() {
   }
 }
 
-void testLoopNestReorderEnclosingAxis() {
+TEST(LoopNest, LoopNestReorderEnclosingAxis) {
   KernelScope kernel_scope;
   Tensor* tensor = Compute(
       "f",
@@ -2042,7 +2087,7 @@ void testLoopNestReorderEnclosingAxis() {
   }
 }
 
-void testLoopNestReorderSameAxis() {
+TEST(LoopNest, LoopNestReorderSameAxis) {
   KernelScope kernel_scope;
   Tensor* tensor = Compute(
       "f", {{2, "x"}, {3, "y"}}, [](const VarHandle& x, const VarHandle& y) {
@@ -2061,7 +2106,7 @@ void testLoopNestReorderSameAxis() {
   ASSERT_EQ(oss.str(), oss2.str());
 }
 
-void testLoopNestReorderExtraStatements() {
+TEST(LoopNest, LoopNestReorderExtraStatements) {
   /* We're going for a structure like this:
    * for x in ...
    *   Stmt 1
@@ -2299,7 +2344,7 @@ void LoopNestReorderTestHelper(
   }
 }
 
-void testLoopNestReorderLongStringOfPreOrphans() {
+TEST(LoopNest, LoopNestReorderLongStringOfPreOrphans) {
   for (int i = 0; i < 5; ++i) {
     for (int j = 0; j < 5; ++j) {
       // skip noops, since we check the loop isn't the same after reordering.
@@ -2310,7 +2355,7 @@ void testLoopNestReorderLongStringOfPreOrphans() {
   }
 }
 
-void testLoopNestReorderLongStringOfPostOrphans() {
+TEST(LoopNest, LoopNestReorderLongStringOfPostOrphans) {
   for (int i = 0; i < 5; ++i) {
     for (int j = 0; j < 5; ++j) {
       // skip noops, since we check the loop isn't the same after reordering.
@@ -2321,7 +2366,7 @@ void testLoopNestReorderLongStringOfPostOrphans() {
   }
 }
 
-void testLoopNestReorderLongStringFull() {
+TEST(LoopNest, LoopNestReorderLongStringFull) {
   for (int i = 0; i < 5; ++i) {
     for (int j = 0; j < 5; ++j) {
       // skip noops, since we check the loop isn't the same after reordering.
@@ -2332,7 +2377,7 @@ void testLoopNestReorderLongStringFull() {
   }
 }
 
-void testLoopNestReorderInternalLoopNest() {
+TEST(LoopNest, LoopNestReorderInternalLoopNest) {
   KernelScope kernel_scope;
   const int M = 4;
   const int N = 5;
@@ -2438,7 +2483,7 @@ void testLoopNestReorderInternalLoopNest() {
   }
 }
 
-void testOuterLoopVectorization() {
+TEST(LoopNest, OuterLoopVectorization) {
   KernelScope kernel_scope;
   Tensor* tensor = Compute(
       "f", {{8, "X"}, {8, "y"}}, [](const VarHandle& x, const VarHandle& y) {
@@ -2483,7 +2528,7 @@ std::string constantUpperBoundLoopIR(int upper_bound_val) {
 
 } // namespace
 
-void testUnroll() {
+TEST(LoopNest, Unroll) {
   const std::string actual = constantUpperBoundLoopIR(3);
   const std::string& verification_pattern =
       R"IR(
@@ -2494,7 +2539,7 @@ void testUnroll() {
   torch::jit::testing::FileCheck().run(verification_pattern, actual);
 }
 
-void testUnrollOuter() {
+TEST(LoopNest, UnrollOuter) {
   KernelScope kernel_scope;
   ExprHandle outer_bound(3);
   ExprHandle inner_bound(4);
@@ -2523,7 +2568,7 @@ void testUnrollOuter() {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
-void testUnrollInner() {
+TEST(LoopNest, UnrollInner) {
   KernelScope kernel_scope;
   ExprHandle outer_bound(3);
   ExprHandle inner_bound(4);
@@ -2550,7 +2595,7 @@ void testUnrollInner() {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
-void testUnrollMultipleStatements() {
+TEST(LoopNest, UnrollMultipleStatements) {
   KernelScope kernel_scope;
   const int kTotalSize = 3;
   BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
@@ -2580,7 +2625,7 @@ void testUnrollMultipleStatements() {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
-void testUnrollEmpty() {
+TEST(LoopNest, UnrollEmpty) {
   const std::string actual = constantUpperBoundLoopIR(0);
   const std::string& verification_pattern = R"IR(
 # CHECK-NOT: A[
@@ -2589,7 +2634,7 @@ void testUnrollEmpty() {
   torch::jit::testing::FileCheck().run(verification_pattern, actual);
 }
 
-void testNoUnroll() {
+TEST(LoopNest, NoUnroll) {
   KernelScope kernel_scope;
   VarHandle upper_bound("N", kInt);
   Tensor* A = Compute(
@@ -2601,7 +2646,7 @@ void testNoUnroll() {
       LoopNest::unroll(loops[0], &unrolled), "non-constant loop");
 }
 
-void testUnrollWithLet() {
+TEST(LoopNest, UnrollWithLet) {
   KernelScope kernel_scope;
   const int kTotalSize = 3;
   BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
@@ -2643,7 +2688,7 @@ void testUnrollWithLet() {
   }
 }
 
-void testNormalizeStartPositive() {
+TEST(LoopNest, NormalizeStartPositive) {
   KernelScope kernel_scope;
 
   // Input IR:
@@ -2676,7 +2721,7 @@ void testNormalizeStartPositive() {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-void testNormalizeStartNegative() {
+TEST(LoopNest, NormalizeStartNegative) {
   KernelScope kernel_scope;
 
   // Input IR:
@@ -2709,7 +2754,7 @@ void testNormalizeStartNegative() {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-void testNormalizeStartZero() {
+TEST(LoopNest, NormalizeStartZero) {
   KernelScope kernel_scope;
 
   // Input IR:
@@ -2744,7 +2789,7 @@ void testNormalizeStartZero() {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-void testNormalizeStartVariable() {
+TEST(LoopNest, NormalizeStartVariable) {
   KernelScope kernel_scope;
 
   // Input IR:
@@ -2779,7 +2824,7 @@ void testNormalizeStartVariable() {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-void testNormalizeOnNestedOuterLoop() {
+TEST(LoopNest, NormalizeOnNestedOuterLoop) {
   KernelScope kernel_scope;
 
   // Input IR:
@@ -2817,7 +2862,7 @@ void testNormalizeOnNestedOuterLoop() {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-void testNormalizeOnNestedInnerLoop() {
+TEST(LoopNest, NormalizeOnNestedInnerLoop) {
   KernelScope kernel_scope;
 
   // Input IR:
@@ -2855,7 +2900,7 @@ void testNormalizeOnNestedInnerLoop() {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-void testNormalizeAndSplitWithTail() {
+TEST(LoopNest, NormalizeAndSplitWithTail) {
   KernelScope kernel_scope;
 
   // Create a dummy tensor to construct LoopNest.
@@ -2904,7 +2949,7 @@ void testNormalizeAndSplitWithTail() {
   torch::jit::testing::FileCheck().run(expected_tail_ir, oss_tail.str());
 }
 
-void testFlattenSimpleLoopNest2D() {
+TEST(LoopNest, FlattenSimpleLoopNest2D) {
   KernelScope kernel_scope;
 
   // Input IR:
@@ -2947,7 +2992,7 @@ void testFlattenSimpleLoopNest2D() {
   }
 }
 
-void testFlattenSimpleLoopNest3D() {
+TEST(LoopNest, FlattenSimpleLoopNest3D) {
   KernelScope kernel_scope;
 
   // Input IR:
@@ -2994,7 +3039,7 @@ void testFlattenSimpleLoopNest3D() {
   }
 }
 
-void testFlattenLoopNestAfterNormalize() {
+TEST(LoopNest, FlattenLoopNestAfterNormalize) {
   KernelScope kernel_scope;
 
   // Input IR:
@@ -3037,7 +3082,7 @@ void testFlattenLoopNestAfterNormalize() {
   }
 }
 
-void testFlattenImperfectLoopNest() {
+TEST(LoopNest, FlattenImperfectLoopNest) {
   KernelScope kernel_scope;
 
   // Input IR:
@@ -3076,7 +3121,7 @@ void testFlattenImperfectLoopNest() {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-void testFlattenReductionLoopNest() {
+TEST(LoopNest, FlattenReductionLoopNest) {
   KernelScope kernel_scope;
 
   // Input IR:
@@ -3120,7 +3165,7 @@ void testFlattenReductionLoopNest() {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-void testFlattenReductionLoopNestFromTensor() {
+TEST(LoopNest, FlattenReductionLoopNestFromTensor) {
   KernelScope kernel_scope;
   const int M = 3;
   const int N = 7;
@@ -3147,7 +3192,7 @@ void testFlattenReductionLoopNestFromTensor() {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-void testFlattenIncorrectLoopsAsInput() {
+TEST(LoopNest, FlattenIncorrectLoopsAsInput) {
   KernelScope kernel_scope;
 
   // Input IR:
@@ -3194,7 +3239,7 @@ void testFlattenIncorrectLoopsAsInput() {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-void testDetectInlineRankMismatch() {
+TEST(LoopNest, DetectInlineRankMismatch) {
   KernelScope kernel_scope;
   const int kTotalSize = 8;
 
@@ -3212,7 +3257,7 @@ void testDetectInlineRankMismatch() {
       "Placeholder indexed access is inconsistent with its rank");
 }
 
-void testCacheReadsSimple() {
+TEST(LoopNest, CacheReadsSimple) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
@@ -3285,7 +3330,7 @@ void testCacheReadsSimple() {
   assertAllEqual(c_data, c_ref);
 }
 
-void testCacheReadsOuter() {
+TEST(LoopNest, CacheReadsOuter) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
@@ -3337,7 +3382,7 @@ void testCacheReadsOuter() {
   assertAllEqual(c_data, c_ref);
 }
 
-void testCacheReadsInternal() {
+TEST(LoopNest, CacheReadsInternal) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
@@ -3388,7 +3433,7 @@ void testCacheReadsInternal() {
   assertAllEqual(c_data, c_ref);
 }
 
-void testCacheReadsInner() {
+TEST(LoopNest, CacheReadsInner) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
@@ -3440,7 +3485,7 @@ void testCacheReadsInner() {
   assertAllEqual(c_data, c_ref);
 }
 
-void testCacheWritesSimple() {
+TEST(LoopNest, CacheWritesSimple) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
@@ -3494,6 +3539,200 @@ void testCacheWritesSimple() {
 
   assertAllEqual(b_data, b_ref);
   assertAllEqual(c_data, c_ref);
+}
+
+TEST(LoopNest, DeadStoreElimination) {
+  KernelScope kernel_scope;
+  VarHandle y("y", kInt);
+  VarHandle x("x_tail", kInt);
+  BufHandle f("f", {26, 5}, kFloat);
+  BufHandle g("g", {26, 5}, kFloat);
+  ExprHandle x_outer_end = 5;
+  ExprHandle x_2 = x + x_outer_end * 4;
+  For* stmt1 = For::make(
+      x,
+      0,
+      5,
+      For::make(
+          y,
+          0,
+          5,
+          Block::make({
+              Store::make(f, {x_2, y}, (x_2 + y), 1),
+              Store::make(g, {x_2, y}, (x_2 * y), 1),
+          })));
+  Stmt* stmt = Block::make({stmt1});
+
+  // Will eliminate if not used by an output.
+  LoopNest loop(stmt, {f.node()}, {}, {});
+  loop.eliminateDeadStores();
+
+  std::ostringstream oss;
+  oss << *loop.root_stmt();
+
+  const std::string& expected_ir =
+      R"IR(
+#CHECK:     f[x_tail + 5 * 4, y]
+#CHECK-NOT: g[x_tail + 5 * 4, y]
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  // But won't eliminate if used by different outputs.
+  LoopNest loop2(stmt, {f.node(), g.node()}, {}, {});
+  loop2.eliminateDeadStores();
+
+  oss.clear();
+  oss << *loop2.root_stmt();
+
+  const std::string& expected_ir2 =
+      R"IR(
+#CHECK:     f[x_tail + 5 * 4, y]
+#CHECK:     g[x_tail + 5 * 4, y]
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir2, oss.str());
+}
+
+TEST(LoopNest, DeadStoreEliminationWithIntermediates) {
+  KernelScope kernel_scope;
+  VarHandle x("x", kInt);
+  VarHandle y("y", kInt);
+  VarHandle z("z", kInt);
+  BufHandle f("f", {26 * 5}, kFloat);
+  BufHandle g("g", {26 * 5}, kFloat);
+  BufHandle h("h", {26, 5}, kFloat);
+  ExprHandle x_outer_end = 5;
+  ExprHandle x_2 = x + x_outer_end * 4;
+  For* stmt1 = For::make(x, 0, 26 * 5, Store::make(f, {x}, x));
+  For* stmt2 = For::make(z, 0, 26 * 5, Store::make(g, {z}, z + 1));
+  For* stmt3 = For::make(
+      x,
+      0,
+      5,
+      For::make(
+          y,
+          0,
+          5,
+          Block::make({
+              Store::make(h, {x, y}, Load::make(f, {x * y}, 1), 1),
+          })));
+  Stmt* stmt = Block::make({stmt1, stmt2, stmt3});
+
+  // Will eliminate the write to g, but not f since it used by the producer of
+  // h.
+  LoopNest loop(stmt, {h.node()}, {}, {});
+  loop.eliminateDeadStores();
+
+  std::ostringstream oss;
+  oss << *loop.root_stmt();
+
+  const std::string& expected_ir =
+      R"IR(
+  #CHECK:     f[x] = x;
+  #CHECK-NOT: g[z] =
+  #CHECK:     h[x, y] = f[x * y];
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  // Sanity check won't eliminate if g is an output.
+  LoopNest loop2(stmt, {h.node(), g.node()}, {}, {});
+  loop2.eliminateDeadStores();
+
+  oss.clear();
+  oss << *loop2.root_stmt();
+
+  const std::string& expected_ir2 =
+      R"IR(
+  #CHECK:     f[x] = x;
+  #CHECK:     g[z] = z + 1;
+  #CHECK:     h[x, y] = f[x * y];
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir2, oss.str());
+}
+
+TEST(LoopNest, CompoundTensorSimple) {
+  KernelScope kernel_scope;
+
+  BufHandle a_buf("A", {10, 5}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle x("x", kInt);
+  VarHandle y("y", kInt);
+  auto for_body1 = Block::make({Store::make(a_buf, {i, j}, i * j, 1)});
+  auto inner_for1 = For::make(j, 0, 5, for_body1);
+  auto outer_for1 = For::make(i, 0, 10, inner_for1);
+  auto for_body2 = Block::make(
+      {Store::make(a_buf, {x, y}, Load::make(a_buf, {x, y}, 1) + x + y, 1)});
+  auto inner_for2 = For::make(y, 0, 5, for_body2);
+  auto outer_for2 = For::make(x, 0, 10, inner_for2);
+  Block* body = Block::make({outer_for1, outer_for2});
+
+  Tensor* A = new CompoundTensor(a_buf.node(), {i.node(), j.node()}, body);
+
+  LoopNest l({A});
+  l.prepareForCodegen();
+
+  std::vector<int> a_data(50, 0);
+
+  Stmt* s = IRSimplifier::simplify(l.root_stmt());
+  SimpleIREvaluator cg(s, {A});
+
+  std::vector<int> a_ref(50, 0);
+
+  for (int i = 0; i < 10; ++i) {
+    for (int j = 0; j < 5; ++j) {
+      a_ref[i * 5 + j] = (i * j) + i + j;
+    }
+  }
+  cg.call({a_data});
+
+  assertAllEqual(a_data, a_ref);
+}
+
+TEST(LoopNest, CompoundTensorUsed) {
+  KernelScope kernel_scope;
+
+  BufHandle a_buf("A", {10, 5}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle x("x", kInt);
+  VarHandle y("y", kInt);
+  auto for_body1 = Block::make({Store::make(a_buf, {i, j}, i * j, 1)});
+  auto inner_for1 = For::make(j, 0, 5, for_body1);
+  auto outer_for1 = For::make(i, 0, 10, inner_for1);
+  auto for_body2 = Block::make(
+      {Store::make(a_buf, {x, y}, Load::make(a_buf, {x, y}, 1) + x + y, 1)});
+  auto inner_for2 = For::make(y, 0, 5, for_body2);
+  auto outer_for2 = For::make(x, 0, 10, inner_for2);
+  Block* body = Block::make({outer_for1, outer_for2});
+
+  Tensor* A = new CompoundTensor(a_buf.node(), {i.node(), j.node()}, body);
+  Tensor* B = Compute(
+      "B", {{10, "i"}, {3, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+        return A->call(i, j + 1) + A->call(i, j + 2);
+      });
+
+  LoopNest l({B});
+  ASSERT_FALSE(l.computeInline(A->buf()));
+  l.prepareForCodegen();
+
+  std::vector<int> a_data(50, 0);
+  std::vector<int> b_data(50, 0);
+
+  Stmt* s = IRSimplifier::simplify(l.root_stmt());
+  std::cout << *s << "\n ";
+  SimpleIREvaluator cg(s, {B});
+
+  std::vector<int> b_ref(50, 0);
+
+  auto AT = [](int i, int j) { return i * j + i + j; };
+  for (int i = 0; i < 10; ++i) {
+    for (int j = 0; j < 3; ++j) {
+      b_ref[i * 3 + j] = AT(i, j + 1) + AT(i, j + 2);
+    }
+  }
+  cg.call({b_data});
+
+  assertAllEqual(b_data, b_ref);
 }
 
 } // namespace jit

@@ -11,12 +11,13 @@ from torch import nn
 from torch.distributed._pipeline.sync import Pipe
 from torch.distributed._pipeline.sync.skip import pop, skippable, stash
 from torch.distributed._pipeline.sync.skip.portal import PortalBlue, PortalCopy, PortalOrange
+from torch.testing._internal.distributed.pipeline.utils import convert_to_balance
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
 @pytest.mark.parametrize("balance", [[3], [1, 2], [2, 1], [1, 1, 1]], ids=["3", "1:2", "2:1", "1:1:1"])
 @pytest.mark.parametrize("checkpoint", ["never", "always", "except_last"])
-def test_1to3(balance, checkpoint):
+def test_1to3(balance, checkpoint, setup_rpc):
     if torch.cuda.device_count() < len(balance):
         pytest.skip("at least %d cuda devices required" % len(balance))
 
@@ -52,21 +53,22 @@ def test_1to3(balance, checkpoint):
             return output
 
     model = nn.Sequential(Layer1(), Layer2(), Layer3())
-    model = Pipe(model, balance, chunks=3, checkpoint=checkpoint)
+    model = convert_to_balance(model, balance)
+    model = Pipe(model, chunks=3, checkpoint=checkpoint)
 
     in_device = model.devices[0]
     out_device = model.devices[-1]
 
     input = torch.rand(30, 3, 224, 224, device=in_device, requires_grad=True)
     output = model(input)
-    loss = output.mean()
+    loss = output.local_value().mean()
     loss.backward()
 
-    assert torch.allclose(output.norm(), torch.tensor(1039.0, device=out_device), atol=6e-1)
+    assert torch.allclose(output.local_value().norm(), torch.tensor(1039.0, device=out_device), atol=6e-1)
     assert torch.allclose(input.grad.norm(), torch.tensor(0.0004533053, device=in_device))
 
 
-def test_none_skip():
+def test_none_skip(setup_rpc):
     @skippable(stash=["none"])
     class Stash(nn.Module):
         def forward(self, input):
@@ -81,7 +83,7 @@ def test_none_skip():
             return input
 
     model = nn.Sequential(Stash(), Pop())
-    model = Pipe(model, [1, 1], devices=["cpu", "cpu"], chunks=5)
+    model = Pipe(model, chunks=5)
 
     input = torch.rand(10, requires_grad=True)
     output = model(input)
@@ -100,7 +102,7 @@ def test_none_skip():
         for next_grad_fn, _ in grad_fn.next_functions:
             assert_grad_fn_is_not_portal(next_grad_fn, visited)
 
-    assert_grad_fn_is_not_portal(output.grad_fn)
+    assert_grad_fn_is_not_portal(output.local_value().grad_fn)
 
-    output.sum().backward()
+    output.local_value().sum().backward()
     assert input.grad.mean().item() == 1

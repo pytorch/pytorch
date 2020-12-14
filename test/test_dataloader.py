@@ -484,6 +484,17 @@ class SynchronizedDataset(Dataset):
         return self.size
 
 
+class EmptyTensorDataset(torch.utils.data.Dataset):
+    def __init__(self, len):
+        self.len = len
+
+    def __len__(self):
+        return self.len
+
+    def __getitem__(self, any):
+        return torch.empty(0)
+
+
 class SynchronizedSeedDataset(SynchronizedDataset):
     def __getitem__(self, idx):
         self.sync_once()
@@ -502,6 +513,24 @@ def _test_timeout_pin_memory(persistent_workers):
     dataloader = DataLoader(dataset, batch_size=2, num_workers=2, timeout=1, pin_memory=True,
                             persistent_workers=persistent_workers)
     _ = next(iter(dataloader))
+
+
+def _test_large_sampler_indices(persistent_workers):
+    # See
+    #   test_large_sampler_indices
+    #   https://github.com/pytorch/pytorch/issues/48666
+
+    dataloader = torch.utils.data.DataLoader(
+        EmptyTensorDataset(10000000),
+        batch_size=40960,
+        persistent_workers=persistent_workers,
+        num_workers=1)
+
+    it = iter(dataloader)
+
+    for x in it:
+        assert x.numel() == 0
+        raise RuntimeError('My Error')
 
 
 def disable_stderr(worker_id):
@@ -978,6 +1007,24 @@ except RuntimeError as e:
             finally:
                 p.terminate()
 
+    def test_large_sampler_indices(self):
+        # Test that the data loader cleanly exit when the process errors
+        #   1. having an reference to the iterator
+        #   2. using a sampler that yields big elements s.t. _index_queues putters block
+        #
+        # More context: https://github.com/pytorch/pytorch/issues/48666
+
+        p = ErrorTrackingProcess(target=_test_large_sampler_indices, args=(self.persistent_workers,))
+        p.start()
+        p.join(JOIN_TIMEOUT)
+        try:
+            self.assertFalse(p.is_alive())
+            self.assertNotEqual(p.exitcode, 0)
+            self.assertIsInstance(p.exception, RuntimeError)
+            self.assertRegex(str(p.exception), r'My Error')
+        finally:
+            p.terminate()
+
     def test_invalid_ctor_args_combinations(self):
         # general
         with self.assertRaisesRegex(ValueError, "num_workers option should be non-negative"):
@@ -1407,6 +1454,15 @@ except RuntimeError as e:
         self.assertEqual(int(math.ceil(float(num_samples) / batch_size)),
                          count_num_samples_in_data_loader)
 
+    def test_distributed_sampler_invalid_rank(self):
+        from torch.utils.data.distributed import DistributedSampler
+        dataset = torch.IntTensor(range(10))
+        with self.assertRaisesRegex(ValueError, "Invalid rank"):
+            sampler = DistributedSampler(dataset, 3, 3)
+
+        with self.assertRaisesRegex(ValueError, "Invalid rank"):
+            sampler = DistributedSampler(dataset, 3, -1)
+
     def test_duplicating_data_with_drop_last(self):
 
         from torch.utils.data.distributed import DistributedSampler
@@ -1564,7 +1620,7 @@ except RuntimeError as e:
             # In all cases, all processes should end properly.
             if use_workers:
                 exit_methods = [None, 'loader_error', 'loader_kill', 'worker_error', 'worker_kill']
-                persistent_workers = self.persistent_workers 
+                persistent_workers = self.persistent_workers
             else:
                 exit_methods = [None, 'loader_error', 'loader_kill']
                 persistent_workers = False
@@ -1839,6 +1895,12 @@ except RuntimeError as e:
             self.assertEqual(_utils.collate.default_collate([n_in]).is_shared(), True)
         finally:
             _utils.worker._worker_info = old
+
+    def test_excessive_thread_creation_warning(self):
+        with self.assertWarnsRegex(
+            UserWarning,
+                r"excessive worker creation might get DataLoader running slow or even freeze"):
+            dataloader = DataLoader(self.dataset, batch_size=2, num_workers=1000)
 
 
 class StringDataset(Dataset):

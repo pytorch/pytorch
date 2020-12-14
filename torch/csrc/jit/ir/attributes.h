@@ -108,7 +108,7 @@ struct TORCH_API GraphAttr : public AttributeValue {
   using ConstructorType = std::shared_ptr<Graph>;
   using ValueType = std::shared_ptr<Graph>;
   GraphAttr(Symbol name, ConstructorType value_)
-      : AttributeValue(name), value_(value_) {}
+      : AttributeValue(name), value_(std::move(value_)) {}
   ValueType& value() {
     return value_;
   }

@@ -7,7 +7,9 @@ namespace c10d {
 
 class PrefixStore : public Store {
  public:
-  explicit PrefixStore(const std::string& prefix, std::shared_ptr<Store> store);
+  explicit PrefixStore(
+      const std::string& prefix,
+      c10::intrusive_ptr<Store> store);
 
   virtual ~PrefixStore(){};
 
@@ -31,7 +33,7 @@ class PrefixStore : public Store {
 
  protected:
   std::string prefix_;
-  std::shared_ptr<Store> store_;
+  c10::intrusive_ptr<Store> store_;
 
   std::string joinKey(const std::string& key);
   std::vector<std::string> joinKeys(const std::vector<std::string>& keys);

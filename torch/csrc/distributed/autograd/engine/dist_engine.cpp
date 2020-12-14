@@ -279,7 +279,7 @@ void DistEngine::computeDependencies(
 
     // Create a dummy GraphRoot and run init_to_execute with it.
     GraphRoot dummyRoot(edges, {});
-    graphTask->init_to_execute(dummyRoot, outputEdges);
+    graphTask->init_to_execute(dummyRoot, outputEdges, /*accumulate_grad=*/false);
     for (auto& mapEntry : graphTask->exec_info_) {
       auto& execInfo = mapEntry.second;
       if (!execInfo.captures_) {

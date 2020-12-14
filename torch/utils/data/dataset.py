@@ -164,7 +164,7 @@ class TensorDataset(Dataset[Tuple[Tensor, ...]]):
     tensors: Tuple[Tensor, ...]
 
     def __init__(self, *tensors: Tensor) -> None:
-        assert all(tensors[0].size(0) == tensor.size(0) for tensor in tensors)
+        assert all(tensors[0].size(0) == tensor.size(0) for tensor in tensors), "Size mismatch between tensors"
         self.tensors = tensors
 
     def __getitem__(self, index):

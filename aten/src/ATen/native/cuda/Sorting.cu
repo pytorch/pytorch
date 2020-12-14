@@ -204,6 +204,7 @@ struct KthValueLauncher {
         self_info.strides[collapse_self_dim],
         values_info,
         indices_info);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 };
 
@@ -238,6 +239,7 @@ struct MedianLauncher {
         num_slices,
         self_info.strides[collapse_self_dim],
         ignore_nan);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 };
 
@@ -250,7 +252,7 @@ void kthvalue_cuda_template(
     int64_t dim_,
     bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim());
-  int64_t slicesize = self.size(dim);
+  int64_t slicesize = self.dim() == 0 ? 1 : self.size(dim);
   // FIXME: This seems bogus, I only do this because it was the old behaviour.
   //        The reductions are fine, as long as the axis being reduced along
   //        isn't of 0 elements (and the output has elements).
@@ -290,8 +292,6 @@ void kthvalue_cuda_template(
     values.squeeze_(dim);
     indices.squeeze_(dim);
   }
-
-  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cuda(
@@ -316,10 +316,14 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
     int64_t dim,
     bool keepdim,
     bool ignore_nan) {
+  // See note [Writing Nondeterministic Operations]
+  // If there are duplicate elements of a median value, the procedure for choosing which
+  // of the duplicates to use for the indices output is nondeterministic.
+  at::globalContext().alertNotDeterministic("median CUDA with indices output");
   NoNamesGuard guard;
 
   dim = at::maybe_wrap_dim(dim, self.dim());
-  Tensor in = self.dim() > 0 ? self : self.unsqueeze(0);
+  Tensor in = self.dim() > 0 ? self.contiguous() : self.unsqueeze(0);
 
   int64_t size = in.size(dim);
   TORCH_CHECK(
@@ -367,8 +371,6 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
                 vals, inds, in, dim, MedianLauncher(ignore_nan));
           }
         });
-
-    AT_CUDA_CHECK(cudaGetLastError());
   }
 
   guard.reset();
@@ -410,6 +412,10 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cuda(
     int64_t k,
     int64_t dim,
     bool keepdim) {
+  // See note [Writing Nondeterministic Operations]
+  // If there are duplicate elements of the kth value, the procedure for choosing which
+  // of the duplicates to use for the indices output is nondeterministic.
+  at::globalContext().alertNotDeterministic("kthvalue CUDA");
   auto result = [&]() {
     NoNamesGuard guard;
     // `kthvalue_out_impl_cuda` expects contiguous in input `self`.

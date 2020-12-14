@@ -102,7 +102,7 @@ auto ConvParams::is_output_padding_neg() const -> bool {
 auto ConvParams::is_output_padding_big() const -> bool {
   bool is_big = false;
   for (size_t i = 0; i < output_padding.size(); i++) {
-    is_big |= (output_padding[i] >= stride[i] || output_padding[i] >= dilation[i]);
+    is_big |= (output_padding[i] >= stride[i]);
   }
   return is_big;
 }
@@ -177,14 +177,10 @@ auto ConvParams::needs_64bit_indexing_no_split(const at::Tensor& input, const at
   int64_t outsize = 1;
   if (transposed) {
     std::vector<int64_t> o = conv_input_size(input.sizes(), weight.sizes(), padding, output_padding, stride, dilation, groups);
-    for (int64_t i = 1; i < o.size(); i++) {
-      outsize *= o[i];
-    }
+    outsize = prod_intlist(o.begin() + 1, o.end());
   } else {
     std::vector<int64_t> o = conv_output_size(input.sizes(), weight.sizes(), padding, stride, dilation);
-    for (int64_t i = 1; i < o.size(); i++) {
-      outsize *= o[i];
-    }
+    outsize = prod_intlist(o.begin() + 1, o.end());
   }
   return outsize > int_max;
 }
@@ -237,7 +233,11 @@ auto ConvParams::use_mkldnn(const at::Tensor& input, const at::Tensor& weight) c
     (input.options().backend() == at::Backend::CPU &&
      input.scalar_type() == kFloat && // only on CPU Float Tensors
      !transposed && // or transposed tensors
-     (groups > 1 || weight.size(2) > 3 || input.size(0) > 1
+     (is_strided() || is_dilated() || input.size(0) >= 16 ||
+      weight.size(-1) != 1 || weight.size(-2) != 1) &&
+     (groups > 1
+      || (weight.size(-1) > 3 && weight.size(-2) > 3)
+      || input.size(0) > 1
       || input.size(0)*input.size(1)*input.size(2)*input.size(3) > 20480)); // for some case, native is faster
 #endif
   return false;

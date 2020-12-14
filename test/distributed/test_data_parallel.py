@@ -18,6 +18,7 @@ import torch.nn.functional as F
 
 torch.set_default_dtype(torch.double)
 
+NO_NCCL = not hasattr(torch.distributed, "ProcessGroupNCCL")
 
 class TestDataParallel(TestCase):
 
@@ -515,6 +516,25 @@ class TestDataParallel(TestCase):
         self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_data_parallel_module_zero_inputs(self):
+        class TestModule(nn.Module):
+            def forward(self):
+                t = torch.eye(2, 3, device='cuda:0')
+                return t + (1 - t)
+
+        def test_helper(output, expected):
+            self.assertEqual(output.get_device(), 0)
+            self.assertEqual(output, expected)
+
+        expected = torch.ones(2, 3, device='cuda:0')
+        model = TestModule()
+
+        test_helper(nn.DataParallel(model, [0])(), expected)
+        test_helper(nn.DataParallel(model, [0, 1])(), expected)
+        test_helper(dp.data_parallel(model, None, [0]), expected)
+        test_helper(dp.data_parallel(model, (), [0, 1]), expected)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_device_args(self):
         cuda0 = torch.device('cuda:0')
         cuda1 = torch.device('cuda:1')
@@ -577,6 +597,25 @@ class TestDataParallel(TestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_scatter_gpu(self):
         self._test_scatter(torch.randn((4, 4)).cuda())
+
+    @unittest.skipIf(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
+    @unittest.skipIf(NO_NCCL, "NCCL needed")
+    def test_data_parallel_complex(self):
+        # We expect complex parameters to be broadcast by view_as_real, e.g. move from C to R^2
+        class Cplx(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.cplx = torch.nn.Parameter(torch.zeros(1, 10, dtype=torch.cfloat).cuda())
+
+            def forward(self, x):
+                return x + self.cplx
+
+        cplx = torch.nn.DataParallel(Cplx().cuda())
+        input = torch.rand(1, 10, dtype=torch.cfloat).cuda()
+        result = cplx(input)
+        # 2 is the extra real view dimension here
+        self.assertEqual(result.size(), torch.Size([1, 10, 2]))
+        self.assertEqual(result, torch.view_as_real(input))
 
     def _test_gather(self, output_device):
         inputs = (

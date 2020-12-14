@@ -1,6 +1,7 @@
 import logging
 import threading
 
+from typing import Generator, Tuple
 import torch
 import torch.distributed as dist
 
@@ -20,12 +21,46 @@ if is_available() and not torch._C._rpc_init():
 
 
 if is_available():
-    from . import api, backend_registry, functions, _set_profiler_node_id
-    from . import (
+    from . import api, backend_registry, functions
+    from torch._C._distributed_rpc import (
         _disable_jit_rref_pickle,
         _enable_jit_rref_pickle,
+        _disable_server_process_global_profiler,
+        _enable_server_process_global_profiler,
         _set_and_start_rpc_agent,
+        _reset_current_rpc_agent,
+        _delete_all_user_and_unforked_owner_rrefs,
+        _destroy_rref_context,
+        _set_profiler_node_id,
+        _is_current_rpc_agent_set,
+        _rref_context_get_debug_info,
+        _cleanup_python_rpc_handler,
+        _invoke_rpc_builtin,
+        _invoke_rpc_python_udf,
+        _invoke_rpc_torchscript,
+        _invoke_remote_builtin,
+        _invoke_remote_python_udf,
+        _invoke_remote_torchscript,
+        _set_rpc_timeout,
+        _get_current_rpc_agent,
+        get_rpc_timeout,
+        enable_gil_profiling,
+        RpcBackendOptions,
+        _TensorPipeRpcBackendOptionsBase,
+        ProcessGroupRpcBackendOptions,
+        RpcAgent,
+        PyRRef,
+        ProcessGroupAgent,
+        TensorPipeAgent,
+        RemoteProfilerManager,
+        WorkerInfo,
+        _DEFAULT_INIT_METHOD,
+        _DEFAULT_NUM_SEND_RECV_THREADS,
+        _DEFAULT_NUM_WORKER_THREADS,
+        _UNSET_RPC_TIMEOUT,
+        _DEFAULT_RPC_TIMEOUT_SEC,
     )  # noqa: F401
+    from torch._C._distributed_c10d import Store
     from .api import *  # noqa: F401
     from .options import TensorPipeRpcBackendOptions  # noqa: F401
     from .backend_registry import BackendType
@@ -36,6 +71,7 @@ if is_available():
 
     import numbers
 
+    rendezvous_iterator: Generator[Tuple[Store, int, int], None, None]
 
     def init_rpc(
         name,
@@ -104,18 +140,19 @@ if is_available():
                 raise TypeError(
                     f"Could not infer backend for options {rpc_backend_options}"
                 )
-            if backend != BackendType.TENSORPIPE:
+            # Ignore type error because mypy doesn't handle dynamically generated type objects (#4865)
+            if backend != BackendType.TENSORPIPE:  # type: ignore[attr-defined]
                 logger.warning(
-                    f"RPC was initialized with no explicit backend but with options "
+                    f"RPC was initialized with no explicit backend but with options "  # type: ignore[attr-defined]
                     f"corresponding to {backend}, hence that backend will be used "
                     f"instead of the default {BackendType.TENSORPIPE}. To silence this "
                     f"warning pass `backend={backend}` explicitly."
                 )
 
         if backend is None:
-            backend = BackendType.TENSORPIPE
+            backend = BackendType.TENSORPIPE  # type: ignore[attr-defined]
 
-        if backend == BackendType.PROCESS_GROUP:
+        if backend == BackendType.PROCESS_GROUP:  # type: ignore[attr-defined]
             logger.warning(
                 "RPC was initialized with the PROCESS_GROUP backend which is "
                 "deprecated and slated to be removed and superseded by the TENSORPIPE "
@@ -176,7 +213,7 @@ if is_available():
 
 
     def _init_rpc_backend(
-        backend=backend_registry.BackendType.TENSORPIPE,
+        backend=BackendType.TENSORPIPE,  # type: ignore[attr-defined]
         store=None,
         name=None,
         rank=-1,
@@ -204,7 +241,6 @@ if is_available():
 
     @api._require_initialized
     def _get_debug_info():
-        from . import _rref_context_get_debug_info
         info = _rref_context_get_debug_info()
         info.update(api._get_current_rpc_agent().get_debug_info())
         info.update(dist_autograd._get_debug_info())

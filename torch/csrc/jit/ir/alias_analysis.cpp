@@ -486,6 +486,7 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeGradOf(node);
     // TODO: think more about TensorExpr alias correctness
     case prim::TensorExprGroup:
+    case prim::StaticSubgraph:
     case prim::Constant:
     case prim::AutogradZero:
     case prim::AutogradAdd:
@@ -494,7 +495,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::MMBatchSide:
     case prim::BroadcastSizes:
     case prim::ChunkSizes:
-    case prim::Function:
+    case prim::Closure:
     case prim::CreateObject:
     case prim::tolist:
       return analyzeCreator(node);
@@ -524,6 +525,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::SetAttr:
       return analyzeSetAttr(node);
     case prim::profile_optional:
+    case prim::profile_ivalue:
     case prim::profile:
       makePointerTo(node->output(), node->inputs().at(0));
       return;

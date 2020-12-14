@@ -1653,6 +1653,21 @@ TEST(WeakIntrusivePtrTest, givenPtr_whenLocking_thenReturnsCorrectObject) {
   EXPECT_EQ(var.ptr.get(), locked.get());
 }
 
+TEST(WeakIntrusivePtrTest, expiredPtr_whenLocking_thenReturnsNullType) {
+  IntrusiveAndWeak<SomeClass> var = make_weak_intrusive<SomeClass>();
+  // reset the intrusive_ptr to test if weak pointer still valid
+  var.ptr.reset();
+  EXPECT_TRUE(var.weak.expired());
+  intrusive_ptr<SomeClass> locked = var.weak.lock();
+  EXPECT_FALSE(locked.defined());
+}
+
+TEST(WeakIntrusivePtrTest, weakNullPtr_locking) {
+  auto weak_ptr = make_invalid_weak<SomeClass>();
+  intrusive_ptr<SomeClass> locked = weak_ptr.lock();
+  EXPECT_FALSE(locked.defined());
+}
+
 TEST(
     WeakIntrusivePtrTest,
     givenValidPtr_whenMoveAssigning_thenPointsToSameObject) {

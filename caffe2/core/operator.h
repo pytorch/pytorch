@@ -1246,7 +1246,7 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
   template <typename FirstType, typename... Types, typename... ExtraArgs>      \
   struct DispatchHelper<TensorTypes<FirstType, Types...>, ExtraArgs...> {      \
     template <typename Op>                                                     \
-    static bool call(Op* op, const TypeMeta& meta) {                           \
+    static bool call(Op* op, const TypeMeta meta) {                           \
       static_assert(                                                           \
           !std::is_same<GenericTensorImplementation, FirstType>::value,        \
           "GenericTensorImplementation must be the last in TensorTypes list"); \
@@ -1269,7 +1269,7 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
   template <typename... ExtraArgs>                                             \
   struct DispatchHelper<TensorTypes<>, ExtraArgs...> {                         \
     template <typename Op>                                                     \
-    static bool call(Op* /* unused */, const TypeMeta& meta) {                 \
+    static bool call(Op* /* unused */, const TypeMeta meta) {                 \
       CAFFE_THROW("Unsupported type of tensor: ", meta.name());                \
     }                                                                          \
     template <typename Op>                                                     \
@@ -1287,7 +1287,7 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
       TensorTypes<GenericTensorImplementation>,                                \
       ExtraArgs...> {                                                          \
     template <typename Op>                                                     \
-    static bool call(Op* op, const TypeMeta&) {                                \
+    static bool call(Op* op, const TypeMeta) {                                \
       return op->template DoRunWithOtherType<ExtraArgs...>();                  \
     }                                                                          \
     template <typename Op>                                                     \
@@ -1446,7 +1446,7 @@ C10_DECLARE_REGISTRY(
 // You should not need to use this class.
 struct StaticLinkingProtector {
   StaticLinkingProtector() {
-    const int registered_ops = CPUOperatorRegistry()->Keys().size();
+    const auto registered_ops = CPUOperatorRegistry()->Keys().size();
     // Note: this is a check failure instead of an exception, because if
     // the linking is wrong, Caffe2 won't be able to run properly anyway,
     // so it's better to fail loud.

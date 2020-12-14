@@ -28,8 +28,6 @@ struct C10_API UndefinedTensorImpl final : public TensorImpl {
 private:
   UndefinedTensorImpl();
   static UndefinedTensorImpl _singleton;
-public:
-  friend struct UndefinedType;
 };
 
 } // namespace c10

@@ -80,6 +80,105 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         ]
         index = g.op("Concat", *indices_list, axis_i=-1)
     else:
+        # Replace index_put node with masked_scatter or masked_fill
+        # when inputs to the index_put node contains boolean inputs
+        #
+        # index_put -> masked_fill
+        #
+        # before graph(%0 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=1, device=cpu),
+        #       %some_const : Float(requires_grad=0, device=cpu)):
+        #   %6 : None = prim::Constant()
+        #   %mask : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = aten::clone(%0, %6)
+        #   %8 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = aten::ne(%mask, %some_const)
+        #   %26 : Long(requires_grad=0, device=cpu) = prim::Constant[value={11}]()
+        #   %27 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
+        #   %11 : Device = prim::Constant[value="cpu"]()
+        #   %12 : None = prim::Constant()
+        #   %28 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
+        #   %29 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
+        #   %15 : None = prim::Constant()
+        #   %16 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) =
+        #               aten::to(%8, %26, %27, %11, %12, %28, %29, %15)
+        #   %18 : Float(requires_grad=0, device=cpu) = prim::Constant[value={1}]()
+        #   %30 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
+        #   %22 : int[] = prim::Constant[value=[-1]]()
+        #   %23 : Tensor = aten::view(%16, %22)
+        #   %24 : Tensor?[] = prim::ListConstruct(%23)
+        #   %25 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) =
+        #                aten::index_put(%mask, %24, %18, %30)
+        #   return (%25)
+        #
+        # after graph(%0 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu),
+        #       %some_const : Float(requires_grad=0, device=cpu)):
+        #   %3 : Tensor = onnx::Equal(%0, %some_const)
+        #   %4 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = onnx::Not(%3)
+        #   %12 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = onnx::Cast[to=9](%4)
+        #   %19 : Tensor = onnx::Cast[to=9](%12)
+        #   %20 : Tensor = onnx::Constant[value={1}]()
+        #   %21 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu)
+        #                = onnx::Where(%19, %20, %0)
+        #   return (%21)
+        #
+        # index_put -> masked_scatter
+        #
+        # before graph(%0 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=1, device=cpu),
+        #       %some_const : Float(requires_grad=0, device=cpu)):
+        #   %6 : None = prim::Constant()
+        #   %mask : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = aten::clone(%0, %6)
+        #   %28 : Float(8, strides=[1], requires_grad=0, device=cpu)
+        #                = prim::Constant[value= 1  1  1  1  1  1  1  1 [ CPUFloatType{8} ]]()
+        #   %15 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu)
+        #                = aten::ne(%mask, %some_const)
+        #   %34 : Long(requires_grad=0, device=cpu) = prim::Constant[value={11}]()
+        #   %35 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
+        #   %18 : Device = prim::Constant[value="cpu"]()
+        #   %19 : None = prim::Constant()
+        #   %36 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
+        #   %37 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
+        #   %22 : None = prim::Constant()
+        #   %23 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu)
+        #                = aten::to(%15, %34, %35, %18, %19, %36, %37, %22)
+        #   %38 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
+        #   %30 : int[] = prim::Constant[value=[-1]]()
+        #   %31 : Tensor = aten::view(%23, %30)
+        #   %32 : Tensor?[] = prim::ListConstruct(%31)
+        #   %33 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu)
+        #               = aten::index_put(%mask, %32, %28, %38)
+        #   return (%33)
+        #
+        # after graph(%0 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu),
+        #       %some_const : Float(requires_grad=0, device=cpu)):
+        #   %3 : Float(8, strides=[1], requires_grad=0, device=cpu)
+        #               = onnx::Constant[value= 1  1  1  1  1  1  1  1 [ CPUFloatType{8} ]]()
+        #   %4 : Tensor = onnx::Equal(%0, %some_const)
+        #   %5 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = onnx::Not(%4)
+        #   %13 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = onnx::Cast[to=9](%5)
+        #   %19 : Tensor = onnx::Shape(%0)
+        #   %20 : Tensor = onnx::Expand(%13, %19)
+        #   %21 : Tensor = onnx::NonZero(%20)
+        #   %22 : Tensor = onnx::Transpose[perm=[1, 0]](%21)
+        #   %23 : Tensor = onnx::Constant[value={-1}]()
+        #   %24 : Tensor = onnx::Reshape(%3, %23)
+        #   %25 : Tensor = onnx::Shape(%22)
+        #   %27 : Tensor = onnx::Constant[value={0}]()
+        #   %28 : Tensor = onnx::Gather[axis=0](%25, %27)
+        #   %29 : Tensor = onnx::Constant[value={0}]()
+        #   %30 : Tensor = onnx::Unsqueeze[axes=[0]](%29)
+        #   %31 : Tensor = onnx::Unsqueeze[axes=[0]](%28)
+        #   %32 : Tensor = onnx::Constant[value={0}]()
+        #   %33 : Tensor = onnx::Unsqueeze[axes=[0]](%32)
+        #   %34 : Tensor = onnx::Slice(%24, %30, %31, %33)
+        #   %35 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu)
+        #               = onnx::ScatterND(%0, %22, %34)
+        #   return (%35)
+
+        bool_inp = list(index.node().inputs())[0]
+        if bool_inp.type() is not None and bool_inp.type().scalarType() == 'Bool':
+            rank = sym_help._get_tensor_rank(values)
+            if rank is not None and rank == 0:
+                from torch.onnx.symbolic_opset9 import masked_fill
+                return masked_fill(g, self, bool_inp, values)
+            return masked_scatter(g, self, bool_inp, values)
         broadcast_index_shape = g.op("Shape", index)
         index = g.op("Unsqueeze", index, axes_i=[-1])
     sub_data_shape = sym_help._slice_helper(
@@ -102,8 +201,8 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
 
 @parse_args('v', 'i')
 def pixel_shuffle(g, self, upscale_factor):
-    dims = self.type().sizes()
-    if len(dims) != 4:
+    rank = sym_help._get_tensor_rank(self)
+    if rank is not None and rank != 4:
         return _unimplemented("pixel_shuffle", "only support 4d input")
     return g.op("DepthToSpace", self, blocksize_i=upscale_factor, mode_s="CRD")
 
@@ -181,11 +280,12 @@ def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_s
                               "while exporting interpolate. Assuming that it is not a scalar.")
 
         if is_scalar:
-            if not input.type().dim():
+            rank = sym_help._get_tensor_rank(input)
+            if rank is None:
                 return sym_help._unimplemented("interpolate (with a scalar output_size)",
                                                "missing input shape (try giving an array of output_size values)")
             size = unsqueeze(g, size, 0)
-            size = [size for i in range(input.type().dim() - 2)]
+            size = [size for i in range(rank - 2)]
             size = g.op("Concat", *size, axis_i=0)
         size = g.op("Cast", size, to_i=sym_help.cast_pytorch_to_onnx['Long'])
         size = g.op("Concat", input_size, size, axis_i=0)
@@ -200,9 +300,10 @@ def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_s
                     mode_s=mode,  # nearest, linear, or cubic
                     nearest_mode_s="floor")
     else:  # if not sym_help._is_none(scales)
-        if not input.type().dim():
+        rank = sym_help._get_tensor_rank(input)
+        if rank is None:
             return sym_help._unimplemented("interpolate (with scales)", "missing input shape")
-        scales = sym_help._interpolate_get_scales(g, scale_factor, input.type().dim())
+        scales = sym_help._interpolate_get_scales(g, scale_factor, rank)
         return g.op("Resize",
                     input,
                     roi,
@@ -274,7 +375,8 @@ def masked_scatter(g, self, mask, source):
 def _len(g, self):
     if _is_tensor_list(self) or self.node().kind() == "onnx::SplitToSequence":
         return g.op("SequenceLength", self)
-    return g.op("Size", self)
+    sz_0 = size(g, self, g.op("Constant", value_t=torch.LongTensor([0])))
+    return g.op('Squeeze', sz_0, axes_i=[0])
 
 
 def __getitem_(g, self, i):
@@ -449,19 +551,19 @@ def constant_pad_nd(g, input, padding, value=None):
     mode = "constant"
     value = sym_help._maybe_get_scalar(value)
     value = sym_help._if_scalar_type_as(g, value, input)
-    pad = _prepare_onnx_paddings(g, input.type().dim(), padding)
+    pad = _prepare_onnx_paddings(g, sym_help._get_tensor_rank(input), padding)
     return g.op("Pad", input, pad, value, mode_s=mode)
 
 
 def reflection_pad(g, input, padding):
     mode = "reflect"
-    paddings = _prepare_onnx_paddings(g, input.type().dim(), padding)
+    paddings = _prepare_onnx_paddings(g, sym_help._get_tensor_rank(input), padding)
     return g.op("Pad", input, paddings, mode_s=mode)
 
 
 def replication_pad(g, input, padding):
     mode = "edge"
-    paddings = _prepare_onnx_paddings(g, input.type().dim(), padding)
+    paddings = _prepare_onnx_paddings(g, sym_help._get_tensor_rank(input), padding)
     return g.op("Pad", input, paddings, mode_s=mode)
 
 
@@ -539,9 +641,12 @@ def squeeze(g, self, dim=None):
 
     dim = sym_help._get_const(dim, 'i', 'dim')
 
-    input_shape = self.type().sizes()
-    from torch.onnx.symbolic_helper import _onnx_shape_inference
-    if input_shape is None or not _onnx_shape_inference:
+    input_rank = sym_help._get_tensor_rank(self)
+    adjusted_dim = dim
+    if input_rank is not None and dim < 0:
+        adjusted_dim += input_rank
+    dim_size = sym_help._get_tensor_dim_size(self, adjusted_dim)
+    if (dim < 0 and input_rank is None) or dim_size is None:
         # If onnx shape inference is not on, export always as dynamic.
         # Because we cannot tell if observed static shape is also static at runtime.
         # create 'cond' node (condition is shape[i]==1)
@@ -561,11 +666,10 @@ def squeeze(g, self, dim=None):
         return if_node_outputs
 
     # For static input shape
-    if dim < 0:
-        dim += self.type().dim()
-    if input_shape[dim] > 1:
+    dim = adjusted_dim
+    if dim_size > 1:
         warnings.warn("This model contains a squeeze operation on dimension " + str(dim) + ". The size of " +
-                      "this dimension in the given input is " + str(input_shape[dim]) + ". The model will " +
+                      "this dimension in the given input is " + str(dim_size) + ". The model will " +
                       "be exported without the squeeze node. If the model is intended to be used with dynamic " +
                       "input shapes, please export with dynamic_axes argument.")
         return self
@@ -579,6 +683,26 @@ def unsqueeze(g, self, dim):
 
 def mm(g, self, other):
     return g.op("Gemm", self, other, beta_f=0.0, alpha_f=1.0)
+
+
+def index(g, self, index):
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", self, index, operator_s="index")
+
+    if sym_help._is_packed_list(index):
+        indices = sym_help._unpack_list(index)
+    else:
+        indices = [index]
+
+    # Handle single mask index.
+    if len(indices) == 1:
+        index = indices[0]
+        if not sym_help._is_none(index) and (index.type().scalarType() == "Bool" or index.type().scalarType() == "Byte"):
+            from torch.onnx.symbolic_opset9 import nonzero
+            index = nonzero(g, index)
+            return g.op('GatherND', self, index)
+    from torch.onnx.symbolic_opset9 import index as index_opset9
+    return index_opset9(g, self, index)
 
 
 def index_fill(g, self, dim, index, value):
@@ -614,7 +738,7 @@ def __rshift_(g, self, other):
     if not sym_help._is_fp(self):
         other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx['Float'])
     two_pow = g.op('Pow', two, other)
-
+    two_pow = g.op('Cast', two_pow, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
     rshift = g.op('Div', self, two_pow)
     return rshift
 
@@ -633,7 +757,7 @@ def __lshift_(g, self, other):
     if not sym_help._is_fp(self):
         other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx['Float'])
     two_pow = g.op('Pow', two, other)
-
+    two_pow = g.op('Cast', two_pow, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
     lshift = g.op('Mul', self, two_pow)
     return lshift
 
@@ -741,7 +865,7 @@ def narrow(g, input, dim, start, length):
 
 @parse_args('v', 'i', 'i')
 def flatten(g, input, start_dim, end_dim):
-    dim = input.type().dim()
+    dim = sym_help._get_tensor_rank(input)
     # use ONNX's Flatten operator for cases where the output shape is 2D
     if start_dim == 1:
         if (end_dim == -1 or (dim is not None and end_dim == dim - 1)):
@@ -824,3 +948,22 @@ def embedding_bag(g,
     # aten::embedding_bag returns a tuple of 4 elements: output, offset2bag, bag_size, max_indices.
     # But the last three outputs are not used in torch.nn.EmbeddingBag or torch.nn.functional.embedding_bag.
     return loop.node().output(), None, None, None
+
+
+def prim_ConstantChunk(g, self, chunks, dim):
+    input_shape = g.op("Shape", self)
+    axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
+    axis_next = g.op("Constant", value_t=torch.tensor([dim + 1], dtype=torch.long))
+    input_shape_dim = g.op("Slice", input_shape, axis, axis_next)
+    start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
+    chunk_size = g.op("Constant", value_t=torch.tensor([chunks], dtype=torch.long))
+    chunk_size_minus_1 = g.op("Constant", value_t=torch.tensor([chunks - 1], dtype=torch.long))
+    input_shape_dim_shift = g.op("Add", input_shape_dim, chunk_size_minus_1)
+    chunk_dim = g.op("Div", input_shape_dim_shift, chunk_size)
+    res = []
+    for i in range(chunks):
+        index = g.op("Constant", value_t=torch.tensor([i + 1], dtype=torch.long))
+        end = g.op("Mul", chunk_dim, index)
+        res.append(g.op("Slice", self, start, end, axis))
+        start = end
+    return res

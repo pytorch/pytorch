@@ -64,6 +64,7 @@ def generate_code(ninja_global=None,
 
         gen_autograd(
             declarations_path or DECLARATIONS_PATH,
+            native_functions_path or NATIVE_FUNCTIONS_PATH,
             autograd_gen_dir,
             autograd_dir,
             disable_autograd=disable_autograd,
@@ -79,7 +80,7 @@ def generate_code(ninja_global=None,
 
     if subset == "python" or not subset:
         gen_annotated(
-            declarations_path or DECLARATIONS_PATH,
+            native_functions_path or NATIVE_FUNCTIONS_PATH,
             python_install_dir,
             autograd_dir)
 
@@ -153,7 +154,7 @@ def main():
     )
     parser.add_argument(
         '--selected-op-list-path',
-        help='Path to the yaml file that contains the list of operators to include for custom build.',
+        help='Path to the YAML file that contains the list of operators to include for custom build.',
     )
     parser.add_argument(
         '--operators_yaml_path',
