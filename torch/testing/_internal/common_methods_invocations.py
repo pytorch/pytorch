@@ -835,15 +835,15 @@ op_db: List[OpInfo] = [
                    handles_complex_extremals=False,
                    test_complex_grad=False),
     # TODO: Make this test pass
-    # OpInfo('linalg.slogdet',
-    #        aten_name='linalg_slogdet',
-    #        op=torch.linalg.slogdet,
-    #        dtypes=floating_and_complex_types(),
-    #        test_inplace_grad=False,
-    #        supports_tensor_out=False,
-    #        sample_inputs_func=sample_inputs_slogdet,
-    #        output_func=itemgetter(1),
-    #        decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
+    OpInfo('linalg.slogdet',
+           aten_name='linalg_slogdet',
+           op=torch.linalg.slogdet,
+           dtypes=floating_and_complex_types(),
+           test_inplace_grad=False,
+           supports_tensor_out=False,
+           sample_inputs_func=sample_inputs_slogdet,
+           output_func=itemgetter(1),
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
 ]
 
 if TEST_SCIPY:

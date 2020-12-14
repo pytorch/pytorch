@@ -2224,6 +2224,7 @@ Tensor slogdet_backward(const Tensor& grad_logabsdet,
                         const Tensor& signdet, const Tensor& logabsdet) {
   auto singular_case_backward = [&](const Tensor& grad_logabsdet, const Tensor& self) -> Tensor {
     Tensor u, sigma, v;
+    // TODO: replace self.svd with linalg_svd
     std::tie(u, sigma, v) = self.svd();
     // sigma has all non-negative entries (also with at least one zero entry)
     // so logabsdet = \sum log(abs(sigma))
@@ -2233,17 +2234,19 @@ Tensor slogdet_backward(const Tensor& grad_logabsdet,
   };
 
   auto nonsingular_case_backward = [&](const Tensor& grad_logabsdet, const Tensor& self) -> Tensor {
-    return unsqueeze_multiple(grad_logabsdet, {-1, -2}, self.dim()) * self.inverse().transpose(-2, -1);
+    // TODO: replace self.inverse with linalg_inverse
+    return unsqueeze_multiple(grad_logabsdet, {-1, -2}, self.dim()) * self.inverse().conj().transpose(-2, -1);
   };
 
   if (self.dim() == 2) {
-    if (signdet.item<double>() == 0) {
+    bool is_singular = self.is_complex() ? signdet.abs().item<double>() == 0 : signdet.item<double>() == 0;
+    if (is_singular) {
       return singular_case_backward(grad_logabsdet, self);
     } else {
       return nonsingular_case_backward(grad_logabsdet, self);
     }
   } else {
-    auto nonzero_signdet_indices = at::where(signdet);
+    auto nonzero_signdet_indices = self.is_complex() ? at::where(signdet.abs()) : at::where(signdet);
 
     if (nonzero_signdet_indices[0].size(0) == logabsdet.numel()) {  // all log determinants are finite (non-singular)
       return nonsingular_case_backward(grad_logabsdet, self);
