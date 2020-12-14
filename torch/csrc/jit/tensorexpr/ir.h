@@ -28,6 +28,7 @@ inline int getPrecedence(IRNodeType ty) {
     case kPrimitive:
       return 0;
     case kCast:
+    case kBitCast:
       return 2;
     case kAdd:
     case kSub:
@@ -79,6 +80,34 @@ class Cast : public ExprNode<Cast> {
 template <typename T>
 ExprHandle cast(const ExprHandle& src_value) {
   return Cast::make(Dtype(ToDtype<T>(), src_value.dtype().lanes()), src_value);
+}
+
+// This is a bitwise cast, akin to bitcast in LLVM
+class BitCast : public ExprNode<BitCast> {
+ public:
+  const Expr* src_value() const {
+    return src_value_;
+  }
+  static ExprHandle make(Dtype dtype, const ExprHandle& src_value) {
+    return ExprHandle(new BitCast(dtype, src_value.node()));
+  }
+  BitCast(Dtype dtype, const Expr* src_value)
+      : ExprNodeBase(dtype, kBitCast), src_value_(src_value) {
+    TORCH_CHECK(src_value_->dtype().byte_size() == dtype.byte_size());
+  }
+
+  bool isConstant() const override {
+    return src_value_->isConstant();
+  }
+
+ private:
+  const Expr* src_value_;
+};
+
+template <typename T>
+ExprHandle bitcast(const ExprHandle& src_value) {
+  return BitCast::make(
+      Dtype(ToDtype<T>(), src_value.dtype().lanes()), src_value);
 }
 
 // Represent the expression node for binary operators.
