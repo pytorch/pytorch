@@ -36,6 +36,16 @@ class TORCH_API TensorExprKernel {
   }
 
  private:
+  enum ElementType {
+    kAllTypes = 0,
+    kIntegralTypes = 1 << 0,
+    kFloatingPointTypes = 1 << 1,
+    kBoolType = 1 << 2,
+    kComplexTypes = 1 << 3,
+    kQintTypes = 1 << 4,
+    kNonComplexOrQintTypes = kIntegralTypes | kBoolType | kFloatingPointTypes,
+  };
+
   enum BackendType {
     kUninitialized,
     kSimpleIREval,
@@ -71,7 +81,11 @@ class TORCH_API TensorExprKernel {
 
   std::vector<ExprHandle> valueShape(const torch::jit::Value* v);
 
-  void promoteInputs(std::vector<ExprHandle>& inputs);
+  bool checkTypes(const ScalarType highType, const int typeConstraints);
+
+  void promoteInputs(
+      std::vector<ExprHandle>& inputs,
+      int typeConstraints = kAllTypes);
 
   ExprHandle demoteOutput(const ExprHandle& e, const torch::jit::Value* v);
 
@@ -82,7 +96,8 @@ class TORCH_API TensorExprKernel {
   Tensor* computeOneOperand(
       const std::string& name,
       const torch::jit::Value* v,
-      const std::function<ExprHandle(const ExprHandle&)>& innerExpr);
+      const std::function<ExprHandle(const ExprHandle&)>& innerExpr,
+      const int checkParamTypes = kAllTypes);
 
   Tensor* computeTwoOperand(
       const std::string& name,
@@ -101,7 +116,8 @@ class TORCH_API TensorExprKernel {
       const torch::jit::Value* v,
       const std::function<
           ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>&
-          innerExpr);
+          innerExpr,
+      bool promote_inputs = true);
 
   Tensor* computeConditionWithTwoOperand(
       const std::string& name,
@@ -136,6 +152,8 @@ class TORCH_API TensorExprKernel {
   BackendType inferBackendTypeFromDevice(at::Device device);
 
   void bindInput(const torch::jit::Value* input);
+
+  Tensor* convertOutputToCorrectStrides(torch::jit::Value* v);
 
   // Captures the information for reduction operation nodes.
   struct ReductionInfo {
@@ -189,6 +207,9 @@ class TORCH_API TensorExprKernel {
 
   int64_t nInputs_ = 0;
   std::vector<KernelArg> kernelArgs_;
+  std::vector<std::vector<int64_t>> tensorOutputSizes_;
+  std::vector<std::vector<int64_t>> tensorOutputStrides_;
+  std::vector<c10::TensorOptions> tensorOutputTensorOptions_;
   std::vector<Tensor*> tensorOutputs_;
   std::unordered_map<int64_t, Tensor*> tensors_;
   std::unordered_map<int64_t, VarHandle> scalars_;
@@ -198,7 +219,8 @@ class TORCH_API TensorExprKernel {
   std::vector<TypePtr> inputTypes_;
   std::shared_ptr<Graph> graph_;
   Code code_;
-  bool fallback_{false};
+  bool allow_fallback_{false};
+  bool use_fallback_{false};
   bool hasRandom_{false};
   bool hasBroadcast_{false};
   std::unordered_map<const torch::jit::Value*, std::vector<ExprHandle>>
