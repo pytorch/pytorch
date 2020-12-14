@@ -938,8 +938,8 @@ class TestCase(expecttest.TestCase):
                 # NOTE: copying an array before conversion is necessary when,
                 #   for example, the array has negative strides.
                 np_result = torch.from_numpy(np_result.copy())
-            if dtype is torch.bfloat16 and np_result.dtype is torch.float:
-                np_result = np_result.bfloat16()
+            if dtype is torch.bfloat16 and torch_result.dtype is torch.bfloat16 and np_result.dtype is torch.float:
+                torch_result = torch_result.to(torch.float)
 
         self.assertEqual(np_result, torch_result, **kwargs)
 
