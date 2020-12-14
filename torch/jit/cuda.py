@@ -64,10 +64,13 @@ class device(object):
     """
 
     def __init__(self, device: _device):
-        self.idx = get_device_index(device)
+        self.idx = -1
         self.prev_idx = -1
+        self.device = device
 
     def __enter__(self):
+        self.idx = get_device_index(self.device, optional=True)
+
         if self.idx == -1:
             return
         self.prev_idx = torch.cuda._current_device()
