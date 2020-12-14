@@ -242,7 +242,7 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
         strideBefore,
         nElemBefore);
       });
-      AT_CUDA_CHECK(cudaGetLastError());
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
       if (permuted)
           self.copy_(src_.permute(inversePerm));
   }
@@ -444,6 +444,10 @@ Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const 
   TORCH_CHECK(index.numel() == (source.dim() == 0 ? 1 : source.size(dim)),
               "index_add_(): Number of indices should be equal to self.size(dim)");
 
+  at::assert_no_internal_overlap(self);
+  at::assert_no_overlap(self, index);
+  at::assert_no_overlap(self, source);
+
   // Scalars are treated as 1-d tensor
   Tensor self_ = (self.dim() == 0) ? self.view(1) : self;
   Tensor source_ = (source.dim() == 0) ? source.view(1) : source;
@@ -474,21 +478,23 @@ Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const 
 
   int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
-#define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM) \
+#define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM)  \
   indexAddSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM> \
-    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(   \
-      selfInfo, sourceInfo, indexInfo,                    \
-      selfAddDim, sourceAddDim, sliceSize, selfAddDimSize);
+    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                                \
+      selfInfo, sourceInfo, indexInfo,                                               \
+      selfAddDim, sourceAddDim, sliceSize, selfAddDimSize);                          \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define LARGE_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE,                        \
-                    SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR)  \
+                    SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR)            \
   indexAddLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                       \
-                     SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR> \
-    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(         \
-      selfInfo, sourceInfo, indexInfo,                          \
-      selfAddDim, sourceAddDim, sourceTotalSize,                     \
-      (IDX_IS_MAJOR) ? sliceSize : numIndex,                \
-      selfAddDimSize);
+                     SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR>           \
+    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                       \
+      selfInfo, sourceInfo, indexInfo,                                      \
+      selfAddDim, sourceAddDim, sourceTotalSize,                            \
+      (IDX_IS_MAJOR) ? sliceSize : numIndex,                                \
+      selfAddDimSize);                                                      \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
   dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));
@@ -719,22 +725,24 @@ void index_select_out_cuda_impl(Tensor& out, const Tensor& self, long dim,
 
   int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
-#define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM) \
+#define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM)         \
   indexSelectSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM>     \
-    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(           \
-      outInfo, selfInfo, indicesInfo,                            \
-      outSelectDim, selfSelectDim, static_cast<TYPE>(sliceSize), \
-      selfSelectDimSize);
+    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                                   \
+      outInfo, selfInfo, indicesInfo,                                                   \
+      outSelectDim, selfSelectDim, static_cast<TYPE>(sliceSize),                        \
+      selfSelectDimSize);                                                               \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define LARGE_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE,                           \
-                    DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR)     \
+                    DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR)                   \
   indexSelectLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                       \
-                        DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR> \
-    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(            \
-      outInfo, selfInfo, indicesInfo,                             \
-      outSelectDim, selfSelectDim, static_cast<TYPE>(outTotalSize), \
-      static_cast<TYPE>((IDX_IS_MAJOR) ? sliceSize : numIndices),  \
-      selfSelectDimSize);
+                        DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR>               \
+    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                          \
+      outInfo, selfInfo, indicesInfo,                                          \
+      outSelectDim, selfSelectDim, static_cast<TYPE>(outTotalSize),            \
+      static_cast<TYPE>((IDX_IS_MAJOR) ? sliceSize : numIndices),              \
+      selfSelectDimSize);                                                      \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
   dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));
@@ -818,6 +826,8 @@ Tensor& index_select_out_cuda(Tensor& out, const Tensor& self, int64_t dim,
   TORCH_CHECK(at::cuda::check_device({out, self, index}),
               "Input, output and indices must be on the current device");
   at::assert_no_internal_overlap(out);
+  at::assert_no_overlap(out, self);
+  at::assert_no_overlap(out, index);
 
   dim = at::maybe_wrap_dim(dim, self);
   TORCH_CHECK(self.dim() <= MAX_TENSORINFO_DIMS, DIM_WARNING);

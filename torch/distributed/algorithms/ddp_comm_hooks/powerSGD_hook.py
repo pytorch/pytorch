@@ -1,3 +1,4 @@
+import logging
 import math
 
 import numpy as np
@@ -46,6 +47,8 @@ class PowerSGDState(object):
         random_seed=0,
     ):
         self.process_group = process_group
+        # The low rank for matrix approximation.
+        # Typically only 1 or 2 is used. See https://arxiv.org/pdf/1905.13727.pdf.
         self.matrix_approximation_rank = matrix_approximation_rank
         # Error feedback is usually crucial for both for convergence and generalization,
         # because PowerSGD is a biased compressor,
@@ -63,16 +66,13 @@ class PowerSGDState(object):
         # there will be differences between the gradients that are never synchronized.
         self.rng = np.random.RandomState(random_seed)
         # Since there is only a single state instance for all the input buckets,
-        # need to maintain a dictionary that maps each bucket to the local error.
-        # TODO(wayi): Currently the key is the (hashcode of) input tensor, which may change across steps,
-        # since the bucket can be rebuilt in the forward pass (to save peak memory usage).
-        # Need to add an index field to the input bucket of comm hook.
+        # need to maintain a dictionary that maps each bucket index to the local error.
         self.error_dict = {}
 
 
 def powerSGD_hook(
     state: PowerSGDState,
-    bucket: dist._GradBucket,
+    bucket,
 ) -> torch.futures.Future:
     """
     This DDP communication hook implements a simplified PowerSGD gradient compression
@@ -99,8 +99,6 @@ def powerSGD_hook(
         bucket (dist._GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
             Note that since DDP comm hook only supports single process single device mode at this time,
             only exactly one tensor is stored in this bucket.
-        matrix_approximation_rank (int): The low rank for matrix approximation.
-            Typically only 1 or 2 is used. See https://arxiv.org/pdf/1905.13727.pdf.
 
     Returns:
         Future handler of the communication, which updates the gradients in place.
@@ -127,11 +125,26 @@ def powerSGD_hook(
     input_tensor[total_length:padded_total_length].fill_(0)
 
     # Incorporate the error from the previous state into the gradients.
+    bucket_index = bucket.get_index()
     if state.use_error_feedback:
-        if input_tensor in state.error_dict:
-            input_tensor.add_(state.error_dict[input_tensor])
+        # The buckets can be rebuilt during training.
+        # In this case, the error tensor shape will not be aligned with the input tensor,
+        # and the error will be re-initialized as zeros.
+        if (
+            bucket_index in state.error_dict
+            and state.error_dict[bucket_index].shape[0] == padded_total_length
+        ):
+            input_tensor.add_(state.error_dict[bucket_index])
         else:
-            state.error_dict[input_tensor] = torch.zeros(padded_total_length, device=device)
+            logging.info(
+                "A zero tensor of length {} that represents local error is created.".format(
+                    padded_total_length
+                )
+            )
+            state.error_dict[bucket_index] = torch.zeros(
+                padded_total_length, device=device
+            )
+
         # Keep a copy of the input tensor,
         # so that we can compute the local error caused by compression later,
         # by comparing this copy and the input tensor updated after decompression.
@@ -149,11 +162,17 @@ def powerSGD_hook(
                 # only fork on CPU and then move the generated tensor to the CUDA device.
                 torch.manual_seed(rng.randint(1_000_000_000))
                 return torch.randn(
-                    square_side_length, state.matrix_approximation_rank, device="cpu"
+                    square_side_length,
+                    state.matrix_approximation_rank,
+                    device="cpu",
+                    dtype=input_tensor.dtype,
                 ).to(device)
         else:
             return torch.empty(
-                square_side_length, state.matrix_approximation_rank, device=device
+                square_side_length,
+                state.matrix_approximation_rank,
+                device=device,
+                dtype=input_tensor.dtype,
             )
 
     p = create_low_rank_tensor(fill_random_values=False, rng=state.rng)
@@ -172,7 +191,7 @@ def powerSGD_hook(
         return [
             dist.all_reduce(q, group=group_to_use, async_op=True)
             .get_future()
-            .value()[0]
+            .wait()[0]
         ]
 
     def decompress(fut):
@@ -181,7 +200,7 @@ def powerSGD_hook(
 
         if state.use_error_feedback:
             # Memorize the local errors.
-            state.error_dict[input_tensor] = input_tensor_cp - input_tensor
+            state.error_dict[bucket_index] = input_tensor_cp - input_tensor
         ret = input_tensor.resize_(total_length)
         return [ret]
 

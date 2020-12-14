@@ -67,6 +67,12 @@ collectives_object_test_list = [
     [1, 2, True, "string", [4, 5, "nested"]],
 ]
 
+# Allowlist of distributed backends where profiling collectives is supported.
+PROFILING_SUPPORTED_BACKENDS = [
+    dist.Backend.NCCL,
+    dist.Backend.GLOO,
+]
+
 # Dummy NamedTuple data structures to test DDP support for NamedTuple types.
 EXPECTED_FIELDS = ("a", "b")
 TestNamedTupleInput_0 = namedtuple("NamedTuple", EXPECTED_FIELDS)
@@ -989,7 +995,6 @@ class DistributedTest:
             "Only Gloo and Nccl backend supports CUDA allReduce",
         )
         @skip_if_no_gpu
-        @skip_if_rocm
         def test_broadcast_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
@@ -1240,7 +1245,6 @@ class DistributedTest:
 
         @skip_if_no_gpu
         @require_backend({"gloo", "nccl"})
-        @skip_if_rocm
         def test_all_reduce_result_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
@@ -1285,7 +1289,7 @@ class DistributedTest:
                 self.assertEqual(result, [_build_tensor(src + 1, expected_value)])
             self._barrier()
 
-        def call_dist_op(self, profiling_title_postfix, is_async, op, *args, expect_event=False, secondary_op_call=None, **kwargs):
+        def call_dist_op(self, profiling_title_postfix, is_async, op, *args, expect_event=True, secondary_op_call=None, **kwargs):
             op_calls = [lambda: op(*args, **kwargs)]
             if secondary_op_call is not None:
                 op_calls.append(secondary_op_call)
@@ -1299,12 +1303,12 @@ class DistributedTest:
             def get_event(postfix):
                 return [event for event in prof.function_events if event.name.endswith(postfix)]
 
-            if expect_event:
+            if expect_event and dist.get_backend() in PROFILING_SUPPORTED_BACKENDS:
                 events = get_event(profiling_title_postfix)
                 self.assertEqual(len(events), len(op_calls))
                 for e in events:
                     self.assertEqual(e.count, 1)
-                    self.assertGreater(e.cpu_time, 0)
+                    self.assertGreaterEqual(e.cpu_time, 0)
 
         # ALL REDUCE
         def _test_all_reduce_helper(
@@ -1383,7 +1387,6 @@ class DistributedTest:
             "Only Gloo and NCCL backends will have CUDA allReduce tested",
         )
         @skip_if_no_gpu
-        @skip_if_rocm
         def test_all_reduce_sum_cuda_async(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
@@ -2340,7 +2343,6 @@ class DistributedTest:
 
         @skip_if_no_gpu
         @unittest.skipIf(BACKEND == "mpi", "MPI doesn't supports GPU barrier")
-        @skip_if_rocm
         def test_barrier_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
@@ -2478,12 +2480,9 @@ class DistributedTest:
                         _build_tensor(src + 1, master_value).cuda(device=i)
                         for i in rank_to_GPU[rank]
                     ]
-                    # TODO: Setting expect_event=False to disable profiling
-                    # tests. Once https://github.com/pytorch/pytorch/issues/48127
-                    # is addressed, this should be reverted.
                     self.call_dist_op(
                         "reduce", False, dist.reduce_multigpu, tensors, src, op, group_id,
-                        expect_event=False)
+                        expect_event=len(tensors) == 1)
                     expected_tensor = _build_tensor(src + 1, expected_value)
                     self.assertEqual(tensors[0], expected_tensor)
                 else:
@@ -2491,12 +2490,9 @@ class DistributedTest:
                         _build_tensor(src + 1, worker_value).cuda(device=i)
                         for i in rank_to_GPU[rank]
                     ]
-                    # TODO: Setting expect_event=False to disable profiling
-                    # tests. Once https://github.com/pytorch/pytorch/issues/48127
-                    # is addressed, this should be reverted.
                     self.call_dist_op(
                         "reduce", False, dist.reduce_multigpu, tensors, src, op, group_id,
-                        expect_event=False)
+                        expect_event=len(tensors) == 1)
 
             self._barrier()
 
@@ -2536,13 +2532,10 @@ class DistributedTest:
                 for gpu in rank_to_GPU[rank]:
                     output_tensors.append([t.cuda(device=gpu) for t in output_per_gpu])
                     expected_output.append([t.cuda(device=gpu) for t in expected_per_gpu])
-                # TODO: Setting expect_event=False to disable profiling
-                # tests. Once https://github.com/pytorch/pytorch/issues/48127
-                # is addressed, this should be reverted.
                 self.call_dist_op(
                     "all_gather", False,
                     dist.all_gather_multigpu, output_tensors, tensors, group_id,
-                    expect_event=False)
+                    expect_event=len(expected_output) == 1)
                 self.assertEqual(output_tensors, expected_output)
 
             self._barrier()
@@ -4268,3 +4261,32 @@ class DistributedTest:
                 ) if i == 1 else suppress():
                     loss = model(random_input).sum()
                     loss.backward()
+
+        @require_backend({"gloo"})
+        @unittest.skipIf(BACKEND == "nccl", "NCCL does not support scatter")
+        def test_scatter_object_list(self):
+            src_rank = 0
+            scatter_list = (
+                collectives_object_test_list
+                if self.rank == src_rank
+                else [None for _ in collectives_object_test_list]
+            )
+            world_size = dist.get_world_size()
+            scatter_list = scatter_list[: world_size]
+            i = 0
+            while len(scatter_list) < world_size:
+                scatter_list.append(scatter_list[i])
+                i += 1
+
+            output_obj_list = [None]
+            dist.scatter_object_list(output_obj_list, scatter_list, src=src_rank)
+            self.assertEqual(
+                output_obj_list[0],
+                collectives_object_test_list[self.rank % len(collectives_object_test_list)],
+            )
+            # Ensure errors are raised upon incorrect arguments.
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Expected argument scatter_object_output_list to be a list of size at least 1.",
+            ):
+                dist.scatter_object_list([], scatter_list, src=src_rank)

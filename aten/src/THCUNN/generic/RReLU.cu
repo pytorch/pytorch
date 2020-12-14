@@ -31,11 +31,11 @@ void THNN_(RReLU_updateOutput)(
     const uint32_t curand4_engine_calls = 4;
     dim3 grid = NUM_BLOCKS(n);
     uint64_t counter_offset = ((n - 1) / (BLOCK_SIZE * grid.x) + 1) * curand4_engine_calls;
-    std::pair<uint64_t, uint64_t> rng_engine_inputs;
+    at::PhiloxCudaState rng_engine_inputs;
     {
       // See Note [Acquire lock when using random generators]
       std::lock_guard<std::mutex> lock(gen->mutex_);
-      rng_engine_inputs = gen->philox_engine_inputs(counter_offset);
+      rng_engine_inputs = gen->philox_cuda_state(counter_offset);
     }
     if (inplace)
     {
