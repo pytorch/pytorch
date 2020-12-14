@@ -89,6 +89,11 @@ class TestFunctionalIterableDataset(TestCase):
         batch_ds4 = BatchIterableDataset(ds, batch_size=2, drop_last=True)
         self.assertEqual(len(batch_ds4), 5)
 
+        ds_nolen = IterDatasetWithoutLen(arrs)
+        batch_ds_nolen = BatchIterableDataset(ds_nolen, batch_size=5)
+        with self.assertRaises(NotImplementedError):
+            len(batch_ds_nolen)
+
 
 if __name__ == '__main__':
     run_tests()
