@@ -7,8 +7,8 @@ T_co = TypeVar('T_co', covariant=True)
 S_co = TypeVar('S_co', covariant=True)
 
 
-class CollateDataset(IterableDataset[T_co]):
-    r""" Prototype of :class:`CollateDataset`.
+class CollateIterableDataset(IterableDataset[T_co]):
+    r""" Prototype of :class:`CollateIterableDataset`.
 
     IterableDataset to collate samples from dataset to Tensor(s) by `util_.collate.default_collate`,
     or customized Data Structure by collate_fn.
@@ -38,7 +38,7 @@ class CollateDataset(IterableDataset[T_co]):
         >>> def collate_fn(batch):
         ...     return torch.tensor(batch, dtype=torch.float)
         ...
-        >>> collated_ds = CollateDataset(ds, collate_fn=collate_fn)
+        >>> collated_ds = CollateIterableDataset(ds, collate_fn=collate_fn)
         >>> print(list(collated_ds))
         [tensor(3.), tensor(4.), tensor(5.), tensor(6.)]
     """
@@ -48,7 +48,7 @@ class CollateDataset(IterableDataset[T_co]):
                  *,
                  collate_fn: Callable[[S_co], T_co] = _utils.collate.default_collate,
                  ) -> None:
-        super(CollateDataset, self).__init__()
+        super(CollateIterableDataset, self).__init__()
         self.dataset = dataset
         self.collate_fn = collate_fn
 

@@ -1,6 +1,6 @@
 import torch
 from torch.utils.data import IterableDataset
-from torch.utils.data.datasets import (CollateDataset)
+from torch.utils.data.datasets import (CollateIterableDataset)
 from torch.testing._internal.common_utils import (TestCase, run_tests)
 
 
@@ -37,14 +37,14 @@ class TestFunctionalIterableDataset(TestCase):
         def _collate_fn(batch):
             return torch.tensor(sum(batch), dtype=torch.float)
 
-        collate_ds = CollateDataset(ds_len, collate_fn=_collate_fn)
+        collate_ds = CollateIterableDataset(ds_len, collate_fn=_collate_fn)
         self.assertEqual(len(ds_len), len(collate_ds))
         ds_iter = iter(ds_len)
         for x in collate_ds:
             y = next(ds_iter)
             self.assertEqual(x, torch.tensor(sum(y), dtype=torch.float))
 
-        collate_ds_nolen = CollateDataset(ds_nolen)
+        collate_ds_nolen = CollateIterableDataset(ds_nolen)
         with self.assertRaises(NotImplementedError):
             len(collate_ds_nolen)
         ds_nolen_iter = iter(ds_nolen)

@@ -1,3 +1,3 @@
-from .collatedataset import CollateDataset
+from .collatedataset import CollateIterableDataset
 
-__all__ = ['CollateDataset']
+__all__ = ['CollateIterableDataset']
