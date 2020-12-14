@@ -9,11 +9,31 @@ from typing import Optional, Any
 from torch import device as _device
 
 def get_current_device_index() -> int:
+    r"""Checks if there are CUDA devices available and
+    returns the device index of the current default CUDA device.
+    Returns -1 in case there are no CUDA devices available.
+
+    Arguments: ``None``
+    """
     if torch.cuda.device_count() > 0:
         return torch.cuda._current_device()
     return -1
 
 def get_device_index(device: Optional[_device] = None, optional: bool = False, allow_cpu: bool = False) -> int:
+    r"""Gets the device index from :attr:`device`, which can be a torch.device
+    object, a Python integer, or ``None``.
+
+    If :attr:`device` is a torch.device object, returns the device index if it
+    is a CUDA device. Note that for a CUDA device without a specified index,
+    , this will return the current default CUDA device if :attr:`optional` is ``True``.
+    If :attr:`allow_cpu` is ``True``,CPU devices will be accepted and ``-1`` will be
+    returned in this case.
+
+    If :attr:`device` is a Python integer, it is returned as is.
+
+    If :attr:`device` is ``None``, this will return the current default CUDA
+    device if :attr:`optional` is ``True``.
+    """
     if device is None:
         if optional:
             return get_current_device_index()
@@ -37,7 +57,7 @@ def get_device_index(device: Optional[_device] = None, optional: bool = False, a
 class device(object):
     r"""Context-manager that changes the selected device.
     This is similar to device (torch.device or int), but has been
-    introduced for jit compatibility
+    introduced for JIT compatibility.
     Arguments:
         device (torch.device or int): device index to select. It's a no-op if
             this argument is a negative integer or ``None``.
@@ -72,12 +92,16 @@ class StreamContext(object):
     """
 
     def __init__(self, stream: 'torch.classes.cuda.Stream'):
-        self.idx = get_device_index(device=None, optional=True)
+        self.idx = -1
         self.cur_stream = stream
         self.src_prev_stream = stream
         self.dst_prev_stream = stream
 
     def __enter__(self):
+        self.idx = get_device_index(device=None, optional=True)
+
+        if self.idx == -1:
+            return
         self.src_prev_stream = torch.cuda.current_stream(self.idx)
         # If the stream is not on the current device, then change the device
         # and set the current stream on the device
