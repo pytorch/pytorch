@@ -1454,6 +1454,15 @@ except RuntimeError as e:
         self.assertEqual(int(math.ceil(float(num_samples) / batch_size)),
                          count_num_samples_in_data_loader)
 
+    def test_distributed_sampler_invalid_rank(self):
+        from torch.utils.data.distributed import DistributedSampler
+        dataset = torch.IntTensor(range(10))
+        with self.assertRaisesRegex(ValueError, "Invalid rank"):
+            sampler = DistributedSampler(dataset, 3, 3)
+
+        with self.assertRaisesRegex(ValueError, "Invalid rank"):
+            sampler = DistributedSampler(dataset, 3, -1)
+
     def test_duplicating_data_with_drop_last(self):
 
         from torch.utils.data.distributed import DistributedSampler
