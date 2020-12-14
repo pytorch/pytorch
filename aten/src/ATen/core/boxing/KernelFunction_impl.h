@@ -53,6 +53,12 @@ inline Return KernelFunction::call(const OperatorHandle& opHandle, Args... args)
         return callUnboxedKernelFunction<Return, Args...>(unboxed_kernel_func_, functor_.get(), std::forward<Args>(args)...);
     }
 
+#if defined C10_MOBILE
+    TORCH_CHECK(
+        false,
+        "Tried to call KernelFunction::call() on an uninitialized KernelFunction."
+    );
+#else
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         boxed_kernel_func_ != nullptr,
         "Tried to call KernelFunction::call() on an uninitialized KernelFunction."
@@ -64,6 +70,7 @@ inline Return KernelFunction::call(const OperatorHandle& opHandle, Args... args)
         opHandle,
         std::forward<Args>(args)...
     );
+#endif
 }
 
 template<KernelFunction::BoxedKernelFunction* func>
