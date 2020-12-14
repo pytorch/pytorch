@@ -1211,7 +1211,6 @@ class TestTEFuser(JitTestCase):
         else:
             return v.to(dtype)
 
-    @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")
     def test_unary_ops(self):
         def apply(fn):
             return lambda x: fn(x)
@@ -1260,8 +1259,7 @@ class TestTEFuser(JitTestCase):
             torch.trunc,
             torch.frac,
             lambda x: torch.threshold(x, 0, -10),
-            # FIXME: fails on cpu with dtype=uint8
-            # lambda x: torch.clamp(x, -10, 10),
+            lambda x: torch.clamp(x, -10, 10),
         ]
         sizes = [(1,), (2,), (4, 4)]
         for dtype, op, device, size in product(dtypes, unary_ops, self.devices, sizes):
