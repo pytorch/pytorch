@@ -125,6 +125,7 @@ void _fft_fill_with_conjugate_symmetry_cuda_(
               static_cast<const scalar_t*>(in_data),
               input_offset_calculator,
               output_offset_calculator);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 }
 
@@ -589,112 +590,5 @@ Tensor _fft_c2c_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization
   return output;
 }
 
-// cuFFT
-// Currently not utilizing multi GPUs so this can be potentially sped up.
-Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
-                  bool complex_input, bool complex_output, bool inverse,
-                  IntArrayRef checked_signal_sizes, int64_t normalization, bool onesided,
-                  IntArrayRef output_sizes) {
-
-  CuFFTParamsLRUCache& plan_cache = cufft_get_plan_cache(self.device().index());
-
-  Tensor input = self;
-  const auto fft_type = GetCuFFTTransformType(complex_input, complex_output);
-
-  if (complex_input) {
-    TORCH_CHECK(input.size(-1) == 2, "Expected a complex (size 2) last dimension");
-  }
-
-
-  // Slice when twosided complex-to-real. This is not always needed because we
-  // calculate the inembed. But it will benefit us in certain cases where we
-  // clone the input tensor.
-  //
-  // See NOTE [ cuFFT Embedded Strides ].
-  // See NOTE [ Fourier Transform Conjugate Symmetry ] in native/SpectralOpsUtils.h.
-  if (fft_type == CuFFTTransformType::C2R && !onesided) {
-    auto onesided_size = infer_ft_real_to_complex_onesided_size(checked_signal_sizes[signal_ndim - 1]);
-    input = input.narrow(signal_ndim, 0, onesided_size);
-  }
-
-  // cuFFT requires input and output data pointers to complex type aligned.
-  // Our newly allocated output tensor is always 512 bytes aligned so it is fine
-  // (see kRoundSmall and kRoundLarge in THCCachingAllocator.cpp), but we do
-  // need to check input tensor to make sure that it is not unaligned, e.g.,
-  // from a slicing.
-  bool must_clone = false;
-  auto complex_size_bytes = 2 * input.element_size();
-  if (reinterpret_cast<std::uintptr_t>(input.data_ptr()) % complex_size_bytes != 0) {
-    must_clone = true;
-  }
-
-  if (complex_input) {
-    auto strides = input.strides();
-    // Real/imag dimension must be like complex type.
-    must_clone |= strides.back() != 1;
-    // Strides of other dimensions needs to be aligned when viewed as complex
-    // type, i.e., multiples of 2.
-    must_clone |= std::any_of(strides.begin(), strides.end() - 1,
-                              [&](int64_t stride) { return stride % 2 != 0; });
-
-    // Complex to real FFTs may overwrite the input buffer (gh-34551)
-    must_clone |= !complex_output;
-  }
-
-  if (must_clone) {
-    input = input.clone(MemoryFormat::Contiguous);
-  }
-
-  // Now that we have done error check and data_ptr checks, we delegate all
-  // further cuFFT parameter computation and plan creation to the helper class
-  // CuFFTConfig in CuFFTPlanCache.h.
-
-  // If plan caching is enabled, we check the cache. Note that this accesses
-  // plan_cache.max_size() and thus makes this function less functional.
-  // However, integrating additional arguments into the "public" level c++ APIs,
-  // e.g., irfft, is difficult as we have a long call sequence looking like
-  //   irfft --> _fft --> _fft_with_size --dispatching-to-> _fft_cufft
-
-  DimVector in_strides(signal_ndim + 1);
-  auto input_strides = input.strides();
-  for (int64_t i = signal_ndim; i >= 0; --i) {
-    in_strides[i] = complex_input ? input_strides[i] / 2 : input_strides[i];
-  }
-
-  DimVector out_strides(signal_ndim + 1);
-  out_strides[signal_ndim] = 1;
-  if (fft_type == CuFFTTransformType::R2C && onesided) {
-    out_strides[signal_ndim - 1] = checked_signal_sizes[signal_ndim - 1] / 2 + 1;
-  } else {
-    out_strides[signal_ndim - 1] = checked_signal_sizes[signal_ndim - 1];
-  }
-  for (int64_t i = signal_ndim - 2; i >= 0; --i) {
-    out_strides[i] = out_strides[i + 1] * checked_signal_sizes[i];
-  }
-
-  DimVector full_sizes(signal_ndim + 1);
-  full_sizes[0] = self.size(0);
-  std::copy(checked_signal_sizes.begin(), checked_signal_sizes.end(), full_sizes.begin() + 1);
-  CuFFTParams Params(in_strides, out_strides, full_sizes, fft_type,
-                     c10::toValueType(input.scalar_type()));
-
-  // This read is not locked for perf reason. Shouldn't matter too much because
-  // we check again after acquiring the lock.
-  if (plan_cache.max_size() > 0) {
-    std::lock_guard<std::mutex> guard(plan_cache.mutex);
-    if (plan_cache.max_size() > 0) {  // check again after acquiring the lock
-      const CuFFTConfig &config = plan_cache.lookup(Params);
-      return _run_cufft(config, input, signal_ndim, complex_input,
-                        complex_output, inverse, checked_signal_sizes,
-                        static_cast<fft_norm_mode>(normalization),
-                        onesided, output_sizes, must_clone);
-    }
-  }
-  CuFFTConfig config(Params);
-  return _run_cufft(config, input, signal_ndim, complex_input,
-                    complex_output, inverse, checked_signal_sizes,
-                    static_cast<fft_norm_mode>(normalization),
-                    onesided, output_sizes, must_clone);
-}
 
 }} // at::native
