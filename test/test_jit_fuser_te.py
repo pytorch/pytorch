@@ -1401,7 +1401,6 @@ class TestTEFuser(JitTestCase):
 
         dtypes = [
             torch.int8,
-            torch.uint8,
             torch.int16,
             torch.int32,
             torch.int64,
