@@ -48,18 +48,6 @@ namespace jit {
 namespace tensorexpr {
 namespace {
 
-bool is_unsigned_integral(const ScalarType& type) {
-  switch (type) {
-    case ScalarType::Bool:
-    case ScalarType::Byte:
-      return true;
-    default:
-      return false;
-  }
-
-  return false;
-}
-
 llvm::CmpInst::Predicate llvm_comparison_predicate(
     CompareSelectOperation compare_op,
     const ScalarType& type) {
@@ -69,17 +57,17 @@ llvm::CmpInst::Predicate llvm_comparison_predicate(
     case CompareSelectOperation::kNE:
       return llvm::ICmpInst::ICMP_NE;
     case CompareSelectOperation::kGT:
-      return is_unsigned_integral(type) ? llvm::ICmpInst::ICMP_UGT
-                                        : llvm::ICmpInst::ICMP_SGT;
+      return is_signed(type) ? llvm::ICmpInst::ICMP_SGT
+                             : llvm::ICmpInst::ICMP_UGT;
     case CompareSelectOperation::kGE:
-      return is_unsigned_integral(type) ? llvm::ICmpInst::ICMP_UGE
-                                        : llvm::ICmpInst::ICMP_SGE;
+      return is_signed(type) ? llvm::ICmpInst::ICMP_SGE
+                             : llvm::ICmpInst::ICMP_UGE;
     case CompareSelectOperation::kLT:
-      return is_unsigned_integral(type) ? llvm::ICmpInst::ICMP_ULT
-                                        : llvm::ICmpInst::ICMP_SLT;
+      return is_signed(type) ? llvm::ICmpInst::ICMP_SLT
+                             : llvm::ICmpInst::ICMP_ULT;
     case CompareSelectOperation::kLE:
-      return is_unsigned_integral(type) ? llvm::ICmpInst::ICMP_ULE
-                                        : llvm::ICmpInst::ICMP_SLE;
+      return is_signed(type) ? llvm::ICmpInst::ICMP_SLE
+                             : llvm::ICmpInst::ICMP_ULE;
     default:
       // TODO: change to a proper error report
       throw std::runtime_error("invalid operator type");
@@ -721,7 +709,8 @@ void LLVMCodeGenImpl::visit(const Max* v) {
   auto rhs = this->value_;
 
   if (v->dtype().is_integral()) {
-    auto icmp = irb_.CreateICmpSGT(lhs, rhs);
+    auto icmp = v->dtype().is_signed() ? irb_.CreateICmpSGT(lhs, rhs)
+                                       : irb_.CreateICmpUGT(lhs, rhs);
     value_ = irb_.CreateSelect(icmp, lhs, rhs);
     return;
   }
@@ -742,7 +731,8 @@ void LLVMCodeGenImpl::visit(const Min* v) {
   v->rhs()->accept(this);
   auto rhs = this->value_;
   if (v->dtype().is_integral()) {
-    auto icmp = irb_.CreateICmpSLT(lhs, rhs);
+    auto icmp = v->dtype().is_signed() ? irb_.CreateICmpSLT(lhs, rhs)
+                                       : irb_.CreateICmpULT(lhs, rhs);
     value_ = irb_.CreateSelect(icmp, lhs, rhs);
     return;
   }
@@ -1671,7 +1661,7 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
   } else if (v->dtype().is_integral() && v->op_type() == kFabs) {
     // abs is only intrinsic defined for integer inputs in pytorch eager
     v->params().front()->accept(this);
-    if (is_unsigned_integral(v->dtype().scalar_type())) {
+    if (!v->dtype().is_signed()) {
       return;
     }
     // TODO: use llvm.abs intrinsic for LLVM 12
