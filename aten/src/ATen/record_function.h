@@ -5,9 +5,9 @@
 #include <c10/macros/Export.h>
 #include <c10/util/Optional.h>
 #include <c10/util/SmallVector.h>
-#include <memory>
-
 #include <functional>
+#include <memory>
+#include <random>
 
 namespace c10 {
 class CAFFE2_API OperatorHandle;
