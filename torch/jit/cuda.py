@@ -19,7 +19,7 @@ def get_device_index(device: Optional[_device] = None, optional: bool = False, a
             return get_current_device_index()
         else:
             raise ValueError('Expected a torch.device with a specified index '
-                             'or an integer, but got:{}'.format(device))
+                             f'or an integer, but got: {device}')
     device_index = -1
     if isinstance(device, str):
         device = torch.device(device)
