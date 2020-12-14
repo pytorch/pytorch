@@ -14,7 +14,7 @@ import torch
 import traceback
 import warnings
 import threading
-from typing import List, Optional, Tuple, Union, Any
+from typing import List, Optional, Tuple, Union
 from ._utils import _get_device_index, _dummy_type
 from .streams import Stream, Event
 from .. import device as _device
@@ -299,93 +299,9 @@ def get_device_properties(device: _device_t) -> _CudaDeviceProperties:
         raise AssertionError("Invalid device id")
     return _get_device_properties(device)  # type: ignore[name-defined]
 
-def get_current_device_index():
-    if torch.cuda._cuda_getDeviceCount() > 0:
-        return torch.cuda._cuda_getDevice()
-    return -1
 
-def get_device_index(device: Optional[_device] = None, optional: bool = False, allow_cpu: bool = False) -> int:
-    if device is None:
-        if optional:
-            return get_current_device_index()
-        else:
-            raise ValueError('Expected a torch.device with a specified index '
-                             'or an integer, but got:{}'.format(device))
-    device_index = -1
-    if isinstance(device, str):
-        device = torch.device(device)
-
-    if isinstance(device, torch.device):
-        if not allow_cpu and device.type == 'cpu':
-            raise ValueError('Expected a non cpu device, but got: {}'.format(device))
-        device_index = -1 if device.type == 'cpu' else torch.cuda._cuda_getDeviceIndex(device)
-
-    if isinstance(device, int):
-        device_index = device
-
-    return device_index
-
-class device_jit(object):
-    r"""Context-manager that changes the selected device.
-    This is similar to device (torch.device or int), but has been
-    introduced for jit compatibility
-
-    Arguments:
-        device_jit (torch.device or int): device index to select. It's a no-op if
-            this argument is a negative integer or ``None``.
-    """
-
-    def __init__(self, device: _device):
-        self.idx = get_device_index(device)
-        self.prev_idx = -1
-
-    def __enter__(self):
-        if self.idx == -1:
-            return
-        self.prev_idx = torch.cuda._cuda_getDevice()
-        if self.prev_idx != self.idx:
-            torch.cuda._cuda_setDevice(self.idx)
-
-    def __exit__(self, type: Any, value: Any, traceback: Any):
-        if self.prev_idx != self.idx:
-            torch.cuda._cuda_setDevice(self.prev_idx)
-
-class get_current_stream(object):
-    r"""Context-manager that selects a given stream.
-
-    All CUDA kernels queued within its context will be enqueued on a selected
-    stream.
-
-    Arguments:
-        stream (Stream): selected stream. This manager is a no-op if it's
-            ``None``.
-
-    .. note:: Streams are per-device. If the selected stream is not on the
-        current device, this function will also change the current device to
-        match the stream.
-    """
-
-    def __init__(self, stream: 'torch.classes.cuda.Stream'):
-        self.idx = get_device_index(device=None, optional=True)
-        self.cur_stream = stream
-        self.src_prev_stream = stream
-        self.dst_prev_stream = stream
-
-    def __enter__(self):
-        if self.idx == -1:
-            return
-        self.src_prev_stream = torch.cuda._cuda_getStream(self.idx)
-        if self.idx != self.cur_stream.device_index():
-            with device_jit(self.cur_stream.device()):
-                self.dst_prev_stream = torch.cuda._cuda_getStream(self.idx)
-        torch.cuda._cuda_setStream(self.cur_stream)
-
-    def __exit__(self, type: Any, value: Any, traceback: Any):
-        if self.src_prev_stream.device_index() != self.cur_stream.device_index():
-            torch.cuda._cuda_setStream(self.dst_prev_stream)
-        torch.cuda._cuda_setStream(self.src_prev_stream)
-
-def stream(stream: 'torch.classes.cuda.Stream') -> 'torch.cuda.get_current_stream':
+@contextlib.contextmanager
+def stream(stream):
     r"""Context-manager that selects a given stream.
 
     All CUDA kernels queued within its context will be enqueued on a selected
@@ -400,8 +316,24 @@ def stream(stream: 'torch.classes.cuda.Stream') -> 'torch.cuda.get_current_strea
         match the stream.
     """
     if stream is None:
+        yield
         return
-    return get_current_stream(stream)
+    src_prev_stream = current_stream()
+
+    if src_prev_stream.device != stream.device:
+        # The given stream is on a different device; have to restore the
+        # current_stream on that device on exit as well
+        with device(stream.device):
+            dst_prev_stream = current_stream()
+
+    torch._C._cuda_setStream(stream._cdata)
+    try:
+        yield
+    finally:
+        if src_prev_stream.device != stream.device:
+            torch._C._cuda_setStream(dst_prev_stream._cdata)
+        torch._C._cuda_setStream(src_prev_stream._cdata)
+
 
 def device_count() -> int:
     r"""Returns the number of GPUs available."""
