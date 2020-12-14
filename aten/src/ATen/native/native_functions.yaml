@@ -230,6 +230,7 @@
     DefaultBackend: abs_
 
 - func: abs.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: abs_out
 
@@ -2053,17 +2054,6 @@
   dispatch:
     CPU, CUDA: native_group_norm_backward
 
-- func: _fft_with_size(Tensor self, int signal_ndim, bool complex_input, bool complex_output, bool inverse, int[] checked_signal_sizes, bool normalized, bool onesided, int[] output_sizes) -> Tensor
-  use_c10_dispatcher: full
-  variants: function
-
-- func: _fft_with_size.norm_modes(Tensor self, int signal_ndim, bool complex_input, bool complex_output, bool inverse, int[] checked_signal_sizes, int normalization, bool onesided, int[] output_sizes) -> Tensor
-  use_c10_dispatcher: full
-  variants: function
-  dispatch:
-    CPU: _fft_mkl
-    CUDA: _fft_cufft
-
 # Real to complex forward FFT
 - func: _fft_r2c(Tensor self, int[] dim, int normalization, bool onesided) -> Tensor
   use_c10_dispatcher: full
@@ -3571,8 +3561,9 @@
 
 - func: size.int(Tensor self, int dim) -> int
   use_c10_dispatcher: full
-  variants: function, method
+  variants: function
   device_guard: False
+  manual_cpp_binding: True
 
 - func: size.Dimname(Tensor self, Dimname dim) -> int
   variants: function, method
@@ -3734,8 +3725,9 @@
 
 - func: stride.int(Tensor self, int dim) -> int
   use_c10_dispatcher: full
-  variants: function, method
+  variants: function
   device_guard: False
+  manual_cpp_binding: True
 
 - func: stride.Dimname(Tensor self, Dimname dim) -> int
   variants: function, method
@@ -6753,27 +6745,27 @@
   use_c10_dispatcher: full
   variants: method, function
 
-- func: quantile.scalar_out(Tensor self, float q, int? dim=None, str interpolation='linear', bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: quantile.scalar_out(Tensor self, float q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: quantile.scalar(Tensor self, float q, int? dim=None, str interpolation='linear', bool keepdim=False) -> Tensor
+- func: quantile.scalar(Tensor self, float q, int? dim=None, bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
 
-- func: quantile.out(Tensor self, Tensor q, int? dim=None, str interpolation='linear', bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: quantile.out(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: quantile(Tensor self, Tensor q, int? dim=None, str interpolation='linear', bool keepdim=False) -> Tensor
+- func: quantile(Tensor self, Tensor q, int? dim=None, bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
 
-- func: nanquantile.scalar_out(Tensor self, float q, int? dim=None, str interpolation='linear', bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: nanquantile.scalar_out(Tensor self, float q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: nanquantile.scalar(Tensor self, float q, int? dim=None, str interpolation='linear', bool keepdim=False) -> Tensor
+- func: nanquantile.scalar(Tensor self, float q, int? dim=None, bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
 
-- func: nanquantile.out(Tensor self, Tensor q, int? dim=None, str interpolation='linear', bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: nanquantile.out(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: nanquantile(Tensor self, Tensor q, int? dim=None, str interpolation='linear', bool keepdim=False) -> Tensor
+- func: nanquantile(Tensor self, Tensor q, int? dim=None, bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
 
