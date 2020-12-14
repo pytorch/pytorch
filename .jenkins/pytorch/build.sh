@@ -1,18 +1,13 @@
 #!/bin/bash
 
+set -ex
+
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
 
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
-
-# Temp: use new sccache
-if [[ -n "$IN_CI" && "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  # Download customized sccache
-  sudo curl --retry 3 http://repo.radeon.com/misc/.sccache_amd/sccache -o /opt/cache/bin/sccache
-  sudo chmod 755 /opt/cache/bin/sccache
-fi
 
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -122,32 +117,6 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # We used to set MAX_JOBS to 4 to avoid, but this is no longer an issue.
   if [ -z "$MAX_JOBS" ]; then
     export MAX_JOBS=$(($(nproc) - 1))
-  fi
-
-  # ROCm CI is using Caffe2 docker images, which needs these wrapper
-  # scripts to correctly use sccache.
-  if [[ -n "${SCCACHE_BUCKET}" && -z "$IN_CI" ]]; then
-    mkdir -p ./sccache
-
-    SCCACHE="$(which sccache)"
-    if [ -z "${SCCACHE}" ]; then
-      echo "Unable to find sccache..."
-      exit 1
-    fi
-
-    # Setup wrapper scripts
-    for compiler in cc c++ gcc g++ clang clang++; do
-      (
-        echo "#!/bin/sh"
-        echo "exec $SCCACHE $(which $compiler) \"\$@\""
-      ) > "./sccache/$compiler"
-      chmod +x "./sccache/$compiler"
-    done
-
-    export CACHE_WRAPPER_DIR="$PWD/sccache"
-
-    # CMake must find these wrapper scripts
-    export PATH="$CACHE_WRAPPER_DIR:$PATH"
   fi
 
   if [[ -n "$IN_CI" ]]; then

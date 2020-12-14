@@ -378,7 +378,7 @@ bool test_add() {
   {                                                                           \
     auto X1 = torch::rand(a1, at::TensorOptions(at::kCPU).dtype(at::kFloat)); \
     auto X2 = torch::rand(a2, at::TensorOptions(at::kCPU).dtype(at::kFloat)); \
-    auto Y1 = at::native::add(X1, X2);                                        \
+    auto Y1 = at::add(X1, X2);                                        \
     auto MX1 = X1.metal();                                                    \
     auto MX2 = X2.metal();                                                    \
     auto Y2 = at::native::metal::mpscnn::add(MX1, MX2).cpu();                 \
