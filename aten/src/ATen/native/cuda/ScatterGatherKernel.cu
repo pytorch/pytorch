@@ -192,7 +192,7 @@ struct cuda_scatter_gather_base_kernel {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
       iter.dtype(),
-      method_name, [&] {
+      "cuda_scatter_gather_base_kernel_func", [&] {
         using dtype = typename std::conditional<cast_to_opaque,
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
@@ -264,7 +264,7 @@ struct cuda_scatter_gather_base_kernel {
     AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
       iter.dtype(),
-      method_name, [&] {
+      "cuda_scatter_gather_base_kernel_reduce_multiply", [&] {
         using dtype = typename std::conditional<cast_to_opaque,
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
@@ -365,7 +365,7 @@ struct cuda_scatter_fill_base_kernel {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
       iter.dtype(),
-      method_name, [&] {
+      "cuda_scatter_fill_base_kernel_func", [&] {
         using dtype = typename std::conditional<cast_to_opaque,
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
@@ -417,7 +417,7 @@ struct cuda_scatter_fill_base_kernel {
     AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
       iter.dtype(),
-      method_name, [&] {
+      "cuda_scatter_fill_base_kernel_reduce_multiply", [&] {
         using dtype = typename std::conditional<cast_to_opaque,
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
