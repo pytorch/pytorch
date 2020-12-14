@@ -516,7 +516,7 @@ def swap_module(mod, mapping, custom_module_class_mapping):
     """
     new_mod = mod
     # Always replace dequantstub with dequantize
-    if hasattr(mod, 'qconfig') and mod.qconfig is not None or type(mod) == DeQuantStub:
+    if hasattr(mod, 'qconfig') and mod.qconfig is not None: # or type(mod) == DeQuantStub:
         swapped = False
         if type(mod) in custom_module_class_mapping:
             new_mod = custom_module_class_mapping[type(mod)].from_observed(mod)
