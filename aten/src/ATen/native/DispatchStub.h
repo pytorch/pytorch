@@ -47,8 +47,12 @@ namespace at { namespace native {
 
 enum class CPUCapability {
   DEFAULT = 0,
+#ifdef HAVE_VSX_CPU_DEFINITION
+  VSX = 1,
+#else
   AVX = 1,
   AVX2 = 2,
+#endif
   NUM_OPTIONS
 };
 
@@ -102,6 +106,12 @@ struct CAFFE2_API DispatchStub<rT (*)(Args...), T> {
       return AVX;
     }
 #endif
+#ifdef HAVE_VSX_CPU_DEFINITION
+    if (capability >= static_cast<int>(CPUCapability::VSX)) {
+      AT_ASSERTM(VSX, "DispatchStub: missing VSX kernel");
+      return VSX;
+    }
+#endif
     AT_ASSERTM(DEFAULT, "DispatchStub: missing default kernel");
     return DEFAULT;
   }
@@ -123,6 +133,9 @@ struct CAFFE2_API DispatchStub<rT (*)(Args...), T> {
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
   static FnPtr AVX2;
+#endif
+#ifdef HAVE_VSX_CPU_DEFINITION
+  static FnPtr VSX;
 #endif
 };
 
@@ -173,10 +186,17 @@ struct RegisterHIPDispatch {
 #define REGISTER_AVX2_DISPATCH(name, fn)
 #endif
 
+#ifdef HAVE_VSX_CPU_DEFINITION
+#define REGISTER_VSX_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, VSX, fn)
+#else
+#define REGISTER_VSX_DISPATCH(name, fn)
+#endif
+
 #define REGISTER_NO_CPU_DISPATCH(name, fn_type)                                \
   REGISTER_ARCH_DISPATCH(name, DEFAULT, static_cast<fn_type>(nullptr))         \
   REGISTER_AVX_DISPATCH(name, static_cast<fn_type>(nullptr))                   \
-  REGISTER_AVX2_DISPATCH(name, static_cast<fn_type>(nullptr))
+  REGISTER_AVX2_DISPATCH(name, static_cast<fn_type>(nullptr))          \
+  REGISTER_VSX_DISPATCH(name, static_cast<fn_type>(nullptr))
 
 #define REGISTER_CUDA_DISPATCH(name, fn) \
   static RegisterCUDADispatch<decltype(fn), struct name> name ## __register(name, fn);
