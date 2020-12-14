@@ -8,7 +8,7 @@ import torch
 from typing import Optional, Any
 from torch import device as _device
 
-def get_current_device_index():
+def get_current_device_index() -> int:
     if torch.cuda.device_count() > 0:
         return torch.cuda._current_device()
     return -1
