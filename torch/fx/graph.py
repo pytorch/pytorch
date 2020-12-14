@@ -549,7 +549,7 @@ class Graph:
                 _shadows_builtin_name(name)
 
         while candidate in self._used_names or illegal_shadowing_name(candidate):
-            match = re.match(r"(.*)_(\d+)", candidate)
+            match = re.match(r"(.*)_(\d+)$", candidate)
             if match is None:
                 candidate = candidate + '_1'
             else:
