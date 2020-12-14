@@ -102,7 +102,7 @@ class StreamContext(object):
             torch.cuda._set_device(self.idx)
         torch.cuda.set_stream(self.src_prev_stream)
 
-def stream(stream: 'torch.classes.cuda.Stream') -> 'torch.jit.cuda.StreamContext':
+def stream(stream: 'torch.classes.cuda.Stream') -> StreamContext:
     r"""Wrapper around the Context-manager that selects a given stream.
     All CUDA kernels queued within its context will be enqueued on a selected
     stream.
