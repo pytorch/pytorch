@@ -230,6 +230,7 @@
     DefaultBackend: abs_
 
 - func: abs.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: abs_out
 
@@ -1119,6 +1120,7 @@
 - func: contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> Tensor(a)
   use_c10_dispatcher: full
   variants: method
+  manual_cpp_binding: True
 
 - func: convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -1485,6 +1487,7 @@
     SparseCPU, SparseCUDA: div_sparse_
 
 - func: div.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: full
   dispatch:
     CPU, CUDA: div_out
     SparseCPU, SparseCUDA: div_out_sparse_zerodim
@@ -2050,17 +2053,6 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: native_group_norm_backward
-
-- func: _fft_with_size(Tensor self, int signal_ndim, bool complex_input, bool complex_output, bool inverse, int[] checked_signal_sizes, bool normalized, bool onesided, int[] output_sizes) -> Tensor
-  use_c10_dispatcher: full
-  variants: function
-
-- func: _fft_with_size.norm_modes(Tensor self, int signal_ndim, bool complex_input, bool complex_output, bool inverse, int[] checked_signal_sizes, int normalization, bool onesided, int[] output_sizes) -> Tensor
-  use_c10_dispatcher: full
-  variants: function
-  dispatch:
-    CPU: _fft_mkl
-    CUDA: _fft_cufft
 
 # Real to complex forward FFT
 - func: _fft_r2c(Tensor self, int[] dim, int normalization, bool onesided) -> Tensor
@@ -3585,8 +3577,9 @@
 
 - func: size.int(Tensor self, int dim) -> int
   use_c10_dispatcher: full
-  variants: function, method
+  variants: function
   device_guard: False
+  manual_cpp_binding: True
 
 - func: size.Dimname(Tensor self, Dimname dim) -> int
   variants: function, method
@@ -3748,8 +3741,9 @@
 
 - func: stride.int(Tensor self, int dim) -> int
   use_c10_dispatcher: full
-  variants: function, method
+  variants: function
   device_guard: False
+  manual_cpp_binding: True
 
 - func: stride.Dimname(Tensor self, Dimname dim) -> int
   variants: function, method
@@ -6269,15 +6263,13 @@
 
 - func: eig.e(Tensor self, bool eigenvectors=False, *, Tensor(a!) e, Tensor(b!) v) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
   dispatch:
-    CPU: legacy::cpu::_th_eig_out
-    CUDA: eig_cuda_out
+    DefaultBackend: eig_out
 
 - func: eig(Tensor self, bool eigenvectors=False) -> (Tensor eigenvalues, Tensor eigenvectors)
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_eig
-    CUDA: eig_cuda
+    DefaultBackend: eig
 
 - func: svd.U(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
   dispatch:

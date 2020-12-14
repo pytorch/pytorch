@@ -5,7 +5,9 @@
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
 import pytest
+import tempfile
 import torch
+from torch.distributed import rpc
 
 
 @pytest.fixture(autouse=True)
@@ -35,3 +37,17 @@ def cuda_sleep():
 
 def pytest_report_header():
     return f"torch: {torch.__version__}"
+
+@pytest.fixture
+def setup_rpc(scope="session"):
+    file = tempfile.NamedTemporaryFile()
+    rpc.init_rpc(
+        name="worker0",
+        rank=0,
+        world_size=1,
+        rpc_backend_options=rpc.TensorPipeRpcBackendOptions(
+            init_method="file://{}".format(file.name),
+        )
+    )
+    yield
+    rpc.shutdown()

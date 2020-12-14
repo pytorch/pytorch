@@ -21,4 +21,5 @@ time python test/run_test.py --verbose -i distributed/test_jit_c10d
 time python test/run_test.py --verbose -i distributed/test_distributed_fork
 time python test/run_test.py --verbose -i distributed/test_c10d
 time python test/run_test.py --verbose -i distributed/test_c10d_spawn
+time python test/run_test.py --verbose -i distributed/rpc/test_tensorpipe_agent
 assert_git_not_dirty
