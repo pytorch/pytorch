@@ -4132,7 +4132,7 @@ class DistributedTest:
             model_copy.load_state_dict(ddp_model.state_dict(), is_parallel=True)
             self.assertEqual(model.state_dict().keys(), model_copy.state_dict().keys())
             self.assertEqual(model.state_dict()._metadata.keys(), model_copy.state_dict()._metadata.keys())
-            
+			
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
@@ -4303,4 +4303,3 @@ class DistributedTest:
                 "Expected argument scatter_object_output_list to be a list of size at least 1.",
             ):
                 dist.scatter_object_list([], scatter_list, src=src_rank)
-
