@@ -40,8 +40,8 @@ class SubgraphMatcher {
   bool matchNodes(const Node* n1, Node* n2);
   bool matchAttributes(const Node* n1, Node* n2);
 
-  bool isPatternInput(const Value* v) const;
-  bool isPatternOutput(const Value* v) const;
+  static bool isInput(const Value* v);
+  static bool isOutput(const Value* v);
 
   std::unordered_map<const Node*, Node*> nodes_map_;
   std::unordered_map<const Value*, Value*> values_map_;
@@ -66,15 +66,12 @@ bool patternGraphIsValid(const Graph& pattern) {
   return true;
 }
 
-bool SubgraphMatcher::isPatternInput(const Value* v) const {
-  return (v->owningGraph() == &pattern_ && v->node()->kind() == prim::Param);
+bool SubgraphMatcher::isInput(const Value* v) {
+  return v->node()->kind() == prim::Param;
 }
 
-bool SubgraphMatcher::isPatternOutput(const Value* v) const {
-  if (v->owningGraph() != &pattern_) {
-    return false;
-  }
-  for (const Value* output : pattern_.outputs()) {
+bool SubgraphMatcher::isOutput(const Value* v) {
+  for (const Value* output : v->owningGraph()->outputs()) {
     if (v == output) {
       return true;
     }
@@ -111,8 +108,7 @@ bool SubgraphMatcher::matchValues(const Value* v1, Value* v2) {
   // When V2 is ANCHOR, we're comparing exiting values, and when V1->node is
   // PARAM, we're comparing entering values - in these two cases the number of
   // uses don't need to be the same.
-  if (v1->uses().size() != v2->uses().size() && !isPatternOutput(v1) &&
-      !isPatternInput(v1)) {
+  if (v1->uses().size() != v2->uses().size() && !isOutput(v1) && !isInput(v1)) {
     GRAPH_DEBUG(
         "Values %",
         v1->debugName(),

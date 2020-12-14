@@ -509,7 +509,9 @@ graph(%x):
   %z = my::op2(%x)
   return (%y, %z))IR",
       &pattern2);
-  // Not supported multi-output pattern
+  // Not supported multi-output pattern, because not the whole pattern is
+  // covered by a traversal up from the first output (`%z = ...` is not
+  // visited). See the note "Multi-output Patterns" in subgraph_matcher.h.
   ASSERT_ANY_THROW(findPatternMatches(pattern2, graph));
 }
 
