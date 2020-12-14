@@ -1,7 +1,7 @@
 import torch
 from torch.utils.data import IterableDataset
-from torch.utils.data.datasets import (CollateIterableDataset, BatchIterableDataset,
-        SamplerIterableDataset)
+from torch.utils.data.datasets import (
+    CollateIterableDataset, BatchIterableDataset, SamplerIterableDataset)
 from torch.testing._internal.common_utils import (TestCase, run_tests)
 
 
