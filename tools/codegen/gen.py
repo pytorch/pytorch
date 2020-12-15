@@ -468,6 +468,7 @@ c10::impl::hacky_wrapper_for_legacy_signatures<
                 return f'm.impl("{f.func.name}", {payload});'
             else:
                 assert_never(self.target)
+                return None
 
         return list(mapMaybe(gen_one, g.functions()))
 
@@ -696,7 +697,7 @@ def compute_native_function_declaration(g: Union[StructuredNativeFunctions, Nati
         # only out has dispatch
         meta_name = meta.name(g)
         rs = []
-        seen = set()
+        seen: Set[Any] = set()
         out_args = native.arguments(g.out.func)
         for k, n in g.out.dispatch.items():
             if n in seen:
