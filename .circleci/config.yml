@@ -325,7 +325,7 @@ pytorch_windows_params: &pytorch_windows_params
       default: ""
     cuda_version:
       type: string
-      default: "10"
+      default: "10.1"
     python_version:
       type: string
       default: "3.6"
@@ -675,7 +675,7 @@ jobs:
         default: ""
       cuda_version:
         type: string
-        default: "10"
+        default: "10.1"
       python_version:
         type: string
         default: "3.6"
@@ -737,7 +737,7 @@ jobs:
         default: ""
       cuda_version:
         type: string
-        default: "10"
+        default: "10.1"
       python_version:
         type: string
         default: "3.6"
@@ -8077,7 +8077,7 @@ workflows:
                 - postnightly
       - pytorch_windows_build:
           build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
-          cuda_version: "10"
+          cuda_version: "10.1"
           name: pytorch_windows_vs2019_py36_cuda10.1_build
           python_version: "3.6"
           use_cuda: "1"
@@ -8086,7 +8086,7 @@ workflows:
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
-          cuda_version: "10"
+          cuda_version: "10.1"
           executor: windows-with-nvidia-gpu
           name: pytorch_windows_vs2019_py36_cuda10.1_test1
           python_version: "3.6"
@@ -8099,7 +8099,7 @@ workflows:
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
-          cuda_version: "10"
+          cuda_version: "10.1"
           executor: windows-with-nvidia-gpu
           name: pytorch_windows_vs2019_py36_cuda10.1_test2
           python_version: "3.6"
@@ -8112,7 +8112,7 @@ workflows:
           vc_year: "2019"
       - pytorch_windows_build:
           build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
-          cuda_version: "11"
+          cuda_version: "11.1"
           name: pytorch_windows_vs2019_py36_cuda11.1_build
           python_version: "3.6"
           use_cuda: "1"
@@ -8121,7 +8121,7 @@ workflows:
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
-          cuda_version: "11"
+          cuda_version: "11.1"
           executor: windows-with-nvidia-gpu
           filters:
             branches:
@@ -8140,7 +8140,7 @@ workflows:
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
-          cuda_version: "11"
+          cuda_version: "11.1"
           executor: windows-with-nvidia-gpu
           filters:
             branches:
@@ -8204,7 +8204,7 @@ workflows:
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
-          cuda_version: "10"
+          cuda_version: "10.1"
           filters:
             branches:
               only:
