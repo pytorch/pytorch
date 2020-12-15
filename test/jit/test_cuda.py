@@ -121,7 +121,7 @@ class TestCUDA(JitTestCase):
                 is_current_stream_same = torch.cuda.current_stream(cur_device_index).id() == current_stream.id()
                 is_default_stream_same = torch.cuda.default_stream(device_index).id() == default_stream.id()
 
-            # check if the device index, current stream and default streams have not changed
+            # Check if the device index, current stream and default streams have not changed
             are_streams_same = is_device_index_same and is_current_stream_same and is_default_stream_same
             return are_streams_same
         self.assertTrue(fn())
