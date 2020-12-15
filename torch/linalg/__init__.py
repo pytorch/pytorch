@@ -495,7 +495,7 @@ Computes the solution ``x`` to the matrix equation ``matmul(input, x) = other``
 with a square matrix, or batches of such matrices, :attr:`input` and one or more right-hand side vectors :attr:`other`.
 If :attr:`input` is batched and :attr:`other` is not, then :attr:`other` is broadcasted
 to have the same batch dimensions as :attr:`input`.
-The resulting tensor has the same shape as broadcasted :attr:`other`.
+The resulting tensor has the same shape as the (possibly broadcasted) :attr:`other`.
 
 Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` dtypes.
 
