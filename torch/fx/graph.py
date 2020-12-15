@@ -1,4 +1,5 @@
 from .node import Node, Argument, Target, map_arg
+from .immutable_collections import immutable_dict, immutable_list
 
 from typing import Callable, Any, List, Dict, Optional, Tuple, Set
 import builtins
@@ -627,11 +628,51 @@ class Graph:
             else:
                 body.append('\n')
 
+        def preprocess_values(a : Argument):
+            """
+            This function preprocesses values with `args`/`kwargs` just before
+            pretty printing
+            """
+            if isinstance(a, tuple) and hasattr(a, '_fields'):
+                # Annoyingly, Python NamedTuples repr() with an unqualified
+                # name. For example, if I have a NamedTuple instance
+                # foo.bar.MyNamedTup, the repr might look something like
+                # `MyNamedTup(...)`. This is not workable if the NamedTuple
+                # definition is in a different module. So, here we:
+                #  1. Register the NamedTuple's module for emission as an import
+                #  2. Replace the NamedTuple instance with a thin wrapper that
+                #     overrides `__repr__` s.t. it prints the fully-qualified
+                #     name rather than just the base name
+                register_modules_used(torch.typename(a))
+                class NTReprWrapper(a.__class__):
+                    def __repr__(self):
+                        value_strs = []
+                        for field in self._fields:
+                            value_strs.append(f'{field}={preprocess_values(getattr(self, field))}')
+                        # NTReprWrapper should have only one base: the NamedTuple
+                        # type we constructed it from.
+                        assert len(self.__class__.__bases__) == 1
+                        return f'{torch.typename(self.__class__.__bases__[0])}({",".join(value_strs)})'
+                return NTReprWrapper(*(getattr(a, field) for field in a._fields))
+            elif isinstance(a, tuple):
+                return tuple(preprocess_values(elem) for elem in a)
+            elif isinstance(a, list):
+                return immutable_list(preprocess_values(elem) for elem in a)
+            elif isinstance(a, dict):
+                return immutable_dict((k, preprocess_values(v)) for k, v in a.items())
+            elif isinstance(a, slice):
+                return slice(preprocess_values(a.start), preprocess_values(a.stop), preprocess_values(a.step))
+            else:
+                return a
+
         def emit_node(node : Node):
+            new_args = preprocess_values(node.args)
+            new_kwargs = preprocess_values(node.kwargs)
+
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
                 maybe_type_annotation = '' if node.type is None else f' : {type_repr(node.type)}'
-                maybe_default_arg = '' if not node.args else f' = {repr(node.args[0])}'
+                maybe_default_arg = '' if not new_args else f' = {repr(new_args[0])}'
                 free_vars.append(f'{node.target}{maybe_type_annotation}{maybe_default_arg}')
                 raw_name = node.target.replace('*', '')
                 if raw_name != node.name:
@@ -640,30 +681,30 @@ class Graph:
             elif node.op == 'call_method':
                 assert isinstance(node.target, str)
                 body.append(
-                    f'{node.name} = {_format_target(repr(node.args[0]), node.target)}'
-                    f'({_format_args(node.args[1:], node.kwargs)})')
+                    f'{node.name} = {_format_target(repr(new_args[0]), node.target)}'
+                    f'({_format_args(new_args[1:], new_kwargs)})')
                 return
             elif node.op == 'call_function':
                 assert callable(node.target)
                 # pretty print operators
                 if node.target.__module__ == '_operator' and node.target.__name__ in magic_methods:
-                    assert isinstance(node.args, tuple)
-                    body.append(f'{node.name} = {magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}')
+                    assert isinstance(new_args, tuple)
+                    body.append(f'{node.name} = {magic_methods[node.target.__name__].format(*(repr(a) for a in new_args))}')
                     return
                 qualified_name = get_qualified_name(node.target)
                 register_modules_used(qualified_name)
                 if qualified_name == 'getattr' and \
-                   isinstance(node.args, tuple) and \
-                   isinstance(node.args[1], str) and \
-                   node.args[1].isidentifier():
+                   isinstance(new_args, tuple) and \
+                   isinstance(new_args[1], str) and \
+                   new_args[1].isidentifier():
                     # pretty print attribute access
-                    body.append(f'{node.name} = {_format_target(repr(node.args[0]), node.args[1])}')
+                    body.append(f'{node.name} = {_format_target(repr(new_args[0]), new_args[1])}')
                     return
-                body.append(f'{node.name} = {qualified_name}({_format_args(node.args, node.kwargs)})')
+                body.append(f'{node.name} = {qualified_name}({_format_args(new_args, new_kwargs)})')
                 return
             elif node.op == 'call_module':
                 assert isinstance(node.target, str)
-                body.append(f'{node.name} = {_format_target(root_module, node.target)}({_format_args(node.args, node.kwargs)})')
+                body.append(f'{node.name} = {_format_target(root_module, node.target)}({_format_args(new_args, new_kwargs)})')
                 return
             elif node.op == 'get_attr':
                 assert isinstance(node.target, str)
@@ -672,7 +713,7 @@ class Graph:
             elif node.op == 'output':
                 if node.type is not None:
                     maybe_return_annotation = f" -> {type_repr(node.type)}"
-                body.append(f'return {repr(node.args[0])}')
+                body.append(f'return {repr(new_args[0])}')
                 return
             raise NotImplementedError(f'node: {node.op} {node.target}')
 
