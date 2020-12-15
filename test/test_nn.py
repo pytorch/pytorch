@@ -3587,49 +3587,57 @@ class TestNN(NNTestCase):
                 output = module(input)
                 self.assertEqual(output.size(), (4,) + (2,) * (numel - 1) + (4,))
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_adaptive_pooling_avg_nhwc(self):
-        input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32, device="cuda")
-        input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
-        grad = torch.randint(1, 10, (4, 8, 7, 7), dtype=torch.float32, device="cuda")
-        pool = torch.nn.AdaptiveAvgPool2d((7, 7)).cuda()
+        device_list = ['cpu']
+        if TEST_CUDA:
+            device_list.append('cuda')
 
-        ref_input = input.detach().clone().contiguous().requires_grad_(True)
-        ref_grad = grad.detach().clone().contiguous()
-        ref_pool = torch.nn.AdaptiveAvgPool2d((7, 7)).cuda()
+        for device in device_list:
+            input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32).to(device)
+            input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
+            grad = torch.randint(1, 10, (4, 8, 7, 7), dtype=torch.float32).to(device)
+            pool = torch.nn.AdaptiveAvgPool2d((7, 7)).to(device)
 
-        out = pool(input)
-        out.backward(grad)
-        ref_out = ref_pool(ref_input)
-        ref_out.backward(ref_grad)
+            ref_input = input.detach().clone().contiguous().requires_grad_(True)
+            ref_grad = grad.detach().clone().contiguous()
+            ref_pool = torch.nn.AdaptiveAvgPool2d((7, 7)).to(device)
 
-        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-        self.assertTrue(ref_out.is_contiguous())
-        self.assertEqual(out, ref_out)
-        self.assertEqual(input.grad, ref_input.grad)
+            out = pool(input)
+            out.backward(grad)
+            ref_out = ref_pool(ref_input)
+            ref_out.backward(ref_grad)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(ref_out.is_contiguous())
+            self.assertEqual(out, ref_out)
+            self.assertEqual(input.grad, ref_input.grad)
+
     def test_adaptive_pooling_avg_nhwc_non_contiguous(self):
-        input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32, device="cuda")
-        input = input.contiguous(memory_format=torch.channels_last)
-        input = input[:, ::2, :, :].requires_grad_()
-        grad = torch.randint(1, 10, (4, 8, 7, 7), dtype=torch.float32, device="cuda")
-        grad = grad[:, ::2, :, :]
-        pool = torch.nn.AdaptiveAvgPool2d((7, 7)).cuda()
+        device_list = ['cpu']
+        if TEST_CUDA:
+            device_list.append('cuda')
 
-        ref_input = input.detach().clone().contiguous().requires_grad_(True)
-        ref_grad = grad.detach().clone().contiguous()
-        ref_pool = torch.nn.AdaptiveAvgPool2d((7, 7)).cuda()
+        for device in device_list:
+            input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32).to(device)
+            input = input.contiguous(memory_format=torch.channels_last)
+            input = input[:, ::2, :, :].requires_grad_()
+            grad = torch.randint(1, 10, (4, 8, 7, 7), dtype=torch.float32).to(device)
+            grad = grad[:, ::2, :, :]
+            pool = torch.nn.AdaptiveAvgPool2d((7, 7)).to(device)
 
-        out = pool(input)
-        out.backward(grad)
-        ref_out = ref_pool(ref_input)
-        ref_out.backward(ref_grad)
+            ref_input = input.detach().clone().contiguous().requires_grad_(True)
+            ref_grad = grad.detach().clone().contiguous()
+            ref_pool = torch.nn.AdaptiveAvgPool2d((7, 7)).to(device)
 
-        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-        self.assertTrue(ref_out.is_contiguous())
-        self.assertEqual(out, ref_out)
-        self.assertEqual(input.grad, ref_input.grad)
+            out = pool(input)
+            out.backward(grad)
+            ref_out = ref_pool(ref_input)
+            ref_out.backward(ref_grad)
+
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(ref_out.is_contiguous())
+            self.assertEqual(out, ref_out)
+            self.assertEqual(input.grad, ref_input.grad)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @largeTensorTest('12GB', device='cuda')
@@ -6479,16 +6487,6 @@ class TestNN(NNTestCase):
                         self.assertNotEqual(output2.data, prev_output)
                 prev_output = output1.data
 
-    def _verify_pixel_shuffle(self, input, output, upscale_factor):
-        for c in range(output.size(1)):
-            for h in range(output.size(2)):
-                for w in range(output.size(3)):
-                    height_idx = h // upscale_factor
-                    weight_idx = w // upscale_factor
-                    channel_idx = (upscale_factor * (h % upscale_factor)) + (w % upscale_factor) + \
-                                  (c * upscale_factor ** 2)
-                    self.assertEqual(output[:, c, h, w], input[:, channel_idx, height_idx, weight_idx])
-
     def test_inplace_thnn(self):
         modules = [nn.ReLU, nn.ELU, nn.SELU, nn.CELU, nn.RReLU]
         for mod in modules:
@@ -6519,18 +6517,74 @@ class TestNN(NNTestCase):
         self.assertEqual(result, input.grad.data, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
     def test_pixel_shuffle(self):
-        batch_size = random.randint(1, 3)
-        upscale_factor = random.randint(2, 5)
-        channels = random.randint(1, 4) * upscale_factor ** 2
-        height = random.randint(5, 10)
-        width = random.randint(5, 10)
+        def _test_pixel_shuffle_helper(num_input_dims, valid_channels_dim=True):
+            # Function to imperatively ensure pixels are shuffled to the correct locations.
+            # Used to validate the batch operations in pixel_shuffle.
+            def _verify_pixel_shuffle(input, output, upscale_factor):
+                for c in range(output.size(-3)):
+                    for h in range(output.size(-2)):
+                        for w in range(output.size(-1)):
+                            height_idx = h // upscale_factor
+                            weight_idx = w // upscale_factor
+                            channel_idx = (upscale_factor * (h % upscale_factor)) + (w % upscale_factor) + \
+                                          (c * upscale_factor ** 2)
+                            self.assertEqual(output[..., c, h, w], input[..., channel_idx, height_idx, weight_idx])
 
-        input = torch.rand(batch_size, channels, height, width, requires_grad=True)
-        ps = nn.PixelShuffle(upscale_factor)
-        output = ps(input)
-        self._verify_pixel_shuffle(input.data, output.data, upscale_factor)
-        output.backward(output.data)
-        self.assertEqual(input.data, input.grad.data)
+            upscale_factor = random.randint(2, 5)
+            # If valid_channels_dim=False, add 1 to make channels dim indivisible by upscale_factor ** 2.
+            channels = random.randint(1, 4) * upscale_factor ** 2 + (0 if valid_channels_dim else 1)
+            height = random.randint(5, 10)
+            width = random.randint(5, 10)
+
+            if num_input_dims == 1:
+                input = torch.rand(channels, requires_grad=True)
+            elif num_input_dims == 2:
+                input = torch.rand(height, width, requires_grad=True)
+            else:
+                batch_sizes = [random.randint(1, 3) for _ in range(num_input_dims - 3)]
+                input = torch.rand(*batch_sizes, channels, height, width, requires_grad=True)
+            ps = nn.PixelShuffle(upscale_factor)
+
+            if num_input_dims >= 3 and valid_channels_dim:
+                output = ps(input)
+                _verify_pixel_shuffle(input, output, upscale_factor)
+                output.backward(output.data)
+                self.assertEqual(input.data, input.grad.data)
+            else:
+                self.assertRaises(RuntimeError, lambda: ps(input))
+
+        def test_pixel_shuffle_1D():
+            _test_pixel_shuffle_helper(num_input_dims=1)
+
+        def test_pixel_shuffle_2D():
+            _test_pixel_shuffle_helper(num_input_dims=2)
+
+        def test_pixel_shuffle_3D_with_valid_channels_dim():
+            _test_pixel_shuffle_helper(num_input_dims=3)
+
+        def test_pixel_shuffle_4D_with_valid_channels_dim():
+            _test_pixel_shuffle_helper(num_input_dims=4)
+
+        def test_pixel_shuffle_5D_with_valid_channels_dim():
+            _test_pixel_shuffle_helper(num_input_dims=5)
+
+        def test_pixel_shuffle_3D_with_invalid_channels_dim():
+            _test_pixel_shuffle_helper(num_input_dims=3, valid_channels_dim=False)
+
+        def test_pixel_shuffle_4D_with_invalid_channels_dim():
+            _test_pixel_shuffle_helper(num_input_dims=4, valid_channels_dim=False)
+
+        def test_pixel_shuffle_5D_with_invalid_channels_dim():
+            _test_pixel_shuffle_helper(num_input_dims=5, valid_channels_dim=False)
+
+        test_pixel_shuffle_1D()
+        test_pixel_shuffle_2D()
+        test_pixel_shuffle_3D_with_valid_channels_dim()
+        test_pixel_shuffle_4D_with_valid_channels_dim()
+        test_pixel_shuffle_5D_with_valid_channels_dim()
+        test_pixel_shuffle_3D_with_invalid_channels_dim()
+        test_pixel_shuffle_4D_with_invalid_channels_dim()
+        test_pixel_shuffle_5D_with_invalid_channels_dim()
 
     def test_elu_inplace_view(self):
         v = torch.tensor([1.0, -1.0, 1.0, -1.0], requires_grad=True)
@@ -12340,7 +12394,6 @@ class TestNNDeviceType(NNTestCase):
                 self._test_batchnorm_eval(device)
 
     @onlyCUDA
-    @skipCUDAIfNotRocm
     def test_batchnorm_eval_bfloat16(self, device):
         self._test_batchnorm_eval(device, torch.bfloat16)
 
