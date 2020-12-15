@@ -159,7 +159,6 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, bool division_
   return false;
 #else
   auto expected_device = tensors1[0].device();
-
   for (int64_t i = 0; i < tensors1.size(); i++) {
     if (!has_same_attributes(expected_device, {tensors1[i], tensors2[i]})) {
       return false;
@@ -182,7 +181,6 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, Scalar scalar)
   return false;
 #else
   auto expected_device = tensors1[0].device();
-
   for (int64_t i = 0; i < tensors1.size(); i++) {
     if (!has_same_attributes(expected_device, {tensors1[i], tensors2[i]})) {
       return false;
@@ -202,7 +200,6 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList ten
   return false;
 #else
   auto expected_device = tensors1[0].device();
-
   for (int64_t i = 0; i < tensors1.size(); i++) {
     if (!has_same_attributes(expected_device, {tensors1[i], tensors2[i], tensors3[i]})) {
       return false;
@@ -218,7 +215,6 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList ten
   return false;
 #else
   auto expected_device = tensors1[0].device();
-
   for (int64_t i = 0; i < tensors1.size(); i++) {
     if (!has_same_attributes(expected_device, {tensors1[i], tensors2[i], tensors3[i]})) {
       return false;
