@@ -775,6 +775,10 @@ class TensorExprFuser {
         if (!v->type()->cast<FloatType>()) {
           return false;
         }
+      } else if (node->isMemberOf(int_only_operator_set)) {
+        if (!v->type()->cast<IntType>()) {
+          return false;
+        }
       }
     }
 
