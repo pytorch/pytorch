@@ -86,7 +86,7 @@ Tensor* Compute(
   return new Tensor(func_name, dims, args_nodes, body);
 }
 
-Stmt* Tensor::ElementStmt() {
+Stmt* Tensor::ElementStmt() const {
   std::vector<const Expr*> indices;
   for (size_t i = 0; i < buf_->ndim(); i++) {
     indices.push_back(args_[i]);
