@@ -739,15 +739,29 @@ class TensorExprFuser {
     };
     // clang-format on
 
-    // Value is only supported if operands are floats.
-    if (node->isMemberOf(float_only_operator_set)) {
-      for (const Value* v : node->inputs()) {
-        if (auto const& tt = v->type()->cast<TensorType>()) {
-          auto const& st = tt->scalarType();
-          if (!st || !isFloatingType(*st)) {
-            return false;
-          }
-        } else if (!v->type()->cast<FloatType>()) {
+    for (const Value* v : node->inputs()) {
+      if (auto const& tt = v->type()->cast<TensorType>()) {
+        auto const& st = tt->scalarType();
+
+        // All tensors must be typed.
+        if (!st) {
+          return false;
+        }
+
+        // Byte tensors introduce too many corner cases in type promotion.
+        // Better not to try to handle them.
+        if (*st == c10::ScalarType::Byte) {
+          return false;
+        }
+
+        // These operators only support floats, because integer divisors need to
+        // raise ZeroDivisionError.
+        if (node->isMemberOf(float_only_operator_set) && !isFloatingType(*st)) {
+          return false;
+        }
+      } else if (node->isMemberOf(float_only_operator_set)) {
+        // Check scalar operands of float-only ops.
+        if (!v->type()->cast<FloatType>()) {
           return false;
         }
       }
