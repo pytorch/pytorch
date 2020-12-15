@@ -420,11 +420,11 @@ class TestTensorExprFuser(BaseTestClass):
         traced = torch.jit.trace(
             easy,
             (torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int8),
-             torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.uint8)),
+             torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int8)),
         )
 
         a = torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int8)
-        b = torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.uint8)
+        b = torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int8)
         x = warmup_and_run_forward(traced, a, b)
         self.assertLastGraphAllFused()
         np.testing.assert_allclose((a.numpy() + b.numpy()) * b.numpy(), x.numpy())
