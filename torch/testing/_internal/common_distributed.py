@@ -273,6 +273,12 @@ class MultiProcessTestCase(TestCase):
     def world_size(self):
         return 4
 
+    def cuda_visible_devices(self) -> str:
+        """
+        Override this to set custom CUDA_VISIBLE_DEVICES.
+        """
+        return None
+
     def join_or_run(self, fn):
         @wraps(fn)
         def wrapper(self):
@@ -347,7 +353,7 @@ class MultiProcessTestCase(TestCase):
     def _run(cls, rank, test_name, file_name):
         self = cls(test_name)
         self.rank = rank
-        if hasattr(self, "cuda_visible_devices"):
+        if self.cuda_visible_devices() is not None:
             os.environ.update({'CUDA_VISIBLE_DEVICES' : self.cuda_visible_devices()})
             print('CUDA_VISIBLE_DEVICES set to: {}, for rank: {}'.format(
                 os.environ['CUDA_VISIBLE_DEVICES'],
