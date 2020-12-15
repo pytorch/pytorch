@@ -21,9 +21,20 @@ class ReadFilesFromTarIterableDataset(IterableDataset):
         self.dataset : Iterable = dataset
         self.length : int = length
 
+        # This is a list to store opened tarfile stream handles, since the yield back extracted file stream
+        # will not be readable once its source tarfile stream is destroyed
+        # each item in this list is a tuple(pathname, tarfile_stream_handle)
+        self.__tarfile_handle_register : list = []
+
     def __iter__(self) -> Iterator[tuple]:
+        self.reset()
         yield from extract_files_from_pathname_binaries(
-            self.dataset, extract_files_from_single_tar_pathname_binary)
+            self.dataset, self.__tarfile_handle_register, extract_files_from_single_tar_pathname_binary)
+
+    def reset(self):
+        # release tarfile stream handles if any
+        if not self.__tarfile_handle_register:
+            self.__tarfile_handle_register = []
 
     def __len__(self):
         if self.length == -1:

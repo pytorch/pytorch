@@ -74,7 +74,6 @@ class TestIterableDatasetBasic(TestCase):
             self.assertTrue(file_pathname in self.temp_files)
             self.assertTrue(rec[1].read() == open(file_pathname, 'rb').read())
 
-        os.remove(temp_tarfile_pathname)
 
     def test_readfilesfromzip_iterable_dataset(self):
         temp_dir = self.temp_dir.name
