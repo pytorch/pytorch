@@ -126,6 +126,7 @@ def powerSGD_hook(
 
     # Incorporate the error from the previous state into the gradients.
     bucket_index = bucket.get_index()
+    input_tensor_cp = None
     if state.use_error_feedback:
         # The buckets can be rebuilt during training.
         # In this case, the error tensor shape will not be aligned with the input tensor,
@@ -189,9 +190,7 @@ def powerSGD_hook(
         torch.matmul(matrix.t(), p, out=q)
 
         return [
-            dist.all_reduce(q, group=group_to_use, async_op=True)
-            .get_future()
-            .wait()[0]
+            dist.all_reduce(q, group=group_to_use, async_op=True).get_future().wait()[0]
         ]
 
     def decompress(fut):
@@ -201,6 +200,7 @@ def powerSGD_hook(
         if state.use_error_feedback:
             # Memorize the local errors.
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
+            assert not torch.any(torch.isnan(state.error_dict[bucket_index]))
         ret = input_tensor.resize_(total_length)
         return [ret]
 
