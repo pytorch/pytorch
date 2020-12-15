@@ -1,5 +1,5 @@
 from torch.utils.data.dataset import IterableDataset
-from typing import Iterable, Iterator
+from typing import List, Iterable, Iterator
 from collections import OrderedDict
 
 import os
@@ -61,7 +61,7 @@ class GroupByFilenameIterableDataset(IterableDataset):
         group_size = self.group_size
         buffer_size = self.buffer_size
         stream_buffer = self.stream_buffer
-        res = []
+        res : List[tuple] = []
         for data in self.dataset:
             # scan stream buffer before reading new data from dataset.
             # try finding a group in each iteration.
