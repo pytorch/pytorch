@@ -9,7 +9,7 @@ import functools
 import random
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
-    do_test_empty_full, load_tests, TEST_NUMPY, TEST_WITH_ROCM, IS_WINDOWS
+    do_test_empty_full, load_tests, TEST_NUMPY, IS_WINDOWS
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from torch.testing._internal.common_methods_invocations import unary_ufuncs
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, ops
@@ -1302,7 +1302,6 @@ class TestSparse(TestCase):
         self._test_spadd_shape(10, [50, 30, 20], [2, 0])
 
     @cuda_only
-    @unittest.skipIf(not TEST_WITH_ROCM, "runs only on ROCm")
     def test_sparse_add_out_bfloat16(self):
         # fp32
         x, _, _ = self._gen_sparse(3, 5, 10)
