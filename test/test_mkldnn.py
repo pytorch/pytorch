@@ -19,10 +19,6 @@ from torch.testing._internal.common_utils import TestCase, run_tests, TemporaryF
 
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 
-
-# TODO(alband) Remove this when this flag is not needed anymore
-torch._C._set_forward_AD_enabled(True)
-
 # Comment the line below to find out the CI machines having MKL-DNN build disabled
 @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
 class TestMkldnn(TestCase):
@@ -73,10 +69,10 @@ class TestMkldnn(TestCase):
         # these numbers are just empirical results that seem to work.
         self.assertWarnsRegex(UserWarning,
                               'double precision floating point',
-                              lambda: gradcheck(func, [root], atol=4e-2, rtol=1e-2))
+                              lambda: gradcheck(func, [root], atol=4e-2, rtol=1e-2, check_forward=False))
         self.assertWarnsRegex(UserWarning,
                               'double precision floating point',
-                              lambda: gradgradcheck(func, [root], atol=4e-2, rtol=1e-2))
+                              lambda: gradgradcheck(func, [root], atol=4e-2, rtol=1e-2, check_forward=False))
 
     def test_autograd_from_mkldnn(self):
         # MKLDNN only supports float32
@@ -89,7 +85,7 @@ class TestMkldnn(TestCase):
         # these numbers are just empirical results that seem to work.
         self.assertWarnsRegex(UserWarning,
                               'double precision floating point',
-                              lambda: gradcheck(func, [root], atol=4e-2, rtol=1e-2))
+                              lambda: gradcheck(func, [root], atol=4e-2, rtol=1e-2, check_forward=False))
 
     def test_detach(self):
         root = torch.randn(4, 5, dtype=torch.float32).to_mkldnn().requires_grad_()
