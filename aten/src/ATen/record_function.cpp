@@ -505,7 +505,7 @@ bool shouldRunRecordFunction(bool* pre_sampled) {
     rf_tls_ptr->coinflip_state_.tries_left_ = sample_geometric();
     return true;
   } else {
-    rf_tls_ptr->coinflip_state_.tries_left_;
+    --rf_tls_ptr->coinflip_state_.tries_left_;
     return false;
   }
 }
