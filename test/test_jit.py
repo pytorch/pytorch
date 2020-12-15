@@ -6504,9 +6504,9 @@ a")
             def forward(self) -> Optional[int]:
                 return None if self.training else 1
 
-        self.checkModule(M1(), ())
-        self.checkModule(M2(), ())
-        self.checkModule(M3(), ())
+        for module in [M1, M2, M3]:
+            self.checkModule(module().train(), ())
+            self.checkModule(module().eval(), ())
 
     def test_print(self):
         def func(x, y):
