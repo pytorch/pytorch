@@ -1550,6 +1550,59 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self.checkGraphModuleNodes(
             mp, expected_node_occurrence=expected_node_occurrence)
 
+    def test_quant_output_always_observed(self):
+        """
+        If the output is hardcoded to be quantized, ensure that
+        there is always an observer, even if the last non-output node is not
+        quantizeable.
+        """
+        qconfig_dict = {'': torch.quantization.get_default_qat_qconfig('fbgemm')}
+        prepare_custom_config_dict = {'output_quantized_idxs': [0]}
+        data = (torch.randn(4, 1, 4, 4),)
+
+        # non-quantizeable node, quantized output
+        class M1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.identity = torch.nn.Identity()
+
+            def forward(self, x):
+                x = self.identity(x)
+                return x
+
+        m1 = M1()
+        self.checkGraphModeFxOp(
+            m1, data, QuantType.QAT,
+            prepare_expected_node_occurrence={
+                ns.call_module(torch.quantization.FakeQuantize): 1,
+            },
+            expected_node_occurrence={
+                ns.call_function(torch.quantize_per_tensor): 1,
+            },
+            prepare_custom_config_dict=prepare_custom_config_dict)
+
+        # quantizeable node, quantized output
+        class M2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv(x)
+                return x
+
+        m2 = M2()
+        self.checkGraphModeFxOp(
+            m2, data, QuantType.QAT,
+            prepare_expected_node_occurrence={
+                # one for weights, one for activations
+                ns.call_module(torch.quantization.FakeQuantize): 2,
+            },
+            expected_node_occurrence={
+                ns.call_function(torch.quantize_per_tensor): 1,
+            },
+            prepare_custom_config_dict=prepare_custom_config_dict)
+
     @skipIfNoFBGEMM
     def test_quantized_cat(self):
         """ quantization of the output of cat will be depend on the

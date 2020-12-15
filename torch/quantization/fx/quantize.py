@@ -399,15 +399,32 @@ class Quantizer:
             'activation_post_process_')
 
         placeholder_node_seen_cnt = 0
+        output_node_seen_cnt = 0
         input_quantized_idxs: List[int] = self.prepare_custom_config_dict.get(
             "input_quantized_idxs", [])
+        output_quantized_idxs: List[int] = self.prepare_custom_config_dict.get(
+            "output_quantized_idxs", [])
 
         result_node : Optional[Node] = None
         for node in model.graph.nodes:
             if node.op == 'output':
+                # If this output is hardcoded to be quantized, insert an
+                # observer on the previous node if it does not already
+                # exist.
+                cur_output_node_idx = output_node_seen_cnt
+                output_node_seen_cnt += 1
+                if cur_output_node_idx in output_quantized_idxs:
+                    prev_node = node.args[0]
+                    if prev_node.name not in observed_node_names_set:
+                        insert_observer(
+                            prev_node, self.qconfig_map[prev_node.name].activation(),
+                            model, self.activation_post_process_map,
+                            env, observed_graph, load_arg, observed_node_names_set)
+
                 observed_graph.output(load_arg(node.args[0]))
                 result_node = node
                 continue
+
             if node.name in observed_node_names_set:
                 continue
 
