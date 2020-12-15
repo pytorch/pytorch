@@ -4701,7 +4701,6 @@ a")
             numel = torch.tensor(size).prod().item()
             return torch.arange(numel).view(size)
 
-        # copied from @agolynski
         def consec_list(size):
             return list(range(size))
 
@@ -4789,7 +4788,6 @@ a")
         check_dynamic_indexing("[i + j]", consec((3, 3)), 0, 1)
         check_dynamic_indexing("[i:j, i]", consec((3, 3, 2)), 0, 2)
 
-        # copied from @agolynski
         # positive striding
         check_indexing_list_int('[0]', consec_list(6))
         check_indexing_list_int('[1]', consec_list(7))
