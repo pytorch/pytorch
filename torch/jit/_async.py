@@ -17,7 +17,7 @@ set_module(Future, "torch.jit")
 
 
 def fork(func, *args, **kwargs):
-    """
+    r"""
     Creates an asynchronous task executing `func` and a reference to the value
     of the result of this execution. `fork` will return immediately,
     so the return value of `func` may not have been computed yet. To force completion
@@ -81,7 +81,7 @@ def fork(func, *args, **kwargs):
 
 
 def wait(future):
-    """
+    r"""
     Forces completion of a `torch.jit.Future[T]` asynchronous task, returning the
     result of the task. See :func:`~fork` for docs and examples.
     Arguments:
