@@ -854,7 +854,10 @@ class Module:
         return result
 
     def _call_impl(self, *input, **kwargs):
-        full_backward_hooks, non_full_backward_hooks = self._get_backward_hooks()
+        # Do not call functions when jit is used
+        full_backward_hooks, non_full_backward_hooks = [], []
+        if len(self._backward_hooks) > 0 or len(_global_backward_hooks) > 0:
+            full_backward_hooks, non_full_backward_hooks = self._get_backward_hooks()
 
         for hook in itertools.chain(
                 _global_forward_pre_hooks.values(),
@@ -915,6 +918,8 @@ class Module:
             self._load_state_dict_pre_hooks = OrderedDict()
         if '_non_persistent_buffers_set' not in self.__dict__:
             self._non_persistent_buffers_set = set()
+        if '_is_full_backward_hook' not in self.__dict__:
+            self._is_full_backward_hook = None
 
     def __getattr__(self, name: str) -> Union[Tensor, 'Module']:
         if '_parameters' in self.__dict__:
