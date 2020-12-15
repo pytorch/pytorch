@@ -2213,7 +2213,8 @@ class TestReductions(TestCase):
         expected = torch.zeros(10, dtype=torch.long, device=device)
         self.assertEqual(expected, actual)
         # empty tensor, range not set - this is how numpy does it, but maybe raising a RuntimeError might be a better idea?
-        # torch.histc outputs a cryptic error message about operator having no identity - which is technically correct, but doesn't tell much.
+        # torch.histc outputs a cryptic error message about operator having no identity - which is technically correct,
+        # but doesn't tell much.
         actual = torch.histogram(torch.tensor([], device=device))[0]
         expected = torch.zeros(10, dtype=torch.long, device=device)
         self.assertEqual(expected, actual)
