@@ -105,11 +105,8 @@
   manual_kernel_registration: True
   variants: method
 
-# This functions needs to be manual registration to be able to include the
-# necessary custom logic during the forward computation.
 - func: fw_primal(Tensor(a) self, int level) -> Tensor(a)
   use_c10_dispatcher: full
-  manual_kernel_registration: True
   variants: method
   dispatch:
     DefaultBackend: fw_primal
