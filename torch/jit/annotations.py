@@ -284,6 +284,12 @@ def try_ann_to_type(ann, loc):
     if is_dict(ann):
         key = try_ann_to_type(ann.__args__[0], loc)
         value = try_ann_to_type(ann.__args__[1], loc)
+        msg = "Unsupported annotation {} could not be resolved because {} could not be resolved."
+        # Assert if key or value is None
+        if key is None:
+            assert key, msg.format(repr(ann.__args__[0]), repr(key))
+        if value is None:
+            assert value, msg.format(repr(ann.__args__[1]), repr(value))
         return DictType(key, value)
     if is_optional(ann):
         if issubclass(ann.__args__[1], type(None)):

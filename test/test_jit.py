@@ -15187,6 +15187,23 @@ dedent """
             def foo():
                 new_item = {'score': [1.0], 'ys': [1, 2, 3]}
 
+    def test_dict_invalid_annotations(self):
+        # Check for invalid value type annotation
+        with self.assertRaisesRegex(AssertionError, "Unsupported annotation"):
+            def fn(dictionary: Dict[str, torch.jit.ScriptModule]):
+                return
+
+        # Check for invalid key type annotation
+        with self.assertRaisesRegex(AssertionError, "Unsupported annotation"):
+            def fn(dictionary: Dict[torch.jit.ScriptModule, str]):
+                return
+
+        # Check for invalid key and value type annotation
+        with self.assertRaisesRegex(AssertionError, "Unsupported annotation"):
+            def fn(dictionary: Dict[torch.jit.ScriptModule, torch.jit.ScriptModule]):
+                return
+
+
     def test_get_set_state_with_tensors(self):
         class M(torch.nn.Module):
             def __init__(self):
