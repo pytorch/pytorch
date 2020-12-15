@@ -130,10 +130,15 @@ struct Capsule {
 // they are marked `@private`, which hides them on the doxygen documentation for
 // this page.
 
-/// IValue (Interpreter Value) is a tagged union over the types supported by the
-/// TorchScript interpreter. IValues contain their values as an
-/// `IValue::Payload`, which holds primitive types (`int64_t`, `bool`, `double`,
-/// `Device`), as values and all other types as a `c10::intrusive_ptr`.
+/// IValue (Interpreter Value) is a tagged union over the types
+/// supported by the TorchScript interpreter. IValues contain their
+/// values as an `IValue::Payload`, which holds primitive types
+/// (`int64_t`, `bool`, `double`, `Device`) and `Tensor` as values,
+/// and all other types as a `c10::intrusive_ptr`. In order to
+/// optimize performance of the destructor and related operations by
+/// making the `Tensor` and `c10::intrusive_ptr` paths generate the
+/// same code, we represent a null `c10::intrusive_ptr` as
+/// `UndefinedTensorImpl::singleton()`, *not* `nullptr`.
 ///
 /// IValues are used as inputs to and outputs from the TorchScript interpreter.
 /// To retrieve the value contained within an IValue, use the `.toX()` methods,
@@ -175,7 +180,7 @@ struct CAFFE2_API IValue final {
     destroy();
   }
 
-  IValue& operator=(IValue&& rhs) & noexcept {
+  C10_ALWAYS_INLINE IValue& operator=(IValue&& rhs) & noexcept {
     if (&rhs == this) {
       return *this;
     }
@@ -355,7 +360,8 @@ struct CAFFE2_API IValue final {
       : tag(Tag::Blob), is_intrusive_ptr(true) {
     // TODO (after Tensor merge) If we pass in a Blob holding a Tensor, extract
     // and store it as a Tensor instead.
-    payload.as_intrusive_ptr = blob.release() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
+    payload.as_intrusive_ptr = blob.release()
+      ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
   }
 
   /// @private [doxygen private]
@@ -694,7 +700,8 @@ struct CAFFE2_API IValue final {
     // This is not an optional optimization: our incref call
     // *will not* do the right thing when called on an
     // undefined generator.
-    payload.as_intrusive_ptr = g.unsafeReleaseGeneratorImpl() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
+    payload.as_intrusive_ptr = g.unsafeReleaseGeneratorImpl()
+      ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
   }
   bool isGenerator() const {
     return Tag::Generator == tag;
@@ -845,11 +852,15 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<T, NullType> toIntrusivePtr() const;
 
   void destroy() {
+    // We carefully construct this call to both 1) avoid UB by using
+    // the "wrong" one of as_tensor and as_intrusive_ptr and 2) enable
+    // the compiler to generate the same code for each case. It is
+    // surprisingly difficult to get this right.
     if (isTensor() || is_intrusive_ptr) {
-      c10::intrusive_ptr<intrusive_ptr_target, c10::UndefinedTensorImpl>::reclaim(payload.as_tensor.unsafeReleaseTensorImpl());
-//      payload.as_tensor.~Tensor();
-    } else if (is_intrusive_ptr) {
-      c10::intrusive_ptr<intrusive_ptr_target, c10::UndefinedTensorImpl>::reclaim(payload.as_intrusive_ptr);
+      c10::intrusive_ptr_target* p = isTensor() ? payload.as_tensor.unsafeGetTensorImpl() : payload.as_intrusive_ptr;
+      c10::intrusive_ptr<intrusive_ptr_target, c10::UndefinedTensorImpl>::reclaim(p);
+      // No need to make this destructor call!
+      // payload.as_tensor.~Tensor();
     }
   }
 
@@ -1054,8 +1065,8 @@ TORCH_API ska::flat_hash_map<std::type_index, c10::ClassTypePtr>&
 getCustomClassTypeMap();
 
 template <typename T>
-c10::ClassTypePtr getCustomClassType() {
-  auto tmap = c10::getCustomClassTypeMap();
+c10::ClassTypePtr getCustomClassTypeImpl() {
+  auto& tmap = c10::getCustomClassTypeMap();
   auto res = tmap.find(std::type_index(typeid(T)));
   if (res == tmap.end()) {
     throw c10::Error("Can't find class id in custom class type map", "");
@@ -1064,9 +1075,13 @@ c10::ClassTypePtr getCustomClassType() {
 }
 
 template <typename T>
-inline bool isCustomClassRegistered() {
-  auto tmap = c10::getCustomClassTypeMap();
-  return tmap.find(std::type_index(typeid(T))) != tmap.end();
+const c10::ClassTypePtr& getCustomClassType() {
+  // Classes are never unregistered from getCustomClassTypeMap and the
+  // hash lookup can be a hot path, so just cache.
+  // For the same reason, it's fine If this ends up getting duplicated across
+  // DSO boundaries for whatever reason.
+  static c10::ClassTypePtr cache = getCustomClassTypeImpl<T>();
+  return cache;
 }
 
 TORCH_API std::unordered_map<std::string, std::function<PyObject*(void*)>>&
