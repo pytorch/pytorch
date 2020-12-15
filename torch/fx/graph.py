@@ -644,6 +644,7 @@ class Graph:
                 #     overrides `__repr__` s.t. it prints the fully-qualified
                 #     name rather than just the base name
                 register_modules_used(torch.typename(a))
+
                 class NTReprWrapper(a.__class__):
                     def __repr__(self):
                         value_strs = []
