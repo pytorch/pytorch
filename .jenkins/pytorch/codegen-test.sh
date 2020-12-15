@@ -37,7 +37,8 @@ python -m tools.setup_helpers.generate_code \
 mkdir -p "$OUT"/pyi/torch/_C
 mkdir -p "$OUT"/pyi/torch/nn
 python -m tools.pyi.gen_pyi \
-  --declarations-path "$OUT"/torch/share/ATen/Declarations.yaml \
+  --native-functions-path aten/src/ATen/native/native_functions.yaml \
+  --deprecated-functions-path tools/autograd/deprecated.yaml \
   --out "$OUT"/pyi
 
 # autograd codegen (called by torch codegen but can run independently)
