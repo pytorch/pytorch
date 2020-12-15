@@ -1317,6 +1317,9 @@
 - name: celu(Tensor self, Scalar alpha=1.0) -> Tensor
   self: elu_backward(grad, alpha, 1, 1.0/alpha.toFloat(), false, result)
 
+- name: celu_(Tensor(a!) self, Scalar alpha=1.0) -> Tensor(a!)
+  self: elu_backward(grad, alpha, 1, 1.0/alpha.toFloat(), true, result)
+
 - name: gelu(Tensor self) -> Tensor
   self: "GradMode::is_enabled() ? infinitely_differentiable_gelu_backward(grad, self) : gelu_backward(grad, self)"
 
@@ -1569,6 +1572,7 @@
   self: zeros_like(self)
 
 - name: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, bool is_result, Tensor output) -> Tensor
+  # is_result is always false here since double backward call is an out-of-place call, self is input itself
   grad_output: elu_backward(grad, alpha, scale, input_scale, false, output)
   output: grad * grad_output * input_scale * (output < 0).type_as(grad)
 

@@ -136,17 +136,11 @@ Tensor elu_backward(
     bool is_result,
     const Tensor& output) {
   TORCH_CHECK(
-    !is_result,
-    "Elu backward calculation is triggered for an in-place gradient which is not supported. "
-    "This is caused by calling in-place forward function, please call out-of-place version instead."
-  );
-
-  TORCH_CHECK(
-    alpha.to<double>() >= 0.0,
-    "Elu backward calculation is triggered with a negative alpha which is not supported. "
-    "Please call elu with a non-negative alpha instead."
-  );
-
+    !is_result || alpha.to<double>() >= 0.0,
+    "In-place elu backward calculation is triggered with a negative slope which is not supported. "
+    "This is caused by calling in-place forward function with a negative slope, "
+    "please call out-of-place version instead.");
+    
   Tensor result;
   auto iter = TensorIterator::binary_op(result, grad_output, output);
   elu_backward_stub(iter.device_type(), iter, alpha, scale, input_scale);
