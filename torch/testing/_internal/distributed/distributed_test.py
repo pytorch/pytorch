@@ -855,7 +855,8 @@ class DistributedTest:
         def test_send_recv_any_source(self):
             rank = dist.get_rank()
             tensor = _build_tensor(10, value=rank)
-            recv_ranks = set()
+            recv_ranks = list()
+            irecv_ranks = list()
 
             for dst in range(0, dist.get_world_size()):
                 if dst == rank:
@@ -863,19 +864,47 @@ class DistributedTest:
                     for dst in range(0, dist.get_world_size()):
                         if dst == rank:
                             continue
-                        output_tensor = _build_tensor(10, value=-1)
-                        sender = dist.recv(output_tensor)
 
-                        # Assert the scalar value "sender" that should be
-                        # equal to the rank of the sender is equal to all
-                        # values in the received tensor.
-                        self.assertTrue(output_tensor.eq(sender).all())
-                        recv_ranks.add(sender)
+                        for recv in ["recv", "irecv"]:
+                            output_tensor = _build_tensor(10, value=-1)
+
+                            if recv == "recv":
+                                sender = dist.recv(output_tensor)
+                                recv_ranks.append(sender)
+                            elif recv == "irecv":
+                                work = dist.irecv(output_tensor)
+                                work.wait()
+                                sender = work._source_rank()
+                                irecv_ranks.append(sender)
+
+                            # Assert the scalar value "sender" that should be
+                            # equal to the rank of the sender is equal to all
+                            # values in the received tensor.
+                            self.assertTrue(output_tensor.eq(sender).all())
                 else:
                     # Send mode
-                    dist.send(tensor, dst)
+                    dist.send(tensor, dst)  # recv
+                    dist.send(tensor, dst)  # irecv
 
-            self.assertEqual(len(recv_ranks), dist.get_world_size() - 1)
+            # Each rank would have 2 * (world_size - 1) sends, verify that
+            # globally we receive the same amount on the other end.
+            recv_ranks_tensor = torch.cat((torch.tensor(recv_ranks), torch.tensor(irecv_ranks)), 0)
+            global_recv_ranks = [
+                torch.empty_like(recv_ranks_tensor),
+                torch.empty_like(recv_ranks_tensor),
+                torch.empty_like(recv_ranks_tensor),
+                torch.empty_like(recv_ranks_tensor),
+            ]
+            dist.all_gather(global_recv_ranks, recv_ranks_tensor)
+            global_recv_ranks_list = []
+            for tensor in global_recv_ranks:
+                global_recv_ranks_list += tensor.tolist()
+
+            from itertools import groupby
+            global_recv_ranks_list.sort()
+            frequency = [len(list(group)) for key, group in groupby(global_recv_ranks_list)]
+            self.assertEqual(dist.get_world_size(), len(frequency))
+            self.assertEqual([2 * (dist.get_world_size() - 1)] * dist.get_world_size(), frequency)
             self._barrier()
 
         # SEND RECV WITH TAG
