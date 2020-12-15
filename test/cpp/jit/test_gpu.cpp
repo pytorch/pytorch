@@ -10879,6 +10879,154 @@ TEST(NVFuserTest, FusionAdvancedComputeAtTransposed6_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionSwizzle1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = mul(tv1, new Double(2));
+  fusion.addOutput(tv2);
+
+  tv2->split(0, 7);
+  tv2->split(0, 9);
+
+  tv0->computeAt(tv2, 1);
+
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+
+  tv1->setMemoryType(MemoryType::Shared);
+  tv1->swizzle(SwizzleType::Transpose, {1, 2});
+
+  tv1->axis(1)->parallelize(ParallelType::TIDx);
+  tv1->axis(2)->parallelize(ParallelType::TIDy);
+
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+  tv2->axis(2)->parallelize(ParallelType::TIDy);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({100}, options);
+
+  std::vector<IValue> aten_inputs = {t0};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  auto aten_output = (t0 + 1) * 2;
+
+  testValidate(
+      &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionSwizzle2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = mul(tv1, new Double(2));
+  fusion.addOutput(tv2);
+
+  tv1->split(-1, 4);
+  tv1->split(-2, 4);
+
+  tv2->split(-1, 4);
+  tv2->split(-2, 4);
+
+  tv0->computeAt(tv2, 1);
+
+  tv2->reorder({{-1, -2}});
+
+  tv1->setMemoryType(MemoryType::Shared);
+  tv1->swizzle(SwizzleType::Transpose, {-2, -1});
+
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(-2)->parallelize(ParallelType::TIDy);
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv1->axis(-2)->parallelize(ParallelType::TIDy);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({123}, options);
+
+  std::vector<IValue> aten_inputs = {t0};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  auto aten_output = (t0 + 1) * 2;
+
+  testValidate(
+      &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionTransposeWithSwizzle_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = transpose(tv0, {{0, 1}});
+  fusion.addOutput(tv1);
+
+  // tv0: [I0, I1]
+  // tv1: [I1, I0]
+
+  const int BS = 32;
+
+  // CTA tiling by BS*BS
+  tv1->split(1, BS);
+  tv1->split(0, BS);
+  tv1->reorder({{1, 2}});
+  // tv1: [I1/BS, I0/BS, BS(I1), BS(I0)]
+
+  // Create a smem buffer to cache each tile
+  auto tv0_cache = tv0->cache_after();
+  tv0_cache->setMemoryType(MemoryType::Shared);
+
+  tv0->computeAt(tv1, 2);
+  // tv0: [I0, I1]
+  // tv0_cache: [I1/BS, I0/BS, BS(I1), BS(I0)]
+  // tv1: [I1/BS, I0/BS, BS(I1), BS(I0)]
+
+  // Assign each thread block to a tile
+  tv1->axis(0)->parallelize(ParallelType::BIDy);
+  tv1->axis(1)->parallelize(ParallelType::BIDx);
+
+  // Thread mapping for each tile. For both of the input and output
+  // tiles, map TIDx to the fastest-changing dimension to facilitate
+  // coalesced gmem accesses.
+  tv1->axis(2)->parallelize(ParallelType::TIDy);
+  tv1->axis(3)->parallelize(ParallelType::TIDx);
+  // Note that the fastest-changing axis is next to the inner-most
+  // axis since computeAt reorders the axes as the output tensor.
+  tv0_cache->axis(2)->parallelize(ParallelType::TIDx);
+  tv0_cache->axis(3)->parallelize(ParallelType::TIDy);
+
+  // Swizzles the smem cache to avoid bank conflicts
+  tv0_cache->swizzle(SwizzleType::Transpose, {3, 2});
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  const int bx = 100;
+  const int by = 200;
+  at::Tensor t0 = at::randn({bx, by}, options);
+  std::vector<IValue> aten_inputs = {t0};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  auto aten_output = t0.t();
+
+  testValidate(
+      &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 

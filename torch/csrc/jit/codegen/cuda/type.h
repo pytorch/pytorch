@@ -176,6 +176,8 @@ enum class IterType {
   BroadcastWithoutStride
 };
 
+enum class SwizzleType { NoSwizzle, Transpose };
+
 // Returns if function needs an f suffix on the operator when operating on a
 // float value i.e. sin->sinf
 bool needFloatSuffix(UnaryOpType t);

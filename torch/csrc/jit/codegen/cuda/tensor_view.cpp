@@ -100,7 +100,12 @@ TensorView::TensorView(const TensorView* src, IrCloner* ir_cloner)
       compute_at_view_(ir_cloner->clone(src->compute_at_view_)),
       relative_compute_at_axis_(src->relative_compute_at_axis_),
       this_compute_at_axis_(src->this_compute_at_axis_),
-      memory_type_(src->memory_type_) {}
+      memory_type_(src->memory_type_),
+      swizzle_type_(src->swizzle_type_) {
+  for (const auto id : src->axesToSwizzle()) {
+    axes_to_swizzle_.push_back(ir_cloner->clone(id));
+  }
+}
 
 bool TensorView::hasAnyReduction() const {
   return domain()->noReductions().size() != domain()->domain().size();
@@ -391,6 +396,57 @@ TensorView* TensorView::reorder(const std::unordered_map<int, int>& old2new_) {
       !(nDims() == 0 && old2new_.size() > 0),
       "Tried to reorder a 0-dim TensorView");
   domain()->reorder(old2new_);
+  return this;
+}
+
+TensorView* TensorView::swizzle(
+    SwizzleType type,
+    const std::vector<int>& axes) {
+  swizzle_type_ = type;
+
+  // Clear previously set swizzle axes if any
+  if (axes_to_swizzle_.size()) {
+    axes_to_swizzle_.clear();
+  }
+
+  if (swizzle_type_ == SwizzleType::Transpose) {
+    TORCH_CHECK(
+        axes.size() == 2,
+        "Invalid axis list: ",
+        axes,
+        ". Number of axes must be two.");
+    TORCH_CHECK(
+        axes[0] != axes[1],
+        "Invalid axis list: ",
+        axes,
+        ". Two distinctive axes must be given.");
+    TORCH_CHECK(
+        getMemoryType() == MemoryType::Shared,
+        "Transpose swizzle is meant for tensors on shared memory.");
+    for (auto pos : axes) {
+      if (pos < 0) {
+        pos += nDims();
+      }
+      TORCH_CHECK(pos >= 0 && pos < (int)nDims(), "Invalid axis: ", pos);
+      TORCH_CHECK(
+          pos >= (int)getThisComputeAtAxis(),
+          "Invalid axis: ",
+          pos,
+          ". Axis outside computeAt position is not allocated.");
+      TORCH_CHECK(
+          !axis(pos)->isReduction(),
+          "Invalid axis: ",
+          pos,
+          ". Swizzling a reduction axis is not supported");
+      TORCH_CHECK(
+          !axis(pos)->isBroadcast(),
+          "Invalid axis: ",
+          pos,
+          ". Swizzling a broadcast axis is not supported");
+      axes_to_swizzle_.push_back(axis(pos));
+    }
+  }
+
   return this;
 }
 
@@ -777,6 +833,10 @@ struct CreateExprConsumer : public OptInDispatch {
         broadcast_expr->getBroadcastDimFlags());
   }
 
+  void handle(TransposeOp* transpose_expr) final {
+    new TransposeOp(consumer_, transpose_expr->in(), transpose_expr->new2old());
+  }
+
  private:
   TensorView* consumer_ = nullptr;
 };
@@ -889,6 +949,11 @@ struct CreateExprProducer : public OptInDispatch {
         broadcast_expr->out(),
         producer_,
         broadcast_expr->getBroadcastDimFlags());
+  }
+
+  void handle(TransposeOp* transpose_expr) final {
+    new TransposeOp(
+        transpose_expr->out(), producer_, transpose_expr->new2old());
   }
 
  private:
