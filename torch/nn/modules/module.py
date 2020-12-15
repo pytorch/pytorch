@@ -841,6 +841,7 @@ class Module:
             return self.forward(*input, **kwargs)
         recording_scopes = torch.jit._trace._trace_module_map is not None
         if recording_scopes:
+            # type ignore was added because at this point one knows that
             # torch.jit._trace._trace_module_map is not Optional and has type Dict[Any, Any] 
             name = torch.jit._trace._trace_module_map[self] if self in torch.jit._trace._trace_module_map else None  # type: ignore
             if name:
@@ -1187,6 +1188,7 @@ class Module:
         metadata = getattr(state_dict, '_metadata', None)
         state_dict = state_dict.copy()
         if metadata is not None:
+            # mypy isn't aware that "_metadata" exists in state_dict
             state_dict._metadata = metadata  # type: ignore[attr-defined]
 
         def load(module, prefix=''):
@@ -1198,8 +1200,9 @@ class Module:
                     load(child, prefix + name + '.')
 
         load(self)
-        # mypy isn't happy with the redef of "@load"
-        load = None  # type: ignore[assignment] # break load->load reference cycle 
+        # instruction "load = None" => break load->load reference cycle 
+        # type ignore[...] is required because mypy isn't happy with the redef of "load"
+        load = None  # type: ignore[assignment]
 
         if strict:
             if len(unexpected_keys) > 0:
