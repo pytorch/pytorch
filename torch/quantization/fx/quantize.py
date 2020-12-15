@@ -415,6 +415,9 @@ class Quantizer:
                 output_node_seen_cnt += 1
                 if cur_output_node_idx in output_quantized_idxs:
                     prev_node = node.args[0]
+                    assert isinstance(prev_node, Node), \
+                        ('hardcoding list/dict outputs to be quantized is ' +
+                         'not supported')
                     if prev_node.name not in observed_node_names_set:
                         insert_observer(
                             prev_node, self.qconfig_map[prev_node.name].activation(),
