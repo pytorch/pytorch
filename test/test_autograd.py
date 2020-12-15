@@ -1257,7 +1257,10 @@ class TestAutograd(TestCase):
                 pass
 
     def test_set_grad_coroutines_critical_exceptions(self):
-        class UnRecoverableException(Exception):
+        class UnrecoverableException(Exception):
+            pass
+
+        class SecondaryException(Exception):
             pass
 
         @torch.no_grad()
@@ -1268,9 +1271,9 @@ class TestAutograd(TestCase):
                     self.assertFalse(torch.is_grad_enabled())
                     yield (-i if has_raised else i)
 
-                except UnRecoverableException:
+                except UnrecoverableException:
                     self.assertFalse(torch.is_grad_enabled())
-                    raise
+                    raise SecondaryException
 
         @torch.enable_grad()
         def coro_enable_grad(n=10):
@@ -1280,21 +1283,21 @@ class TestAutograd(TestCase):
                     self.assertTrue(torch.is_grad_enabled())
                     yield (-i if has_raised else i)
 
-                except UnRecoverableException:
+                except UnrecoverableException:
                     self.assertTrue(torch.is_grad_enabled())
-                    raise
+                    raise SecondaryException
 
         with torch.enable_grad():
             coro = coro_no_grad()
             assert 0 == next(coro)
-            with self.assertRaises(UnRecoverableException):
-                coro.throw(UnRecoverableException)
+            with self.assertRaises(SecondaryException):
+                coro.throw(UnrecoverableException)
 
         with torch.no_grad():
             coro = coro_enable_grad()
             assert 0 == next(coro)
-            with self.assertRaises(UnRecoverableException):
-                coro.throw(UnRecoverableException)
+            with self.assertRaises(SecondaryException):
+                coro.throw(UnrecoverableException)
 
     def test_set_grad_coroutines_exit(self):
         @torch.no_grad()
