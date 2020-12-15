@@ -317,12 +317,10 @@ def main():
         while len(alive_processes):
             finished_processes = []
             for process in alive_processes:
-                print(f"POLLING FOR {process.pid}")
                 if process.poll() is None:
                     # the process is still running
                     continue
                 else:
-                    print(f"process {process.pid} is no more")
                     if process.returncode != 0:
                         last_return_code = process.returncode  # for sigkill_handler
                         sigkill_handler(signal.SIGTERM, None)  # not coming back
