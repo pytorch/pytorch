@@ -422,8 +422,14 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
 
     if (expr_type == IRNodeType::kLshift || expr_type == IRNodeType::kRshift) {
       switch (lhs_v.dtype().scalar_type()) {
-        case ScalarType::Int:
-          value_ = shift_binary_op<int>(lhs_v, rhs_v, expr_type);
+#define TYPE_CASE(Type, Name)                                \
+  case ScalarType::Name:                                     \
+    value_ = shift_binary_op<Type>(lhs_v, rhs_v, expr_type); \
+    break;
+        AT_FORALL_INT_TYPES(TYPE_CASE);
+#undef TYPE_CASE
+        case ScalarType::Bool:
+          value_ = shift_binary_op<unsigned char>(lhs_v, rhs_v, expr_type);
           break;
         default:
           throw unsupported_dtype();
