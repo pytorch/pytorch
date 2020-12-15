@@ -475,6 +475,87 @@ Tensor index_add(const Tensor & self, int64_t dim, const Tensor & index, const T
   return self.clone(at::MemoryFormat::Preserve).index_add_(dim, index, source);
 }
 
+// Check that indices fall within dimension array size
+// Avoid redispatch call to min/max
+template <typename IndexType>
+static void check_indexarray_range(
+    const IndexType* indices,
+    int64_t n,
+    IndexType indexing_axis_dim) {
+  for (auto i = 0; i < n; ++i) {
+    auto idx = indices[i];
+    TORCH_CHECK(
+        0 <= idx && idx < indexing_axis_dim,
+        "INDICES element is out of DATA bounds, id=",
+        idx,
+        " axis_dim=",
+        indexing_axis_dim);
+  }
+}
+
+Tensor & index_select_out_cpu_dim1_(
+    Tensor & result_contig, const Tensor & self, const Tensor & index_contig) {
+
+  auto self_contig = self.contiguous();
+  const caffe2::TypeMeta dataType = self_contig.dtype();
+  size_t item_bytesize = dataType.itemsize();
+
+  auto out = static_cast<char*>(result_contig.data_ptr());
+
+  auto src_base = static_cast<const char*>(self_contig.data_ptr());
+
+  auto self_sizes = self_contig.sizes();
+  auto outer_dims_product = c10::size_to_dim_(1, self_sizes);
+  auto block_size = c10::size_from_dim_(2, self_sizes);
+  auto block_bytesize = block_size * item_bytesize;
+
+  auto src_indexing_axis_dim = self_sizes[1];
+  auto src_batch_bytesize = self_sizes[1] * block_bytesize;
+  auto N = index_contig.numel();
+
+  auto gathered_batch_bytesize = N * block_bytesize;
+
+  AT_DISPATCH_INDEX_TYPES(
+    index_contig.scalar_type(), "batch_index_select_compute", [&]() {
+
+      const auto* idxs = index_contig.data_ptr<index_t>();
+      check_indexarray_range<index_t>(idxs, N, src_indexing_axis_dim);
+
+      // Special-case single-float copy for efficiency
+      if (self.scalar_type() == ScalarType::Float && block_size == 1) {
+        for (auto batch = 0; batch < outer_dims_product; ++batch) {
+          const float* src_floats =
+              (const float*)(src_base + batch * src_batch_bytesize);
+          float* dst_floats = (float*)(out + batch * gathered_batch_bytesize);
+
+          for (auto i = 0; i < N; ++i) {
+            auto idx = idxs[i];
+            if (idx < 0) {
+              idx = idx + src_indexing_axis_dim;
+            }
+            dst_floats[i] = src_floats[idx];
+          }
+        }
+      } else {
+        // outer_dims_product specifies how many times we repeat inner dimensions,
+        // so we just iterate over it to cover all outer dimensions.
+        for (auto batch = 0; batch < outer_dims_product; ++batch) {
+          for (auto i = 0; i < N; ++i) {
+            auto idx = idxs[i];
+            if (idx < 0) {
+              idx = idx + src_indexing_axis_dim;
+            }
+
+            auto src = src_base + batch * src_batch_bytesize + idx * block_bytesize;
+            auto dst = out + batch * gathered_batch_bytesize + i * block_bytesize;
+            memcpy(dst, src, block_bytesize);
+          }
+        }
+      }
+  });
+  return result_contig;
+}
+
 Tensor & index_select_out_cpu_(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index) {
   dim = maybe_wrap_dim(dim, self.dim());
 
@@ -500,6 +581,11 @@ Tensor & index_select_out_cpu_(Tensor & result, const Tensor & self, int64_t dim
   if (self.dim() > 1) {
     if (numel == 0 || self.numel() == 0) {
       return result;
+    }
+
+    if (dim == 1 && result.is_contiguous()) {
+      // fast pass
+      return index_select_out_cpu_dim1_(result, self, index_contig);
     }
 
     auto selfSlice = self.select(dim, 0);
