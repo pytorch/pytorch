@@ -558,10 +558,11 @@ struct ParserImpl {
         return parseFunction(/*is_method=*/in_class);
       }
       case TK_DELETE: {
-        L.expect(TK_DELETE);
-        auto expr = parseExp();
+        auto range = L.next().range;
+        auto targets =
+            parseList(TK_NOTHING, ',', TK_NOTHING, &ParserImpl::parseExp);
         L.expect(TK_NEWLINE);
-        return Delete::create(expr);
+        return Delete::create(range, targets);
       }
       case TK_WITH: {
         return parseWith();
