@@ -190,6 +190,7 @@ allow_list = [
     ("aten::quantile", datetime.date(2021, 1, 31)),
     ("aten::nanquantile", datetime.date(2021, 1, 31)),
     ("aten::_fft_with_size", datetime.date(2021, 1, 31)),
+    ("aten::slice", datetime.date(2021, 3, 1)),
 ]
 
 def allow_listed(schema, allow_list):
