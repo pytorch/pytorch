@@ -4,6 +4,17 @@
 namespace at {
 namespace native {
 namespace {
+// Check if tensor list has a boolean tensor	
+bool has_int_or_bool_tensor(TensorList tensors) {	
+    bool has_integral = false;	
+    for (auto t : tensors) {	
+        if (at::isIntegralType(t.scalar_type(), /*includeBool=*/true)) {	
+            has_integral = true;	
+        }	
+    }	
+    return has_integral;	
+}
+
 // Check foreach API restrictions 
 // - Tensor lists must be non-empty.
 // - All tensors in all lists must have the same dtype.
@@ -147,7 +158,6 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, bool division_
   return false;
 #else
   auto expected_device = tensors1[0].device();
-
   for (int64_t i = 0; i < tensors1.size(); i++) {
     if (!has_same_attributes(expected_device, {tensors1[i], tensors2[i]})) {
       return false;
@@ -170,7 +180,6 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, Scalar scalar)
   return false;
 #else
   auto expected_device = tensors1[0].device();
-
   for (int64_t i = 0; i < tensors1.size(); i++) {
     if (!has_same_attributes(expected_device, {tensors1[i], tensors2[i]})) {
       return false;
@@ -190,7 +199,6 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList ten
   return false;
 #else
   auto expected_device = tensors1[0].device();
-
   for (int64_t i = 0; i < tensors1.size(); i++) {
     if (!has_same_attributes(expected_device, {tensors1[i], tensors2[i], tensors3[i]})) {
       return false;
@@ -206,7 +214,6 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList ten
   return false;
 #else
   auto expected_device = tensors1[0].device();
-
   for (int64_t i = 0; i < tensors1.size(); i++) {
     if (!has_same_attributes(expected_device, {tensors1[i], tensors2[i], tensors3[i]})) {
       return false;
