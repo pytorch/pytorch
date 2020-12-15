@@ -347,6 +347,12 @@ class MultiProcessTestCase(TestCase):
     def _run(cls, rank, test_name, file_name):
         self = cls(test_name)
         self.rank = rank
+        if hasattr(self, "cuda_visible_devices"):
+            os.environ.update({'CUDA_VISIBLE_DEVICES' : self.cuda_visible_devices()})
+            print('CUDA_VISIBLE_DEVICES set to: {}, for rank: {}'.format(
+                os.environ['CUDA_VISIBLE_DEVICES'],
+                self.rank)
+            )
         self.file_name = file_name
 
         # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
