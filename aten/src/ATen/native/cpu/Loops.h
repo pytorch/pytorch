@@ -185,7 +185,7 @@ static inline void unroll_contiguous_scalar_checks(
 }
 
 template <typename func_t>
-void cpu_kernel(TensorIterator& iter, func_t&& op) {
+void cpu_kernel(TensorIteratorBase& iter, func_t&& op) {
   using traits = function_traits<func_t>;
   // this could be extended to work with void return types
   TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
@@ -207,7 +207,7 @@ void cpu_kernel(TensorIterator& iter, func_t&& op) {
 }
 
 template <bool check_dynamic_cast=true, typename func_t, typename vec_func_t>
-void cpu_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop) {
+void cpu_kernel_vec(TensorIteratorBase& iter, func_t&& op, vec_func_t&& vop) {
   using traits = function_traits<func_t>;
   // this could be extended to work with void return types
   TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
@@ -236,7 +236,7 @@ void cpu_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop) {
 }
 
 template <typename func_t>
-void cpu_serial_kernel(TensorIterator& iter, func_t&& op, const Range& range) {
+void cpu_serial_kernel(TensorIteratorBase& iter, func_t&& op, const Range& range) {
   using traits = function_traits<func_t>;
   constexpr bool result_void = std::is_void<typename traits::result_type>::value;
   TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity &&
@@ -258,12 +258,12 @@ void cpu_serial_kernel(TensorIterator& iter, func_t&& op, const Range& range) {
 }
 
 template <typename func_t>
-void cpu_serial_kernel(TensorIterator& iter, func_t&& op) {
+void cpu_serial_kernel(TensorIteratorBase& iter, func_t&& op) {
   cpu_serial_kernel(iter, op, {0, iter.numel()});
 }
 
 template <typename func_t, typename vec_func_t>
-void cpu_serial_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop, const Range& range) {
+void cpu_serial_kernel_vec(TensorIteratorBase& iter, func_t&& op, vec_func_t&& vop, const Range& range) {
   using traits = function_traits<func_t>;
   // this could be extended to work with void return types
   TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
@@ -289,7 +289,7 @@ void cpu_serial_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop, 
 }
 
 template <typename func_t, typename vec_func_t>
-void cpu_serial_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop) {
+void cpu_serial_kernel_vec(TensorIteratorBase& iter, func_t&& op, vec_func_t&& vop) {
   cpu_serial_kernel_vec(iter, op, vop, {0, iter.numel()});
 }
 
