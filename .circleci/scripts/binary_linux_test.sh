@@ -7,6 +7,11 @@ set -eux -o pipefail
 
 python_nodot="\$(echo $DESIRED_PYTHON | tr -d m.u)"
 
+# There was a bug that was introduced in conda-package-handling >= 1.6.1 that makes archives
+# above a certain size fail out when attempting to extract
+# see: https://github.com/conda/conda-package-handling/issues/71
+conda install -y conda-package-handling=1.6.0
+
 # Set up Python
 if [[ "$PACKAGE_TYPE" == conda ]]; then
   retry conda create -qyn testenv python="$DESIRED_PYTHON"
