@@ -1301,7 +1301,7 @@ class TestAutograd(TestCase):
 
     def test_set_grad_coroutines_exit(self):
         @torch.no_grad()
-        def coro_no_grad(state=set()):
+        def coro_no_grad(state):
             for i in range(10):
                 try:
                     self.assertFalse(torch.is_grad_enabled())
@@ -1313,7 +1313,7 @@ class TestAutograd(TestCase):
                     raise
 
         @torch.enable_grad()
-        def coro_enable_grad(state=set()):
+        def coro_enable_grad(state):
             for i in range(10):
                 try:
                     self.assertTrue(torch.is_grad_enabled())
