@@ -19,11 +19,11 @@ const float kLowSamplingProb = 0.0001;
 
 void addTestCallback(
     double sampling_prob = 1.0,
-    std::function<void(const at::RecordFunction&)> fn =
-        [](const at::RecordFunction&) {}) {
+    std::function<std::unique_ptr<at::ObserverContext>(const at::RecordFunction&)> fn =
+        [](const at::RecordFunction&) { return nullptr; }) {
   auto cb = at::RecordFunctionCallback(
       std::move(fn),
-      [](const at::RecordFunction&) {})
+      [](const at::RecordFunction&, at::ObserverContext*) {})
     .needsInputs(false);
   if (sampling_prob < 1.0) {
     cb.samplingProb(sampling_prob);
@@ -111,6 +111,7 @@ int main(int argc, char** argv) {
       kLowSamplingProb,
       [&](const at::RecordFunction& fn) {
         ++cb_count;
+        return nullptr;
       }
   );
 
