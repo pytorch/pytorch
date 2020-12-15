@@ -32,9 +32,9 @@ class ReadFilesFromTarIterableDataset(IterableDataset):
             self.dataset, self.__tarfile_handle_register, extract_files_from_single_tar_pathname_binary)
 
     def reset(self):
-        # release tarfile stream handles if any
-        if not self.__tarfile_handle_register:
-            self.__tarfile_handle_register = []
+        # explicitly release tarfile stream handles if any
+        if self.__tarfile_handle_register:
+            del self.__tarfile_handle_register[:]
 
     def __len__(self):
         if self.length == -1:
