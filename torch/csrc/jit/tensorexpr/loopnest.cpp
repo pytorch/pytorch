@@ -154,6 +154,14 @@ class Vectorizer : public IRMutator {
     });
   }
 
+  const Expr* mutate(const BitCast* v) override {
+    std::vector<const Expr*> inputs = {v->src_value()};
+    return try_vectorize(v, inputs, [&]() {
+      return BitCast::make(
+          Dtype(v->dtype().scalar_type(), lanes_), ExprHandle(inputs[0]));
+    });
+  }
+
   const Expr* mutate(const Cast* v) override {
     std::vector<const Expr*> inputs = {v->src_value()};
     return try_vectorize(v, inputs, [&]() {
@@ -398,7 +406,11 @@ class DepTracker : public IRVisitor {
  public:
   std::vector<Tensor*> findUsedTensors(Tensor* tensor) {
     used_tensors.clear();
-    tensor->body()->accept(this);
+    if (tensor->body()) {
+      tensor->body()->accept(this);
+    } else {
+      tensor->ElementStmt()->accept(this);
+    }
     return used_tensors;
   }
 
@@ -504,6 +516,11 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
 
 Stmt* LoopNest::lowerToStmt(Tensor* t) {
   Stmt* body = t->ElementStmt();
+
+  // If this Tensor has no functional body, it already has its axes expanded.
+  if (nullptr == t->body()) {
+    return body;
+  }
 
   if (t->ndim() == 0 && t->reduce_ndim() == 0) {
     return body;

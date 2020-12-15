@@ -134,7 +134,7 @@ template<typename... Args> inline variable_list flatten_tensor_args(Args&&... ar
 }
 
 // See NOTE [ Autograd View Variables ] for details.
-inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable,
+inline Tensor as_view(const Tensor & base, const Tensor& tensor, bool is_differentiable,
         c10::optional<std::function<Tensor(const Tensor&)>> view_func=c10::nullopt,
         CreationMeta creation_meta=CreationMeta::DEFAULT) {
   auto base_var = Variable(base);
@@ -194,16 +194,16 @@ inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable
     base_var = base_var._base();
   }
   if (is_differentiable) {
-    return make_variable_differentiable_view(std::move(base_var), std::move(tensor), creation_meta, std::move(view_func));
+    return make_variable_differentiable_view(std::move(base_var), tensor, creation_meta, std::move(view_func));
   } else {
     TORCH_CHECK(creation_meta == CreationMeta::DEFAULT,
                 "Non-differentiable views must have creation_meta=CreationMeta::DEFAULT");
-    return make_variable_non_differentiable_view(std::move(base_var), std::move(tensor));
+    return make_variable_non_differentiable_view(std::move(base_var), tensor);
   }
 }
 
 // See NOTE [ Autograd View Variables ] for details.
-inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tensors, bool is_differentiable,
+inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& tensors, bool is_differentiable,
                                    CreationMeta creation_meta=CreationMeta::DEFAULT) {
   auto base_var = Variable(base);
   if (base_var.is_view()) {
@@ -211,11 +211,11 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tens
   }
   for(Tensor &tensor : tensors) {
     if (is_differentiable) {
-      tensor = make_variable_differentiable_view(base_var, std::move(tensor), creation_meta);
+      tensor = make_variable_differentiable_view(base_var, tensor, creation_meta);
     } else {
       TORCH_CHECK(creation_meta == CreationMeta::DEFAULT,
                   "Non-differentiable views must have creation_meta=CreationMeta::DEFAULT");
-      tensor = make_variable_non_differentiable_view(base_var, std::move(tensor));
+      tensor = make_variable_non_differentiable_view(base_var, tensor);
     }
   }
   return tensors;
