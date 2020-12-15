@@ -3,20 +3,18 @@
 namespace c10 {
 namespace impl {
 
-constexpr int SizesAndStrides::MAX_INLINE_SIZE;
-
 void SizesAndStrides::resizeSlowPath(const size_t newSize, const size_t oldSize) {
-  if (newSize <= MAX_INLINE_SIZE) {
+  if (newSize <= C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!isInline(), "resizeSlowPath called when fast path should have been hit!");
     int64_t* tempStorage = outOfLineStorage_;
     memcpy(
         &inlineStorage_[0],
         &tempStorage[0],
-        MAX_INLINE_SIZE * sizeof(inlineStorage_[0]));
+        C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE * sizeof(inlineStorage_[0]));
     memcpy(
-        &inlineStorage_[MAX_INLINE_SIZE],
+        &inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE],
         &tempStorage[oldSize],
-        MAX_INLINE_SIZE * sizeof(inlineStorage_[0]));
+        C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE * sizeof(inlineStorage_[0]));
     // CANNOT USE freeOutOfLineStorage() HERE! outOfLineStorage_
     // HAS BEEN OVERWRITTEN!
     free(tempStorage);
@@ -32,7 +30,7 @@ void SizesAndStrides::resizeSlowPath(const size_t newSize, const size_t oldSize)
       if (bytesToZero) {
         memset(&tempStorage[oldSize], 0, bytesToZero);
       }
-      memcpy(&tempStorage[newSize], &inlineStorage_[MAX_INLINE_SIZE], bytesToCopy);
+      memcpy(&tempStorage[newSize], &inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE], bytesToCopy);
       if (bytesToZero) {
         memset(&tempStorage[newSize + oldSize], 0, bytesToZero);
       }

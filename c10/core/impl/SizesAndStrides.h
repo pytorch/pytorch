@@ -7,6 +7,8 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/SmallVector.h>
 
+#define C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE 5
+
 namespace c10 {
 namespace impl {
 
@@ -151,7 +153,7 @@ class C10_API SizesAndStrides {
 
   const int64_t* strides_data() const noexcept {
     if (C10_LIKELY(isInline())) {
-      return &inlineStorage_[MAX_INLINE_SIZE];
+      return &inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE];
     } else {
       return &outOfLineStorage_[size()];
     }
@@ -159,7 +161,7 @@ class C10_API SizesAndStrides {
 
   int64_t* strides_data() noexcept {
     if (C10_LIKELY(isInline())) {
-      return &inlineStorage_[MAX_INLINE_SIZE];
+      return &inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE];
     } else {
       return &outOfLineStorage_[size()];
     }
@@ -167,7 +169,7 @@ class C10_API SizesAndStrides {
 
   strides_const_iterator strides_begin() const noexcept {
     if (C10_LIKELY(isInline())) {
-      return &inlineStorage_[MAX_INLINE_SIZE];
+      return &inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE];
     } else {
       return &outOfLineStorage_[size()];
     }
@@ -175,7 +177,7 @@ class C10_API SizesAndStrides {
 
   strides_iterator strides_begin() noexcept {
     if (C10_LIKELY(isInline())) {
-      return &inlineStorage_[MAX_INLINE_SIZE];
+      return &inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE];
     } else {
       return &outOfLineStorage_[size()];
     }
@@ -236,11 +238,11 @@ class C10_API SizesAndStrides {
     if (newSize == oldSize) {
       return;
     }
-    if (C10_LIKELY(newSize <= MAX_INLINE_SIZE && isInline())) {
+    if (C10_LIKELY(newSize <= C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE && isInline())) {
       if (oldSize < newSize) {
         const auto bytesToZero = (newSize - oldSize) * sizeof(inlineStorage_[0]);
         memset(&inlineStorage_[oldSize], 0, bytesToZero);
-        memset(&inlineStorage_[MAX_INLINE_SIZE + oldSize], 0, bytesToZero);
+        memset(&inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE + oldSize], 0, bytesToZero);
       }
       size_ = newSize;
     } else {
@@ -252,7 +254,7 @@ class C10_API SizesAndStrides {
 
  private:
   bool isInline() const noexcept {
-    return size_ <= MAX_INLINE_SIZE;
+    return size_ <= C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE;
   }
 
   void copyDataInline(const SizesAndStrides& rhs) {
@@ -279,12 +281,10 @@ class C10_API SizesAndStrides {
     memcpy(outOfLineStorage_, rhs.outOfLineStorage_, storageBytes(rhs.size_));
   }
 
-  static constexpr int MAX_INLINE_SIZE = 5;
-
   size_t size_;
   union {
     int64_t *outOfLineStorage_;
-    int64_t inlineStorage_[MAX_INLINE_SIZE * 2]{};
+    int64_t inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE * 2]{};
   };
 
 };
