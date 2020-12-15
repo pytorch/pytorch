@@ -71,6 +71,7 @@ import pickle
 
 PRECISION = 1e-4
 
+# See #49409, we should remove these if we end up with a global gradcheck setting
 gradcheck = partial(gradcheck, check_batched_grad=True)
 gradgradcheck = partial(gradgradcheck, check_batched_grad=True)
 
