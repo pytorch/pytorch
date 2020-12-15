@@ -4,17 +4,6 @@
 namespace at {
 namespace native {
 namespace {
-// Check if tensor list has a boolean tensor
-bool has_bool_tensor(TensorList tensors) {
-    bool has_integral = false;
-    for (auto t : tensors) {
-        if (at::isIntegralType(t.scalar_type(), /*includeBool=*/true)) {
-            has_integral = true;
-        }
-    }
-    return has_integral;
-}
-
 // Check foreach API restrictions 
 // - Tensor lists must be non-empty.
 // - All tensors in all lists must have the same dtype.
