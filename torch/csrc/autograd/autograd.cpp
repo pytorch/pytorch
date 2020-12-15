@@ -176,7 +176,7 @@ at::Tensor make_dual(const at::Tensor& primal, at::Tensor tangent, uint64_t leve
 }
 
 std::pair<at::Tensor, at::Tensor> unpack_dual(const at::Tensor& tensor, uint64_t level) {
-  return {tensor.fw_primal(level), tensor.fw_grad(level)};
+  return {tensor._fw_primal(level), tensor.fw_grad(level)};
 }
 
 } // namespace forward_ad

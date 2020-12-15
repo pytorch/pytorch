@@ -603,7 +603,7 @@ void AutogradMeta::set_fw_grad(Variable& new_grad, const Variable& self, uint64_
     // Setting the forward grad again is only allowed if it is a no-op.
     // We do allow this case to simplify writing codegen for inplace ops.
     TORCH_INTERNAL_ASSERT(new_grad.defined(), "Cannot set a forward grad that is an undefined Tensor. Use "
-                          "fw_primal(level) to get a new Tensor with this forward grad unset.");
+                          "_fw_primal(level) to get a new Tensor with this forward grad unset.");
 
     TORCH_INTERNAL_ASSERT(is_inplace_op, "Only inplace operations can re-set the forward grad of a Tensor that "
                           "already has one.");

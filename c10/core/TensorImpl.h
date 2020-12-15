@@ -607,14 +607,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * This is an internal API that should never be used by end users.
    *
    * The API is as follows:
-   *   - "level" allows to specify the level of nesting for which the
+   *   - "level" allows to specify the level of forward AD nesting for which the
    *     gradient should be returned. Note that since levels are not fully
-   *     supported yet, this argument should be 0.
-   *   - "self" should reprensent the Tensor whose forward grad is accessed. It is
+   *     supported yet, this argument should be 0. See documentation for
+   *     torch::autograd::enter_dual_level for more details about forward AD nesting.
+   *   - "self" should represent the Tensor whose forward grad is accessed. It is
    *     required when dealing with view.
-   *
-   * It is only valid to call this method on a Variable.
-   * See Note [Tensor versus Variable in C++].
    */
   const at::Tensor& fw_grad(uint64_t level, const at::Tensor& self) const;
 
@@ -629,14 +627,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    *     be set
    *   - "self" should reprensent the Tensor whose forward grad is accessed. It is
    *     required when dealing with view.
-   *   - "level" allows to specify the level of nesting for which the
+   *   - "level" allows to specify the level of forward AD nesting for which the
    *     gradient should be set. Note that since levels are not fully supported
-   *     yet, this argument should be 0.
+   *     yet, this argument should be 0. See documentation for torch::autograd::enter_dual_level
+   *     for more details about forward AD nesting.
    *   - "is_inplace_op" is a boolean flag that tells if this gradient was generated
    *     by an inplace operation or an out of place one. This allows better error checking.
-   *
-   * It is only valid to call this method on a Variable.
-   * See Note [Tensor versus Variable in C++].
    */
   void set_fw_grad(at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op);
 
