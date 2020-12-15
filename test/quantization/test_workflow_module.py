@@ -1335,10 +1335,11 @@ class TestFakeQuantize(TestCase):
     @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
     def test_learnable_backward_per_channel_cuda(self, X):
         torch.random.manual_seed(NP_RANDOM_SEED)
-        X, (scale, zero_point, axis, torch_type) = X
+        X, (_, _, axis, _) = X
         X_base = torch.tensor(X).to('cuda')
-        scale_base = to_tensor(scale, 'cuda')
-        zero_point_base = to_tensor(zero_point, 'cuda')
+        channel_size = X_base.size(axis)
+        scale_base = torch.normal(mean=0, std=1, size=(channel_size,)).clamp(1e-4, 100)
+        zero_point_base = torch.normal(mean=0, std=128, size=(channel_size,))
         self._test_learnable_backward_per_channel(
             X_base, 'cuda', scale_base, zero_point_base, axis)
 
