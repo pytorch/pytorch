@@ -4,7 +4,11 @@
 namespace at {
 namespace native {
 namespace {
-
+// Check foreach API restrictions 
+// - Tensor lists must be non-empty.
+// - All tensors in all lists must have the same dtype.
+// - All TensorLists and ScalarLists must have the same number of elements.
+// - Corresponding tensors must have the same size.
 void check_foreach_api_restrictions(TensorList tensors) {
   TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
   auto expected_dtype = tensors[0].dtype();
@@ -85,27 +89,8 @@ bool has_same_attributes(Device expected_device, TensorList tensors) {
 }
 
 bool will_promote_tensor(const Tensor& tensor, Scalar scalar) {
-  // complex scalar + integral or boolean tensor will result in complex tensor
-  if (scalar.isComplex() && at::isIntegralType(tensor.scalar_type(), /*includeBool*/ true)) {
-    return true;
-  }
-
-  // complex scalar + float tensor will result in complex tensor
-  if (scalar.isComplex() && at::isFloatingType(tensor.scalar_type())) {
-    return true;
-  }
-
-  // float scalar + integral or boolean tensor will result in float tensor
-  if (scalar.isFloatingPoint() && at::isIntegralType(tensor.scalar_type(), /*includeBool*/ true)) {
-    return true;
-  }
-
-  // integral scalar + boolean tensor will result in integral tensor
-  if (scalar.isIntegral(/*includeBool*/ false) && tensor.dtype() == at::kBool) {
-    return true;
-  }
-
-  return false;
+  auto result_dtype = at::result_type(tensor, scalar);
+  return result_dtype != tensor.scalar_type();
 }
 
 bool can_use_fast_route(TensorList tensors) {
