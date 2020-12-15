@@ -285,16 +285,20 @@ def sample_inputs_slogdet(op_info, device, dtype, requires_grad):
     from torch.testing._internal.common_utils import random_hermitian_matrix, random_hermitian_pd_matrix
 
     # tests cases are copied from 'method_tests'
+    # but make_nonzero_det is not used, since there is no negative or positive determinant
+    # for complex-valued input
+    # in addition sample inputs with shapes 0x0, 0xSxS, 3x3x0x0 are added
     test_inputs = (
-        torch.randn(1, 1, dtype=dtype, device=device),  # '1x1_pos_det'
-        torch.randn(1, 1, dtype=dtype, device=device),  # '1x1_neg_det'
-        torch.randn(S, S, dtype=dtype, device=device),  # 'pos_det'
-        torch.randn(S, S, dtype=dtype, device=device),  # 'neg_det'
+        torch.randn(0, 0, dtype=dtype, device=device),  # '0x0'
+        torch.randn(1, 1, dtype=dtype, device=device),  # '1x1'
+        torch.randn(S, S, dtype=dtype, device=device),  # 'SxS'
         random_hermitian_matrix(S, dtype=dtype, device=device),  # 'hermitian'
         random_hermitian_pd_matrix(S, dtype=dtype, device=device),  # 'hermitian_pd'
         random_fullrank_matrix_distinct_singular_value(S, dtype=dtype, device=device),  # 'distinct_singular_values'
-        torch.randn(3, 3, 1, 1, dtype=dtype, device=device),  # 'batched_1x1_neg_det'
-        torch.randn(3, 3, S, S, dtype=dtype, device=device),  # 'batched_pos_det'
+        torch.randn(0, S, S, dtype=dtype, device=device),  # 'zero_batched_SxS'
+        torch.randn(3, 3, 0, 0, dtype=dtype, device=device),  # 'batched_0x0'
+        torch.randn(3, 3, 1, 1, dtype=dtype, device=device),  # 'batched_1x1'
+        torch.randn(3, 3, S, S, dtype=dtype, device=device),  # 'batched_SxS'
         random_hermitian_matrix(S, 3, dtype=dtype, device=device),  # 'batched_hermitian'
         random_hermitian_pd_matrix(S, 3, dtype=dtype, device=device),  # 'batched_hermitian_pd'
         random_fullrank_matrix_distinct_singular_value(S, 3, dtype=dtype, device=device),  # 'batched_distinct_singular_values'
