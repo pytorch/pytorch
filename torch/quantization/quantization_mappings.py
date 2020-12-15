@@ -84,10 +84,10 @@ DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Callable] = {
 }
 
 # Whitelist for propagating the qconfig
-_EXCLUDE_QCONFIG_PROPAGATE_LIST : List[Callable] = {
+_EXCLUDE_QCONFIG_PROPAGATE_LIST : Set[Callable] = {
     DeQuantStub,
 }
-_INCLUDE_QCONFIG_PROPAGATE_LIST : List[Callable] = {
+_INCLUDE_QCONFIG_PROPAGATE_LIST : Set[Callable] = {
     nn.Sequential,
 }
 
