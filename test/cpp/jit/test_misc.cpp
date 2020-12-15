@@ -721,34 +721,12 @@ void checkTracedInputs(const TracedTestInputs& inputs) {
   TORCH_CHECK(found_mul);
 }
 
-static bool bad_scope = false;
-template <RecordScope scope, size_t* cnt>
-std::unique_ptr<at::ObserverContext> checkScopeCallback(const at::RecordFunction& fn) {
-  if (fn.scope() == scope) {
-    ++(*cnt);
-  } else {
-    bad_scope = true;
-  }
-  return nullptr;
-}
-
-template<RecordScope scope, size_t* cnt>
-void pushScopedCallback() {
-  at::addGlobalCallback(
-      at::RecordFunctionCallback(
-          checkScopeCallback<scope, cnt>)
-      .scopes({scope}));
-}
-
 void checkScopeCallbacks() {
-  static bool found_function_scope;
-  static bool found_method_scope;
-  static bool found_user_scope;
-  found_function_scope = false;
-  found_method_scope = false;
-  found_user_scope = false;
+  bool found_function_scope = false;
+  bool found_method_scope = false;
+  bool found_user_scope = false;
   at::addGlobalCallback(at::RecordFunctionCallback(
-      [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext>{
+      [&](const at::RecordFunction& fn) {
         if (fn.scope() == at::RecordScope::FUNCTION &&
             std::string(fn.name().str()) == "test_function") {
           found_function_scope = true;
@@ -764,17 +742,27 @@ void checkScopeCallbacks() {
         return nullptr;
       }));
 
-  static size_t fun_cnt;
-  static size_t ts_fun_cnt;
-  static size_t user_scope_cnt;
+  bool bad_scope = false;
+  auto pushScopedCallback = [&](at::RecordScope scope, size_t& cnt) {
+    at::addGlobalCallback(
+        at::RecordFunctionCallback(
+            [&bad_scope, &cnt, scope](const at::RecordFunction& fn) {
+              if (fn.scope() == scope) {
+                ++cnt;
+              } else {
+                bad_scope = true;
+              }
+              return nullptr;
+            })
+            .scopes({scope}));
+  };
 
-  bad_scope = false;
-  fun_cnt = 0;
-  pushScopedCallback<at::RecordScope::FUNCTION, &fun_cnt>();
-  ts_fun_cnt = 0;
-  pushScopedCallback<at::RecordScope::TORCHSCRIPT_FUNCTION, &ts_fun_cnt>();
-  user_scope_cnt = 0;
-  pushScopedCallback<at::RecordScope::USER_SCOPE, &user_scope_cnt>();
+  size_t fun_cnt = 0;
+  pushScopedCallback(at::RecordScope::FUNCTION, fun_cnt);
+  size_t ts_fun_cnt = 0;
+  pushScopedCallback(at::RecordScope::TORCHSCRIPT_FUNCTION, ts_fun_cnt);
+  size_t user_scope_cnt = 0;
+  pushScopedCallback(at::RecordScope::USER_SCOPE, user_scope_cnt);
 
   TORCH_CHECK(at::hasCallbacks());
 
@@ -800,33 +788,33 @@ static bool shouldRunCallback(const RecordFunctionCallback&) {
   return should_run;
 }
 
-static TracedTestInputs traced_inputs;
-static std::unordered_set<std::string> ts_names;
-
-std::unique_ptr<at::ObserverContext> tracedInputsCallback(const RecordFunction& fn) {
-   if (fn.scope() == RecordScope::FUNCTION) {
-      auto inputs = fn.inputs();
-      std::vector<std::vector<int64_t>> sizes;
-      for (const auto& input : inputs) {
-        if (input.isTensor()) {
-          sizes.push_back(input.toTensor().sizes().vec());
-        } else if (input.isScalar()) {
-          sizes.push_back(std::vector<int64_t>());
-        }
-      }
-      traced_inputs.push_back(std::make_tuple(fn.name().str(), sizes));
-    } else if (fn.scope() == RecordScope::TORCHSCRIPT_FUNCTION) {
-      ts_names.insert(fn.name().str());
-    }
-    return nullptr;
-}
-
-TEST(RecordFunctionTest, TracedTestInputs) {
+TEST(RecordFunctionTest, Basic) {
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
 
   // [(fn, [[sizes], [sizes], ...]), ...]
-  addGlobalCallback(RecordFunctionCallback(tracedInputsCallback).needsInputs(true));
+  TracedTestInputs traced_inputs;
+  std::unordered_set<std::string> ts_names;
+  addGlobalCallback(
+      RecordFunctionCallback(
+          [&](const RecordFunction& fn) {
+            if (fn.scope() == RecordScope::FUNCTION) {
+              auto inputs = fn.inputs();
+              std::vector<std::vector<int64_t>> sizes;
+              for (const auto& input : inputs) {
+                if (input.isTensor()) {
+                  sizes.push_back(input.toTensor().sizes().vec());
+                } else if (input.isScalar()) {
+                  sizes.push_back(std::vector<int64_t>());
+                }
+              }
+              traced_inputs.push_back(std::make_tuple(fn.name().str(), sizes));
+            } else if (fn.scope() == RecordScope::TORCHSCRIPT_FUNCTION) {
+              ts_names.insert(fn.name().str());
+            }
+            return nullptr;
+          })
+          .needsInputs(true));
 
   TracedTestInputs eager_inputs, jit_inputs;
   {
@@ -853,36 +841,28 @@ TEST(RecordFunctionTest, TracedTestInputs) {
   checkTracedInputs(eager_inputs);
   checkTracedInputs(jit_inputs);
   at::clearCallbacks();
-}
-
-static int sampled_cb_ctr = 0;
-std::unique_ptr<ObserverContext> sampledCallback(const RecordFunction& fn) {
-  if (std::string(fn.name().str()) == "test") {
-    ++sampled_cb_ctr;
-  }
-  return nullptr;
-}
-
-static int non_sampled_cb_ctr = 0;
-std::unique_ptr<ObserverContext> nonSampledCallback(const RecordFunction& fn) {
-  if (std::string(fn.name().str()) == "test") {
-    ++non_sampled_cb_ctr;
-  }
-  return nullptr;
-}
-
-TEST(RecordFunctionTest, SampledCallbacks) {
-  // disabling the inlining of method calls
-  GraphOptimizerEnabledGuard opt_guard(false);
 
   // test sampled callbacks
-  sampled_cb_ctr = 0;
-  auto setup_sampled_callback = [](double sampling_prob) {
-    return addGlobalCallback(RecordFunctionCallback(sampledCallback)
+  int sampled_cb_ctr = 0;
+  auto setup_sampled_callback = [&sampled_cb_ctr](double sampling_prob) {
+    return addGlobalCallback(RecordFunctionCallback(
+                                 [&sampled_cb_ctr](const RecordFunction& fn) {
+                                   if (std::string(fn.name().str()) == "test") {
+                                     ++sampled_cb_ctr;
+                                   }
+                                   return nullptr;
+                                 })
                                  .samplingProb(sampling_prob));
   };
 
-  addGlobalCallback(RecordFunctionCallback(nonSampledCallback));
+  int non_sampled_cb_ctr = 0;
+  addGlobalCallback(RecordFunctionCallback(
+      [&non_sampled_cb_ctr](const RecordFunction& fn) {
+        if (std::string(fn.name().str()) == "test") {
+          ++non_sampled_cb_ctr;
+        }
+        return nullptr;
+      }));
 
   auto handle = setup_sampled_callback(0.5);
 
@@ -917,19 +897,13 @@ TEST(RecordFunctionTest, SampledCallbacks) {
   // test the scope of the callbacks
   checkScopeCallbacks();
   clearCallbacks();
-}
-
-TEST(RecordFunctionTest, RecordFunctionGuard) {
-  // disabling the inlining of method calls
-  GraphOptimizerEnabledGuard opt_guard(false);
-
-  static std::vector<std::string> fn_names;
-  static std::mutex guard_mtx;
 
   // check record function guard
+  std::vector<std::string> fn_names;
+  std::mutex mtx;
   addGlobalCallback(RecordFunctionCallback(
-      [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext>{
-        std::lock_guard<std::mutex> lock(guard_mtx);
+      [&fn_names, &mtx](const RecordFunction& fn) {
+        std::lock_guard<std::mutex> lock(mtx);
         fn_names.push_back(fn.name().str());
         return nullptr;
       }));
@@ -951,26 +925,20 @@ TEST(RecordFunctionTest, RecordFunctionGuard) {
   TORCH_CHECK(fn_names.size() == 1);
   TORCH_CHECK(fn_names[0] == "B");
   clearCallbacks();
-}
 
-static std::vector<size_t> ids;
+  // test add/remove
+  std::vector<size_t> ids;
+  auto add_remove_test_add_cb = [&ids](size_t id) {
+    return addGlobalCallback(RecordFunctionCallback(
+        [&ids, id](const RecordFunction& fn) {
+          ids.push_back(id);
+          return nullptr ;
+        }));
+  };
 
-template<size_t id>
-auto add_remove_test_add_cb() {
-  return addGlobalCallback(RecordFunctionCallback(
-      [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
-        ids.push_back(id);
-        return nullptr;
-      }));
-}
-
-TEST(RecordFunctionTest, Callbacks) {
-  // disabling the inlining of method calls
-  GraphOptimizerEnabledGuard opt_guard(false);
-
-  auto h1 = add_remove_test_add_cb<1>();
-  auto h2 = add_remove_test_add_cb<2>();
-  auto h3 = add_remove_test_add_cb<3>();
+  auto h1 = add_remove_test_add_cb(1);
+  auto h2 = add_remove_test_add_cb(2);
+  auto h3 = add_remove_test_add_cb(3);
 
   { RECORD_USER_SCOPE("test"); }
 
@@ -1001,7 +969,8 @@ TEST(RecordFunctionTest, Callbacks) {
   // thread local / global callbacks
 
   ids.clear();
-  add_remove_test_add_cb<1>();
+  addGlobalCallback(RecordFunctionCallback(
+      [&ids](const RecordFunction& fn) { ids.push_back(1); return nullptr; }));
 
   { RECORD_USER_SCOPE("test"); }
 
@@ -1009,9 +978,9 @@ TEST(RecordFunctionTest, Callbacks) {
   TORCH_CHECK(ids[0] == 1);
   ids.clear();
 
-  auto th = std::thread([]() {
+  auto th = std::thread([&ids]() {
     addThreadLocalCallback(RecordFunctionCallback(
-        [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> { ids.push_back(2); return nullptr; }));
+        [&ids](const RecordFunction& fn) { ids.push_back(2); return nullptr; }));
 
     { RECORD_USER_SCOPE("test_thread"); }
   });
@@ -1036,19 +1005,22 @@ TEST(RecordFunctionTest, Callbacks) {
   };
   ids.clear();
   { // START: global test
+    const int test_val = 123;
+    const std::string test_str = "test str";
     addGlobalCallback(RecordFunctionCallback(
-        [](const RecordFunction& /* unused */) -> std::unique_ptr<at::ObserverContext> {
+        [test_val, test_str, &ids](const RecordFunction& /* unused */) {
           auto ctx = std::make_unique<TestContext>();
-          ctx->a = 123;
-          ctx->b = "test_str";
+          ctx->a = test_val;
+          ctx->b = test_str;
           ids.push_back(1);
           return ctx;
         },
-        [](const RecordFunction& /* unused */, ObserverContext* ctx_ptr) {
+        [test_val, test_str](
+            const RecordFunction& /* unused */, ObserverContext* ctx_ptr) {
           auto ctx = dynamic_cast<TestContext*>(ctx_ptr);
           TORCH_CHECK(ctx_ptr != nullptr);
-          TORCH_CHECK(ctx->a == 123);
-          TORCH_CHECK(ctx->b == "test_str");
+          TORCH_CHECK(ctx->a == test_val);
+          TORCH_CHECK(ctx->b == test_str);
         }));
 
     { RECORD_USER_SCOPE("test"); }
@@ -1058,23 +1030,23 @@ TEST(RecordFunctionTest, Callbacks) {
     ids.clear();
   } // END: global test
   { // START: thread local test
-    auto ctx_th = std::thread([]() {
+    auto ctx_th = std::thread([&ids]() {
       const int test_val = 234;
       const std::string test_str = "test thread str";
       addThreadLocalCallback(RecordFunctionCallback(
-          [](const RecordFunction& /* unused */) -> std::unique_ptr<at::ObserverContext> {
+          [test_val, test_str, &ids](const RecordFunction& /* unused */) {
             auto ctx = std::make_unique<TestContext>();
-            ctx->a = 234;
-            ctx->b = "test_thread_str";
+            ctx->a = test_val;
+            ctx->b = test_str;
             ids.push_back(2);
             return ctx;
           },
-          [](
+          [test_val, test_str](
               const RecordFunction& /* unused */, ObserverContext* ctx_ptr) {
             auto ctx = dynamic_cast<TestContext*>(ctx_ptr);
             TORCH_CHECK(ctx_ptr != nullptr);
-            TORCH_CHECK(ctx->a == 234);
-            TORCH_CHECK(ctx->b == "test_thread_str");
+            TORCH_CHECK(ctx->a == test_val);
+            TORCH_CHECK(ctx->b == test_str);
           }));
 
       // Will call both global and thread local callbacks.
@@ -1088,16 +1060,13 @@ TEST(RecordFunctionTest, Callbacks) {
   } // END: thread local test
 
   clearCallbacks();
-}
 
-TEST(RecordFunctionTest, ShouldRun) {
-  // disabling the inlining of method calls
-  GraphOptimizerEnabledGuard opt_guard(false);
+  // test should_run
 
+  bool ran = false;
   should_run = false;
-  static bool ran = false;
   addGlobalCallback(RecordFunctionCallback(
-                        [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> { ran = true; return nullptr; })
+                        [&ran](const RecordFunction& fn) { ran = true; return nullptr; })
                         .setShouldRun(shouldRunCallback));
 
   { RECORD_USER_SCOPE("test"); }
@@ -1111,20 +1080,13 @@ TEST(RecordFunctionTest, ShouldRun) {
   TORCH_CHECK(ran);
 
   clearCallbacks();
-}
-
-TEST(RecordFunctionTest, Basic) {
-  // disabling the inlining of method calls
-  GraphOptimizerEnabledGuard opt_guard(false);
-
-  static std::string recorded_op;
-  static bool has_ids = false;
 
   // test propagation of TLS callbacks
   std::thread t([]() {
     RecordFunctionGuard enable_rec_fn;
+    std::string recorded_op;
     auto handle = addThreadLocalCallback(RecordFunctionCallback(
-        [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
+        [&recorded_op](const RecordFunction& fn) {
           recorded_op = fn.name().str();
           return nullptr;
         }));
@@ -1134,16 +1096,17 @@ TEST(RecordFunctionTest, Basic) {
       RECORD_USER_SCOPE("test_in_thread");
     });
     t_child.join();
-    EXPECT_EQ(recorded_op, "test_in_thread");
+    TORCH_CHECK(recorded_op == "test_in_thread");
     removeCallback(handle);
   });
   t.join();
   clearCallbacks();
 
   // test set ids
+  bool has_ids = false;
   addGlobalCallback(
       RecordFunctionCallback(
-          [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
+          [&has_ids](const RecordFunction& fn) {
             has_ids = fn.handle() > 0;
             return nullptr;
           })
@@ -1153,7 +1116,7 @@ TEST(RecordFunctionTest, Basic) {
   clearCallbacks();
   has_ids = false;
   addGlobalCallback(RecordFunctionCallback(
-      [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
+      [&has_ids](const RecordFunction& fn) {
         has_ids = fn.handle() > 0;
         return nullptr;
       }));
@@ -1163,9 +1126,10 @@ TEST(RecordFunctionTest, Basic) {
 }
 
 TEST(RecordFunctionTest, OperatorNameOverload) {
-  static std::set<std::string> operator_names;
+  std::set<std::string> operator_names;
+
   at::addGlobalCallback(at::RecordFunctionCallback(
-                            [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
+                            [&operator_names](const at::RecordFunction& fn) {
                               c10::optional<c10::OperatorName> op_name =
                                   fn.operator_name();
                               if (op_name.has_value()) {
@@ -1214,8 +1178,6 @@ void checkDebugInfo(c10::DebugInfoKind kind, int model_id) {
 }
 
 TEST(ThreadLocalDebugInfoTest, Basic) {
-  static std::atomic<bool> done{false};
-
   TORCH_CHECK(
       c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::TEST_INFO) == nullptr);
   auto debug_info = std::make_shared<TestThreadLocalDebugInfo>();
@@ -1228,9 +1190,10 @@ TEST(ThreadLocalDebugInfoTest, Basic) {
   // check that thread local debug info is propagated through fork calls
   TORCH_CHECK(
       c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::TEST_INFO) == nullptr);
+  std::atomic<bool> done{false};
   {
     c10::DebugInfoGuard guard(c10::DebugInfoKind::TEST_INFO, debug_info);
-    at::launch([]() {
+    at::launch([&done]() {
       checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
       done = true;
     });
@@ -1243,7 +1206,7 @@ TEST(ThreadLocalDebugInfoTest, Basic) {
       c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::TEST_INFO) == nullptr);
   done = false;
   auto handle = addGlobalCallback(RecordFunctionCallback(
-      [](const RecordFunction&) -> std::unique_ptr<at::ObserverContext> {
+      [&done](const RecordFunction&) {
         checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
         done = true;
         return nullptr;
@@ -1273,7 +1236,7 @@ TEST(ThreadLocalDebugInfoTest, Basic) {
           checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
           checkDebugInfo(c10::DebugInfoKind::TEST_INFO_2, 314);
           done = false;
-          at::launch([]() {
+          at::launch([&done]() {
             checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
             checkDebugInfo(c10::DebugInfoKind::TEST_INFO_2, 314);
             done = true;
