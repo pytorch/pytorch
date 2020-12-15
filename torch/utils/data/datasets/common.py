@@ -67,7 +67,10 @@ def validate_pathname_binary(rec):
     return ""
 
 
-def extract_files_from_pathname_binaries(pathname_binaries : Iterable, src_file_handle_register : list, extract_fn : Callable):
+def extract_files_from_pathname_binaries(
+        pathname_binaries : Iterable,
+        src_file_handle_register : List[tuple],
+        extract_fn : Callable):
     if not isinstance(pathname_binaries, Iterable):
         warnings.warn("pathname_binaries must be Iterable type got {}".format(type(pathname_binaries)))
         raise TypeError
@@ -83,11 +86,11 @@ def extract_files_from_pathname_binaries(pathname_binaries : Iterable, src_file_
 def extract_files_from_single_tar_pathname_binary(
         pathname : str,
         binary_stream : Any,
-        src_file_handle_register : list):
+        tarfile_handle_register : List[tuple]):
 
     try:
         tar = tarfile.open(fileobj=binary_stream, mode="r:*")
-        src_file_handle_register.append((pathname, tar))
+        tarfile_handle_register.append((pathname, tar))
 
         for tarinfo in tar:
             if not tarinfo.isfile():
