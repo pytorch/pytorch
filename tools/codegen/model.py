@@ -98,6 +98,12 @@ class NativeFunction:
     # registrations don't participate in codegen-based selective build!
     manual_kernel_registration: bool
 
+    # Whether or not to skip generating TensorMethod/Functions bindings
+    # for this kernel.  Technically, this doesn't actually skip generating
+    # the binding; instead, the binding gets generated to __dispatch_{funcname}
+    # so you can make use of the normal binding if you need it.
+    manual_cpp_binding: bool
+
     # A mapping of dispatch keys to names of functions implementing
     # them.  In native_functions.yaml, the dispatch entry is optional; in that
     # case, that is equivalent to having written:
@@ -188,6 +194,9 @@ class NativeFunction:
         manual_kernel_registration = e.pop('manual_kernel_registration', False)
         assert isinstance(manual_kernel_registration, bool), f'not a bool: {manual_kernel_registration}'
 
+        manual_cpp_binding = e.pop('manual_cpp_binding', False)
+        assert isinstance(manual_cpp_binding, bool), f'not a bool: {manual_cpp_binding}'
+
         device_guard = e.pop('device_guard', True)
         assert isinstance(device_guard, bool), f'not a bool: {device_guard}'
 
@@ -240,6 +249,7 @@ class NativeFunction:
             structured_delegate=structured_delegate,
             structured_inherits=structured_inherits,
             manual_kernel_registration=manual_kernel_registration,
+            manual_cpp_binding=manual_cpp_binding,
             python_module=python_module,
             category_override=category_override,
             dispatch=dispatch,
@@ -1019,7 +1029,7 @@ class Arguments:
         Input: 'int x, int y, int z'
         """
 
-        # We do this in two phases.  First we parse into three 
+        # We do this in two phases.  First we parse into three
         # main categories: positional, kwarg_only, out.
         # Then, we reparse positional and kwarg_only to separate
         # out the self argument and tensor options arguments.
