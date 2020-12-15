@@ -172,7 +172,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
     at::enableRecordFunction(enable);
   });
   m.def("_set_empty_test_observer", [](bool is_global, double sampling_prob) {
-    auto cb = at::RecordFunctionCallback(nullptr)
+    auto cb = at::RecordFunctionCallback(
+        [](const at::RecordFunction&) { return nullptr; },
+        [](const at::RecordFunction&, at::ObserverContext*) {})
       .needsInputs(true)
       .samplingProb(sampling_prob);
     if (is_global) {
