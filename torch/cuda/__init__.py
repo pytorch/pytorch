@@ -16,7 +16,7 @@ import warnings
 import threading
 from typing import List, Optional, Tuple, Union
 from ._utils import _get_device_index, _dummy_type
-from .streams import Stream, Event
+from .streams import Stream, Event, _Graph
 from .. import device as _device
 import torch._C
 
