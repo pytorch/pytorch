@@ -625,6 +625,10 @@ Args:
 Keyword args:
     {out}
 
+.. note::  From version 1.8 onwards, the angle function returns `PI` for negative real numbers,
+           and `0` for zero and postive real numbers. Prior to version 1.8, the function would
+           return `0` for all real numbers and `NaN`.
+
 Example::
 
     >>> torch.angle(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))*180/3.14159
