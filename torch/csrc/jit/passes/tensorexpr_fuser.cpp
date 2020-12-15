@@ -459,7 +459,7 @@ class TensorExprFuser {
     // fusion is done.
     inlineSmallFusionGroups(graph_->block());
     GRAPH_DUMP("After inlining small fusion groups: ", graph_);
-    guardFusionGroupsAndRemoveOutputs(graph_->block());
+    prepareFusionGroupAndGuardOutputs(graph_->block());
     GRAPH_DUMP("After guarding fusion groups: ", graph_);
     removeTensorTypeSpecializations(graph_->block());
     GRAPH_DUMP("After removing tensor type specializations: ", graph_);
@@ -763,17 +763,10 @@ class TensorExprFuser {
   }
 
   bool canHandle(Node* node) {
-    REQ(node->kind() != prim::Constant);
     REQ(disable_shape_checks_ || allShapesAreKnown(node));
     REQ(isFusableOnDevice(node));
 
-    // Don't include nodes whose inputs are tensor constants - we cannot handle
-    // them at the moment.
-    // TODO: actually support tensor constants and remove this.
     for (Value* input : node->inputs()) {
-      if (input->node()->kind() == prim::Constant) {
-        REQ(!input->type()->cast<TensorType>())
-      }
       if (auto const& tt = input->type()->cast<TensorType>()) {
         auto st = tt->scalarType();
         if (!st) {
@@ -975,11 +968,32 @@ class TensorExprFuser {
     }
   }
 
-  void guardFusionGroupsAndRemoveOutputs(Block* block) {
+  // TODO: support constant tensors instead of setting them as input
+  void liftTensorConstantsFromFusionGroups(Node* fusion_group) {
+    auto subgraph = SubgraphUtils::getSubgraph(fusion_group);
+    WithInsertPoint guard(fusion_group);
+    for (auto it = subgraph->block()->nodes().begin();
+         it != subgraph->block()->nodes().end();
+         ++it) {
+      auto n = *it;
+      if (n->kind() == prim::Constant &&
+          n->output()->type()->cast<TensorType>()) {
+        auto constant =
+            fusion_group->owningGraph()->insertConstant(*toIValue(n->output()));
+        fusion_group->addInput(constant);
+        auto inputToGraph = subgraph->addInput();
+        inputToGraph->setType(n->output()->type());
+        n->output()->replaceAllUsesWith(inputToGraph);
+        it.destroyCurrent();
+      }
+    }
+  }
+
+  void prepareFusionGroupAndGuardOutputs(Block* block) {
     std::vector<Node*> fusion_groups;
     for (Node* n : block->nodes()) {
       for (Block* b : n->blocks()) {
-        guardFusionGroupsAndRemoveOutputs(b);
+        prepareFusionGroupAndGuardOutputs(b);
       }
       if (n->kind() == prim::TensorExprGroup) {
         fusion_groups.push_back(n);
@@ -987,6 +1001,7 @@ class TensorExprFuser {
     }
     for (Node* fusion_group : fusion_groups) {
       removeOutputsUsedOnlyInSize(fusion_group);
+      liftTensorConstantsFromFusionGroups(fusion_group);
       guardFusionGroup(fusion_group);
     }
   }
@@ -1028,16 +1043,7 @@ Operation createTensorExprOp(const Node* node) {
       std::make_shared<tensorexpr::TensorExprKernel>(node->g(attr::Subgraph));
   return [kernel](Stack* stack) {
     RECORD_FUNCTION("TensorExpr", std::vector<c10::IValue>());
-    if (!tensorexpr::fallbackAllowed()) {
-      kernel->run(*stack);
-      return 0;
-    }
-
-    try {
-      kernel->run(*stack);
-    } catch (const std::runtime_error& e) {
-      kernel->fallback(*stack);
-    }
+    kernel->run(*stack);
     return 0;
   };
 }
