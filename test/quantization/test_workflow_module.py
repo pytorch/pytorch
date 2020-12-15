@@ -826,6 +826,7 @@ class TestFakeQuantize(TestCase):
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
                        qparams=hu.qparams(dtypes=torch.quint8)))
+    @unittest.skip("disable the test since py_module is replaced")
     def test_learnable_py_module_forward_per_tensor(self, device, X):
         r"""Tests the forward path of the _LearnableFakeQuantize module per tensor op.
         """
@@ -849,6 +850,7 @@ class TestFakeQuantize(TestCase):
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
                        qparams=hu.qparams(dtypes=torch.quint8)))
+    @unittest.skip("disable the test since py_module is replaced")
     def test_learnable_py_module_backward_per_tensor(self, device, X):
         X, (_, _, torch_type) = X
         quant_min = torch.iinfo(torch_type).min
@@ -1330,7 +1332,7 @@ class TestFakeQuantize(TestCase):
 
     @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
                                    qparams=hu.qparams(dtypes=torch.quint8)))
-    @unittest.skip("temporarily disable the test")
+    # @unittest.skip("temporarily disable the test")
     def test_learnable_backward_per_channel_cuda(self, X):
         torch.random.manual_seed(NP_RANDOM_SEED)
         X, (scale, zero_point, axis, torch_type) = X
@@ -1344,6 +1346,7 @@ class TestFakeQuantize(TestCase):
            X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
                                    elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
                                    qparams=hu.qparams(dtypes=torch.quint8)))
+    @unittest.skip("disable the test since py_module is replaced")
     def test_learnable_py_module_forward_per_channel(self, device, X):
         r"""Tests the forward path of the _LearnableFakeQuantizePerChannel op.
         """
@@ -1367,6 +1370,7 @@ class TestFakeQuantize(TestCase):
            X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
                                    elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
                                    qparams=hu.qparams(dtypes=torch.quint8)))
+    @unittest.skip("disable the test since py_module is replaced")
     def test_learnable_py_module_backward_per_channel(self, device, X):
         r"""Tests the forward path of the _LearnableFakeQuantizePerChannel op.
         """
