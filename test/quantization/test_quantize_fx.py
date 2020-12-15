@@ -1524,6 +1524,32 @@ class TestQuantizeFxOps(QuantizationTestCase):
         }
         self._test_quantized_add_mul_qat(m, expected_node_occurrence)
 
+    def test_int8_input_no_unnecessary_fq(self):
+        """
+        If the inputs to the graph are quantized and the only node
+        does not need an activation observer, verifies that the
+        activation observer is not inserted.
+        """
+        class M(nn.Module):
+            def __init__(self, scalar):
+                super().__init__()
+                self.scalar = scalar
+                self.add_func = torch.nn.quantized.FloatFunctional()
+
+            def forward(self, x):
+                return self.add_func.add_scalar(x, self.scalar)
+
+        m = M(0.5)
+        d = {}
+        mp = torch.quantization.quantize_fx.prepare_qat_fx(
+            m, {'': torch.quantization.get_default_qat_qconfig('fbgemm')},
+            prepare_custom_config_dict={"input_quantized_idxs": [0]})
+        expected_node_occurrence = {
+            ns.call_module(torch.quantization.FakeQuantize): 0,
+        }
+        self.checkGraphModuleNodes(
+            mp, expected_node_occurrence=expected_node_occurrence)
+
     @skipIfNoFBGEMM
     def test_quantized_cat(self):
         """ quantization of the output of cat will be depend on the

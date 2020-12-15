@@ -438,6 +438,11 @@ class Quantizer:
                 cur_placeholder_node_idx = placeholder_node_seen_cnt
                 placeholder_node_seen_cnt += 1
                 if cur_placeholder_node_idx in input_quantized_idxs:
+                    # If an input node is marked as quantized, it was observed
+                    # elsewhere. For now, make it as observed for the purposes
+                    # of this file.  If in the future we will need the observer
+                    # instance for anything, we will have to adjust the API
+                    observed_node_names_set.add(node.name)
                     continue
 
             insert_observer_for_input_arg_of_observed_node(
