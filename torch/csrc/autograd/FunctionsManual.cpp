@@ -47,7 +47,7 @@ Tensor toLegacyFwGrad(const c10::optional<Tensor>& t) {
 }
 
 Tensor toLegacyPrimal(const c10::optional<Tensor>& t) {
-  return (t.has_value() && t->defined()) ? t->fw_primal(/*level */ 0) : Tensor();
+  return (t.has_value() && t->defined()) ? t->_fw_primal(/*level */ 0) : Tensor();
 }
 
 void copy_range(variable_list& out, IndexRange range, const Tensor & t) {

@@ -196,7 +196,7 @@ void retain_grad(Tensor & self) {
 }
 
 // Taken from codegened version
-Tensor fw_primal(const Tensor & self, int64_t level) {
+Tensor _fw_primal(const Tensor & self, int64_t level) {
   auto& self_ = unpack(self, "self", 0);
   std::shared_ptr<Identity> grad_fn;
   if (compute_requires_grad( self )) {
@@ -222,7 +222,7 @@ Tensor fw_primal(const Tensor & self, int64_t level) {
   if (generated::details::isFwGradDefined(self)) {
     // Modified from original codegen
     // We explicitely want to ignore the forward grad at the given level
-    TORCH_CHECK(level == 0, "Invalid level given to fw_primal");
+    TORCH_CHECK(level == 0, "Invalid level given to _fw_primal");
     // End modified from original codegen
   }
   return result;
@@ -400,7 +400,7 @@ TORCH_LIBRARY_IMPL(aten, Autograd, m) {
   //      and requires_grad_(), then remove the backend Autograd kernel here, only leaving the Math kernel.
   m.impl("_backward", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::_backward)));
   m.impl("requires_grad_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::requires_grad_)));
-  m.impl("fw_primal", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::fw_primal)));
+  m.impl("_fw_primal", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::_fw_primal)));
 }
 
 TORCH_LIBRARY_IMPL(aten, DefaultBackend, m) {
