@@ -1540,7 +1540,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 return self.add_func.add_scalar(x, self.scalar)
 
         m = M(0.5)
-        d = {}
         mp = torch.quantization.quantize_fx.prepare_qat_fx(
             m, {'': torch.quantization.get_default_qat_qconfig('fbgemm')},
             prepare_custom_config_dict={"input_quantized_idxs": [0]})
