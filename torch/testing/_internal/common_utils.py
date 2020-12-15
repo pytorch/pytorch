@@ -15,6 +15,7 @@ import math
 from functools import partial
 import inspect
 import io
+import copy
 import operator
 import argparse
 import unittest
@@ -391,7 +392,6 @@ if TEST_NUMPY:
 
     # Dict of torch dtype -> NumPy dtype
     torch_to_numpy_dtype_dict = {value : key for (key, value) in numpy_to_torch_dtype_dict.items()}
-    torch_to_numpy_dtype_dict[torch.bfloat16] = np.float32
 
 ALL_TENSORTYPES = [torch.float,
                    torch.double,
@@ -942,6 +942,8 @@ class TestCase(expecttest.TestCase):
             a = tensor_like.detach().cpu().numpy()
             t = tensor_like
         else:
+            d = copy.copy(torch_to_numpy_dtype_dict)
+            d[torch.bfloat16] = np.float32
             a = np.array(tensor_like, dtype=torch_to_numpy_dtype_dict[dtype])
             t = torch.tensor(tensor_like, device=device, dtype=dtype)
 
