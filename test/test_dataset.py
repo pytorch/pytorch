@@ -133,8 +133,8 @@ class TestIterableDatasetBasic(TestCase):
         dataset3 = ReadFilesFromTarIterableDataset(dataset2)
         dataset4 = GroupByFilenameIterableDataset(dataset3, group_size=2)
 
-        expected_result = [("a.png", "a.json"), ("b.png", "b.json"), ("c.json", "c.png"),
-            ("d.png", "d.json"), ("e.png", "e.json"), ("f.json", "f.png"), ("g.png", "g.json")]
+        expected_result = [("a.png", "a.json"), ("b.png", "b.json"), ("c.json", "c.png"), (
+            "d.png", "d.json"), ("e.png", "e.json"), ("f.json", "f.png"), ("g.png", "g.json")]
 
         count = 0
         for rec, expected in zip(dataset4, expected_result):
