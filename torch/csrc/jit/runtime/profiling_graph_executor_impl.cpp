@@ -35,6 +35,11 @@ C10_DEFINE_bool(
     true,
     "If this flag is set to false TorchScript will be using the legacy/original executor");
 
+C10_DEFINE_bool(
+    torch_jit_disable_warning_prints,
+    false,
+    "Disables warning.warn prints in TorchScript graph");
+
 constexpr size_t kDefaultNumProfiledRuns = 1;
 constexpr size_t kDefaultBailoutDepth = 20;
 
