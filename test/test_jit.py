@@ -15206,7 +15206,6 @@ dedent """
             def fn(dictionary: Dict[torch.jit.ScriptModule, torch.jit.ScriptModule]):
                 return
 
-
     def test_get_set_state_with_tensors(self):
         class M(torch.nn.Module):
             def __init__(self):
