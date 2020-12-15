@@ -13,7 +13,7 @@ from torch.utils.data.datasets.decoder import (
 
 from torch.utils.data.datasets import (
     ListDirFilesIterableDataset, LoadFilesFromDiskIterableDataset, ReadFilesFromTarIterableDataset,
-    ReadFilesFromZipIterableDataset, RoutedDecoderIterableDataset)
+    ReadFilesFromZipIterableDataset, RoutedDecoderIterableDataset, GroupByFilenameIterableDataset)
 
 def create_temp_dir_and_files():
     # The temp dir and files within it will be released and deleted in tearDown().
@@ -132,10 +132,19 @@ class TestIterableDatasetBasic(TestCase):
         dataset1 = ListDirFilesIterableDataset(temp_dir, '*.tar')
         dataset2 = LoadFilesFromDiskIterableDataset(dataset1)
         dataset3 = ReadFilesFromTarIterableDataset(dataset2)
-        dataset4 = GroupByFilenameIterableDataset(dataset3)
+        dataset4 = GroupByFilenameIterableDataset(dataset3, group_size=2)
 
-        for rec in dataset4:
-            print(rec)
+        expected_result = [("a.png", "a.json"), ("b.png", "b.json"), ("c.json", "c.png"),
+            ("d.png", "d.json"), ("e.png", "e.json"), ("f.json", "f.png"), ("g.png", "g.json")]
+
+        count = 0
+        for rec, expected in zip(dataset4, expected_result):
+            count = count + 1
+            self.assertEqual(os.path.basename(rec[0][0]), expected[0])
+            self.assertEqual(os.path.basename(rec[1][0]), expected[1])
+            self.assertEqual(rec[0][1].read(), b'12345abcde')
+            self.assertEqual(rec[1][1].read(), b'12345abcde')
+        self.assertEqual(count, 7)
 
 if __name__ == '__main__':
     run_tests()
