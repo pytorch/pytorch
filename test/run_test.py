@@ -41,6 +41,7 @@ TESTS = [
     'distributed/test_distributed_spawn',
     'distributions/test_constraints',
     'distributions/test_distributions',
+    'test_dispatch',
     'test_expecttest',
     'test_foreach',
     'test_indexing',
