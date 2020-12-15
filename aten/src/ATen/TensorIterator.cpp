@@ -58,6 +58,11 @@ TensorIteratorConfig& TensorIteratorConfig::promote_inputs_to_common_dtype(const
   return *this;
 }
 
+TensorIteratorConfig& TensorIteratorConfig::set_common_dtype(ScalarType common_dtype) {
+  specified_common_dtype = c10::make_optional(common_dtype);
+  return *this;
+}
+
 TensorIteratorConfig& TensorIteratorConfig::promote_integer_inputs_to_float(const bool _promote_integer_inputs_to_float) {
   promote_integer_inputs_to_float_ = _promote_integer_inputs_to_float;
   TORCH_INTERNAL_ASSERT(!promote_integer_inputs_to_float_ || promote_inputs_to_common_dtype_);
@@ -343,14 +348,18 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
     return;
   }
 
+  common_dtype_ = config.specified_common_dtype.value_or(common_dtype_);
+
   // Computes a common dtype, if needed
-  if (has_different_input_dtypes && config.promote_inputs_to_common_dtype_) {
+  if (has_different_input_dtypes && config.promote_inputs_to_common_dtype_ &&
+      !config.specified_common_dtype.has_value()) {
     common_dtype_ = compute_common_dtype();
   }
 
   // Promotes common dtype to the default float scalar type, if needed
   if (config.promote_integer_inputs_to_float_ &&
-      c10::isIntegralType(common_dtype_, /*include_bool=*/true)) {
+      c10::isIntegralType(common_dtype_, /*include_bool=*/true) &&
+      !config.specified_common_dtype.has_value()) {
     common_dtype_ = c10::typeMetaToScalarType(c10::get_default_dtype());
   }
 

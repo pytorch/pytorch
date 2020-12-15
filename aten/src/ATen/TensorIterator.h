@@ -476,6 +476,7 @@ public:
   //   the operation.
   // Setting this flag to true sets check_all_same_dtype_ to false.
   TensorIteratorConfig& promote_inputs_to_common_dtype(const bool _promote_inputs_to_common_dtype);
+  TensorIteratorConfig& set_common_dtype(ScalarType common_dtype);
 
   // Sets the promote_integer_inputs_to_float_ flag, which is false by default
   // NOTE: If set to true, the promote_inputs_to_common_dtype_ must also be true.
@@ -515,6 +516,7 @@ private:
 
   c10::optional<DimVector> static_shape_ = c10::nullopt;
   c10::optional<std::pair<ScalarType, Device>> static_dtype_and_device_ = c10::nullopt;
+  c10::optional<ScalarType> specified_common_dtype = c10::nullopt;
   bool check_mem_overlap_ = true;
   bool allow_cpu_scalars_ = false;
   bool is_reduction_ = false;
