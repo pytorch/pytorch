@@ -92,8 +92,6 @@ Tensor& elu_out(
     Scalar alpha,
     Scalar scale,
     Scalar input_scale) {
-  TORCH_CHECK(alpha.to<double>() >= 0,
-      "Alpha cannot be negative.");
   auto iter = TensorIterator::unary_op(result, self);
   elu_stub(iter.device_type(), iter, alpha, scale, input_scale);
   return result;
@@ -105,8 +103,6 @@ Tensor elu(
     Scalar scale,
     Scalar input_scale) {
   Tensor result;
-  TORCH_CHECK(alpha.to<double>() >= 0,
-      "Alpha cannot be negative.");
   auto iter = TensorIterator::unary_op(result, self);
   elu_stub(iter.device_type(), iter, alpha, scale, input_scale);
   return iter.output();
@@ -137,7 +133,20 @@ Tensor elu_backward(
     Scalar alpha,
     Scalar scale,
     Scalar input_scale,
+    bool is_result,
     const Tensor& output) {
+  TORCH_CHECK(
+    !is_result,
+    "Elu backward calculation is triggered for an in-place gradient which is not supported. "
+    "This is caused by calling in-place forward function, please call out-of-place version instead."
+  );
+
+  TORCH_CHECK(
+    alpha.to<double>() >= 0.0,
+    "Elu backward calculation is triggered with a negative alpha which is not supported. "
+    "Please call elu with a non-negative alpha instead."
+  );
+
   Tensor result;
   auto iter = TensorIterator::binary_op(result, grad_output, output);
   elu_backward_stub(iter.device_type(), iter, alpha, scale, input_scale);
