@@ -1,5 +1,6 @@
 import os
 import sys
+import gc
 import unittest
 
 import torch
@@ -41,6 +42,14 @@ class TestCUDA(JitTestCase):
     """
     A suite of tests for the CUDA API in TorchScript.
     """
+    def setUp(self):
+        super(TestCUDA, self).setUp()
+
+    def tearDown(self):
+        gc.collect()
+        torch.cuda.empty_cache()
+        super(TestCUDA, self).tearDown()
+
     @skipIfRocm
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_current_stream(self):
@@ -65,11 +74,12 @@ class TestCUDA(JitTestCase):
 
     @skipIfRocm
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     @skipCUDANonDefaultStreamIf(True)
-    def test_default_stream(self):
+    def test_streams_and_events(self):
         # This test checks for the default stream ID is set to 0 on the device
         @torch.jit.script
-        def fn():
+        def test_default_streams():
             s0 = torch.cuda.default_stream(0)
             s1 = torch.cuda.default_stream(1)
 
@@ -93,7 +103,7 @@ class TestCUDA(JitTestCase):
 
             return s0.device_index(), s1.device_index(), check_s2, check_s3, check_d0, check_d1, is_device_d0
 
-        d0, d1, check_s2, check_s3, check_d0, check_d1, is_device_d0 = fn()
+        d0, d1, check_s2, check_s3, check_d0, check_d1, is_device_d0 = test_default_streams()
 
         self.assertEqual(d0, 0)
         self.assertEqual(d1, 1)
@@ -103,13 +113,10 @@ class TestCUDA(JitTestCase):
         self.assertTrue(check_d1)
         self.assertTrue(is_device_d0)
 
-    @skipIfRocm
-    @skipCUDANonDefaultStreamIf(True)
-    def test_set_none_stream(self):
         # This test checks if the Stream Context manager is a no op
         # when the stream is none for `with torch.jit.cuda.stream`
         @torch.jit.script
-        def fn():
+        def test_set_none_stream():
             device_index = torch.cuda._current_device()
             current_stream = torch.cuda.current_stream(device_index)
             default_stream = torch.cuda.default_stream(device_index)
@@ -124,27 +131,20 @@ class TestCUDA(JitTestCase):
             # Check if the device index, current stream and default streams have not changed
             are_streams_same = is_device_index_same and is_current_stream_same and is_default_stream_same
             return are_streams_same
-        self.assertTrue(fn())
+        self.assertTrue(test_set_none_stream())
 
-    @skipIfRocm
-    @skipCUDANonDefaultStreamIf(True)
-    def test_set_device_none(self):
         # This test checks if the Device Context manager is a no op
         # when the device is none for `with torch.jit.cuda.device`
         @torch.jit.script
-        def fn():
+        def test_set_device_none():
             device_index = torch.cuda._current_device()
             # When device is none, check if this operation is a no-op
             with torch.jit.cuda.device(None):
                 # Check if the current device is the same
                 is_device_same = torch.cuda._current_device() == device_index
             return is_device_same
-        self.assertTrue(fn())
+        self.assertTrue(test_set_device_none())
 
-    @skipIfRocm
-    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    @skipCUDANonDefaultStreamIf(True)
-    def test_streams(self):
         # Check if a CUDA JIT stream is created
         # on the _current_device
         @torch.jit.script
@@ -309,10 +309,6 @@ class TestCUDA(JitTestCase):
         self.assertEqual(torch.matmul(B, B), C)
         self.assertTrue(check_stream)
 
-    @skipIfRocm
-    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
-    def test_events(self):
         # Test a simple CUDA event. Test if the CUDA event was created successfully
         @torch.jit.script
         def test_simple_event():
@@ -447,33 +443,32 @@ class TestCUDA(JitTestCase):
             return e0.query() and s0.query() and s1.query()
         self.assertTrue(test_wait_event())
 
-    # Test if a scripted module with cuda streams can be saved, loaded and executed
-    @skipIfRocm
-    def test_save_load(self):
-        class Model(torch.nn.Module):
-            def forward(self):
-                device_index = torch.cuda._current_device()
-                s = torch.jit.cuda.Stream(device_index, 0)
-                a = torch.rand(3, 4, device = "cuda")
-                b = torch.rand(3, 4, device = "cuda")
+        # Test if a scripted module with cuda streams can be saved, loaded and executed
+        def test_save_load(self):
+            class Model(torch.nn.Module):
+                def forward(self):
+                    device_index = torch.cuda._current_device()
+                    s = torch.jit.cuda.Stream(device_index, 0)
+                    a = torch.rand(3, 4, device = "cuda")
+                    b = torch.rand(3, 4, device = "cuda")
 
-                with torch.jit.cuda.stream(s):
-                    is_stream_s = torch.cuda.current_stream(s.device_index()).id() == s.id()
-                    c = torch.cat((a, b), 0).cuda()
-                s.synchronize()
-                return is_stream_s, a, b, c
+                    with torch.jit.cuda.stream(s):
+                        is_stream_s = torch.cuda.current_stream(s.device_index()).id() == s.id()
+                        c = torch.cat((a, b), 0).cuda()
+                    s.synchronize()
+                    return is_stream_s, a, b, c
 
-        model = Model()
+            model = Model()
 
-        # Script the model and save
-        script_model = torch.jit.script(model)
-        is_stream_s, a, b, c = script_model()
-        # Verify if the output is correct
-        self.assertTrue(is_stream_s)
-        self.assertEqual(torch.cat((a, b), 0), c)
+            # Script the model and save
+            script_model = torch.jit.script(model)
+            is_stream_s, a, b, c = script_model()
+            # Verify if the output is correct
+            self.assertTrue(is_stream_s)
+            self.assertEqual(torch.cat((a, b), 0), c)
 
-        # Save and load scripted model
-        load_model = self.getExportImportCopy(script_model)
-        is_stream_s, a_load, b_load, c_load = load_model()
-        self.assertTrue(is_stream_s)
-        self.assertEqual(torch.cat((a_load, b_load), 0), c_load)
+            # Save and load scripted model
+            load_model = self.getExportImportCopy(script_model)
+            is_stream_s, a_load, b_load, c_load = load_model()
+            self.assertTrue(is_stream_s)
+            self.assertEqual(torch.cat((a_load, b_load), 0), c_load)
