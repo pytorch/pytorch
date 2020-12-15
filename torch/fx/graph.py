@@ -645,7 +645,7 @@ class Graph:
                 #     name rather than just the base name
                 register_modules_used(torch.typename(a))
 
-                class NTReprWrapper(a.__class__):
+                class NTReprWrapper(a.__class__):  # type: ignore
                     def __repr__(self):
                         value_strs = []
                         for field in self._fields:
@@ -654,7 +654,7 @@ class Graph:
                         # type we constructed it from.
                         assert len(self.__class__.__bases__) == 1
                         return f'{torch.typename(self.__class__.__bases__[0])}({",".join(value_strs)})'
-                return NTReprWrapper(*(getattr(a, field) for field in a._fields))
+                return NTReprWrapper(*(getattr(a, field) for field in a._fields))  # type: ignore
             elif isinstance(a, tuple):
                 return tuple(preprocess_values(elem) for elem in a)
             elif isinstance(a, list):
