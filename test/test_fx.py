@@ -1171,6 +1171,8 @@ class TestFX(JitTestCase):
                 return Pair(x, x)
 
         traced = symbolic_trace(NamedTupReturn())
+        input = torch.rand(3, 4)
+        self.assertEqual(traced(input), Pair(input, input))
 
 if __name__ == '__main__':
     run_tests()
