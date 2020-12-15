@@ -5,8 +5,8 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
-#include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/serialization/import.h>
 #include <torch/custom_class.h>
 #include <torch/torch.h>
 
@@ -800,14 +800,16 @@ TEST(LiteInterpreterTest, OpNameExportFetchRootOperators) {
   m._save_for_mobile(ss);
 
   torch::jit::mobile::Module ptl_model = torch::jit::_load_for_mobile(ss);
-  std::set<std::string> operator_names = torch::jit::mobile::_export_operator_list(ptl_model);
+  std::set<std::string> operator_names =
+      torch::jit::mobile::_export_operator_list(ptl_model);
   std::set<std::string> expected_operator_names = {
-    "aten::_convolution",
-    "aten::empty.memory_format",
-    "aten::empty_like",
-    "aten::zeros",
+      "aten::_convolution",
+      "aten::empty.memory_format",
+      "aten::empty_like",
+      "aten::zeros",
   };
-  EXPECT_EQ(operator_names, expected_operator_names) << "Expected the root operator lists to be the same";
+  EXPECT_EQ(operator_names, expected_operator_names)
+      << "Expected the root operator lists to be the same";
 }
 
 namespace {
