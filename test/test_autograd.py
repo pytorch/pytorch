@@ -1170,6 +1170,7 @@ class TestAutograd(TestCase):
                 r = yield i
                 self.assertFalse(torch.is_grad_enabled())
                 self.assertEqual(i, r)
+            self.assertFalse(torch.is_grad_enabled())
 
         @torch.enable_grad()
         def coro_enable_grad(n=10):
@@ -1179,6 +1180,7 @@ class TestAutograd(TestCase):
                 r = yield i
                 self.assertTrue(torch.is_grad_enabled())
                 self.assertEqual(i, r)
+            self.assertTrue(torch.is_grad_enabled())
 
         with torch.enable_grad():
             self.assertTrue(torch.is_grad_enabled())
@@ -1213,6 +1215,7 @@ class TestAutograd(TestCase):
             has_raised = False
             for i in range(n):
                 try:
+                    self.assertFalse(torch.is_grad_enabled())
                     yield (-i if has_raised else i)
 
                 except RecoverableException:
@@ -1224,6 +1227,7 @@ class TestAutograd(TestCase):
             has_raised = False
             for i in range(n):
                 try:
+                    self.assertTrue(torch.is_grad_enabled())
                     yield (-i if has_raised else i)
 
                 except RecoverableException:
@@ -1261,6 +1265,7 @@ class TestAutograd(TestCase):
             has_raised = False
             for i in range(n):
                 try:
+                    self.assertFalse(torch.is_grad_enabled())
                     yield (-i if has_raised else i)
 
                 except UnRecoverableException:
@@ -1272,6 +1277,7 @@ class TestAutograd(TestCase):
             has_raised = False
             for i in range(n):
                 try:
+                    self.assertTrue(torch.is_grad_enabled())
                     yield (-i if has_raised else i)
 
                 except UnRecoverableException:
@@ -1295,6 +1301,7 @@ class TestAutograd(TestCase):
         def coro_no_grad():
             for i in range(10):
                 try:
+                    self.assertFalse(torch.is_grad_enabled())
                     yield i
 
                 except GeneratorExit:
@@ -1305,6 +1312,7 @@ class TestAutograd(TestCase):
         def coro_enable_grad():
             for i in range(10):
                 try:
+                    self.assertTrue(torch.is_grad_enabled())
                     yield i
 
                 except GeneratorExit:
