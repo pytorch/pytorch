@@ -67,7 +67,7 @@ def validate_pathname_binary(rec):
     return ""
 
 
-def extract_files_from_pathname_binaries(pathname_binaries : Iterable, extract_fn : Callable):
+def extract_files_from_pathname_binaries(pathname_binaries : Iterable, src_file_handle_register : list, extract_fn : Callable):
     if not isinstance(pathname_binaries, Iterable):
         warnings.warn("pathname_binaries must be Iterable type got {}".format(type(pathname_binaries)))
         raise TypeError
@@ -77,26 +77,29 @@ def extract_files_from_pathname_binaries(pathname_binaries : Iterable, extract_f
         if ret:
             warnings.warn("encounter invalid pathname and binary record ({}), abort!".format(ret))
             raise TypeError
-        yield from extract_fn(rec[0], rec[1])
+        yield from extract_fn(rec[0], rec[1], src_file_handle_register)
 
 
 def extract_files_from_single_tar_pathname_binary(
         pathname : str,
-        binary_stream : Any):
+        binary_stream : Any,
+        src_file_handle_register : list):
 
     try:
-        with tarfile.open(fileobj=binary_stream, mode="r:*") as tar:
-            for tarinfo in tar:
-                if not tarinfo.isfile():
-                    continue
+        tar = tarfile.open(fileobj=binary_stream, mode="r:*")
+        src_file_handle_register.append((pathname, tar))
 
-                extract_fobj = tar.extractfile(tarinfo)
-                if extract_fobj is None:
-                    warnings.warn("failed to extract tar file {}".format(tarinfo.name))
-                    raise tarfile.ExtractError
+        for tarinfo in tar:
+            if not tarinfo.isfile():
+                continue
 
-                inner_pathname = os.path.normpath(os.path.join(pathname, tarinfo.name))
-                yield (inner_pathname, extract_fobj)
+            extract_fobj = tar.extractfile(tarinfo)
+            if extract_fobj is None:
+                warnings.warn("failed to extract tar file {}".format(tarinfo.name))
+                raise tarfile.ExtractError
+
+            inner_pathname = os.path.normpath(os.path.join(pathname, tarinfo.name))
+            yield (inner_pathname, extract_fobj)
     except tarfile.TarError as e:
         warnings.warn("Unable to extract files from corrupted tarfile stream {}, abort!".format(pathname))
         raise e
