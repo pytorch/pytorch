@@ -723,6 +723,10 @@ static Tensor norm(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool
   }
 }
 
+Tensor norm(const Tensor& self, IntArrayRef dim, optional<Scalar> p) {
+  return at::native::norm(self, p, dim, /*keepdim=*/false, /*opt_dtype=*/c10::nullopt);
+}
+
 Tensor norm(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim, ScalarType dtype) {
   return at::native::norm(self, p, dim, keepdim, optional<ScalarType>(dtype));
 }
