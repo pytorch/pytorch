@@ -104,7 +104,7 @@ std::vector<Tensor> foreach_pointwise_op(TensorList input, TensorList tensors1, 
 #define FOREACH_POINTWISE_OP_SCALAR(NAME, OP)                                                                                         \
 std::vector<Tensor> foreach_tensor_##NAME##_scalar_cuda(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {  \
     check_foreach_api_restrictions(input, tensors1, tensors2);                                                                        \
-    bool has_integral = has_bool_tensor(input);                                                                                       \
+    bool has_integral = has_int_or_bool_tensor(input);                                                                                \
                                                                                                                                       \
     /* MTA doesnt support different return type than input one */                                                                     \
     if (!can_use_fast_route(input, tensors1, tensors2, scalar) || has_integral) {                                                     \
@@ -116,7 +116,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalar_cuda(TensorList input, Tensor
                                                                                                                                       \
 void foreach_tensor_##NAME##_scalar_cuda_(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {                \
     check_foreach_api_restrictions(input, tensors1, tensors2);                                                                        \
-    bool has_integral = has_bool_tensor(input);                                                                                       \
+    bool has_integral = has_int_or_bool_tensor(input);                                                                                \
                                                                                                                                       \
     /* MTA doesnt support different return type than input one */                                                                     \
     if (!can_use_fast_route(input, tensors1, tensors2, scalar) || has_integral) {                                                     \
@@ -130,7 +130,7 @@ void foreach_tensor_##NAME##_scalar_cuda_(TensorList input, TensorList tensors1,
 #define FOREACH_POINTWISE_OP_SCALARLIST(NAME, OP)                                                                                                        \
 std::vector<Tensor> foreach_tensor_##NAME##_scalarlist_cuda(TensorList input, TensorList tensors1, TensorList tensors2, at::ArrayRef<Scalar> scalars) {  \
     check_foreach_api_restrictions(input, tensors1, tensors2, scalars);                                                                                  \
-    bool has_integral = has_bool_tensor(input);                                                                                                          \
+    bool has_integral = has_int_or_bool_tensor(input);                                                                                                   \
                                                                                                                                                          \
     /* MTA doesnt support different return type than input one */                                                                                        \
     if (!can_use_fast_route(input, tensors1, tensors2, scalars) || has_integral) {                                                                       \
@@ -142,7 +142,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalarlist_cuda(TensorList input, Te
                                                                                                                                                          \
 void foreach_tensor_##NAME##_scalarlist_cuda_(TensorList input, TensorList tensors1, TensorList tensors2, at::ArrayRef<Scalar> scalars) {                \
     check_foreach_api_restrictions(input, tensors1, tensors2, scalars);                                                                                  \
-    bool has_integral = has_bool_tensor(input);                                                                                                          \
+    bool has_integral = has_int_or_bool_tensor(input);                                                                                                   \
                                                                                                                                                          \
     /* MTA doesnt support different return type than input one */                                                                                        \
     if (!can_use_fast_route(input, tensors1, tensors2, scalars) || has_integral) {                                                                       \
