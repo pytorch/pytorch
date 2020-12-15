@@ -92,3 +92,59 @@ def ge(g, input, other):
 
 def le(g, input, other):
     return g.op('LessOrEqual', input, other)
+
+@parse_args('v', 'i', 'v', 'v')
+def unfold(g, input, dimension, size, step):
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
+    sizes = sym_help._get_tensor_sizes(input)
+    try:
+        sizedim = sizes[dimension]
+    except Exception:
+        sizedim = None
+    if sizedim is not None:
+        low_start = g.op("Constant", value_t=torch.tensor(0))
+        low_end = g.op("Constant", value_t=torch.tensor(sizedim))
+        hi_end = g.op("Constant", value_t=torch.tensor(sizedim + 1))
+        low_indices = g.op("Range", low_start, low_end, step)
+        hi_indices = g.op("Range", size, hi_end, step)
+
+        low_size = sym_help._size_helper(g, low_indices, g.op("Constant", value_t=torch.tensor(0)))
+        hi_size = sym_help._size_helper(g, hi_indices, g.op("Constant", value_t=torch.tensor(0)))
+
+        ndim = len(sizes)
+        perm = list(range(0, ndim))
+        perm.append(perm.pop(dimension))
+
+        unsqueeze_list = []
+        loop_condition = g.op("Constant", value_t=torch.tensor(1))
+        loop_len = g.op("Min", low_size, hi_size)
+        loop = g.op("Loop", loop_len, loop_condition)
+
+        loop_block = _add_block(loop.node())
+        block_input_iter = _add_input_to_block(loop_block)
+
+        starts = loop_block.op("Gather", low_indices, block_input_iter)
+        ends = loop_block.op("Gather", hi_indices, block_input_iter)
+        axes = loop_block.op("Constant", value_t=torch.tensor([2]))
+        starts = loop_block.op("Unsqueeze", starts, axes_i=[0])
+        ends = loop_block.op("Unsqueeze", ends, axes_i=[0])
+        stack = loop_block.op("Slice", input, starts, ends, axes)
+
+        unsqueeze = loop_block.op("Unsqueeze", loop_block.op("Transpose", stack, perm_i=perm), axes_i=[dimension])
+        unsqueeze_list.append(unsqueeze)
+        concat = loop_block.op("Concat", *unsqueeze_list, axis_i=0)
+
+        _add_output_to_block(loop_block, loop_condition)
+        _add_output_to_block(loop_block, concat)
+        torch._C._jit_pass_fixup_onnx_loop_node_inputs(loop.node())
+
+        loop_output = loop.node().output()
+        perm = [0, 1, 2, 3, 4]
+        perm[0], perm[dimension + 1] = perm[dimension + 1], perm[0]
+        transpose = g.op("Transpose", loop_output, perm_i=perm)
+        squeeze = g.op("Squeeze", transpose, axes_i=[0])
+
+        return squeeze
+    else:
+        return _unimplemented("Unfold", "input size not accessible")
