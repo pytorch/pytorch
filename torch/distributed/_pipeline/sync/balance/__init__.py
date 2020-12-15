@@ -18,7 +18,7 @@ Usage::
     pipe = Pipe(model, balance, chunks=8)
 
 """
-from typing import List, Tuple, Union
+from typing import List, Union, Sequence
 
 import torch
 from torch import Tensor
@@ -32,7 +32,7 @@ __all__ = ["balance_by_time", "balance_by_size"]
 
 Device = Union[torch.device, int, str]
 
-Tensors = Tuple[Tensor, ...]
+Tensors = Sequence[Tensor]
 TensorOrTensors = Union[Tensor, Tensors]
 
 
