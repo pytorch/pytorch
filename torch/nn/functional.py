@@ -2815,6 +2815,26 @@ Examples::
     torch.Size([1, 1, 12, 12])
 """)
 
+pixel_unshuffle = _add_docstr(torch.pixel_unshuffle, r"""
+pixel_unshuffle(input, downscale_factor) -> Tensor
+
+Rearranges elements in a tensor of shape :math:`(*, C, H \times r, W \times r)` to a
+tensor of shape :math:`(*, C \times r^2, H, W)`.
+
+See :class:`~torch.nn.PixelUnshuffle` for details.
+
+Args:
+    input (Tensor): the input tensor
+    downscale_factor (int): factor to increase spatial resolution by
+
+Examples::
+
+    >>> input = torch.randn(1, 1, 12, 12)
+    >>> output = torch.nn.functional.pixel_unshuffle(input, 3)
+    >>> print(output.size())
+    torch.Size([1, 9, 4, 4])
+""")
+
 channel_shuffle = _add_docstr(torch.channel_shuffle, r"""
 channel_shuffle(input, groups) -> Tensor
 

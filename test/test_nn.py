@@ -6897,8 +6897,8 @@ class TestNN(NNTestCase):
         output.backward(grad.contiguous())
         self.assertEqual(result, input.grad.data, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
-    def test_pixel_shuffle(self):
-        def _test_pixel_shuffle_helper(num_input_dims, valid_channels_dim=True):
+    def test_pixel_shuffle_unshuffle(self):
+        def _test_pixel_shuffle_unshuffle_helper(num_input_dims, valid_channels_dim=True):
             # Function to imperatively ensure pixels are shuffled to the correct locations.
             # Used to validate the batch operations in pixel_shuffle.
             def _verify_pixel_shuffle(input, output, upscale_factor):
@@ -6925,47 +6925,108 @@ class TestNN(NNTestCase):
                 batch_sizes = [random.randint(1, 3) for _ in range(num_input_dims - 3)]
                 input = torch.rand(*batch_sizes, channels, height, width, requires_grad=True)
             ps = nn.PixelShuffle(upscale_factor)
+            pus = nn.PixelUnshuffle(downscale_factor=upscale_factor)
 
             if num_input_dims >= 3 and valid_channels_dim:
                 output = ps(input)
                 _verify_pixel_shuffle(input, output, upscale_factor)
                 output.backward(output.data)
                 self.assertEqual(input.data, input.grad.data)
+
+                # Ensure unshuffle properly inverts shuffle.
+                unshuffle_output = pus(output)
+                self.assertEqual(input, unshuffle_output)
             else:
                 self.assertRaises(RuntimeError, lambda: ps(input))
 
+        def _test_pixel_unshuffle_error_case_helper(num_input_dims, valid_height_dim=True, valid_width_dim=True):
+            downscale_factor = random.randint(2, 5)
+            channels = random.randint(1, 4)
+            # If valid_height_dim=False, add 1 to make height dim indivisible by downscale_factor.
+            height = random.randint(3, 5) * downscale_factor + (0 if valid_height_dim else 1)
+            # If valid_width_dim=False, add 1 to make width dim indivisible by downscale_factor.
+            width = random.randint(3, 5) * downscale_factor + (0 if valid_width_dim else 1)
+
+            if num_input_dims == 1:
+                input = torch.rand(channels, requires_grad=True)
+            elif num_input_dims == 2:
+                input = torch.rand(height, width, requires_grad=True)
+            else:
+                batch_sizes = [random.randint(1, 3) for _ in range(num_input_dims - 3)]
+                input = torch.rand(*batch_sizes, channels, height, width, requires_grad=True)
+
+            pus = nn.PixelUnshuffle(downscale_factor)
+            self.assertRaises(RuntimeError, lambda: pus(input))
+
+        def test_pixel_shuffle_unshuffle_3D_with_valid_channels_dim():
+            _test_pixel_shuffle_unshuffle_helper(num_input_dims=3)
+
+        def test_pixel_shuffle_unshuffle_4D_with_valid_channels_dim():
+            _test_pixel_shuffle_unshuffle_helper(num_input_dims=4)
+
+        def test_pixel_shuffle_unshuffle_5D_with_valid_channels_dim():
+            _test_pixel_shuffle_unshuffle_helper(num_input_dims=5)
+
         def test_pixel_shuffle_1D():
-            _test_pixel_shuffle_helper(num_input_dims=1)
+            _test_pixel_shuffle_unshuffle_helper(num_input_dims=1)
 
         def test_pixel_shuffle_2D():
-            _test_pixel_shuffle_helper(num_input_dims=2)
-
-        def test_pixel_shuffle_3D_with_valid_channels_dim():
-            _test_pixel_shuffle_helper(num_input_dims=3)
-
-        def test_pixel_shuffle_4D_with_valid_channels_dim():
-            _test_pixel_shuffle_helper(num_input_dims=4)
-
-        def test_pixel_shuffle_5D_with_valid_channels_dim():
-            _test_pixel_shuffle_helper(num_input_dims=5)
+            _test_pixel_shuffle_unshuffle_helper(num_input_dims=2)
 
         def test_pixel_shuffle_3D_with_invalid_channels_dim():
-            _test_pixel_shuffle_helper(num_input_dims=3, valid_channels_dim=False)
+            _test_pixel_shuffle_unshuffle_helper(num_input_dims=3, valid_channels_dim=False)
 
         def test_pixel_shuffle_4D_with_invalid_channels_dim():
-            _test_pixel_shuffle_helper(num_input_dims=4, valid_channels_dim=False)
+            _test_pixel_shuffle_unshuffle_helper(num_input_dims=4, valid_channels_dim=False)
 
         def test_pixel_shuffle_5D_with_invalid_channels_dim():
-            _test_pixel_shuffle_helper(num_input_dims=5, valid_channels_dim=False)
+            _test_pixel_shuffle_unshuffle_helper(num_input_dims=5, valid_channels_dim=False)
 
+        def test_pixel_unshuffle_1D():
+            _test_pixel_unshuffle_error_case_helper(num_input_dims=1)
+
+        def test_pixel_unshuffle_2D():
+            _test_pixel_unshuffle_error_case_helper(num_input_dims=2)
+
+        def test_pixel_unshuffle_3D_invalid_height_dim():
+            _test_pixel_unshuffle_error_case_helper(num_input_dims=3, valid_height_dim=False)
+
+        def test_pixel_unshuffle_4D_invalid_height_dim():
+            _test_pixel_unshuffle_error_case_helper(num_input_dims=4, valid_height_dim=False)
+
+        def test_pixel_unshuffle_5D_invalid_height_dim():
+            _test_pixel_unshuffle_error_case_helper(num_input_dims=5, valid_height_dim=False)
+
+        def test_pixel_unshuffle_3D_invalid_width_dim():
+            _test_pixel_unshuffle_error_case_helper(num_input_dims=3, valid_width_dim=False)
+
+        def test_pixel_unshuffle_4D_invalid_width_dim():
+            _test_pixel_unshuffle_error_case_helper(num_input_dims=4, valid_width_dim=False)
+
+        def test_pixel_unshuffle_5D_invalid_width_dim():
+            _test_pixel_unshuffle_error_case_helper(num_input_dims=5, valid_width_dim=False)
+
+        # Success cases for pixel_shuffle + pixel_unshuffle.
+        test_pixel_shuffle_unshuffle_3D_with_valid_channels_dim()
+        test_pixel_shuffle_unshuffle_4D_with_valid_channels_dim()
+        test_pixel_shuffle_unshuffle_5D_with_valid_channels_dim()
+
+        # Error cases for pixel_shuffle.
         test_pixel_shuffle_1D()
         test_pixel_shuffle_2D()
-        test_pixel_shuffle_3D_with_valid_channels_dim()
-        test_pixel_shuffle_4D_with_valid_channels_dim()
-        test_pixel_shuffle_5D_with_valid_channels_dim()
         test_pixel_shuffle_3D_with_invalid_channels_dim()
         test_pixel_shuffle_4D_with_invalid_channels_dim()
         test_pixel_shuffle_5D_with_invalid_channels_dim()
+
+        # Error cases for pixel_unshuffle.
+        test_pixel_unshuffle_1D()
+        test_pixel_unshuffle_2D()
+        test_pixel_unshuffle_3D_invalid_height_dim()
+        test_pixel_unshuffle_4D_invalid_height_dim()
+        test_pixel_unshuffle_5D_invalid_height_dim()
+        test_pixel_unshuffle_3D_invalid_width_dim()
+        test_pixel_unshuffle_4D_invalid_width_dim()
+        test_pixel_unshuffle_5D_invalid_width_dim()
 
     def test_elu_inplace_view(self):
         v = torch.tensor([1.0, -1.0, 1.0, -1.0], requires_grad=True)

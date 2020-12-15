@@ -50,3 +50,45 @@ class PixelShuffle(Module):
 
     def extra_repr(self) -> str:
         return 'upscale_factor={}'.format(self.upscale_factor)
+
+
+class PixelUnshuffle(Module):
+    r"""Rearranges elements in a tensor of shape :math:`(*, C, H \times r, W \times r)`
+    to a tensor of shape :math:`(*, C \times r^2, H, W)`. This is the inverse operation
+    of :class:`~torch.nn.PixelShuffle`.
+
+    Note that this function can take inputs with any number of batch dimensions:
+    :math:`(C \times r^2, H, W)`, :math:`(N, C \times r^2, H, W)`, :math:`(N_1, N_2, C \times r^2, H, W)`, etc.
+
+    Args:
+        downscale_factor (int): factor to decrease spatial resolution by
+
+    Shape:
+        - Input: :math:`(*, C, H_{in}, W_{in})`
+        - Output: :math:`(*, L, H_{out}, W_{out})` where `L=C \times \text{downscale\_factor}^2`
+          :math:`H_{out} = H_{in} \div \text{downscale\_factor}`
+          and :math:`W_{out} = W_{in} \div \text{downscale\_factor}`
+
+    Examples::
+
+        >>> pixel_unshuffle = nn.PixelUnshuffle(3)
+        >>> input = torch.randn(1, 1, 12, 12)
+        >>> output = pixel_unshuffle(input)
+        >>> print(output.size())
+        torch.Size([1, 9, 4, 4])
+
+    .. _Real-Time Single Image and Video Super-Resolution Using an Efficient Sub-Pixel Convolutional Neural Network:
+        https://arxiv.org/abs/1609.05158
+    """
+    __constants__ = ['downscale_factor']
+    downscale_factor: int
+
+    def __init__(self, downscale_factor: int) -> None:
+        super(PixelUnshuffle, self).__init__()
+        self.downscale_factor = downscale_factor
+
+    def forward(self, input: Tensor) -> Tensor:
+        return F.pixel_unshuffle(input, self.downscale_factor)
+
+    def extra_repr(self) -> str:
+        return 'downscale_factor={}'.format(self.downscale_factor)

@@ -51,4 +51,49 @@ Tensor pixel_shuffle(const Tensor& self, int64_t upscale_factor) {
   return input_permuted.reshape(final_shape);
 }
 
+
+Tensor pixel_unshuffle(const Tensor& self, int64_t downscale_factor) {
+  TORCH_CHECK(self.dim() >= 3,
+              "pixel_unshuffle expects input to have at least 3 dimensions, but got input with ",
+              self.dim(), " dimension(s)");
+  // Format: (B1, ..., Bn), C, H, W
+  int64_t c = self.size(-3);
+  int64_t h = self.size(-2);
+  int64_t w = self.size(-1);
+  const auto NUM_NON_BATCH_DIMS = 3;
+  const auto last_batch_dim = self.sizes().end() - NUM_NON_BATCH_DIMS;
+
+  TORCH_CHECK(h % downscale_factor == 0,
+             "pixel_unshuffle expects height to be divisible by downscale_factor, but input.size(-2)=", h,
+             " is not divisible by ", downscale_factor)
+  TORCH_CHECK(w % downscale_factor == 0,
+             "pixel_unshuffle expects width to be divisible by downscale_factor, but input.size(-1)=", w,
+             " is not divisible by ", downscale_factor)
+  int64_t downscale_factor_squared = downscale_factor * downscale_factor;
+  int64_t oc = c * downscale_factor_squared;
+  int64_t oh = h / downscale_factor;
+  int64_t ow = w / downscale_factor;
+
+  // First, reshape to expand height dim into (oh, downscale_factor) dims and width dim into
+  // (ow, downscale_factor) dims. This allows unshuffling to be done next by permuting dims.
+  std::vector<int64_t> expanded_shape(self.sizes().begin(), last_batch_dim);
+  expanded_shape.insert(expanded_shape.end(), {c, oh, downscale_factor, ow, downscale_factor});
+  const auto input_expanded = self.reshape(expanded_shape);
+
+  // Next, unshuffle by permuting the downscale_factor dims alongside the channel dim.
+  std::vector<int64_t> permutation(self.sizes().begin(), last_batch_dim);
+  // std::iota is used to maintain the batch dims within the permutation.
+  // Since expansion added 2 dims, the correct batch dim offsets are now: -expanded_shape.size(), ..., -7, -6.
+  std::iota(permutation.begin(), permutation.end(), -expanded_shape.size());
+  permutation.insert(permutation.end(), {-5 /* c */, -3 /* 1st downscale_factor */, -1 /*2nd downscale_factor */,
+                                         -4 /* oh */, -2 /* ow */});
+  const auto input_permuted = input_expanded.permute(permutation);
+
+  // Finally, downscale by collapsing (c, downscale_factor, downscale_factor) -> a single dim (oc),
+  // resulting in height=oh and width=ow.
+  std::vector<int64_t> final_shape(self.sizes().begin(), last_batch_dim);
+  final_shape.insert(final_shape.end(), {oc, oh, ow});
+  return input_permuted.reshape(final_shape);
+}
+
 }} // namespace at::native
