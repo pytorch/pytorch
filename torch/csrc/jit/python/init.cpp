@@ -154,8 +154,8 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx_function_substitution", ONNXFunctionCallSubstitution)
       .def(
           "_jit_pass_onnx_fold_if",
-          [](std::shared_ptr<Graph>& graph, bool dynamic_axes) {
-            return FoldIfONNX(graph->block(), dynamic_axes);
+          [](std::shared_ptr<Graph>& graph) {
+            return FoldIfONNX(graph->block());
           })
       .def(
           "_jit_pass_onnx_peephole",

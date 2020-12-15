@@ -13,7 +13,7 @@ namespace onnx {
 using namespace ::c10::onnx;
 }
 
-static bool checkIfFold(Node* node) {
+static bool conditionIfFold(Node* node) {
   auto cast_node = node->input()->node();
   if (cast_node->kind() != onnx::Cast)
     cast_node = node;
@@ -21,7 +21,7 @@ static bool checkIfFold(Node* node) {
 
   if (prev_node->kind() == onnx::Not || prev_node->kind() == onnx::Identity ||
       prev_node->kind() == onnx::If)
-    return checkIfFold(prev_node);
+    return conditionIfFold(prev_node);
 
   auto compare_node = prev_node;
   if (compare_node->kind() == onnx::Equal ||
@@ -179,14 +179,14 @@ static bool constantFoldingValue(Node* node) {
 //   %9 : Int(3, 4, strides=[4, 1], device=cpu) = onnx::Add(%8, %14)
 //   return (%9)
 
-static void foldIfNode(Block* b, bool dynamic_axes) {
+static void foldIfNode(Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
-      foldIfNode(child_block, dynamic_axes);
+      foldIfNode(child_block);
     }
     if (it->kind() == onnx::If) {
       auto if_node = *it;
-      if (checkIfFold(if_node)) {
+      if (conditionIfFold(if_node)) {
         Block* then_block = it->blocks()[0];
         Block* else_block = it->blocks()[1];
         Block* block = else_block;
@@ -213,16 +213,16 @@ static void foldIfNode(Block* b, bool dynamic_axes) {
   }
 }
 
-void FoldIfONNX(Block* b, bool dynamic_axes) {
-  foldIfNode(b, dynamic_axes);
+void FoldIfONNX(Block* b) {
+  foldIfNode(b);
 }
 
-bool FoldConditionONNX(Node* n) {
+bool FoldValueONNX(Node* n) {
   return constantFoldingValue(n);
 }
 
-bool CheckFoldONNX(Node* n) {
-  return checkIfFold(n);
+bool FoldConditionONNX(Node* n) {
+  return conditionIfFold(n);
 }
 
 } // namespace jit
