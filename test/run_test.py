@@ -35,6 +35,7 @@ TESTS = [
     'test_jit_cuda_fuser',
     'test_cuda_primary_ctx',
     'test_dataloader',
+    'test_dataset',
     'distributed/test_data_parallel',
     'distributed/test_distributed_fork',
     'distributed/test_distributed_spawn',

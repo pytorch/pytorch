@@ -74,11 +74,15 @@ class GroupByFilenameIterableDataset(IterableDataset):
                     res = []
 
             # try grouping data from input dataset if stream_buffer has no enough items to group
+            key = None
             if len(res) == 0:
+                # start finding a new group
                 key = os.path.splitext(data[0])[0]
                 res.append((data[0], data[1]))
             else:
-                key = os.path.splitext(res[0][0])[0]
+                # find the rest of item in a group that initiated from stream_buffer
+                if key is None:
+                    key = os.path.splitext(res[0][0])[0]
                 if key == os.path.splitext(data[0])[0]:
                     res.append((data[0], data[1]))
                 elif len(stream_buffer) < buffer_size:
