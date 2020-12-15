@@ -119,7 +119,7 @@ bool Module::is_training() const {
 const std::vector<Method> Module::get_methods() const {
   std::vector<Method> methods;
   for (std::unique_ptr<Function>& fn : cu_->methods()) {
-    methods.emplace_back(this, fn.get()));
+    methods.emplace_back(this, fn.get());
   }
   return methods;
 }
