@@ -477,7 +477,9 @@ class TestTEFuser(JitTestCase):
         binary_ops = [
             operator.__and__,
             operator.__or__,
-            operator.__xor__
+            operator.__xor__,
+            operator.__lshift__,
+            operator.__rshift__,
         ]
         devices = self.devices
         for dtype, op, device in product(self.int_dtypes, binary_ops, devices):
@@ -1209,7 +1211,7 @@ class TestTEFuser(JitTestCase):
             return v.to(dtype)
 
     def test_masked_fill(self):
-        # check scalar overload 
+        # check scalar overload
         def foo(x, mask):
             return torch.masked_fill(x, mask, .6), torch.masked_fill(x, mask, 2)
 
@@ -1225,7 +1227,6 @@ class TestTEFuser(JitTestCase):
         # check tensor overload
         dtypes = [
             torch.int8,
-            torch.uint8,
             torch.int16,
             torch.int32,
             torch.int64,
@@ -1267,7 +1268,6 @@ class TestTEFuser(JitTestCase):
         ]
         dtypes = [
             torch.int8,
-            torch.uint8,
             torch.int16,
             torch.int32,
             torch.int64,
@@ -1373,11 +1373,6 @@ class TestTEFuser(JitTestCase):
             torch.lt,
             torch.fmod,
             torch.remainder,
-
-            # FIXME: segfaults on CPU backend
-            # operator.__rshift__,
-            # operator.__lshift__,
-
             lambda x, y: y.type_as(x),
         ]
         fp_only = [
@@ -1424,10 +1419,6 @@ class TestTEFuser(JitTestCase):
             torch.ge,
             torch.lt,
             torch.gt,
-
-            # FIXME: segfaults on CPU backend
-            # operator.__rshift__,
-            # operator.__lshift__,
         ]
         devices = self.devices
         # Maybe we should split this into separate tests to speed it up by
