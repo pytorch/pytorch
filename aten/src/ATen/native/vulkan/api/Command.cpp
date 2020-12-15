@@ -420,9 +420,10 @@ void Command::Pool::purge() {
       "This command pool is in an invalid state! "
       "Potential reason: This command pool is moved from.");
 
-  TORCH_INTERNAL_ASSERT(
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       !stream_,
-      "TMP CHECK");
+      "Pending command buffer detected.  Make sure all command buffers are "
+      "submitted to the queue for execution prior to reclaiming pool memory.");
 
   buffer_.in_use = 0u;
   VK_CHECK(vkResetCommandPool(device_, command_pool_.get(), 0u));
@@ -430,7 +431,7 @@ void Command::Pool::purge() {
 
 void Command::Pool::submit(
     const VkQueue queue,
-    c10::ArrayRef<Buffer> command_buffers,
+    c10::ArrayRef<const Buffer> buffers,
     const Resource::Fence fence) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_ && command_pool_,
@@ -441,19 +442,45 @@ void Command::Pool::submit(
       queue,
       "Invalid Vulkan queue!");
 
-  // const VkSubmitInfo submit_info{
-  //   VK_STRUCTURE_TYPE_SUBMIT_INFO,
-  //   nullptr,
-  //   0u,
-  //   nullptr,
-  //   nullptr,
-  //   1u,
-  //   &command_buffer_,
-  //   0u,
-  //   nullptr,
-  // };
+  c10::SmallVector<VkCommandBuffer, Configuration::kReserve> command_buffers;
+  command_buffers.reserve(buffers.size());
 
-  // VK_CHECK(vkQueueSubmit(queue, 1u, &submit_info, fence.handle()));
+  for (const Buffer& buffer : buffers) {
+    VkCommandBuffer command_buffer = buffer.handle();
+
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        command_buffer,
+        "Invalid Vulkan command buffer!");
+
+    if (stream_.handle() == command_buffer) {
+      if (fence) {
+        stream_.end();
+        stream_.invalidate();
+      }
+      else {
+        // Skip
+        command_buffer = VK_NULL_HANDLE;
+      }
+    }
+
+    if (command_buffer) {
+      command_buffers.push_back(command_buffer);
+    }
+  }
+
+  const VkSubmitInfo submit_info{
+    VK_STRUCTURE_TYPE_SUBMIT_INFO,
+    nullptr,
+    0u,
+    nullptr,
+    nullptr,
+    command_buffers.size(),
+    command_buffers.data(),
+    0u,
+    nullptr,
+  };
+
+  VK_CHECK(vkQueueSubmit(queue, 1u, &submit_info, fence.handle()));
 }
 
 void Command::Pool::invalidate() {

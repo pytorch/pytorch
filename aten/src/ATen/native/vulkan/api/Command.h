@@ -92,7 +92,7 @@ struct Command final {
 
     void submit(
         VkQueue queue,
-        c10::ArrayRef<Buffer> command_buffers,
+        c10::ArrayRef<const Buffer> buffers,
         Resource::Fence fence = {});
 
    private:
@@ -128,7 +128,7 @@ inline Command::Buffer::operator bool() const {
   return VK_NULL_HANDLE != command_buffer_;
 }
 
-inline Command::Buffer::handle() const {
+inline VkCommandBuffer Command::Buffer::handle() const {
   return command_buffer_;
 }
 

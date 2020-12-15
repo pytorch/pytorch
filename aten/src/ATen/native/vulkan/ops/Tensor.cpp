@@ -505,9 +505,16 @@ vTensor::View::View(
   ops::verify(options);
 }
 
+// We typically do not know whether we need a command buffer to service a request
+// until we have perfomed a bunch of checks in nested logic, and even then we
+// may end up with the always issued state transition optimized away under
+// certain conditions, which makes a policy of always allocating a command buffer
+// up front, only to end up using it at times, a wasteful approach.  This class
+// answers that need.
+
 class vTensor::View::CMD final {
  public:
-  CMD(const View&, api::Command::Buffer&);
+  explicit CMD(const View&, api::Command::Buffer* = nullptr);
   CMD(const CMD&) = delete;
   CMD& operator=(const CMD&) = delete;
   CMD(CMD&&) = delete;
@@ -543,15 +550,18 @@ class vTensor::View::CMD final {
   void submit(Fence fence);
 
  private:
+  api::Command::Buffer& command_buffer();
+
+ private:
   const View& view_;
-  api::Command::Buffer& command_buffer_;
+  api::Command::Buffer* command_buffer_;
 };
 
 vTensor::View::CMD::CMD(
     const View& view,
-    api::Command::Buffer& command_buffer)
+    api::Command::Buffer* const command_buffer)
   : view_(view),
-    command_buffer_(command_buffer) {
+    command_buffer_(&command_buffer) {
 }
 
 void vTensor::View::CMD::barrier(
@@ -682,7 +692,7 @@ void vTensor::View::CMD::barrier(
       barrier.stage.src = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
     }
 
-    command_buffer_.barrier(barrier);
+    command_buffer().barrier(barrier);
   }
 }
 
@@ -710,7 +720,7 @@ void vTensor::View::CMD::copy_buffer_to_staging(
           {},
         }));
 
-  command_buffer_.copy(buffer, staging);
+  command_buffer().copy(buffer, staging);
 }
 
 void vTensor::View::CMD::copy_staging_to_buffer(
@@ -737,7 +747,7 @@ void vTensor::View::CMD::copy_staging_to_buffer(
           {},
         }));
 
-  command_buffer_.copy(staging, buffer);
+  command_buffer().copy(staging, buffer);
 }
 
 void vTensor::View::CMD::copy_buffer_to_image(
@@ -784,7 +794,7 @@ void vTensor::View::CMD::copy_buffer_to_image(
   };
 
   view_.context_->dispatch(
-      command_buffer_,
+      command_buffer(),
       {
         VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -841,7 +851,7 @@ void vTensor::View::CMD::copy_image_to_buffer(
   };
 
   view_.context_->dispatch(
-      command_buffer_,
+      command_buffer(),
       {
         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -855,7 +865,12 @@ void vTensor::View::CMD::copy_image_to_buffer(
 }
 
 void vTensor::View::CMD::submit(const api::Resource::Fence fence) {
-  // command_buffer_.submit(view_.context_->gpu().queue, fence);
+  view_.context_->command().pool.submit(
+      view_.context_->gpu().queue,
+      {
+        command_buffer(),
+      },
+      fence);
 }
 
 vTensor::Buffer& vTensor::View::buffer() const {
