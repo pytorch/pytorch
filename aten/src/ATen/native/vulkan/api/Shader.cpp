@@ -60,6 +60,10 @@ Shader::Layout::Cache::Cache(Factory factory)
   : cache_(std::move(factory)) {
 }
 
+void Shader::Layout::Cache::purge() {
+  cache_.purge();
+}
+
 #ifdef USE_VULKAN_SHADERC_RUNTIME
 
 struct Shader::Factory::Compiler final {

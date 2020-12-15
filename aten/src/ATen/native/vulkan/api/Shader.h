@@ -218,10 +218,6 @@ inline Shader::Layout::Object Shader::Layout::Cache::retrieve(
   };
 }
 
-inline void Shader::Layout::Cache::purge() {
-  cache_.purge();
-}
-
 inline bool operator==(
     const Shader::WorkGroup& _1,
     const Shader::WorkGroup& _2) {

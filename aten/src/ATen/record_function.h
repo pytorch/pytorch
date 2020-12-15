@@ -23,6 +23,8 @@ enum class C10_API_ENUM RecordScope : uint8_t {
   BACKWARD_FUNCTION,
   // TorchScript functions, methods
   TORCHSCRIPT_FUNCTION,
+  // Kernel Function dtype Tag
+  KERNEL_FUNCTION_DTYPE,
   // User defined scope (e.g. with record_function())
   USER_SCOPE,
   NUM_SCOPES, // must be the last in the list
@@ -311,17 +313,6 @@ class TORCH_API RecordFunctionCallback {
         [](const RecordFunction&, ObserverContext*) {}):
       start_(std::move(start)),
       end_(std::move(end)) {
-    scopes_.fill(true);
-  }
-
-  // This interface is for observers that do not pass an ObserverContext object
-  // between start and end callbacks.
-  explicit RecordFunctionCallback(
-      std::function<void(const RecordFunction&)> start,
-      std::function<void(const RecordFunction&)> end =
-        [](const RecordFunction&) {}):
-      start_{[start](const RecordFunction& rf) { start(rf); return nullptr; }},
-      end_{[end](const RecordFunction& rf, ObserverContext*) { end(rf); }} {
     scopes_.fill(true);
   }
 

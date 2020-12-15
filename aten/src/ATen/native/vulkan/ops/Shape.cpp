@@ -21,7 +21,7 @@ Tensor view(
     self.options(),
   };
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();
 
   command_buffer.copy(
       // Read-only access is implied on const tensors and triggers an async

@@ -14,13 +14,15 @@ namespace vulkan {
 namespace api {
 
 struct Command final {
+  class Pool;
+
   //
   // Buffer
   //
 
   class Buffer final {
    public:
-    explicit Buffer(VkCommandBuffer command_buffer);
+    explicit Buffer(VkCommandBuffer command_buffer = VK_NULL_HANDLE);
     Buffer(const Buffer&) = delete;
     Buffer& operator=(const Buffer&) = delete;
     Buffer(Buffer&&);
@@ -32,15 +34,19 @@ struct Command final {
 
     void begin();
     void end();
+
     void barrier(const Pipeline::Barrier& barrier);
     void bind(const Pipeline::Object& pipeline);
     void bind(const Descriptor::Set& set);
     void copy(Resource::Buffer::Object source, Resource::Buffer::Object destination);
     void dispatch(const Shader::WorkGroup& global_work_group);
-    void submit(VkQueue queue, Resource::Fence fence = {});
+
+   private:
+    friend class Pool;
 
    private:
     void barrier();
+    void invalidate();
 
    private:
     VkCommandBuffer command_buffer_;
@@ -81,12 +87,21 @@ struct Command final {
     ~Pool();
 
     Buffer allocate();
+    Buffer& stream();
     void purge();
+
+    void submit(
+        VkQueue queue,
+        c10::ArrayRef<Buffer> command_buffers,
+        Resource::Fence fence = {});
+
+   private:
+    void invalidate();
 
    private:
     struct Configuration final {
-      static constexpr uint32_t kQuantum = 64u;
-      static constexpr uint32_t kReserve = 1024u;
+      static constexpr uint32_t kQuantum = 4u;
+      static constexpr uint32_t kReserve = 16u;
     };
 
     VkDevice device_;
@@ -96,6 +111,8 @@ struct Command final {
       std::vector<VkCommandBuffer> pool;
       size_t in_use;
     } buffer_;
+
+    Buffer stream_;
   } pool /* [thread_count] */;
 
   explicit Command(const GPU& gpu)
@@ -107,47 +124,12 @@ struct Command final {
 // Impl
 //
 
-inline Command::Buffer::Buffer(Buffer&& buffer)
-  : command_buffer_(std::move(buffer.command_buffer_)),
-    bound_(std::move(buffer.bound_)),
-    barriers_(std::move(buffer.barriers_)) {
-  buffer.command_buffer_ = VK_NULL_HANDLE;
-}
-
-inline Command::Buffer& Command::Buffer::operator=(Buffer&& buffer) {
-  if (&buffer != this) {
-    command_buffer_ = std::move(buffer.command_buffer_);
-    bound_ = std::move(buffer.bound_);
-    barriers_ = std::move(buffer.barriers_);
-
-    buffer.command_buffer_ = VK_NULL_HANDLE;
-  };
-
-  return *this;
-}
-
 inline Command::Buffer::operator bool() const {
   return VK_NULL_HANDLE != command_buffer_;
 }
 
-inline VkCommandBuffer Command::Buffer::handle() const {
+inline Command::Buffer::handle() const {
   return command_buffer_;
-}
-
-inline void Command::Buffer::Bound::reset() {
-  pipeline = {};
-  descriptor_set = VK_NULL_HANDLE;
-}
-
-inline Command::Buffer::Barrier::Stage::operator bool() const {
-  return (0u != src) ||
-         (0u != dst);
-}
-
-inline void Command::Buffer::Barrier::reset() {
-  stage = {};
-  buffers.clear();
-  images.clear();
 }
 
 } // namespace api

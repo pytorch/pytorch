@@ -236,10 +236,6 @@ inline Pipeline::Object Pipeline::Cache::retrieve(
   };
 }
 
-inline void Pipeline::Cache::purge() {
-  cache_.purge();
-}
-
 } // namespace api
 } // namespace vulkan
 } // namespace native

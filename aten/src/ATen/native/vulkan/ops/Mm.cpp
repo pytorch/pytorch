@@ -165,7 +165,7 @@ Tensor mm(
       mat1.options(),
   };
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();
 
   if C10_LIKELY(v_mat1.has_image() && v_mat2.has_image()) {
     const struct {
@@ -281,7 +281,7 @@ Tensor LinearOpContext::run(
       input.options(),
   };
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();
 
   if C10_LIKELY(
       v_output.has_image() &&

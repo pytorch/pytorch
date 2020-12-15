@@ -151,6 +151,27 @@ void Descriptor::Set::update(const Item& item) {
   bindings_.dirty = true;
 }
 
+Descriptor::Set::Set(Set&& set)
+  : device_(std::move(set.device_)),
+    descriptor_set_(std::move(set.descriptor_set_)),
+    shader_layout_signature_(std::move(set.shader_layout_signature_)),
+    bindings_(std::move(set.bindings_)) {
+  set.invalidate();
+}
+
+Descriptor::Set& Descriptor::Set::operator=(Set&& set) {
+  if (&set != this) {
+    device_ = std::move(set.device_);
+    descriptor_set_ = std::move(set.descriptor_set_);
+    shader_layout_signature_ = std::move(set.shader_layout_signature_);
+    bindings_ = std::move(set.bindings_);
+
+    set.invalidate();
+  };
+
+  return *this;
+}
+
 Descriptor::Set& Descriptor::Set::bind(
     const uint32_t binding,
     const Resource::Buffer::Object& buffer) {
@@ -276,6 +297,11 @@ VkDescriptorSet Descriptor::Set::handle() const {
   return descriptor_set_;
 }
 
+void Descriptor::Set::invalidate() {
+  device_ = VK_NULL_HANDLE;
+  descriptor_set_ = VK_NULL_HANDLE;
+}
+
 Descriptor::Pool::Pool(const GPU& gpu)
   : device_(gpu.device),
     descriptor_pool_(
@@ -295,7 +321,7 @@ Descriptor::Pool::Pool(Pool&& pool)
   : device_(std::move(pool.device_)),
     descriptor_pool_(std::move(pool.descriptor_pool_)),
     set_(std::move(pool.set_)) {
-  pool.device_ = VK_NULL_HANDLE;
+  pool.invalidate();
 }
 
 Descriptor::Pool& Descriptor::Pool::operator=(Pool&& pool) {
@@ -304,7 +330,7 @@ Descriptor::Pool& Descriptor::Pool::operator=(Pool&& pool) {
     descriptor_pool_ = std::move(pool.descriptor_pool_);
     set_ = std::move(pool.set_);
 
-    pool.device_ = VK_NULL_HANDLE;
+    pool.invalidate();
   };
 
   return *this;
@@ -371,8 +397,13 @@ void Descriptor::Pool::purge() {
       "This descriptor pool is in an invalid state! "
       "Potential reason: This descriptor pool is moved from.");
 
-  set_.layouts.clear();
   VK_CHECK(vkResetDescriptorPool(device_, descriptor_pool_.get(), 0u));
+  set_.layouts.clear();
+}
+
+void Descriptor::Pool::invalidate() {
+  device_ = VK_NULL_HANDLE;
+  descriptor_pool_.reset();
 }
 
 } // namespace api

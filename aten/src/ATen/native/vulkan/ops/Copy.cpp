@@ -40,7 +40,7 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
     }
     // Vulkan -> Vulkan
     else if (at::kVulkan == src.device().type()) {
-      api::Command::Buffer command_buffer = api::context()->command().pool.allocate();
+      api::Command::Buffer& command_buffer = api::context()->command().pool.stream();
 
       command_buffer.copy(
           // - Read-only access is implied on const tensors.  Memory barriers

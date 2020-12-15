@@ -36,7 +36,7 @@ Tensor upsample_nearest2d(
     input.options(),
   };
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();
 
   if C10_LIKELY(v_input.has_image()) {
     const struct {

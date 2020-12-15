@@ -854,8 +854,8 @@ void vTensor::View::CMD::copy_image_to_buffer(
       view_.context_->resource().pool.uniform(block).object);
 }
 
-void submit(const api::Resource::Fence fence) {
-  // view_.context_->submit(fence);
+void vTensor::View::CMD::submit(const api::Resource::Fence fence) {
+  // command_buffer_.submit(view_.context_->gpu().queue, fence);
 }
 
 vTensor::Buffer& vTensor::View::buffer() const {
@@ -868,6 +868,14 @@ vTensor::Buffer& vTensor::View::buffer() const {
   }
 
   return buffer_;
+}
+
+vTensor::Buffer& vTensor::View::buffer(
+    api::Command::Buffer& command_buffer,
+    const Stage::Flags stage,
+    const Access::Flags access) const {
+  CMD cmd(*this, command_buffer);
+  return buffer(cmd, stage, access);
 }
 
 vTensor::Buffer& vTensor::View::buffer(
@@ -928,6 +936,14 @@ vTensor::Image& vTensor::View::image() const {
 }
 
 vTensor::Image& vTensor::View::image(
+    api::Command::Buffer& command_buffer,
+    const Stage::Flags stage,
+    const Access::Flags access) const {
+  CMD cmd(*this, command_buffer);
+  return image(cmd, stage, access);
+}
+
+vTensor::Image& vTensor::View::image(
     CMD& cmd,
     const Stage::Flags stage,
     const Access::Flags access) const {
@@ -978,6 +994,18 @@ vTensor::Buffer& vTensor::View::staging() const {
 }
 
 vTensor::Buffer& vTensor::View::staging(
+    const Stage::Flags stage,
+    const Access::Flags access) const {
+  api::Command::Buffer& command_buffer = context_->command().pool.stream();
+
+  CMD cmd(*this, command_buffer);
+  Buffer& staging = this->staging(cmd, stage, access);
+  cmd.submit(fence());
+
+  return staging;
+}
+
+vTensor::Buffer& vTensor::View::staging(
     CMD& cmd,
     const Stage::Flags stage,
     const Access::Flags access) const {
@@ -1000,8 +1028,6 @@ vTensor::Buffer& vTensor::View::staging(
           // Image
           {},
         }));
-
-  cmd.submit(fence());
 
   if (access & Access::Write) {
     state_.set_dirty(Component::All);

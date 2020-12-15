@@ -50,10 +50,15 @@ class Caffe2BenchmarkBase(object):
             Return:
                 C2 tensor of dtype
         """
+        return self.feed_tensor(benchmark_utils.numpy_random(dtype, *shapes), device)
+
+    def feed_tensor(self, tensor, device='cpu'):
+        """ Similar to tensor, but can supply any data compatible with FeedBlob
+        """
         blob_name = 'blob_' + str(Caffe2BenchmarkBase.tensor_index)
         dev = self._device_option(device)
         with core.DeviceScope(dev):
-            workspace.FeedBlob(blob_name, benchmark_utils.numpy_random(dtype, *shapes))
+            workspace.FeedBlob(blob_name, tensor)
         Caffe2BenchmarkBase.tensor_index += 1
         return blob_name
 

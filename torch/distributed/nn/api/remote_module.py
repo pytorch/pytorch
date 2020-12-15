@@ -18,9 +18,9 @@ import torch.distributed.rpc as rpc
 from torch import Tensor, device, dtype, nn
 from torch.distributed.nn.jit import instantiator
 from torch.distributed.rpc.utils import _parse_remote_device
+from torch.nn import Module
 from torch.nn.parameter import Parameter
 from torch.utils.hooks import RemovableHandle
-from torch.nn import Module
 
 
 _grad_t = Union[Tuple[Tensor, ...], Tensor]
@@ -208,6 +208,10 @@ class _RemoteModule(nn.Module):
             A list of RRefs to remote module parameters.
         """
         return rpc.rpc_sync(self.on, _param_rrefs, args=(self.module_rref, recurse))
+
+    def get_module_rref(self) -> rpc.RRef[nn.Module]:
+        """Returns the RRef to remote module."""
+        return self.module_rref
 
     def register_buffer(
         self, name: str, tensor: Optional[Tensor], persistent: bool = True

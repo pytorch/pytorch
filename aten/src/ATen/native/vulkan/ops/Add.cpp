@@ -24,7 +24,7 @@ Tensor add_scalar(
     v_self.options(),
   };
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();
 
   if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
     const struct {
@@ -78,7 +78,7 @@ Tensor& add_scalar_(
 
   vTensor& v_self = convert(self);
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();
 
   if C10_LIKELY(v_self.has_image()) {
     const struct {
@@ -132,7 +132,7 @@ Tensor add_tensor(
     v_self.options(),
   };
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();
 
   if C10_LIKELY(v_self.has_image() && v_other.has_image()) {
     const struct {
@@ -195,7 +195,7 @@ Tensor& add_tensor_(
   const Tensor other = other_arg.is_vulkan() ? other_arg : other_arg.vulkan();
   const vTensor& v_other = convert(other);
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();
 
   if C10_LIKELY(v_self.has_image() && v_other.has_image() && !self.is_same(other)) {
     const struct {

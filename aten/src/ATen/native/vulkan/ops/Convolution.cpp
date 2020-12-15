@@ -400,24 +400,34 @@ void conv2d_depthwise(
     const IntArrayRef dilation,
     const float output_min,
     const float output_max) {
-  if (v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
+  if C10_LIKELY(v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
     const struct {
-      int32_t kernel_x, kernel_y;
-      int32_t stride_x, stride_y;
-      int32_t padding_x, padding_y;
-      int32_t dilate_x, dilate_y;
-      float clamp_x, clamp_y;
+      ivec2 kernel;
+      ivec2 stride;
+      ivec2 padding;
+      ivec2 dilate;
+      vec2 clamp;
     } block {
-      safe_downcast<int32_t>(filter[Layout::Filter::width]),
-      safe_downcast<int32_t>(filter[Layout::Filter::height]),
-      safe_downcast<int32_t>(stride[Layout::Parameter::width]),
-      safe_downcast<int32_t>(stride[Layout::Parameter::height]),
-      safe_downcast<int32_t>(padding[Layout::Parameter::width]),
-      safe_downcast<int32_t>(padding[Layout::Parameter::height]),
-      safe_downcast<int32_t>(dilation[Layout::Parameter::width]),
-      safe_downcast<int32_t>(dilation[Layout::Parameter::height]),
-      output_min,
-      output_max,
+      {
+        safe_downcast<int32_t>(filter[Layout::Filter::width]),
+        safe_downcast<int32_t>(filter[Layout::Filter::height]),
+      },
+      {
+        safe_downcast<int32_t>(stride[Layout::Parameter::width]),
+        safe_downcast<int32_t>(stride[Layout::Parameter::height]),
+      },
+      {
+        safe_downcast<int32_t>(padding[Layout::Parameter::width]),
+        safe_downcast<int32_t>(padding[Layout::Parameter::height]),
+      },
+      {
+        safe_downcast<int32_t>(dilation[Layout::Parameter::width]),
+        safe_downcast<int32_t>(dilation[Layout::Parameter::height]),
+      },
+      {
+        output_min,
+        output_max,
+      },
     };
 
     context->dispatch(
@@ -473,25 +483,31 @@ void conv2d_pointwise(
     const IntArrayRef padding,
     const float output_min,
     const float output_max) {
-  if (v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
-    const int64_t stacks_per_tower = v_weight.sizes()[0];
-
+  if C10_LIKELY(v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
     const struct {
-      int32_t kernel_ic, kernel_oc;
-      int32_t stride_x, stride_y;
-      int32_t padding_x, padding_y;
-      float clamp_x, clamp_y;
+      ivec2 kernel;
+      ivec2 stride;
+      ivec2 padding;
+      vec2 clamp;
       int32_t stacks_per_tower;
     } block {
-      safe_downcast<int32_t>(filter[Layout::Filter::input]),
-      safe_downcast<int32_t>(filter[Layout::Filter::output]),
-      safe_downcast<int32_t>(stride[Layout::Parameter::width]),
-      safe_downcast<int32_t>(stride[Layout::Parameter::height]),
-      safe_downcast<int32_t>(padding[Layout::Parameter::width]),
-      safe_downcast<int32_t>(padding[Layout::Parameter::height]),
-      output_min,
-      output_max,
-      safe_downcast<int32_t>(stacks_per_tower),
+      {
+        safe_downcast<int32_t>(filter[Layout::Filter::input]),
+        safe_downcast<int32_t>(filter[Layout::Filter::output]),
+      },
+      {
+        safe_downcast<int32_t>(stride[Layout::Parameter::width]),
+        safe_downcast<int32_t>(stride[Layout::Parameter::height]),
+      },
+      {
+        safe_downcast<int32_t>(padding[Layout::Parameter::width]),
+        safe_downcast<int32_t>(padding[Layout::Parameter::height]),
+      },
+      {
+        output_min,
+        output_max,
+      },
+      safe_downcast<int32_t>(v_weight.sizes()[0]),
     };
 
     context->dispatch(
@@ -548,29 +564,38 @@ void conv2d(
     const IntArrayRef dilation,
     const float output_min,
     const float output_max) {
-  if (v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
-    const int64_t stacks_per_tower = v_weight.sizes()[0];
+  if C10_LIKELY(v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
     const struct {
-      int32_t kernel_x, kernel_y, kernel_ic, kernel_oc;
-      int32_t stride_x, stride_y;
-      int32_t padding_x, padding_y;
-      int32_t dilate_x, dilate_y;
-      float clamp_x, clamp_y;
-      int32_t stacks_per_tower;
+      ivec4 kernel;
+      ivec2 stride;
+      ivec2 padding;
+      ivec2 dilate;
+      vec2 clamp;
+      ivec2 stacks_per_tower;
     } block {
-      safe_downcast<int32_t>(filter[Layout::Filter::width]),
-      safe_downcast<int32_t>(filter[Layout::Filter::height]),
-      safe_downcast<int32_t>(filter[Layout::Filter::input]),
-      safe_downcast<int32_t>(filter[Layout::Filter::output]),
-      safe_downcast<int32_t>(stride[Layout::Parameter::width]),
-      safe_downcast<int32_t>(stride[Layout::Parameter::height]),
-      safe_downcast<int32_t>(padding[Layout::Parameter::width]),
-      safe_downcast<int32_t>(padding[Layout::Parameter::height]),
-      safe_downcast<int32_t>(dilation[Layout::Parameter::width]),
-      safe_downcast<int32_t>(dilation[Layout::Parameter::height]),
-      output_min,
-      output_max,
-      safe_downcast<int32_t>(stacks_per_tower),
+      {
+        safe_downcast<int32_t>(filter[Layout::Filter::width]),
+        safe_downcast<int32_t>(filter[Layout::Filter::height]),
+        safe_downcast<int32_t>(filter[Layout::Filter::input]),
+        safe_downcast<int32_t>(filter[Layout::Filter::output]),
+      },
+      {
+        safe_downcast<int32_t>(stride[Layout::Parameter::width]),
+        safe_downcast<int32_t>(stride[Layout::Parameter::height]),
+      },
+      {
+        safe_downcast<int32_t>(padding[Layout::Parameter::width]),
+        safe_downcast<int32_t>(padding[Layout::Parameter::height]),
+      },
+      {
+        safe_downcast<int32_t>(dilation[Layout::Parameter::width]),
+        safe_downcast<int32_t>(dilation[Layout::Parameter::height]),
+      },
+      {
+        output_min,
+        output_max,
+      },
+      safe_downcast<int32_t>(v_weight.sizes()[0]),
     };
 
     context->dispatch(
@@ -848,11 +873,26 @@ Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
     input.options(),
   };
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
-  command_buffer.begin();
-  {
-    if (is_depthwise(unpacked_.filter, unpacked_.groups)) {
-      conv2d_depthwise(
+  api::Command::Buffer& command_buffer = context->command().pool.stream();
+
+  if (is_depthwise(unpacked_.filter, unpacked_.groups)) {
+    conv2d_depthwise(
+        context,
+        command_buffer,
+        v_output,
+        v_input,
+        packed_.v_weight,
+        packed_.v_bias,
+        packed_.filter,
+        packed_.stride,
+        packed_.padding,
+        packed_.dilation,
+        packed_.output_min,
+        packed_.output_max);
+  }
+  else {
+    if (Experimentation::kUseConv2dOldApi) {
+      conv2d_old(
           context,
           command_buffer,
           v_output,
@@ -865,10 +905,23 @@ Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
           packed_.dilation,
           packed_.output_min,
           packed_.output_max);
-    }
-    else {
-      if (Experimentation::kUseConv2dOldApi) {
-        conv2d_old(
+    } else {
+      if (is_pointwise(unpacked_.filter)) {
+        conv2d_pointwise(
+            context,
+            command_buffer,
+            v_output,
+            v_input,
+            packed_.v_weight,
+            packed_.v_bias,
+            packed_.filter,
+            packed_.stride,
+            packed_.padding,
+            packed_.output_min,
+            packed_.output_max);
+      }
+      else {
+        conv2d(
             context,
             command_buffer,
             v_output,
@@ -881,41 +934,9 @@ Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
             packed_.dilation,
             packed_.output_min,
             packed_.output_max);
-      } else {
-        if (is_pointwise(unpacked_.filter)) {
-          conv2d_pointwise(
-              context,
-              command_buffer,
-              v_output,
-              v_input,
-              packed_.v_weight,
-              packed_.v_bias,
-              packed_.filter,
-              packed_.stride,
-              packed_.padding,
-              packed_.output_min,
-              packed_.output_max);
-        }
-        else {
-          conv2d(
-              context,
-              command_buffer,
-              v_output,
-              v_input,
-              packed_.v_weight,
-              packed_.v_bias,
-              packed_.filter,
-              packed_.stride,
-              packed_.padding,
-              packed_.dilation,
-              packed_.output_min,
-              packed_.output_max);
-        }
       }
     }
   }
-  command_buffer.end();
-  command_buffer.submit(context->gpu().queue);
 
   return convert(v_output);
 }

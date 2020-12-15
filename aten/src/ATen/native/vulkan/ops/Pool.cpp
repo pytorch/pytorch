@@ -33,7 +33,7 @@ Tensor adaptive_avg_pool2d(
     v_self.options(),
   };
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();
 
   if C10_LIKELY(v_self.has_image()) {
     const uvec3 v_output_size = v_output.extents();
@@ -167,7 +167,7 @@ Tensor avg_pool2d(
     v_self.options(),
   };
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();
 
   if C10_LIKELY(v_self.has_image()) {
     const struct {

@@ -420,11 +420,11 @@ class TestTensorExprFuser(BaseTestClass):
         traced = torch.jit.trace(
             easy,
             (torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int8),
-             torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.uint8)),
+             torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int8)),
         )
 
         a = torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int8)
-        b = torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.uint8)
+        b = torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int8)
         x = warmup_and_run_forward(traced, a, b)
         self.assertLastGraphAllFused()
         np.testing.assert_allclose((a.numpy() + b.numpy()) * b.numpy(), x.numpy())
@@ -1488,6 +1488,39 @@ class TestTensorExprFuser(BaseTestClass):
         np.testing.assert_allclose(f.numpy(), f_test)
         torch._C._jit_set_te_generate_block_code(val)
         torch._C._jit_texpr_set_fallback_allowed(fall_bk)
+
+    def test_strided_output_preserved(self):
+        def foo(a, b):
+            return a + b - a
+
+        # smaller, easier to debug example
+        x = torch.arange(6)
+        x = torch.as_strided(x, (2, 3), (1, 2))
+        total = 0
+        for i in range(2):
+            for j in range(3):
+                x[i, j] = total
+                total += 1
+        foo_script = torch.jit.script(foo)
+        foo_script(x, x)
+        foo_script(x, x)
+        out_s = foo_script(x, x)
+        out_eager = foo(x, x)
+        self.assertEqual(out_s, out_eager)
+        self.assertEqual(out_s.stride(), out_eager.stride())
+        self.assertLastGraphAllFused()
+
+        # more dims
+        N, C, H, W, = 2, 3, 4, 5
+        x = torch.rand(N, C, H, W).to(memory_format=torch.channels_last)
+        foo_script = torch.jit.script(foo)
+        foo_script(x, x)
+        foo_script(x, x)
+        out_s = foo_script(x, x)
+        out_eager = foo(x, x)
+        self.assertEqual(out_s, out_eager)
+        self.assertEqual(out_s.stride(), out_eager.stride())
+        self.assertLastGraphAllFused()
 
     def test_alias_analysis_module(self):
         class AliasModule(nn.Module):
