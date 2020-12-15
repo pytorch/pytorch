@@ -285,16 +285,6 @@ class RemoteModuleTest(RpcAgentTestFixture):
                 )
             )
 
-        with self.assertRaisesRegex(
-            RuntimeError, r"CPU device index must be -1 or zero, got 2"
-        ):
-            list(
-                self._create_remote_module_iter(
-                    "{}/cpu:2".format(dst_worker_name),
-                    modes=[ModuleCreationMode.MODULE_CTOR],
-                )
-            )
-
         with self.assertRaisesRegex(RuntimeError, r"Device string must not be empty"):
             list(
                 self._create_remote_module_iter(

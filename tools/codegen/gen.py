@@ -468,7 +468,7 @@ c10::impl::hacky_wrapper_for_legacy_signatures<
                 return f'm.impl("{f.func.name}", {payload});'
             else:
                 assert_never(self.target)
-                return None
+                # Silence mypy's "Missing return statement" error
 
         return list(mapMaybe(gen_one, g.functions()))
 
