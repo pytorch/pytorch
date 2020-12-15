@@ -1899,7 +1899,8 @@ def _write_ninja_file(path,
         # Compilation will work on earlier CUDA versions but header file
         # dependencies are not correctly computed.
         required_cuda_version = packaging.version.parse('10.2')
-        if packaging.version.parse(torch.version.cuda) >= required_cuda_version:
+        has_cuda_version = torch.version.cuda is not None
+        if has_cuda_version and packaging.version.parse(torch.version.cuda) >= required_cuda_version:
             cuda_compile_rule.append('  depfile = $out.d')
             cuda_compile_rule.append('  deps = gcc')
             # Note: non-system deps with nvcc are only supported
