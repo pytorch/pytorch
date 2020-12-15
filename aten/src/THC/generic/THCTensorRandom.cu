@@ -5,6 +5,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/Utils.h>
+#include <c10/cuda/CUDAException.h>
 #include <utility>
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
@@ -39,6 +40,8 @@ void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_probs, THCud
                      THCudaLongTensor_data(state, larger_short),
                      one, inputsize
                      );
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   at::Tensor smaller_short_wrapped = THTensor_wrap(smaller_short);
   at::Tensor smaller_wrapped = THTensor_wrap(smaller);
   at::Tensor larger_short_wrapped = THTensor_wrap(larger_short);
@@ -57,6 +60,8 @@ void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_probs, THCud
                 THCudaLongTensor_data(state, larger_short),
                 inputsize - h_large_c, h_large_c
                 );
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   scalar_t q_max = at::max(THTensor_wrap(_q)).item<scalar_t>();
   condDiv<<<
     inputBlockDim, BLOCK_SIZE, 0, c10::cuda::getCurrentCUDAStream()>>>(
@@ -64,6 +69,7 @@ void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_probs, THCud
                       THCudaLongTensor_data(state, _J),
                       inputsize, q_max
                       );
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   THCudaLongTensor_free(state, smaller);
   THCudaLongTensor_free(state, larger);
@@ -104,6 +110,8 @@ void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, T
           THCTensor_(data)(state, uniform),
           THCTensor_(data)(state, bernoulli)
           );
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   THCTensor_(free)(state, uniform);
   THCTensor_(free)(state, bernoulli);
 }
