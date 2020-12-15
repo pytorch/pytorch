@@ -55,13 +55,13 @@ TORCH_API Module load(
     c10::optional<c10::Device> device = c10::nullopt,
     ExtraFilesMap& extra_files = default_extra_files);
 
-/// Loads a serialized `Module` from the given `rai`.
+/// Loads a serialized `Module` from the given shared_ptr `rai`.
 ///
 /// The reader adapter, which is for customized input stream, must contain a
 /// serialized `Module`, exported either via `ScriptModule.save()` in
 /// Python or `torch::jit::ExportModule` in C++.
 TORCH_API Module load(
-    std::unique_ptr<caffe2::serialize::ReadAdapterInterface> rai,
+    std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai,
     c10::optional<c10::Device> device = c10::nullopt,
     ExtraFilesMap& extra_files = default_extra_files);
 
