@@ -14,7 +14,7 @@ else
     exit 1
 fi
 
-if [[ "$CUDA_VERSION" =~ ^10.* && "${JOB_EXECUTOR}" == "windows-with-nvidia-gpu" ]]; then
+if [[ "$CUDA_VERSION" =~ ^11.* && "${JOB_EXECUTOR}" == "windows-with-nvidia-gpu" ]]; then
     cuda_install_packages="${cuda_install_packages} Display.Driver"
 fi
 

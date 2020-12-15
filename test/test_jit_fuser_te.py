@@ -71,6 +71,19 @@ class TestTEFuser(JitTestCase):
         torch._C._jit_set_texpr_fuser_enabled(True)
 
         self.devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        self.int_dtypes = [
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.bool,
+        ]
+        self.fp_dtypes = [
+            torch.float16,
+            torch.float32,
+            torch.float64,
+        ]
+        self.dtypes = self.int_dtypes + self.fp_dtypes
 
     def tearDown(self):
         torch._C._jit_set_profiling_executor(self.old_profiling_executor)
@@ -461,21 +474,13 @@ class TestTEFuser(JitTestCase):
         def apply(fn):
             return lambda x, y, z: fn(fn(x, y), z)
 
-        dtypes = [
-            torch.int8,
-            torch.uint8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
-            torch.bool,
-        ]
         binary_ops = [
             operator.__and__,
             operator.__or__,
             operator.__xor__
         ]
         devices = self.devices
-        for dtype, op, device in product(dtypes, binary_ops, devices):
+        for dtype, op, device in product(self.int_dtypes, binary_ops, devices):
             try:
                 x = self.data_for(dtype, device)
                 y = self.data_for(dtype, device)
@@ -500,20 +505,12 @@ class TestTEFuser(JitTestCase):
         def apply(fn):
             return lambda x, y, z: fn(fn(x, y), z)
 
-        dtypes = [
-            torch.int8,
-            torch.uint8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
-            torch.bool,
-        ]
         binary_ops = [
             torch.min,
             torch.max
         ]
         devices = self.devices
-        for dtype, op, device in product(dtypes, binary_ops, devices):
+        for dtype, op, device in product(self.int_dtypes, binary_ops, devices):
             try:
                 x = self.data_for(dtype, device)
                 y = self.data_for(dtype, device)
@@ -1296,17 +1293,6 @@ class TestTEFuser(JitTestCase):
         def apply(fn):
             return lambda x: fn(x)
 
-        dtypes = [
-            torch.int8,
-            torch.uint8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
-            torch.float16,
-            torch.float32,
-            torch.float64,
-            torch.bool,
-        ]
         unary_ops = [
             torch.lgamma,
             torch.sigmoid,
@@ -1343,7 +1329,7 @@ class TestTEFuser(JitTestCase):
             lambda x: torch.clamp(x, -10, 10),
         ]
         sizes = [(1,), (2,), (4, 4)]
-        for dtype, op, device, size in product(dtypes, unary_ops, self.devices, sizes):
+        for dtype, op, device, size in product(self.dtypes, unary_ops, self.devices, sizes):
             try:
                 x = self.data_for(dtype, device, size=size)
                 fn = apply(op)
@@ -1367,18 +1353,7 @@ class TestTEFuser(JitTestCase):
         def apply(fn):
             return lambda x, y: fn(x, y)
 
-        dtypes = [
-            # FIXME: Fails in IR Eval: torch.int8 and_ cpu
-            torch.int8,
-            torch.uint8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
-            torch.float16,
-            torch.float32,
-            torch.float64,
-            torch.bool,
-        ]
+        # FIXME: Fails in IR Eval: torch.int8 and_ cpu
         binary_ops = [
             operator.__and__,
             operator.__or__,
@@ -1410,7 +1385,7 @@ class TestTEFuser(JitTestCase):
             torch.remainder,
         ]
         devices = self.devices
-        for dtype, op, device in product(dtypes, binary_ops, devices):
+        for dtype, op, device in product(self.dtypes, binary_ops, devices):
             try:
                 x = self.data_for(dtype, device)
                 y = self.data_for(dtype, device)
@@ -1436,18 +1411,7 @@ class TestTEFuser(JitTestCase):
         def apply_with_scalar(fn, scalar):
             return lambda x: fn(x, scalar)
 
-        dtypes = [
-            torch.int8,
-            torch.uint8,
-            torch.int16,
-            torch.int32,
-            # FIXME: Fails in IR Eval: torch.int64 and_ cpu
-            torch.int64,
-            torch.float16,
-            torch.float32,
-            torch.float64,
-            torch.bool
-        ]
+        # FIXME: Fails in IR Eval: torch.int64 and_ cpu
         binary_ops = [
             operator.__and__,
             operator.__or__,
@@ -1457,11 +1421,9 @@ class TestTEFuser(JitTestCase):
             torch.mul,
             torch.eq,
             torch.ne,
-
-            # FIXME: fails with dtype=uint8, scalar=-1
-            # torch.ge,
-            # torch.lt,
-            # torch.gt,
+            torch.ge,
+            torch.lt,
+            torch.gt,
 
             # FIXME: segfaults on CPU backend
             # operator.__rshift__,
@@ -1471,7 +1433,7 @@ class TestTEFuser(JitTestCase):
         # Maybe we should split this into separate tests to speed it up by
         # only using  scalar values relevant to particular ops
         scalars = [1.5, 3, 0, -2.0, -1]
-        for dtype, op, device, scalar in product(dtypes, binary_ops, devices, scalars):
+        for dtype, op, device, scalar in product(self.dtypes, binary_ops, devices, scalars):
             try:
                 x = self.data_for(dtype, device)
                 fn = apply_with_scalar(op, scalar)
@@ -1494,17 +1456,6 @@ class TestTEFuser(JitTestCase):
         def apply_with_scalar(fn, scalar):
             return lambda x: fn(x, scalar)
 
-        dtypes = [
-            torch.int8,
-            torch.uint8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
-            torch.float16,
-            torch.float32,
-            torch.float64,
-            torch.bool
-        ]
         binary_ops = [
             torch.div,
             torch.remainder,
@@ -1514,7 +1465,7 @@ class TestTEFuser(JitTestCase):
         # Maybe we should split this into separate tests to speed it up by
         # only using  scalar values relevant to particular ops
         scalars = [1.5, 3, -2.0, -1]  # skip 0
-        for dtype, op, device, scalar in product(dtypes, binary_ops, devices, scalars):
+        for dtype, op, device, scalar in product(self.dtypes, binary_ops, devices, scalars):
             try:
                 x = self.data_for(dtype, device)
                 fn = apply_with_scalar(op, scalar)
@@ -1538,7 +1489,6 @@ class TestTEFuser(JitTestCase):
 
         dtypes = [
             torch.int8,
-            torch.uint8,
             torch.int16,
             torch.int32,
             torch.int64,
@@ -1579,23 +1529,12 @@ class TestTEFuser(JitTestCase):
         def apply(fn):
             return lambda x, y, z: fn(x, y, z)
 
-        dtypes = [
-            torch.int8,
-            torch.uint8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
-            torch.float16,
-            torch.float32,
-            torch.float64,
-            torch.bool,
-        ]
         ternary_ops = [
             torch.lerp,
             torch.addcmul,
         ]
         devices = self.devices
-        for dtype, op, device in product(dtypes, ternary_ops, devices):
+        for dtype, op, device in product(self.dtypes, ternary_ops, devices):
             try:
                 x = self.data_for(dtype, device)
                 y = self.data_for(dtype, device)
@@ -1621,22 +1560,11 @@ class TestTEFuser(JitTestCase):
         def apply(fn):
             return lambda x, y, z: fn([x * x, y * y, z * z])
 
-        dtypes = [
-            torch.int8,
-            torch.uint8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
-            torch.float16,
-            torch.float32,
-            torch.float64,
-            torch.bool,
-        ]
         devices = self.devices
         list_ops = [
             torch.cat,
         ]
-        for dtype, op, device in product(dtypes, list_ops, devices):
+        for dtype, op, device in product(self.dtypes, list_ops, devices):
             try:
                 x = self.data_for(dtype, device, size=[5, 4, 1, 7])
                 y = self.data_for(dtype, device, size=[5, 4, 1, 7])
@@ -1661,24 +1589,13 @@ class TestTEFuser(JitTestCase):
         def apply(fn):
             return lambda cond, x, y: fn(cond, x, y)
 
-        dtypes = [
-            torch.int8,
-            torch.uint8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
-            torch.float16,
-            torch.float32,
-            torch.float64,
-            torch.bool,
-        ]
         ops = [
             torch.where,
             lambda cond, x, y: torch.where(cond, x, 3.1415),
             lambda cond, x, y: torch.where(cond, 42, y),
         ]
         devices = self.devices
-        for dtype, op, device in product(dtypes, ops, devices):
+        for dtype, op, device in product(self.dtypes, ops, devices):
             try:
                 cond = self.data_for(torch.bool, device)
                 x = self.data_for(dtype, device)
@@ -1705,6 +1622,7 @@ class TestTEFuser(JitTestCase):
             return x * x + x
 
         unsupported_dtypes = [
+            torch.uint8,
             torch.bfloat16,
             torch.complex32,
             torch.complex64,
