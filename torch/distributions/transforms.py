@@ -733,6 +733,7 @@ class CatTransform(Transform):
     """
     def __init__(self, tseq, dim=0, lengths=None, cache_size=0):
         assert all(isinstance(t, Transform) for t in tseq)
+        self.event_dim = max(t.event_dim for t in tseq)
         if cache_size:
             tseq = [t.with_cache(cache_size) for t in tseq]
         super(CatTransform, self).__init__(cache_size=cache_size)
@@ -784,9 +785,20 @@ class CatTransform(Transform):
         for trans, length in zip(self.transforms, self.lengths):
             xslice = x.narrow(self.dim, start, length)
             yslice = y.narrow(self.dim, start, length)
-            logdetjacs.append(trans.log_abs_det_jacobian(xslice, yslice))
+            logdetjac = trans.log_abs_det_jacobian(xslice, yslice)
+            if trans.event_dim < self.event_dim:
+                logdetjac = _sum_rightmost(logdetjac, self.event_dim - trans.event_dim)
+            logdetjacs.append(logdetjac)
             start = start + length  # avoid += for jit compat
-        return torch.cat(logdetjacs, dim=self.dim)
+        # Decide whether to concatenate or sum.
+        dim = self.dim
+        if dim >= 0:
+            dim = dim - x.dim()
+        dim = dim + self.event_dim
+        if dim < 0:
+            return torch.cat(logdetjacs, dim=dim)
+        else:
+            return sum(logdetjacs)
 
     @property
     def bijective(self):
