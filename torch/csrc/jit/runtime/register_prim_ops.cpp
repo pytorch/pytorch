@@ -21,6 +21,7 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include "c10/util/Optional.h"
 
 namespace torch {
 namespace jit {
@@ -29,23 +30,26 @@ namespace {
 
 std::string stringSlice(
     std::string string,
-    int64_t start,
-    int64_t end,
-    int64_t step) {
-  TORCH_CHECK(step == 1, "Slicing a string only supports step=1");
+    c10::optional<int64_t> start,
+    c10::optional<int64_t> end,
+    c10::optional<int64_t> step) {
+  int64_t start_val = start.has_value() ? start.value() : 0;
+  int64_t end_val = end.has_value() ? end.value() : INT64_MAX;
+  int64_t step_val = step.has_value() ? step.value() : 1;
+  TORCH_CHECK(step_val == 1, "Slicing a string only supports step=1");
 
   const int64_t size = string.size();
 
   // Clamp start and end to the bounds of the list
-  start = std::max(int64_t(0), normalizeIndex(start, size));
-  end = std::min(size, normalizeIndex(end, size));
+  start_val = std::max(int64_t(0), normalizeIndex(start_val, size));
+  end_val = std::min(size, normalizeIndex(end_val, size));
 
-  if (end <= start) {
+  if (end_val <= start_val) {
     // Slice is empty
     return std::string("");
   }
 
-  std::string result(string.begin() + start, string.begin() + end);
+  std::string result(string.begin() + start_val, string.begin() + end_val);
   return result;
 }
 
