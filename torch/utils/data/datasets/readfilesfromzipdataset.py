@@ -21,9 +21,20 @@ class ReadFilesFromZipIterableDataset(IterableDataset):
         self.dataset : Iterable = dataset
         self.length : int = length
 
+        # This is a list to store opened zipfile stream handles, since the yield back extracted file stream
+        # will not be readable once its source zipfile stream is destroyed
+        # each item in this list is a tuple(pathname, zipfile_stream_handle)
+        self.__zipfile_handle_register : list = []
+
+    def reset(self):
+        # release zipfile stream handles if any
+        if not self.__zipfile_handle_register:
+            self.__zipfile_handle_register = []
+
     def __iter__(self) -> Iterator[tuple]:
+        self.reset()
         yield from extract_files_from_pathname_binaries(
-            self.dataset, extract_files_from_single_zip_pathname_binary)
+            self.dataset, self.__zipfile_handle_register, extract_files_from_single_zip_pathname_binary)
 
     def __len__(self):
         if self.length == -1:
