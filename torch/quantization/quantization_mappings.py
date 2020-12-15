@@ -9,7 +9,7 @@ import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.qat as nnqat
 
-from typing import Optional, Union, Dict, List, Set, Callable
+from typing import Optional, Union, Dict, Set, Callable
 
 from .stubs import QuantStub, DeQuantStub
 from .fake_quantize import (
