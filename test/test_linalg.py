@@ -4688,24 +4688,27 @@ else:
         # mat_chars denotes matrix characteristics
         # possible values are: hermitian, hermitian_psd, hermitian_pd, singular, non_singular
         def run_test(matsize, batchdims, mat_chars):
-            num_matrices = reduce(lambda x, y: x * y, batchdims, 1)
+            num_matrices = np.prod(batchdims)
             list_of_matrices = []
-
-            for idx in range(num_matrices):
-                mat_type = idx % len(mat_chars)
-                if mat_chars[mat_type] == 'hermitian':
-                    list_of_matrices.append(random_hermitian_matrix(matsize, dtype=dtype, device=device))
-                elif mat_chars[mat_type] == 'hermitian_psd':
-                    list_of_matrices.append(random_hermitian_psd_matrix(matsize, dtype=dtype, device=device))
-                elif mat_chars[mat_type] == 'hermitian_pd':
-                    list_of_matrices.append(random_hermitian_pd_matrix(matsize, dtype=dtype, device=device))
-                elif mat_chars[mat_type] == 'singular':
-                    list_of_matrices.append(torch.ones(matsize, matsize, dtype=dtype, device=device))
-                elif mat_chars[mat_type] == 'non_singular':
-                    list_of_matrices.append(random_square_matrix_of_rank(matsize, matsize, dtype=dtype, device=device))
-            full_tensor = torch.stack(list_of_matrices, dim=0).reshape(batchdims + (matsize, matsize))
-            # Scaling adapted from `get_random_mat_scale` in _test_det_logdet_slogdet
-            full_tensor *= (math.factorial(matsize - 1) ** (-1.0 / (2 * matsize)))
+            if num_matrices != 0:
+                for idx in range(num_matrices):
+                    mat_type = idx % len(mat_chars)
+                    if mat_chars[mat_type] == 'hermitian':
+                        list_of_matrices.append(random_hermitian_matrix(matsize, dtype=dtype, device=device))
+                    elif mat_chars[mat_type] == 'hermitian_psd':
+                        list_of_matrices.append(random_hermitian_psd_matrix(matsize, dtype=dtype, device=device))
+                    elif mat_chars[mat_type] == 'hermitian_pd':
+                        list_of_matrices.append(random_hermitian_pd_matrix(matsize, dtype=dtype, device=device))
+                    elif mat_chars[mat_type] == 'singular':
+                        list_of_matrices.append(torch.ones(matsize, matsize, dtype=dtype, device=device))
+                    elif mat_chars[mat_type] == 'non_singular':
+                        list_of_matrices.append(random_square_matrix_of_rank(matsize, matsize, dtype=dtype, device=device))
+                full_tensor = torch.stack(list_of_matrices, dim=0).reshape(batchdims + (matsize, matsize))
+                # Scaling adapted from `get_random_mat_scale` in _test_det_logdet_slogdet
+                if matsize != 0:
+                    full_tensor *= (math.factorial(matsize - 1) ** (-1.0 / (2 * matsize)))
+            else:
+                full_tensor = torch.randn(*batchdims, matsize, matsize, dtype=dtype, device=device)
 
             actual_value = torch.linalg.slogdet(full_tensor)
             expected_value = np.linalg.slogdet(full_tensor.cpu().numpy())
@@ -4721,7 +4724,7 @@ else:
             self.assertEqual(sign_out, actual_value[0])
             self.assertEqual(logabsdet_out, actual_value[1])
 
-        for matsize, batchdims in itertools.product([3, 5], [(3,), (5, 3)]):
+        for matsize, batchdims in itertools.product([0, 3, 5], [(0,), (3,), (5, 3)]):
             run_test(matsize, batchdims, mat_chars=['hermitian_pd'])
             run_test(matsize, batchdims, mat_chars=['singular'])
             run_test(matsize, batchdims, mat_chars=['non_singular'])
