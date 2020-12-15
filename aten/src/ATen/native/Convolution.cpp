@@ -177,14 +177,10 @@ auto ConvParams::needs_64bit_indexing_no_split(const at::Tensor& input, const at
   int64_t outsize = 1;
   if (transposed) {
     std::vector<int64_t> o = conv_input_size(input.sizes(), weight.sizes(), padding, output_padding, stride, dilation, groups);
-    for (int64_t i = 1; i < o.size(); i++) {
-      outsize *= o[i];
-    }
+    outsize = prod_intlist(o.begin() + 1, o.end());
   } else {
     std::vector<int64_t> o = conv_output_size(input.sizes(), weight.sizes(), padding, stride, dilation);
-    for (int64_t i = 1; i < o.size(); i++) {
-      outsize *= o[i];
-    }
+    outsize = prod_intlist(o.begin() + 1, o.end());
   }
   return outsize > int_max;
 }

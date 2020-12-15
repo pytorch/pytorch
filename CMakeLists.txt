@@ -205,10 +205,10 @@ cmake_dependent_option(
     USE_VALGRIND "Use Valgrind. Only available on Linux." ON
     "LINUX" OFF)
 option(USE_VULKAN "Use Vulkan GPU backend" OFF)
-option(USE_VULKAN_API "Use Vulkan GPU backend v2" OFF)
-option(USE_VULKAN_WRAPPER "Use Vulkan wrapper" ON)
-option(USE_VULKAN_SHADERC_RUNTIME "Use Vulkan Shader compilation runtime(Needs shaderc lib)" OFF)
-option(USE_VULKAN_RELAXED_PRECISION "Use Vulkan relaxed precision(mediump)" OFF)
+option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference even on fp32 tensors" ON)
+option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
+option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation (needs libshaderc)" OFF)
+option(USE_VULKAN_WRAPPER "Vulkan - Dynamically load Vulkan functions" ON)
 option(USE_XNNPACK "Use XNNPACK" ON)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
@@ -554,22 +554,23 @@ endif()
 
 if(USE_VULKAN)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN")
-endif()
-
-if(USE_VULKAN_API)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_API")
-endif()
 
-if(USE_VULKAN_WRAPPER)
-  string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_WRAPPER")
-endif()
+  if(USE_VULKAN_FP16_INFERENCE)
+    string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_FP16_INFERENCE")
+  endif()
 
-if(USE_VULKAN_SHADERC_RUNTIME)
-  string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_SHADERC_RUNTIME")
-endif()
+  if(USE_VULKAN_RELAXED_PRECISION)
+    string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_RELAXED_PRECISION")
+  endif()
 
-if(USE_VULKAN_RELAXED_PRECISION)
-  string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_RELAXED_PRECISION")
+  if(USE_VULKAN_SHADERC_RUNTIME)
+    string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_SHADERC_RUNTIME")
+  endif()
+
+  if(USE_VULKAN_WRAPPER)
+    string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_WRAPPER")
+  endif()
 endif()
 
 if(USE_PYTORCH_METAL)
@@ -683,8 +684,8 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
 int main() {
   float a[] = {1.0, 1.0};
   float32x4x2_t v;
-  v.val[0] = vcombine_f32 (vcreate_f32 (__AARCH64_UINT64_C (0)), vcreate_f32 (__AARCH64_UINT64_C (0)));
-  v.val[1] = vcombine_f32 (vcreate_f32 (__AARCH64_UINT64_C (0)), vcreate_f32 (__AARCH64_UINT64_C (0)));
+  v.val[0] = vcombine_f32 (vcreate_f32 (0UL), vcreate_f32 (0UL));
+  v.val[1] = vcombine_f32 (vcreate_f32 (0UL), vcreate_f32 (0UL));
   vst1q_f32_x2(a, v);
   return 0;
 }" HAS_VST1)

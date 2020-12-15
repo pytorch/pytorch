@@ -153,15 +153,15 @@ Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Sc
   if (p == 0.0) {
     return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else if (p == 1.0) {
-    return self.sign() * grad;
+    return self.sgn() * grad;
   } else if (p == 2.0) {
     self_scaled = self;
     scale_v = grad / norm;
   } else if (std::isinf(p)) {
-    self_scaled = self.sign() * (self.abs() == norm).type_as(self);
+    self_scaled = self.sgn() * (self.abs() == norm).type_as(self);
     scale_v = grad.clone(at::MemoryFormat::Preserve);
   } else if (p < 2.0) {
-    self_scaled = self.sign() * self.abs().pow(p - 1);
+    self_scaled = self.sgn() * self.abs().pow(p - 1);
     scale_v = grad / norm.pow(p - 1);
   } else {
     self_scaled = self * self.abs().pow(p - 2);
@@ -2006,67 +2006,58 @@ Tensor qr_backward(const std::vector<torch::autograd::Variable> &grads, const Te
                                       const Tensor& A,
                                       const Tensor& Q,
                                       const Tensor& R) -> Tensor {
-    // For square and deep (tall) case we refer
-    // Walter, S.F and Lehmann, L., Algorithmic Differentiation of Linear
-    // Algebra Functions with Application in Optimum Experimental Design
-    // (Extended Version) The derivative for the QR decomposition is adapted
-    // from Eq. 42 of the above reference.
+    // For square and deep (tall) case we refer:
+    // Matthias Seeger, Asmus Hetzel, Zhenwen Dai, Eric Meissner, Neil D. Lawrence (2018). Auto-Differentiating Linear Algebra.
+    // https://arxiv.org/abs/1710.08717 Section 4.3 LQ Decomposition (Note that LQ decomposition is the transpose of QR decomposition)
+    // Hai-Jun Liao, Jin-Guo Liu, Lei Wang, Tao Xiang (2019). Differentiable Programming Tensor Networks.
+    // https://arxiv.org/abs/1903.09650 Section 3. QR factorization
+    // For derivations of complex-valued input case, see https://giggleliu.github.io/2019/04/02/einsumbp.html
 
-    // Compute R (R')^{T}
+    // Compute R grad_R^H
     Tensor R_term;
     if (grad_R.defined()) {
-      R_term = at::matmul(R, grad_R.transpose(-2, -1));
+      R_term = at::matmul(R, grad_R.conj().transpose(-2, -1));
     } else {
       // R is ... x N x N, grad_R is ... x N x N and grad_R.T is ... x N x N
       R_term = at::zeros_like(R, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     }
 
-    // Compute Q^{T} Q'
+    // Compute grad_Q^H Q
     Tensor Q_term;
     if (grad_Q.defined()) {
-      Q_term = at::matmul(Q.transpose(-2, -1), grad_Q);
+      Q_term = at::matmul(grad_Q.conj().transpose(-2, -1), Q);
     } else {
       // Q is ... x M x N, Q.T is ... x N x M and grad_Q is ... x M x N
       Q_term = at::zeros_like(R, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     }
 
-    // We want to compute: (rhs_solve_1 . R^{-T})
-    // Note that (rhs_solve_1 . R^{-T}) = (R^{-1} . rhs_solve_1^{T})^{T}
+    Tensor M = R_term - Q_term;
+
+    // Compute M = (tril(M) + tril(M).conj().transpose(-2, -1)) * 0.5 Identity
+    Tensor M_tril = at::tril(M);
+    M = M_tril + M_tril.conj().transpose(-2, -1);
+    M.diagonal(0, -2, -1).mul_(0.5);
+
+    Tensor rhs_term;
+    if (grad_Q.defined()) {
+      rhs_term = grad_Q + at::matmul(Q, M);
+    } else {
+      rhs_term = at::matmul(Q, M);
+    }
+
+    // We want to compute: (rhs_term @ R^{-H})
+    // Note that (rhs_term @ R^{-H}) = (R^{-1} @ rhs_solve_1^H)^H
     // Since R is upper triangular, we can do this using
-    // triangular_solve(rhs_solve_1^{T}, R)^{T}
-    auto rhs_solve_1 =
-        R_term - R_term.transpose(-2, -1) + Q_term - Q_term.transpose(-2, -1);
-    rhs_solve_1 = at::tril(rhs_solve_1, /*k=*/-1);
-    Tensor solve_soln_1;
-    std::tie(solve_soln_1, std::ignore) = at::triangular_solve(
-        rhs_solve_1.transpose(-2, -1),
+    // triangular_solve(rhs_term^H, R)^H
+    Tensor grad_A;
+    std::tie(grad_A, std::ignore) = at::triangular_solve(
+        rhs_term.conj().transpose(-2, -1),
         R,
         /*upper=*/true,
         /*transpose=*/false,
         /*unitriangular=*/false);
-    Tensor grad_A;
-    if (grad_R.defined()) {
-      grad_A = at::matmul(Q, solve_soln_1.transpose(-2, -1) + grad_R);
-    } else {
-      grad_A = at::matmul(Q, solve_soln_1.transpose(-2, -1));
-    }
 
-    // Successive computations involve computation of QQ^{T} which is identity when A is square
-    if (A.size(-1) != A.size(-2)) {
-      Tensor rhs_solve_2;
-      // We use the same trick from above for this computation
-      if (grad_Q.defined()) {
-        rhs_solve_2 = grad_Q - at::matmul(Q, Q_term);
-      } else {
-        rhs_solve_2 = -at::matmul(Q, Q_term);
-      }
-      Tensor solve_soln_2;
-      std::tie(solve_soln_2, std::ignore) = at::triangular_solve(rhs_solve_2.transpose(-2, -1), R,
-                                                               /*upper=*/true, /*transpose=*/false,
-                                                               /*unitriangular=*/false);
-      grad_A.add_(solve_soln_2.transpose(-2, -1));
-    }
-    return grad_A;
+    return grad_A.conj().transpose(-2, -1);
   };
 
   auto m = self.size(-2);
@@ -2087,7 +2078,7 @@ Tensor qr_backward(const std::vector<torch::autograd::Variable> &grads, const Te
     // grad_R = [grad_U | grad_V] and grad_A = [grad_X | grad_Y].
     // To obtain grad_X we reuse the gradient formula from the square case.
     // Formulae: grad_X = square_case_grad(grad_Q_prime, grad_U, Q, U),
-    // where grad_Q_prime = grad_Q + Y @ grad_V.T
+    // where grad_Q_prime = grad_Q + Y @ grad_V^H
     // and grad_Y = Q @ grad_V.
     // Then concatenate grads to get grad_A = [grad_X | grad_Y].
 
@@ -2099,8 +2090,8 @@ Tensor qr_backward(const std::vector<torch::autograd::Variable> &grads, const Te
       grad_V = grad_R.narrow(-1, m, n - m);
       // reuse grad_R to store grad_U
       grad_R = grad_R.narrow(-1, 0, m);
-      // grad_Q_prime starts with the value of Y @ grad_V.T
-      grad_Q_prime = at::matmul(Y, grad_V.transpose(-2, -1));
+      // grad_Q_prime starts with the value of Y @ grad_V^H
+      grad_Q_prime = at::matmul(Y, grad_V.conj().transpose(-2, -1));
     } else {
       // when grad_R is not defined then grad_V and grad_Q_prime
       // get initialized with zeros
@@ -2312,8 +2303,8 @@ std::tuple<Tensor, Tensor> cholesky_solve_backward(
   if (grad_x.defined()) {
     grad_self = grad_x.cholesky_solve(input2, /*upper=*/upper);
 
-    Tensor common_term = at::matmul(grad_self, result.transpose(-2, -1));
-    common_term = common_term + common_term.transpose(-2, -1);
+    Tensor common_term = at::matmul(grad_self, result.conj().transpose(-2, -1));
+    common_term = common_term + common_term.conj().transpose(-2, -1);
 
     if (upper) {
       grad_input2 = -at::matmul(input2, common_term);
@@ -2410,6 +2401,72 @@ Tensor fft_backward(const Tensor& self, const Tensor& grad, int64_t signal_ndim,
                         self.sizes());
   }
   return gI;
+}
+
+Tensor fft_c2r_backward(const Tensor& grad, IntArrayRef dim, int64_t normalization) {
+  // Forward is C2R (onesided)
+  // Think of onesided C2R irfft as
+  //    1. fill the other half by conjugate symmetry
+  //    2. inverse C2C ifft
+  //    3. discard the complex dimension
+  // So backward is
+  //    1. R2C rfft (essentially add dummy complex dimension, and dft)
+  //    2. accumulate gradient by conjugate symmetry
+  //       since rfft results follow conjugate symmetry, we only need to
+  //       double some entries from onesided rfft results, i.e., the ones with
+  //       their reflected indices also landing out of the onesided range. So
+  //       consider the index of last dim:
+  //           i.   idx = 0.
+  //                Reflected to (N - 0) % N = 0. Not doubled.
+  //           ii   0 < idx < floor(N/2) (last).
+  //                N > N - idx > ceil(N/2)
+  //                Reflected to ()
+  //           iii. idx = floor(N/2) = N/2 (last) when N even.
+  //                Reflected to (N - N/2) % N = N/2. Not doubled.
+  //           iv.  idx = floor(N/2) = (N-1)/2 (last) when N odd.
+  //                Reflected to (N - (N-1)/2) % N = (N+1)/2. Doubled.
+  //       Therefore, needs to double
+  //           idx = 1, 2, ..., N/2 - 1     when N even
+  //           idx = 1, 2, ..., (N-1)/2     when N odd
+  //       that is
+  //           idx = 1, 2, ..., N - (floor(N/2) + 1)
+  //               = 1, 2, ..., N - onesided_length
+  auto gI = at::_fft_r2c(grad, dim, normalization, /*onesided=*/true);
+
+  auto double_length = grad.size(dim.back()) - gI.size(dim.back());
+  if (double_length > 0) {  // also covers case when signal size is zero
+    gI.narrow(dim.back(), 1, double_length).mul_(2);
+  }
+  return gI;
+}
+
+Tensor fft_r2c_backward(const Tensor& grad, IntArrayRef dim, int64_t normalization,
+                        bool onesided, int64_t last_dim_size) {
+  if (!onesided) {
+    return at::real(at::_fft_c2c(grad, dim, normalization, /*forward=*/false));
+  }
+
+  // Forward is R2C (onesided)
+  // Think of onesided R2C rfft as
+  //     1. view as complex numbers (fill complex dim with zeros)
+  //     2. C2C fft
+  //     3. discard half of results
+  // So backward is
+  //     1. fill the other half with zeros (with `zero_grad_shape` below)
+  //        (C2C ifft only take twosided inputs so we need to fill here)
+  //     2. inverse C2C ifft
+  //     3. discard the complex dim
+  auto half_sizes = grad.sizes();
+  at::DimVector new_grad_shape(half_sizes.begin(), half_sizes.end());
+  const auto last_dim = at::maybe_wrap_dim(dim.back(), half_sizes.size());
+  new_grad_shape[last_dim] = last_dim_size;
+
+  const auto zero_length = last_dim_size - grad.size(dim.back());
+  auto complex_full_grad = zero_length > 0 ? at::zeros(new_grad_shape, grad.options()) : grad;
+  if (zero_length > 0) {
+    complex_full_grad.slice(last_dim, 0, half_sizes[last_dim]).copy_(grad);
+  }
+  return at::real(at::_fft_c2c(complex_full_grad, dim, normalization, /*forward=*/false));
 }
 
 // Helper for batchnorm_double_backward

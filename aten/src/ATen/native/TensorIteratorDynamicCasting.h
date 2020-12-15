@@ -26,7 +26,7 @@ namespace at { namespace native {
 // (and returns) of func_t
 template<typename func_t, int nargs=function_traits<func_t>::arity>
 struct needs_dynamic_casting {
-  static bool check(TensorIterator& iter) {
+  static bool check(TensorIteratorBase& iter) {
     using traits = function_traits<func_t>;
     using cpp_type = typename traits::template arg<nargs - 1>::type;
     using cpp_map = c10::CppTypeToScalarType<cpp_type>;
@@ -40,7 +40,7 @@ struct needs_dynamic_casting {
 
 template<typename func_t>
 struct needs_dynamic_casting<func_t, 0> {
-  static bool check(TensorIterator& iter) {
+  static bool check(TensorIteratorBase& iter) {
     using traits = function_traits<func_t>;
     using cpp_type = typename traits::result_type;
 

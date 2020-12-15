@@ -30,9 +30,15 @@
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
 
+#include <torch/csrc/jit/jit_log.h>
 #define DEBUG_PRINT 0
 
 using namespace torch::jit::tensorexpr;
+
+C10_DEFINE_bool(
+    torch_jit_llvm_use_fast_intrinsics,
+    false,
+    "Use fast (but slightly less accurate) implementations of tanh and sigmoid");
 
 DEFINE_TRIGGER(llvm_codegen_created);
 DEFINE_TRIGGER(llvm_codegen_executed);
@@ -158,6 +164,7 @@ class LLVMCodeGenImpl : public IRVisitor {
 #undef IMM_VISIT_DECLARE
 
   void visit(const Cast* v) override;
+  void visit(const BitCast* v) override;
   void visit(const Var* v) override;
   void visit(const Ramp* v) override;
   void visit(const Load* v) override;
@@ -495,8 +502,13 @@ void LLVMCodeGenImpl::emitKernel(
   irb_.SetInsertPoint(bb_);
 
   // Maybe expand some of the intrinsics.
-  LLVMIntrinsicsExpander intrinsics_expander;
-  stmt = stmt->accept_mutator(&intrinsics_expander);
+  if (FLAGS_torch_jit_llvm_use_fast_intrinsics) {
+    LLVMIntrinsicsExpander intrinsics_expander;
+    stmt = stmt->accept_mutator(&intrinsics_expander);
+  } else {
+    GenericIntrinsicsExpander intrinsics_expander;
+    stmt = stmt->accept_mutator(&intrinsics_expander);
+  }
 
   // Compile the kernel.
   stmt->accept(this);
@@ -514,6 +526,13 @@ void LLVMCodeGenImpl::emitKernel(
   if (llvm::verifyFunction(*fn_, &llvm::outs())) {
     throw std::runtime_error("Function verification failed");
   }
+
+  // print graph debug info.
+  std::string fnstr;
+  llvm::raw_string_ostream FS(fnstr);
+  fn_->print(FS);
+  GRAPH_DEBUG("LLVM Function:\n", FS.str(), "\n");
+
   optimize(*module_);
 
 #if DEBUG_PRINT
@@ -868,6 +887,25 @@ void LLVMCodeGenImpl::visit(const Cast* v) {
   } else {
     throw unimplemented_lowering(v);
   }
+}
+
+void LLVMCodeGenImpl::visit(const BitCast* v) {
+  v->src_value()->accept(this);
+
+  llvm::Type* dstType = dtypeToLLVM(v->dtype());
+  if (v->dtype().lanes() > 1) {
+    dstType = llvm::VectorType::get(dstType, ElementCount(v->dtype().lanes()));
+  }
+  llvm::Type* srcType = dtypeToLLVM(v->src_value()->dtype());
+
+  if (srcType == dstType) {
+    // do nothing.
+    return;
+  }
+
+  TORCH_CHECK(llvm::CastInst::isBitCastable(
+      srcType->getScalarType(), dstType->getScalarType()));
+  value_ = irb_.CreateBitOrPointerCast(value_, dstType);
 }
 
 void LLVMCodeGenImpl::visit(const Var* v) {
