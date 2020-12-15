@@ -2010,7 +2010,7 @@ Returns a new tensor with the hyperbolic cosine  of the elements of
 :attr:`input`.
 
 .. note::
-    Depending on the size and contiguity of the input vector, the implementation
+    Depending on the size and contiguity of the input, the implementation
     implementation of `torch.cosh` on cpu may use the Sleef library, which
     only supports inputs in `[-709, 709]` for double precision numbers or inputs
     in `[-88.5, 88.5]` for single precision numbers. If the input is out of this
@@ -7468,7 +7468,7 @@ Returns a new tensor with the hyperbolic sine of the elements of
 :attr:`input`.
 
 .. note::
-    Depending on the size and contiguity of the input vector, the implementation
+    Depending on the size and contiguity of the input, the implementation
     implementation of `torch.sinh` on cpu may use the Sleef library, which
     only supports inputs in `[-709, 709]` for double precision numbers or inputs
     in `[-88.5, 88.5]` for single precision numbers. If the input is out of this
