@@ -837,7 +837,6 @@ op_db: List[OpInfo] = [
                    promotes_integers_to_float=True,
                    handles_complex_extremals=False,
                    test_complex_grad=False),
-    # TODO: Make this test pass
     OpInfo('linalg.slogdet',
            aten_name='linalg_slogdet',
            op=torch.linalg.slogdet,
