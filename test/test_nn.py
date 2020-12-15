@@ -75,6 +75,9 @@ if TEST_NUMPY:
 
 DOUBLE_TENSORTYPES = [torch.double]
 
+# See #49409, we should remove these if we end up with a global gradcheck setting
+gradcheck = partial(gradcheck, check_forward=True)
+gradgradcheck = partial(gradgradcheck, check_forward=True)
 
 # WARNING: If you add a new top-level test case to this file, you MUST
 # update test/run_test.py to list it, otherwise it will NOT be run in

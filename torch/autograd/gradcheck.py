@@ -208,7 +208,7 @@ def get_analytical_jacobian_fw(fn, input, output):
     if output.is_sparse:
         raise ValueError('Sparse output is not supported at gradcheck yet. '
                          'Please call to_dense() on the output of fn for gradcheck.')
-    if output.layout == torch._mkldnn:
+    if output.layout == torch._mkldnn:  # type: ignore
         raise ValueError('MKLDNN output is not supported at gradcheck yet. '
                          'Please call to_dense() on the output of fn for gradcheck.')
     jacobian = make_jacobian(input, output.numel())
@@ -218,7 +218,7 @@ def get_analytical_jacobian_fw(fn, input, output):
         new_input = []
         for inp in input:
             if torch.is_tensor(inp) and inp.requires_grad:
-                if inp.layout == torch._mkldnn:
+                if inp.layout == torch._mkldnn:  # type: ignore
                     raise ValueError('MKLDNN inputs are not supported for forward gradcheck.')
 
                 inp = fwAD.make_dual(inp, torch.zeros_like(inp))
@@ -270,7 +270,7 @@ def gradcheck(
     nondet_tol: float = 0.0,
     check_undefined_grad: bool = True,
     check_grad_dtypes: bool = False,
-    check_forward: bool = True,
+    check_forward: bool = False,
     stacklevel: int = 2
 ) -> bool:
     r"""Check gradients computed via small finite differences against analytical
@@ -562,7 +562,7 @@ def gradgradcheck(
     nondet_tol: float = 0.0,
     check_undefined_grad: bool = True,
     check_grad_dtypes: bool = False,
-    check_forward: bool = True,
+    check_forward: bool = False,
 ) -> bool:
     r"""Check gradients of gradients computed via small finite differences
     against analytical gradients w.r.t. tensors in :attr:`inputs` and

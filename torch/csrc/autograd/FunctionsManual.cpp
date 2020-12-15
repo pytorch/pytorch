@@ -47,7 +47,7 @@ Tensor toLegacyFwGrad(const c10::optional<Tensor>& t) {
 }
 
 Tensor toLegacyPrimal(const c10::optional<Tensor>& t) {
-  return (t.has_value() && t->defined()) ? t->fw_primal(/*level */ 0) : Tensor();
+  return (t.has_value() && t->defined()) ? t->_fw_primal(/*level */ 0) : Tensor();
 }
 
 bool any_variable_defined(variable_list& variables) {

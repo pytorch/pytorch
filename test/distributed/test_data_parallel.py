@@ -45,7 +45,7 @@ class TestDataParallel(TestCase):
         def fn(t):
             return dpm(inp)
 
-        torch.autograd.gradcheck(fn, (m.t_rg,))
+        torch.autograd.gradcheck(fn, (m.t_rg,), check_forward=True)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_rnn(self):

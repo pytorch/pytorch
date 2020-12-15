@@ -300,9 +300,9 @@ class TestFFT(TestCase):
         def test_fn(x):
             return torch_fn(x, *args)
 
-        self.assertTrue(torch.autograd.gradcheck(test_fn, inputs))
+        self.assertTrue(torch.autograd.gradcheck(test_fn, inputs, check_forward=True))
         if TEST_WITH_SLOW:
-            self.assertTrue(gradgradcheck(test_fn, inputs))
+            self.assertTrue(gradgradcheck(test_fn, inputs, check_forward=True))
 
 
     @slowAwareTest

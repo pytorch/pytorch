@@ -12,7 +12,7 @@ from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
 from operator import mul
-from functools import reduce
+from functools import reduce, partial
 import torch
 import json
 
@@ -75,6 +75,9 @@ import pickle
 
 PRECISION = 1e-4
 
+# See #49409, we should remove these if we end up with a global gradcheck setting
+gradcheck = partial(gradcheck, check_forward=True)
+gradgradcheck = partial(gradgradcheck, check_forward=True)
 
 @contextlib.contextmanager
 def backward_engine(engine):

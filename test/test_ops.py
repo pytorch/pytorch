@@ -80,14 +80,17 @@ class TestGradients(TestCase):
             partial_fn = partial(variant, **sample.kwargs)
             if check == 'gradcheck':
                 self.assertTrue(gradcheck(partial_fn, (*sample.input,) + sample.args,
-                                          check_grad_dtypes=True))
+                                          check_grad_dtypes=True,
+                                          check_forward=True))
             elif check == 'gradgradcheck':
                 self.assertTrue(gradgradcheck(partial_fn, (*sample.input,) + sample.args, 
                                               gen_non_contig_grad_outputs=False,
-                                              check_grad_dtypes=True))
+                                              check_grad_dtypes=True,
+                                              check_forward=True))
                 self.assertTrue(gradgradcheck(partial_fn, (*sample.input,) + sample.args,
                                               gen_non_contig_grad_outputs=True,
-                                              check_grad_dtypes=True))
+                                              check_grad_dtypes=True,
+                                              check_forward=True))
             else:
                 self.assertTrue(False, msg="Unknown check requested!")
 

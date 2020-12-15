@@ -35,6 +35,10 @@ assert torch.get_default_dtype() is torch.float32
 # TODO(alband) Remove this when this flag is not needed anymore
 torch._C._set_forward_AD_enabled(True)
 
+# See #49409, we should remove these if we end up with a global gradcheck setting
+gradcheck = partial(gradcheck, check_forward=True)
+gradgradcheck = partial(gradgradcheck, check_forward=True)
+
 if TEST_SCIPY:
     import scipy
 

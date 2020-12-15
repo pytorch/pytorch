@@ -739,7 +739,7 @@ class TestDistributions(TestCase):
         def apply_fn(s, *params):
             return dist_ctor(*params).log_prob(s)
 
-        gradcheck(apply_fn, (s,) + tuple(ctor_params), raise_exception=True)
+        gradcheck(apply_fn, (s,) + tuple(ctor_params), raise_exception=True, check_forward=True)
 
     def _check_log_prob(self, dist, asset_fn):
         # checks that the log_prob matches a reference function
@@ -1982,7 +1982,8 @@ class TestDistributions(TestCase):
                 if prec is not None:
                     prec = 0.5 * (prec + prec.transpose(-1, -2))  # Ensure symmetry of precision
                 return MultivariateNormal(mu, sigma, prec, scale_tril).log_prob(samples)
-            gradcheck(gradcheck_func, (mvn_samples, mean, covariance, precision, scale_tril), raise_exception=True)
+            gradcheck(gradcheck_func, (mvn_samples, mean, covariance, precision, scale_tril),
+                      raise_exception=True, check_forward=True)
 
         multivariate_normal_log_prob_gradcheck(mean, cov)
         multivariate_normal_log_prob_gradcheck(mean_multi_batch, cov)
