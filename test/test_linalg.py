@@ -4728,6 +4728,47 @@ else:
             run_test(matsize, batchdims, mat_chars=['hermitian', 'hermitian_pd', 'hermitian_psd'])
             run_test(matsize, batchdims, mat_chars=['singular', 'non_singular'])
 
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_slogdet_errors_and_warnings(self, device, dtype):
+        # slogdet requires the input to be a square matrix or batch of square matrices
+        a = torch.randn(2, 3, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, r'must be batches of square matrices'):
+            torch.linalg.slogdet(a)
+
+        # slogdet requires the input to be at least 2 dimensional tensor
+        a = torch.randn(2, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, r'must have at least 2 dimensions'):
+            torch.linalg.slogdet(a)
+
+        # slogdet requires the input to be of float, double, cfloat or cdouble types
+        a = torch.randn(2, 2, device=device, dtype=torch.bfloat16)
+        with self.assertRaisesRegex(RuntimeError, r'of float, double, cfloat or cdouble types'):
+            torch.linalg.slogdet(a)
+
+        # if non-empty out tensor with wrong shape is passed a warning is given
+        a = torch.randn(2, 3, 3, device=device, dtype=dtype)
+        sign_out = torch.empty(1, device=device, dtype=dtype)
+        real_dtype = a.real.dtype if dtype.is_complex else dtype
+        logabsdet_out = torch.empty(1, device=device, dtype=real_dtype)
+        with warnings.catch_warnings(record=True) as w:
+            # Trigger warning
+            torch.linalg.slogdet(a, out=(sign_out, logabsdet_out))
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+        # dtypes should match
+        sign_out = torch.empty_like(a).to(torch.int)
+        logabsdet_out = torch.empty_like(a).to(torch.int)
+        with self.assertRaisesRegex(RuntimeError, "sign dtype Int does not match input dtype"):
+            torch.linalg.slogdet(a, out=(sign_out, logabsdet_out))
+
+        sign_out = torch.empty(0, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "logabsdet dtype Int does not match the expected dtype"):
+            torch.linalg.slogdet(a, out=(sign_out, logabsdet_out))
+
     @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
