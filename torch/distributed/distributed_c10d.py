@@ -172,6 +172,15 @@ _default_pg_init_method = None
 # Process group count for default naming
 _group_count = 0
 
+STORE_BASED_BARRIER_PREFIX = "store_based_barrier_key"
+
+def _store_based_barrier(rank, store):
+    global _group_count
+    store_key = "{}:{}".format(STORE_BASED_BARRIER_PREFIX, _group_count)
+    if rank == 0:
+        store.set(store_key, "1")
+    else:
+        store.wait([store_key])
 
 def _rank_not_in_group(group: ProcessGroup):
     """
@@ -474,7 +483,13 @@ def init_process_group(backend,
     # barrier at the end to ensure that once we return from this method, all
     # process groups including global variables are updated correctly on all
     # ranks.
-    barrier()
+    if backend == Backend.MPI:
+        # MPI doesn't have store.
+        barrier()
+    else:
+        # Use store based barrier here since barrier() used a bunch of
+        # default devices and messes up NCCL internal state.
+        _store_based_barrier(rank, store)
 
 def _new_process_group_helper(world_size,
                               rank,
@@ -2443,6 +2458,12 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
     # barrier at the end to ensure that once we return from this method, all
     # process groups including global variables are updated correctly on all
     # ranks.
-    barrier()
+    if backend == Backend.MPI:
+        # MPI doesn't have store.
+        barrier()
+    else:
+        # Use store based barrier here since barrier() used a bunch of
+        # default devices and messes up NCCL internal state.
+        _store_based_barrier(group_rank, default_store)
 
     return pg

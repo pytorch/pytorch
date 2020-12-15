@@ -4528,6 +4528,19 @@ class CommTest(MultiProcessTestCase):
         for root_rank in ranks:
             self._test_broadcast_coalesced(process_group, device, root_rank)
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    def test_nccl_barrier(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(backend="nccl", rank=self.rank, world_size=self.world_size, store=store)
+
+        t = torch.rand(10).cuda(2 * self.rank)
+        c10d.all_reduce(t)
+
+        # Test with new_group
+        pg = c10d.new_group([0, 1])
+        c10d.all_reduce(t)
+
 
 if __name__ == "__main__":
     assert (
