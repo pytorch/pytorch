@@ -399,7 +399,8 @@ def sample_inputs_linalg_solve(op_info, device, dtype, requires_grad=False):
         a = random_fullrank_matrix_distinct_singular_value(n, *batch, dtype=dtype).to(device)
         a.requires_grad = requires_grad
         b = torch.randn(*batch, n, *rhs, dtype=dtype, device=device)
-        out.append(SampleInput(a, args=(b,)))
+        b.requires_grad = requires_grad
+        out.append(SampleInput((a, b)))
     return out
 
 
