@@ -93,6 +93,7 @@ class StreamContext(object):
         match the stream.
     """
     cur_stream : Optional['torch.classes.cuda.Stream']
+
     def __init__(self, stream: Optional['torch.classes.cuda.Stream']):
         self.idx = -1
         self.stream = stream
