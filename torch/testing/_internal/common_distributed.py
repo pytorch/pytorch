@@ -273,7 +273,7 @@ class MultiProcessTestCase(TestCase):
     def world_size(self):
         return 4
 
-    def cuda_visible_devices(self) -> str:
+    def cuda_visible_devices(self):
         """
         Override this to set custom CUDA_VISIBLE_DEVICES.
         """
