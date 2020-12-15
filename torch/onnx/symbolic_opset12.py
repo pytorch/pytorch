@@ -2,6 +2,7 @@
 import torch
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _parse_arg
+from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
 
 
 # EDITING THIS FILE? READ THIS FIRST!
