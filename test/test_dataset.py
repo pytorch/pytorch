@@ -67,11 +67,13 @@ class TestIterableDatasetBasic(TestCase):
         dataset2 = LoadFilesFromDiskIterableDataset(dataset1)
         dataset3 = ReadFilesFromTarIterableDataset(dataset2)
 
-        for rec in dataset3:
-            file_pathname = rec[0][rec[0].find('.tar') + 4:]
-            self.assertTrue(file_pathname in self.temp_files)
-            self.assertTrue(rec[1].read() == open(file_pathname, 'rb').read())
-
+        count = 0
+        for rec, temp_file in zip(dataset3, self.temp_files):
+            count = count + 1
+            self.assertEqual(os.path.basename(rec[0]), os.path.basename(temp_file))
+            self.assertEqual(rec[1].read(), open(temp_file, 'rb').read())
+        self.assertEqual(count, len(self.temp_files))
+        dataset3.reset()
 
 if __name__ == '__main__':
     run_tests()
