@@ -1,7 +1,7 @@
 import re
 
 from dataclasses import dataclass
-from typing import List, Dict, Optional, Iterator, Tuple, Set, NoReturn, Sequence, Callable
+from typing import List, Dict, Optional, Iterator, Tuple, Set, NoReturn, Sequence, Callable, Union
 from enum import Enum
 import itertools
 
@@ -98,6 +98,12 @@ class NativeFunction:
     # registrations don't participate in codegen-based selective build!
     manual_kernel_registration: bool
 
+    # Whether or not to skip generating TensorMethod/Functions bindings
+    # for this kernel.  Technically, this doesn't actually skip generating
+    # the binding; instead, the binding gets generated to __dispatch_{funcname}
+    # so you can make use of the normal binding if you need it.
+    manual_cpp_binding: bool
+
     # A mapping of dispatch keys to names of functions implementing
     # them.  In native_functions.yaml, the dispatch entry is optional; in that
     # case, that is equivalent to having written:
@@ -124,6 +130,12 @@ class NativeFunction:
     # Whether or not this non-out function is a structured kernel, defined
     # in terms of the out kernel referenced by the string here.
     structured_delegate: Optional['OperatorName']
+
+    # Only valid for structured kernels.  Specifies alternative of what
+    # to inherit from when defining the meta class for the structured
+    # operator.  This will usually be TensorIteratorBase.  This also
+    # changes the semantics of set_output to call the parent class.
+    structured_inherits: Optional[str]
 
     # Note [Abstract ATen methods]
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -182,6 +194,9 @@ class NativeFunction:
         manual_kernel_registration = e.pop('manual_kernel_registration', False)
         assert isinstance(manual_kernel_registration, bool), f'not a bool: {manual_kernel_registration}'
 
+        manual_cpp_binding = e.pop('manual_cpp_binding', False)
+        assert isinstance(manual_cpp_binding, bool), f'not a bool: {manual_cpp_binding}'
+
         device_guard = e.pop('device_guard', True)
         assert isinstance(device_guard, bool), f'not a bool: {device_guard}'
 
@@ -193,6 +208,9 @@ class NativeFunction:
         structured_delegate: Optional[OperatorName] = None
         if structured_delegate_s is not None:
             structured_delegate = OperatorName.parse(structured_delegate_s)
+
+        structured_inherits = e.pop('structured_inherits', None)
+        assert structured_inherits is None or isinstance(structured_inherits, str), f'not a str: {structured_inherits}'
 
         python_module = e.pop('python_module', None)
         assert python_module is None or isinstance(python_module, str), f'not a str: {python_module}'
@@ -229,7 +247,9 @@ class NativeFunction:
             variants=variants,
             structured=structured,
             structured_delegate=structured_delegate,
+            structured_inherits=structured_inherits,
             manual_kernel_registration=manual_kernel_registration,
+            manual_cpp_binding=manual_cpp_binding,
             python_module=python_module,
             category_override=category_override,
             dispatch=dispatch,
@@ -261,9 +281,11 @@ class NativeFunction:
         if self.structured:
             assert self.func.kind() == SchemaKind.out, "Put structured field on the out= " \
                 "variant of a function; did you mean structured_delegate?"
+            assert self.device_guard, "device_guard: False is not respected by structured kernels"
         if self.structured_delegate:
             assert self.func.kind() != SchemaKind.out, "structured_delegate field not allowed " \
                 "on out= functions; did you mean structured?"
+            assert self.device_guard, "device_guard: False is not respected by structured kernels"
         # Technically, with the asserts above, this assert is impossible to
         # happen
         assert not (self.structured and self.structured_delegate), \
@@ -386,7 +408,11 @@ class FunctionSchema:
     returns: Tuple['Return', ...]
 
     def schema_order_arguments(self) -> Iterator['Argument']:
-        return itertools.chain(self.arguments.positional, self.arguments.kwarg_only, self.arguments.out)
+        return itertools.chain(
+            self.arguments.flat_positional,
+            self.arguments.flat_kwarg_only,
+            self.arguments.out
+        )
 
     @staticmethod
     def parse(func: str) -> 'FunctionSchema':
@@ -416,7 +442,7 @@ class FunctionSchema:
         # This means that all mutable returns should be aliased to a keyword argument
         # (except for "self", which we explicitly don't treat as an out argument because of its use in methods)
         # See Note [is_out_fn]
-        out_and_self = list(self.arguments.out) + [arg for arg in self.arguments.positional if arg.name == "self"]
+        out_and_self = list(self.arguments.out) + [arg for arg in self.arguments.flat_positional if arg.name == "self"]
         mutable_returns = [ret for ret in self.returns if ret.annotation is not None and ret.annotation.is_write]
         for ret in mutable_returns:
             assert any([ret.annotation == arg.annotation for arg in out_and_self]), \
@@ -466,6 +492,9 @@ class FunctionSchema:
                     '_foreach_round_',
                     '_foreach_lgamma_',
                     '_foreach_frac_',
+                    '_foreach_reciprocal_',
+                    '_foreach_sigmoid_',
+                    '_foreach_trunc_',
                     '_foreach_addcmul_.Scalar',
                     '_foreach_addcdiv_.Scalar',
                     '_foreach_addcmul_.ScalarList',
@@ -884,7 +913,14 @@ class Arguments:
     out: Tuple[Argument, ...]  # these are also kwarg-only
 
     @property
-    def positional(self) -> Sequence[Argument]:
+    def flat_non_out(self) -> Sequence[Argument]:
+        ret: List[Argument] = []
+        ret.extend(self.flat_positional)
+        ret.extend(self.flat_kwarg_only)
+        return ret
+
+    @property
+    def flat_positional(self) -> Sequence[Argument]:
         ret: List[Argument] = []
         ret.extend(self.pre_self_positional)
         if self.self_arg is not None:
@@ -894,11 +930,36 @@ class Arguments:
 
     # NB: doesn't contain out arguments
     @property
-    def kwarg_only(self) -> Sequence[Argument]:
+    def flat_kwarg_only(self) -> Sequence[Argument]:
         ret: List[Argument] = []
         ret.extend(self.pre_tensor_options_kwarg_only)
         if self.tensor_options is not None:
             ret.extend(self.tensor_options.all())
+        ret.extend(self.post_tensor_options_kwarg_only)
+        return ret
+
+    @property
+    def non_out(self) -> Sequence[Union[Argument, SelfArgument, TensorOptionsArguments]]:
+        ret: List[Union[Argument, SelfArgument, TensorOptionsArguments]] = []
+        ret.extend(self.positional)
+        ret.extend(self.kwarg_only)
+        return ret
+
+    @property
+    def positional(self) -> Sequence[Union[Argument, SelfArgument]]:
+        ret: List[Union[Argument, SelfArgument]] = []
+        ret.extend(self.pre_self_positional)
+        if self.self_arg is not None:
+            ret.append(self.self_arg)
+        ret.extend(self.post_self_positional)
+        return ret
+
+    @property
+    def kwarg_only(self) -> Sequence[Union[Argument, TensorOptionsArguments]]:
+        ret: List[Union[Argument, TensorOptionsArguments]] = []
+        ret.extend(self.pre_tensor_options_kwarg_only)
+        if self.tensor_options is not None:
+            ret.append(self.tensor_options)
         ret.extend(self.post_tensor_options_kwarg_only)
         return ret
 
@@ -968,7 +1029,7 @@ class Arguments:
         Input: 'int x, int y, int z'
         """
 
-        # We do this in two phases.  First we parse into three 
+        # We do this in two phases.  First we parse into three
         # main categories: positional, kwarg_only, out.
         # Then, we reparse positional and kwarg_only to separate
         # out the self argument and tensor options arguments.
@@ -1041,10 +1102,10 @@ class Arguments:
 
     def __str__(self) -> str:
         all_arguments: List[str] = []
-        all_arguments.extend(map(str, self.positional))
-        if self.kwarg_only or self.out:
+        all_arguments.extend(map(str, self.flat_positional))
+        if self.flat_kwarg_only or self.out:
             all_arguments.append('*')
-        all_arguments.extend(map(str, self.kwarg_only))
+        all_arguments.extend(map(str, self.flat_kwarg_only))
         all_arguments.extend(map(str, self.out))
         return ', '.join(all_arguments)
 
