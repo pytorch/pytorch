@@ -872,8 +872,6 @@ if TEST_SCIPY:
                        dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
                        dtypesIfCUDA=all_types_and(torch.bool, torch.half),
                        promotes_integers_to_float=True,
-                       handles_extremals=False,
-                       handles_large_floats=False,
                        domain=(-1, 1),
                        skips=(
                            # Reference: https://github.com/pytorch/pytorch/pull/49155#issuecomment-742664611
