@@ -1301,7 +1301,7 @@ class TestAutograd(TestCase):
 
     def test_set_grad_coroutines_exit(self):
         @torch.no_grad()
-        def coro_no_grad():
+        def coro_no_grad(state=set()):
             for i in range(10):
                 try:
                     self.assertFalse(torch.is_grad_enabled())
@@ -1309,10 +1309,11 @@ class TestAutograd(TestCase):
 
                 except GeneratorExit:
                     self.assertFalse(torch.is_grad_enabled())
+                    state.add('GeneratorExit')
                     raise
 
         @torch.enable_grad()
-        def coro_enable_grad():
+        def coro_enable_grad(state=set()):
             for i in range(10):
                 try:
                     self.assertTrue(torch.is_grad_enabled())
@@ -1320,21 +1321,26 @@ class TestAutograd(TestCase):
 
                 except GeneratorExit:
                     self.assertTrue(torch.is_grad_enabled())
+                    state.add('GeneratorExit')
                     raise
 
+        state = set()
         with torch.enable_grad():
-            coro = coro_no_grad()
+            coro = coro_no_grad(state)
             for i in range(5):
                 next(coro)
 
             coro.close()
+        self.assertTrue('GeneratorExit' in state)
 
+        state = set()
         with torch.no_grad():
-            coro = coro_enable_grad()
+            coro = coro_enable_grad(state)
             for i in range(5):
                 next(coro)
 
             coro.close()
+        self.assertTrue('GeneratorExit' in state)
 
     def test_no_grad_python_function(self):
         """Python Functions should respect grad mode."""
