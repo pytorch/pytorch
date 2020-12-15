@@ -33,7 +33,7 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
                   (options.layout() == c10::kStrided));
 
   if (memory_format == MemoryFormat::Preserve) {
-    if (self.is_non_overlapping_and_dense()) {
+    if (self.unsafeGetTensorImpl()->support_as_strided() && self.is_non_overlapping_and_dense()) {
       // Copy all strides
       auto r = at::empty_strided(self.sizes(),
                                  self.strides(),
