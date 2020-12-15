@@ -27,9 +27,9 @@ class ReadFilesFromZipIterableDataset(IterableDataset):
         self.__zipfile_handle_register : list = []
 
     def reset(self):
-        # release zipfile stream handles if any
-        if not self.__zipfile_handle_register:
-            self.__zipfile_handle_register = []
+        # explicitly release zipfile stream handles if any
+        if self.__zipfile_handle_register:
+            del self.__zipfile_handle_register[:]
 
     def __iter__(self) -> Iterator[tuple]:
         self.reset()
