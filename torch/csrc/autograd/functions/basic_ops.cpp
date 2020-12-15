@@ -48,7 +48,7 @@ auto UndefinedGradBackward::apply(variable_list&& output_grads) -> variable_list
 }
 
 auto Identity::apply(variable_list&& grads) -> variable_list {
-  return grads;
+  return std::move(grads);
 }
 
 }} // namespace torch::autograd
