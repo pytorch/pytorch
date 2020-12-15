@@ -81,28 +81,28 @@ TORCH_LIBRARY_IMPL(aten, VmapMode, m) {
   m.impl_UNBOXED("rand.generator", unsupportedRandomOp<IntArrayRef, optional<Generator>, const TensorOptions&>);
   m.impl_UNBOXED("rand.names", unsupportedRandomOp<IntArrayRef, optional<DimnameList>, const TensorOptions&>);
   m.impl_UNBOXED("rand.generator_with_names", unsupportedRandomOp<IntArrayRef, optional<Generator>, optional<DimnameList>, const TensorOptions&>);
-  m.impl_UNBOXED("rand.out", unsupportedRandomOp_<Tensor&, IntArrayRef>);
+  m.impl("rand.out", unsupportedRandomOp_<IntArrayRef, Tensor&>);
   m.impl_UNBOXED("rand.generator_out", unsupportedRandomOp_<Tensor&, IntArrayRef, optional<Generator>>);
 
   m.impl("randn", unsupportedRandomOp<IntArrayRef, TENSOROPTIONS>);
   m.impl_UNBOXED("randn.generator", unsupportedRandomOp<IntArrayRef, optional<Generator>, const TensorOptions&>);
   m.impl_UNBOXED("randn.names", unsupportedRandomOp<IntArrayRef, optional<DimnameList>, const TensorOptions&>);
   m.impl_UNBOXED("randn.generator_with_names", unsupportedRandomOp<IntArrayRef, optional<Generator>, optional<DimnameList>, const TensorOptions&>);
-  m.impl_UNBOXED("randn.out", unsupportedRandomOp_<Tensor&, IntArrayRef>);
+  m.impl("randn.out", unsupportedRandomOp_<IntArrayRef, Tensor&>);
   m.impl_UNBOXED("randn.generator_out", unsupportedRandomOp_<Tensor&, IntArrayRef, optional<Generator>>);
 
   m.impl("randperm", unsupportedRandomOp<int64_t, TENSOROPTIONS>);
   m.impl_UNBOXED("randperm.generator", unsupportedRandomOp<int64_t, optional<Generator>, const TensorOptions&>);
-  m.impl_UNBOXED("randperm.out", unsupportedRandomOp_<Tensor&, int64_t>);
+  m.impl("randperm.out", unsupportedRandomOp_<int64_t, Tensor&>);
   m.impl_UNBOXED("randperm.generator_out", unsupportedRandomOp_<Tensor&, int64_t, optional<Generator>>);
 
   m.impl("randint", unsupportedRandomOp<int64_t, IntArrayRef, TENSOROPTIONS>);
   m.impl_UNBOXED("randint.generator", unsupportedRandomOp<int64_t, IntArrayRef, optional<Generator>, const TensorOptions&>);
   m.impl("randint.low", unsupportedRandomOp<int64_t, int64_t, IntArrayRef, TENSOROPTIONS>);
   m.impl_UNBOXED("randint.low_generator", unsupportedRandomOp<int64_t, int64_t, IntArrayRef, optional<Generator>, const TensorOptions&>);
-  m.impl_UNBOXED("randint.out", unsupportedRandomOp_<Tensor&, int64_t, IntArrayRef>);
+  m.impl("randint.out", unsupportedRandomOp_<int64_t, IntArrayRef, Tensor&>);
   m.impl_UNBOXED("randint.generator_out", unsupportedRandomOp_<Tensor&, int64_t, IntArrayRef, optional<Generator>>);
-  m.impl_UNBOXED("randint.low_out", unsupportedRandomOp_<Tensor&, int64_t, int64_t, IntArrayRef>);
+  m.impl("randint.low_out", unsupportedRandomOp_<int64_t, int64_t, IntArrayRef, Tensor&>);
   m.impl_UNBOXED("randint.low_generator_out", unsupportedRandomOp_<Tensor&, int64_t, int64_t, IntArrayRef, optional<Generator>>);
 
   m.impl_UNBOXED("uniform_", unsupportedRandomOp_<Tensor&, double, double, optional<Generator>>);
