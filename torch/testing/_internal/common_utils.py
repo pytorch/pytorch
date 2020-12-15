@@ -944,7 +944,7 @@ class TestCase(expecttest.TestCase):
         else:
             d = copy.copy(torch_to_numpy_dtype_dict)
             d[torch.bfloat16] = np.float32
-            a = np.array(tensor_like, dtype=torch_to_numpy_dtype_dict[dtype])
+            a = np.array(tensor_like, dtype=d[dtype])
             t = torch.tensor(tensor_like, device=device, dtype=dtype)
 
         np_result = np_fn(a)
