@@ -1281,7 +1281,6 @@ class TestTEFuser(JitTestCase):
                     " ".join(["Failed:", str(dtype), op.__name__, device, str(size)])
                 )
 
-    @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")
     def test_binary_ops(self):
         def apply(fn):
             return lambda x, y: fn(x, y)

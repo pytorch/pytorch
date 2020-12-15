@@ -1135,7 +1135,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::fmod: {
       return computeTwoOperand(
           "aten_fmod", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return fmod(lhs, rhs);
+            return fmod(promoteHalfToFloat(lhs), promoteHalfToFloat(rhs));
           });
     } break;
 
@@ -1152,7 +1152,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
         return Mod::make(lhs, rhs);
       };
       auto fmodImpl = [](const ExprHandle& lhs, const ExprHandle& rhs) {
-        return fmod((rhs + fmod(lhs, rhs)), rhs);
+        auto lhs_t = promoteHalfToFloat(lhs);
+        auto rhs_t = promoteHalfToFloat(rhs);
+        return fmod((rhs_t + fmod(lhs_t, rhs_t)), rhs_t);
       };
       {
         auto const& n = v->node();
