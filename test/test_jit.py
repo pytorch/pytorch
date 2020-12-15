@@ -15190,19 +15190,28 @@ dedent """
     def test_dict_invalid_annotations(self):
         # Check for invalid value type annotation
         with self.assertRaisesRegex(AssertionError, "Unsupported annotation"):
+<<<<<<< HEAD
             @torch.jit.script
+=======
+>>>>>>> 60928ee37187e0e4e207170ebcef73283cb610a9
             def fn(dictionary: Dict[str, torch.jit.ScriptModule]):
                 return
 
         # Check for invalid key type annotation
         with self.assertRaisesRegex(AssertionError, "Unsupported annotation"):
+<<<<<<< HEAD
             @torch.jit.script
+=======
+>>>>>>> 60928ee37187e0e4e207170ebcef73283cb610a9
             def fn(dictionary: Dict[torch.jit.ScriptModule, str]):
                 return
 
         # Check for invalid key and value type annotation
         with self.assertRaisesRegex(AssertionError, "Unsupported annotation"):
+<<<<<<< HEAD
             @torch.jit.script
+=======
+>>>>>>> 60928ee37187e0e4e207170ebcef73283cb610a9
             def fn(dictionary: Dict[torch.jit.ScriptModule, torch.jit.ScriptModule]):
                 return
 
