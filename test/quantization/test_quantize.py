@@ -543,16 +543,18 @@ class TestPostTrainingStatic(QuantizationTestCase):
         self.checkObservers(m)
         convert(m, inplace=True)
         self.assertEqual(type(m.quant), nnq.Quantize)
+        self.assertEqual(type(m.fc), nnq.Linear)
         self.assertEqual(type(m.dequant), nnq.DeQuantize)
 
         # check DeQuantStub is not swapped when it doesn't have a qconfig
-        m = QuantStubModel().eval()
-        m.dequant.qconfig = None
-        prepare(m, inplace=True)
-        self.checkObservers(m)
-        convert(m, inplace=True)
-        self.assertEqual(type(m.quant), nnq.Quantize)
-        self.assertEqual(type(m.dequant), DeQuantStub)
+        m2 = QuantStubModel().eval()
+        m2.dequant.qconfig = None
+        prepare(m2, inplace=True)
+        self.checkObservers(m2)
+        convert(m2, inplace=True)
+        self.assertEqual(type(m2.quant), nnq.Quantize)
+        self.assertEqual(type(m2.fc), nnq.Linear)
+        self.assertEqual(type(m2.dequant), DeQuantStub)
 
 
     @skipIfNoFBGEMM
