@@ -17,6 +17,9 @@ from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, 
 from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining
 
 
+# TODO(alband) Remove this when this flag is not needed anymore
+torch._C._set_forward_AD_enabled(True)
+
 # Tests that apply to all operators
 
 class TestOpInfo(TestCase):

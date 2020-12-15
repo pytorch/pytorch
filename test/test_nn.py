@@ -20,6 +20,9 @@ import torch
 # NN tests use double as the default dtype
 torch.set_default_dtype(torch.double)
 
+# TODO(alband) Remove this when this flag is not needed anymore
+torch._C._set_forward_AD_enabled(True)
+
 from torch._six import inf, nan
 import torch.backends.cudnn as cudnn
 import torch.nn as nn

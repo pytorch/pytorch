@@ -20,6 +20,9 @@ from torch.testing._internal.common_utils import TestCase, run_tests, TemporaryF
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 
 
+# TODO(alband) Remove this when this flag is not needed anymore
+torch._C._set_forward_AD_enabled(True)
+
 # Comment the line below to find out the CI machines having MKL-DNN build disabled
 @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
 class TestMkldnn(TestCase):

@@ -32,6 +32,9 @@ from torch.autograd import gradcheck, gradgradcheck
 torch.set_default_dtype(torch.float32)
 assert torch.get_default_dtype() is torch.float32
 
+# TODO(alband) Remove this when this flag is not needed anymore
+torch._C._set_forward_AD_enabled(True)
+
 if TEST_SCIPY:
     import scipy
 
