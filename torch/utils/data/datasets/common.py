@@ -2,7 +2,7 @@ import os
 import fnmatch
 import warnings
 import tarfile
-from typing import List, Union, Iterable, Any
+from typing import List, Union, Iterable, Any, Callable
 from io import BufferedIOBase
 
 
@@ -67,6 +67,19 @@ def validate_pathname_binary(rec):
     return ""
 
 
+def extract_files_from_pathname_binaries(pathname_binaries : Iterable, extract_fn : Callable):
+    if not isinstance(pathname_binaries, Iterable):
+        warnings.warn("pathname_binaries must be Iterable type got {}".format(type(pathname_binaries)))
+        raise TypeError
+
+    for rec in pathname_binaries:
+        ret = validate_pathname_binary(rec)
+        if ret:
+            warnings.warn("encounter invalid pathname and binary record ({}), abort!".format(ret))
+            raise TypeError
+        yield from extract_fn(rec[0], rec[1])
+
+
 def extract_files_from_single_tar_pathname_binary(
         pathname : str,
         binary_stream : Any):
@@ -87,18 +100,3 @@ def extract_files_from_single_tar_pathname_binary(
     except tarfile.TarError as e:
         warnings.warn("Unable to extract files from corrupted tarfile stream {}, abort!".format(pathname))
         raise e
-
-
-def extract_files_from_tar_pathname_binaries(pathname_binaries : Iterable):
-    if not isinstance(pathname_binaries, Iterable):
-        warnings.warn("pathname_binaries must be Iterable type got {}".format(type(pathname_binaries)))
-        raise TypeError
-
-    for rec in pathname_binaries:
-        ret = validate_pathname_binary(rec)
-
-        if ret:
-            warnings.warn("encounter invalid pathname and binary record ({}), abort!".format(ret))
-            raise TypeError
-
-        yield from extract_files_from_single_tar_pathname_binary(rec[0], rec[1])
