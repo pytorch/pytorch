@@ -476,4 +476,22 @@ namespace test_tuple_concat {
   }
 }
 
+namespace test_concat_iseq {
+  using std::index_sequence;
+  using std::integer_sequence;
+  static_assert(std::is_same<index_sequence<>, concat_iseq_t<>>::value, "");
+  static_assert(std::is_same<index_sequence<>, concat_iseq_t<index_sequence<>>>::value, "");
+  static_assert(std::is_same<index_sequence<>, concat_iseq_t<index_sequence<>, index_sequence<>>>::value, "");
+  static_assert(std::is_same<index_sequence<4>, concat_iseq_t<index_sequence<4>>>::value, "");
+  static_assert(std::is_same<index_sequence<4>, concat_iseq_t<index_sequence<4>, index_sequence<>>>::value, "");
+  static_assert(std::is_same<index_sequence<4>, concat_iseq_t<index_sequence<>, index_sequence<4>>>::value, "");
+  static_assert(std::is_same<index_sequence<4>, concat_iseq_t<index_sequence<>, index_sequence<4>, index_sequence<>>>::value, "");
+  static_assert(std::is_same<index_sequence<4, 2>, concat_iseq_t<index_sequence<4>, index_sequence<2>>>::value, "");
+  static_assert(std::is_same<index_sequence<4, 2>, concat_iseq_t<index_sequence<>, index_sequence<4, 2>, index_sequence<>>>::value, "");
+  static_assert(std::is_same<index_sequence<4, 2, 9>, concat_iseq_t<index_sequence<>, index_sequence<4, 2>, index_sequence<9>>>::value, "");
+
+  static_assert(std::is_same<integer_sequence<int8_t, -5, -3>, concat_iseq_t<integer_sequence<int8_t, -5>, integer_sequence<int8_t, -3>>>::value, "");
+}
+
+
 }
