@@ -28,6 +28,13 @@ TORCH_API bool texprReductionsEnabled();
 TORCH_API void RemoveProfileNodesAndSpecializeTypes(
     std::shared_ptr<Graph>& graph);
 TORCH_API void RemoveTensorTypeSpecializations(std::shared_ptr<Graph>& graph);
+TORCH_API void removeTensorTypeSpecializations(Block* block);
+
+using tensor_type_converter_t =
+    c10::function_ref<TensorTypePtr(const TensorTypePtr& t)>;
+TORCH_API void insertTypeGuard(
+    Node* guarded_node,
+    tensor_type_converter_t type_converter);
 
 TORCH_API bool usedOnlyInSize(Value* v);
 TORCH_API Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db);
