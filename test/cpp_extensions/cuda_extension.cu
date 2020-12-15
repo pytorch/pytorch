@@ -6,6 +6,7 @@
 
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include <c10/cuda/CUDAException.h>
 
 #include <ATen/ATen.h>
 
