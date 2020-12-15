@@ -322,6 +322,7 @@ class TestBinaryUfuncs(TestCase):
         t *= 1
         t /= 1
         t //= 1
+        t %= 1
         self.assertEqual(expected, t.data_ptr())
 
     def check_internal_mem_overlap(self, inplace_op, num_inputs,
