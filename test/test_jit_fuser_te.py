@@ -109,6 +109,15 @@ class TestTEFuser(JitTestCase):
                 result += self.findFusionGroups(block)
         return result
 
+    def findNodesInBlocks(self, graph, kind):
+        result = []
+        for n in graph.nodes():
+            if n.kind() == kind:
+                result.append(n)
+            for block in n.blocks():
+                result += self.findNodesInBlocks(block, kind)
+        return result
+
     def _test_fused_abs(self, device='cpu'):
         def func(x):
             return x.abs() * 2
@@ -655,7 +664,7 @@ class TestTEFuser(JitTestCase):
         y = torch.ones(1, requires_grad=True, device='cuda')
         warmup_forward(scripted_f, x, y)
         g = torch.jit.last_executed_optimized_graph()
-        diff_nodes = [n for n in g.nodes() if n.kind() == 'prim::DifferentiableGraph']
+        diff_nodes = self.findNodesInBlocks(g, 'prim::DifferentiableGraph')
         self.assertEqual(len(diff_nodes), 1)
         g = diff_nodes[0].g('Subgraph')
         if_nodes = [n for n in g.nodes() if n.kind() == 'prim::If']
@@ -964,7 +973,7 @@ class TestTEFuser(JitTestCase):
             forward_graph = module.graph_for(*inputs)
             self.assertGraphContainsExactly(
                 forward_graph, FUSION_GROUP, 1, consider_subgraphs=True)
-            FileCheck().check("DifferentiableGraph").check_next("TupleConstruct") \
+            FileCheck().check("DifferentiableGraph").check("TupleConstruct") \
                 .check_next("return").check(FUSION_GROUP).run(str(forward_graph))
             hy, cy = module(*inputs)
             warmup_backward((hy + cy).sum())
@@ -1642,6 +1651,20 @@ class TestTEFuser(JitTestCase):
         self.assertAllFused(script.graph_for(a, s))
         script = self.checkScript(eager_st, (s, b))
         self.assertAllFused(script.graph_for(s, b))
+
+    def test_autodiff_fallback(self):
+        for rq in [True, False]:
+            @torch.jit.script
+            def fn(x):
+                return torch.max(x**2.0, x**3.0)
+
+            x = torch.randn(5, requires_grad=not rq)
+            # cause optimization to be created
+            for i in range(5):
+                fn(x)
+            # test fallback when optimization is not applicable
+            y = fn(torch.randn(5, requires_grad=rq))
+            self.assertEqual(y.requires_grad, rq)
 
 if __name__ == '__main__':
     run_tests()

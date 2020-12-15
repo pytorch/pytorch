@@ -29,6 +29,7 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
+#include <torch/csrc/jit/passes/update_differentiable_graph_requires_grad.h>
 
 C10_DEFINE_bool(
     torch_jit_enable_new_executor,
@@ -376,6 +377,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
   runPreAutodiffPassPipeline(copy);
 
   if (needsGradientInProfilingMode(copy->block())) {
+    RemoveProfileNodesAndSpecializeTypes(copy);
     auto diff_nodes = CreateAutodiffSubgraphs(
         copy,
         getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
@@ -383,10 +385,15 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     size_t idx = 0;
     for (Node* dnode : diff_nodes) {
       GRAPH_DEBUG("Optimizing diff node ", idx);
+      insertTypeGuard(dnode, [](const TensorTypePtr& t) {
+        return TensorType::get()->withRequiresGrad(t->requiresGrad());
+      });
       auto diff_graph = std::move(dnode->g(attr::Subgraph));
       Gradient gradient = differentiate(diff_graph);
       GRAPH_DEBUG("Forward graph:\n", *(gradient.f));
       GRAPH_DEBUG("Backward graph:\n", *(gradient.df));
+      UpdateDifferentiableGraphRequiresGrad(gradient.f, false);
+      GRAPH_DEBUG("After UpdateDifferentiableGraphRequiresGrad ", *gradient.f);
       runDiffGraphPasses(gradient.f);
       // replaces fallback graphs inserted by TE Fuser
       replaceFallbackGraphWithFallbackFunction(gradient.f->block());
@@ -396,7 +403,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     InlineAutodiffSubgraphs(
         copy,
         getAutodiffSubgraphInlining() ? autodiffSubgraphInlineThreshold : 1);
-    RemoveProfilingNodes(copy);
+    replaceFallbackGraphWithFallbackFunction(copy->block());
     GRAPH_DEBUG(
         "After InlineAutodiffSubgraphs and Removing Profiling Nodes\n", *copy);
   } else {

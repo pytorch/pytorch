@@ -73,6 +73,23 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
+    def test_autodiff_fallback(self):
+        for rq in [True, False]:
+            @torch.jit.script
+            def fn(x):
+                return torch.max(x**2.0, x**3.0)
+
+            x = torch.randn(5, requires_grad=not rq)
+            # cause optimization to be created
+            for i in range(5):
+                fn(x)
+            # test fallback when optimization is not applicable
+            y = fn(torch.randn(5, requires_grad=rq))
+            self.assertEqual(y.requires_grad, rq)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
     def test_half(self):
         def t(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor, alpha: float):
             o_16 = torch.add(x, y)

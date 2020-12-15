@@ -267,6 +267,8 @@ def get_grad_executor(plan_state, diff_graph_idx=None, skip_check=False):
             nodes = list(filter(lambda n : n.kind() != "prim::BailOut" and n.kind() != "prim::BailoutTemplate", nodes))
             if len(nodes) == 1 or (len(nodes) == 2 and nodes[1].kind() == "prim::TupleConstruct"):
                 pass
+            elif len(nodes) == 2 and nodes[0].kind() == "prim::TypeCheck" and nodes[1].kind() == "prim::If":
+                pass
             else:
                 raise RuntimeError("Can't get a grad_executor for a non-differentiable graph")
     grad_executors = list(plan_state.code.grad_executor_states())
@@ -1270,11 +1272,11 @@ graph(%Ra, %Rb):
           %4 : bool = prim::Constant[value=1]()
           %1 : int = prim::Constant[value=2]()
           %7 : int = prim::Constant[value=0]()
-          # CHECK: FloatTensor = prim::Loop
+          # CHECK: FloatTensor(requires_grad=0, device=cpu) = prim::Loop
           %x : Tensor = prim::Loop(%1, %4, %x.1)
-            # CHECK: : FloatTensor):
+            # CHECK: : FloatTensor(requires_grad=0, device=cpu)):
             block0(%i : int, %x.6 : Tensor):
-              # CHECK: FloatTensor = aten::unsqueeze
+              # CHECK: FloatTensor(requires_grad=0, device=cpu) = aten::unsqueeze
               %x.3 : Tensor = aten::unsqueeze(%x.6, %7)
               -> (%4, %x.3)
           return (%x)"""
@@ -6168,7 +6170,7 @@ a")
             res = fn(None, t2, False)
         res = fn(None, t2, True)
         g = torch.jit.last_executed_optimized_graph()
-        self.assertEqual(next(g.outputs()).type().str(), "Tensor")
+        self.assertIn(next(g.outputs()).type().str(), ("Tensor", "Tensor(requires_grad=1)"))
 
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "the current version of Profiler doesn't profile/specialize Optionals")
     def test_optional_list(self):
