@@ -2009,13 +2009,6 @@ cosh(input, *, out=None) -> Tensor
 Returns a new tensor with the hyperbolic cosine  of the elements of
 :attr:`input`.
 
-.. note::
-    Depending on the size and contiguity of the input, the implementation
-    implementation of `torch.cosh` on cpu may use the Sleef library, which
-    only supports inputs in `[-709, 709]` for double precision numbers or inputs
-    in `[-88.5, 88.5]` for single precision numbers. If the input is out of this
-    range, infinity (with the correct sign) may be returned instead.
-
 .. math::
     \text{out}_{i} = \cosh(\text{input}_{i})
 """ + r"""
@@ -2032,6 +2025,11 @@ Example::
     tensor([ 0.1632,  1.1835, -0.6979, -0.7325])
     >>> torch.cosh(a)
     tensor([ 1.0133,  1.7860,  1.2536,  1.2805])
+
+.. note::
+   When :attr:`input` is on the CPU, the implementation of torch.cosh may use
+   the Sleef library, which rounds very large results to infinity or negative
+   infinity. See `here <https://sleef.org/purec.xhtml>`_ for details.
 """.format(**common_args))
 
 add_docstr(torch.cross,
@@ -7467,13 +7465,6 @@ sinh(input, *, out=None) -> Tensor
 Returns a new tensor with the hyperbolic sine of the elements of
 :attr:`input`.
 
-.. note::
-    Depending on the size and contiguity of the input, the implementation
-    implementation of `torch.sinh` on cpu may use the Sleef library, which
-    only supports inputs in `[-709, 709]` for double precision numbers or inputs
-    in `[-88.5, 88.5]` for single precision numbers. If the input is out of this
-    range, infinity (with the correct sign) may be returned instead.
-
 .. math::
     \text{out}_{i} = \sinh(\text{input}_{i})
 """ + r"""
@@ -7490,6 +7481,11 @@ Example::
     tensor([ 0.5380, -0.8632, -0.1265,  0.9399])
     >>> torch.sinh(a)
     tensor([ 0.5644, -0.9744, -0.1268,  1.0845])
+
+.. note::
+   When :attr:`input` is on the CPU, the implementation of torch.sinh may use
+   the Sleef library, which rounds very large results to infinity or negative
+   infinity. See `here <https://sleef.org/purec.xhtml>`_ for details.
 """.format(**common_args))
 
 add_docstr(torch.sort,
