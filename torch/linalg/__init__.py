@@ -493,9 +493,9 @@ linalg.solve(input, other, *, out=None) -> Tensor
 
 Computes the solution ``x`` to the matrix equation ``matmul(input, x) = other``
 with a square matrix, or batches of such matrices, :attr:`input` and one or more right-hand side vectors :attr:`other`.
-If :attr:`input` is batched and :attr:`other` is not, then :attr:`other` is broadcasted
+If :attr:`input` is batched and :attr:`other` is not, then :attr:`other` is broadcast
 to have the same batch dimensions as :attr:`input`.
-The resulting tensor has the same shape as the (possibly broadcasted) :attr:`other`.
+The resulting tensor has the same shape as the (possibly broadcast) :attr:`other`.
 
 Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` dtypes.
 
@@ -526,7 +526,7 @@ Batched input::
     >>> x = torch.linalg.solve(A, b)
     >>> torch.allclose(A @ x, b)
     True
-    >>> b = torch.rand(3) # b is broadcasted internally to (*A.shape[:-2], 3)
+    >>> b = torch.rand(3) # b is broadcast internally to (*A.shape[:-2], 3)
     >>> x = torch.linalg.solve(A, b)
     >>> x.shape
     torch.Size([2, 3])
