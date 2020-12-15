@@ -2620,7 +2620,7 @@ class TestLinalg(TestCase):
             self.assertEqual(torch.matrix_rank(aaT, True), np.linalg.matrix_rank(aaT.cpu().numpy(), True))
             self.assertEqual(torch.matrix_rank(aaT, 0.01, True), np.linalg.matrix_rank(aaT.cpu().numpy(), 0.01, True))
 
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.cdouble)
     def test_einsum(self, device, dtype):
         def check(equation, *operands):
             ref = np.einsum(equation, *[operand.cpu().numpy() for operand in operands])
@@ -2697,7 +2697,7 @@ class TestLinalg(TestCase):
         # with strided tensors
         check("bn,anm,bm->ba", l[:, ::2], w[:, ::2, ::2], r[:, ::2])
 
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.cdouble)
     def test_einsum_random(self, device, dtype):
         def check(equation, *operands):
             ref = np.einsum(equation, *[op.cpu().numpy() for op in operands])
