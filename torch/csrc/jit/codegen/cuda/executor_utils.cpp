@@ -18,6 +18,7 @@
 #include <nvfuser_resources/helpers.h>
 #include <nvfuser_resources/random_numbers.h>
 #include <nvfuser_resources/tensor.h>
+#include <nvfuser_resources/welford.h>
 
 #include <fstream>
 
@@ -40,6 +41,7 @@ std::string kernelPreamble() {
   ss << nvfuser_resources::block_reduction_cu;
   ss << nvfuser_resources::grid_reduction_cu;
   ss << nvfuser_resources::broadcast_cu;
+  ss << nvfuser_resources::welford_cu;
 
   return ss.str();
 }

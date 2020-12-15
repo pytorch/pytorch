@@ -552,6 +552,45 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   return allocated_outputs;
 }
 
+void FusionExecutor::compileRtc(
+    const std::string& code,
+    const std::string& name,
+    bool structured) {
+  std::string scode;
+  if (!structured) {
+    scode = getStructuredCode(code);
+  } else {
+    scode = code;
+  }
+  fusion_id_ = 1;
+  options_ = CompileOptions();
+  compiled_kernel_ = executor_utils::nvrtcCompile(scode, name, fusion_id_);
+}
+
+void FusionExecutor::runRtc(
+    const LaunchParams& launch_params,
+    const std::vector<at::Tensor>& args) {
+  FUSER_PERF_SCOPE("runFusion");
+
+  c10::DeviceGuard dg(options_.device);
+  auto stream = at::cuda::getCurrentCUDAStream();
+
+  KernelArgumentHolder kernel_arguments;
+  kernel_arguments.push(args);
+  AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLaunchKernel(
+      compiled_kernel_.function,
+      launch_params.gdimx(),
+      launch_params.gdimy(),
+      launch_params.gdimz(),
+      launch_params.bdimx(),
+      launch_params.bdimy(),
+      launch_params.bdimz(),
+      launch_params.smem(),
+      stream,
+      kernel_arguments.getBuffer(),
+      nullptr));
+}
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

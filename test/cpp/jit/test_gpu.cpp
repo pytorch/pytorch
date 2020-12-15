@@ -10234,6 +10234,336 @@ TEST(NVFuserTest, FusionIssue549_CUDA) {
       &fusion, cg_outputs, {t0, t1}, {aten_output}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, simplecompileRtc) {
+  FusionExecutor fe;
+  std::string kernel = R"(
+__global__ void kernel1(Tensor<float, 1> T0, Tensor<float, 1> T1) {
+  if(threadIdx.x==0){
+    for(size_t ki28 = 0; ki28 < T0.size[0]; ++ki28) {
+      T1[ki28*T1.stride[0]] = T0[ki28*T0.stride[0]]*2;
+    }
+  }
+}
+    )";
+  fe.compileRtc(kernel, "CudaCodeGen::kernel1");
+  LaunchParams lp(
+      256, // gdimx
+      1, // gdimy
+      1, // gdimz
+      1, // bdimx
+      1, // bdimy
+      1 // bdimz
+  );
+  lp.setSmem(0);
+  const auto options =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  const std::vector<int64_t> tensor_dims = {8};
+  auto in0 = at::randn(tensor_dims, options);
+  auto out0 = at::empty_like(in0);
+  fe.runRtc(lp, {in0, out0});
+
+  auto out_ref = in0 * 2;
+  TORCH_CHECK(out_ref.allclose(out0));
+}
+
+TEST(NVFuserTest, serialWelford) {
+  FusionExecutor fe;
+  int x = 128, y = 64, z = 64;
+
+  std::string kernel = R"(
+__global__ void kernel1(
+    Tensor<float,3> inp,
+    Tensor<float,1> out_var,
+    Tensor<float,1> out_avg
+){
+    for(int i0=0;i0<inp.size[0];i0++){
+        float tmp_M2=0;
+        float tmp_avg=0;
+        long tmp_N=0;
+        for(int i1=0;i1<inp.size[1];i1++){
+            for(int i2=0;i2<inp.size[2];i2++){
+                welfordCombine(
+                    tmp_M2,
+                    tmp_avg,
+                    tmp_N,
+                    0.f,
+                    inp[i0*inp.stride[0]+
+                        i1*inp.stride[1]+
+                        i2*inp.stride[2]],
+                    (long)1
+                );
+            }
+        }
+        out_var[i0*out_var.stride[0]]=
+            tmp_M2/(tmp_N);
+        out_avg[i0*out_var.stride[0]]=
+            tmp_avg;
+    }
+}
+    )";
+  fe.compileRtc(kernel, "CudaCodeGen::kernel1");
+  LaunchParams lp(
+      1, // gdimx
+      1, // gdimy
+      1, // gdimz
+      1, // bdimx
+      1, // bdimy
+      1 // bdimz
+  );
+  lp.setSmem(0);
+  const auto options =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  const std::vector<int64_t> tensor_dims = {x, y, z};
+  auto in0 = at::randn(tensor_dims, options);
+  auto out_var = at::empty({x}, options);
+  auto out_avg = at::empty({x}, options);
+  fe.runRtc(lp, {in0, out_var, out_avg});
+
+  TORCH_CHECK(in0.var({1, 2}, false).allclose(out_var));
+  TORCH_CHECK(in0.mean({1, 2}).allclose(out_avg, /*rtol*/ 1e-5, /*atol*/ 1e-6));
+}
+
+TEST(NVFuserTest, blockWelford) {
+  FusionExecutor fe;
+  int x = 7, y = 8, z = 9;
+
+  std::string kernel = R"(
+__global__ void kernel1(
+    Tensor<float,2> inp,
+    Tensor<float,1> out_var,
+    Tensor<float,1> out_avg,
+    Tensor<float,1> init_var,
+    Tensor<float,1> init_avg,
+    Tensor<long,0> init_N
+){
+    //actual generated kernel will use dynamic shared mem,
+    // here is just for prototype
+    __shared__ float mem_M2[512];
+    __shared__ float mem_avg[512];
+    __shared__ long mem_N[512];
+    float in=inp[threadIdx.x*inp.stride[0]+
+                        threadIdx.y*inp.stride[1]];
+    float tmp_M2;
+    float tmp_avg;
+    long tmp_N;
+    blockWelford<false,true,false>(
+        tmp_M2,
+        tmp_avg,
+        tmp_N,
+        0.f,
+        in,
+        (long)1,
+        threadIdx,
+        blockDim,
+        (float*)mem_M2,
+        (float*)mem_avg,
+        (long*)mem_N,
+        (bool)(threadIdx.x<inp.size[0]),
+        0.f);
+    __syncthreads();
+    if(threadIdx.x<out_var.size[0] && threadIdx.y==0){
+        welfordCombine(
+                    tmp_M2,
+                    tmp_avg,
+                    tmp_N,
+                    init_var[threadIdx.x*init_var.stride[0]]*init_N[0],
+                    init_avg[threadIdx.x*init_avg.stride[0]],
+                    init_N[0]
+                );
+        out_var[threadIdx.x*out_var.stride[0]]=tmp_M2/(tmp_N);
+        out_avg[threadIdx.x*out_avg.stride[0]]=tmp_avg;
+    }
+}
+    )";
+  fe.compileRtc(kernel, "CudaCodeGen::kernel1");
+  LaunchParams lp(
+      1, // gdimx
+      1, // gdimy
+      1, // gdimz
+      x, // bdimx
+      y, // bdimy
+      1 // bdimz
+  );
+  lp.setSmem(0);
+  const auto options =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  const std::vector<int64_t> tensor_dims = {x, y};
+  const std::vector<int64_t> init_dims = {x, z};
+
+  // generate initial values
+  auto init_in = at::randn(init_dims, options);
+  auto init_var = init_in.var({1}, false);
+  auto init_avg = init_in.mean({1});
+  auto init_N =
+      at::tensor(z, at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0));
+
+  auto in0 = at::randn(tensor_dims, options);
+
+  // run kernel
+  auto out_var = at::zeros({x}, options);
+  auto out_avg = at::zeros({x}, options);
+  fe.runRtc(lp, {in0, out_var, out_avg, init_var, init_avg, init_N});
+
+  // compare with reference output
+  auto cat_tensor = at::cat({init_in, in0}, 1);
+  TORCH_CHECK(cat_tensor.var({1}, false).allclose(out_var));
+  TORCH_CHECK(
+      cat_tensor.mean({1}).allclose(out_avg, /*rtol*/ 1e-5, /*atol*/ 1e-6));
+}
+
+TEST(NVFuserTest, blockWelfordNoInit) {
+  FusionExecutor fe;
+  int x = 7, y = 8, z = 9;
+
+  // need support IValue for integer input as initial count
+  std::string kernel = R"(
+__global__ void kernel1(
+    Tensor<float,3> inp,
+    Tensor<float,1> out_var,
+    Tensor<float,1> out_avg
+){
+    //actual generated kernel will use dynamic shared mem,
+    // here is just for prototype
+    __shared__ float mem_M2[512];
+    __shared__ float mem_avg[512];
+    __shared__ long mem_N[512];
+    float in=inp[threadIdx.x*inp.stride[0]+
+                        threadIdx.y*inp.stride[1]+
+                        threadIdx.z*inp.stride[2]];
+    float tmp_M2;
+    float tmp_avg;
+    long tmp_N;
+    blockWelford<false,true,true>(
+        tmp_M2,
+        tmp_avg,
+        tmp_N,
+        0.f,
+        in,
+        (long) 1,
+        threadIdx,
+        blockDim,
+        (float*)mem_M2,
+        (float*)mem_avg,
+        (long*)mem_N,
+        (bool)(threadIdx.x<inp.size[0]),
+        0.f);
+    __syncthreads();
+    if(threadIdx.x<out_var.size[0] && threadIdx.y==0 && threadIdx.z==0){
+        out_var[threadIdx.x*out_var.stride[0]]=tmp_M2/(tmp_N);
+        out_avg[threadIdx.x*out_var.stride[0]]=tmp_avg;
+    }
+}
+    )";
+  fe.compileRtc(kernel, "CudaCodeGen::kernel1");
+  LaunchParams lp(
+      1, // gdimx
+      1, // gdimy
+      1, // gdimz
+      x, // bdimx
+      y, // bdimy
+      z // bdimz
+  );
+  lp.setSmem(0);
+  const auto options =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  const std::vector<int64_t> tensor_dims = {x, y, z};
+  auto in0 = at::randn(tensor_dims, options);
+  auto out_var = at::empty({x}, options);
+  auto out_avg = at::empty({x}, options);
+  fe.runRtc(lp, {in0, out_var, out_avg});
+
+  TORCH_CHECK(in0.var({1, 2}, false).allclose(out_var));
+  TORCH_CHECK(in0.mean({1, 2}).allclose(out_avg, /*rtol*/ 1e-5, /*atol*/ 1e-6));
+}
+
+TEST(NVFuserTest, gridWelfordNoInit) {
+  FusionExecutor fe;
+  int x = 128, y = 64, z = 128;
+
+  std::string kernel = R"(
+__global__ void kernel1(
+    Tensor<float,3> inp,
+    Tensor<float,1> out_var,
+    Tensor<float,1> out_avg,
+    Tensor<float,1> work_buf_M2,
+    Tensor<float,1> work_buf_avg,
+    Tensor<long,1> work_buf_N,
+    Tensor<int64_t,1> sync_flag
+){
+    __shared__ float shared_buf_M2[512];
+    __shared__ float shared_buf_avg[512];
+    __shared__ long shared_buf_N[512];
+    float tmp_M2;
+    float tmp_avg;
+    long tmp_N;
+    float in = inp[ blockIdx.x  * inp.stride[0]+
+                    blockIdx.y  * inp.stride[1]+
+                    threadIdx.x * inp.stride[2]];
+    bool T_pred;
+    T_pred=welford::gridWelford<
+        true,true,false,
+        true,false,false
+    >(
+        tmp_M2,
+        tmp_avg,
+        tmp_N,
+        0.f,
+        in,
+        (long) 1, 
+        &work_buf_M2[0],
+        &work_buf_avg[0],
+        &work_buf_N[0],
+        sync_flag,
+        (float*)shared_buf_M2, 
+        (float*)shared_buf_avg,
+        (long*)shared_buf_N,
+        threadIdx.x<out_var.size[0], 
+        0.f);
+    if(T_pred){
+        out_var[threadIdx.x*out_var.stride[0]]=tmp_M2/tmp_N;
+        out_avg[threadIdx.x*out_avg.stride[0]]=tmp_avg;
+    }
+}
+    )";
+  fe.compileRtc(kernel, "CudaCodeGen::kernel1");
+  LaunchParams lp(
+      x, // gdimx
+      y, // gdimy
+      1, // gdimz
+      z, // bdimx
+      1, // bdimy
+      1 // bdimz
+  );
+  lp.setSmem(0);
+  const auto options =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  const auto options_int =
+      at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0);
+
+  const std::vector<int64_t> tensor_dims = {x, y, z};
+  auto in0 = at::randn(tensor_dims, options);
+
+  auto out_var = at::empty({z}, options);
+  auto out_avg = at::empty({z}, options);
+  auto work_buf_var = at::empty({x * y * z}, options);
+  auto work_buf_avg = at::empty({x * y * z}, options);
+  auto work_buf_N = at::empty({x * y * z}, options_int);
+  auto sync_flag = at::zeros({1}, options_int);
+  fe.runRtc(
+      lp,
+      {in0,
+       out_var,
+       out_avg,
+       work_buf_var,
+       work_buf_avg,
+       work_buf_N,
+       sync_flag});
+  std::vector<int64_t> dims{0, 1};
+
+  TORCH_CHECK(in0.var(dims, false).allclose(out_var));
+  TORCH_CHECK(in0.mean(dims).allclose(out_avg, /*rtol*/ 1e-5, /*atol*/ 1e-6));
+}
+
 TEST(NVFuserTest, FusionGetComputeAtRelPos_CUDA) {
   {
     Fusion fusion;

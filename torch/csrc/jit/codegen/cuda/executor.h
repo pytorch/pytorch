@@ -98,6 +98,19 @@ class TORCH_CUDA_API FusionExecutor : public NonCopyable {
     return measure_kernel_time_ ? kernel_time_ms_ : 0;
   }
 
+  //! Internal tests only. Compiles CUDA code with NVRTC directly from
+  //! string. This util provides a path to test runtime code, i.e. the resource
+  //! strings.
+  void compileRtc(
+      const std::string& code,
+      const std::string& name,
+      bool structured = false);
+
+  //! Internal tests only. Runs the compiled CUDA kernel from compileRtc.
+  void runRtc(
+      const LaunchParams& launch_params,
+      const std::vector<at::Tensor>& args);
+
  private:
   struct GlobalBuffers {
     std::vector<at::Tensor> empty_buffers;
