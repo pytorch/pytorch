@@ -499,7 +499,8 @@ The resulting tensor has the same shape as the (possibly broadcast) :attr:`other
 
 Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` dtypes.
 
-.. note:: If :attr:`input` is a non-invertible matrix or non-square matrix then a RuntimeError will be thrown.
+.. note:: If :attr:`input` is a non-square or non-invertible matrix, or a batch containing non-square matrices
+          or one or more non-invertible matrices, then a RuntimeError will be thrown.
 .. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
 
 Args:
