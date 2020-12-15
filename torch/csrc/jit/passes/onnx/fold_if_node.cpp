@@ -13,7 +13,7 @@ namespace onnx {
 using namespace ::c10::onnx;
 }
 
-static bool checkIfFold(Node* node, bool dynamic_axes) {
+static bool checkIfFold(Node* node) {
   auto cast_node = node->input()->node();
   if (cast_node->kind() != onnx::Cast)
     cast_node = node;
@@ -21,20 +21,37 @@ static bool checkIfFold(Node* node, bool dynamic_axes) {
 
   if (prev_node->kind() == onnx::Not || prev_node->kind() == onnx::Identity ||
       prev_node->kind() == onnx::If)
-    return checkIfFold(prev_node, dynamic_axes);
+    return checkIfFold(prev_node);
 
   auto compare_node = prev_node;
   if (compare_node->kind() == onnx::Equal ||
       compare_node->kind() == onnx::Greater ||
       compare_node->kind() == onnx::Less) {
     for (size_t i = 0; i < compare_node->inputs().size(); i++) {
+      auto sym = compare_node->inputs()[i]
+                     ->type()
+                     ->cast<TensorType>()
+                     ->symbolic_sizes();
       if (!(compare_node->inputs()[i]->node()->kind() == onnx::Constant ||
             compare_node->inputs()[i]->node()->kind() == onnx::Size ||
             compare_node->inputs()[i]->node()->kind() == onnx::ReduceProd))
         return false;
-      if (compare_node->inputs()[i]->node()->kind() == onnx::ReduceProd &&
-          dynamic_axes)
-        return false;
+      if (compare_node->inputs()[i]->node()->kind() != onnx::Constant) {
+        auto shape_node = compare_node->inputs()[i]->node()->input()->node();
+        auto shape =
+            shape_node->input()->type()->cast<TensorType>()->symbolic_sizes();
+
+        // ONNX shape and type inference cannot determine the shape of the input
+        if (!shape.rank())
+          return false;
+
+        // If dynamic_axes are used on inputs to ReduceProd node, don't fold If
+        // node
+        auto dynamic_axes = shape.isComplete();
+        if (!dynamic_axes &&
+            compare_node->inputs()[i]->node()->kind() == onnx::ReduceProd)
+          return false;
+      }
     }
     return true;
   } else if (compare_node->kind() == onnx::Constant) {
@@ -169,7 +186,7 @@ static void foldIfNode(Block* b, bool dynamic_axes) {
     }
     if (it->kind() == onnx::If) {
       auto if_node = *it;
-      if (checkIfFold(if_node, dynamic_axes)) {
+      if (checkIfFold(if_node)) {
         Block* then_block = it->blocks()[0];
         Block* else_block = it->blocks()[1];
         Block* block = else_block;
@@ -205,7 +222,7 @@ bool FoldConditionONNX(Node* n) {
 }
 
 bool CheckFoldONNX(Node* n) {
-  return checkIfFold(n, false);
+  return checkIfFold(n);
 }
 
 } // namespace jit

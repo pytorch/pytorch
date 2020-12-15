@@ -330,9 +330,14 @@ bool checkOutputType(Node* n) {
   auto else_block = n->blocks()[1];
   for (size_t i = 0; i < n->outputs().size(); i++) {
     // check the type
-    if (then_block->outputs()[i]->type()->cast<TensorType>()->scalarType() !=
-        else_block->outputs()[i]->type()->cast<TensorType>()->scalarType()) {
-      return false;
+    auto then_block_type = then_block->outputs()[i]->type();
+    auto else_block_type = else_block->outputs()[i]->type();
+    if (then_block_type->cast<TensorType>() &&
+        else_block_type->cast<TensorType>()) {
+      if (then_block_type->cast<TensorType>()->scalarType() !=
+          else_block_type->cast<TensorType>()->scalarType()) {
+        return false;
+      }
     }
   }
   return true;
