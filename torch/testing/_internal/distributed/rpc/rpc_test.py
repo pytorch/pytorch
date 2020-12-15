@@ -1998,7 +1998,7 @@ class RpcTest(RpcAgentTestFixture):
             # Ensure newlines are unescaped to provide a better repr of error.
             self.assertEqual(msg, msg.encode("utf-8").decode("unicode_escape"))
         else:
-            self.assertTrue(False)
+            self.assertTrue(False, "expected raise_func_escape to raise ValueError.")
 
     @dist_init
     def test_nested_rpc(self):
