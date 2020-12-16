@@ -77,7 +77,7 @@ class TORCH_API SubgraphRewriter {
    *
    * The method takes two parameters specifying the pattern:
    * \p PATTERN - IR string representing the pattern subgraph.
-   * \p REPLACEMENT - IR stringn representing the replacement subgraph.
+   * \p REPLACEMENT - IR string representing the replacement subgraph.
    *
    * See examples of pattern registering in `RegisterDefaultPatterns`.
    */

@@ -45,6 +45,27 @@ struct Match {
  *  - The matcher will not mutate either the pattern graph or the matched graph,
  * but the latter is taken as non-const so that Match may contain non-const
  * pointers.  This enables clients of this API to use Match to drive mutations.
+ *
+ * Note [Multi-output Patterns]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * Subgraph matcher provides a limited support for multi-output patterns. With a
+ * single output pattern it a single scan through the graph is sufficient to
+ * find all the matcher: given a starting, an anchor, node we deterministically
+ * could check whether a pattern matches a subgraph corresponding to this anchor
+ * node. For a general case of multi-output patterns we would have N anchors,
+ * which would result in M^N comparisons we need to perform (M is the size of
+ * the graph), which is computationally prohibitive.
+ *
+ * To overcome this, we impose some constraints on the multi-output patterns
+ * that we accept. We require that checking whether the pattern matches a
+ * subgraph would still be fully determined by a single node in the graph. To
+ * achieve this we designate the first output in the pattern as the 'main'
+ * output and assume that it is sufficient to traverse up from it to match the
+ * entire pattern.
+ *
+ * Corrolary 1: the order of outputs in the pattern matters!
+ * Corollary 2: patterns cannot contain any nodes not participating in the main
+ * output computation.
  */
 std::vector<Match> TORCH_API
 findPatternMatches(const Graph& pattern, Graph& graph);
