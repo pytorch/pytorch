@@ -437,6 +437,8 @@ struct {class_name} final : public {parent_class} {{
                 # For an overview of what this template code looks like, see
                 # https://github.com/pytorch/rfcs/pull/9
                 return f"""\
+namespace {{
+
 {self.gen_structured_class(
     f, k,
     class_name=class_name,
@@ -450,6 +452,8 @@ struct {class_name} final : public {parent_class} {{
     {impl_call}
     return {ret_expr};
 }}
+
+}} // anonymous namespace
 """
 
             elif self.target is Target.REGISTRATION:
@@ -537,9 +541,13 @@ struct {class_name} final : public {parent_class} {{
 """
 
             return f"""\
+namespace {{
+
 {returns_type} {name}({args_str}) {{
 {cuda_guard}{return_kw}{impl_name}({args_exprs_str});
 }}
+
+}} // anonymous namespace
 """
 
         elif self.target is Target.REGISTRATION:

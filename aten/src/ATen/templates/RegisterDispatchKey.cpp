@@ -37,9 +37,12 @@ $legacy_th_headers
 
 namespace at {
 
-namespace {
-
 ${dispatch_definitions}
+
+// NB: TORCH_LIBRARY_IMPL must be in an anonymous namespace to avoid
+// ambiguity with conflicting identifiers that may have been defined in
+// at namespace already.
+namespace {
 
 TORCH_LIBRARY_IMPL(aten, ${DispatchKey}, m) {
   ${dispatch_registrations}
