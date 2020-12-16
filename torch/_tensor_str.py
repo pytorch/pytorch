@@ -280,6 +280,9 @@ def _str_intern(inp):
     indent = len(prefix)
     suffixes = []
 
+    # This is used to extract the primal value and thus disable the forward AD
+    # within this function.
+    # TODO(albanD) This needs to be updated when more than one level is supported
     self, tangent = torch.autograd.forward_ad.unpack_dual(inp)
 
     # Note [Print tensor device]:

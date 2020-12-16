@@ -3,6 +3,9 @@
 namespace torch { namespace autograd {
 
 namespace {
+    // See discussion in forward_grad.h for why these are global variables and not
+    // thread local
+
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     static std::mutex all_forward_levels_mutex_;
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -57,6 +60,8 @@ ForwardADLevel::~ForwardADLevel() {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = grads_.begin();
     while (it != grads_.end()) {
+        // Warning this will lock *it mutex
+        // This is ok as this function is the *only* one to call back into another class's method.
         (*it)->reset(idx_, /* update_level */ false);
         it = grads_.erase(it);
     }
