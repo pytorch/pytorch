@@ -3143,6 +3143,7 @@ class TestSparse(TestCase):
             # This is not a matrix
             self.assertRaises(RuntimeError, lambda: fn(3, 4, [2, 2, 2], [2, 2, 2]))
 
+            # Shapes does not 
             self.assertRaisesRegex(RuntimeError, 
                                    r"mat1 and mat2 shapes cannot be multiplied \(2x3 and 4x2\)",
                                    lambda: fn(2, 10, [2, 3], [4, 2]))
