@@ -691,6 +691,8 @@ inline DeviceType computeDeviceType(DispatchKey tid) {
     return DeviceType::Vulkan;
   } else if (tid == DispatchKey::Metal) {
     return DeviceType::Metal;
+  } else if (tid == DispatchKey::QuantizedCPU) {
+    return DeviceType::CPU;
   } else {
     AT_ASSERTM(false, "Unknown DispatchKey: ", tid);
   }
