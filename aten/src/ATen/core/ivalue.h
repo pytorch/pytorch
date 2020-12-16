@@ -360,8 +360,7 @@ struct CAFFE2_API IValue final {
       : tag(Tag::Blob), is_intrusive_ptr(true) {
     // TODO (after Tensor merge) If we pass in a Blob holding a Tensor, extract
     // and store it as a Tensor instead.
-    payload.as_intrusive_ptr = blob.release()
-      ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
+    payload.as_intrusive_ptr = blob.release() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
   }
 
   /// @private [doxygen private]
@@ -700,8 +699,7 @@ struct CAFFE2_API IValue final {
     // This is not an optional optimization: our incref call
     // *will not* do the right thing when called on an
     // undefined generator.
-    payload.as_intrusive_ptr = g.unsafeReleaseGeneratorImpl()
-      ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
+    payload.as_intrusive_ptr = g.unsafeReleaseGeneratorImpl() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
   }
   bool isGenerator() const {
     return Tag::Generator == tag;
