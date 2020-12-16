@@ -3781,16 +3781,20 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         # Get GPU model with the hook registered.
-        state = powerSGD.PowerSGDState(
-            process_group=process_group, matrix_approximation_rank=1
-        )
-        for hook in [powerSGD.powerSGD_hook, powerSGD.batched_powerSGD_hook]:
-            gpu_model = self._gpu_model_with_ddp_comm_hook(
-                process_group, hook, gradient_as_bucket_view, state
-            )
+        # Test the hook with different configs.
+        for matrix_approximation_rank in range(1, 4):
+            for use_error_feedback in [True, False]:
+                for warm_start in [True, False]:
+                    state = powerSGD.PowerSGDState(
+                        process_group=process_group, matrix_approximation_rank=matrix_approximation_rank, use_error_feedback=use_error_feedback, warm_start=warm_start
+                    )
+                    for hook in [powerSGD.powerSGD_hook, powerSGD.batched_powerSGD_hook]:
+                        gpu_model = self._gpu_model_with_ddp_comm_hook(
+                            process_group, hook, gradient_as_bucket_view, state
+                        )
 
-            # check whether the grads are equal to what DDP without hook would return.
-            self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
+                        # check whether the grads are equal to what DDP without hook would return.
+                        self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
 
     def _test_builtin_ddp_comm_hooks_nccl(self, gradient_as_bucket_view=False):
         """

@@ -310,8 +310,8 @@ def powerSGD_hook(
             # Memorize the local errors.
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
         if not state.warm_start:
-            p_memory_dict.clear()
-            q_memory_dict.clear()
+            state.p_memory_dict.clear()
+            state.q_memory_dict.clear()
 
         return [input_tensor]
 
@@ -502,8 +502,8 @@ def batched_powerSGD_hook(
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         if not state.warm_start:
-            p_memory_dict.clear()
-            q_memory_dict.clear()
+            state.p_memory_dict.clear()
+            state.q_memory_dict.clear()
         ret = input_tensor.resize_(total_length)
         return [ret]
 
