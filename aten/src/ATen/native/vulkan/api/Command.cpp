@@ -453,14 +453,14 @@ void Command::Pool::submit(
         "Invalid Vulkan command buffer!");
 
     if (stream_.handle() == command_buffer) {
-      if (fence) {
+      // if (fence) {
         stream_.end();
         stream_.invalidate();
-      }
-      else {
-        // Skip
-        command_buffer = VK_NULL_HANDLE;
-      }
+      // }
+      // else {
+      //   // Skip
+      //   command_buffer = VK_NULL_HANDLE;
+      // }
     }
 
     if (command_buffer) {

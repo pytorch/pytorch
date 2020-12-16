@@ -561,11 +561,18 @@ vTensor::View::CMD::CMD(
     const View& view,
     api::Command::Buffer* const command_buffer)
   : view_(view),
-    command_buffer_(&command_buffer) {
+    command_buffer_(command_buffer) {
 }
 
-void vTensor::View::CMD::barrier(
-    State::Transition transition) {
+api::Command::Buffer& vTensor::View::CMD::command_buffer() {
+  if (!command_buffer_) {
+    command_buffer_ = &view_.context_->command().pool.stream();
+  }
+
+  return *command_buffer_;
+}
+
+void vTensor::View::CMD::barrier(State::Transition transition) {
   // Buffer and Staging are just an alias for the same memory region on UMA.
 
   if (view_.state_.is_uma()) {
@@ -865,12 +872,14 @@ void vTensor::View::CMD::copy_image_to_buffer(
 }
 
 void vTensor::View::CMD::submit(const api::Resource::Fence fence) {
-  view_.context_->command().pool.submit(
-      view_.context_->gpu().queue,
-      {
-        command_buffer(),
-      },
-      fence);
+  if (command_buffer_) {
+    view_.context_->command().pool.submit(
+        view_.context_->gpu().queue,
+        {
+          std::move(command_buffer()),
+        },
+        fence);
+  }
 }
 
 vTensor::Buffer& vTensor::View::buffer() const {
@@ -889,7 +898,7 @@ vTensor::Buffer& vTensor::View::buffer(
     api::Command::Buffer& command_buffer,
     const Stage::Flags stage,
     const Access::Flags access) const {
-  CMD cmd(*this, command_buffer);
+  CMD cmd(*this, &command_buffer);
   return buffer(cmd, stage, access);
 }
 
@@ -954,7 +963,7 @@ vTensor::Image& vTensor::View::image(
     api::Command::Buffer& command_buffer,
     const Stage::Flags stage,
     const Access::Flags access) const {
-  CMD cmd(*this, command_buffer);
+  CMD cmd(*this, &command_buffer);
   return image(cmd, stage, access);
 }
 
@@ -1011,9 +1020,7 @@ vTensor::Buffer& vTensor::View::staging() const {
 vTensor::Buffer& vTensor::View::staging(
     const Stage::Flags stage,
     const Access::Flags access) const {
-  api::Command::Buffer& command_buffer = context_->command().pool.stream();
-
-  CMD cmd(*this, command_buffer);
+  CMD cmd(*this);
   Buffer& staging = this->staging(cmd, stage, access);
   cmd.submit(fence());
 
