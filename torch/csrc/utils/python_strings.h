@@ -89,12 +89,12 @@ static py::object PyObject_FastGetAttrString(PyObject *obj, char *name)
     }
     /* Attribute referenced by (PyObject *)name */
     else if (tp->tp_getattro != NULL) {
-        PyObject *w = THPUtils_internString(name);
-        if (w == NULL) {
+        auto w = py::reinterpret_steal<py::object>(
+          THPUtils_internString(name));
+        if (w.ptr() == nullptr) {
           return py::object();
         }
-        res = (*tp->tp_getattro)(obj, w);
-        Py_DECREF(w);
+        res = (*tp->tp_getattro)(obj, w.ptr());
         if (res == NULL) {
             PyErr_Clear();
         }

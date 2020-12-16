@@ -1229,7 +1229,8 @@ struct to_ir {
           static_if = true;
         } else if (
             kind == aten::has_torch_function ||
-            kind == aten::object_has_torch_function) {
+            kind == aten::has_torch_function_unary ||
+            kind == aten::has_torch_function_variadic) {
           static_if = false;
         }
         // MetaCompile on boolean literals and constants

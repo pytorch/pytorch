@@ -927,7 +927,10 @@ Tensor new_empty_strided_batching_rule(
     const Tensor& self,
     IntArrayRef size,
     IntArrayRef stride,
-    const TensorOptions& options) {
+    optional<ScalarType> dtype,
+    optional<Layout> layout,
+    optional<Device> device,
+    optional<bool> pin_memory) {
   auto physical_view = MultiBatchVmapTransform::logicalToPhysical(self);
   auto physical_size = physical_view.getPhysicalShape(size);
 
@@ -975,7 +978,7 @@ Tensor new_empty_strided_batching_rule(
   physical_strides.insert(physical_strides.end(), stride.begin(), stride.end());
 
   auto result = physical_view.tensor().new_empty_strided(
-      physical_size, physical_strides, options);
+      physical_size, physical_strides, dtype, layout, device, pin_memory);
   return physical_view.newLogicalFromPhysical(result);
 }
 
@@ -1150,8 +1153,8 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("diagonal_backward", diagonal_backward_batching_rule);
 
   // Tensor.new_* operators
-  m.impl_UNBOXED("new_empty", new_empty_batching_rule);
-  m.impl_UNBOXED("new_empty_strided", new_empty_strided_batching_rule);
+  m.impl("new_empty", new_empty_batching_rule);
+  m.impl("new_empty_strided", new_empty_strided_batching_rule);
   m.impl("new_zeros", new_zeros_batching_rule);
 
   m.impl("contiguous", contiguous_batching_rule);

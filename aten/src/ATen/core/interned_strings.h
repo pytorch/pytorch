@@ -290,7 +290,8 @@ namespace c10 {
   _(aten, movedim)                   \
   _(aten, moveaxis)                  \
   _(aten, has_torch_function)        \
-  _(aten, object_has_torch_function) \
+  _(aten, has_torch_function_unary)  \
+  _(aten, has_torch_function_variadic) \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \
