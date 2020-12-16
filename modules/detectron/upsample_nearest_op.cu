@@ -164,6 +164,8 @@ bool UpsampleNearestOp<float, CUDAContext>::RunOnDevice() {
 
   upscale<<<blocks, threads, 0, context_.cuda_stream()>>>(
       input_data, output_data, no_elements, scale_, d1, d2, d3);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -209,6 +211,7 @@ bool UpsampleNearestGradientOp<float, CUDAContext>::RunOnDevice() {
   math::Set<float, CUDAContext>(no_elements, 0.f, gradInput_data, &context_);
   downscale<<<blocks, threads, 0, context_.cuda_stream()>>>(
       gradInput_data, gradOutput_data, no_elements, scale_, d1, d2, d3);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return true;
 }
