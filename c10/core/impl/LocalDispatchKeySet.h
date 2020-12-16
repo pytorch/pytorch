@@ -52,6 +52,10 @@ struct C10_API LocalDispatchKeySet {
   DispatchKeySet excluded_;
 };
 
+// thread_local variables cannot be C10_API on Windows.
+#ifdef _MSC_VER
+C10_API LocalDispatchKeySet tls_local_dispatch_key_set();
+#else // _MSC_VER
 /// In the CAFFE2_FB_LIMITED_MOBILE_CAPABILITY build setting,
 /// thread_local is not supported.
 #ifndef CAFFE2_FB_LIMITED_MOBILE_CAPABILITY
@@ -65,6 +69,7 @@ inline C10_API LocalDispatchKeySet tls_local_dispatch_key_set() {
   // because they include this header.
   return raw_local_dispatch_key_set;
 }
+#endif // _MSC_VER
 
 // Internal, use ThreadLocalStateGuard
 C10_API void _force_tls_local_dispatch_key_set(LocalDispatchKeySet key_set);

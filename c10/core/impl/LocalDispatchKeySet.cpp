@@ -18,6 +18,12 @@ PODLocalDispatchKeySet raw_local_dispatch_key_set;
 
 #endif
 
+#ifdef _MSC_VER
+LocalDispatchKeySet tls_local_dispatch_key_set() {
+  return raw_local_dispatch_key_set;
+}
+#endif // _MSC_VER
+
 void _force_tls_local_dispatch_key_set(LocalDispatchKeySet key_set) {
   raw_local_dispatch_key_set = PODLocalDispatchKeySet {
     key_set.included_.raw_repr(),
