@@ -50,6 +50,9 @@ inline int32_t THPUtils_unpackInt(PyObject* obj) {
   if (overflow != 0) {
     throw std::runtime_error("Overflow when unpacking long");
   }
+  if (value > INT32_MAX || value < INT32_MIN) {
+    throw std::runtime_error("Overflow when unpacking long");
+  }
   return (int32_t)value;
 }
 
@@ -69,6 +72,9 @@ inline uint32_t THPUtils_unpackUInt32(PyObject* obj) {
   unsigned long value = PyLong_AsUnsignedLong(obj);
   if (PyErr_Occurred()) {
     throw python_error();
+  }
+  if (value > UINT32_MAX || value < UINT32_MIN) {
+    throw std::runtime_error("Overflow when unpacking unsigned long");
   }
   return (uint32_t)value;
 }
