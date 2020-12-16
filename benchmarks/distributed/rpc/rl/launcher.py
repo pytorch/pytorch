@@ -69,7 +69,8 @@ def run_worker(rank, world_size, master_addr, master_port, batch, state_size, nl
 
 
 def main():
-    GRAPH_VARIABLES = {'world_size':[24,48,96,192], 'batch': [True, False]}
+    GRAPH_VARIABLES = {'world_size':[24,48,96,192], 'batch': [True, False], 
+    'state_size': ['10,20,10', '15,20,25'], 'nlayers': [5, 10], 'out_features': [10, 20]}
     if args['graph_variable'] in GRAPH_VARIABLES.keys():
         x_axis_name = args['graph_variable']
         x_axis_variables = GRAPH_VARIABLES[x_axis_name]
@@ -106,7 +107,7 @@ def main():
             nprocs=args['world_size'],
             join=True
         )
-        print(f"Time taken - {world_size}, {time.time() - start_time}")
+        print(f"Time taken -, {time.time() - start_time}")
 
 if __name__ == '__main__':
     main()
