@@ -628,47 +628,14 @@ class Graph:
             else:
                 body.append('\n')
 
-        def preprocess_values(a : Argument):
-            """
-            This function preprocesses values with `args`/`kwargs` just before
-            pretty printing
-            """
-            if isinstance(a, tuple) and hasattr(a, '_fields'):
-                # Annoyingly, Python NamedTuples repr() with an unqualified
-                # name. For example, if I have a NamedTuple instance
-                # foo.bar.MyNamedTup, the repr might look something like
-                # `MyNamedTup(...)`. This is not workable if the NamedTuple
-                # definition is in a different module. So, here we:
-                #  1. Register the NamedTuple's module for emission as an import
-                #  2. Replace the NamedTuple instance with a thin wrapper that
-                #     overrides `__repr__` s.t. it prints the fully-qualified
-                #     name rather than just the base name
-                register_modules_used(torch.typename(a))
-
-                class NTReprWrapper(a.__class__):  # type: ignore
-                    def __repr__(self):
-                        value_strs = []
-                        for field in self._fields:
-                            value_strs.append(f'{field}={preprocess_values(getattr(self, field))}')
-                        # NTReprWrapper should have only one base: the NamedTuple
-                        # type we constructed it from.
-                        assert len(self.__class__.__bases__) == 1
-                        return f'{torch.typename(self.__class__.__bases__[0])}({",".join(value_strs)})'
-                return NTReprWrapper(*(getattr(a, field) for field in a._fields))  # type: ignore
-            elif isinstance(a, tuple):
-                return tuple(preprocess_values(elem) for elem in a)
-            elif isinstance(a, list):
-                return immutable_list(preprocess_values(elem) for elem in a)
-            elif isinstance(a, dict):
-                return immutable_dict((k, preprocess_values(v)) for k, v in a.items())
-            elif isinstance(a, slice):
-                return slice(preprocess_values(a.start), preprocess_values(a.stop), preprocess_values(a.step))
-            else:
+        def emit_node(node : Node):
+            def register_import_type(a : Argument) -> Argument:
+                if isinstance(a, torch.fx.proxy.FakeNamedTuple):
+                    register_modules_used(torch.typename(type(a)))
                 return a
 
-        def emit_node(node : Node):
-            new_args = preprocess_values(node.args)
-            new_kwargs = preprocess_values(node.kwargs)
+            new_args = map_arg(node.args, lambda n: n, register_import_type)
+            new_kwargs = map_arg(node.kwargs, lambda n: n, register_import_type)
 
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)

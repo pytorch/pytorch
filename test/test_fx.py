@@ -1148,7 +1148,12 @@ class TestFX(JitTestCase):
 
         traced = symbolic_trace(NamedTupReturn())
         input = torch.rand(3, 4)
-        self.assertEqual(traced(input), MyNamedTup(input, input))
+        ref_tup = MyNamedTup(input, input)
+        out_tup = traced(input)
+        self.assertEqual(out_tup.to_named_tuple(MyNamedTup), ref_tup)
+        for i, field in enumerate(ref_tup._fields):
+            self.assertEqual(getattr(out_tup, field), getattr(ref_tup, field))
+            self.assertEqual(out_tup[i], ref_tup[i])
 
     def test_torchbind_class_attribute_in_fx(self):
         if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS:
@@ -1172,7 +1177,12 @@ class TestFX(JitTestCase):
 
         traced = symbolic_trace(NamedTupReturn())
         input = torch.rand(3, 4)
-        self.assertEqual(traced(input), Pair(input, input))
+        ref_tup = Pair(input, input)
+        out_tup = traced(input)
+        self.assertEqual(out_tup.to_named_tuple(Pair), ref_tup)
+        for i, field in enumerate(ref_tup._fields):
+            self.assertEqual(getattr(out_tup, field), getattr(ref_tup, field))
+            self.assertEqual(out_tup[i], ref_tup[i])
 
 if __name__ == '__main__':
     run_tests()

@@ -246,20 +246,21 @@ class Node:
         return to_process
 
 
-def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
+def map_arg(a: Argument, node_fn: Callable[[Node], Argument], arg_fn : Callable[[Argument], Argument] = lambda a: a) -> Argument:
     """ Apply fn to each Node appearing arg. arg may be a list, tuple, slice, or dict with string keys. """
+    a = arg_fn(a)
     if isinstance(a, tuple) and hasattr(a, '_fields'):
-        elements = tuple(map_arg(elem, fn) for elem in a)
+        elements = tuple(map_arg(elem, node_fn, arg_fn) for elem in a)
         return type(a)(*elements)  # type: ignore
     elif isinstance(a, tuple):
-        return tuple(map_arg(elem, fn) for elem in a)
+        return tuple(map_arg(elem, node_fn, arg_fn) for elem in a)
     elif isinstance(a, list):
-        return immutable_list(map_arg(elem, fn) for elem in a)
+        return immutable_list(map_arg(elem, node_fn, arg_fn) for elem in a)
     elif isinstance(a, dict):
-        return immutable_dict((k, map_arg(v, fn)) for k, v in a.items())
+        return immutable_dict((k, map_arg(v, node_fn, arg_fn)) for k, v in a.items())
     elif isinstance(a, slice):
-        return slice(map_arg(a.start, fn), map_arg(a.stop, fn), map_arg(a.step, fn))
+        return slice(map_arg(a.start, node_fn, arg_fn), map_arg(a.stop, node_fn, arg_fn), map_arg(a.step, node_fn, arg_fn))
     elif isinstance(a, Node):
-        return fn(a)
+        return node_fn(a)
     else:
         return a
