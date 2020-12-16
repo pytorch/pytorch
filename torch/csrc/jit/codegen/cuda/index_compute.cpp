@@ -399,7 +399,9 @@ IndexCompute::IndexCompute(
       }
     }
   }
+}
 
+void IndexCompute::run() {
   const std::vector<Val*> domain_vals(
       td_->domain().begin(), td_->domain().end());
 
@@ -455,12 +457,14 @@ IndexCompute IndexCompute::updateIndexCompute(
     }
   }
 
-  return IndexCompute(
+  IndexCompute updated_index_compute(
       new_td,
       updated_index_map,
       updated_extent_map,
       updated_zero_merged_in,
       root_contiguity);
+  updated_index_compute.run();
+  return updated_index_compute;
 }
 
 std::vector<bool> IndexCompute::contiguityAnd(
@@ -519,31 +523,6 @@ std::vector<bool> IndexCompute::contiguityPasC(
 }
 
 namespace {
-
-std::deque<const TensorView*> getComputeAtTVStackFrom(
-    const TensorView* from_tv) {
-  // What's the computeAt root tensor view in this operation
-  // This tensor is the terminating tensor in the computeAT dag from consumer
-  auto end_tv = from_tv->getComputeAtAxis(0).second;
-
-  // grab all tensor views from producer_tv -> computeAtRoot
-  std::deque<const TensorView*> tv_stack;
-
-  // Then immediate consumer
-  auto running_tv = from_tv;
-
-  // Follow computeAt path until we hit end_tv
-  while (running_tv != end_tv) {
-    TORCH_INTERNAL_ASSERT(running_tv->hasComputeAt());
-    tv_stack.push_front(running_tv);
-    running_tv = running_tv->getComputeAtView();
-  }
-
-  tv_stack.push_front(end_tv);
-
-  return tv_stack;
-}
-
 // Map indices down to the leaf domains for applying swizzle
 class UpdateLeafIndices : public IterVisitor {
  public:
@@ -594,7 +573,7 @@ class UpdateLeafIndices : public IterVisitor {
     index_map_[inner_id] = ir_builder.modExpr(index_map_[in_id], factor);
     extent_map_[inner_id] = factor;
     index_map_[outer_id] = ir_builder.divExpr(index_map_[in_id], factor);
-    extent_map_[inner_id] = ir_builder.ceilDivExpr(getExtent(in_id), factor);
+    extent_map_[outer_id] = ir_builder.ceilDivExpr(getExtent(in_id), factor);
   }
 
   void handle(Merge* merge) override {
@@ -641,51 +620,105 @@ class UpdateLeafIndices : public IterVisitor {
   std::unordered_map<kir::IterDomain*, kir::Val*> extent_map_;
 };
 
-void swizzleIndices(const TensorView* tv, IndexCompute& index_compute) {
+} // namespace
+
+IndexSwizzle::IndexSwizzle(
+    const TensorView* tv,
+    std::unordered_map<kir::IterDomain*, kir::Val*> initial_index_map,
+    std::unordered_map<kir::IterDomain*, kir::Val*> extent_map,
+    std::unordered_set<kir::IterDomain*> zero_merged_in)
+    : IndexCompute(
+          tv->domain(),
+          std::move(initial_index_map),
+          std::move(extent_map),
+          std::move(zero_merged_in),
+          std::vector<bool>(tv->getRootDomain().size(), false)),
+      tv_(tv),
+      swizzle_type_(tv->swizzleType()),
+      ids_to_swizzle_(tv->axesToSwizzle()) {}
+
+void IndexSwizzle::run() {
   TORCH_INTERNAL_ASSERT(
-      tv->swizzleType() == SwizzleType::NoSwizzle ||
-          tv->swizzleType() == SwizzleType::Transpose,
+      swizzle_type_ == SwizzleType::NoSwizzle ||
+          swizzle_type_ == SwizzleType::Transpose,
       "Invalid swizzle type");
-  if (tv->swizzleType() == SwizzleType::Transpose) {
+
+  if (swizzle_type_ == SwizzleType::Transpose) {
     // Shifts the second axis by the first axis as ((idx_1 + idx_2) %
     // ext). Alternatively, ((idx_1 - idx_2) & (ext - 1)) would also
     // work if ext is a power of two. Practically, ext should be 32 if
     // the data type of the tensor is float, so the latter approach
     // should also be fine.
-    TORCH_INTERNAL_ASSERT(tv->getMemoryType() == MemoryType::Shared);
-    TORCH_INTERNAL_ASSERT(tv->axesToSwizzle().size() == 2);
-    UpdateLeafIndices update_leaves(
-        tv->domain(), index_compute.indexMap(), index_compute.extentMap());
-    auto id_to_swizzle_i = GpuLower::current()
-                               ->lowerValue(tv->axesToSwizzle().at(0))
-                               ->as<kir::IterDomain>();
-    auto id_to_swizzle_j = GpuLower::current()
-                               ->lowerValue(tv->axesToSwizzle().at(1))
-                               ->as<kir::IterDomain>();
+    TORCH_INTERNAL_ASSERT(tv_->getMemoryType() == MemoryType::Shared);
+    TORCH_INTERNAL_ASSERT(tv_->axesToSwizzle().size() == 2);
 
-    if (update_leaves.indexMap().find(id_to_swizzle_i) !=
-            update_leaves.indexMap().end() &&
-        update_leaves.indexMap().find(id_to_swizzle_j) !=
-            update_leaves.indexMap().end()) {
-      auto updated_idx_map = update_leaves.indexMap();
-      auto idx_to_swizzle_i = updated_idx_map[id_to_swizzle_i];
-      auto idx_to_swizzle_j = updated_idx_map[id_to_swizzle_j];
+    UpdateLeafIndices update_leaves(td_, indexMap(), extentMap());
+    index_map_ = update_leaves.indexMap();
+    extent_map_ = update_leaves.extentMap();
+
+    IterDomain* id_to_swizzle_i = ids_to_swizzle_.at(0);
+    IterDomain* id_to_swizzle_j = ids_to_swizzle_.at(1);
+    kir::IterDomain* id_to_swizzle_i_kir =
+        GpuLower::current()->lowerValue(id_to_swizzle_i)->as<kir::IterDomain>();
+    kir::IterDomain* id_to_swizzle_j_kir =
+        GpuLower::current()->lowerValue(id_to_swizzle_j)->as<kir::IterDomain>();
+
+    if (indexMap().find(id_to_swizzle_i_kir) != indexMap().end() &&
+        indexMap().find(id_to_swizzle_j_kir) != indexMap().end()) {
+      auto idx_to_swizzle_i = indexMap().at(id_to_swizzle_i_kir);
+      auto idx_to_swizzle_j = indexMap().at(id_to_swizzle_j_kir);
 
       kir::IrBuilder ir_builder(GpuLower::current()->kernel());
       auto swizzled_idx = ir_builder.modExpr(
           ir_builder.addExpr(idx_to_swizzle_i, idx_to_swizzle_j),
-          id_to_swizzle_j->rawExtent());
-      updated_idx_map[id_to_swizzle_j] = swizzled_idx;
-
-      // Update the rest of the axes, including the root.
-      index_compute = IndexCompute(
-          tv->domain(),
-          updated_idx_map,
-          update_leaves.extentMap(),
-          index_compute.zeroMergedIn(),
-          std::vector<bool>(tv->getRootDomain().size(), false));
+          id_to_swizzle_j_kir->rawExtent());
+      index_map_[id_to_swizzle_j_kir] = swizzled_idx;
+      swizzled_ids_.insert(id_to_swizzle_j);
+      IndexCompute::run();
     }
   }
+}
+
+void IndexSwizzle::handle(Expr* e) {
+  auto out_ids = ir_utils::filterByType<IterDomain>(e->outputs());
+  bool needs_update =
+      std::any_of(out_ids.begin(), out_ids.end(), [this](IterDomain* id) {
+        return swizzled_ids_.find(id) != swizzled_ids_.end();
+      });
+  if (!needs_update) {
+    return;
+  }
+
+  IndexCompute::handle(e);
+  for (auto input : ir_utils::filterByType<IterDomain>(e->inputs())) {
+    swizzled_ids_.insert(input);
+  }
+}
+
+namespace {
+
+std::deque<const TensorView*> getComputeAtTVStackFrom(
+    const TensorView* from_tv) {
+  // What's the computeAt root tensor view in this operation
+  // This tensor is the terminating tensor in the computeAT dag from consumer
+  auto end_tv = from_tv->getComputeAtAxis(0).second;
+
+  // grab all tensor views from producer_tv -> computeAtRoot
+  std::deque<const TensorView*> tv_stack;
+
+  // Then immediate consumer
+  auto running_tv = from_tv;
+
+  // Follow computeAt path until we hit end_tv
+  while (running_tv != end_tv) {
+    TORCH_INTERNAL_ASSERT(running_tv->hasComputeAt());
+    tv_stack.push_front(running_tv);
+    running_tv = running_tv->getComputeAtView();
+  }
+
+  tv_stack.push_front(end_tv);
+
+  return tv_stack;
 }
 
 //! Generates index and extent expressions of tensors.
@@ -891,6 +924,7 @@ generateIndexAndExtentMap(
       std::unordered_map<kir::IterDomain*, kir::Val*>(),
       std::unordered_set<kir::IterDomain*>(),
       std::vector<bool>(tv->getRootDomain().size(), false));
+  index_compute.run();
 
   p2c_index_maps[tv] = index_compute.indexMap();
 
@@ -970,6 +1004,7 @@ generateIndexAndExtentMap(
       c2p_tv_stack.empty()
           ? last_tv_root_contiguity
           : std::vector<bool>(tv->getRootDomain().size(), false));
+  index_compute.run();
 
   // Go through the tv entire stack
   while (!c2p_tv_stack.empty()) {
@@ -991,9 +1026,17 @@ generateIndexAndExtentMap(
   }
 
   // PROPAGATE CONSUMER -> PRODUCER END
-
+  std::unordered_map<kir::IterDomain*, kir::Val*> index_map;
   if (swizzle_indices) {
-    swizzleIndices(c2p_tv_stack.back(), index_compute);
+    IndexSwizzle index_swizzle(
+        c2p_tv_stack.back(),
+        index_compute.indexMap(),
+        index_compute.extentMap(),
+        index_compute.zeroMergedIn());
+    index_swizzle.run();
+    index_map = index_swizzle.indexMap();
+  } else {
+    index_map = index_compute.indexMap();
   }
 
   // Fill in extent map as some mapped indices may not have their extent filled
@@ -1001,14 +1044,14 @@ generateIndexAndExtentMap(
 
   std::unordered_map<kir::IterDomain*, kir::Val*> extent_map(
       index_compute.extentMap());
-  for (auto ind_entry : index_compute.indexMap()) {
+  for (auto ind_entry : index_map) {
     auto id = ind_entry.first;
     if (extent_map.find(id) == extent_map.end()) {
       extent_map[id] = id->extent();
     }
   }
 
-  return std::make_pair(index_compute.indexMap(), extent_map);
+  return std::make_pair(index_map, extent_map);
 }
 
 } // namespace

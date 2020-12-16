@@ -60,8 +60,9 @@ namespace fuser {
 namespace cuda {
 
 class IndexCompute : public BackwardVisitor {
- private:
+ protected:
   using BackwardVisitor::handle;
+
   void handle(Split*) override;
   void handle(Merge*) override;
   void handle(Expr*) override;
@@ -98,15 +99,15 @@ class IndexCompute : public BackwardVisitor {
   std::unordered_set<kir::IterDomain*> contig_ids;
 
  public:
-  const std::unordered_map<kir::IterDomain*, kir::Val*> indexMap() const {
+  const std::unordered_map<kir::IterDomain*, kir::Val*>& indexMap() const {
     return index_map_;
   }
 
-  const std::unordered_map<kir::IterDomain*, kir::Val*> extentMap() const {
+  const std::unordered_map<kir::IterDomain*, kir::Val*>& extentMap() const {
     return extent_map_;
   }
 
-  std::unordered_set<kir::IterDomain*> zeroMergedIn() const {
+  const std::unordered_set<kir::IterDomain*>& zeroMergedIn() const {
     return zero_merged_in_;
   }
 
@@ -127,6 +128,8 @@ class IndexCompute : public BackwardVisitor {
       std::unordered_map<kir::IterDomain*, kir::Val*> new_index_entries,
       const std::vector<bool>& _root_contiguity);
 
+  virtual void run();
+
   // Map producer contiguity information to consumer, if entries don't match
   // mark as false
   static std::vector<bool> contiguityPasC(
@@ -136,6 +139,29 @@ class IndexCompute : public BackwardVisitor {
   static std::vector<bool> contiguityAnd(
       const std::vector<bool>& contig1,
       const std::vector<bool>& contig2);
+};
+
+//! Apply swizzle and update root indices accordingly
+class IndexSwizzle : public IndexCompute {
+ public:
+  IndexSwizzle(
+      const TensorView* tv,
+      std::unordered_map<kir::IterDomain*, kir::Val*> initial_index_map,
+      std::unordered_map<kir::IterDomain*, kir::Val*> extent_map,
+      std::unordered_set<kir::IterDomain*> zero_merged_in);
+
+  void run() override;
+
+ protected:
+  using IndexCompute::handle;
+
+  void handle(Expr* e) override;
+
+ private:
+  const TensorView* tv_ = nullptr;
+  SwizzleType swizzle_type_ = SwizzleType::NoSwizzle;
+  std::vector<IterDomain*> ids_to_swizzle_;
+  std::unordered_set<IterDomain*> swizzled_ids_;
 };
 
 // Simple interface for IndexCompute
