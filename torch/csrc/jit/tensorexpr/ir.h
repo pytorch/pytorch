@@ -179,69 +179,51 @@ class Mod : public BinaryOpNode<Mod> {
       : BinaryOpNode(lhs, rhs, IRNodeType::kMod) {}
 };
 
-class And : public BinaryOpNode<And> {
+template <typename Op>
+class BitwiseOpNode : public BinaryOpNode<Op> {
+ public:
+  BitwiseOpNode(const Expr* lhs, const Expr* rhs, IRNodeType type)
+      : BinaryOpNode<Op>(lhs, rhs, type) {}
+
+  static ExprHandle make(const ExprHandle& lhs, const ExprHandle& rhs) {
+    if (!lhs.dtype().is_integral()) {
+      throw unsupported_dtype();
+    }
+    if (lhs.dtype() != rhs.dtype()) {
+      throw malformed_input("lhs/rhs dtype mismatch");
+    }
+    return BinaryOpNode<Op>::make(lhs, rhs);
+  }
+};
+
+class And : public BitwiseOpNode<And> {
  public:
   And(const Expr* lhs, const Expr* rhs)
-      : BinaryOpNode(lhs, rhs, IRNodeType::kAnd) {
-    if (!lhs->dtype().is_integral()) {
-      throw unsupported_dtype();
-    }
-    if (lhs->dtype() != rhs->dtype()) {
-      throw malformed_input("bad dtype in And");
-    }
-  }
+      : BitwiseOpNode(lhs, rhs, IRNodeType::kAnd) {}
 };
 
-class Or : public BinaryOpNode<Or> {
+class Or : public BitwiseOpNode<Or> {
  public:
   Or(const Expr* lhs, const Expr* rhs)
-      : BinaryOpNode(lhs, rhs, IRNodeType::kOr) {
-    if (!lhs->dtype().is_integral()) {
-      throw unsupported_dtype();
-    }
-    if (lhs->dtype() != rhs->dtype()) {
-      throw malformed_input("bad dtype in Or");
-    }
-  }
+      : BitwiseOpNode(lhs, rhs, IRNodeType::kOr) {}
 };
 
-class Xor : public BinaryOpNode<Xor> {
+class Xor : public BitwiseOpNode<Xor> {
  public:
   Xor(const Expr* lhs, const Expr* rhs)
-      : BinaryOpNode(lhs, rhs, IRNodeType::kXor) {
-    if (!lhs->dtype().is_integral()) {
-      throw unsupported_dtype();
-    }
-    if (lhs->dtype() != rhs->dtype()) {
-      throw malformed_input("bad dtype in Xor");
-    }
-  }
+      : BitwiseOpNode(lhs, rhs, IRNodeType::kXor) {}
 };
 
-class Lshift : public BinaryOpNode<Lshift> {
+class Lshift : public BitwiseOpNode<Lshift> {
  public:
   Lshift(const Expr* lhs, const Expr* rhs)
-      : BinaryOpNode(lhs, rhs, IRNodeType::kLshift) {
-    if (lhs->dtype().scalar_type() != ScalarType::Int) {
-      throw unsupported_dtype();
-    }
-    if (lhs->dtype() != rhs->dtype()) {
-      throw malformed_input("bad dtype in Lshift");
-    }
-  }
+      : BitwiseOpNode(lhs, rhs, IRNodeType::kLshift) {}
 };
 
-class Rshift : public BinaryOpNode<Rshift> {
+class Rshift : public BitwiseOpNode<Rshift> {
  public:
   Rshift(const Expr* lhs, const Expr* rhs)
-      : BinaryOpNode(lhs, rhs, IRNodeType::kRshift) {
-    if (lhs->dtype().scalar_type() != ScalarType::Int) {
-      throw unsupported_dtype();
-    }
-    if (lhs->dtype() != rhs->dtype()) {
-      throw malformed_input("bad dtype in Rshift");
-    }
-  }
+      : BitwiseOpNode(lhs, rhs, IRNodeType::kRshift) {}
 };
 
 class Max : public BinaryOpNode<Max> {
