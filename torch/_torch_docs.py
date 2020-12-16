@@ -610,105 +610,6 @@ Example::
     True
 """)
 
-add_docstr(torch.all,
-           r"""
-all(input) -> Tensor
-
-Tests if all elements in :attr:`input` evaluate to `True`.
-
-Example::
-
-    >>> a = torch.rand(1, 2).bool()
-    >>> a
-    tensor([[False, True]], dtype=torch.bool)
-    >>> torch.all(a)
-    tensor(False, dtype=torch.bool)
-    >>> a = torch.arange(0, 3)
-    >>> a
-    tensor([0, 1, 2])
-    >>> torch.all(a)
-    tensor(False)
-
-.. function:: all(input, dim, keepdim=False, *, out=None) -> Tensor
-
-For each row of :attr:`input` in the given dimension :attr:`dim`,
-returns `True` if all elements in the row evaluate to `True` and `False` otherwise.
-
-{keepdim_details}
-
-Args:
-    {input}
-    {dim}
-    {keepdim}
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> a = torch.rand(4, 2).bool()
-    >>> a
-    tensor([[True, True],
-            [True, False],
-            [True, True],
-            [True, True]], dtype=torch.bool)
-    >>> torch.all(a, dim=1)
-    tensor([ True, False,  True,  True], dtype=torch.bool)
-    >>> torch.all(a, dim=0)
-    tensor([ True, False], dtype=torch.bool)
-""".format(**single_dim_common))
-
-add_docstr(torch.any,
-           r"""
-any(input) -> Tensor
-
-Args:
-    {input}
-
-Tests if any element in :attr:`input` evaluates to `True`.
-
-Example::
-
-    >>> a = torch.rand(1, 2).bool()
-    >>> a
-    tensor([[False, True]], dtype=torch.bool)
-    >>> torch.any(a)
-    tensor(True, dtype=torch.bool)
-    >>> a = torch.arange(0, 3)
-    >>> a
-    tensor([0, 1, 2])
-    >>> torch.any(a)
-    tensor(True)
-
-.. function:: any(input, dim, keepdim=False, *, out=None) -> Tensor
-
-For each row of :attr:`input` in the given dimension :attr:`dim`,
-returns `True` if any element in the row evaluate to `True` and `False` otherwise.
-
-{keepdim_details}
-
-Args:
-    {input}
-    {dim}
-    {keepdim}
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> a = torch.randn(4, 2) < 0
-    >>> a
-    tensor([[ True,  True],
-            [False,  True],
-            [ True,  True],
-            [False, False]])
-    >>> torch.any(a, 1)
-    tensor([ True,  True,  True, False])
-    >>> torch.any(a, 0)
-    tensor([True, True])
-""".format(**single_dim_common))
-
 add_docstr(torch.angle,
            r"""
 angle(input, *, out=None) -> Tensor
@@ -8099,7 +8000,7 @@ add_docstr(torch.svd,
 svd(input, some=True, compute_uv=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
 This function returns a namedtuple ``(U, S, V)`` which is the singular value
-decomposition of a input real matrix or batches of real matrices :attr:`input` such that
+decomposition of a input matrix or batches of matrices :attr:`input` such that
 :math:`input = U \times diag(S) \times V^T`.
 
 If :attr:`some` is ``True`` (default), the method returns the reduced
@@ -8110,6 +8011,8 @@ will be :math:`(*, n, n)`.
 
 If :attr:`compute_uv` is ``False``, the returned `U` and `V` matrices will be zero matrices
 of shape :math:`(m \times m)` and :math:`(n \times n)` respectively. :attr:`some` will be ignored here.
+
+Supports real-valued and complex-valued input.
 
 .. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
           then the singular values of each matrix in the batch is returned in descending order.
@@ -8134,6 +8037,9 @@ of shape :math:`(m \times m)` and :math:`(n \times n)` respectively. :attr:`some
 
 .. note:: When :attr:`compute_uv` = ``False``, backward cannot be performed since `U` and `V`
           from the forward pass is required for the backward operation.
+
+.. note:: With the complex-valued input the backward operation works correctly only
+          for gauge invariant loss functions. Please look at `Gauge problem in AD`_ for more details.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
@@ -8172,6 +8078,8 @@ Example::
     >>> u, s, v = torch.svd(a_big)
     >>> torch.dist(a_big, torch.matmul(torch.matmul(u, torch.diag_embed(s)), v.transpose(-2, -1)))
     tensor(2.6503e-06)
+
+.. _Gauge problem in AD: https://re-ra.xyz/Gauge-Problem-in-Automatic-Differentiation/
 """)
 
 add_docstr(torch.symeig,
