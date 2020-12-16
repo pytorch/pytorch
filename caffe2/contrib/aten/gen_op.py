@@ -20,7 +20,7 @@ import yaml
 import argparse
 import os
 from copy import deepcopy
-from typing import Dict, List, Set
+from typing import Dict, List
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--template_dir", default=".", help="where template.h is")
@@ -241,7 +241,7 @@ if __name__ == '__main__':
         'implementations': [],
         'cases': [],
     }  # type: Dict[str, List]
-    seen: Set[str] = set()
+    seen = set()
     key = 0
     for o in filtered:
         # [DESCRIPTORS]

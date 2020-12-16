@@ -469,6 +469,7 @@ c10::impl::hacky_wrapper_for_legacy_signatures<
             else:
                 assert_never(self.target)
                 # Silence mypy's "Missing return statement" error
+                return None
 
         return list(mapMaybe(gen_one, g.functions()))
 
@@ -697,7 +698,7 @@ def compute_native_function_declaration(g: Union[StructuredNativeFunctions, Nati
         # only out has dispatch
         meta_name = meta.name(g)
         rs = []
-        seen: Set[Any] = set()
+        seen = set()
         out_args = native.arguments(g.out.func)
         for k, n in g.out.dispatch.items():
             if n in seen:
