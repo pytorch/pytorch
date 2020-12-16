@@ -2185,6 +2185,11 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected rcond and input to be on the same device"):
             torch.linalg.pinv(a, rcond=rcond)
 
+        # rcond can't be complex
+        rcond = torch.full((), 1j, device=device)
+        with self.assertRaisesRegex(RuntimeError, "rcond tensor of complex type is not supported"):
+            torch.linalg.pinv(a, rcond=rcond)
+
     # TODO: RuntimeError: svd does not support automatic differentiation for outputs with complex dtype.
     # See https://github.com/pytorch/pytorch/pull/47761
     @unittest.expectedFailure

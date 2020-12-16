@@ -99,11 +99,14 @@ Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
   ScalarType t = input.scalar_type();
   TORCH_CHECK((t == ScalarType::Double || t == ScalarType::Float || t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble)
               && input.dim() >= 2,
-              "linalg_pinv(", input.scalar_type(), "{", input.sizes(), "}): expected a tensor with 2 or more dimensions "
+              "linalg_pinv(", t, "{", input.sizes(), "}): expected a tensor with 2 or more dimensions "
               "of float, double, cfloat or cdouble types");
   TORCH_CHECK(rcond.device() == input.device(),
               "Expected rcond and input to be on the same device, but found rcond on ",
               rcond.device(), " and input on ", input.device(), " instead.");
+  TORCH_CHECK(!at::isComplexType(rcond.scalar_type()),
+              "linalg_pinv: rcond tensor of complex type is not supported.");
+
   if (input.numel() == 0) {
     // The implementation below uses operations that do not work for zero numel tensors
     // therefore we need this early return for 'input.numel() == 0' case
