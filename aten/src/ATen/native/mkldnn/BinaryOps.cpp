@@ -75,7 +75,7 @@ Tensor mkldnn_add(const Tensor& self, const Tensor& other, Scalar alpha) {
 }
 
 Tensor& mkldnn_add_(Tensor& self, const Tensor& other, Scalar alpha) {
-  return native::mkldnn_add_out(self, self, other, alpha);
+  return native::mkldnn_add_out(self, other, alpha, self);
 }
 
 Tensor& mkldnn_mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
