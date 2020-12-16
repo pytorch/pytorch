@@ -1336,6 +1336,7 @@ class TestFakeQuantize(TestCase):
     def test_learnable_backward_per_channel_cuda(self, X):
         torch.random.manual_seed(NP_RANDOM_SEED)
         X, (_, _, axis, _) = X
+        X = torch.rand(2, 5) * 2 - 1
         X_base = torch.tensor(X).to('cuda')
         channel_size = X_base.size(axis)
         scale_base = torch.normal(mean=0, std=1, size=(channel_size,)).clamp(1e-4, 100)
