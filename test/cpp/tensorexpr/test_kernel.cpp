@@ -522,7 +522,7 @@ TEST(Kernel, DISABLED_SumAllAxes) {
 std::string li_to_str(at::ArrayRef<int64_t> li) {
   std::stringstream out;
   bool first = true;
-  for (auto elem: li) {
+  for (auto elem : li) {
     if (!first) {
       out << ", ";
     }

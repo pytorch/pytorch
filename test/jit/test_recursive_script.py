@@ -539,6 +539,15 @@ class TestRecursiveScript(JitTestCase):
         script_out = sm(t.clone())
         self.assertNotEqual(eager_out, script_out)
 
+    def test_prepare_scriptable_cycle(self):
+        t = torch.randn(5, 5)
+        c = torch.nn.Module()
+        p = torch.nn.Module()
+        c.__dict__["_p"] = p
+        p.__dict__["_c"] = c
+
+        sm = torch.jit.script(p)
+
     def test_attributes(self):
         @torch.jit.script
         class Inner2(object):
