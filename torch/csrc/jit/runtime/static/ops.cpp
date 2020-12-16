@@ -31,7 +31,6 @@ bool canRunNatively(Node* n) {
   // In alphabetical order
   const static std::unordered_set<std::string> native_nodes{
       "aten::flatten",
-      "aten::narrow",
       "aten::permute",
       "aten::reshape",
       "aten::slice",
@@ -301,6 +300,28 @@ REGISTER_OPERATOR_FUNCTOR(aten::clone, aten_clone, [](Node* n) -> SROperator {
     auto out_t = p_node->Output(0, reg).toTensor();
     at::native::resize_as_(out_t, in0_t, c10::nullopt);
     at::native::copy_(out_t, in0_t, false);
+  };
+});
+
+REGISTER_OPERATOR_FUNCTOR(aten::narrow, aten_narrow, [](Node* n) -> SROperator {
+  return [](const ProcessedNode* p_node, std::vector<IValue>& reg) {
+    auto self = p_node->Input(0, reg).toTensor(); // self
+    auto dim = p_node->Input(1, reg).toInt(); // dim
+    int64_t start = 0;
+    if (p_node->Input(2, reg).isScalar()) {
+      start = p_node->Input(2, reg).toInt();
+    } else {
+      auto t = p_node->Input(2, reg).toTensor();
+      start = t.item<int64_t>();
+    }
+    auto length = p_node->Input(3, reg).toInt(); // length
+
+    if (p_node->Output(0, reg).isNone()) {
+      p_node->Output(0, reg) = create_empty_from(self);
+    }
+    auto output = p_node->Output(0, reg).toTensor();
+    output.resize_({0});
+    at::native::narrow_copy_dense_out(output, self, dim, start, length);
   };
 });
 
