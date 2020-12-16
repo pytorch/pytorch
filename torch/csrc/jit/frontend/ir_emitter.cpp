@@ -4024,7 +4024,8 @@ std::unique_ptr<Function> CompilationUnit::define(
     const ResolverPtr& resolver,
     const Self* self,
     const std::unordered_map<std::string, Function*>& function_table,
-    bool shouldMangle) const {
+    bool shouldMangle,
+    CompilationUnit::FunctionType type) const {
   TORCH_INTERNAL_ASSERT(resolver);
   auto _resolver = resolver;
   if (!self) {
@@ -4060,7 +4061,13 @@ std::unique_ptr<Function> CompilationUnit::define(
       std::move(name), std::make_shared<Graph>(), creator);
   if (self) {
     // Register this as a method on `self`'s type
-    self->getClassType()->addMethod(fn.get());
+    if(CompilationUnit::FunctionType::hook == type) {
+      self->getClassType()->addForwardHook(fn.get());
+    } else if (CompilationUnit::FunctionType::pre_hook == type) { 
+      self->getClassType()->addForwardPreHook(fn.get());
+    } else {
+      self->getClassType()->addMethod(fn.get()); 
+    }
   }
   return fn;
 }
@@ -4113,7 +4120,8 @@ std::vector<Function*> CompilationUnit::define(
         defResolvers[i],
         self,
         function_table,
-        shouldMangle);
+        shouldMangle,
+        CompilationUnit::FunctionType::method);
 
     record_function(std::move(fn));
   }
@@ -4130,6 +4138,94 @@ std::vector<Function*> CompilationUnit::define(
     function->ensure_defined();
   }
 
+  return functions;
+}
+
+std::vector<Function*> CompilationUnit::define_hooks(
+    const c10::optional<c10::QualifiedName>& prefix,
+    const std::vector<Def>& hookDefs,
+    const std::vector<ResolverPtr>& hookResolvers,
+    const std::vector<Def>& preHookDefs,
+    const std::vector<ResolverPtr>& preHookResolvers,
+    const Self* self,
+    bool shouldMangle) {
+  TORCH_INTERNAL_ASSERT(hookDefs.size() == hookResolvers.size());
+  TORCH_INTERNAL_ASSERT(preHookDefs.size() == preHookResolvers.size());
+  std::vector<Function*> functions;
+  std::unordered_map<std::string, Function*> function_table;
+  
+  // check hook for name collisions and redefinition
+  auto check_collisions = [&](Def hook) -> Function* {
+    auto name = prefix ? QualifiedName(*prefix, hook.name().name()).name()
+                     : QualifiedName(hook.name().name()).name();
+    // check if hook is already defined for this module
+    auto found_hook = function_table.find(name);
+    auto existing_hook = found_hook != function_table.end() ? found_hook->second : nullptr;
+    // check if hook name is already defined on module as method
+    if (existing_hook == nullptr){
+     TORCH_CHECK(
+      self->getClassType()->findCallable(name) == nullptr,
+      "Can't define hook: ",
+      name,
+      " on class: ",
+      self->getClassType()->repr_str(),
+      " because a method with that name already exists."); 
+    }
+    return existing_hook;
+  };
+
+  // define hooks
+  for (size_t i = 0; i < hookDefs.size(); i++) {
+    // check to see if already defined this hook 
+    auto existing_fn = check_collisions(hookDefs[i]);
+    if (existing_fn != nullptr){
+        // add it to class type again so it's called
+        self->getClassType()->addForwardHook(existing_fn);
+        continue;
+    } 
+    // define hook
+    auto fn = define(
+        prefix,
+        hookDefs[i],
+        hookResolvers[i],
+        self,
+        function_table,
+        shouldMangle,
+        CompilationUnit::FunctionType::hook);
+    
+    function_table[fn->name()] = fn.get();
+    functions.emplace_back(fn.get());
+    fn->ensure_defined();
+    // TODO check that hook schema is well formed
+    this->register_function(std::move(fn));
+  }
+  
+  // define pre_hooks
+  for (size_t i = 0; i < preHookDefs.size(); i++) {
+    // check to see if already defined this hook 
+    auto existing_fn = check_collisions(preHookDefs[i]);
+    if (existing_fn != nullptr){
+        // add it to class type again so it's called
+        self->getClassType()->addForwardPreHook(existing_fn);
+        continue;
+    } 
+    // define pre_hook
+    auto fn = define(
+        prefix,
+        preHookDefs[i],
+        preHookResolvers[i],
+        self,
+        function_table,
+        shouldMangle,
+        CompilationUnit::FunctionType::pre_hook);
+
+    function_table[fn->name()] = fn.get();
+    functions.emplace_back(fn.get());
+    fn->ensure_defined();
+    // TODO check to ensure hook schema is well formed
+    this->register_function(std::move(fn));
+  }
+  
   return functions;
 }
 

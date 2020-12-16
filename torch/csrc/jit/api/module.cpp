@@ -118,6 +118,51 @@ IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs) {
   return (*function_)(std::move(stack), kwargs);
 }
 
+IValue Module::operator()(std::vector<IValue> inputs) {
+  const auto& pre_forward_hooks = type()->getForwardPreHooks();
+  const auto& forward_hooks = type()->getForwardHooks();
+
+  // call forward pre_hooks
+  for (const auto& pre_hook : pre_forward_hooks) {
+    std::vector<IValue> pre_hook_input_vals = inputs;
+    if (pre_hook_input_vals.size() == 0) {
+      pre_hook_input_vals.emplace_back(IValue());
+    }
+    auto tuple_input = c10::ivalue::Tuple::create(pre_hook_input_vals);
+    std::vector<IValue> pre_hook_inputs;
+    pre_hook_inputs.emplace_back(tuple_input);
+
+    IValue result = Method(_ivalue(), pre_hook)(pre_hook_inputs);
+    
+    if (!result.isNone()) {
+      inputs = result.toTuple()->elements();
+    }
+  }
+
+  // call forward
+  auto outputs = forward(inputs);
+
+  // call forward hooks
+  for (const auto& hook : forward_hooks) {
+    std::vector<IValue> hook_input_vals = inputs;
+    if (hook_input_vals.size() == 0) {
+      hook_input_vals.emplace_back(IValue());
+    }
+    auto tuple_input = c10::ivalue::Tuple::create(hook_input_vals);
+    std::vector<IValue> hook_inputs;
+    hook_inputs.emplace_back(tuple_input);
+    hook_inputs.emplace_back(outputs);
+
+    Kwargs output_param;
+    output_param["outputs"] = outputs;
+    auto hook_result = Method(_ivalue(), hook)(hook_inputs);
+    if (!hook_result.isNone()) {
+      outputs = hook_result;
+    }
+  }
+  return outputs;
+}
+
 void Module::clone_method(
     const Module& orig,
     const Function& method,

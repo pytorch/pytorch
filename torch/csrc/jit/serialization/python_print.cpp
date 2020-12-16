@@ -1072,7 +1072,7 @@ struct PythonPrintImpl {
 
         if (auto selfClass = self->type()->cast<ClassType>()) {
           deps_table_.add(selfClass);
-          const Function& method = selfClass->getMethod(node->s(attr::name));
+          const Function& method = selfClass->getCallable(node->s(attr::name));
           TORCH_INTERNAL_ASSERT(
               method.qualname() ==
               QualifiedName(selfClass->name()->qualifiedName(), methodName));
@@ -1348,6 +1348,24 @@ struct PythonPrintImpl {
         }
         body_ << "]\n";
 #endif
+        auto forwardPreHooks = classType->getForwardPreHooks();
+        if (forwardPreHooks.size() > 0) {
+          indent();
+          body_ << "__forward_pre_hooks__ = [";
+          for (const auto& pre_hook : forwardPreHooks) {
+            body_ << "\"" << pre_hook->name() << "\", ";
+          }
+          body_ << "]\n";
+        }
+        auto forwardHooks = classType->getForwardHooks();
+        if (forwardHooks.size() > 0) {
+          indent();
+          body_ << "__forward_hooks__ = [";
+          for (const auto& hook : forwardHooks) {
+            body_ << "\"" << hook->name() << "\", ";
+          }
+          body_ << "]\n";
+        }
       }
 
       for (size_t i = 0; i < numAttrs; i++) {
@@ -1393,6 +1411,19 @@ struct PythonPrintImpl {
       // TODO fields
       for (auto& method : classType->methods()) {
         printFunction(*method);
+      }
+      std::set<std::string> already_printed;
+      for (auto& hook : classType->getForwardHooks()) {
+        if (already_printed.count(hook->name()) == 0){
+          already_printed.insert(hook->name());
+          printFunction(*hook);
+        }
+      }
+      for (auto& pre_hook : classType->getForwardPreHooks()) {
+        if (already_printed.count(pre_hook->name()) == 0){
+          already_printed.insert(pre_hook->name());
+          printFunction(*pre_hook);
+        } 
       }
     }
   }

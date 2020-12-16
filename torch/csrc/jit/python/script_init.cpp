@@ -1572,6 +1572,9 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "add_builtin_function",
           &ConcreteModuleTypeBuilder::addBuiltinFunction)
+      .def("add_forward_hook", &ConcreteModuleTypeBuilder::addForwardHook)
+      .def(
+          "add_forward_pre_hook", &ConcreteModuleTypeBuilder::addForwardPreHook)
       .def("add_module", &ConcreteModuleTypeBuilder::addModule)
       .def("add_overload", &ConcreteModuleTypeBuilder::addOverload)
       .def("set_poisoned", &ConcreteModuleTypeBuilder::setPoisoned)
@@ -1675,6 +1678,43 @@ void initJitScriptBindings(PyObject* module) {
               ++defs_it;
               ++defaults_it;
             }
+          })
+      .def(
+          "_create_hooks",
+          [](std::shared_ptr<ConcreteModuleType> concreteType,
+             const std::vector<Def>& hookDefs,
+             const std::vector<ResolutionCallback>& hookRcbs,
+             const std::vector<FunctionDefaults>& hookDefaults,
+             const std::vector<Def>& preHookDefs,
+             const std::vector<ResolutionCallback>& preHookRcbs,
+             const std::vector<FunctionDefaults>& preHookDefaults) {
+            TORCH_INTERNAL_ASSERT(hookDefs.size() == hookRcbs.size());
+            TORCH_INTERNAL_ASSERT(preHookDefs.size() == preHookRcbs.size());
+
+            std::vector<ResolverPtr> hookResolvers, preHookResolvers;
+
+            hookResolvers.reserve(hookRcbs.size());
+            for (auto& callback : hookRcbs) {
+              hookResolvers.push_back(pythonResolver(callback));
+            }
+
+            preHookResolvers.reserve(preHookRcbs.size());
+            for (auto& callback : preHookRcbs) {
+              preHookResolvers.push_back(pythonResolver(callback));
+            }
+
+            const auto& selfType =
+                concreteType->getJitType()->expect<ClassType>();
+            const auto& prefix = selfType->name().value();
+            const auto self = ModuleSelf(std::move(concreteType));
+            auto cu = selfType->compilation_unit();
+            cu->define_hooks(
+                prefix,
+                hookDefs,
+                hookResolvers,
+                preHookDefs,
+                preHookResolvers,
+                &self);
           });
 
   m.def(
@@ -1694,6 +1734,24 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def(
       "_run_emit_module_hook", [](const Module& m) { didFinishEmitModule(m); });
+
+  m.def(
+      "_get_forward_hooks",
+      [](const Module& m) {
+        std::vector<StrongFunctionPtr> funcs;
+        for(auto& hook : m.type()->getForwardHooks()){
+          funcs.emplace_back(StrongFunctionPtr(m.type()->compilation_unit(), hook));
+        }
+        return funcs;
+      });
+  m.def("_get_forward_pre_hooks",
+      [](const Module& m) {
+        std::vector<StrongFunctionPtr> funcs;
+        for(auto& pre_hook : m.type()->getForwardPreHooks()){
+          funcs.emplace_back(StrongFunctionPtr(m.type()->compilation_unit(), pre_hook));
+        }
+        return funcs;
+      });
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<logging::LoggerBase, std::shared_ptr<logging::LoggerBase>>(

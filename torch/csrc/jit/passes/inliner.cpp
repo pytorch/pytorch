@@ -30,7 +30,7 @@ void inlineCalls(Block* block) {
       case prim::CallMethod: {
         const std::string& name = cur->s(attr::name);
         if (auto class_type = cur->input(0)->type()->cast<ClassType>()) {
-          Function& function = class_type->getMethod(name);
+          Function& function = class_type->getCallable(name);
           if (!function.isGraphFunction()) {
             continue;
           }

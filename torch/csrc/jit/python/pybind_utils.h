@@ -621,11 +621,19 @@ inline IValue toIValue(
       auto tuple_type = type->cast<TupleType>();
       const auto& elem_types = tuple_type->elements();
       if (elem_types.size() != tuple_size) {
-        throw py::cast_error(c10::str(
+        if(!(tuple_size == 0 && type->repr_str() == "Tuple[None]")){
+        // Above check added for static forward hooks. Need a way to 
+        // match a type to eager's empty 'tuple' input for python calls
+        // to scripted pre_hook/hook when forward has no inputs.
+        // Tuple[] and 'tuple' aren't valid types and providing no type
+        // results in the inferred type of 'Tensor' for the hooks' input.
+        // Using type 'None' also fails to match the python input of '()'
+         throw py::cast_error(c10::str(
             "Object ",
             py::str(obj),
             " had a different number of elements than type ",
-            type->repr_str()));
+            type->repr_str())); 
+        }
       }
       std::vector<IValue> values;
       values.reserve(tuple_size);

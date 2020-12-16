@@ -274,6 +274,14 @@ def infer_concrete_type_builder(nn_module, share_types=True):
                     "to a TorchScript type.)").format(torch.typename(type(value)))
             concrete_type_builder.add_failed_attribute(name, hint)
 
+    # add hooks to concrete type
+    # TODO: would using a random number here be better? I had collisions happen
+    # even with the name and python id combination here ...  
+    for hook in nn_module._forward_hooks.values():
+        concrete_type_builder.add_forward_hook(hook.__name__ + str(id(hook)))
+    for pre_hook in nn_module._forward_pre_hooks.values():
+        concrete_type_builder.add_forward_pre_hook(pre_hook.__name__ + str(id(pre_hook)))
+
     return concrete_type_builder
 
 class ConcreteTypeStore(object):
@@ -321,6 +329,16 @@ def create_methods_and_properties_from_stubs(concrete_type, method_stubs, proper
 
     concrete_type._create_methods_and_properties(property_defs, property_rcbs, method_defs, method_rcbs, method_defaults)
 
+def create_hooks_from_stubs(concrete_type, hook_stubs, pre_hook_stubs):
+    hook_defs = [h.def_ for h in hook_stubs]
+    hook_rcbs = [h.resolution_callback for h in hook_stubs]
+    hook_defaults = [get_default_args(h.original_method) for h in hook_stubs]
+
+    pre_hook_defs = [h.def_ for h in pre_hook_stubs]
+    pre_hook_rcbs = [h.resolution_callback for h in pre_hook_stubs]
+    pre_hook_defaults = [get_default_args(h.original_method) for h in pre_hook_stubs]
+
+    concrete_type._create_hooks(hook_defs, hook_rcbs, hook_defaults, pre_hook_defs, pre_hook_rcbs, pre_hook_defaults)
 
 def get_module_concrete_type(nn_module, share_types=True):
     """
@@ -381,6 +399,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     cpp_module = torch._C._create_module_with_type(concrete_type.jit_type)
     method_stubs = stubs_fn(nn_module)
     property_stubs = get_property_stubs(nn_module)
+    hook_stubs, pre_hook_stubs = get_hook_stubs(nn_module)
 
     def init_fn(script_module):
         # Initialize the ScriptModule:
@@ -408,7 +427,15 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
             cpp_module.setattr(name, scripted)
             script_module._modules[name] = scripted
 
-        # 3. Copy @ignored/@unused methods and attrs from the original `nn_module` to the new ScriptModule.
+        ## 3. Copy the python forward and pre_forward hooks from the original 'nn_module'
+        #     to the new ScriptModule. This is done so when the top most module is called
+        #     from eager the hooks will be envoked.
+        for hook in nn_module._forward_hooks.values():
+            script_module.register_forward_hook(hook)
+        for pre_hook in nn_module._forward_pre_hooks.values():
+            script_module.register_forward_pre_hook(pre_hook)
+
+        # 4. Copy @ignored/@unused methods and attrs from the original `nn_module` to the new ScriptModule.
         #    This ensures we can access these Python methods on the ScriptModule.
         for name in dir(nn_module):
             item = getattr(nn_module, name, None)
@@ -428,6 +455,9 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     # Compile methods if necessary
     if concrete_type not in concrete_type_store.methods_compiled:
         create_methods_and_properties_from_stubs(concrete_type, method_stubs, property_stubs)
+        # create hooks after methods to ensure no name collisions between hooks and methods
+        # if done before hooks can overshadow methods that aren't exported
+        create_hooks_from_stubs(concrete_type, hook_stubs, pre_hook_stubs)
         torch._C._run_emit_module_hook(cpp_module)
         concrete_type_store.methods_compiled.add(concrete_type)
 
@@ -619,6 +649,23 @@ def infer_methods_to_compile(nn_module):
     return overload_stubs + stubs
 
 
+def get_hook_stubs(nn_module):
+    """
+    Returns forward hook and pre_hook ScriptModuleStubs
+    """
+    check_module_initialized(nn_module)
+
+    hook_stubs = []
+    for hook in nn_module._forward_hooks.values():
+        hook_stubs.append(make_stub(hook, hook.__name__))
+
+    pre_hook_stubs = []
+    for pre_hook in nn_module._forward_pre_hooks.values():
+        pre_hook_stubs.append(make_stub(pre_hook, pre_hook.__name__))
+    
+    return hook_stubs, pre_hook_stubs
+
+
 def get_property_stubs(nn_module):
     """
     Create property stubs for the properties of the module by creating method
@@ -695,6 +742,12 @@ def wrap_cpp_module(cpp_module):
         for name, cpp_module in torch._C.ModuleDict(script_module._c).items():
             setattr(script_module, name, wrap_cpp_module(cpp_module))
         script_module._concrete_type = torch._C.ConcreteModuleType.from_jit_type(script_module._c._type())
+        
+        for idx, fn in enumerate(torch._C._get_forward_pre_hooks(script_module._c)):
+            script_module._forward_pre_hooks[idx] = fn
+        for idx, fn in enumerate(torch._C._get_forward_hooks(script_module._c)):
+            script_module._forward_hooks[idx] = fn
+
     return torch.jit.RecursiveScriptModule._construct(cpp_module, init_fn)
 
 def compile_unbound_method(concrete_type, fn):

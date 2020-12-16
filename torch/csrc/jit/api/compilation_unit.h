@@ -46,6 +46,11 @@ struct Self {
 // are used to implement their Methods
 
 struct TORCH_API CompilationUnit {
+  enum FunctionType {
+    method,
+    hook,
+    pre_hook
+  };
   // constructor that takes a set of functions to compile using the native
   // resolver
   explicit CompilationUnit(const std::string& source);
@@ -97,6 +102,15 @@ struct TORCH_API CompilationUnit {
       // if non-null, the first argument to each def, is bound to this value
       const Self* self,
       // see [name mangling]
+      bool shouldMangle = false);
+
+  std::vector<Function*> define_hooks(
+      const c10::optional<c10::QualifiedName>& prefix,
+      const std::vector<Def>& hookDefs,
+      const std::vector<ResolverPtr>& hookResolvers,
+      const std::vector<Def>& preHookDefs,
+      const std::vector<ResolverPtr>& preHookResolvers,
+      const Self* self,
       bool shouldMangle = false);
 
   // same as above but parse the definitions from source
@@ -221,6 +235,33 @@ struct TORCH_API CompilationUnit {
           // Erase in our big lookup table
           dict_.erase(it);
         }
+        // Classes can have multiple pointers to the same hook,
+        // need to make sure to not delete it twice
+        std::set<Function*> already_deleted;
+        for (auto hook : cls->getForwardHooks()) {
+          // Tombstone the hook in the compilation unit.
+          if (already_deleted.count(hook) == 0){
+            auto it = dict_.find(hook->qualname());
+            if (it != dict_.end()) {
+              functions_[it->second] = nullptr;
+              // Erase in our big lookup table
+              dict_.erase(it);
+            }
+            already_deleted.insert(hook);
+          }
+        }
+        for (auto pre_hook : cls->getForwardPreHooks()) {
+          // Tombstone the hook in the compilation unit.
+          if (already_deleted.count(pre_hook) == 0){
+            auto it = dict_.find(pre_hook->qualname());
+            if (it != dict_.end()) {
+              functions_[it->second] = nullptr;
+              // Erase in our big lookup table
+              dict_.erase(it);
+            }
+            already_deleted.insert(pre_hook);
+          }
+        }
       }
     }
     classes_.clear();
@@ -263,7 +304,8 @@ struct TORCH_API CompilationUnit {
       const ResolverPtr& resolver,
       const Self* self,
       const std::unordered_map<std::string, Function*>& function_table,
-      bool shouldMangle = false) const;
+      bool shouldMangle = false,
+      FunctionType type = FunctionType::method) const;
 
   // Define a property on \p self.
   struct PropertyPair;

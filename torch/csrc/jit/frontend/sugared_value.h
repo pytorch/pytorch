@@ -457,7 +457,7 @@ struct MethodValue : public SugaredValue {
     std::vector<const FunctionSchema*> schemas;
     for (const std::string& method_name : method_names_) {
       if (auto class_type = self_->type()->cast<ClassType>()) {
-        Function& method = class_type->getMethod(method_name);
+        Function& method = class_type->getCallable(method_name);
         try {
           method.ensure_defined();
         } catch (const RecursiveMethodCallError&) {
