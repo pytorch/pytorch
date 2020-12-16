@@ -116,7 +116,7 @@ size_t normalizeAndCheckIndex(int64_t idx, int64_t list_size) {
 }
 
 static at::ScalarType tensorType(Tensor* t) {
-  return static_cast<at::ScalarType>(t->body()->dtype().scalar_type());
+  return static_cast<at::ScalarType>(t->buf()->dtype().scalar_type());
 }
 
 static std::vector<ExprHandle> computeIndicesToBroadcast(
@@ -1086,7 +1086,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::type_as: {
       auto const& n = v->node();
       Tensor* rhs = tensors_.at(n->inputs()[1]->unique());
-      auto dtype = rhs->body()->dtype();
+      auto dtype = rhs->buf()->dtype();
       return computeOneOperand(
           "aten_type_as", v, [dtype](const ExprHandle& lhs) {
             return Cast::make(dtype, lhs);
@@ -1331,86 +1331,111 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     }
 
     case aten::cat: {
-      return Compute(
-          "aten_cat",
-          dimsFromSizes(sizesForValue(v)),
-          [this, v](const std::vector<VarHandle>& axes) {
-            auto const& n = v->node();
-            auto inputs = n->inputs()[0]->node()->inputs();
-            if (inputs.size() == 0) {
-              throw std::runtime_error(
-                  "Empty input list is passed to aten::cat");
-            }
+      std::vector<Stmt*> chunks;
+      auto dims = dimsFromSizes(sizesForValue(v));
 
-            // Some of the inputs can be empty tensors, we need to skip them
-            // when we construct the expression, but we need to take them into
-            // account in dtype promotion.
-            std::vector<const torch::jit::Value*> nonempty_inputs;
-            for (auto input : inputs) {
-              if (input->type()->kind() == TypeKind::TensorType) {
-                auto tt = input->type()->cast<TensorType>();
-                if (tt->isComplete() && tt->sizes().size() && tt->sizes()[0] &&
-                    *tt->sizes()[0]) {
-                  nonempty_inputs.push_back(input);
-                }
-              }
-            }
+      auto const& n = v->node();
+      auto inputs = n->inputs()[0]->node()->inputs();
+      if (inputs.size() == 0) {
+        throw std::runtime_error("Empty input list is passed to aten::cat");
+      }
 
-            // When all inputs are empty tensors, the tensor we create for this
-            // computation would contain no elements, so it doesn't really
-            // matter what we return here, so just return 0.
-            if (!nonempty_inputs.size()) {
-              return ExprHandle(0);
-            }
+      // Some of the inputs can be empty tensors, we need to skip them
+      // when we construct the expression, but we need to take them into
+      // account in dtype promotion.
+      std::vector<const torch::jit::Value*> nonempty_inputs;
+      for (auto input : inputs) {
+        if (input->type()->kind() == TypeKind::TensorType) {
+          auto tt = input->type()->cast<TensorType>();
+          if (tt->isComplete() && tt->sizes().size() && tt->sizes()[0] &&
+              *tt->sizes()[0]) {
+            nonempty_inputs.push_back(input);
+          }
+        }
+      }
 
-            int64_t dim_ = n->inputs()[1]->node()->i(attr::value);
-            size_t dim = normalizeAndCheckIndex(dim_, axes.size());
-            // Promote input types.
-            // Note that we need to consider all inputs, including empty - they
-            // also affect the resultant dtype.
-            auto maybe_dtype = findDtypeForValue(inputs[0]);
-            TORCH_INTERNAL_ASSERT(
-                maybe_dtype, "Cannot find dtype for one of aten::cat inputs");
-            ScalarType highType = *maybe_dtype;
-            for (const auto input : inputs) {
-              auto maybe_dtype = findDtypeForValue(input);
-              TORCH_INTERNAL_ASSERT(
-                  maybe_dtype, "Cannot find dtype for one of aten::cat inputs");
-              highType = promoteTypes(highType, *maybe_dtype);
-            }
+      // When all inputs are empty tensors, the tensor we create for this
+      // computation would contain no elements, so it doesn't really
+      // matter what we return here, so just return 0.
+      if (!nonempty_inputs.size()) {
+        return Compute("aten_cat", dims, [](const std::vector<VarHandle>&) {
+          return ExprHandle(0);
+        });
+      }
 
-            // Now we know the final dtype, we know what inputs are non-empty,
-            // and we know that there is at least one such an input. With all
-            // that we construct a tensor expression performing the
-            // concatenation.
-            // The expression we build here is a cascading if-then-else that
-            // essentially represents:
-            //
-            //              inp1[i, j, k]         if 0   < i < l1,
-            // out[i,j,k] = inp2[i, j-l1, k]      if l1 =< i < l1 + l2,
-            //              ...
-            //              inpN[i, j-l_N_1, k]   if l1+l2+...l_N_1  < i
-            // where l_i is the corresponding size of the i-th input.
-            std::vector<ExprHandle> newAxes(axes.begin(), axes.end());
-            ExprHandle load = promoteToDtype(
-                tensorOrConstant(nonempty_inputs[0], newAxes), highType);
-            size_t offset =
-                bufferSizes(tensors_.at(nonempty_inputs[0]->unique()))[dim];
-            newAxes[dim] = newAxes[dim] - IntImm::make(offset);
+      std::vector<const Var*> axis_vars;
+      std::vector<ExprHandle> axes;
+      for (auto& d : dims) {
+        axis_vars.push_back(new Var(d.name_hint(), kInt));
+        axes.push_back(ExprHandle(axis_vars.back()));
+      }
 
-            for (size_t ii = 1; ii < nonempty_inputs.size(); ++ii) {
-              auto input = nonempty_inputs[ii];
-              load = ifThenElse(
-                  CompareSelect::make(axes[dim], IntImm::make(offset), kLT),
-                  load,
-                  promoteToDtype(tensorOrConstant(input, newAxes), highType));
+      int64_t dim_ = n->inputs()[1]->node()->i(attr::value);
+      size_t dim = normalizeAndCheckIndex(dim_, axes.size());
+      // Promote input types.
+      // Note that we need to consider all inputs, including empty - they
+      // also affect the resultant dtype.
+      auto maybe_dtype = findDtypeForValue(inputs[0]);
+      TORCH_INTERNAL_ASSERT(
+          maybe_dtype, "Cannot find dtype for one of aten::cat inputs");
+      ScalarType highType = *maybe_dtype;
+      for (const auto input : inputs) {
+        auto maybe_dtype = findDtypeForValue(input);
+        TORCH_INTERNAL_ASSERT(
+            maybe_dtype, "Cannot find dtype for one of aten::cat inputs");
+        highType = promoteTypes(highType, *maybe_dtype);
+      }
 
-              offset += bufferSizes(tensors_.at(input->unique()))[dim];
-              newAxes[dim] = axes[dim] - IntImm::make(offset);
-            }
+      std::vector<const Expr*> dim_extents;
+      for (auto& d : dims) {
+        dim_extents.push_back(d.dim().node());
+      }
 
-            return load;
-          });
+      Buf* output_buf =
+          new Buf(new Var("aten_cat", kHandle), dim_extents, ToDtype(highType));
+
+      std::vector<ExprHandle> newAxes(axes.begin(), axes.end());
+      ExprHandle start = IntImm::make(0);
+      size_t offset = 0;
+      for (size_t i = 0; i < nonempty_inputs.size(); ++i) {
+        VarHandle dim_var(axis_vars[dim]->name_hint(), kInt);
+        axes[dim] = dim_var;
+        newAxes[dim] = dim_var - start;
+        std::vector<VarHandle> inner_vars;
+        for (size_t j = dim + 1; j < newAxes.size(); ++j) {
+          inner_vars.push_back(VarHandle(axis_vars[j]->name_hint(), kInt));
+          axes[j] = inner_vars.back();
+          newAxes[j] = inner_vars.back();
+        }
+
+        ExprHandle load = promoteToDtype(
+            tensorOrConstant(nonempty_inputs[i], newAxes), highType);
+
+        ExprHandle end = start +
+            IntImm::make(bufferSizes(
+                tensors_.at(nonempty_inputs[i]->unique()))[dim]);
+
+        Stmt* loop = Store::make(BufHandle(output_buf), axes, load, 1);
+        for (ssize_t j = newAxes.size() - 1; j > dim; --j) {
+          loop = For::make(
+              inner_vars[j - (dim + 1)], ExprHandle(0), dims[j].dim(), loop);
+        }
+        loop = For::make(dim_var, start, end, loop);
+
+        chunks.push_back(loop);
+        start = end;
+      }
+
+      Stmt* loops = new Block(chunks);
+      for (ssize_t i = dim - 1; i >= 0; --i) {
+        loops = For::make(
+            VarHandle(axis_vars[i]), ExprHandle(0), dims[i].dim(), loops);
+      }
+
+      Stmt* s = IRSimplifier::simplify(new Block({loops}));
+      std::cout << *s << "\n";
+
+      return new CompoundTensor(output_buf, axis_vars, s);
     }
     case aten::slice: {
       return Compute(
@@ -1469,9 +1494,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
       return computeSoftmax(v, true);
     }
 
-    default: {
-      throw std::runtime_error("Unhandled node kind");
-    }
+    default: { throw std::runtime_error("Unhandled node kind"); }
   }
 }
 
@@ -1484,14 +1507,20 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
   l.inlineIntermediateBufs();
 
   if (backendType == kCudaCodeGen) {
-    for (auto tensor : tensorOutputs_) {
+    std::cout << "cuda\n";
+    for (auto pair : tensors_) {
+      Tensor* tensor = pair.second;
+      std::cout << "Tensor \n";
       std::vector<For*> loops = l.getLoopStmtsFor(tensor);
       TORCH_INTERNAL_ASSERT(!loops.empty(), "loops should not be empty");
       For* flattened = nullptr;
       LoopNest::flatten(loops, &flattened);
+      std::cout << flattened << "\n";
       assert(flattened);
+      std::cout << *flattened << "\n";
 
       int loopLevels = getTECudaPointwiseLoopLevels();
+      std::cout << "loop levels " << loopLevels << "\n";
       const int kDefaultLoopLevels = 2;
       loopLevels = (loopLevels > 0) ? loopLevels : kDefaultLoopLevels;
       int blockCount = getTECudaPointwiseBlockCount();
@@ -1568,6 +1597,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
   // Arithmetic Simplification.
   stmt = IRSimplifier::simplify(stmt);
   GRAPH_DEBUG("Final Stmt:\n", std::to_string(stmt), "\n");
+  std::cout << *stmt << "\n";
   return stmt;
 }
 
