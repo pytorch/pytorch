@@ -16,4 +16,5 @@ PyObject* THPModule_isEnabledTorchFunction(PyObject* self, PyObject *unused);
 PyObject* THPModule_DisableTorchFunctionType();
 PyObject* THPModule_disable_torch_function(PyObject *self, PyObject *args);
 PyObject* THPModule_has_torch_function(PyObject*, PyObject *arg);
-PyObject* THPModule_object_has_torch_function(PyObject*, PyObject *obj);
+PyObject* THPModule_has_torch_function_unary(PyObject*, PyObject *obj);
+PyObject* THPModule_has_torch_function_variadic(PyObject*, PyObject *const *args, Py_ssize_t nargs);

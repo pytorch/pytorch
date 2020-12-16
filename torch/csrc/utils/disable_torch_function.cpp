@@ -166,30 +166,12 @@ inline bool has_torch_function_attr(PyObject* obj) {
     attr.ptr() != torch::disabled_torch_function);
 }
 
-inline bool sequence_has_torch_function(PyObject* args) {
-  // NB: The caller is expected to guarantee a sequence.
-  if (!torch::torch_function_enabled())
-    return false;
-
-  Py_ssize_t n = PySequence_Fast_GET_SIZE(args);
-  for (Py_ssize_t i = 0; i < n; i++) {
-    PyObject* obj = PySequence_Fast_GET_ITEM(args, i);
-    PyTypeObject *tp = Py_TYPE(obj);
-    if (!THPVariable_CheckExact(tp) &&
-        !is_basic_python_type(tp) &&
-        has_torch_function_attr(obj))
-      return true;
-  }
-
-  return false;
-}
-
 namespace torch {
 auto check_has_torch_function(PyObject* obj) -> bool
 {
   PyTypeObject *tp = Py_TYPE(obj);
   return (
-    !THPVariable_CheckExact(tp) &&
+    !THPVariable_CheckTypeExact(tp) &&
     !is_basic_python_type(tp) &&
     torch::torch_function_enabled() &&
     has_torch_function_attr(obj)
@@ -197,30 +179,54 @@ auto check_has_torch_function(PyObject* obj) -> bool
 }
 } // namespace torch
 
+inline bool _sequence_has_torch_function(PyObject* args) {
+  Py_ssize_t nargs = PySequence_Fast_GET_SIZE(args);
+  for (Py_ssize_t i = 0; i < nargs; i++) {
+    PyObject* obj = PySequence_Fast_GET_ITEM(args, i);
+    if (torch::check_has_torch_function(obj))
+      return true;
+  }
+  return false;
+}
+
+inline bool _array_has_torch_function(PyObject *const *args, Py_ssize_t nargs) {
+  for (Py_ssize_t i = 0; i < nargs; i++) {
+    if (torch::check_has_torch_function(args[i]))
+      return true;
+  }
+  return false;
+}
+
 PyObject* THPModule_has_torch_function(PyObject*, PyObject *arg) {
+  bool result;
   if (PyTuple_CheckExact(arg) || PyList_CheckExact(arg)) {
     // Fast path:
     //   If we know that we have a tuple or list, we can skip an INCREF and
     //   DECREF from PySequence_Fast. Core functions will always follow this
     //   convention (almost always tuples), and it shaves ~3.5% off the cost of
     //   the check.
-    if (sequence_has_torch_function(arg))
-      Py_RETURN_TRUE;
-    Py_RETURN_FALSE;
+    result = _sequence_has_torch_function(arg);
+  } else {
+    auto args = py::reinterpret_steal<py::object>(
+      PySequence_Fast(arg, "expected a sequence"));
+    result = _sequence_has_torch_function(args.ptr());
   }
-
-  PyObject* args(PySequence_Fast(arg, "expected a sequence"));
-  auto result = sequence_has_torch_function(args);
-  Py_DECREF(args);
 
   if (result)
     Py_RETURN_TRUE;
   Py_RETURN_FALSE;
 }
 
-PyObject* THPModule_object_has_torch_function(PyObject*, PyObject *obj) {
+PyObject* THPModule_has_torch_function_unary(PyObject*, PyObject *obj) {
   // Special case `THPModule_has_torch_function` for the single arg case.
   if (torch::check_has_torch_function(obj))
+    Py_RETURN_TRUE;
+
+  Py_RETURN_FALSE;
+}
+
+PyObject* THPModule_has_torch_function_variadic(PyObject*, PyObject *const *args, Py_ssize_t nargs) {
+  if (_array_has_torch_function(args, nargs))
     Py_RETURN_TRUE;
 
   Py_RETURN_FALSE;

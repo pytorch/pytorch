@@ -28,7 +28,9 @@ import types
 from typing import Dict, Set, List, Any, Callable, Iterable
 
 import torch
-from torch._C import _has_torch_function, _object_has_torch_function, _add_docstr
+from torch._C import (
+    _has_torch_function, _has_torch_function_unary,
+    _has_torch_function_variadic, _add_docstr)
 
 __all__ = [
     "get_ignored_functions",
@@ -167,7 +169,8 @@ def get_ignored_functions() -> Set[Callable]:
         torch.nn.functional.upsample_bilinear,
         torch.nn.functional.upsample_nearest,
         torch.nn.functional.has_torch_function,
-        torch.nn.functional.object_has_torch_function,
+        torch.nn.functional.has_torch_function_unary,
+        torch.nn.functional.has_torch_function_variadic,
         torch.nn.functional.handle_torch_function,
         torch.nn.functional.sigmoid,
         torch.nn.functional.hardsigmoid,
@@ -1203,13 +1206,29 @@ has_torch_function = _add_docstr(
     """
 )
 
-object_has_torch_function = _add_docstr(
-    _object_has_torch_function,
+has_torch_function_unary = _add_docstr(
+    _has_torch_function_unary,
     r"""Special case of `has_torch_function` for single inputs.
     Instead of:
       `has_torch_function((t,))`
     call:
-      `object_has_torch_function(t)`
+      `has_torch_function_unary(t)`
+    which skips unnecessary packing and unpacking work.
+    """
+)
+
+has_torch_function_variadic = _add_docstr(
+    _has_torch_function_variadic,
+    r"""Special case of `has_torch_function` that skips tuple creation.
+
+    This uses the METH_FASTCALL protocol introduced in Python 3.7; for 3.6
+    and before it has roughly equivilent performance compared to
+    `has_torch_function`.
+
+    Instead of:
+      `has_torch_function((a, b))`
+    call:
+      `has_torch_function_variadic(a, b)`
     which skips unnecessary packing and unpacking work.
     """
 )
