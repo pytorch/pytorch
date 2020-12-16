@@ -159,7 +159,7 @@ static bool constantFoldedConditionValue(Node* node) {
 // value of the constant-folded sublock that is input to the If node
 //
 // Example:
-// before peephole pass
+// before post pass
 // graph(%y.2 : Int(3, 4, strides=[4, 1], requires_grad=0, device=cpu)):
 //   %4 : Long(2, strides=[1], device=cpu) = onnx::Shape(%y.2)
 //   %5 : Long(device=cpu) = onnx::Size(%4)
@@ -179,7 +179,7 @@ static bool constantFoldedConditionValue(Node* node) {
 //       -> (%y.1)
 //   return (%7)
 
-// after peephole pass
+// after post pass
 // graph(%y.2 : Int(3, 4, strides=[4, 1], requires_grad=0, device=cpu)):
 //   %4 : Long(2, strides=[1], device=cpu) = onnx::Shape(%y.2)
 //   %5 : Long(device=cpu) = onnx::Size(%4)
