@@ -51,7 +51,7 @@ void cos_kernel_cuda(TensorIterator& iter) {
 }
 
 void sinh_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "sinh_cuda", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.common_dtype(), "sinh_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ::sinh(a);
     });
@@ -59,7 +59,7 @@ void sinh_kernel_cuda(TensorIterator& iter) {
 }
 
 void cosh_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "cosh_cuda", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.common_dtype(), "cosh_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ::cosh(a);
     });

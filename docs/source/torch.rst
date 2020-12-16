@@ -340,6 +340,7 @@ Pointwise Ops
     sign
     signbit
     sin
+    sinc
     sinh
     sqrt
     square
@@ -414,6 +415,7 @@ Comparison Ops
     not_equal
     sort
     topk
+    msort
 
 
 Spectral Ops
@@ -422,10 +424,6 @@ Spectral Ops
     :toctree: generated
     :nosignatures:
 
-    fft
-    ifft
-    rfft
-    irfft
     stft
     istft
     bartlett_window

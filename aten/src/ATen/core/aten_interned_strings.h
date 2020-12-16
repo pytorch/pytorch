@@ -497,6 +497,7 @@ _(aten, mode) \
 _(aten, mse_loss) \
 _(aten, mse_loss_backward) \
 _(aten, mse_loss_forward) \
+_(aten, msort) \
 _(aten, multi_margin_loss) \
 _(aten, multi_margin_loss_backward) \
 _(aten, multi_margin_loss_forward) \
@@ -621,6 +622,7 @@ _(aten, signbit) \
 _(aten, silu) \
 _(aten, sgn) \
 _(aten, sin) \
+_(aten, sinc) \
 _(aten, sinh) \
 _(aten, size) \
 _(aten, sizes) \

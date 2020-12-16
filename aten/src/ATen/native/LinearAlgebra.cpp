@@ -18,6 +18,8 @@
 #include <limits>
 #include <ATen/NamedTensorUtils.h>
 
+#include <c10/util/variant.h>
+
 namespace at {
 namespace native {
 
@@ -482,7 +484,7 @@ static void addmm_impl_cpu_(
   }
 }
 
-static void addbmm_impl_cpu_(
+static void addbmm_impl_(
     Tensor &result, const Tensor &self, const Tensor &batch1, const Tensor &batch2, Scalar beta, Scalar alpha) {
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
@@ -507,29 +509,38 @@ static void addbmm_impl_cpu_(
 
   const int64_t num_batches = batch1.size(0);
 
+  if (num_batches == 0) {
+    if (beta.to<c10::complex<double>>() != 0.0) {
+      result.mul_(beta);
+    } else {
+      result.zero_();
+    }
+    return;
+  }
+
   for (int64_t batch = 0; batch < num_batches; ++batch) {
-    addmm_impl_cpu_(result, result, batch1[batch], batch2[batch], beta, alpha);
+    result.addmm_(batch1[batch], batch2[batch], beta, alpha);
     beta = 1; // accumulate output once
   }
 }
 
-Tensor& addbmm_cpu_out(Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+Tensor& addbmm_out(Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
   Tensor b_self = std::get<0>(expand_size(self, {batch1.size(1), batch2.size(2)}, "addbmm_out"));
   {
     at::NoNamesGuard guard;
-    addbmm_impl_cpu_(result, b_self, batch1, batch2, beta, alpha);
+    addbmm_impl_(result, b_self, batch1, batch2, beta, alpha);
   }
   at::namedinference::propagate_names_for_addmm(result, batch1, batch2, self);
   return result;
 }
 
-Tensor &addbmm_cpu_(Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
-  return addbmm_cpu_out(self, self, batch1, batch2, beta, alpha);
+Tensor &addbmm_(Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+  return native::addbmm_out(self, self, batch1, batch2, beta, alpha);
 }
 
-Tensor addbmm_cpu(const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+Tensor addbmm(const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
   Tensor result = at::empty({0}, self.options());
-  return addbmm_cpu_out(result, self, batch1, batch2, beta, alpha);
+  return native::addbmm_out(result, self, batch1, batch2, beta, alpha);
 }
 
 Tensor& addmm_cpu_out(Tensor &result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
@@ -648,7 +659,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
   if (self_or_result.numel() == 0) {
     return self_or_result;
   } else if (contraction_size == 0) {
-    if (is_bmm_out) {
+    if (is_bmm_out || (beta.to<c10::complex<double>>() == 0.0)) {
       return self_or_result.zero_();
     } else {
       return self_or_result.mul_(beta);
@@ -1461,14 +1472,13 @@ Tensor matrix_power(const Tensor& a, int64_t n) {
 }
 
 Tensor frobenius_norm(const Tensor& self) {
-  TORCH_CHECK(!self.is_complex(), "frobenius norm not supported for complex tensors");
   return at::norm(self);
 }
 
 Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
   // NOTE: As frobenius_norm_out is currently implemented, it will always produce a
   //    strided tensor result, even if the input is sparse.
-  auto options = self.options().layout(c10::Layout::Strided);
+  auto options = self.options().layout(c10::Layout::Strided).dtype(toValueType(self.scalar_type()));
   Tensor result = at::empty({0}, options);
   return at::native::frobenius_norm_out(result, self, dim, keepdim);
 }
@@ -1478,7 +1488,6 @@ Tensor &frobenius_norm_out(
     const Tensor& self,
     IntArrayRef dim,
     bool keepdim) {
-  TORCH_CHECK(!self.is_complex(), "frobenius norm not supported for complex tensors");
   TORCH_CHECK(
       dim.size() <= 2,
       "Expected at most 2 dimensions, but got ",
@@ -1522,7 +1531,7 @@ Tensor &nuclear_norm_out(Tensor& result, const Tensor& self, bool keepdim) {
 }
 
 Tensor nuclear_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
-  Tensor result = at::empty({0}, self.options());
+  Tensor result = at::empty({0}, self.options().dtype(toValueType(self.scalar_type())));
   return at::native::nuclear_norm_out(result, self, dim, keepdim);
 }
 
@@ -1677,7 +1686,7 @@ static Tensor& _linalg_norm_vector_out(Tensor& result, const Tensor& self, optio
       // when the input contains extreme values (like nan or +/-inf) or if the input
       // size is degenerate (like size(0), size(0, N), etc)
       case_was_overridden = true;
-      self_ = self.abs();
+      self_ = self_.abs();
       result_ = _norm_min_max(self_, ord, dim[0], keepdim);
     } else if ((self_.numel() == 0) && (ord < 0)) {
       // For negative orders with degenerate input sizes, at::norm's result does not
@@ -1696,7 +1705,7 @@ static Tensor& _linalg_norm_vector_out(Tensor& result, const Tensor& self, optio
   }
   if (!case_was_overridden) {
     if (opt_dtype.has_value()) {
-      result_ = at::norm(self, opt_ord, dim, keepdim, opt_dtype.value());
+      result_ = at::norm(self.to(opt_dtype.value()), opt_ord, dim, keepdim);
     } else {
       result_ = at::norm(self, opt_ord, dim, keepdim);
     }
@@ -1747,14 +1756,14 @@ static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, optional
 
 // Numerical or None norms
 Tensor linalg_norm(const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type()).device(self.device());
+  auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : toValueType(self.scalar_type())).device(self.device());
   Tensor result = at::empty({0}, options);
   return at::native::linalg_norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
 // Frobenius and nuclear norms
 Tensor linalg_norm(const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type()).device(self.device());
+  auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : toValueType(self.scalar_type())).device(self.device());
   Tensor result = at::empty({0}, options);
   return at::native::linalg_norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
 }
@@ -1767,6 +1776,161 @@ Tensor& linalg_norm_out(Tensor& result, const Tensor& self, optional<Scalar> opt
 // Frobenius and nuclear norms
 Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return linalg_norm_out_impl(result, self, c10::nullopt, ord, opt_dim, keepdim, opt_dtype);
+}
+
+Tensor _linalg_cond_exception_helper(const Tensor& self) {
+  // For batched input if at least one matrix in the batch is not invertible,
+  // we can't get the result for all other (possibly) invertible matrices in the batch without an explicit for loop.
+  // This should change when at::inverse works with silent errors
+  if (self.dim() > 2) {
+    TORCH_CHECK(false,
+      "One or more matrices in the batch was not invertible! "
+      "linalg_cond does not support yet this case.");
+  }
+  auto result_shape = IntArrayRef(self.sizes().cbegin(), self.sizes().cend()-2);
+  TensorOptions options = self.options().dtype(toValueType(self.scalar_type()));
+  Tensor result = at::full(result_shape, INFINITY, options);
+  return result;
+}
+
+// This function helps to dispatch norm computations depending on 'ord' of variant type
+Tensor _linalg_cond_helper(const Tensor& self, c10::variant<Scalar, std::string> ord_variant) {
+  // Ignore errors if not invertible, result is INFINITY in this case
+  // Currently checking for error in at::inverse causes cross-device data movement
+  // For batched input if at least one matrix in the batch is not invertible,
+  // then the result for all other (possibly) invertible matrices will be infinity as well
+  // since there is currently no way to use at::inverse with silent errors
+  Tensor self_inverse;
+  try {
+    self_inverse = at::inverse(self);
+  } catch (const std::exception& e) {
+    if (strstr(e.what(), "singular")) {
+      return _linalg_cond_exception_helper(self);
+    } else {
+      TORCH_CHECK(false, "linalg_cond got an unexpected error:\n", e.what());
+    }
+  }
+  std::array<int64_t, 2> dim_arr = {-2, -1};
+  optional<IntArrayRef> dim = IntArrayRef(dim_arr);
+
+  return c10::visit([&](auto&& ord) {
+    Tensor norm_self = at::linalg_norm(self, ord, dim);
+    Tensor norm_inverse = at::linalg_norm(self_inverse, ord, dim);
+    Tensor result = norm_self * norm_inverse;
+    return result;
+  }, ord_variant);
+}
+
+// Return zero for each matrix in the batch
+Tensor _linalg_cond_empty_matrix(const Tensor& self, c10::ScalarType dtype) {
+  auto result_shape = IntArrayRef(self.sizes().cbegin(), self.sizes().cend()-2);
+  TensorOptions options = self.options().dtype(toValueType(self.scalar_type()));
+  return at::zeros(result_shape, options);
+}
+
+void _linalg_cond_check_ord(c10::variant<Scalar, std::string> ord_variant) {
+  if (ord_variant.index() == 0) {
+    Scalar* ord = c10::get_if<Scalar>(&ord_variant);
+    double abs_ord = std::abs(ord->toDouble());
+    TORCH_CHECK(abs_ord == 2.0 || abs_ord == 1.0 || abs_ord == INFINITY,
+      "linalg_cond got an invalid norm type: ", ord->toDouble());
+  } else if (ord_variant.index() == 1) {
+    std::string* ord = c10::get_if<std::string>(&ord_variant);
+    TORCH_CHECK(*ord == "fro" || *ord == "nuc",
+      "linalg_cond got an invalid norm type: ", *ord);
+  } else {
+    TORCH_CHECK(false,
+      "linalg_cond: something went wrong while checking the norm type");
+  }
+}
+
+// Numerical or None norms
+Tensor linalg_cond(const Tensor& self, optional<Scalar> opt_ord) {
+  TORCH_CHECK(self.dim() >= 2, "linalg_cond only supports matrices or batches of matrices, but got a tensor with ",
+    self.dim(), " dimensions.");
+
+  // The default case is using 2-norm
+  Scalar ord = opt_ord.has_value() ? opt_ord.value() : 2;
+
+  c10::variant<Scalar, std::string> ord_variant = ord;
+  _linalg_cond_check_ord(ord_variant);
+
+  // NumPy doesn't define the condition number for 0x0 matrices, we return 0.0 for such input
+  if (self.numel() == 0) {
+    auto real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
+    return _linalg_cond_empty_matrix(self, real_dtype);
+  }
+
+  // If ord == None or ord == ±2
+  if (std::abs(ord.toDouble()) == 2.0) {
+    auto singular_values = std::get<1>(at::svd(self));
+    // singular values are sorted in descending order
+    auto s_max = at::narrow(singular_values, /*dim=*/-1, /*start=*/0, /*length=*/1);
+    auto s_min = at::narrow(singular_values, /*dim=*/-1, /*start=*/-1, /*length=*/1);
+    Tensor result;
+    if (ord.toDouble() == -2.0) {
+      result = s_min / s_max;
+    } else {
+      result = s_max / s_min;
+    }
+    return result;
+  }
+
+  // ord == ±1 ord == ±inf
+  // since at::inverse is used in the implementation, self has to be a tensor consisting of square matrices
+  // the same check as squareCheckInputs(self) but with a slightly more informative error message
+  TORCH_CHECK(self.size(-1) == self.size(-2),
+              "linalg_cond with ±1 or ±inf norm types only supports square matrices or batches of square matrices "
+              "but got ", self.size(-1), " by ", self.size(-2), " matrices");
+
+  return _linalg_cond_helper(self, ord_variant);
+}
+
+Tensor& linalg_cond_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord) {
+  // If ord == None or ord == ±2 then SVD is used to compute the condition number
+  // the result is always real-valued, for other cases it is complex-valued for the complex-valued input.
+  ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
+  Scalar ord = opt_ord.has_value() ? opt_ord.value() : 2;
+
+  TORCH_CHECK(result.scalar_type() == real_dtype,
+    "result dtype ", result.scalar_type(), " does not match the expected dtype ", real_dtype);
+
+  Tensor result_tmp = at::linalg_cond(self, opt_ord);
+  at::native::resize_output(result, result_tmp.sizes());
+  result.copy_(result_tmp);
+  return result;
+}
+
+// Frobenius or nuclear norms
+Tensor linalg_cond(const Tensor& self, std::string ord) {
+  // the same checks as squareCheckInputs(self) but with a slightly more informative error message
+  TORCH_CHECK(self.dim() >= 2, "linalg_cond only supports matrices or batches of matrices, but got a tensor with ",
+    self.dim(), " dimensions.");
+  TORCH_CHECK(self.size(-1) == self.size(-2),
+              "linalg_cond with frobenius or nuclear norm types only supports square matrices or batches of square matrices "
+              "but got ", self.size(-1), " by ", self.size(-2), " matrices");
+
+  c10::variant<Scalar, std::string> ord_variant = ord;
+  _linalg_cond_check_ord(ord_variant);
+
+  // NumPy doesn't define the condition number for 0x0 matrices, we return 0.0 for such input
+  if (self.numel() == 0) {
+    return _linalg_cond_empty_matrix(self, self.scalar_type());
+  }
+
+  return _linalg_cond_helper(self, ord_variant);
+}
+
+// TODO: implement _out variant avoiding copy and using already allocated storage directly
+Tensor& linalg_cond_out(Tensor& result, const Tensor& self, std::string ord) {
+  ScalarType real_type = toValueType(self.scalar_type());
+  TORCH_CHECK(result.scalar_type() == real_type,
+    "result dtype ", result.scalar_type(), " does not match the expected dtype ", real_type);
+
+  Tensor result_tmp = at::linalg_cond(self, ord);
+  at::native::resize_output(result, result_tmp.sizes());
+  result.copy_(result_tmp);
+  return result;
 }
 
 Tensor linalg_tensorinv(const Tensor& self, int64_t ind) {
