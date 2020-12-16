@@ -6,7 +6,6 @@ import torch
 import torch.distributed.rpc as rpc
 import torch.multiprocessing as mp
 import json
-import matplotlib.pyplot as plt
 import numpy as np
 
 import time
@@ -41,11 +40,10 @@ parser.add_argument('--batch', type=str2bool, default=True)
 parser.add_argument('--state_size', type=str, default='10,20,10')
 parser.add_argument('--nlayers', type=int, default=5)
 parser.add_argument('--out_features', type=int, default=10)
-parser.add_argument('--graph_variable', type=str, default='batch')
+parser.add_argument('--graph_variable', type=str, default='')
 
 args = parser.parse_args()
 args = vars(args)
-
 
 def run_worker(rank, world_size, master_addr, master_port, batch, state_size, nlayers, out_features, queue=None):
     state_size = list(map(int, state_size.split(',')))
@@ -73,36 +71,30 @@ def run_worker(rank, world_size, master_addr, master_port, batch, state_size, nl
 def main():
     GRAPH_VARIABLES = {'world_size':[24,48,96,192], 'batch': [True, False]}
     if args['graph_variable'] in GRAPH_VARIABLES.keys():
-        graph_variables = GRAPH_VARIABLES[args['graph_variable']]
         x_axis_name = args['graph_variable']
+        x_axis_variables = GRAPH_VARIABLES[x_axis_name]
         ctx = mp.get_context('spawn')
         queue = ctx.SimpleQueue()
-        returns = []
-        for i, graph_variable in enumerate(graph_variables): #x axis variable
-            args[x_axis_name] = graph_variable #set x axis variable for this iteration
-            print('starting process {0}'.format(i ))            
+        benchmark_runs = []
+
+        for i, x_axis_variable in enumerate(x_axis_variables): #run benchmark for every x axis variable
+            args[x_axis_name] = x_axis_variable #set x axis variable for this iteration of benchmark run
             processes = []
             for rank in range(args['world_size']):
                 prc = ctx.Process(target=run_worker, args=(rank, args['world_size'], args['master_addr'], args['master_port'],
                 args['batch'], args['state_size'], args['nlayers'], args['out_features'], queue))
                 prc.start()
                 processes.append(prc)
-            benchmark_metrics = queue.get()   
+            benchmark_run_results = queue.get()   
             for process in processes:
                 process.join()
-            benchmark_metrics[x_axis_name] = graph_variable         
-            returns.append(benchmark_metrics)
-            print("finished process {0}, ret cxt is: {1}".format(i, returns))
-        print("returns is {0}".format(returns))
+            benchmark_run_results[x_axis_name] = x_axis_variable #save what the x axis value was for this benchmark run       
+            benchmark_runs.append(benchmark_run_results)
+
         report = args
         report['x_axis_name'] = x_axis_name
-        del report[x_axis_name]
-        report['benchmark_results'] = returns
-
-        print(f'args is {args}')
-        import pdb
-        pdb.set_trace()
-        print(f'args is {args}')
+        del report[x_axis_name] #x_axis_name was variable so dont save a constant in the report
+        report['benchmark_results'] = benchmark_runs
         with open('report.json', 'w') as f:
             json.dump(report, f)
     else:
