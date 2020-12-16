@@ -519,7 +519,7 @@ static PyMethodDef torch_functions[] = {
   {"spmm", castPyCFunctionWithKeywords(THPVariable_mm), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"tensor", castPyCFunctionWithKeywords(THPVariable_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"get_device", castPyCFunctionWithKeywords(THPVariable_get_device), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"numel", castPyCFunctionWithKeywords(THPVariable_numel), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  //{"numel", castPyCFunctionWithKeywords(THPVariable_numel), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   ${py_method_defs}
   {NULL}
 };
@@ -618,24 +618,24 @@ static PyObject * THPVariable_nonzero(PyObject* self, PyObject* args, PyObject* 
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_numel(PyObject* self_, PyObject* args, PyObject* kwargs)
-{
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser({
-    "numel(Tensor input)",
-  }, /*traceable=*/false);
+// static PyObject * THPVariable_numel(PyObject* self_, PyObject* args, PyObject* kwargs)
+// {
+//   HANDLE_TH_ERRORS
+//   static PythonArgParser parser({
+//     "numel(Tensor input)",
+//   }, /*traceable=*/false);
 
-  ParsedArgs<1> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
+//   ParsedArgs<1> parsed_args;
+//   auto r = parser.parse(args, kwargs, parsed_args);
 
-  if(r.has_torch_function()){
-    return handle_torch_function(r, args, kwargs, THPVariableFunctionsModule, "torch");
-  }
+//   if(r.has_torch_function()){
+//     return handle_torch_function(r, args, kwargs, THPVariableFunctionsModule, "torch");
+//   }
 
-  if (r.idx == 0) {
-    return wrap(r.tensor(0).numel());
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
+//   if (r.idx == 0) {
+//     return wrap(r.tensor(0).numel());
+//   }
+//   Py_RETURN_NONE;
+//   END_HANDLE_TH_ERRORS
+// }
 }} // namespace torch::autograd

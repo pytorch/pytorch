@@ -215,16 +215,16 @@ static PyObject * THPVariable_dim(PyObject* self, PyObject* args)
 }
 
 // implemented on the python object to avoid dispatch overhead
-static PyObject * THPVariable_numel(PyObject* self, PyObject* args)
-{
-   HANDLE_TH_ERRORS
-   if (check_has_torch_function(self)) {
-     return handle_torch_function(self, "numel", args);
-   }
-   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-   return THPUtils_packInt64(self_.numel());
-   END_HANDLE_TH_ERRORS
-}
+// static PyObject * THPVariable_numel(PyObject* self, PyObject* args)
+// {
+//    HANDLE_TH_ERRORS
+//    if (check_has_torch_function(self)) {
+//      return handle_torch_function(self, "numel", args);
+//    }
+//    auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+//    return THPUtils_packInt64(self_.numel());
+//    END_HANDLE_TH_ERRORS
+// }
 
 static Tensor dispatch_contiguous(const Tensor & self, at::MemoryFormat memory_format) {
   pybind11::gil_scoped_release no_gil;
@@ -1172,7 +1172,7 @@ PyMethodDef variable_methods[] = {
   {"new_ones", castPyCFunctionWithKeywords(THPVariable_new_ones), METH_VARARGS | METH_KEYWORDS, NULL},
   {"new_tensor", castPyCFunctionWithKeywords(THPVariable_new_tensor), METH_VARARGS | METH_KEYWORDS, NULL},
   {"nonzero", castPyCFunctionWithKeywords(THPVariable_nonzero), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"numel", THPVariable_numel, METH_NOARGS, NULL},
+  //{"numel", THPVariable_numel, METH_NOARGS, NULL},
   {"numpy", THPVariable_numpy, METH_NOARGS, NULL},
   {"requires_grad_", castPyCFunctionWithKeywords(THPVariable_requires_grad_), METH_VARARGS | METH_KEYWORDS, NULL},
   {"set_", castPyCFunctionWithKeywords(THPVariable_set_), METH_VARARGS | METH_KEYWORDS, NULL},

@@ -420,6 +420,7 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("sinh_", CppFunction::makeFallthrough());
   m.impl("size.Dimname", CppFunction::makeFallthrough());
   m.impl("size.int", CppFunction::makeFallthrough());
+  m.impl("numel.int", CppFunction::makeFallthrough());
   m.impl("slice.Tensor", CppFunction::makeFallthrough());
   m.impl("softmax.Dimname", CppFunction::makeFallthrough());
   m.impl("softmax.int", CppFunction::makeFallthrough());

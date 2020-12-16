@@ -3758,6 +3758,12 @@
   device_guard: False
   manual_cpp_binding: True
 
+- func: numel.int(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  device_guard: False
+  manual_cpp_binding: True
+
 - func: size.Dimname(Tensor self, Dimname dim) -> int
   use_c10_dispatcher: full
   variants: function, method

@@ -982,7 +982,6 @@ Tensor new_empty_strided_batching_rule(
   return physical_view.newLogicalFromPhysical(result);
 }
 
-
 TORCH_LIBRARY_IMPL(_, Batched, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedTensorForLoopFallback>());
 }
@@ -993,6 +992,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   // Tensor wrapper, it only has one dispatch key (Batched) on it. The resolution
   // here is to just directly call the underlying implementation.
   m.impl("size.int", static_cast<int64_t (*)(const Tensor&, int64_t)>(native::size));
+  m.impl("numel.int", numel);
   m.impl("_add_batch_dim", native::_add_batch_dim);
   m.impl("_remove_batch_dim", native::_remove_batch_dim);
 
