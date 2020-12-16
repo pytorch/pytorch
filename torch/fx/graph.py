@@ -630,8 +630,8 @@ class Graph:
 
         def emit_node(node : Node):
             def register_import_type(a : Argument) -> Argument:
-                if isinstance(a, torch.fx.proxy.FakeNamedTuple):
-                    register_modules_used(torch.typename(type(a)))
+                if isinstance(a, tuple) and hasattr(a, '_repr_wrapper_orig_type'):
+                    register_modules_used(torch.typename(a._repr_wrapper_orig_type()))
                 return a
 
             new_args = map_arg(node.args, lambda n: n, register_import_type)

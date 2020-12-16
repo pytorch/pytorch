@@ -7,29 +7,6 @@ from .graph import magic_methods, reflectable_magic_methods, Graph
 from typing import Tuple, Dict, Optional, Iterable, Any, Iterator
 from .node import Target, Node, Argument, base_types
 
-class FakeNamedTuple(object):
-    def __init__(self, field_names, values):
-        self._field_names = field_names
-        self._values = values
-
-    def __repr__(self):
-        return f'torch.fx.proxy.FakeNamedTuple({self._field_names}, {self._values})'
-
-    def __iter__(self):
-        return iter(self._values)
-
-    def __getitem__(self, i):
-        return self._values[i]
-
-    def __getattr__(self, name):
-        if name in self._field_names:
-            return self._values[self._field_names.index(name)]
-        return super().__getattribute__(name)
-
-    def to_named_tuple(self, named_tuple_type):
-        init_dict = {k : v for k, v in zip(self._field_names, self._values)}
-        return named_tuple_type(**init_dict)
-
 class TracerBase:
     graph: Graph
 
@@ -78,7 +55,21 @@ class TracerBase:
             # expression as an argument to their constructor, so build this
             # intermediate tuple and unpack it into the NamedTuple constructor
             args = tuple(self.create_arg(elem) for elem in a)
-            return FakeNamedTuple(a._fields, args)  # type: ignore
+
+            class NTReprWrapper(a.__class__):  # type: ignore
+                def __repr__(self):
+                    value_strs = []
+                    for field in self._fields:
+                        value_strs.append(f'{field}={repr(getattr(self, field))}')
+                    # NTReprWrapper should have only one base: the NamedTuple
+                    # type we constructed it from.
+                    return f'{torch.typename(self._repr_wrapper_orig_type())}({",".join(value_strs)})'
+
+                def _repr_wrapper_orig_type(self):
+                    assert len(self.__class__.__bases__) == 1
+                    return self.__class__.__bases__[0]
+
+            return NTReprWrapper(*args)  # type: ignore
         elif isinstance(a, (tuple, list)):
             return type(a)(self.create_arg(elem) for elem in a)
         elif isinstance(a, dict):
