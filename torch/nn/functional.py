@@ -2322,60 +2322,58 @@ def gaussian_nll_loss(input, target, var, eps=1e-8, full=False, reduction='mean'
     See :class:`~torch.nn.GaussianNLLLoss` for details.
 
     Args:
-        input: tensor of shape=(N, *).
-        target: tensor with same shape as input.
-        var: tensor of positive variance(s), shape = (N, 1)
-            or same shape as input.
+        input: tensor of size (N, *).
+        target: tensor with same size as input.
+        var: tensor of positive variance(s), size (N, 1)
+            or same size as input.
         eps: value added to var, for stability.
         full: True/False (bool), include the constant term in the loss
             calculation. Default: False.
         reduction: specifies the reduction to apply to the output:
             'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
-            'mean': the sum of the output will be divided by the number of
-            elements in the output, 'sum': the output will be summed.
+            'mean': the output is the average of all batch member losses,
+            'sum': the output is the sum of all batch member losses.
             Default: 'mean'.
 
     Output:
         loss: scalar by default. If reduction is 'none', then (N, *), same
-            shape as input.
+            size as input.
 
     """
-
     #Inputs and targets much have same shape
-    if input.shape != target.shape:
-        loss = input
-        raise ValueError("input and target must have same shape")
-
-    #First dimension N must be equal
-    if var.shape[0] != input.shape[0]:
-        loss = input
-        raise ValueError("dim 0 of var and input do not match")
+    input = input.view(input.size(0), -1)
+    target = target.view(target.size(0), -1)
+    if input.size() != target.size():
+        raise ValueError("input and target must have same size")
 
     #Second dim must be 1 ie shape (N, 1) if var and input do not have same shape
-    if var.shape != input.shape and len(var.shape) > 1 and var.shape[1] != 1:
-        loss = input
-        raise ValueError("var is of incorrect shape")
+    var = var.view(var.size(0), -1)
+    if var.size() != input.size() and var.size(1) != 1:
+        raise ValueError("var is of incorrect size")
 
     if reduction != 'none' and reduction != 'mean' and reduction != 'sum':
-        loss = input
         raise ValueError(reduction + " is not valid")
+
+    #Entries of var must be non-negative
+    if torch.any(var < 0):
+        raise ValueError("var has negative entry/entries")
 
     #Add eps for stability
     var = var + eps
 
     #Calculate loss (without constant)
-    loss = 0.5*(torch.sum(torch.log(var) + (input - target)**2/var, dim=1))
+    loss = 0.5*(torch.log(var) + (input - target)**2/var).view(input.size(0), -1).sum(dim=1)
 
     #Add constant to loss term if required
     if full:
-        length = input.shape[1]
-        loss = loss + 0.5*length*math.log(2*math.pi)
+        D = input.size(1)
+        loss = loss + 0.5*D*math.log(2*math.pi)
 
     #Apply reduction
     if reduction == 'mean':
-        return torch.mean(loss)
+        return loss.mean()
     elif reduction == 'sum':
-        return torch.sum(loss)
+        return loss.sum()
     else:
         return loss
 
