@@ -190,6 +190,11 @@ allow_list = [
     ("aten::quantile", datetime.date(2021, 1, 31)),
     ("aten::nanquantile", datetime.date(2021, 1, 31)),
     ("aten::_fft_with_size", datetime.date(2021, 1, 31)),
+    ("aten::thnn_conv_depthwise2d_backward", datetime.date(2021, 1, 31)),
+    ("aten::slow_conv3d_backward", datetime.date(2021, 1, 31)),
+    ("aten::thnn_conv2d_backward", datetime.date(2021, 1, 31)),
+    ("aten::slow_conv_transpose3d_backward", datetime.date(2021, 1, 31)),
+    ("aten::slow_conv_transpose2d_backward", datetime.date(2021, 1, 31)),
 ]
 
 def allow_listed(schema, allow_list):
