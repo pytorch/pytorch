@@ -70,11 +70,16 @@ std::shared_ptr<Operator> matchBuiltinOp(
     // not incur significant extra overhead.
     auto ops = torch::jit::getAllOperatorsFor(symbol);
     std::vector<std::shared_ptr<torch::jit::Operator>> c10OpsForSymbol;
-    for (const auto& op : ops) {
+    for (auto it = ops.begin(); it != ops.end(); ) {
+      std::shared_ptr<jit::Operator> op = *it;
       if (op->isC10Op()) {
-        c10OpsForSymbol.push_back(op);
+        c10OpsForSymbol.push_back(std::move(op));
+        it = ops.erase(it);
+      } else {
+        ++it;
       }
     }
+
     // Don't throw on failures in this call, since we are not examining on all
     // operators here, and the matched operator may indeed not be a c10 op.
     std::pair<std::shared_ptr<torch::jit::Operator>, torch::jit::Stack>
