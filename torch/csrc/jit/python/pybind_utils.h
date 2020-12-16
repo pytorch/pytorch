@@ -1256,8 +1256,7 @@ inline py::object invokeScriptMethodFromPython(
 inline std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     const std::vector<std::shared_ptr<Operator>>& operations,
     py::args args,
-    const py::kwargs& kwargs,
-    bool throwOnMatchFailure = true) {
+    const py::kwargs& kwargs) {
   Stack stack;
   if (operations.size() == 1) {
     std::shared_ptr<Operator> op = operations.at(0);
@@ -1278,7 +1277,7 @@ inline std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
         errors.push_back(std::move(error));
       }
     }
-    if (!found_op && throwOnMatchFailure) {
+    if (!found_op) {
       std::stringstream ss;
       ss << "Overloaded torch operator invoked from Python failed to many any schema:\n";
       for (const auto& err : errors) {

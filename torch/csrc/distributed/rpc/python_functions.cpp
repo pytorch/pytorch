@@ -70,7 +70,7 @@ std::shared_ptr<Operator> matchBuiltinOp(
     // not incur significant extra overhead.
     auto ops = torch::jit::getAllOperatorsFor(symbol);
     std::vector<std::shared_ptr<torch::jit::Operator>> c10OpsForSymbol;
-    for (auto it = ops.begin(); it != ops.end(); ) {
+    for (auto it = ops.begin(); it != ops.end();) {
       std::shared_ptr<jit::Operator> op = *it;
       if (op->isC10Op()) {
         c10OpsForSymbol.push_back(std::move(op));
@@ -83,19 +83,14 @@ std::shared_ptr<Operator> matchBuiltinOp(
     // Don't throw on failures in this call, since we are not examining on all
     // operators here, and the matched operator may indeed not be a c10 op.
     std::pair<std::shared_ptr<torch::jit::Operator>, torch::jit::Stack>
-        opWithStack = torch::jit::getOpWithStack(
-            c10OpsForSymbol, args, kwargs, false /* throwOnMatchFailure */);
-
-    if ((matchedOperator = std::get<0>(opWithStack)) != nullptr) {
-      stack = std::get<1>(opWithStack);
-    } else {
-      // Will throw on operator match failures since this call searches through
-      // all ops for the symbol.
-      std::pair<std::shared_ptr<torch::jit::Operator>, torch::jit::Stack>
-          opWithStack = torch::jit::getOpWithStack(ops, args, kwargs);
-      matchedOperator = std::get<0>(opWithStack);
-      stack = std::get<1>(opWithStack);
+        opWithStack;
+    try {
+      opWithStack = torch::jit::getOpWithStack(c10OpsForSymbol, args, kwargs);
+    } catch (const std::runtime_error& e) {
+      opWithStack = torch::jit::getOpWithStack(ops, args, kwargs);
     }
+    matchedOperator = std::get<0>(opWithStack);
+    stack = std::get<1>(opWithStack);
   }
 
   // We should never hit this path, since if !matchedOperator, then the last
