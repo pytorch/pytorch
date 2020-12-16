@@ -281,6 +281,15 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad):
                                     low=None, high=None,
                                     requires_grad=False))),)
 
+def np_sinc_with_fp16_as_fp32(x):
+    # Wraps numpy's sinc function so that fp16 values are promoted to fp32
+    # before sinc is invoked. Context: numpy's sinc returns NaN when evaluated
+    # at 0 for fp16.
+    if x.dtype == np.float16:
+        return np.sinc(x.astype(np.float32))
+    else:
+        return np.sinc(x)
+
 def np_unary_ufunc_integer_promotion_wrapper(fn):
     # Wrapper that passes PyTorch's default scalar
     #   type as an argument to the wrapped NumPy
@@ -697,6 +706,26 @@ op_db: List[OpInfo] = [
                    promotes_integers_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    skips=(
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.float], active_if=TEST_WITH_ROCM),
+                   )),
+    UnaryUfuncInfo('sinc',
+                   ref=np_sinc_with_fp16_as_fp32,
+                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+                   skip_bfloat16_grad=True,
+                   handles_large_floats=False,
+                   handles_complex_extremals=False,
+                   promotes_integers_to_float=True,
+                   decorators=(precisionOverride({torch.bfloat16: 1e-2,
+                                                  torch.float16: 1e-2}),),
+                   skips=(
+                       # Reference: https://github.com/pytorch/pytorch/issues/49133
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.cfloat]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
