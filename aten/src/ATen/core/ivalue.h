@@ -359,7 +359,7 @@ struct CAFFE2_API IValue final {
       : tag(Tag::Blob), is_intrusive_ptr(true) {
     // TODO (after Tensor merge) If we pass in a Blob holding a Tensor, extract
     // and store it as a Tensor instead.
-    payload.as_intrusive_ptr = blob.release() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
+    payload.as_intrusive_ptr = null_to_undefined_tensor(blob.release());
   }
 
   /// @private [doxygen private]
@@ -698,7 +698,7 @@ struct CAFFE2_API IValue final {
     // This is not an optional optimization: our incref call
     // *will not* do the right thing when called on an
     // undefined generator.
-    payload.as_intrusive_ptr = g.unsafeReleaseGeneratorImpl() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
+    payload.as_intrusive_ptr = null_to_undefined_tensor(g.unsafeReleaseGeneratorImpl());
   }
   bool isGenerator() const {
     return Tag::Generator == tag;
@@ -826,6 +826,10 @@ struct CAFFE2_API IValue final {
   IValue deepcopy(HashAliasedIValueMap& memo) const;
 
  private:
+  static c10::intrusive_ptr_target* null_to_undefined_tensor(c10::intrusive_ptr_target* p) {
+    return p ? p : static_cast<c10::intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
+  }
+
   static bool ptrEqual(const IValue& lhs, const IValue& rhs);
   // NOTE: IValue tags are intentionally private. In the future we may encode
   // this value different (e.g. using NaN boxing), and this would make it more
@@ -935,6 +939,7 @@ struct CAFFE2_API WeakIValue final {
         is_intrusive_ptr(rhs.is_intrusive_ptr) {
     if (rhs.isTensor()) {
       payload.as_intrusive_ptr = rhs.unsafeToTensorImpl();
+      is_intrusive_ptr = true;
     } else {
       static_assert(sizeof(payload) == sizeof(rhs.payload), "IValue and WeakIValue payload sizes don't match!");
       memcpy(&payload, &rhs.payload, sizeof(payload));
@@ -982,6 +987,7 @@ struct CAFFE2_API WeakIValue final {
       auto temp = c10::weak_intrusive_ptr<at::TensorImpl, c10::UndefinedTensorImpl>::reclaim(
           static_cast<at::TensorImpl*>(payload.as_intrusive_ptr));
       c10::intrusive_ptr<at::TensorImpl, c10::UndefinedTensorImpl> ip(temp.lock());
+      temp.release();
       if (!ip) {
         return IValue();
       } else {
