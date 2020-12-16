@@ -225,10 +225,18 @@ class TestMkldnn(TestCase):
                         stride=stride,
                         padding=1,
                         ceil_mode=ceil_mode)
+                    x1 = x.clone().requires_grad_()
+                    x2 = x.clone().to_mkldnn().requires_grad_()
+                    y1 = max_pool2d(x1)
+                    y2 = max_pool2d(x2).to_dense()
 
-                    self.assertEqual(
-                        max_pool2d(x),
-                        max_pool2d(x.to_mkldnn()).to_dense())
+                    loss1 = y1.sum()
+                    loss2 = y2.sum()
+                    loss1.backward()
+                    loss2.backward()
+
+                    self.assertEqual(y1, y2)
+                    self.assertEqual(x1.grad, x2.grad.to_dense())
 
     def test_max_pool2d_stride_none(self):
         N = torch.randint(3, 10, (1,)).item()
@@ -310,10 +318,18 @@ class TestMkldnn(TestCase):
                 stride=2,
                 padding=1,
                 count_include_pad=count_include_pad)
+            x1 = x.clone().requires_grad_()
+            x2 = x.clone().to_mkldnn().requires_grad_()
+            y1 = avg_pool2d(x1)
+            y2 = avg_pool2d(x2).to_dense()
 
-            self.assertEqual(
-                avg_pool2d(x),
-                avg_pool2d(x.to_mkldnn()).to_dense())
+            loss1 = y1.sum()
+            loss2 = y2.sum()
+            loss1.backward()
+            loss2.backward()
+
+            self.assertEqual(y1, y2)
+            self.assertEqual(x1.grad, x2.grad.to_dense())
 
     def test_avg_pool2d_stride_none(self):
         N = torch.randint(3, 10, (1,)).item()
@@ -358,10 +374,18 @@ class TestMkldnn(TestCase):
         x = torch.randn(N, C, 224, 224, dtype=torch.float32) * 100
 
         adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d(7)
+        x1 = x.clone().requires_grad_()
+        x2 = x.clone().to_mkldnn().requires_grad_()
+        y1 = adaptive_avg_pool2d(x1)
+        y2 = adaptive_avg_pool2d(x2).to_dense()
 
-        self.assertEqual(
-            adaptive_avg_pool2d(x),
-            adaptive_avg_pool2d(x.to_mkldnn()).to_dense())
+        loss1 = y1.sum()
+        loss2 = y2.sum()
+        loss1.backward()
+        loss2.backward()
+
+        self.assertEqual(y1, y2)
+        self.assertEqual(x1.grad, x2.grad.to_dense())
 
     def test_batch_norm2d(self):
         N = torch.randint(3, 10, (1,)).item()
