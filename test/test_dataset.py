@@ -125,7 +125,8 @@ class TestIterableDatasetBasic(TestCase):
         temp_tarfile_pathname = os.path.join(temp_dir, "test_tar.tar")
         file_list = [
             "a.png", "b.png", "c.json", "a.json", "c.png", "b.json", "d.png",
-            "d.json", "e.png", "f.json", "g.png", "f.png", "g.json", "e.json"]
+            "d.json", "e.png", "f.json", "g.png", "f.png", "g.json", "e.json",
+            "h.txt", "h.json"]
         with tarfile.open(temp_tarfile_pathname, "w:gz") as tar:
             for file_name in file_list:
                 file_pathname = os.path.join(temp_dir, file_name)
@@ -138,8 +139,8 @@ class TestIterableDatasetBasic(TestCase):
         dataset3 = ReadFilesFromTarIterableDataset(dataset2)
         dataset4 = GroupByFilenameIterableDataset(dataset3, group_size=2)
 
-        expected_result = [("a.png", "a.json"), ("b.png", "b.json"), ("c.json", "c.png"), (
-            "d.png", "d.json"), ("e.png", "e.json"), ("f.json", "f.png"), ("g.png", "g.json")]
+        expected_result = [("a.png", "a.json"), ("c.png", "c.json"), ("b.png", "b.json"), ("d.png", "d.json"), (
+            "f.png", "f.json"), ("g.png", "g.json"), ("e.png", "e.json"), ("h.json", "h.txt")]
 
         count = 0
         for rec, expected in zip(dataset4, expected_result):
@@ -148,7 +149,9 @@ class TestIterableDatasetBasic(TestCase):
             self.assertEqual(os.path.basename(rec[1][0]), expected[1])
             self.assertEqual(rec[0][1].read(), b'12345abcde')
             self.assertEqual(rec[1][1].read(), b'12345abcde')
-        self.assertEqual(count, 7)
+        self.assertEqual(count, 8)
+        dataset3.reset()
+
 
 if __name__ == '__main__':
     run_tests()

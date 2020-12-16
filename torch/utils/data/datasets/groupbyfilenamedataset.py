@@ -1,8 +1,37 @@
 from torch.utils.data.dataset import IterableDataset
-from typing import List, Iterable, Iterator
-from collections import OrderedDict
+from typing import Dict, List, Tuple, Callable, Iterable, Iterator
 
 import os
+import functools
+from io import BufferedIOBase
+
+
+def default_group_key_fn(dataitem : Tuple[str, BufferedIOBase]):
+    return os.path.splitext(dataitem[0])[0]
+
+
+def default_sort_data_fn(datalist : List[Tuple[str, BufferedIOBase]]):
+    txt_ext = ['.json', '.jsn', '.txt', '.text']
+
+    def cmp_fn(a : Tuple[str, BufferedIOBase], b : Tuple[str, BufferedIOBase]):
+        a_is_txt = os.path.splitext(a[0])[1] in txt_ext
+        b_is_txt = os.path.splitext(b[0])[1] in txt_ext
+
+        # if a is txt but b is not, b go front
+        if a_is_txt and not b_is_txt:
+            return 1
+        # if a is not txt but b is txt, a go front
+        if not a_is_txt and b_is_txt:
+            return -1
+        # if a and b both are or are not txt, sort in alphabetic order
+        if a[0] < b[0]:
+            return -1
+        elif a[0] > b[0]:
+            return 1
+        return 0
+
+    return sorted(datalist, key=functools.cmp_to_key(cmp_fn))
+
 
 class GroupByFilenameIterableDataset(IterableDataset):
     r""" :class:`GroupByFilenameIterableDataset`.
@@ -14,7 +43,9 @@ class GroupByFilenameIterableDataset(IterableDataset):
     args:
         dataset: Iterable dataset that provides pathname and zip binary stream in tuples
         group_size: the size of group
-        buffer_size: the size of buffer which is used to store non-grouped but iterated streams
+        max_buffer_size: the max size of stream buffer which is used to store not yet grouped but iterated data stream
+        group_key_fn: a function which is used to generate group key from pathname of the data stream
+        sort_data_fn: a function which is used to sort the grouped data stream before yield back
         length: a nominal length of the dataset
     """
 
@@ -22,94 +53,47 @@ class GroupByFilenameIterableDataset(IterableDataset):
             self,
             dataset : Iterable,
             group_size : int = 1,
-            buffer_size : int = 10,
+            max_buffer_size : int = 10,
+            group_key_fn : Callable = default_group_key_fn,
+            sort_data_fn : Callable = default_sort_data_fn,
             length: int = -1):
         super().__init__()
         self.dataset : Iterable = dataset
         self.group_size : int = group_size
-        self.buffer_size : int = buffer_size
-        self.stream_buffer : OrderedDict = OrderedDict()
+        self.max_buffer_size : int = max_buffer_size
+        self.group_key_fn : Callable = group_key_fn
+        self.sort_data_fn : Callable = sort_data_fn
+        self.curr_buffer_size : int = 0
+        self.stream_buffer : Dict[str, List[Tuple[str, BufferedIOBase]]] = {}
         self.length : int = length
-
-
-    def __scan_stream_buffer(self, group_size : int):
-        # scan current stream buffer, return a group of data or partial group of data
-        stream_buffer = self.stream_buffer
-        res = []
-        removed_pathnames = []
-        key = None
-        for pathname, stream in stream_buffer.items():
-            name_ext = os.path.splitext(pathname)
-            if key is None:
-                key = name_ext[0]
-                res.append((pathname, stream))
-                removed_pathnames.append(pathname)
-            elif key == name_ext[0]:
-                res.append((pathname, stream))
-                removed_pathnames.append(pathname)
-            if len(res) == group_size:
-                break
-        for pathname in removed_pathnames:
-            del stream_buffer[pathname]
-        return res
 
 
     def __iter__(self) -> Iterator[list]:
         assert self.group_size > 0
-        assert self.buffer_size >= 0
+        assert self.max_buffer_size >= 0
 
-        group_size = self.group_size
-        buffer_size = self.buffer_size
-        stream_buffer = self.stream_buffer
-        res : List[tuple] = []
+        if self.group_size == 1:
+            for data in self.dataset:
+                yield [data]
+
         for data in self.dataset:
-            # scan stream buffer before reading new data from dataset.
-            # try finding a group in each iteration.
-            # note that stream_buffer won't be scanned if size of `res` is not 0, since
-            # we need to find the rest of the items in current group from input dataset
-            while len(res) == 0 and len(stream_buffer) > 0:
-                res = self.__scan_stream_buffer(group_size)
-                if len(res) == group_size:
-                    yield res
-                    res = []
-
-            # try grouping data from input dataset if stream_buffer has no enough items to group
-            key = None
-            if len(res) == 0:
-                # start finding a new group
-                key = os.path.splitext(data[0])[0]
-                res.append((data[0], data[1]))
+            key = self.group_key_fn(data)
+            res = self.stream_buffer.get(key, []) + [data]
+            if len(res) == self.group_size:
+                yield self.sort_data_fn(res)
+                del self.stream_buffer[key]
+                self.curr_buffer_size = self.curr_buffer_size - self.group_size + 1
             else:
-                # find the rest of item in a group that initiated from stream_buffer
-                if key is None:
-                    key = os.path.splitext(res[0][0])[0]
-                if key == os.path.splitext(data[0])[0]:
-                    res.append((data[0], data[1]))
-                elif len(stream_buffer) < buffer_size:
-                    stream_buffer[data[0]] = data[1]
-                else:
+                if self.curr_buffer_size == self.max_buffer_size:
                     raise OverflowError(
-                        "stream_buffer is full, please adjust the order of data "
+                        "stream_buffer is overflow, please adjust the order of data "
                         "in the input dataset or increase the buffer size!")
+                self.stream_buffer[key] = res
+                self.curr_buffer_size = self.curr_buffer_size + 1
 
-            if len(res) == group_size:
-                yield res
-                res = []
-
-        # finally handle the rest of items in the stream_buffer if any
-        while len(res) == 0 and len(stream_buffer) >= group_size:
-            res = self.__scan_stream_buffer(group_size)
-            if len(res) == group_size:
-                yield res
-                res = []
-
-        if len(res) > 0:
+        if self.curr_buffer_size > 0:
             msg = "Not able to group [{}] with group size {}.".format(
-                ','.join([v[0] for v in res]), str(group_size))
-            raise RuntimeError(msg)
-        if len(stream_buffer) > 0:
-            msg = "Not able to group [{}] with group size {}".format(
-                ','.join(v for v in list(stream_buffer)), str(group_size))
+                ','.join([v[0] for _, vs in self.stream_buffer.items() for v in vs]), str(self.group_size))
             raise RuntimeError(msg)
 
 
