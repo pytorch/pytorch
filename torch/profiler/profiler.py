@@ -114,7 +114,7 @@ class profile(object):
     def __init__(
             self,
             *,
-            activities: Iterable[ProfilerActivity],
+            activities: Optional[Iterable[ProfilerActivity]] = None,
             schedule: Optional[Callable[[int], ProfilerAction]] = None,
             on_trace_ready: Optional[Callable[..., Any]] = None,
             record_shapes: bool = False,
@@ -122,12 +122,16 @@ class profile(object):
             with_stack: bool = False,
             # deprecated:
             use_gpu: Optional[bool] = None):
-        self.activities = activities
-        if use_gpu:
-            warn("use_gpu is deprecated, use activities=[ProfilerActivity.CUDA, ...] instead")
-            if ProfilerActivity.CUDA not in self.activities:
-                self.activities = set(self.activities)
-                self.activities.add(ProfilerActivity.CUDA)
+        if activities:
+            self.activities = activities
+        else:
+            if use_gpu is not None:
+                warn("use_gpu is deprecated, use activities argument instead")
+                self.activities = set([ProfilerActivity.CPU])
+                if use_gpu:
+                    self.activities.add(ProfilerActivity.CUDA)
+            else:
+                raise RuntimeError("Expected activities argument specified")
         if schedule:
             self.schedule = schedule
             # add step markers into the trace and table view
