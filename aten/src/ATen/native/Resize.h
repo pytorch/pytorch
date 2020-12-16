@@ -43,7 +43,8 @@ static inline void maybe_resize_storage_cpu(TensorImpl* self, int64_t new_size) 
 inline TensorImpl* resize_impl_cpu_(
     TensorImpl* self,
     IntArrayRef size,
-    c10::optional<IntArrayRef> stride) {
+    c10::optional<IntArrayRef> stride,
+    bool resize_storage = true) {
   if (self->sizes() == size && (!stride || self->strides() == stride)) {
     return self;
   }
@@ -57,7 +58,9 @@ inline TensorImpl* resize_impl_cpu_(
     self->set_sizes_contiguous(size);
     storage_size = self->numel();
   }
-  maybe_resize_storage_cpu(self, storage_size);
+  if (resize_storage) {
+    maybe_resize_storage_cpu(self, storage_size);
+  }
 
   return self;
 }

@@ -29,7 +29,7 @@ class Conv2d(nn.Conv2d):
         self.weight_fake_quant = qconfig.weight()
 
     def forward(self, input):
-        return self._conv_forward(input, self.weight_fake_quant(self.weight))
+        return self._conv_forward(input, self.weight_fake_quant(self.weight), self.bias)
 
     @classmethod
     def from_float(cls, mod):

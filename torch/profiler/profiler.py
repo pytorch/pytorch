@@ -1,97 +1,50 @@
 import torch.autograd.profiler as prof
 from torch.autograd import ProfilerActivity
 
-from typing import Callable, Iterable, Optional
+from enum import Enum
+from typing import Any, Callable, Iterable, Optional
+from warnings import warn
 
-class EnablePred(object):
+
+class ProfilerAction(Enum):
+    NONE = 0
+    WARMUP = 1
+    RECORD = 2
+    RECORD_AND_SAVE = 3
+
+
+def schedule(*, wait: int, warmup: int, active: int):
     """
-    EnablePred describes on which steps profiler is active:
-    - profiler starts in inactive state and stays in inactive state for the first 'wait' steps
-    - profiler then enters a warmup state and stays in this state for the next 'warmup' steps
-    - profiler then starts actively tracing/collecting stats for the next 'active' steps
-    - after this, profiler returns to the inactive state and cycle repeats
-
-    In case output_fn is specified, it is called every time the trace is ready
+    Represents profiler behavior:
+      - wait for 'wait' steps
+      - do the warmup for the next 'warmup' steps
+      - do the active recording for the next 'active' steps
+      - repeat the cycle
     """
-    class Action(object):
-        START_WARMUP = 0
-        START_TRACE = 1
-        STOP_TRACE = 2
-
-    class State(object):
-        INACTIVE = 0
-        WARMUP = 1
-        ACTIVE = 2
-
-    def __init__(self, wait: int, warmup: int, active: int, output_fn: Optional[Callable[[prof.profile], None]]):
-        assert wait >= 0 and warmup >= 0 and active > 0
-        if warmup == 0:
-            print("Warning: profiler won't be using a warmup, which can skew profiler results")
-        self.wait = wait
-        self.warmup = warmup
-        self.active = active
-        self.output_fn = output_fn
-
-        def active_active_fn(step):
-            if self._mod_step(step) == 1:
-                return [EnablePred.Action.STOP_TRACE, EnablePred.Action.START_WARMUP, EnablePred.Action.START_TRACE]
-            else:
-                return []
-
-        def inactive_warmup_fn(_):
-            raise RuntimeError("Incorrect profiler state sequence")
-
-        self.actions_map = {
-            EnablePred.State.ACTIVE: {
-                EnablePred.State.ACTIVE: active_active_fn,
-                EnablePred.State.WARMUP: [EnablePred.Action.START_TRACE],
-                EnablePred.State.INACTIVE: [EnablePred.Action.START_WARMUP, EnablePred.Action.START_TRACE],
-            },
-            EnablePred.State.WARMUP: {
-                EnablePred.State.ACTIVE: [EnablePred.Action.STOP_TRACE, EnablePred.Action.START_WARMUP],
-                EnablePred.State.WARMUP: [],
-                EnablePred.State.INACTIVE: [EnablePred.Action.START_WARMUP],
-            },
-            EnablePred.State.INACTIVE: {
-                EnablePred.State.ACTIVE: [EnablePred.Action.STOP_TRACE],
-                EnablePred.State.WARMUP: inactive_warmup_fn,
-                EnablePred.State.INACTIVE: [],
-            }
-        }
-
-    def _mod_step(self, step: int):
-        sum_states = self.wait + self.warmup + self.active
-        r = step % sum_states
-        if r == 0:
-            r = sum_states
-        return r
-
-    def _num_state(self, step: int):
-        mod_step = self._mod_step(step)
-        if mod_step <= self.wait:
-            return EnablePred.State.INACTIVE
-        elif mod_step <= self.wait + self.warmup:
-            return EnablePred.State.WARMUP
+    def schedule_fn(step: int) -> ProfilerAction:
+        assert step >= 0
+        num_steps = wait + warmup + active
+        mod_step = step % num_steps
+        if mod_step < wait:
+            return ProfilerAction.NONE
+        elif mod_step < wait + warmup:
+            return ProfilerAction.WARMUP
         else:
-            return EnablePred.State.ACTIVE
+            return ProfilerAction.RECORD if mod_step < num_steps - 1 \
+                else ProfilerAction.RECORD_AND_SAVE
+    assert wait >= 0 and warmup >= 0 and active > 0, \
+        "Invalid profiler schedule arguments"
+    if warmup == 0:
+        warn("Profiler won't be using warmup, this can skew profiler results")
+    return schedule_fn
 
-    def actions(self, step: int):
-        if step == 1:
-            st = self._num_state(step)
-            if st == EnablePred.State.ACTIVE:
-                return [EnablePred.Action.START_WARMUP, EnablePred.Action.START_TRACE]
-            elif st == EnablePred.State.WARMUP:
-                return [EnablePred.Action.START_WARMUP]
-            else:
-                return []
-        else:
-            st = self._num_state(step)
-            prev_st = self._num_state(step - 1)
-            acts = self.actions_map[st][prev_st]
-            if callable(acts):
-                return acts(step)
-            else:
-                return acts
+
+def _default_schedule_fn(_: int) -> ProfilerAction:
+    """
+    Default profiler behavior - immediately start recording the events,
+    keep doing it on every step
+    """
+    return ProfilerAction.RECORD
 
 
 class profile(object):
@@ -99,93 +52,227 @@ class profile(object):
     PyTorch profiler context manager.
 
     Arguments:
-        activities - list of activity groups (CPU, CUDA)
-        enable_pred (optional) - iteration predicate function, used together with `next_step` call
+        activities - list of activity groups (CPU, CUDA);
+        schedule - a callable takes step (int) as a single parameter and returns
+          ProfilerAction value - specifies the profiler action on each step;
+        on_trace_ready (optional) - callable, called each time the trace is ready
+          during the profiling;
+        record_shapes - save information about operator's input shapes;
+        profile_memory - track tensor memory allocation/deallocation;
+        with_stack - save stack traces;
+        use_gpu - (deprecated, use activities)
 
     Notes:
-     - profiler is based on the Kineto library - system profiler library, with support for CUPTI tracing
-     - enable_pred is used for training loop tracing, allowing users to enable profiler on certain
-       iterations and account for the warmup
-     - when enable_pred is not set, profiler is always active
-     - next_step uses record_function api to add information about steps in the trace
+     - profiler is using Kineto library - system profiler library, with support for CUPTI tracing
+     - with default schedule profiler immediately starts recording the events, a single trace produced
+       when context manager exits
+     - non-default profiler schedules can useful when tracing training loops, allowing users to enable
+       profiler on certain iterations (steps) and account for the warmup.
+
+    Warning: enabling shape and stack tracing causes an additional overhead.
+
+    Examples:
+     - example that uses default schedule:
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA]
+        ) as p:
+            code_to_profile()
+        print(p.key_averages().table(
+            sort_by="self_cuda_time_total", row_limit=-1))
+
+     - the following example demonstrates the usage of schedule() and next_step():
+        def trace_handler(p):
+            print(p.key_averages().table(
+                sort_by="self_cuda_time_total", row_limit=-1))
+            # p.export_chrome_trace("/tmp/test_trace_" + str(called_num[0]) + ".json")
+
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA],
+
+            # Profiler will skip the first step/iteration,
+            # start warming up on the second, record
+            # the third and the forth iterations,
+            # after which the trace will become available
+            # and on_trace_ready (when set) is called;
+            # the cycle repeats starting with the next step
+
+            schedule=torch.profiler.schedule(
+                wait=1,
+                warmup=1,
+                active=2),
+            on_trace_ready=trace_handler
+        ) as p:
+            for iter in range(N):
+                code_iteration_to_profile(iter)
+                # send a signal to the profiler that the next iteration has started
+                p.next_step()
     """
     def __init__(
             self,
+            *,
             activities: Iterable[ProfilerActivity],
-            enable_pred: Optional[EnablePred] = None,
-            record_shapes=False,
-            profile_memory=False,
-            with_stack=False):
+            schedule: Optional[Callable[[int], ProfilerAction]] = None,
+            on_trace_ready: Optional[Callable[..., Any]] = None,
+            record_shapes: bool = False,
+            profile_memory: bool = False,
+            with_stack: bool = False,
+            # deprecated:
+            use_gpu: Optional[bool] = None):
         self.activities = activities
-        self.enable_pred = enable_pred
+        if use_gpu:
+            warn("use_gpu is deprecated, use activities=[ProfilerActivity.CUDA, ...] instead")
+            if ProfilerActivity.CUDA not in self.activities:
+                self.activities = set(self.activities)
+                self.activities.add(ProfilerActivity.CUDA)
+        if schedule:
+            self.schedule = schedule
+            # add step markers into the trace and table view
+            self.record_steps = True
+        else:
+            self.schedule = _default_schedule_fn
+            self.record_steps = False
+        self.on_trace_ready = on_trace_ready
         self.record_shapes = record_shapes
         self.profile_memory = profile_memory
         self.with_stack = with_stack
         self.step_num = 0
+        self.current_action = self.schedule(self.step_num)
         self.profiler: Optional[prof.profile] = None
         self.step_rec_fn: Optional[prof.record_function] = None
 
-        if not self.enable_pred:
-            print("Warning: using profiler without enable predicate may result in the skewed " +
-                "results, use enable_pred to control the warmup time")
-
     def __enter__(self):
-        self.next_step()
-        if not self.enable_pred:
-            self._run_action(EnablePred.Action.START_WARMUP)
-            self._run_action(EnablePred.Action.START_TRACE)
+        self._enter_actions()
+        if self.record_steps:
+            self.step_rec_fn = prof.record_function("ProfilerStep#" + str(self.step_num))
+            self.step_rec_fn.__enter__()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.step_rec_fn:
+        if self.record_steps and self.step_rec_fn:
             self.step_rec_fn.__exit__(None, None, None)
-        if self.profiler:
-            if self.enable_pred:
-                if self.enable_pred._num_state(self.step_num) == EnablePred.State.WARMUP:
-                    self._run_action(EnablePred.Action.START_TRACE)
-            self._run_action(EnablePred.Action.STOP_TRACE, keep_profiler=True)
+        self._exit_actions()
 
     def next_step(self):
-        if self.step_rec_fn:
+        """
+        Signals the profiler that the next profiling step has started.
+        """
+        if self.record_steps and self.step_rec_fn:
             self.step_rec_fn.__exit__(None, None, None)
+        prev_action = self.current_action
         self.step_num += 1
-        if self.enable_pred:
-            self._run_actions(self.step_num)
+        self.current_action = self.schedule(self.step_num)
 
-        self.step_rec_fn = prof.record_function("ProfilerStep#" + str(self.step_num))
-        self.step_rec_fn.__enter__()
+        if self.current_action == ProfilerAction.NONE:
+            if prev_action == ProfilerAction.NONE:
+                pass
+            elif prev_action == ProfilerAction.WARMUP:
+                warn("Incorrect schedule: WARMUP followed by NONE")
+                self._start_trace()
+                self._stop_trace()
+            elif prev_action == ProfilerAction.RECORD:
+                warn("Incorrect schedule: RECORD followed by NONE")
+                self._stop_trace()
+            else:
+                assert prev_action == ProfilerAction.RECORD_AND_SAVE
+                self._stop_trace()
+                if self.on_trace_ready:
+                    self.on_trace_ready(self)
+        elif self.current_action == ProfilerAction.WARMUP:
+            if prev_action == ProfilerAction.NONE:
+                self._start_warmup()
+            elif prev_action == ProfilerAction.WARMUP:
+                pass
+            elif prev_action == ProfilerAction.RECORD:
+                warn("Incorrect schedule: RECORD followed by WARMUP")
+                self._stop_trace()
+            else:
+                assert prev_action == ProfilerAction.RECORD_AND_SAVE
+                self._stop_trace()
+                if self.on_trace_ready:
+                    self.on_trace_ready(self)
+                self._start_warmup()
+        elif self.current_action in \
+                [ProfilerAction.RECORD, ProfilerAction.RECORD_AND_SAVE]:
+            if prev_action == ProfilerAction.NONE:
+                self._start_warmup()
+                self._start_trace()
+            elif prev_action == ProfilerAction.WARMUP:
+                self._start_trace()
+            elif prev_action == ProfilerAction.RECORD:
+                pass
+            else:
+                assert prev_action == ProfilerAction.RECORD_AND_SAVE
+                self._stop_trace()
+                if self.on_trace_ready:
+                    self.on_trace_ready(self)
+                self._start_warmup()
+                self._start_trace()
+
+        if self.record_steps:
+            self.step_rec_fn = prof.record_function("ProfilerStep#" + str(self.step_num))
+            self.step_rec_fn.__enter__()
+
+    def step(self):
+        """
+        Returns the current profiling step.
+        """
+        return self.step_num
 
     def export_chrome_trace(self, path: str):
+        """
+        Exports the collected trace in Chrome JSON format.
+        """
         assert self.profiler
         return self.profiler.export_chrome_trace(path)
 
     def key_averages(self, group_by_input_shape: bool = False, group_by_stack_n: int = 0):
+        """
+        Averages events, grouping them by operator name and (optionally) input shapes and
+        stack.
+        Note: to use shape/stack functionality make sure to set record_shapes/with_stack
+        when creating profiler context manager.
+        """
         assert self.profiler
         return self.profiler.key_averages(group_by_input_shape, group_by_stack_n)
 
-    def _run_actions(self, step_num):
-        assert self.enable_pred
-        for act in self.enable_pred.actions(self.step_num):
-            self._run_action(act)
+    def _enter_actions(self):
+        if self.current_action == ProfilerAction.WARMUP:
+            self._start_warmup()
+        elif self.current_action in \
+                [ProfilerAction.RECORD, ProfilerAction.RECORD_AND_SAVE]:
+            self._start_warmup()
+            self._start_trace()
 
-    def _run_action(self, act, keep_profiler=False):
-        if act == EnablePred.Action.START_WARMUP:
-            self.profiler = prof.profile(
-                use_cuda=(ProfilerActivity.CUDA in self.activities),
-                use_cpu=(ProfilerActivity.CPU in self.activities),
-                record_shapes=self.record_shapes,
-                profile_memory=self.profile_memory,
-                with_stack=self.with_stack,
-                use_kineto=True,
-            )
-            self.profiler._prepare_kineto_trace()
-        elif act == EnablePred.Action.START_TRACE:
-            assert self.profiler is not None
-            self.profiler._start_kineto_trace()
-        elif act == EnablePred.Action.STOP_TRACE:
-            assert self.profiler is not None
-            self.profiler.__exit__(None, None, None)
-            if self.enable_pred and self.enable_pred.output_fn:
-                self.enable_pred.output_fn(self.profiler)
-            if not keep_profiler:
-                self.profiler = None
+    def _exit_actions(self):
+        if self.current_action == ProfilerAction.WARMUP:
+            self._start_trace()
+            self._stop_trace()
+        elif self.current_action == ProfilerAction.RECORD:
+            self._stop_trace()
+        elif self.current_action == ProfilerAction.RECORD_AND_SAVE:
+            self._stop_trace()
+            if self.on_trace_ready:
+                self.on_trace_ready(self)
+
+    def _start_warmup(self):
+        self.profiler = prof.profile(
+            use_cuda=(ProfilerActivity.CUDA in self.activities),
+            use_cpu=(ProfilerActivity.CPU in self.activities),
+            record_shapes=self.record_shapes,
+            profile_memory=self.profile_memory,
+            with_stack=self.with_stack,
+            use_kineto=True,
+        )
+        self.profiler._prepare_kineto_trace()
+
+    def _start_trace(self):
+        assert self.profiler is not None
+        self.profiler._start_kineto_trace()
+
+    def _stop_trace(self):
+        assert self.profiler is not None
+        self.profiler.__exit__(None, None, None)
