@@ -31,6 +31,7 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(EnumType)               \
   _(AnyEnumType)            \
   _(TensorType)             \
+  _(StorageType)            \
   _(TupleType)              \
   _(ListType)               \
   _(DictType)               \
@@ -630,8 +631,7 @@ struct CAFFE2_API TensorType : public Type {
       const SymbolicShape& sizes,
       const VaryingShape<Stride>& stride_,
       c10::optional<bool> requires_grad,
-      c10::optional<bool> undefined = false,
-      bool is_inferred = false);
+      c10::optional<bool> undefined = false);
 
   static TensorTypePtr create(
       c10::optional<at::ScalarType> scalar_type,
@@ -776,10 +776,13 @@ struct CAFFE2_API TensorType : public Type {
 
   static TensorTypePtr getInferred() {
     static auto valueInferred = TensorType::create(
-      /*scalar_type=*/{}, /*device=*/{},
-      /*sizes=*/SymbolicShape(),
-      /*stride=*/VaryingShape<Stride>{}, /*requires_grad=*/{},
-      /*undefined=*/false, /*is_inferred=*/true);
+        /*scalar_type=*/{},
+        /*device=*/{},
+        /*sizes=*/SymbolicShape(),
+        /*stride=*/VaryingShape<Stride>{},
+        /*requires_grad=*/{},
+        /*undefined=*/false);
+    valueInferred->is_inferred_ = true;
     return valueInferred;
   }
 
@@ -808,6 +811,17 @@ struct CAFFE2_API TensorType : public Type {
 
   static const TypeKind Kind = TypeKind::TensorType;
 
+  static std::vector<int64_t> contiguousStridesOf(at::IntArrayRef sizes) {
+    std::vector<int64_t> strides(sizes.size());
+    if (sizes.empty()) // zero-dim case
+      return strides;
+    strides.back() = 1;
+    for (size_t i = strides.size() - 1; i > 0; i--) {
+      strides[i - 1] = strides[i] * sizes[i];
+    }
+    return strides;
+  }
+
  private:
   TensorType(
       c10::optional<at::ScalarType> scalar_type,
@@ -820,17 +834,6 @@ struct CAFFE2_API TensorType : public Type {
   TensorTypePtr clone() const {
     return TensorTypePtr(new TensorType(
         scalar_type_, device_, sizes_, strides_, requires_grad_, undefined_));
-  }
-
-  static std::vector<int64_t> contiguousStridesOf(at::IntArrayRef sizes) {
-    std::vector<int64_t> strides(sizes.size());
-    if (sizes.empty()) // zero-dim case
-      return strides;
-    strides.back() = 1;
-    for (size_t i = strides.size() - 1; i > 0; i--) {
-      strides[i - 1] = strides[i] * sizes[i];
-    }
-    return strides;
   }
 
   static VaryingShape<Stride> computeStrideProps(
@@ -1405,6 +1408,29 @@ struct CAFFE2_API StringType : public Type {
   StringType() : Type(TypeKind::StringType) {}
 };
 
+struct StorageType;
+using StorageTypePtr = std::shared_ptr<StorageType>;
+struct CAFFE2_API StorageType : public Type {
+  static StorageTypePtr create() {
+    return StorageTypePtr(new StorageType()); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return annotation_str();
+  }
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    return "Storage";
+  }
+  static const TypeKind Kind = TypeKind::StorageType;
+  // global singleton
+  static StorageTypePtr get();
+
+ private:
+  StorageType() : Type(TypeKind::StorageType) {}
+};
+
 struct FunctionType;
 using FunctionTypePtr = std::shared_ptr<FunctionType>;
 struct CAFFE2_API FunctionType : public NamedType {
@@ -1725,13 +1751,18 @@ namespace detail {
 template <typename T>
 struct getTypePtr_ final {
   static TypePtr call() {
-    TORCH_CHECK(
-        isCustomClassRegistered<T>(),
-        "Type ",
-        c10::util::get_fully_qualified_type_name<T>(),
-        " could not be converted to any of the known types."
-    );
-    auto res = getCustomClassType<T>();
+    TypePtr res = []() {
+      try {
+        return getCustomClassType<T>();
+      } catch(const c10::Error&) {
+        TORCH_CHECK(
+            false,
+            "Type ",
+            c10::util::get_fully_qualified_type_name<T>(),
+            " could not be converted to any of the known types."
+        );
+      }
+    }();
     return std::dynamic_pointer_cast<Type>(std::move(res));
   }
 };
@@ -1747,6 +1778,12 @@ template <>
 struct getTypePtr_<at::Tensor> final {
   static TypePtr call() {
     return TensorType::get();
+  }
+};
+template <>
+struct getTypePtr_<c10::Storage> final {
+  static TypePtr call() {
+    return StorageType::get();
   }
 };
 template <>
@@ -1817,6 +1854,12 @@ struct getTypePtr_<at::Generator> final {
 };
 template <>
 struct getTypePtr_<std::string> final {
+  static TypePtr call() {
+    return StringType::get();
+  }
+};
+template <>
+struct getTypePtr_<at::Dimname> final {
   static TypePtr call() {
     return StringType::get();
   }
