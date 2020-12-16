@@ -3530,6 +3530,7 @@
     DefaultBackend: sinc_
 
 - func: sinc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: sinc_out
 
