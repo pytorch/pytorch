@@ -5,8 +5,7 @@ import pdb
 import torch
 import torch.distributed.rpc as rpc
 import torch.multiprocessing as mp
-
-import matplotlib.pyplot as plt
+import json
 import numpy as np
 
 import time
@@ -41,13 +40,12 @@ parser.add_argument('--batch', type=str2bool, default=True)
 parser.add_argument('--state_size', type=str, default='10,20,10')
 parser.add_argument('--nlayers', type=int, default=5)
 parser.add_argument('--out_features', type=int, default=10)
-parser.add_argument('--graph_variable', type=str, default='world_size')
+parser.add_argument('--graph_variable', type=str, default='')
 
 args = parser.parse_args()
 args = vars(args)
 
-
-def run_worker(rank, world_size, master_addr, master_port, batch, state_size, nlayers, out_features, queue):
+def run_worker(rank, world_size, master_addr, master_port, batch, state_size, nlayers, out_features, queue=None):
     state_size = list(map(int, state_size.split(',')))
     batch_size = world_size - 2  # No. of observers
 
@@ -71,73 +69,45 @@ def run_worker(rank, world_size, master_addr, master_port, batch, state_size, nl
 
 
 def main():
-    GRAPH_VARIABLES = {'world_size':[7]} #[12,22,42,62,122,242]
+    GRAPH_VARIABLES = {'world_size':[24,48,96,192], 'batch': [True, False], 
+    'state_size': ['10,20,10', '15,20,25'], 'nlayers': [5, 10], 'out_features': [10, 20]}
     if args['graph_variable'] in GRAPH_VARIABLES.keys():
-        graph_variables = GRAPH_VARIABLES[args['graph_variable']]
+        x_axis_name = args['graph_variable']
+        x_axis_variables = GRAPH_VARIABLES[x_axis_name]
         ctx = mp.get_context('spawn')
         queue = ctx.SimpleQueue()
-        returns = {}
-        for i, graph_variable in enumerate(graph_variables): #x axis variable
-            args[args['graph_variable']] = graph_variable
-            print('starting process {0}'.format(i ))            
+        benchmark_runs = []
+
+        for i, x_axis_variable in enumerate(x_axis_variables): #run benchmark for every x axis variable
+            args[x_axis_name] = x_axis_variable #set x axis variable for this iteration of benchmark run
             processes = []
             for rank in range(args['world_size']):
                 prc = ctx.Process(target=run_worker, args=(rank, args['world_size'], args['master_addr'], args['master_port'],
                 args['batch'], args['state_size'], args['nlayers'], args['out_features'], queue))
                 prc.start()
                 processes.append(prc)
-            benchmark_metrics = queue.get()   
+            benchmark_run_results = queue.get()   
             for process in processes:
-                process.join()         
-            returns[i] = benchmark_metrics
-            print("finished process {0}, ret cxt is: {1}".format(i, returns))
+                process.join()
+            benchmark_run_results[x_axis_name] = x_axis_variable #save what the x axis value was for this benchmark run       
+            benchmark_runs.append(benchmark_run_results)
 
-        width = 0.35  # the width of the bars
-        labels = graph_variables
-        label_location = np.arange(len(labels))
-
-        for i, benchmark_metric in enumerate(returns[0].keys()):
-            fig, ax = plt.subplots()
-            p50s = []
-            p95s = []
-            for i in range(len(graph_variables)):
-                p50s.append(returns[i][benchmark_metric][50]) #KeyError: '50'
-                p95s.append(returns[i][benchmark_metric][95])
-
-            y1 = ax.bar(label_location - width/2, p50s, width, label='p50')
-            y2 = ax.bar(label_location + width/2, p95s, width, label='p95')
-            ax.set_ylabel(benchmark_metric)
-            ax.set_xlabel(args['graph_variable'])
-            ax.set_title('RPC Benchmarks')
-            ax.set_xticks(label_location)
-            ax.set_xticklabels(labels)
-            ax.legend()
-            fig.tight_layout()
-        plt.grid()
-        plt.show()
-    # else: #need to add in a queue to satisfy run coordinator
-        # for world_size in range(12, 13):
-        # delays = []
-        # for batch in [True, False]:
-        #     print(world_size, batch, "==>\n")
-        #     tik = time.time()
-        #     mp.spawn(
-        #         run_worker,
-        #         args=(world_size, args['master_addr'], args['master_port'],
-        #               batch, args['state_size'], args['nlayers'], args['out_features']),
-        #         nprocs=world_size,
-        #         join=True
-        #     )
-        #     tok = time.time()
-        #     delays.append(tok - tik)
-        # print(f"Time taken - {world_size}, {delays[0]}, {delays[1]}")
-            # mp.spawn(
-            #     run_worker,
-            #     args=(world_size, args['master_addr'], args['master_port'],
-            #           args['batch'], args['state_size'], args['nlayers'], args['out_features'], ret_cxt, i),
-            #     nprocs=world_size,
-            #     join=True
-            # )
+        report = args
+        report['x_axis_name'] = x_axis_name
+        del report[x_axis_name] #x_axis_name was variable so dont save a constant in the report
+        report['benchmark_results'] = benchmark_runs
+        with open('report.json', 'w') as f:
+            json.dump(report, f)
+    else:
+        start_time = time.time()
+        mp.spawn(
+            run_worker,
+            args=(args['world_size'], args['master_addr'], args['master_port'],
+                  args['batch'], args['state_size'], args['nlayers'], args['out_features']),
+            nprocs=args['world_size'],
+            join=True
+        )
+        print(f"Time taken -, {time.time() - start_time}")
 
 if __name__ == '__main__':
     main()

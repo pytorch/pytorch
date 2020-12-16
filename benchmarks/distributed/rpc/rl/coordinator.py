@@ -110,5 +110,5 @@ class CoordinatorBase:
             print("p" + str(p) + ":", int(v))
             benchmark_metrics['observer throughput'][p] = int(v)
 
-        print("benchmark_metrics in coordinator.py is {0}".format(benchmark_metrics))
-        queue.put(benchmark_metrics)
+        if queue:
+            queue.put(benchmark_metrics)

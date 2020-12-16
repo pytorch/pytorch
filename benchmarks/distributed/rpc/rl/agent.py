@@ -147,29 +147,6 @@ class AgentBase:
         return action.item()
 
     def finish_episode(self, rets):
-        rewards = torch.stack([ret[0] for ret in rets]).t()
-        # ep_rewards = sum([ret[1] for ret in rets]) / len(rets)
-
-
-        if self.batch:
-            probs = torch.stack(self.saved_log_probs)
-        else:
-            probs = [torch.stack(self.saved_log_probs[i])
-                     for i in range(len(rets))]
-            probs = torch.stack(probs)
-
-        policy_loss = -probs * rewards / len(rets)
-
-        policy_loss.sum().backward()
-        self.optimizer.step()
-        self.optimizer.zero_grad()
-
-        # reset variables
-        self.saved_log_probs = [] if self.batch else {
-            k: [] for k in range(self.batch_size)}
-        self.states = torch.zeros(self.batch_size, *self.state_size)
-
-
         return self.agent_latency, self.agent_throughput
 
         # calculate running rewards
