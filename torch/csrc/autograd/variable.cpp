@@ -44,7 +44,7 @@ DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl,
 
 // Chain this view info with the new view op between base and tensor
 ViewInfo ViewInfo::chain(const Variable & base, const Variable & tensor,
-  c10::optional<std::function<Variable(const Variable&)>> view_func) {
+  c10::optional<std::function<Variable(const Variable&)>> view_func) const {
   // Set `view_func` using the root base as input.
   // `view_func` is used to recover views in backward when either as_strided is not supported
   // or the view function changes the metadata which is not recorded by as_strided
@@ -362,7 +362,7 @@ Tensor VariableHooks::tensor_data(const Tensor& self) const {
 bool VariableHooks::is_view(const Tensor& self) const {
   auto meta = torch::autograd::impl::get_autograd_meta(self);
   if (meta && meta->is_view_) {
-    auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(self));
+    auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(meta);
     return diff_view_meta->has_bw_view();
   } else {
     return false;
@@ -674,7 +674,7 @@ const Variable& AutogradMeta::fw_grad(uint64_t level, const Variable& self) cons
     // See [Forward Grad View] for more details.
     auto this_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(self));
     if (this_view_meta->has_fw_view()) {
-      auto view_info = this_view_meta->get_forward_view();
+      const auto& view_info = this_view_meta->get_forward_view();
       const auto& base = view_info.base_;
 
       const auto& base_val = base.fw_grad(level);

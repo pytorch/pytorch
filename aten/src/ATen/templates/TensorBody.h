@@ -608,7 +608,9 @@ class CAFFE2_API Tensor {
   }
 
   /// This function can be used to set the value of the forward grad.
-  /// Note that the given value might not be used directly if it is a view of another Tensor.
+  /// Note that the given new_grad might not be used directly if it has different
+  /// metadata (size/stride/storage offset) compared to this Tensor. In that case,
+  /// new_grad content will be copied into a new Tensor
   void set_fw_grad(const Tensor& new_grad, uint64_t level, bool is_inplace_op) {
     impl_->set_fw_grad(new_grad, *this, level, is_inplace_op);
   }

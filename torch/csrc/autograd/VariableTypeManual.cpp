@@ -221,7 +221,7 @@ Tensor _fw_primal(const Tensor & self, int64_t level) {
   }
   if (generated::details::isFwGradDefined(self)) {
     // Modified from original codegen
-    // We explicitely want to ignore the forward grad at the given level
+    // We explicitly want to ignore the forward grad at the given level
     TORCH_CHECK(level == 0, "Invalid level given to _fw_primal");
     // End modified from original codegen
   }
