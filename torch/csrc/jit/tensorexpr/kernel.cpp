@@ -283,7 +283,6 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::lgamma:
     case aten::type_as:
     case aten::masked_fill:
-    case aten::nan_to_num:
       return sizesForValue(v->node()->input(0));
 
     case aten::sub:
@@ -764,8 +763,7 @@ Tensor* TensorExprKernel::computeFourOperand(
         const ExprHandle&,
         const ExprHandle&,
         const ExprHandle&,
-        const ExprHandle&)>& innerExpr,
-    bool promote_inputs) {
+        const ExprHandle&)>& innerExpr) {
   auto const& n = v->node();
   std::vector<std::vector<ExprHandle>> shapes;
   for (size_t idx = 0; idx < 4; idx++) {
@@ -776,7 +774,7 @@ Tensor* TensorExprKernel::computeFourOperand(
   return Compute(
       name,
       c10::fmap<DimArg>(shape),
-      [this, v, innerExpr, promote_inputs](const std::vector<VarHandle>& axes) {
+      [this, v, innerExpr](const std::vector<VarHandle>& axes) {
         auto const& n = v->node();
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
@@ -786,9 +784,7 @@ Tensor* TensorExprKernel::computeFourOperand(
             tensorOrConstant(n->inputs()[3], indices),
         };
 
-        if (promote_inputs) {
-          promoteInputs(inputs);
-        }
+        promoteInputs(inputs);
         ExprHandle compute =
             innerExpr(inputs[0], inputs[1], inputs[2], inputs[3]);
         return demoteOutput(compute, n->output());
@@ -970,62 +966,6 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
             // value needs to promote to input, not vice versa
             auto val = promoteToDtype(value, input.dtype().scalar_type());
             return ifThenElse(mask, val, input);
-          },
-          /*promote_inputs*/ false);
-    }
-
-    case aten::nan_to_num: {
-      auto node = v->node();
-      return computeFourOperand(
-          "nan_to_num",
-          v,
-          [node](
-              const ExprHandle& input,
-              const ExprHandle& nan_replacement,
-              const ExprHandle& pos_inf_replacement,
-              const ExprHandle& neg_inf_replacement) {
-            if (!input.dtype().is_floating_point()) {
-              return input;
-            }
-
-            // we dont use default promoteTypes logic,
-            // because we cast the non-input types to the input dtype
-            auto value_or_default_at_index =
-                [&](size_t index, ExprHandle val, ExprHandle default_v) {
-                  if (node->inputs().at(index)->type() == NoneType::get()) {
-                    return Cast::make(input.dtype(), default_v);
-                  } else {
-                    TORCH_INTERNAL_ASSERT(
-                        !node->input(index)->type()->cast<OptionalType>());
-                    return Cast::make(input.dtype(), val);
-                  }
-                };
-
-            auto nan_val = value_or_default_at_index(
-                1,
-                nan_replacement,
-                Cast::make(input.dtype(), DoubleImm::make(0.)));
-            auto pos_inf_val = value_or_default_at_index(
-                2,
-                pos_inf_replacement,
-                maximumVal(input.dtype().scalar_type()));
-            auto neg_inf_val = value_or_default_at_index(
-                3,
-                neg_inf_replacement,
-                minimumVal(input.dtype().scalar_type()));
-
-            auto positive_infinity = infinityVal(input.dtype().scalar_type());
-            auto negative_infinity =
-                negInfinityVal(input.dtype().scalar_type());
-            auto pos_inf_replaced = ifThenElse(
-                CompareSelect::make(input, positive_infinity, kEQ),
-                pos_inf_val,
-                input);
-            auto infs_replaced = ifThenElse(
-                CompareSelect::make(input, negative_infinity, kEQ),
-                neg_inf_val,
-                pos_inf_replaced);
-            return ifThenElse(isnan(input), nan_val, infs_replaced);
           },
           /*promote_inputs*/ false);
     }
