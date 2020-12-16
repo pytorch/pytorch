@@ -7,7 +7,7 @@
 """Per-layer profilers."""
 import copy
 import time
-from typing import Generator, List, Tuple, Union
+from typing import Generator, List, Union, Sequence
 
 import torch
 from torch import Tensor
@@ -20,7 +20,7 @@ __all__: List[str] = []
 
 Device = Union[torch.device, int, str]
 
-Tensors = Tuple[Tensor, ...]
+Tensors = Sequence[Tensor]
 TensorOrTensors = Union[Tensor, Tensors]
 
 

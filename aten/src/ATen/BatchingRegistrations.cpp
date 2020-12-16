@@ -233,6 +233,32 @@ Tensor unsqueeze_batching_rule(const Tensor& self, int64_t dim) {
   return self_physical.newLogicalFromPhysical(result);
 }
 
+Tensor& fill_inplace_scalar_batching_rule(Tensor& self, Scalar value) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  self_physical.tensor().fill_(value);
+  return self;
+}
+
+Tensor& fill_inplace_tensor_batching_rule(Tensor& self, const Tensor& value) {
+  auto value_batched = isBatchedTensor(value);
+
+  if (value_batched) {
+    auto physical_args =
+      BroadcastingVmapTransform::logicalToPhysical({self, value});
+    physical_args[0].tensor().copy_(physical_args[1].tensor());
+  } else {
+    auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+    self_physical.tensor().fill_(value);
+  }
+  return self;
+}
+
+Tensor& zero_inplace_batching_rule(Tensor &self) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  self_physical.tensor().zero_();
+  return self;
+}
+
 Tensor squeeze_batching_rule(const Tensor& self) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto physical_sizes = self_physical.tensor().sizes();
@@ -901,7 +927,10 @@ Tensor new_empty_strided_batching_rule(
     const Tensor& self,
     IntArrayRef size,
     IntArrayRef stride,
-    const TensorOptions& options) {
+    optional<ScalarType> dtype,
+    optional<Layout> layout,
+    optional<Device> device,
+    optional<bool> pin_memory) {
   auto physical_view = MultiBatchVmapTransform::logicalToPhysical(self);
   auto physical_size = physical_view.getPhysicalShape(size);
 
@@ -949,7 +978,7 @@ Tensor new_empty_strided_batching_rule(
   physical_strides.insert(physical_strides.end(), stride.begin(), stride.end());
 
   auto result = physical_view.tensor().new_empty_strided(
-      physical_size, physical_strides, options);
+      physical_size, physical_strides, dtype, layout, device, pin_memory);
   return physical_view.newLogicalFromPhysical(result);
 }
 
@@ -970,6 +999,11 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl_UNBOXED("sum.dim_IntList", sum_batching_rule);
   m.impl("is_complex", native::is_complex);
   m.impl("conj", native::conj);
+
+  // inplace operations
+  m.impl("fill_.Scalar", fill_inplace_scalar_batching_rule);
+  m.impl("fill_.Tensor", fill_inplace_tensor_batching_rule);
+  m.impl("zero_", zero_inplace_batching_rule);
 
   // view operations
   m.impl("as_strided", as_strided_batching_rule);
@@ -1119,8 +1153,8 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("diagonal_backward", diagonal_backward_batching_rule);
 
   // Tensor.new_* operators
-  m.impl_UNBOXED("new_empty", new_empty_batching_rule);
-  m.impl_UNBOXED("new_empty_strided", new_empty_strided_batching_rule);
+  m.impl("new_empty", new_empty_batching_rule);
+  m.impl("new_empty_strided", new_empty_strided_batching_rule);
   m.impl("new_zeros", new_zeros_batching_rule);
 
   m.impl("contiguous", contiguous_batching_rule);
