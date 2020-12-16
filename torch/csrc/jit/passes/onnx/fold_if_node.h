@@ -5,9 +5,9 @@
 namespace torch {
 namespace jit {
 
-void FoldIfONNX(Block* b);
-bool FoldValueONNX(Node* n);
-bool FoldConditionONNX(Node* n);
+void FoldIfNodeONNX(Block* b);
+bool ConditionValueONNX(Node* n);
+bool IsStaticConditionONNX(Node* n);
 
 } // namespace jit
 

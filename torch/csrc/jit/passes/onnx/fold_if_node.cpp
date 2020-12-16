@@ -13,7 +13,11 @@ namespace onnx {
 using namespace ::c10::onnx;
 }
 
-static bool conditionIfFold(Node* node) {
+// This function determines wheather If Node can be folded.
+static bool isStaticCondition(Node* node) {
+  TORCH_INTERNAL_ASSERT(
+      node->kind() == onnx::If || node->kind() == onnx::Not ||
+      node->kind() == onnx::Identity);
   auto cast_node = node->input()->node();
   if (cast_node->kind() != onnx::Cast)
     cast_node = node;
@@ -21,7 +25,7 @@ static bool conditionIfFold(Node* node) {
 
   if (prev_node->kind() == onnx::Not || prev_node->kind() == onnx::Identity ||
       prev_node->kind() == onnx::If)
-    return conditionIfFold(prev_node);
+    return isStaticCondition(prev_node);
 
   auto compare_node = prev_node;
   if (compare_node->kind() == onnx::Equal ||
@@ -60,13 +64,18 @@ static bool conditionIfFold(Node* node) {
   return false;
 }
 
-static bool constantFoldingValue(Node* node) {
+// This function returns the value of the constant-folded subblock
+// that is input to the If node.
+static bool constantFoldedConditionValue(Node* node) {
+  TORCH_INTERNAL_ASSERT(node->kind() == onnx::If);
+  // usually Cast node precedes If node in the graph, but
+  // there are some rare scenarios when that is not the case.
   auto cast_node = node->input()->node();
   if (cast_node->kind() != onnx::Cast)
     cast_node = node;
   auto prev_node = cast_node->input()->node();
   if (prev_node->kind() == onnx::If) {
-    int cond = 1 - (int)constantFoldingValue(prev_node);
+    int cond = 1 - (int)constantFoldedConditionValue(prev_node);
     Block* block = prev_node->blocks()[cond];
     // we are assuming that the number of block outputs is 1.
     // TODO: make this more general by supporting the case
@@ -146,6 +155,10 @@ static bool constantFoldingValue(Node* node) {
   return false;
 }
 
+// This pass return then or else branch of the If node depending on the
+// value of the constant-folded sublock that is input to the If node
+//
+// Example:
 // before peephole pass
 // graph(%y.2 : Int(3, 4, strides=[4, 1], requires_grad=0, device=cpu)):
 //   %4 : Long(2, strides=[1], device=cpu) = onnx::Shape(%y.2)
@@ -186,11 +199,11 @@ static void foldIfNode(Block* b) {
     }
     if (it->kind() == onnx::If) {
       auto if_node = *it;
-      if (conditionIfFold(if_node)) {
+      if (isStaticCondition(if_node)) {
         Block* then_block = it->blocks()[0];
         Block* else_block = it->blocks()[1];
         Block* block = else_block;
-        if (constantFoldingValue(if_node))
+        if (constantFoldedConditionValue(if_node))
           block = then_block;
 
         std::vector<Node*> nodes_in_valid_path;
@@ -213,16 +226,23 @@ static void foldIfNode(Block* b) {
   }
 }
 
-void FoldIfONNX(Block* b) {
+// This pass is folding If node when the condition (subblock) can be
+// constant-folded. Currently ONNX Runtime is doing Shape and Type Inference on
+// both branches of the If operator, regardless of which branch is executing in
+// Runtime. This can cause runtime errors in some cases:
+// 1. Condition of the If node is based on shape / size of the input
+// 2. then and else branch have different return types
+// Folding If node can prevent Runtime errors in ONNXRuntime.
+void FoldIfNodeONNX(Block* b) {
   foldIfNode(b);
 }
 
-bool FoldValueONNX(Node* n) {
-  return constantFoldingValue(n);
+bool ConditionValueONNX(Node* n) {
+  return constantFoldedConditionValue(n);
 }
 
-bool FoldConditionONNX(Node* n) {
-  return conditionIfFold(n);
+bool IsStaticConditionONNX(Node* n) {
+  return isStaticCondition(n);
 }
 
 } // namespace jit

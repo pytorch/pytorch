@@ -154,7 +154,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_onnx_fold_if",
           [](std::shared_ptr<Graph>& graph) {
-            return FoldIfONNX(graph->block());
+            return FoldIfNodeONNX(graph->block());
           })
       .def(
           "_jit_pass_onnx_peephole",
