@@ -2149,6 +2149,42 @@ class TestLinalg(TestCase):
             run_test_main(A, hermitian)
             run_test_numpy(A, hermitian)
 
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_pinv_errors_and_warnings(self, device, dtype):
+        # pinv requires at least 2D tensor
+        a = torch.randn(1, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "expected a tensor with 2 or more dimensions"):
+            torch.linalg.pinv(a)
+
+        # if non-empty out tensor with wrong shape is passed a warning is given
+        a = torch.randn(3, 3, dtype=dtype, device=device)
+        out = torch.empty(7, 7, dtype=dtype, device=device)
+        with warnings.catch_warnings(record=True) as w:
+            # Trigger warning
+            torch.linalg.pinv(a, out=out)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+        # dtypes of out and input should match
+        out = torch.empty_like(a).to(torch.int)
+        with self.assertRaisesRegex(RuntimeError, "dtype Int does not match the expected dtype"):
+            torch.linalg.pinv(a, out=out)
+
+        # device of out and input should match
+        wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+        out = torch.empty_like(a).to(wrong_device)
+        with self.assertRaisesRegex(RuntimeError, "Expected result and input to be on the same device"):
+            torch.linalg.pinv(a, out=out)
+
+        # device of rcond and input should match
+        wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+        rcond = torch.full((), 1e-2, device=wrong_device)
+        with self.assertRaisesRegex(RuntimeError, "Expected rcond and input to be on the same device"):
+            torch.linalg.pinv(a, rcond=rcond)
+
     # TODO: RuntimeError: svd does not support automatic differentiation for outputs with complex dtype.
     # See https://github.com/pytorch/pytorch/pull/47761
     @unittest.expectedFailure

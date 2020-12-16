@@ -101,6 +101,9 @@ Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
               && input.dim() >= 2,
               "linalg_pinv(", input.scalar_type(), "{", input.sizes(), "}): expected a tensor with 2 or more dimensions "
               "of float, double, cfloat or cdouble types");
+  TORCH_CHECK(rcond.device() == input.device(),
+              "Expected rcond and input to be on the same device, but found rcond on ",
+              rcond.device(), " and input on ", input.device(), " instead.");
   if (input.numel() == 0) {
     // The implementation below uses operations that do not work for zero numel tensors
     // therefore we need this early return for 'input.numel() == 0' case
@@ -143,6 +146,9 @@ Tensor linalg_pinv(const Tensor& input, double rcond, bool hermitian) {
 Tensor& linalg_pinv_out(Tensor& result, const Tensor& input, const Tensor& rcond, bool hermitian) {
   TORCH_CHECK(result.scalar_type() == input.scalar_type(),
     "result dtype ", result.scalar_type(), " does not match the expected dtype ", input.scalar_type());
+  TORCH_CHECK(result.device() == input.device(),
+              "Expected result and input to be on the same device, but found result on ",
+              result.device(), " and input on ", input.device(), " instead.");
 
   Tensor result_tmp = at::linalg_pinv(input, rcond, hermitian);
   at::native::resize_output(result, result_tmp.sizes());
