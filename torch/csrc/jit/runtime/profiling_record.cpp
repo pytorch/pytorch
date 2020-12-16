@@ -12,6 +12,12 @@ namespace jit {
 
 namespace {
 
+struct TypePtrComparer {
+  bool operator()(const TypePtr& lhs, const TypePtr& rhs) const {
+    return *lhs == *rhs;
+  }
+};
+
 class ProfileRegistry {
  public:
   static ProfileRegistry* getRegistry() {
@@ -368,6 +374,49 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
       // to a profiled TensorType
       // we make a copy of profiling information from the very first run
       // and use it for building the symbol sets
+
+      if (getProfilingDataAggregationStrategy() ==
+          PROFILING_DATA_AGGREGATION_STRATEGY::TOP_ONE) {
+        std::unordered_map<
+            Value*,
+            std::unordered_map<
+                TensorTypePtr,
+                size_t,
+                std::hash<c10::TypePtr>,
+                TypePtrComparer>>
+            counts;
+        for (auto profiled_types_iter =
+                 raw_pr->profiled_types_per_frame_.begin();
+             profiled_types_iter != raw_pr->profiled_types_per_frame_.end();
+             ++profiled_types_iter) {
+          for (const auto& val_type_pair : profiled_types_iter->second) {
+            // if (!val_type_pair->second->isSummarized()) {
+            counts[val_type_pair.first][val_type_pair.second] += 1;
+            //}
+          }
+        }
+
+        for (const auto& e : counts) {
+          auto& val_type_counts = e.second;
+          // find max
+          // TODO: we could be more intelligent here and skip top 1
+          // if it's summarized and the next one isn't
+          TypePtr max_type = nullptr;
+          GRAPH_DEBUG("Type counts for %", e.first->debugName());
+          size_t max_count = 0;
+          for (auto& t : val_type_counts) {
+            GRAPH_DEBUG("\t", *t.first, ", count: ", t.second);
+            if (t.second > max_count) {
+              max_count = t.second;
+              max_type = t.first;
+            }
+          }
+          // assign top 1 type
+          e.first->node()->ty_(attr::profiled_type, max_type);
+        }
+        return;
+      }
+
       auto profiled_types_iter = raw_pr->profiled_types_per_frame_.begin();
       auto merged_profiled_types = profiled_types_iter->second;
       ++profiled_types_iter;

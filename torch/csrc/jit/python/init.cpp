@@ -528,6 +528,13 @@ void initJITBindings(PyObject* module) {
             return old_num;
           })
       .def(
+          "_jit_set_profiling_data_aggregation_strategy",
+          [](int st) {
+            auto old_st = getProfilingDataAggregationStrategy().exchange(
+                static_cast<PROFILING_DATA_AGGREGATION_STRATEGY>(st));
+            return static_cast<int>(old_st);
+          })
+      .def(
           "_jit_get_num_profiled_runs",
           [] {
             // pybind can't automatically bind to atomic size_t

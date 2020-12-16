@@ -65,6 +65,9 @@ static std::atomic<bool> profiling_mode{true};
 
 static std::atomic<size_t> num_profiled_runs{kDefaultNumProfiledRuns};
 static std::atomic<size_t> bailout_depth{kDefaultBailoutDepth};
+static std::atomic<PROFILING_DATA_AGGREGATION_STRATEGY>
+    profiling_data_aggregation_strategy{
+        PROFILING_DATA_AGGREGATION_STRATEGY::SYMBOLIC_MERGE};
 
 std::atomic<bool>& getProfilingMode() {
   return profiling_mode;
@@ -81,6 +84,11 @@ std::atomic<size_t>& getNumProfiledRuns() {
   }();
   (void)init; // Silence clang-tidy.
   return num_profiled_runs;
+}
+
+std::atomic<PROFILING_DATA_AGGREGATION_STRATEGY>&
+getProfilingDataAggregationStrategy() {
+  return profiling_data_aggregation_strategy;
 }
 
 std::atomic<size_t>& getBailoutDepth() {

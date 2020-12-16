@@ -1,5 +1,6 @@
 import os
 import sys
+from torch.testing._internal.common_utils import num_profiled_runs
 
 import torch
 
@@ -138,6 +139,30 @@ class TestProfiler(JitTestCase):
         g = torch.jit.last_executed_optimized_graph()
         self.assertEqual(len(list(g.findAllNodes("prim::TypeCheck"))), 2)
         FileCheck().check("TensorExpr").check("aten::add_").check("TensorExpr").run(g)
+
+    def test_top_one(self):
+        torch._C._jit_set_profiling_data_aggregation_strategy(1)
+        with num_profiled_runs(3):
+            @torch.jit.script
+            def foo(t1, t2):
+                return t1 + t2
+
+                return h
+
+            inputs_once = [torch.rand(3), torch.rand(3)]
+            inputs_twice = [torch.rand(8), torch.rand(8)]
+            
+            # 8 is top 1
+            foo(*inputs_twice)
+            foo(*inputs_twice)
+            foo(*inputs_once)
+            # trigger a fallback
+            foo(*inputs_once)
+            foo(*inputs_once)
+            foo(*inputs_twice)
+            # 3 is top 1 now 
+            foo(*inputs_once)
+        torch._C._jit_set_profiling_data_aggregation_strategy(0)
 
     def test_use_not_profiled(self):
         def foo(t1, t2, t3, t4, t: float):
