@@ -2532,6 +2532,7 @@ class TestDynamicQuantizedRNNOp(TestCase):
                 if torch.backends.quantized.engine == 'qnnpack' and dtype == torch.float16:
                     continue
 
+                print(rnn_type, dtype, num_directions, torch.backends.quantized.engine)
                 Xq, Hq, Cq = self._get_rnn_inputs(seq_len, num_batches, input_size, hidden_size, num_directions)
                 Wq1, Wq2, b1, b2 = self._get_rnn_weights_and_bias(input_size,
                                                                   hidden_size,
