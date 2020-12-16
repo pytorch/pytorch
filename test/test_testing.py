@@ -3,7 +3,7 @@ import torch
 import math
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, make_tensor)
+    (TestCase, make_tensor, run_tests, slowTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyOnCPUAndCUDA, dtypes)
 
@@ -437,6 +437,21 @@ class TestTesting(TestCase):
         self.assertEqual("\nno_debug_msg", self._get_assert_msg("no_debug_msg"))
         self.assertEqual("no_user_msg", self._get_assert_msg(msg=None, debug_msg="no_user_msg"))
         self.assertEqual("debug_msg\nuser_msg", self._get_assert_msg(msg="user_msg", debug_msg="debug_msg"))
+
+    @onlyCUDA
+    @slowTest
+    def test_cuda_assert_should_stop_test_suite(self, device):
+        # This test is slow because it spawn another process to run another test suite.
+        import subprocess
+        curdir = os.path.dirname(os.path.abspath(__file__))
+        test_path = os.path.join(curdir, 'scripts', 'test_with_deterministic_cuda_assert_failures.py')
+
+        # Test running of cuda assert test suite should early terminate.
+        p = subprocess.run([sys.executable, test_path], capture_output=True, timeout=120)
+        # should capture CUDA error
+        self.assertIn('CUDA error: device-side assert triggered', p.stderr.decode('ascii'))
+        # should run only 3 tests - 2 CPUs and 1 CUDA (remaining CUDA test should skip)
+        self.assertIn('Ran 3 tests', p.stderr.decode('ascii'))
 
 instantiate_device_type_tests(TestTesting, globals())
 
