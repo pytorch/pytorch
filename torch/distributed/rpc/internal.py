@@ -201,7 +201,7 @@ def _run_function(python_udf):
 
 def _handle_exception(result):
     if isinstance(result, RemoteException):
-        raise result.exception_type(result.msg)
+        raise result.exception_type(result.msg.encode("utf-8").decode("unicode_escape"))
 
 
 def _build_rpc_profiling_key(
