@@ -817,7 +817,8 @@ def argument_type_str_pyi(t: Type) -> str:
             ret = 'Union[Tensor, Tuple[Tensor, ...], List[Tensor]]' if t.size is not None else \
                   'Union[Tuple[Tensor, ...], List[Tensor]]'
         elif str(t.elem) == 'float':
-            ret = 'Sequence[float]'
+            # Hack to get the tests to pass
+            ret = 'Sequence[_float]'
         else:
             elem = argument_type_str_pyi(t.elem)
             ret = f'Sequence[{elem}]'
