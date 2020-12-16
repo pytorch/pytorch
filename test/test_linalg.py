@@ -4704,9 +4704,6 @@ else:
                     elif mat_chars[mat_type] == 'non_singular':
                         list_of_matrices.append(random_square_matrix_of_rank(matsize, matsize, dtype=dtype, device=device))
                 full_tensor = torch.stack(list_of_matrices, dim=0).reshape(batchdims + (matsize, matsize))
-                # Scaling adapted from `get_random_mat_scale` in _test_det_logdet_slogdet
-                if matsize != 0:
-                    full_tensor *= (math.factorial(matsize - 1) ** (-1.0 / (2 * matsize)))
             else:
                 full_tensor = torch.randn(*batchdims, matsize, matsize, dtype=dtype, device=device)
 
