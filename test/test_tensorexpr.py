@@ -1635,19 +1635,19 @@ class TestTensorExprFuser(BaseTestClass):
             # A bug reported internally similar to the one reported in #48533
             def foo(a, b, c):
                 t_next = c + 1
-                t5 = torch.log(t_next * b)
-                return (t5, torch.relu(t5), torch.log1p(t5))
+                t5 = t_next * b
+                t6 = torch.unsqueeze(t_next, 1)
+                t7 = a * t6
+                return (t7, t5, t_next)
 
             a = torch.rand(20, 20, dtype=torch.float32, device=device)
-            b = torch.rand(20, 20, dtype=torch.float32, device=device)
+            b = torch.rand(20 * 29, dtype=torch.float32, device=device).as_strided([20], [29])
             c = torch.ones(20, dtype=torch.int64, device=device)
             traced = torch.jit.trace(foo, (a, b, c))
             ref = foo(a, b, c)
             exp = traced(a, b, c)
             exp = traced(a, b, c)
-            for i in range(3):
-                assert(torch.allclose(ref[i], exp[i]))
-
+            self.assertEqual(ref, exp)
 
 if __name__ == '__main__':
     unittest.main()
