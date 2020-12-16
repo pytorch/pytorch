@@ -102,7 +102,8 @@ Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
               "linalg_pinv(", input.scalar_type(), "{", input.sizes(), "}): expected a tensor with 2 or more dimensions "
               "of float, double, cfloat or cdouble types");
   if (input.numel() == 0) {
-    // Match NumPy
+    // The implementation below uses operations that do not work for zero numel tensors
+    // therefore we need this early return for 'input.numel() == 0' case
     auto input_sizes = input.sizes().vec();
     std::swap(input_sizes[input.dim() - 1], input_sizes[input.dim() - 2]);
     return at::empty(input_sizes, input.options());
