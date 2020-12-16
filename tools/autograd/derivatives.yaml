@@ -992,7 +992,7 @@
   self: split_with_sizes_backward(grads, split_sizes, dim, self.sizes(), self.options())
 
 - name: sqrt(Tensor self) -> Tensor
-  self: grad / (2 * result)
+  self: grad / (2 * result.conj())
 
 - name: squeeze(Tensor(a) self) -> Tensor(a)
   self: unsqueeze_to(grad, self.sizes())

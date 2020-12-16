@@ -800,14 +800,10 @@ op_db: List[OpInfo] = [
                                 active_if=IS_MACOS),
                        # Reference: https://github.com/pytorch/pytorch/pull/47293#issuecomment-721774436
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                dtypes=[torch.bfloat16]),
-                       SkipInfo('TestCommon', 'test_variant_consistency_eager',
-                                dtypes=[torch.cfloat, torch.cdouble]),
-                       SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                                dtypes=[torch.cfloat, torch.cdouble])),
+                                dtypes=[torch.bfloat16])),
                    promotes_integers_to_float=True,
                    handles_complex_extremals=False,
-                   test_complex_grad=False),
+                   test_complex_grad=True),
 ]
 
 if TEST_SCIPY:
