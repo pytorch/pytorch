@@ -310,7 +310,9 @@ public:
     // smuggle in a kernel that is typed incorrectly).  For everything
     // in core library this won't happen, because all the static registrations
     // will be done by the time a typed() handle is acquired.
+#if !defined C10_MOBILE
     operatorIterator_->op.assertSignatureIsCorrect<FuncType>();
+#endif
     return TypedOperatorHandle<FuncType>(operatorIterator_);
   }
 
