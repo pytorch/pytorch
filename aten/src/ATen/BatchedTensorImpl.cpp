@@ -139,4 +139,19 @@ Tensor addBatchDim(const Tensor& tensor, int64_t level, int64_t dim) {
   return makeBatched(batched->value(), std::move(new_bdims));
 }
 
+bool inplaceIsVmapCompatible(const Tensor& self, const Tensor& other) {
+  const auto* other_batched = maybeGetBatchedImpl(other);
+  if (!other_batched) {
+    return true;
+  }
+  const auto* self_batched = maybeGetBatchedImpl(self);
+  if (!self_batched) {
+    // self is not batched but other is batched
+    return false;
+  }
+  auto self_levels = createVmapLevelsBitset(self_batched->bdims());
+  auto other_levels = createVmapLevelsBitset(other_batched->bdims());
+  return self_levels == (self_levels | other_levels);
+}
+
 } // namespace at
