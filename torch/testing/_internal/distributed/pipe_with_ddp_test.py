@@ -21,9 +21,6 @@ class PipeWithDDPTest(RpcAgentTestFixture):
     def world_size(self) -> int:
         return 2
 
-    def cuda_visible_devices(self) -> str:
-        return "{},{}".format(2 * self.rank, 2 * self.rank + 1)
-
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
     @dist_init
@@ -80,23 +77,15 @@ class PipeWithDDPTest(RpcAgentTestFixture):
 
         # Use 4 GPUs, two replicas of a pipe across GPU 0 and 1 and another
         # pipe between GPU 2 and 3. Both replicas are replicated via DDP.
-        # We use CUDA_VISIBLE_DEVICES to ensure each process only can see two devices.
-        # HACK: Since barrier() creates a tensor on the GPU index matching the rank,
-        # the barrier() call ends up happening between GPU0 on the first process and
-        # GPU3 (which represents GPU index 1 for rank 1 when CUDA_VISIBLE_DEVICES is
-        # set to 2,3 for process 2) on the second process. As a result, the
-        # communicator is established between GPU0 and GPU3 and hence we invert the
-        # pipe on the second process to ensure all the communicators match. This is
-        # an ugly hack that needs to be resolved in ProcessGroupNCCL properly.
-        fc1 = nn.Linear(16, 8).cuda(self.rank)
-        fc2 = nn.Linear(8, 4).cuda((self.rank + 1) % self.world_size)
+        fc1 = nn.Linear(16, 8).cuda(2 * self.rank)
+        fc2 = nn.Linear(8, 4).cuda(2 * self.rank + 1)
         model = nn.Sequential(
             fc1,
             fc2
         )
         model = Pipe(model, chunks=2, checkpoint=checkpoint)
         model = DistributedDataParallel(model)
-        out = model(torch.rand(16, 16).cuda(self.rank)).local_value()
+        out = model(torch.rand(16, 16).cuda(2 * self.rank)).local_value()
         out.sum().backward()
 
         # Check grads
