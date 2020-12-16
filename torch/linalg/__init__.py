@@ -511,6 +511,7 @@ Args:
     input (Tensor): the input matrix of size :math:`(m, n)` or the batch of matrices of size :math:`(*, m, n)`
                     where `*` is one or more batch dimensions.
     rcond (float, Tensor, optional): the tolerance value to determine the cutoff for small singular values. Default: 1e-15
+                                     :attr:`rcond` must be broadcastable to singular values of :attr:`input`.
     hermitian(bool, optional): indicates whether :attr:`input` is Hermitian. Default: ``False``
 
 Examples::
@@ -562,6 +563,13 @@ Examples::
     tensor([[-0.2672, -0.2351, -0.0539],
             [-0.0211,  0.6467, -0.0698],
             [-0.4400, -0.3638, -0.0910]])
+
+    Matrix-wise rcond example
+    >>> a = torch.randn(5, 6, 2, 3, 3)
+    >>> rcond = torch.rand(2)  # different rcond values for each matrix in a[:, :, 0] and a[:, :, 1]
+    >>> torch.linalg.pinv(a, rcond)
+    >>> rcond = torch.randn(5, 6, 2) # different rcond value for each matrix in 'a'
+    >>> torch.linalg.pinv(a, rcond)
 """)
 
 tensorinv = _add_docstr(_linalg.linalg_tensorinv, r"""
