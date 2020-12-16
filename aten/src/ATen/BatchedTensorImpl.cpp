@@ -76,13 +76,6 @@ void BatchedTensorImpl::checkInvariants() const {
 }
 
 // The following are publically exposed as methods of Tensor
-IntArrayRef BatchedTensorImpl::strides() const {
-  TORCH_CHECK(false, "NYI: Getting tensor strides inside of vmap");
-}
-int64_t BatchedTensorImpl::stride(int64_t d) const {
-  TORCH_CHECK(false, "NYI: Getting tensor strides inside of vmap");
-}
-
 bool BatchedTensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
   TORCH_CHECK(memory_format == MemoryFormat::Contiguous,
       "NYI: querying is_contiguous inside of vmap for memory_format ",
