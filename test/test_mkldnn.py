@@ -19,6 +19,14 @@ from torch.testing._internal.common_utils import TestCase, run_tests, TemporaryF
 
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 
+def has_avx512():
+    import subprocess
+    try:
+        subprocess.check_output(["grep", "avx512", "/proc/cpuinfo"])
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
 types = [torch.float, torch.bfloat16]
 
 # Comment the line below to find out the CI machines having MKL-DNN build disabled
@@ -213,6 +221,7 @@ class TestMkldnn(TestCase):
                 self._test_serialization(mkldnn_conv2d, (x.to_mkldnn(),))
                 self._test_tracing(mkldnn_conv2d, (x.to_mkldnn(),))
 
+    @unittest.skipIf(not has_avx512(), "OneDNN bfloat16 path requires AVX512")
     def test_conv2d_bf16(self):
         options = itertools.product([1, 4], [True, False], [1, 2])
         # compare mkldnn bf16 with fp32 path.
@@ -634,6 +643,7 @@ class TestMkldnn(TestCase):
             self._test_serialization(mkldnn_linear, (x.to_mkldnn(),))
             self._test_tracing(mkldnn_linear, (x.to_mkldnn(),))
 
+    @unittest.skipIf(not has_avx512(), "OneDNN bfloat16 path requires AVX512")
     def test_linear_bf16(self):
         in_features = torch.randint(3, 10, (1,)).item()
         out_features = torch.randint(3, 100, (1,)).item()
@@ -742,39 +752,15 @@ class TestMkldnn(TestCase):
                 mkldnn_model(x.to_mkldnn()).to_dense(),
             )
 
-    def _test_imagenet_model_bf16(self, model):
-        model = model.train(False).float()
-        mkldnn_model = mkldnn_utils.to_mkldnn(copy.deepcopy(model))
-        mkldnn_model_bf16 = mkldnn_utils.to_mkldnn(copy.deepcopy(model), torch.bfloat16)
-        x = torch.randn(1, 3, 224, 224, dtype=torch.float32)
-        x_bf16 = x.bfloat16()
-        with torch.no_grad():
-            self.assertEqual(
-                mkldnn_model(x.to_mkldnn()).to_dense(),
-                mkldnn_model_bf16(x_bf16.to_mkldnn()).to_dense(torch.float32),
-                atol=1e-1,
-                rtol=1e-5,
-            )
-
     @skipIfNoTorchVision
     def test_resnet18(self):
         model = torchvision.models.resnet.resnet18(pretrained=False)
         self._test_imagenet_model(model)
 
     @skipIfNoTorchVision
-    def test_resnet18_bf16(self):
-        model = torchvision.models.resnet.resnet18(pretrained=False)
-        self._test_imagenet_model_bf16(model)
-
-    @skipIfNoTorchVision
     def test_resnext50_32x4d(self):
         model = torchvision.models.resnet.resnext50_32x4d(pretrained=False)
         self._test_imagenet_model(model)
-
-    @skipIfNoTorchVision
-    def test_resnext50_32x4d_bf16(self):
-        model = torchvision.models.resnet.resnext50_32x4d(pretrained=False)
-        self._test_imagenet_model_bf16(model)
 
 
 if __name__ == '__main__':
