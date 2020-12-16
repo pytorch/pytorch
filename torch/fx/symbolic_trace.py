@@ -1,6 +1,6 @@
 import inspect
 from types import CodeType, FunctionType
-from typing import Any, Dict, Optional, List, Callable, Union
+from typing import Any, Dict, Optional, Tuple, List, Callable, Union
 import torch
 from torch._C import ScriptObject  # type: ignore
 
@@ -51,21 +51,31 @@ class Tracer(TracerBase):
     def __init__(self):
         super().__init__()
 
-    def create_arg(self, a: Any) -> Argument:
+    def create_arg(self, a: Any) -> 'Argument':
         """
         A method to specify the behavior of tracing when preparing values to
         be used as arguments to nodes in the ``Graph``.
 
         By default, the behavior includes:
-        - Iterate through collection types (e.g. tuple, list, dict) and recursively
-          call ``create_args`` on the elements.
-        - Given a Proxy object, return a reference to the underlying IR ``Node``
-        - Given a non-Proxy Tensor object, emit IR for various cases:
-            - For a Parameter, emit a ``get_attr`` node referring to that Parameter
-            - For a non-Parameter Tensor, store the Tensor away in a special
-              attribute referring to that attribute.
 
+        #. Iterate through collection types (e.g. tuple, list, dict) and recursively
+           call ``create_args`` on the elements.
+        #. Given a Proxy object, return a reference to the underlying IR ``Node``
+        #. Given a non-Proxy Tensor object, emit IR for various cases:
+
+            * For a Parameter, emit a ``get_attr`` node referring to that Parameter
+            * For a non-Parameter Tensor, store the Tensor away in a special
+              attribute referring to that attribute.
         This method can be overridden to support more types.
+
+        Args:
+
+            a (Any): The value to be emitted as an ``Argument`` in the ``Graph``.
+
+
+        Returns:
+
+            The value ``a`` converted into the appropriate ``Argument``
         """
         # The base tracer is used to construct Graphs when there is no associated
         # module hierarchy, so it can never create parameter references.
@@ -115,28 +125,32 @@ class Tracer(TracerBase):
         their constituent ops are recorded, unless specified otherwise
         via this parameter.
 
-        Args
-        m - The module itself
-        module_qualified_name - The path to root of this module. For example,
-            if you have a module hierarchy where submodule ``foo`` contains
-            submodule ``bar``, which contains submodule ``baz``, that module will
-            appear with the qualified name ``foo.bar.baz`` here.
+        Args:
+            m (Module): The module being queried about
+            module_qualified_name (str): The path to root of this module. For example,
+                if you have a module hierarchy where submodule ``foo`` contains
+                submodule ``bar``, which contains submodule ``baz``, that module will
+                appear with the qualified name ``foo.bar.baz`` here.
         """
         return m.__module__.startswith('torch.nn') and not isinstance(m, torch.nn.Sequential)
 
-    def path_of_module(self, mod) -> str:
+    def path_of_module(self, mod : torch.nn.Module) -> str:
         """
         Helper method to find the qualified name of ``mod`` in the Module hierarchy
         of ``root``. For example, if ``root`` has a submodule named ``foo``, which has
         a submodule named ``bar``, passing ``bar`` into this function will return
         the string "foo.bar".
+
+        Args:
+
+            mod (str): The ``Module`` to retrieve the qualified name for.
         """
         for n, p in self.root.named_modules():
             if mod is p:
                 return n
         raise NameError('module is not installed as a submodule')
 
-    def call_module(self, m: torch.nn.Module, forward: Callable[..., Any], args, kwargs):
+    def call_module(self, m: torch.nn.Module, forward: Callable[..., Any], args : Tuple[Any, ...], kwargs : Dict[str, Any]) -> Any:
         """
         Method that specifies the behavior of this ``Tracer`` when it encounters
         a call to an ``nn.Module`` instance.
@@ -149,6 +163,20 @@ class Tracer(TracerBase):
         This method can be overridden to--for example--create nested traced
         GraphModules, or any other behavior you would want while tracing across
         ``Module`` boundaries.
+         ``Module`` boundaries.
+
+        Args:
+
+            m (Module): The module for which a call is being emitted
+            forward (Callable): The forward() method of the ``Module`` to be invoked
+            args (Tuple): args of the module callsite
+            kwargs (Dict): kwargs of the module callsite
+
+        Return:
+
+            The return value from the Module call. In the case that a ``call_module``
+            node was emitted, this is a ``Proxy`` value. Otherwise, it is whatever
+            value was returned from the ``Module`` invocation.
         """
         module_qualified_name = self.path_of_module(m)
         if not self.is_leaf_module(m, module_qualified_name):
@@ -205,6 +233,16 @@ class Tracer(TracerBase):
         """
         Trace ``root`` and return the corresponding FX ``Graph`` representation. ``root``
         can either be an ``nn.Module`` instance or a Python callable.
+
+
+        Args:
+
+            root (Union[Module, Callable]): Either a ``Module`` or a function to be
+                traced through.
+
+        Returns:
+
+            A ``Graph`` representing the semantics of the passed-in ``root``.
         """
         if isinstance(root, torch.nn.Module):
             self.root = root

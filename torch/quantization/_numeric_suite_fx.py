@@ -7,6 +7,7 @@ import torch.nn.quantized.dynamic as nnqd
 from torch.fx import GraphModule  # type: ignore
 from torch.fx import map_arg  # type: ignore
 from torch.fx.graph import Graph
+from torch.quantization._numeric_suite import get_logger_dict, Shadow, ShadowLogger
 from torch.quantization.fx.quantize import _remove_qconfig, is_activation_post_process
 
 
@@ -86,7 +87,7 @@ def compare_weights_fx(float_dict, quantized_dict):
         quantized_model = convert_fx(prepared_model)
 
         qmodel = quantized_model
-        wt_compare_dict = compare_weights(backup_prepared_model.state_dict(), qmodel.state_dict())
+        wt_compare_dict = compare_weights_fx(backup_prepared_model.state_dict(), qmodel.state_dict())
         for key in wt_compare_dict:
             print(key, compute_error(wt_compare_dict[key]['float'], wt_compare_dict[key]['quantized'].dequantize()))
 
@@ -137,122 +138,6 @@ def compare_weights_fx(float_dict, quantized_dict):
                 )
 
     return weight_dict
-
-def _get_logger_dict_helper(mod, target_dict, prefix=""):
-    r"""This is the helper function for get_logger_dict
-
-    Args:
-        mod: module we want to save all logger stats
-        prefix: prefix for the current module
-        target_dict: the dictionary used to save all logger stats
-    """
-
-    def get_prefix(prefix):
-        return prefix if prefix == "" else prefix + "."
-
-    for name, child in mod.named_children():
-        if isinstance(child, Logger):
-            target_dict[get_prefix(prefix) + "stats"] = child.stats
-            break
-
-    for name, child in mod.named_children():
-        module_prefix = get_prefix(prefix) + name if prefix else name
-        _get_logger_dict_helper(child, target_dict, module_prefix)
-
-
-def get_logger_dict(mod, prefix=""):
-    r"""Traverse the modules and save all logger stats into target dict.
-    This is mainly used for quantization accuracy debug.
-
-    Type of loggers supported:
-        ShadowLogger: used to log the outputs of the quantized module and its
-            matching float shadow module,
-        OutputLogger: used to log the outputs of the modules
-
-    Args:
-        mod: module we want to save all logger stats
-        prefix: prefix for the current module
-
-    Return:
-        target_dict: the dictionary used to save all logger stats
-    """
-    torch._C._log_api_usage_once("quantization_api._numeric_suite.get_logger_dict")
-
-    target_dict: Dict[str, Dict] = {}
-    _get_logger_dict_helper(mod, target_dict, prefix)
-    return target_dict
-
-
-class Logger(nn.Module):
-    r"""Base class for stats logging"""
-
-    def __init__(self):
-        super(Logger, self).__init__()
-        self.stats = {}
-
-    def forward(self, x):
-        pass
-
-
-class ShadowLogger(Logger):
-    r"""Class used in Shadow module to record the outputs of the original and
-    shadow modules.
-    """
-
-    def __init__(self):
-        super(ShadowLogger, self).__init__()
-        self.stats["float"] = []
-        self.stats["quantized"] = []
-
-    def forward(self, x, y):
-        if len(x) > 1:
-            x = x[0]
-        if len(y) > 1:
-            y = y[0]
-        self.stats["quantized"].append(x.detach())
-        self.stats["float"].append(y.detach())
-
-
-def _convert_tuple_to_list(t):
-    return list(_convert_tuple_to_list(x) for x in t) if type(t) is tuple else t
-
-
-def _dequantize_tensor_list(t):
-    return (
-        list(_dequantize_tensor_list(x) for x in t)
-        if type(t) is list
-        else t.dequantize()
-        if t.is_quantized
-        else t
-    )
-
-
-class Shadow(nn.Module):
-    r"""Shadow module attaches the float module to its matching quantized module
-    as the shadow. Then it uses Logger module to process the outputs of both
-    modules.
-
-    Args:
-        q_module: module quantized from float_module that we want to shadow
-        float_module: float module used to shadow q_module
-        Logger: type of logger used to process the outputs of q_module and
-            float_module. ShadowLogger or custom loggers can be used.
-    """
-
-    def __init__(self, q_module, float_module, Logger):
-        super(Shadow, self).__init__()
-        self.orig_module = q_module
-        self.shadow_module = float_module
-        self.dequant = nnq.DeQuantize()
-        self.logger = Logger()
-
-    def forward(self, *x):
-        xl = _convert_tuple_to_list(x)
-        output = self.orig_module(*xl)
-        xl_float = _dequantize_tensor_list(xl)
-        shadow_output = self.shadow_module(*xl_float)
-        self.logger(output, shadow_output)
-        return output
 
 
 def prepare_model_with_stubs_fx(float_module, q_module, module_swap_list, Logger):
