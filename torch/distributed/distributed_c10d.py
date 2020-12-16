@@ -2,6 +2,7 @@ import pickle
 import torch
 import warnings
 import contextlib
+import time
 from torch._six import string_classes
 from datetime import timedelta
 from typing import Dict, Optional, Tuple, Union
@@ -174,13 +175,20 @@ _group_count = 0
 
 STORE_BASED_BARRIER_PREFIX = "store_based_barrier_key"
 
-def _store_based_barrier(rank, store):
+def _store_based_barrier(rank, store, timeout):
     global _group_count
     store_key = "{}:{}".format(STORE_BASED_BARRIER_PREFIX, _group_count)
-    if rank == 0:
-        store.set(store_key, "1")
-    else:
-        store.wait([store_key])
+    store.add(store_key, 1)
+
+    # Now wait for all workers to check in with the store.
+    world_size = get_world_size()
+    worker_count = int(store.get(store_key))
+    start = time.time()
+    while worker_count != world_size:
+        time.sleep(0.01)
+        worker_count = int(store.get(store_key))
+        if timedelta(seconds=(time.time() - start)) > timeout:
+            raise RuntimeError("Timed out initializing process group")
 
 def _rank_not_in_group(group: ProcessGroup):
     """
@@ -489,7 +497,7 @@ def init_process_group(backend,
     else:
         # Use store based barrier here since barrier() used a bunch of
         # default devices and messes up NCCL internal state.
-        _store_based_barrier(rank, store)
+        _store_based_barrier(rank, store, timeout)
 
 def _new_process_group_helper(world_size,
                               rank,
@@ -2464,6 +2472,6 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
     else:
         # Use store based barrier here since barrier() used a bunch of
         # default devices and messes up NCCL internal state.
-        _store_based_barrier(group_rank, default_store)
+        _store_based_barrier(group_rank, default_store, timeout)
 
     return pg
