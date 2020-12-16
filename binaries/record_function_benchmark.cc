@@ -19,10 +19,10 @@ const float kLowSamplingProb = 0.0001;
 
 void addTestCallback(
     double sampling_prob = 1.0,
-    std::function<std::unique_ptr<at::ObserverContext>(const at::RecordFunction&)> fn =
-        [](const at::RecordFunction&) { return nullptr; }) {
+    at::RecordFunctionCallback::StartCallback fn =
+        [](const at::RecordFunction&) -> std::unique_ptr<at::ObserverContext> { return nullptr; }) {
   auto cb = at::RecordFunctionCallback(
-      std::move(fn),
+      fn,
       [](const at::RecordFunction&, at::ObserverContext*) {})
     .needsInputs(false);
   if (sampling_prob < 1.0) {
@@ -106,10 +106,10 @@ int main(int argc, char** argv) {
   at::clearCallbacks();
 
   std::cout << "Checking number of sampled observer invocations" << std::endl;
-  int cb_count = 0;
+  static int cb_count = 0;
   addTestCallback(
       kLowSamplingProb,
-      [&](const at::RecordFunction& fn) {
+      [](const at::RecordFunction&) -> std::unique_ptr<at::ObserverContext> {
         ++cb_count;
         return nullptr;
       }
