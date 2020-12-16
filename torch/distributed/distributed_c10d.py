@@ -726,8 +726,11 @@ def irecv(tensor,
     if src is None:
         return pg.recv_anysource([tensor], tag)
     else:
-        group_src_rank = _get_group_rank(pg, src)
-        return pg.recv([tensor], group_src_rank, tag)
+        if pg is GroupMember.WORLD:
+            pg.recv([tensor], src, tag).wait()
+        else:
+            group_src_rank = _get_group_rank(pg, src)
+            return pg.recv([tensor], group_src_rank, tag)
 
 
 def send(tensor,
