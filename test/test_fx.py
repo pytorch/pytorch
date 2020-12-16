@@ -1154,6 +1154,12 @@ class TestFX(JitTestCase):
         m = FooBar1234()
         self.checkGraphModule(m, ())
 
+    def test_namedtuple_return_trace(self):
+        class NamedTupReturn(torch.nn.Module):
+            def forward(self, x):
+                return Pair(x, x)
+
+        traced = symbolic_trace(NamedTupReturn())
 
 if __name__ == '__main__':
     run_tests()
