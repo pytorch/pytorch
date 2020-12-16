@@ -863,15 +863,34 @@ auto Engine::execute(const edge_list& roots,
       /* depth */ not_reentrant_backward_call ? 0 : total_depth + 1,
       /* cpu_ready_queue */ local_ready_queue);
 
+  // If we receive a single root, skip creating extra root node
+  bool skip_dummy_node = roots.size() == 1;
+  auto graph_root = skip_dummy_node ?
+    roots.at(0).function :
+    std::make_shared<GraphRoot>(roots, inputs);
+
   // Now compute the dependencies for all executable functions and queue the root
-  auto graph_root = std::make_shared<GraphRoot>(roots, inputs);
   compute_dependencies(graph_root.get(), *graph_task);
 
   if (!outputs.empty()) {
     graph_task->init_to_execute(*graph_root, outputs, accumulate_grad);
   }
 
-  execute_with_graph_task(graph_task, graph_root);
+  if (skip_dummy_node) {
+    InputBuffer input_buffer(roots.at(0).function->num_inputs());
+    auto input = inputs.at(0);
+
+    const auto input_stream = InputMetadata(input).stream();
+    const auto opt_next_stream = roots.at(0).function->stream(c10::DeviceType::CUDA);
+    input_buffer.add(roots.at(0).input_nr,
+                      std::move(input),
+                      input_stream,
+                      opt_next_stream);
+
+    execute_with_graph_task(graph_task, graph_root, std::move(input_buffer));
+  } else {
+    execute_with_graph_task(graph_task, graph_root, InputBuffer(variable_list()));
+  }
   // Avoid a refcount bump for the Future, since we check for refcount in
   // DistEngine (see TORCH_INTERNAL_ASSERT(futureGrads.use_count() == 1)
   // in dist_engine.cpp).
@@ -890,13 +909,14 @@ void Engine::initialize_device_threads_pool() {
 
 std::shared_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
-    std::shared_ptr<Node> graph_root) {
+    std::shared_ptr<Node> graph_root,
+    InputBuffer&& input_buffer) {
   initialize_device_threads_pool();
   // Lock mutex for GraphTask.
   std::unique_lock<std::mutex> lock(graph_task->mutex_);
 
-  ready_queue(graph_task->cpu_ready_queue_, at::kCPU)->push(
-      NodeTask(graph_task, std::move(graph_root), InputBuffer(0)));
+  auto queue = ready_queue(graph_task->cpu_ready_queue_, input_buffer.device());
+  queue->push(NodeTask(graph_task, std::move(graph_root), std::move(input_buffer)));
 
   // worker_device == NO_DEVICE it's a CPU thread and it's trying to drive the
   // autograd engine with corresponding GraphTask, and its NOT a re-entrant call
@@ -1082,7 +1102,6 @@ void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
 
 void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs, bool accumulate_grad) {
   exec_info_[&graph_root].needed_ = true;
-
   int output_idx = 0;
   for (auto & output_edge : outputs) {
     Node *output = output_edge.function.get();
@@ -1123,6 +1142,7 @@ void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs, bool
   std::vector<Frame> stack;
   std::unordered_set<Node*> seen;
   for (const auto & input : graph_root.next_edges()) {
+    if (!input.function.get()) continue;
     if (seen.count(input.function.get()) > 0) continue;
     stack.emplace_back(input.function.get());
     while (!stack.empty()) {

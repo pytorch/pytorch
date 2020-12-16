@@ -6,12 +6,13 @@ import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
+from torch.nn.intrinsic import _FusedModule
 import torch.distributed as dist
 
 from torch.testing._internal.common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
-    propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit, float_qparams_dynamic_qconfig, \
+    propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit, float_qparams_weight_only_qconfig, \
     get_default_qat_qconfig, PerChannelMinMaxObserver, default_dynamic_quant_observer, QConfigDynamic, QuantType
 from torch.quantization.quantization_mappings import (
     get_default_dynamic_quant_module_mappings,
@@ -365,7 +366,8 @@ class QuantizationTestCase(TestCase):
         # we don't need to check observers for child modules of the
         # qat modules
         if type(module) not in get_default_qat_module_mappings().values() and \
-           type(module) not in float_to_observed_module_class_mapping.values():
+           type(module) not in float_to_observed_module_class_mapping.values() and \
+           not isinstance(module, _FusedModule):
             for child in module.children():
                 self.checkObservers(child, propagate_qconfig_list, prepare_custom_config_dict)
 
@@ -671,6 +673,7 @@ class QuantizationTestCase(TestCase):
                 print()
             self.checkGraphModuleNodes(
                 qgraph_to_check, expected_node, expected_node_occurrence, expected_node_list)
+            return result
 
 
     def checkEmbeddingSerialization(self, qemb, num_embeddings, embedding_dim, indices, offsets,
@@ -739,8 +742,8 @@ class QuantizationTestCase(TestCase):
         self.assertTrue(expected_name in str(q_embeddingbag))
 
 
-# Below are a series of neural net models to use in testing quantization
-# Single layer models
+# Below are a series of toy models to use in testing quantization
+
 class SingleLayerLinearModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1347,7 +1350,7 @@ class ResNetBase(torch.nn.Module):
         self.downsample = torch.nn.Identity()
         self.myop = nn.quantized.FloatFunctional()
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-
+        self.fc = torch.nn.Linear(inplanes, 1)
 
     def forward(self, x):
         out = self.conv1(x)
@@ -1357,7 +1360,12 @@ class ResNetBase(torch.nn.Module):
         out = self.myop.add(out, identity)
         out = self.relu2(out)
         out = self.avgpool(out)
+        out = torch.flatten(out, 1)
+        out = self.fc(out)
         return out
+
+    def fuse_model(self):
+        torch.quantization.fuse_modules(self, [['conv1', 'bn1', 'relu1']], inplace=True)
 
 class ModelMultipleOps(torch.nn.Module):
     def __init__(self):
@@ -1446,7 +1454,7 @@ class EmbeddingWithLinear(torch.nn.Module):
         super().__init__()
         self.emb = torch.nn.Embedding(num_embeddings=10, embedding_dim=12)
         self.fc = torch.nn.Linear(5, 5)
-        self.emb.qconfig = float_qparams_dynamic_qconfig
+        self.emb.qconfig = float_qparams_weight_only_qconfig
         self.qconfig = default_qconfig
 
     def forward(self, indices, linear_in):

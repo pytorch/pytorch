@@ -6,7 +6,7 @@
 #include <sys/stat.h>
 
 #ifdef _WIN32
-#include <windows.h>
+#include <c10/util/win32-headers.h>
 #include <fileapi.h>
 #include <io.h>
 #else

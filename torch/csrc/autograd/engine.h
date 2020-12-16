@@ -282,7 +282,8 @@ struct TORCH_API Engine {
   // machinery and shouldn't be exposed to users in anyway.
   virtual std::shared_ptr<at::ivalue::Future> execute_with_graph_task(
       const std::shared_ptr<GraphTask>& graph_task,
-      std::shared_ptr<Node> graph_root);
+      std::shared_ptr<Node> graph_root,
+      InputBuffer&& input_buffer);
 
   virtual std::unique_ptr<AnomalyMetadata> make_anomaly_metadata() {
     return std::make_unique<AnomalyMetadata>();

@@ -38,6 +38,17 @@ Containers
     ParameterList
     ParameterDict
 
+Global Hooks For Module
+
+.. currentmodule:: torch.nn.modules.module
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    register_module_forward_pre_hook
+    register_module_forward_hook
+    register_module_backward_hook
+
 .. currentmodule:: torch
 
 Convolution Layers
@@ -54,6 +65,12 @@ Convolution Layers
     nn.ConvTranspose1d
     nn.ConvTranspose2d
     nn.ConvTranspose3d
+    nn.LazyConv1d
+    nn.LazyConv2d
+    nn.LazyConv3d
+    nn.LazyConvTranspose1d
+    nn.LazyConvTranspose2d
+    nn.LazyConvTranspose3d
     nn.Unfold
     nn.Fold
 

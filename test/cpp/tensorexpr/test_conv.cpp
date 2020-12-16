@@ -10,7 +10,7 @@ namespace jit {
 namespace te = torch::jit::tensorexpr;
 namespace F = torch::nn::functional;
 
-void testConv2D() {
+TEST(Conv, Conv2D) {
   te::KernelScope kernel_scope;
 
   // Input dimensions.

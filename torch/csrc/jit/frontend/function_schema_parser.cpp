@@ -202,14 +202,14 @@ struct SchemaParser {
   IValue convertToList(
       TypeKind kind,
       const SourceRange& range,
-      std::vector<IValue> vs) {
+      const std::vector<IValue>& vs) {
     switch (kind) {
       case TypeKind::FloatType:
-        return fmap(vs, [](IValue v) { return v.toDouble(); });
+        return fmap(vs, [](const IValue& v) { return v.toDouble(); });
       case TypeKind::IntType:
-        return fmap(vs, [](IValue v) { return v.toInt(); });
+        return fmap(vs, [](const IValue& v) { return v.toInt(); });
       case TypeKind::BoolType:
-        return fmap(vs, [](IValue v) { return v.toBool(); });
+        return fmap(vs, [](const IValue& v) { return v.toBool(); });
       default:
         throw ErrorReport(range)
             << "lists are only supported for float or int types";
@@ -224,7 +224,7 @@ struct SchemaParser {
       } while (L.nextIf(','));
     }
     L.expect(']');
-    return convertToList(kind, tok.range, std::move(vs));
+    return convertToList(kind, tok.range, vs);
   }
 
   IValue parseTensorDefault(const SourceRange& range) {

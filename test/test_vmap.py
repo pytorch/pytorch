@@ -1,5 +1,6 @@
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
+import torch.nn.functional as F
 from torch import Tensor, vmap
 import functools
 import itertools
@@ -1299,6 +1300,17 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(vmap(lambda t: op(t, 4, 1), in_dims=2)),
              (torch.rand(B1, 2, B0, 64, B2),), in_dims=2)
 
+    def test_clamp(self):
+        clamp_cases = (
+            (lambda t: t.clamp(min=-0.5), TensorFactory.randn),
+            (lambda t: t.clamp(max=0.5), TensorFactory.randn),
+            (lambda t: t.clamp(min=-0.5, max=0.5), TensorFactory.randn),
+            (lambda t: t.clamp_min(min=-0.5), TensorFactory.randn),
+            (lambda t: t.clamp_max(max=0.5), TensorFactory.randn),
+        )
+        for op, getter in clamp_cases:
+            self._test_unary(op, getter, 'cpu')
+
     def test_diagonal(self):
         tensor = torch.randn(3, 5, 7, 11, 13)
         test = self._vmap_view_test
@@ -1352,6 +1364,37 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(op), (torch.rand(B0, B1, 1, 5), torch.rand(B1, B0, 2, 3, 5)), in_dims=(0, 1))
         test(vmap(op), (torch.rand(B0, B1), torch.rand(B1, 2, 3, 5)), in_dims=(0, None))
         test(vmap(vmap(op)), (torch.rand(B0, B1, B2), torch.rand(B0, B1, B2, 2, 3, 5)))
+
+    def test_fill_and_zero_inplace(self):
+        test = functools.partial(self._vmap_test, check_propagates_grad=False)
+        B0, B1 = 7, 11
+        ops = (
+            lambda t: t.fill_(0.1),
+            lambda t: t.fill_(torch.tensor(0.2)),
+            lambda t: t.zero_(),
+        )
+
+        for op in ops:
+            # Single vmap, various in_dims / out_dims
+            test(op, [TensorFactory.randn([B0, 3])])
+            test(op, [TensorFactory.randn([2, 5, B0, 3])], in_dims=2)
+            test(op, [TensorFactory.randn([2, 5, B0, 3])], in_dims=2, out_dims=2)
+
+            # Doubly nested vmap
+            test(vmap(op), [TensorFactory.randn([B0, B1])])
+            test(vmap(op), [TensorFactory.randn([B1, 2, 5, B0, 3])], in_dims=2)
+            test(vmap(op, in_dims=2), [TensorFactory.randn([2, 5, B0, B1, 3])],
+                 in_dims=2, out_dims=2)
+
+        # test when value is a batched tensor for fill_ operator
+        B0, B1 = 3, 5
+        test(Tensor.fill_, [TensorFactory.randn([B0, B1]), TensorFactory.randn(B0)])
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"output with shape .+ doesn't match the broadcast shape"):
+            # Runtime Error is thrown when the tensor being written to isn't being vmapped over
+            vmap(Tensor.fill_, (None, 0))(TensorFactory.randn([B0, B1]),
+                                          TensorFactory.randn([B0]))
 
     def _test_complex_views(self, op, dtypes):
         test = self._vmap_view_test
@@ -2142,6 +2185,16 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self._test_arithmetic(torch.div, device)
         self._test_arithmetic(lambda x, y: x / y, device)
 
+    @allowVmapFallbackUsage
+    def test_binary_cross_entropy(self, device):
+        x = F.sigmoid(torch.randn(3, 2, device=device, requires_grad=True))
+        target = torch.rand(3, 2, device=device)
+
+        op = functools.partial(F.binary_cross_entropy, target=target)
+
+        self._batched_grad_test(op, (x,), {})
+        self._batched_grad_grad_test(op, (x,), {})
+
     def test_expand(self, device):
         x = torch.randn(2, 3, device=device, requires_grad=True)
 
@@ -2240,6 +2293,15 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self._batched_grad_test(lambda x: x[0:1], (x,))
         self._batched_grad_test(lambda x: x[:, 1:3], (x,))
         self._batched_grad_test(lambda x: x[..., 1:3], (x,))
+
+    @allowVmapFallbackUsage
+    def test_symeig(self, device):
+        def op(x):
+            return torch.symeig(x, eigenvectors=True)[0]
+
+        x = torch.randn(3, 3, device=device, requires_grad=True)
+        self._batched_grad_test(op, (x,), {})
+        self._batched_grad_grad_test(op, (x,), {})
 
     @allowVmapFallbackUsage
     def test_inplace_view(self, device):

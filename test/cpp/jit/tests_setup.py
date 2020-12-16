@@ -67,14 +67,15 @@ class TorchSaveJitStream_CUDA(FileSetup):
     path = 'saved_stream_model.pt'
 
     def setup(self):
-        if not torch.cuda.is_available(): return
+        if not torch.cuda.is_available():
+            return
 
         class Model(torch.nn.Module):
             def forward(self):
                 device_index = torch.cuda._current_device()
                 s = torch.jit.cuda.Stream(device_index, 0)
-                a = torch.rand(3, 4, device = "cuda")
-                b = torch.rand(3, 4, device = "cuda")
+                a = torch.rand(3, 4, device="cuda")
+                b = torch.rand(3, 4, device="cuda")
 
                 with torch.jit.cuda.stream(s):
                     is_stream_s = torch.cuda.current_stream(s.device_index()).id() == s.id()

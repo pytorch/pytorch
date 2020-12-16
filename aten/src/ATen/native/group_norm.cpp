@@ -122,6 +122,7 @@ Tensor group_norm(
 DEFINE_DISPATCH(GroupNormKernel);
 DEFINE_DISPATCH(GroupNormBackwardKernel);
 
+// Ported from pytorch/xla repo
 std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
     const at::Tensor& input,
     const at::Tensor& weight,
