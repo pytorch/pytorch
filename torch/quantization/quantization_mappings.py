@@ -77,6 +77,7 @@ DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS = {
     nn.GRUCell: nnqd.GRUCell,
     nn.Linear: nnqd.Linear,
     nn.LSTM: nnqd.LSTM,
+    nn.GRU: nnqd.GRU,
     nn.LSTMCell: nnqd.LSTMCell,
     nn.RNNCell: nnqd.RNNCell,
 }
