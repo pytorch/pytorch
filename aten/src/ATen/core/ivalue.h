@@ -319,7 +319,10 @@ struct CAFFE2_API IValue final {
       // make this abundantly clear.
       //
       // payload.as_tensor.~Tensor();
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wclass-memaccess"
       memcpy(&payload, &rhs.payload, sizeof(payload));
+#pragma GCC diagnostic pop
       new (&rhs.payload.as_tensor) at::Tensor(std::move(t));
     } else if (rhs.isTensor()) {
       rhs.swap(*this);
@@ -879,7 +882,10 @@ struct CAFFE2_API IValue final {
       //
       // rhs.payload.as_tensor.~Tensor();
     } else {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wclass-memaccess"
       memcpy(&payload, &rhs.payload, sizeof(payload));
+#pragma GCC diagnostic pop
     }
     tag = rhs.tag;
     is_intrusive_ptr = rhs.is_intrusive_ptr;
@@ -914,7 +920,10 @@ struct CAFFE2_API IValue final {
     if (isTensor()) {
       new (&payload.as_tensor) at::Tensor(p.as_tensor);
     } else {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wclass-memaccess"
       memcpy(&payload, &p, sizeof(payload));
+#pragma GCC diagnostic pop
     }
   }
 
@@ -981,7 +990,10 @@ struct CAFFE2_API WeakIValue final {
   IValue lock() const {
     if (!is_intrusive_ptr) {
       IValue::Payload newPayload;
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wclass-memaccess"
       memcpy(&newPayload, &payload, sizeof(newPayload));
+#pragma GCC diagnostic pop
       return IValue(newPayload, tag, false);
     }
     if (IValue::Tag::Tensor == tag) {
