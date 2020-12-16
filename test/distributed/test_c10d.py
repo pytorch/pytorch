@@ -4528,6 +4528,89 @@ class CommTest(MultiProcessTestCase):
         for root_rank in ranks:
             self._test_broadcast_coalesced(process_group, device, root_rank)
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    def test_nccl_barrier(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="nccl",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store)
+
+        t = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
+        c10d.all_reduce(t)
+        expected_tensor = torch.tensor([3] * 10).cuda(2 * self.rank)
+        self.assertEqual(expected_tensor, t)
+
+        # Test with new_group
+        pg = c10d.new_group([0, 1])
+        t = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
+        pg.allreduce(t)
+        self.assertEqual(expected_tensor, t)
+
+        pg = c10d.new_group([0])
+        if self.rank == 0:
+            t = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
+            expected_tensor = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
+            pg.allreduce(t)
+            self.assertEqual(expected_tensor, t)
+
+        pg = c10d.new_group([1])
+        if self.rank == 1:
+            t = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
+            expected_tensor = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
+            pg.allreduce(t)
+            self.assertEqual(expected_tensor, t)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    def test_nccl_barrier_timeout(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        if self.rank == 0:
+            with self.assertRaisesRegex(RuntimeError, "Timed out initializing process group"):
+                c10d.init_process_group(
+                    backend="nccl",
+                    rank=self.rank,
+                    world_size=self.world_size,
+                    store=store,
+                    timeout=timedelta(seconds=1))
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    def test_nccl_barrier_timeout_new_group(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="nccl",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store,
+            timeout=timedelta(seconds=1))
+
+        if self.rank == 0:
+            with self.assertRaisesRegex(RuntimeError, "Timed out initializing process group"):
+                c10d.new_group([0, 1], timeout=timedelta(seconds=1))
+
+            with self.assertRaisesRegex(RuntimeError, "Timed out initializing process group"):
+                c10d.new_group([0], timeout=timedelta(seconds=1))
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    def test_nccl_barrier_timeout_new_group_non_member(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="nccl",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store,
+            timeout=timedelta(seconds=1))
+
+        if self.rank == 1:
+            with self.assertRaisesRegex(RuntimeError, "Timed out initializing process group"):
+                c10d.new_group([0, 1], timeout=timedelta(seconds=1))
+
+            with self.assertRaisesRegex(RuntimeError, "Timed out initializing process group"):
+                c10d.new_group([0], timeout=timedelta(seconds=1))
 
 if __name__ == "__main__":
     assert (
