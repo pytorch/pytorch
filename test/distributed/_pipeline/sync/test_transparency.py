@@ -10,7 +10,7 @@ from torch import nn
 from torch.distributed._pipeline.sync import Pipe
 
 
-def test_simple_linears():
+def test_simple_linears(setup_rpc):
     def sum_grad(parameters):
         return sum([p.grad.sum() for p in parameters if p.grad is not None])
 
@@ -31,9 +31,9 @@ def test_simple_linears():
     zero_grad(model.parameters())
 
     # With Pipe
-    model = Pipe(model, [2, 2], devices=["cpu", "cpu"], chunks=4)
+    model = Pipe(model, chunks=4)
 
-    outputs = model(inputs)
+    outputs = model(inputs).local_value()
     loss = outputs.mean()
     loss.backward()
 

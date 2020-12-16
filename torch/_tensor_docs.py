@@ -432,45 +432,9 @@ Examples::
 
 add_docstr_all('all',
                r"""
-.. function:: all() -> bool
+all(dim=None, keepdim=False) -> Tensor
 
-Returns True if all elements in the tensor are True, False otherwise.
-
-Example::
-
-    >>> a = torch.rand(1, 2).bool()
-    >>> a
-    tensor([[False, True]], dtype=torch.bool)
-    >>> a.all()
-    tensor(False, dtype=torch.bool)
-
-.. function:: all(dim, keepdim=False, out=None) -> Tensor
-
-Returns True if all elements in each row of the tensor in the given
-dimension :attr:`dim` are True, False otherwise.
-
-If :attr:`keepdim` is ``True``, the output tensor is of the same size as
-:attr:`input` except in the dimension :attr:`dim` where it is of size 1.
-Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting
-in the output tensor having 1 fewer dimension than :attr:`input`.
-
-Args:
-    dim (int): the dimension to reduce
-    keepdim (bool): whether the output tensor has :attr:`dim` retained or not
-    out (Tensor, optional): the output tensor
-
-Example::
-
-    >>> a = torch.rand(4, 2).bool()
-    >>> a
-    tensor([[True, True],
-            [True, False],
-            [True, True],
-            [True, True]], dtype=torch.bool)
-    >>> a.all(dim=1)
-    tensor([ True, False,  True,  True], dtype=torch.bool)
-    >>> a.all(dim=0)
-    tensor([ True, False], dtype=torch.bool)
+See :func:`torch.all`
 """)
 
 add_docstr_all('allclose',
@@ -489,45 +453,9 @@ See :func:`torch.angle`
 
 add_docstr_all('any',
                r"""
-.. function:: any() -> bool
+any(dim=None, keepdim=False) -> Tensor
 
-Returns True if any elements in the tensor are True, False otherwise.
-
-Example::
-
-    >>> a = torch.rand(1, 2).bool()
-    >>> a
-    tensor([[False, True]], dtype=torch.bool)
-    >>> a.any()
-    tensor(True, dtype=torch.bool)
-
-.. function:: any(dim, keepdim=False, out=None) -> Tensor
-
-Returns True if any elements in each row of the tensor in the given
-dimension :attr:`dim` are True, False otherwise.
-
-If :attr:`keepdim` is ``True``, the output tensor is of the same size as
-:attr:`input` except in the dimension :attr:`dim` where it is of size 1.
-Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting
-in the output tensor having 1 fewer dimension than :attr:`input`.
-
-Args:
-    dim (int): the dimension to reduce
-    keepdim (bool): whether the output tensor has :attr:`dim` retained or not
-    out (Tensor, optional): the output tensor
-
-Example::
-
-    >>> a = torch.randn(4, 2) < 0
-    >>> a
-    tensor([[ True,  True],
-            [False,  True],
-            [ True,  True],
-            [False, False]])
-    >>> a.any(1)
-    tensor([ True,  True,  True, False])
-    >>> a.any(0)
-    tensor([True, True])
+See :func:`torch.any`
 """)
 
 add_docstr_all('apply_',
@@ -1076,11 +1004,25 @@ cumprod(dim, dtype=None) -> Tensor
 See :func:`torch.cumprod`
 """)
 
+add_docstr_all('cumprod_',
+               r"""
+cumprod_(dim, dtype=None) -> Tensor
+
+In-place version of :meth:`~Tensor.cumprod`
+""")
+
 add_docstr_all('cumsum',
                r"""
 cumsum(dim, dtype=None) -> Tensor
 
 See :func:`torch.cumsum`
+""")
+
+add_docstr_all('cumsum_',
+               r"""
+cumsum_(dim, dtype=None) -> Tensor
+
+In-place version of :meth:`~Tensor.cumsum`
 """)
 
 add_docstr_all('data_ptr',
@@ -1543,6 +1485,12 @@ ger(vec2) -> Tensor
 See :func:`torch.ger`
 """)
 
+add_docstr_all('inner', r"""
+inner(other) -> Tensor
+
+See :func:`torch.inner`.
+""")
+
 add_docstr_all('outer', r"""
 outer(vec2) -> Tensor
 
@@ -1589,6 +1537,18 @@ add_docstr_all('igamma_',
 igamma_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.igamma`
+""")
+
+add_docstr_all('igammac',
+               r"""
+igammac(other) -> Tensor
+See :func:`torch.igammac`
+""")
+
+add_docstr_all('igammac_',
+               r"""
+igammac_(other) -> Tensor
+In-place version of :meth:`~Tensor.igammac`
 """)
 
 add_docstr_all('indices',
@@ -1742,6 +1702,11 @@ The :attr:`dim`\ th dimension of :attr:`tensor` must have the same size as the
 length of :attr:`index` (which must be a vector), and all other dimensions must
 match :attr:`self`, or an error will be raised.
 
+.. note::
+    If :attr:`index` contains duplicate entries, multiple elements from
+    :attr:`tensor` will be copied to the same index of :attr:`self`. The result
+    is nondeterministic since it depends on which copy occurs last.
+
 Args:
     dim (int): dimension along which to index
     index (LongTensor): indices of :attr:`tensor` to select from
@@ -1783,26 +1748,26 @@ Example::
 
 add_docstr_all('index_put_',
                r"""
-index_put_(indices, value, accumulate=False) -> Tensor
+index_put_(indices, values, accumulate=False) -> Tensor
 
-Puts values from the tensor :attr:`value` into the tensor :attr:`self` using
+Puts values from the tensor :attr:`values` into the tensor :attr:`self` using
 the indices specified in :attr:`indices` (which is a tuple of Tensors). The
-expression ``tensor.index_put_(indices, value)`` is equivalent to
-``tensor[indices] = value``. Returns :attr:`self`.
+expression ``tensor.index_put_(indices, values)`` is equivalent to
+``tensor[indices] = values``. Returns :attr:`self`.
 
-If :attr:`accumulate` is ``True``, the elements in :attr:`value` are added to
+If :attr:`accumulate` is ``True``, the elements in :attr:`values` are added to
 :attr:`self`. If accumulate is ``False``, the behavior is undefined if indices
 contain duplicate elements.
 
 Args:
     indices (tuple of LongTensor): tensors used to index into `self`.
-    value (Tensor): tensor of same dtype as `self`.
+    values (Tensor): tensor of same dtype as `self`.
     accumulate (bool): whether to accumulate into self
 """)
 
 add_docstr_all('index_put',
                r"""
-index_put(tensor1, indices, value, accumulate=False) -> Tensor
+index_put(tensor1, indices, values, accumulate=False) -> Tensor
 
 Out-place version of :meth:`~Tensor.index_put_`.
 `tensor1` corresponds to `self` in :meth:`torch.Tensor.index_put_`.
@@ -2003,6 +1968,20 @@ add_docstr_all('kthvalue',
 kthvalue(k, dim=None, keepdim=False) -> (Tensor, LongTensor)
 
 See :func:`torch.kthvalue`
+""")
+
+add_docstr_all('ldexp',
+               r"""
+ldexp(other) -> Tensor
+
+See :func:`torch.ldexp`
+""")
+
+add_docstr_all('ldexp_',
+               r"""
+ldexp_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.ldexp`
 """)
 
 add_docstr_all('lcm',
@@ -2363,6 +2342,12 @@ movedim(source, destination) -> Tensor
 See :func:`torch.movedim`
 """)
 
+add_docstr_all('moveaxis', r"""
+moveaxis(source, destination) -> Tensor
+
+See :func:`torch.moveaxis`
+""")
+
 add_docstr_all('mul', r"""
 mul(value) -> Tensor
 
@@ -2629,6 +2614,20 @@ add_docstr_all('pow_',
 pow_(exponent) -> Tensor
 
 In-place version of :meth:`~Tensor.pow`
+""")
+
+add_docstr_all('float_power',
+               r"""
+float_power(exponent) -> Tensor
+
+See :func:`torch.float_power`
+""")
+
+add_docstr_all('float_power_',
+               r"""
+float_power_(exponent) -> Tensor
+
+In-place version of :meth:`~Tensor.float_power`
 """)
 
 add_docstr_all('prod',
@@ -3311,6 +3310,13 @@ sort(dim=-1, descending=False) -> (Tensor, LongTensor)
 See :func:`torch.sort`
 """)
 
+add_docstr_all('msort',
+               r"""
+msort() -> Tensor
+
+See :func:`torch.msort`
+""")
+
 add_docstr_all('argsort',
                r"""
 argsort(dim=-1, descending=False) -> LongTensor
@@ -3536,6 +3542,31 @@ symeig(eigenvectors=False, upper=True) -> (Tensor, Tensor)
 See :func:`torch.symeig`
 """)
 
+add_docstr_all('swapdims', r"""
+swapdims(dim0, dim1) -> Tensor
+
+See :func:`torch.swapdims`
+""")
+
+add_docstr_all('swapdims_',
+               r"""
+swapdims_(dim0, dim1) -> Tensor
+
+In-place version of :meth:`~Tensor.swapdims`
+""")
+
+add_docstr_all('swapaxes', r"""
+swapaxes(axis0, axis1) -> Tensor
+
+See :func:`torch.swapaxes`
+""")
+
+add_docstr_all('swapaxes_', r"""
+swapaxes_(axis0, axis1) -> Tensor
+
+In-place version of :meth:`~Tensor.swapaxes`
+""")
+
 add_docstr_all('t',
                r"""
 t() -> Tensor
@@ -3548,6 +3579,13 @@ add_docstr_all('t_',
 t_() -> Tensor
 
 In-place version of :meth:`~Tensor.t`
+""")
+
+add_docstr_all('tile',
+               r"""
+tile(*reps) -> Tensor
+
+See :func:`torch.tile`
 """)
 
 add_docstr_all('to',
@@ -4244,33 +4282,6 @@ istft(n_fft, hop_length=None, win_length=None, window=None,
  center=True, normalized=False, onesided=True, length=None) -> Tensor
 
 See :func:`torch.istft`
-""")
-
-add_docstr_all('fft', r"""
-fft(signal_ndim, normalized=False) -> Tensor
-
-See :func:`torch.fft`
-""")
-
-add_docstr_all('ifft',
-               r"""
-ifft(signal_ndim, normalized=False) -> Tensor
-
-See :func:`torch.ifft`
-""")
-
-add_docstr_all('rfft',
-               r"""
-rfft(signal_ndim, normalized=False, onesided=True) -> Tensor
-
-See :func:`torch.rfft`
-""")
-
-add_docstr_all('irfft',
-               r"""
-irfft(signal_ndim, normalized=False, onesided=True, signal_sizes=None) -> Tensor
-
-See :func:`torch.irfft`
 """)
 
 add_docstr_all('det',

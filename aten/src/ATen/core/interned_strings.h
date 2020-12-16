@@ -28,6 +28,7 @@ namespace c10 {
   _(prim, Assign)                    \
   _(prim, BroadcastingChunk)         \
   _(prim, BroadcastSizes)            \
+  _(prim, ReductionSizes)            \
   _(prim, Constant)                  \
   _(prim, ChunkSizes)                \
   _(prim, Drop)                      \
@@ -39,6 +40,7 @@ namespace c10 {
   _(prim, FunctionalGraph)           \
   _(prim, DifferentiableGraph)       \
   _(prim, TensorExprGroup)           \
+  _(prim, StaticSubgraph)            \
   _(prim, If)                        \
   _(prim, Jump) /* debug */          \
   _(prim, JumpNZ) /* debug */        \
@@ -139,6 +141,7 @@ namespace c10 {
   _(prim, HasAttr)                   \
   _(prim, profile)                   \
   _(prim, profile_optional)          \
+  _(prim, profile_ivalue)            \
   _(prim, AddStatValue)              \
   _(prim, TimePoint)                 \
   _(prim, CallFunction)              \
@@ -236,6 +239,7 @@ namespace c10 {
   _(aten, _ger)                      \
   _(aten, ger)                       \
   _(aten, outer)                     \
+  _(aten, transpose)                 \
   _(aten, transpose_)                \
   _(aten, unsqueeze_)                \
   _(aten, __getitem__)               \
@@ -283,6 +287,12 @@ namespace c10 {
   _(cuda, _set_device)               \
   _(cuda, set_stream)                \
   _(cuda, _current_device)           \
+  _(aten, swapaxes)                  \
+  _(aten, swapaxes_)                 \
+  _(aten, swapdims)                  \
+  _(aten, swapdims_)                 \
+  _(aten, movedim)                   \
+  _(aten, moveaxis)                  \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \

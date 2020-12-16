@@ -90,6 +90,9 @@ static void getMajorMinor(
     max_dev_version = CudaVersion(7, 2);
   } else if (nvrtc_version.first <= 10) { // 10 supports 3-7.5
     max_dev_version = CudaVersion(7, 5);
+  } else if (nvrtc_version.first == 11 && nvrtc_version.second == 0) {
+    // 11.0 supports 3-8.0
+    max_dev_version = CudaVersion(8, 0);
   }
   if (dev_version > max_dev_version) {
     dev_version = max_dev_version;
@@ -923,7 +926,7 @@ void CudaCodeGen::Initialize() {
   // Check whether the statement uses the Half type, if so add the
   // half_support_literal.
   Stmt* stmt_v = stmt();
-  HalfChecker halfChecker;
+  HalfChecker halfChecker(buffer_args());
   stmt_v->accept(&halfChecker);
   if (halfChecker.hasHalf()) {
     os() << fuser::cuda::half_support_literal << std::endl;

@@ -36,12 +36,10 @@ bool InterpreterState::run(Stack& stack) {
     switch (inst.op) {
       case OP: {
         if (at::hasGlobalCallbacks()) {
-          if (auto debug_info = c10::ThreadLocalDebugInfo::get(
-                  c10::DebugInfoKind::MOBILE_RUNTIME_INFO)) {
-            if (auto* mobile_debug_info =
-                    dynamic_cast<MobileDebugInfo*>(debug_info.get())) {
-              mobile_debug_info->setOpIdx(pc);
-            }
+          if (auto* mobile_debug_info =
+                  static_cast<MobileDebugInfo*>(c10::ThreadLocalDebugInfo::get(
+                      c10::DebugInfoKind::MOBILE_RUNTIME_INFO))) {
+            mobile_debug_info->setOpIdx(pc);
           }
         }
 
@@ -52,7 +50,7 @@ bool InterpreterState::run(Stack& stack) {
           // enable only for the RecordFunction
           enableRecordFunction(true);
         }
-        RECORD_FUNCTION(code_->op_names_[inst.X].name, stack);
+        RECORD_USER_SCOPE_WITH_INPUTS(code_->op_names_[inst.X].name, stack);
         if (!prev_value) {
           enableRecordFunction(false);
         }

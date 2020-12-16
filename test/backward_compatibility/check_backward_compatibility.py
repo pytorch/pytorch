@@ -177,6 +177,24 @@ allow_list = [
     ("aten::_foreach_floor_", datetime.date(2020, 11, 15)),
     ("aten::_foreach_log1p", datetime.date(2020, 11, 15)),
     ("aten::_foreach_neg", datetime.date(2020, 11, 15)),
+    ("__caffe2::RoIAlign", datetime.date(2020, 11, 30)),
+    ("__caffe2::HeatmapMaxKeypoint", datetime.date(2020, 11, 30)),
+    ("__caffe2::BoxWithNMSLimit", datetime.date(2020, 11, 30)),
+    ("__caffe2::BBoxTransform", datetime.date(2020, 11, 30)),
+    ("__caffe2::GenerateProposals", datetime.date(2020, 11, 30)),
+    ("__caffe2::RoIAlignRotated", datetime.date(2020, 11, 30)),
+    ("aten::fft", datetime.date(2021, 1, 31)),
+    ("aten::ifft", datetime.date(2021, 1, 31)),
+    ("aten::irfft", datetime.date(2021, 1, 31)),
+    ("aten::rfft", datetime.date(2021, 1, 31)),
+    ("aten::quantile", datetime.date(2021, 1, 31)),
+    ("aten::nanquantile", datetime.date(2021, 1, 31)),
+    ("aten::_fft_with_size", datetime.date(2021, 1, 31)),
+    ("aten::thnn_conv_depthwise2d_backward", datetime.date(2021, 1, 31)),
+    ("aten::slow_conv3d_backward", datetime.date(2021, 1, 31)),
+    ("aten::thnn_conv2d_backward", datetime.date(2021, 1, 31)),
+    ("aten::slow_conv_transpose3d_backward", datetime.date(2021, 1, 31)),
+    ("aten::slow_conv_transpose2d_backward", datetime.date(2021, 1, 31)),
 ]
 
 def allow_listed(schema, allow_list):
@@ -198,6 +216,7 @@ def allow_listed(schema, allow_list):
 dont_parse_list = [
     ("_TorchScriptTesting.*", datetime.date(2099, 9, 17)),
     ("test_backend", datetime.date(2099, 9, 17)),
+    ("c10d.frontend", datetime.date(2020, 12, 30)),
 ]
 
 

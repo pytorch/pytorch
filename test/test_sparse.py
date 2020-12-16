@@ -10,7 +10,7 @@ import operator
 import random
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
-    do_test_empty_full, load_tests, TEST_NUMPY, TEST_WITH_ROCM, IS_WINDOWS
+    do_test_empty_full, load_tests, TEST_NUMPY, IS_WINDOWS
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
 from torch.autograd.gradcheck import gradcheck
@@ -1301,7 +1301,6 @@ class TestSparse(TestCase):
         self._test_spadd_shape(10, [50, 30, 20], [2, 0])
 
     @cuda_only
-    @unittest.skipIf(not TEST_WITH_ROCM, "runs only on ROCm")
     def test_sparse_add_out_bfloat16(self):
         # fp32
         x, _, _ = self._gen_sparse(3, 5, 10)
@@ -1813,63 +1812,83 @@ class TestSparse(TestCase):
         self.assertRaises(RuntimeError, lambda: with_dense.narrow_copy(10, 0, 3))  # dim > sparseDim + denseDim
 
     def _test_log1p_tensor(self, sparse_tensor):
+        def is_integral(dtype):
+            return dtype in torch.testing.get_all_int_dtypes()
+
         dense_tensor = sparse_tensor.to_dense()
         expected_output = dense_tensor.log1p()
-
+        is_integral_dtype = is_integral(sparse_tensor.dtype)
         self.assertEqual(expected_output, sparse_tensor.log1p().to_dense())
-        self.assertEqual(expected_output, sparse_tensor.coalesce().log1p_().to_dense())
+        if is_integral_dtype:
+            with self.assertRaisesRegex(RuntimeError, "log1p: result type cannot be Integral, got:"):
+                sparse_tensor.coalesce().log1p_()
+        else:
+            self.assertEqual(expected_output, sparse_tensor.coalesce().log1p_().to_dense())
 
-        if self.is_uncoalesced:
+        if self.is_uncoalesced and not is_integral_dtype:
             # test in-place op on uncoalesced input
             with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
                 sparse_tensor.log1p_()
+        elif self.is_uncoalesced and is_integral_dtype:
+            with self.assertRaisesRegex(RuntimeError, "log1p: result type cannot be Integral, got"):
+                sparse_tensor.log1p_()
 
-        sparse_tensor.requires_grad_()
-        self.assertTrue(sparse_tensor.requires_grad)
+        if not is_integral_dtype:
+            sparse_tensor.requires_grad_()
+            self.assertTrue(sparse_tensor.requires_grad)
 
-        # test autograd
-        x = sparse_tensor.clone()
-        y = sparse_tensor.log1p()
-        with self.assertRaisesRegex(RuntimeError, "log1p of a sparse tensor is made to be non-differentiable"):
-            y.backward(x)
+            # test autograd
+            x = sparse_tensor.clone()
+            y = sparse_tensor.log1p()
+            with self.assertRaisesRegex(RuntimeError, "log1p of a sparse tensor is made to be non-differentiable"):
+                y.backward(x)
+        else:
+            with self.assertRaisesRegex(RuntimeError, "only Tensors of floating point dtype can require gradients"):
+                sparse_tensor.requires_grad_()
 
     def test_log1p(self):
-        if not self.is_uncoalesced:
-            input_coalesced = torch.sparse_coo_tensor(
-                indices=torch.tensor([[0], [1], [2]]).transpose(1, 0),
-                values=torch.tensor([3.0, 4.0, 5.0]),
-                size=[3, ],
-                device=self.device
-            ).coalesce()
-            self._test_log1p_tensor(input_coalesced)
+        for dtype in torch.testing.get_all_dtypes(include_bool=False, include_half=False,
+                                                  include_bfloat16=False, include_complex=False):
+            if not self.is_uncoalesced:
+                input_coalesced = torch.sparse_coo_tensor(
+                    indices=torch.tensor([[0], [1], [2]]).transpose(1, 0),
+                    values=torch.tensor([3.0, 4.0, 5.0]),
+                    size=[3, ],
+                    device=self.device,
+                    dtype=dtype
+                ).coalesce()
+                self._test_log1p_tensor(input_coalesced)
 
-            # hybrid sparse input
-            input_coalesced = torch.sparse_coo_tensor(
-                indices=torch.tensor([[1, 3], [2, 4]]),
-                values=torch.tensor([[1.0, 3.0], [5.0, 7.0]]),
-                size=[4, 5, 2],
-                device=self.device
-            ).coalesce()
-            self._test_log1p_tensor(input_coalesced)
+                # hybrid sparse input
+                input_coalesced = torch.sparse_coo_tensor(
+                    indices=torch.tensor([[1, 3], [2, 4]]),
+                    values=torch.tensor([[1.0, 3.0], [5.0, 7.0]]),
+                    size=[4, 5, 2],
+                    device=self.device,
+                    dtype=dtype
+                ).coalesce()
+                self._test_log1p_tensor(input_coalesced)
 
-        if self.is_uncoalesced:
-            # test uncoalesced input
-            input_uncoalesced = torch.sparse_coo_tensor(
-                indices=torch.tensor([[0], [1], [2], [0], [1], [2]]).transpose(1, 0),
-                values=torch.tensor([2.0, 3.0, 4.0, 1.0, 1.0, 1.0]),
-                size=[3, ],
-                device=self.device
-            )
-            self._test_log1p_tensor(input_uncoalesced)
+            if self.is_uncoalesced:
+                # test uncoalesced input
+                input_uncoalesced = torch.sparse_coo_tensor(
+                    indices=torch.tensor([[0], [1], [2], [0], [1], [2]]).transpose(1, 0),
+                    values=torch.tensor([2.0, 3.0, 4.0, 1.0, 1.0, 1.0]),
+                    size=[3, ],
+                    device=self.device,
+                    dtype=dtype
+                )
+                self._test_log1p_tensor(input_uncoalesced)
 
-            # test on empty sparse tensor
-            input_uncoalesced = torch.sparse_coo_tensor(
-                indices=torch.zeros([2, 0]),
-                values=torch.zeros([0, 5, 5, 5, 5, 5, 5, 0]),
-                size=[0, 0, 5, 5, 5, 5, 5, 5, 0],
-                device=self.device
-            )
-            self._test_log1p_tensor(input_uncoalesced)
+                # test on empty sparse tensor
+                input_uncoalesced = torch.sparse_coo_tensor(
+                    indices=torch.zeros([2, 0]),
+                    values=torch.zeros([0, 5, 5, 5, 5, 5, 5, 0]),
+                    size=[0, 0, 5, 5, 5, 5, 5, 5, 0],
+                    device=self.device,
+                    dtype=dtype
+                )
+                self._test_log1p_tensor(input_uncoalesced)
 
     def _test_neg_negative(self, sparse_tensor):
         dense_tensor = sparse_tensor.to_dense()
@@ -1929,6 +1948,10 @@ class TestSparse(TestCase):
             self._test_neg_negative(input_uncoalesced)
 
     def _test_asin_arcsin(self, sparse_tensor):
+        def is_integral(dtype):
+            return dtype in torch.testing.get_all_int_dtypes()
+        is_integral_dtype = is_integral(sparse_tensor.dtype)
+
         dense_tensor = sparse_tensor.to_dense()
         expected_output = dense_tensor.asin()
 
@@ -1940,54 +1963,73 @@ class TestSparse(TestCase):
             self.assertEqual(expected_output, op(sparse_tensor).to_dense())
             if op in (torch.asin, torch.arcsin):
                 sparse_tensor_out = torch.zeros_like(sparse_tensor)
-                op(sparse_tensor, out=sparse_tensor_out)
-                self.assertEqual(expected_output, sparse_tensor_out.to_dense())
+                if not is_integral_dtype:
+                    op(sparse_tensor, out=sparse_tensor_out)
+                    self.assertEqual(expected_output, sparse_tensor_out.to_dense())
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "asin: result type cannot be Integral"):
+                        op(sparse_tensor, out=sparse_tensor_out)
 
         for op in (torch.Tensor.asin_, torch.Tensor.arcsin_):
-            self.assertEqual(expected_output, op(sparse_tensor.clone().coalesce()).to_dense())
-            if self.is_uncoalesced:
+            if is_integral_dtype:
+                # test coalesce on integral dtype tensor
+                with self.assertRaisesRegex(RuntimeError, "asin: result type cannot be Integral"):
+                    op(sparse_tensor.clone().coalesce()).to_dense()
+            else:
+                self.assertEqual(expected_output, op(sparse_tensor.clone().coalesce()).to_dense())
+
+            if self.is_uncoalesced and not is_integral_dtype:
                 # test in-place op on uncoalesced input
                 with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
                     op(sparse_tensor)
+            elif self.is_uncoalesced:
+                # test in-place op on integral dtype tensor
+                with self.assertRaisesRegex(RuntimeError, "asin: result type cannot be Integral"):
+                    op(sparse_tensor)
 
     def test_asin_arcsin(self):
+        for dtype in torch.testing.get_all_dtypes(include_bool=False, include_half=False,
+                                                  include_bfloat16=False, include_complex=False):
+            if not self.is_uncoalesced:
+                input_coalesced = torch.sparse_coo_tensor(
+                    indices=torch.tensor([[0, 1, 2, 3]]),
+                    values=torch.tensor([0.5, -0.5, 0.7, -0.7]),
+                    size=[4, ],
+                    dtype=dtype,
+                    device=self.device
+                ).coalesce()
+                self._test_asin_arcsin(input_coalesced)
 
-        if not self.is_uncoalesced:
-            input_coalesced = torch.sparse_coo_tensor(
-                indices=torch.tensor([[0, 1, 2, 3]]),
-                values=torch.tensor([0.5, -0.5, 0.7, -0.7]),
-                size=[4, ],
-                device=self.device
-            ).coalesce()
-            self._test_asin_arcsin(input_coalesced)
+                # hybrid sparse input
+                input_coalesced = torch.sparse_coo_tensor(
+                    indices=torch.tensor([[1, 3], [2, 4]]),
+                    values=torch.tensor([[-0.1, 0.24], [-0.44, 0.1]]),
+                    size=[4, 5, 2],
+                    dtype=dtype,
+                    device=self.device
+                ).coalesce()
+                self._test_asin_arcsin(input_coalesced)
 
-            # hybrid sparse input
-            input_coalesced = torch.sparse_coo_tensor(
-                indices=torch.tensor([[1, 3], [2, 4]]),
-                values=torch.tensor([[-0.1, 0.24], [-0.44, 0.1]]),
-                size=[4, 5, 2],
-                device=self.device
-            ).coalesce()
-            self._test_asin_arcsin(input_coalesced)
+            if self.is_uncoalesced:
+                # test uncoalesced input
+                input_uncoalesced = torch.sparse_coo_tensor(
+                    indices=torch.tensor([[0], [1], [2], [0], [1], [2]]).transpose(1, 0),
+                    values=torch.tensor([0.3, -0.3, -0.4, 0.3, -0.5, 0.15]),
+                    size=[3, ],
+                    dtype=dtype,
+                    device=self.device
+                )
+                self._test_asin_arcsin(input_uncoalesced)
 
-        if self.is_uncoalesced:
-            # test uncoalesced input
-            input_uncoalesced = torch.sparse_coo_tensor(
-                indices=torch.tensor([[0], [1], [2], [0], [1], [2]]).transpose(1, 0),
-                values=torch.tensor([0.3, -0.3, -0.4, 0.3, -0.5, 0.15]),
-                size=[3, ],
-                device=self.device
-            )
-            self._test_asin_arcsin(input_uncoalesced)
-
-            # test on empty sparse tensor
-            input_uncoalesced = torch.sparse_coo_tensor(
-                indices=torch.zeros([2, 0]),
-                values=torch.zeros([0, 5, 5, 5, 5, 5, 5, 0]),
-                size=[0, 0, 5, 5, 5, 5, 5, 5, 0],
-                device=self.device
-            )
-            self._test_asin_arcsin(input_uncoalesced)
+                # test on empty sparse tensor
+                input_uncoalesced = torch.sparse_coo_tensor(
+                    indices=torch.zeros([2, 0]),
+                    values=torch.zeros([0, 5, 5, 5, 5, 5, 5, 0]),
+                    size=[0, 0, 5, 5, 5, 5, 5, 5, 0],
+                    dtype=dtype,
+                    device=self.device
+                )
+                self._test_asin_arcsin(input_uncoalesced)
 
     def test_mv(self):
         def test_shape(di, dj, dk, nnz):

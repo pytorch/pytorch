@@ -27,6 +27,8 @@ class DeferredBatchNorm(_BatchNorm):
 
     sum: Tensor
     sum_squares: Tensor
+    running_mean: Tensor
+    running_var: Tensor
 
     def __init__(
         self,
@@ -149,6 +151,8 @@ class DeferredBatchNorm(_BatchNorm):
             if module.affine:
                 module_output.register_parameter("weight", module.weight)
                 module_output.register_parameter("bias", module.bias)
+            assert isinstance(module.running_mean, Tensor)
+            assert isinstance(module.running_var, Tensor)
             module_output.register_buffer("running_mean", module.running_mean)
             module_output.register_buffer("running_var", module.running_var)
             module_output.register_buffer("num_batches_tracked", module.num_batches_tracked)

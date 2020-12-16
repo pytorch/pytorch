@@ -497,6 +497,43 @@ class MemongerTest(hu.HypothesisTestCase):
         blobs_after = count_blobs(optim_proto)
         self.assertLess(blobs_after, blobs_before)
 
+    # This is specifically to verify the op schema check being done in memonger
+    def test_forward_optim_tree_enforce_inplace_op_invalid(self):
+        m = model_helper.ModelHelper()
+        m.Proto().type = "dag"
+        m.Proto().num_workers = 4
+
+        net = m.net
+        net.IndexFreeze("A", "B")  # enforce inplace op
+        net.Sum(["B", "B"], "C")
+        net.Relu("C", "D")
+        net.Sum(["D", "D"], "E")
+
+        with self.assertRaises(RuntimeError):
+            memonger.optimize_inference_for_dag(net, ["A"], "")
+
+    # Here inplace op is specifically a root op to repro the scenario where dag
+    # memonger could treat all the output blobs as shareable blobs and fails
+    # assertion of input blob with the same name not allowed to share
+    def test_forward_optim_tree_enforce_inplace_op_valid_and_as_head(self):
+        m = model_helper.ModelHelper()
+        m.Proto().type = "dag"
+        m.Proto().num_workers = 4
+
+        net = m.net
+        net.IndexFreeze("A", "A")  # enforce inplace op
+        net.Sum(["A", "A"], "B")
+        net.Relu("B", "C")
+        net.Relu("C", "D")
+        net.Sum(["D", "D"], "E")
+
+        blobs_before = count_blobs(m.net.Proto())
+        optim_proto = memonger.optimize_inference_for_dag(
+            net, ["A"], ""
+        )
+        blobs_after = count_blobs(optim_proto)
+        self.assertLess(blobs_after, blobs_before)
+
     def test_rnn(self):
         from caffe2.python import rnn_cell
         T = 5

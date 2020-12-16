@@ -39,7 +39,6 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS = {
     nn.LeakyReLU: nnq.LeakyReLU,
     nn.Linear: nnq.Linear,
     nn.ReLU6: nnq.ReLU6,
-    nn.ReLU: nnq.ReLU,
     # Wrapper Modules:
     nnq.FloatFunctional: nnq.QFunctional,
     # Intrinsic modules:
@@ -124,6 +123,19 @@ def get_static_quant_module_class(float_module_class, additional_static_quant_ma
         "Floating point module class {}".format(str(float_module_class)) + \
         " does not have a corresponding quantized module class"
     return static_quant_module_class
+
+def get_dynamic_quant_module_class(float_module_class, additional_dynamic_quant_mapping=None):
+    r"""n Get the dynamically quantized module class corresponding to
+    the floating point module class
+    """
+    if additional_dynamic_quant_mapping is None:
+        additional_dynamic_quant_mapping = {}
+    all_mappings = get_combined_dict(DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS, additional_dynamic_quant_mapping)
+    dynamic_quant_module_class = all_mappings.get(float_module_class, None)
+    assert dynamic_quant_module_class is not None, \
+        "Floating point module class {}".format(str(float_module_class)) + \
+        " does not have a corresponding quantized module class"
+    return dynamic_quant_module_class
 
 def get_default_qat_module_mappings():
     ''' Get default module mapping for quantization aware training

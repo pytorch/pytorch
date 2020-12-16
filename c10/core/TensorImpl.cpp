@@ -289,10 +289,41 @@ c10::AutogradMetaInterface* TensorImpl::autograd_meta() const {
   return autograd_meta_.get();
 }
 
-void TensorImpl::copy_tensor_metadata(
+c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
+    const c10::VariableVersion& version_counter,
+    bool allow_tensor_metadata_change) const {
+  auto impl = c10::make_intrusive<TensorImpl>(
+      // No need to populate Storage; copy_tensor_metadata will do it for us.
+      key_set_, data_type_, device_opt_);
+  copy_tensor_metadata(
+      /*src_impl=*/this,
+      /*dest_impl=*/impl.get(),
+      /*version_counter=*/version_counter,
+      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+  impl->refresh_numel();
+  impl->refresh_contiguous();
+  return impl;
+}
+
+c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
+    c10::VariableVersion&& version_counter,
+    bool allow_tensor_metadata_change) const {
+  auto impl = c10::make_intrusive<TensorImpl>(
+      // No need to populate Storage; copy_tensor_metadata will do it for us.
+      key_set_, data_type_, device_opt_);
+  copy_tensor_metadata(
+      /*src_impl=*/this,
+      /*dest_impl=*/impl.get(),
+      /*version_counter=*/std::move(version_counter),
+      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+  impl->refresh_numel();
+  impl->refresh_contiguous();
+  return impl;
+}
+
+void TensorImpl::copy_tensor_metadata_except_version_counter(
     const TensorImpl* src_impl,
     TensorImpl* dest_impl,
-    const c10::VariableVersion& version_counter,
     bool allow_tensor_metadata_change) {
   dest_impl->storage_ = src_impl->storage_;
   dest_impl->sizes_ = src_impl->sizes_;
@@ -309,11 +340,28 @@ void TensorImpl::copy_tensor_metadata(
   dest_impl->is_non_overlapping_and_dense_ = src_impl->is_non_overlapping_and_dense_;
   dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
   dest_impl->reserved_ = src_impl->reserved_;
-  dest_impl->set_version_counter(version_counter);
   dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
   if (src_impl->named_tensor_meta_ != nullptr) {
     dest_impl->named_tensor_meta_ = src_impl->named_tensor_meta_->clone();
   }
+}
+
+void TensorImpl::copy_tensor_metadata(
+    const TensorImpl* src_impl,
+    TensorImpl* dest_impl,
+    const c10::VariableVersion& version_counter,
+    bool allow_tensor_metadata_change) {
+  copy_tensor_metadata_except_version_counter(src_impl, dest_impl, allow_tensor_metadata_change);
+  dest_impl->set_version_counter(version_counter);
+}
+
+void TensorImpl::copy_tensor_metadata(
+    const TensorImpl* src_impl,
+    TensorImpl* dest_impl,
+    c10::VariableVersion&& version_counter,
+    bool allow_tensor_metadata_change) {
+  copy_tensor_metadata_except_version_counter(src_impl, dest_impl, allow_tensor_metadata_change);
+  dest_impl->set_version_counter(std::move(version_counter));
 }
 
 namespace impl {

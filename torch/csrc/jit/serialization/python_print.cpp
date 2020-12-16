@@ -873,7 +873,8 @@ struct PythonPrintImpl {
 
   void printConstant(TaggedStringStream& stmt, const IValue& v) {
     const auto customFormatter = [&](std::ostream& ss, const IValue& v) {
-      if (v.isTensor() || containsNonASCIIString(v)) {
+      if (v.isTensor() || containsNonASCIIString(v) || v.isObject()) {
+        TORCH_INTERNAL_ASSERT(!v.type()->is_module());
         ss << "CONSTANTS.c" << getOrAddConstant(v);
         return true;
       }
@@ -1465,7 +1466,7 @@ struct PythonPrintImpl {
     }
   }
 
-  ~PythonPrintImpl() {}
+  ~PythonPrintImpl() = default;
 
   TaggedStringStream body_;
   // When printing this node, is it safe to write it inline (i.e. without
