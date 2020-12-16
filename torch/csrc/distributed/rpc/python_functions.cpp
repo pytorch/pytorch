@@ -73,7 +73,7 @@ std::shared_ptr<Operator> matchBuiltinOp(
     for (auto it = ops.begin(); it != ops.end();) {
       std::shared_ptr<jit::Operator> op = *it;
       if (op->isC10Op()) {
-        c10OpsForSymbol.push_back(std::move(op));
+        c10OpsForSymbol.emplace_back(std::move(op));
         it = ops.erase(it);
       } else {
         ++it;
