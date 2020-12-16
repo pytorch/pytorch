@@ -1407,7 +1407,7 @@ def is_ninja_available():
     '''
     try:
         subprocess.check_output('ninja --version'.split())
-    except:
+    except Exception:
         return False
     else:
         return True
