@@ -1,7 +1,5 @@
-from collections.abc import Sized
 from torch.utils.data import IterableDataset, _utils
-from typing import TypeVar, Callable, Iterator
-
+from typing import TypeVar, Callable, Iterator, Sized
 
 T_co = TypeVar('T_co', covariant=True)
 S_co = TypeVar('S_co', covariant=True)
@@ -42,7 +40,6 @@ class CollateIterableDataset(IterableDataset[T_co]):
         >>> print(list(collated_ds))
         [tensor(3.), tensor(4.), tensor(5.), tensor(6.)]
     """
-
     def __init__(self,
                  dataset: IterableDataset[S_co],
                  *,
@@ -61,5 +58,4 @@ class CollateIterableDataset(IterableDataset[T_co]):
     def __len__(self) -> int:
         if isinstance(self.dataset, Sized) and len(self.dataset) >= 0:
             return len(self.dataset)
-        else:
-            raise NotImplementedError
+        raise NotImplementedError

@@ -305,25 +305,16 @@ struct TORCH_API RecordFunction {
  */
 class TORCH_API RecordFunctionCallback {
  public:
+  using StartCallback = std::unique_ptr<ObserverContext>(*)(const RecordFunction&);
+  using EndCallback = void (*)(const RecordFunction&, ObserverContext*);
+
   // This interface supports observers that require passing an ObserverContext
   // between start and end callbacks.
   explicit RecordFunctionCallback(
-      std::function<std::unique_ptr<ObserverContext>(const RecordFunction&)> start,
-      std::function<void(const RecordFunction&, ObserverContext*)> end =
-        [](const RecordFunction&, ObserverContext*) {}):
-      start_(std::move(start)),
-      end_(std::move(end)) {
-    scopes_.fill(true);
-  }
-
-  // This interface is for observers that do not pass an ObserverContext object
-  // between start and end callbacks.
-  explicit RecordFunctionCallback(
-      std::function<void(const RecordFunction&)> start,
-      std::function<void(const RecordFunction&)> end =
-        [](const RecordFunction&) {}):
-      start_{[start](const RecordFunction& rf) { start(rf); return nullptr; }},
-      end_{[end](const RecordFunction& rf, ObserverContext*) { end(rf); }} {
+      StartCallback start,
+      EndCallback end = nullptr) :
+      start_(start),
+      end_(end) {
     scopes_.fill(true);
   }
 
@@ -379,18 +370,18 @@ class TORCH_API RecordFunctionCallback {
     return scopes_[(size_t)sc];
   }
 
-  inline const std::function<std::unique_ptr<ObserverContext>(const RecordFunction&)>& start() const {
+  inline StartCallback start() const {
     return start_;
   }
 
-  inline const std::function<void(const RecordFunction&, ObserverContext*)>& end() const {
+  inline EndCallback end() const {
     return end_;
   }
 
  private:
   friend class CallbackManager;
-  std::function<std::unique_ptr<ObserverContext>(const RecordFunction&)> start_;
-  std::function<void(const RecordFunction&, ObserverContext*)> end_;
+  StartCallback start_;
+  EndCallback end_;
   bool(*should_run_)(const RecordFunctionCallback&) = nullptr;
   double sampling_prob_ = 1.0;
   std::array<bool, static_cast<size_t>(RecordScope::NUM_SCOPES)> scopes_ = {};

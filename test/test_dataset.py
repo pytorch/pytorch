@@ -1,5 +1,5 @@
 import torch
-from torch.utils.data import IterableDataset
+from torch.utils.data import IterableDataset, RandomSampler
 from torch.utils.data.datasets import (
     CollateIterableDataset, BatchIterableDataset, SamplerIterableDataset)
 from torch.testing._internal.common_utils import (TestCase, run_tests)
@@ -98,6 +98,7 @@ class TestFunctionalIterableDataset(TestCase):
     def test_sampler_dataset(self):
         arrs = range(10)
         ds = IterDatasetWithLen(arrs)
+        # Default SequentialSampler
         sampled_ds = SamplerIterableDataset(ds)
         self.assertEqual(len(sampled_ds), 10)
         i = 0
@@ -105,10 +106,13 @@ class TestFunctionalIterableDataset(TestCase):
             self.assertEqual(x, i)
             i += 1
 
+        # RandomSampler
+        random_sampled_ds = SamplerIterableDataset(ds, sampler=RandomSampler, replacement=True)
+
+        # Requires `__len__` to build SamplerDataset
         ds_nolen = IterDatasetWithoutLen(arrs)
-        sampled_ds = SamplerIterableDataset(ds_nolen)
-        with self.assertRaises(NotImplementedError):
-            len(sampled_ds)
+        with self.assertRaises(AssertionError):
+            sampled_ds = SamplerIterableDataset(ds_nolen)
 
 
 if __name__ == '__main__':
