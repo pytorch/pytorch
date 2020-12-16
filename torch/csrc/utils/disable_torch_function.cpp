@@ -179,7 +179,7 @@ auto check_has_torch_function(PyObject* obj) -> bool
 }
 } // namespace torch
 
-inline bool _sequence_has_torch_function(PyObject* args) {
+inline bool sequence_has_torch_function(PyObject* args) {
   Py_ssize_t nargs = PySequence_Fast_GET_SIZE(args);
   for (Py_ssize_t i = 0; i < nargs; i++) {
     PyObject* obj = PySequence_Fast_GET_ITEM(args, i);
@@ -189,7 +189,7 @@ inline bool _sequence_has_torch_function(PyObject* args) {
   return false;
 }
 
-inline bool _array_has_torch_function(PyObject *const *args, Py_ssize_t nargs) {
+inline bool array_has_torch_function(PyObject *const *args, Py_ssize_t nargs) {
   for (Py_ssize_t i = 0; i < nargs; i++) {
     if (torch::check_has_torch_function(args[i]))
       return true;
@@ -198,18 +198,18 @@ inline bool _array_has_torch_function(PyObject *const *args, Py_ssize_t nargs) {
 }
 
 PyObject* THPModule_has_torch_function(PyObject*, PyObject *arg) {
-  bool result;
+  bool result;  // NOLINT(cppcoreguidelines-init-variables)
   if (PyTuple_CheckExact(arg) || PyList_CheckExact(arg)) {
     // Fast path:
     //   If we know that we have a tuple or list, we can skip an INCREF and
     //   DECREF from PySequence_Fast. Core functions will always follow this
     //   convention (almost always tuples), and it shaves ~3.5% off the cost of
     //   the check.
-    result = _sequence_has_torch_function(arg);
+    result = sequence_has_torch_function(arg);
   } else {
     auto args = py::reinterpret_steal<py::object>(
       PySequence_Fast(arg, "expected a sequence"));
-    result = _sequence_has_torch_function(args.ptr());
+    result = sequence_has_torch_function(args.ptr());
   }
 
   if (result)
@@ -226,7 +226,7 @@ PyObject* THPModule_has_torch_function_unary(PyObject*, PyObject *obj) {
 }
 
 PyObject* THPModule_has_torch_function_variadic(PyObject*, PyObject *const *args, Py_ssize_t nargs) {
-  if (_array_has_torch_function(args, nargs))
+  if (array_has_torch_function(args, nargs))
     Py_RETURN_TRUE;
 
   Py_RETURN_FALSE;
