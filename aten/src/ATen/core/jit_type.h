@@ -1727,13 +1727,18 @@ namespace detail {
 template <typename T>
 struct getTypePtr_ final {
   static TypePtr call() {
-    TORCH_CHECK(
-        isCustomClassRegistered<T>(),
-        "Type ",
-        c10::util::get_fully_qualified_type_name<T>(),
-        " could not be converted to any of the known types."
-    );
-    auto res = getCustomClassType<T>();
+    TypePtr res = []() {
+      try {
+        return getCustomClassType<T>();
+      } catch(const c10::Error&) {
+        TORCH_CHECK(
+            false,
+            "Type ",
+            c10::util::get_fully_qualified_type_name<T>(),
+            " could not be converted to any of the known types."
+        );
+      }
+    }();
     return std::dynamic_pointer_cast<Type>(std::move(res));
   }
 };
@@ -1819,6 +1824,12 @@ struct getTypePtr_<at::Generator> final {
 };
 template <>
 struct getTypePtr_<std::string> final {
+  static TypePtr call() {
+    return StringType::get();
+  }
+};
+template <>
+struct getTypePtr_<at::Dimname> final {
   static TypePtr call() {
     return StringType::get();
   }
@@ -2540,4 +2551,27 @@ inline std::shared_ptr<const NamedType> Type::cast<NamedType>() const {
   }
   return nullptr;
 }
+
+// Used as a return type when inferring the IValue type of a Python object.
+struct InferredType {
+  /* implicit */ InferredType(TypePtr type) : type_(std::move(type)) {}
+  /* implicit */ InferredType(std::string reason)
+      : type_(nullptr), reason_(std::move(reason)) {}
+  TypePtr type() const {
+    TORCH_INTERNAL_ASSERT(type_);
+    return type_;
+  }
+  bool success() const {
+    return type_ != nullptr;
+  }
+  const std::string& reason() const {
+    TORCH_INTERNAL_ASSERT(!type_);
+    return reason_;
+  }
+
+private:
+  TypePtr type_;
+  std::string reason_;
+};
+
 } // namespace c10

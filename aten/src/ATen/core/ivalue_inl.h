@@ -7,6 +7,7 @@
 #include <ATen/core/List.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
+#include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
 #include <ATen/core/rref_interface.h>
 #include <c10/core/Scalar.h>
@@ -28,6 +29,7 @@ struct IValue;
 struct ClassType;
 struct TupleType;
 struct EnumType;
+struct InferredType;
 
 // For custom class __init__ registration, we need to pass in a function
 // that looks like this: [](IValue x, args...)
@@ -172,7 +174,7 @@ inline at::Generator IValue::toGenerator() const& {
 namespace ivalue {
 
 void CAFFE2_API
-checkCustomClassType(TypePtr expected_type, TypePtr actual_type);
+checkCustomClassType(const Type* expected_type, const Type* actual_type);
 
 template <typename T>
 using Shared = c10::intrusive_ptr<T>;
@@ -637,29 +639,8 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
 // see concrete implementation in python_ivalue.h
 struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
  public:
-  struct InferredType {
-    InferredType(TypePtr type) : type_(std::move(type)) {}
-    InferredType(std::string reason)
-        : type_(nullptr), reason_(std::move(reason)) {}
-    TypePtr type() const {
-      TORCH_INTERNAL_ASSERT(type_);
-      return type_;
-    }
-    bool success() const {
-      return type_ != nullptr;
-    }
-    const std::string& reason() const {
-      TORCH_INTERNAL_ASSERT(!type_);
-      return reason_;
-    }
-
-  private:
-    TypePtr type_;
-    std::string reason_;
-  };
-
   virtual PyObject* getPyObject() = 0;
-  virtual InferredType tryToInferType() = 0;
+  virtual c10::InferredType tryToInferType() = 0;
   virtual IValue toIValue(const TypePtr& type, c10::optional<int32_t> N = c10::nullopt) = 0;
   virtual std::string toStr() = 0;
 
@@ -818,8 +799,8 @@ c10::intrusive_ptr<T> IValue::toCustomClass() && {
       obj->slots().size() == 1,
       "Tried to cast IValue to custom class but it did "
       "not contain a custom class!");
-  auto expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>();
-  ivalue::checkCustomClassType(expected_type, type());
+  const Type* expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>().get();
+  ivalue::checkCustomClassType(expected_type, type().get());
   auto userObj =
       c10::static_intrusive_pointer_cast<T>(obj->getSlot(0).toCapsule());
   return userObj;
@@ -836,8 +817,8 @@ c10::intrusive_ptr<T> IValue::toCustomClass() const& {
       obj->slots().size() == 1,
       "Tried to cast IValue to custom class but it did "
       "not contain a custom class!");
-  auto expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>();
-  ivalue::checkCustomClassType(expected_type, type());
+  const Type* expected_type = c10::getCustomClassType<c10::intrusive_ptr<T>>().get();
+  ivalue::checkCustomClassType(expected_type, type().get());
   auto userObj =
       c10::static_intrusive_pointer_cast<T>(obj->getSlot(0).toCapsule());
   return userObj;
@@ -1147,13 +1128,16 @@ template <
     typename T,
     std::enable_if_t<std::is_base_of<torch::CustomClassHolder, T>::value, int>>
 IValue::IValue(c10::intrusive_ptr<T> custom_class) {
-  if (!c10::isCustomClassRegistered<c10::intrusive_ptr<T>>()) {
-    throw c10::Error(
-        "Trying to instantiate a class that isn't a registered custom class: " +
-            std::string(c10::util::get_fully_qualified_type_name<T>()),
-        "");
-  }
-  auto classType = c10::getCustomClassType<c10::intrusive_ptr<T>>();
+  TypePtr classType = []() {
+    try {
+      return c10::getCustomClassType<c10::intrusive_ptr<T>>();
+    } catch (const c10::Error&) {
+      throw c10::Error(
+          "Trying to instantiate a class that isn't a registered custom class: " +
+          std::string(c10::util::get_fully_qualified_type_name<T>()),
+          "");
+    }
+  }();
   auto ivalue_obj = c10::ivalue::Object::create(
       c10::StrongTypePtr(nullptr, classType), /*num_slots=*/1);
   ivalue_obj->setSlot(0, IValue::make_capsule(std::move(custom_class)));

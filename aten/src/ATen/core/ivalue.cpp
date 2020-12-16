@@ -22,7 +22,7 @@ namespace ivalue {
 
 // This is in ivalue.cpp because we need to access Type::annotation_str, which
 // is declared in jit_type.h
-void checkCustomClassType(TypePtr expected_type, TypePtr actual_type) {
+void checkCustomClassType(const Type* expected_type, const Type* actual_type) {
   // NB: doing pointer comparison here
   // If in the future there ever arises a need to call operator== on custom class
   // Type's, this needs to be changed!
@@ -213,7 +213,7 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
       c10::intrusive_ptr<at::ivalue::PyObjectHolder> py_obj = toPyObjectHolder();
       auto match = py_obj->tryToInferType();
       TORCH_INTERNAL_ASSERT(match.success(),
-            "Tracer cannot infer type of ", py_obj->toStr(), "\n:", match.reason());
+            "Cannot infer type of ", py_obj->toStr(), "\n:", match.reason());
       auto contained_value = py_obj->toIValue(match.type());
       contained_value.getSubValues(subValues);
       break;

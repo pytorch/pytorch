@@ -2,8 +2,7 @@
 
 #include <torch/csrc/jit/python/python_ivalue.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
   switch (type->kind()) {
@@ -148,6 +147,15 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         const auto& attrType = classType->getAttribute(slot);
         const auto& attrName = classType->getAttributeName(slot);
 
+        if (!py::hasattr(obj, attrName.c_str())) {
+          throw py::cast_error(c10::str(
+              "Tried to cast object to type ",
+              type->repr_str(),
+              " but object",
+              " was missing attribute ",
+              attrName));
+        }
+
         const auto& contained = py::getattr(obj, attrName.c_str());
         userObj->setSlot(slot, toIValue(contained, attrType));
       }
@@ -256,5 +264,4 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       "toIValue() cannot handle converting to type: ", type->repr_str()));
 }
 
-} // namespace jit
 } // namespace torch

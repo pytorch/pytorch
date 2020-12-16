@@ -260,7 +260,7 @@ inline c10::optional<TypePtr> unifyOrInitializeType(
   return unifyTypes(accum, unify);
 }
 
-using InferredType = at::ivalue::PyObjectHolder::InferredType;
+using InferredType = c10::InferredType;
 
 InferredType tryToInferContainerType(py::handle input);
 
