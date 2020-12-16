@@ -268,7 +268,7 @@ void foreach_tensor_##NAME##_cuda_(TensorList tensors) {                \
     floating_half_bfloat16_<NAME1>(tensors);                            \
 }
 
-#define FLOATING_HALF(NAME, NAME1, SUPPORTS_COMPLEX, SUPPORTS_INT)                 \
+#define FLOATING_HALF(NAME, NAME1)                                                 \
 template<typename T>                                                               \
 struct NAME1 {                                                                     \
     __device__ T operator()(T t) const { return std::NAME(t); }                    \
@@ -293,12 +293,12 @@ void foreach_tensor_##NAME##_cuda_(TensorList tensors) {                        
     floating_half_<NAME1>(tensors);                                                \
 }
 
-FLOATING_HALF(erfc, Erfc, true, false);
-FLOATING_HALF(expm1, Expm1, true, false);
-FLOATING_HALF(lgamma, Lgamma, true, false);
-FLOATING_HALF(trunc, Truncf, false, true);
-FLOATING_HALF(floor, Floor, false, true);
-FLOATING_HALF(ceil, Ceil, false, true);
+FLOATING_HALF(erfc, Erfc);
+FLOATING_HALF(expm1, Expm1);
+FLOATING_HALF(lgamma, Lgamma);
+FLOATING_HALF(trunc, Truncf);
+FLOATING_HALF(floor, Floor);
+FLOATING_HALF(ceil, Ceil);
 
 template<typename T>
 struct Log1p {
