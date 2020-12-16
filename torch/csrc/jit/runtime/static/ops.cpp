@@ -6,17 +6,23 @@
 namespace torch {
 namespace jit {
 
-namespace {
-inline at::Tensor create_empty_from(const at::Tensor& t) {
-  return at::empty({0}, t.options());
-}
-} // namespace
-
 C10_DEFINE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
 
 bool canRunOutOfPlace(Node* n) {
   auto op_name = std::string(n->kind().toQualString());
   return SROperatorRegistry()->Has(op_name);
+}
+
+bool canReuseInputs(Node* n) {
+  auto op_name = std::string(n->kind().toQualString());
+  DCHECK(SROperatorRegistry()->Has(op_name));
+  return SROperatorRegistry()->Create(op_name)->CanReuseInput();
+}
+
+bool canReuseOutputs(Node* n) {
+  auto op_name = std::string(n->kind().toQualString());
+  DCHECK(SROperatorRegistry()->Has(op_name));
+  return SROperatorRegistry()->Create(op_name)->CanReuseOutput();
 }
 
 // TODO: expand to include all view producing ops, mostly in
@@ -25,13 +31,12 @@ bool canRunNatively(Node* n) {
   // In alphabetical order
   const static std::unordered_set<std::string> native_nodes{
       "aten::flatten",
+      "aten::narrow",
       "aten::permute",
       "aten::reshape",
       "aten::slice",
       "aten::transpose",
       "aten::to",
-      "aten::reshape",
-      "aten::slice",
       "prim::ListConstruct",
       "prim::ListUnpack",
       "prim::TupleConstruct"};
@@ -45,6 +50,34 @@ bool canRunNatively(Node* n) {
   return true;
 }
 
+// TODO: PLEASE DON'T COPY PASTE THIS, this is copy pasted
+// generated code to unblock, need to make this nicer
+struct static_add final : public at::native::structured_add_out {
+  static_add(at::Tensor& output) : output_(output) {}
+  void set_output(
+      int64_t output_idx,
+      at::IntArrayRef sizes,
+      at::IntArrayRef strides,
+      at::TensorOptions options,
+      at::DimnameList names) override {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(output_idx == 0);
+    // NB: do NOT use resize_output as it will complain if not zero sized.
+    at::native::resize_(output_, sizes);
+    if (!strides.empty()) {
+      TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
+      output_.as_strided_(sizes, strides);
+    } else if (options.memory_format_opt().has_value()) {
+      output_.unsafeGetTensorImpl()->empty_tensor_restride(
+          *options.memory_format_opt());
+    }
+  }
+  const at::Tensor& maybe_get_output(int64_t output_idx) override {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(output_idx == 0);
+    return output_;
+  }
+  at::Tensor& output_;
+};
+
 REGISTER_OPERATOR_FUNCTOR(aten::add, aten_add, [](Node* n) -> SROperator {
   return [](const ProcessedNode* p_node, std::vector<IValue>& reg) {
     auto in0_t = p_node->Input(0, reg).toTensor();
@@ -54,8 +87,9 @@ REGISTER_OPERATOR_FUNCTOR(aten::add, aten_add, [](Node* n) -> SROperator {
       p_node->Output(0, reg) = create_empty_from(in0_t);
     }
     auto out_t = p_node->Output(0, reg).toTensor();
-    out_t.resize_({0});
-    at::native::add_out(out_t, in0_t, in1_t, in2_s);
+    static_add op{out_t};
+    op.meta(in0_t, in1_t, in2_s);
+    op.impl(out_t, in0_t, in1_t, in2_s);
   };
 });
 
@@ -372,6 +406,37 @@ getNativeOperation(Node* n) {
       auto in4_i = p_node->Input(4, reg).toInt();
       p_node->Output(0, reg) =
           at::native::slice(in0_t, in1_i, in2_i, in3_i, in4_i);
+    };
+  } else if (n->kind() == c10::Symbol::fromQualString("aten::narrow")) {
+    return [](const ProcessedNode* p_node, std::vector<IValue>& reg) {
+      auto self = p_node->Input(0, reg).toTensor(); // self
+      auto dim = p_node->Input(1, reg).toInt(); // dim
+      int64_t start = 0;
+      if (p_node->Input(2, reg).isScalar()) {
+        start = p_node->Input(2, reg).toInt();
+      } else {
+        auto t = p_node->Input(2, reg).toTensor();
+        start = t.item<int64_t>();
+      }
+      auto length = p_node->Input(3, reg).toInt(); // length
+      TORCH_CHECK(
+          self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
+      auto cur_size = self.size(dim);
+      if (start != cur_size && start < 0) { // start being the end is valid, but
+                                            // not a valid dim specification.
+        start = at::maybe_wrap_dim(start, cur_size);
+      }
+      TORCH_CHECK(
+          length >= 0 && start <= cur_size - length,
+          "start (",
+          start,
+          ") + length (",
+          length,
+          ") exceeds dimension size (",
+          cur_size,
+          ").");
+      p_node->Output(0, reg) =
+          at::native::slice(self, dim, start, start + length, 1);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::to")) {
     return [](const ProcessedNode* p_node, std::vector<IValue>& reg) {

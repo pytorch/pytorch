@@ -33,8 +33,8 @@ class TracerBase:
 
         If kind = 'placeholder', then we're creating a Node that
         represents the parameter of a function. If we need to encode
-        a default parameter, we use the `args` tuple. `args` is
-        otherwise empty for `placeholder` Nodes.
+        a default parameter, we use the ``args`` tuple. ``args`` is
+        otherwise empty for ``placeholder`` Nodes.
         '''
         args_ = self.create_arg(args)
         kwargs_ = self.create_arg(kwargs)
@@ -50,7 +50,13 @@ class TracerBase:
         Can be override to support more trace-specific types.
         """
         # aggregates
-        if isinstance(a, (tuple, list)):
+        if isinstance(a, tuple) and hasattr(a, '_fields'):
+            # NamedTuple constructors don't seem to like getting a generator
+            # expression as an argument to their constructor, so build this
+            # intermediate tuple and unpack it into the NamedTuple constructor
+            args = tuple(self.create_arg(elem) for elem in a)
+            return type(a)(*args)  # type: ignore
+        elif isinstance(a, (tuple, list)):
             return type(a)(self.create_arg(elem) for elem in a)
         elif isinstance(a, dict):
             r = {}
