@@ -96,9 +96,11 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
 }
 
 Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
-  TORCH_CHECK((at::isFloatingType(input.scalar_type()) || at::isComplexType(input.scalar_type())) && input.dim() >= 2,
+  ScalarType t = input.scalar_type();
+  TORCH_CHECK((t == ScalarType::Double || t == ScalarType::Float || t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble)
+              && input.dim() >= 2,
               "linalg_pinv(", input.scalar_type(), "{", input.sizes(), "}): expected a tensor with 2 or more dimensions "
-              "of floating types");
+              "of float, double, cfloat or cdouble types");
   if (input.numel() == 0) {
     // Match NumPy
     auto input_sizes = input.sizes().vec();
