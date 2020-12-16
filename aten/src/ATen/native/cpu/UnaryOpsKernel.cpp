@@ -277,7 +277,7 @@ static void sign_kernel(TensorIterator& iter){
           [=](scalar_t a) -> scalar_t { return (0 < a) - (a < 0); },
           [=](Vec256<scalar_t> self_vec){
 
-              // Comparision operators returns bitmask.
+              // Comparison operators returns bitmask.
               auto left = Vec256<scalar_t>::blendv(zero_vec, one_vec, zero_vec < self_vec);
               auto right = Vec256<scalar_t>::blendv(zero_vec, one_vec, self_vec < zero_vec);
 
