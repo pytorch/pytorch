@@ -75,8 +75,7 @@ inline uint32_t THPUtils_unpackUInt32(PyObject* obj) {
   if (PyErr_Occurred()) {
     throw python_error();
   }
-  if (value > std::numeric_limits<uint32_t>::max() ||
-      value < std::numeric_limits<uint32_t>::min()) {
+  if (value > std::numeric_limits<uint32_t>::max()) {
     throw std::runtime_error("Overflow when unpacking unsigned long");
   }
   return (uint32_t)value;
