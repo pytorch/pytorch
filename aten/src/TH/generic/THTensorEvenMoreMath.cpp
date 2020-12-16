@@ -5,6 +5,7 @@
 #include <TH/generic/THTensorApply.hpp>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/WrapDimUtils.h>
+#include <ATen/MemoryOverlap.h>
 
 // Finds non-zero elements of a tensor and returns their subscripts
 void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
@@ -254,6 +255,13 @@ void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, scalar
   numel = THLongTensor_nElement(index);
   THArgCheck(THTensor_nDimensionLegacyNoScalars(index) == 1, 3, "Index is supposed to be a vector");
   THArgCheck(dim < THTensor_nDimensionLegacyNoScalars(tensor), 4,"Indexing dim %d is out of bounds of tensor", dim);
+  at::assert_no_overlap(tensor, index);
+  if (at::has_internal_overlap(tensor) == at::MemOverlap::YES) {
+    TORCH_WARN(
+      "Use of index_fill_ on expanded tensors is deprecated. "
+      "Please clone() the tensor before performing this operation. "
+      "This also applies to advanced indexing e.g. tensor[mask] = scalar");
+  }
 
   index = THLongTensor_newContiguous(index);
   index_data = THLongTensor_data(index);
