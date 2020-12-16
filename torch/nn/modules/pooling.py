@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from torch import Tensor
 from .module import Module
@@ -303,9 +303,9 @@ class MaxUnpool1d(_MaxUnpoolNd):
         tensor([[[ 0.,  2.,  0.,  4.,  0.,  6.,  0., 8.]]])
     """
 
-    kernel_size: _size_1_t
-    stride: _size_1_t
-    padding: _size_1_t
+    kernel_size: Tuple[int]
+    stride: Tuple[int]
+    padding: Tuple[int]
 
     def __init__(self, kernel_size: _size_1_t, stride: Optional[_size_1_t] = None, padding: _size_1_t = 0) -> None:
         super(MaxUnpool1d, self).__init__()
@@ -380,9 +380,9 @@ class MaxUnpool2d(_MaxUnpoolNd):
                   [  0.,   0.,   0.,   0.,   0.]]]])
     """
 
-    kernel_size: _size_2_t
-    stride: _size_2_t
-    padding: _size_2_t
+    kernel_size: Tuple[int, int]
+    stride: Tuple[int, int]
+    padding: Tuple[int, int]
 
     def __init__(self, kernel_size: _size_2_t, stride: Optional[_size_2_t] = None, padding: _size_2_t = 0) -> None:
         super(MaxUnpool2d, self).__init__()
@@ -446,9 +446,9 @@ class MaxUnpool3d(_MaxUnpoolNd):
         torch.Size([20, 16, 51, 33, 15])
     """
 
-    kernel_size: _size_3_t
-    stride: _size_3_t
-    padding: _size_3_t
+    kernel_size: Tuple[int, int, int]
+    stride: Tuple[int, int, int]
+    padding: Tuple[int, int, int]
 
     def __init__(self, kernel_size: _size_3_t, stride: Optional[_size_3_t] = None, padding: _size_3_t = 0) -> None:
         super(MaxUnpool3d, self).__init__()
@@ -739,10 +739,10 @@ class FractionalMaxPool2d(Module):
     __constants__ = ['kernel_size', 'return_indices', 'output_size',
                      'output_ratio']
 
-    kernel_size: _size_2_t
+    kernel_size: Tuple[int, int]
     return_indices: bool
-    output_size: _size_2_t
-    output_ratio: _ratio_2_t
+    output_size: Optional[Tuple[int, int]]
+    output_ratio: Optional[Tuple[int, int]]
 
     def __init__(self, kernel_size: _size_2_t, output_size: Optional[_size_2_t] = None,
                  output_ratio: Optional[_ratio_2_t] = None,
@@ -802,10 +802,10 @@ class FractionalMaxPool3d(Module):
     """
     __constants__ = ['kernel_size', 'return_indices', 'output_size',
                      'output_ratio']
-    kernel_size: _size_3_t
+    kernel_size: Tuple[int, int, int] 
     return_indices: bool
-    output_size: _size_3_t
-    output_ratio: _ratio_3_t
+    output_size: Optional[Tuple[int, int, int]]
+    output_ratio: Optional[Tuple[int, int, int]]
 
     def __init__(self, kernel_size: _size_3_t, output_size: Optional[_size_3_t] = None,
                  output_ratio: Optional[_ratio_3_t] = None,
