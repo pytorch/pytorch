@@ -77,9 +77,9 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
 }
 
 // Helper function for getting an ideep tensor out of an aten Tensor.
-// // Note in case the aten Tensor is a dense tensor, the returned ideep
-// // tensor is just a view of the storage of the aten dense tensor, so
-// // caller needs to make sure the aten dense tensor's lifetime is
+// Note in case the aten Tensor is a dense tensor, the returned ideep
+// tensor is just a view of the storage of the aten dense tensor, so
+// caller needs to make sure the aten dense tensor's lifetime is
 // longer than the ideep tensor.
 ideep::tensor itensor_from_tensor(const Tensor& tensor) {
   if (tensor.is_mkldnn()) {
