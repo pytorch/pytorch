@@ -1997,7 +1997,8 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    @precisionOverride({torch.float32: 2e-3, torch.complex64: 2e-3})
+    @precisionOverride({torch.float32: 2e-3, torch.complex64: 2e-3,
+                        torch.float64: 1e-8, torch.complex128: 1e-8})
     def test_inverse(self, device, dtype):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
@@ -2008,7 +2009,7 @@ class TestLinalg(TestCase):
             # NumPy uses 'gesv' LAPACK routine solving the equation A A_inv = I
             # But in PyTorch 'gertf' + 'getri' is used causing element-wise differences
             expected = np.linalg.inv(matrix.cpu().numpy())
-            self.assertEqual(matrix_inverse, expected, atol=self.precision, rtol=1e-3)
+            self.assertEqual(matrix_inverse, expected, atol=self.precision, rtol=self.precision)
 
             # Additional correctness tests, check matrix*matrix_inverse == identity
             identity = torch.eye(n, dtype=dtype, device=device)
