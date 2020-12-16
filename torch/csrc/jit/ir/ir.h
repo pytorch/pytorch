@@ -73,7 +73,9 @@ namespace aten {
 using namespace ::c10::aten;
 }
 namespace cuda {
+#ifdef __HIP_PLATFORM_HCC__
 using namespace ::c10::cuda;
+#endif
 }
 
 struct Function;
