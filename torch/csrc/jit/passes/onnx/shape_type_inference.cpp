@@ -328,7 +328,7 @@ void ConvertGraphToONNXProto(
 // this function checks wheather the blocks of If node have the same return
 // type.
 bool IsBlockReturnType(Node* n) {
-  TORCH_INTERNAL_ASSERT(node()->kind() == onnx::If);
+  TORCH_INTERNAL_ASSERT(n->kind() == ::c10::onnx::If);
   auto then_block = n->blocks()[0];
   auto else_block = n->blocks()[1];
   for (size_t i = 0; i < n->outputs().size(); i++) {
