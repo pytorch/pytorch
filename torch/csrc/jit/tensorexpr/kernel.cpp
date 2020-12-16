@@ -1251,7 +1251,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
       return computeOneOperand(
           "aten_abs",
           v,
-          [](const ExprHandle& a) { return tensorexpr::abs(promoteHalfToFloat(a)); },
+          [](const ExprHandle& a) {
+            return tensorexpr::abs(promoteHalfToFloat(a));
+          },
           kIntegralTypes | kFloatingPointTypes | kBoolType);
     } break;
 
