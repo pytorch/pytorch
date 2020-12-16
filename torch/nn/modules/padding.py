@@ -4,6 +4,7 @@ from .. import functional as F
 
 from torch import Tensor
 from ..common_types import _size_2_t, _size_4_t, _size_6_t
+from typing import Sequence
 
 
 # TODO: grad_output size asserts in THNN
@@ -18,6 +19,7 @@ class _ConstantPadNd(Module):
         self.value = value
 
     def forward(self, input: Tensor) -> Tensor:
+        assert isinstance(self.padding, Sequence)
         return F.pad(input, self.padding, 'constant', self.value)
 
     def extra_repr(self) -> str:
@@ -167,6 +169,7 @@ class _ReflectionPadNd(Module):
     __constants__ = ['padding']
 
     def forward(self, input: Tensor) -> Tensor:
+        assert isinstance(self.padding, Sequence)
         return F.pad(input, self.padding, 'reflect')
 
     def extra_repr(self) -> str:
@@ -268,6 +271,7 @@ class _ReplicationPadNd(Module):
     __constants__ = ['padding']
 
     def forward(self, input: Tensor) -> Tensor:
+        assert isinstance(self.padding, Sequence)
         return F.pad(input, self.padding, 'replicate')
 
     def extra_repr(self) -> str:
