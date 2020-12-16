@@ -22,7 +22,7 @@ from torch.testing._internal.common_device_type import \
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyOnCPUAndCUDA, dtypesIfCUDA,
      onlyCUDA)
-from torch.testing import floating_and_complex_types, floating_types
+from torch.testing import floating_and_complex_types, floating_types, all_types
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32
 from torch.testing._internal.jit_metaprogramming_utils import gen_script_fn_and_args
 from torch.autograd import gradcheck, gradgradcheck
@@ -2122,7 +2122,10 @@ class TestLinalg(TestCase):
         def run_test_numpy(A, hermitian):
             # Check against NumPy output
             # Test float rcond, and specific value for each matrix
-            rconds = [float(torch.rand(1)), torch.rand(A.shape[:-2], dtype=torch.double, device=device)]
+            rconds = [float(torch.rand(1)), ]
+            # Test different types of rcond tensor
+            for rcond_type in all_types():
+                rconds.append(torch.rand(A.shape[:-2], dtype=torch.double, device=device).to(rcond_type))
             # Test broadcasting of rcond
             if A.ndim > 2:
                 rconds.append(torch.rand(A.shape[-3], device=device))
@@ -2130,7 +2133,7 @@ class TestLinalg(TestCase):
                 actual = torch.linalg.pinv(A, rcond=rcond, hermitian=hermitian)
                 numpy_rcond = rcond if isinstance(rcond, float) else rcond.cpu().numpy()
                 expected = np.linalg.pinv(A.cpu().numpy(), rcond=numpy_rcond, hermitian=hermitian)
-                self.assertEqual(actual, expected)
+                self.assertEqual(actual, expected, atol=self.precision, rtol=1e-5)
 
         for sizes in [(5, 5), (3, 5, 5), (3, 2, 5, 5),  # square matrices
                       (3, 2), (5, 3, 2), (2, 5, 3, 2),  # fat matrices
