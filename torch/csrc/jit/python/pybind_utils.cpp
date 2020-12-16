@@ -2,7 +2,8 @@
 
 #include <torch/csrc/jit/python/python_ivalue.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
   switch (type->kind()) {
@@ -264,4 +265,5 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       "toIValue() cannot handle converting to type: ", type->repr_str()));
 }
 
+} // namespace jit
 } // namespace torch
