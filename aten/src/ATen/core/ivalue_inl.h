@@ -861,6 +861,36 @@ c10::List<Elem> generic_to(IValue ivalue, _fake_type<c10::List<Elem>>) {
   return impl::toTypedList<Elem>(std::move(ivalue).toList());
 }
 
+template <typename T>
+static std::vector<T> createVectorFromList(const c10::detail::ListImpl* impl) {
+  std::vector<T> result;
+  result.reserve(impl->list.size());
+  for (size_t i = 0, N = impl->list.size(); i < N; ++i) {
+    result.push_back(impl->list[i].to<T>());
+  }
+  return result;
+}
+
+template <typename T>
+static std::vector<T> createVectorFromList(const c10::List<T>& impl) {
+  std::vector<T> result;
+  result.reserve(impl.size());
+  for (size_t i = 0, N = impl.size(); i < N; ++i) {
+    result.push_back(impl[i]);
+  }
+  return result;
+}
+
+template <typename T>
+OptionalArray<T> generic_to(IValue ivalue, _fake_type<OptionalArray<T>>) {
+  if (ivalue.isNone()) {
+    return {};
+  }
+  return createVectorFromList<T>(
+    std::move(ivalue).to<c10::List<T>>()
+  );
+}
+
 namespace detail {
 template <typename Elem, size_t... I>
 std::array<Elem, sizeof...(I)> generic_to_array(
@@ -950,16 +980,6 @@ inline T IValue::to() && {
 template <typename T>
 inline T IValue::to() const& {
   return generic_to(*this, _fake_type<T>{});
-}
-
-template <typename T>
-static std::vector<T> createVectorFromList(const c10::detail::ListImpl* impl) {
-  std::vector<T> result;
-  result.reserve(impl->list.size());
-  for (size_t i = 0, N = impl->list.size(); i < N; ++i) {
-    result.push_back(impl->list[i].to<T>());
-  }
-  return result;
 }
 
 inline c10::List<int64_t> IValue::toIntList() && {
@@ -1209,20 +1229,6 @@ inline optional<T> IValue::toOptional() {
     return nullopt;
   }
   return this->to<T>();
-}
-
-inline OptionalArray<int64_t> IValue::toOptionalIntArray() {
-  if (this->isNone()) {
-    return {};
-  }
-  return this->toIntVector();
-}
-
-inline OptionalArray<double> IValue::toOptionalDoubleArray() {
-  if (this->isNone()) {
-    return {};
-  }
-  return this->toDoubleVector();
 }
 
 inline bool IValue::isCustomClass() const {

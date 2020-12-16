@@ -889,12 +889,7 @@ class DistributedTest:
             # Each rank would have 2 * (world_size - 1) sends, verify that
             # globally we receive the same amount on the other end.
             recv_ranks_tensor = torch.cat((torch.tensor(recv_ranks), torch.tensor(irecv_ranks)), 0)
-            global_recv_ranks = [
-                torch.empty_like(recv_ranks_tensor),
-                torch.empty_like(recv_ranks_tensor),
-                torch.empty_like(recv_ranks_tensor),
-                torch.empty_like(recv_ranks_tensor),
-            ]
+            global_recv_ranks = [torch.empty_like(recv_ranks_tensor) for _ in range(dist.get_world_size())]
             dist.all_gather(global_recv_ranks, recv_ranks_tensor)
             global_recv_ranks_list = []
             for tensor in global_recv_ranks:
