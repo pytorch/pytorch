@@ -2,7 +2,7 @@ import torch
 from torch.testing import FileCheck
 
 from torch.testing._internal.common_utils import \
-    (run_tests, clone_input_helper)
+    (run_tests)
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, skipCPUIfNoLapack, skipCUDAIfNoMagma, onlyCPU)
@@ -171,6 +171,13 @@ class TestOpNormalization(JitTestCase):
     pass
 
 
+# Clone input tensor and sequence of Tensors
+def clone_inp(inp):
+    if isinstance(inp, Sequence):
+        return list(map(torch.clone, inp))
+    else:
+        return inp.clone()
+
 # Generates alias tests and adds them to the specified class (cls)
 def create_alias_tests(cls):
     for info in alias_infos:
@@ -214,8 +221,8 @@ def create_alias_tests(cls):
 
             # Acquires and checks the graph remaps the alias
             inp = info.get_input(device)
-            scripted(clone_input_helper(inp))
-            graph = scripted.graph_for(clone_input_helper(inp))
+            scripted(clone_inp(inp))
+            graph = scripted.graph_for(clone_inp(inp))
             FileCheck().check(info.original_name).check_not(info.alias_name).run(graph)
 
             # Checks that tracing converts aliases
@@ -225,9 +232,9 @@ def create_alias_tests(cls):
             def _fn(t, info=info, args=args):
                 return info.alias_op(t, *args)
 
-            traced = torch.jit.trace(_fn, (clone_input_helper(inp),))
-            traced(clone_input_helper(inp))
-            graph = traced.graph_for(clone_input_helper(inp))
+            traced = torch.jit.trace(_fn, (clone_inp(inp),))
+            traced(clone_inp(inp))
+            graph = traced.graph_for(clone_inp(inp))
             FileCheck().check(info.original_name).check_not(info.alias_name).run(graph)
 
         # Applies decorators
@@ -245,10 +252,10 @@ def create_alias_tests(cls):
             inp = info.get_input(device)
             args = info.get_args(device)
 
-            alias_input = clone_input_helper(inp)
+            alias_input = clone_inp(inp)
             alias_result = alias_op(alias_input, *args)
 
-            original_input = clone_input_helper(inp)
+            original_input = clone_inp(inp)
             original_result = alias_op(original_input, *args)
 
             self.assertEqual(alias_input, original_input, atol=0, rtol=0)

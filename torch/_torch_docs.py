@@ -1134,7 +1134,7 @@ add_docstr(torch.broadcast_to,
            r"""
 broadcast_to(input, shape) -> Tensor
 
-Broadcasts :attr:`input` to the :attr:`shape`.
+Broadcasts :attr:`input` to the shape :attr:`\shape`.
 Equivalent to calling ``input.expand(shape)``. See :meth:`~Tensor.expand` for details.
 
 Args:

@@ -292,10 +292,10 @@ def sample_inputs_broadcast_to(op_info, device, dtype, requires_grad):
         ((), (1, 3, 2)),
     )
 
-    return [SampleInput((make_tensor(size, device, dtype,
-                                     low=None, high=None,
-                                     requires_grad=requires_grad),
-                         shape)) for size, shape in test_cases]
+    return tuple(SampleInput((make_tensor(size, device, dtype,
+                                          low=None, high=None,
+                                          requires_grad=requires_grad), shape))
+                 for size, shape in test_cases)
 
 def np_unary_ufunc_integer_promotion_wrapper(fn):
     # Wrapper that passes PyTorch's default scalar
