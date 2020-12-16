@@ -42,7 +42,8 @@ set +ex
 grep -E -R 'PyLong_(From|As)(Unsigned|)Long\(' --exclude=python_numbers.h torch/
 PYLONG_API_CHECK=$?
 if [[ $PYLONG_API_CHECK == 0 ]]; then
-  echo "Usage of PyLong_{From,As}{Unsigned}Long API may lead to potential errors on Windows."
+  echo "Usage of PyLong_{From,As}{Unsigned}Long API may lead to overflow errors on Windows"
+  echo "because `sizeof(long) == 4` and `sizeof(unsigned long) == 4`."
   echo "Please include \"torch/csrc/python_numbers.h\" and use the correspoding APIs instead."
   echo "PyLong_FromLong -> THPUtils_packInt32 / THPUtils_packInt64"
   echo "PyLong_AsLong -> THPUtils_unpackInt / THPUtils_packLong"
