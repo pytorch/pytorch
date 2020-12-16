@@ -15190,19 +15190,19 @@ dedent """
     def test_dict_invalid_annotations(self):
         # Check for invalid value type annotation
         def wrong_value_type(dictionary: Dict[str, torch.jit.ScriptModule]):
-                return
+            return
         with self.assertRaisesRegex(ValueError, "Unknown type annotation"):
             torch.jit.script(wrong_value_type)
 
         # Check for invalid key type annotation
         def wrong_key_type(dictionary: Dict[torch.jit.ScriptModule, str]):
-                return
+            return
         with self.assertRaisesRegex(ValueError, "Unknown type annotation"):
             torch.jit.script(wrong_key_type)
 
         # Check for invalid key and value type annotation
         def wrong_key_value_type(dictionary: Dict[torch.jit.ScriptModule, torch.jit.ScriptModule]):
-                return
+            return
         with self.assertRaisesRegex(ValueError, "Unknown type annotation"):
             torch.jit.script(wrong_key_value_type)
 
