@@ -194,7 +194,8 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   std::shared_ptr<Node> grad_fn_;
   std::weak_ptr<Node> grad_accumulator_;
 
-  // This field is lazily initialized
+  // This field is lazily initialized and is used to store all the
+  // forward AD gradients associated with this Tensor
   // Any transition from not_initialized to initialized
   // must be protected by mutex_
   std::shared_ptr<ForwardGrad> fw_grad_;
@@ -265,6 +266,16 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
     TORCH_CHECK(
         !grad_fn_ || !requires_grad_,
         "requires_grad should be false if grad_fn is set");
+  }
+
+  ~AutogradMeta() {
+    // If AutogradMeta is being destroyed, it means that no other thread can hold a reference to its
+    // corresponding Tensor. It implies that no other thread can be using this object and so there is
+    // no need to lock mutex_ here.
+    if (fw_grad_) {
+      fw_grad_->clear();
+    }
+
   }
 };
 

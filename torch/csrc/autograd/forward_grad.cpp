@@ -44,6 +44,15 @@ std::shared_ptr<ForwardADLevel> ForwardADLevel::get_by_idx(uint64_t idx) {
     return all_forward_levels_[idx];
 }
 
+std::shared_ptr<ForwardADLevel> ForwardADLevel::try_get_by_idx(uint64_t idx) {
+    std::lock_guard<std::mutex> lock(all_forward_levels_mutex_);
+    if (idx < all_forward_levels_.size()) {
+        return all_forward_levels_[idx];
+    } else {
+        return nullptr;
+    }
+}
+
 ForwardADLevel::~ForwardADLevel() {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = grads_.begin();

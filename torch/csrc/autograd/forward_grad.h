@@ -7,6 +7,7 @@ namespace torch { namespace autograd {
 
 struct ForwardGrad;
 
+
 // This file contains two classes that are used to store forward AD gradients and
 // ensure that they are scoped properly.
 // Because forward AD runs concurently with the evaluation of the function, we need
@@ -30,6 +31,13 @@ struct ForwardGrad;
 // On the other hand, the level, when it is released, will reset all the gradients for this
 // level on all the ForwardGrad.
 
+
+// Data structures in this file are optimized for this maximum number of levels.
+// The number of levels corresponds to the degree of the gradient being
+// computed using forward AD and we don't expect more than second order gradients
+// to be common.
+#define EXPECTED_MAX_LEVEL 2
+
 struct TORCH_API ForwardADLevel {
     ForwardADLevel(uint64_t idx): idx_(idx) {}
     ~ForwardADLevel();
@@ -37,6 +45,7 @@ struct TORCH_API ForwardADLevel {
     static uint64_t get_next_idx();
     static void release_idx(uint64_t idx);
     static std::shared_ptr<ForwardADLevel> get_by_idx(uint64_t idx);
+    static std::shared_ptr<ForwardADLevel> try_get_by_idx(uint64_t idx);
 
     void erase(const std::shared_ptr<ForwardGrad>& grad) {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -58,9 +67,33 @@ private:
 struct TORCH_API ForwardGrad : std::enable_shared_from_this<ForwardGrad> {
 
     ForwardGrad() {}
-    ~ForwardGrad() {
-        for (auto& c: content_) {
-            ForwardADLevel::get_by_idx(c.first)->erase(shared_from_this());
+
+    // This function must only be called when AutogradMeta is being destructed
+    // as it ensures that:
+    //   - The only (potential) other references to this ForwardGrad are the
+    //     different level it is registered to
+    //   - No other thread will try to call `set_value` or `value` ever from now on
+    //   - Any of the ForwardADLevel that this ForwardGrad is registered with migh
+    //     call `reset` at any point during this function
+    void clear() {
+        c10::SmallVector<uint64_t, EXPECTED_MAX_LEVEL> levels_idx;
+
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            for (auto& c: content_) {
+                levels_idx.push_back(c.first);
+            }
+        }
+
+        for (auto l_idx: levels_idx) {
+            // Use "try" version here as another thread might have deleted this
+            // level before we got here
+            // This is an owning reference as we want to keep the level alive
+            // until we successfully unregister ourselves
+            auto level = ForwardADLevel::try_get_by_idx(l_idx);
+            if (level) {
+                level->erase(shared_from_this());
+            }
         }
     }
 
@@ -95,6 +128,7 @@ struct TORCH_API ForwardGrad : std::enable_shared_from_this<ForwardGrad> {
 
 
 private:
+    // TODO(albanD): replace this with a SmallVector
     std::unordered_map<uint64_t, at::Tensor> content_;
     mutable std::mutex mutex_;
 
