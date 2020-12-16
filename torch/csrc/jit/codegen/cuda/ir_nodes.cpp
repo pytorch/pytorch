@@ -215,6 +215,10 @@ BroadcastOp::BroadcastOp(Val* out, Val* in, std::vector<bool> is_broadcast_dims)
       out_(out),
       in_(in),
       is_broadcast_dims_(std::move(is_broadcast_dims)) {
+  // clang-tidy complains about out_ that it may be null.
+  TORCH_INTERNAL_ASSERT(out_ != nullptr);
+  TORCH_INTERNAL_ASSERT(in_ != nullptr);
+
   auto out_type = out->getValType().value();
   auto in_type = in->getValType().value();
 
@@ -551,6 +555,7 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
 
 // TODO(kir): review if this is still needed in the Fusion IR
 Val* IterDomain::extent() const {
+  TORCH_INTERNAL_ASSERT(extent_ != nullptr);
   if (isThread()) {
     if (extent_->getValType() == ValType::Scalar)
       if (extent_->as<Int>()->isConst())
@@ -564,6 +569,8 @@ Val* IterDomain::extent() const {
 namespace {
 
 class RejectMultipleGridReductions : public IterVisitor {
+  using IterVisitor::handle;
+
  public:
   static void analyze(Fusion* fusion) {
     RejectMultipleGridReductions multi_grid;

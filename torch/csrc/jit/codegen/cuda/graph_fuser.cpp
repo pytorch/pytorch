@@ -513,6 +513,7 @@ struct CudaGraphFuser {
       bchunk = promoteChunkToBroadcastingChunk(chunk);
     }
     size_t nchunks = bchunk->i(attr::chunks);
+    TORCH_INTERNAL_ASSERT(nchunks != 0);
     WithInsertPoint guard(bchunk->next());
 
     std::vector<Value*> producer_chunk_outputs;
@@ -865,7 +866,7 @@ struct CudaGraphFuser {
       any_changed = false;
       refreshAliasDb();
       for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();) {
-        bool changed;
+        bool changed = false;
         std::tie(it, changed) = scanNode(*it);
         any_changed |= changed;
       }

@@ -62,7 +62,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
                      .size()
               << "> " << varName(tv);
       } else {
-        TORCH_INTERNAL_ASSERT(val->isScalar());
+        TORCH_INTERNAL_ASSERT(val->isScalar()); // NOLINT (LLVM bug 48525)
         TORCH_INTERNAL_ASSERT(val->definition() == nullptr);
         code_ << val->dtype() << " " << gen(val);
       }

@@ -165,7 +165,7 @@ class AllocateReuseModifier {
           const auto register_size =
               expr_evaluator_.evaluate(allocation->size());
           if (register_size.has_value()) {
-            local_valid = *register_size > kRegisterSizeThreshold;
+            local_valid = size_t(*register_size) > kRegisterSizeThreshold;
           }
         }
 

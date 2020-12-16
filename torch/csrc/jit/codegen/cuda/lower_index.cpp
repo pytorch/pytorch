@@ -147,8 +147,6 @@ void allocateGridReductionFlag(
 void IndexLowering::visit(const kir::ReductionOp* rop) {
   TORCH_INTERNAL_ASSERT(ir_utils::isTVOp(rop));
 
-  const auto gpu_lower = GpuLower::current();
-
   const auto out_tv = rop->out()->as<kir::TensorView>();
   const auto out_domain = out_tv->domain();
 

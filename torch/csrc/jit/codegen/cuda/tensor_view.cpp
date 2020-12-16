@@ -1017,7 +1017,7 @@ TensorViewBuilder& TensorViewBuilder::shape(std::vector<int64_t> shape) {
 TensorView* TensorViewBuilder::build() const {
   // Build the domain
   std::vector<IterDomain*> domain(ndims_, nullptr);
-  for (int i = 0; i < ndims_; i++) {
+  for (size_t i = 0; i < ndims_; i++) {
     if (shape_.empty() || shape_[i] == -1) {
       domain[i] = new IterDomain(new Int(0), new Int());
     } else {

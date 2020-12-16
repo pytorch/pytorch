@@ -983,7 +983,7 @@ TensorView* sum_to(TensorView* in, const std::vector<Int*>& sum_to_size) {
   bool reduction_within_shape = false;
 
   // Reduce rest of the dims with keep_dim
-  for (int i = leading_dims; i < root.size(); i++) {
+  for (int i = leading_dims; i < int(root.size()); i++) {
     if (sum_to_size[i - leading_dims]->isOneInt() &&
         !root[i]->rawExtent()->isOneInt()) {
       inner_red_dims[i - leading_dims] = true;

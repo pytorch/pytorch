@@ -542,18 +542,18 @@ class IrParser {
             }
 
             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            auto training = constant_as<bool>(node->input(5));
-            TORCH_INTERNAL_ASSERT(
-                training.has_value(),
-                "The training (bool) parameter is required.");
-            const bool kTraining = training.value();
+            // auto training = constant_as<bool>(node->input(5));
+            // TORCH_INTERNAL_ASSERT(
+            //     training.has_value(),
+            //     "The training (bool) parameter is required.");
+            // const bool kTraining = training.value();
 
             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            auto momentum = constant_as<float>(node->input(6));
-            TORCH_INTERNAL_ASSERT(
-                momentum.has_value(),
-                "The momentum (float) parameter is required.");
-            const float kMomentum = momentum.value();
+            // auto momentum = constant_as<float>(node->input(6));
+            // TORCH_INTERNAL_ASSERT(
+            //     momentum.has_value(),
+            //     "The momentum (float) parameter is required.");
+            // const float kMomentum = momentum.value();
 
             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             auto eps = constant_as<float>(node->input(7));
@@ -613,7 +613,7 @@ class IrParser {
             // Optional: norm * weight + bias
             if (bias) {
               auto bias_bcast = broadcast(bias, broadcast_mask);
-              output = add(output, bias);
+              output = add(output, bias_bcast);
             }
             value_map.emplace(node->output()->unique(), output);
           },

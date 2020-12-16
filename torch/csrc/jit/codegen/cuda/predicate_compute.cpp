@@ -22,6 +22,7 @@ namespace {
 //    why do we assume a single TV output?
 //
 const kir::TensorView* firstTvOutput(const kir::Expr* expr) {
+  TORCH_INTERNAL_ASSERT(expr != nullptr);
   for (auto out : expr->outputs()) {
     if (out->isA<kir::TensorView>()) {
       return out->as<kir::TensorView>();
@@ -223,6 +224,8 @@ kir::Bool* UnswitchPredicate::get(
       unroll_pred = ir_builder.andExpr(unroll_pred, pred);
     }
   }
+
+  TORCH_INTERNAL_ASSERT(unroll_pred != nullptr);
 
   return unroll_pred->as<kir::Bool>();
 }

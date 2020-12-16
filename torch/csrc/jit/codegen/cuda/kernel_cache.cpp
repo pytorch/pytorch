@@ -203,7 +203,7 @@ at::DimVector inversePermutation(
 
 void encodeBuffer(size_t value, std::string& buffer) {
   const char* v = reinterpret_cast<char*>(&value);
-  for (int i = 0; i < sizeof(size_t); i++) {
+  for (size_t i = 0; i < sizeof(size_t); i++) {
     buffer.push_back(*(v++));
   }
 }
