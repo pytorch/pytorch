@@ -1022,6 +1022,8 @@ Tensor log_softmax_double_backward(const Tensor & grad, const Tensor & grad_outp
   return z * grad_output.sum(dim, true) * ((grad * z).sum(dim, true) - grad);
 }
 
+// NOTE: [How to write vmap-compatible backward formulas]
+//
 // See NOTE: [vmap-incompatible in-place operations] for what it means for an
 // in-place operation to be incompatible with vmap.
 //
@@ -1039,29 +1041,15 @@ Tensor log_softmax_double_backward(const Tensor & grad, const Tensor & grad_outp
 // - If the in-place operation followed some sequence of operations, if the
 //   we want to be able to vmap over the backward formula as-is (this is
 //   usually the case for simple (<15loc) backward formulas), then use
-//   inplace_is_vmap_compatible to guard the operation. For example:
+//   inplaceIsVmapCompatible to guard the operation. For example:
 //             c = a * b
 //     Before: c.mul_(grad)
-//     After:  c = inplace_is_vmap_compatible(c, grad) ? c.mul_(grad) : c * grad
+//     After:  c = at::inplaceIsVmapCompatible(c, grad) ? c.mul_(grad) : c * grad
 //
 // - If we don't want to vmap directly over the backward formula (e.g., if the
 //   backward formula is too complicated or has a lot of vmap-incompatible
 //   operations, then register the backward formula as an operator and eventually
 //   write a batching rule for it.
-static bool inplace_is_vmap_compatible(const Tensor& self, const Tensor& other) {
-  const auto* other_batched = at::maybeGetBatchedImpl(other);
-  if (!other_batched) {
-    return true;
-  }
-  const auto* self_batched = at::maybeGetBatchedImpl(self);
-  if (!self_batched) {
-    // self is not batched but other is batched
-    return false;
-  }
-  auto self_levels = at::createVmapLevelsBitset(self_batched->bdims());
-  auto other_levels = at::createVmapLevelsBitset(other_batched->bdims());
-  return self_levels == (self_levels | other_levels);
-}
 
 Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Tensor & grad, const Tensor & input, const Tensor & target, const c10::optional<Tensor>& weight, int64_t reduction) {
   auto eps = 1e-12;
@@ -1069,7 +1057,7 @@ Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Te
   auto one_m_inp_pl_eps = 1 - input + eps;
   // gradient wrt input
   auto gI = (input * input - 2 * input * target + target) / (inp_pl_eps.pow(2) * one_m_inp_pl_eps.pow(2));
-  if (inplace_is_vmap_compatible(gI, grad)) {
+  if (at::inplaceIsVmapCompatible(gI, grad)) {
     gI *= (grad * grad_output);
   } else {
     gI = gI * (grad * grad_output);
@@ -1090,7 +1078,7 @@ Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad, con
   auto eps = 1e-12;
   // gradient wrt grad_output
   auto ggO = (input - target) / ((input + eps) * (1 - input + eps));
-  if (inplace_is_vmap_compatible(ggO, grad)) {
+  if (at::inplaceIsVmapCompatible(ggO, grad)) {
     ggO *= grad;
   } else {
     ggO = ggO * grad;
@@ -1836,16 +1824,21 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   auto gsigma = grads[1];
 
   auto u = raw_u;
-  auto v = raw_v;
+  // Currently torch.svd for complex dtypes returns the conjugate of V,
+  // while the backward formula is derived with just V (without the conjugation)
+  // therefore here we need to conjugate the V output of SVD and grads[2].
+  // Once https://github.com/pytorch/pytorch/issues/45821 is resolved
+  // extra .conj(), that are marked below in the code, shall be removed.
+  auto v = raw_v.conj();  // TODO: remove .conj()
   auto gu = grads[0];
-  auto gv = grads[2];
+  auto gv = grads[2].conj();  // TODO: remove .conj()
 
   if (!some) {
     // We ignore the free subspace here because possible base vectors cancel
     // each other, e.g., both -v and +v are valid base for a dimension.
     // Don't assume behavior of any particular implementation of svd.
     u = raw_u.narrow(-1, 0, k);
-    v = raw_v.narrow(-1, 0, k);
+    v = raw_v.narrow(-1, 0, k).conj();  // TODO: remove .conj()
     if (gu.defined()) {
       gu = gu.narrow(-1, 0, k);
     }
@@ -1853,11 +1846,13 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
       gv = gv.narrow(-1, 0, k);
     }
   }
-  auto vt = v.transpose(-2, -1);
+  auto vh = v.conj().transpose(-2, -1);
 
   Tensor sigma_term;
   if (gsigma.defined()) {
-    sigma_term = at::matmul(u, at::matmul(gsigma.diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1), vt));
+    gsigma = gsigma.to(self.dtype());
+    // computes u @ diag(gsigma) @ vh
+    sigma_term = at::matmul(u * gsigma.unsqueeze(-2), vh);
   } else {
     sigma_term = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
@@ -1867,11 +1862,11 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
     return sigma_term;
   }
 
-  auto ut = u.transpose(-2, -1);
+  auto uh = u.conj().transpose(-2, -1);
   auto im = at::eye(m, self.options());
   auto in = at::eye(n, self.options());
-  auto sigma_mat = sigma.diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1);
-  auto sigma_mat_inv = sigma.pow(-1).diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1);
+  auto sigma_mat = sigma.diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).to(self.dtype());
+  auto sigma_mat_inv = sigma.pow(-1).diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).to(self.dtype());
   auto sigma_sq = sigma.pow(2);
   auto F = sigma_sq.unsqueeze(-2) - sigma_sq.unsqueeze(-1);
   // The following two lines invert values of F, and fills the diagonal with 0s.
@@ -1883,24 +1878,36 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   Tensor u_term, v_term;
 
   if (gu.defined()) {
-    u_term = at::matmul(u, at::matmul(F.mul(at::matmul(ut, gu) - at::matmul(gu.transpose(-2, -1), u)), sigma_mat));
+    auto guh = gu.conj().transpose(-2, -1);
+    u_term = at::matmul(u, at::matmul(F.mul(at::matmul(uh, gu) - at::matmul(guh, u)), sigma_mat));
     if (m > k) {
-      u_term = u_term + at::matmul(im - at::matmul(u, ut), at::matmul(gu, sigma_mat_inv));
+      u_term = u_term + at::matmul(im - at::matmul(u, uh), at::matmul(gu, sigma_mat_inv));
     }
-    u_term = at::matmul(u_term, vt);
+    u_term = at::matmul(u_term, vh);
   } else {
     u_term = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   if (gv.defined()) {
-    auto gvt = gv.transpose(-2, -1);
-    v_term = at::matmul(sigma_mat, at::matmul(F.mul(at::matmul(vt, gv) - at::matmul(gvt, v)), vt));
+    auto gvh = gv.conj().transpose(-2, -1);
+    v_term = at::matmul(sigma_mat, at::matmul(F.mul(at::matmul(vh, gv) - at::matmul(gvh, v)), vh));
     if (n > k) {
-      v_term = v_term + at::matmul(sigma_mat_inv, at::matmul(gvt, in - at::matmul(v, vt)));
+      v_term = v_term + at::matmul(sigma_mat_inv, at::matmul(gvh, in - at::matmul(v, vh)));
     }
     v_term = at::matmul(u, v_term);
   } else {
     v_term = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  }
+
+  // for complex-valued input there is an additional term
+  // https://giggleliu.github.io/2019/04/02/einsumbp.html
+  // https://arxiv.org/abs/1909.02659
+  if (self.is_complex() && gu.defined()) {
+    // computes L = Identity.mul(uh @ gu)
+    Tensor L = at::matmul(uh, gu).diagonal(0, -2, -1).diag_embed(0, -2, -1);
+    L = L - L.conj().transpose(-2, -1);
+    Tensor imag_term = 0.5 * at::matmul(at::matmul(at::matmul(u, L), sigma_mat_inv), vh);
+    return u_term + sigma_term + v_term + imag_term;
   }
 
   return u_term + sigma_term + v_term;
@@ -1990,7 +1997,7 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
     glambda = glambda.to(self.dtype());
     // computes v @ diag(glambda) @ vh
     Tensor glambda_term = at::matmul(v * glambda.unsqueeze(-2), vh);
-    if (inplace_is_vmap_compatible(result, glambda_term)) {
+    if (at::inplaceIsVmapCompatible(result, glambda_term)) {
       result.add_(glambda_term);
     } else {
       result = result + glambda_term;

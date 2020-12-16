@@ -31,6 +31,7 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(EnumType)               \
   _(AnyEnumType)            \
   _(TensorType)             \
+  _(StorageType)            \
   _(TupleType)              \
   _(ListType)               \
   _(DictType)               \
@@ -1407,6 +1408,29 @@ struct CAFFE2_API StringType : public Type {
   StringType() : Type(TypeKind::StringType) {}
 };
 
+struct StorageType;
+using StorageTypePtr = std::shared_ptr<StorageType>;
+struct CAFFE2_API StorageType : public Type {
+  static StorageTypePtr create() {
+    return StorageTypePtr(new StorageType()); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return annotation_str();
+  }
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    return "Storage";
+  }
+  static const TypeKind Kind = TypeKind::StorageType;
+  // global singleton
+  static StorageTypePtr get();
+
+ private:
+  StorageType() : Type(TypeKind::StorageType) {}
+};
+
 struct FunctionType;
 using FunctionTypePtr = std::shared_ptr<FunctionType>;
 struct CAFFE2_API FunctionType : public NamedType {
@@ -1754,6 +1778,12 @@ template <>
 struct getTypePtr_<at::Tensor> final {
   static TypePtr call() {
     return TensorType::get();
+  }
+};
+template <>
+struct getTypePtr_<c10::Storage> final {
+  static TypePtr call() {
+    return StorageType::get();
   }
 };
 template <>
