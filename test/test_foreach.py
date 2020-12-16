@@ -1239,7 +1239,7 @@ class TestForeach(TestCase):
                     with self.assertRaisesRegex(RuntimeError, "can't be cast to the desired output type"):
                         [t.add_(scalar) for t in tensors]
 
-                    with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor is not supported."):
+                    with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool"):
                         [t.sub_(scalar) for t in tensors]
                     continue
 
