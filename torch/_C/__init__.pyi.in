@@ -735,6 +735,10 @@ class _CudaEventBase:
     def synchronize(self) -> None: ...
     def ipc_handle(self) -> bytes: ...
 
+# Defined in torch/csrc/cuda/Graph.cpp
+class _CudaGraphBase:
+    ...
+
 # Defined in torch/csrc/DataLoader.cpp
 def _set_worker_signal_handlers(*arg: Any) -> None: ...  # THPModule_setWorkerSignalHandlers
 def _set_worker_pids(key: _int, child_pids: Tuple[_int, ...]) -> None: ...  # THPModule_setWorkerPIDs

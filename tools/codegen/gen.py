@@ -722,7 +722,18 @@ struct CAFFE2_API structured_{n} : public at::meta::{meta_name} {{
                 if is_structured_dispatch_key(k):
                     continue
                 seen.add(n)
-                rs.append(f"CAFFE2_API {returns_type} {n}({', '.join(a.str_with_default() for a in args)});")
+                if f.func.is_out_fn() and local.use_c10_dispatcher() is UseC10Dispatcher.full:
+                    # out overloads don't get default arguments because
+                    # defaulted arguments would be before the out argument
+                    # in the argument list and that doesn't work.
+                    # TODO We should consider if we just want to remove
+                    # default arguments from all at::native functions
+                    # but that would be a larger change because we need
+                    # to change a lot of call sites
+                    args_str = ', '.join(str(a) for a in args)
+                else:
+                    args_str = ', '.join(a.str_with_default() for a in args)
+                rs.append(f"CAFFE2_API {returns_type} {n}({args_str});")
 
         return rs
 
