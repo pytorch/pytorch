@@ -176,7 +176,11 @@ _group_count = 0
 STORE_BASED_BARRIER_PREFIX = "store_based_barrier_key"
 
 def _store_based_barrier(rank, store, timeout):
-    global _group_count
+    """
+    Barrier based on store which is used for synchronizing processes after
+    ``init_process_group`` or ``new_group``. Intended to be used only with
+    those two methods and is not a generic alternative to ``barrier()``.
+    """
     store_key = "{}:{}".format(STORE_BASED_BARRIER_PREFIX, _group_count)
     store.add(store_key, 1)
 

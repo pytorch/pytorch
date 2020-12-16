@@ -4538,18 +4538,30 @@ class CommTest(MultiProcessTestCase):
             world_size=self.world_size,
             store=store)
 
-        t = torch.rand(10).cuda(2 * self.rank)
+        t = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
         c10d.all_reduce(t)
+        expected_tensor = torch.tensor([3] * 10).cuda(2 * self.rank)
+        self.assertEqual(expected_tensor, t)
 
         # Test with new_group
         pg = c10d.new_group([0, 1])
-        c10d.all_reduce(t)
+        t = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
+        pg.allreduce(t)
+        self.assertEqual(expected_tensor, t)
 
         pg = c10d.new_group([0])
-        c10d.all_reduce(t)
+        if self.rank == 0:
+            t = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
+            expected_tensor = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
+            pg.allreduce(t)
+            self.assertEqual(expected_tensor, t)
 
         pg = c10d.new_group([1])
-        c10d.all_reduce(t)
+        if self.rank == 1:
+            t = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
+            expected_tensor = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
+            pg.allreduce(t)
+            self.assertEqual(expected_tensor, t)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
