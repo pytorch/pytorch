@@ -3035,8 +3035,10 @@ from_numpy(ndarray) -> Tensor
 Creates a :class:`Tensor` from a :class:`numpy.ndarray`.
 
 The returned tensor and :attr:`ndarray` share the same memory. Modifications to
-the tensor will be reflected in the :attr:`ndarray` and vice versa. The returned
-tensor is not resizable.
+the tensor will be reflected in the :attr:`ndarray` and vice versa. 
+If the underlying :attr:`ndarray` is memory mapped and read only, changing the
+tensor is not allowed.
+The returned tensor is not resizable.
 
 It currently accepts :attr:`ndarray` with dtypes of ``numpy.float64``,
 ``numpy.float32``, ``numpy.float16``, ``numpy.complex64``, ``numpy.complex128``,
