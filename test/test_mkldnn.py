@@ -19,10 +19,13 @@ from torch.testing._internal.common_utils import TestCase, run_tests, TemporaryF
 
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 
-def has_avx512():
+def has_bf16_support():
     import subprocess
     try:
-        subprocess.check_output(["grep", "avx512", "/proc/cpuinfo"])
+        # for bf16 path, OneDNN requires the cpu has intel avx512 with avx512bw,
+        # avx512vl, and avx512dq.
+        cmd = "grep avx512bw /proc/cpuinfo | grep avx512vl | grep avx512dq"
+        subprocess.check_output(cmd, shell=True)
         return True
     except subprocess.CalledProcessError:
         return False
@@ -221,7 +224,7 @@ class TestMkldnn(TestCase):
                 self._test_serialization(mkldnn_conv2d, (x.to_mkldnn(),))
                 self._test_tracing(mkldnn_conv2d, (x.to_mkldnn(),))
 
-    @unittest.skipIf(not has_avx512(), "OneDNN bfloat16 path requires AVX512")
+    @unittest.skipIf(not has_bf16_support(), "OneDNN bfloat16 path requires AVX512")
     def test_conv2d_bf16(self):
         options = itertools.product([1, 4], [True, False], [1, 2])
         # compare mkldnn bf16 with fp32 path.
@@ -643,7 +646,7 @@ class TestMkldnn(TestCase):
             self._test_serialization(mkldnn_linear, (x.to_mkldnn(),))
             self._test_tracing(mkldnn_linear, (x.to_mkldnn(),))
 
-    @unittest.skipIf(not has_avx512(), "OneDNN bfloat16 path requires AVX512")
+    @unittest.skipIf(not has_bf16_support(), "OneDNN bfloat16 path requires AVX512")
     def test_linear_bf16(self):
         in_features = torch.randint(3, 10, (1,)).item()
         out_features = torch.randint(3, 100, (1,)).item()
