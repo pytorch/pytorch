@@ -1808,7 +1808,7 @@ if(USE_KINETO)
       set(CUPTI_INCLUDE_DIR "${CUDA_SOURCE_DIR}/include")
     endif()
 
-    if((NOT DEFINED CUDA_cupti_LIBRARY) OR (${CUDA_cupti_LIBRARY} STREQUAL "CUDA_cupti_LIBRARY-NOTFOUND"))
+    if((NOT DEFINED CUDA_cupti_LIBRARY) OR ("${CUDA_cupti_LIBRARY}" STREQUAL "CUDA_cupti_LIBRARY-NOTFOUND"))
       if(EXISTS ${CUDA_SOURCE_DIR}/extras/CUPTI/lib64/libcupti_static.a)
         set(CUDA_cupti_LIBRARY "${CUDA_SOURCE_DIR}/extras/CUPTI/lib64/libcupti_static.a")
       elseif(EXISTS ${CUDA_SOURCE_DIR}/lib64/libcupti_static.a)
