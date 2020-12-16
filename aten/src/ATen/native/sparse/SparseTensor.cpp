@@ -344,7 +344,7 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim){
 // NB: Dropped the resizeNd variants
 
 Tensor sparse_to_dense(const SparseTensor& self, c10::optional<ScalarType> dtype) {
-  TORCH_CHECK(!dtype.has_value(), "dtype is not need provided for sparse_to_dense");
+  TORCH_CHECK(!dtype.has_value(), "dtype argument is not supported by sparse_to_dense");
   if(self.scalar_type() == ScalarType::Half && self.options().device().is_cpu()) {
     TORCH_CHECK(false, "to_dense() not supported for float16 on CPU");
   }
