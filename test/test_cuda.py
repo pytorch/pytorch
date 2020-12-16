@@ -2895,6 +2895,209 @@ t2.start()
     def test_to_numpy(self):
         self.assertRaises(TypeError, lambda: torch.empty(1, device="cuda").numpy())
 
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    def test_graph_capture_simple(self):
+        s1 = torch.cuda.Stream()
+
+        with torch.cuda.stream(s1):
+            a = torch.zeros((1000,), device="cuda")
+            a += 1
+            g = torch.cuda._Graph()
+            g.capture_begin()
+            a += 1
+            g.capture_end()
+        torch.cuda.current_stream().wait_stream(s1)
+
+        g.replay()
+        g.replay()
+
+        self.assertTrue(a.sum().item() == 3000.)
+
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    def test_graph_rng_functional(self):
+        # The caching allocator isn't yet graph-safe.
+        # In this test, graphed regions try to ensure allocator safety by
+        # stashing references to all temporaries.  This is why we use _fused_dropout
+        # instead of a public dropout API:  _fused_dropout returns the mask temporary
+        # as well as the output, so we can stash references to both.
+        #
+        # TODO:
+        # Switch to public dropout API when the allocator is made graph-safe.
+        ops_with_kwargs = ((torch._fused_dropout, {"p": 0.1}),
+                           (torch.nn.functional.rrelu, {"training": True}),)
+        size = 10000
+
+        def run(op, kwargs):
+            a = torch.randn((size,), device="cuda", dtype=torch.float)
+
+            torch.cuda.manual_seed(5)
+
+            # Control
+            eager_out = a
+            for _ in range(6):
+                out = op(eager_out, **kwargs)
+                # _fused_dropout returns a tuple, rrelu returns a bare tensor.
+                eager_out = out[0] if isinstance(out, tuple) else out
+
+            graph_in = a.clone()
+            stream = torch.cuda.Stream()
+            stream.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(stream):
+                # warms up allocator so no mallocs occur in capture
+                refs = ()
+                graph_out = graph_in
+                for _ in range(3):
+                    out = op(graph_out, **kwargs)
+                    refs += tuple(out)
+                    graph_out = out[0] if isinstance(out, tuple) else out
+                del out, refs, graph_out
+
+                torch.cuda.manual_seed(5)
+
+                refs = ()
+                g = torch.cuda._Graph()
+                g.capture_begin()
+                graph_out = graph_in
+                for _ in range(2):
+                    out = op(graph_out, **kwargs)
+                    refs += tuple(out)
+                    graph_out = out[0] if isinstance(out, tuple) else out
+                g.capture_end()
+            torch.cuda.current_stream().wait_stream(stream)
+
+            # Runs a graphed->eager->graphed sequence of RNG ops.
+            # replay() plays 2 invocations of the op, so the sequence has 6
+            # invocations total, matching Control.
+            # replay() reads from graph_in and writes to graph_out.
+            g.replay()
+            out = op(graph_out, **kwargs)
+            out = op(out[0], **kwargs)[0] if isinstance(out, tuple) else op(out, **kwargs)
+            graph_in.copy_(out)
+            g.replay()
+
+            # If replay() updated RNG state correctly, graph_out
+            # should now hold data equal to eager_out.
+            try:
+                self.assertEqual(eager_out, graph_out)
+            except Exception as e:
+                raise RuntimeError("Failed on ", op) from e
+
+            # We hold references to all tensors used across streams up til this sync,
+            # so no need to call record_stream on those tensors.
+            torch.cuda.synchronize()
+
+        for op, kwargs in ops_with_kwargs:
+            run(op, kwargs)
+
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    def test_graph_rng_distributions(self):
+        # The caching allocator isn't yet graph-safe.
+        # In this test, all ops maintain static references to inputs and outputs
+        # that persist across replay(), so they should be safe to test with graphs,
+        # EXCEPT for multinomial which is a complicated compound op.
+        #
+        # TODO:
+        # Uncomment multinomial when the allocator is made graph-safe.
+        size = 10000
+        input = torch.rand((size,), device="cuda", dtype=torch.float)
+        alloc = torch.empty((size,), device="cuda", dtype=torch.float)
+
+        # Torch ops to test with sample args (tuple) and kwargs (dict)
+        torch_with_args = (("bernoulli", (input.clone(),), {}),
+                           # ("multinomial", (input.clone(), size, True), {}),
+                           # ("multinomial", (input.clone(), size // 2, False), {}),
+                           ("normal", (input.clone() + 1, input.clone()), {}),
+                           ("poisson", (input.clone(),), {}),
+                           ("rand", (size,), {"device": "cuda", "dtype": torch.float}),
+                           ("randint", (0, 3, (size,)), {"device": "cuda", "dtype": torch.float}),
+                           ("randn", (size,), {"device": "cuda", "dtype": torch.float}),)
+
+        # Tensor methods to test with sample args (tuple)
+        tensor_with_args = (("bernoulli_", (input.clone(),)),
+                            ("cauchy_", ()),
+                            ("exponential_", ()),
+                            ("geometric_", (0.3,)),
+                            ("log_normal_", ()),
+                            ("normal_", ()),
+                            ("random_", ()),
+                            ("uniform_", ()),)
+
+        def run(module, op, args, kwargs):
+            torch.cuda.manual_seed(5)
+
+            # Each path runs a dummy op to increment the state a bit before creating controls.
+            if (module == "torch"):
+                dummy = getattr(torch, op)(*args, **kwargs)
+                control1 = getattr(torch, op)(*args, **kwargs)
+                control2 = getattr(torch, op)(*args, **kwargs)
+            else:
+                dummy = alloc.clone()
+                control1 = alloc.clone()
+                control2 = alloc.clone()
+                getattr(dummy, op)(*args)
+                getattr(control1, op)(*args)
+                getattr(control2, op)(*args)
+
+            stream = torch.cuda.Stream()
+            stream.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(stream):
+                torch.cuda.manual_seed(5)
+
+                g = torch.cuda._Graph()
+                if (module == "torch"):
+                    g.capture_begin()
+                    t1 = getattr(torch, op)(*args, **kwargs)
+                    t2 = getattr(torch, op)(*args, **kwargs)
+                    g.capture_end()
+                else:
+                    t1 = alloc.clone()
+                    t2 = alloc.clone()
+                    g.capture_begin()
+                    getattr(t1, op)(*args)
+                    getattr(t2, op)(*args)
+                    g.capture_end()
+            torch.cuda.current_stream().wait_stream(stream)
+
+            try:
+                self.assertNotEqual(control1, t1)
+                self.assertNotEqual(control2, t2)
+            except Exception as e:
+                raise RuntimeError("Failed on " + module + "." + op) from e
+
+            # Runs a dummy op prelude, as for controls, to make sure replay()
+            # picks up the dummy op's state increment.
+            if module == "torch":
+                dummy = getattr(torch, op)(*args, **kwargs)
+            else:
+                dummy = alloc.clone()
+                getattr(dummy, op)(*args)
+
+            # Runs RNG ops that fill t1 and t2.
+            g.replay()
+
+            try:
+                self.assertEqual(control1, t1)
+                self.assertEqual(control2, t2)
+            except Exception as e:
+                raise RuntimeError("Failed on " + module + "." + op) from e
+
+            # We hold references to all tensors used across streams up til this sync,
+            # so no need to call record_stream on those tensors.
+            torch.cuda.synchronize()
+
+        for op_with_args in torch_with_args:
+            run("torch", *op_with_args)
+
+        for meth_with_args in tensor_with_args:
+            # Adds an empty dict for kwargs, which none of the Tensor methods use
+            run("Tensor", *(meth_with_args + ({},)))
+
 
 class TestCudaComm(TestCase):
     def _test_broadcast(self, input):
@@ -3278,6 +3481,7 @@ class TestCudaComm(TestCase):
             expected_b = b_tensors_for_gpu[i]
             self.assertEqual(expected_a, x.a)
             self.assertEqual(expected_b, x.b)
+
 
 if __name__ == '__main__':
     run_tests()
