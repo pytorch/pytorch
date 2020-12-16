@@ -3091,7 +3091,20 @@ add_docstr(torch.flatten,
            r"""
 flatten(input, start_dim=0, end_dim=-1) -> Tensor
 
-Flattens a contiguous range of dims in a tensor.
+By default, reshapes :attr:`input` into a one-dimensional tensor while preserving its row-major order.
+If :attr:`start_dim` or :attr:`end_dim` are passed, :attr:`end_dim` cannot come before :attr:`start_dim`,
+and only dimensions starting at :attr:`start_dim` and ending at :attr:`end_dim` are flattened.
+
+If `start_dim < end_dim`, flattening an :attr:`input` with shape :math:`(l*, f+, r*)` produces an output
+shape of :math:`(l*, \prod f+, r*)` where :math:`l*` is the sizes of the zero or more "left" dimensions
+before :attr:`start_dim`, :math:`f+` is the sizes of the one or more dimensions between :attr:`start_dim` and
+:attr:`end_dim` that will be "flattened", and :math:`r*` is the sizes of the zero or more "right" dimensions
+after :attr:`end_dim`. It is equivalent to calling :math:`\text{torch.reshape}(\textit{input}, (l*, \prod f+, r*))`
+and like :func:`torch.reshape` returns a view when possible. See :meth:`torch.Tensor.view` for details on
+when a view will be returned.
+
+If `start_dim == end_dim` then this returns the original object :attr:`input` if :attr:`input` has one or more
+dimensions, and a one-dimensional view if :attr:`input` is a zero-dimensional tensor.
 
 Args:
     {input}
