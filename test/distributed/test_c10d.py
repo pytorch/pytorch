@@ -275,7 +275,6 @@ def create_tcp_store(addr):
     raise RuntimeError("Unable to find free port (tried %s)" % ", ".join(ports))
 
 
-@skip_if_win32()
 class TCPStoreTest(TestCase, StoreTestBase):
     def _create_store(self):
         store = create_tcp_store("localhost")
@@ -283,7 +282,11 @@ class TCPStoreTest(TestCase, StoreTestBase):
         return store
 
     def test_address_already_in_use(self):
-        with self.assertRaisesRegex(RuntimeError, "^Address already in use$"):
+        if sys.platform == 'win32':
+            err_msg_reg = "Only one usage of each socket address*"
+        else:
+            err_msg_reg = "^Address already in use$"
+        with self.assertRaisesRegex(RuntimeError, err_msg_reg):
             addr = "localhost"
             port = common.find_free_port()
 
@@ -321,8 +324,6 @@ class TCPStoreTest(TestCase, StoreTestBase):
     def test_numkeys_delkeys(self):
         self._test_numkeys_delkeys(self._create_store())
 
-
-@skip_if_win32()
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
         super(PrefixTCPStoreTest, self).setUp()
@@ -379,7 +380,6 @@ class RendezvousTest(TestCase):
             c10d.rendezvous("invalid://")
 
 
-@skip_if_win32()
 class RendezvousEnvTest(TestCase):
     @retry_on_connect_failures
     @requires_nccl()
@@ -3267,6 +3267,20 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             output = ddp(input)
             loss = criterion(output, target)
             loss.backward()
+
+    @requires_nccl()
+    @skip_if_not_multigpu
+    def test_pass_default_pg(self):
+        dist.init_process_group(
+            "nccl",
+            init_method=f"file://{self.file_name}",
+            world_size=self.world_size,
+            rank=self.rank,
+        )
+
+        default_pg = c10d.distributed_c10d._get_default_group()
+        dist.destroy_process_group(default_pg)
+        self.assertFalse(dist.is_initialized())
 
     @requires_nccl()
     @skip_if_not_multigpu

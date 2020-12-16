@@ -21,39 +21,20 @@ namespace torch {
 namespace jit {
 namespace tracer {
 
-namespace {
-const std::string kPySelf = "self";
-}
-
 // Python interpreter retrieval routine adapted from
 // https://stackoverflow.com/a/8706144
-std::vector<FileLineFunc> _pythonCallstack() {
+std::vector<StackEntry> _pythonCallstack() {
   pybind11::gil_scoped_acquire gil;
   PyFrameObject* frame = PyEval_GetFrame();
-  std::vector<FileLineFunc> entries;
+  std::vector<StackEntry> entries;
 
-  while (frame != nullptr) {
+  while (nullptr != frame) {
     size_t line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
     std::string filename = THPUtils_unpackString(frame->f_code->co_filename);
     std::string funcname = THPUtils_unpackString(frame->f_code->co_name);
-    std::string classname = "";
-
-    if (PyFrame_FastToLocalsWithError(frame) >= 0) {
-      auto locals = frame->f_locals;
-      if (PyDict_Check(locals)) {
-        PyObject *key, *value;
-        ssize_t pos = 0;
-        while (PyDict_Next(locals, &pos, &key, &value)) {
-          auto key_str = THPUtils_unpackString(key);
-          if (key_str == kPySelf) {
-            classname = Py_TYPE(value)->tp_name;
-          }
-        }
-      }
-    }
-
+    auto source = std::make_shared<Source>(funcname, filename, line);
     entries.emplace_back(
-        FileLineFunc{filename, line, funcname, classname});
+        StackEntry{funcname, SourceRange(source, 0, funcname.size())});
     frame = frame->f_back;
   }
   return entries;
@@ -65,11 +46,19 @@ SourceRange getPythonInterpreterSourceRange() {
   size_t source_line = 0;
   std::stringstream stack_trace;
   for (const auto& entry : cs) {
-    stack_trace << entry.filename << "(" << entry.line
-        << "): " << entry.funcname << "\n";
-    if (!source_filename) {
-      source_filename = entry.filename;
-      source_line = entry.line;
+    auto& range = entry.range;
+    if (range.source()) {
+      auto& src = range.source();
+      if (src && src->filename()) {
+        auto line =
+            src->starting_line_no() + src->lineno_for_offset(range.start());
+        stack_trace << *(src->filename()) << "(" << line
+                    << "): " << entry.filename << "\n";
+        if (!source_filename) {
+          source_filename = *(src->filename());
+          source_line = line;
+        }
+      }
     }
   }
 
@@ -187,7 +176,9 @@ void initPythonTracerBindings(PyObject* module) {
           })
       .def(
           "set_graph",
-          [](TracingState& s, std::shared_ptr<Graph> g) { s.graph = g; })
+          [](TracingState& s, std::shared_ptr<Graph> g) {
+            s.graph = std::move(g);
+          })
       .def("graph", [](TracingState& s) { return s.graph; });
 
   m.def("_tracer_warn_use_python", []() { tracer::setWarn(pythonWarn); });
@@ -202,7 +193,7 @@ void initPythonTracerBindings(PyObject* module) {
       py::arg("self") = nullptr);
   m.def("_get_tracing_state", []() { return getTracingState(); });
   m.def("_set_tracing_state", [](std::shared_ptr<TracingState> state) {
-    return setTracingState(state);
+    return setTracingState(std::move(state));
   });
   m.def("_get_value_trace", [](const Variable& var) {
     return getValueTrace(var);
@@ -210,7 +201,7 @@ void initPythonTracerBindings(PyObject* module) {
   m.def("_set_value_trace", [](const Variable& var, Value* value) {
     return setValueTrace(var, value);
   });
-  m.def("_tracer_set_get_unique_name_fn", [](py::function func) {
+  m.def("_tracer_set_get_unique_name_fn", [](const py::function& func) {
     const auto& tracing_state = getTracingState();
     AT_ASSERT(tracing_state);
     tracing_state->lookup_var_name_fn =

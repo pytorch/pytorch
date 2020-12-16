@@ -165,7 +165,7 @@ void pushProfilingCallbacks() {
             fn.scope() != at::RecordScope::BACKWARD_FUNCTION) {
           auto cs = prepareCallstack(jit::currentCallstack());
           if (cs.empty()) {
-            cs = jit::tracer::pythonCallstack();
+            cs = prepareCallstack(jit::tracer::pythonCallstack());
           }
           ctx_ptr->stack = callstackStr(cs);
         }
@@ -242,6 +242,7 @@ void prepareProfiler(
 
   if (!libkineto::api().isProfilerRegistered()) {
     libkineto_init();
+    libkineto::api().suppressLogMessages();
   }
 
   if (!libkineto::api().isProfilerInitialized()) {

@@ -416,9 +416,14 @@ void ONNXShapeTypeInference(Node* n, int opset_version) {
     try {
       onnx::shape_inference::InferShapes(*model_proto);
       UpdateOutputTypeByONNXProto(n, clone_node, *model_proto, symbol_map);
-    } catch (onnx::InferenceError& ex) {
+    } catch (std::runtime_error& ex) {
       // TODO: include this as warning once we have a more consolidated warning
       // system.
+      const char shape_err[] = "ShapeInferenceError";
+      const char type_err[] = "TypeInferenceError";
+      if ((strstr(ex.what(), shape_err) == NULL) &&
+          (strstr(ex.what(), type_err) == NULL))
+        throw;
       GRAPH_DEBUG("ONNX shape inference fails with: ", ex.what());
     }
     GRAPH_DEBUG(

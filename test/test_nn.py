@@ -2663,6 +2663,11 @@ class TestNN(NNTestCase):
             mod = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
         self.assertTrue(len(w) == 0)
 
+        with warnings.catch_warnings(record=True) as w:
+            mod.train()
+            mod.eval()
+        self.assertTrue(len(w) == 0)
+
         with self.assertWarnsRegex(UserWarning,
                                    r"Setting attributes on ParameterList is not supported"):
             torch.nn.utils.weight_norm(mod, "0")
@@ -2671,9 +2676,51 @@ class TestNN(NNTestCase):
             mod = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
         self.assertTrue(len(w) == 0)
 
+        with warnings.catch_warnings(record=True) as w:
+            mod.train()
+            mod.eval()
+        self.assertTrue(len(w) == 0)
+
         with self.assertWarnsRegex(UserWarning,
                                    r"Setting attributes on ParameterDict is not supported"):
             torch.nn.utils.weight_norm(mod, "b")
+
+    def test_parameterlistdict_pickle(self):
+        m = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
+        with warnings.catch_warnings(record=True) as w:
+            m = pickle.loads(pickle.dumps(m))
+        self.assertTrue(len(w) == 0)
+
+        m = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
+        del m._initialized
+        with warnings.catch_warnings(record=True) as w:
+            m = pickle.loads(pickle.dumps(m))
+        self.assertTrue(len(w) == 0)
+
+        # Test whether loading from older checkpoints works without triggering warnings
+        m = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
+        del m._forward_pre_hooks, m._state_dict_hooks, m._load_state_dict_pre_hooks, m._non_persistent_buffers_set
+        with warnings.catch_warnings(record=True) as w:
+            m = pickle.loads(pickle.dumps(m))
+        self.assertTrue(len(w) == 0)
+
+        m = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
+        with warnings.catch_warnings(record=True) as w:
+            m = pickle.loads(pickle.dumps(m))
+        self.assertTrue(len(w) == 0)
+
+        m = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
+        del m._initialized
+        with warnings.catch_warnings(record=True) as w:
+            m = pickle.loads(pickle.dumps(m))
+        self.assertTrue(len(w) == 0)
+
+        # Test whether loading from older checkpoints works without triggering warnings
+        m = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
+        del m._forward_pre_hooks, m._state_dict_hooks, m._load_state_dict_pre_hooks, m._non_persistent_buffers_set
+        with warnings.catch_warnings(record=True) as w:
+            m = pickle.loads(pickle.dumps(m))
+        self.assertTrue(len(w) == 0)
 
     def test_weight_norm_pickle(self):
         m = torch.nn.utils.weight_norm(nn.Linear(5, 7))
@@ -3540,49 +3587,57 @@ class TestNN(NNTestCase):
                 output = module(input)
                 self.assertEqual(output.size(), (4,) + (2,) * (numel - 1) + (4,))
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_adaptive_pooling_avg_nhwc(self):
-        input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32, device="cuda")
-        input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
-        grad = torch.randint(1, 10, (4, 8, 7, 7), dtype=torch.float32, device="cuda")
-        pool = torch.nn.AdaptiveAvgPool2d((7, 7)).cuda()
+        device_list = ['cpu']
+        if TEST_CUDA:
+            device_list.append('cuda')
 
-        ref_input = input.detach().clone().contiguous().requires_grad_(True)
-        ref_grad = grad.detach().clone().contiguous()
-        ref_pool = torch.nn.AdaptiveAvgPool2d((7, 7)).cuda()
+        for device in device_list:
+            input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32).to(device)
+            input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
+            grad = torch.randint(1, 10, (4, 8, 7, 7), dtype=torch.float32).to(device)
+            pool = torch.nn.AdaptiveAvgPool2d((7, 7)).to(device)
 
-        out = pool(input)
-        out.backward(grad)
-        ref_out = ref_pool(ref_input)
-        ref_out.backward(ref_grad)
+            ref_input = input.detach().clone().contiguous().requires_grad_(True)
+            ref_grad = grad.detach().clone().contiguous()
+            ref_pool = torch.nn.AdaptiveAvgPool2d((7, 7)).to(device)
 
-        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-        self.assertTrue(ref_out.is_contiguous())
-        self.assertEqual(out, ref_out)
-        self.assertEqual(input.grad, ref_input.grad)
+            out = pool(input)
+            out.backward(grad)
+            ref_out = ref_pool(ref_input)
+            ref_out.backward(ref_grad)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(ref_out.is_contiguous())
+            self.assertEqual(out, ref_out)
+            self.assertEqual(input.grad, ref_input.grad)
+
     def test_adaptive_pooling_avg_nhwc_non_contiguous(self):
-        input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32, device="cuda")
-        input = input.contiguous(memory_format=torch.channels_last)
-        input = input[:, ::2, :, :].requires_grad_()
-        grad = torch.randint(1, 10, (4, 8, 7, 7), dtype=torch.float32, device="cuda")
-        grad = grad[:, ::2, :, :]
-        pool = torch.nn.AdaptiveAvgPool2d((7, 7)).cuda()
+        device_list = ['cpu']
+        if TEST_CUDA:
+            device_list.append('cuda')
 
-        ref_input = input.detach().clone().contiguous().requires_grad_(True)
-        ref_grad = grad.detach().clone().contiguous()
-        ref_pool = torch.nn.AdaptiveAvgPool2d((7, 7)).cuda()
+        for device in device_list:
+            input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32).to(device)
+            input = input.contiguous(memory_format=torch.channels_last)
+            input = input[:, ::2, :, :].requires_grad_()
+            grad = torch.randint(1, 10, (4, 8, 7, 7), dtype=torch.float32).to(device)
+            grad = grad[:, ::2, :, :]
+            pool = torch.nn.AdaptiveAvgPool2d((7, 7)).to(device)
 
-        out = pool(input)
-        out.backward(grad)
-        ref_out = ref_pool(ref_input)
-        ref_out.backward(ref_grad)
+            ref_input = input.detach().clone().contiguous().requires_grad_(True)
+            ref_grad = grad.detach().clone().contiguous()
+            ref_pool = torch.nn.AdaptiveAvgPool2d((7, 7)).to(device)
 
-        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-        self.assertTrue(ref_out.is_contiguous())
-        self.assertEqual(out, ref_out)
-        self.assertEqual(input.grad, ref_input.grad)
+            out = pool(input)
+            out.backward(grad)
+            ref_out = ref_pool(ref_input)
+            ref_out.backward(ref_grad)
+
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(ref_out.is_contiguous())
+            self.assertEqual(out, ref_out)
+            self.assertEqual(input.grad, ref_input.grad)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @largeTensorTest('12GB', device='cuda')
@@ -6432,16 +6487,6 @@ class TestNN(NNTestCase):
                         self.assertNotEqual(output2.data, prev_output)
                 prev_output = output1.data
 
-    def _verify_pixel_shuffle(self, input, output, upscale_factor):
-        for c in range(output.size(1)):
-            for h in range(output.size(2)):
-                for w in range(output.size(3)):
-                    height_idx = h // upscale_factor
-                    weight_idx = w // upscale_factor
-                    channel_idx = (upscale_factor * (h % upscale_factor)) + (w % upscale_factor) + \
-                                  (c * upscale_factor ** 2)
-                    self.assertEqual(output[:, c, h, w], input[:, channel_idx, height_idx, weight_idx])
-
     def test_inplace_thnn(self):
         modules = [nn.ReLU, nn.ELU, nn.SELU, nn.CELU, nn.RReLU]
         for mod in modules:
@@ -6472,18 +6517,74 @@ class TestNN(NNTestCase):
         self.assertEqual(result, input.grad.data, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
     def test_pixel_shuffle(self):
-        batch_size = random.randint(1, 3)
-        upscale_factor = random.randint(2, 5)
-        channels = random.randint(1, 4) * upscale_factor ** 2
-        height = random.randint(5, 10)
-        width = random.randint(5, 10)
+        def _test_pixel_shuffle_helper(num_input_dims, valid_channels_dim=True):
+            # Function to imperatively ensure pixels are shuffled to the correct locations.
+            # Used to validate the batch operations in pixel_shuffle.
+            def _verify_pixel_shuffle(input, output, upscale_factor):
+                for c in range(output.size(-3)):
+                    for h in range(output.size(-2)):
+                        for w in range(output.size(-1)):
+                            height_idx = h // upscale_factor
+                            weight_idx = w // upscale_factor
+                            channel_idx = (upscale_factor * (h % upscale_factor)) + (w % upscale_factor) + \
+                                          (c * upscale_factor ** 2)
+                            self.assertEqual(output[..., c, h, w], input[..., channel_idx, height_idx, weight_idx])
 
-        input = torch.rand(batch_size, channels, height, width, requires_grad=True)
-        ps = nn.PixelShuffle(upscale_factor)
-        output = ps(input)
-        self._verify_pixel_shuffle(input.data, output.data, upscale_factor)
-        output.backward(output.data)
-        self.assertEqual(input.data, input.grad.data)
+            upscale_factor = random.randint(2, 5)
+            # If valid_channels_dim=False, add 1 to make channels dim indivisible by upscale_factor ** 2.
+            channels = random.randint(1, 4) * upscale_factor ** 2 + (0 if valid_channels_dim else 1)
+            height = random.randint(5, 10)
+            width = random.randint(5, 10)
+
+            if num_input_dims == 1:
+                input = torch.rand(channels, requires_grad=True)
+            elif num_input_dims == 2:
+                input = torch.rand(height, width, requires_grad=True)
+            else:
+                batch_sizes = [random.randint(1, 3) for _ in range(num_input_dims - 3)]
+                input = torch.rand(*batch_sizes, channels, height, width, requires_grad=True)
+            ps = nn.PixelShuffle(upscale_factor)
+
+            if num_input_dims >= 3 and valid_channels_dim:
+                output = ps(input)
+                _verify_pixel_shuffle(input, output, upscale_factor)
+                output.backward(output.data)
+                self.assertEqual(input.data, input.grad.data)
+            else:
+                self.assertRaises(RuntimeError, lambda: ps(input))
+
+        def test_pixel_shuffle_1D():
+            _test_pixel_shuffle_helper(num_input_dims=1)
+
+        def test_pixel_shuffle_2D():
+            _test_pixel_shuffle_helper(num_input_dims=2)
+
+        def test_pixel_shuffle_3D_with_valid_channels_dim():
+            _test_pixel_shuffle_helper(num_input_dims=3)
+
+        def test_pixel_shuffle_4D_with_valid_channels_dim():
+            _test_pixel_shuffle_helper(num_input_dims=4)
+
+        def test_pixel_shuffle_5D_with_valid_channels_dim():
+            _test_pixel_shuffle_helper(num_input_dims=5)
+
+        def test_pixel_shuffle_3D_with_invalid_channels_dim():
+            _test_pixel_shuffle_helper(num_input_dims=3, valid_channels_dim=False)
+
+        def test_pixel_shuffle_4D_with_invalid_channels_dim():
+            _test_pixel_shuffle_helper(num_input_dims=4, valid_channels_dim=False)
+
+        def test_pixel_shuffle_5D_with_invalid_channels_dim():
+            _test_pixel_shuffle_helper(num_input_dims=5, valid_channels_dim=False)
+
+        test_pixel_shuffle_1D()
+        test_pixel_shuffle_2D()
+        test_pixel_shuffle_3D_with_valid_channels_dim()
+        test_pixel_shuffle_4D_with_valid_channels_dim()
+        test_pixel_shuffle_5D_with_valid_channels_dim()
+        test_pixel_shuffle_3D_with_invalid_channels_dim()
+        test_pixel_shuffle_4D_with_invalid_channels_dim()
+        test_pixel_shuffle_5D_with_invalid_channels_dim()
 
     def test_elu_inplace_view(self):
         v = torch.tensor([1.0, -1.0, 1.0, -1.0], requires_grad=True)
@@ -12293,7 +12394,6 @@ class TestNNDeviceType(NNTestCase):
                 self._test_batchnorm_eval(device)
 
     @onlyCUDA
-    @skipCUDAIfNotRocm
     def test_batchnorm_eval_bfloat16(self, device):
         self._test_batchnorm_eval(device, torch.bfloat16)
 
@@ -13454,6 +13554,136 @@ class TestLazyModules(TestCase):
         lazy_module = nn.LazyLinear(10)
         with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
             module.load_state_dict(lazy_module.state_dict())
+
+    def _check_lazy_conv(self, cls, lazy_cls, func, init_args, input_shape, expected_weight_shape):
+        module = lazy_cls(*init_args)
+        self.assertIsInstance(module.weight, UninitializedParameter)
+        input = torch.ones(*input_shape)
+        module(input)
+        self.assertIsInstance(module, cls)
+        self.assertNotIsInstance(module, lazy_cls)
+        self.assertEqual(module.weight.shape, expected_weight_shape)
+        y = module(input)
+        self.assertTrue(torch.equal(func(input, module.weight, module.bias), y))
+
+    def _check_lazy_conv_pickle(self, cls, lazy_cls, init_args, input_shape, expected_weight_shape):
+        module = lazy_cls(*init_args)
+        self.assertIsInstance(module.weight, UninitializedParameter)
+        module = pickle.loads(pickle.dumps(module))
+        self.assertIsInstance(module, lazy_cls)
+        self.assertIsInstance(module.weight, UninitializedParameter)
+        input = torch.ones(*input_shape)
+        module(input)  # fully materialized
+        new_module = pickle.loads(pickle.dumps(module))
+        self.assertIsInstance(new_module, cls)
+        self.assertNotIsInstance(new_module, lazy_cls)
+        self.assertEqual(new_module.weight.shape, expected_weight_shape)
+        self.assertNotIsInstance(new_module.weight, UninitializedParameter)
+
+    def _check_lazy_conv_state(self, gen_module, gen_lazy_module, expected_weight_shape):
+        module = gen_module()
+        lazy_module = gen_lazy_module()
+        lazy_module.load_state_dict(module.state_dict())
+        # Parameters have been initialized but the module won't become a full
+        # Conv one until the first iteration. This is due to
+        # limitations on the state_dict loading logic
+        self.assertFalse(lazy_module.has_uninitialized_params())
+        self.assertEqual(lazy_module.weight.shape, expected_weight_shape)
+
+        module = gen_module()
+        lazy_module = gen_lazy_module()
+        with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
+            module.load_state_dict(lazy_module.state_dict())
+
+    @suppress_warnings
+    def test_lazy_conv1d(self):
+        self._check_lazy_conv(nn.Conv1d, nn.LazyConv1d, torch.nn.functional.conv1d,
+                              (32, 2), (192, 16, 50), (32, 16, 2))
+
+    @suppress_warnings
+    def test_lazy_conv1d_pickle(self):
+        self._check_lazy_conv_pickle(nn.Conv1d, nn.LazyConv1d, (32, 2), (192, 16, 50), (32, 16, 2))
+
+    @suppress_warnings
+    def test_lazy_conv1d_state(self):
+        self._check_lazy_conv_state(lambda: nn.Conv1d(16, 32, 2),
+                                    lambda: nn.LazyConv1d(32, 2),
+                                    (32, 16, 2))
+
+    @suppress_warnings
+    def test_lazy_conv2d(self):
+        self._check_lazy_conv(nn.Conv2d, nn.LazyConv2d, torch.nn.functional.conv2d,
+                              (32, 2), (192, 16, 8, 6), (32, 16, 2, 2))
+
+    @suppress_warnings
+    def test_lazy_conv2d_pickle(self):
+        self._check_lazy_conv_pickle(nn.Conv2d, nn.LazyConv2d, (32, 2), (192, 16, 8, 6), (32, 16, 2, 2))
+
+    @suppress_warnings
+    def test_lazy_conv2d_state(self):
+        self._check_lazy_conv_state(lambda: nn.Conv2d(16, 32, 2),
+                                    lambda: nn.LazyConv2d(32, 2),
+                                    (32, 16, 2, 2))
+
+    @suppress_warnings
+    def test_lazy_conv3d(self):
+        self._check_lazy_conv(nn.Conv3d, nn.LazyConv3d, torch.nn.functional.conv3d,
+                              (32, 2), (192, 16, 8, 7, 6), (32, 16, 2, 2, 2))
+
+    @suppress_warnings
+    def test_lazy_conv3d_pickle(self):
+        self._check_lazy_conv_pickle(nn.Conv3d, nn.LazyConv3d, (32, 2), (192, 16, 8, 7, 6), (32, 16, 2, 2, 2))
+
+    @suppress_warnings
+    def test_lazy_conv3d_state(self):
+        self._check_lazy_conv_state(lambda: nn.Conv3d(16, 32, 2),
+                                    lambda: nn.LazyConv3d(32, 2),
+                                    (32, 16, 2, 2, 2))
+
+    @suppress_warnings
+    def test_lazy_conv_transposed1d(self):
+        self._check_lazy_conv(nn.ConvTranspose1d, nn.LazyConvTranspose1d, torch.nn.functional.conv_transpose1d,
+                              (32, 2), (192, 16, 50), (16, 32, 2))
+
+    @suppress_warnings
+    def test_lazy_conv_transpose1d_pickle(self):
+        self._check_lazy_conv_pickle(nn.ConvTranspose1d, nn.LazyConvTranspose1d, (32, 2), (192, 16, 50), (16, 32, 2))
+
+    @suppress_warnings
+    def test_lazy_conv_transpose1d_state(self):
+        self._check_lazy_conv_state(lambda: nn.ConvTranspose1d(16, 32, 2),
+                                    lambda: nn.LazyConvTranspose1d(32, 2),
+                                    (16, 32, 2))
+
+    @suppress_warnings
+    def test_lazy_conv_transpose2d(self):
+        self._check_lazy_conv(nn.ConvTranspose2d, nn.LazyConvTranspose2d, torch.nn.functional.conv_transpose2d,
+                              (32, 2), (192, 16, 8, 6), (16, 32, 2, 2))
+
+    @suppress_warnings
+    def test_lazy_conv_transpose2d_pickle(self):
+        self._check_lazy_conv_pickle(nn.ConvTranspose2d, nn.LazyConvTranspose2d, (32, 2), (192, 16, 8, 6), (16, 32, 2, 2))
+
+    @suppress_warnings
+    def test_lazy_conv_transpose2d_state(self):
+        self._check_lazy_conv_state(lambda: nn.ConvTranspose2d(16, 32, 2),
+                                    lambda: nn.LazyConvTranspose2d(32, 2),
+                                    (16, 32, 2, 2))
+
+    @suppress_warnings
+    def test_lazy_conv_transpose3d(self):
+        self._check_lazy_conv(nn.ConvTranspose3d, nn.LazyConvTranspose3d, torch.nn.functional.conv_transpose3d,
+                              (32, 2), (192, 16, 8, 7, 6), (16, 32, 2, 2, 2))
+
+    @suppress_warnings
+    def test_lazy_conv_transpose3d_pickle(self):
+        self._check_lazy_conv_pickle(nn.ConvTranspose3d, nn.LazyConvTranspose3d, (32, 2), (192, 16, 8, 7, 6), (16, 32, 2, 2, 2))
+
+    @suppress_warnings
+    def test_lazy_conv_transpose3d_state(self):
+        self._check_lazy_conv_state(lambda: nn.ConvTranspose3d(16, 32, 2),
+                                    lambda: nn.LazyConvTranspose3d(32, 2),
+                                    (16, 32, 2, 2, 2))
 
     @suppress_warnings
     def test_materialize_dtype(self):

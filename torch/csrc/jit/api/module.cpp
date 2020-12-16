@@ -75,7 +75,7 @@ void Module::to(at::Device device, bool non_blocking) {
 }
 
 void module_state_to(
-    autograd::Variable variable,
+    const autograd::Variable& variable,
     const c10::optional<at::Device>& device,
     const c10::optional<at::ScalarType>& dtype,
     bool non_blocking) {
@@ -116,6 +116,17 @@ IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs) {
   stack.insert(stack.begin(), owner()._ivalue());
   RECORD_TORCHSCRIPT_FUNCTION(name(), stack);
   return (*function_)(std::move(stack), kwargs);
+}
+
+c10::intrusive_ptr<c10::ivalue::Future> Method::run_async(
+    std::vector<IValue> stack,
+    const Kwargs& kwargs,
+    TaskLauncher taskLauncher) {
+  stack.insert(stack.begin(), owner()._ivalue());
+  RECORD_TORCHSCRIPT_FUNCTION(name(), stack);
+
+  function_->getSchema().checkAndNormalizeInputs(stack, kwargs);
+  return function_->runAsync(stack, std::move(taskLauncher));
 }
 
 void Module::clone_method(

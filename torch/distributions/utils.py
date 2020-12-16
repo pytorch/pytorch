@@ -3,6 +3,9 @@ from numbers import Number
 import torch
 import torch.nn.functional as F
 from typing import Dict, Any
+from torch.overrides import has_torch_function
+
+euler_constant = 0.57721566490153286060  # Euler Mascheroni Constant
 
 
 def broadcast_all(*values):
@@ -15,21 +18,23 @@ def broadcast_all(*values):
         values are scalars, then they are upcasted to scalar Tensors.
 
     Args:
-        values (list of `numbers.Number` or `torch.*Tensor`)
+        values (list of `numbers.Number`, `torch.*Tensor` or objects implementing __torch_function__)
 
     Raises:
-        ValueError: if any of the values is not a `numbers.Number` or
-            `torch.*Tensor` instance
+        ValueError: if any of the values is not a `numbers.Number` instance,
+            a `torch.*Tensor` instance, or an instance implementing __torch_function__
     """
-    if not all(isinstance(v, torch.Tensor) or isinstance(v, Number) for v in values):
-        raise ValueError('Input arguments must all be instances of numbers.Number or torch.tensor.')
-    if not all([isinstance(v, torch.Tensor) for v in values]):
+    if not all(isinstance(v, torch.Tensor) or has_torch_function((v,)) or isinstance(v, Number)
+               for v in values):
+        raise ValueError('Input arguments must all be instances of numbers.Number, '
+                         'torch.Tensor or objects implementing __torch_function__.')
+    if not all([isinstance(v, torch.Tensor) or has_torch_function((v,)) for v in values]):
         options: Dict[str, Any] = dict(dtype=torch.get_default_dtype())
         for value in values:
             if isinstance(value, torch.Tensor):
                 options = dict(dtype=value.dtype, device=value.device)
                 break
-        new_values = [v if isinstance(v, torch.Tensor) else torch.tensor(v, **options)
+        new_values = [v if isinstance(v, torch.Tensor) or has_torch_function((v,)) else torch.tensor(v, **options)
                       for v in values]
         return torch.broadcast_tensors(*new_values)
     return torch.broadcast_tensors(*values)
@@ -105,3 +110,36 @@ class lazy_property(object):
             value = self.wrapped(instance)
         setattr(instance, self.wrapped.__name__, value)
         return value
+
+
+def tril_matrix_to_vec(mat, diag=0):
+    r"""
+    Convert a `D x D` matrix or a batch of matrices into a (batched) vector
+    which comprises of lower triangular elements from the matrix in row order.
+    """
+    n = mat.shape[-1]
+    if not torch._C._get_tracing_state() and (diag < -n or diag >= n):
+        raise ValueError(f'diag ({diag}) provided is outside [{-n}, {n-1}].')
+    arange = torch.arange(n, device=mat.device)
+    tril_mask = arange < arange.view(-1, 1) + (diag + 1)
+    vec = mat[..., tril_mask]
+    return vec
+
+
+def vec_to_tril_matrix(vec, diag=0):
+    r"""
+    Convert a vector or a batch of vectors into a batched `D x D`
+    lower triangular matrix containing elements from the vector in row order.
+    """
+    # +ve root of D**2 + (1+2*diag)*D - |diag| * (diag+1) - 2*vec.shape[-1] = 0
+    n = (-(1 + 2 * diag) + ((1 + 2 * diag)**2 + 8 * vec.shape[-1] + 4 * abs(diag) * (diag + 1))**0.5) / 2
+    eps = torch.finfo(vec.dtype).eps
+    if not torch._C._get_tracing_state() and (round(n) - n > eps):
+        raise ValueError(f'The size of last dimension is {vec.shape[-1]} which cannot be expressed as ' +
+                         'the lower triangular part of a square D x D matrix.')
+    n = torch.round(n).long() if isinstance(n, torch.Tensor) else round(n)
+    mat = vec.new_zeros(vec.shape[:-1] + torch.Size((n, n)))
+    arange = torch.arange(n, device=vec.device)
+    tril_mask = arange < arange.view(-1, 1) + (diag + 1)
+    mat[..., tril_mask] = vec
+    return mat
