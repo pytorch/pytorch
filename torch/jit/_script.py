@@ -774,7 +774,7 @@ def call_prepare_scriptable_func_impl(obj, memo):
     return obj
 
 def call_prepare_scriptable_func(obj):
-    memo = {}
+    memo: Dict[int, torch.nn.Module] = {}
     return call_prepare_scriptable_func_impl(obj, memo)
 
 def script(obj, optimize=None, _frames_up=0, _rcb=None):
