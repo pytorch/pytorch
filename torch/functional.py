@@ -19,6 +19,7 @@ __all__ = [
     'atleast_2d',
     'atleast_3d',
     'align_tensors',
+    'broadcast_shapes',
     'broadcast_tensors',
     'cartesian_prod',
     'block_diag',
@@ -70,6 +71,39 @@ def broadcast_tensors(*tensors):
         if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
             return handle_torch_function(broadcast_tensors, tensors, *tensors)
     return _VF.broadcast_tensors(tensors)  # type: ignore
+
+
+def broadcast_shapes(*shapes):
+    r"""broadcast_shapes(*shapes) -> Size
+
+    Similar to :func:`broadcast_tensors` but for shapes.
+
+    This is equivalent to
+    ``torch.broadcast_tensors(*map(torch.empty, shapes))[0].shape``
+    but avoids the need create to intermediate tensors. This is useful for
+    broadcasting tensors of common batch shape but different rightmost shape,
+    e.g. to broadcast mean vectors with covariance matrices.
+
+    Example::
+
+        >>> torch.broadcast_shapes((2,), (3, 1), (1, 1, 1))
+        torch.Size([1, 3, 2])
+
+    Args:
+        \*shapes (torch.Size): Shapes of tensors.
+
+    Returns:
+        shape (torch.Size): A shape compatible with all input shapes.
+
+    Raises:
+        RuntimeError: If shapes are incompatible.
+    """
+    # TODO Movie this to C++ once the jit has better support for torch.Size.
+    with torch.no_grad():
+        scalar = torch.zeros((), device="cpu")
+        tensors = [scalar.expand(shape) for shape in shapes]
+        tensors = broadcast_tensors(*tensors)
+        return tensors[0].shape
 
 
 def split(tensor, split_size_or_sections, dim=0):
@@ -553,6 +587,10 @@ def istft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
             can either be complex (``channel``, ``fft_size``, ``n_frame``), or real
             (``channel``, ``fft_size``, ``n_frame``, 2) where the ``channel``
             dimension is optional.
+
+            .. deprecated:: 1.8.0
+               Real input is deprecated, use complex inputs as returned by
+               ``stft(..., return_complex=True)`` instead.
         n_fft (int): Size of Fourier transform
         hop_length (Optional[int]): The distance between neighboring sliding window frames.
             (Default: ``n_fft // 4``)
@@ -1228,7 +1266,13 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         more consistent with NumPy's numpy.linalg.norm.
 
     Args:
-        input (Tensor): the input tensor
+        input (Tensor): The input tensor. Its data type must be either a floating
+            point or complex type. For complex inputs, the norm is calculated using the
+            absolute value of each element. If the input is complex and neither
+            :attr:`dtype` nor :attr:`out` is specified, the result's data type will
+            be the corresponding floating point type (e.g. float if :attr:`input` is
+            complexfloat).
+
         p (int, float, inf, -inf, 'fro', 'nuc', optional): the order of norm. Default: ``'fro'``
             The following norms can be calculated:
 

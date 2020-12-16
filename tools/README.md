@@ -24,11 +24,16 @@ Build system pieces:
 * [setup_helpers](setup_helpers) - Helper code for searching for
   third-party dependencies on the user system.
 * [build_pytorch_libs.py](build_pytorch_libs.py) - cross-platform script that
-  builds all of the constituent libraries of PyTorch, 
+  builds all of the constituent libraries of PyTorch,
   but not the PyTorch Python extension itself.
 * [build_libtorch.py](build_libtorch.py) - Script for building
   libtorch, a standalone C++ library without Python support.  This
   build script is tested in CI.
+* [fast_nvcc](fast_nvcc) - Mostly-transparent wrapper over nvcc that
+  parallelizes compilation when used to build CUDA files for multiple
+  architectures at once.
+  * [fast_nvcc.py](fast_nvcc/fast_nvcc.py) - Python script, entrypoint to the
+    fast nvcc wrapper.
 
 Developer tools which you might find useful:
 
@@ -52,8 +57,6 @@ Important if you want to run on AMD GPU:
 
 Tools which are only situationally useful:
 
-* [aten_mirror.sh](aten_mirror.sh) - Mirroring script responsible
-  for keeping https://github.com/zdevito/ATen up-to-date.
 * [docker](docker) - Dockerfile for running (but not developing)
   PyTorch, using the official conda binary distribution.  Context:
   https://github.com/pytorch/pytorch/issues/1619
