@@ -84,6 +84,16 @@ class TestTracer(JitTestCase):
 
         self.checkTrace(f, (x, y))
 
+    def test_trace_torch_numel(self):
+
+        def avg(x):
+            return x.sum()/x.numel()
+
+        traced_avg = torch.jit.trace(avg, torch.empty(2,4,5))
+        inp = torch.ones(2,3,5)
+        print(traced_avg.code)
+        self.assertEqual(traced_avg(inp), avg(inp))
+
     def test_trace_checking_with_global_name(self):
         class MyClass(torch.nn.Module):
             def __init__(self):
