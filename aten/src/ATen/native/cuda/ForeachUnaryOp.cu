@@ -221,6 +221,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_cuda(TensorList tensors) {   \
 }                                                                        \
                                                                          \
 void foreach_tensor_##NAME##_cuda_(TensorList tensors) {                 \
+    check_foreach_api_restrictions(tensors);                             \
     bool has_integral = has_int_or_bool_tensor(tensors);                 \
     /* MTA doesnt support different return type than input one */        \
     if (!can_use_fast_route(tensors) || has_integral) {                  \
