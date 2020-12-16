@@ -609,7 +609,7 @@ class CAFFE2_API Tensor {
 
   /// This function can be used to set the value of the forward grad.
   /// Note that the given value might not be used directly if it is a view of another Tensor.
-  void set_fw_grad(Tensor& new_grad, uint64_t level, bool is_inplace_op) {
+  void set_fw_grad(const Tensor& new_grad, uint64_t level, bool is_inplace_op) {
     impl_->set_fw_grad(new_grad, *this, level, is_inplace_op);
   }
 
