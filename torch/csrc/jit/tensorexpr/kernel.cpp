@@ -1489,7 +1489,11 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
 
   bool hasReduction = NodeFinder<ReduceOp>::find(l.root_stmt()).size() != 0;
 
-  l.inlineIntermediateBufs();
+  // inlining output buffers duplicates computation. it slows down
+  // cpu code generation but is enabled on gpu because it avoids difficult
+  // synchronization logic across blocks.
+  bool inline_output_buffers = backendType == kCudaCodeGen;
+  l.inlineIntermediateBufs(inline_output_buffers);
 
   if (backendType == kCudaCodeGen) {
     for (auto tensor : tensorOutputs_) {
