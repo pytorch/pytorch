@@ -1073,7 +1073,7 @@ inline c10::intrusive_ptr<ivalue::Tuple> IValue::toTuple() const& {
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Tuple> v)
     : tag(Tag::Tuple), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
+  payload.as_intrusive_ptr = null_to_undefined_tensor(v.release());
 }
 template <
     typename... Args,
@@ -1089,14 +1089,14 @@ inline IValue::IValue(const std::tuple<Args...>& t)
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::ConstantString> v)
     : tag(Tag::String), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
+  payload.as_intrusive_ptr = null_to_undefined_tensor(v.release());
 }
 inline IValue::IValue(std::string v)
     : IValue(ivalue::ConstantString::create(std::move(v))) {}
 
 inline IValue::IValue(c10::impl::GenericList v)
     : tag(Tag::GenericList), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.impl_.release() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
+  payload.as_intrusive_ptr = null_to_undefined_tensor(v.impl_.release());
 }
 
 template <class T, IValue::enable_if_ivalue_constructible<T>>
@@ -1128,7 +1128,7 @@ inline IValue::IValue(std::array<T, N> v) : IValue(c10::List<T>()) {
 
 inline IValue::IValue(c10::impl::GenericDict v)
     : tag(Tag::GenericDict), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.impl_.release() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
+  payload.as_intrusive_ptr = null_to_undefined_tensor(v.impl_.release());
 }
 template <class Key, class Value>
 inline IValue::IValue(c10::Dict<Key, Value> v)
@@ -1155,17 +1155,17 @@ inline IValue::IValue(c10::nullopt_t) : IValue() {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Object> v)
     : tag(Tag::Object), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
+  payload.as_intrusive_ptr = null_to_undefined_tensor(v.release());
 }
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::PyObjectHolder> v)
     : tag(Tag::PyObject), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
+  payload.as_intrusive_ptr = null_to_undefined_tensor(v.release());
 }
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::EnumHolder> v)
     : tag(Tag::Enum), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
+  payload.as_intrusive_ptr = null_to_undefined_tensor(v.release());
 }
 
 inline IValue IValue::make_capsule(
@@ -1173,7 +1173,7 @@ inline IValue IValue::make_capsule(
   IValue iv;
   iv.tag = Tag::Capsule;
   iv.is_intrusive_ptr = true;
-  iv.payload.as_intrusive_ptr = blob.release() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
+  iv.payload.as_intrusive_ptr = null_to_undefined_tensor(blob.release());
   return iv;
 }
 
@@ -1194,24 +1194,24 @@ IValue::IValue(c10::intrusive_ptr<T> custom_class) {
   auto ivalue_obj = c10::ivalue::Object::create(
       c10::StrongTypePtr(nullptr, classType), /*num_slots=*/1);
   ivalue_obj->setSlot(0, IValue::make_capsule(std::move(custom_class)));
-  payload.as_intrusive_ptr = ivalue_obj.release() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
+  payload.as_intrusive_ptr = null_to_undefined_tensor(ivalue_obj.release());
   tag = Tag::Object;
   is_intrusive_ptr = true;
 }
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
     : tag(Tag::Future), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
+  payload.as_intrusive_ptr = null_to_undefined_tensor(v.release());
 }
 
 inline IValue::IValue(c10::intrusive_ptr<c10::RRefInterface> v)
     : tag(Tag::RRef), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
+  payload.as_intrusive_ptr = null_to_undefined_tensor(v.release());
 }
 
 inline IValue::IValue(c10::intrusive_ptr<at::Quantizer> v)
     : tag(Tag::Quantizer), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release() ?: static_cast<intrusive_ptr_target*>(c10::UndefinedTensorImpl::singleton());
+  payload.as_intrusive_ptr = null_to_undefined_tensor(v.release());
 }
 
 inline const std::string& IValue::toStringRef() const {
