@@ -162,8 +162,7 @@ class TORCH_API HashProvider : public IRVisitor {
   // casting to short instead of accessing val.x can error if value is
   // outside of representable short rangee
   void _hash_combine(SimplifierHashType& seed, const at::Half& val) {
-    seed._h ^=
-        te_hash(val.x) + 0x1f752c19 + (seed._h << 7) + (seed._h >> 4);
+    seed._h ^= te_hash(val.x) + 0x1f752c19 + (seed._h << 7) + (seed._h >> 4);
   }
 
   void _hash_combine(SimplifierHashType& seed, const Dtype& val) {
