@@ -83,6 +83,9 @@ struct TORCH_API InferenceModule {
   void init();
 };
 
+TORCH_API void PrepareGraphForStaticRuntime(
+    std::shared_ptr<torch::jit::Graph> g);
+
 inline TORCH_API std::shared_ptr<InferenceModule> PrepareForStaticRuntime(
     const torch::jit::Module& m,
     InferenceModuleOptions opts = InferenceModuleOptions()) {
@@ -155,6 +158,8 @@ class TORCH_API StaticRuntime {
   const std::vector<IValue>& get_registers() {
     return reg_;
   }
+
+  size_t num_outputs() const;
 
  private:
   // Static runtime states
