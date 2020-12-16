@@ -2620,6 +2620,202 @@ class TestLinalg(TestCase):
             self.assertEqual(torch.matrix_rank(aaT, True), np.linalg.matrix_rank(aaT.cpu().numpy(), True))
             self.assertEqual(torch.matrix_rank(aaT, 0.01, True), np.linalg.matrix_rank(aaT.cpu().numpy(), 0.01, True))
 
+    @dtypes(torch.double, torch.cdouble)
+    def test_einsum(self, device, dtype):
+        def check(equation, *operands):
+            ref = np.einsum(equation, *[operand.cpu().numpy() for operand in operands])
+            res = torch.einsum(equation, operands)
+            self.assertEqual(res.cpu(), torch.from_numpy(np.array(ref)))
+
+            # Check autograd
+            ops = [op.detach().requires_grad_() for op in operands]
+            self.assertTrue(torch.autograd.gradcheck(lambda *ops: torch.einsum(equation, ops), ops))
+            for op in ops:
+                self.assertTrue(op._version == 0)
+
+        # Test cases from https://gist.github.com/rockt/15ee013889d65342088e9260a377dc8f
+        x = torch.rand(5, device=device, dtype=dtype)
+        y = torch.rand(7, device=device, dtype=dtype)
+        A = torch.randn(3, 5, device=device, dtype=dtype)
+        B = torch.randn(2, 5, device=device, dtype=dtype)
+        C = torch.randn(2, 3, 5, device=device, dtype=dtype)
+        D = torch.randn(2, 5, 7, device=device, dtype=dtype)
+        E = torch.randn(7, 9, device=device, dtype=dtype)
+        F = torch.randn(2, 3, 3, 5, device=device, dtype=dtype)
+        G = torch.randn(5, 4, 6, device=device, dtype=dtype)
+        H = torch.randn(4, 4, device=device, dtype=dtype)
+        I = torch.rand(2, 3, 2, device=device, dtype=dtype)
+
+        # Note: gradcheck fails if the same input is given multiple times which is why the
+        # calls to clone below. (see https://github.com/pytorch/pytorch/issues/9282)
+
+        # Vector operations
+        check('i->', x)                     # sum
+        check('i,i->', x, x.clone())        # dot
+        check('i,i->i', x, x.clone())       # vector element-wisem mul
+        check('i,j->ij', x, y)              # outer
+
+        # Matrix operations
+        check("ij->ji", A)                  # transpose
+        check("ij->j", A)                   # row sum
+        check("ij->i", A)                   # col sum
+        check("ij,ij->ij", A, A.clone())    # matrix element-wise mul
+        check("ij,j->i", A, x)              # matrix vector multiplication
+        check("ij,kj->ik", A, B)            # matmul
+        check("ij,ab->ijab", A, E)          # matrix outer product
+
+        # Tensor operations
+        check("aij,ajk->aik", C, D)         # batch matmul
+        check("ijk,jk->i", C, A)            # tensor matrix contraction
+        check("aij,jk->aik", D, E)          # tensor matrix contraction
+        check("abcd,dfg->abcfg", F, G)      # tensor tensor contraction
+        check("ijk,jk->ik", C, A)           # tensor matrix contraction with double indices
+        check("ijk,jk->ij", C, A)           # tensor matrix contraction with double indices
+        check("ijk,ik->j", C, B)            # non contiguous
+        check("ijk,ik->jk", C, B)           # non contiguous with double indices
+
+        # Test diagonals
+        check("ii", H)                      # trace
+        check("ii->i", H)                   # diagonal
+        check('iji->j', I)                  # non-contiguous trace
+        check('ngrg...->nrg...', torch.rand((2, 1, 3, 1, 4), device=device, dtype=dtype))
+
+        # Test ellipsis
+        check("i...->...", H)
+        check("ki,...k->i...", A.t(), B)
+        check("k...,jk->...", A.t(), B)
+        check('...ik, ...j -> ...ij', C, x)
+        check('bik,k...j->i...j', C, torch.rand(5, 3, device=device, dtype=dtype))
+        check('i...j, ij... -> ...ij', C, torch.rand(2, 5, 2, 3, device=device, dtype=dtype))
+
+        # torch.bilinear with discontiguous tensors
+        l = torch.randn(10, 5, device=device, dtype=dtype).transpose(0, 1)
+        r = torch.randn(20, 5, device=device, dtype=dtype).transpose(0, 1)
+        w = torch.randn(15, 10, 20, device=device, dtype=dtype)
+        check("bn,anm,bm->ba", l, w, r)
+
+        # with strided tensors
+        check("bn,anm,bm->ba", l[:, ::2], w[:, ::2, ::2], r[:, ::2])
+
+    @dtypes(torch.double, torch.cdouble)
+    def test_einsum_random(self, device, dtype):
+        def check(equation, *operands):
+            ref = np.einsum(equation, *[op.cpu().numpy() for op in operands])
+            res = torch.einsum(equation, operands)
+            self.assertEqual(res.cpu(), torch.from_numpy(np.array(ref)))
+
+        for _ in range(20):
+            # Create a random number of input operands, each with a random
+            # number of dimensions randomly labeled.
+            op_labels = []
+            valid_labels = set()
+            for _ in range(random.randint(1, 3)):
+                labels = np.random.randint(0, 10, random.randint(1, 5))
+                op_labels.append(labels)
+                valid_labels.update(labels)
+            label_size = np.random.randint(1, 5, 10)
+            ell_sizes = np.random.randint(1, 5, 3)
+
+            # Build equation and tensors from input operand labels.
+            ops = []
+            equation = ''
+            for labels in op_labels:
+                sizes = [label_size[label] for label in labels]
+                labels = [chr(ord('a') + label) for label in labels]
+
+                # Add ellipsis dimensions at random
+                ell_num_dim = random.randint(0, 3)
+                if ell_num_dim > 0:
+                    ell_index = random.randint(0, len(labels))
+                    sizes[ell_index:ell_index] = ell_sizes[-ell_num_dim:]
+                    labels.insert(ell_index, "...")
+
+                equation += ''.join(labels) + ','
+                ops.append(torch.rand(sizes, device=device, dtype=dtype))
+            equation = equation[:-1]
+
+            # Test with implicit output
+            check(equation, *ops)
+
+            # Randomly choose some labels to be part of the output
+            out_labels = np.unique(np.random.choice(list(valid_labels), random.randint(1, len(valid_labels))))
+            out_labels = [chr(ord('a') + label) for label in out_labels]
+            ell_index = random.randint(0, len(out_labels))
+            out_labels.insert(ell_index, '...')
+            equation += '->' + ''.join(out_labels)
+
+            # Randomly test the output
+            check(equation, *ops)
+
+    def test_einsum_corner_cases(self, device):
+        def check(equation, *operands, expected_output):
+            tensors = [torch.tensor(operand, dtype=torch.float32, device=device) if not isinstance(operand, tuple)
+                       else torch.rand(operand, dtype=torch.float32, device=device) for operand in operands]
+            output = torch.einsum(equation, tensors)
+            self.assertEqual(output, torch.tensor(expected_output, dtype=torch.float32, device=device))
+
+        # Test equation variantions
+        check(' ', 1, expected_output=1)
+        check(' -> ', 1, expected_output=1)
+        check(' , ', 2, 2, expected_output=4)
+        check(' , , ', 2, 2, 2, expected_output=8)
+        check(' , -> ', 2, 2, expected_output=4)
+        check(' i ', [1], expected_output=[1])
+        check(' i -> ', [1], expected_output=1)
+        check(' i -> i ', [1], expected_output=[1])
+        check(' i , i ', [2], [2], expected_output=4)
+        check(' i , i -> i ', [2], [2], expected_output=[4])
+
+        # Test tensors with 0 size dimensions
+        check('i', [], expected_output=[])
+        check(' i j -> j', [[], []], expected_output=[])
+        check('ij->i', [[], []], expected_output=[0., 0.])
+        check(' i j k  ,  k  -> i j ', (3, 0, 6), (6,), expected_output=[[], [], []])
+
+        # Test broadcasting
+        check('i,j', [2], [1, 2], expected_output=[[2, 4]])
+        check('i,ij->ij', [1, 2], [[1, 2, 3], [2, 3, 4]], expected_output=[[1, 2, 3], [4, 6, 8]])
+
+        # Test ellipsis broadcasting
+        check('...', 1, expected_output=1)
+        check('...->', 1, expected_output=1)
+        check('...->...', 1, expected_output=1)
+        check('...', [1], expected_output=[1])
+        check('...->', [1], expected_output=1)
+        check('i...->i', [1], expected_output=[1])
+        check('i...->...i', [1], expected_output=[1])
+        check('...a->', [[2], [4]], expected_output=6)
+        check('a...b->ab', [[[1], [2]], [[3], [4]]], expected_output=[[3], [7]])
+
+    def test_einsum_error_cases(self, device):
+        def check(equation, operands, regex, exception=RuntimeError):
+            with self.assertRaisesRegex(exception, r'einsum\(\) ' + regex):
+                torch.einsum(equation, operands)
+
+        x = torch.rand(2)
+        y = torch.rand(2, 3)
+
+        check('', [], r'must provide at least one operand')
+        check('. ..', [x], r'found \'.\' for operand 0 that is not part of any ellipsis')
+        check('... ...', [x], r'found \'.\' for operand 0 for which an ellipsis was already found')
+        check('A', [x], r'operand subscript must be in range \[a, z\] but found A for operand 0')
+        check(',', [x], r'fewer operands were provided than specified in the equation')
+        check('', [x, x], r'more operands were provided than specified in the equation')
+        check('', [x], r'the number of subscripts in the equation \(0\) does not match the number '
+                       r'of dimensions \(1\) for operand 0 and no ellipsis was given')
+        check('ai', [x], r'the number of subscripts in the equation \(2\) does not match the number '
+                         r'of dimensions \(1\) for operand 0 and no ellipsis was given')
+        check('ai...', [x], r'the number of subscripts in the equation \(2\) is more than the number '
+                            r'of dimensions \(1\) for operand 0')
+        check('a->... .', [x], r'found \'.\' for output but an ellipsis \(...\) was already found')
+        check('a->..', [x], r'found \'.\' for output that is not part of any ellipsis \(...\)')
+        check('a->A', [x], r'subscripts must be in range \[a, z\] but found A for the output')
+        check('a->aa', [x], r'output subscript a appears more than once in the output')
+        check('a->i', [x], r'output subscript i does not appear in the equation for any input operand')
+        check('aa', [y], r'subscript a is repeated for operand 0 but the sizes don\'t match, 3 != 2')
+        check('a, ba', [x, y], r'operands do not broadcast with remapped shapes \[original->remapped\]: '
+                               r'\[2\]->\[1, 2\] \[2, 3\]->\[2, 3\]')
+
     def triangular_solve_test_helper(self, A_dims, b_dims, upper, unitriangular,
                                      device, dtype):
         triangle_function = torch.triu if upper else torch.tril
@@ -3272,80 +3468,6 @@ class TestLinalg(TestCase):
         if self.device_type == 'cuda':
             run_test(False)
 
-    @onlyCPU
-    @slowTest
-    @dtypes(torch.double)
-    def test_einsum(self, device: torch.device, dtype: torch.dtype) -> None:
-        # test cases taken from https://gist.github.com/rockt/15ee013889d65342088e9260a377dc8f
-        x = torch.randn(5, dtype=dtype, device=device)
-        y = torch.randn(7, dtype=dtype, device=device)
-        A = torch.randn(3, 5, dtype=dtype, device=device)
-        B = torch.randn(2, 5, dtype=dtype, device=device)
-        C = torch.randn(2, 3, 5, dtype=dtype, device=device)
-        D = torch.randn(2, 5, 7, dtype=dtype, device=device)
-        E = torch.randn(7, 9, dtype=dtype, device=device)
-        F = torch.randn(2, 3, 5, 7, dtype=dtype, device=device)
-        G = torch.randn(7, 11, 13, dtype=dtype, device=device)
-        H = torch.randn(4, 4, dtype=dtype, device=device)
-        I = torch.randn(3, 4, 4, dtype=dtype, device=device)
-        l = torch.randn(5, 10, dtype=dtype, device=device)
-        r = torch.randn(5, 20, dtype=dtype, device=device)
-        w = torch.randn(30, 10, 20, dtype=dtype, device=device)
-        test_list: List[Union[Tuple[str, torch.Tensor],
-                        Tuple[str, torch.Tensor, torch.Tensor],
-                        Tuple[str, torch.Tensor, torch.Tensor, torch.Tensor]]] = [
-            # -- Vector
-            ("i->", x),                 # sum
-            ("i,i->", x, x),            # dot
-            ("i,i->i", x, x),           # vector element-wise mul
-            ("i,j->ij", x, y),          # outer
-            # -- Matrix
-            ("ij->ji", A),              # transpose
-            ("ij->j", A),               # row sum
-            ("ij->i", A),               # col sum
-            ("ij,ij->ij", A, A),        # matrix element-wise mul
-            ("ij,j->i", A, x),          # matrix vector multiplication
-            ("ij,kj->ik", A, B),        # matmul
-            ("ij,ab->ijab", A, E),      # matrix outer product
-            # -- Tensor
-            ("aij,ajk->aik", C, D),     # batch matmul
-            ("ijk,jk->i", C, A),        # tensor matrix contraction
-            ("aij,jk->aik", D, E),      # tensor matrix contraction
-            ("abcd,dfg->abcfg", F, G),  # tensor tensor contraction
-            ("ijk,jk->ik", C, A),       # tensor matrix contraction with double indices
-            ("ijk,jk->ij", C, A),       # tensor matrix contraction with double indices
-            ("ijk,ik->j", C, B),        # non contiguous
-            ("ijk,ik->jk", C, B),       # non contiguous with double indices
-            # -- Diagonal
-            ("ii", H),                 # trace
-            ("ii->i", H),              # diagonal
-            # -- Ellipsis
-            ("i...->...", H),
-            ("ki,...k->i...", A.t(), B),
-            ("k...,jk", A.t(), B),
-            ("...ii->...i", I),       # batch diagonal
-            # -- Other
-            ("bn,anm,bm->ba", l, w, r),  # as torch.bilinear
-            ("... ii->...i  ", I),       # batch diagonal with spaces
-        ]
-        for test in test_list:
-            actual = torch.einsum(test[0], test[1:])
-            expected = np.einsum(test[0], *[t.numpy() for t in test[1:]])
-            self.assertEqual(expected.shape, actual.shape, msg=test[0])
-            self.assertEqual(expected, actual, msg=test[0])
-            # test vararg
-            actual2 = torch.einsum(test[0], *test[1:])
-            self.assertEqual(expected.shape, actual2.shape, msg=test[0])
-            self.assertEqual(expected, actual2, msg=test[0])
-
-            def do_einsum(*args):
-                return torch.einsum(test[0], args)
-            # FIXME: following test cases fail gradcheck
-            if test[0] not in {"i,i->", "i,i->i", "ij,ij->ij"}:
-                gradcheck_inps = tuple(t.detach().requires_grad_() for t in test[1:])
-                self.assertTrue(torch.autograd.gradcheck(do_einsum, gradcheck_inps))
-            self.assertTrue(A._version == 0)  # check that we do not use inplace ops
-
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.double)
@@ -3921,7 +4043,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         torch_fn = lambda x: torch.mm(x, x)  # noqa: E731
         self.compare_with_numpy(torch_fn, np_fn, sx[0])
 
-    @precisionOverride({torch.half: 0.005, torch.bfloat16: 0.05})
+    @precisionOverride({torch.half: 0.05, torch.bfloat16: 0.05})
     @skipCUDAIf(torch.version.cuda == "10.1", "flaky on CUDA 10.1")
     @onlyOnCPUAndCUDA
     @dtypes(*torch.testing.get_all_fp_dtypes(), *torch.testing.get_all_complex_dtypes())
@@ -3947,17 +4069,26 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             return (d[0], d[1], d[2])
 
         def generate_inputs():
+            # transposed tensors
             for perm1, perm2 in itertools.product(itertools.permutations((0, 1, 2)), repeat=2):
                 b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
                 b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1)
                 b1 = b1.permute(perm1).contiguous().permute(invert_perm(perm1))
                 b2 = b2.permute(perm2).contiguous().permute(invert_perm(perm2))
                 yield b1, b2
+            # broadcasting tensors
             for b1, b2, b3, b4, b5, b6 in itertools.product((True, False), repeat=6):
                 shape1 = (num_batches if b1 else 1, M if b2 else 1, N if b3 else 1)
                 shape2 = (num_batches if b4 else 1, N if b5 else 1, O if b6 else 1)
                 b1 = make_tensor(shape1, device, dtype, low=-1, high=1).expand(num_batches, M, N)
                 b2 = make_tensor(shape2, device, dtype, low=-1, high=1).expand(num_batches, N, O)
+                yield b1, b2
+            # zero-sized tensors
+            for z1, z2, z3, z4 in itertools.product((True, False), repeat=4):
+                shape1 = (num_batches if z1 else 0, M if z2 else 0, N if z3 else 0)
+                shape2 = (num_batches if z1 else 0, N if z3 else 0, O if z4 else 0)
+                b1 = torch.randn(shape1, dtype=dtype, device=device)
+                b2 = torch.randn(shape2, dtype=dtype, device=device)
                 yield b1, b2
 
         for (b1, b2), perm3 in itertools.product(generate_inputs(), itertools.permutations((0, 1, 2))):
@@ -4139,6 +4270,17 @@ else:
                 ).to(device=device, dtype=dtype).sum(0)
                 out_tensor = torch.zeros_like(ref)
                 yield b1, b2, ref, out_tensor
+            # zero-sized tensors
+            for z1, z2, z3, z4 in itertools.product((True, False), repeat=4):
+                shape1 = (num_batches if z1 else 0, M if z2 else 0, N if z3 else 0)
+                shape2 = (num_batches if z1 else 0, N if z3 else 0, O if z4 else 0)
+                b1 = make_tensor(shape1, device, dtype, low=-1, high=1)
+                b2 = make_tensor(shape2, device, dtype, low=-1, high=1)
+                ref = torch.from_numpy(
+                    b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()
+                ).to(device=device, dtype=dtype).sum(0)
+                out_tensor = torch.zeros_like(ref)
+                yield b1, b2, ref, out_tensor
 
         for b1, b2, ref, out_tensor in generate_tensor():
             self._test_addbmm_baddbmm("addbmm", b1, b2, ref, out_tensor)
@@ -4186,6 +4328,16 @@ else:
                 shape2 = (num_batches if s4 else 1, N if s5 else 1, O if s6 else 1)
                 b1 = make_tensor(shape1, device, dtype, low=-1, high=1).expand(num_batches, M, N)
                 b2 = make_tensor(shape2, device, dtype, low=-1, high=1).expand(num_batches, N, O)
+                ref = torch.from_numpy(
+                    b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()).to(device=device, dtype=dtype)
+                out_tensor = torch.zeros_like(ref)
+                yield b1, b2, ref, out_tensor
+            # zero-sized tensors
+            for z1, z2, z3, z4 in itertools.product((True, False), repeat=4):
+                shape1 = (num_batches if z1 else 0, M if z2 else 0, N if z3 else 0)
+                shape2 = (num_batches if z1 else 0, N if z3 else 0, O if z4 else 0)
+                b1 = make_tensor(shape1, device, dtype, low=-2, high=2)
+                b2 = make_tensor(shape2, device, dtype, low=-2, high=2)
                 ref = torch.from_numpy(
                     b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()).to(device=device, dtype=dtype)
                 out_tensor = torch.zeros_like(ref)
