@@ -382,7 +382,8 @@ def init_process_group(backend,
                                      Mutually exclusive with ``store``.
         world_size (int, optional): Number of processes participating in
                                     the job. Required if ``store`` is specified.
-        rank (int, optional): Rank of the current process.
+        rank (int, optional): Rank of the current process (it should be a
+                              number between 0 and ``world_size``-1).
                               Required if ``store`` is specified.
         store(Store, optional): Key/value store accessible to all workers, used
                                 to exchange connection/address information.
