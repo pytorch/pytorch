@@ -1210,6 +1210,35 @@ class TestTEFuser(JitTestCase):
         else:
             return v.to(dtype)
 
+    def test_nan_to_num(self):
+        nan_vals = torch.tensor([float('nan'), float('inf'), -float('inf'), 3.14])
+        sizes = [(1, 4), (4, 4)]
+        dtypes = [
+            torch.int,
+            torch.float16,
+            torch.float32,
+            torch.float64,
+        ]
+        for dtype, device, size in product(dtypes, self.devices, sizes):
+            # TODO
+            if dtype == torch.float16 and not LLVM_ENABLED:
+                continue
+
+            x = self.data_for(dtype, device, size=size)
+            x[0] = nan_vals.to(dtype)
+
+            def fn(x):
+                return torch.nan_to_num(x), torch.nan_to_num(x, 1., 2., 3.)
+            ref = fn(x)
+            try:
+                t = torch.jit.trace(fn, (x,))
+                self.assertEqual(ref, t(x))
+                self.assertAllFused(t.graph_for(x))
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), "torch.nan_to_num", device, str(size)])
+                )
+
     def test_torch_to(self):
         # test no op
         @torch.jit.script
@@ -1280,35 +1309,6 @@ class TestTEFuser(JitTestCase):
             warmup_forward(mod.forward, x)
             self.assertEqual(ref, mod.forward(x))
             self.assertLastGraphAllFused()
-
-    def test_nan_to_num(self):
-        nan_vals = torch.tensor([float('nan'), float('inf'), -float('inf'), 3.14])
-        sizes = [(1, 4), (4, 4)]
-        dtypes = [
-            torch.int,
-            torch.float16,
-            torch.float32,
-            torch.float64,
-        ]
-        for dtype, device, size in product(dtypes, self.devices, sizes):
-            # TODO
-            if dtype == torch.float16 and not LLVM_ENABLED:
-                continue
-
-            x = self.data_for(dtype, device, size=size)
-            x[0] = nan_vals.to(dtype)
-
-            def fn(x):
-                return torch.nan_to_num(x), torch.nan_to_num(x, 1., 2., 3.)
-            ref = fn(x)
-            try:
-                t = torch.jit.trace(fn, (x,))
-                self.assertEqual(ref, t(x))
-                self.assertAllFused(t.graph_for(x))
-            except Exception as e:
-                raise RuntimeError(
-                    " ".join(["Failed:", str(dtype), "torch.nan_to_num", device, str(size)])
-                )
 
     def test_masked_fill(self):
         # check scalar overload
