@@ -3,6 +3,7 @@ import fnmatch
 import warnings
 from typing import List, Union, Iterable
 
+
 def match_masks(name : str, masks : Union[str, List[str]]) -> bool:
     # empty mask matches any input name
     if not masks:
@@ -15,6 +16,7 @@ def match_masks(name : str, masks : Union[str, List[str]]) -> bool:
         if fnmatch.fnmatch(name, mask):
             return True
     return False
+
 
 def get_file_pathnames_from_root(
         root: str,
@@ -35,3 +37,17 @@ def get_file_pathnames_from_root(
                 yield os.path.join(path, f)
         if not recursive:
             break
+
+
+def get_file_binaries_from_pathnames(pathnames : Iterable):
+
+    if not isinstance(pathnames, Iterable):
+        warnings.warn("get_file_binaries_from_pathnames needs the input be an Iterable")
+        raise TypeError
+
+    for pathname in pathnames:
+        if not isinstance(pathname, str):
+            warnings.warn("file pathname must be string type, but got {}".format(type(pathname)))
+            raise TypeError
+
+        yield (pathname, open(pathname, 'rb'))
