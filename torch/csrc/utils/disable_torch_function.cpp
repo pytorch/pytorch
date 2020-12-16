@@ -183,16 +183,18 @@ inline bool sequence_has_torch_function(PyObject* args) {
   Py_ssize_t nargs = PySequence_Fast_GET_SIZE(args);
   for (Py_ssize_t i = 0; i < nargs; i++) {
     PyObject* obj = PySequence_Fast_GET_ITEM(args, i);
-    if (torch::check_has_torch_function(obj))
+    if (torch::check_has_torch_function(obj)) {
       return true;
+    }
   }
   return false;
 }
 
 inline bool array_has_torch_function(PyObject *const *args, Py_ssize_t nargs) {
   for (Py_ssize_t i = 0; i < nargs; i++) {
-    if (torch::check_has_torch_function(args[i]))
+    if (torch::check_has_torch_function(args[i])) {
       return true;
+    }
   }
   return false;
 }
@@ -212,22 +214,23 @@ PyObject* THPModule_has_torch_function(PyObject*, PyObject *arg) {
     result = sequence_has_torch_function(args.ptr());
   }
 
-  if (result)
+  if (result) {
     Py_RETURN_TRUE;
+  }
   Py_RETURN_FALSE;
 }
 
 PyObject* THPModule_has_torch_function_unary(PyObject*, PyObject *obj) {
   // Special case `THPModule_has_torch_function` for the single arg case.
-  if (torch::check_has_torch_function(obj))
+  if (torch::check_has_torch_function(obj)) {
     Py_RETURN_TRUE;
-
+  }
   Py_RETURN_FALSE;
 }
 
 PyObject* THPModule_has_torch_function_variadic(PyObject*, PyObject *const *args, Py_ssize_t nargs) {
-  if (array_has_torch_function(args, nargs))
+  if (array_has_torch_function(args, nargs)) {
     Py_RETURN_TRUE;
-
+  }
   Py_RETURN_FALSE;
 }

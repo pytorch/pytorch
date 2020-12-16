@@ -78,24 +78,24 @@ inline void THPUtils_internStringInPlace(PyObject** obj) {
 static py::object PyObject_FastGetAttrString(PyObject *obj, char *name)
 {
     PyTypeObject *tp = Py_TYPE(obj);
-    PyObject *res = (PyObject *)NULL;
+    PyObject *res = (PyObject *)nullptr;
 
     /* Attribute referenced by (char *)name */
-    if (tp->tp_getattr != NULL) {
+    if (tp->tp_getattr != nullptr) {
         res = (*tp->tp_getattr)(obj, name);
-        if (res == NULL) {
+        if (res == nullptr) {
           PyErr_Clear();
         }
     }
     /* Attribute referenced by (PyObject *)name */
-    else if (tp->tp_getattro != NULL) {
+    else if (tp->tp_getattro != nullptr) {
         auto w = py::reinterpret_steal<py::object>(
           THPUtils_internString(name));
         if (w.ptr() == nullptr) {
           return py::object();
         }
         res = (*tp->tp_getattro)(obj, w.ptr());
-        if (res == NULL) {
+        if (res == nullptr) {
             PyErr_Clear();
         }
     }
