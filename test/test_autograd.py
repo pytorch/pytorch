@@ -35,6 +35,7 @@ from torch.testing._internal.common_utils import (TestCase, run_tests, skipIfNoL
                                                   IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck)
 from torch.autograd import Variable, Function, detect_anomaly, kineto_available
 from torch.autograd.function import InplaceFunction
+import torch.autograd.forward_ad as fwAD
 from torch.testing import randn_like
 from torch.testing._internal.common_methods_invocations import (method_tests,
                                                                 create_input, unpack_variables,
@@ -6187,6 +6188,65 @@ class TestAutogradFunctional(TestCase):
         self.assertEqual(hvp, torch.mm(hes, v.unsqueeze(1)).squeeze(1))
         self.assertEqual(vhp, torch.mm(v.unsqueeze(0), hes).squeeze(0))
 
+class TestAutogradForwardMode(TestCase):
+    def test_forward_level_cleanup(self):
+        import weakref
+
+        def get_tensor_and_weak_ref():
+            # Helper function to get a Tensor and a weak ref that tells us
+            # if the c++ version of this Tensor is still alive or not.
+            #
+            # Create the following reference chain to do so:
+            #   - python Tensor t
+            #   - c++ Tensor corresponding by t
+            #   - c++ Node corresponding to t.grad_fn
+            #   - python dict of metadata from this Node
+            #   - an object in this dict that we can take a weakref of
+
+
+            # Create a new Tensor and Node
+            t = torch.rand(2, requires_grad=True).clone()
+            # Create the metadata dict
+            meta_dict = t.grad_fn.metadata
+            # Create the object in the dict
+            class Foo(object):
+                pass
+            my_obj = Foo()
+            meta_dict[0] = my_obj
+
+            # After exiting this function, the python Tensor t is the only
+            # thing keeping ref alive
+            ref = weakref.ref(my_obj)
+            return t, ref
+
+        # Sanity check that the helper function works as expected
+        t, t_ref = get_tensor_and_weak_ref()
+        self.assertIsNotNone(t_ref())
+
+        del t
+        self.assertIsNone(t_ref())
+
+        # Main test code
+        foo = torch.rand(2)
+
+        with fwAD.dual_level():
+            tangent, tangent_ref = get_tensor_and_weak_ref()
+            self.assertIsNotNone(tangent_ref())
+
+            dual = fwAD.make_dual(foo, tangent)
+            self.assertIsNotNone(tangent_ref())
+
+            # Make sure that the tangent we provided has been re-used as is
+            self.assertTrue(fwAD.unpack_dual(dual)[1] is tangent)
+
+            # Make sure that dual is keeping the tangent alive
+            del tangent
+            self.assertIsNotNone(tangent_ref())
+
+            # Make sure that the dual level does not keep the c++
+            # version of the tangent alive
+            del dual
+            self.assertIsNone(tangent_ref())
 
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
