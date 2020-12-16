@@ -317,32 +317,6 @@ static PyObject * python_exit_dual_level(PyObject* _unused, PyObject* args, PyOb
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * python_make_dual(PyObject* _unused, PyObject* args, PyObject* kwargs) {
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser({
-    "make_dual(Tensor tensor, Tensor tangent, *, int64_t level)"
-  });
-
-  ParsedArgs<3> parsed_args;
-  auto _r = parser.parse(args, kwargs, parsed_args);
-
-  return utils::wrap(forward_ad::make_dual(_r.tensor(0), _r.tensor(1), _r.toInt64(2)));
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject * python_unpack_dual(PyObject* _unused, PyObject* args, PyObject* kwargs) {
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser({
-    "unpack_dual(Tensor tensor, *, int64_t level)"
-  });
-
-  ParsedArgs<2> parsed_args;
-  auto _r = parser.parse(args, kwargs, parsed_args);
-
-  return utils::wrap(forward_ad::unpack_dual(_r.tensor(0), _r.toInt64(1)));
-  END_HANDLE_TH_ERRORS
-}
-
 // autograd methods on torch._C
 static PyMethodDef methods[] = { // NOLINT
   {"_set_grad_enabled", set_grad_enabled, METH_O, nullptr},
@@ -356,8 +330,6 @@ static PyMethodDef methods[] = { // NOLINT
   {"autocast_decrement_nesting", autocast_decrement_nesting, METH_NOARGS, nullptr},
   {"set_anomaly_enabled", set_anomaly_mode_enabled, METH_O, nullptr},
   {"is_anomaly_enabled", is_anomaly_mode_enabled, METH_NOARGS, nullptr},
-  {"_make_dual", castPyCFunctionWithKeywords(python_make_dual), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"_unpack_dual", castPyCFunctionWithKeywords(python_unpack_dual), METH_VARARGS | METH_KEYWORDS, nullptr},
   {"_enter_dual_level", python_enter_dual_level, METH_NOARGS, nullptr},
   {"_exit_dual_level", castPyCFunctionWithKeywords(python_exit_dual_level), METH_VARARGS | METH_KEYWORDS, nullptr},
   {nullptr, nullptr, 0, nullptr}

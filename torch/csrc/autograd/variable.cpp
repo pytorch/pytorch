@@ -594,7 +594,7 @@ namespace {
 
 // This function is will ensure that the fw_grad_ is properly a view of the base for inplace ops on
 // Tensors that do not have forward grad originally.
-void AutogradMeta::set_fw_grad(Variable& new_grad, const Variable& self, uint64_t level, bool is_inplace_op) {
+void AutogradMeta::set_fw_grad(const Variable& new_grad_, const Variable& self, uint64_t level, bool is_inplace_op) {
   if (!fw_grad_) {
     // Lazy initialization
     fw_grad_ = std::make_shared<ForwardGrad>();
@@ -602,15 +602,18 @@ void AutogradMeta::set_fw_grad(Variable& new_grad, const Variable& self, uint64_
   if (fw_grad_->contains(level)) {
     // Setting the forward grad again is only allowed if it is a no-op.
     // We do allow this case to simplify writing codegen for inplace ops.
-    TORCH_INTERNAL_ASSERT(new_grad.defined(), "Cannot set a forward grad that is an undefined Tensor. Use "
+    TORCH_INTERNAL_ASSERT(new_grad_.defined(), "Cannot set a forward grad that is an undefined Tensor. Use "
                           "_fw_primal(level) to get a new Tensor with this forward grad unset.");
 
     TORCH_INTERNAL_ASSERT(is_inplace_op, "Only inplace operations can re-set the forward grad of a Tensor that "
                           "already has one.");
 
-    TORCH_INTERNAL_ASSERT(fw_grad_->value(level).is_same(new_grad), "Cannot set a value of a forward grad if it "
+    TORCH_INTERNAL_ASSERT(fw_grad_->value(level).is_same(new_grad_), "Cannot set a value of a forward grad if it "
                           "already exists. Inplace operations should modify it inplace.");
   } else {
+    // TODO(alband) remove this spurious version counter bump
+    auto new_grad = new_grad_;
+
     // For inplace ops on a Tensor that does not already have a forward grad and is a view, we propagate
     // the tangent to the base and ensure that the new_grad is a view of that base's tangent.
     if (is_inplace_op && is_view_) {

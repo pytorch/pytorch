@@ -50,7 +50,7 @@ const at::Tensor& TensorImpl::fw_grad(uint64_t level, const at::Tensor& self) co
   return autograd_meta_->fw_grad(level, self);
 }
 
-void TensorImpl::set_fw_grad(at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op) {
+void TensorImpl::set_fw_grad(const at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op) {
   if (!autograd_meta_) autograd_meta_ = impl::GetAutogradMetaFactory()->make();
   autograd_meta_->set_fw_grad(new_grad, self, level, is_inplace_op);
 }
