@@ -194,8 +194,13 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   std::shared_ptr<Node> grad_fn_;
   std::weak_ptr<Node> grad_accumulator_;
 
-  // This field is lazily initialized and is used to store all the
-  // forward AD gradients associated with this Tensor
+  // This field is used to store all the forward AD gradients
+  // associated with this AutogradMeta (and the Tensor it corresponds to)
+  // There is a semantic 1:1 correspondence between AutogradMeta and
+  // ForwardGrad but:
+  //   - This field is lazily populated.
+  //   - This field is a shared_ptr but it must never be
+  //     shared by multiple Tensors. See Note [ Using ForwardGrad ]
   // Any transition from not_initialized to initialized
   // must be protected by mutex_
   std::shared_ptr<ForwardGrad> fw_grad_;
@@ -269,13 +274,13 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   }
 
   ~AutogradMeta() {
-    // If AutogradMeta is being destroyed, it means that no other thread can hold a reference to its
+    // If AutogradMeta is being destroyed, it means that there is no other reference to its
     // corresponding Tensor. It implies that no other thread can be using this object and so there is
-    // no need to lock mutex_ here.
+    // no need to lock mutex_ here to guard the check if fw_grad_ is populated.
     if (fw_grad_) {
+      // See note [ Using ForwardGrad ]
       fw_grad_->clear();
     }
-
   }
 };
 
@@ -309,7 +314,7 @@ struct TORCH_API ViewInfo {
   /// The "view_func", if provided, should be a function that allows to re-do the view
   /// between "base" and "tensor".
   ViewInfo chain(const Variable & base, const Variable & tensor,
-    c10::optional<std::function<Variable(const Variable&)>> view_func=c10::nullopt);
+    c10::optional<std::function<Variable(const Variable&)>> view_func=c10::nullopt) const;
 
   ViewInfo(Variable base, c10::optional<std::function<Variable(const Variable&)>> view_fn) :
     base_(std::move(base)),
@@ -346,6 +351,15 @@ struct TORCH_API ViewInfo {
 /// But there are also functions that are forward but not backward differentiable
 /// views (only detach for now) or functions that are backward but not forward
 /// differentiable view (only make_dual and unpack dual for now).
+///
+/// A concrete example of two views with different bases is as follow:
+///
+///     # Have:
+///     #   dual is a dual Tensor that is neither a forward or backward view
+///     detached_dual = dual.detach()
+///     view = detached_dual.view_as(dual)
+///     # The forward base of view is dual
+///     # The backward base of view is detached_dual
 ///
 /// - Backward Mode View
 /// Differentiable views are the view variables where you want gradients to flow
@@ -385,6 +399,7 @@ struct TORCH_API ViewInfo {
 ///     #   base is a regular Tensor
 ///     #   var is a dual Tensor whose tangent is all ones
 ///     base[1] = var  # i.e., base[1].copy_(var)
+///     # Now, base is a dual Tensor
 ///     _, fw_grad = fwAD.unpack_dual(base) <- fw_grad should be a tensor with
 ///                                              fw_grad[1] filled with all ones and
 ///                                              zeros everywhere else
