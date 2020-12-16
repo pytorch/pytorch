@@ -133,3 +133,10 @@
 [submodule "third_party/kineto"]
 	path = third_party/kineto
 	url = https://github.com/pytorch/kineto
+[submodule "torch/csrc/deploy/interpreter/cpython"]
+	path = torch/csrc/deploy/interpreter/cpython
+	url = https://github.com/python/cpython.git
+	branch = 3.8
+[submodule "torch/csrc/deploy/interpreter/third_party/typing"]
+	path = torch/csrc/deploy/interpreter/third_party/typing
+	url = https://github.com/python/typing.git
