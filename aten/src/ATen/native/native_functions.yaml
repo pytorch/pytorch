@@ -2205,6 +2205,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: index
+    QuantizedCPU: quantized_index
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
   # NB: The following functions are declared in aten/src/ATen/templates/TensorBody.h and defined in aten/src/ATen/TensorIndexing.cpp:
   # - Tensor Tensor::index(ArrayRef<TensorIndex> indices)
@@ -5450,12 +5451,6 @@
   dispatch:
     CPU: set_cpu_
     CUDA: set_cuda_
-
-- func: set_quantizer_(Tensor(a!) self, ConstQuantizerPtr quantizer) -> Tensor(a!)
-  use_c10_dispatcher: full
-  variants: method
-  dispatch:
-    QuantizedCPU, QuantizedCUDA: set_quantizer_
 
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
   use_c10_dispatcher: full
