@@ -212,7 +212,11 @@ class TestCommon(JitCommonTestCase):
                         continue
                     self.fail("Inplace operation on integer tensor that should be promoted to float didn't fail!")
                 # Compares variant's forward
-                variant_forward = variant(*(clone_input_helper(input) for input in sample.input), *sample.args, **sample.kwargs)
+                # Note: copy the tensor-type inputs when testing inplace operation
+                variant_forward = variant(*(clone_input_helper(input) if variant is inplace else input
+                                            for input in sample.input),
+                                          *sample.args,
+                                          **sample.kwargs)
                 self.assertEqual(variant_forward, expected_forward)
 
                 # Compares variant's backward
