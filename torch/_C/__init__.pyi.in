@@ -497,7 +497,7 @@ def _supported_qengines() -> List[_int]: ...  # THPModule_supportedQEngines
 def _is_xnnpack_enabled() -> _bool: ...  # THPModule_isEnabledXNNPACK
 def _has_torch_function(Iterable[Any]) -> _bool: ...  # THPModule_has_torch_function
 def _has_torch_function_unary(Any) -> _bool: ...  # THPModule_has_torch_function_unary
-def _has_torch_function_variadic(...: Any) -> _bool: ...  # THPModule_has_torch_function_variadic
+def _has_torch_function_variadic(*args: Any) -> _bool: ...  # THPModule_has_torch_function_variadic
 def _vmapmode_increment_nesting() -> _int: ...  # THPModule_vmapmode_increment_nesting
 def _vmapmode_decrement_nesting() -> _int: ...  # THPModule_vmapmode_decrement_nesting
 def _log_api_usage_once(str) -> None: ...  # LogAPIUsageOnceFromPython

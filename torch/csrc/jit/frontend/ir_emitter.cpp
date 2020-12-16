@@ -1227,10 +1227,7 @@ struct to_ir {
         auto kind = expr_out->node()->kind();
         if (kind == aten::is_scripting) {
           static_if = true;
-        } else if (
-            kind == aten::has_torch_function ||
-            kind == aten::has_torch_function_unary ||
-            kind == aten::has_torch_function_variadic) {
+        } else if (kind == aten::has_torch_function) {
           static_if = false;
         }
         // MetaCompile on boolean literals and constants

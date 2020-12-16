@@ -373,17 +373,7 @@ RegisterOperators reg({
         [](Stack* stack) { push(stack, true); },
         aliasAnalysisFromSchema()),
     OperatorGenerator(
-        TORCH_SELECTIVE_SCHEMA("aten::has_torch_function(Any args) -> bool"),
-        [](Stack* stack) { push(stack, false); },
-        aliasAnalysisFromSchema()),
-    OperatorGenerator(
-        TORCH_SELECTIVE_SCHEMA(
-            "aten::has_torch_function_unary(Any obj) -> bool"),
-        [](Stack* stack) { push(stack, false); },
-        aliasAnalysisFromSchema()),
-    OperatorGenerator(
-        TORCH_SELECTIVE_SCHEMA(
-            "aten::has_torch_function_variadic(...) -> bool"),
+        TORCH_SELECTIVE_SCHEMA("aten::has_torch_function(...) -> bool"),
         [](Stack* stack) { push(stack, false); },
         aliasAnalysisFromSchema()),
     OperatorGenerator(

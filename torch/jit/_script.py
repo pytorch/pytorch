@@ -1084,5 +1084,5 @@ def _unwrap_optional(x):
 _register_builtin(_unwrap_optional, "aten::_unwrap_optional")
 _register_builtin(_jit_internal.is_scripting, "aten::is_scripting")
 _register_builtin(has_torch_function, "aten::has_torch_function")
-_register_builtin(has_torch_function_unary, "aten::has_torch_function_unary")
-_register_builtin(has_torch_function_variadic, "aten::has_torch_function_variadic")
+_register_builtin(has_torch_function_unary, "aten::has_torch_function")
+_register_builtin(has_torch_function_variadic, "aten::has_torch_function")
