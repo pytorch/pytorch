@@ -6209,6 +6209,7 @@ class TestAutogradForwardMode(TestCase):
             # Create the metadata dict
             meta_dict = t.grad_fn.metadata
             # Create the object in the dict
+
             class Foo(object):
                 pass
             my_obj = Foo()
