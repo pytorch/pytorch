@@ -266,11 +266,12 @@ def argument(
                 sub_argument(a.device) + sub_argument(a.pin_memory)
         else:
             default = None
-            if 'options' not in cpp_no_default_args:
-                if all(x.default == "None" for x in a.all()):
-                    default = '{}'
-                elif a.dtype.default == "long":
-                    default = 'at::kLong'  # TODO: this is wrong
+            # Enforced by NativeFunction.__post_init__
+            assert 'options' not in cpp_no_default_args
+            if all(x.default == "None" for x in a.all()):
+                default = '{}'
+            elif a.dtype.default == "long":
+                default = 'at::kLong'  # TODO: this is wrong
             return [Binding(
                 ctype=ConstRefCType(BaseCType('TensorOptions', 'options')),
                 name='options',
