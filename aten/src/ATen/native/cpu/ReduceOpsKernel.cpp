@@ -174,113 +174,115 @@ static void norm_kernel_tensor_iterator_impl(
   if (p.isIntegral(false)) {
     val = p.to<int64_t>();
   } else if (p.isFloatingPoint()) {
-    val = p.to<float>();
+    val = p.to<double>();
   } else {
     AT_ERROR("norm_kernel_tensor_iterator_impl expects norm to be integer or float");
   }
 
-
+  // In the dispatch code blocks below, reduction kernels accumulate results as
+  // the type `acc_t`. When `scalar_t` is complex, `acc_t` is the downgraded
+  // real number type. Otherwise, `acc_t` and `scalar_t` are the same type.
   if (val == 0) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "norm_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
+      using acc_t = typename scalar_value_type<scalar_t>::type;
       binary_kernel_reduce(
         iter,
-        NormZeroOps<scalar_t>(),
-        scalar_t(0)
+        NormZeroOps<scalar_t, acc_t>(),
+        acc_t(0)
       );
     });
   } else if (val == 1) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "norm_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
+      using acc_t = typename scalar_value_type<scalar_t>::type;
       binary_kernel_reduce(
         iter,
-        NormOneOps<scalar_t>(),
-        scalar_t(0)
+        NormOneOps<scalar_t, acc_t>(),
+        acc_t(0)
       );
     });
   } else if (val == 2) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "norm_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
+      using acc_t = typename scalar_value_type<scalar_t>::type;
       binary_kernel_reduce(
         iter,
-        NormTwoOps<scalar_t>(),
-        scalar_t(0)
+        NormTwoOps<scalar_t, acc_t>(),
+        acc_t(0)
       );
     });
   } else if (val == INFINITY) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "norm_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
+      using acc_t = typename scalar_value_type<scalar_t>::type;
       binary_kernel_reduce(
         iter,
-        AbsMaxOps<scalar_t>(),
-        scalar_t(std::numeric_limits<scalar_t>::min())
+        AbsMaxOps<scalar_t, acc_t>(),
+        std::numeric_limits<acc_t>::min()
       );
     });
   } else if (val == -INFINITY) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "norm_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
+      using acc_t = typename scalar_value_type<scalar_t>::type;
       binary_kernel_reduce(
         iter,
-        AbsMinOps<scalar_t>(),
-        scalar_t(std::numeric_limits<scalar_t>::max())
+        AbsMinOps<scalar_t, acc_t>(),
+        std::numeric_limits<acc_t>::max()
       );
     });
   } else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "norm_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
+      using acc_t = typename scalar_value_type<scalar_t>::type;
       binary_kernel_reduce(
         iter,
-        NormOps<scalar_t> { scalar_t(val) },
-        scalar_t(0)
+        NormOps<scalar_t, acc_t> { acc_t(val) },
+        acc_t(0)
       );
     });
+  }
+
+  // For complex outputs, the above kernels do not touch the imaginary values,
+  // so we must zero them out
+  if (isComplexType(iter.output().scalar_type())) {
+    at::imag(iter.output()).zero_();
   }
 }
 
 static void and_kernel_impl(TensorIterator& iter) {
-  if (c10::isIntegralType(iter.dtype(), /*includeBool=*/true)) {
-    binary_kernel_reduce_vec(
-        iter,
-        [=](uint8_t a, uint8_t b) -> uint8_t { return (a && b) ? 1 : 0; },
-        [=](Vec256<uint8_t> a, Vec256<uint8_t> b) {
-          // Adding the implementation here instead of in vec256_base to avoid
-          // return value inconsistency. Other comparison operators in
-          // vec256_base return -1/0 (all bit 1 / all bit 0) as true/false to
-          // follow the AVX2 convention. This would be convenient when combined
-          // with other vectorized operations. For example, one can use the
-          // logical operation results as a mask for a bit operation to
-          // retrieve/reset multiple elements in a vector.
-          //
-          // In this method, users would expect, e.g., all(), to return 1/0 as
-          // true/false.
-          Vec256<uint8_t> c = Vec256<uint8_t>();
-          for (int i = 0; i != Vec256<uint8_t>::size(); i++) {
-            c[i] = (a[i] && b[i]) ? 1 : 0;
-          }
-          return c;
-        },
-        /*ident=*/true);
-  } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.dtype(), "and_kernel", [&]() {
-      binary_kernel_reduce(
-          iter, AndOps<scalar_t>(), static_cast<scalar_t>(true));
-    });
-  }
+  binary_kernel_reduce_vec(
+      iter,
+      [=](bool a, bool b) -> bool { return a && b; },
+      [=](Vec256<bool> a, Vec256<bool> b) {
+        // Adding the implementation here instead of in vec256_base to avoid
+        // return value inconsistency. Other comparison operators in
+        // vec256_base return -1/0 (all bit 1 / all bit 0) as true/false to
+        // follow the AVX2 convention. This would be convenient when combined
+        // with other vectorized operations. For example, one can use the
+        // logical operation results as a mask for a bit operation to
+        // retrieve/reset multiple elements in a vector.
+        //
+        // In this method, users would expect, e.g., all(), to return 1/0 as
+        // true/false.
+        Vec256<bool> c = Vec256<bool>();
+
+        for (decltype(c.size()) i = 0; i != Vec256<bool>::size(); i++) {
+          c[i] = a[i] && b[i];
+        }
+        return c;
+      },
+      /*ident=*/true);
 }
 
 static void or_kernel_impl(TensorIterator& iter) {
-  if (c10::isIntegralType(iter.dtype(), /*includeBool=*/true)) {
-    binary_kernel_reduce_vec(
-        iter,
-        [=](uint8_t a, uint8_t b) -> uint8_t { return (a || b) ? 1 : 0; },
-        [=](Vec256<uint8_t> a, Vec256<uint8_t> b) {
-          Vec256<uint8_t> c = Vec256<uint8_t>();
-          for (int i = 0; i != Vec256<uint8_t>::size(); i++) {
-            c[i] = (a[i] || b[i]) ? 1 : 0;
-          }
-          return c;
-        },
-        /*ident=*/false);
-  } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.dtype(), "or_kernel", [&]() {
-      binary_kernel_reduce(
-          iter, OrOps<scalar_t>(), static_cast<scalar_t>(false));
-    });
-  }
+  binary_kernel_reduce_vec(
+      iter,
+      [=](bool a, bool b) -> bool { return a || b; },
+      [=](Vec256<bool> a, Vec256<bool> b) {
+        Vec256<bool> c = Vec256<bool>();
+
+        for (decltype(c.size()) i = 0; i != Vec256<bool>::size(); i++) {
+          c[i] = a[i] || b[i];
+        }
+        return c;
+      },
+      /*ident=*/false);
 }
 
 template<typename scalar_t>
