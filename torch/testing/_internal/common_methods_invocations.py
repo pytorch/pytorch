@@ -375,7 +375,8 @@ class SpectralFuncInfo(OpInfo):
 class HermitianOpInfo(OpInfo):
     """Operator information for Hermitian functions
     These are functions that take Hermitian matrices as input.
-    They require a modified function to be tested for gradcheck.
+    They require a modified function to be tested for gradcheck, because the finite-difference algorithm
+    for calculating derivatives does not preserve the Hermitian property of the input and returning incorrect results.
     """
 
     def get_op(self):
