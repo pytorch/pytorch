@@ -12250,7 +12250,6 @@ class TestNNDeviceType(NNTestCase):
 
 
     @onlyCUDA
-    @skipCUDAIfNotRocm
     @dtypes(torch.int, torch.long)
     def test_embedding_bag_bfloat16(self, device, dtype):
         self._test_EmbeddingBag(device, 'sum', True, wdtype=torch.bfloat16, dtype=dtype, test_backward=True)
