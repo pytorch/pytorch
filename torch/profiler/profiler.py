@@ -131,7 +131,8 @@ class profile(object):
                 if use_gpu:
                     self.activities.add(ProfilerActivity.CUDA)
             else:
-                raise RuntimeError("Expected activities argument specified")
+                raise RuntimeError("Profiler activities are not specified")
+
         if schedule:
             self.schedule = schedule
             # add step markers into the trace and table view
