@@ -19,7 +19,7 @@ at::Tensor make_dual(const at::Tensor& primal, const at::Tensor& tangent, int64_
 /// is a view of the dual and the tangent is returned as is.
 /// This function is backward differentiable.
 std::tuple<at::Tensor, at::Tensor> unpack_dual(const at::Tensor& tensor, int64_t level) {
-  return {tensor._fw_primal(level), tensor.fw_grad(level)};
+  return std::tuple<at::Tensor, at::Tensor>(tensor._fw_primal(level), tensor.fw_grad(level));
 }
 
 } // namespace native
