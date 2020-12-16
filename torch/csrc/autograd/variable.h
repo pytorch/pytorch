@@ -195,6 +195,8 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   std::weak_ptr<Node> grad_accumulator_;
 
   // This field is lazily initialized
+  // Any transition from not_initialized to initialized
+  // must be protected by mutex_
   std::shared_ptr<ForwardGrad> fw_grad_;
 
   std::vector<std::shared_ptr<FunctionPreHook>> hooks_;
@@ -215,9 +217,11 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   uint32_t output_nr_;
 
   // Mutex to ensure that concurrent read operations that modify internal
-  // state are still thread-safe. Used by grad_fn() and
-  // grad_accumulator().
-  std::mutex mutex_;
+  // state are still thread-safe. Used by grad_fn(), grad_accumulator(),
+  // fw_grad() and set_fw_grad()
+  // This is mutable because we need to be able to acquire this from const
+  // version of this class for the functions above
+  mutable std::mutex mutex_;
 
   /// Sets the `requires_grad` property of `Variable`. This should be true for
   /// leaf variables that want to accumulate gradients, and false for all other
