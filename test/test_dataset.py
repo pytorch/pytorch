@@ -3,14 +3,16 @@ import warnings
 
 from torch.testing._internal.common_utils import (TestCase, run_tests)
 
-from torch.utils.data.datasets import (ListDirFilesIterableDataset)
+from torch.utils.data.datasets import (ListDirFilesIterableDataset, LoadFilesFromDiskIterableDataset)
 
 def create_temp_dir_and_files():
-    temp_dir = tempfile.TemporaryDirectory()
+    # The temp dir and files within it will be released and deleted in tearDown().
+    # Adding `noqa: P201` to avoid mypy's warning on not releasing the dir handle within this function.
+    temp_dir = tempfile.TemporaryDirectory()  # noqa: P201
     temp_dir_path = temp_dir.name
-    temp_file1 = tempfile.NamedTemporaryFile(dir=temp_dir_path, delete=False)
-    temp_file2 = tempfile.NamedTemporaryFile(dir=temp_dir_path, delete=False)
-    temp_file3 = tempfile.NamedTemporaryFile(dir=temp_dir_path, delete=False)
+    temp_file1 = tempfile.NamedTemporaryFile(dir=temp_dir_path, delete=False)  # noqa: P201
+    temp_file2 = tempfile.NamedTemporaryFile(dir=temp_dir_path, delete=False)  # noqa: P201
+    temp_file3 = tempfile.NamedTemporaryFile(dir=temp_dir_path, delete=False)  # noqa: P201
 
     return (temp_dir, temp_file1.name, temp_file2.name, temp_file3.name)
 
@@ -33,6 +35,15 @@ class TestIterableDatasetBasic(TestCase):
         dataset = ListDirFilesIterableDataset(temp_dir, '')
         for pathname in dataset:
             self.assertTrue(pathname in self.temp_files)
+
+    def test_loadfilesfromdisk_iterable_dataset(self):
+        temp_dir = self.temp_dir.name
+        dataset1 = ListDirFilesIterableDataset(temp_dir, '')
+        dataset2 = LoadFilesFromDiskIterableDataset(dataset1)
+
+        for rec in dataset2:
+            self.assertTrue(rec[0] in self.temp_files)
+            self.assertTrue(rec[1].read() == open(rec[0], 'rb').read())
 
 if __name__ == '__main__':
     run_tests()
