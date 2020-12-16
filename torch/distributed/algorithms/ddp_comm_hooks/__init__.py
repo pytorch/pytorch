@@ -72,7 +72,7 @@ class DDPCommHookType(Enum):
         comm_hook=powerSGD.batched_powerSGD_hook,
         matrix_approximation_rank=1,
     )
-    BATCHED_POWER_SGD = partial(
+    BATCHED_POWER_SGD_RANK2 = partial(
         _powerSGD_comm_hook_wrapper,
         comm_hook=powerSGD.batched_powerSGD_hook,
         matrix_approximation_rank=2,
