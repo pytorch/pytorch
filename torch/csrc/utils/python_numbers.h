@@ -6,6 +6,7 @@
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/tensor_numpy.h>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 
 // largest integer that can be represented consecutively in a double
@@ -50,7 +51,8 @@ inline int32_t THPUtils_unpackInt(PyObject* obj) {
   if (overflow != 0) {
     throw std::runtime_error("Overflow when unpacking long");
   }
-  if (value > INT32_MAX || value < INT32_MIN) {
+  if (value > std::numeric_limits<int32_t>::max() ||
+      value < std::numeric_limits<int32_t>::min()) {
     throw std::runtime_error("Overflow when unpacking long");
   }
   return (int32_t)value;
@@ -73,7 +75,8 @@ inline uint32_t THPUtils_unpackUInt32(PyObject* obj) {
   if (PyErr_Occurred()) {
     throw python_error();
   }
-  if (value > UINT32_MAX || value < UINT32_MIN) {
+  if (value > std::numeric_limits<uint32_t>::max() ||
+      value < std::numeric_limits<uint32_t>::min()) {
     throw std::runtime_error("Overflow when unpacking unsigned long");
   }
   return (uint32_t)value;
