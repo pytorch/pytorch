@@ -64,16 +64,6 @@ void TestStack(TensorOptions T, Tensor& t) {
   }
 }
 
-void TestNarrow(TensorOptions T, Tensor& t) {
-  auto x = rand({5, 8, 3});
-  for (int64_t dim = 0; dim < 3; ++dim) {
-    const int64_t start = 1, length = 2;
-    auto y_ref = x.narrow(dim, start, length);
-    auto y_test = at::native::narrow_copy_dense(x, dim, start, length);
-    ASSERT_EQUAL(y_ref, y_test);
-  }
-}
-
 // size / stride
 void TestSize(TensorOptions T, Tensor& t) {
   auto scalar = randn({}, T);
@@ -209,7 +199,6 @@ void test(TensorOptions T, TensorOptions AccT) {
   TestSplit(T, t);
   TestChunk(T, t);
   TestStack(T, t);
-  TestNarrow(T, t);
   TestSize(T, t);
   TestMatmul(T, t, AccT);
   TestStandardGammaGrad(T, t);
