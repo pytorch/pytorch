@@ -925,7 +925,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       case kExp:
         return std::exp(v);
       case kAbs:
-        return std::abs(v);
+        return std::is_unsigned<T>::value ? v : std::abs(v);
       case kExpm1:
         return std::expm1(v);
       case kLog:
