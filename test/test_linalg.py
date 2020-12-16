@@ -2149,27 +2149,6 @@ class TestLinalg(TestCase):
             run_test_main(A, hermitian)
             run_test_numpy(A, hermitian)
 
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.float64)
-    def test_pinv_autograd(self, device, dtype):
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
-
-        n = 5
-        for batches in ([], [2], [2, 3]):
-            # using .to(device) instead of device=device because @xwang233 claims it's faster
-            a = random_fullrank_matrix_distinct_singular_value(n, *batches, dtype=dtype).to(device)
-            a.requires_grad_()
-
-            def func(a, hermitian):
-                if hermitian:
-                    a = a + a.conj().transpose(-2, -1)
-                return torch.linalg.pinv(a, hermitian=hermitian)
-
-            for hermitian in [False, True]:
-                gradcheck(func, [a, hermitian])
-                gradgradcheck(func, [a, hermitian])
-
     # TODO: RuntimeError: svd does not support automatic differentiation for outputs with complex dtype.
     # See https://github.com/pytorch/pytorch/pull/47761
     @unittest.expectedFailure
