@@ -35,6 +35,7 @@ class PowerSGDState(object):
         "process_group",
         "matrix_approximation_rank",
         "use_error_feedback",
+        "warm_start",
         "rng",
         "error_dict",
         "p_memory_dict",
@@ -46,6 +47,7 @@ class PowerSGDState(object):
         process_group,
         matrix_approximation_rank=1,
         use_error_feedback=True,
+        warm_start=True,
         random_seed=0,
     ):
         self.process_group = process_group
@@ -61,6 +63,12 @@ class PowerSGDState(object):
         # sometimes it is possible to converge to the optima without error feedback.
         # See: http://proceedings.mlr.press/v54/yurtsever17a/yurtsever17a.pdf
         self.use_error_feedback = use_error_feedback
+        # Warm-start reuses P(s) and Q(s) from the previous iteration.
+        # This can improve the approximation quality and hence improve the accuracy.
+        # Additionally, by avoiding the initialization of these low-rank tensors at every step,
+        # this can also accelerate training.
+        # However, this is at the cost of extra memory.
+        self.warm_start = warm_start
         # The purpose of this RNG is to generate different random seeds for initializing Q across iterations,
         # but in the same order for all the DDP replicas.
         # Different random seeds across iterations indicate different 'projections' of the gradients at different SGD steps.
@@ -188,15 +196,19 @@ def powerSGD_hook(
     # The memory spaces of Ps and Qs need to be (re)allocated at the beginning,
     # as well as later whenever the buckets are rebuilt during training.
     if (
-        bucket_index not in state.p_memory_dict
+        not state.warm_start
+        or bucket_index not in state.p_memory_dict
         or state.p_memory_dict[bucket_index].shape[0] != total_Ps_size
         or state.q_memory_dict[bucket_index].shape[0] != total_Qs_size
     ):
-        logging.info(
-            "Allocating contiguous memory of length {} for Ps, and of length {} for Qs, respectively.".format(
-                total_Ps_size, total_Qs_size
+        # If warm-start is disabled, low-rank tensors will be initialized at every step.
+        # Only log this if warm-start to avoid spamming.
+        if state.warm_start:
+            logging.info(
+                "Allocating contiguous memory of length {} for Ps, and of length {} for Qs, respectively.".format(
+                    total_Ps_size, total_Qs_size
+                )
             )
-        )
         state.p_memory_dict[bucket_index] = torch.empty(
             total_Ps_size, device=device, dtype=dtype
         )
@@ -297,6 +309,10 @@ def powerSGD_hook(
         if state.use_error_feedback:
             # Memorize the local errors.
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
+        if not state.warm_start:
+            p_memory_dict.clear()
+            q_memory_dict.clear()
+
         return [input_tensor]
 
     return (
@@ -393,10 +409,12 @@ def batched_powerSGD_hook(
     # Reuse P and Q from the previous iteration if possible.
     # The memory spaces of P and Q need to be (re)allocated at the beginning,
     # as well as later whenever the buckets are rebuilt during training.
-    if bucket_index not in state.p_memory_dict or state.p_memory_dict[
+    if not state.warm_start or bucket_index not in state.p_memory_dict or state.p_memory_dict[
         bucket_index
     ].shape != (square_side_length, state.matrix_approximation_rank):
-        if bucket_index not in state.p_memory_dict:
+        # If warm-start is disabled, low-rank tensors will be initialized at every step.
+        # Only log this if warm-start to avoid spamming.
+        if state.warm_start and bucket_index not in state.p_memory_dict:
             logging.info(
                 "Initializing low-rank tensors P and Q, each of which has a shape of {} x {}.".format(
                     square_side_length, state.matrix_approximation_rank
@@ -404,11 +422,11 @@ def batched_powerSGD_hook(
             )
         else:
             logging.info(
-                "Re-initializing low-rank tensors P and Q, each of which has a shape of {} x {}; The previous shape is {} x {}.".format(
+                "Re-initializing low-rank tensors P and Q, each of which has a shape of {} x {}; "
+                "The previous shape is {}.".format(
                     square_side_length,
                     state.matrix_approximation_rank,
-                    state.p_memory_dict[bucket_index].shape[0],
-                    state.p_memory_dict[bucket_index].shape[1],
+                    state.p_memory_dict[bucket_index].shape,
                 )
             )
 
@@ -416,7 +434,8 @@ def batched_powerSGD_hook(
             "Returns a low-rank 2D tensor of square_side_length * matrix_approximation_rank."
             if fill_random_values:
                 with torch.random.fork_rng(devices=[]):
-                    # Fork this RNG to avoid changing the seed globally and affecting the random sampling anywhere else in the training.
+                    # Fork this RNG to avoid changing the seed globally and affecting the random sampling
+                    # anywhere else in the training.
                     # The seed makes sure that the initial random values are the same across all the DDP replicas.
                     # Such seed should differ at every step.
                     # Since it is very slow to fork RNG state across all the CUDA devices,
@@ -482,6 +501,9 @@ def batched_powerSGD_hook(
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
         if torch.cuda.is_available():
             torch.cuda.synchronize()
+        if not state.warm_start:
+            p_memory_dict.clear()
+            q_memory_dict.clear()
         ret = input_tensor.resize_(total_length)
         return [ret]
 
