@@ -916,6 +916,20 @@ class TestIndexing(TestCase):
         self.assertIn(Tensor.__setitem__, triggered)
         self.assertEqual(t, torch.tensor([5]))
 
+    def test_setitem_val(self):
+        triggered = set()
+
+        class A:
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                triggered.add(func)
+                return -1
+
+        t = torch.tensor([5])
+        t[0] = A()
+        self.assertIn(Tensor.__setitem__, triggered)
+        self.assertEqual(t, torch.tensor([5]))
+
     def test_setitem_subclass(self):
         triggered = set()
 

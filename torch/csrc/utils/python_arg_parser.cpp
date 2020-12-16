@@ -278,6 +278,7 @@ auto handle_torch_function_indexing(PyObject* self, PyObject* index, PyObject* v
     PyObject *obj = PyTuple_GetItem(index_tup.ptr(), i);
     is_tensor_and_append_overloaded(obj, &overridable_args);
   }
+  if (val != nullptr) is_tensor_and_append_overloaded(val, &overridable_args);
   py::object func = PyObject_FastGetAttrString(THPVariableClass, (char *)func_name.c_str());
   py::object args = (val == nullptr) ? py::make_tuple(py::handle(self), py::handle(index)) : py::make_tuple(py::handle(self), py::handle(index), py::handle(val));
   return handle_torch_function_no_python_arg_parser(overridable_args, args.ptr(), nullptr, (char *)func_name.c_str(), func.ptr(), "torch.Tensor");

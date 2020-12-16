@@ -349,8 +349,9 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   if (py_value == nullptr) {
     throw TypeError("Tensor does not support deleting items");
   }
-  if (!THPVariable_CheckExact(self) && check_has_torch_function(self)) {
-    py::object val = py::reinterpret_steal<py::object>(
+  if ((!THPVariable_CheckExact(self) && check_has_torch_function(self)) ||
+      (!THPVariable_CheckExact(py_value) && check_has_torch_function(py_value))) {
+    py::object ret = py::reinterpret_steal<py::object>(
       handle_torch_function_indexing(self, index, py_value)
     );
     return 0;
