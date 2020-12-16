@@ -409,24 +409,18 @@ def batched_powerSGD_hook(
     # Reuse P and Q from the previous iteration if possible.
     # The memory spaces of P and Q need to be (re)allocated at the beginning,
     # as well as later whenever the buckets are rebuilt during training.
-    if not state.warm_start or bucket_index not in state.p_memory_dict or state.p_memory_dict[
-        bucket_index
-    ].shape != (square_side_length, state.matrix_approximation_rank):
+    if (
+        not state.warm_start
+        or bucket_index not in state.p_memory_dict
+        or state.p_memory_dict[bucket_index].shape
+        != (square_side_length, state.matrix_approximation_rank)
+    ):
         # If warm-start is disabled, low-rank tensors will be initialized at every step.
         # Only log this if warm-start to avoid spamming.
-        if state.warm_start and bucket_index not in state.p_memory_dict:
+        if state.warm_start:
             logging.info(
                 "Initializing low-rank tensors P and Q, each of which has a shape of {} x {}.".format(
                     square_side_length, state.matrix_approximation_rank
-                )
-            )
-        else:
-            logging.info(
-                "Re-initializing low-rank tensors P and Q, each of which has a shape of {} x {}; "
-                "The previous shape is {}.".format(
-                    square_side_length,
-                    state.matrix_approximation_rank,
-                    state.p_memory_dict[bucket_index].shape,
                 )
             )
 
