@@ -595,9 +595,12 @@ namespace {
 // This function is will ensure that the fw_grad_ is properly a view of the base for inplace ops on
 // Tensors that do not have forward grad originally.
 void AutogradMeta::set_fw_grad(const Variable& new_grad_, const Variable& self, uint64_t level, bool is_inplace_op) {
-  if (!fw_grad_) {
-    // Lazy initialization
-    fw_grad_ = std::make_shared<ForwardGrad>();
+  // Lazy initialization
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!fw_grad_) {
+      fw_grad_ = std::make_shared<ForwardGrad>();
+    }
   }
   if (fw_grad_->contains(level)) {
     // Setting the forward grad again is only allowed if it is a no-op.
@@ -660,8 +663,12 @@ void AutogradMeta::set_fw_grad(const Variable& new_grad_, const Variable& self, 
 }
 
 const Variable& AutogradMeta::fw_grad(uint64_t level, const Variable& self) const {
-  bool has_no_direct_fw_grad = !(fw_grad_ && fw_grad_->value(level).defined());
-  if (has_no_direct_fw_grad && is_view_) {
+  // Ensure that concurent fw_grad() "reads" are thread safe
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  const auto& direct_fw_grad = fw_grad_ ? fw_grad_->value(level) : ForwardGrad::undef_grad();
+
+  if (!direct_fw_grad.defined() && is_view_) {
     // For view that don't have a forward grad, check if their base has one that
     // has been defined by an inplace operation.
     // See [Forward Grad View] for more details.
@@ -672,7 +679,7 @@ const Variable& AutogradMeta::fw_grad(uint64_t level, const Variable& self) cons
 
       const auto& base_val = base.fw_grad(level);
       if (base_val.defined()) {
-        // Lazy initialization
+        // Lazy initialization of fw_grad_
         this_view_meta->fw_grad_ = std::make_shared<ForwardGrad>();
 
         Variable new_val;
@@ -687,11 +694,7 @@ const Variable& AutogradMeta::fw_grad(uint64_t level, const Variable& self) cons
       }
     }
   }
-  if (fw_grad_) {
-    return fw_grad_->value(level);
-  } else {
-    return ForwardGrad::undef_grad();
-  }
+  return direct_fw_grad;
 }
 
 }} // namespace torch::autograd
