@@ -5452,11 +5452,6 @@
     CPU: set_cpu_
     CUDA: set_cuda_
 
-- func: set_quantizer_(Tensor(a!) self, ConstQuantizerPtr quantizer) -> Tensor(a!)
-  variants: method
-  dispatch:
-    QuantizedCPU, QuantizedCUDA: set_quantizer_
-
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
   use_c10_dispatcher: full
   variants: method
