@@ -3065,14 +3065,10 @@
 
 - func: narrow_copy(Tensor self, int dim, int start, int length) -> Tensor
   use_c10_dispatcher: full
-  variants: function, method
+  variants: method
   dispatch:
     CPU, CUDA: narrow_copy_dense
     SparseCPU, SparseCUDA: narrow_copy_sparse
-
-- func: narrow_copy.out(Tensor self, int dim, int start, int length, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: narrow_copy_dense_out
 
 - func: narrow(Tensor(a) self, int dim, int start, int length) -> Tensor(a)
   use_c10_dispatcher: full
