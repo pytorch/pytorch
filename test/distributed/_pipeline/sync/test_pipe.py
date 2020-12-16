@@ -19,7 +19,7 @@ skip_if_no_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda
 
 def test_parameters():
     model = nn.Sequential(nn.Linear(1, 1))
-    pipe = Pipe(model, balance=[1], devices=["cpu"], chunks=1)
+    pipe = Pipe(model, chunks=1)
     assert list(pipe.parameters()) != []
 
 
@@ -32,9 +32,8 @@ def test_public_attrs():
             return self.value
 
     model = nn.Sequential(nn.Linear(1, 1))
-    pipe = Pipe(model, balance=(1,), devices=("cpu",), chunks=42.000, checkpoint=MyString("always"))
+    pipe = Pipe(model, chunks=42.000, checkpoint=MyString("always"))
 
-    assert pipe.balance == [1]
     assert pipe.devices == [torch.device("cpu")]
     assert pipe.chunks == 42
     assert isinstance(pipe.chunks, int)
@@ -42,13 +41,12 @@ def test_public_attrs():
     assert isinstance(pipe.checkpoint, str)
 
 
-@pytest.mark.parametrize("balance", [[2], [1, 1]])
-def test_sequential_like(balance):
+def test_sequential_like():
     a = nn.Linear(1, 1)
     b = nn.Linear(1, 1)
 
     model = nn.Sequential(a, b)
-    model = Pipe(model, balance, devices=["cpu", "cpu"])
+    model = Pipe(model)
 
     assert len(model) == 2
     assert list(model) == [a, b]
@@ -61,54 +59,18 @@ def test_sequential_like(balance):
     assert model[-1] is b
     assert model[-2] is a
 
-
-def test_balance_wrong_length():
-    a = nn.Linear(1, 1)
-    b = nn.Linear(1, 1)
-
-    model = nn.Sequential(a, b)
-
-    with pytest.raises(ValueError):
-        Pipe(model, balance=[1])
-
-    with pytest.raises(ValueError):
-        Pipe(model, balance=[3])
-
-
-def test_balance_less_than_1():
-    a = nn.Linear(1, 1)
-    b = nn.Linear(1, 1)
-
-    model = nn.Sequential(a, b)
-
-    with pytest.raises(ValueError):
-        Pipe(model, balance=[0, 2])
-
-    with pytest.raises(ValueError):
-        Pipe(model, balance=[-1, 3])
-
-
 def test_chunks_less_than_1():
     model = nn.Sequential(nn.Linear(1, 1))
 
     with pytest.raises(ValueError):
-        Pipe(model, balance=[1], devices=["cpu"], chunks=0)
+        Pipe(model, chunks=0)
 
     with pytest.raises(ValueError):
-        Pipe(model, balance=[1], devices=["cpu"], chunks=-1)
+        Pipe(model, chunks=-1)
 
-
-def test_too_few_devices():
-    model = nn.Sequential(nn.Linear(1, 1), nn.Linear(1, 1), nn.Linear(1, 1), nn.Linear(1, 1))
-
-    with pytest.raises(IndexError):
-        # len(balance) > len(devices)
-        model = Pipe(model, balance=[1, 1, 1, 1], devices=["cpu"])
-
-
-def test_batch_size_indivisible():
+def test_batch_size_indivisible(setup_rpc):
     model = nn.Sequential(nn.Linear(1, 1))
-    model = Pipe(model, balance=[1], devices=["cpu"], chunks=4)
+    model = Pipe(model, chunks=4)
 
     with pytest.warns(None) as record:
         model(torch.rand(7, 1))
@@ -117,9 +79,9 @@ def test_batch_size_indivisible():
     assert not record
 
 
-def test_batch_size_small():
+def test_batch_size_small(setup_rpc):
     model = nn.Sequential(nn.Linear(1, 1))
-    model = Pipe(model, balance=[1], devices=["cpu"], chunks=4)
+    model = Pipe(model, chunks=4)
 
     with pytest.warns(None) as record:
         model(torch.rand(2, 1))
@@ -128,7 +90,7 @@ def test_batch_size_small():
     assert not record
 
 
-def test_checkpoint_mode():
+def test_checkpoint_mode(setup_rpc):
     def count_grad_fn(grad_fn, name, visited=None):
         if visited is None:
             visited = set()
@@ -149,38 +111,38 @@ def test_checkpoint_mode():
     model = nn.Sequential(nn.Linear(1, 1))
     input = torch.rand(2, 1)
 
-    always = Pipe(model, balance=[1], devices=["cpu"], chunks=2, checkpoint="always")
-    except_last = Pipe(model, balance=[1], devices=["cpu"], chunks=2, checkpoint="except_last")
-    never = Pipe(model, balance=[1], devices=["cpu"], chunks=2, checkpoint="never")
+    always = Pipe(model, chunks=2, checkpoint="always")
+    except_last = Pipe(model, chunks=2, checkpoint="except_last")
+    never = Pipe(model, chunks=2, checkpoint="never")
 
     always_output = always(input)
     except_last_output = except_last(input)
     never_output = never(input)
 
-    assert count_grad_fn(always_output.grad_fn, "CheckpointBackward") == 2
-    assert count_grad_fn(except_last_output.grad_fn, "CheckpointBackward") == 1
-    assert count_grad_fn(never_output.grad_fn, "CheckpointBackward") == 0
+    assert count_grad_fn(always_output.local_value().grad_fn, "CheckpointBackward") == 2
+    assert count_grad_fn(except_last_output.local_value().grad_fn, "CheckpointBackward") == 1
+    assert count_grad_fn(never_output.local_value().grad_fn, "CheckpointBackward") == 0
 
 
 def test_checkpoint_mode_invalid():
     model = nn.Sequential(nn.Linear(1, 1))
 
     with pytest.raises(ValueError, match="checkpoint is not one of 'always', 'except_last', or 'never'"):
-        Pipe(model, balance=[1], devices=["cpu"], chunks=2, checkpoint="INVALID_CHECKPOINT")
+        Pipe(model, chunks=2, checkpoint="INVALID_CHECKPOINT")
 
 
 def test_checkpoint_mode_when_chunks_1():
     model = nn.Sequential(nn.Linear(1, 1))
 
     # All checkpoint modes are fine.
-    Pipe(model, balance=[1], devices=["cpu"], chunks=1, checkpoint="except_last")
-    Pipe(model, balance=[1], devices=["cpu"], chunks=1, checkpoint="always")
-    Pipe(model, balance=[1], devices=["cpu"], chunks=1, checkpoint="never")
+    Pipe(model, chunks=1, checkpoint="except_last")
+    Pipe(model, chunks=1, checkpoint="always")
+    Pipe(model, chunks=1, checkpoint="never")
 
 
-def test_checkpoint_eval():
+def test_checkpoint_eval(setup_rpc):
     model = nn.Sequential(nn.Linear(1, 1))
-    model = Pipe(model, balance=[1], devices=["cpu"], chunks=2)
+    model = Pipe(model, chunks=2)
     input = torch.rand(2, 1)
 
     def find_grad_fn(grad_fn, name):
@@ -195,16 +157,16 @@ def test_checkpoint_eval():
 
     model.train()
     train_output = model(input)
-    assert find_grad_fn(train_output.grad_fn, "CheckpointBackward")
-    assert find_grad_fn(train_output.grad_fn, "RecomputeBackward")
+    assert find_grad_fn(train_output.local_value().grad_fn, "CheckpointBackward")
+    assert find_grad_fn(train_output.local_value().grad_fn, "RecomputeBackward")
 
     model.eval()
     eval_output = model(input)
-    assert not find_grad_fn(eval_output.grad_fn, "CheckpointBackward")
-    assert not find_grad_fn(eval_output.grad_fn, "RecomputeBackward")
+    assert not find_grad_fn(eval_output.local_value().grad_fn, "CheckpointBackward")
+    assert not find_grad_fn(eval_output.local_value().grad_fn, "RecomputeBackward")
 
 
-def test_checkpoint_non_float_input():
+def test_checkpoint_non_float_input(setup_rpc):
     class ForkNonFloat(nn.Module):
         def forward(self, input):
             return (input * 2, torch.tensor([False]))
@@ -214,16 +176,16 @@ def test_checkpoint_non_float_input():
             return input[0] * 2
 
     model = nn.Sequential(ForkNonFloat(), JoinNonFloat())
-    model = Pipe(model, balance=[1, 1], devices=["cpu", "cpu"], chunks=1, checkpoint="always")
+    model = Pipe(model, chunks=1, checkpoint="always")
 
     input = torch.rand(1, requires_grad=True)
     output = model(input)
     output.backward()
 
 
-def test_no_grad():
+def test_no_grad(setup_rpc):
     model = nn.Sequential(nn.Linear(1, 1))
-    model = Pipe(model, balance=[1], devices=["cpu"], chunks=2)
+    model = Pipe(model, chunks=2)
     input = torch.rand(2, 1)
 
     latent = None
@@ -244,7 +206,7 @@ def test_no_grad():
     assert latent.grad_fn is None
 
 
-def test_exception():
+def test_exception(setup_rpc):
     class ExpectedException(Exception):
         pass
 
@@ -253,13 +215,13 @@ def test_exception():
             raise ExpectedException()
 
     model = nn.Sequential(Raise())
-    model = Pipe(model, balance=[1], devices=["cpu"], chunks=1)
+    model = Pipe(model, chunks=1)
 
     with pytest.raises(ExpectedException):
         model(torch.rand(1))
 
 
-def test_exception_early_stop_asap():
+def test_exception_early_stop_asap(setup_rpc):
     """Even the first partitions have finished to process, the partition before
     the failed partition should be killed as soon as possible.
     """
@@ -287,7 +249,7 @@ def test_exception_early_stop_asap():
             raise ExpectedException()
 
     model = nn.Sequential(Pass(), Pass(), Counter(), Raise())
-    model = Pipe(model, [1, 1, 1, 1], devices=["cpu", "cpu", "cpu", "cpu"], chunks=3)
+    model = Pipe(model, chunks=3)
 
     with pytest.raises(ExpectedException):
         model(torch.rand(3))
@@ -296,7 +258,32 @@ def test_exception_early_stop_asap():
     assert counter == 2
 
 
-def test_input_pair():
+def test_nested_input(setup_rpc):
+    class NestedInput(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.fc_a = nn.Linear(1, 1)
+            self.fc_b = nn.Linear(1, 1)
+
+        def forward(self, inp):
+            return inp
+
+    model = nn.Sequential(NestedInput())
+    model = Pipe(model, chunks=2)
+
+    a = torch.rand(10, 1, requires_grad=True)
+    b = torch.rand(10, 1, requires_grad=True)
+
+    # TypeError: expected Tensor, but got tuple
+    with pytest.raises(TypeError):
+        model((a, (a, b))).local_value()
+
+    # TypeError: expected Tensor, but got list
+    with pytest.raises(TypeError):
+        model((a, [a, b])).local_value()
+
+
+def test_input_pair(setup_rpc):
     class Two(nn.Module):
         def __init__(self):
             super().__init__()
@@ -308,12 +295,22 @@ def test_input_pair():
             return (self.fc_a(a), self.fc_b(b))
 
     model = nn.Sequential(Two())
-    model = Pipe(model, balance=[1], devices=["cpu"], chunks=2)
+    model = Pipe(model, chunks=2)
 
     a = torch.rand(10, 1, requires_grad=True)
     b = torch.rand(10, 1, requires_grad=True)
 
-    a_out, b_out = model((a, b))
+    a_out, b_out = model((a, b)).local_value()
+    loss = (a_out + b_out).mean()
+    loss.backward()
+
+    assert a.grad is not None
+    assert b.grad is not None
+
+    # Test with list.
+    a.grad = None
+    b.grad = None
+    a_out, b_out = model([a, b]).local_value()
     loss = (a_out + b_out).mean()
     loss.backward()
 
@@ -321,7 +318,8 @@ def test_input_pair():
     assert b.grad is not None
 
 
-def test_input_singleton():
+
+def test_input_singleton(setup_rpc):
     class One(nn.Module):
         def __init__(self):
             super().__init__()
@@ -332,11 +330,23 @@ def test_input_singleton():
             return (self.fc(a),)
 
     model = nn.Sequential(One())
-    model = Pipe(model, balance=[1], devices=["cpu"], chunks=2)
+    model = Pipe(model, chunks=2)
 
     a = torch.rand(10, 1, requires_grad=True)
 
-    (a_out,) = model((a,))
+    (a_out,) = model((a,)).local_value()
+    loss = a_out.mean()
+    loss.backward()
+
+    assert all(p.grad is not None for p in model.parameters())
+    assert a.grad is not None
+
+    # Test with list
+    a.grad = None
+    for p in model.parameters():
+        p.grad = None
+
+    (a_out,) = model([a]).local_value()
     loss = a_out.mean()
     loss.backward()
 
@@ -344,9 +354,9 @@ def test_input_singleton():
     assert a.grad is not None
 
 
-def test_input_varargs():
+def test_input_varargs(setup_rpc):
     model = nn.Sequential(nn.Linear(1, 1))
-    model = Pipe(model, balance=[1], devices=["cpu"])
+    model = Pipe(model)
 
     a = torch.rand(1)
     b = torch.rand(1)
@@ -356,13 +366,13 @@ def test_input_varargs():
         model(a, b)
 
 
-def test_non_tensor():
+def test_non_tensor(setup_rpc):
     class NonTensor(nn.Module):
         def forward(self, _):
             return "hello"
 
     model = nn.Sequential(NonTensor())
-    model = Pipe(model, balance=[1], devices=["cpu"])
+    model = Pipe(model)
     x = torch.rand(1)
 
     # TypeError: expected Tensor as element 0 in argument 0, but got str
@@ -374,13 +384,13 @@ def test_non_tensor():
         model("hello")
 
 
-def test_non_tensor_tuple():
+def test_non_tensor_sequence(setup_rpc):
     class NonTensorTuple(nn.Module):
         def forward(self, x):
             return (x, "hello")
 
     model = nn.Sequential(NonTensorTuple())
-    model = Pipe(model, balance=[1], devices=["cpu"])
+    model = Pipe(model)
     x = torch.rand(1)
 
     # TypeError: CheckpointBackward.forward: expected Variable (got str) for return value 1
@@ -391,17 +401,21 @@ def test_non_tensor_tuple():
     with pytest.raises(TypeError):
         model((x, "hello"))
 
+    # TypeError: expected Tensor to scatter, but got str
+    with pytest.raises(TypeError):
+        model([x, "hello"])
+
 
 @pytest.mark.parametrize("checkpoint", ["never", "always", "except_last"])
-def test_deferred_batch_norm(checkpoint):
+def test_deferred_batch_norm(checkpoint, setup_rpc):
     bn = nn.BatchNorm2d(3)
     pipe_bn = deepcopy(bn)
     pipe = Pipe(
-        nn.Sequential(pipe_bn), balance=[1], devices=["cpu"], chunks=2, checkpoint=checkpoint, deferred_batch_norm=True
+        nn.Sequential(pipe_bn), chunks=2, checkpoint=checkpoint, deferred_batch_norm=True
     )
 
     x = torch.rand(4, 3, 10, 10)
-    pipe(x).mean().backward()
+    pipe(x).local_value().mean().backward()
     bn(x).mean().backward()
 
     assert torch.allclose(pipe[0].running_mean, bn.running_mean, atol=1e-4)
@@ -409,15 +423,15 @@ def test_deferred_batch_norm(checkpoint):
 
 
 @pytest.mark.parametrize("checkpoint", ["never", "always"])
-def test_deferred_batch_norm_params(checkpoint):
+def test_deferred_batch_norm_params(checkpoint, setup_rpc):
     bn = nn.BatchNorm2d(3)
     pipe_bn = deepcopy(bn)
     pipe = Pipe(
-        nn.Sequential(pipe_bn), balance=[1], devices=["cpu"], chunks=1, checkpoint=checkpoint, deferred_batch_norm=True
+        nn.Sequential(pipe_bn), chunks=1, checkpoint=checkpoint, deferred_batch_norm=True
     )
 
     x = torch.rand(4, 3, 10, 10)
-    pipe(x).mean().backward()
+    pipe(x).local_value().mean().backward()
     bn(x).mean().backward()
 
     assert pipe[0].weight.grad is not None
@@ -433,10 +447,8 @@ def test_devices():
     c = nn.Linear(1, 1)
 
     # There are extra two devices.
-    devices = ["cpu", "cpu", "cpu", "cpu", "cpu"]
-
     model = nn.Sequential(a, b, c)
-    model = Pipe(model, [1, 1, 1], devices=devices)
+    model = Pipe(model)
 
     cpu = torch.device("cpu")
     # Extra devices must be discarded.
@@ -448,7 +460,7 @@ def test_partitions():
     b = nn.Linear(1, 1)
 
     model = nn.Sequential(a, b)
-    model = Pipe(model, [1, 1], devices=["cpu", "cpu"])
+    model = Pipe(model)
 
     assert isinstance(model.partitions, nn.ModuleList)
     assert isinstance(model.partitions[0], nn.Sequential)
@@ -462,7 +474,7 @@ def test_deny_moving():
     b = nn.Linear(1, 1)
 
     model = nn.Sequential(a, b)
-    model = Pipe(model, [1, 1], devices=["cpu", "cpu"])
+    model = Pipe(model)
 
     # Moving is denied.
     with pytest.raises(TypeError):
@@ -495,13 +507,13 @@ def test_deny_moving():
     model.to(dtype=torch.float)
 
 
-def test_empty_module():
+def test_empty_module(setup_rpc):
     # Empty sequential module is not illegal.
     model = nn.Sequential()
-    model = Pipe(model, [])
+    model = Pipe(model)
 
-    assert model(torch.tensor(42)) == torch.tensor(42)
-    assert model((torch.tensor(42),)) == (torch.tensor(42),)
+    assert model(torch.tensor(42)).local_value() == torch.tensor(42)
+    assert model((torch.tensor(42),)).local_value() == (torch.tensor(42),)
 
     # But only tensor or tensors is legal in Pipe.
     with pytest.raises(TypeError):
@@ -513,7 +525,7 @@ def test_named_children():
     b = nn.Linear(1, 1)
 
     model = nn.Sequential(OrderedDict([("a", a), ("b", b)]))
-    model = Pipe(model, [1, 1], devices=["cpu", "cpu"])
+    model = Pipe(model)
 
     names = set(n for n, _ in model.named_modules())
     assert "partitions.0.a" in names
@@ -525,23 +537,9 @@ def test_named_children():
         model.a
 
 
-def test_recommend_auto_balance():
-    with pytest.raises(ValueError, match="torch.distributed._pipeline.sync.balance"):
-        # balance is required
-        Pipe(nn.Sequential())
-
-    with pytest.raises(ValueError, match="torch.distributed._pipeline.sync.balance"):
-        # module and sum of balance have differen length (module: 0, sum of balance: 1)
-        Pipe(nn.Sequential(), [1])
-
-    with pytest.raises(ValueError, match="torch.distributed._pipeline.sync.balance"):
-        # module and sum of balance have different length (module: 2, sum of balance: 1)
-        Pipe(nn.Sequential(nn.Linear(1, 1), nn.Linear(1, 1)), [1])
-
-
 def test_verify_module_non_sequential():
     with pytest.raises(TypeError, match="module must be nn.Sequential to be partitioned"):
-        Pipe(nn.Module(), [1])
+        Pipe(nn.Module())
 
 
 def test_verify_module_duplicate_children():
@@ -549,22 +547,45 @@ def test_verify_module_duplicate_children():
     model = nn.Sequential(conv, conv)
 
     with pytest.raises(ValueError, match="module with duplicate children is not supported"):
-        Pipe(model, [1, 1])
+        Pipe(model)
 
 
 @skip_if_no_cuda
-def test_verify_module_duplicate_parameters_on_distinct_devices():
+def test_verify_module_params_on_same_device():
     class Surrogate(nn.Module):
-        def __init__(self, module):
+        def __init__(self, param1, param2):
             super().__init__()
-            self.module = module
+            self.param1 = param1
+            self.param2 = param2
 
-    conv = nn.Conv2d(3, 3, 1)
-    model = nn.Sequential(Surrogate(conv), Surrogate(conv))
+    conv1 = nn.Conv2d(3, 3, 1)
+    conv2 = nn.Conv2d(3, 3, 1)
+    model = nn.Sequential(Surrogate(conv1, conv2.cuda()))
 
-    with pytest.raises(ValueError, match="module with duplicate parameters on distinct devices is not supported"):
-        Pipe(model, [1, 1], devices=["cpu", "cuda"])
+    with pytest.raises(
+        ValueError,
+        match=r'should have all parameters on a single device, please use .to\(\)'
+            ' to place the module on a single device'):
+        Pipe(model)
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
+@pytest.mark.skipif(torch.cuda.device_count() < 2, reason="Need atleast two GPUs")
+def test_verify_nested_modules(setup_rpc):
+    model = nn.Sequential(
+        nn.Sequential(
+            nn.Linear(32, 16).cuda(0),
+            nn.Linear(16, 8).cuda(0)
+        ),
+        nn.Sequential(
+            nn.Linear(8, 4).cuda(1),
+            nn.Linear(4, 2).cuda(1)
+        ),
+    )
+
+    pipe = Pipe(model)
+    out = pipe(torch.rand(10, 32).cuda(0))
+    assert out.local_value().device == torch.device("cuda:1")
+    assert out.local_value().size() == torch.Size([10, 2])
 
 def test_verify_module_duplicate_parameters_on_same_device():
     class Surrogate(nn.Module):
@@ -575,10 +596,10 @@ def test_verify_module_duplicate_parameters_on_same_device():
     conv = nn.Conv2d(3, 3, 1)
     model = nn.Sequential(Surrogate(conv), Surrogate(conv))
 
-    Pipe(model, [1, 1], devices=["cpu", "cpu"])
+    Pipe(model)
 
 
-def test_forward_lockstep():
+def test_forward_lockstep(setup_rpc):
     timeline = []
 
     class DelayedLog(nn.Module):
@@ -597,7 +618,7 @@ def test_forward_lockstep():
             return x
 
     model = nn.Sequential(DelayedLog(0, seconds=0), DelayedLog(1, seconds=0.1))
-    model = Pipe(model, balance=[1, 1], devices=["cpu", "cpu"], chunks=3)
+    model = Pipe(model, chunks=3)
     model(torch.rand(3, 1))
 
     # Expected timeline: (Logs are recorded at !)

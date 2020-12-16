@@ -1,5 +1,6 @@
 #pragma once
-#ifdef USE_VULKAN
+
+#ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/ops/Common.h>
 #include <torch/custom_class.h>
@@ -96,4 +97,4 @@ c10::intrusive_ptr<Conv2dOpContext> conv2d_clamp_prepack(
 } // namespace native
 } // namespace at
 
-#endif /* USE_VULKAN */
+#endif /* USE_VULKAN_API */

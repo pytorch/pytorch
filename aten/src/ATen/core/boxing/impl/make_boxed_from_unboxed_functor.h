@@ -120,14 +120,6 @@ namespace impl {
   };
 
   template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_input_type<std::vector<T>, AllowDeprecatedTypes>
-  : assert_is_valid_input_type<T, AllowDeprecatedTypes> {
-    static_assert(!std::is_same<T, at::Scalar>::value,
-      "You tried to register a kernel with an unsupported input type: std::vector<Scalar>. Please use List<int64_t>, List<double> or Tensor instead.");
-    // TODO static_assert(AllowDeprecatedTypes, "You tried to register a kernel with an unsupported input type: std::vector<T>. Please use List<T> instead.");
-  };
-
-  template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_input_type<c10::ArrayRef<T>, AllowDeprecatedTypes>
   : assert_is_valid_input_type<T, AllowDeprecatedTypes> {
     static_assert(!std::is_same<T, at::Scalar>::value,
@@ -291,19 +283,25 @@ namespace impl {
   };
 
   // return_to_ivalue
+  template<class T, bool AllowDeprecatedTypes, class Enable = void>
+  struct return_to_ivalue final {};
 
   template<class T, bool AllowDeprecatedTypes>
-  IValue return_to_ivalue(T&& v) {
-    assert_is_valid_output_type<T, AllowDeprecatedTypes>();
-    return c10::ivalue::from(std::forward<T>(v));
-  }
+  struct return_to_ivalue<T, AllowDeprecatedTypes, std::enable_if_t<!std::is_same<at::Tensor&, T>::value>> final {
+    static IValue call(T&& v) {
+      assert_is_valid_output_type<T, AllowDeprecatedTypes>();
+      return c10::ivalue::from(std::move(v));
+    }
+  };
 
   // Special case to allow kernels to return `Tensor&`.
   // TODO Delete this once kernels don't do that anymore
-  template<>
-  inline IValue return_to_ivalue<at::Tensor&, false>(at::Tensor& v) {
-    return c10::ivalue::from(v);
-  }
+  template<bool AllowDeprecatedTypes>
+  struct return_to_ivalue<at::Tensor&, AllowDeprecatedTypes, void> final {
+    static IValue call(at::Tensor& v) {
+      return c10::ivalue::from(v);
+    }
+  };
 
   // reference_cast allows casting references, e.g. T&& to T&:
   //    T make_t() {}
@@ -349,7 +347,7 @@ namespace impl {
   template<class OutputType, bool AllowDeprecatedTypes>
   struct push_outputs final {
     static void call(OutputType&& output, Stack* stack) {
-      torch::jit::push(*stack, return_to_ivalue<OutputType, AllowDeprecatedTypes>(std::forward<OutputType>(output)));
+      torch::jit::push(*stack, return_to_ivalue<OutputType, AllowDeprecatedTypes>::call(std::forward<OutputType>(output)));
     }
   };
   template<class... OutputTypes, bool AllowDeprecatedTypes>
@@ -361,7 +359,7 @@ namespace impl {
   private:
     template<size_t... indices>
     static void call_(std::tuple<OutputTypes...>&& output, Stack* stack, std::index_sequence<indices...>) {
-      torch::jit::push(*stack, return_to_ivalue<OutputTypes, AllowDeprecatedTypes>(std::move(std::get<indices>(output)))...);
+      torch::jit::push(*stack, return_to_ivalue<OutputTypes, AllowDeprecatedTypes>::call(std::forward<OutputTypes>(std::get<indices>(output)))...);
     }
   };
   template<bool AllowDeprecatedTypes>

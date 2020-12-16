@@ -55,7 +55,6 @@ CONFIG_TREE_DATA = [
                             ('build_only', [X(True)]),
                         ]),
                     ]),
-                    ("kineto", [XImportant(True)]),
                 ]),
             ]),
             ("11.1", [
@@ -94,7 +93,7 @@ CONFIG_TREE_DATA = [
             ]),
         ]),
         ("rocm", [
-            ("3.7", [
+            ("3.9", [
                 ("3.6", [
                     ('build_only', [XImportant(True)]),
                 ]),
@@ -179,20 +178,8 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
             "cuda_gcc_override": CudaGccOverrideConfigNode,
             "coverage": CoverageConfigNode,
             "pure_torch": PureTorchConfigNode,
-            "kineto": KinetoTorchConfigNode,
         }
         return next_nodes[experimental_feature]
-
-
-class KinetoTorchConfigNode(TreeConfigNode):
-    def modify_label(self, label):
-        return "KINETO=" + str(label)
-
-    def init2(self, node_name):
-        self.props["is_kineto"] = node_name
-
-    def child_constructor(self):
-        return ImportantConfigNode
 
 
 class PureTorchConfigNode(TreeConfigNode):

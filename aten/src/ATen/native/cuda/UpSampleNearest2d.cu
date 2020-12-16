@@ -204,7 +204,7 @@ static void upsample_nearest2d_out_cuda_template(
                 output_width,
                 height_scale,
                 width_scale);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 }
 
@@ -286,7 +286,7 @@ static void upsample_nearest2d_backward_out_cuda_template(
                 idata,
                 height_scale,
                 width_scale);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 }
 

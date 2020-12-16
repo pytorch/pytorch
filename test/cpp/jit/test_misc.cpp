@@ -5,57 +5,53 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 
-#include "test/cpp/jit/test_utils.h"
+#include <test/cpp/jit/test_utils.h>
 
+#include <torch/csrc/autograd/engine.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/codegen/fuser/interface.h>
+#include <torch/csrc/jit/frontend/code_template.h>
+#include <torch/csrc/jit/frontend/ir_emitter.h>
+#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/ir/attributes.h>
+#include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/ir/scope.h>
 #include <torch/csrc/jit/ir/type_hashing.h>
+#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
-#include "torch/csrc/autograd/generated/variable_factories.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/codegen/fuser/interface.h"
-#include "torch/csrc/jit/frontend/code_template.h"
-#include "torch/csrc/jit/frontend/tracer.h"
-#include "torch/csrc/jit/ir/alias_analysis.h"
-#include "torch/csrc/jit/ir/attributes.h"
-#include "torch/csrc/jit/ir/irparser.h"
-#include "torch/csrc/jit/ir/scope.h"
-#include "torch/csrc/jit/jit_log.h"
-#include "torch/csrc/jit/passes/bailout_graph.h"
-#include "torch/csrc/jit/passes/common_subexpression_elimination.h"
-#include "torch/csrc/jit/passes/constant_propagation.h"
-#include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/jit/passes/graph_fuser.h"
-#include "torch/csrc/jit/passes/guard_elimination.h"
-#include "torch/csrc/jit/passes/inline_autodiff_subgraphs.h"
-#include "torch/csrc/jit/passes/insert_guards.h"
-#include "torch/csrc/jit/passes/liveness.h"
-#include "torch/csrc/jit/passes/loop_unrolling.h"
-#include "torch/csrc/jit/passes/lower_grad_of.h"
-#include "torch/csrc/jit/passes/lower_tuples.h"
-#include "torch/csrc/jit/passes/pass_manager.h"
-#include "torch/csrc/jit/passes/requires_grad_analysis.h"
-#include "torch/csrc/jit/passes/shape_analysis.h"
-#include "torch/csrc/jit/passes/utils/subgraph_utils.h"
-#include "torch/csrc/jit/runtime/argument_spec.h"
-#include "torch/csrc/jit/runtime/autodiff.h"
-#include "torch/csrc/jit/runtime/custom_operator.h"
-#include "torch/csrc/jit/runtime/interpreter.h"
-#include "torch/csrc/jit/runtime/symbolic_script.h"
-#include "torch/csrc/jit/serialization/import.h"
-
-#include "torch/csrc/autograd/engine.h"
-#include "torch/csrc/autograd/variable.h"
-
+#include <torch/csrc/jit/passes/common_subexpression_elimination.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/graph_fuser.h>
+#include <torch/csrc/jit/passes/guard_elimination.h>
+#include <torch/csrc/jit/passes/inline_autodiff_subgraphs.h>
+#include <torch/csrc/jit/passes/insert_guards.h>
+#include <torch/csrc/jit/passes/liveness.h>
+#include <torch/csrc/jit/passes/loop_unrolling.h>
+#include <torch/csrc/jit/passes/lower_grad_of.h>
+#include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/passes/pass_manager.h>
+#include <torch/csrc/jit/passes/requires_grad_analysis.h>
+#include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
+#include <torch/csrc/jit/runtime/argument_spec.h>
+#include <torch/csrc/jit/runtime/autodiff.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/jit/runtime/profiling_record.h>
+#include <torch/csrc/jit/runtime/symbolic_script.h>
+#include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/testing/file_check.h>
+#include <torch/jit.h>
 #include <torch/script.h>
 
-#include "torch/csrc/jit/api/module.h"
-#include "torch/csrc/jit/frontend/ir_emitter.h"
-#include "torch/csrc/jit/runtime/profiling_record.h"
-#include "torch/jit.h"
-
-#include "onnx/onnx_pb.h"
+#include <onnx/onnx_pb.h>
 
 #include <c10/util/Exception.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
@@ -368,9 +364,9 @@ TEST(ATenNativeBatchNormTest, Basic) {
 }
 
 TEST(CustomFusionTest, Basic) {
-  #if defined(FBCODE_CAFFE2)
-      return;
-  #endif
+#if defined(FBCODE_CAFFE2)
+  return;
+#endif
 
   auto graph_string = R"IR(
     graph(%0 : Float(2, 3, 4),
@@ -406,9 +402,9 @@ TEST(CustomFusionTest, Basic) {
 }
 
 TEST(CustomFusionTest, NestedBlocks) {
-  #if defined(FBCODE_CAFFE2)
-      return;
-  #endif
+#if defined(FBCODE_CAFFE2)
+  return;
+#endif
 
   auto graph_string = R"IR(
   graph(%0 : Float(2, 3, 4),
@@ -743,8 +739,8 @@ void checkScopeCallbacks() {
             std::string(fn.name().str()) == "test_user_scope") {
           found_user_scope = true;
         }
-      },
-      [](const at::RecordFunction&) {}));
+        return nullptr;
+      }));
 
   bool bad_scope = false;
   auto pushScopedCallback = [&](at::RecordScope scope, size_t& cnt) {
@@ -756,9 +752,8 @@ void checkScopeCallbacks() {
               } else {
                 bad_scope = true;
               }
-              return true;
-            },
-            [](const at::RecordFunction&) {})
+              return nullptr;
+            })
             .scopes({scope}));
   };
 
@@ -787,6 +782,12 @@ void checkScopeCallbacks() {
   TORCH_CHECK(found_user_scope);
 }
 
+static bool should_run = false;
+
+static bool shouldRunCallback(const RecordFunctionCallback&) {
+  return should_run;
+}
+
 TEST(RecordFunctionTest, Basic) {
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
@@ -811,8 +812,8 @@ TEST(RecordFunctionTest, Basic) {
             } else if (fn.scope() == RecordScope::TORCHSCRIPT_FUNCTION) {
               ts_names.insert(fn.name().str());
             }
-          },
-          [](const RecordFunction&) {})
+            return nullptr;
+          })
           .needsInputs(true));
 
   TracedTestInputs eager_inputs, jit_inputs;
@@ -849,9 +850,8 @@ TEST(RecordFunctionTest, Basic) {
                                    if (std::string(fn.name().str()) == "test") {
                                      ++sampled_cb_ctr;
                                    }
-                                   return true;
-                                 },
-                                 [](const RecordFunction&) {})
+                                   return nullptr;
+                                 })
                                  .samplingProb(sampling_prob));
   };
 
@@ -861,9 +861,8 @@ TEST(RecordFunctionTest, Basic) {
         if (std::string(fn.name().str()) == "test") {
           ++non_sampled_cb_ctr;
         }
-        return true;
-      },
-      [](const RecordFunction&) {}));
+        return nullptr;
+      }));
 
   auto handle = setup_sampled_callback(0.5);
 
@@ -906,9 +905,8 @@ TEST(RecordFunctionTest, Basic) {
       [&fn_names, &mtx](const RecordFunction& fn) {
         std::lock_guard<std::mutex> lock(mtx);
         fn_names.push_back(fn.name().str());
-        return true;
-      },
-      [](const RecordFunction&) {}));
+        return nullptr;
+      }));
   {
     RecordFunctionGuard g1(false);
     {
@@ -932,8 +930,10 @@ TEST(RecordFunctionTest, Basic) {
   std::vector<size_t> ids;
   auto add_remove_test_add_cb = [&ids](size_t id) {
     return addGlobalCallback(RecordFunctionCallback(
-        [&ids, id](const RecordFunction& fn) { ids.push_back(id); },
-        [](const RecordFunction&) {}));
+        [&ids, id](const RecordFunction& fn) {
+          ids.push_back(id);
+          return nullptr ;
+        }));
   };
 
   auto h1 = add_remove_test_add_cb(1);
@@ -970,8 +970,7 @@ TEST(RecordFunctionTest, Basic) {
 
   ids.clear();
   addGlobalCallback(RecordFunctionCallback(
-      [&ids](const RecordFunction& fn) { ids.push_back(1); },
-      [](const RecordFunction&) {}));
+      [&ids](const RecordFunction& fn) { ids.push_back(1); return nullptr; }));
 
   { RECORD_USER_SCOPE("test"); }
 
@@ -981,8 +980,7 @@ TEST(RecordFunctionTest, Basic) {
 
   auto th = std::thread([&ids]() {
     addThreadLocalCallback(RecordFunctionCallback(
-        [&ids](const RecordFunction& fn) { ids.push_back(2); },
-        [](const RecordFunction&) {}));
+        [&ids](const RecordFunction& fn) { ids.push_back(2); return nullptr; }));
 
     { RECORD_USER_SCOPE("test_thread"); }
   });
@@ -1066,14 +1064,10 @@ TEST(RecordFunctionTest, Basic) {
   // test should_run
 
   bool ran = false;
-  bool should_run = false;
-  addGlobalCallback(
-      RecordFunctionCallback(
-          [&ran](const RecordFunction& fn) { ran = true; },
-          [](const RecordFunction&) {})
-          .setShouldRun([&should_run](const RecordFunctionCallback&) {
-            return should_run;
-          }));
+  should_run = false;
+  addGlobalCallback(RecordFunctionCallback(
+                        [&ran](const RecordFunction& fn) { ran = true; return nullptr; })
+                        .setShouldRun(shouldRunCallback));
 
   { RECORD_USER_SCOPE("test"); }
 
@@ -1094,8 +1088,8 @@ TEST(RecordFunctionTest, Basic) {
     auto handle = addThreadLocalCallback(RecordFunctionCallback(
         [&recorded_op](const RecordFunction& fn) {
           recorded_op = fn.name().str();
-        },
-        [](const RecordFunction&) {}));
+          return nullptr;
+        }));
     ThreadLocalState state;
     std::thread t_child([state]() {
       ThreadLocalStateGuard g_tls(state);
@@ -1112,16 +1106,20 @@ TEST(RecordFunctionTest, Basic) {
   bool has_ids = false;
   addGlobalCallback(
       RecordFunctionCallback(
-          [&has_ids](const RecordFunction& fn) { has_ids = fn.handle() > 0; },
-          [](const RecordFunction&) {})
+          [&has_ids](const RecordFunction& fn) {
+            has_ids = fn.handle() > 0;
+            return nullptr;
+          })
           .needsIds(true));
   { RECORD_USER_SCOPE("test"); }
   TORCH_CHECK(has_ids);
   clearCallbacks();
   has_ids = false;
   addGlobalCallback(RecordFunctionCallback(
-      [&has_ids](const RecordFunction& fn) { has_ids = fn.handle() > 0; },
-      [](const RecordFunction&) {}));
+      [&has_ids](const RecordFunction& fn) {
+        has_ids = fn.handle() > 0;
+        return nullptr;
+      }));
   { RECORD_USER_SCOPE("test"); }
   TORCH_CHECK(!has_ids);
   clearCallbacks();
@@ -1139,6 +1137,7 @@ TEST(RecordFunctionTest, OperatorNameOverload) {
                               } else {
                                 operator_names.insert("No Operator Name");
                               }
+                              return nullptr;
                             })
                             .scopes({at::RecordScope::FUNCTION}));
   auto t = torch::randn({1, 2, 3}, at::kCPU);
@@ -1173,8 +1172,7 @@ class TestThreadLocalDebugInfo : public c10::DebugInfoBase {
 void checkDebugInfo(c10::DebugInfoKind kind, int model_id) {
   auto* debug_info = c10::ThreadLocalDebugInfo::get(kind);
   TORCH_CHECK(debug_info != nullptr);
-  auto* test_debug_info =
-      dynamic_cast<TestThreadLocalDebugInfo*>(debug_info);
+  auto* test_debug_info = dynamic_cast<TestThreadLocalDebugInfo*>(debug_info);
   TORCH_CHECK(test_debug_info != nullptr);
   TORCH_CHECK(test_debug_info->getModelId() == model_id);
 }
@@ -1211,9 +1209,8 @@ TEST(ThreadLocalDebugInfoTest, Basic) {
       [&done](const RecordFunction&) {
         checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
         done = true;
-        return true;
-      },
-      [](const RecordFunction&) {}));
+        return nullptr;
+      }));
   {
     c10::DebugInfoGuard guard(c10::DebugInfoKind::TEST_INFO, debug_info);
     auto t = torch::randn({1, 2, 3}, at::kCPU);
@@ -1847,7 +1844,7 @@ def foo(x):
           ASSERT_TRUE(n->callstack());
           auto callstack_vector = (*n->callstack())->vec();
           ASSERT_EQ(callstack_vector.size(), 1);
-          ASSERT_EQ(callstack_vector[0].first, &cu->get_function("bar"));
+          ASSERT_EQ(std::get<0>(callstack_vector[0]), &cu->get_function("bar"));
           break;
         }
         case 7: {
@@ -1857,8 +1854,8 @@ def foo(x):
           ASSERT_TRUE(n->callstack());
           auto callstack_vector = (*n->callstack())->vec();
           ASSERT_EQ(callstack_vector.size(), 2);
-          ASSERT_EQ(callstack_vector[0].first, &cu->get_function("baz"));
-          ASSERT_EQ(callstack_vector[1].first, &cu->get_function("ham"));
+          ASSERT_EQ(std::get<0>(callstack_vector[0]), &cu->get_function("baz"));
+          ASSERT_EQ(std::get<0>(callstack_vector[1]), &cu->get_function("ham"));
           break;
         }
         case 11: {
@@ -1887,7 +1884,7 @@ def foo(x):
       ASSERT_TRUE(n->callstack());
       auto callstack_vector = (*n->callstack())->vec();
       ASSERT_EQ(callstack_vector.size(), 1);
-      ASSERT_EQ(callstack_vector[0].first, &cu->get_function("ham"));
+      ASSERT_EQ(std::get<0>(callstack_vector[0]), &cu->get_function("ham"));
     }
   }
 }
