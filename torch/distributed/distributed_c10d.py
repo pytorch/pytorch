@@ -727,7 +727,7 @@ def irecv(tensor,
         return pg.recv_anysource([tensor], tag)
     else:
         if pg is GroupMember.WORLD:
-            pg.recv([tensor], src, tag).wait()
+            return pg.recv([tensor], src, tag)
         else:
             group_src_rank = _get_group_rank(pg, src)
             return pg.recv([tensor], group_src_rank, tag)
