@@ -19,7 +19,7 @@ from .fake_quantize import (
 from .utils import get_combined_dict
 
 # Default map for swapping float module to quantized ones
-DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, type] = {
+DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     QuantStub: nnq.Quantize,
     DeQuantStub: nnq.DeQuantize,
     nn.BatchNorm2d: nnq.BatchNorm2d,
@@ -62,7 +62,7 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, type] = {
 }
 
 # Default map for swapping float module to qat modules
-DEFAULT_QAT_MODULE_MAPPINGS : Dict[Callable, type] = {
+DEFAULT_QAT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.Conv2d: nnqat.Conv2d,
     nn.Linear: nnqat.Linear,
     # Intrinsic modules:
@@ -75,7 +75,7 @@ DEFAULT_QAT_MODULE_MAPPINGS : Dict[Callable, type] = {
 }
 
 # Default map for swapping dynamic modules
-DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS : Dict[Callable, type] = {
+DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.GRUCell: nnqd.GRUCell,
     nn.Linear: nnqd.Linear,
     nn.LSTM: nnqd.LSTM,
@@ -108,14 +108,14 @@ DEFAULT_MODULE_TO_ACT_POST_PROCESS : Dict[Callable, Callable] = {
     nn.Tanh: default_symmetric_fixed_qparams_fake_quant,
 }
 
-def get_default_static_quant_module_mappings() -> Dict[Callable, type]:
+def get_default_static_quant_module_mappings() -> Dict[Callable, Any]:
     ''' Get module mapping for post training static quantization
     '''
     return DEFAULT_STATIC_QUANT_MODULE_MAPPINGS
 
 def get_static_quant_module_class(
         float_module_class: Callable,
-        additional_static_quant_mapping: Optional[Dict[Callable, type]] = None) -> type:
+        additional_static_quant_mapping: Optional[Dict[Callable, Any]] = None) -> Any:
     r"""n Get the statically quantized module class corresponding to
     the floating point module class
     """
@@ -130,7 +130,7 @@ def get_static_quant_module_class(
 
 def get_dynamic_quant_module_class(
         float_module_class: Callable,
-        additional_dynamic_quant_mapping: Optional[Dict[Callable, type]] = None) -> type:
+        additional_dynamic_quant_mapping: Optional[Dict[Callable, Any]] = None) -> Any:
     r"""n Get the dynamically quantized module class corresponding to
     the floating point module class
     """
@@ -143,12 +143,12 @@ def get_dynamic_quant_module_class(
         " does not have a corresponding quantized module class"
     return dynamic_quant_module_class
 
-def get_default_qat_module_mappings() -> Dict[Callable, type]:
+def get_default_qat_module_mappings() -> Dict[Callable, Any]:
     ''' Get default module mapping for quantization aware training
     '''
     return DEFAULT_QAT_MODULE_MAPPINGS
 
-def get_default_dynamic_quant_module_mappings() -> Dict[Callable, type]:
+def get_default_dynamic_quant_module_mappings() -> Dict[Callable, Any]:
     ''' Get module mapping for post training dynamic quantization
     '''
     return DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS
