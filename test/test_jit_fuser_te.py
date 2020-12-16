@@ -1285,10 +1285,10 @@ class TestTEFuser(JitTestCase):
         nan_vals = torch.tensor([float('nan'), float('inf'), -float('inf'), 3.14])
         sizes = [(1, 4), (4, 4)]
         dtypes = [
-            # torch.int,
+            torch.int,
             torch.float16,
-            # torch.float32,
-            # torch.float64,
+            torch.float32,
+            torch.float64,
         ]
         for dtype, device, size in product(dtypes, self.devices, sizes):
             # TODO
