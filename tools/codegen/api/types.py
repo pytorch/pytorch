@@ -141,7 +141,9 @@ class CppSignature:
     # discarding information about which arguments are semantically
     # related to each other.
     def arguments(self) -> Sequence[Binding]:
-        return cpp.arguments(self.func.arguments, faithful=self.faithful, method=self.method)
+        return cpp.arguments(
+            self.func.arguments, faithful=self.faithful,
+            method=self.method, cpp_no_default_args=self.cpp_no_default_args)
 
     def name(self) -> str:
         n = cpp.name(self.func, faithful_name_for_out_overloads=self.faithful)
@@ -152,10 +154,7 @@ class CppSignature:
     # Render the C++ declaration for this signature
     def decl(self) -> str:
         returns_type = cpp.returns_type(self.func.returns)
-        cpp_args_str = ', '.join(
-            a.decl() if a.name not in self.cpp_no_default_args else a.no_default().decl()
-            for a in self.arguments()
-        )
+        cpp_args_str = ', '.join(a.decl() for a in self.arguments())
         return f"{returns_type} {self.name()}({cpp_args_str})"
 
     # Render the C++ definition for this signature, not including
