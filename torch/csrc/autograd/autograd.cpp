@@ -166,19 +166,6 @@ void exit_dual_level(uint64_t level) {
   ForwardADLevel::release_idx(level);
 }
 
-at::Tensor make_dual(const at::Tensor& primal, at::Tensor tangent, uint64_t level) {
-  TORCH_CHECK(!primal.fw_grad(level).defined(), "Making a dual Tensor based on a Tensor that "
-              "already has a forward gradient at the same level ", level, " is not supported.");
-
-  auto dual_tensor = primal.view(primal.sizes());
-  dual_tensor.set_fw_grad(tangent, level, /* is_inplace_op */ false);
-  return dual_tensor;
-}
-
-std::pair<at::Tensor, at::Tensor> unpack_dual(const at::Tensor& tensor, uint64_t level) {
-  return {tensor._fw_primal(level), tensor.fw_grad(level)};
-}
-
 } // namespace forward_ad
 
 } // namespace autograd

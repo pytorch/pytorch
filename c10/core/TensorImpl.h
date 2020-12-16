@@ -137,7 +137,7 @@ struct C10_API AutogradMetaInterface {
   virtual at::Tensor& mutable_grad() = 0;
   virtual const at::Tensor& grad() const = 0;
   virtual const at::Tensor& fw_grad(uint64_t level, const at::Tensor& self) const = 0;
-  virtual void set_fw_grad(at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op) = 0;
+  virtual void set_fw_grad(const at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op) = 0;
   virtual ~AutogradMetaInterface();
 };
 
@@ -634,7 +634,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    *   - "is_inplace_op" is a boolean flag that tells if this gradient was generated
    *     by an inplace operation or an out of place one. This allows better error checking.
    */
-  void set_fw_grad(at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op);
+  void set_fw_grad(const at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op);
 
   /**
    * Return a typed data pointer to the actual data which this tensor refers to.
