@@ -294,7 +294,7 @@ Tensor quantized_index(const Tensor & self, TensorList indices) {
   TORCH_INTERNAL_ASSERT(
       self.qscheme() == c10::kPerTensorAffine ||
       self.qscheme() == c10::kPerTensorSymmetric,
-      "Indexing for per-channel quantized Tensors is not supported.");
+      "Indexing is only supported for per-Tensor quantized Tensors.");
 
   // For now, this is a naive implementation which does dq -> index -> q.
   // TODO(future PR): improve performance by removing the copies.
