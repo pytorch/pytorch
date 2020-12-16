@@ -4,6 +4,7 @@
 #include <ATen/core/TensorBody.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Functions.h>
+#include <ATen/ScalarOps.h>
 
 // TODO: try to remove this
 // There is some back story, see https://github.com/pytorch/pytorch/issues/48684
@@ -226,9 +227,9 @@ static inline Tensor applySelect(
 static inline Tensor boolToIndexingTensorCPUOrCUDA(const Tensor& self, bool value) {
   // booleans add a dimension of size 1. true indexes this dimension as if 0:, false as empty.
   if (value) {
-    return at::native::zeros({1}, {}, self.options().dtype(kLong));
+    return at::empty({1}, {}, self.options().dtype(kLong)).fill_(0.);
   } else {
-    return at::native::empty({0}, {}, self.options().dtype(kLong));
+    return at::empty({0}, {}, self.options().dtype(kLong));
   }
 }
 
@@ -247,10 +248,6 @@ static inline Tensor boolToIndexingTensor(const Tensor& self, bool value, const 
   } else {
     return boolToIndexingTensorNonNativeDeviceType(self, value);
   }
-}
-
-static inline Tensor scalarToTensorCPUOrCUDA(Scalar v, const TensorOptions& options) {
-  return at::native::scalar_tensor(v, options);
 }
 
 static inline Tensor scalarToTensorNonNativeDeviceType(Scalar v, const TensorOptions& options) {
@@ -320,8 +317,11 @@ static inline int64_t count_specified_dimensions(const ArrayRef<TensorIndex>& in
 // The rest of the functions are in `at::indexing::impl` namespace, signifying
 // that they shouldn't be used from Python indexing implementation.
 static inline Tensor scalarToTensor(Scalar v, const TensorOptions& options, const at::Device& self_device) {
-  if (self_device == at::kCPU || self_device == at::kCUDA) {
-    return impl::scalarToTensorCPUOrCUDA(v, options);
+  if (self_device == at::kCPU && !v.isComplex() &&
+      options.dtype_opt()->toScalarType() != ScalarType::ComplexDouble &&
+      options.dtype_opt()->toScalarType() != ScalarType::ComplexFloat &&
+      options.dtype_opt()->toScalarType() != ScalarType::ComplexHalf) {
+    return at::detail::scalar_tensor_static(v, options.dtype_opt()->toScalarType(), self_device);
   } else {
     return impl::scalarToTensorNonNativeDeviceType(v, options);
   }

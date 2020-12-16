@@ -277,10 +277,12 @@ class CallbackManager {
       bool is_start) {
     try {
       if (is_start) {
-        ctx = rfcb.start()(rf);
+        ctx = rfcb.start() ? rfcb.start()(rf) : nullptr;
       }
       else {
-        rfcb.end()(rf, ctx.get());
+        if (rfcb.end()) {
+          rfcb.end()(rf, ctx.get());
+        }
       }
       return true;
     } catch (const std::exception &e) {
@@ -496,14 +498,17 @@ bool checkRecordAllFunctions() {
 
 bool shouldRunRecordFunction(bool* pre_sampled) {
   auto* rf_tls_ptr = &rf_tls_;
-  if (!rf_tls_ptr->tls_record_function_enabled_) {
+  if (rf_tls_ptr->sorted_tls_callbacks_.empty() && !manager().hasGlobalCallbacks()) {
     *pre_sampled = false;
     return false;
   }
-
   if (global_record_all_functions_.load(std::memory_order_relaxed) > 0) {
     *pre_sampled = false;
     return true;
+  }
+  if (!rf_tls_ptr->tls_record_function_enabled_) {
+    *pre_sampled = false;
+    return false;
   }
 
   *pre_sampled = true;

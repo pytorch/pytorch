@@ -61,6 +61,8 @@ inline IValue toIValue(
 
 py::object toPyObject(IValue ivalue);
 
+IValue toTypeInferredIValue(py::handle input);
+
 // The PythonFutureWrapper for ivalue::Future
 //
 // NB: VISIBILITY_HIDDEN is for silencing compiling error,
@@ -119,32 +121,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
     // vector, but Future does not acquire GIL on destruction.
     auto pf = std::make_shared<PythonFunctionGuard>(std::move(cb));
 
-#ifdef USE_C10D_NCCL
-    // This callback is only used by NCCL backend, so skip this code on other
-    // backends and avoid importing cuda dependency.
-    // By default, assume that the input value is or can be casted into a tensor
-    // vector that has exactly one tensor.
-    auto record_stream_cb = [](const at::IValue& value,
-                               const c10::Stream& stream) {
-      if (value.isTensorList() || value.isPyObject()) {
-        std::vector<at::Tensor> tensors;
-        if (value.isTensorList()) {
-          tensors = value.toTensorVector();
-        } else {
-          pybind11::gil_scoped_acquire gil;
-          py::object obj = torch::jit::toPyObject(value);
-          tensors = torch::jit::toIValue(
-                        obj, c10::ListType::create(c10::TensorType::get()))
-                        .toTensorVector();
-        }
-        TORCH_INTERNAL_ASSERT(tensors.size() == 1, "expected exactly 1 tensor");
-        at::cuda::CUDAStream cuda_stream(stream);
-        c10::cuda::CUDACachingAllocator::recordStream(
-            tensors[0].storage().data_ptr(), cuda_stream);
-      }
-    };
-    fut->setRecordStreamCallback(record_stream_cb);
-#endif
+    fut->setDataPtrExtractor(&PythonFutureWrapper::dataPtrExtractor);
 
     return std::make_shared<jit::PythonFutureWrapper>(fut->then(
         // Capture a copy of the ivalue::Future instead of the `this` pointer
@@ -241,6 +218,23 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
   std::shared_ptr<PythonFutureWrapper> getPtr() {
     return shared_from_this();
   }
+
+  // This callback is only used by subclasses of Future that deal with CUDA,
+  // in order to register the pointers on the right streams with the caching
+  // allocator.
+  static std::vector<std::reference_wrapper<const at::DataPtr>> dataPtrExtractor(
+      const at::IValue& value) {
+    if (value.isPyObject()) {
+      pybind11::gil_scoped_acquire gil;
+      py::object obj = torch::jit::toPyObject(value);
+      // FIXME This could fail. As a fallback we could try to pickle the
+      // object, since the pickler might support broader types and it is able
+      // to extract the tensors from the object as a vector.
+      auto new_value = torch::jit::toTypeInferredIValue(obj);
+      return at::ivalue::Future::defaultDataPtrExtractor(new_value);
+    }
+    return at::ivalue::Future::defaultDataPtrExtractor(value);
+  };
 };
 
 // error reporting: when reporting user-caused errors, these functions should
@@ -718,6 +712,15 @@ inline IValue toIValue(
       for (size_t slot = 0; slot < numAttrs; slot++) {
         const auto& attrType = classType->getAttribute(slot);
         const auto& attrName = classType->getAttributeName(slot);
+
+        if (!py::hasattr(obj, attrName.c_str())) {
+          throw py::cast_error(c10::str(
+              "Tried to cast object to type ",
+              type->repr_str(),
+              " but object",
+              " was missing attribute ",
+              attrName));
+        }
 
         const auto& contained = py::getattr(obj, attrName.c_str());
         userObj->setSlot(slot, toIValue(contained, attrType));

@@ -2274,6 +2274,45 @@ class TestQuantizedOps(TestCase):
         result = torch.ops.quantized.linear_dynamic(X, w_packed)
         self.assertEqual(result.shape, (0, 2))
 
+    def test_advanced_indexing(self):
+        """
+        Verifies that the x[:, [0], :, :] syntax works for quantized tensors.
+        """
+        for dtype in (torch.qint8, torch.quint8, torch.qint32):
+            scale = 0.1
+            zp = 0
+            x_q = torch.quantize_per_tensor(
+                torch.randn(1, 4, 4, 4), scale, zp, dtype)
+            # reference
+            x_fp32 = x_q.dequantize()
+
+            # single dim, single index
+            x_q_s1 = x_q[:, [0], :, :]
+            x_fp32_s1 = x_fp32[:, [0], :, :]
+            x_fp32_s1_ref = \
+                torch.quantize_per_tensor(x_fp32_s1, scale, zp, dtype)
+            self.assertEqual(x_q_s1, x_fp32_s1_ref)
+
+            # multiple dim, single index
+            x_q_s2 = x_q[:, [0], [2], :]
+            x_fp32_s2 = x_fp32[:, [0], [2], :]
+            x_fp32_s2_ref = \
+                torch.quantize_per_tensor(x_fp32_s2, scale, zp, dtype)
+            self.assertEqual(x_q_s2, x_fp32_s2_ref)
+
+            # single dim, multiple indices
+            x_q_s3 = x_q[:, [2, 0, 1], :, :]
+            x_fp32_s3 = x_fp32[:, [2, 0, 1], :, :]
+            x_fp32_s3_ref = \
+                torch.quantize_per_tensor(x_fp32_s3, scale, zp, dtype)
+            self.assertEqual(x_q_s3, x_fp32_s3_ref)
+
+            # multiple dim, multiple indices
+            x_q_s4 = x_q[:, [2, 0, 1], :, [1]]
+            x_fp32_s4 = x_fp32[:, [2, 0, 1], :, [1]]
+            x_fp32_s4_ref = \
+                torch.quantize_per_tensor(x_fp32_s4, scale, zp, dtype)
+            self.assertEqual(x_q_s4, x_fp32_s4_ref)
 
 
 class TestDynamicQuantizedLinear(TestCase):

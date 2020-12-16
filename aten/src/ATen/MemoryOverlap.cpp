@@ -75,4 +75,16 @@ void assert_no_partial_overlap(TensorImpl* a, TensorImpl* b) {
     "Please clone() the tensor before performing the operation.");
 }
 
+void assert_no_overlap(const Tensor& a, const Tensor& b) {
+  assert_no_overlap(a.unsafeGetTensorImpl(), b.unsafeGetTensorImpl());
+}
+
+void assert_no_overlap(TensorImpl* a, TensorImpl* b) {
+  const auto lap = get_overlap_status(a, b);
+  TORCH_CHECK(lap != MemOverlapStatus::PARTIAL && lap != MemOverlapStatus::FULL,
+    "unsupported operation: some elements of the input tensor and "
+    "the written-to tensor refer to a single memory location. "
+    "Please clone() the tensor before performing the operation.");
+}
+
 }
