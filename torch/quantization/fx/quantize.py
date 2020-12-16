@@ -419,8 +419,12 @@ class Quantizer:
                         ('hardcoding list/dict outputs to be quantized is ' +
                          'not supported')
                     if prev_node.name not in observed_node_names_set:
+                        assert self.qconfig_map is not None
+                        local_qconfig = self.qconfig_map[prev_node.name]
+                        assert local_qconfig is not None, \
+                            'qconfig of a node before a quantized output must exist'
                         insert_observer(
-                            prev_node, self.qconfig_map[prev_node.name].activation(),
+                            prev_node, local_qconfig.activation(),
                             model, self.activation_post_process_map,
                             env, observed_graph, load_arg, observed_node_names_set)
 
