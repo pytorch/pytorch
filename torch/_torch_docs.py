@@ -610,6 +610,105 @@ Example::
     True
 """)
 
+add_docstr(torch.all,
+           r"""
+all(input) -> Tensor
+
+Tests if all elements in :attr:`input` evaluate to `True`.
+
+Example::
+
+    >>> a = torch.rand(1, 2).bool()
+    >>> a
+    tensor([[False, True]], dtype=torch.bool)
+    >>> torch.all(a)
+    tensor(False, dtype=torch.bool)
+    >>> a = torch.arange(0, 3)
+    >>> a
+    tensor([0, 1, 2])
+    >>> torch.all(a)
+    tensor(False)
+
+.. function:: all(input, dim, keepdim=False, *, out=None) -> Tensor
+
+For each row of :attr:`input` in the given dimension :attr:`dim`,
+returns `True` if all elements in the row evaluate to `True` and `False` otherwise.
+
+{keepdim_details}
+
+Args:
+    {input}
+    {dim}
+    {keepdim}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.rand(4, 2).bool()
+    >>> a
+    tensor([[True, True],
+            [True, False],
+            [True, True],
+            [True, True]], dtype=torch.bool)
+    >>> torch.all(a, dim=1)
+    tensor([ True, False,  True,  True], dtype=torch.bool)
+    >>> torch.all(a, dim=0)
+    tensor([ True, False], dtype=torch.bool)
+""".format(**single_dim_common))
+
+add_docstr(torch.any,
+           r"""
+any(input) -> Tensor
+
+Args:
+    {input}
+
+Tests if any element in :attr:`input` evaluates to `True`.
+
+Example::
+
+    >>> a = torch.rand(1, 2).bool()
+    >>> a
+    tensor([[False, True]], dtype=torch.bool)
+    >>> torch.any(a)
+    tensor(True, dtype=torch.bool)
+    >>> a = torch.arange(0, 3)
+    >>> a
+    tensor([0, 1, 2])
+    >>> torch.any(a)
+    tensor(True)
+
+.. function:: any(input, dim, keepdim=False, *, out=None) -> Tensor
+
+For each row of :attr:`input` in the given dimension :attr:`dim`,
+returns `True` if any element in the row evaluate to `True` and `False` otherwise.
+
+{keepdim_details}
+
+Args:
+    {input}
+    {dim}
+    {keepdim}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.randn(4, 2) < 0
+    >>> a
+    tensor([[ True,  True],
+            [False,  True],
+            [ True,  True],
+            [False, False]])
+    >>> torch.any(a, 1)
+    tensor([ True,  True,  True, False])
+    >>> torch.any(a, 0)
+    tensor([True, True])
+""".format(**single_dim_common))
+
 add_docstr(torch.angle,
            r"""
 angle(input, *, out=None) -> Tensor
@@ -5182,23 +5281,12 @@ Example::
     >>> torch.quantile(a, q)
     tensor([-0.5446,  0.0700,  0.9214])
 
-.. function:: quantile(input, q, dim=None, interpolation='linear', keepdim=False, *, out=None) -> Tensor
+.. function:: quantile(input, q, dim=None, keepdim=False, *, out=None) -> Tensor
 
-Returns the q-th quantiles of each row of the :attr:`input` tensor
-along the dimension :attr:`dim` based on :attr:`interpolation`.
-When the desired quantile lies between two data points ``i < j``,
-the result is computed based on the :attr:`interpolation` value as described below.
-By default, :attr:`interpolation` is ``linear`` and :attr:`dim` is ``None`` resulting in the :attr:`input` tensor
+Returns the q-th quantiles of each row of the :attr:`input` tensor along the dimension
+:attr:`dim`, doing a linear interpolation when the q-th quantile lies between two
+data points. By default, :attr:`dim` is ``None`` resulting in the :attr:`input` tensor
 being flattened before computation.
-
-When the quantile value lies between two data points ``i < j``,
-the result is computed according to the given :attr:`interpolation` method as follows:
-
-- ``linear``: ``i + (j - i) * fraction``, where ``fraction`` is the fractional part of the index surrounded by ``i`` and ``j``.
-- ``lower``: ``i``.
-- ``higher``: ``j``.
-- ``nearest``: ``i`` or ``j``, whichever is nearest.
-- ``midpoint``: ``(i + j) / 2``.
 
 If :attr:`keepdim` is ``True``, the output dimensions are of the same size as :attr:`input`
 except in the dimensions being reduced (:attr:`dim` or all if :attr:`dim` is ``None``) where they
@@ -5210,8 +5298,6 @@ Args:
     {input}
     q (float or Tensor): a scalar or 1D tensor of quantile values in the range [0, 1]
     {dim}
-    interpolation (string): interpolation method to use when the desired quantile lies between two data points,
-      can be ``linear``, ``lower``, ``higher``, ``midpoint`` and ``nearest``. Default is ``linear``.
     {keepdim}
 
 Keyword arguments:
@@ -5235,24 +5321,11 @@ Example::
             [ 0.9206]]])
     >>> torch.quantile(a, q, dim=1, keepdim=True).shape
     torch.Size([3, 2, 1])
-    >>> a = torch.arange(4.)
-    >>> a
-    tensor([0., 1., 2., 3.])
-    >>> torch.quantile(a, 0.6, interpolation='linear')
-    tensor(1.8000)
-    >>> torch.quantile(a, 0.6, interpolation='lower')
-    tensor(1.)
-    >>> torch.quantile(a, 0.6, interpolation='higher')
-    tensor(2.)
-    >>> torch.quantile(a, 0.6, interpolation='midpoint')
-    tensor(1.5000)
-    >>> torch.quantile(a, 0.6, interpolation='nearest')
-    tensor(2.)
 """.format(**single_dim_common))
 
 add_docstr(torch.nanquantile,
            r"""
-nanquantile(input, q, dim=None, interpolation='linear', keepdim=False, *, out=None) -> Tensor
+nanquantile(input, q, dim=None, keepdim=False, *, out=None) -> Tensor
 
 This is a variant of :func:`torch.quantile` that "ignores" ``NaN`` values,
 computing the quantiles :attr:`q` as if ``NaN`` values in :attr:`input` did
@@ -5263,8 +5336,6 @@ Args:
     {input}
     q (float or Tensor): a scalar or 1D tensor of quantile values in the range [0, 1]
     {dim}
-    interpolation (string): interpolation method to use when the desired quantile lies between two data points,
-      can be ``linear``, ``lower``, ``higher``, ``midpoint`` and ``nearest``. Default is ``linear``.
     {keepdim}
 
 Keyword arguments:

@@ -68,7 +68,7 @@ def test_chunks_less_than_1():
     with pytest.raises(ValueError):
         Pipe(model, chunks=-1)
 
-def test_batch_size_indivisible():
+def test_batch_size_indivisible(setup_rpc):
     model = nn.Sequential(nn.Linear(1, 1))
     model = Pipe(model, chunks=4)
 
@@ -79,7 +79,7 @@ def test_batch_size_indivisible():
     assert not record
 
 
-def test_batch_size_small():
+def test_batch_size_small(setup_rpc):
     model = nn.Sequential(nn.Linear(1, 1))
     model = Pipe(model, chunks=4)
 
@@ -90,7 +90,7 @@ def test_batch_size_small():
     assert not record
 
 
-def test_checkpoint_mode():
+def test_checkpoint_mode(setup_rpc):
     def count_grad_fn(grad_fn, name, visited=None):
         if visited is None:
             visited = set()
@@ -119,9 +119,9 @@ def test_checkpoint_mode():
     except_last_output = except_last(input)
     never_output = never(input)
 
-    assert count_grad_fn(always_output.grad_fn, "CheckpointBackward") == 2
-    assert count_grad_fn(except_last_output.grad_fn, "CheckpointBackward") == 1
-    assert count_grad_fn(never_output.grad_fn, "CheckpointBackward") == 0
+    assert count_grad_fn(always_output.local_value().grad_fn, "CheckpointBackward") == 2
+    assert count_grad_fn(except_last_output.local_value().grad_fn, "CheckpointBackward") == 1
+    assert count_grad_fn(never_output.local_value().grad_fn, "CheckpointBackward") == 0
 
 
 def test_checkpoint_mode_invalid():
@@ -140,7 +140,7 @@ def test_checkpoint_mode_when_chunks_1():
     Pipe(model, chunks=1, checkpoint="never")
 
 
-def test_checkpoint_eval():
+def test_checkpoint_eval(setup_rpc):
     model = nn.Sequential(nn.Linear(1, 1))
     model = Pipe(model, chunks=2)
     input = torch.rand(2, 1)
@@ -157,16 +157,16 @@ def test_checkpoint_eval():
 
     model.train()
     train_output = model(input)
-    assert find_grad_fn(train_output.grad_fn, "CheckpointBackward")
-    assert find_grad_fn(train_output.grad_fn, "RecomputeBackward")
+    assert find_grad_fn(train_output.local_value().grad_fn, "CheckpointBackward")
+    assert find_grad_fn(train_output.local_value().grad_fn, "RecomputeBackward")
 
     model.eval()
     eval_output = model(input)
-    assert not find_grad_fn(eval_output.grad_fn, "CheckpointBackward")
-    assert not find_grad_fn(eval_output.grad_fn, "RecomputeBackward")
+    assert not find_grad_fn(eval_output.local_value().grad_fn, "CheckpointBackward")
+    assert not find_grad_fn(eval_output.local_value().grad_fn, "RecomputeBackward")
 
 
-def test_checkpoint_non_float_input():
+def test_checkpoint_non_float_input(setup_rpc):
     class ForkNonFloat(nn.Module):
         def forward(self, input):
             return (input * 2, torch.tensor([False]))
@@ -183,7 +183,7 @@ def test_checkpoint_non_float_input():
     output.backward()
 
 
-def test_no_grad():
+def test_no_grad(setup_rpc):
     model = nn.Sequential(nn.Linear(1, 1))
     model = Pipe(model, chunks=2)
     input = torch.rand(2, 1)
@@ -206,7 +206,7 @@ def test_no_grad():
     assert latent.grad_fn is None
 
 
-def test_exception():
+def test_exception(setup_rpc):
     class ExpectedException(Exception):
         pass
 
@@ -221,7 +221,7 @@ def test_exception():
         model(torch.rand(1))
 
 
-def test_exception_early_stop_asap():
+def test_exception_early_stop_asap(setup_rpc):
     """Even the first partitions have finished to process, the partition before
     the failed partition should be killed as soon as possible.
     """
@@ -258,7 +258,32 @@ def test_exception_early_stop_asap():
     assert counter == 2
 
 
-def test_input_pair():
+def test_nested_input(setup_rpc):
+    class NestedInput(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.fc_a = nn.Linear(1, 1)
+            self.fc_b = nn.Linear(1, 1)
+
+        def forward(self, inp):
+            return inp
+
+    model = nn.Sequential(NestedInput())
+    model = Pipe(model, chunks=2)
+
+    a = torch.rand(10, 1, requires_grad=True)
+    b = torch.rand(10, 1, requires_grad=True)
+
+    # TypeError: expected Tensor, but got tuple
+    with pytest.raises(TypeError):
+        model((a, (a, b))).local_value()
+
+    # TypeError: expected Tensor, but got list
+    with pytest.raises(TypeError):
+        model((a, [a, b])).local_value()
+
+
+def test_input_pair(setup_rpc):
     class Two(nn.Module):
         def __init__(self):
             super().__init__()
@@ -275,7 +300,17 @@ def test_input_pair():
     a = torch.rand(10, 1, requires_grad=True)
     b = torch.rand(10, 1, requires_grad=True)
 
-    a_out, b_out = model((a, b))
+    a_out, b_out = model((a, b)).local_value()
+    loss = (a_out + b_out).mean()
+    loss.backward()
+
+    assert a.grad is not None
+    assert b.grad is not None
+
+    # Test with list.
+    a.grad = None
+    b.grad = None
+    a_out, b_out = model([a, b]).local_value()
     loss = (a_out + b_out).mean()
     loss.backward()
 
@@ -283,7 +318,8 @@ def test_input_pair():
     assert b.grad is not None
 
 
-def test_input_singleton():
+
+def test_input_singleton(setup_rpc):
     class One(nn.Module):
         def __init__(self):
             super().__init__()
@@ -298,7 +334,19 @@ def test_input_singleton():
 
     a = torch.rand(10, 1, requires_grad=True)
 
-    (a_out,) = model((a,))
+    (a_out,) = model((a,)).local_value()
+    loss = a_out.mean()
+    loss.backward()
+
+    assert all(p.grad is not None for p in model.parameters())
+    assert a.grad is not None
+
+    # Test with list
+    a.grad = None
+    for p in model.parameters():
+        p.grad = None
+
+    (a_out,) = model([a]).local_value()
     loss = a_out.mean()
     loss.backward()
 
@@ -306,7 +354,7 @@ def test_input_singleton():
     assert a.grad is not None
 
 
-def test_input_varargs():
+def test_input_varargs(setup_rpc):
     model = nn.Sequential(nn.Linear(1, 1))
     model = Pipe(model)
 
@@ -318,7 +366,7 @@ def test_input_varargs():
         model(a, b)
 
 
-def test_non_tensor():
+def test_non_tensor(setup_rpc):
     class NonTensor(nn.Module):
         def forward(self, _):
             return "hello"
@@ -336,7 +384,7 @@ def test_non_tensor():
         model("hello")
 
 
-def test_non_tensor_tuple():
+def test_non_tensor_sequence(setup_rpc):
     class NonTensorTuple(nn.Module):
         def forward(self, x):
             return (x, "hello")
@@ -353,9 +401,13 @@ def test_non_tensor_tuple():
     with pytest.raises(TypeError):
         model((x, "hello"))
 
+    # TypeError: expected Tensor to scatter, but got str
+    with pytest.raises(TypeError):
+        model([x, "hello"])
+
 
 @pytest.mark.parametrize("checkpoint", ["never", "always", "except_last"])
-def test_deferred_batch_norm(checkpoint):
+def test_deferred_batch_norm(checkpoint, setup_rpc):
     bn = nn.BatchNorm2d(3)
     pipe_bn = deepcopy(bn)
     pipe = Pipe(
@@ -363,7 +415,7 @@ def test_deferred_batch_norm(checkpoint):
     )
 
     x = torch.rand(4, 3, 10, 10)
-    pipe(x).mean().backward()
+    pipe(x).local_value().mean().backward()
     bn(x).mean().backward()
 
     assert torch.allclose(pipe[0].running_mean, bn.running_mean, atol=1e-4)
@@ -371,7 +423,7 @@ def test_deferred_batch_norm(checkpoint):
 
 
 @pytest.mark.parametrize("checkpoint", ["never", "always"])
-def test_deferred_batch_norm_params(checkpoint):
+def test_deferred_batch_norm_params(checkpoint, setup_rpc):
     bn = nn.BatchNorm2d(3)
     pipe_bn = deepcopy(bn)
     pipe = Pipe(
@@ -379,7 +431,7 @@ def test_deferred_batch_norm_params(checkpoint):
     )
 
     x = torch.rand(4, 3, 10, 10)
-    pipe(x).mean().backward()
+    pipe(x).local_value().mean().backward()
     bn(x).mean().backward()
 
     assert pipe[0].weight.grad is not None
@@ -455,13 +507,13 @@ def test_deny_moving():
     model.to(dtype=torch.float)
 
 
-def test_empty_module():
+def test_empty_module(setup_rpc):
     # Empty sequential module is not illegal.
     model = nn.Sequential()
     model = Pipe(model)
 
-    assert model(torch.tensor(42)) == torch.tensor(42)
-    assert model((torch.tensor(42),)) == (torch.tensor(42),)
+    assert model(torch.tensor(42)).local_value() == torch.tensor(42)
+    assert model((torch.tensor(42),)).local_value() == (torch.tensor(42),)
 
     # But only tensor or tensors is legal in Pipe.
     with pytest.raises(TypeError):
@@ -518,7 +570,7 @@ def test_verify_module_params_on_same_device():
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
 @pytest.mark.skipif(torch.cuda.device_count() < 2, reason="Need atleast two GPUs")
-def test_verify_nested_modules():
+def test_verify_nested_modules(setup_rpc):
     model = nn.Sequential(
         nn.Sequential(
             nn.Linear(32, 16).cuda(0),
@@ -532,8 +584,8 @@ def test_verify_nested_modules():
 
     pipe = Pipe(model)
     out = pipe(torch.rand(10, 32).cuda(0))
-    assert out.device == torch.device("cuda:1")
-    assert out.size() == torch.Size([10, 2])
+    assert out.local_value().device == torch.device("cuda:1")
+    assert out.local_value().size() == torch.Size([10, 2])
 
 def test_verify_module_duplicate_parameters_on_same_device():
     class Surrogate(nn.Module):
@@ -547,7 +599,7 @@ def test_verify_module_duplicate_parameters_on_same_device():
     Pipe(model)
 
 
-def test_forward_lockstep():
+def test_forward_lockstep(setup_rpc):
     timeline = []
 
     class DelayedLog(nn.Module):
