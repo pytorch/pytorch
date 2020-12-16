@@ -497,12 +497,15 @@ The pseudo-inverse is computed using singular value decomposition (see :func:`to
 If :attr:`hermitian` is ``True``, then :attr:`input` is assumed to be Hermitian (symmetric if real-valued),
 and the computation of the pseudo-inverse is done by obtaining the eigenvalues and eigenvectors
 (see :func:`torch.linalg.eigh`).
-The singular values (or the absolute eigenvalues when :attr:`hermitian` is ``True``) that are below
-the specified :attr:`rcond` threshold are treated to be zero and discarded in the computation.
+The singular values (or the absolute values of the eigenvalues when :attr:`hermitian` is ``True``) that are below
+the specified :attr:`rcond` threshold are treated as zero and discarded in the computation.
 
 Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` datatypes.
 
 .. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+.. note:: If singular value decomposition or eigenvalue decomposition algorithms do not converge
+          then a RuntimeError will be thrown.
 
 Args:
     input (Tensor): the input matrix of size :math:`(m, n)` or the batch of matrices of size :math:`(*, m, n)`
