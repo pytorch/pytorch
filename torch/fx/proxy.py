@@ -61,11 +61,11 @@ class TracerBase:
                     value_strs = []
                     for field in self._fields:
                         value_strs.append(f'{field}={repr(getattr(self, field))}')
-                    # NTReprWrapper should have only one base: the NamedTuple
-                    # type we constructed it from.
                     return f'{torch.typename(self._repr_wrapper_orig_type())}({",".join(value_strs)})'
 
                 def _repr_wrapper_orig_type(self):
+                    # NTReprWrapper should have only one base: the NamedTuple
+                    # type we constructed it from.
                     assert len(self.__class__.__bases__) == 1
                     return self.__class__.__bases__[0]
 
