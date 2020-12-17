@@ -2025,6 +2025,11 @@ Example::
     tensor([ 0.1632,  1.1835, -0.6979, -0.7325])
     >>> torch.cosh(a)
     tensor([ 1.0133,  1.7860,  1.2536,  1.2805])
+
+.. note::
+   When :attr:`input` is on the CPU, the implementation of torch.cosh may use
+   the Sleef library, which rounds very large results to infinity or negative
+   infinity. See `here <https://sleef.org/purec.xhtml>`_ for details.
 """.format(**common_args))
 
 add_docstr(torch.cross,
@@ -7476,6 +7481,11 @@ Example::
     tensor([ 0.5380, -0.8632, -0.1265,  0.9399])
     >>> torch.sinh(a)
     tensor([ 0.5644, -0.9744, -0.1268,  1.0845])
+
+.. note::
+   When :attr:`input` is on the CPU, the implementation of torch.sinh may use
+   the Sleef library, which rounds very large results to infinity or negative
+   infinity. See `here <https://sleef.org/purec.xhtml>`_ for details.
 """.format(**common_args))
 
 add_docstr(torch.sort,
@@ -8000,7 +8010,7 @@ add_docstr(torch.svd,
 svd(input, some=True, compute_uv=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
 This function returns a namedtuple ``(U, S, V)`` which is the singular value
-decomposition of a input real matrix or batches of real matrices :attr:`input` such that
+decomposition of a input matrix or batches of matrices :attr:`input` such that
 :math:`input = U \times diag(S) \times V^T`.
 
 If :attr:`some` is ``True`` (default), the method returns the reduced
@@ -8011,6 +8021,8 @@ will be :math:`(*, n, n)`.
 
 If :attr:`compute_uv` is ``False``, the returned `U` and `V` matrices will be zero matrices
 of shape :math:`(m \times m)` and :math:`(n \times n)` respectively. :attr:`some` will be ignored here.
+
+Supports real-valued and complex-valued input.
 
 .. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
           then the singular values of each matrix in the batch is returned in descending order.
@@ -8035,6 +8047,9 @@ of shape :math:`(m \times m)` and :math:`(n \times n)` respectively. :attr:`some
 
 .. note:: When :attr:`compute_uv` = ``False``, backward cannot be performed since `U` and `V`
           from the forward pass is required for the backward operation.
+
+.. note:: With the complex-valued input the backward operation works correctly only
+          for gauge invariant loss functions. Please look at `Gauge problem in AD`_ for more details.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
@@ -8073,6 +8088,8 @@ Example::
     >>> u, s, v = torch.svd(a_big)
     >>> torch.dist(a_big, torch.matmul(torch.matmul(u, torch.diag_embed(s)), v.transpose(-2, -1)))
     tensor(2.6503e-06)
+
+.. _Gauge problem in AD: https://re-ra.xyz/Gauge-Problem-in-Automatic-Differentiation/
 """)
 
 add_docstr(torch.symeig,
