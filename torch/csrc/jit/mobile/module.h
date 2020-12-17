@@ -1,5 +1,4 @@
 #pragma once
-//#include <ATen/core/function_schema.h>
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/method.h>
 

@@ -14,6 +14,7 @@ TORCH_CUDA_API std::tuple<Tensor, std::vector<Tensor>> copy_weights_to_flat_buf_
     int64_t input_size,
     int64_t mode,
     int64_t hidden_size,
+    int64_t proj_size,
     int64_t num_layers,
     bool batch_first,
     bool bidirectional,

@@ -403,7 +403,8 @@ def init_process_group(backend,
                                      Mutually exclusive with ``store``.
         world_size (int, optional): Number of processes participating in
                                     the job. Required if ``store`` is specified.
-        rank (int, optional): Rank of the current process.
+        rank (int, optional): Rank of the current process (it should be a
+                              number between 0 and ``world_size``-1).
                               Required if ``store`` is specified.
         store(Store, optional): Key/value store accessible to all workers, used
                                 to exchange connection/address information.
@@ -722,7 +723,7 @@ def isend(tensor,
 
 
 def irecv(tensor,
-          src,
+          src=None,
           group=None,
           tag=0):
     """
@@ -730,7 +731,8 @@ def irecv(tensor,
 
     Arguments:
         tensor (Tensor): Tensor to fill with received data.
-        src (int): Source rank.
+        src (int, optional): Source rank. Will receive from any
+            process if unspecified.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match recv with remote send
@@ -745,11 +747,18 @@ def irecv(tensor,
         return
 
     if group is None or group is GroupMember.WORLD:
-        default_pg = _get_default_group()
-        return default_pg.recv([tensor], src, tag)
+        pg = _get_default_group()
     else:
-        group_src_rank = _get_group_rank(group, src)
-        return group.recv([tensor], group_src_rank, tag)
+        pg = group
+
+    if src is None:
+        return pg.recv_anysource([tensor], tag)
+    else:
+        if pg is GroupMember.WORLD:
+            return pg.recv([tensor], src, tag)
+        else:
+            group_src_rank = _get_group_rank(pg, src)
+            return pg.recv([tensor], group_src_rank, tag)
 
 
 def send(tensor,
