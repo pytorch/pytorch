@@ -1210,6 +1210,36 @@ class TestTEFuser(JitTestCase):
         else:
             return v.to(dtype)
 
+    def test_isnan(self):
+        x = torch.rand([4])
+        x[0] = float('nan')
+        inputs = [
+            x,
+            torch.tensor([float('nan'), .5])
+        ]
+        dtypes = [
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.float16,
+            torch.float32,
+            torch.float64,
+            torch.bool,
+        ]
+
+        for inp, device, dtype in product(inputs, self.devices, dtypes):
+            # TODO
+            if dtype == torch.float16 and not LLVM_ENABLED:
+                continue
+
+            inp = inp.to(device=device, dtype=dtype)
+            f = torch.jit.trace(lambda x: x.isnan(), (inp,))
+            warmup_forward(f, inp)
+            self.assertEqual(f(inp), inp.isnan())
+            self.assertLastGraphAllFused()
+
+    @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")
     def test_unary_ops(self):
         def apply(fn):
             return lambda x: fn(x)
