@@ -2575,7 +2575,7 @@ class TestDynamicQuantizedRNNOp(TestCase):
                     reduce_range = False
                 else:
                     reduce_range = True
-
+                print(rnn_type, torch.backends.quantized.engine, reduce_range, dtype)
                 Xq, Hq, Cq = self._get_rnn_inputs(seq_len, num_batches, input_size, hidden_size, num_directions, reduce_range)
                 Wq1, Wq2, b1, b2 = self._get_rnn_weights_and_bias(input_size,
                                                                   hidden_size,
@@ -2710,6 +2710,7 @@ class TestDynamicQuantizedRNNOp(TestCase):
                 else:
                     reduce_range = True
 
+                print(rnn_type, torch.backends.quantized.engine, reduce_range, dtype)
                 Xq, Hq, Cq = self._get_rnn_inputs(seq_len, num_batches, input_size, hidden_size, 1, reduce_range)
                 Wq1, Wq2, b1, b2 = self._get_rnn_weights_and_bias(input_size, hidden_size, 1, per_channel_quant, rnn_type)
                 if dtype == torch.qint8:
