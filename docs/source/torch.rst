@@ -340,7 +340,6 @@ Pointwise Ops
     sign
     signbit
     sin
-    sinc
     sinh
     sqrt
     square
@@ -361,8 +360,6 @@ Reduction Ops
     argmin
     amax
     amin
-    all
-    any
     max
     min
     dist
