@@ -1287,6 +1287,25 @@ class TestVmapOperators(Namespace.TestVmapBase):
         with self.assertRaisesRegex(RuntimeError, msg):
             vmap(functools.partial(op, memory_format=torch.channels_last_3d))(tensor)
 
+    def test_stride(self):
+        B0 = 3
+
+        x = torch.randn(B0, 2, 5, 7)
+
+        def foo(x):
+            assert x.stride() == (7 * 5, 7, 1)
+            return x
+
+        vmap(foo)(x)
+
+        x = torch.randn(2, B0, 5, 7).movedim(1, 0)
+
+        def bar(x):
+            assert x.stride() == (7 * 5 * B0, 7, 1)
+            return x
+
+        vmap(bar)(x)
+
     def test_chunk(self):
         test = self._vmap_view_test
         op = torch.chunk
@@ -1364,6 +1383,37 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(op), (torch.rand(B0, B1, 1, 5), torch.rand(B1, B0, 2, 3, 5)), in_dims=(0, 1))
         test(vmap(op), (torch.rand(B0, B1), torch.rand(B1, 2, 3, 5)), in_dims=(0, None))
         test(vmap(vmap(op)), (torch.rand(B0, B1, B2), torch.rand(B0, B1, B2, 2, 3, 5)))
+
+    def test_fill_and_zero_inplace(self):
+        test = functools.partial(self._vmap_test, check_propagates_grad=False)
+        B0, B1 = 7, 11
+        ops = (
+            lambda t: t.fill_(0.1),
+            lambda t: t.fill_(torch.tensor(0.2)),
+            lambda t: t.zero_(),
+        )
+
+        for op in ops:
+            # Single vmap, various in_dims / out_dims
+            test(op, [TensorFactory.randn([B0, 3])])
+            test(op, [TensorFactory.randn([2, 5, B0, 3])], in_dims=2)
+            test(op, [TensorFactory.randn([2, 5, B0, 3])], in_dims=2, out_dims=2)
+
+            # Doubly nested vmap
+            test(vmap(op), [TensorFactory.randn([B0, B1])])
+            test(vmap(op), [TensorFactory.randn([B1, 2, 5, B0, 3])], in_dims=2)
+            test(vmap(op, in_dims=2), [TensorFactory.randn([2, 5, B0, B1, 3])],
+                 in_dims=2, out_dims=2)
+
+        # test when value is a batched tensor for fill_ operator
+        B0, B1 = 3, 5
+        test(Tensor.fill_, [TensorFactory.randn([B0, B1]), TensorFactory.randn(B0)])
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"output with shape .+ doesn't match the broadcast shape"):
+            # Runtime Error is thrown when the tensor being written to isn't being vmapped over
+            vmap(Tensor.fill_, (None, 0))(TensorFactory.randn([B0, B1]),
+                                          TensorFactory.randn([B0]))
 
     def _test_complex_views(self, op, dtypes):
         test = self._vmap_view_test
@@ -2309,6 +2359,35 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
 
         x = torch.randn(3, 4, 5, device=device, requires_grad=True)
         self._batched_grad_test(lambda x: x.diagonal(0, -1, -2), (x,))
+
+    @allowVmapFallbackUsage
+    def test_unrelated_output(self, device):
+        B0 = 3
+        x = torch.randn([], requires_grad=True)
+        y = torch.randn([], requires_grad=True)
+        gy = torch.randn(B0, requires_grad=True)
+
+        def vjp(v):
+            res, = torch.autograd.grad(y, x, v, allow_unused=True)
+            return torch.zeros_like(x) if res is None else res
+
+        result = vmap(vjp)(gy)
+        self.assertEqual(result, torch.zeros(B0, *x.shape, device=device))
+
+    @allowVmapFallbackUsage
+    def test_unrelated_output_multiple_grad(self, device):
+        B0 = 3
+        x = torch.randn([], requires_grad=True)
+        y = torch.randn([], requires_grad=True)
+        gy = torch.randn(B0, requires_grad=True)
+
+        def vjp(v):
+            res, = torch.autograd.grad(y, x, v, allow_unused=True)
+            return torch.zeros_like(x) if res is None else res
+
+        _ = vjp(gy[0])
+        result = vmap(vjp)(gy)
+        self.assertEqual(result, torch.zeros(B0, *x.shape, device=device))
 
 instantiate_device_type_tests(
     TestVmapBatchedGradient,

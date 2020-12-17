@@ -39,6 +39,7 @@ namespace c10 {
   _(prim, FunctionalGraph)           \
   _(prim, DifferentiableGraph)       \
   _(prim, TensorExprGroup)           \
+  _(prim, StaticSubgraph)            \
   _(prim, If)                        \
   _(prim, Jump) /* debug */          \
   _(prim, JumpNZ) /* debug */        \
@@ -226,6 +227,7 @@ namespace c10 {
   _(aten, lt_)                       \
   _(aten, less)                      \
   _(aten, less_)                     \
+  _(aten, isnan)                     \
   _(aten, mul)                       \
   _(aten, mul_)                      \
   _(aten, multiply)                  \

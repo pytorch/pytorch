@@ -134,4 +134,12 @@ inline int64_t numel(const Tensor& tensor) {
   return tensor.numel();
 }
 
+inline int64_t size(const Tensor& tensor, int64_t dim) {
+  return tensor.size(dim);
+}
+
+inline int64_t stride(const Tensor& tensor, int64_t dim) {
+  return tensor.stride(dim);
+}
+
 }

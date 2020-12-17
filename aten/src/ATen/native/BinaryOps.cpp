@@ -148,7 +148,7 @@ Tensor& copysign_(Tensor& self, Scalar other) {
   return native::copysign_(self, wrapped_scalar_tensor(other));
 }
 
-Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& div_out(const Tensor& self, const Tensor& other, Tensor& result) {
   auto iter = TensorIterator::binary_float_op(result, self, other);
   div_stub(iter.device_type(), iter);
   return result;
@@ -162,7 +162,7 @@ Tensor div(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& div_(Tensor& self, const Tensor& other) {
-  return native::div_out(self, self, other);
+  return native::div_out(self, other, self);
 }
 
 // WARNING: There doesn't appear to be any testing for this function
