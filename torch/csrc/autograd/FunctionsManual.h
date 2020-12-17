@@ -208,6 +208,41 @@ infinitely_differentiable_native_layer_norm_backward(
     double eps,
     std::array<bool, 3> grad_input_mask);
 
+Tensor mkldnn_convolution_forward(const Tensor& self_fw_grad, const Tensor& weight_fw_grad, const Tensor& bias_fw_grad,
+        const Tensor& self, const Tensor& weight, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int groups,
+        const Tensor& result);
+Tensor thnn_conv2d_forward_grad(const Tensor& self_fw_grad, const Tensor& weight_fw_grad, IntArrayRef kernel_size, const Tensor& bias_fw_grad,
+        const Tensor& self, const Tensor& weight, IntArrayRef stride, IntArrayRef padding, const Tensor& result);
+Tensor slow_conv_dilated2d_forward_grad(const Tensor& self_fw_grad, const Tensor& weight_fw_grad, IntArrayRef kernel_size, const Tensor& bias_fw_grad,
+        const Tensor& self, const Tensor& weight, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, const Tensor& result);
+Tensor native_batch_norm_forward(const Tensor& input_fw_grad, const Tensor& input, const c10::optional<at::Tensor> weight,
+        const c10::optional<at::Tensor>  running_mean, const c10::optional<at::Tensor>  running_var, const Tensor& result1,
+        const Tensor& result2, bool training, float eps, const Tensor& weight_fw_grad, const Tensor& bias_fw_grad);
+Tensor native_layer_norm_forward(const Tensor& input_fw_grad, const Tensor& input, const c10::optional<at::Tensor> weight,
+        const Tensor& result1, const Tensor& result2, int64_t M, int64_t N, const Tensor& weight_fw_grad, const Tensor& bias_fw_grad,
+        const Tensor& result);
+Tensor max_pool2d_with_indices_forward(const Tensor& self_fw_grad, const Tensor& indices);
+Tensor addmm_forward(const Tensor& self_fw_grad, const Tensor& mat1_fw_grad, const Tensor& mat2_fw_grad,
+        Scalar beta, Scalar alpha, const Tensor& mat1, const Tensor& mat2);
+Tensor bmm_forward(const Tensor& self_fw_grad, const Tensor& mat2_fw_grad,
+        const Tensor& self, const Tensor& mat2);
+Tensor _log_softmax_foward(const Tensor& self_fw_grad, const Tensor& result, int dim);
+Tensor stack_forward(at::TensorList tensors, int64_t dim);
+Tensor cat_forward(at::TensorList tensors, int64_t dim);
+Tensor max_forward(const Tensor& self_fw_grad, const Tensor& self, const Tensor& result);
+Tensor index_add_forward(const Tensor& self_fw_grad, const Tensor& source_fw_grad, int dim, const Tensor& index, const Tensor& self);
+at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction);
+Tensor binary_cross_entropy_with_logits_forward(const at::Tensor& self_fw_grad, const at::Tensor& target_fw_grad,
+        const at::Tensor& self, const at::Tensor& target, const c10::optional<at::Tensor> weight,
+        const c10::optional<at::Tensor> pos_weight, int64_t reduction);
+Tensor index_put_forward(const at::Tensor& self_fw_grad_, const at::Tensor& values_fw_grad_, const at::Tensor& self,
+        at::TensorList indices, const at::Tensor& values, bool accumulate);
+Tensor min_max_other_forward(const at::Tensor& self_fw_grad, const at::Tensor& other_fw_grad, const at::Tensor& self,
+        const at::Tensor& other, bool is_min);
+Tensor max_dim_forward(const Tensor& self_fw_grad, int64_t dim, const Tensor& indices, bool keepdim);
+
+
+
 
 } // namespace details
 } // namespace generated

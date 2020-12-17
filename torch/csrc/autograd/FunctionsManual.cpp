@@ -50,6 +50,15 @@ Tensor toLegacyPrimal(const c10::optional<Tensor>& t) {
   return (t.has_value() && t->defined()) ? t->_fw_primal(/*level */ 0) : Tensor();
 }
 
+bool any_variable_defined(variable_list& variables) {
+  for (auto variable : variables) {
+    if (variable.defined()) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void copy_range(variable_list& out, IndexRange range, const Tensor & t) {
   AT_ASSERT(range.second <= out.size());
   AT_ASSERTM(range.second - range.first == 1, "inconsistent range for Tensor output");
@@ -2819,13 +2828,440 @@ Tensor _cudnn_ctc_loss_backward(const Tensor& grad_out, const Tensor& loss, cons
   }
 }
 
-bool any_variable_defined(variable_list& variables) {
-  for (auto variable : variables) {
-    if (variable.defined()) {
-      return true;
+Tensor mkldnn_convolution_forward(const Tensor& self_fw_grad, const Tensor& weight_fw_grad, const Tensor& bias_fw_grad,
+        const Tensor& self, const Tensor& weight, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int groups,
+        const Tensor& result) {
+  Tensor out_fw_grad;
+
+  if (self_fw_grad.defined()) {
+    out_fw_grad = at::mkldnn_convolution(self_fw_grad, weight, Tensor(), padding, stride, dilation, groups);
+  }
+
+  if (weight_fw_grad.defined()) {
+    auto val = at::mkldnn_convolution(self, weight_fw_grad, bias_fw_grad, padding, stride, dilation, groups);
+    if (out_fw_grad.defined()) {
+      out_fw_grad = out_fw_grad + val;
+    } else {
+      out_fw_grad = val;
+    }
+  } else if (bias_fw_grad.defined()) {
+    // Used to make the broadcasting work when working with channel-only values
+    auto view_size = result.sizes().vec();
+    for (auto dim = 0; dim < view_size.size(); ++dim) {
+      // Don't change the channel size
+      if (dim != 1) {
+        view_size[dim] = 1;
+      }
+    }
+
+    if (out_fw_grad.defined()) {
+      out_fw_grad = out_fw_grad + bias_fw_grad.view(view_size);
+    } else {
+      out_fw_grad = bias_fw_grad.view(view_size).expand_as(result);
     }
   }
-  return false;
+
+  return out_fw_grad;
+}
+
+Tensor thnn_conv2d_forward_grad(const Tensor& self_fw_grad, const Tensor& weight_fw_grad, IntArrayRef kernel_size, const Tensor& bias_fw_grad,
+        const Tensor& self, const Tensor& weight, IntArrayRef stride, IntArrayRef padding, const Tensor& result) {
+  Tensor out_fw_grad;
+
+  if (self_fw_grad.defined()) {
+    out_fw_grad = std::get<0>(at::thnn_conv2d_forward(self_fw_grad, weight, kernel_size, Tensor(), stride, padding));
+  }
+
+  if (weight_fw_grad.defined()) {
+    auto val = std::get<0>(at::thnn_conv2d_forward(self, weight_fw_grad, kernel_size, bias_fw_grad, stride, padding));
+    if (out_fw_grad.defined()) {
+      out_fw_grad = out_fw_grad + val;
+    } else {
+      out_fw_grad = val;
+    }
+  } else if (bias_fw_grad.defined()) {
+    // Used to make the broadcasting work when working with channel-only values
+    auto view_size = result.sizes().vec();
+    for (auto dim = 0; dim < view_size.size(); ++dim) {
+      // Don't change the channel size
+      if (dim != 1) {
+        view_size[dim] = 1;
+      }
+    }
+
+    if (out_fw_grad.defined()) {
+      out_fw_grad = out_fw_grad + bias_fw_grad.view(view_size);
+    } else {
+      out_fw_grad = bias_fw_grad.view(view_size).expand_as(result);
+    }
+  }
+
+  return out_fw_grad;
+}
+
+Tensor slow_conv_dilated2d_forward_grad(const Tensor& self_fw_grad, const Tensor& weight_fw_grad, IntArrayRef kernel_size, const Tensor& bias_fw_grad,
+        const Tensor& self, const Tensor& weight, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, const Tensor& result) {
+  Tensor out_fw_grad;
+
+  if (self_fw_grad.defined()) {
+    out_fw_grad = at::slow_conv_dilated2d(self_fw_grad, weight, kernel_size, Tensor(), stride, padding, dilation);
+  }
+
+  if (weight_fw_grad.defined()) {
+    auto val = at::slow_conv_dilated2d(self, weight_fw_grad, kernel_size, bias_fw_grad, stride, padding, dilation);
+    if (out_fw_grad.defined()) {
+      out_fw_grad = out_fw_grad + val;
+    } else {
+      out_fw_grad = val;
+    }
+  } else if (bias_fw_grad.defined()) {
+    // Used to make the broadcasting work when working with channel-only values
+    auto view_size = result.sizes().vec();
+    for (auto dim = 0; dim < view_size.size(); ++dim) {
+      // Don't change the channel size
+      if (dim != 1) {
+        view_size[dim] = 1;
+      }
+    }
+
+    if (out_fw_grad.defined()) {
+      out_fw_grad = out_fw_grad + bias_fw_grad.view(view_size);
+    } else {
+      out_fw_grad = bias_fw_grad.view(view_size).expand_as(result);
+    }
+  }
+
+  return out_fw_grad;
+}
+
+Tensor native_batch_norm_forward(const Tensor& input_fw_grad, const Tensor& input, const c10::optional<at::Tensor> weight,
+        const c10::optional<at::Tensor>  running_mean, const c10::optional<at::Tensor>  running_var, const Tensor& result1,
+        const Tensor& result2, bool training, float eps, const Tensor& weight_fw_grad, const Tensor& bias_fw_grad) {
+  Tensor out_fw_grad;
+
+  // Used to make the broadcasting work when working with channel-only values
+  auto view_size = input.sizes().vec();
+  for (auto dim = 0; dim < view_size.size(); ++dim) {
+    // Don't change the channel size
+    if (dim != 1) {
+      view_size[dim] = 1;
+    }
+  }
+
+  if (input_fw_grad.defined()) {
+    out_fw_grad = std::get<0>(native_batch_norm_backward(input_fw_grad, input, weight, running_mean, running_var, result1, result2, training, eps, {true, false, false}));
+  }
+
+  if (weight_fw_grad.defined()) {
+    Tensor val;
+    if (training) {
+      val = weight_fw_grad.view(view_size) * (input - result1.view(view_size)) * result2.view(view_size);
+    } else {
+      val = weight_fw_grad.view(view_size) * (input - toLegacyTensor(running_mean).view(view_size)) / (toLegacyTensor(running_var).view(view_size) + eps).sqrt();
+    }
+    if (out_fw_grad.defined()) {
+      out_fw_grad = out_fw_grad + val;
+    } else {
+      out_fw_grad = val;
+    }
+  }
+
+  if (bias_fw_grad.defined()) {
+    auto val = bias_fw_grad.view(view_size);
+    if (out_fw_grad.defined()) {
+      out_fw_grad = out_fw_grad + val;
+    } else {
+      out_fw_grad = val.expand_as(input);
+    }
+  }
+  return out_fw_grad;
+}
+
+Tensor native_layer_norm_forward(const Tensor& input_fw_grad, const Tensor& input, const c10::optional<at::Tensor> weight,
+        const Tensor& result1, const Tensor& result2, int64_t M, int64_t N, const Tensor& weight_fw_grad, const Tensor& bias_fw_grad,
+        const Tensor& result) {
+  Tensor out_fw_grad;
+
+  // Used to make the broadcasting work when working with channel-only values
+  auto param_size = input.sizes().vec();
+  auto res_size = result.sizes().vec();
+
+  size_t curr_prod = 1;
+  for (auto dim = 0; dim < param_size.size(); ++dim) {
+    // early exit for empty Tensors that have at least one size of 0
+    if (param_size[dim] == 0) {
+      return at::zeros_like(result);
+    }
+    curr_prod *= param_size[dim];
+    if (curr_prod <= M) {
+      param_size[dim] = 1;
+    } else {
+      res_size[dim] = 1;
+    }
+  }
+
+  if (input_fw_grad.defined()) {
+    out_fw_grad = std::get<0>(native_layer_norm_backward(input_fw_grad, input, result1, result2, weight, M, N, {true, false, false}));
+  }
+
+  if (weight_fw_grad.defined()) {
+    auto val = weight_fw_grad.view(param_size) * (input - result1.view(res_size)) * result2.view(res_size);
+    if (out_fw_grad.defined()) {
+      out_fw_grad = out_fw_grad + val;
+    } else {
+      out_fw_grad = val;
+    }
+  }
+
+  if (bias_fw_grad.defined()) {
+    auto val = bias_fw_grad.view(param_size);
+    if (out_fw_grad.defined()) {
+      out_fw_grad = out_fw_grad + val;
+    } else {
+      out_fw_grad = val.expand_as(input);
+    }
+  }
+  return out_fw_grad;
+}
+
+Tensor max_pool2d_with_indices_forward(const Tensor& self_fw_grad, const Tensor& indices) {
+  auto out_size = indices.sizes().vec();
+  auto lin_size = out_size;
+  if (out_size.size() == 4) {
+    // batch mode
+    lin_size = {out_size[0], out_size[1], -1};
+  } else {
+    lin_size = {out_size[0], -1};
+  }
+  auto linearized_fw_grad = self_fw_grad.view(lin_size);
+  auto linearized_ind = indices.view(lin_size);
+
+  auto res = linearized_fw_grad.gather(-1, linearized_ind);
+
+  return res.view(out_size);
+}
+
+Tensor addmm_forward(const Tensor& self_fw_grad, const Tensor& mat1_fw_grad, const Tensor& mat2_fw_grad,
+        Scalar beta, Scalar alpha, const Tensor& mat1, const Tensor& mat2) {
+
+  Tensor out_fw_grad;
+
+  if (self_fw_grad.defined()) {
+    out_fw_grad = maybe_multiply(self_fw_grad, beta);
+  }
+
+  if (mat1_fw_grad.defined()) {
+    auto val = maybe_multiply(mat1_fw_grad.mm(mat2.conj()), alpha);
+    if (out_fw_grad.defined()) {
+      out_fw_grad = out_fw_grad + val;
+    } else {
+      out_fw_grad = val;
+    }
+  }
+
+  if (mat2_fw_grad.defined()) {
+    auto val = maybe_multiply(mat1.conj().mm(mat2_fw_grad), alpha);
+    if (out_fw_grad.defined()) {
+      out_fw_grad = out_fw_grad + val;
+    } else {
+      out_fw_grad = val;
+    }
+  }
+
+  return out_fw_grad;
+}
+
+Tensor bmm_forward(const Tensor& self_fw_grad, const Tensor& mat2_fw_grad,
+        const Tensor& self, const Tensor& mat2) {
+
+  Tensor out_fw_grad;
+
+  if (self_fw_grad.defined()) {
+    auto val = self_fw_grad.bmm(mat2.conj());
+    out_fw_grad = val;
+  }
+
+  if (mat2_fw_grad.defined()) {
+    auto val = self.conj().bmm(mat2_fw_grad);
+    if (out_fw_grad.defined()) {
+      out_fw_grad = out_fw_grad + val;
+    } else {
+      out_fw_grad = val;
+    }
+  }
+
+  return out_fw_grad;
+}
+
+Tensor _log_softmax_foward(const Tensor& self_fw_grad, const Tensor& result, int dim) {
+  // dyi/dw = dxi/dw - sum_j (e(yj) * dxj/dw)
+  auto sum = at::sum(self_fw_grad * result.exp(), dim, true);
+
+  auto out_fw_grad = self_fw_grad - sum;
+
+  return out_fw_grad;
+}
+
+Tensor stack_forward(TensorList tensors, int64_t dim) {
+  Tensor out_fw_grad;
+
+  auto any_defined = false;
+  for (auto& t: tensors) {
+    any_defined |= isFwGradDefined(t);
+  }
+
+  if (any_defined) {
+    std::vector<Tensor> fw_grads;
+
+    for (auto& t: tensors) {
+      fw_grads.push_back(isFwGradDefined(t)? t.fw_grad(/* level */ 0): at::zeros_like(t));
+    }
+
+    out_fw_grad = at::stack(fw_grads, dim);
+  }
+
+  return out_fw_grad;
+}
+
+Tensor cat_forward(TensorList tensors, int64_t dim) {
+  Tensor out_fw_grad;
+
+  auto any_defined = false;
+  for (const auto& t: tensors) {
+    any_defined |= isFwGradDefined(t);
+  }
+
+  if (any_defined) {
+    std::vector<Tensor> fw_grads;
+
+    for (auto& t: tensors) {
+      fw_grads.push_back(isFwGradDefined(t)? t.fw_grad(/* level */ 0): at::zeros_like(t));
+    }
+
+    out_fw_grad = at::cat(fw_grads, dim);
+  }
+
+  return out_fw_grad;
+}
+
+Tensor max_forward(const Tensor& self_fw_grad, const Tensor& self, const Tensor& result) {
+  Tensor out_fw_grad;
+  if (self_fw_grad.defined()) {
+    auto first_value_idx = (self == result).nonzero().select(0, 0);
+    auto n_dim = first_value_idx.sizes()[0];
+    out_fw_grad = self_fw_grad;
+    for (auto dim=0; dim < n_dim; ++dim) {
+      out_fw_grad = at::select(out_fw_grad, 0, first_value_idx[dim].item().to<int64_t>());
+    }
+  }
+  return out_fw_grad;
+}
+
+Tensor index_add_forward(const Tensor& self_fw_grad, const Tensor& source_fw_grad, int dim, const Tensor& index, const Tensor& self) {
+  if (self_fw_grad.defined()) {
+    if (source_fw_grad.defined()) {
+      self_fw_grad.index_add_(dim, index, source_fw_grad);
+    }
+    return self_fw_grad;
+  } else {
+    Tensor out_fw_grad;
+    if (source_fw_grad.defined()){
+      out_fw_grad = at::zeros(self.sizes(), self.options());
+      out_fw_grad.index_add_(dim, index, source_fw_grad);
+    }
+    return out_fw_grad;
+  }
+}
+
+// Utility function used in derivatives.yaml for different loss functions
+at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
+  if (reduction == at::Reduction::Mean) {
+    return unreduced.mean();
+  } else if (reduction == at::Reduction::Sum) {
+    return unreduced.sum();
+  }
+  return unreduced;
+}
+
+
+Tensor binary_cross_entropy_with_logits_forward(const at::Tensor& self_fw_grad, const at::Tensor& target_fw_grad,
+        const at::Tensor& self, const at::Tensor& target, const c10::optional<at::Tensor> weight,
+        const c10::optional<at::Tensor> pos_weight, int64_t reduction) {
+  Tensor out_fw_grad;
+
+  if (self_fw_grad.defined()) {
+    out_fw_grad = at::binary_cross_entropy_with_logits_backward(self_fw_grad, self, target, weight, pos_weight, at::Reduction::None);
+  }
+
+  if (target_fw_grad.defined()) {
+    auto val = binary_cross_entropy_with_logits_target_backward(target_fw_grad, self, target, weight, pos_weight, at::Reduction::None);
+    if (out_fw_grad.defined()) {
+      out_fw_grad = out_fw_grad + val;
+    } else {
+      out_fw_grad = val;
+    }
+  }
+
+  if (out_fw_grad.defined()) {
+    out_fw_grad = apply_loss_reduction(out_fw_grad, reduction);
+  }
+
+  return out_fw_grad;
+}
+
+Tensor index_put_forward(const at::Tensor& self_fw_grad_, const at::Tensor& values_fw_grad_, const at::Tensor& self,
+        TensorList indices, const at::Tensor& values, bool accumulate) {
+  Tensor self_fw_grad = self_fw_grad_;
+  Tensor values_fw_grad = values_fw_grad_;
+
+  if (!self_fw_grad.defined()) {
+    self_fw_grad = at::zeros_like(self);
+  }
+
+  if (!values_fw_grad.defined()) {
+    values_fw_grad = at::zeros_like(values);
+  }
+
+  return at::index_put_(self_fw_grad, indices, values_fw_grad, accumulate);
+}
+
+Tensor min_max_other_forward(const at::Tensor& self_fw_grad, const at::Tensor& other_fw_grad, const at::Tensor& self,
+        const at::Tensor& other, bool is_min) {
+  // Note: at least one of the two forward grad is defined when we get here
+  Tensor out_fw_grad;
+
+  Tensor use_self_grad;
+  // Follow the same boundary condition as the backward formula
+  if (is_min) {
+    use_self_grad = (self < other).type_as(self);
+  } else {
+    use_self_grad = (self > other).type_as(self);
+  }
+
+  if (self_fw_grad.defined()) {
+    out_fw_grad = self_fw_grad * use_self_grad;
+  } else {
+    out_fw_grad = at::zeros_like(self);
+  }
+
+  if (other_fw_grad.defined()) {
+    out_fw_grad = out_fw_grad + (1 - use_self_grad) * other_fw_grad;
+  }
+
+  return out_fw_grad;
+}
+
+Tensor max_dim_forward(const Tensor& self_fw_grad, int64_t dim, const Tensor& indices, bool keepdim) {
+  auto full_indices = indices;
+  if (!keepdim) {
+    full_indices = indices.unsqueeze(dim);
+  }
+  auto out_fw_grad = at::gather(self_fw_grad, dim, full_indices);
+  if (!keepdim) {
+    out_fw_grad = out_fw_grad.squeeze(dim);
+  }
+
+  return out_fw_grad;
 }
 
 } // namespace details
