@@ -516,10 +516,6 @@ class TestUnaryUfuncs(TestCase):
     @unittest.skipIf(not TEST_SCIPY, "Requires SciPy")
     @dtypes(torch.float, torch.double)
     def test_digamma(self, device, dtype):
-        nan = float('nan')
-        tensor = torch.randn(10, 10, 10, dtype=dtype, device=device)
-        self.compare_with_numpy(torch.digamma, scipy.special.digamma, tensor)
-
         # Tests pole behavior
         # TODO: Add value `-1931.99999994`, to the tensor below when
         # https://github.com/pytorch/pytorch/issues/49015 is fixed
