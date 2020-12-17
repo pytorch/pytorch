@@ -1458,6 +1458,57 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_quantized_binary_op_relu_impl(
             operator.mul, operator.imul, torch.ops.quantized.mul_relu)
 
+    # TODO(future PR): make more generic
+    def _test_quantized_add_mul_qat(self, model, expected_node_occurrence):
+        qconfig_dict = {'': torch.quantization.get_default_qat_qconfig('fbgemm')}
+        mp = torch.quantization.quantize_fx.prepare_qat_fx(model, qconfig_dict)
+        self.checkGraphModuleNodes(
+            mp, expected_node_occurrence=expected_node_occurrence)
+
+    @skipIfNoFBGEMM
+    def test_quantized_add_qat(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(1, 1, 1)
+                self.conv2 = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = torch.add(x, 1.0)
+                x = self.conv1(x)
+                x = torch.add(x, 1.0)
+                x = torch.relu(x)
+                x = self.conv2(x)
+                return x
+
+        m = M()
+        expected_node_occurrence = {
+            ns.call_module(torch.quantization.FakeQuantize): 4,
+        }
+        self._test_quantized_add_mul_qat(m, expected_node_occurrence)
+
+    @skipIfNoFBGEMM
+    def test_quantized_mul_qat(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(1, 1, 1)
+                self.conv2 = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = torch.mul(x, 1.0)
+                x = self.conv1(x)
+                x = torch.mul(x, 1.0)
+                x = torch.relu(x)
+                x = self.conv2(x)
+                return x
+
+        m = M()
+        expected_node_occurrence = {
+            ns.call_module(torch.quantization.FakeQuantize): 4,
+        }
+        self._test_quantized_add_mul_qat(m, expected_node_occurrence)
+
     @skipIfNoFBGEMM
     def test_quantized_cat(self):
         """ quantization of the output of cat will be depend on the
