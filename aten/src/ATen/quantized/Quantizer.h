@@ -225,4 +225,6 @@ CAFFE2_API Tensor new_qtensor(
     const TensorOptions& options,
     QuantizerPtr quantizer);
 
+CAFFE2_API void set_quantizer_(const Tensor& self, ConstQuantizerPtr quantizer);
+
 } // namespace at
