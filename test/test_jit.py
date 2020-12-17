@@ -15488,11 +15488,7 @@ EXCLUDE_TYPE_CHECK = {
     'test_slogdet_batched_pos_det',
     'test_slogdet_batched_symmetric',
     'test_slogdet_batched_symmetric_pd',
-    'test_slogdet_batched_distinct_singular_values',
-    'test_svd_check_grad_s',
-    'test_svd_check_grad_u',
-    'test_svd_check_grad_uv',
-    'test_svd_check_grad_v'
+    'test_slogdet_batched_distinct_singular_values'
 }
 
 # chunk returns a list in scripting and we don't unpack the list,
