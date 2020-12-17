@@ -2511,9 +2511,9 @@ Keyword args:
 
 .. note::  This function is similar to SciPy's `scipy.special.digamma`.
 
-.. note::  From PyTorch 1.8 onwards, the digamma function returns `NaN` for non-positive integers,
+.. note::  From PyTorch 1.8 onwards, the digamma function returns `NaN` for negative integers,
            while for `0`, it returns `-Inf` to be consistent with SciPy and the C++ Standard.
-           Prior to PyTorch 1.8, the function would return `NaN` for non-positive integers and `0`.
+           Prior to PyTorch 1.8, the function would return `NaN` for non-positive integers.
 
 Example::
 
