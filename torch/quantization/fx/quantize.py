@@ -398,6 +398,10 @@ class Quantizer:
         get_new_observer_name = get_new_attr_name_with_prefix(
             'activation_post_process_')
 
+        placeholder_node_seen_cnt = 0
+        input_quantized_idxs: List[int] = self.prepare_custom_config_dict.get(
+            "input_quantized_idxs", [])
+
         result_node : Optional[Node] = None
         for node in model.graph.nodes:
             if node.op == 'output':
@@ -427,6 +431,15 @@ class Quantizer:
                         matched_nodes)
             else:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
+
+            if node.op == 'placeholder':
+                # skip adding observers at the graph input if the input is
+                # overriden to be quantized
+                cur_placeholder_node_idx = placeholder_node_seen_cnt
+                placeholder_node_seen_cnt += 1
+                if cur_placeholder_node_idx in input_quantized_idxs:
+                    continue
+
             insert_observer_for_input_arg_of_observed_node(
                 node, observed_node_names_set, quants,
                 model, self.activation_post_process_map, env,
