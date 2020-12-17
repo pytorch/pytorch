@@ -9,7 +9,8 @@ namespace jit {
 class CUDAEvent;
 // This class is a wrapper around c10::cuda::CUDAStream.
 // It is needed because TorchBind does not support all of the argument types
-// for c10::cuda::CUDAStream. For more details, please refer to c10/cuda/CUDAStream.h.
+// for c10::cuda::CUDAStream. For more details, please refer to
+// c10/cuda/CUDAStream.h.
 class CUDAStream final : public CustomClassHolder {
  public:
   CUDAStream(int64_t device = -1, int64_t priority = 0) {
@@ -19,7 +20,7 @@ class CUDAStream final : public CustomClassHolder {
   }
 
   CUDAStream(c10::cuda::CUDAStream s) {
-      stream_ = std::make_unique<c10::cuda::CUDAStream>(s);
+    stream_ = std::make_unique<c10::cuda::CUDAStream>(s);
   }
 
   bool query() {
@@ -67,7 +68,8 @@ class CUDAStream final : public CustomClassHolder {
 
 // This class is a wrapper around at::cuda::CUDAStream.
 // It is needed because TorchBind does not support all of the argument types
-// for at::cuda::CUDAEvent. For more details, please refer to aten/src/ATen/cuda/CUDAEvent.h.
+// for at::cuda::CUDAEvent. For more details, please refer to
+// aten/src/ATen/cuda/CUDAEvent.h.
 class CUDAEvent final : public CustomClassHolder {
  public:
   CUDAEvent(

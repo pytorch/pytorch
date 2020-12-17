@@ -147,7 +147,6 @@ TEST(SerializationTest, TestJitStream_CUDA) {
   ASSERT_EQ(op.sizes(), c.sizes());
   // Check if both the output tensors are equal
   ASSERT_TRUE(op.equal(c));
-
 }
 } // namespace jit
 } // namespace torch

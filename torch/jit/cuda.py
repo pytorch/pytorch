@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 r"""
 This package adds support for JIT compilation for CUDA Streams and events,
 This is similar to API's available in the eager mode
