@@ -5,9 +5,9 @@ T_co = TypeVar('T_co', covariant=True)
 
 
 class SamplerIterableDataset(IterableDataset[T_co]):
-    r""" Prototype of :class:`SamplerIterableDataset`.
+    r""" :class:`SamplerIterableDataset`.
 
-    IterableDataset to generate samples elements.
+    IterableDataset to generate sample elements.
     args:
         dataset: IterableDataset sampled from
         sampler: Sampler class to genereate sample elements from input dataset.

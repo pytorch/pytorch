@@ -5,7 +5,7 @@ T_co = TypeVar('T_co', covariant=True)
 
 
 class BatchIterableDataset(IterableDataset[List[T_co]]):
-    r""" Prototype of :class:`BatchIterableDataset`.
+    r""" :class:`BatchIterableDataset`.
 
     IterableDataset to create mini-batches of data. An outer dimension will be added as
     `batch_size` if `drop_last` is set to `True`, or `length % batch_size` for the
