@@ -106,9 +106,11 @@
   variants: method
 
 - func: rename_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: method
 
 - func: rename(Tensor(a) self, Dimname[]? names) -> Tensor(a)
+  use_c10_dispatcher: full
   variants: method
 
 - func: align_to(Tensor(a) self, Dimname[] names) -> Tensor(a)
@@ -143,17 +145,17 @@
 - func: _use_cudnn_rnn_flatten_weight() -> bool
   use_c10_dispatcher: full
 
-- func: _cudnn_rnn_flatten_weight(Tensor[] weight_arr, int weight_stride0, int input_size, int mode, int hidden_size, int num_layers, bool batch_first, bool bidirectional) -> Tensor
+- func: _cudnn_rnn_flatten_weight(Tensor[] weight_arr, int weight_stride0, int input_size, int mode, int hidden_size, int proj_size, int num_layers, bool batch_first, bool bidirectional) -> Tensor
   use_c10_dispatcher: full
   dispatch:
     CUDA: _cudnn_rnn_flatten_weight
 
-- func: _cudnn_rnn(Tensor input, Tensor[] weight, int weight_stride0, Tensor? weight_buf, Tensor hx, Tensor? cx, int mode, int hidden_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+- func: _cudnn_rnn(Tensor input, Tensor[] weight, int weight_stride0, Tensor? weight_buf, Tensor hx, Tensor? cx, int mode, int hidden_size, int proj_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CUDA: _cudnn_rnn
 
-- func: _cudnn_rnn_backward(Tensor input, Tensor[] weight, int weight_stride0, Tensor weight_buf, Tensor hx, Tensor? cx, Tensor output, Tensor? grad_output, Tensor? grad_hy, Tensor? grad_cy, int mode, int hidden_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state, Tensor reserve, bool[4] output_mask) -> (Tensor, Tensor, Tensor, Tensor[])
+- func: _cudnn_rnn_backward(Tensor input, Tensor[] weight, int weight_stride0, Tensor weight_buf, Tensor hx, Tensor? cx, Tensor output, Tensor? grad_output, Tensor? grad_hy, Tensor? grad_cy, int mode, int hidden_size, int proj_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state, Tensor reserve, bool[4] output_mask) -> (Tensor, Tensor, Tensor, Tensor[])
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CUDA: _cudnn_rnn_backward
@@ -1738,6 +1740,7 @@
   use_c10_dispatcher: full
 
 - func: empty.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   device_guard: False
 
 - func: empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
@@ -1942,6 +1945,7 @@
   variants: function, method
 
 - func: unflatten.int(Tensor(a) self, int dim, int[] sizes, Dimname[]? names=None) -> Tensor(a)
+  use_c10_dispatcher: full
   variants: method
 
 - func: unflatten.Dimname(Tensor(a) self, Dimname dim, int[] sizes, Dimname[] names) -> Tensor(a)
@@ -2023,6 +2027,7 @@
     CPU, CUDA: frac_out
 
 - func: full.names(int[] size, Scalar fill_value, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   device_guard: False
 
 - func: full(int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -2200,6 +2205,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: index
+    QuantizedCPU: quantized_index
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
   # NB: The following functions are declared in aten/src/ATen/templates/TensorBody.h and defined in aten/src/ATen/TensorIndexing.cpp:
   # - Tensor Tensor::index(ArrayRef<TensorIndex> indices)
@@ -2353,14 +2359,14 @@
 - func: layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
-- func: native_layer_norm(Tensor input, Tensor? weight, Tensor? bias, int M, int N, float eps) -> (Tensor, Tensor, Tensor)
+- func: native_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> (Tensor, Tensor, Tensor)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: layer_norm_cpu
     CUDA: layer_norm_cuda
     Math: math_native_layer_norm
 
-- func: native_layer_norm_backward(Tensor grad_out, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, int M, int N, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+- func: native_layer_norm_backward(Tensor grad_out, Tensor input, int[] normalized_shape, Tensor mean, Tensor rstd, Tensor? weight, Tensor? bias, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: layer_norm_backward_cpu
@@ -3164,6 +3170,7 @@
   variants: function
 
 - func: ones.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   device_guard: False
 
 - func: ones(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -3310,9 +3317,11 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: rand.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   device_guard: False
 
 - func: rand.generator_with_names(int[] size, *, Generator? generator, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   device_guard: False
 
 - func: rand(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -3367,9 +3376,11 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randn.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   device_guard: False
 
 - func: randn.generator_with_names(int[] size, *, Generator? generator, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   device_guard: False
 
 - func: randn.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
@@ -3654,6 +3665,9 @@
 - func: silu_backward(Tensor grad_output, Tensor self) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
+  dispatch:
+    CPU, CUDA: silu_backward
+    Math: math_silu_backward
 
 - func: sigmoid(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -4442,6 +4456,7 @@
   variants: function
 
 - func: zeros.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   device_guard: False
 
 - func: zeros(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -4935,7 +4950,7 @@
     SparseCPU: sparse_mask_cpu
     SparseCUDA: sparse_mask_cuda
 
-- func: to_dense(Tensor self) -> Tensor
+- func: to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
   use_c10_dispatcher: full
   variants: method
   dispatch:
@@ -5074,7 +5089,7 @@
   dispatch:
     CPU, CUDA: dense_to_sparse
 
-- func: to_mkldnn(Tensor self) -> Tensor
+- func: to_mkldnn(Tensor self, ScalarType? dtype=None) -> Tensor
   use_c10_dispatcher: full
   variants: method
   dispatch:
@@ -5411,12 +5426,14 @@
 # wrappers for legacy TH methods
 
 - func: set_.source_Storage(Tensor(a!) self, Storage source) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: method
   device_guard: False
   dispatch:
     CPU, CUDA: set_
 
 - func: set_.source_Storage_storage_offset(Tensor(a!) self, Storage source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: method
   device_guard: False
   dispatch:
@@ -5894,21 +5911,18 @@
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    CPU: addbmm_cpu_
-    CUDA: addbmm__cuda
+    CPU, CUDA: addbmm_
 
 - func: addbmm.out(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
-    CPU: addbmm_cpu_out
-    CUDA: addbmm_out_cuda
+    CPU, CUDA: addbmm_out
 
 - func: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: addbmm_cpu
-    CUDA: addbmm_cuda
+    CPU, CUDA: addbmm
 
 - func: addcdiv_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
   use_c10_dispatcher: full
@@ -7619,6 +7633,14 @@
   dispatch:
     CPU: foreach_tensor_exp_slow
     CUDA: foreach_tensor_exp_cuda
+
+- func: _foreach_zero_(Tensor(a!)[] self) -> ()
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_zero_slow_
+    CUDA: foreach_tensor_zero_cuda_
 
 - func: _foreach_exp_(Tensor(a!)[] self) -> ()
   use_c10_dispatcher: full
@@ -9565,7 +9587,8 @@
     CPU: slow_conv_transpose2d_cpu
     CUDA: slow_conv_transpose2d_cuda
 
-- func: slow_conv_transpose2d_backward.grad_output(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, Tensor columns, Tensor ones, *, Tensor(a!)? grad_input, Tensor(b!)? grad_weight, Tensor(c!)? grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+- func: slow_conv_transpose2d_backward.grad_output(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, Tensor columns, Tensor ones, *, Tensor(a!) grad_input, Tensor(b!) grad_weight, Tensor(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: slow_conv_transpose2d_backward_out_cpu
@@ -9592,7 +9615,8 @@
     CPU: slow_conv_transpose3d_cpu
     CUDA: slow_conv_transpose3d_cuda
 
-- func: slow_conv_transpose3d_backward.grad_output(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] output_padding, int[3] dilation, Tensor finput, Tensor fgrad_input, *, Tensor(a!)? grad_input, Tensor(b!)? grad_weight, Tensor(c!)? grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+- func: slow_conv_transpose3d_backward.grad_output(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] output_padding, int[3] dilation, Tensor finput, Tensor fgrad_input, *, Tensor(a!) grad_input, Tensor(b!) grad_weight, Tensor(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: slow_conv_transpose3d_backward_out_cpu
@@ -9627,7 +9651,8 @@
     CPU: slow_conv2d_forward_cpu
     CUDA: legacy::cuda::_thnn_conv2d_forward
 
-- func: thnn_conv2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, Tensor finput, Tensor fgrad_input, *, Tensor(a!)? grad_input, Tensor(b!)? grad_weight, Tensor(c!)? grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+- func: thnn_conv2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, Tensor finput, Tensor fgrad_input, *, Tensor(a!) grad_input, Tensor(b!) grad_weight, Tensor(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: slow_conv2d_backward_out_cpu
@@ -9660,7 +9685,8 @@
   dispatch:
     CUDA: legacy::cuda::_thnn_conv_depthwise2d_forward
 
-- func: thnn_conv_depthwise2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, *, Tensor(a!)? grad_input, Tensor(b!)? grad_weight) -> (Tensor(a!), Tensor(b!))
+- func: thnn_conv_depthwise2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, *, Tensor(a!) grad_input, Tensor(b!) grad_weight) -> (Tensor(a!), Tensor(b!))
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CUDA: thnn_conv_depthwise2d_backward_out
@@ -9691,7 +9717,8 @@
   dispatch:
     CPU: slow_conv3d_forward_cpu
 
-- func: slow_conv3d_backward.grad_input(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, Tensor finput, Tensor fgrad_input, *, Tensor(a!)? grad_input, Tensor(b!)? grad_weight, Tensor(c!)? grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+- func: slow_conv3d_backward.grad_input(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, Tensor finput, Tensor fgrad_input, *, Tensor(a!) grad_input, Tensor(b!) grad_weight, Tensor(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: slow_conv3d_backward_out_cpu
