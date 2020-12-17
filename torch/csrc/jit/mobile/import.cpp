@@ -121,7 +121,8 @@ class BytecodeDeserializer final {
  private:
   TypePtr resolveTypeName(const c10::QualifiedName& qn);
   void parseMethods(
-      const std::vector<IValue>& vals, // vals is a list of all methods in the model.
+      const std::vector<IValue>&
+          vals, // vals is a list of all methods in the model.
       const c10::optional<std::vector<IValue>>& debug_info_vals,
       mobile::CompilationUnit& mcu);
   c10::IValue readArchive(
@@ -159,7 +160,8 @@ TypePtr BytecodeDeserializer::resolveTypeName(const c10::QualifiedName& qn) {
 }
 
 void BytecodeDeserializer::parseMethods(
-    const std::vector<IValue>& vals, // vals is a list of all methods in the model.
+    const std::vector<IValue>&
+        vals, // vals is a list of all methods in the model.
     const c10::optional<std::vector<IValue>>& debug_info_vals,
     mobile::CompilationUnit& mcu) {
   TORCH_CHECK(vals.size() > 0, "Bytecode has no elements. ");
