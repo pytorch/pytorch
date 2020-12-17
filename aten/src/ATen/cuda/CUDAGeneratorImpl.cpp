@@ -84,7 +84,7 @@ Generator createCUDAGenerator(DeviceIndex device_index) {
  */
 CUDAGeneratorImpl::CUDAGeneratorImpl(DeviceIndex device_index)
   : c10::GeneratorImpl{Device(DeviceType::CUDA, device_index),
-              DispatchKeySet(c10::DispatchKey::CUDA)} { 
+              DispatchKeySet(c10::DispatchKey::CUDA)} {
   at::cuda::assertNotCapturing("Cannot construct a new CUDAGeneratorImpl");
 }
 
@@ -101,20 +101,18 @@ void CUDAGeneratorImpl::set_current_seed(uint64_t seed) {
 }
 
 #define CAPTURE_DEFAULT_GENS_MSG \
-"Non-default (user-constructed) CUDA RNG generators cannot be used " \
-"in regions captured by CUDA graphs. " \
-"If you need a non-default CUDA generator in a captured region, " \
-"please file an issue."
+"In regions captured by CUDA graphs, you may only use the default CUDA RNG " \
+"generator on the device that's current when capture begins. " \
+"If you need a non-default (user-supplied) generator, or a generator on another " \
+"device, please file an issue."
 
 /**
  * Gets the current seed of CUDAGeneratorImpl.
  */
 uint64_t CUDAGeneratorImpl::current_seed() const {
-  TORCH_CHECK((at::cuda::currentStreamCaptureStatus() ==
-               at::cuda::CaptureStatus::None) ||
-              ((void*)this ==
-               (void*)&at::cuda::detail::getDefaultCUDAGenerator(device_.index())),
-              CAPTURE_DEFAULT_GENS_MSG);
+  // Debatable if current_seed() should be allowed in captured regions.
+  // Conservatively disallow it for now.
+  at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::current_seed");
   return seed_;
 }
 
@@ -151,25 +149,21 @@ uint64_t CUDAGeneratorImpl::philox_offset_per_thread() {
 }
 
 /**
- * Prepares this instance for a cuda graph capture region.
+ * Called by CUDAGraph to prepare this instance for a graph capture region.
  * offset_extragraph is the initial offset at the start of the graphed region.
  * offset_intragraph tracks the offset in the graphed region.
  */
-void CUDAGeneratorImpl::graph_prologue(int64_t* offset_extragraph) {
-  TORCH_CHECK((void*)this ==
-              (void*)&at::cuda::detail::getDefaultCUDAGenerator(device_.index()),
-              CAPTURE_DEFAULT_GENS_MSG);
+void CUDAGeneratorImpl::capture_prologue(int64_t* offset_extragraph) {
   offset_extragraph_ = offset_extragraph;
   offset_intragraph_ = 0;
+  graph_expects_this_gen_ = true;
 }
 
 /**
- * Finalizes a cuda graph capture region for this instance.
+ * Called by CUDAGraph to finalize a graph capture region for this instance.
  */
-uint64_t CUDAGeneratorImpl::graph_epilogue() {
-  TORCH_CHECK((void*)this ==
-              (void*)&at::cuda::detail::getDefaultCUDAGenerator(device_.index()),
-              CAPTURE_DEFAULT_GENS_MSG);
+uint64_t CUDAGeneratorImpl::capture_epilogue() {
+  graph_expects_this_gen_ = false;
   return offset_intragraph_;
 }
 
@@ -187,7 +181,7 @@ uint64_t CUDAGeneratorImpl::graph_epilogue() {
  * it intends to generate.
  *
  * Increment should be at least the number of curand() random numbers used in
- * each thread. It is the user's responsibility to make sure that the increment
+ * each thread. It is the user's responsibility to make sure the increment
  * for philox is never smaller than the number of curand() calls. Increment
  * value > the number of curand() calls won't harm but anything less would mean
  * that you would be reusing random values from previous calls.
@@ -196,17 +190,20 @@ uint64_t CUDAGeneratorImpl::graph_epilogue() {
  */
 PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
   if (at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None) {
-    TORCH_CHECK((void*)this ==
-                (void*)&at::cuda::detail::getDefaultCUDAGenerator(device_.index()),
+    TORCH_CHECK(graph_expects_this_gen_,
+                "philox_cuda_state for an unexpected CUDA generator used during capture. "
                 CAPTURE_DEFAULT_GENS_MSG);
     uint32_t offset = this->offset_intragraph_;
     TORCH_INTERNAL_ASSERT(this->offset_intragraph_ <=
-                          std::numeric_limits<uint32_t>::max() - increment); 
+                          std::numeric_limits<uint32_t>::max() - increment);
     this->offset_intragraph_ += increment;
     return PhiloxCudaState(this->seed_,
                            this->offset_extragraph_,
                            offset);
   } else {
+    TORCH_CHECK(!graph_expects_this_gen_,
+                "CUDA generator expects graph capture to be underway, "
+                "but the current stream is not capturing.");
     uint64_t offset = this->philox_offset_per_thread_;
     this->philox_offset_per_thread_ += increment;
     return PhiloxCudaState(this->seed_, offset);
