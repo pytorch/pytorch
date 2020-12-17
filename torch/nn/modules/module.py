@@ -253,6 +253,7 @@ class Module:
     _version: int = 1
 
     training: bool
+    _is_full_backward_hook: Optional[bool]
 
     def __init__(self):
         """
