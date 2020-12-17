@@ -3665,6 +3665,9 @@
 - func: silu_backward(Tensor grad_output, Tensor self) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
+  dispatch:
+    CPU, CUDA: silu_backward
+    Math: math_silu_backward
 
 - func: sigmoid(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -4947,7 +4950,7 @@
     SparseCPU: sparse_mask_cpu
     SparseCUDA: sparse_mask_cuda
 
-- func: to_dense(Tensor self) -> Tensor
+- func: to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
   use_c10_dispatcher: full
   variants: method
   dispatch:
@@ -5086,7 +5089,7 @@
   dispatch:
     CPU, CUDA: dense_to_sparse
 
-- func: to_mkldnn(Tensor self) -> Tensor
+- func: to_mkldnn(Tensor self, ScalarType? dtype=None) -> Tensor
   use_c10_dispatcher: full
   variants: method
   dispatch:
@@ -7630,6 +7633,14 @@
   dispatch:
     CPU: foreach_tensor_exp_slow
     CUDA: foreach_tensor_exp_cuda
+
+- func: _foreach_zero_(Tensor(a!)[] self) -> ()
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_zero_slow_
+    CUDA: foreach_tensor_zero_cuda_
 
 - func: _foreach_exp_(Tensor(a!)[] self) -> ()
   use_c10_dispatcher: full

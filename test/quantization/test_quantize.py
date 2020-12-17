@@ -1220,6 +1220,49 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
         torch.quantization.convert(model, inplace=True)
         checkHooksIsPresent(model, False)
 
+    def test_add_scalar_uses_input_qparams(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quant = torch.quantization.QuantStub()
+                self.ff = torch.nn.quantized.FloatFunctional()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.ff.add_scalar(x, 1.0)
+                return x
+
+        m = M()
+        m.qconfig = torch.quantization.default_qconfig
+        mp = torch.quantization.prepare_qat(m)
+        mp(torch.randn(4, 4))
+        mq = torch.quantization.convert(mp)
+        res = mq(torch.randn(4, 4))
+        eps = 1e-5
+        self.assertTrue(torch.abs(mq.quant.scale - res.q_scale()) < eps)
+
+    def test_mul_scalar_uses_input_qparams(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quant = torch.quantization.QuantStub()
+                self.ff = torch.nn.quantized.FloatFunctional()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.ff.mul_scalar(x, 2.0)
+                return x
+
+        m = M()
+        m.qconfig = torch.quantization.default_qconfig
+        mp = torch.quantization.prepare_qat(m)
+        mp(torch.randn(4, 4))
+        mq = torch.quantization.convert(mp)
+        res = mq(torch.randn(4, 4))
+        eps = 1e-5
+        self.assertTrue(torch.abs(mq.quant.scale * 2 - res.q_scale()) < eps)
+
+
 class TestEagerModeOps(QuantizationTestCase):
     def _test_activation_op_impl(
             self, float_module_class, quantized_module_class, extra_module_kwargs):
