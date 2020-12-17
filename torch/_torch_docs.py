@@ -616,6 +616,10 @@ all(input) -> Tensor
 
 Tests if all elements in :attr:`input` evaluate to `True`.
 
+.. note:: This function matches the behaviour of NumPy in returning
+          output of dtype `bool` for all supported dtypes except `uint8`.
+          For `uint8` the dtype of output is `uint8` itself.
+
 Example::
 
     >>> a = torch.rand(1, 2).bool()
@@ -666,6 +670,10 @@ Args:
     {input}
 
 Tests if any element in :attr:`input` evaluates to `True`.
+
+.. note:: This function matches the behaviour of NumPy in returning
+          output of dtype `bool` for all supported dtypes except `uint8`.
+          For `uint8` the dtype of output is `uint8` itself.
 
 Example::
 

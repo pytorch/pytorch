@@ -1124,6 +1124,9 @@ class TestReductions(TestCase):
     @dtypes(*(torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
                                            include_bool=True, include_complex=True)))
     def test_all_any_vs_numpy(self, device, dtype):
+        # Note [all, any uint8 compatibility]: However for compatibility reason,
+        # for `uint8`, they return Tensor of same dtype `uint8`.
+        # Reference: https://github.com/pytorch/pytorch/pull/47878#issuecomment-747108561
         exact_dtype = True if dtype != torch.uint8 else False
 
         def _test_all_any(x):
@@ -2227,6 +2230,7 @@ class TestReductions(TestCase):
 
         for dtype in torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
                                                   include_bool=True, include_complex=True):
+            # Refer: [all, any uint8 compatibility]
             if dtype == torch.uint8:
                 out_dtype = torch.uint8
             else:
