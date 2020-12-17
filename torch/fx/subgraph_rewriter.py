@@ -214,7 +214,7 @@ def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable
 
         # Insert the new graph
         with original_graph.inserting_before(subgraph_output):
-            last_placeholder = next(iter(reversed(original_graph_inputs.values())))
+            last_placeholder = next(iter(reversed(list(original_graph_inputs.values()))))
             for n in replacement_graph.nodes:
                 if n.op == "output":
                     # To ensure that we have one and only one "output"
