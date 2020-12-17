@@ -3720,22 +3720,6 @@
   dispatch:
     CPU, CUDA: sin_out
 
-- func: sinc(Tensor self) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-  dispatch:
-    DefaultBackend: sinc
-
-- func: sinc_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: full
-  variants: function, method
-  dispatch:
-    DefaultBackend: sinc_
-
-- func: sinc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: sinc_out
-
 - func: sinh(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -4963,7 +4947,7 @@
     SparseCPU: sparse_mask_cpu
     SparseCUDA: sparse_mask_cuda
 
-- func: to_dense(Tensor self) -> Tensor
+- func: to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
   use_c10_dispatcher: full
   variants: method
   dispatch:
@@ -5102,7 +5086,7 @@
   dispatch:
     CPU, CUDA: dense_to_sparse
 
-- func: to_mkldnn(Tensor self) -> Tensor
+- func: to_mkldnn(Tensor self, ScalarType? dtype=None) -> Tensor
   use_c10_dispatcher: full
   variants: method
   dispatch:
@@ -5439,12 +5423,14 @@
 # wrappers for legacy TH methods
 
 - func: set_.source_Storage(Tensor(a!) self, Storage source) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: method
   device_guard: False
   dispatch:
     CPU, CUDA: set_
 
 - func: set_.source_Storage_storage_offset(Tensor(a!) self, Storage source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: method
   device_guard: False
   dispatch:
