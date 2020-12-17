@@ -32,28 +32,19 @@ thread_local uint64_t current_thread_id_ = 0;
 
 // Low probability constant
 static const double kLowProb = 0.001;
-struct CoinflipTLS {
-  int tries_left_;
-  std::mt19937 genGeo_;
-  std::mt19937 genZeroOne_;
-  std::geometric_distribution<int> distGeo_;
-  std::uniform_real_distribution<double> distZeroOne_;
-  CoinflipTLS();
-};
-
-CoinflipTLS::CoinflipTLS()
-    : tries_left_(0), genGeo_(std::random_device()()), genZeroOne_(std::random_device()()), distGeo_(kLowProb), distZeroOne_(0.0, 1.0) {}
-thread_local CoinflipTLS coinflip_tls_;
 
 int sample_geometric() {
-  return coinflip_tls_.distGeo_(coinflip_tls_.genGeo_);
+  return rf_tls_.coinflip_state_.distGeo_(rf_tls_.coinflip_state_.genGeo_);
 }
 
 double sample_zero_one() {
-  return coinflip_tls_.distZeroOne_(coinflip_tls_.genZeroOne_);
+  return rf_tls_.coinflip_state_.distZeroOne_(rf_tls_.coinflip_state_.genZeroOne_);
 }
 
 } // namespace
+
+RecordFunctionTLS::CoinflipTLS::CoinflipTLS()
+    : tries_left_(0), genGeo_(std::random_device()()), genZeroOne_(std::random_device()()), distGeo_(kLowProb), distZeroOne_(0.0, 1.0) {}
 
 const RecordFunctionTLS& get_record_function_tls_() {
   return rf_tls_;
@@ -169,11 +160,11 @@ class CallbackManager {
       // flip for kLowProb with a thread local number of tries tries_left_
       // sampled from the geometric distribution.
       if (sampling_prob < kLowProb) {
-        if (coinflip_tls_.tries_left_ == 0) {
-          coinflip_tls_.tries_left_ = sample_geometric();
+        if (rf_tls_.coinflip_state_.tries_left_ == 0) {
+          rf_tls_.coinflip_state_.tries_left_ = sample_geometric();
           return (sample_zero_one() < sampling_prob / kLowProb);
         } else {
-          --coinflip_tls_.tries_left_;
+          --rf_tls_.coinflip_state_.tries_left_;
           return false;
         }
       } else {
@@ -512,12 +503,11 @@ bool shouldRunRecordFunction(bool* pre_sampled) {
   }
 
   *pre_sampled = true;
-  auto* coinflip_tls_ptr = &coinflip_tls_;
-  if (coinflip_tls_ptr->tries_left_ == 0) {
-    coinflip_tls_ptr->tries_left_ = sample_geometric();
+  if (rf_tls_ptr->coinflip_state_.tries_left_ == 0) {
+    rf_tls_ptr->coinflip_state_.tries_left_ = sample_geometric();
     return true;
   } else {
-    --coinflip_tls_ptr->tries_left_;
+    --rf_tls_ptr->coinflip_state_.tries_left_;
     return false;
   }
 }
