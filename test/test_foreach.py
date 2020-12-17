@@ -508,10 +508,10 @@ class TestForeach(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "ceil is not supported for complex inputs"):
                     expected = [torch.ceil(tensors[i]) for i in range(N)]
 
-                with self.assertRaisesRegex(RuntimeError, "supported for complex inputs"):
+                with self.assertRaisesRegex(RuntimeError, "not implemented for"):
                     torch._foreach_ceil(tensors)
 
-                with self.assertRaisesRegex(RuntimeError, "supported for complex inputs"):
+                with self.assertRaisesRegex(RuntimeError, "not implemented for"):
                     torch._foreach_ceil_(tensors)
                 continue
 
@@ -667,10 +667,10 @@ class TestForeach(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "floor is not supported for complex inputs"):
                     expected = [torch.floor(tensors[i]) for i in range(N)]
 
-                with self.assertRaisesRegex(RuntimeError, "supported for complex inputs"):
+                with self.assertRaisesRegex(RuntimeError, "not implemented for"):
                     torch._foreach_floor(tensors)
 
-                with self.assertRaisesRegex(RuntimeError, "supported for complex inputs"):
+                with self.assertRaisesRegex(RuntimeError, "not implemented for"):
                     torch._foreach_floor_(tensors)
                 continue
 
@@ -881,10 +881,10 @@ class TestForeach(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "trunc is not supported for complex inputs"):
                     expected = [torch.trunc(tensors[i]) for i in range(N)]
 
-                with self.assertRaisesRegex(RuntimeError, "supported for complex inputs"):
+                with self.assertRaisesRegex(RuntimeError, "not implemented for"):
                     torch._foreach_trunc(tensors)
 
-                with self.assertRaisesRegex(RuntimeError, "supported for complex inputs"):
+                with self.assertRaisesRegex(RuntimeError, "not implemented for"):
                     torch._foreach_trunc_(tensors)
                 continue
 
