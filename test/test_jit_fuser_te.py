@@ -1210,6 +1210,77 @@ class TestTEFuser(JitTestCase):
         else:
             return v.to(dtype)
 
+    def test_torch_to(self):
+        # test no op
+        @torch.jit.script
+        def foo(x):
+            return x.to(torch.float)
+
+        foo(torch.tensor([3.], dtype=torch.float))
+        foo(torch.tensor([3.], dtype=torch.float))
+        FileCheck().check_not("TensorExpr").run(torch.jit.last_executed_optimized_graph())
+
+        # test not fusing non-const inputs
+        @torch.jit.script
+        def foo(x, dtype: int):
+            return x.to(dtype)
+
+        foo(torch.tensor([3.], dtype=torch.float), torch.int)
+        foo(torch.tensor([3.], dtype=torch.float), torch.int)
+        FileCheck().check_not("TensorExpr").run(torch.jit.last_executed_optimized_graph())
+
+        # test not fusing to_pinned inputs
+        @torch.jit.script
+        def foo(x, dtype: int):
+            return x.to(pin_memory=True)
+
+        foo(torch.tensor([3.], dtype=torch.float), torch.int)
+        foo(torch.tensor([3.], dtype=torch.float), torch.int)
+        FileCheck().check_not("TensorExpr").run(torch.jit.last_executed_optimized_graph())
+
+
+        # test across-device not supported
+        if torch.cuda.is_available():
+            @torch.jit.script
+            def foo(x):
+                return x.to(device="cuda")
+
+            foo(torch.tensor([3.], dtype=torch.float))
+            foo(torch.tensor([3.], dtype=torch.float))
+            FileCheck().check_not("TensorExpr").run(torch.jit.last_executed_optimized_graph())
+
+        sizes = [(1, 4), (4, 4)]
+        # reuses cast impl, smaller dtype set for faster test
+        dtypes = [
+            torch.bool,
+            torch.int,
+            torch.float16,
+            torch.float32,
+            torch.float64,
+        ]
+
+        class MyMod(torch.nn.Module):
+            def __init__(self, dtype):
+                super(MyMod, self).__init__()
+                self.dtype = dtype
+
+            def forward(self, x):
+                return x.to(self.dtype)
+
+        bad_dtypes = []
+        for dtype, output_dtype, device, size in product(dtypes, dtypes, self.devices, sizes):
+            if dtype == output_dtype:
+                continue
+
+            x = self.data_for(dtype, device, size=size)
+            mod = MyMod(output_dtype)
+            ref = mod.forward(x)
+            # use freezing to make non-Tensor args to `to` constant
+            mod = torch.jit.freeze(torch.jit.script(mod.eval()))
+            warmup_forward(mod.forward, x)
+            self.assertEqual(ref, mod.forward(x))
+            self.assertLastGraphAllFused()
+
     def test_masked_fill(self):
         # check scalar overload
         def foo(x, mask):
