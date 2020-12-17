@@ -185,14 +185,7 @@ class Node:
     @property
     def all_input_nodes(self) -> List['Node']:
         """
-        Return all Nodes that are inputs to this Node. This is equivalent to
-        iterating over ``args`` and ``kwargs`` and only collecting the values that
-        are Nodes.
-
-        Returns:
-
-            List of ``Nodes`` that appear in the ``args`` and ``kwargs`` of this
-            ``Node``, in that order.
+        Return all Nodes that are inputs to this Node.
         """
         return list(self._input_nodes.keys())
 
