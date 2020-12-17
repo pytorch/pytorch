@@ -2,6 +2,7 @@ from tools.codegen.model import *
 from tools.codegen.api.types import *
 import tools.codegen.local as local
 from typing import Optional, Sequence, Union, List, Set
+from dataclasses import dataclass
 
 # This file describes the translation of JIT schema to the public C++
 # API, which is what people use when they call functions like at::add.
@@ -20,8 +21,15 @@ from typing import Optional, Sequence, Union, List, Set
 #   - defaulting lives here (in fact, the dispatcher is completely
 #     oblivious of defaults!)
 #
-# BTW: policy on name collisions: we try not to have types with
-# collisions, but functions are fair game to collide
+# The public API for this module are the CppSignature and CppSignatureGroup
+# classes; 'name' is also exposed because the _out naming convention gets
+# a lot of traffic (though one should think carefully about whether or not they
+# should have used a CppSignature instead).  Whether or not you implement things
+# like type translation as methods or functions is a matter of taste; but in
+# general prefer use functions if you don't need very much of the class's
+# implicit state
+
+__all__ = ['name', 'CppSignature', 'CppSignatureGroup']
 
 def name(func: FunctionSchema, *, faithful_name_for_out_overloads: bool = False) -> str:
     name = str(func.name.name)
@@ -305,3 +313,94 @@ def arguments(
             has_tensor_options=arguments.tensor_options is not None,
             cpp_no_default_args=cpp_no_default_args)
     ]
+
+# A CppSignature represents a single overload in the C++ API.  For
+# any given function schema, there may be multiple CppSignatures
+# corresponding to it, based on how we desugar to C++.  See also
+# CppSignatureGroup.
+@dataclass(frozen=True)
+class CppSignature:
+    # The schema this signature is derived from
+    func: FunctionSchema
+
+    # Is this a C++ signature for a method, i.e. Tensor::my_op(...)?
+    method: bool
+
+    # Is this a faithful C++ signature (i.e. following the JIT schema) or a convenience API
+    # (i.e. with a potential TensorOptions argument and out arguments in the front)
+    faithful: bool
+
+    # The set of C++ arguments which should not have defaults applied to them
+    cpp_no_default_args: Set[str]
+
+    # Is this a fallback C++ binding?  Fallback bindings are enabled by
+    # manual_cpp_binding: True and are alternate, non-public API that
+    # lets manual C++ binding implementors access the binding that would
+    # have been automatically generated
+    fallback_binding: bool = False
+
+    # Return the unpacked argument structure of this signature,
+    # discarding information about which arguments are semantically
+    # related to each other.
+    def arguments(self) -> Sequence[Binding]:
+        return arguments(
+            self.func.arguments, faithful=self.faithful,
+            method=self.method, cpp_no_default_args=self.cpp_no_default_args)
+
+    def name(self) -> str:
+        n = name(self.func, faithful_name_for_out_overloads=self.faithful)
+        if self.fallback_binding:
+            n = f"__dispatch_{n}"
+        return n
+
+    # Render the C++ declaration for this signature
+    def decl(self) -> str:
+        rets = returns_type(self.func.returns)
+        cpp_args_str = ', '.join(a.decl() for a in self.arguments())
+        return f"{rets} {self.name()}({cpp_args_str})"
+
+    # Render the C++ definition for this signature, not including
+    # the body (with curly braces)
+    def defn(self, *, prefix: str = "") -> str:
+        rets = returns_type(self.func.returns)
+        cpp_args_str = ', '.join(a.defn() for a in self.arguments())
+        name = prefix + self.name()
+        return f"{rets} {name}({cpp_args_str})"
+
+
+# Represents group of all CppSignatures associated with a
+# FunctionSchema.  Right now, that's the regular, user-visible
+# signature, as well as a "faithful" signature which doesn't
+# have grouping.
+@dataclass(frozen=True)
+class CppSignatureGroup:
+    func: FunctionSchema
+    signature: CppSignature
+    faithful_signature: Optional[CppSignature]
+
+    @staticmethod
+    def from_native_function(f: NativeFunction, *, method: bool, fallback_binding: bool = False) -> 'CppSignatureGroup':
+        func = f.func
+        faithful_signature: Optional[CppSignature]
+        if func.arguments.tensor_options is not None or len(func.arguments.out) > 0:
+            faithful_signature = CppSignature(
+                func=func,
+                faithful=True,
+                method=method,
+                fallback_binding=fallback_binding,
+                cpp_no_default_args=f.cpp_no_default_args
+            )
+        else:
+            faithful_signature = None
+        signature = CppSignature(
+            func=func,
+            faithful=False,
+            method=method,
+            fallback_binding=fallback_binding,
+            cpp_no_default_args=f.cpp_no_default_args
+        )
+        return CppSignatureGroup(
+            func=func,
+            signature=signature,
+            faithful_signature=faithful_signature,
+        )

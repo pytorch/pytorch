@@ -2,6 +2,7 @@ import itertools
 from typing import Optional, List, Sequence, Union
 
 from tools.codegen.api.types import *
+from tools.codegen.api.cpp import CppSignatureGroup
 import tools.codegen.api.cpp as cpp
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.gen import with_native_function, parse_native_yaml, FileManager, mapMaybe

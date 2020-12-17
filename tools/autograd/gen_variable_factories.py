@@ -7,6 +7,7 @@ from typing import Optional, List
 
 from tools.codegen.api.types import *
 import tools.codegen.api.cpp as cpp
+from tools.codegen.api.cpp import CppSignatureGroup
 import tools.codegen.api.python as python
 from tools.codegen.gen import with_native_function, parse_native_yaml, FileManager, mapMaybe
 from tools.codegen.model import *

@@ -1,6 +1,6 @@
 from tools.codegen.model import *
 from dataclasses import dataclass
-from typing import Optional, Union, Sequence, TypeVar, List, Set
+from typing import Optional, Union, TypeVar, List
 from enum import Enum
 
 _T = TypeVar('_T')
@@ -112,97 +112,6 @@ class Expr:
     expr: str
     type: CType
 
-# A CppSignature represents a single overload in the C++ API.  For
-# any given function schema, there may be multiple CppSignatures
-# corresponding to it, based on how we desugar to C++.  See also
-# CppSignatureGroup.
-@dataclass(frozen=True)
-class CppSignature:
-    # The schema this signature is derived from
-    func: FunctionSchema
-
-    # Is this a C++ signature for a method, i.e. Tensor::my_op(...)?
-    method: bool
-
-    # Is this a faithful C++ signature (i.e. following the JIT schema) or a convenience API
-    # (i.e. with a potential TensorOptions argument and out arguments in the front)
-    faithful: bool
-
-    # The set of C++ arguments which should not have defaults applied to them
-    cpp_no_default_args: Set[str]
-
-    # Is this a fallback C++ binding?  Fallback bindings are enabled by
-    # manual_cpp_binding: True and are alternate, non-public API that
-    # lets manual C++ binding implementors access the binding that would
-    # have been automatically generated
-    fallback_binding: bool = False
-
-    # Return the unpacked argument structure of this signature,
-    # discarding information about which arguments are semantically
-    # related to each other.
-    def arguments(self) -> Sequence[Binding]:
-        return cpp.arguments(
-            self.func.arguments, faithful=self.faithful,
-            method=self.method, cpp_no_default_args=self.cpp_no_default_args)
-
-    def name(self) -> str:
-        n = cpp.name(self.func, faithful_name_for_out_overloads=self.faithful)
-        if self.fallback_binding:
-            n = f"__dispatch_{n}"
-        return n
-
-    # Render the C++ declaration for this signature
-    def decl(self) -> str:
-        returns_type = cpp.returns_type(self.func.returns)
-        cpp_args_str = ', '.join(a.decl() for a in self.arguments())
-        return f"{returns_type} {self.name()}({cpp_args_str})"
-
-    # Render the C++ definition for this signature, not including
-    # the body (with curly braces)
-    def defn(self, *, prefix: str = "") -> str:
-        returns_type = cpp.returns_type(self.func.returns)
-        cpp_args_str = ', '.join(a.defn() for a in self.arguments())
-        name = prefix + self.name()
-        return f"{returns_type} {name}({cpp_args_str})"
-
-
-# Represents group of all CppSignatures associated with a
-# FunctionSchema.  Right now, that's the regular, user-visible
-# signature, as well as a "faithful" signature which doesn't
-# have grouping.
-@dataclass(frozen=True)
-class CppSignatureGroup:
-    func: FunctionSchema
-    signature: CppSignature
-    faithful_signature: Optional[CppSignature]
-
-    @staticmethod
-    def from_native_function(f: NativeFunction, *, method: bool, fallback_binding: bool = False) -> 'CppSignatureGroup':
-        func = f.func
-        faithful_signature: Optional[CppSignature]
-        if func.arguments.tensor_options is not None or len(func.arguments.out) > 0:
-            faithful_signature = CppSignature(
-                func=func,
-                faithful=True,
-                method=method,
-                fallback_binding=fallback_binding,
-                cpp_no_default_args=f.cpp_no_default_args
-            )
-        else:
-            faithful_signature = None
-        signature = CppSignature(
-            func=func,
-            faithful=False,
-            method=method,
-            fallback_binding=fallback_binding,
-            cpp_no_default_args=f.cpp_no_default_args
-        )
-        return CppSignatureGroup(
-            func=func,
-            signature=signature,
-            faithful_signature=faithful_signature,
-        )
-
 @dataclass(frozen=True)
 class DispatcherSignature:
     # The schema this signature is derived from
@@ -263,4 +172,4 @@ class NativeSignature:
         return translate.translate(self.arguments(), dispatcher.arguments(self.func), method=False)
 
 # Functions only, no types
-from tools.codegen.api import cpp, dispatcher, native, translate
+from tools.codegen.api import dispatcher, native, translate

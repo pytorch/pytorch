@@ -32,6 +32,7 @@ from .gen_trace_type import MANUAL_BACKEND, MANUAL_AUTOGRAD_AND_TRACER, MANUAL_A
 from tools.codegen.api.types import *
 from tools.codegen.api.autograd import *
 import tools.codegen.api.cpp as cpp
+from tools.codegen.api.cpp import CppSignatureGroup
 import tools.codegen.api.python as python
 from tools.codegen.gen import with_native_function
 from tools.codegen.model import *

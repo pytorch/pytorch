@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.model import *
 from tools.codegen.api.types import *
+from tools.codegen.api.cpp import CppSignatureGroup
 import tools.codegen.api.cpp as cpp
 import tools.codegen.api.dispatcher as dispatcher
 import tools.codegen.api.native as native
