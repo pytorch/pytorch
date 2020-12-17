@@ -70,7 +70,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'repeat', 'expand', 'flip', 'fliplr', 'flipud', 'rot90', 'transpose',
     'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
     'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_', 'eq_',
-    'ne_', 'add', '__radd__', 'sum', '_conj', 'sin', 'cos', 'mul', 'sinh',
+    'ne_', 'add', '__radd__', 'sum', '_conj', 'sin', 'cos', 'mul', 'sinc', 'sinh',
     'cosh', '__rmul__', 'sgn', 'asin', 'acos', 'sub', 'div', 'cat', 'view_as_complex',
     'neg', 'complex', 'select', '_s_where', 'as_strided', 'slice', 'constant_pad_nd',
     'unbind', 'split', 'split_with_sizes', 'unsafe_split', 'split_with_sizes_backward',
@@ -188,6 +188,7 @@ std::shared_ptr<${op}> grad_fn;
 
 SETUP_ANY_REQUIRES_GRAD = CodeTemplate("""\
 auto _any_requires_grad = compute_requires_grad( ${args_with_derivatives} );
+(void)_any_requires_grad;
 """)
 
 SETUP_DERIVATIVE = CodeTemplate("""\
