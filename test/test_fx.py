@@ -1161,5 +1161,13 @@ class TestFX(JitTestCase):
 
         traced = symbolic_trace(NamedTupReturn())
 
+    def test_len(self):
+        class LenTest(torch.nn.Module):
+            def forward(self, x):
+                return torch.fx.len(x)
+
+        traced = symbolic_trace(LenTest())
+
+
 if __name__ == '__main__':
     run_tests()

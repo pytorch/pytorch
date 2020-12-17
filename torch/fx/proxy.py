@@ -2,6 +2,9 @@ import dis
 import torch
 import inspect
 import operator
+import builtins
+import warnings
+from typing import Union
 
 from .graph import magic_methods, reflectable_magic_methods, Graph
 from typing import Tuple, Dict, Optional, Iterable, Any, Iterator
@@ -153,6 +156,10 @@ class Proxy:
     def keys(self):
         return self.tracer.keys(self)
 
+    def __len__(self):
+        warnings.warn("'builtins.len' is not supported. Replace `builtins.len` with 'torch.fx.len' and try again.")
+        return
+
     def __torch_function__(self, orig_method, types, args=None, kwargs=None):
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
@@ -161,6 +168,12 @@ class Proxy:
         else:
             return self.tracer.create_proxy('call_function', orig_method, args, kwargs,
                                             name=self.tracer.graph._target_to_str(orig_method.__name__))
+
+def len(item: Any) -> Union[Proxy, int]:
+    if not isinstance(item, Proxy):
+        return builtins.len(item)
+
+    return item.tracer.create_proxy('call_function', builtins.len, (item,), {})
 
 class Attribute(Proxy):
     def __init__(self, root: Proxy, attr: str):
