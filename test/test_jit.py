@@ -15187,6 +15187,25 @@ dedent """
             def foo():
                 new_item = {'score': [1.0], 'ys': [1, 2, 3]}
 
+    def test_dict_invalid_annotations(self):
+        # Check for invalid value type annotation
+        def wrong_value_type(dictionary: Dict[str, torch.jit.ScriptModule]):
+            return
+        with self.assertRaisesRegex(ValueError, "Unknown type annotation"):
+            torch.jit.script(wrong_value_type)
+
+        # Check for invalid key type annotation
+        def wrong_key_type(dictionary: Dict[torch.jit.ScriptModule, str]):
+            return
+        with self.assertRaisesRegex(ValueError, "Unknown type annotation"):
+            torch.jit.script(wrong_key_type)
+
+        # Check for invalid key and value type annotation
+        def wrong_key_value_type(dictionary: Dict[torch.jit.ScriptModule, torch.jit.ScriptModule]):
+            return
+        with self.assertRaisesRegex(ValueError, "Unknown type annotation"):
+            torch.jit.script(wrong_key_value_type)
+
     def test_get_set_state_with_tensors(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -15469,11 +15488,7 @@ EXCLUDE_TYPE_CHECK = {
     'test_slogdet_batched_pos_det',
     'test_slogdet_batched_symmetric',
     'test_slogdet_batched_symmetric_pd',
-    'test_slogdet_batched_distinct_singular_values',
-    'test_svd_check_grad_s',
-    'test_svd_check_grad_u',
-    'test_svd_check_grad_uv',
-    'test_svd_check_grad_v'
+    'test_slogdet_batched_distinct_singular_values'
 }
 
 # chunk returns a list in scripting and we don't unpack the list,
