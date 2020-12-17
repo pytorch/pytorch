@@ -224,6 +224,13 @@ Tensor silu_backward(
   return grad_input;
 }
 
+Tensor math_silu_backward(
+    const Tensor& grad_output,
+    const Tensor& input) {
+  auto input_sigmoid = at::sigmoid(input);
+  return grad_output * (input_sigmoid * (1 + input * (1 - input_sigmoid)));
+}
+
 template <typename scalar_t>
 inline void _rrelu_with_noise_train(
     Tensor& output,

@@ -461,13 +461,9 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
     r"""Short-time Fourier transform (STFT).
 
     .. warning::
-        From version 1.8.0, :attr:`return_complex` must always be given
-        explicitly for real inputs and `return_complex=False` has been
-        deprecated. Strongly prefer `return_complex=True` as in a future
-        pytorch release, this function will only return complex tensors.
-
-        Note that :func:`torch.view_as_real` can be used to recover a real
-        tensor with an extra last dimension for real and imaginary components.
+        Setting :attr:`return_complex` explicitly will be required in a future
+        PyTorch release. Set it to False to preserve the current behavior or
+        True to return a complex output.
 
     The STFT computes the Fourier transform of short overlapping windows of the
     input. This giving frequency components of the signal as they change over
