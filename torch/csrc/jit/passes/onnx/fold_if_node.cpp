@@ -30,7 +30,9 @@ static bool isStaticCondition(Node* node) {
   auto compare_node = prev_node;
   if (compare_node->kind() == onnx::Equal ||
       compare_node->kind() == onnx::Greater ||
-      compare_node->kind() == onnx::Less) {
+      compare_node->kind() == onnx::Less ||
+      compare_node->kind() == onnx::GreaterOrEqual ||
+      compare_node->kind() == onnx::LessOrEqual) {
     for (size_t i = 0; i < compare_node->inputs().size(); i++) {
       auto sym = compare_node->inputs()[i]
                      ->type()
@@ -64,6 +66,20 @@ static bool isStaticCondition(Node* node) {
   return false;
 }
 
+// find index of the block output
+static c10::optional<int> findIndex(
+    c10::ArrayRef<torch::jit::Value*> outputs,
+    Value* input) {
+  c10::optional<int> idx = c10::nullopt;
+  for (size_t i = 0; i < outputs.size(); i++) {
+    if (input == outputs[i]) {
+      idx = i;
+      break;
+    }
+  }
+  return idx;
+}
+
 // This function returns the value of the constant-folded subblock
 // that is input to the If node.
 static bool constantFoldedConditionValue(Node* node) {
@@ -80,7 +96,10 @@ static bool constantFoldedConditionValue(Node* node) {
     // we are assuming that the number of block outputs is 1.
     // TODO: make this more general by supporting the case
     // of multiple outputs
-    prev_node = block->outputs()[0]->node();
+    auto outputs = cast_node->input()->node()->outputs();
+    auto cast_input = cast_node->input();
+    int idx = findIndex(outputs, cast_input).value();
+    prev_node = block->outputs()[idx]->node();
   }
 
   if (prev_node->kind() == onnx::Constant) {
@@ -131,28 +150,32 @@ static bool constantFoldedConditionValue(Node* node) {
     }
   }
 
+  at::Tensor res;
   if (compare_node->kind() == onnx::Equal) {
+    res = at::eq(inputs[0], inputs[1]);
     if (prev_node->kind() == onnx::Not)
-      return !(at::equal(inputs[0], inputs[1]));
-    return at::equal(inputs[0], inputs[1]);
+      res = at::not_equal(inputs[0], inputs[1]);
   } else if (
-      (compare_node->kind() == onnx::Greater &&
-       prev_node->kind() != onnx::Not) ||
-      (prev_node->kind() == onnx::Not && compare_node->kind() == onnx::Less)) {
-    auto res = at::greater(inputs[0], inputs[1]);
-    if (prev_node->kind() == onnx::Not)
-      res = at::greater_equal(inputs[0], inputs[1]);
-    return at::is_nonzero(res);
+      compare_node->kind() == onnx::Greater && prev_node->kind() != onnx::Not) {
+    res = at::greater(inputs[0], inputs[1]);
   } else if (
-      compare_node->kind() == onnx::Less ||
+      (prev_node->kind() == onnx::Not && compare_node->kind() == onnx::Less) ||
+      compare_node->kind() == onnx::GreaterOrEqual) {
+    res = at::greater_equal(inputs[0], inputs[1]);
+  } else if (
+      compare_node->kind() == onnx::Less && prev_node->kind() != onnx::Not) {
+    res = at::less(inputs[0], inputs[1]);
+  } else if (
       (prev_node->kind() == onnx::Not &&
-       compare_node->kind() == onnx::Greater)) {
-    auto res = at::less(inputs[0], inputs[1]);
-    if (prev_node->kind() == onnx::Not)
-      res = at::less_equal(inputs[0], inputs[1]);
-    return at::is_nonzero(res);
+       compare_node->kind() == onnx::Greater) ||
+      compare_node->kind() == onnx::LessOrEqual) {
+    res = at::less_equal(inputs[0], inputs[1]);
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        false, "Condition value of the If node could not be constant-folded!");
   }
-  return false;
+
+  return at::is_nonzero(res);
 }
 
 // This pass return then or else branch of the If node depending on the

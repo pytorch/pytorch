@@ -151,7 +151,11 @@ void initJITBindings(PyObject* module) {
           })
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
       .def("_jit_pass_onnx_function_substitution", ONNXFunctionCallSubstitution)
-      .def("_jit_pass_onnx_fold_if", FoldIfNodeONNX)
+      .def(
+          "_jit_pass_onnx_fold_if",
+          [](std::shared_ptr<Graph>& graph) {
+            return FoldIfNodeONNX(graph->block());
+          })
       .def(
           "_jit_pass_onnx_peephole",
           [](std::shared_ptr<Graph>& graph,
