@@ -1840,10 +1840,9 @@ if(USE_KINETO)
     endif()
   endif()
 
-  message(STATUS "  CUDA_cupti_LIBRARY = ${CUDA_cupti_LIBRARY}")
-  message(STATUS "  CUPTI_INCLUDE_DIR = ${CUPTI_INCLUDE_DIR}")
-
   if(FOUND_CUPTI)
+    message(STATUS "  CUDA_cupti_LIBRARY = ${CUDA_cupti_LIBRARY}")
+    message(STATUS "  CUPTI_INCLUDE_DIR = ${CUPTI_INCLUDE_DIR}")
     if(NOT TARGET kineto)
       add_subdirectory("${KINETO_SOURCE_DIR}")
       message(STATUS "Configured Kineto as a dependency.")
