@@ -554,9 +554,65 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
   }
 }
 
-// [Forward Grad View]
-// Note that the code below relies on view op to generate tangent that are a view of the
-// input's tangent. And for inplace to modify the input's tangent inplace.
+
+// [Forward Grad View/inplace]
+// It is important to us to allow view and inplace to work with dual Tensors. These operations
+// should either compute the right gradient or raise a user-friendly error.
+
+// The basic case where all Tensors are dual Tensors is as follows:
+//     # Have:
+//     #   foo is a dual Tensor that is not a view
+//     #   bar is a dual Tensor of appropriate size (depending on cases) that is not a view
+//
+//     # Case 1: no view
+//     foo.copy_(bar)
+//
+//     # Case 2: with view, propagate from view to base
+//     view = foo[0]
+//     view.copy_(bar)
+//
+//     # Case 3: with view, propagate from base to view
+//     view = foo[0]
+//     foo.copy_(bar)
+//
+//     # In both cases, the forward grad of foo must be properly updated.
+//     # In the second and third cases, the forward grad of view must match
+//     # the one of foo for the subset they have in common.
+//
+// All these cases can be handled by the following layout constraint on the forward grad:
+//   - A Tensor and its forward grad (for all levels) must have the same metadata (size, stride
+//     and storage offset). Storage offset must be in this metadata because of as_strided.
+//   - View operations must create a forward grad that is a view of the base's forward grad.
+//   - Inplace operations must modify the input's forward grad inplace.
+//
+// This layout constraint is ensured in the `set_fw_grad` function below
+
+
+// More complex cases arrise when non-dual Tensor interact with dual Tensors.
+// The two most important cases are:
+//
+//     # Have:
+//     #   foo is a regular Tensor that is not a view
+//     #   bar is a dual Tensor of appropriate size (depending on cases) that is not a view
+//
+//     # Case 4: Changes on the view must propagate to its base
+//     view = foo[0]
+//     # view is still a regular Tensor here
+//     view.copy_(bar)
+//     # Now both view and foo are dual Tensor with appropriate forward grad
+//
+//     # Case 5: Changes on the base must propagate on all its views
+//     view = foo[0]
+//     # view is still a regular Tensor here
+//     base.copy_(bar)
+//     # Now both view and foo are dual Tensor with appropriate forward grad
+//
+//     # NB there is a case 6 involving changes on a view propagating to other views
+//     # but it is fully described by the two others and is skipped in this discussion.
+//
+// Case 4 is handled by set_fw_grad by properly setting the forward grad of the base if needed.
+// Case 5 is handled in fw_grad by reading the forward grad from the base if needed.
+
 
 namespace {
   // Check if two Tensor have the same storage offset, sizes and strides
@@ -617,10 +673,18 @@ void AutogradMeta::set_fw_grad(const Variable& new_grad_, const Variable& self, 
     // TODO(alband) remove this spurious version counter bump
     auto new_grad = new_grad_;
 
-    // For inplace ops on a Tensor that does not already have a forward grad and is a view, we propagate
-    // the tangent to the base and ensure that the new_grad is a view of that base's tangent.
     if (is_inplace_op && is_view_) {
       auto this_view_meta = static_cast<DifferentiableViewMeta*>(this);
+
+      // For inplace ops on a Tensor that does not already have a forward grad and is a view, we propagate
+      // the tangent to the base and ensure that the new_grad is a view of that base's tangent.
+      // This ensure that case 4 from [Forward Grad View/inplace] above works fine
+      // What happens in this long if statement is:
+      //   - Check if the base already has a grad
+      //   - If not, set a new fw_grad for it full of zeros
+      //   - Take a view of the base's forward grad
+      //   - Copy the given new_grad into this view
+      //   - Use this view as the new new_grad
       if (this_view_meta->has_fw_view()) {
         auto view_info = this_view_meta->get_forward_view();
         auto& base = view_info.base_;
@@ -652,6 +716,7 @@ void AutogradMeta::set_fw_grad(const Variable& new_grad_, const Variable& self, 
       }
     }
 
+    // Enforce the basic layout constraint
     if (!has_same_meta(new_grad, self)) {
       Tensor new_grad_with_meta = new_with_same_meta(self);
       new_grad_with_meta.copy_(new_grad);
@@ -671,7 +736,7 @@ const Variable& AutogradMeta::fw_grad(uint64_t level, const Variable& self) cons
   if (!direct_fw_grad.defined() && is_view_) {
     // For view that don't have a forward grad, check if their base has one that
     // has been defined by an inplace operation.
-    // See [Forward Grad View] for more details.
+    // This ensure that case 5 from [Forward Grad View/inplace] above works fine
     auto this_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(self));
     if (this_view_meta->has_fw_view()) {
       const auto& view_info = this_view_meta->get_forward_view();

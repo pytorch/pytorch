@@ -329,7 +329,7 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False, fw_mode=False):
     """
 
     is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "jvp")
-    inputs = _grad_preprocess(inputs, create_graph=create_graph, need_graph=False)
+    inputs = _grad_preprocess(inputs, create_graph=create_graph, need_graph=not fw_mode)
 
     if v is not None:
         _, v = _as_tuple(v, "v", "jvp")

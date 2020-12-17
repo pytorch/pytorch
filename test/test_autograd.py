@@ -5462,7 +5462,7 @@ class TestAutogradFunctional(TestCase):
 
         inp = torch.rand(4)
         v = torch.rand(4)
-        with self.assertRaisesRegex(RuntimeError, "The output of the user-provided function is independent of input 0"):
+        with self.assertRaisesRegex(RuntimeError, "Output 0 of the user-provided function does not require gradients."):
             res = autogradF.jvp(foo, inp, v, strict=True)
         res = autogradF.jvp(foo, inp, v, strict=False)
         self._assert_same_struct(res[1], res[0])
