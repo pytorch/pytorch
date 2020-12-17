@@ -92,6 +92,8 @@ class Tracer(TracerBase):
                 if a is p:
                     return self.create_node('get_attr', n, (), {})
 
+        # For NamedTuple instances that appear literally as args, we emit
+        # a node to construct the NamedTuple and use that Node as the argument.
         if isinstance(a, tuple) and hasattr(a, '_fields'):
             args = tuple(self.create_arg(elem) for elem in a)
             return self.create_node('call_function', a.__class__, args, {})
