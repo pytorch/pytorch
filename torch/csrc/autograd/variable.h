@@ -413,6 +413,9 @@ struct TORCH_API ViewInfo {
 ///     base.copy_(var)
 ///     _, fw_grad = fwAD.unpack_dual(view) <- fw_grad should be an all ones tensor
 ///
+/// See Note [Forward Grad View/inplace] for more details on how we handle these hard cases.
+///
+///
 /// DifferentiableViewMeta is created to support gradient tracking of
 /// such **in-place** operations. In particular,
 ///   + if an in-place op is done on base, the grad_fn field of the view may
