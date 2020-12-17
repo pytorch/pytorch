@@ -1168,6 +1168,16 @@ class TestReductions(TestCase):
             np_fn = partial(np.any, axis=dim, keepdims=keepdim)
             self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=exact_dtype)
 
+        def _test_output_dtype(x):
+            # This test will fail once the functions return bool output
+            # for uint8 input.
+            expected_dtype = torch.uint8 if dtype == torch.uint8 else torch.bool
+            self.assertEqual(torch.all(x).dtype, expected_dtype)
+            self.assertEqual(torch.any(x).dtype, expected_dtype)
+
+            self.assertEqual(torch.all(x, dim=0).dtype, expected_dtype)
+            self.assertEqual(torch.any(x, dim=0).dtype, expected_dtype)
+
         for ndim in range(5):
             shape = _rand_shape(ndim, 1, 5)
             x = _generate_input(shape, dtype, device, with_extremal=False)
@@ -1189,7 +1199,7 @@ class TestReductions(TestCase):
             _test_all_any(x)
             _test_all_any(x.T)
             _test_all_any(x[..., ::2])
-
+            _test_output_dtype(x)
             for dim in range(ndim):
                 x = _generate_input(shape, dtype, device, with_extremal=False)
                 _test_all_any_with_dim(x, dim)
