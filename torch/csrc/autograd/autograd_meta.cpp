@@ -189,6 +189,7 @@ const Variable& AutogradMeta::fw_grad(uint64_t level, const Variable& self) cons
     // This ensure that case 5 from [Forward Grad View/inplace] above works fine
     auto const_view_meta = static_cast<const torch::autograd::DifferentiableViewMeta*>(this);
     // This is ok to do as we ONLY modify fw_grad_ and this field is properly locked in all methods
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
     auto this_view_meta = const_cast<torch::autograd::DifferentiableViewMeta*>(const_view_meta);
     if (this_view_meta->has_fw_view()) {
       const auto& view_info = this_view_meta->get_forward_view();
