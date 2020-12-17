@@ -1305,20 +1305,18 @@ class TestFakeQuantize(TestCase):
                 dZeroPoint_actual = zero_point_curr.to(device).grad.detach()
                 tolerance = 1e-4
 
-                if not all([torch.allclose(dX_expected, dX_actual, rtol=tolerance, atol=tolerance),
-                           torch.allclose(dScale_expected * grad_factor, dScale_actual, rtol=tolerance, atol=tolerance),
-                           torch.allclose(dZeroPoint_expected * grad_factor, dZeroPoint_actual, rtol=tolerance, atol=tolerance)]):
-                    print(X_curr, scale_curr, zero_point_curr)
-
                 self.assertTrue(
                     torch.allclose(dX_expected, dX_actual, rtol=tolerance, atol=tolerance),
-                    "Expected dX={} to match X.grad={}".format(dX_expected, dX_actual))
+                    "Expected dX={} to match X.grad={}, X={}, s={}, z={}".format(
+                        dX_expected, dX_actual, X_curr, scale_curr, zero_point_curr))
                 self.assertTrue(
                     torch.allclose(dScale_expected * grad_factor, dScale_actual, rtol=tolerance, atol=tolerance),
-                    "Expected dScale={} to match scale.grad={}".format(dScale_expected * grad_factor, dScale_actual))
+                    "Expected dScale={} to match scale.grad={}, X={}, s={}, z={}".format(dScale_expected * grad_factor, dScale_actual,
+                    X_curr, scale_curr, zero_point_curr))
                 self.assertTrue(
                     torch.allclose(dZeroPoint_expected * grad_factor, dZeroPoint_actual, rtol=tolerance, atol=tolerance),
-                    "Expected dZeroPoint={} to match zero_point.grad={}".format(dZeroPoint_expected * grad_factor, dZeroPoint_actual))
+                    "Expected dZeroPoint={} to match zero_point.grad={}, X={}, s={}, z={}".format(dZeroPoint_expected * grad_factor, dZeroPoint_actual,
+                    X_curr, scale_curr, zero_point_curr))
                 X_curr.grad.data.zero_()
                 scale_curr.grad.data.zero_()
                 zero_point_curr.grad.data.zero_()
