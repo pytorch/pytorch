@@ -212,8 +212,6 @@ class TestUnaryUfuncs(TestCase):
         for alt, inplace in ((op.get_method(), False), (op.get_inplace(), True),
                              (torch.jit.script(_fn), False)):
             if alt is None:
-                with self.assertRaisesRegex(TypeError, "'NoneType' object is not callable"):
-                    alt(t.clone())
                 continue
 
             if inplace and op.promotes_integers_to_float and dtype in integral_types() + (torch.bool,):
