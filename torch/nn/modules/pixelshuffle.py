@@ -6,26 +6,30 @@ from torch import Tensor
 
 class PixelShuffle(Module):
     r"""Rearranges elements in a tensor of shape :math:`(*, C \times r^2, H, W)`
-    to a tensor of shape :math:`(*, C, H \times r, W \times r)`.
+    to a tensor of shape :math:`(*, C, H \times r, W \times r)`, where r is an upscale factor.
 
     This is useful for implementing efficient sub-pixel convolution
     with a stride of :math:`1/r`.
 
-    Look at the paper:
+    See the paper:
     `Real-Time Single Image and Video Super-Resolution Using an Efficient Sub-Pixel Convolutional Neural Network`_
     by Shi et. al (2016) for more details.
-
-    Note that this function can take inputs with any number of batch dimensions:
-    :math:`(L, H_{in}, W_{in})`, :math:`(N, L, H_{in}, W_{in})`, :math:`(N_1, N_2, L, H_{in}, W_{in})`, etc.
 
     Args:
         upscale_factor (int): factor to increase spatial resolution by
 
     Shape:
-        - Input: :math:`(*, L, H_{in}, W_{in})` where :math:`L=C \times \text{upscale\_factor}^2`
-        - Output: :math:`(*, C, H_{out}, W_{out})` where
-          :math:`H_{out} = H_{in} \times \text{upscale\_factor}`
-          and :math:`W_{out} = W_{in} \times \text{upscale\_factor}`
+        - Input: :math:`(*, C_{in}, H_{in}, W_{in})`, where * is zero or more batch dimensions
+        - Output: :math:`(*, C_{out}, H_{out}, W_{out})`, where
+
+    .. math::
+        C_{out} = C_{in} \div \text{upscale\_factor}^2
+
+    .. math::
+        H_{out} = H_{in} \times \text{upscale\_factor}
+
+    .. math::
+        W_{out} = W_{in} \times \text{upscale\_factor}
 
     Examples::
 
@@ -53,21 +57,27 @@ class PixelShuffle(Module):
 
 
 class PixelUnshuffle(Module):
-    r"""Rearranges elements in a tensor of shape :math:`(*, C, H \times r, W \times r)`
-    to a tensor of shape :math:`(*, C \times r^2, H, W)`. This is the inverse operation
-    of :class:`~torch.nn.PixelShuffle`.
+    r"""Reverses the :class:`~torch.nn.PixelShuffle` operation by rearranging elements in a tensor of shape :math:`(*, C, H \times r, W \times r)` to a tensor of shape :math:`(*, C \times r^2, H, W)`, where r is a downscale factor.
 
-    Note that this function can take inputs with any number of batch dimensions:
-    :math:`(C \times r^2, H, W)`, :math:`(N, C \times r^2, H, W)`, :math:`(N_1, N_2, C \times r^2, H, W)`, etc.
+    See the paper:
+    `Real-Time Single Image and Video Super-Resolution Using an Efficient Sub-Pixel Convolutional Neural Network`_
+    by Shi et. al (2016) for more details.
 
     Args:
         downscale_factor (int): factor to decrease spatial resolution by
 
     Shape:
-        - Input: :math:`(*, C, H_{in}, W_{in})`
-        - Output: :math:`(*, L, H_{out}, W_{out})` where `L=C \times \text{downscale\_factor}^2`
-          :math:`H_{out} = H_{in} \div \text{downscale\_factor}`
-          and :math:`W_{out} = W_{in} \div \text{downscale\_factor}`
+        - Input: :math:`(*, C_{in}, H_{in}, W_{in})`, where * is zero or more batch dimensions
+        - Output: :math:`(*, C_{out}, H_{out}, W_{out})`, where
+
+    .. math::
+        C_{out} = C_{in} \times \text{downscale\_factor}^2
+
+    .. math::
+        H_{out} = H_{in} \div \text{downscale\_factor}
+
+    .. math::
+        W_{out} = W_{in} \div \text{downscale\_factor}
 
     Examples::
 
