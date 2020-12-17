@@ -3,6 +3,7 @@
 #include <torch/serialize/archive.h>
 #include <torch/serialize/tensor.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
 
 #include <utility>
 
