@@ -33,6 +33,12 @@ inline double zabs <c10::complex<double>, double> (c10::complex<double> z) {
   return std::abs(z);
 }
 
+// This overload corresponds to non-complex dtypes.
+// The function is consistent with its NumPy equivalent
+// for non-complex dtypes where `pi` is returned for
+// negative real numbers and `0` is returned for 0 or positive
+// real numbers.
+// Note: `nan` is propagated.
 template <typename SCALAR_TYPE, typename VALUE_TYPE=SCALAR_TYPE>
 inline VALUE_TYPE angle_impl (SCALAR_TYPE z) {
   if (at::_isnan(z)) {
