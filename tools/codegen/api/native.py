@@ -81,10 +81,37 @@ def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments], *, is_out
             )]
         else:
             assert local.use_c10_dispatcher() == UseC10Dispatcher.full
-            return argument(a.dtype, is_out=is_out) + \
-                argument(a.layout, is_out=is_out) + \
-                argument(a.device, is_out=is_out) + \
-                argument(a.pin_memory, is_out=is_out)
+            default = None
+            if should_default:
+                default = '{}'
+            # TODO: Not sure why the arguments assigned here are for
+            # TensorOptionsArguments and not the constituent pieces.  It seems
+            # to matter
+            return [
+                Binding(
+                    ctype=OptionalCType(BaseCType('ScalarType', 'dtype')),
+                    name='dtype',
+                    default=default,
+                    argument=a,
+                ),
+                Binding(
+                    ctype=OptionalCType(BaseCType('Layout', 'layout')),
+                    name='layout',
+                    default=default,
+                    argument=a,
+                ),
+                Binding(
+                    ctype=OptionalCType(BaseCType('Device', 'device')),
+                    name='device',
+                    default=default,
+                    argument=a,
+                ),
+                Binding(
+                    ctype=OptionalCType(BaseCType('bool', 'pin_memory')),
+                    name='pin_memory',
+                    default=default,
+                    argument=a,
+                )]
     else:
         assert_never(a)
 
