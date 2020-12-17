@@ -22,6 +22,13 @@ std::unique_ptr<FunctionSchema> inferFunctionSchemaFromFunctor() {
   using func_type = typename c10::guts::infer_function_traits_t<KernelFunctor>::func_type;
   return std::make_unique<FunctionSchema>(inferFunctionSchemaFlattenedReturns<func_type>("", ""));
 }
+
+// TODO: temp
+template<class KernelFunctor>
+std::unique_ptr<FunctionSchema> inferFunctionSchemaFromFunctor_withKeys() {
+  using func_type = typename c10::guts::infer_function_traits_withKeys_t<KernelFunctor>::func_type;
+  return std::make_unique<FunctionSchema>(inferFunctionSchemaFlattenedReturns<func_type>("", ""));
+}
 }
 
 /**

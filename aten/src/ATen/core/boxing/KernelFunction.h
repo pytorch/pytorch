@@ -98,6 +98,9 @@ public:
   template<class Return, class... Args>
   Return call(const OperatorHandle& opHandle, Args... args) const;
 
+  template<class Return, class... Args>
+  Return call_withKey(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Args... args) const;
+
   /**
    * Create a KernelFunction from a boxed function.
    *
@@ -122,6 +125,9 @@ public:
    */
   template<bool AllowLegacyTypes = false, class KernelFunctor>
   static KernelFunction makeFromUnboxedFunctor(std::unique_ptr<OperatorKernel> kernelFunctor);
+
+  template<bool AllowLegacyTypes = false, class KernelFunctor>
+  static KernelFunction makeFromUnboxedFunctor_withKeys(std::unique_ptr<OperatorKernel> kernelFunctor);
 
   /**
    * Create a KernelFunction from an unboxed functor and prevent creation of an
@@ -158,6 +164,9 @@ public:
   template<class FuncPtr, bool AllowLegacyTypes = false>
   static KernelFunction makeFromUnboxedFunction(FuncPtr);
 
+  template<class FuncPtr, bool AllowLegacyTypes = false>
+  static KernelFunction makeFromUnboxedFunction_withKeys(FuncPtr);
+
   /**
    * Create a KernelFunction from an unboxed function and prevent creation of an
    * unboxing-wrapper. This means that you cannot call this KernelFunction
@@ -189,6 +198,9 @@ public:
   template<bool AllowLegacyTypes = false, class FuncType>
   static KernelFunction makeFromUnboxedRuntimeFunction(FuncType* func);
 
+  template<bool AllowLegacyTypes = false, class FuncType>
+  static KernelFunction makeFromUnboxedRuntimeFunction_withKeys(FuncType* func);
+
   template<class FuncType>
   static KernelFunction makeFromUnboxedOnlyRuntimeFunction(FuncType* func);
 
@@ -208,6 +220,11 @@ public:
   static std::enable_if_t<guts::is_stateless_lambda<std::decay_t<Lambda>>::value, KernelFunction> makeFromUnboxedLambda(Lambda&& lambda);
   template<bool AllowLegacyTypes = false, class Lambda>
   static std::enable_if_t<!guts::is_stateless_lambda<std::decay_t<Lambda>>::value, KernelFunction> makeFromUnboxedLambda(Lambda&& lambda);
+
+  template<bool AllowLegacyTypes = false, class Lambda>
+  static std::enable_if_t<guts::is_stateless_lambda<std::decay_t<Lambda>>::value, KernelFunction> makeFromUnboxedLambda_withKeys(Lambda&& lambda);
+  template<bool AllowLegacyTypes = false, class Lambda>
+  static std::enable_if_t<!guts::is_stateless_lambda<std::decay_t<Lambda>>::value, KernelFunction> makeFromUnboxedLambda_withKeys(Lambda&& lambda);
 
   std::string dumpState() const;
   // For testing internal invariants only

@@ -195,7 +195,7 @@ void retain_grad(Tensor & self) {
 }
 
 // We don't have an outplace copy, so this can't be generated automatically
-Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
+Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool non_blocking) {
   jit::Value* output = nullptr;
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
@@ -213,7 +213,12 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    self_.copy_(src_, non_blocking);
+    //self_.copy_(src_, non_blocking);
+    static auto op = c10::Dispatcher::singleton()
+      .findSchemaOrThrow("aten::copy_", "")
+      .typed<Tensor & (Tensor &, const Tensor &, bool)>();
+    c10::Dispatcher::singleton()
+      .redispatch_withKey<Tensor &, Tensor &, const Tensor &, bool>(op, ks & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther), self_, src_, non_blocking);
   }
   increment_version(self);
   rebase_history(self , std::move(grad_fn));
@@ -221,6 +226,7 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
 }
 
 Tensor& resize_(
+    c10::DispatchKeySet ks,
     Tensor& self,
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
@@ -230,12 +236,18 @@ Tensor& resize_(
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    self_.resize_(size, std::move(optional_memory_format));
+    //self_.resize_(size, std::move(optional_memory_format));
+    static auto op = c10::Dispatcher::singleton()
+      .findSchemaOrThrow("aten::resize_", "")
+      .typed<Tensor & (Tensor &, IntArrayRef, c10::optional<MemoryFormat>)>();
+    c10::Dispatcher::singleton()
+      .redispatch_withKey<Tensor &, Tensor &, IntArrayRef, c10::optional<MemoryFormat>>(op, ks & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther), self_, size, std::move(optional_memory_format));
   }
   return self;
 }
 
 Tensor& resize_as_(
+    c10::DispatchKeySet ks,
     Tensor& self,
     const Tensor& the_template,
     c10::optional<MemoryFormat> optional_memory_format) {
@@ -246,7 +258,12 @@ Tensor& resize_as_(
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    at::resize_as_(self_, the_template_, std::move(optional_memory_format));
+    //at::resize_as_(self_, the_template_, std::move(optional_memory_format));
+    static auto op = c10::Dispatcher::singleton()
+      .findSchemaOrThrow("aten::resize_as_", "")
+      .typed<Tensor & (Tensor &, const Tensor &, c10::optional<MemoryFormat>)>();
+    c10::Dispatcher::singleton()
+      .redispatch_withKey<Tensor &, Tensor &, const Tensor &, c10::optional<MemoryFormat>>(op, ks & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther), self_, the_template_, std::move(optional_memory_format));
   }
   return self;
 }
@@ -308,11 +325,11 @@ Tensor & detach_(Tensor & self) {
 // - Ops registered to DispatchKey::Autograd below must be included in `MANUAL_AUTOGRAD` in tools/autograd/gen_variable_type.py
 
 TORCH_LIBRARY_IMPL(aten, Autograd, m) {
-  m.impl("resize_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::resize_)));
-  m.impl("resize_as_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::resize_as_)));
+  m.impl_withKeys("resize_", torch::dispatch_withKeys(DispatchKey::Autograd, TORCH_FN(VariableType::resize_)));
+  m.impl_withKeys("resize_as_", torch::dispatch_withKeys(DispatchKey::Autograd, TORCH_FN(VariableType::resize_as_)));
   m.impl("detach", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::detach)));
   m.impl("detach_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::detach_)));
-  m.impl("copy_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::copy_)));
+  m.impl_withKeys("copy_", torch::dispatch_withKeys(DispatchKey::Autograd, TORCH_FN(VariableType::copy_)));
   // For backward() and requires_grad_(), we need the DefaultBackend kernel, but we also need the Autograd backend
   // kernel, because when called with a VariableTensorId tensor, it goes through the variable fallback kernel,
   // which calls callBoxed(), which doesn't support optional tensor arguments yet and backward() has an optional

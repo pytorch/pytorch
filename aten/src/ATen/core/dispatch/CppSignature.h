@@ -25,6 +25,15 @@ public:
         return CppSignature(std::type_index(typeid(decayed_function_type)));
     }
 
+    // TODO: temp
+    template<class FuncType>
+    static CppSignature make_withKeys() {
+        // Normalize functors, lambdas, function pointers, etc. into the plain function type
+        using decayed_function_type = typename guts::infer_function_traits_withKeys_t<std::decay_t<FuncType>>::func_type;
+
+        return CppSignature(std::type_index(typeid(decayed_function_type)));
+    }
+
     std::string name() const {
         return c10::demangle(signature_.name());
     }

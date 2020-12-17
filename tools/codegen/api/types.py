@@ -277,8 +277,9 @@ class DispatcherSignature:
     def name(self) -> str:
         return dispatcher.name(self.func)
 
-    def defn(self, name: Optional[str] = None) -> str:
-        args_str = ', '.join(map(str, self.arguments()))
+    def defn(self, name: Optional[str] = None, *, addDispatchKeySet: bool = False) -> str:
+        args = ('c10::DispatchKeySet',) + self.arguments() if addDispatchKeySet else self.arguments()
+        args_str = ', '.join(map(str, args))
         if name is None:
             name = self.name()
         return f"{self._returns_type} {name}({args_str})"
@@ -287,8 +288,11 @@ class DispatcherSignature:
         return dispatcher.exprs(self.arguments())
 
     # Return the C++ function type, e.g., something like int(bool)
-    def type(self) -> str:
-        dispatcher_args_types_str = ', '.join(a.type for a in self._arguments)
+    def type(self, *, addDispatchKeySet: bool = False) -> str:
+        arg_types = [a.type for a in self._arguments]
+        if addDispatchKeySet:
+            arg_types.insert(0, 'c10::DispatchKeySet')
+        dispatcher_args_types_str = ', '.join(arg_types)
         return f'{self._returns_type} ({dispatcher_args_types_str})'
 
     @staticmethod
@@ -349,8 +353,9 @@ class NativeSignature:
     def name(self) -> str:
         return native.name(self.func)
 
-    def defn(self, name: Optional[str] = None) -> str:
-        args_str = ', '.join(map(str, self.arguments()))
+    def defn(self, name: Optional[str] = None, *, addDispatchKeySet: bool = False) -> str:
+        args = ('c10::DispatchKeySet',) + self.arguments() if addDispatchKeySet else self.arguments()
+        args_str = ', '.join(map(str, args))
         if name is None:
             name = self.name()
         return f"{self._returns_type} {name}({args_str})"

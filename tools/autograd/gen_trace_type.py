@@ -325,7 +325,7 @@ static auto op = c10::Dispatcher::singleton()
     .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
     .typed<${arg_types}>();
 ${assign_return_values}c10::Dispatcher::singleton()
-    .redispatch<${ret_and_arg_types}>(${redispatch_args});
+    .redispatch_withKey<${ret_and_arg_types}>(${redispatch_args});
 """)
 
 def emit_trace_body(f: NativeFunction) -> List[str]:
@@ -338,7 +338,8 @@ def emit_trace_body(f: NativeFunction) -> List[str]:
     dispatcher_exprs = dispatcher_sig.exprs()
 
     ret_and_arg_types = ', '.join([dispatcher_sig._returns_type] + [a.type for a in dispatcher_exprs])
-    redispatch_args = ', '.join(['op', 'c10::DispatchKey::Tracer'] + [a.expr for a in dispatcher_exprs])
+    dispatch_key_set = 'ks & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::Tracer)'
+    redispatch_args = ', '.join(['op', dispatch_key_set] + [a.expr for a in dispatcher_exprs])
 
     assign_return_values = f'{tie_return_values(f)} = ' \
                            if f.func.kind() == SchemaKind.functional and f.func.returns else ''
@@ -375,10 +376,10 @@ def method_definition(f: NativeFunction) -> Optional[str]:
         return None
 
     if f.use_c10_dispatcher.dispatcher_uses_new_style():
-        formals = ', '.join(f'{cpp.argument_type(a)} {a.name}' for a in f.func.schema_order_arguments())
+        formals = ', '.join(['c10::DispatchKeySet ks'] + [f'{cpp.argument_type(a)} {a.name}' for a in f.func.schema_order_arguments()])
     else:
         sig_group = CppSignatureGroup.from_schema(f.func, method=False)
-        formals = ', '.join(f'{a.type} {a.name}' for a in sig_group.signature.arguments())
+        formals = ', '.join(['c10::DispatchKeySet ks'] + [f'{a.type} {a.name}' for a in sig_group.signature.arguments()])
 
     return METHOD_DEFINITION.substitute(
         return_type=cpp.returns_type(f.func.returns),
@@ -388,13 +389,13 @@ def method_definition(f: NativeFunction) -> Optional[str]:
     )
 
 WRAPPER_REGISTRATION = CodeTemplate("""\
-m.impl("${name}",
+m.impl_withKeys("${name}",
        TORCH_FN(${class_type}::${type_wrapper_name})
 );
 """)
 
 UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
-m.impl_UNBOXED("${name}", &${class_type}::${type_wrapper_name});
+m.impl_UNBOXED_withKeys("${name}", &${class_type}::${type_wrapper_name});
 """)
 
 @with_native_function

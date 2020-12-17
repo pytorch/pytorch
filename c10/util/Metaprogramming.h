@@ -24,6 +24,17 @@ struct function_traits<Result (Args...)> {
   using parameter_types = typelist::typelist<Args...>;
   static constexpr auto number_of_parameters = sizeof...(Args);
 };
+//
+template<class Func> struct function_traits_withKeys {
+  static_assert(!std::is_same<Func, Func>::value, "In function_traits_withKeys<Func>, Func must be a plain function type and have at least one argument.");
+};
+template<class Result, class FirstArg, class... Args>
+struct function_traits_withKeys<Result (FirstArg, Args...)> {
+  using func_type = Result (Args...);
+  using return_type = Result;
+  using parameter_types = typelist::typelist<Args...>;
+  static constexpr auto number_of_parameters = sizeof...(Args);
+};
 
 /**
  * infer_function_traits: creates a `function_traits` type for a simple
@@ -34,20 +45,26 @@ struct function_traits<Result (Args...)> {
 template <typename Functor>
 struct infer_function_traits {
   using type = function_traits<c10::guts::detail::strip_class_t<decltype(&Functor::operator())>>;
+  using type_withKeys = function_traits_withKeys<c10::guts::detail::strip_class_t<decltype(&Functor::operator())>>;
 };
 
 template <typename Result, typename... Args>
 struct infer_function_traits<Result (*)(Args...)> {
   using type = function_traits<Result(Args...)>;
+  using type_withKeys = function_traits_withKeys<Result(Args...)>;
 };
 
 template <typename Result, typename... Args>
 struct infer_function_traits<Result (Args...)> {
   using type = function_traits<Result(Args...)>;
+  using type_withKeys = function_traits_withKeys<Result(Args...)>;
 };
 
 template <typename T>
 using infer_function_traits_t = typename infer_function_traits<T>::type;
+
+template <typename T>
+using infer_function_traits_withKeys_t = typename infer_function_traits<T>::type_withKeys;
 
 /**
  * Use extract_arg_by_filtered_index to return the i-th argument whose
