@@ -1275,7 +1275,7 @@ class TestFakeQuantize(TestCase):
     def _test_learnable_backward_per_channel(self, X_base, device, scale_base, zero_point_base, axis):
         r"""Tests the backward path of the learnable FakeQuantizePerTensorAffine op.
         """
-        for n_bits in (4, 8):
+        for n_bits in [8]:
             quant_min, quant_max = 0, 2 ** n_bits - 1
 
             scale_base = scale_base.to(device)
@@ -1296,6 +1296,7 @@ class TestFakeQuantize(TestCase):
                 dX, dScale, dZeroPoint = _fake_quantize_learnable_per_channel_affine_grad_reference(
                     dout, X_curr, scale_curr, zero_point_curr, axis, quant_min, quant_max, device)
                 Y_prime.backward(dout)
+                torch.cuda.synchronize(device)
 
                 dX_expected = dX.to(device).detach()
                 dX_actual = X_curr.to(device).grad.detach()
