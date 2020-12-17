@@ -949,6 +949,14 @@ class TestPostTrainingDynamic(QuantizationTestCase):
             torch.nn.GRU: qconfig
         }
 
+        def checkQuantized(model, module_type):
+            mod_type_map = {'LSTM': torch.nn.quantized.dynamic.LSTM,
+                            'GRU': torch.nn.quantized.dynamic.GRU}
+            mod_repr_map = {'LSTM': 'DynamicQuantizedLSTM',
+                            'GRU': 'DynamicQuantizedGRU'}
+            self.assertTrue(mod_repr_map[module_type] in str(model_quantized))
+            self.checkDynamicQuantizedModule(model_quantized.mod, mod_type_map[module_type], dtype)
+
         for module_type in ['LSTM', 'GRU']:
             model = RNNDynamicModel(module_type).eval()
 
@@ -957,19 +965,12 @@ class TestPostTrainingDynamic(QuantizationTestCase):
             else:
                 model_quantized = quantize_dynamic(model=model, qconfig_spec=qconfig_dict, dtype=dtype)
 
-            def checkQuantized(model, module_type):
-                mod_type_map = {'LSTM': torch.nn.quantized.dynamic.LSTM,
-                                'GRU': torch.nn.quantized.dynamic.GRU}
-                mod_repr_map = {'LSTM': 'DynamicQuantizedLSTM',
-                                'GRU': 'DynamicQuantizedGRU'}
-                self.assertTrue(mod_repr_map[module_type] in str(model_quantized))
-                self.checkDynamicQuantizedModule(model_quantized.mod, mod_type_map[module_type], dtype)
             checkQuantized(model_quantized, module_type)
             self.checkScriptable(model_quantized, [[x]], check_save_load=True)
 
-            class ScriptWrapperPacked(torch.nn.Module):
+            class ScriptWrapperPackedLSTM(torch.nn.Module):
                 def __init__(self, cell):
-                    super(ScriptWrapperPacked, self).__init__()
+                    super(ScriptWrapperPackedLSTM, self).__init__()
                     self.cell = cell
 
                 def forward(self,
@@ -989,7 +990,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
                     # type: (...) -> Tuple[PackedSequence, torch.Tensor]
                     return self.cell(x)
 
-            script_wrapper_map = {'LSTM': ScriptWrapperPacked,
+            script_wrapper_map = {'LSTM': ScriptWrapperPackedLSTM,
                                   'GRU': ScriptWrapperPackedGRU}
             packed_input = torch.nn.utils.rnn.pack_padded_sequence(x, torch.tensor([10, 5, 2]))
             model_with_packed_input = script_wrapper_map[module_type](model_quantized.mod)
