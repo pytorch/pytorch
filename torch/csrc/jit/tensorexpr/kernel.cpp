@@ -249,6 +249,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     const torch::jit::Value* v) {
   switch (v->node()->kind()) {
     case aten::_cast_Float:
+    case aten::to:
     case aten::sigmoid:
     case aten::reciprocal:
     case aten::neg:
@@ -826,6 +827,17 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::_cast_Float: {
       return computeOneOperand("aten_cast_float", v, [](const ExprHandle& a) {
         return cast<float>(a);
+      });
+    } break;
+
+    case aten::to: {
+      // see handling of aten::to in tensorexpr_fuser.cpp for why we only
+      // need to handle the first input
+      auto node = v->node();
+      return computeOneOperand("aten_to", v, [node](const ExprHandle& a) {
+        auto output_dtype = findDtypeForValue(node->output());
+        TORCH_INTERNAL_ASSERT(output_dtype);
+        return Cast::make(ToDtype(*output_dtype), a);
       });
     } break;
 
