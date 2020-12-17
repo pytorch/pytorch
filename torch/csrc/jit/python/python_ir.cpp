@@ -526,6 +526,7 @@ void initPythonIRBindings(PyObject* module_) {
           "Find all nodes",
           py::arg("kind"),
           py::arg("recurse") = true)
+      .def("updateLoopInputs", [](Node& n) { return updateLoopNodeInputs(&n); })
       .def("input", [](Node& n) { return n.input(); })
       .def("output", [](Node& n) { return n.output(); })
       .NS(addInput)

@@ -9,7 +9,7 @@ import numpy
 from torch.onnx.symbolic_helper import parse_args, _unimplemented, _is_tensor_list
 from torch.onnx.symbolic_opset9 import expand, unused
 from torch.nn.modules.utils import _single, _pair, _triple
-from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
+from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block, _update_loop_inputs
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
@@ -943,8 +943,7 @@ def embedding_bag(g,
     _add_output_to_block(loop_block, loop_condition)
     _add_output_to_block(loop_block, embeddings)
     # This pass does all required type casting for loop inputs (condition and iter)
-    torch._C._jit_pass_fixup_onnx_loop_node_inputs(loop.node())
-
+    _update_loop_inputs(loop.node())
     # aten::embedding_bag returns a tuple of 4 elements: output, offset2bag, bag_size, max_indices.
     # But the last three outputs are not used in torch.nn.EmbeddingBag or torch.nn.functional.embedding_bag.
     return loop.node().output(), None, None, None
