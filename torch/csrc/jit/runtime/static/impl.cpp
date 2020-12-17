@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/interned_strings.h>
 #include <c10/core/CPUAllocator.h>
 #include <caffe2/core/scope_guard.h>
@@ -212,6 +213,7 @@ size_t AssignRegisters(
     if (!optimize_memory) {
       return num_regs++;
     }
+    TORCH_CHECK(!value_to_reg.count(v));
     auto iter = lm.first.find(v);
     if (iter == lm.first.end()) {
       return num_regs++;
@@ -398,6 +400,10 @@ StaticRuntime::StaticRuntime(
   }
 }
 
+size_t StaticRuntime::num_outputs() const {
+  return module_->output_regs.size();
+}
+
 std::vector<at::Tensor> StaticRuntime::run(
     const std::vector<at::Tensor>& inps) {
   std::vector<c10::IValue> stack;
@@ -424,21 +430,31 @@ std::vector<at::Tensor> StaticRuntime::run(
 c10::IValue StaticRuntime::run(
     const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
+  // We assume inference workloads, so we do not need
+  // autograd. Enabling this is a significant win on dispatcher
+  // overhead because it saves a round of dispatch for at least some
+  // functions, such as resize_ and resize_as_.
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+
   if (planner_) {
     planner_->allocate();
   }
 
-  std::vector<IValue> stack(args);
   if (!kwargs.empty()) {
     // This is not ideal
     TORCH_CHECK(
         module_->schema != nullptr,
         "Schema is not available. Consider creating the Static Runtime "
         "with StaticRuntime(const torch::jit::Module& m) instead.");
-    module_->schema->checkAndNormalizeInputs(stack, kwargs);
-  }
-  for (size_t i = 0; i < stack.size(); i++) {
-    Input(i) = stack[i];
+    std::vector<c10::IValue> s = args;
+    module_->schema->checkAndNormalizeInputs(s, kwargs);
+    for (size_t i = 0; i < s.size(); i++) {
+      Input(i) = s[i];
+    }
+  } else {
+    for (size_t i = 0; i < args.size(); i++) {
+      Input(i) = args[i];
+    }
   }
 
   // NB: before optimizing the order of execution, ensure that the
@@ -457,7 +473,14 @@ c10::IValue StaticRuntime::run(
   }
 
   // no need to keep references of outputs in static runtime anymore
-  DCHECK(module_->output_regs.size() == 1);
+  if (num_outputs() > 1) {
+    std::vector<c10::IValue> outputs;
+    outputs.reserve(num_outputs());
+    for (const auto& reg : module_->output_regs) {
+      outputs.emplace_back(reg_[reg]);
+    }
+    return c10::ivalue::Tuple::create(outputs);
+  }
   return std::move(reg_[module_->output_regs[0]]);
 }
 
@@ -534,6 +557,10 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     const int warmup_runs,
     const int main_runs) {
   TORCH_CHECK(warmup_runs >= 0 && main_runs >= 1);
+
+  // See comment on above use of AutoNonVariableTypeMode for
+  // explanation.
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
 
   IndividualMetrics results;
   results.total_time = 0.0;

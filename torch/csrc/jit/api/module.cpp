@@ -107,15 +107,26 @@ Module Method::owner() const {
   return Module(owner_);
 }
 void Method::run(Stack& stack) {
-  stack.insert(stack.begin(), owner()._ivalue());
+  stack.insert(stack.begin(), owner()._ivalue()); // self
   RECORD_TORCHSCRIPT_FUNCTION(name(), stack);
   function_->run(stack);
 }
 
 IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs) {
-  stack.insert(stack.begin(), owner()._ivalue());
+  stack.insert(stack.begin(), owner()._ivalue()); // self
   RECORD_TORCHSCRIPT_FUNCTION(name(), stack);
   return (*function_)(std::move(stack), kwargs);
+}
+
+c10::intrusive_ptr<c10::ivalue::Future> Method::run_async(
+    std::vector<IValue> stack,
+    const Kwargs& kwargs,
+    TaskLauncher taskLauncher) {
+  stack.insert(stack.begin(), owner()._ivalue());
+  RECORD_TORCHSCRIPT_FUNCTION(name(), stack);
+
+  function_->getSchema().checkAndNormalizeInputs(stack, kwargs);
+  return function_->runAsync(stack, std::move(taskLauncher));
 }
 
 void Module::clone_method(

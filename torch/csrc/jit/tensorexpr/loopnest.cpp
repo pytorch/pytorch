@@ -154,6 +154,14 @@ class Vectorizer : public IRMutator {
     });
   }
 
+  const Expr* mutate(const BitCast* v) override {
+    std::vector<const Expr*> inputs = {v->src_value()};
+    return try_vectorize(v, inputs, [&]() {
+      return BitCast::make(
+          Dtype(v->dtype().scalar_type(), lanes_), ExprHandle(inputs[0]));
+    });
+  }
+
   const Expr* mutate(const Cast* v) override {
     std::vector<const Expr*> inputs = {v->src_value()};
     return try_vectorize(v, inputs, [&]() {
@@ -748,13 +756,19 @@ bool LoopNest::computeInline(const Buf* b) {
   return true;
 }
 
-void LoopNest::inlineIntermediateBufs() {
+void LoopNest::inlineIntermediateBufs(bool inline_output_buffers) {
   // We need to collect all intermediate buffers as the buffers to be inlined
   // before calling 'computeInline' since the buffers that are inlined are
   // erased from the set 'intermediate_bufs_' in that function.
   std::unordered_set<const Buf*> bufs_to_inline(
       intermediate_bufs_.begin(), intermediate_bufs_.end());
-  bufs_to_inline.insert(output_bufs_.begin(), output_bufs_.end());
+
+  // inlining output buffers duplicates computation. it slows down
+  // cpu code generation but is enabled on gpu because it avoids difficult
+  // synchronization logic across blocks.
+  if (inline_output_buffers) {
+    bufs_to_inline.insert(output_bufs_.begin(), output_bufs_.end());
+  }
   for (auto b : bufs_to_inline) {
     computeInline(b);
   }

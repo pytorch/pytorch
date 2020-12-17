@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
+#include <ATen/ExpandUtils.h>
 #include <ATen/TensorGeometry.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -8,7 +9,6 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
-#include <ATen/ExpandUtils.h>
 
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
@@ -249,10 +249,12 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     const torch::jit::Value* v) {
   switch (v->node()->kind()) {
     case aten::_cast_Float:
+    case aten::to:
     case aten::sigmoid:
     case aten::reciprocal:
     case aten::neg:
     case aten::relu:
+    case aten::isnan:
     case aten::log:
     case aten::log10:
     case aten::log1p:
@@ -281,6 +283,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::frac:
     case aten::lgamma:
     case aten::type_as:
+    case aten::masked_fill:
       return sizesForValue(v->node()->input(0));
 
     case aten::sub:
@@ -311,7 +314,6 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
       }
       return broadcastShapes(shapes);
     }
-
     case aten::lerp:
     case aten::clamp:
     case aten::threshold:
@@ -726,7 +728,8 @@ Tensor* TensorExprKernel::computeThreeOperand(
     const torch::jit::Value* v,
     const std::function<
         ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>&
-        innerExpr) {
+        innerExpr,
+    bool promote_inputs) {
   auto const& n = v->node();
   std::vector<std::vector<ExprHandle>> shapes;
   for (size_t idx = 0; idx < 3; idx++) {
@@ -737,7 +740,7 @@ Tensor* TensorExprKernel::computeThreeOperand(
   return Compute(
       name,
       c10::fmap<DimArg>(shape),
-      [this, v, innerExpr](const std::vector<VarHandle>& axes) {
+      [this, v, innerExpr, promote_inputs](const std::vector<VarHandle>& axes) {
         auto const& n = v->node();
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
@@ -746,7 +749,9 @@ Tensor* TensorExprKernel::computeThreeOperand(
             tensorOrConstant(n->inputs()[2], indices),
         };
 
-        promoteInputs(inputs);
+        if (promote_inputs) {
+          promoteInputs(inputs);
+        }
         ExprHandle compute = innerExpr(inputs[0], inputs[1], inputs[2]);
         return demoteOutput(compute, n->output());
       });
@@ -822,6 +827,17 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::_cast_Float: {
       return computeOneOperand("aten_cast_float", v, [](const ExprHandle& a) {
         return cast<float>(a);
+      });
+    } break;
+
+    case aten::to: {
+      // see handling of aten::to in tensorexpr_fuser.cpp for why we only
+      // need to handle the first input
+      auto node = v->node();
+      return computeOneOperand("aten_to", v, [node](const ExprHandle& a) {
+        auto output_dtype = findDtypeForValue(node->output());
+        TORCH_INTERNAL_ASSERT(output_dtype);
+        return Cast::make(ToDtype(*output_dtype), a);
       });
     } break;
 
@@ -952,6 +968,20 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
           });
     } break;
 
+    case aten::masked_fill: {
+      return computeThreeOperand(
+          "aten::masked_fill",
+          v,
+          [](const ExprHandle& input,
+             const ExprHandle& mask,
+             const ExprHandle& value) {
+            // value needs to promote to input, not vice versa
+            auto val = promoteToDtype(value, input.dtype().scalar_type());
+            return ifThenElse(mask, val, input);
+          },
+          /*promote_inputs*/ false);
+    }
+
     case aten::clamp: {
       bool noMin = false;
       bool noMax = false;
@@ -976,21 +1006,26 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
               const ExprHandle& in,
               const ExprHandle& min,
               const ExprHandle& max) {
+            auto cast = [&](const ExprHandle& e) {
+              return Cast::make(in.dtype(), e);
+            };
+
             if (noMin && noMax) {
               return in;
             } else if (noMin) {
-              return CompareSelect::make(in, max, max, in, kGT);
+              auto cmax = cast(max);
+              return CompareSelect::make(in, cmax, cmax, in, kGT);
             } else if (noMax) {
-              return CompareSelect::make(in, min, min, in, kLT);
+              auto cmin = cast(min);
+              return CompareSelect::make(in, cmin, cmin, in, kLT);
             } else {
-              return CompareSelect::make(
-                  in,
-                  min,
-                  min,
-                  CompareSelect::make(in, max, max, in, kGT),
-                  kLT);
+              auto cmax = cast(max);
+              auto cmin = cast(min);
+              auto mm = CompareSelect::make(in, cmin, cmin, in, kLT);
+              return CompareSelect::make(mm, cmax, cmax, mm, kGT);
             }
-          });
+          },
+          false /* promote_inputs */);
     } break;
 
     case aten::sigmoid: {
@@ -1008,6 +1043,15 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::neg: {
       return computeOneOperand("aten_neg", v, [](const ExprHandle& a) {
         return ExprHandle(-0) - a;
+      });
+    } break;
+
+    case aten::isnan: {
+      return computeOneOperand("aten_isnan", v, [](const ExprHandle& a) {
+        if (!a.dtype().is_floating_point()) {
+          return IntImm::make(0);
+        }
+        return isnan(a);
       });
     } break;
 
@@ -1481,7 +1525,11 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
 
   bool hasReduction = NodeFinder<ReduceOp>::find(l.root_stmt()).size() != 0;
 
-  l.inlineIntermediateBufs();
+  // inlining output buffers duplicates computation. it slows down
+  // cpu code generation but is enabled on gpu because it avoids difficult
+  // synchronization logic across blocks.
+  bool inline_output_buffers = backendType == kCudaCodeGen;
+  l.inlineIntermediateBufs(inline_output_buffers);
 
   if (backendType == kCudaCodeGen) {
     for (auto tensor : tensorOutputs_) {
