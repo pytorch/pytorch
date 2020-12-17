@@ -408,6 +408,12 @@ TEST(Expr, UnaryMath01) {
     SimpleIRExprEval eval(v);
     ASSERT_NEAR(eval.value<float>(), v_ref, 1e-6);
   }
+
+  for (float input_v : {std::nan("1"), 0., .5}) {
+    ExprHandle v = FloatImm::make(input_v);
+    SimpleIRExprEval eval(Intrinsics::make(kIsNan, v));
+    ASSERT_NEAR(eval.value<int>(), std::isnan(input_v), 0);
+  }
 }
 
 TEST(Expr, BinaryMath01) {
