@@ -2958,6 +2958,9 @@ struct to_ir {
     ErrorReport::CallStack::update_pending_range(tree.range());
     Value* out_val =
         emitSugaredExpr(tree, 1, type_hint)->asValue(tree.range(), method);
+    // AnyType is the only user-exposed type which we don't unify to from
+    // its subtypes, so we add a cast for use cases like
+    // x : Any = 1 if cond else "str"
     if (type_hint == AnyType::get() && out_val->type() != AnyType::get()) {
       out_val = graph->insertUncheckedCast(out_val, type_hint);
     }
