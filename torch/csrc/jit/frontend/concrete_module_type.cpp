@@ -280,8 +280,7 @@ void ConcreteModuleTypeBuilder::addForwardHook(std::string hook_id) {
   forward_hook_ids.emplace_back(std::move(hook_id));
 }
 
-void ConcreteModuleTypeBuilder::addForwardPreHook(
-    std::string pre_hook_id) {
+void ConcreteModuleTypeBuilder::addForwardPreHook(std::string pre_hook_id) {
   forward_pre_hook_ids.emplace_back(std::move(pre_hook_id));
 }
 
