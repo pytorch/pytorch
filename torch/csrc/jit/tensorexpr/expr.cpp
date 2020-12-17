@@ -200,6 +200,10 @@ ExprHandle remainder(const ExprHandle& v1, const ExprHandle& v2) {
   return Intrinsics::make(kRemainder, v1, v2);
 }
 
+ExprHandle isnan(const ExprHandle& v1) {
+  return Intrinsics::make(kIsNan, v1);
+}
+
 ExprHandle ifThenElse(
     const ExprHandle& c,
     const ExprHandle& t,
