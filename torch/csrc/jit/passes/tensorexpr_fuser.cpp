@@ -87,6 +87,13 @@ bool isSupported(Node* node) {
       "aten::clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor",
       "aten::lerp.Scalar(Tensor self, Tensor end, Scalar weight) -> Tensor",
       "aten::lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor",
+      "aten::to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::to.device(Tensor self, Device device, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::to.dtype_layout(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None"
+      ", bool? pin_memory=None, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::to.prim_Device(Tensor(a) self, Device? device, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
+      "aten::to.prim_dtype(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
+      "aten::isnan(Tensor self) -> Tensor",
       "aten::lgamma(Tensor self) -> Tensor",
       "aten::log10(Tensor self) -> Tensor",
       "aten::log(Tensor self) -> Tensor",
@@ -115,6 +122,8 @@ bool isSupported(Node* node) {
       "aten::round(Tensor self) -> Tensor",
       "aten::trunc(Tensor self) -> Tensor",
       "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
+      "aten::masked_fill.Scalar(Tensor self, Tensor mask, Scalar value) -> Tensor",
+      "aten::masked_fill.Tensor(Tensor self, Tensor mask, Tensor value) -> Tensor",
       "aten::remainder.Scalar(Tensor self, Scalar other) -> Tensor",
       "aten::remainder.Tensor(Tensor self, Tensor other) -> Tensor",
       "aten::cat(Tensor[] tensors, int dim=0) -> Tensor",
@@ -522,6 +531,17 @@ class TensorExprFuser {
     }
   }
 
+  // No Ops in eager shouldn't be outputs of Fusion Groups because it
+  // will degrade perf and change aliasing relationships
+  static bool unexecutedEagerOp(Node* n) {
+    if (n->kind() != aten::to) {
+      return false;
+    }
+
+    return *n->input(0)->type()->expect<TensorType>() ==
+        *n->output()->type()->expect<TensorType>();
+  }
+
   std::pair<graph_node_list::iterator, bool> scanNode(Node* n) {
     GRAPH_DEBUG("Considering node:", *n)
 
@@ -532,7 +552,7 @@ class TensorExprFuser {
     // fusion group from - skip them.
     if (n->kind() == prim::ListConstruct || n->kind() == aten::slice ||
         n->kind() == aten::unsqueeze || n->kind() == prim::ConstantChunk ||
-        n->kind() == prim::Constant) {
+        n->kind() == prim::Constant || unexecutedEagerOp(n)) {
       return std::make_pair(++n->reverseIterator(), false);
     }
     return createFusionGroup(n);
@@ -728,7 +748,7 @@ class TensorExprFuser {
     return true;
   }
 
-  bool typesAreSupported(const Node* node) {
+  bool typesAreSupported(Node* node) {
     // clang-format off
     // breaks up the schema strings so they are no longer discoverable with ctrl-F
     static const OperatorSet float_only_operator_set{
@@ -737,17 +757,74 @@ class TensorExprFuser {
       "aten::remainder.Scalar(Tensor self, Scalar other) -> Tensor",
       "aten::remainder.Tensor(Tensor self, Tensor other) -> Tensor",
     };
+    static const OperatorSet int_only_operator_set{
+      "aten::__lshift__.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::__lshift__.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::__rshift__.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::__rshift__.Tensor(Tensor self, Tensor other) -> Tensor",
+    };
     // clang-format on
 
-    // Value is only supported if operands are floats.
-    if (node->isMemberOf(float_only_operator_set)) {
-      for (const Value* v : node->inputs()) {
-        if (auto const& tt = v->type()->cast<TensorType>()) {
-          auto const& st = tt->scalarType();
-          if (!st || !isFloatingType(*st)) {
-            return false;
-          }
-        } else if (!v->type()->cast<FloatType>()) {
+    for (const Value* v : node->inputs()) {
+      if (auto const& tt = v->type()->cast<TensorType>()) {
+        auto const& st = tt->scalarType();
+
+        // All tensors must be typed.
+        if (!st) {
+          return false;
+        }
+
+        // Byte tensors introduce too many corner cases in type promotion.
+        // Better not to try to handle them.
+        if (*st == c10::ScalarType::Byte) {
+          return false;
+        }
+
+        // These operators only support floats, because integer divisors need to
+        // raise ZeroDivisionError.
+        if (node->isMemberOf(float_only_operator_set) && !isFloatingType(*st)) {
+          return false;
+        }
+
+        // These operators have complicated casting rules for floats.
+        if (node->isMemberOf(int_only_operator_set) && isFloatingType(*st)) {
+          return false;
+        }
+      } else if (node->isMemberOf(float_only_operator_set)) {
+        // Check scalar operands of float-only ops.
+        if (!v->type()->cast<FloatType>()) {
+          return false;
+        }
+      } else if (node->isMemberOf(int_only_operator_set)) {
+        if (!v->type()->cast<IntType>()) {
+          return false;
+        }
+      }
+    }
+    if (node->kind() == aten::to) {
+      // only support same-device conversion
+      auto device = tensorexpr::pickDeviceType(node->inputs());
+      auto output_device = tensorexpr::pickDeviceType(node->outputs());
+      if (!device || !output_device || *device != *output_device) {
+        return false;
+      }
+      // non_blocking only applies in cross-device conversion, which we bail on
+      // copy arg only applies if op is a no-op, which we dont start fusion
+      // group from memory format is separately handled in NNC output
+
+      // all non-Tensor arguments must be constant
+      for (size_t i = 1; i < node->inputs().size(); i++) {
+        if (node->inputs().at(i)->node()->kind() != prim::Constant) {
+          return false;
+        }
+      }
+      // cant support non-constant pin_memory or pin_memory = True
+      if (auto maybe_index =
+              node->schema().argumentIndexWithName("pin_memory")) {
+        int index = *maybe_index;
+        auto inp = node->input(index);
+        if (inp->type() != NoneType::get() &&
+            constant_as<bool>(inp).value_or(true)) {
           return false;
         }
       }
