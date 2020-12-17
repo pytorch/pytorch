@@ -105,6 +105,7 @@ struct Capsule {
 #define TORCH_FORALL_TAGS(_) \
   _(None)                    \
   _(Tensor)                  \
+  _(Storage)                 \
   _(Double)                  \
   _(Int)                     \
   _(Bool)                    \
@@ -313,6 +314,20 @@ struct CAFFE2_API IValue final {
   at::TensorImpl* unsafeToTensorImpl() const {
     return static_cast<at::TensorImpl*>(payload.as_intrusive_ptr);
   }
+
+  IValue(at::Storage s) : tag(Tag::Storage), is_intrusive_ptr(static_cast<bool>(s)) {
+    // Note: the undefined tensor is not refcounted, so while it
+    // is tagged as a tensor, is_intrusive_ptr is set to false.
+    // This is not an optional optimization: our incref call
+    // *will not* do the right thing when called on an
+    // undefined tensor.
+    payload.as_intrusive_ptr = s.unsafeReleaseStorageImpl();
+  }
+  bool isStorage() const {
+    return Tag::Storage == tag;
+  }
+  c10::Storage toStorage() &&;
+  c10::Storage toStorage() const&;
 
   const IValue& toIValue() const {
     return *this;
