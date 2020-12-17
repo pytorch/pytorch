@@ -116,7 +116,8 @@ class TORCH_API TensorExprKernel {
       const torch::jit::Value* v,
       const std::function<
           ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>&
-          innerExpr);
+          innerExpr,
+      bool promote_inputs = true);
 
   Tensor* computeConditionWithTwoOperand(
       const std::string& name,

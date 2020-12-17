@@ -2591,39 +2591,42 @@ class TestNN(NNTestCase):
         assert dict(l.named_parameters())['weight_ih_l0'] is not None
         assert 'weight_ih_l0_orig' not in dict(l.named_parameters())
 
-
     def test_rnn_weight_norm(self):
-        l = torch.nn.LSTM(32, 32)
-        # This Module has 4 parameters called:
-        # 'weight_ih_l0', 'weight_hh_l0', 'bias_ih_l0', 'bias_hh_l0'
+        def check_weight_norm(l, name, num_params):
+            # This Module has 4 or 5 parameters called:
+            # 'weight_ih_l0', 'weight_hh_l0', 'bias_ih_l0', 'bias_hh_l0', weight_hr_l0
 
-        # Applying weight norm on one of them causes it to become a tensor
-        l = torch.nn.utils.weight_norm(l, name='weight_ih_l0')
-        assert (
-            sum([isinstance(p, torch.nn.Parameter) for p in l._flat_weights])
-            == 3
-        )
+            # Applying weight norm on one of them causes it to become a tensor
+            l = torch.nn.utils.weight_norm(l, name=name)
+            self.assertEqual(
+                sum([isinstance(p, torch.nn.Parameter) for p in l._flat_weights]),
+                num_params - 1,
+            )
 
-        # Removing the weight norm reparametrization restores the Parameter
-        l = torch.nn.utils.remove_weight_norm(l, name='weight_ih_l0')
-        assert (
-            sum([isinstance(p, torch.nn.Parameter) for p in l._flat_weights])
-            == 4
-        )
+            # Removing the weight norm reparametrization restores the Parameter
+            l = torch.nn.utils.remove_weight_norm(l, name=name)
+            self.assertEqual(
+                sum([isinstance(p, torch.nn.Parameter) for p in l._flat_weights]),
+                num_params,
+            )
 
-        # Make sure that, upon removal of the reparametrization, the
-        # `._parameters` and `.named_parameters` contain the right params.
-        # Specifically, the original weight ('weight_ih_l0') should be placed
-        # back in the parameters, while the reparametrization components
-        # ('weight_ih_l0_v' and 'weight_ih_l0_g') should be removed.
-        assert 'weight_ih_l0' in l._parameters
-        assert l._parameters['weight_ih_l0'] is not None
-        assert 'weight_ih_l0_v' not in l._parameters
-        assert 'weight_ih_l0_g' not in l._parameters
-        assert 'weight_ih_l0' in dict(l.named_parameters())
-        assert dict(l.named_parameters())['weight_ih_l0'] is not None
-        assert 'weight_ih_l0_v' not in dict(l.named_parameters())
-        assert 'weight_ih_l0_g' not in dict(l.named_parameters())
+            # Make sure that, upon removal of the reparametrization, the
+            # `._parameters` and `.named_parameters` contain the right params.
+            # Specifically, the original weight ('weight_ih_l0') should be placed
+            # back in the parameters, while the reparametrization components
+            # ('weight_ih_l0_v' and 'weight_ih_l0_g') should be removed.
+            self.assertTrue(name in l._parameters)
+            self.assertIsNotNone(l._parameters[name])
+            self.assertTrue(name + '_v' not in l._parameters)
+            self.assertTrue(name + '_g' not in l._parameters)
+            self.assertTrue(name in dict(l.named_parameters()))
+            self.assertIsNotNone(dict(l.named_parameters())[name])
+            self.assertTrue(name + '_v' not in dict(l.named_parameters()))
+            self.assertTrue(name + '_g' not in dict(l.named_parameters()))
+
+        check_weight_norm(torch.nn.LSTM(32, 32), 'weight_ih_l0', 4)
+        check_weight_norm(torch.nn.LSTM(32, 32, proj_size=16), 'weight_hr_l0', 5)
+
 
     def test_weight_norm(self):
         input = torch.randn(3, 5)
@@ -3587,49 +3590,57 @@ class TestNN(NNTestCase):
                 output = module(input)
                 self.assertEqual(output.size(), (4,) + (2,) * (numel - 1) + (4,))
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_adaptive_pooling_avg_nhwc(self):
-        input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32, device="cuda")
-        input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
-        grad = torch.randint(1, 10, (4, 8, 7, 7), dtype=torch.float32, device="cuda")
-        pool = torch.nn.AdaptiveAvgPool2d((7, 7)).cuda()
+        device_list = ['cpu']
+        if TEST_CUDA:
+            device_list.append('cuda')
 
-        ref_input = input.detach().clone().contiguous().requires_grad_(True)
-        ref_grad = grad.detach().clone().contiguous()
-        ref_pool = torch.nn.AdaptiveAvgPool2d((7, 7)).cuda()
+        for device in device_list:
+            input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32).to(device)
+            input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
+            grad = torch.randint(1, 10, (4, 8, 7, 7), dtype=torch.float32).to(device)
+            pool = torch.nn.AdaptiveAvgPool2d((7, 7)).to(device)
 
-        out = pool(input)
-        out.backward(grad)
-        ref_out = ref_pool(ref_input)
-        ref_out.backward(ref_grad)
+            ref_input = input.detach().clone().contiguous().requires_grad_(True)
+            ref_grad = grad.detach().clone().contiguous()
+            ref_pool = torch.nn.AdaptiveAvgPool2d((7, 7)).to(device)
 
-        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-        self.assertTrue(ref_out.is_contiguous())
-        self.assertEqual(out, ref_out)
-        self.assertEqual(input.grad, ref_input.grad)
+            out = pool(input)
+            out.backward(grad)
+            ref_out = ref_pool(ref_input)
+            ref_out.backward(ref_grad)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(ref_out.is_contiguous())
+            self.assertEqual(out, ref_out)
+            self.assertEqual(input.grad, ref_input.grad)
+
     def test_adaptive_pooling_avg_nhwc_non_contiguous(self):
-        input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32, device="cuda")
-        input = input.contiguous(memory_format=torch.channels_last)
-        input = input[:, ::2, :, :].requires_grad_()
-        grad = torch.randint(1, 10, (4, 8, 7, 7), dtype=torch.float32, device="cuda")
-        grad = grad[:, ::2, :, :]
-        pool = torch.nn.AdaptiveAvgPool2d((7, 7)).cuda()
+        device_list = ['cpu']
+        if TEST_CUDA:
+            device_list.append('cuda')
 
-        ref_input = input.detach().clone().contiguous().requires_grad_(True)
-        ref_grad = grad.detach().clone().contiguous()
-        ref_pool = torch.nn.AdaptiveAvgPool2d((7, 7)).cuda()
+        for device in device_list:
+            input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32).to(device)
+            input = input.contiguous(memory_format=torch.channels_last)
+            input = input[:, ::2, :, :].requires_grad_()
+            grad = torch.randint(1, 10, (4, 8, 7, 7), dtype=torch.float32).to(device)
+            grad = grad[:, ::2, :, :]
+            pool = torch.nn.AdaptiveAvgPool2d((7, 7)).to(device)
 
-        out = pool(input)
-        out.backward(grad)
-        ref_out = ref_pool(ref_input)
-        ref_out.backward(ref_grad)
+            ref_input = input.detach().clone().contiguous().requires_grad_(True)
+            ref_grad = grad.detach().clone().contiguous()
+            ref_pool = torch.nn.AdaptiveAvgPool2d((7, 7)).to(device)
 
-        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-        self.assertTrue(ref_out.is_contiguous())
-        self.assertEqual(out, ref_out)
-        self.assertEqual(input.grad, ref_input.grad)
+            out = pool(input)
+            out.backward(grad)
+            ref_out = ref_pool(ref_input)
+            ref_out.backward(ref_grad)
+
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(ref_out.is_contiguous())
+            self.assertEqual(out, ref_out)
+            self.assertEqual(input.grad, ref_input.grad)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @largeTensorTest('12GB', device='cuda')
@@ -5782,6 +5793,7 @@ class TestNN(NNTestCase):
     def test_cudnn_weight_format(self):
         rnns = [
             nn.LSTM(10, 20, batch_first=True),
+            nn.LSTM(10, 20, batch_first=True, proj_size=10),
             nn.GRU(10, 20, batch_first=True),
             nn.RNN(10, 20, batch_first=True)
         ]
@@ -5792,6 +5804,10 @@ class TestNN(NNTestCase):
             hx = torch.randn(1, 5, 20, requires_grad=True, device="cuda")
             all_vars = [input, hx] + list(rnn.parameters())
             if isinstance(rnn, nn.LSTM):
+                # LSTM with projections has different hx size
+                if rnn.proj_size > 0:
+                    hx = torch.randn(1, 5, 10, requires_grad=True, device="cuda")
+                    all_vars[1] = hx
                 cx = torch.randn(1, 5, 20, requires_grad=True, device="cuda")
                 all_vars[2:2] = [cx]
                 hx = (hx, cx)
@@ -5831,6 +5847,7 @@ class TestNN(NNTestCase):
     def test_cudnn_weight_tying(self):
         rnns = [
             nn.LSTM(10, 20, batch_first=True, bidirectional=True),
+            nn.LSTM(10, 20, batch_first=True, bidirectional=True, proj_size=10),
             nn.GRU(10, 20, batch_first=True, bidirectional=True),
             nn.RNN(10, 20, batch_first=True, bidirectional=True)
         ]
@@ -5843,6 +5860,10 @@ class TestNN(NNTestCase):
             opt = torch.optim.SGD(rnn.parameters(), lr=0.1)
             opt.zero_grad()
             if isinstance(rnn, nn.LSTM):
+                # LSTM with projections has different hx size
+                if rnn.proj_size > 0:
+                    hx = torch.randn(2, 5, 10, requires_grad=True, device="cuda")
+                    all_vars[1] = hx
                 cx = torch.randn(2, 5, 20, requires_grad=True, device="cuda")
                 all_vars[2:2] = [cx]
                 hx = (hx, cx)
@@ -6103,6 +6124,82 @@ class TestNN(NNTestCase):
             hidden_shape = update_shape(correct_hidden_shape, 0, bad_size)
             test(input_shape, hidden_shape, mode)
 
+    def test_projections_lstm_args_check(self):
+        input_size = 3
+        hidden_size = 5
+        proj_size = 2
+        num_layers = 2
+        batch_size = 4
+        seq_len = 6
+        num_directions = 1
+        bad_size = 7  # prime number so that no size can divide it.
+
+        def test(input_shape, hidden_h_shape, hidden_c_shape):
+            for input, hidden in get_inputs(input_shape, hidden_h_shape, hidden_c_shape):
+                model = nn.LSTM(input_size, hidden_size, num_layers, proj_size=proj_size)
+                self.assertRaises(RuntimeError, lambda: model(input, hidden))
+
+        correct_input_shape = (seq_len, batch_size, input_size)
+        correct_hidden_h_shape = (num_layers * num_directions, batch_size, proj_size)
+        correct_hidden_c_shape = (num_layers * num_directions, batch_size, hidden_size)
+
+        def update_shape(shape, dim, new_dim_size):
+            new_shape = list(shape)
+            new_shape[dim] = new_dim_size
+            return tuple(new_shape)
+
+        def get_inputs(input_shape, hidden_h_shape, hidden_c_shape):
+            '''returns list( tuple(input, hidden) )
+            where input, hidden are inputs to a model'''
+            input = torch.randn(input_shape)
+            hidden_h = torch.randn(hidden_h_shape)
+            hidden_c = torch.randn(hidden_c_shape)
+            return [(input, (hidden_h, hidden_c))]
+
+        # Incorrect input batch size
+        input_shape = update_shape(correct_input_shape, 1, bad_size)
+        test(input_shape, correct_hidden_h_shape, correct_hidden_c_shape)
+
+        # Incorrect hidden batch size
+        input_shape = correct_input_shape
+        hidden_h_shape = update_shape(correct_hidden_h_shape, 1, bad_size)
+        hidden_c_shape = update_shape(correct_hidden_c_shape, 1, bad_size)
+        test(input_shape, hidden_h_shape, hidden_c_shape)
+
+        # Incorrect input size
+        input_shape = update_shape(correct_input_shape, 2, bad_size)
+        test(input_shape, correct_hidden_h_shape, correct_hidden_c_shape)
+
+        # Incorrect hidden size
+        input_shape = correct_input_shape
+        hidden_h_shape = update_shape(correct_hidden_h_shape, 2, bad_size)
+        hidden_c_shape = update_shape(correct_hidden_c_shape, 2, bad_size)
+        test(input_shape, hidden_h_shape, hidden_c_shape)
+
+        # Incorrect hidden[0]
+        input_shape = correct_input_shape
+        hidden_h_shape = update_shape(correct_hidden_h_shape, 0, bad_size)
+        hidden_c_shape = update_shape(correct_hidden_c_shape, 0, bad_size)
+        test(input_shape, hidden_h_shape, hidden_c_shape)
+
+        # Incorrect proj size = hidden size
+        input_shape = correct_input_shape
+        hidden_h_shape = update_shape(correct_hidden_h_shape, 0, hidden_size)
+        hidden_c_shape = correct_hidden_c_shape
+        test(input_shape, hidden_h_shape, hidden_c_shape)
+
+        # Incorrect proj size != hidden size
+        input_shape = correct_input_shape
+        hidden_h_shape = update_shape(correct_hidden_h_shape, 0, bad_size)
+        hidden_c_shape = correct_hidden_c_shape
+        test(input_shape, hidden_h_shape, hidden_c_shape)
+
+        # Incorrect cell size != hidden size
+        input_shape = correct_input_shape
+        hidden_h_shape = correct_hidden_h_shape
+        hidden_c_shape = update_shape(correct_hidden_c_shape, 0, bad_size)
+        test(input_shape, hidden_h_shape, hidden_c_shape)
+
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_rnn_check_device(self):
         input_size = 3
@@ -6140,6 +6237,40 @@ class TestNN(NNTestCase):
                                             "Input and hidden tensors are not at the same device"):
                     model(input.to('cuda:0'), (hidden.to('cuda:0'), hidden.to('cuda:1')))
 
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_projections_lstm_check_device(self):
+        input_size = 3
+        hidden_size = 5
+        proj_size = 2
+        num_layers = 2
+        batch_size = 4
+        seq_len = 6
+        num_directions = 1
+
+        correct_input_shape = (seq_len, batch_size, input_size)
+        correct_hidden_h_shape = (num_layers * num_directions, batch_size, proj_size)
+        correct_hidden_c_shape = (num_layers * num_directions, batch_size, hidden_size)
+
+        model = nn.LSTM(input_size, hidden_size, num_layers, proj_size=proj_size)
+        input = torch.randn(correct_input_shape)
+        hidden_h = torch.randn(correct_hidden_h_shape)
+        hidden_c = torch.randn(correct_hidden_c_shape)
+
+        # input and weights are not at the same device
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Input and parameter tensors are not at the same device"):
+            model(input.to('cuda:0'))
+
+        # input and hiddens are not at the same device
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"Input and hidden tensors are not at the same device"):
+            model(input, (hidden_h.to('cuda:0'), hidden_c.to('cuda:0')))
+
+        # hidden tensors are not at the same CUDA device
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Input and hidden tensors are not at the same device"):
+            model(input.to('cuda:0'), (hidden_h.to('cuda:0'), hidden_c.to('cuda:1')))
+
     def test_rnn_initial_hidden_state(self):
         rnn_modes = ['RNN', 'GRU', 'LSTM']
         for mode in rnn_modes:
@@ -6154,9 +6285,29 @@ class TestNN(NNTestCase):
             self.assertEqual(output1, output2)
             self.assertEqual(hidden1, hidden2)
 
+    def test_projections_lstm_initial_hidden_state(self):
+        for bidir in [False, True]:
+            rnn = nn.LSTM(30, 20, 2, bidirectional=bidir, proj_size=10)
+            num_dirs = 2 if bidir else 1
+            input = torch.randn(10, 32, 30)
+            hidden_h = torch.zeros(2 * num_dirs, 32, 10)
+            hidden_c = torch.zeros(2 * num_dirs, 32, 20)
+            hidden = (hidden_h, hidden_c)
+            output1, hidden1 = rnn(input, hidden)
+            output2, hidden2 = rnn(input)
+            self.assertEqual(output1, output2)
+            self.assertEqual(hidden1, hidden2)
+
+    def test_projections_errors_on_gru_and_rnn(self):
+        error_msg = "proj_size argument is only supported for LSTM, not RNN or GRU"
+        for mode in ['RNN', 'GRU']:
+            with self.assertRaisesRegex(ValueError, error_msg):
+                rnn = getattr(nn, mode)(30, 20, 2, proj_size=10)
+
     def _test_RNN_cpu_vs_cudnn(self, dropout, dtype=torch.double):
 
-        def forward_backward(cuda, rnn, input_val, hx_val, grad_output, grad_hy, weights_val):
+        def forward_backward(cuda, rnn, input_val, grad_output, weights_val, hx_val, grad_hy,
+                             cx_val=None, grad_cy=None):
             is_lstm = isinstance(rnn, nn.LSTM)
 
             for x_layer, y_layer in zip(rnn.all_weights, weights_val):
@@ -6171,8 +6322,12 @@ class TestNN(NNTestCase):
                 input = input_val.clone().requires_grad_(True)
                 input_var = input
             if is_lstm:
-                hx = (hx_val.clone().requires_grad_(True),
-                      hx_val.add(1).requires_grad_(True))
+                if cx_val is None:
+                    hx = (hx_val.clone().requires_grad_(True),
+                          hx_val.add(1).requires_grad_(True))
+                else:
+                    hx = (hx_val.clone().requires_grad_(True),
+                          cx_val.add(1).requires_grad_(True))
             else:
                 hx = hx_val.clone().requires_grad_(True)
 
@@ -6185,6 +6340,8 @@ class TestNN(NNTestCase):
                 else:
                     hx.data = hx.data.cuda()
                 grad_hy = grad_hy.cuda()
+                if grad_cy is not None:
+                    grad_cy = grad_cy.cuda()
                 grad_output = grad_output.cuda()
 
             output, hy = rnn(input, hx)
@@ -6193,7 +6350,10 @@ class TestNN(NNTestCase):
                 output = output.data
 
             if is_lstm:
-                torch.autograd.backward([output, hy[0], hy[1]], [grad_output, grad_hy, grad_hy + 1])
+                if grad_cy is None:
+                    torch.autograd.backward([output, hy[0], hy[1]], [grad_output, grad_hy, grad_hy + 1])
+                else:
+                    torch.autograd.backward([output, hy[0], hy[1]], [grad_output, grad_hy, grad_cy + 1])
             else:
                 torch.autograd.backward([output, hy], [grad_output, grad_hy])
 
@@ -6207,6 +6367,7 @@ class TestNN(NNTestCase):
 
         input_size = 10
         hidden_size = 6
+        proj_size = 3
         num_layers = 2
         seq_length = 7
         batch = 6
@@ -6238,14 +6399,14 @@ class TestNN(NNTestCase):
                     input_val = torch.randn(seq_length, batch, input_size, dtype=dtype)
                     grad_output = torch.randn(seq_length, batch, hidden_size * num_directions, dtype=dtype)
 
+                hx_val = torch.randn(num_layers * num_directions, batch, hidden_size, dtype=dtype)
+                grad_hy = torch.randn(num_layers * num_directions, batch, hidden_size, dtype=dtype)
+
                 if not contig:
                     grad_output = make_noncontig(grad_output)
                     grad_hy = make_noncontig(grad_hy)
                     input_var = make_noncontig(input_val)
                     hx_val = make_noncontig(hx_val)
-
-                hx_val = torch.randn(num_layers * num_directions, batch, hidden_size, dtype=dtype)
-                grad_hy = torch.randn(num_layers * num_directions, batch, hidden_size, dtype=dtype)
 
                 if variable_len:
                     lengths = [7, 5, 5, 2, 1, 1]
@@ -6263,7 +6424,7 @@ class TestNN(NNTestCase):
                              batch_first=batch_first).to(dtype)
 
                 outputs_cpu = forward_backward(
-                    False, rnn, input_val, hx_val, grad_output, grad_hy, rnn.all_weights)
+                    False, rnn, input_val, grad_output, rnn.all_weights, hx_val, grad_hy)
 
                 rnn_gpu = module(input_size,
                                  hidden_size,
@@ -6274,7 +6435,7 @@ class TestNN(NNTestCase):
                                  batch_first=batch_first).to(dtype)
 
                 outputs_gpu = forward_backward(
-                    True, rnn_gpu, input_val, hx_val, grad_output, grad_hy, rnn.all_weights)
+                    True, rnn_gpu, input_val, grad_output, rnn.all_weights, hx_val, grad_hy)
 
                 compare_cpu_gpu(outputs_cpu, outputs_gpu)
 
@@ -6287,12 +6448,77 @@ class TestNN(NNTestCase):
                 num_layers * num_directions, batch, hidden_size, dtype=dtype)
 
             rnn = nn.RNN(input_size, hidden_size, num_layers, bias=bias, nonlinearity=nonlinearity).to(dtype)
-            outputs_cpu = forward_backward(False, rnn, input_val, hx_val, grad_output, grad_hy, rnn.all_weights)
+            outputs_cpu = forward_backward(False, rnn, input_val, grad_output, rnn.all_weights, hx_val, grad_hy)
 
             rnn_gpu = nn.RNN(input_size, hidden_size, num_layers, bias=bias, nonlinearity=nonlinearity).to(dtype)
-            outputs_gpu = forward_backward(True, rnn_gpu, input_val, hx_val, grad_output, grad_hy, rnn.all_weights)
+            outputs_gpu = forward_backward(True, rnn_gpu, input_val, grad_output, rnn.all_weights, hx_val, grad_hy)
 
             compare_cpu_gpu(outputs_cpu, outputs_gpu)
+
+        # checking LSTM with projections
+        for bias, bidirectional, batch_first, contig, variable_len, lens_as_tensor \
+                in product((True, False), repeat=6):
+            num_directions = 2 if bidirectional else 1
+            if batch_first:
+                input_val = torch.randn(batch, seq_length, input_size, dtype=dtype)
+                grad_output = torch.randn(batch, seq_length, proj_size * num_directions, dtype=dtype)
+            else:
+                input_val = torch.randn(seq_length, batch, input_size, dtype=dtype)
+                grad_output = torch.randn(seq_length, batch, proj_size * num_directions, dtype=dtype)
+
+            hx_val = torch.randn(num_layers * num_directions, batch, proj_size, dtype=dtype)
+            cx_val = torch.randn(num_layers * num_directions, batch, hidden_size, dtype=dtype)
+            grad_hy = torch.randn(num_layers * num_directions, batch, proj_size, dtype=dtype)
+            grad_cy = torch.randn(num_layers * num_directions, batch, hidden_size, dtype=dtype)
+
+            if not contig:
+                grad_output = make_noncontig(grad_output)
+                grad_hy = make_noncontig(grad_hy)
+                grad_cy = make_noncontig(grad_cy)
+                input_var = make_noncontig(input_val)
+                hx_val = make_noncontig(hx_val)
+                cx_val = make_noncontig(cx_val)
+
+            if variable_len:
+                lengths = [7, 5, 5, 2, 1, 1]
+                if lens_as_tensor:
+                    lengths = torch.tensor(lengths, dtype=torch.long)
+                input_val = rnn_utils.pack_padded_sequence(input_val, lengths, batch_first=batch_first)
+                grad_output = rnn_utils.pack_padded_sequence(grad_output, lengths, batch_first=batch_first).data
+
+            rnn = nn.LSTM(input_size,
+                          hidden_size,
+                          num_layers,
+                          bias=bias,
+                          dropout=dropout,
+                          bidirectional=bidirectional,
+                          batch_first=batch_first,
+                          proj_size=proj_size).to(dtype)
+
+            outputs_cpu = forward_backward(
+                False, rnn, input_val, grad_output, rnn.all_weights,
+                hx_val, grad_hy, cx_val, grad_cy)
+
+            rnn_gpu = nn.LSTM(input_size,
+                              hidden_size,
+                              num_layers,
+                              bias=bias,
+                              dropout=dropout,
+                              bidirectional=bidirectional,
+                              batch_first=batch_first,
+                              proj_size=proj_size).to(dtype)
+            # LSTM with projections is not supported with MIOpen
+            if TEST_WITH_ROCM and dtype == torch.float:
+                with self.assertRaisesRegex(RuntimeError,
+                                            "LSTM with projections is not supported with MIOpen"):
+                    outputs_gpu = forward_backward(
+                        True, rnn_gpu, input_val, grad_output, rnn.all_weights,
+                        hx_val, grad_hy, cx_val, grad_cy)
+            else:
+                outputs_gpu = forward_backward(
+                    True, rnn_gpu, input_val, grad_output, rnn.all_weights,
+                    hx_val, grad_hy, cx_val, grad_cy)
+                compare_cpu_gpu(outputs_cpu, outputs_gpu)
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_RNN_cpu_vs_cudnn_no_dropout(self):
@@ -6316,25 +6542,27 @@ class TestNN(NNTestCase):
         batch = 6
 
         # runs on CPU to acquire expected output
-        m = nn.LSTM(input_size, hidden_size, num_layers)
-        input = torch.randn(seq_length, batch, input_size)
-        expected_output = m(input)
+        def check_weight_norm(m, name):
+            input = torch.randn(seq_length, batch, input_size)
+            expected_output = m(input)
 
-        # adds weight normalization
-        name = 'weight_hh_l0'
-        m = torch.nn.utils.weight_norm(m, name=name)
+            # adds weight normalization
+            m = torch.nn.utils.weight_norm(m, name=name)
 
-        # moves to CUDA
-        m = m.cuda()
-        input = input.cuda()
+            # moves to CUDA
+            m = m.cuda()
+            input = input.cuda()
 
-        # otherwise, subsequent warnings will be hidden, and further tests rely on them
-        warnings.simplefilter("always")
-        self.assertEqual(m(input), expected_output)
+            # otherwise, subsequent warnings will be hidden, and further tests rely on them
+            warnings.simplefilter("always")
+            self.assertEqual(m(input), expected_output)
 
-        # remove weight norm
-        m = torch.nn.utils.remove_weight_norm(m, name=name)
-        self.assertEqual(m(input), expected_output)
+            # remove weight norm
+            m = torch.nn.utils.remove_weight_norm(m, name=name)
+            self.assertEqual(m(input), expected_output)
+
+        check_weight_norm(nn.LSTM(input_size, hidden_size, num_layers), 'weight_hh_l0')
+        check_weight_norm(nn.LSTM(input_size, hidden_size, num_layers, proj_size=3), 'weight_hr_l0')
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_partial_flat_weights(self):
@@ -6479,16 +6707,6 @@ class TestNN(NNTestCase):
                         self.assertNotEqual(output2.data, prev_output)
                 prev_output = output1.data
 
-    def _verify_pixel_shuffle(self, input, output, upscale_factor):
-        for c in range(output.size(1)):
-            for h in range(output.size(2)):
-                for w in range(output.size(3)):
-                    height_idx = h // upscale_factor
-                    weight_idx = w // upscale_factor
-                    channel_idx = (upscale_factor * (h % upscale_factor)) + (w % upscale_factor) + \
-                                  (c * upscale_factor ** 2)
-                    self.assertEqual(output[:, c, h, w], input[:, channel_idx, height_idx, weight_idx])
-
     def test_inplace_thnn(self):
         modules = [nn.ReLU, nn.ELU, nn.SELU, nn.CELU, nn.RReLU]
         for mod in modules:
@@ -6519,18 +6737,74 @@ class TestNN(NNTestCase):
         self.assertEqual(result, input.grad.data, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
     def test_pixel_shuffle(self):
-        batch_size = random.randint(1, 3)
-        upscale_factor = random.randint(2, 5)
-        channels = random.randint(1, 4) * upscale_factor ** 2
-        height = random.randint(5, 10)
-        width = random.randint(5, 10)
+        def _test_pixel_shuffle_helper(num_input_dims, valid_channels_dim=True):
+            # Function to imperatively ensure pixels are shuffled to the correct locations.
+            # Used to validate the batch operations in pixel_shuffle.
+            def _verify_pixel_shuffle(input, output, upscale_factor):
+                for c in range(output.size(-3)):
+                    for h in range(output.size(-2)):
+                        for w in range(output.size(-1)):
+                            height_idx = h // upscale_factor
+                            weight_idx = w // upscale_factor
+                            channel_idx = (upscale_factor * (h % upscale_factor)) + (w % upscale_factor) + \
+                                          (c * upscale_factor ** 2)
+                            self.assertEqual(output[..., c, h, w], input[..., channel_idx, height_idx, weight_idx])
 
-        input = torch.rand(batch_size, channels, height, width, requires_grad=True)
-        ps = nn.PixelShuffle(upscale_factor)
-        output = ps(input)
-        self._verify_pixel_shuffle(input.data, output.data, upscale_factor)
-        output.backward(output.data)
-        self.assertEqual(input.data, input.grad.data)
+            upscale_factor = random.randint(2, 5)
+            # If valid_channels_dim=False, add 1 to make channels dim indivisible by upscale_factor ** 2.
+            channels = random.randint(1, 4) * upscale_factor ** 2 + (0 if valid_channels_dim else 1)
+            height = random.randint(5, 10)
+            width = random.randint(5, 10)
+
+            if num_input_dims == 1:
+                input = torch.rand(channels, requires_grad=True)
+            elif num_input_dims == 2:
+                input = torch.rand(height, width, requires_grad=True)
+            else:
+                batch_sizes = [random.randint(1, 3) for _ in range(num_input_dims - 3)]
+                input = torch.rand(*batch_sizes, channels, height, width, requires_grad=True)
+            ps = nn.PixelShuffle(upscale_factor)
+
+            if num_input_dims >= 3 and valid_channels_dim:
+                output = ps(input)
+                _verify_pixel_shuffle(input, output, upscale_factor)
+                output.backward(output.data)
+                self.assertEqual(input.data, input.grad.data)
+            else:
+                self.assertRaises(RuntimeError, lambda: ps(input))
+
+        def test_pixel_shuffle_1D():
+            _test_pixel_shuffle_helper(num_input_dims=1)
+
+        def test_pixel_shuffle_2D():
+            _test_pixel_shuffle_helper(num_input_dims=2)
+
+        def test_pixel_shuffle_3D_with_valid_channels_dim():
+            _test_pixel_shuffle_helper(num_input_dims=3)
+
+        def test_pixel_shuffle_4D_with_valid_channels_dim():
+            _test_pixel_shuffle_helper(num_input_dims=4)
+
+        def test_pixel_shuffle_5D_with_valid_channels_dim():
+            _test_pixel_shuffle_helper(num_input_dims=5)
+
+        def test_pixel_shuffle_3D_with_invalid_channels_dim():
+            _test_pixel_shuffle_helper(num_input_dims=3, valid_channels_dim=False)
+
+        def test_pixel_shuffle_4D_with_invalid_channels_dim():
+            _test_pixel_shuffle_helper(num_input_dims=4, valid_channels_dim=False)
+
+        def test_pixel_shuffle_5D_with_invalid_channels_dim():
+            _test_pixel_shuffle_helper(num_input_dims=5, valid_channels_dim=False)
+
+        test_pixel_shuffle_1D()
+        test_pixel_shuffle_2D()
+        test_pixel_shuffle_3D_with_valid_channels_dim()
+        test_pixel_shuffle_4D_with_valid_channels_dim()
+        test_pixel_shuffle_5D_with_valid_channels_dim()
+        test_pixel_shuffle_3D_with_invalid_channels_dim()
+        test_pixel_shuffle_4D_with_invalid_channels_dim()
+        test_pixel_shuffle_5D_with_invalid_channels_dim()
 
     def test_elu_inplace_view(self):
         v = torch.tensor([1.0, -1.0, 1.0, -1.0], requires_grad=True)
@@ -12196,7 +12470,6 @@ class TestNNDeviceType(NNTestCase):
 
 
     @onlyCUDA
-    @skipCUDAIfNotRocm
     @dtypes(torch.int, torch.long)
     def test_embedding_bag_bfloat16(self, device, dtype):
         self._test_EmbeddingBag(device, 'sum', True, wdtype=torch.bfloat16, dtype=dtype, test_backward=True)
@@ -12638,7 +12911,7 @@ class TestNNDeviceType(NNTestCase):
             return tuple(maybe_tuple_of_tensors[j][:, index:index + 1, :].contiguous()
                          for j in range(2))
 
-        def check_lengths(lengths, enforce_sorted, use_default_hiddens):
+        def check_lengths(lengths, enforce_sorted, use_default_hiddens, proj_size):
             input_size = 3
             hidden_size = 4
             num_layers = 2
@@ -12649,15 +12922,17 @@ class TestNNDeviceType(NNTestCase):
                                  dtype=dtype, requires_grad=True)
             num_directions = 2 if bidirectional else 1
             lstm = nn.LSTM(input_size, hidden_size, bidirectional=bidirectional,
-                           num_layers=num_layers).to(device, dtype)
+                           num_layers=num_layers, proj_size=proj_size).to(device, dtype)
             lstm2 = deepcopy(lstm).to(device, dtype)
             x = x_leaf
 
             hidden0 = None
             if not use_default_hiddens:
-                hidden0 = tuple(torch.randn(num_directions * num_layers, len(lengths), hidden_size,
-                                            device=device, dtype=dtype)
-                                for _ in range(2))
+                real_hidden_size = hidden_size if proj_size == 0 else proj_size
+                hidden0 = (torch.randn(num_directions * num_layers, len(lengths), real_hidden_size,
+                                       device=device, dtype=dtype),
+                           torch.randn(num_directions * num_layers, len(lengths), hidden_size,
+                                       device=device, dtype=dtype))
 
             # Compute sequences separately
             seq_outs = []
@@ -12692,7 +12967,7 @@ class TestNNDeviceType(NNTestCase):
             for p1, p2 in zip(lstm.parameters(), lstm2.parameters()):
                 prec = dtype2prec_DONTUSE[dtype]
                 if dtype == torch.float16:
-                    prec = 2e-2
+                    prec = 4e-2
                 self.assertEqual(p1.grad, p2.grad, atol=prec, rtol=0)
 
         tests = [
@@ -12704,9 +12979,16 @@ class TestNNDeviceType(NNTestCase):
             [False, [2, 1, 3, 2, 10, 5, 3]],
         ]
 
+        rocm_error_msg = "LSTM with projections is not supported with MIOpen"
         for enforce_sorted, seq_lens, in tests:
             for use_default_hiddens in (True, False):
-                check_lengths(seq_lens, enforce_sorted, use_default_hiddens)
+                for proj_size in [0, 2]:
+                    # LSTM with projections is not supported with MIOpen
+                    if device != 'cpu' and dtype == torch.float32 and TEST_WITH_ROCM and proj_size > 0:
+                        with self.assertRaisesRegex(RuntimeError, rocm_error_msg):
+                            check_lengths(seq_lens, enforce_sorted, use_default_hiddens, proj_size)
+                    else:
+                        check_lengths(seq_lens, enforce_sorted, use_default_hiddens, proj_size)
 
     def _test_batchnorm_update_stats(self, device, dtype=torch.float):
         module = nn.BatchNorm1d(3).to(device, dtype)
