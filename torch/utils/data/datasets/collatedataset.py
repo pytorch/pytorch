@@ -6,7 +6,7 @@ S_co = TypeVar('S_co', covariant=True)
 
 
 class CollateIterableDataset(IterableDataset[T_co]):
-    r""" Prototype of :class:`CollateIterableDataset`.
+    r""" :class:`CollateIterableDataset`.
 
     IterableDataset to collate samples from dataset to Tensor(s) by `util_.collate.default_collate`,
     or customized Data Structure by collate_fn.
