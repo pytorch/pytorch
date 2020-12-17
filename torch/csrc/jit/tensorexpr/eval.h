@@ -924,8 +924,12 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
         return std::tanh(v);
       case kExp:
         return std::exp(v);
-      case kAbs:
-        return std::is_unsigned<T>::value ? v : std::abs(v);
+      case kAbs: {
+        // internal tool complains about calling `abs` on unsigned types,
+        // the following contraption makes the tool happy
+        using X = std::conditional_t<std::is_unsigned<T>::value, int, T>;
+        return std::is_unsigned<T>::value ? v : std::abs(static_cast<X>(v));
+      }
       case kExpm1:
         return std::expm1(v);
       case kLog:
@@ -954,10 +958,11 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
         return std::trunc(v);
       case kLgamma:
         return std::lgamma(v);
-      case kFrac:
+      case kFrac: {
         using X = std::conditional_t<std::is_integral<T>::value, float, T>;
         X intpart;
         return std::modf(v, &intpart);
+      }
       default:
         throw std::runtime_error("Invalid op_type: " + c10::to_string(op_type));
     }

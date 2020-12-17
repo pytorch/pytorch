@@ -288,8 +288,8 @@ void CudaPrinter::visit(const Intrinsics* v) {
     func_name = func_name + "f";
   }
   if (v->op_type() == IntrinsicsOp::kAbs && !is_integral(returnType)) {
-      // since kAbs's func_name is `abs`, prefix `f` for floating point
-      func_name = "f" + func_name;
+    // since kAbs's func_name is `abs`, prefix `f` for floating point
+    func_name = "f" + func_name;
   }
 
   os() << func_name << "(";
