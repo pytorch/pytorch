@@ -1811,10 +1811,6 @@ if(USE_KINETO)
     set(CUDA_SOURCE_DIR "${CUDA_TOOLKIT_ROOT_DIR}" CACHE STRING "")
 
     message(STATUS "Configuring Kineto dependency:")
-    message(STATUS "  INTERN_BUILD_MOBILE = ${INTERN_BUILD_MOBILE}")
-    message(STATUS "  USE_CUDA = ${USE_CUDA}")
-    message(STATUS "  MSVC = ${MSVC}")
-
     message(STATUS "  KINETO_SOURCE_DIR = ${KINETO_SOURCE_DIR}")
     message(STATUS "  KINETO_BUILD_TESTS = ${KINETO_BUILD_TESTS}")
     message(STATUS "  KINETO_LIBRARY_TYPE = ${KINETO_LIBRARY_TYPE}")
