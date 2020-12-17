@@ -14,8 +14,6 @@ namespace vulkan {
 namespace api {
 
 struct Command final {
-  class Pool;
-
   //
   // Buffer
   //
@@ -40,9 +38,6 @@ struct Command final {
     void bind(const Descriptor::Set& set);
     void copy(Resource::Buffer::Object source, Resource::Buffer::Object destination);
     void dispatch(const Shader::WorkGroup& global_work_group);
-
-   private:
-    friend class Pool;
 
    private:
     void barrier();
@@ -92,7 +87,8 @@ struct Command final {
 
     void submit(
         VkQueue queue,
-        c10::ArrayRef<const Buffer> buffers,
+        const Buffer* buffers,
+        uint32_t count,
         Resource::Fence fence = {});
 
    private:

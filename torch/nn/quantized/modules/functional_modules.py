@@ -50,7 +50,8 @@ class FloatFunctional(torch.nn.Module):
     def add_scalar(self, x, y):
         # type: (Tensor, float) -> Tensor
         r = torch.add(x, y)
-        r = self.activation_post_process(r)
+        # Note: this operation is not observed because the observation is not
+        # needed for the quantized op.
         return r
 
     r"""Operation equivalent to ``torch.mul(Tensor, Tensor)``"""
@@ -64,7 +65,8 @@ class FloatFunctional(torch.nn.Module):
     def mul_scalar(self, x, y):
         # type: (Tensor, float) -> Tensor
         r = torch.mul(x, y)
-        r = self.activation_post_process(r)
+        # Note: this operation is not observed because the observation is not
+        # needed for the quantized op.
         return r
 
     r"""Operation equivalent to ``torch.cat``"""
@@ -203,7 +205,8 @@ class QFunctional(torch.nn.Module):
     def add_scalar(self, x, y):
         # type: (Tensor, float) -> Tensor
         r = ops.quantized.add_scalar(x, y)
-        r = self.activation_post_process(r)
+        # Note: this operation is not observed because the observation is not
+        # needed for the quantized op.
         return r
 
     r"""Operation equivalent to ``torch.ops.quantized.mul(Tensor, Tensor)``"""
@@ -217,7 +220,8 @@ class QFunctional(torch.nn.Module):
     def mul_scalar(self, x, y):
         # type: (Tensor, float) -> Tensor
         r = ops.quantized.mul_scalar(x, y)
-        r = self.activation_post_process(r)
+        # Note: this operation is not observed because the observation is not
+        # needed for the quantized op.
         return r
 
     r"""Operation equivalent to ``torch.ops.quantized.cat``"""

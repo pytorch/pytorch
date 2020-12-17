@@ -871,13 +871,12 @@ void vTensor::View::CMD::copy_image_to_buffer(
       view_.context_->resource().pool.uniform(block).object);
 }
 
-void vTensor::View::CMD::submit(const api::Resource::Fence fence) {
+void vTensor::View::CMD::submit(api::Resource::Fence fence) {
   if (command_buffer_) {
     view_.context_->command().pool.submit(
         view_.context_->gpu().queue,
-        {
-          std::move(command_buffer()),
-        },
+        &command_buffer(),
+        1u,
         fence);
   }
 }
@@ -1060,16 +1059,16 @@ vTensor::Buffer& vTensor::View::staging(
   return staging();
 }
 
+vTensor::Fence& vTensor::View::fence() const {
+  return (fence_ = allocate_fence(pool_));
+}
+
 vTensor::Memory& vTensor::View::wait() const {
   if (fence_) {
     fence_.wait();
   }
 
   return staging().memory;
-}
-
-vTensor::Fence& vTensor::View::fence() const {
-  return (fence_ = allocate_fence(pool_));
 }
 
 void vTensor::View::verify() const {

@@ -396,10 +396,10 @@ Command::Buffer Command::Pool::allocate() {
         Configuration::kQuantum);
 
     allocate_command_buffers(
-       device_,
-       command_pool_.get(),
-       buffer_.pool.data() + buffer_.in_use,
-       Configuration::kQuantum);
+        device_,
+        command_pool_.get(),
+        buffer_.pool.data() + buffer_.in_use,
+        Configuration::kQuantum);
   }
 
   return Buffer(buffer_.pool[buffer_.in_use++]);
@@ -431,7 +431,8 @@ void Command::Pool::purge() {
 
 void Command::Pool::submit(
     const VkQueue queue,
-    c10::ArrayRef<const Buffer> buffers,
+    const Buffer* const buffers,
+    const uint32_t count,
     const Resource::Fence fence) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_ && command_pool_,
@@ -443,24 +444,24 @@ void Command::Pool::submit(
       "Invalid Vulkan queue!");
 
   c10::SmallVector<VkCommandBuffer, Configuration::kReserve> command_buffers;
-  command_buffers.reserve(buffers.size());
+  command_buffers.reserve(count);
 
-  for (const Buffer& buffer : buffers) {
-    VkCommandBuffer command_buffer = buffer.handle();
+  for (uint32_t buffer = 0u; buffer < count; ++buffer) {
+    VkCommandBuffer command_buffer = buffers[buffer].handle();
 
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         command_buffer,
         "Invalid Vulkan command buffer!");
 
     if (stream_.handle() == command_buffer) {
-      // if (fence) {
+      if (fence) {
         stream_.end();
-        stream_.invalidate();
-      // }
-      // else {
-      //   // Skip
-      //   command_buffer = VK_NULL_HANDLE;
-      // }
+        stream_ = Buffer{};
+      }
+      else {
+        // Skip
+        command_buffer = VK_NULL_HANDLE;
+      }
     }
 
     if (command_buffer) {
