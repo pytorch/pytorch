@@ -1293,6 +1293,14 @@ class TestONNXRuntime(unittest.TestCase):
                       dynamic_axes={'input_1': [0, 1, 2],
                                     'output_1': [0, 1, 2]})
 
+    def test_square(self):
+        class Square(torch.nn.Module):
+            def forward(self, x):
+                return torch.square(x)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(Square(), x)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_arange_dynamic(self):
         class ArangeModel(torch.nn.Module):
