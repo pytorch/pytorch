@@ -4997,6 +4997,24 @@ class TestONNXRuntime(unittest.TestCase):
                       output_names=['output_1'],
                       dynamic_axes={'output_1': [0, 1]})
 
+    @skipIfONNXShapeInference(False)
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_if_list(self):
+        class IfModel(torch.nn.Module):
+            def forward(self, x, y, cond):
+                res = []
+                if cond:
+                    res = res + [x]
+                else:
+                    res = res + [y]
+                # TODO: remove torch.stack once graph sequence output is supported.
+                return torch.stack(res)
+
+        x = torch.randn(2, 3)
+        y = torch.randn(3, 3)
+        cond = torch.tensor(1, dtype=torch.bool)
+        self.run_test(torch.jit.script(IfModel()), (x, y, cond))
+
     def test_onnx_proto_checker(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -5502,6 +5520,12 @@ TestONNXRuntime_opset12_IRv4 = type(str("TestONNXRuntime_opset12_IRv4"),
                                     dict(TestONNXRuntime.__dict__, opset_version=12,
                                          keep_initializers_as_inputs=False))
 
+# opset 13 tests
+TestONNXRuntime_opset13 = type(str("TestONNXRuntime_opset13"),
+                               (unittest.TestCase,),
+                               dict(TestONNXRuntime.__dict__, opset_version=13,
+                                    keep_initializers_as_inputs=False,
+                                    onnx_shape_inference=True))
 
 # opset 9 tests, with use_new_jit_passes=True for using new jit API,
 # and with keep_initializers_as_inputs=False for IR version 4 style export.
