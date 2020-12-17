@@ -1932,9 +1932,9 @@ def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwarg
                 arg = arg.double()
             if arg.dtype == torch.cfloat:
                 arg = arg.to(torch.cdouble)
-            if arg.is_complex() != dtype.is_complex:
-                raise RuntimeError("User provided tensor is real for a test that runs with complex dtype, ",
-                                   "which is not supported for now")
+            # if arg.is_complex() != dtype.is_complex:
+            #     raise RuntimeError("User provided tensor is real for a test that runs with complex dtype, ",
+            #                        "which is not supported for now")
             # NOTE: We do clone() after detach() here because we need to be able to change size/storage of v afterwards
             v = maybe_non_contig(arg).detach().to(device=device).clone()
             v.requires_grad = requires_grad and (v.is_floating_point() or v.is_complex())

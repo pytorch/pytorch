@@ -1945,58 +1945,62 @@ class TestAutograd(TestCase):
         self.assertEqual(result, expected)
 
     def test_stack(self):
-        x = torch.randn(10, 10, requires_grad=True)
-        y = torch.randn(10, 10, requires_grad=True)
-        z = torch.randn(10, 10, requires_grad=True)
-        stacked = torch.stack([x, y, z], 0)
-        grad = torch.randn(3, 10, 10)
-        stacked.backward(grad)
-        self.assertEqual(x.grad, grad[0])
-        self.assertEqual(y.grad, grad[1])
-        self.assertEqual(z.grad, grad[2])
+        for dtype in [torch.float, torch.cfloat]:
+            x = torch.randn(10, 10, dtype=dtype, requires_grad=True)
+            y = torch.randn(10, 10, dtype=dtype, requires_grad=True)
+            z = torch.randn(10, 10, dtype=dtype, requires_grad=True)
+            stacked = torch.stack([x, y, z], 0)
+            grad = torch.randn(3, 10, 10, dtype=dtype)
+            stacked.backward(grad)
+            self.assertEqual(x.grad, grad[0])
+            self.assertEqual(y.grad, grad[1])
+            self.assertEqual(z.grad, grad[2])
 
     def test_hstack(self):
-        x = torch.randn(10, 10, requires_grad=True)
-        y = torch.randn(10, 10, requires_grad=True)
-        z = torch.randn(10, 10, requires_grad=True)
-        stacked = torch.hstack([x, y, z])
-        grad = torch.randn(10, 30)
-        stacked.backward(grad)
-        self.assertEqual(x.grad, grad[:, 0:10])
-        self.assertEqual(y.grad, grad[:, 10:20])
-        self.assertEqual(z.grad, grad[:, 20:30])
+        for dtype in [torch.float, torch.cfloat]:
+            x = torch.randn(10, 10, dtype=dtype, requires_grad=True)
+            y = torch.randn(10, 10, dtype=dtype, requires_grad=True)
+            z = torch.randn(10, 10, dtype=dtype, requires_grad=True)
+            stacked = torch.hstack([x, y, z])
+            grad = torch.randn(10, 30, dtype=dtype)
+            stacked.backward(grad)
+            self.assertEqual(x.grad, grad[:, 0:10])
+            self.assertEqual(y.grad, grad[:, 10:20])
+            self.assertEqual(z.grad, grad[:, 20:30])
 
-        x = torch.randn(10, requires_grad=True)
-        y = torch.randn(10, requires_grad=True)
-        z = torch.randn(10, requires_grad=True)
-        stacked = torch.hstack([x, y, z])
-        grad = torch.randn(30)
-        stacked.backward(grad)
-        self.assertEqual(x.grad, grad[0:10])
-        self.assertEqual(y.grad, grad[10:20])
-        self.assertEqual(z.grad, grad[20:30])
+            x = torch.randn(10, dtype=dtype, requires_grad=True)
+            y = torch.randn(10, dtype=dtype, requires_grad=True)
+            z = torch.randn(10, dtype=dtype, requires_grad=True)
+            stacked = torch.hstack([x, y, z])
+            grad = torch.randn(30, dtype=dtype)
+            stacked.backward(grad)
+            self.assertEqual(x.grad, grad[0:10])
+            self.assertEqual(y.grad, grad[10:20])
+            self.assertEqual(z.grad, grad[20:30])
 
     def test_vstack(self):
-        x = torch.randn(10, 10, requires_grad=True)
-        y = torch.randn(10, 10, requires_grad=True)
-        z = torch.randn(10, 10, requires_grad=True)
-        stacked = torch.vstack([x, y, z])
-        grad = torch.randn(30, 10)
-        stacked.backward(grad)
-        self.assertEqual(x.grad, grad[0:10])
-        self.assertEqual(y.grad, grad[10:20])
-        self.assertEqual(z.grad, grad[20:30])
+        for dtype in [torch.float, torch.cfloat]:
+            x = torch.randn(10, 10, dtype=dtype, requires_grad=True)
+            y = torch.randn(10, 10, dtype=dtype, requires_grad=True)
+            z = torch.randn(10, 10, dtype=dtype, requires_grad=True)
+            stacked = torch.vstack([x, y, z])
+            grad = torch.randn(30, 10, dtype=dtype)
+            stacked.backward(grad)
+            self.assertEqual(x.grad, grad[0:10])
+            self.assertEqual(y.grad, grad[10:20])
+            self.assertEqual(z.grad, grad[20:30])
 
     def test_dstack(self):
-        x = torch.randn(10, 10, requires_grad=True)
-        y = torch.randn(10, 10, requires_grad=True)
-        z = torch.randn(10, 10, requires_grad=True)
-        stacked = torch.dstack([x, y, z])
-        grad = torch.randn(10, 10, 3)
-        stacked.backward(grad)
-        self.assertEqual(x.grad, grad[:, :, 0])
-        self.assertEqual(y.grad, grad[:, :, 1])
-        self.assertEqual(z.grad, grad[:, :, 2])
+        for dtype in [torch.float, torch.cfloat]:
+            x = torch.randn(10, 10, dtype=dtype, requires_grad=True)
+            y = torch.randn(10, 10, dtype=dtype, requires_grad=True)
+            z = torch.randn(10, 10, dtype=dtype, requires_grad=True)
+            stacked = torch.dstack([x, y, z])
+            grad = torch.randn(10, 10, 3, dtype=dtype)
+            stacked.backward(grad)
+            self.assertEqual(x.grad, grad[:, :, 0])
+            self.assertEqual(y.grad, grad[:, :, 1])
+            self.assertEqual(z.grad, grad[:, :, 2])
 
     def test_unbind(self):
         stacked = torch.randn(3, 10, 10, requires_grad=True)
@@ -5108,7 +5112,8 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'tensor_split', 'matmul',
                 'bmm', 'mv', 'ger', 'diagonal', 'atan', 'angle', 'tanh', 'fill_', 'sub',
                 'exp', 'mean', 'inverse', 'triangular_solve', 'solve', 'addcmul',
-                'addcdiv', 'linalg.tensorinv', 'matrix_exp', 'qr', ] + separate_complex_tests
+                'addcdiv', 'linalg.tensorinv', 'matrix_exp', 'qr', 'gather', 'index_select',
+                'narrow', 'swapaxes', 'swapdims', 'tensor_split', 'tile'] + separate_complex_tests
 
 def add_test(
         name,
@@ -7302,15 +7307,16 @@ class TestAutogradDeviceType(TestCase):
 
     def test_movedim(self, device):
         for fn in [torch.movedim, torch.moveaxis]:
-            x = torch.randn(4, 3, 2, 1, dtype=torch.double, device=device, requires_grad=True)
+            for dtype in [torch.cdouble, torch.double]:
+                x = torch.randn(4, 3, 2, 1, dtype=dtype, device=device, requires_grad=True)
 
-            # Positive axis
-            gradcheck(lambda x: fn(x, (0, 1, 2, 3), (3, 2, 1, 0)), x)
-            gradgradcheck(lambda x: fn(x, (0, 1, 2, 3), (3, 2, 1, 0)), x)
+                # Positive axis
+                gradcheck(lambda x: fn(x, (0, 1, 2, 3), (3, 2, 1, 0)), x)
+                gradgradcheck(lambda x: fn(x, (0, 1, 2, 3), (3, 2, 1, 0)), x)
 
-            # Negative axis
-            gradcheck(lambda x: fn(x, (0, -1, -2, -3), (-3, -2, -1, -0)), x)
-            gradgradcheck(lambda x: fn(x, (0, -1, -2, -3), (-3, -2, -1, -0)), x)
+                # Negative axis
+                gradcheck(lambda x: fn(x, (0, -1, -2, -3), (-3, -2, -1, -0)), x)
+                gradgradcheck(lambda x: fn(x, (0, -1, -2, -3), (-3, -2, -1, -0)), x)
 
     def _test_atleast(self, device, torch_fn):
         # 0-dim
