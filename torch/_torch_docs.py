@@ -4347,9 +4347,7 @@ add_docstr(torch.xlogy,
            r"""
 xlogy(self, other, *, out=None) -> Tensor
 
-Computes ``self * log(other)`` except it treats ``0 * log(0)`` as ``0``.
-
-Similar to SciPy's `scipy.special.xlogy`.
+Computes ``self * log(other)`` with the following cases.
 
 .. math::
     \text{out}_{i} = \begin{cases}
@@ -4358,23 +4356,25 @@ Similar to SciPy's `scipy.special.xlogy`.
         self_i * \log{(other_i)} & \text{otherwise}
     \end{cases}
 
+Similar to SciPy's `scipy.special.xlogy`.
+
 """ + r"""
 
 Args:
     self (Number or Tensor)
     other (Number or Tensor)
 
-.. note:: Both attr:`self` and attr:`other` cannot be number.
+.. note:: At least one of :attr:`self` or :attr:`other` must be a tensor.
 
 Keyword args:
     {out}
 
 Example::
 
-    >>> x = torch.zeros(4,)
-    >>> y = torch.tensor([0, 1, float('inf'), float('nan')])
+    >>> x = torch.zeros(5,)
+    >>> y = torch.tensor([-1, 0, 1, float('inf'), float('nan')])
     >>> torch.xlogy(x, y)
-    tensor([0., 0., 0., nan])
+    tensor([0., 0., 0., 0., nan])
     >>> x = torch.tensor([1, 2, 3])
     >>> y = torch.tensor([3, 2, 1])
     >>> torch.xlogy(x, y)
