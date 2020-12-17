@@ -277,7 +277,7 @@ static inline float trigamma(float x) {
  * See note [3-Clause BSD License for the Cephes Math Library].
  */
 static inline double calc_digamma(double x) {
-  // [CPP Standard Reference] https://en.cppreference.com/w/cpp/numeric/math/tgamma
+  // [C++ Standard Reference: Gamma Function] https://en.cppreference.com/w/cpp/numeric/math/tgamma
   static double PSI_10 = 2.25175258906672110764;
   if (x == 0) {
     // As per C++ standard for gamma related functions and SciPy,
@@ -285,7 +285,7 @@ static inline double calc_digamma(double x) {
     return std::copysign(INFINITY, -x);
   }
 
-  int x_is_integer = x == floor(x);
+  int x_is_integer = x == trunc(x);
   if (x < 0) {
     if (x_is_integer) {
       // As per C++ standard for gamma related functions and SciPy,
@@ -329,7 +329,7 @@ static inline double calc_digamma(double x) {
  * See note [3-Clause BSD License for the Cephes Math Library].
  */
 static inline float calc_digamma(float x) {
-  // See [CPP Standard Reference]
+  // See [C++ Standard Reference: Gamma Function]
   static float PSI_10 = 2.25175258906672110764f;
   if (x == 0) {
     // As per C++ standard for gamma related functions and SciPy,
@@ -337,7 +337,7 @@ static inline float calc_digamma(float x) {
     return std::copysign(INFINITY, -x);
   }
 
-  int x_is_integer = x == floorf(x);
+  int x_is_integer = x == truncf(x);
   if (x < 0) {
     if (x_is_integer) {
     // As per C++ standard for gamma related functions and SciPy,

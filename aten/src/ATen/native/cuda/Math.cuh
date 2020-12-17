@@ -93,7 +93,7 @@ static inline __host__ __device__ scalar_t zeta(scalar_t _x, scalar_t _q) {
  */
 template <typename scalar_t>
 static inline __host__ __device__ scalar_t calc_digamma(scalar_t in) {
-  // [CPP Standard Reference] https://en.cppreference.com/w/cpp/numeric/math/tgamma
+  // [C++ Standard Reference: Gamma Function] https://en.cppreference.com/w/cpp/numeric/math/tgamma
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
   static const double PI_f64 = 3.14159265358979323846;
   const accscalar_t PSI_10 = 2.25175258906672110764;
@@ -114,7 +114,7 @@ static inline __host__ __device__ scalar_t calc_digamma(scalar_t in) {
     return std::copysign(static_cast<scalar_t>(INFINITY), -x);
   }
 
-  bool x_is_integer = x == ::floor(x);
+  bool x_is_integer = x == ::trunc(x);
   accscalar_t result = 0;
   if (x < 0) {
     if (x_is_integer) {
