@@ -10008,8 +10008,9 @@
   dispatch:
     DefaultBackend: linalg_slogdet
 
-- func: linalg_slogdet.sign(Tensor self, *, Tensor(a!) sign, Tensor(b!) logabsdet) -> (Tensor(a!) sign, Tensor(b!) logabsdet)
+- func: linalg_slogdet.out(Tensor self, *, Tensor(a!) sign, Tensor(b!) logabsdet) -> (Tensor(a!) sign, Tensor(b!) logabsdet)
   python_module: linalg
+  use_c10_dispatcher: full
   dispatch:
     DefaultBackend: linalg_slogdet_out
 

@@ -100,7 +100,7 @@ std::tuple<Tensor, Tensor> linalg_slogdet(const Tensor& self) {
 }
 
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
-std::tuple<Tensor&, Tensor&> linalg_slogdet_out(Tensor& sign, Tensor& logabsdet, const Tensor& input) {
+std::tuple<Tensor&, Tensor&> linalg_slogdet_out(const Tensor& input, Tensor& sign, Tensor& logabsdet) {
   TORCH_CHECK(sign.scalar_type() == input.scalar_type(),
     "sign dtype ", sign.scalar_type(), " does not match input dtype ", input.scalar_type());
   ScalarType real_dtype = toValueType(typeMetaToScalarType(input.dtype()));
