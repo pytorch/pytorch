@@ -311,6 +311,7 @@ struct Resource final {
       std::unique_ptr<Policy> policy;
     } memory_;
 
+
     struct {
       std::vector<Handle<Buffer, void(*)(const Buffer&)>> pool;
     } buffer_;
