@@ -3,6 +3,7 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/autograd_metadata.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
+#include <torch/csrc/autograd/variable.h>
 #include <vector>
 
 namespace torch {
