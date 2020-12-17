@@ -1841,6 +1841,5 @@ if(USE_KINETO)
   endif()
 
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_KINETO")
-
   list(APPEND Caffe2_DEPENDENCY_LIBS kineto)
 endif()
