@@ -869,10 +869,6 @@ if TEST_SCIPY:
                dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                test_inplace_grad=True,
                supports_tensor_out=True,
-               skips=(
-                   # RuntimeError: "isfinite" not implemented for 'BFloat16'
-                   SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                            dtypes=[torch.bfloat16]),),
                promotes_integers_to_float=True,
                sample_inputs_func=sample_inputs_xlogy),
     ]
