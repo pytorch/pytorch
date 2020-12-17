@@ -173,22 +173,26 @@ struct Sigmoid {
     __device__ T operator()(T t) const { return (one / (one + std::exp(-t))); }
 };
 
-std::vector<Tensor> foreach_tensor_sigmoid_cuda(TensorList tensors) {
-    check_foreach_api_restrictions(tensors);
-    if (!can_use_fast_route(tensors)) {
-        at::native::foreach_tensor_sigmoid_slow(tensors);
-    }
-    return floating_half_bfloat16<Sigmoid>(tensors);
-}
+template<typename T>                                                 \
+struct Round {                                                       \
+    __device__ T operator()(T t) const { return std::nearbyint(t); } \
+};
 
-void foreach_tensor_sigmoid_cuda_(TensorList tensors) {
-    check_foreach_api_restrictions(tensors);
-    if (!can_use_fast_route(tensors)) {
-        at::native::foreach_tensor_sigmoid_slow_(tensors);
-    }
+template<typename T>
+struct Trunc {
+    __device__ T operator()(T t) const { return t - std::trunc(t); }
+};
 
-    floating_half_bfloat16_<Sigmoid>(tensors);
-}
+template<typename T>
+struct Reciprocal {
+    T one = T(1);
+    __device__ T operator()(T t) const { return (one / t); }
+};
+
+OP_CUSTOM_FUNCTOR(floating_half_bfloat16, sigmoid, Sigmoid)
+OP_CUSTOM_FUNCTOR(floating_half, round, Round)
+OP_CUSTOM_FUNCTOR(floating_half, frac, Trunc)
+OP_CUSTOM_FUNCTOR(floating_complex_half_bfloat16, reciprocal, Reciprocal)
 
 std::vector<Tensor> foreach_tensor_neg_cuda(TensorList tensors) {
     check_foreach_api_restrictions(tensors);
@@ -208,31 +212,6 @@ void foreach_tensor_neg_cuda_(TensorList tensors) {
     }
 
     all_types_half_complex_bfloat16_<std::negate>(tensors);
-}
-
-template<typename T>                                                 \
-struct Round {                                                       \
-    __device__ T operator()(T t) const { return std::nearbyint(t); } \
-};
-
-std::vector<Tensor> foreach_tensor_round_cuda(TensorList tensors) {
-    check_foreach_api_restrictions(tensors);
-
-    if (!can_use_fast_route(tensors)) {
-        return at::native::foreach_tensor_round_slow(tensors);
-    }
-
-    return floating_half<Round>(tensors);
-}
-
-void foreach_tensor_round_cuda_(TensorList tensors) {
-    check_foreach_api_restrictions(tensors);
-
-    if (!can_use_fast_route(tensors)) {
-        return at::native::foreach_tensor_round_slow_(tensors);
-    }
-
-    floating_half_<Round>(tensors);
 }
 
 // Abs have to go via slow path in case of a complex  or integer type.
@@ -273,57 +252,6 @@ void foreach_tensor_abs_cuda_(TensorList tensors) {
     }
 
     floating_complex_half_bfloat16_<Abs>(tensors);
-}
-
-template<typename T>
-struct Trunc {
-    __device__ T operator()(T t) const { return t - std::trunc(t); }
-};
-
-std::vector<Tensor> foreach_tensor_frac_cuda(TensorList tensors) {
-    check_foreach_api_restrictions(tensors);
-
-    if (!can_use_fast_route(tensors)) {
-        return at::native::foreach_tensor_frac_slow(tensors);
-    }
-
-    return floating_half<Trunc>(tensors);
-}
-
-void foreach_tensor_frac_cuda_(TensorList tensors) {
-    check_foreach_api_restrictions(tensors);
-
-    if (!can_use_fast_route(tensors)) {
-        return at::native::foreach_tensor_frac_slow_(tensors);
-    }
-
-    floating_half_<Trunc>(tensors);
-}
-
-template<typename T>
-struct Reciprocal {
-    T one = T(1);
-    __device__ T operator()(T t) const { return (one / t); }
-};
-
-std::vector<Tensor> foreach_tensor_reciprocal_cuda(TensorList tensors) {
-    check_foreach_api_restrictions(tensors);
-
-    if (!can_use_fast_route(tensors)) {
-        return at::native::foreach_tensor_reciprocal_slow(tensors);
-    }
-
-    return floating_complex_half_bfloat16<Reciprocal>(tensors);
-}
-
-void foreach_tensor_reciprocal_cuda_(TensorList tensors) {
-    check_foreach_api_restrictions(tensors);
-
-    if (!can_use_fast_route(tensors)) {
-        return at::native::foreach_tensor_reciprocal_slow_(tensors);
-    }
-
-    floating_complex_half_bfloat16_<Reciprocal>(tensors);
 }
 
 void foreach_tensor_zero_cuda_(TensorList tensors) {
