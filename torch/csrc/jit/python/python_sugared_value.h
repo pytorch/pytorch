@@ -179,11 +179,18 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs,
       size_t n_binders) override {
-    bool is_class_type = concreteType_->getJitType()->cast<ClassType>() != nullptr; 
-    bool have_pre_hooks = is_class_type && 
-      concreteType_->getJitType()->expect<ClassType>()->getForwardPreHooks().size() != 0; 
-    bool have_hooks = is_class_type 
-      && concreteType_->getJitType()->expect<ClassType>()->getForwardHooks().size() != 0; 
+    bool is_class_type =
+        concreteType_->getJitType()->cast<ClassType>() != nullptr;
+    bool have_pre_hooks = is_class_type &&
+        concreteType_->getJitType()
+                ->expect<ClassType>()
+                ->getForwardPreHooks()
+                .size() != 0;
+    bool have_hooks = is_class_type &&
+        concreteType_->getJitType()
+                ->expect<ClassType>()
+                ->getForwardHooks()
+                .size() != 0;
     std::vector<Value*> arg_values;
     std::vector<NamedValue> pre_hook_result;
     Value* forward_input;
@@ -197,12 +204,11 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
       if (args.size() == 0) {
         arg_values.push_back(caller.graph()->createNone()->output());
       }
-      forward_input =
-          caller.graph()
-              ->insertNode(caller.graph()->createTuple(arg_values))
-              ->output();
+      forward_input = caller.graph()
+                          ->insertNode(caller.graph()->createTuple(arg_values))
+                          ->output();
     }
-    
+
     // call pre_hooks
     if (have_pre_hooks) {
       for (const auto& hook : concreteType_->getJitType()
@@ -238,9 +244,10 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
     Value* forward_output = forwardSV->asValue(loc, caller);
 
     // call hooks
-    if (have_hooks){
-      for (const auto& hook :
-            concreteType_->getJitType()->expect<ClassType>()->getForwardHooks()) {
+    if (have_hooks) {
+      for (const auto& hook : concreteType_->getJitType()
+                                  ->expect<ClassType>()
+                                  ->getForwardHooks()) {
         // convert input and output
         std::vector<NamedValue> hook_args;
         hook_args.emplace_back(NamedValue(forward_input));
