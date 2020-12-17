@@ -1830,5 +1830,7 @@ if(USE_KINETO AND USE_CUDA)
     message(STATUS "Configured Kineto as a dependency.")
   endif()
 
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_KINETO")
+
   list(APPEND Caffe2_DEPENDENCY_LIBS kineto)
 endif()

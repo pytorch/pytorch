@@ -538,10 +538,6 @@ if(USE_FBGEMM)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_FBGEMM")
 endif()
 
-if(USE_KINETO)
-  string(APPEND CMAKE_CXX_FLAGS " -DUSE_KINETO")
-endif()
-
 if(USE_QNNPACK)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_QNNPACK")
 endif()
