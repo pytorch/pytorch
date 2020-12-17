@@ -199,6 +199,8 @@ allow_list = [
     ("aten::slow_conv_transpose3d_backward", datetime.date(2021, 1, 31)),
     ("aten::slow_conv_transpose2d_backward", datetime.date(2021, 1, 31)),
     ("aten::set_", datetime.date(2021, 1, 31)),
+    ("aten::native_layer_norm", datetime.date(2021, 1, 31)),
+    ("aten::native_layer_norm_backward", datetime.date(2021, 1, 31)),
 ]
 
 def allow_listed(schema, allow_list):
