@@ -3649,6 +3649,45 @@ TEST(LoopNest, DeadStoreEliminationWithIntermediates) {
   torch::jit::testing::FileCheck().run(expected_ir2, oss.str());
 }
 
+TEST(LoopNest, InlineOutputBuffers) {
+  KernelScope kernel_scope;
+  const int M = 4;
+  const int N = 5;
+  const int K = 6;
+  Placeholder a_buf("a", kFloat, {M, N});
+  Placeholder b_buf("b", kFloat, {N, K});
+  Tensor* c = Compute(
+      "broadcast_add",
+      {{M, "m"}, {N, "n"}, {K, "k"}},
+      [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
+        return a_buf.load(m, n) + b_buf.load(n, k);
+      });
+  Tensor* out1 = Compute(
+      "out1",
+      {{M, "m"}, {N, "n"}, {K, "k"}},
+      [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
+        return c->call(m, n, k) + 1;
+      });
+
+  Tensor* out2 = Compute(
+      "out2",
+      {{M, "m"}, {N, "n"}, {K, "k"}},
+      [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
+        return out1->call(m, n, k) / c->call(m, n, k) * 4;
+      });
+  for (const bool inline_outputs : {true, false}) {
+    LoopNest l({out1, out2});
+    l.inlineIntermediateBufs(inline_outputs);
+    Stmt* stmt1 = l.root_stmt();
+    std::ostringstream oss;
+    oss << *stmt1;
+    size_t num_out1_uses = inline_outputs ? 1 : 2;
+    torch::jit::testing::FileCheck()
+        .check_count("out1", num_out1_uses, /*exactly*/ true)
+        ->run(oss.str());
+  }
+}
+
 TEST(LoopNest, CompoundTensorSimple) {
   KernelScope kernel_scope;
 
