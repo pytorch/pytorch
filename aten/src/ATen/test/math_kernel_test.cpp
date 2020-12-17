@@ -98,3 +98,11 @@ TEST(MathKernelTest, Addr) {
     }
   }
 }
+
+TEST(MathKernelTest, SiluBackward) {
+  const auto input = rand({20, 10});
+  const auto grad_output = rand({20, 10});
+  auto out = at::native::silu_backward(grad_output, input);
+  auto math_out = at::native::math_silu_backward(grad_output, input);
+  ASSERT_ALLCLOSE_TOLERANCES(out, math_out, 1e-4, 1e-6);
+}
