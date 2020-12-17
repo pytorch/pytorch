@@ -3,7 +3,6 @@ import torch
 import inspect
 import operator
 import builtins
-import warnings
 from typing import Union
 
 from .graph import magic_methods, reflectable_magic_methods, Graph
