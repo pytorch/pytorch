@@ -157,8 +157,7 @@ class Proxy:
         return self.tracer.keys(self)
 
     def __len__(self):
-        warnings.warn("'builtins.len' is not supported. Replace `builtins.len` with 'torch.fx.len' and try again.")
-        return
+        raise RuntimeError("'builtins.len' is not supported. Replace `builtins.len` with 'torch.fx.len' and try again.")
 
     def __torch_function__(self, orig_method, types, args=None, kwargs=None):
         args = args if args else ()

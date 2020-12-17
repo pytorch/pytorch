@@ -656,6 +656,22 @@ class TestFX(JitTestCase):
         traced = torch.fx.symbolic_trace(IHaveATensorConstant())
         torch.jit.script(traced)
 
+    def test_len(self):
+        class LenTest(torch.nn.Module):
+            def forward(self, x):
+                return len(x)
+
+        lt = LenTest()
+        with self.assertRaisesRegex(RuntimeError, "'builtins.len' is not supported. Replace `builtins.len` with 'torch.fx.len' and try again."):
+            symbolic_trace(lt)
+
+    def test_torch_fx_len(self):
+        class FXLenTest(torch.nn.Module):
+            def forward(self, x):
+                return torch.fx.len(x)
+
+        traced = symbolic_trace(FXLenTest())
+
     def test_torch_custom_ops(self):
         class M(torch.nn.Module):
             def forward(self, a):
@@ -1160,14 +1176,6 @@ class TestFX(JitTestCase):
                 return Pair(x, x)
 
         traced = symbolic_trace(NamedTupReturn())
-
-    def test_len(self):
-        class LenTest(torch.nn.Module):
-            def forward(self, x):
-                return torch.fx.len(x)
-
-        traced = symbolic_trace(LenTest())
-
 
 if __name__ == '__main__':
     run_tests()
