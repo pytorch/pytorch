@@ -7,7 +7,8 @@ class ObservedGraphModule(GraphModule):
     def get_preserved_attr_names(self):
         return ['_activation_post_process_map',
                 '_patterns',
-                '_qconfig_map']
+                '_qconfig_map',
+                '_prepare_custom_config_dict']
 
     def __init__(self, root, graph):
         preserved_attrs = dict()
