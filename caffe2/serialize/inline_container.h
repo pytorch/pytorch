@@ -133,20 +133,14 @@ constexpr uint64_t kMaxSupportedFileFormatVersion = 0x5L;
 //      when given bool or integer fill values.
 constexpr uint64_t kProducedFileFormatVersion = 0x3L;
 
-// The version we write when the archive contains bytecode.
+// the version we write when the archive contains bytecode.
 // It must be higher or eq to kProducedFileFormatVersion.
 // Because torchscript changes is likely introduce bytecode change.
 // If kProducedFileFormatVersion is increased, kProducedBytecodeVersion
 // should be increased too. The relationship is:
 // kMaxSupportedFileFormatVersion >= (most likely ==) kProducedBytecodeVersion
 //   >= kProducedFileFormatVersion
-// Versions:
-//  0x1L: Initial version
-//  0x2L: (Comment missing)
-//  0x3L: (Comment missing)
-//  0x4L: (Comment missing)
-//  0x5L: Added schema to function tuple
-constexpr uint64_t kProducedBytecodeVersion = 0x5L;
+constexpr uint64_t kProducedBytecodeVersion = 0x4L;
 
 static_assert(kProducedBytecodeVersion >= kProducedFileFormatVersion,
     "kProducedBytecodeVersion must be higher or equal to kProducedFileFormatVersion.");
