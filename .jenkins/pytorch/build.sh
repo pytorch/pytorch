@@ -223,6 +223,18 @@ else
     popd
     assert_git_not_dirty
 
+    # Build jit hook tests
+    JIT_HOOK_BUILD="$PWD/../jit-hook-build"
+    JIT_HOOK_TEST="$PWD/test/jit_hooks"
+    python --version
+    SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+    mkdir "$JIT_HOOK_BUILD"
+    pushd "$JIT_HOOK_BUILD"
+    cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
+    make VERBOSE=1
+    popd
+    assert_git_not_dirty
+
     # Build custom backend tests.
     CUSTOM_BACKEND_BUILD="$PWD/../custom-backend-build"
     CUSTOM_BACKEND_TEST="$PWD/test/custom_backend"
