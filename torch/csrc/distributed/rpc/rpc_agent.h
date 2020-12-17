@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <thread>
 
 namespace torch {
 namespace distributed {
