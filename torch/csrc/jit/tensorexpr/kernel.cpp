@@ -249,12 +249,10 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     const torch::jit::Value* v) {
   switch (v->node()->kind()) {
     case aten::_cast_Float:
-    case aten::to:
     case aten::sigmoid:
     case aten::reciprocal:
     case aten::neg:
     case aten::relu:
-    case aten::isnan:
     case aten::log:
     case aten::log10:
     case aten::log1p:
@@ -283,7 +281,6 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::frac:
     case aten::lgamma:
     case aten::type_as:
-    case aten::masked_fill:
       return sizesForValue(v->node()->input(0));
 
     case aten::sub:
@@ -314,6 +311,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
       }
       return broadcastShapes(shapes);
     }
+
     case aten::lerp:
     case aten::clamp:
     case aten::threshold:
@@ -830,17 +828,6 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
       });
     } break;
 
-    case aten::to: {
-      // see handling of aten::to in tensorexpr_fuser.cpp for why we only
-      // need to handle the first input
-      auto node = v->node();
-      return computeOneOperand("aten_to", v, [node](const ExprHandle& a) {
-        auto output_dtype = findDtypeForValue(node->output());
-        TORCH_INTERNAL_ASSERT(output_dtype);
-        return Cast::make(ToDtype(*output_dtype), a);
-      });
-    } break;
-
     case aten::sub: {
       auto sub_lambda = [](const ExprHandle& lhs, const ExprHandle& rhs) {
         // NB: sub isn't supported on boolean, no need to promote to integer.
@@ -968,20 +955,6 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
           });
     } break;
 
-    case aten::masked_fill: {
-      return computeThreeOperand(
-          "aten::masked_fill",
-          v,
-          [](const ExprHandle& input,
-             const ExprHandle& mask,
-             const ExprHandle& value) {
-            // value needs to promote to input, not vice versa
-            auto val = promoteToDtype(value, input.dtype().scalar_type());
-            return ifThenElse(mask, val, input);
-          },
-          /*promote_inputs*/ false);
-    }
-
     case aten::clamp: {
       bool noMin = false;
       bool noMax = false;
@@ -1043,15 +1016,6 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::neg: {
       return computeOneOperand("aten_neg", v, [](const ExprHandle& a) {
         return ExprHandle(-0) - a;
-      });
-    } break;
-
-    case aten::isnan: {
-      return computeOneOperand("aten_isnan", v, [](const ExprHandle& a) {
-        if (!a.dtype().is_floating_point()) {
-          return IntImm::make(0);
-        }
-        return isnan(a);
       });
     } break;
 
@@ -1525,11 +1489,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
 
   bool hasReduction = NodeFinder<ReduceOp>::find(l.root_stmt()).size() != 0;
 
-  // inlining output buffers duplicates computation. it slows down
-  // cpu code generation but is enabled on gpu because it avoids difficult
-  // synchronization logic across blocks.
-  bool inline_output_buffers = backendType == kCudaCodeGen;
-  l.inlineIntermediateBufs(inline_output_buffers);
+  l.inlineIntermediateBufs();
 
   if (backendType == kCudaCodeGen) {
     for (auto tensor : tensorOutputs_) {

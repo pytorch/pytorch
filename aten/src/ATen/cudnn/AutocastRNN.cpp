@@ -27,7 +27,6 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
                           const c10::optional<Tensor>& cx,
                           int64_t mode,
                           int64_t hidden_size,
-                          int64_t proj_size,
                           int64_t num_layers,
                           bool batch_first,
                           double dropout,
@@ -44,18 +43,10 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
   // weight_stride0 is the number of weight tensors per layer and direction, as seen by model.parameters().
   // If bias is enabled, there are 4 such tensors (ih and hh weights, ih and hh biases).
   // If bias is not enabled, there are 2 (ih and hh weights).
-  // This organization holds for all rnn types (RNN, GRU, and LSTM). If LSTM with projections is
-  // used, additional hr weight is added.
-  if (proj_size > 0) {
-    TORCH_INTERNAL_ASSERT((weight_stride0 == 3) || (weight_stride0 == 5),
-                          "weight_stride0 must be 3 (if no bias) or 5 (if bias) for LSTM with projections.  Received ",
-                          weight_stride0);
-  } else {
-    TORCH_INTERNAL_ASSERT((weight_stride0 == 2) || (weight_stride0 == 4),
-                          "weight_stride0 must be 2 (if no bias) or 4 (if bias).  Received ",
-                          weight_stride0);
-  }
-
+  // This organization holds for all rnn types (RNN, GRU, and LSTM).
+  TORCH_INTERNAL_ASSERT((weight_stride0 == 2) || (weight_stride0 == 4),
+                        "weight_stride0 must be 2 (if no bias) or 4 (if bias).  Received ",
+                        weight_stride0);
 
   Tensor weight_buf, redispatch_weight_buf;
   std::vector<Tensor> redispatch_weight;
@@ -74,10 +65,6 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
     // Casts weight tensors to FP16 and ensures all weights for all layers are views into a large flat buffer,
     // with the right locations and layouts expected by cudnn.
     // This is (and should be) autograd-exposed.
-    bool include_bias = true;
-    if (weight_stride0 == 2 || (weight_stride0 == 3 && proj_size > 0)) {
-      include_bias = false;
-    }
     std::tie(redispatch_weight_buf, redispatch_weight) =
         at::native::cudnn_rnn::copy_weights_to_flat_buf_views(
             weight,
@@ -85,7 +72,6 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
             input.size(-1),
             mode,
             hidden_size,
-            proj_size,
             num_layers,
             batch_first,
             bidirectional,
@@ -93,8 +79,9 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
             /*flat_buf_options=*/weight[0].options().dtype(at::kHalf),
             /*set_orig_weights_to_flat_buf=*/false,
             /*allow_type_change=*/true,
-            /*include_bias=*/include_bias);
+            /*include_bias=*/weight_stride0 == 4);
   }
+
   return at::_cudnn_rnn(
       cached_cast(at::kHalf, input),
       needs_cast_and_flatten ? TensorList(redispatch_weight) : weight,
@@ -104,7 +91,6 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
       cached_cast(at::kHalf, cx),
       mode,
       hidden_size,
-      proj_size,
       num_layers,
       batch_first,
       dropout,
