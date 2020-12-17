@@ -281,6 +281,67 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad):
                                     low=None, high=None,
                                     requires_grad=False))),)
 
+def sample_inputs_stack(op_info, device, dtype, requires_grad):
+    return (SampleInput((make_tensor((S, S), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                        make_tensor((S, S), device, dtype,
+                                    low=None, high=None,
+                                    requires_grad=requires_grad),
+                        make_tensor((S, S), device, dtype,
+                                    low=None, high=None,
+                                    requires_grad=requires_grad)), kwargs=dict(idx=0)),)
+
+def sample_inputs_hstack_dstack_vstack(op_info, device, dtype, requires_grad):
+    return (SampleInput((make_tensor((S, S), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                        make_tensor((S, S), device, dtype,
+                                    low=None, high=None,
+                                    requires_grad=requires_grad),
+                        make_tensor((S, S), device, dtype,
+                                    low=None, high=None,
+                                    requires_grad=requires_grad))),)
+
+def sample_inputs_gather(op_info, device, dtype, requires_grad):
+    return (SampleInput((make_tensor((M, S), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                        0, gather_variable((S, S), 1, M, True))),
+            SampleInput((make_tensor((M, S), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                        1, gather_variable((M, S // 2), 0, S, True))),
+            SampleInput((make_tensor((), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                        0, torch.tensor([0], dtype=torch.int64))),
+            SampleInput((make_tensor((S,), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                        0, torch.tensor(0, dtype=torch.int64))),
+            SampleInput((make_tensor((), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                        0, torch.tensor(0, dtype=torch.int64))),
+            )
+
+
+def sample_inputs_index_select(op_info, device, dtype, requires_grad):
+    return (SampleInput((make_tensor((S, S, S), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                        0, index_variable(2, S))),
+            SampleInput((make_tensor((), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                        0, torch.tensor([0], dtype=torch.int64))),
+            SampleInput((make_tensor((), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                        0, torch.tensor(0, dtype=torch.int64))),
+            )
+
 def np_unary_ufunc_integer_promotion_wrapper(fn):
     # Wrapper that passes PyTorch's default scalar
     #   type as an argument to the wrapped NumPy
@@ -800,6 +861,64 @@ op_db: List[OpInfo] = [
                    promotes_integers_to_float=True,
                    handles_complex_extremals=False,
                    test_complex_grad=False),
+        OpInfo('gather',
+                dtypes=all_types_and_complex_and(torch.bool, torch.float16),
+                test_inplace_grad=False,
+                skips=(
+                        SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                        dtypes=all_types_and_complex_and(torch.bool, torch.float16)),
+                ),
+                sample_inputs_func=sample_inputs_gather),
+        OpInfo('index_select',
+                dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+                test_inplace_grad=False,
+                skips=(
+                        SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                                    dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
+                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                    dtypes=[torch.complex64, torch.complex128, torch.float16, torch.bfloat16]),
+                ),
+                sample_inputs_func=sample_inputs_index_select),
+        OpInfo('stack',
+                op = lambda *args, idx: torch.stack([*args], idx),
+                dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+                test_inplace_grad=False,
+                supports_tensor_out=False,
+                skips=(
+                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                    dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
+                ),
+                sample_inputs_func=sample_inputs_stack),
+        OpInfo('hstack',
+                op = lambda *args: torch.hstack([*args]),
+                dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+                test_inplace_grad=False,
+                supports_tensor_out=False,
+                skips=(
+                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                    dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
+                ),
+                sample_inputs_func=sample_inputs_hstack_dstack_vstack),
+        OpInfo('vstack',
+                op = lambda *args: torch.vstack([*args]),
+                dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+                test_inplace_grad=False,
+                supports_tensor_out=False,
+                skips=(
+                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                    dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
+                ),
+                sample_inputs_func=sample_inputs_hstack_dstack_vstack),
+        OpInfo('dstack',
+                op = lambda *args: torch.dstack([*args]),
+                dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+                test_inplace_grad=False,
+                supports_tensor_out=False,
+                skips=(
+                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                    dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
+                ),
+                sample_inputs_func=sample_inputs_hstack_dstack_vstack),
 ]
 
 if TEST_SCIPY:
@@ -1932,9 +2051,9 @@ def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwarg
                 arg = arg.double()
             if arg.dtype == torch.cfloat:
                 arg = arg.to(torch.cdouble)
-            # if arg.is_complex() != dtype.is_complex:
-            #     raise RuntimeError("User provided tensor is real for a test that runs with complex dtype, ",
-            #                        "which is not supported for now")
+            if arg.is_complex() != dtype.is_complex:
+                raise RuntimeError("User provided tensor is real for a test that runs with complex dtype, ",
+                                   "which is not supported for now")
             # NOTE: We do clone() after detach() here because we need to be able to change size/storage of v afterwards
             v = maybe_non_contig(arg).detach().to(device=device).clone()
             v.requires_grad = requires_grad and (v.is_floating_point() or v.is_complex())
