@@ -24,6 +24,7 @@ using c10::OptionalType;
 using c10::QSchemeType;
 using c10::QuantizerType;
 using c10::RRefType;
+using c10::StorageType;
 using c10::StreamObjType;
 using c10::StringType;
 using c10::Symbol;
@@ -41,7 +42,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"ScalarType", IntType::get()},
       {"Layout", IntType::get()},
       {"MemoryFormat", IntType::get()},
-      {"Storage", IntType::get()},
+      {"Storage", StorageType::get()},
       {"QScheme", QSchemeType::get()},
       {"Quantizer", QuantizerType::get()},
       {"ConstQuantizerPtr",

@@ -1022,6 +1022,8 @@ Tensor log_softmax_double_backward(const Tensor & grad, const Tensor & grad_outp
   return z * grad_output.sum(dim, true) * ((grad * z).sum(dim, true) - grad);
 }
 
+// NOTE: [How to write vmap-compatible backward formulas]
+//
 // See NOTE: [vmap-incompatible in-place operations] for what it means for an
 // in-place operation to be incompatible with vmap.
 //
@@ -1039,29 +1041,15 @@ Tensor log_softmax_double_backward(const Tensor & grad, const Tensor & grad_outp
 // - If the in-place operation followed some sequence of operations, if the
 //   we want to be able to vmap over the backward formula as-is (this is
 //   usually the case for simple (<15loc) backward formulas), then use
-//   inplace_is_vmap_compatible to guard the operation. For example:
+//   inplaceIsVmapCompatible to guard the operation. For example:
 //             c = a * b
 //     Before: c.mul_(grad)
-//     After:  c = inplace_is_vmap_compatible(c, grad) ? c.mul_(grad) : c * grad
+//     After:  c = at::inplaceIsVmapCompatible(c, grad) ? c.mul_(grad) : c * grad
 //
 // - If we don't want to vmap directly over the backward formula (e.g., if the
 //   backward formula is too complicated or has a lot of vmap-incompatible
 //   operations, then register the backward formula as an operator and eventually
 //   write a batching rule for it.
-static bool inplace_is_vmap_compatible(const Tensor& self, const Tensor& other) {
-  const auto* other_batched = at::maybeGetBatchedImpl(other);
-  if (!other_batched) {
-    return true;
-  }
-  const auto* self_batched = at::maybeGetBatchedImpl(self);
-  if (!self_batched) {
-    // self is not batched but other is batched
-    return false;
-  }
-  auto self_levels = at::createVmapLevelsBitset(self_batched->bdims());
-  auto other_levels = at::createVmapLevelsBitset(other_batched->bdims());
-  return self_levels == (self_levels | other_levels);
-}
 
 Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Tensor & grad, const Tensor & input, const Tensor & target, const c10::optional<Tensor>& weight, int64_t reduction) {
   auto eps = 1e-12;
@@ -1069,7 +1057,7 @@ Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Te
   auto one_m_inp_pl_eps = 1 - input + eps;
   // gradient wrt input
   auto gI = (input * input - 2 * input * target + target) / (inp_pl_eps.pow(2) * one_m_inp_pl_eps.pow(2));
-  if (inplace_is_vmap_compatible(gI, grad)) {
+  if (at::inplaceIsVmapCompatible(gI, grad)) {
     gI *= (grad * grad_output);
   } else {
     gI = gI * (grad * grad_output);
@@ -1090,7 +1078,7 @@ Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad, con
   auto eps = 1e-12;
   // gradient wrt grad_output
   auto ggO = (input - target) / ((input + eps) * (1 - input + eps));
-  if (inplace_is_vmap_compatible(ggO, grad)) {
+  if (at::inplaceIsVmapCompatible(ggO, grad)) {
     ggO *= grad;
   } else {
     ggO = ggO * grad;
@@ -1990,7 +1978,7 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
     glambda = glambda.to(self.dtype());
     // computes v @ diag(glambda) @ vh
     Tensor glambda_term = at::matmul(v * glambda.unsqueeze(-2), vh);
-    if (inplace_is_vmap_compatible(result, glambda_term)) {
+    if (at::inplaceIsVmapCompatible(result, glambda_term)) {
       result.add_(glambda_term);
     } else {
       result = result + glambda_term;
@@ -2551,10 +2539,19 @@ infinitely_differentiable_native_layer_norm_backward(
     const Tensor& mean,
     const Tensor& rstd,
     const c10::optional<Tensor>& gamma,
-    int64_t M,
-    int64_t N,
+    IntArrayRef normalized_shape,
     double eps,
     std::array<bool, 3> grad_input_mask) {
+
+  const int normalized_ndim = normalized_shape.size();
+  const auto input_shape = X.sizes();
+  const auto input_ndim = X.dim();
+  const int axis = input_ndim - normalized_ndim;
+  const int64_t M =
+      at::prod_intlist(input_shape.cbegin(), input_shape.cbegin() + axis);
+  const int64_t N =
+      at::prod_intlist(input_shape.cbegin() + axis, input_shape.cend());
+
   Tensor dX;
   Tensor dgamma;
   Tensor dbeta;
