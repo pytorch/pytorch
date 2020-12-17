@@ -14,7 +14,10 @@ Tensor pixel_shuffle(const Tensor& self, int64_t upscale_factor) {
   TORCH_CHECK(self.dim() >= 3,
               "pixel_shuffle expects input to have at least 3 dimensions, but got input with ",
               self.dim(), " dimension(s)");
-  TORCH_CHECK(upscale_factor > 0, "pixel_shuffle expects a positive upscale_factor, but got ", upscale_factor);
+  TORCH_CHECK(
+      upscale_factor > 0,
+      "pixel_shuffle expects a positive upscale_factor, but got ",
+      upscale_factor);
   // Format: (B1, ..., Bn), C, H, W
   int64_t c = self.size(-3);
   int64_t h = self.size(-2);
@@ -30,16 +33,20 @@ Tensor pixel_shuffle(const Tensor& self, int64_t upscale_factor) {
   int64_t oh = h * upscale_factor;
   int64_t ow = w * upscale_factor;
 
-  // First, reshape to split the channels dim from c into 3 separate dims: (oc, upscale_factor, upscale_factor).
-  // This allows shuffling to be done next by permuting dims.
-  std::vector<int64_t> added_dims_shape(self.sizes().begin(), self_sizes_batch_end);
-  added_dims_shape.insert(added_dims_shape.end(), {oc, upscale_factor, upscale_factor, h, w});
+  // First, reshape to split the channels dim from c into 3 separate dims: (oc,
+  // upscale_factor, upscale_factor). This allows shuffling to be done next by
+  // permuting dims.
+  std::vector<int64_t> added_dims_shape(
+      self.sizes().begin(), self_sizes_batch_end);
+  added_dims_shape.insert(
+      added_dims_shape.end(), {oc, upscale_factor, upscale_factor, h, w});
   const auto input_reshaped = self.reshape(added_dims_shape);
 
   // Next, shuffle by permuting the new upscale_factor dims alongside the height and width dims.
   std::vector<int64_t> permutation(self.sizes().begin(), self_sizes_batch_end);
   // std::iota is used to maintain the batch dims within the permutation.
-  // Since 2 dims were added, the correct batch dim offsets are now: -added_dims_shape.size(), ..., -7, -6.
+  // Since 2 dims were added, the correct batch dim offsets are now:
+  // -added_dims_shape.size(), ..., -7, -6.
   std::iota(permutation.begin(), permutation.end(), -added_dims_shape.size());
   permutation.insert(permutation.end(), {-5 /* oc */, -2 /* h */, -4 /* 1st upscale_factor */, -1 /* w */,
                                          -3 /* 2nd upscale_factor */});
@@ -57,7 +64,10 @@ Tensor pixel_unshuffle(const Tensor& self, int64_t downscale_factor) {
   TORCH_CHECK(self.dim() >= 3,
               "pixel_unshuffle expects input to have at least 3 dimensions, but got input with ",
               self.dim(), " dimension(s)");
-  TORCH_CHECK(downscale_factor > 0, "pixel_unshuffle expects a positive downscale_factor, but got ", downscale_factor);
+  TORCH_CHECK(
+      downscale_factor > 0,
+      "pixel_unshuffle expects a positive downscale_factor, but got ",
+      downscale_factor);
   // Format: (B1, ..., Bn), C, H, W
   int64_t c = self.size(-3);
   int64_t h = self.size(-2);
@@ -76,16 +86,20 @@ Tensor pixel_unshuffle(const Tensor& self, int64_t downscale_factor) {
   int64_t oh = h / downscale_factor;
   int64_t ow = w / downscale_factor;
 
-  // First, reshape to split height dim into (oh, downscale_factor) dims and width dim into
-  // (ow, downscale_factor) dims. This allows unshuffling to be done next by permuting dims.
-  std::vector<int64_t> added_dims_shape(self.sizes().begin(), self_sizes_batch_end);
-  added_dims_shape.insert(added_dims_shape.end(), {c, oh, downscale_factor, ow, downscale_factor});
+  // First, reshape to split height dim into (oh, downscale_factor) dims and
+  // width dim into (ow, downscale_factor) dims. This allows unshuffling to be
+  // done next by permuting dims.
+  std::vector<int64_t> added_dims_shape(
+      self.sizes().begin(), self_sizes_batch_end);
+  added_dims_shape.insert(
+      added_dims_shape.end(), {c, oh, downscale_factor, ow, downscale_factor});
   const auto input_reshaped = self.reshape(added_dims_shape);
 
   // Next, unshuffle by permuting the downscale_factor dims alongside the channel dim.
   std::vector<int64_t> permutation(self.sizes().begin(), self_sizes_batch_end);
   // std::iota is used to maintain the batch dims within the permutation.
-  // Since 2 dims were added, the correct batch dim offsets are now: -added_dims_shape.size(), ..., -7, -6.
+  // Since 2 dims were added, the correct batch dim offsets are now:
+  // -added_dims_shape.size(), ..., -7, -6.
   std::iota(permutation.begin(), permutation.end(), -added_dims_shape.size());
   permutation.insert(permutation.end(), {-5 /* c */, -3 /* 1st downscale_factor */, -1 /*2nd downscale_factor */,
                                          -4 /* oh */, -2 /* ow */});
