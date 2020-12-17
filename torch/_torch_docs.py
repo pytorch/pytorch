@@ -610,105 +610,6 @@ Example::
     True
 """)
 
-add_docstr(torch.all,
-           r"""
-all(input) -> Tensor
-
-Tests if all elements in :attr:`input` evaluate to `True`.
-
-Example::
-
-    >>> a = torch.rand(1, 2).bool()
-    >>> a
-    tensor([[False, True]], dtype=torch.bool)
-    >>> torch.all(a)
-    tensor(False, dtype=torch.bool)
-    >>> a = torch.arange(0, 3)
-    >>> a
-    tensor([0, 1, 2])
-    >>> torch.all(a)
-    tensor(False)
-
-.. function:: all(input, dim, keepdim=False, *, out=None) -> Tensor
-
-For each row of :attr:`input` in the given dimension :attr:`dim`,
-returns `True` if all elements in the row evaluate to `True` and `False` otherwise.
-
-{keepdim_details}
-
-Args:
-    {input}
-    {dim}
-    {keepdim}
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> a = torch.rand(4, 2).bool()
-    >>> a
-    tensor([[True, True],
-            [True, False],
-            [True, True],
-            [True, True]], dtype=torch.bool)
-    >>> torch.all(a, dim=1)
-    tensor([ True, False,  True,  True], dtype=torch.bool)
-    >>> torch.all(a, dim=0)
-    tensor([ True, False], dtype=torch.bool)
-""".format(**single_dim_common))
-
-add_docstr(torch.any,
-           r"""
-any(input) -> Tensor
-
-Args:
-    {input}
-
-Tests if any element in :attr:`input` evaluates to `True`.
-
-Example::
-
-    >>> a = torch.rand(1, 2).bool()
-    >>> a
-    tensor([[False, True]], dtype=torch.bool)
-    >>> torch.any(a)
-    tensor(True, dtype=torch.bool)
-    >>> a = torch.arange(0, 3)
-    >>> a
-    tensor([0, 1, 2])
-    >>> torch.any(a)
-    tensor(True)
-
-.. function:: any(input, dim, keepdim=False, *, out=None) -> Tensor
-
-For each row of :attr:`input` in the given dimension :attr:`dim`,
-returns `True` if any element in the row evaluate to `True` and `False` otherwise.
-
-{keepdim_details}
-
-Args:
-    {input}
-    {dim}
-    {keepdim}
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> a = torch.randn(4, 2) < 0
-    >>> a
-    tensor([[ True,  True],
-            [False,  True],
-            [ True,  True],
-            [False, False]])
-    >>> torch.any(a, 1)
-    tensor([ True,  True,  True, False])
-    >>> torch.any(a, 0)
-    tensor([True, True])
-""".format(**single_dim_common))
-
 add_docstr(torch.angle,
            r"""
 angle(input, *, out=None) -> Tensor
@@ -2124,6 +2025,11 @@ Example::
     tensor([ 0.1632,  1.1835, -0.6979, -0.7325])
     >>> torch.cosh(a)
     tensor([ 1.0133,  1.7860,  1.2536,  1.2805])
+
+.. note::
+   When :attr:`input` is on the CPU, the implementation of torch.cosh may use
+   the Sleef library, which rounds very large results to infinity or negative
+   infinity. See `here <https://sleef.org/purec.xhtml>`_ for details.
 """.format(**common_args))
 
 add_docstr(torch.cross,
@@ -7575,6 +7481,11 @@ Example::
     tensor([ 0.5380, -0.8632, -0.1265,  0.9399])
     >>> torch.sinh(a)
     tensor([ 0.5644, -0.9744, -0.1268,  1.0845])
+
+.. note::
+   When :attr:`input` is on the CPU, the implementation of torch.sinh may use
+   the Sleef library, which rounds very large results to infinity or negative
+   infinity. See `here <https://sleef.org/purec.xhtml>`_ for details.
 """.format(**common_args))
 
 add_docstr(torch.sort,

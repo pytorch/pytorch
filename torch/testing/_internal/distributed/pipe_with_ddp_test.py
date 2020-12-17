@@ -21,14 +21,14 @@ class PipeWithDDPTest(RpcAgentTestFixture):
     def world_size(self) -> int:
         return 2
 
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     @requires_nccl()
     @dist_init
     @skip_if_rocm
     def test_basic_nccl_ckpt_never(self):
         self._run_basic_test("nccl", "never")
 
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     @requires_nccl()
     @dist_init
     @skip_if_rocm
@@ -36,7 +36,7 @@ class PipeWithDDPTest(RpcAgentTestFixture):
     def test_basic_nccl_ckpt_always(self):
         self._run_basic_test("nccl", "always")
 
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     @requires_nccl()
     @dist_init
     @skip_if_rocm
@@ -44,14 +44,14 @@ class PipeWithDDPTest(RpcAgentTestFixture):
     def test_basic_nccl_ckpt_except_last(self):
         self._run_basic_test("nccl", "except_last")
 
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     @requires_gloo()
     @dist_init
     @skip_if_rocm
     def test_basic_gloo_ckpt_never(self):
         self._run_basic_test("gloo", "never")
 
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     @requires_gloo()
     @dist_init
     @skip_if_rocm
@@ -59,7 +59,7 @@ class PipeWithDDPTest(RpcAgentTestFixture):
     def test_basic_gloo_ckpt_always(self):
         self._run_basic_test("gloo", "always")
 
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     @requires_gloo()
     @dist_init
     @skip_if_rocm
