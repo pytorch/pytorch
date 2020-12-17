@@ -662,7 +662,7 @@ class TestFX(JitTestCase):
                 return len(x)
 
         lt = LenTest()
-        with self.assertRaisesRegex(RuntimeError, "'builtins.len' is not supported. Replace `builtins.len` with 'torch.fx.len' and try again."):
+        with self.assertRaisesRegex(RuntimeError, "'len' is not supported. Replace it with 'torch.fx.len'."):
             symbolic_trace(lt)
 
     def test_torch_fx_len(self):
