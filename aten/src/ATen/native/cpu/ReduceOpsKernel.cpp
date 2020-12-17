@@ -233,6 +233,7 @@ static void norm_kernel_tensor_iterator_impl(
 
 static void and_kernel_impl(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Byte) {
+    // Refer [all, any : uint8 compatibility]
     binary_kernel_reduce_vec(
         iter,
         [=](uint8_t a, uint8_t b) -> uint8_t { return (a && b) ? 1 : 0; },
@@ -273,6 +274,7 @@ static void and_kernel_impl(TensorIterator& iter) {
 
 static void or_kernel_impl(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Byte) {
+    // Refer [all, any : uint8 compatibility]
     binary_kernel_reduce_vec(
         iter,
         [=](uint8_t a, uint8_t b) -> uint8_t { return (a || b) ? 1 : 0; },

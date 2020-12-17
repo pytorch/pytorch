@@ -739,6 +739,12 @@ Tensor norm(const Tensor& self, Scalar p) {
   return at::native::_norm(self, p);
 }
 
+// Note [all, any : uint8 compatibility]:
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// For NumPy comptability, `all` and `any` return
+// Tensor of dtype `bool`. However for compatibility reason,
+// for `uint8`, they return Tensor of same dtype `uint8`.
+// Reference: https://github.com/pytorch/pytorch/pull/47878#issuecomment-747108561
 inline Tensor & _all(Tensor & result, TensorIterator & iter) {
   if (iter.numel() == 0) {
     result.fill_(1);
@@ -755,6 +761,7 @@ Tensor all(const Tensor& self) {
   TORCH_CHECK(self.layout() == Layout::Strided,
               "all only supports strided layout, got: ", self.layout());
 
+  // Refer [all, any : uint8 compatibility]
   Tensor result;
   ScalarType out_dtype;
   if (self.scalar_type() == ScalarType::Byte){
@@ -780,6 +787,7 @@ Tensor all(const Tensor& self) {
 }
 
 Tensor all(const Tensor& self, int64_t dim, bool keepdim) {
+  // Refer [all, any : uint8 compatibility]
   Tensor result;
   if (self.scalar_type() == ScalarType::Byte){
     result = at::empty({0}, self.options());
@@ -795,6 +803,7 @@ Tensor &all_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
               "all only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "all only supports strided layout, got: ", self.layout());
+  // Refer [all, any : uint8 compatibility]
   TORCH_CHECK(result.scalar_type() == ScalarType::Bool || result.scalar_type() == ScalarType::Byte,
               "all only supports bool tensor for result, got: ", result.scalar_type());
 
@@ -834,6 +843,7 @@ Tensor any(const Tensor& self) {
   TORCH_CHECK(self.layout() == Layout::Strided || self.layout() == Layout::Sparse,
               "any only supports strided AND sparse layout, got: ", self.layout());
   
+  // Refer [all, any : uint8 compatibility]
   Tensor result;
   ScalarType out_dtype;
   if (self.scalar_type() == ScalarType::Byte){
@@ -859,6 +869,7 @@ Tensor any(const Tensor& self) {
 }
 
 Tensor any(const Tensor& self, int64_t dim, bool keepdim) {
+  // Refer [all, any : uint8 compatibility]
   Tensor result;
   if (self.scalar_type() == ScalarType::Byte){
     result = at::empty({0}, self.options());
@@ -874,6 +885,7 @@ Tensor &any_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
               "any only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "any only supports strided layout, got: ", self.layout());
+  // Refer [all, any : uint8 compatibility]
   TORCH_CHECK(result.scalar_type() == ScalarType::Bool || result.scalar_type() == ScalarType::Byte,
               "any only supports bool tensor for result, got: ", result.scalar_type());
 
