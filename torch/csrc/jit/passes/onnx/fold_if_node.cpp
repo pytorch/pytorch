@@ -93,9 +93,6 @@ static bool constantFoldedConditionValue(Node* node) {
   if (prev_node->kind() == onnx::If) {
     int cond = 1 - (int)constantFoldedConditionValue(prev_node);
     Block* block = prev_node->blocks()[cond];
-    // we are assuming that the number of block outputs is 1.
-    // TODO: make this more general by supporting the case
-    // of multiple outputs
     auto outputs = cast_node->input()->node()->outputs();
     auto cast_input = cast_node->input();
     int idx = findIndex(outputs, cast_input).value();

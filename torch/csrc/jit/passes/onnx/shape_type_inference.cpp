@@ -351,9 +351,11 @@ void SpecialPostProcess(Node* n) {
   switch (n->kind()) {
     case ::c10::onnx::If: {
       if (!IsBlockReturnTypeSame(n) && IsStaticConditionONNX(n)) {
-        auto cond = ConditionValueONNX(n) ? 0 : 1;
+        auto cond = ConditionValueONNX(n);
+        auto block_idx = cond ? 0 : 1;
         for (size_t i = 0; i < n->outputs().size(); i++) {
-          n->outputs()[i]->setType(n->blocks()[cond]->outputs()[i]->type());
+          n->outputs()[i]->setType(
+              n->blocks()[block_idx]->outputs()[i]->type());
         }
       }
       break;
