@@ -145,10 +145,10 @@ inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_dif
       if (base.is_view()) {
         auto diff_view_meta = static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base));
         const auto& base_bw_info = diff_view_meta->get_backward_view();
-        return make_variable_differentiable_view(std::move(tensor), base_bw_info.chain(base, tensor, view_func),
+        return make_variable_differentiable_view(tensor, base_bw_info.chain(base, tensor, view_func),
                                                  c10::nullopt, creation_meta, allow_tensor_metadata_change);
       } else {
-        return make_variable_differentiable_view(std::move(tensor), ViewInfo(base, view_func),
+        return make_variable_differentiable_view(tensor, ViewInfo(base, view_func),
                                                  c10::nullopt, creation_meta, allow_tensor_metadata_change);
       }
     } else {
@@ -188,10 +188,10 @@ inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_dif
   }
 
   if (is_fw_differentiable || is_bw_differentiable) {
-    return make_variable_differentiable_view(std::move(tensor), std::move(new_bw_info), std::move(new_fw_info),
+    return make_variable_differentiable_view(tensor, std::move(new_bw_info), std::move(new_fw_info),
                                              creation_meta, allow_tensor_metadata_change);
   } else {
-    return make_variable_non_differentiable_view(base, std::move(tensor), allow_tensor_metadata_change);
+    return make_variable_non_differentiable_view(base, tensor, allow_tensor_metadata_change);
   }
 }
 
