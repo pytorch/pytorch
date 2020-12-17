@@ -2764,15 +2764,14 @@ TEST_F(ModulesTest, PixelShuffle) {
 TEST_F(ModulesTest, PixelUnshuffle) {
   PixelUnshuffle module(/*downscale_factor=*/2);
   auto x = torch::tensor(
-    {{{{-17, 7, 19, 14},
-       {0, -15, -2, 0},
-       {-1, -3, 2, 1},
-       {-12, -3, 14, 9}}}}, torch::kFloat);
+      {{{{-17, 7, 19, 14}, {0, -15, -2, 0}, {-1, -3, 2, 1}, {-12, -3, 14, 9}}}},
+      torch::kFloat);
   auto y_exp = torch::tensor(
-    {{{{-17, 19}, {-1, 2}},
-      {{7, 14}, {-3, 1}},
-      {{0, -2}, {-12, 14}},
-      {{-15, 0}, {-3, 9}}}}, torch::kFloat);
+      {{{{-17, 19}, {-1, 2}},
+        {{7, 14}, {-3, 1}},
+        {{0, -2}, {-12, 14}},
+        {{-15, 0}, {-3, 9}}}},
+      torch::kFloat);
   auto y = module(x);
 
   ASSERT_EQ(y.ndimension(), 4);
@@ -4784,8 +4783,9 @@ TEST_F(ModulesTest, PrettyPrintPixelShuffle) {
 }
 
 TEST_F(ModulesTest, PrettyPrintPixelUnshuffle) {
-  ASSERT_EQ(c10::str(PixelUnshuffle(PixelUnshuffleOptions(5))),
-            "torch::nn::PixelUnshuffle(downscale_factor=5)");
+  ASSERT_EQ(
+      c10::str(PixelUnshuffle(PixelUnshuffleOptions(5))),
+      "torch::nn::PixelUnshuffle(downscale_factor=5)");
 }
 
 TEST_F(ModulesTest, PrettyPrintSoftplus) {
