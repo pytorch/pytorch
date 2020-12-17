@@ -1305,7 +1305,9 @@ class TestFakeQuantize(TestCase):
                 dZeroPoint_actual = zero_point_curr.to(device).grad.detach()
                 tolerance = 1e-4
 
-                if not all(torch.allclose(dX_expected, dX_actual, rtol=tolerance, atol=tolerance), torch.allclose(dScale_expected * grad_factor, dScale_actual, rtol=tolerance, atol=tolerance), torch.allclose(dZeroPoint_expected * grad_factor, dZeroPoint_actual, rtol=tolerance, atol=tolerance)):
+                if not all([torch.allclose(dX_expected, dX_actual, rtol=tolerance, atol=tolerance),
+                           torch.allclose(dScale_expected * grad_factor, dScale_actual, rtol=tolerance, atol=tolerance),
+                           torch.allclose(dZeroPoint_expected * grad_factor, dZeroPoint_actual, rtol=tolerance, atol=tolerance)]):
                     print(X_curr, scale_curr, zero_point_curr)
 
                 self.assertTrue(
