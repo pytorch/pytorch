@@ -15,15 +15,17 @@
 namespace torch {
 namespace jit {
 
-// gets a string representation of a node header
-// (e.g. outputs, a node kind and outputs)
-std::string getHeader(const Node* node) {
-  std::stringstream ss;
-  node->print(ss, 0, {}, false, false, false, false);
-  return ss.str();
+static int parseOptLimit(const std::string& opt_limit) {
+  // TODO bad code
+  try {
+    int64_t n = std::stoi(opt_limit);
+    return n;
+  } catch (...) {
+    return -1;
+  }
 }
 
-static std::unordered_map<std::string, size_t> parseJITBisectOption(
+static std::unordered_map<std::string, int64_t> parseJITBisectOption(
     const char* option) {
   std::stringstream in_ss;
   in_ss << "function:";
@@ -31,56 +33,45 @@ static std::unordered_map<std::string, size_t> parseJITBisectOption(
     in_ss << option;
   }
 
-  std::unordered_map<std::string, size_t> files_to_levels;
+  std::unordered_map<std::string, int64_t> passes_to_opt_limits;
   std::string line;
   while (std::getline(in_ss, line, ':')) {
     if (line.size() == 0) {
       continue;
     }
-
-    auto index_at = line.find_last_of('>');
-    auto begin_index = index_at == std::string::npos ? 0 : index_at + 1;
-    size_t logging_level = index_at == std::string::npos ? 0 : index_at + 1;
+    auto index_at = line.find_last_of('=');
     auto end_index = line.find_last_of('.') == std::string::npos
-        ? line.size()
+        ? index_at
         : line.find_last_of('.');
-    auto filename = line.substr(begin_index, end_index - begin_index);
-    files_to_levels.insert({filename, logging_level});
+    auto pass_name = line.substr(0, end_index);
+    auto opt_limit = parseOptLimit(line.substr(index_at+1));
+    passes_to_opt_limits.insert({pass_name, opt_limit});
   }
 
-  return files_to_levels;
+  return passes_to_opt_limits;
 }
 
-bool is_enabled(const char* cfname, JitBisectionLevels level) {
+bool is_bisect_enabled(const char* pass_name, int64_t* current_counter) {
   static const char* opt_limit = std::getenv("PYTORCH_OPT_LIMIT");
-  std::string fname{cfname};
-  fname = c10::detail::StripBasename(fname);
-  auto end_index = fname.find_last_of('.') == std::string::npos
-      ? fname.size()
-      : fname.find_last_of('.');
-  auto fname_no_ext = fname.substr(0, end_index);
-
-  auto it = files_to_levels.find(fname_no_ext);
-  if (it == files_to_levels.end()) {
+  static const std::unordered_map<std::string, int64_t> passes_to_opt_limits =
+      parseJITBisectOption(opt_limit);
+  std::string pass{pass_name};
+  pass = c10::detail::StripBasename(pass);
+  auto it = passes_to_opt_limits.find(pass);
+  if (it == passes_to_opt_limits.end()) {
     return false;
   }
 
-  return level <= static_cast<JitLoggingLevels>(it->second);
+  auto opt_limit_for_file = it->second;
+  if (*current_counter >= opt_limit_for_file) {
+    return false;
+  }
+
+  (*current_counter)++;
+  return true;
 }
 
-// Unfortunately, in `GraphExecutor` where `log_function` is invoked
-// we won't have access to an original function, so we have to construct
-// a dummy function to give to PythonPrint
-std::string log_function(const std::shared_ptr<torch::jit::Graph>& graph) {
-  torch::jit::GraphFunction func("source_dump", graph, nullptr);
-  std::vector<at::IValue> constants;
-  PrintDepsTable deps;
-  PythonPrint pp(constants, deps);
-  pp.printFunction(func);
-  return pp.str();
-}
-
-std::string jit_log_prefix(
+std::string jit_bisect_prefix(
     const std::string& prefix,
     const std::string& in_str) {
   std::stringstream in_ss(in_str);
@@ -93,36 +84,23 @@ std::string jit_log_prefix(
   return out_ss.str();
 }
 
-std::string jit_log_prefix(
-    JitLoggingLevels level,
-    const char* fn,
+std::string jit_bisect_prefix(
+    int64_t level,
+    const char* pn,
     int l,
     const std::string& in_str) {
   std::stringstream prefix_ss;
   prefix_ss << "[";
-  prefix_ss << level << " ";
-  prefix_ss << c10::detail::StripBasename(std::string(fn)) << ":";
+  prefix_ss << std::to_string(level) << " ";
+  prefix_ss << c10::detail::StripBasename(std::string(pn)) << ":";
   prefix_ss << std::setfill('0') << std::setw(3) << l;
   prefix_ss << "] ";
 
-  return jit_log_prefix(prefix_ss.str(), in_str);
+  return jit_bisect_prefix(prefix_ss.str(), in_str);
 }
 
-std::ostream& operator<<(std::ostream& out, JitLoggingLevels level) {
-  switch (level) {
-    case JitLoggingLevels::GRAPH_DUMP:
-      out << "DUMP";
-      break;
-    case JitLoggingLevels::GRAPH_UPDATE:
-      out << "UPDATE";
-      break;
-    case JitLoggingLevels::GRAPH_DEBUG:
-      out << "DEBUG";
-      break;
-    default:
-      TORCH_INTERNAL_ASSERT(false, "Invalid level");
-  }
-
+std::ostream& operator<<(std::ostream& out, int64_t level) {
+  out << "OPT_LIMIT:" << std::to_string(level);
   return out;
 }
 

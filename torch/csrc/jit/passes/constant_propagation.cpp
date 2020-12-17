@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/node_hashing.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/jit_opt_bisect.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
@@ -15,6 +16,8 @@
 
 namespace torch {
 namespace jit {
+
+static int64_t opt_counter_const_prop = 0;
 
 c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     const Node* n,
@@ -336,6 +339,11 @@ struct ConstantPropagator {
   }
 
   void ConstantPropagation(Node* n) {
+    std::cout << "BEFORE: " << std::to_string(opt_counter_const_prop) << std::endl;
+    if (!JIT_BISECT(&opt_counter_const_prop)) {
+      return;
+    }
+    std::cout << "AFTER: " << std::to_string(opt_counter_const_prop) << std::endl;
     bool runnable_inputs = runnableInputs(n);
     if (n->kind() == prim::If) {
       // inline node if we can, otherwise check for simplified outputs
