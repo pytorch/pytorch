@@ -1788,7 +1788,21 @@ list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt-header-only)
 set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
 
 # ---[ Kineto
-if(USE_KINETO AND USE_CUDA)
+if(USE_KINETO AND INTERN_BUILD_MOBILE)
+  message(STATUS "Not using libkineto in a mobile build.")
+  set(USE_KINETO OFF)
+endif()
+
+if(USE_KINETO AND (NOT USE_CUDA))
+  message(STATUS "Not using libkineto in a non-CUDA build.")
+  set(USE_KINETO OFF)
+endif()
+
+if(USE_KINETO AND MSVC)
+  message(STATUS "Not using libkineto in a Windows build.")
+  set(USE_KINETO OFF)
+endif()
+if(USE_KINETO)
   if(NOT TARGET kineto)
     set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party" CACHE STRING "")
     set(KINETO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/kineto/libkineto" CACHE STRING "")
