@@ -5,9 +5,9 @@
 #include <c10/macros/Export.h>
 #include <c10/util/Optional.h>
 #include <c10/util/SmallVector.h>
-#include <memory>
-
 #include <functional>
+#include <memory>
+#include <random>
 
 namespace c10 {
 class CAFFE2_API OperatorHandle;
@@ -544,8 +544,15 @@ struct TORCH_API RecordFunctionTLS {
 
   bool tls_record_function_enabled_ = true;
 
-  // Stores the number of coin flips before the next successful coin flip
-  int tries_left_ = 0;
+  struct CoinflipTLS {
+    int tries_left_;
+    std::mt19937 genGeo_;
+    std::mt19937 genZeroOne_;
+    std::geometric_distribution<int> distGeo_;
+    std::uniform_real_distribution<double> distZeroOne_;
+    CoinflipTLS();
+  };
+  CoinflipTLS coinflip_state_;
 };
 
 TORCH_API const RecordFunctionTLS& get_record_function_tls_();

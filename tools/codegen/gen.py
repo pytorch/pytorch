@@ -473,6 +473,12 @@ namespace {{
         # for mypy type refinement; would be fixed by TODO on target
         assert self.target is not Target.DECLARATION
 
+        if f.func.is_out_fn():
+            assert local.use_c10_dispatcher().dispatcher_uses_new_style(), \
+                ("{} takes out arguments and has to be written in the new style. " +
+                 "Please add `use_c10_dispatcher: full` to your operator in native_functions.yaml " +
+                 "and write the C++ implementation to take out arguments in the end.").format(f.func.name)
+
         if self.dispatch_key not in f.dispatch:
             return None
         if f.manual_kernel_registration:
