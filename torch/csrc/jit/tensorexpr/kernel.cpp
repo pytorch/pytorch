@@ -1525,11 +1525,12 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
 
   bool hasReduction = NodeFinder<ReduceOp>::find(l.root_stmt()).size() != 0;
 
-  // inlining output buffers duplicates computation. it slows down
+  // inlining intermediate buffers duplicates computation. it slows down
   // cpu code generation but is enabled on gpu because it avoids difficult
   // synchronization logic across blocks.
-  bool inline_output_buffers = backendType == kCudaCodeGen;
-  l.inlineIntermediateBufs(inline_output_buffers);
+  if (backendType == kCudaCodeGen) {
+    l.inlineIntermediateBufs();
+  }
 
   if (backendType == kCudaCodeGen) {
     for (auto tensor : tensorOutputs_) {

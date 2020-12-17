@@ -19,6 +19,35 @@ namespace jit {
 using namespace torch::indexing;
 using namespace torch::jit::tensorexpr;
 
+TEST(Kernel, InliningIntermediates_CUDA) {
+  const auto graph_template = R"IR(
+      graph(%0 : Float(5, 3, strides=[3, 1], device=${device}),
+            %1 : Float(5, 3, strides=[3, 1], device=${device})):
+        %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
+        %one : int = prim::Constant[value=1]()
+        %3 : Float(5, 3, strides=[3, 1]) = aten::sub(%0, %2, %one)
+        %4 : Float(5, 3, strides=[3, 1]) = aten::add(%0, %2, %one)
+        return (%3, %4))IR";
+  for (bool use_cuda : {true, false}) {
+    KernelScope kernel_scope;
+    TemplateEnv env;
+    env.s("device", use_cuda ? "cuda:0" : "cpu");
+    const auto graph_string = format(graph_template, env);
+    auto graph = std::make_shared<Graph>();
+    parseIR(graph_string, &*graph);
+    auto device = use_cuda ? kCUDA : kCPU;
+    TensorExprKernel k(graph);
+    auto stmt = k.getCodeGenStmt();
+    std::ostringstream oss;
+    oss << *stmt;
+    // 5 uses: alloc, initialize with values, use in sub and add, and free
+    size_t num_out1_uses = use_cuda ? 0 : 5;
+    torch::jit::testing::FileCheck()
+        .check_count("aten_mul", num_out1_uses, /*exactly*/ true)
+        ->run(oss.str());
+  }
+}
+
 TEST(Kernel, _1) {
   KernelScope kernel_scope;
 
