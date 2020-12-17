@@ -4921,6 +4921,13 @@ else:
         with self.assertRaisesRegex(RuntimeError, "logabsdet dtype Int does not match the expected dtype"):
             torch.linalg.slogdet(a, out=(sign_out, logabsdet_out))
 
+        # device should match
+        wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+        sign_out = torch.empty(0, device=wrong_device, dtype=dtype)
+        logabsdet_out = torch.empty(0, device=wrong_device, dtype=real_dtype)
+        with self.assertRaisesRegex(RuntimeError, "Expected sign, logabsdet and input to be on the same device"):
+            torch.linalg.slogdet(a, out=(sign_out, logabsdet_out))
+
     @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack

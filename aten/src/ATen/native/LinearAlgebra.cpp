@@ -106,6 +106,9 @@ std::tuple<Tensor&, Tensor&> linalg_slogdet_out(const Tensor& input, Tensor& sig
   ScalarType real_dtype = toValueType(typeMetaToScalarType(input.dtype()));
   TORCH_CHECK(logabsdet.scalar_type() == real_dtype,
     "logabsdet dtype ", logabsdet.scalar_type(), " does not match the expected dtype ", real_dtype);
+  TORCH_CHECK(sign.device() == input.device() && logabsdet.device() == input.device(),
+              "Expected sign, logabsdet and input to be on the same device, but found sign on ",
+              sign.device(), ", logabsdet on ", logabsdet.device(), " and input on ", input.device(), " instead.");
 
   Tensor sign_tmp, logabsdet_tmp;
   std::tie(sign_tmp, logabsdet_tmp) = at::linalg_slogdet(input);
