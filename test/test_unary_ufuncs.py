@@ -1217,7 +1217,7 @@ class TestUnaryUfuncs(TestCase):
         for num in abs_zeros:
             self.assertGreater(math.copysign(1.0, num), 0.0)
 
-    @dtypes(torch.float)
+    @dtypes(*torch.testing.get_all_fp_dtypes())
     def test_isfinite_isinf_isnan(self, device, dtype):
         vals = (-float('inf'), float('inf'), float('nan'), -1, 0, 1)
 
@@ -1225,7 +1225,7 @@ class TestUnaryUfuncs(TestCase):
         self.compare_with_numpy(torch.isinf, np.isinf, vals, device, dtype)
         self.compare_with_numpy(torch.isnan, np.isnan, vals, device, dtype)
 
-    @dtypes(torch.long)
+    @dtypes(torch.int8, torch.int16, torch.int32, torch.int64)
     def test_isfinite_isinf_isnan_int(self, device, dtype):
         vals = (-1, 0, 1)
 
@@ -1297,7 +1297,7 @@ class TestUnaryUfuncs(TestCase):
             with self.assertRaisesRegex(RuntimeError, 'does not support non-boolean outputs'):
                 torch_op(t, out=out)
 
-    @dtypes(torch.complex64)
+    @dtypes(torch.complex64, torch.complex128)
     def test_isfinite_isinf_isnan_complex(self, device, dtype):
         vals = (
             complex(-float('inf'), float('inf')),

@@ -93,12 +93,16 @@ static inline void check_cat_shape_except_dim(const Tensor & first, const Tensor
     if (dim == dimension) {
       continue;
     }
-    int64_t first_dim_size = first.size(dim);
-    int64_t second_dim_size = second.size(dim);
+    int64_t first_dim_size = first.sizes()[dim];
+    int64_t second_dim_size = second.sizes()[dim];
     TORCH_CHECK(first_dim_size == second_dim_size, "Sizes of tensors must match except in dimension ",
                 dimension, ". Got ", first_dim_size, " and ", second_dim_size, " in dimension ", dim,
                 " (The offending index is ", index, ")");
   }
+}
+
+static bool should_skip(const Tensor& t) {
+  return t.numel() == 0 && t.dim() == 1;
 }
 
 Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
@@ -109,7 +113,6 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   // FIXME: warn if this is the case
   bool allSkipped = true;
   bool allContiguous = true;
-  Tensor notSkippedTensor;
 
   // Inputs cannot alias the output tensor
   for (int64_t i = 0; i < tensors.size(); i++) {
@@ -121,19 +124,21 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   }
   at::assert_no_internal_overlap(result);
 
-  auto should_skip = [](const Tensor& t) { return t.numel() == 0 && t.dim() == 1; };
-  for (auto const &tensor : tensors) {
-    if (should_skip(tensor)) {
-      continue;
+  const Tensor* pnotSkippedTensor = [](TensorList tensors) -> const Tensor* {
+    for (auto const &tensor : tensors) {
+      if (should_skip(tensor)) {
+        continue;
+      }
+      // we've found a non-empty tensor
+      return &tensor;
     }
-    // we've found a non-empty tensor
-    allSkipped = false;
-    notSkippedTensor = tensor;
-    break;
-  }
-  if (allSkipped) {
+    return nullptr;
+  }(tensors);
+
+  if (!pnotSkippedTensor) {
     return result;
   }
+  const Tensor& notSkippedTensor = *pnotSkippedTensor;
 
   TORCH_CHECK(tensors.size() > 0, "expected a non-empty list of Tensors");
   TORCH_CHECK(dim <= notSkippedTensor.dim(), "dimension ", dim, "out of range");
@@ -156,7 +161,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
       continue;
     }
     check_cat_shape_except_dim(notSkippedTensor, tensor, dim, i);
-    cat_dim_size += tensor.size(dim);
+    cat_dim_size += tensor.sizes()[dim];
 
     if (!tensor.is_contiguous(first_tensor_mem_format)) {
       allContiguous = false;
@@ -191,8 +196,8 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   if (reuse_iterator &&
       result.is_contiguous(first_tensor_mem_format) &&
       no_type_promotion) {
-    auto source_slice = notSkippedTensor;
-    auto slice_dim_size = source_slice.size(dim);
+    const auto& source_slice = notSkippedTensor;
+    auto slice_dim_size = source_slice.sizes()[dim];
     auto result_slice = result.narrow(dim, 0, slice_dim_size);
     auto result_slice_data = result_slice.data_ptr();
     auto result_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
@@ -221,7 +226,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
       if (should_skip(tensor)) {
         continue;
       }
-      auto slice_dim_size = tensor.size(dim);
+      auto slice_dim_size = tensor.sizes()[dim];
       auto result_slice = result.narrow(dim, offset, slice_dim_size);
 
       auto iter = TensorIteratorConfig()
@@ -753,89 +758,8 @@ Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_
   return newTensor._coalesced_(self.is_coalesced());
 }
 
-Tensor& narrow_copy_dense_out(
-  Tensor& output, const Tensor& self, int64_t dim, int64_t start, int64_t length
-) {
-  if (self.is_cuda()) {
-    return output.copy_(self.narrow(dim, start, length));
-  }
-  TORCH_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
-  TORCH_CHECK(self.dtype() == output.dtype());
-
-  Tensor self_contig = self.contiguous();
-  const auto self_sizes = self_contig.sizes();
-
-  // wrap dim if negative and do bound check
-  if (dim < 0) {
-    dim = at::maybe_wrap_dim(dim, self_sizes.size());
-  } else {
-    TORCH_CHECK(dim < self_sizes.size());
-  }
-
-  // wrap start and do bound check
-  const auto cur_size = self_sizes[dim];
-  if (start != cur_size && start < 0) { // start being the end is valid, but
-                                        // not a valid dim specification.
-    start = at::maybe_wrap_dim(start, cur_size);
-  }
-  TORCH_CHECK(
-      length >= 0 && start <= cur_size - length,
-      "start (",
-      start,
-      ") + length (",
-      length,
-      ") exceeds dimension size (",
-      cur_size,
-      ").");
-
-  // resize output
-  auto output_sizes = self_sizes.vec();
-  output_sizes[dim] = length;
-  at::native::resize_(output, output_sizes);
-
-  const int64_t unit = c10::size_from_dim_(dim + 1, self_sizes);
-  const int64_t num_blocks = c10::size_to_dim_(dim, self_sizes);
-
-  const auto itemsize = self_contig.dtype().itemsize();
-  size_t src_nbytes = itemsize * self_contig.numel();
-  size_t dst_nbytes = itemsize * output.numel();
-
-  size_t src_block_size = unit * self_sizes[dim];
-  size_t dst_block_size = unit * length;
-
-  if (num_blocks == 0 || dst_block_size == 0) {
-    return output;
-  }
-
-  char* src_bytes = static_cast<char*>(self_contig.data_ptr());
-  char* dst_bytes = static_cast<char*>(output.data_ptr());
-
-  size_t src_block_size_bytes = itemsize * src_block_size;
-  size_t dst_block_size_bytes = itemsize * dst_block_size;
-  size_t src_offset = unit * start;
-
-  char* src_offset_bytes = src_bytes + itemsize * src_offset;
-  char* dst_offset_bytes = dst_bytes;
-
-  for (size_t i = 0; i < num_blocks; ++i) {
-    char* local_src_offset_bytes = src_offset_bytes + i * src_block_size_bytes;
-    char* local_dst_offset_bytes = dst_offset_bytes + i * dst_block_size_bytes;
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        static_cast<void*>(local_src_offset_bytes + dst_block_size_bytes) <=
-        static_cast<void*>(src_bytes + src_nbytes));
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        static_cast<void*>(local_dst_offset_bytes + dst_block_size_bytes) <=
-        static_cast<void*>(dst_bytes + dst_nbytes));
-
-    memcpy(
-        local_dst_offset_bytes, local_src_offset_bytes, dst_block_size_bytes);
-  }
-  return output;
-}
-
 Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t length){
-  auto output = at::empty_like(self);
-  return narrow_copy_dense_out(output, self, dim, start, length);
+    return self.narrow(dim, start, length).clone(at::MemoryFormat::Contiguous);
 }
 
 Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
