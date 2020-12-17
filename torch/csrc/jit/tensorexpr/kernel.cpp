@@ -282,6 +282,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::frac:
     case aten::lgamma:
     case aten::type_as:
+    case aten::masked_fill:
       return sizesForValue(v->node()->input(0));
 
     case aten::sub:
@@ -312,7 +313,6 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
       }
       return broadcastShapes(shapes);
     }
-
     case aten::lerp:
     case aten::clamp:
     case aten::threshold:
@@ -955,6 +955,20 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
             return Max::make(boolToInteger(lhs), boolToInteger(rhs), false);
           });
     } break;
+
+    case aten::masked_fill: {
+      return computeThreeOperand(
+          "aten::masked_fill",
+          v,
+          [](const ExprHandle& input,
+             const ExprHandle& mask,
+             const ExprHandle& value) {
+            // value needs to promote to input, not vice versa
+            auto val = promoteToDtype(value, input.dtype().scalar_type());
+            return ifThenElse(mask, val, input);
+          },
+          /*promote_inputs*/ false);
+    }
 
     case aten::clamp: {
       bool noMin = false;
