@@ -898,7 +898,6 @@ op_db: List[OpInfo] = [
                    promotes_integers_to_float=True,
                    handles_complex_extremals=False,
                    test_complex_grad=False),
-<<<<<<< HEAD
     UnaryUfuncInfo('angle',
                    ref=np.angle,
                    dtypes=all_types_and_complex_and(torch.bool),
@@ -914,7 +913,6 @@ op_db: List[OpInfo] = [
                    promotes_integers_to_float=True,
                    supports_complex_to_float=True,
                    test_inplace_grad=False),
-=======
     OpInfo('svd',
            op=torch.svd,
            dtypes=floating_and_complex_types(),
@@ -929,7 +927,6 @@ op_db: List[OpInfo] = [
            supports_tensor_out=False,
            sample_inputs_func=sample_inputs_pinverse,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
->>>>>>> 6230e337d5c51fa6a64e985b84497c948cb7bf35
 ]
 
 if TEST_SCIPY:
