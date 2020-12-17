@@ -273,7 +273,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
         "requires_grad should be false if grad_fn is set");
   }
 
-  ~AutogradMeta() {
+  ~AutogradMeta() override {
     // If AutogradMeta is being destroyed, it means that there is no other reference to its
     // corresponding Tensor. It implies that no other thread can be using this object and so there is
     // no need to lock mutex_ here to guard the check if fw_grad_ is populated.
