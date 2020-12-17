@@ -18,8 +18,6 @@
 namespace torch {
 namespace jit {
 
-static int64_t opt_counter_const_prop = 0;
-
 c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     const Node* n,
     bool ignore_custom_classes) {
@@ -340,12 +338,12 @@ struct ConstantPropagator {
   }
 
   void ConstantPropagation(Node* n) {
-    std::cout << "BEFORE BISECT: " << std::to_string(opt_counter_const_prop) << std::endl;
-    auto allowed = JIT_BISECT(&opt_counter_const_prop);
+    auto allowed = JIT_BISECT();
     if (!allowed) {
+      JIT_BISECT_LOG(
+          std::string("Stopped optimization at constant propagation"));
       return;
     }
-    std::cout << "AFTER BISECT: " << std::to_string(opt_counter_const_prop) << std::endl;
     bool runnable_inputs = runnableInputs(n);
     if (n->kind() == prim::If) {
       // inline node if we can, otherwise check for simplified outputs
