@@ -45,13 +45,15 @@ class SkipInfo(object):
 class SampleInput(object):
     """Represents sample inputs to a function."""
 
-    __slots__ = ['input', 'args', 'kwargs']
+    # output_process_fn_grad is a function that modifies the output of op compatible with input
+    __slots__ = ['input', 'args', 'kwargs', 'output_process_fn_grad']
 
-    def __init__(self, input, *, args=tuple(), kwargs=None):
+    def __init__(self, input, *, args=tuple(), kwargs=None, output_process_fn_grad=None):
         # test_ops.py expects input to be a tuple
         self.input = input if isinstance(input, tuple) else (input,)
         self.args = args
         self.kwargs = kwargs if kwargs is not None else {}
+        self.output_process_fn_grad = output_process_fn_grad
 
 
 _NOTHING = object()  # Unique value to distinguish default from anything else
@@ -370,6 +372,92 @@ class SpectralFuncInfo(OpInfo):
             ]
 
 
+def sample_inputs_svd(op_info, device, dtype, requires_grad=False):
+    """
+    This function generates input for torch.svd with distinct singular values so that autograd is always stable.
+    Matrices of different size:
+        square matrix - S x S size
+        tall marix - S x (S-2)
+        wide matrix - (S-2) x S
+    and batched variants of above are generated.
+    Each SampleInput has a function 'output_process_fn_grad' attached to it that is applied on the output of torch.svd
+    It is needed for autograd checks, because backward of svd doesn't work for an arbitrary loss function.
+    """
+    from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+
+    test_cases1 = (  # some=True (default)
+        # loss functions for complex-valued svd have to be "gauge invariant",
+        # i.e. loss functions shouldn't change when sigh of the singular vectors change.
+        # the simplest choice to satisfy this requirement is to apply 'abs'.
+        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),
+            lambda usv: usv[1]),  # 'check_grad_s'
+        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),
+            lambda usv: abs(usv[0])),  # 'check_grad_u'
+        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),
+            lambda usv: abs(usv[2])),  # 'check_grad_v'
+        # TODO: replace lambda usv: usv[0][0, 0] * usv[2][0, 0] with lambda usv: usv[0][0, 0] * usv[2][0, 0].conj()
+        # once https://github.com/pytorch/pytorch/issues/45821 is resolved
+        # this test is important as it checks the additional term that is non-zero only for complex-valued inputs
+        # and when the loss function depends both on 'u' and 'v'
+        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),
+            lambda usv: usv[0][0, 0] * usv[2][0, 0]),  # 'check_grad_uv'
+        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:(S - 2)],
+            lambda usv: (abs(usv[0]), usv[1], abs(usv[2][..., :, :(S - 2)]))),  # 'wide'
+        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:, :(S - 2)],
+            lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'tall'
+        (random_fullrank_matrix_distinct_singular_value(M, dtype=dtype).to(device),
+            lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'large'
+        (random_fullrank_matrix_distinct_singular_value(S, 3, dtype=dtype).to(device),
+            lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'batched'
+        (random_fullrank_matrix_distinct_singular_value(S, 3, dtype=dtype).to(device)[..., :(S - 2), :],
+            lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'wide_batched'
+        (random_fullrank_matrix_distinct_singular_value(S, 3, dtype=dtype).to(device)[..., :, :(S - 2)],
+            lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'tall_batched'
+    )
+    test_cases2 = (  # some=False
+        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:(S - 2)],
+            lambda usv: (abs(usv[0]), usv[1], abs(usv[2][:, :(S - 2)]))),  # 'wide_all'
+        (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:, :(S - 2)],
+            lambda usv: (abs(usv[0][:, :(S - 2)]), usv[1], abs(usv[2]))),  # 'tall_all'
+        (random_fullrank_matrix_distinct_singular_value(S, 3, 3, dtype=dtype).to(device)[..., :(S - 2), :],
+            lambda usv: (abs(usv[0]), usv[1], abs(usv[2][..., :, :(S - 2)]))),  # 'wide_all_batched'
+        (random_fullrank_matrix_distinct_singular_value(S, 3, 3, dtype=dtype).to(device)[..., :, :(S - 2)],
+            lambda usv: (abs(usv[0][..., :, :(S - 2)]), usv[1], abs(usv[2]))),  # 'tall_all_batched'
+    )
+
+    out = []
+    for a, out_fn in test_cases1:
+        a.requires_grad = requires_grad
+        out.append(SampleInput(a, output_process_fn_grad=out_fn))
+
+    for a, out_fn in test_cases2:
+        a.requires_grad = requires_grad
+        kwargs = {'some': False}
+        out.append(SampleInput(a, kwargs=kwargs, output_process_fn_grad=out_fn))
+
+    return out
+
+
+def sample_inputs_pinverse(op_info, device, dtype, requires_grad=False):
+    """
+    This function generates input for torch.pinverse with distinct singular values so that autograd is always stable.
+    Implementation of torch.pinverse depends on torch.svd, therefore it's sufficient to check only square S x S matrix
+    and the batched (3 x S x S) input.
+    """
+    from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+
+    test_cases = (
+        random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),  # pinverse
+        random_fullrank_matrix_distinct_singular_value(S, 3, dtype=dtype).to(device),  # pinverse 'batched'
+    )
+
+    out = []
+    for a in test_cases:
+        a.requires_grad = requires_grad
+        out.append(SampleInput(a))
+    return out
+
+
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
     # NOTE: CPU complex acos produces incorrect outputs (https://github.com/pytorch/pytorch/issues/42952)
@@ -493,12 +581,7 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    promotes_integers_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
-                   test_inplace_grad=False,
-                   skips=(
-                       # RuntimeError: "isfinite" not implemented for 'BFloat16'
-                       SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                                device_type='cuda', dtypes=[torch.bfloat16]),
-                   )),
+                   test_inplace_grad=False),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -775,9 +858,6 @@ op_db: List[OpInfo] = [
                        # Reference: https://github.com/pytorch/pytorch/pull/48926#issuecomment-739734774
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cpu', dtypes=[torch.bfloat16]),
-                       # RuntimeError: "isfinite" not implemented for 'BFloat16'
-                       SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                                device_type='cpu', dtypes=[torch.bfloat16]),
                    )),
     UnaryUfuncInfo('nan_to_num',
                    ref=np.nan_to_num,
@@ -808,6 +888,20 @@ op_db: List[OpInfo] = [
                    promotes_integers_to_float=True,
                    handles_complex_extremals=False,
                    test_complex_grad=False),
+    OpInfo('svd',
+           op=torch.svd,
+           dtypes=floating_and_complex_types(),
+           test_inplace_grad=False,
+           supports_tensor_out=False,
+           sample_inputs_func=sample_inputs_svd,
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
+    OpInfo('pinverse',
+           op=torch.pinverse,
+           dtypes=floating_and_complex_types(),
+           test_inplace_grad=False,
+           supports_tensor_out=False,
+           sample_inputs_func=sample_inputs_pinverse,
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
 ]
 
 if TEST_SCIPY:
@@ -834,7 +928,6 @@ if TEST_SCIPY:
                        dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                        dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                        promotes_integers_to_float=True,
-                       skip_bfloat16_grad=True,
                        assert_autodiffed=True,
                        test_complex_grad=False),  # Reference: https://github.com/pytorch/pytorch/issues/48552
         UnaryUfuncInfo('erf',
@@ -1272,13 +1365,13 @@ def method_tests():
         ('kthvalue', (), (1, 0, True), 'scalar_keepdim_dim', (), [1]),
         ('quantile', (S, S, S), (0.5,)),
         ('quantile', (S, S, S), (0.5, 0), 'dim', (), [1]),
-        ('quantile', (S, S, S), (0.5, None, 'linear', True), 'keepdim'),
-        ('quantile', (S, S, S), (0.5, 0, 'linear', True), 'keepdim_dim', (), [1]),
+        ('quantile', (S, S, S), (0.5, None, True), 'keepdim'),
+        ('quantile', (S, S, S), (0.5, 0, True), 'keepdim_dim', (), [1]),
         ('quantile', (), (0.5,), 'scalar'),
         ('nanquantile', (S, S, S), (0.5,)),
         ('nanquantile', (S, S, S), (0.5, 0), 'dim', (), [1]),
-        ('nanquantile', (S, S, S), (0.5, None, 'linear', True), 'keepdim'),
-        ('nanquantile', (S, S, S), (0.5, 0, 'linear', True), 'keepdim_dim', (), [1]),
+        ('nanquantile', (S, S, S), (0.5, None, True), 'keepdim'),
+        ('nanquantile', (S, S, S), (0.5, 0, True), 'keepdim_dim', (), [1]),
         ('nanquantile', (), (0.5,), 'scalar'),
         ('median', (S, S, S), NO_ARGS),
         ('median', (S, S, S), (1,), 'dim', (), [0]),
@@ -1697,30 +1790,6 @@ def method_tests():
          'batched_symmetric_pd', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma], itemgetter(1)),
         ('slogdet', lambda dtype, device: random_fullrank_matrix_distinct_singular_value(S, 3), NO_ARGS,
          'batched_distinct_singular_values', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma], itemgetter(1)),
-        ('svd', lambda dtype, device: random_fullrank_matrix_distinct_singular_value(S),
-            NO_ARGS, '', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('svd', lambda dtype, device: random_fullrank_matrix_distinct_singular_value(S)[:(S - 2)], NO_ARGS,
-         'wide', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('svd', lambda dtype, device: random_fullrank_matrix_distinct_singular_value(S)[:, :(S - 2)], NO_ARGS,
-         'tall', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('svd', lambda dtype, device: random_fullrank_matrix_distinct_singular_value(S)[:(S - 2)], (False,),
-         'wide_all', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma], lambda usv: (usv[0], usv[1], usv[2][:, :(S - 2)])),
-        ('svd', lambda dtype, device: random_fullrank_matrix_distinct_singular_value(S)[:, :(S - 2)], (False,),
-         'tall_all', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma], lambda usv: (usv[0][:, :(S - 2)], usv[1], usv[2])),
-        ('svd', lambda dtype, device: random_fullrank_matrix_distinct_singular_value(M), NO_ARGS,
-         'large', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('svd', lambda dtype, device: random_fullrank_matrix_distinct_singular_value(S, 3), NO_ARGS,
-         'batched', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('svd', lambda dtype, device: random_fullrank_matrix_distinct_singular_value(S, 3)[..., :(S - 2), :], NO_ARGS,
-         'wide_batched', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('svd', lambda dtype, device: random_fullrank_matrix_distinct_singular_value(S, 3)[..., :, :(S - 2)], NO_ARGS,
-         'tall_batched', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('svd', lambda dtype, device: random_fullrank_matrix_distinct_singular_value(S, 3, 3)[..., :(S - 2), :], (False,),
-         'wide_all_batched', (), NO_ARGS,
-         [skipCPUIfNoLapack, skipCUDAIfNoMagma], lambda usv: (usv[0], usv[1], usv[2][..., :, :(S - 2)])),
-        ('svd', lambda dtype, device: random_fullrank_matrix_distinct_singular_value(S, 3, 3)[..., :, :(S - 2)], (False,),
-         'tall_all_batched', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma],
-         lambda usv: (usv[0][..., :, :(S - 2)], usv[1], usv[2])),
         ('qr', (S, S), (False,), 'square_single', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('qr', (S, S - 2), (True,), 'tall_single' , (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('qr', (S - 2, S), (False,), 'wide_single' , (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),

@@ -1161,6 +1161,187 @@ class TestAutograd(TestCase):
             enable_grad_context_manager_recursive(10)
             self.assertFalse(torch.is_grad_enabled())
 
+    def test_set_grad_coroutines(self):
+        @torch.no_grad()
+        def coro_no_grad(n=10):
+            self.assertFalse(torch.is_grad_enabled())
+            for i in range(n):
+                self.assertFalse(torch.is_grad_enabled())
+                r = yield i
+                self.assertFalse(torch.is_grad_enabled())
+                self.assertEqual(i, r)
+            self.assertFalse(torch.is_grad_enabled())
+
+        @torch.enable_grad()
+        def coro_enable_grad(n=10):
+            self.assertTrue(torch.is_grad_enabled())
+            for i in range(n):
+                self.assertTrue(torch.is_grad_enabled())
+                r = yield i
+                self.assertTrue(torch.is_grad_enabled())
+                self.assertEqual(i, r)
+            self.assertTrue(torch.is_grad_enabled())
+
+        with torch.enable_grad():
+            self.assertTrue(torch.is_grad_enabled())
+            coro, r = coro_no_grad(), None
+            try:
+                while True:
+                    self.assertTrue(torch.is_grad_enabled())
+                    r = coro.send(r)
+                    self.assertTrue(torch.is_grad_enabled())
+
+            except StopIteration:
+                pass
+
+        with torch.no_grad():
+            self.assertFalse(torch.is_grad_enabled())
+            coro, r = coro_enable_grad(), None
+            try:
+                while True:
+                    self.assertFalse(torch.is_grad_enabled())
+                    r = coro.send(r)
+                    self.assertFalse(torch.is_grad_enabled())
+
+            except StopIteration:
+                pass
+
+    def test_set_grad_coroutines_benign_exceptions(self):
+        class RecoverableException(Exception):
+            pass
+
+        @torch.no_grad()
+        def coro_no_grad(n=10):
+            has_raised = False
+            for i in range(n):
+                try:
+                    self.assertFalse(torch.is_grad_enabled())
+                    yield (-i if has_raised else i)
+
+                except RecoverableException:
+                    self.assertFalse(torch.is_grad_enabled())
+                    has_raised = True
+
+        @torch.enable_grad()
+        def coro_enable_grad(n=10):
+            has_raised = False
+            for i in range(n):
+                try:
+                    self.assertTrue(torch.is_grad_enabled())
+                    yield (-i if has_raised else i)
+
+                except RecoverableException:
+                    self.assertTrue(torch.is_grad_enabled())
+                    has_raised = True
+
+        with torch.enable_grad():
+            coro = coro_no_grad()
+            assert 0 == next(coro)
+            try:
+                while True:
+                    r = coro.throw(RecoverableException)
+                    self.assertLess(r, 0)
+
+            except StopIteration:
+                pass
+
+        with torch.no_grad():
+            coro = coro_enable_grad()
+            assert 0 == next(coro)
+            try:
+                while True:
+                    r = coro.throw(RecoverableException)
+                    self.assertLess(r, 0)
+
+            except StopIteration:
+                pass
+
+    def test_set_grad_coroutines_critical_exceptions(self):
+        class UnrecoverableException(Exception):
+            pass
+
+        class SecondaryException(Exception):
+            pass
+
+        @torch.no_grad()
+        def coro_no_grad(n=10):
+            has_raised = False
+            for i in range(n):
+                try:
+                    self.assertFalse(torch.is_grad_enabled())
+                    yield (-i if has_raised else i)
+
+                except UnrecoverableException:
+                    self.assertFalse(torch.is_grad_enabled())
+                    raise SecondaryException
+
+        @torch.enable_grad()
+        def coro_enable_grad(n=10):
+            has_raised = False
+            for i in range(n):
+                try:
+                    self.assertTrue(torch.is_grad_enabled())
+                    yield (-i if has_raised else i)
+
+                except UnrecoverableException:
+                    self.assertTrue(torch.is_grad_enabled())
+                    raise SecondaryException
+
+        with torch.enable_grad():
+            coro = coro_no_grad()
+            assert 0 == next(coro)
+            with self.assertRaises(SecondaryException):
+                coro.throw(UnrecoverableException)
+
+        with torch.no_grad():
+            coro = coro_enable_grad()
+            assert 0 == next(coro)
+            with self.assertRaises(SecondaryException):
+                coro.throw(UnrecoverableException)
+
+    def test_set_grad_coroutines_exit(self):
+        @torch.no_grad()
+        def coro_no_grad(state):
+            for i in range(10):
+                try:
+                    self.assertFalse(torch.is_grad_enabled())
+                    yield i
+
+                except GeneratorExit:
+                    self.assertFalse(torch.is_grad_enabled())
+                    state.add('GeneratorExit')
+                    raise
+
+        @torch.enable_grad()
+        def coro_enable_grad(state):
+            for i in range(10):
+                try:
+                    self.assertTrue(torch.is_grad_enabled())
+                    yield i
+
+                except GeneratorExit:
+                    self.assertTrue(torch.is_grad_enabled())
+                    state.add('GeneratorExit')
+                    raise
+
+        state = set()
+        with torch.enable_grad():
+            coro = coro_no_grad(state)
+            for i in range(5):
+                next(coro)
+
+            coro.close()
+        self.assertTrue('GeneratorExit' in state)
+
+        state = set()
+        with torch.no_grad():
+            coro = coro_enable_grad(state)
+            for i in range(5):
+                next(coro)
+
+            coro.close()
+        self.assertTrue('GeneratorExit' in state)
+
     def test_no_grad_python_function(self):
         """Python Functions should respect grad mode."""
         x = torch.ones(5, 5, requires_grad=True)
@@ -2818,30 +2999,6 @@ class TestAutograd(TestCase):
         x = (torch.rand(100, dtype=torch.double)).requires_grad_()
         gradcheck(torch.igamma, (s, x))
         gradgradcheck(torch.igamma, (s, x))
-
-    @skipIfNoLapack
-    def test_pinverse(self):
-        # Why is pinverse tested this way, and not ordinarily as other linear algebra methods?
-        # 1. Pseudo-inverses are not generally continuous, which means that they are not differentiable
-        # 2. Derivatives for pseudo-inverses exist typically for constant rank (Golub et al, 1973)
-        # 3. This method creates two orthogonal matrices, and a constructs a test case with large
-        #    singular values (given by x to the function).
-        # 4. This will ensure that small perturbations don't affect the rank of matrix, in which case
-        #    a derivative exists.
-        # 5. This test exists since pinverse is implemented using SVD, and is hence a backpropable method
-        m, n = 5, 10
-        U = torch.randn(n, m).qr()[0].t()  # Orthogonal with dimensions m x n
-        V = torch.randn(n, m).qr()[0].t()  # Orthogonal with dimensions m x n
-
-        def func(x):
-            S = torch.cat([x, torch.zeros(n - m)], 0)
-            M = U.mm(torch.diag(S)).mm(V.t())
-            return M.pinverse()
-
-        gradcheck(func, [torch.rand(m).add_(1).requires_grad_()])
-        gradcheck(func, [torch.rand(m).add_(10).requires_grad_()])
-        gradgradcheck(func, [torch.rand(m).add_(1).requires_grad_()])
-        gradgradcheck(func, [torch.rand(m).add_(10).requires_grad_()])
 
     def test_chain_matmul(self):
         def gen_matrices(p):
@@ -4927,7 +5084,7 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'tensor_split', 'matmul',
                 'bmm', 'mv', 'ger', 'diagonal', 'atan', 'angle', 'tanh', 'fill_', 'sub',
                 'exp', 'mean', 'inverse', 'triangular_solve', 'solve', 'addcmul',
-                'addcdiv', 'linalg.tensorinv', 'matrix_exp'] + separate_complex_tests
+                'addcdiv', 'linalg.tensorinv', 'matrix_exp', 'qr', ] + separate_complex_tests
 
 def add_test(
         name,

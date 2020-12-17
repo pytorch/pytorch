@@ -80,7 +80,7 @@ namespace torch {
 enum class ParameterType {
   TENSOR, SCALAR, INT64, DOUBLE, COMPLEX, TENSOR_LIST, INT_LIST, GENERATOR,
   BOOL, STORAGE, PYOBJECT, SCALARTYPE, LAYOUT, MEMORY_FORMAT, DEVICE, STREAM, STRING,
-  DIMNAME, DIMNAME_LIST, QSCHEME, FLOAT_LIST
+  DIMNAME, DIMNAME_LIST, QSCHEME, FLOAT_LIST, SCALAR_LIST
 };
 
 struct FunctionParameter;
@@ -158,6 +158,7 @@ struct PythonArgs {
   inline c10::optional<at::Tensor> optionalTensor(int i);
   inline at::Scalar scalar(int i);
   inline at::Scalar scalarWithDefault(int i, at::Scalar default_scalar);
+  inline std::vector<at::Scalar> scalarlist(int i);
   inline std::vector<at::Tensor> tensorlist(int i);
   template<int N>
   inline std::array<at::Tensor, N> tensorlist_n(int i);
@@ -206,6 +207,7 @@ struct PythonArgs {
 private:
   at::Tensor tensor_slow(int i);
   at::Scalar scalar_slow(int i);
+  at::Scalar scalar_slow(PyObject* arg);
 };
 
 struct FunctionParameter {
@@ -287,6 +289,19 @@ inline at::Scalar PythonArgs::scalar(int i) {
   return scalar_slow(i);
 }
 
+inline std::vector<at::Scalar> PythonArgs::scalarlist(int i) {
+  if (!args[i]) return std::vector<at::Scalar>();
+  auto tuple = six::isTuple(args[i]);
+  THPObjectPtr arg = six::maybeAsTuple(args[i]);
+  auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
+  std::vector<at::Scalar> res(size);
+  for (int idx = 0; idx < size; idx++) {
+    PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx) : PyList_GET_ITEM(arg.get(), idx);
+    res[idx] = scalar_slow(obj);
+  }
+  return res;
+}
+
 inline at::Scalar PythonArgs::scalarWithDefault(int i, at::Scalar default_scalar) {
   if (!args[i]) return default_scalar;
   return scalar_slow(i);
@@ -359,6 +374,8 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
       } else {
         res[idx] = THPUtils_unpackIndex(obj);
       }
+    } catch (const std::runtime_error& e) {
+        throw std::runtime_error(e.what());
     } catch (const std::exception &e) {
       throw TypeError("%s(): argument '%s' must be %s, but found element of type %s at pos %d",
           signature.name.c_str(), signature.params[i].name.c_str(),
@@ -384,6 +401,8 @@ inline std::vector<double> PythonArgs::getDoublelist(int i) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     try {
       res[idx] = THPUtils_unpackDouble(obj);
+    } catch (const std::runtime_error& e) {
+        throw std::runtime_error(e.what());
     } catch (const std::exception &e) {
       throw TypeError("%s(): argument '%s' must be %s, but found element of type %s at pos %d",
           signature.name.c_str(), signature.params[i].name.c_str(),

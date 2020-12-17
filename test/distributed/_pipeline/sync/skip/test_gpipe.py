@@ -17,7 +17,7 @@ from torch.testing._internal.distributed.pipeline.utils import convert_to_balanc
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
 @pytest.mark.parametrize("balance", [[3], [1, 2], [2, 1], [1, 1, 1]], ids=["3", "1:2", "2:1", "1:1:1"])
 @pytest.mark.parametrize("checkpoint", ["never", "always", "except_last"])
-def test_1to3(balance, checkpoint):
+def test_1to3(balance, checkpoint, setup_rpc):
     if torch.cuda.device_count() < len(balance):
         pytest.skip("at least %d cuda devices required" % len(balance))
 
@@ -61,14 +61,14 @@ def test_1to3(balance, checkpoint):
 
     input = torch.rand(30, 3, 224, 224, device=in_device, requires_grad=True)
     output = model(input)
-    loss = output.mean()
+    loss = output.local_value().mean()
     loss.backward()
 
-    assert torch.allclose(output.norm(), torch.tensor(1039.0, device=out_device), atol=6e-1)
+    assert torch.allclose(output.local_value().norm(), torch.tensor(1039.0, device=out_device), atol=6e-1)
     assert torch.allclose(input.grad.norm(), torch.tensor(0.0004533053, device=in_device))
 
 
-def test_none_skip():
+def test_none_skip(setup_rpc):
     @skippable(stash=["none"])
     class Stash(nn.Module):
         def forward(self, input):
@@ -102,7 +102,7 @@ def test_none_skip():
         for next_grad_fn, _ in grad_fn.next_functions:
             assert_grad_fn_is_not_portal(next_grad_fn, visited)
 
-    assert_grad_fn_is_not_portal(output.grad_fn)
+    assert_grad_fn_is_not_portal(output.local_value().grad_fn)
 
-    output.sum().backward()
+    output.local_value().sum().backward()
     assert input.grad.mean().item() == 1

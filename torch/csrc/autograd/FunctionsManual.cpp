@@ -153,15 +153,15 @@ Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Sc
   if (p == 0.0) {
     return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else if (p == 1.0) {
-    return self.sign() * grad;
+    return self.sgn() * grad;
   } else if (p == 2.0) {
     self_scaled = self;
     scale_v = grad / norm;
   } else if (std::isinf(p)) {
-    self_scaled = self.sign() * (self.abs() == norm).type_as(self);
+    self_scaled = self.sgn() * (self.abs() == norm).type_as(self);
     scale_v = grad.clone(at::MemoryFormat::Preserve);
   } else if (p < 2.0) {
-    self_scaled = self.sign() * self.abs().pow(p - 1);
+    self_scaled = self.sgn() * self.abs().pow(p - 1);
     scale_v = grad / norm.pow(p - 1);
   } else {
     self_scaled = self * self.abs().pow(p - 2);
@@ -1022,6 +1022,8 @@ Tensor log_softmax_double_backward(const Tensor & grad, const Tensor & grad_outp
   return z * grad_output.sum(dim, true) * ((grad * z).sum(dim, true) - grad);
 }
 
+// NOTE: [How to write vmap-compatible backward formulas]
+//
 // See NOTE: [vmap-incompatible in-place operations] for what it means for an
 // in-place operation to be incompatible with vmap.
 //
@@ -1039,29 +1041,15 @@ Tensor log_softmax_double_backward(const Tensor & grad, const Tensor & grad_outp
 // - If the in-place operation followed some sequence of operations, if the
 //   we want to be able to vmap over the backward formula as-is (this is
 //   usually the case for simple (<15loc) backward formulas), then use
-//   inplace_is_vmap_compatible to guard the operation. For example:
+//   inplaceIsVmapCompatible to guard the operation. For example:
 //             c = a * b
 //     Before: c.mul_(grad)
-//     After:  c = inplace_is_vmap_compatible(c, grad) ? c.mul_(grad) : c * grad
+//     After:  c = at::inplaceIsVmapCompatible(c, grad) ? c.mul_(grad) : c * grad
 //
 // - If we don't want to vmap directly over the backward formula (e.g., if the
 //   backward formula is too complicated or has a lot of vmap-incompatible
 //   operations, then register the backward formula as an operator and eventually
 //   write a batching rule for it.
-static bool inplace_is_vmap_compatible(const Tensor& self, const Tensor& other) {
-  const auto* other_batched = at::maybeGetBatchedImpl(other);
-  if (!other_batched) {
-    return true;
-  }
-  const auto* self_batched = at::maybeGetBatchedImpl(self);
-  if (!self_batched) {
-    // self is not batched but other is batched
-    return false;
-  }
-  auto self_levels = at::createVmapLevelsBitset(self_batched->bdims());
-  auto other_levels = at::createVmapLevelsBitset(other_batched->bdims());
-  return self_levels == (self_levels | other_levels);
-}
 
 Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Tensor & grad, const Tensor & input, const Tensor & target, const c10::optional<Tensor>& weight, int64_t reduction) {
   auto eps = 1e-12;
@@ -1069,7 +1057,7 @@ Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Te
   auto one_m_inp_pl_eps = 1 - input + eps;
   // gradient wrt input
   auto gI = (input * input - 2 * input * target + target) / (inp_pl_eps.pow(2) * one_m_inp_pl_eps.pow(2));
-  if (inplace_is_vmap_compatible(gI, grad)) {
+  if (at::inplaceIsVmapCompatible(gI, grad)) {
     gI *= (grad * grad_output);
   } else {
     gI = gI * (grad * grad_output);
@@ -1090,7 +1078,7 @@ Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad, con
   auto eps = 1e-12;
   // gradient wrt grad_output
   auto ggO = (input - target) / ((input + eps) * (1 - input + eps));
-  if (inplace_is_vmap_compatible(ggO, grad)) {
+  if (at::inplaceIsVmapCompatible(ggO, grad)) {
     ggO *= grad;
   } else {
     ggO = ggO * grad;
@@ -1836,16 +1824,21 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   auto gsigma = grads[1];
 
   auto u = raw_u;
-  auto v = raw_v;
+  // Currently torch.svd for complex dtypes returns the conjugate of V,
+  // while the backward formula is derived with just V (without the conjugation)
+  // therefore here we need to conjugate the V output of SVD and grads[2].
+  // Once https://github.com/pytorch/pytorch/issues/45821 is resolved
+  // extra .conj(), that are marked below in the code, shall be removed.
+  auto v = raw_v.conj();  // TODO: remove .conj()
   auto gu = grads[0];
-  auto gv = grads[2];
+  auto gv = grads[2].conj();  // TODO: remove .conj()
 
   if (!some) {
     // We ignore the free subspace here because possible base vectors cancel
     // each other, e.g., both -v and +v are valid base for a dimension.
     // Don't assume behavior of any particular implementation of svd.
     u = raw_u.narrow(-1, 0, k);
-    v = raw_v.narrow(-1, 0, k);
+    v = raw_v.narrow(-1, 0, k).conj();  // TODO: remove .conj()
     if (gu.defined()) {
       gu = gu.narrow(-1, 0, k);
     }
@@ -1853,11 +1846,13 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
       gv = gv.narrow(-1, 0, k);
     }
   }
-  auto vt = v.transpose(-2, -1);
+  auto vh = v.conj().transpose(-2, -1);
 
   Tensor sigma_term;
   if (gsigma.defined()) {
-    sigma_term = at::matmul(u, at::matmul(gsigma.diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1), vt));
+    gsigma = gsigma.to(self.dtype());
+    // computes u @ diag(gsigma) @ vh
+    sigma_term = at::matmul(u * gsigma.unsqueeze(-2), vh);
   } else {
     sigma_term = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
@@ -1867,11 +1862,11 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
     return sigma_term;
   }
 
-  auto ut = u.transpose(-2, -1);
+  auto uh = u.conj().transpose(-2, -1);
   auto im = at::eye(m, self.options());
   auto in = at::eye(n, self.options());
-  auto sigma_mat = sigma.diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1);
-  auto sigma_mat_inv = sigma.pow(-1).diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1);
+  auto sigma_mat = sigma.diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).to(self.dtype());
+  auto sigma_mat_inv = sigma.pow(-1).diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).to(self.dtype());
   auto sigma_sq = sigma.pow(2);
   auto F = sigma_sq.unsqueeze(-2) - sigma_sq.unsqueeze(-1);
   // The following two lines invert values of F, and fills the diagonal with 0s.
@@ -1883,24 +1878,36 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   Tensor u_term, v_term;
 
   if (gu.defined()) {
-    u_term = at::matmul(u, at::matmul(F.mul(at::matmul(ut, gu) - at::matmul(gu.transpose(-2, -1), u)), sigma_mat));
+    auto guh = gu.conj().transpose(-2, -1);
+    u_term = at::matmul(u, at::matmul(F.mul(at::matmul(uh, gu) - at::matmul(guh, u)), sigma_mat));
     if (m > k) {
-      u_term = u_term + at::matmul(im - at::matmul(u, ut), at::matmul(gu, sigma_mat_inv));
+      u_term = u_term + at::matmul(im - at::matmul(u, uh), at::matmul(gu, sigma_mat_inv));
     }
-    u_term = at::matmul(u_term, vt);
+    u_term = at::matmul(u_term, vh);
   } else {
     u_term = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   if (gv.defined()) {
-    auto gvt = gv.transpose(-2, -1);
-    v_term = at::matmul(sigma_mat, at::matmul(F.mul(at::matmul(vt, gv) - at::matmul(gvt, v)), vt));
+    auto gvh = gv.conj().transpose(-2, -1);
+    v_term = at::matmul(sigma_mat, at::matmul(F.mul(at::matmul(vh, gv) - at::matmul(gvh, v)), vh));
     if (n > k) {
-      v_term = v_term + at::matmul(sigma_mat_inv, at::matmul(gvt, in - at::matmul(v, vt)));
+      v_term = v_term + at::matmul(sigma_mat_inv, at::matmul(gvh, in - at::matmul(v, vh)));
     }
     v_term = at::matmul(u, v_term);
   } else {
     v_term = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  }
+
+  // for complex-valued input there is an additional term
+  // https://giggleliu.github.io/2019/04/02/einsumbp.html
+  // https://arxiv.org/abs/1909.02659
+  if (self.is_complex() && gu.defined()) {
+    // computes L = Identity.mul(uh @ gu)
+    Tensor L = at::matmul(uh, gu).diagonal(0, -2, -1).diag_embed(0, -2, -1);
+    L = L - L.conj().transpose(-2, -1);
+    Tensor imag_term = 0.5 * at::matmul(at::matmul(at::matmul(u, L), sigma_mat_inv), vh);
+    return u_term + sigma_term + v_term + imag_term;
   }
 
   return u_term + sigma_term + v_term;
@@ -1990,7 +1997,7 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
     glambda = glambda.to(self.dtype());
     // computes v @ diag(glambda) @ vh
     Tensor glambda_term = at::matmul(v * glambda.unsqueeze(-2), vh);
-    if (inplace_is_vmap_compatible(result, glambda_term)) {
+    if (at::inplaceIsVmapCompatible(result, glambda_term)) {
       result.add_(glambda_term);
     } else {
       result = result + glambda_term;
@@ -2006,67 +2013,58 @@ Tensor qr_backward(const std::vector<torch::autograd::Variable> &grads, const Te
                                       const Tensor& A,
                                       const Tensor& Q,
                                       const Tensor& R) -> Tensor {
-    // For square and deep (tall) case we refer
-    // Walter, S.F and Lehmann, L., Algorithmic Differentiation of Linear
-    // Algebra Functions with Application in Optimum Experimental Design
-    // (Extended Version) The derivative for the QR decomposition is adapted
-    // from Eq. 42 of the above reference.
+    // For square and deep (tall) case we refer:
+    // Matthias Seeger, Asmus Hetzel, Zhenwen Dai, Eric Meissner, Neil D. Lawrence (2018). Auto-Differentiating Linear Algebra.
+    // https://arxiv.org/abs/1710.08717 Section 4.3 LQ Decomposition (Note that LQ decomposition is the transpose of QR decomposition)
+    // Hai-Jun Liao, Jin-Guo Liu, Lei Wang, Tao Xiang (2019). Differentiable Programming Tensor Networks.
+    // https://arxiv.org/abs/1903.09650 Section 3. QR factorization
+    // For derivations of complex-valued input case, see https://giggleliu.github.io/2019/04/02/einsumbp.html
 
-    // Compute R (R')^{T}
+    // Compute R grad_R^H
     Tensor R_term;
     if (grad_R.defined()) {
-      R_term = at::matmul(R, grad_R.transpose(-2, -1));
+      R_term = at::matmul(R, grad_R.conj().transpose(-2, -1));
     } else {
       // R is ... x N x N, grad_R is ... x N x N and grad_R.T is ... x N x N
       R_term = at::zeros_like(R, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     }
 
-    // Compute Q^{T} Q'
+    // Compute grad_Q^H Q
     Tensor Q_term;
     if (grad_Q.defined()) {
-      Q_term = at::matmul(Q.transpose(-2, -1), grad_Q);
+      Q_term = at::matmul(grad_Q.conj().transpose(-2, -1), Q);
     } else {
       // Q is ... x M x N, Q.T is ... x N x M and grad_Q is ... x M x N
       Q_term = at::zeros_like(R, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     }
 
-    // We want to compute: (rhs_solve_1 . R^{-T})
-    // Note that (rhs_solve_1 . R^{-T}) = (R^{-1} . rhs_solve_1^{T})^{T}
+    Tensor M = R_term - Q_term;
+
+    // Compute M = (tril(M) + tril(M).conj().transpose(-2, -1)) * 0.5 Identity
+    Tensor M_tril = at::tril(M);
+    M = M_tril + M_tril.conj().transpose(-2, -1);
+    M.diagonal(0, -2, -1).mul_(0.5);
+
+    Tensor rhs_term;
+    if (grad_Q.defined()) {
+      rhs_term = grad_Q + at::matmul(Q, M);
+    } else {
+      rhs_term = at::matmul(Q, M);
+    }
+
+    // We want to compute: (rhs_term @ R^{-H})
+    // Note that (rhs_term @ R^{-H}) = (R^{-1} @ rhs_solve_1^H)^H
     // Since R is upper triangular, we can do this using
-    // triangular_solve(rhs_solve_1^{T}, R)^{T}
-    auto rhs_solve_1 =
-        R_term - R_term.transpose(-2, -1) + Q_term - Q_term.transpose(-2, -1);
-    rhs_solve_1 = at::tril(rhs_solve_1, /*k=*/-1);
-    Tensor solve_soln_1;
-    std::tie(solve_soln_1, std::ignore) = at::triangular_solve(
-        rhs_solve_1.transpose(-2, -1),
+    // triangular_solve(rhs_term^H, R)^H
+    Tensor grad_A;
+    std::tie(grad_A, std::ignore) = at::triangular_solve(
+        rhs_term.conj().transpose(-2, -1),
         R,
         /*upper=*/true,
         /*transpose=*/false,
         /*unitriangular=*/false);
-    Tensor grad_A;
-    if (grad_R.defined()) {
-      grad_A = at::matmul(Q, solve_soln_1.transpose(-2, -1) + grad_R);
-    } else {
-      grad_A = at::matmul(Q, solve_soln_1.transpose(-2, -1));
-    }
 
-    // Successive computations involve computation of QQ^{T} which is identity when A is square
-    if (A.size(-1) != A.size(-2)) {
-      Tensor rhs_solve_2;
-      // We use the same trick from above for this computation
-      if (grad_Q.defined()) {
-        rhs_solve_2 = grad_Q - at::matmul(Q, Q_term);
-      } else {
-        rhs_solve_2 = -at::matmul(Q, Q_term);
-      }
-      Tensor solve_soln_2;
-      std::tie(solve_soln_2, std::ignore) = at::triangular_solve(rhs_solve_2.transpose(-2, -1), R,
-                                                               /*upper=*/true, /*transpose=*/false,
-                                                               /*unitriangular=*/false);
-      grad_A.add_(solve_soln_2.transpose(-2, -1));
-    }
-    return grad_A;
+    return grad_A.conj().transpose(-2, -1);
   };
 
   auto m = self.size(-2);
@@ -2087,7 +2085,7 @@ Tensor qr_backward(const std::vector<torch::autograd::Variable> &grads, const Te
     // grad_R = [grad_U | grad_V] and grad_A = [grad_X | grad_Y].
     // To obtain grad_X we reuse the gradient formula from the square case.
     // Formulae: grad_X = square_case_grad(grad_Q_prime, grad_U, Q, U),
-    // where grad_Q_prime = grad_Q + Y @ grad_V.T
+    // where grad_Q_prime = grad_Q + Y @ grad_V^H
     // and grad_Y = Q @ grad_V.
     // Then concatenate grads to get grad_A = [grad_X | grad_Y].
 
@@ -2099,8 +2097,8 @@ Tensor qr_backward(const std::vector<torch::autograd::Variable> &grads, const Te
       grad_V = grad_R.narrow(-1, m, n - m);
       // reuse grad_R to store grad_U
       grad_R = grad_R.narrow(-1, 0, m);
-      // grad_Q_prime starts with the value of Y @ grad_V.T
-      grad_Q_prime = at::matmul(Y, grad_V.transpose(-2, -1));
+      // grad_Q_prime starts with the value of Y @ grad_V^H
+      grad_Q_prime = at::matmul(Y, grad_V.conj().transpose(-2, -1));
     } else {
       // when grad_R is not defined then grad_V and grad_Q_prime
       // get initialized with zeros
@@ -2322,94 +2320,6 @@ std::tuple<Tensor, Tensor> cholesky_solve_backward(
     }
   }
   return std::tuple<Tensor, Tensor>{grad_self, grad_input2};
-}
-
-// Generally speaking, fft's backward is ifft.
-Tensor fft_backward(const Tensor& self, const Tensor& grad, int64_t signal_ndim,
-                    bool complex_input, bool complex_output,
-                    bool inverse, IntArrayRef checked_signal_sizes,
-                    int64_t normalization, bool onesided,
-                    IntArrayRef output_sizes) {
-  Tensor gI;
-  if (!complex_input && complex_output) {
-    // Forward is R2C
-    // Do inverse C2C and project onto real plane because grad can be
-    // asymmetrical so C2R can't be used.
-    if (onesided) {
-      // Forward is R2C (onesided)
-      // Think of onesided R2C rfft as
-      //     1. view as complex numbers (fill complex dim with zeros)
-      //     2. C2C fft
-      //     3. discard half of results
-      // So backward is
-      //     1. fill the other half with zeros (with `zero_grad_shape` below)
-      //        (C2C ifft only take twosided inputs so we need to fill here)
-      //     2. inverse C2C ifft
-      //     3. discard the complex dim
-      int64_t zero_length = checked_signal_sizes[signal_ndim - 1] - grad.size(signal_ndim);
-      auto complex_full_grad = grad;
-      if (zero_length > 0) {
-        std::vector<int64_t> zero_grad_shape(signal_ndim + 2);
-        zero_grad_shape[0] = self.size(0);
-        for (int64_t i = 1; i < signal_ndim; i++) {
-          zero_grad_shape[i] = checked_signal_sizes[i - 1];
-        }
-        zero_grad_shape[signal_ndim] = zero_length;
-        zero_grad_shape[signal_ndim + 1] = 2;
-        complex_full_grad =  at::cat({ grad, at::zeros(zero_grad_shape, grad.options()) }, signal_ndim);
-      }
-      gI = _fft_with_size(complex_full_grad, signal_ndim,
-                          /* complex_input */ true, /* complex_output */ true,
-                          !inverse, checked_signal_sizes, normalization,
-                          /* onesided */ false, complex_full_grad.sizes()).select(-1, 0);
-    } else {
-      gI = _fft_with_size(grad, signal_ndim, /* complex_input */ true,
-                          /* complex_output */ true, !inverse,
-                          checked_signal_sizes, normalization,
-                          /* onesided */ false, grad.sizes()).select(-1, 0);
-    }
-  } else if (complex_input && !complex_output && onesided) {
-    // Forward is C2R (onesided)
-    // Think of onesided C2R irfft as
-    //    1. fill the other half by conjugate symmetry
-    //    2. inverse C2C ifft
-    //    3. discard the complex dimension
-    // So backward is
-    //    1. R2C rfft (essentially add dummy complex dimension, and dft)
-    //    2. accumulate gradient by conjugate symmetry
-    //       since rfft results follow conjugate symmetry, we only need to
-    //       double some entries from onesided rfft results, i.e., the ones with
-    //       their reflected indices also landing out of the onesided range. So
-    //       consider the index of last dim:
-    //           i.   idx = 0.
-    //                Reflected to (N - 0) % N = 0. Not doubled.
-    //           ii   0 < idx < floor(N/2) (last).
-    //                N > N - idx > ceil(N/2)
-    //                Reflected to ()
-    //           iii. idx = floor(N/2) = N/2 (last) when N even.
-    //                Reflected to (N - N/2) % N = N/2. Not doubled.
-    //           iv.  idx = floor(N/2) = (N-1)/2 (last) when N odd.
-    //                Reflected to (N - (N-1)/2) % N = (N+1)/2. Doubled.
-    //       Therefore, needs to double
-    //           idx = 1, 2, ..., N/2 - 1     when N even
-    //           idx = 1, 2, ..., (N-1)/2     when N odd
-    //       that is
-    //           idx = 1, 2, ..., N - (floor(N/2) + 1)
-    //               = 1, 2, ..., N - onesided_length
-    gI = _fft_with_size(grad, signal_ndim, /* complex_input */ false,
-                        /* complex_output */ true, /* inverse */ false,
-                        checked_signal_sizes, normalization, /* onesided */ true,
-                        self.sizes());
-    int64_t double_length = checked_signal_sizes[signal_ndim - 1] - self.size(signal_ndim);
-    if (double_length > 0) {  // also covers case when signal size is zero
-      gI.narrow(signal_ndim, 1, double_length).mul_(2);
-    }
-  } else {
-    gI = _fft_with_size(grad, signal_ndim, complex_output, complex_input,
-                        !inverse, checked_signal_sizes, normalization, onesided,
-                        self.sizes());
-  }
-  return gI;
 }
 
 Tensor fft_c2r_backward(const Tensor& grad, IntArrayRef dim, int64_t normalization) {
