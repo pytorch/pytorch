@@ -660,7 +660,7 @@ class TestSortAndSelect(TestCase):
         k = 5
         a = torch.randn(S)
         indices = torch.empty((), device=device, dtype=torch.long)
-        with self.assertRaisesRegex(RuntimeError, "output tensor's memory overlaps with input tensor"):
+        with self.assertRaisesRegex(RuntimeError, "unsupported operation:"):
             torch.kthvalue(a, k, out=(a, indices))
 
     @dtypes(torch.float)
