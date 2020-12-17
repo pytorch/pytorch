@@ -19,7 +19,6 @@ import tools.codegen.api.cpp as cpp
 import tools.codegen.api.dispatcher as dispatcher
 import tools.codegen.api.native as native
 import tools.codegen.api.meta as meta
-from tools.codegen.api.translate import translate
 import tools.codegen.local as local
 from tools.codegen.selective_build.selector import SelectiveBuilder
 
@@ -393,10 +392,10 @@ struct {class_name} final : public {parent_class} {{
             functional_func = g.out.func.signature()
             functional_sig = DispatcherSignature.from_schema(functional_func)
 
-            # TODO: is it meta or wot?  Sort this out
-            functional_exprs = ', '.join(
-                e.expr for e in translate(functional_sig.arguments(), dispatcher.arguments(functional_func), method=False)
-            )
+            # This is a little abusive; this assumes that the functionalization
+            # transformation ALWAYS refers to valid arguments in the original
+            # signature
+            functional_exprs = ', '.join(e.expr for e in functional_sig.exprs())
 
             op_name = f"aten::{f.func.name}"
             if self.target is Target.REGISTRATION and not self.selector.is_operator_selected(op_name):
@@ -479,12 +478,6 @@ c10::impl::hacky_wrapper_for_legacy_signatures<
         # for mypy type refinement; would be fixed by TODO on target
         assert self.target is not Target.DECLARATION
 
-        if f.func.is_out_fn():
-            assert local.use_c10_dispatcher().dispatcher_uses_new_style(), \
-                ("{} takes out arguments and has to be written in the new style. " +
-                 "Please add `use_c10_dispatcher: full` to your operator in native_functions.yaml " +
-                 "and write the C++ implementation to take out arguments in the end.").format(f.func.name)
-
         if self.dispatch_key not in f.dispatch:
             return None
 
@@ -495,7 +488,7 @@ c10::impl::hacky_wrapper_for_legacy_signatures<
         name = native.name(f.func)
         returns_type = native.returns_type(f.func.returns)
         args = native.arguments(f.func)
-        args_str = ', '.join(a.defn() for a in args)
+        args_str = ', '.join(map(str, args))
 
         if self.target is Target.DEFINITION:
             impl_name = f"at::native::{f.dispatch[self.dispatch_key]}"
@@ -614,7 +607,7 @@ class ComputeFunction:
             else:
                 sig = sig_group.signature
 
-            dispatcher_exprs = translate(sig.arguments(), dispatcher_sig.arguments())
+            dispatcher_exprs = dispatcher.cpparguments_exprs(f.func, method=False, api_is_faithful=faithful)
             dispatcher_exprs_str = ', '.join(a.expr for a in dispatcher_exprs)
 
             return f"""
@@ -669,7 +662,7 @@ class ComputeTensorMethod:
             else:
                 sig = sig_group.signature
 
-            dispatcher_exprs = translate(sig.arguments(), dispatcher_sig.arguments(), method=True)
+            dispatcher_exprs = dispatcher.cpparguments_exprs(f.func, method=True, api_is_faithful=faithful)
             dispatcher_exprs_str = ', '.join(a.expr for a in dispatcher_exprs)
 
             return f"""
@@ -715,7 +708,7 @@ def compute_native_function_declaration(g: Union[StructuredNativeFunctions, Nati
             seen.add(n)
             rs.append(f"""\
 struct CAFFE2_API structured_{n} : public at::meta::{meta_name} {{
-    void impl({', '.join(a.decl() for a in out_args)});
+    void impl({', '.join(a.str_with_default() for a in out_args)});
 }};
 """)
 
@@ -737,9 +730,9 @@ struct CAFFE2_API structured_{n} : public at::meta::{meta_name} {{
                     # default arguments from all at::native functions
                     # but that would be a larger change because we need
                     # to change a lot of call sites
-                    args_str = ', '.join(a.defn() for a in args)
+                    args_str = ', '.join(str(a) for a in args)
                 else:
-                    args_str = ', '.join(a.decl() for a in args)
+                    args_str = ', '.join(a.str_with_default() for a in args)
                 rs.append(f"CAFFE2_API {returns_type} {n}({args_str});")
 
         return rs
@@ -760,7 +753,7 @@ struct CAFFE2_API structured_{n} : public at::meta::{meta_name} {{
             seen.add(n)
             returns_type = native.returns_type(f.func.returns)
             args = native.arguments(f.func)
-            rs.append(f"CAFFE2_API {returns_type} {n}({', '.join(a.decl() for a in args)});")
+            rs.append(f"CAFFE2_API {returns_type} {n}({', '.join(a.str_with_default() for a in args)});")
 
         return rs
 
@@ -768,8 +761,8 @@ def compute_meta_function_declaration(g: StructuredNativeFunctions) -> str:
     with native_function_manager(g.out):
         sig = g.signature()
         name = meta.name(g)
-        args = native.arguments(sig)
-        args_str = ', '.join(a.defn() for a in args)
+        args = meta.arguments(sig)
+        args_str = ', '.join(map(str, args))
         parent_class = g.out.structured_inherits
         if parent_class is None:
             parent_class = "at::impl::MetaBase"
@@ -901,7 +894,7 @@ def dynamic_type(t: Type) -> str:
     # also include Tensor[]
     if str(t) == 'Tensor':
         return 'Tensor'
-    return cpp.argumenttype_type(t, mutable=False, binds='__placeholder__').cpp_type()
+    return cpp.argumenttype_type(t, mutable=False)
 
 def compute_method_of_yaml(variants: Set[Variant]) -> List[str]:
     # This is written out explicitly to ensure that Tensor and
@@ -976,7 +969,7 @@ def compute_returns_yaml(f: NativeFunction) -> Tuple[List[Dict[str, str]], Dict[
     return returns, name_to_field_name
 
 # arguments in yaml roughly corresponds to the public C++ API
-def compute_cpp_argument_yaml(cpp_a: Binding, *, schema_order: bool, kwarg_only_set: Set[str],
+def compute_cpp_argument_yaml(cpp_a: CppArgument, *, schema_order: bool, kwarg_only_set: Set[str],
                               out_arg_set: Set[str], name_to_field_name: Dict[str, str]) -> object:
     if isinstance(cpp_a.argument, TensorOptionsArguments):
         arg: Dict[str, object] = {
@@ -1004,7 +997,7 @@ def compute_argument_yaml(a: Argument, *, schema_order: bool, kwarg_only_set: Se
         'dynamic_type': dynamic_type(a.type),
         'is_nullable': a.type.is_nullable(),
         'name': a.name,
-        'type': cpp.argument_type(a, binds="__placeholder__").cpp_type(),
+        'type': cpp.argument_type(a),
     }
     if a.default is not None:
         arg['default'] = pythonify_default(cpp.default_expr(a.default, a.type))
@@ -1052,7 +1045,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
 
     cpp_schema_order_types = [
         # NB: method here doesn't matter
-        r.type for a in schema_order_jit_arguments for r in cpp.argument(a, method=False)
+        cpp.argument(a, method=False).type for a in schema_order_jit_arguments
     ]
 
     cpp_returns = cpp.returns_type(f.func.returns)
@@ -1091,7 +1084,7 @@ def compute_registration_declarations(f: NativeFunction) -> str:
     name = dispatcher.name(f.func)
     returns_type = dispatcher.returns_type(f.func.returns)
     args = dispatcher.arguments(f.func)
-    args_str = ', '.join(a.defn() for a in args)
+    args_str = ', '.join(map(str, args))
     comment_data : Dict[str, str] = {
         'schema': f'aten::{f.func}',
         # TODO: What exactly is the semantics of the 'dispatch' field?

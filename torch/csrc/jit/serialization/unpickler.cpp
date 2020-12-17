@@ -54,7 +54,6 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
     }
     switch (w.static_type->kind()) {
       case TensorType::Kind:
-      case StorageType::Kind:
       case NumberType::Kind:
       case FloatType::Kind:
       case IntType::Kind:

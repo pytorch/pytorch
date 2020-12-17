@@ -28,7 +28,6 @@ using c10::StreamObjType;
 using c10::StringType;
 using c10::Symbol;
 using c10::TensorType;
-using c10::StorageType;
 using c10::TupleType;
 using c10::VarType;
 
@@ -42,7 +41,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"ScalarType", IntType::get()},
       {"Layout", IntType::get()},
       {"MemoryFormat", IntType::get()},
-      {"Storage", StorageType::get()},
+      {"Storage", IntType::get()},
       {"QScheme", QSchemeType::get()},
       {"Quantizer", QuantizerType::get()},
       {"ConstQuantizerPtr",
