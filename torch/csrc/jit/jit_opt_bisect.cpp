@@ -1,6 +1,7 @@
 #include <cstdlib>
 #include <iomanip>
 #include <sstream>
+#include <string>
 #include <vector>
 
 #include <ATen/core/function.h>
@@ -40,10 +41,8 @@ static std::unordered_map<std::string, int64_t> parseJITBisectOption(
       continue;
     }
     auto index_at = line.find_last_of('=');
-    auto end_index = line.find_last_of('.') == std::string::npos
-        ? index_at
-        : line.find_last_of('.');
-    auto pass_name = line.substr(0, end_index);
+    auto pass_name = line.substr(0, index_at);
+    pass_name = c10::detail::ExcludeFileExtension(pass_name);
     auto opt_limit = parseOptLimit(line.substr(index_at+1));
     passes_to_opt_limits.insert({pass_name, opt_limit});
   }
@@ -57,6 +56,7 @@ bool is_bisect_enabled(const char* pass_name, int64_t* current_counter) {
       parseJITBisectOption(opt_limit);
   std::string pass{pass_name};
   pass = c10::detail::StripBasename(pass);
+  pass = c10::detail::ExcludeFileExtension(pass);
   auto it = passes_to_opt_limits.find(pass);
   if (it == passes_to_opt_limits.end()) {
     return false;

@@ -30,7 +30,7 @@ TORCH_API std::ostream& operator<<(
     std::ostream& out,
     int64_t level);
 
-#define JIT_BISECT(level) is_bisect_enabled(__FILE__, level)
+#define JIT_BISECT(level, ...) (is_bisect_enabled(__FILE__, level));
 
 } // namespace jit
 } // namespace torch

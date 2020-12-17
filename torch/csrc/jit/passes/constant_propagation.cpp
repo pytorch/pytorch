@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <torch/csrc/utils/memory.h>
+#include <string>
 
 namespace torch {
 namespace jit {
@@ -339,11 +340,12 @@ struct ConstantPropagator {
   }
 
   void ConstantPropagation(Node* n) {
-    std::cout << "BEFORE: " << std::to_string(opt_counter_const_prop) << std::endl;
-    if (!JIT_BISECT(&opt_counter_const_prop)) {
+    std::cout << "BEFORE BISECT: " << std::to_string(opt_counter_const_prop) << std::endl;
+    auto allowed = JIT_BISECT(&opt_counter_const_prop);
+    if (!allowed) {
       return;
     }
-    std::cout << "AFTER: " << std::to_string(opt_counter_const_prop) << std::endl;
+    std::cout << "AFTER BISECT: " << std::to_string(opt_counter_const_prop) << std::endl;
     bool runnable_inputs = runnableInputs(n);
     if (n->kind() == prim::If) {
       // inline node if we can, otherwise check for simplified outputs
