@@ -275,6 +275,7 @@ class Quantizer:
         #     <class 'torch.quantization.fx.quantize.Add'>),
         # }
         self.patterns: Optional[Dict[Pattern, QuantizeHandler]] = None
+        self.prepare_custom_config_dict: Dict[str, Any] = {}
 
 
     def _qat_swap_modules(
@@ -341,6 +342,7 @@ class Quantizer:
         """
         if prepare_custom_config_dict is None:
             prepare_custom_config_dict = {}
+        self.prepare_custom_config_dict = prepare_custom_config_dict
 
         additional_quant_patterns = \
             prepare_custom_config_dict.get("additional_quant_pattern", {})
@@ -441,6 +443,8 @@ class Quantizer:
             self.activation_post_process_map  # type: ignore
         observed._patterns = self.patterns  # type: ignore
         observed._qconfig_map = self.qconfig_map  # type: ignore
+        observed._prepare_custom_config_dict = \
+            self.prepare_custom_config_dict  # type: ignore
 
     def restore_state(self, observed: GraphModule) -> None:
         assert is_observed_module(observed), \
@@ -449,6 +453,8 @@ class Quantizer:
             observed._activation_post_process_map  # type: ignore
         self.patterns = observed._patterns  # type: ignore
         self.qconfig_map = observed._qconfig_map  # type: ignore
+        self.prepare_custom_config_dict = \
+            observed._prepare_custom_config_dict  # type: ignore
 
     def prepare(self, model: GraphModule, qconfig_dict: Any,
                 prepare_custom_config_dict: Dict[str, Any] = None,
@@ -655,9 +661,9 @@ class Quantizer:
         # by the user
         placeholder_node_seen_cnt = 0
         output_node_seen_cnt = 0
-        input_quantized_idxs: List[int] = convert_custom_config_dict.get(
+        input_quantized_idxs: List[int] = self.prepare_custom_config_dict.get(
             "input_quantized_idxs", [])
-        output_quantized_idxs: List[int] = convert_custom_config_dict.get(
+        output_quantized_idxs: List[int] = self.prepare_custom_config_dict.get(
             "output_quantized_idxs", [])
 
         for node in model.graph.nodes:
