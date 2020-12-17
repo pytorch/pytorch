@@ -306,7 +306,7 @@ endif()
 # Also, we will turn off deprecated-declarations
 # due to protobuf.
 
-if(IOS AND ${IOS_ARCH} MATCHES "armv7*")
+if(IOS AND (${IOS_ARCH} MATCHES "armv7*"))
   add_definitions("-mfpu=neon-fp16")
   add_definitions("-arch" ${IOS_ARCH})
   add_definitions("-Wno-deprecated-declarations")
