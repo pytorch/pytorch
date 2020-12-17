@@ -214,8 +214,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: arctan_
    .. automethod:: atan2
    .. automethod:: atan2_
-   .. automethod:: all
-   .. automethod:: any
    .. automethod:: backward
       :noindex:
    .. automethod:: baddbmm
@@ -645,3 +643,10 @@ view of a storage and defines numeric operations on it.
    .. automethod:: view_as
    .. automethod:: where
    .. automethod:: zero_
+
+.. class:: BoolTensor()
+
+   The following methods are unique to :class:`torch.BoolTensor`.
+
+   .. automethod:: all
+   .. automethod:: any
