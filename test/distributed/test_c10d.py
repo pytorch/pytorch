@@ -4546,21 +4546,21 @@ class CommTest(MultiProcessTestCase):
         # Test with new_group
         pg = c10d.new_group([0, 1])
         t = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
-        pg.allreduce(t)
+        pg.allreduce(t).wait()
         self.assertEqual(expected_tensor, t)
 
         pg = c10d.new_group([0])
         if self.rank == 0:
             t = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
             expected_tensor = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
-            pg.allreduce(t)
+            pg.allreduce(t).wait()
             self.assertEqual(expected_tensor, t)
 
         pg = c10d.new_group([1])
         if self.rank == 1:
             t = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
             expected_tensor = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
-            pg.allreduce(t)
+            pg.allreduce(t).wait()
             self.assertEqual(expected_tensor, t)
 
     @requires_nccl()

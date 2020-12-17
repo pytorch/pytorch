@@ -17,8 +17,8 @@ from .checkpoint import Checkpointing
 from .copy import Copy, Wait
 from .dependency import fork, join
 from .microbatch import Batch
-from ._skip.layout import SkipLayout
-from ._skip.tracker import SkipTrackerThroughPotals, use_skip_tracker
+from .skip.layout import SkipLayout
+from .skip.tracker import SkipTrackerThroughPotals, use_skip_tracker
 from .stream import AbstractStream, current_stream, use_device
 from .worker import Task, create_workers, join_workers
 
