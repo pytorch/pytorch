@@ -8,6 +8,8 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 
+C10_DECLARE_bool(torch_jit_disable_warning_prints);
+
 namespace at {
 class Tensor;
 CAFFE2_API void launch(std::function<void()> func);
