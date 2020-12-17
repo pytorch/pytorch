@@ -1,4 +1,5 @@
 from .node import Node, Argument, Target, map_arg
+from .immutable_collections import FakeNamedTuple
 
 from typing import Callable, Any, List, Dict, Optional, Tuple, Set
 import builtins
@@ -629,12 +630,14 @@ class Graph:
 
         def emit_node(node : Node):
             def register_import_type(a : Argument) -> Argument:
-                if isinstance(a, torch.fx.proxy.FakeNamedTuple):
+                if isinstance(a, FakeNamedTuple):
                     register_modules_used(torch.typename(type(a)))
                 return a
 
             new_args = map_arg(node.args, lambda n: n, register_import_type)
+            assert isinstance(new_args, tuple)
             new_kwargs = map_arg(node.kwargs, lambda n: n, register_import_type)
+            assert isinstance(new_kwargs, dict)
 
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)

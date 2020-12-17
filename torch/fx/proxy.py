@@ -6,29 +6,7 @@ import operator
 from .graph import magic_methods, reflectable_magic_methods, Graph
 from typing import Tuple, Dict, Optional, Iterable, Any, Iterator
 from .node import Target, Node, Argument, base_types
-
-class FakeNamedTuple(object):
-    def __init__(self, field_names, values):
-        self._field_names = field_names
-        self._values = values
-
-    def __repr__(self):
-        return f'torch.fx.proxy.FakeNamedTuple({self._field_names}, {self._values})'
-
-    def __iter__(self):
-        return iter(self._values)
-
-    def __getitem__(self, i):
-        return self._values[i]
-
-    def __getattr__(self, name):
-        if name in self._field_names:
-            return self._values[self._field_names.index(name)]
-        return super().__getattribute__(name)
-
-    def to_named_tuple(self, named_tuple_type):
-        init_dict = {k : v for k, v in zip(self._field_names, self._values)}
-        return named_tuple_type(**init_dict)
+from .immutable_collections import FakeNamedTuple
 
 class TracerBase:
     graph: Graph
