@@ -610,6 +610,10 @@ def select(g, self, dim, index):
         return g.op("Gather", self, index, axis_i=dim)
 
 
+def square(g, self):
+    return g.op("Mul", self, self)
+
+
 def squeeze(g, self, dim=None):
     if dim is None:
         return g.op("Squeeze", self)
