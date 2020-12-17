@@ -5,7 +5,7 @@ import math
 from torch.testing._internal.common_utils import \
     (TestCase, make_tensor, run_tests, slowTest)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, onlyOnCPUAndCUDA, dtypes)
+    (instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA, dtypes)
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
