@@ -13,9 +13,9 @@ from torch import nn
 
 from torch.distributed.pipeline.sync.checkpoint import enable_checkpointing, enable_recomputing
 from torch.distributed.pipeline.sync.microbatch import Batch
-from torch.distributed.pipeline.sync._skip import pop, skippable, stash
-from torch.distributed.pipeline.sync._skip.layout import SkipLayout
-from torch.distributed.pipeline.sync._skip.tracker import SkipTracker, SkipTrackerThroughPotals, current_skip_tracker
+from torch.distributed.pipeline.sync.skip import pop, skippable, stash
+from torch.distributed.pipeline.sync.skip.layout import SkipLayout
+from torch.distributed.pipeline.sync.skip.tracker import SkipTracker, SkipTrackerThroughPotals, current_skip_tracker
 
 
 def test_default_skip_tracker():

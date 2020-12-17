@@ -8,7 +8,7 @@ import pytest
 import torch
 
 from torch.distributed.pipeline.sync.dependency import fork, join
-from torch.distributed.pipeline.sync._skip.portal import Portal
+from torch.distributed.pipeline.sync.skip.portal import Portal
 from torch.distributed.pipeline.sync.stream import default_stream
 
 

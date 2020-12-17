@@ -17,8 +17,8 @@ import torch.cuda
 from . import microbatch
 from .batchnorm import DeferredBatchNorm
 from .pipeline import Pipeline
-from ._skip.layout import inspect_skip_layout
-from ._skip.skippable import verify_skippables
+from .skip.layout import inspect_skip_layout
+from .skip.skippable import verify_skippables
 from .stream import AbstractStream, new_stream
 
 __all__ = ["Pipe"]
