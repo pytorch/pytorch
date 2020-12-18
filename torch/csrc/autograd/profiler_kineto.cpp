@@ -360,7 +360,7 @@ void ProfilerResult::save(const std::string& path) {
 
 bool kinetoAvailable() {
 #ifdef USE_KINETO
-  return true;
+  return at::hasCUDA();
 #else
   return false;
 #endif
