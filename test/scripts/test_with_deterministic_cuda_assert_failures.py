@@ -8,10 +8,9 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 # This test is added to ensure that test suite early terminates when 
 # CUDA assert was thrown since all subsequence test will fail. 
 # See: https://github.com/pytorch/pytorch/issues/49019
-# This test file should be invoked from test_tes_runner.py
+# This test file should be invoked from test_testing.py
 class TestThatContainsCUDAAssertFailure(TestCase):
 
-    # Test that wrap_with_cuda_memory_check successfully detects leak
     def test_throw_unrecoverable_cuda_exception(self, device):
         x = torch.rand(10, device=device)
         # cause unrecoverable CUDA exception, recoverable on CPU
