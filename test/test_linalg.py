@@ -1331,9 +1331,6 @@ class TestLinalg(TestCase):
         # TODO: Fix autograd for matrix orders 'nuc', 2, and -2 by adding complex
         #       support to svd's backward method. Once this is done, these ords
         #       should be added to `matrix_ords` above
-        # Update: svd's backward now works with https://github.com/pytorch/pytorch/pull/47761
-        # However run_test_case doesn't work for 'matrix_ords_unsupported' cases
-        # because singular values of 'x' and 'x_real' can be different and so is their norms based on singular values
         matrix_ords_unsupported = ['nuc', 2, -2]
 
         def run_test_case(x, ord, keepdim):
@@ -1359,6 +1356,13 @@ class TestLinalg(TestCase):
             for ord in matrix_ords:
                 x = torch.randn(25, 25, dtype=dtype, device=device, requires_grad=True)
                 run_test_case(x, ord, keepdim)
+
+            for ord in matrix_ords_unsupported:
+                x = torch.randn(25, 25, dtype=dtype, device=device, requires_grad=True)
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        r'svd does not support automatic differentiation for outputs with complex dtype'):
+                    res = torch.linalg.norm(x, ord, keepdim=keepdim)
 
     # Test that linal.norm gives the same result as numpy when inputs
     # contain extreme values (inf, -inf, nan)
