@@ -337,9 +337,12 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     std::vector<T> result_v(lhs_v.size());
     for (size_t i = 0; i < lhs_v.size(); i++) {
       switch (op_type) {
-        case IRNodeType::kLshift:
-          result_v[i] = lhs_v[i] << rhs_v[i];
+        case IRNodeType::kLshift: {
+          typename std::make_unsigned<T>::type a =
+              static_cast<typename std::make_unsigned<T>::type>(lhs_v[i]);
+          result_v[i] = a << rhs_v[i];
           break;
+        }
         case IRNodeType::kRshift:
           result_v[i] = lhs_v[i] >> rhs_v[i];
           break;
