@@ -203,8 +203,7 @@ infinitely_differentiable_native_layer_norm_backward(
     const Tensor& mean,
     const Tensor& rstd,
     const c10::optional<Tensor>& gamma,
-    int64_t M,
-    int64_t N,
+    IntArrayRef normalized_shape,
     double eps,
     std::array<bool, 3> grad_input_mask);
 
@@ -218,9 +217,6 @@ Tensor slow_conv_dilated2d_forward_grad(const Tensor& self_fw_grad, const Tensor
 Tensor native_batch_norm_forward(const Tensor& input_fw_grad, const Tensor& input, const c10::optional<at::Tensor> weight,
         const c10::optional<at::Tensor>  running_mean, const c10::optional<at::Tensor>  running_var, const Tensor& result1,
         const Tensor& result2, bool training, float eps, const Tensor& weight_fw_grad, const Tensor& bias_fw_grad);
-Tensor native_layer_norm_forward(const Tensor& input_fw_grad, const Tensor& input, const c10::optional<at::Tensor> weight,
-        const Tensor& result1, const Tensor& result2, int64_t M, int64_t N, const Tensor& weight_fw_grad, const Tensor& bias_fw_grad,
-        const Tensor& result);
 Tensor max_pool2d_with_indices_forward(const Tensor& self_fw_grad, const Tensor& indices);
 Tensor addmm_forward(const Tensor& self_fw_grad, const Tensor& mat1_fw_grad, const Tensor& mat2_fw_grad,
         Scalar beta, Scalar alpha, const Tensor& mat1, const Tensor& mat2);

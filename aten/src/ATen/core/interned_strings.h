@@ -58,7 +58,7 @@ namespace c10 {
   _(prim, ReturnStmt)                \
   _(prim, BreakStmt)                 \
   _(prim, ContinueStmt)              \
-  _(prim, ListComprehensionScope)    \
+  _(prim, ComprehensionScope)        \
   _(prim, Store)                     \
   _(prim, AutogradZero)              \
   _(prim, AutogradAnyNonZero)        \
@@ -227,6 +227,7 @@ namespace c10 {
   _(aten, lt_)                       \
   _(aten, less)                      \
   _(aten, less_)                     \
+  _(aten, isnan)                     \
   _(aten, mul)                       \
   _(aten, mul_)                      \
   _(aten, multiply)                  \
