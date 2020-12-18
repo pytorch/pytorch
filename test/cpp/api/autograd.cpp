@@ -681,6 +681,8 @@ TEST(CustomAutogradTest, ReentrantPriority) {
   ASSERT_EQ(order.size(), 10);
   ASSERT_EQ(std::count(order.begin(), order.end(), 1), 9);
   ASSERT_EQ(order.back(), 0);
+  // Clear static variable in case test get executed in a loop
+  order.clear();
 }
 
 TEST(CustomAutogradTest, Hooks) {
