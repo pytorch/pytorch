@@ -9,6 +9,7 @@ import torch.optim
 import torch.utils.data
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, TEST_WITH_ASAN, IS_WINDOWS)
+import torch.autograd.profiler as profiler
 from torch.autograd.profiler import profile
 from torch.autograd import kineto_available
 
@@ -243,6 +244,20 @@ class TestProfiler(TestCase):
             "Optimizer.zero_grad#CustomSGD.zero_grad": N
         }
         judge(expected_event_count, prof)
+
+    def test_flops(self):
+        model = torch.nn.Sequential(
+            nn.Conv2d(16, 33, 18),
+            nn.ReLU(),
+            nn.Linear(243, 243),
+            nn.ReLU(),
+        )
+        inputs = torch.randn(40, 16, 18, 260)
+        with profiler.profile(record_shapes=True, with_flops=True) as prof:
+            model(inputs)
+        profiler_output = prof.key_averages(group_by_input_shape=True).table(sort_by="cpu_time_total", row_limit=10)
+        print(profiler_output)
+        self.assertIn("FLOPS", profiler_output)
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
