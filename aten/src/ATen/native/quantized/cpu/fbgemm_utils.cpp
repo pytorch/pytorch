@@ -237,8 +237,8 @@ template <>
 Tensor TransposeConvTensorUnpackConversion<2>(const Tensor& src, int groups) {
   // OC IC/G HW -> IC OC/G HW logically
   auto oc_g_ic_g_hw_tensors = src.chunk(groups);
-  auto fused_tensor =
-      at::cat(oc_g_ic_g_hw_tensors, 1).set_quantizer_(src.quantizer());
+  auto fused_tensor = at::cat(oc_g_ic_g_hw_tensors, 1);
+  set_quantizer_(fused_tensor, src.quantizer());
   return fused_tensor.permute({1, 0, 2, 3});
 }
 
@@ -284,8 +284,8 @@ template <>
 Tensor TransposeConvTensorUnpackConversion<3>(const Tensor& src, int groups) {
   // OC IC/G DHW -> IC OC/G DHW logically
   auto oc_g_ic_g_hw_tensors = src.chunk(groups);
-  auto fused_tensor =
-      at::cat(oc_g_ic_g_hw_tensors, 1).set_quantizer_(src.quantizer());
+  auto fused_tensor = at::cat(oc_g_ic_g_hw_tensors, 1);
+  set_quantizer_(fused_tensor, src.quantizer());
   return fused_tensor.permute({1, 0, 2, 3, 4});
 }
 
@@ -302,8 +302,8 @@ Tensor ConvertConvWeightsToChannelLastTensor<2>(
         for (auto& tensor : ic_g_oc_g_hw_tensors) {
           tensor = tensor.unsqueeze(0);
         }
-        auto fused_tensor =
-            at::cat(ic_g_oc_g_hw_tensors).set_quantizer_(src.quantizer());
+        auto fused_tensor = at::cat(ic_g_oc_g_hw_tensors);
+        set_quantizer_(fused_tensor, src.quantizer());
         return fused_tensor.permute({0, 2, 3, 4, 1})
             .contiguous(c10::MemoryFormat::Contiguous);
       }()

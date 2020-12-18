@@ -199,8 +199,7 @@ infinitely_differentiable_native_layer_norm_backward(
     const Tensor& mean,
     const Tensor& rstd,
     const c10::optional<Tensor>& gamma,
-    int64_t M,
-    int64_t N,
+    IntArrayRef normalized_shape,
     double eps,
     std::array<bool, 3> grad_input_mask);
 
