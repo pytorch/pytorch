@@ -117,6 +117,26 @@ static bool needsGradientInProfilingMode(Block* b) {
   return false;
 }
 
+void guardDifferentiableGraph(Node* dnode) {
+  auto gi = dnode->g(attr::Subgraph)->inputs();
+  for (size_t i = 0; i < gi.size(); i++) {
+    auto ty = gi[i]->type()->cast<TensorType>();
+    if (ty) {
+      auto n = gi[i]->uses().at(0).user;
+      TORCH_INTERNAL_ASSERT(n->kind() == prim::profile);
+      dnode->inputs().at(i)->setType(n->ty(attr::profiled_type));
+    }
+  }
+  insertTypeGuard(dnode, [](const TensorTypePtr& t) {
+    TORCH_INTERNAL_ASSERT(
+        t->requiresGrad(),
+        "profiler did not say whether grad is required"); // i.e. we want the
+                                                          // optional to be
+                                                          // defined
+    return TensorType::get()->withRequiresGrad(t->requiresGrad());
+  });
+}
+
 void runNooptPassPipeline(std::shared_ptr<Graph>& graph) {
   GRAPH_DEBUG(
       "Before LowerGradOf (beginning of runNooptPassPipeline)\n", *graph);
@@ -377,7 +397,6 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
   runPreAutodiffPassPipeline(copy);
 
   if (needsGradientInProfilingMode(copy->block())) {
-    RemoveProfileNodesAndSpecializeTypes(copy);
     auto diff_nodes = CreateAutodiffSubgraphs(
         copy,
         getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
@@ -385,9 +404,8 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     size_t idx = 0;
     for (Node* dnode : diff_nodes) {
       GRAPH_DEBUG("Optimizing diff node ", idx);
-      insertTypeGuard(dnode, [](const TensorTypePtr& t) {
-        return TensorType::get()->withRequiresGrad(t->requiresGrad());
-      });
+      guardDifferentiableGraph(dnode);
+      GRAPH_DEBUG("After guardDifferentiableGraph:\n", *copy);
       auto diff_graph = std::move(dnode->g(attr::Subgraph));
       Gradient gradient = differentiate(diff_graph);
       GRAPH_DEBUG("Forward graph:\n", *(gradient.f));
@@ -404,6 +422,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
         copy,
         getAutodiffSubgraphInlining() ? autodiffSubgraphInlineThreshold : 1);
     replaceFallbackGraphWithFallbackFunction(copy->block());
+    RemoveProfilingNodes(copy);
     GRAPH_DEBUG(
         "After InlineAutodiffSubgraphs and Removing Profiling Nodes\n", *copy);
   } else {

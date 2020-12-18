@@ -109,15 +109,6 @@ class TestTEFuser(JitTestCase):
                 result += self.findFusionGroups(block)
         return result
 
-    def findNodesInBlocks(self, graph, kind):
-        result = []
-        for n in graph.nodes():
-            if n.kind() == kind:
-                result.append(n)
-            for block in n.blocks():
-                result += self.findNodesInBlocks(block, kind)
-        return result
-
     def _test_fused_abs(self, device='cpu'):
         def func(x):
             return x.abs() * 2
@@ -664,7 +655,7 @@ class TestTEFuser(JitTestCase):
         y = torch.ones(1, requires_grad=True, device='cuda')
         warmup_forward(scripted_f, x, y)
         g = torch.jit.last_executed_optimized_graph()
-        diff_nodes = self.findNodesInBlocks(g, 'prim::DifferentiableGraph')
+        diff_nodes = g.findAllNodes('prim::DifferentiableGraph')
         self.assertEqual(len(diff_nodes), 1)
         g = diff_nodes[0].g('Subgraph')
         if_nodes = [n for n in g.nodes() if n.kind() == 'prim::If']
