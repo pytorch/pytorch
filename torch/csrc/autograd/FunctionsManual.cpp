@@ -25,6 +25,17 @@ namespace autograd {
 namespace generated {
 namespace details {
 
+namespace {
+torch::List<c10::optional<Tensor>> toListOfOptionalTensors(ArrayRef<Tensor> list) {
+  torch::List<c10::optional<Tensor>> result;
+  result.reserve(list.size());
+  for (const Tensor& a : list) {
+    result.push_back(a);
+  }
+  return result;
+}
+}
+
 using at::Tensor;
 using at::Scalar;
 using at::IntArrayRef;
@@ -2120,19 +2131,13 @@ Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) 
       return nonsingular_case_backward(grad, self, det);
     }
   } else {
-    torch::List<c10::optional<Tensor>> nonzero_det_indices;
-    for (Tensor t : at::where(det)) {
-      nonzero_det_indices.push_back(std::move(t));
-    }
+    auto nonzero_det_indices = toListOfOptionalTensors(at::where(det));
 
     if (static_cast<optional<Tensor>>(nonzero_det_indices[0])->size(0) == det.numel()) {  // all determinants are nonzero (non-singular)
       return nonsingular_case_backward(grad, self, det);
     }
 
-    torch::List<c10::optional<Tensor>> zero_det_indices;
-    for (Tensor t: at::where(det == 0)) {
-      zero_det_indices.push_back(std::move(t));
-    }
+    auto zero_det_indices = toListOfOptionalTensors(at::where(det == 0));
 
     if (static_cast<optional<Tensor>>(zero_det_indices[0])->size(0) == det.numel()) {  // all determinants are zero (singular)
       return singular_case_backward(grad, self, det);
@@ -2176,19 +2181,13 @@ Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& lo
       return singular_case_backward(grad, self);
     }
   } else {
-    torch::List<c10::optional<Tensor>> finite_logdet_indices;
-    for (Tensor t : at::where(logdet != -INFINITY)) {
-      finite_logdet_indices.push_back(std::move(t));
-    }
+    auto finite_logdet_indices = toListOfOptionalTensors(at::where(logdet != -INFINITY));
 
     if (static_cast<optional<Tensor>>(finite_logdet_indices[0])->size(0) == logdet.numel()) {  // all log determinants are finite (non-singular)
       return nonsingular_case_backward(grad, self);
     }
 
-    torch::List<c10::optional<Tensor>> neginf_logdet_indices;
-    for (Tensor t : at::where(logdet == -INFINITY)) {
-      neginf_logdet_indices.push_back(std::move(t));
-    }
+    auto neginf_logdet_indices = toListOfOptionalTensors(at::where(logdet == -INFINITY));
 
     if (static_cast<optional<Tensor>>(neginf_logdet_indices[0])->size(0) == logdet.numel()) {  // all log determinants are -inf (singular)
       return singular_case_backward(grad, self);
@@ -2234,19 +2233,13 @@ Tensor slogdet_backward(const Tensor& grad_logabsdet,
       return nonsingular_case_backward(grad_logabsdet, self);
     }
   } else {
-    torch::List<c10::optional<Tensor>> nonzero_signdet_indices;
-    for (Tensor t: at::where(signdet)) {
-      nonzero_signdet_indices.push_back(std::move(t));
-    }
+    auto nonzero_signdet_indices = toListOfOptionalTensors(at::where(signdet));
 
     if (static_cast<optional<Tensor>>(nonzero_signdet_indices[0])->size(0) == logabsdet.numel()) {  // all log determinants are finite (non-singular)
       return nonsingular_case_backward(grad_logabsdet, self);
     }
 
-    torch::List<c10::optional<Tensor>> zero_signdet_indices;
-    for (Tensor t: at::where(signdet == 0)) {
-      zero_signdet_indices.push_back(std::move(t));
-    }
+    auto zero_signdet_indices = toListOfOptionalTensors(at::where(signdet == 0));
 
     if (static_cast<optional<Tensor>>(zero_signdet_indices[0])->size(0) == logabsdet.numel()) {  // all log determinants are -inf (singular)
       return singular_case_backward(grad_logabsdet, self);

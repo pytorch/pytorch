@@ -870,7 +870,7 @@ def emit_body(declaration):
 
 def unpack_args(env, declaration):
     def requires_unpack(arg):
-        return 'Tensor' in arg['dynamic_type']
+        return 'Tensor' in arg['dynamic_type'] and 'c10::optional' not in arg['type']
 
     body = []
     unpacked_args = []
@@ -889,9 +889,8 @@ def unpack_args(env, declaration):
         dynamic_type = arg['dynamic_type']
         if 'TensorOptions' not in dynamic_type:
             is_nullable = arg.get('is_nullable', False)
-            ref = (not is_nullable) and dynamic_type not in ['TensorList', 'const c10::List<c10::optional<Tensor>>&']
-            suffix = '_opt' if is_nullable and dynamic_type not in ['TensorList', 'const c10::List<c10::optional<Tensor>>&'] else ''
-
+            ref = (not is_nullable) and dynamic_type != 'TensorList'
+            suffix = '_opt' if is_nullable and dynamic_type != 'TensorList' else ''
             body.append(UNPACK_TENSOR.substitute(
                 arg_name=arg['name'],
                 arg_pos=i,
