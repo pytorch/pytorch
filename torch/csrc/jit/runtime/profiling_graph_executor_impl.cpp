@@ -1,4 +1,3 @@
-#include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
@@ -30,6 +29,8 @@
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/update_differentiable_graph_requires_grad.h>
+#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
+#include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 
 C10_DEFINE_bool(
     torch_jit_enable_new_executor,
@@ -117,25 +118,35 @@ static bool needsGradientInProfilingMode(Block* b) {
   return false;
 }
 
-void guardDifferentiableGraph(Node* dnode) {
+bool guardDifferentiableGraph(Node* dnode) {
   auto gi = dnode->g(attr::Subgraph)->inputs();
+  bool all_requires_grad_defined = true;
   for (size_t i = 0; i < gi.size(); i++) {
     auto ty = gi[i]->type()->cast<TensorType>();
     if (ty) {
       auto n = gi[i]->uses().at(0).user;
+      auto dni = dnode->inputs().at(i);
       if (n->kind() == prim::profile) {
-        dnode->inputs().at(i)->setType(n->ty(attr::profiled_type));
+        dni->setType(n->ty(attr::profiled_type));
       }
+      // we check if the optional is defined
+      all_requires_grad_defined &=
+          dni->type()->cast<TensorType>()->requiresGrad().has_value();
     }
   }
-  insertTypeGuard(dnode, [](const TensorTypePtr& t) {
-    TORCH_INTERNAL_ASSERT(
-        t->requiresGrad(),
-        "profiler did not say whether grad is required"); // i.e. we want the
-                                                          // optional to be
-                                                          // defined
-    return TensorType::get()->withRequiresGrad(t->requiresGrad());
-  });
+  if (all_requires_grad_defined) {
+    insertTypeGuard(dnode, [](const TensorTypePtr& t) {
+      return TensorType::get()->withRequiresGrad(t->requiresGrad());
+    });
+    return true;
+  } else {
+    // we inline the differentiable graph as a fallback
+    // ideally we would set this up for re-profiling
+    UpdateDifferentiableGraphRequiresGrad(
+        dnode->g(attr::Subgraph), c10::nullopt);
+    SubgraphUtils::unmergeSubgraph(dnode);
+    return false;
+  }
 }
 
 void runNooptPassPipeline(std::shared_ptr<Graph>& graph) {
@@ -405,7 +416,9 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     size_t idx = 0;
     for (Node* dnode : diff_nodes) {
       GRAPH_DEBUG("Optimizing diff node ", idx);
-      guardDifferentiableGraph(dnode);
+      if (!guardDifferentiableGraph(dnode)) {
+        continue;
+      }
       GRAPH_DEBUG("After guardDifferentiableGraph:\n", *copy);
       auto diff_graph = std::move(dnode->g(attr::Subgraph));
       Gradient gradient = differentiate(diff_graph);
