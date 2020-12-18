@@ -175,6 +175,17 @@ Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& 
     }
   }
 
+  // handle pathological cases that blas may not like
+  if (result.numel() == 0) {
+    return result;
+  } else if (batch1_sizes[2] == 0) {
+    if (beta.to<c10::complex<double>>() == 0.0) {
+      return result.zero_();
+    } else {
+      return result.mul_(beta);
+    }
+  }
+
   bool transpose_result = false;
   Tensor result_;
   IntArrayRef result_strides = result.strides();
@@ -311,71 +322,6 @@ Tensor& bmm_out_cuda(Tensor &result, const Tensor& batch1, const Tensor& batch2)
 Tensor bmm_cuda(const Tensor& self, const Tensor& mat2) {
   Tensor result = at::empty({0}, self.options());
   return native::bmm_out_cuda(result, self, mat2);
-}
-
-Tensor& addbmm_out_cuda(Tensor& out, const Tensor& self,
-                        const Tensor& batch1, const Tensor& batch2,
-                        Scalar beta, Scalar alpha) {
-  TORCH_CHECK(batch1.dim() == 3 && batch2.dim() == 3,
-              "Batch tensors should be 3D, got dimensions ", batch1.dim(),
-              " and ", batch2.dim());
-
-  Tensor self_;
-  if (&out != &self) {
-    std::tie(self_) = expand_size(self, {batch1.size(1), batch2.size(2)}, "addbmm");
-  } else {
-    self_ = self;
-  }
-
-  TORCH_CHECK(out.device() == self_.device() &&
-              out.device() == batch1.device() &&
-              out.device() == batch2.device(),
-              "Expected all tensors to be on the same device. Found: ",
-              out.device(), ", ", self_.device(), ", ",
-              batch1.device(), " and ", batch2.device());
-  TORCH_CHECK(self_.dim() == 2,
-              "2D tensor expected, got ", self_.dim(), "D tensor for input");
-  int64_t batchnum = batch1.size(0);
-  int64_t m1d1 = batch1.size(1);
-  int64_t innerdim = batch1.size(2);
-  int64_t m2d2 = batch2.size(2);
-  TORCH_CHECK(batchnum == batch2.size(0),
-              "equal number of batches expected");
-  TORCH_CHECK(m1d1 == self_.size(0),
-              "first dimension of batch1  must match first dimension of input");
-  TORCH_CHECK(m2d2 == self_.size(1),
-              "second dimension of batch2 must match second dimension of input");
-  TORCH_CHECK(innerdim == batch2.size(1),
-              "second dimension of batch1 must match first dimension of batch2");
-
-  if (&out != &self) {
-    at::native::resize_as_(out, self_);
-    if (beta.to<c10::complex<double>>() != 0.0) {
-      at::native::copy_(out, self_);
-    }
-  }
-
-  for (int64_t i=0; i<batchnum; i++) {
-    addmm_out_cuda(out, out, batch1[i], batch2[i], beta, alpha);
-    beta = 1;
-  }
-  return out;
-}
-
-Tensor& addbmm__cuda(Tensor& self,
-                     const Tensor& batch1, const Tensor& batch2,
-                     Scalar beta, Scalar alpha) {
-  addbmm_out_cuda(self, self, batch1, batch2, beta, alpha);
-  return self;
-}
-
-Tensor addbmm_cuda(const Tensor& self,
-                   const Tensor& batch1, const Tensor& batch2,
-                   Scalar beta, Scalar alpha)
-{
-  Tensor out = at::empty({0}, self.options());
-  addbmm_out_cuda(out, self, batch1, batch2, beta, alpha);
-  return out;
 }
 
 namespace {

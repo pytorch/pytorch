@@ -1022,6 +1022,8 @@ Tensor log_softmax_double_backward(const Tensor & grad, const Tensor & grad_outp
   return z * grad_output.sum(dim, true) * ((grad * z).sum(dim, true) - grad);
 }
 
+// NOTE: [How to write vmap-compatible backward formulas]
+//
 // See NOTE: [vmap-incompatible in-place operations] for what it means for an
 // in-place operation to be incompatible with vmap.
 //
@@ -1039,29 +1041,15 @@ Tensor log_softmax_double_backward(const Tensor & grad, const Tensor & grad_outp
 // - If the in-place operation followed some sequence of operations, if the
 //   we want to be able to vmap over the backward formula as-is (this is
 //   usually the case for simple (<15loc) backward formulas), then use
-//   inplace_is_vmap_compatible to guard the operation. For example:
+//   inplaceIsVmapCompatible to guard the operation. For example:
 //             c = a * b
 //     Before: c.mul_(grad)
-//     After:  c = inplace_is_vmap_compatible(c, grad) ? c.mul_(grad) : c * grad
+//     After:  c = at::inplaceIsVmapCompatible(c, grad) ? c.mul_(grad) : c * grad
 //
 // - If we don't want to vmap directly over the backward formula (e.g., if the
 //   backward formula is too complicated or has a lot of vmap-incompatible
 //   operations, then register the backward formula as an operator and eventually
 //   write a batching rule for it.
-static bool inplace_is_vmap_compatible(const Tensor& self, const Tensor& other) {
-  const auto* other_batched = at::maybeGetBatchedImpl(other);
-  if (!other_batched) {
-    return true;
-  }
-  const auto* self_batched = at::maybeGetBatchedImpl(self);
-  if (!self_batched) {
-    // self is not batched but other is batched
-    return false;
-  }
-  auto self_levels = at::createVmapLevelsBitset(self_batched->bdims());
-  auto other_levels = at::createVmapLevelsBitset(other_batched->bdims());
-  return self_levels == (self_levels | other_levels);
-}
 
 Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Tensor & grad, const Tensor & input, const Tensor & target, const c10::optional<Tensor>& weight, int64_t reduction) {
   auto eps = 1e-12;
@@ -1069,7 +1057,7 @@ Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Te
   auto one_m_inp_pl_eps = 1 - input + eps;
   // gradient wrt input
   auto gI = (input * input - 2 * input * target + target) / (inp_pl_eps.pow(2) * one_m_inp_pl_eps.pow(2));
-  if (inplace_is_vmap_compatible(gI, grad)) {
+  if (at::inplaceIsVmapCompatible(gI, grad)) {
     gI *= (grad * grad_output);
   } else {
     gI = gI * (grad * grad_output);
@@ -1090,7 +1078,7 @@ Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad, con
   auto eps = 1e-12;
   // gradient wrt grad_output
   auto ggO = (input - target) / ((input + eps) * (1 - input + eps));
-  if (inplace_is_vmap_compatible(ggO, grad)) {
+  if (at::inplaceIsVmapCompatible(ggO, grad)) {
     ggO *= grad;
   } else {
     ggO = ggO * grad;
@@ -1990,7 +1978,7 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
     glambda = glambda.to(self.dtype());
     // computes v @ diag(glambda) @ vh
     Tensor glambda_term = at::matmul(v * glambda.unsqueeze(-2), vh);
-    if (inplace_is_vmap_compatible(result, glambda_term)) {
+    if (at::inplaceIsVmapCompatible(result, glambda_term)) {
       result.add_(glambda_term);
     } else {
       result = result + glambda_term;
@@ -2315,94 +2303,6 @@ std::tuple<Tensor, Tensor> cholesky_solve_backward(
   return std::tuple<Tensor, Tensor>{grad_self, grad_input2};
 }
 
-// Generally speaking, fft's backward is ifft.
-Tensor fft_backward(const Tensor& self, const Tensor& grad, int64_t signal_ndim,
-                    bool complex_input, bool complex_output,
-                    bool inverse, IntArrayRef checked_signal_sizes,
-                    int64_t normalization, bool onesided,
-                    IntArrayRef output_sizes) {
-  Tensor gI;
-  if (!complex_input && complex_output) {
-    // Forward is R2C
-    // Do inverse C2C and project onto real plane because grad can be
-    // asymmetrical so C2R can't be used.
-    if (onesided) {
-      // Forward is R2C (onesided)
-      // Think of onesided R2C rfft as
-      //     1. view as complex numbers (fill complex dim with zeros)
-      //     2. C2C fft
-      //     3. discard half of results
-      // So backward is
-      //     1. fill the other half with zeros (with `zero_grad_shape` below)
-      //        (C2C ifft only take twosided inputs so we need to fill here)
-      //     2. inverse C2C ifft
-      //     3. discard the complex dim
-      int64_t zero_length = checked_signal_sizes[signal_ndim - 1] - grad.size(signal_ndim);
-      auto complex_full_grad = grad;
-      if (zero_length > 0) {
-        std::vector<int64_t> zero_grad_shape(signal_ndim + 2);
-        zero_grad_shape[0] = self.size(0);
-        for (int64_t i = 1; i < signal_ndim; i++) {
-          zero_grad_shape[i] = checked_signal_sizes[i - 1];
-        }
-        zero_grad_shape[signal_ndim] = zero_length;
-        zero_grad_shape[signal_ndim + 1] = 2;
-        complex_full_grad =  at::cat({ grad, at::zeros(zero_grad_shape, grad.options()) }, signal_ndim);
-      }
-      gI = _fft_with_size(complex_full_grad, signal_ndim,
-                          /* complex_input */ true, /* complex_output */ true,
-                          !inverse, checked_signal_sizes, normalization,
-                          /* onesided */ false, complex_full_grad.sizes()).select(-1, 0);
-    } else {
-      gI = _fft_with_size(grad, signal_ndim, /* complex_input */ true,
-                          /* complex_output */ true, !inverse,
-                          checked_signal_sizes, normalization,
-                          /* onesided */ false, grad.sizes()).select(-1, 0);
-    }
-  } else if (complex_input && !complex_output && onesided) {
-    // Forward is C2R (onesided)
-    // Think of onesided C2R irfft as
-    //    1. fill the other half by conjugate symmetry
-    //    2. inverse C2C ifft
-    //    3. discard the complex dimension
-    // So backward is
-    //    1. R2C rfft (essentially add dummy complex dimension, and dft)
-    //    2. accumulate gradient by conjugate symmetry
-    //       since rfft results follow conjugate symmetry, we only need to
-    //       double some entries from onesided rfft results, i.e., the ones with
-    //       their reflected indices also landing out of the onesided range. So
-    //       consider the index of last dim:
-    //           i.   idx = 0.
-    //                Reflected to (N - 0) % N = 0. Not doubled.
-    //           ii   0 < idx < floor(N/2) (last).
-    //                N > N - idx > ceil(N/2)
-    //                Reflected to ()
-    //           iii. idx = floor(N/2) = N/2 (last) when N even.
-    //                Reflected to (N - N/2) % N = N/2. Not doubled.
-    //           iv.  idx = floor(N/2) = (N-1)/2 (last) when N odd.
-    //                Reflected to (N - (N-1)/2) % N = (N+1)/2. Doubled.
-    //       Therefore, needs to double
-    //           idx = 1, 2, ..., N/2 - 1     when N even
-    //           idx = 1, 2, ..., (N-1)/2     when N odd
-    //       that is
-    //           idx = 1, 2, ..., N - (floor(N/2) + 1)
-    //               = 1, 2, ..., N - onesided_length
-    gI = _fft_with_size(grad, signal_ndim, /* complex_input */ false,
-                        /* complex_output */ true, /* inverse */ false,
-                        checked_signal_sizes, normalization, /* onesided */ true,
-                        self.sizes());
-    int64_t double_length = checked_signal_sizes[signal_ndim - 1] - self.size(signal_ndim);
-    if (double_length > 0) {  // also covers case when signal size is zero
-      gI.narrow(signal_ndim, 1, double_length).mul_(2);
-    }
-  } else {
-    gI = _fft_with_size(grad, signal_ndim, complex_output, complex_input,
-                        !inverse, checked_signal_sizes, normalization, onesided,
-                        self.sizes());
-  }
-  return gI;
-}
-
 Tensor fft_c2r_backward(const Tensor& grad, IntArrayRef dim, int64_t normalization) {
   // Forward is C2R (onesided)
   // Think of onesided C2R irfft as
@@ -2639,10 +2539,19 @@ infinitely_differentiable_native_layer_norm_backward(
     const Tensor& mean,
     const Tensor& rstd,
     const c10::optional<Tensor>& gamma,
-    int64_t M,
-    int64_t N,
+    IntArrayRef normalized_shape,
     double eps,
     std::array<bool, 3> grad_input_mask) {
+
+  const int normalized_ndim = normalized_shape.size();
+  const auto input_shape = X.sizes();
+  const auto input_ndim = X.dim();
+  const int axis = input_ndim - normalized_ndim;
+  const int64_t M =
+      at::prod_intlist(input_shape.cbegin(), input_shape.cbegin() + axis);
+  const int64_t N =
+      at::prod_intlist(input_shape.cbegin() + axis, input_shape.cend());
+
   Tensor dX;
   Tensor dgamma;
   Tensor dbeta;

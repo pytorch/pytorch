@@ -340,13 +340,11 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
 
       AT_DISPATCH_ALL_TYPES_AND2(
         at::ScalarType::Half, at::ScalarType::BFloat16, commonDtype, "add_out_dense_sparse_cuda", [&] {
-          AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "add_out_dense_sparse_cuda", [&] {
-            apply::sparseElementwiseKernelScalar<TensorCAddOp<scalar_t>, uint64_t, scalar_t>
-              <<<grid, block, 0, stream>>>(
-                TensorCAddOp<scalar_t>(value.to<scalar_t>()),
-                V_INFO(r), I_INFO(indices), V_INFO(values),
-                static_cast<uint64_t>(nnz));
-            });
+          apply::sparseElementwiseKernelScalar<TensorCAddOp<scalar_t>, uint64_t, scalar_t>
+            <<<grid, block, 0, stream>>>(
+              TensorCAddOp<scalar_t>(value.to<scalar_t>()),
+              V_INFO(r), I_INFO(indices), V_INFO(values),
+              static_cast<uint64_t>(nnz));
           });
     } else {
       TORCH_CHECK(cuda::getApplyGrid(nnz * block.x, grid, curDevice), "add: Argument #0: tensor too large or too many dimensions");
@@ -356,13 +354,11 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
 
       AT_DISPATCH_ALL_TYPES_AND2(
         at::ScalarType::Half, at::ScalarType::BFloat16, commonDtype, "add_out_dense_sparse_cuda", [&] {
-          AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "add_out_dense_sparse_cuda", [&] {
-            apply::sparseElementwiseKernel<TensorCAddOp<scalar_t>, uint64_t, scalar_t>
-              <<<grid, block, 0, stream>>>(
-                TensorCAddOp<scalar_t>(value.to<scalar_t>()),
-                V_INFO(r), I_INFO(indices), V_INFO(values),
-                static_cast<uint64_t>(nnz));
-            });
+          apply::sparseElementwiseKernel<TensorCAddOp<scalar_t>, uint64_t, scalar_t>
+            <<<grid, block, 0, stream>>>(
+              TensorCAddOp<scalar_t>(value.to<scalar_t>()),
+              V_INFO(r), I_INFO(indices), V_INFO(values),
+              static_cast<uint64_t>(nnz));
           });
     }
   } else {
@@ -434,11 +430,9 @@ SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const
 
   AT_DISPATCH_ALL_TYPES_AND2(
     at::ScalarType::Half, at::ScalarType::BFloat16, commonDtype, "add_out_sparse_cuda", [&] {
-      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "add_out_sparse_cuda", [&] {
-        if (value.to<scalar_t>() != static_cast<scalar_t>(1)) {
-          s_values_ = s_values_.mul(value);
-        }
-      });
+      if (value.to<scalar_t>() != static_cast<scalar_t>(1)) {
+        s_values_ = s_values_.mul(value);
+      }
     });
   LongTensor r_indices_ = at::cat({t_indices_, s_indices_}, 1);
   Tensor r_values_ = at::cat({t_values_, s_values_}, 0);
