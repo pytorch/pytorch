@@ -316,7 +316,7 @@ set(OP_DEPENDENCY "" CACHE STRING
 # symbol lookup error: miniconda3/envs/pytorch-py3.7/lib/libmkl_intel_lp64.so: undefined symbol: mkl_blas_dsyrk
 # https://software.intel.com/en-us/articles/symbol-lookup-error-when-linking-intel-mkl-with-gcc-on-ubuntu
 if(LINUX)
-  set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--no-as-needed")
+  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-as-needed")
 endif()
 
 if(MSVC)
