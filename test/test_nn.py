@@ -10691,13 +10691,13 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(x.grad, torch.zeros_like(x))
 
             with self.assertRaisesRegex(RuntimeError, 'Expected'):
-                x = torch.randn(0, requires_grad=True, dtype=dtype)
-                y = torch.ones(10).type(torch.long)
+                x = torch.randn(0, requires_grad=True, device=device, dtype=dtype)
+                y = torch.ones(10, device=device).type(torch.long)
                 mod(x, y)
 
             with self.assertRaisesRegex(RuntimeError, 'Expected'):
-                x = torch.randn(10, 0, requires_grad=True, dtype=dtype)
-                y = torch.ones(10, 0).type(torch.long)
+                x = torch.randn(10, 0, requires_grad=True, device=device, dtype=dtype)
+                y = torch.ones(10, 0, device=device).type(torch.long)
                 mod(x, y)
 
 

@@ -30,10 +30,10 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
            THCTensor *istarget,
            int64_t reduction)
 {
+  THNN_(MultiLabelMarginCriterion_shapeCheck)(state, input, target);
   if (input->numel() == 0) {
     return;
   }
-  THNN_(MultiLabelMarginCriterion_shapeCheck)(state, input, target);
   input = THCTensor_(newContiguous)(state, input);
   target = THCIndexTensor_(newContiguous)(state, target);
   istarget = THCTensor_(newContiguous)(state, istarget);
@@ -121,10 +121,10 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
             THCTensor *istarget,
             int64_t reduction)
 {
+  input = THCTensor_(newContiguous)(state, input);
   if (input->numel() == 0) {
     return;
   }
-  input = THCTensor_(newContiguous)(state, input);
   target = THCIndexTensor_(newContiguous)(state, target);
   istarget = THCTensor_(newContiguous)(state, istarget);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
