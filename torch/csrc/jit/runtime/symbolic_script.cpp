@@ -1204,6 +1204,8 @@ const std::vector<std::string> functions = {
             self_size, other_size = AD_sizes_if_not_equal_multi_1(self, other, result)
             def backward(grad_output):
                 temp = grad_output
+                # Conditional prevents an extra kernel in trivial cases.
+                # This was noticed with bias backward fusions.
                 if float(alpha) != 1.0 :
                     temp *= alpha 
                 grad_other = (temp)._grad_sum_to_size(other_size)
