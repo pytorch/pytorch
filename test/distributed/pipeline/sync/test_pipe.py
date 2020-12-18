@@ -12,7 +12,7 @@ import pytest
 import torch
 from torch import nn
 
-from torch.distributed._pipeline.sync import Pipe
+from torch.distributed.pipeline.sync import Pipe
 
 skip_if_no_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
 

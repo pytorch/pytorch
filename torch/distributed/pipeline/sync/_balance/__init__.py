@@ -9,8 +9,8 @@
 Usage::
 
     import torch
-    from torch.distributed._pipeline.sync import Pipe
-    from torch.distributed._pipeline.sync.balance import balance_by_time
+    from torch.distributed.pipeline.sync import Pipe
+    from torch.distributed.pipeline.sync.balance import balance_by_time
 
     sample = torch.empty(128, 3, 224, 224)
     balance = balance_by_time(torch.cuda.device_count(), model, sample)

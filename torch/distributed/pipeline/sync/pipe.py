@@ -39,16 +39,16 @@ else:
     NamedModules = OrderedDict
 
 
-def recommend_auto_balance(message: str) -> str:
+def _recommend_auto_balance(message: str) -> str:
     """Expands a message with recommendation to :mod:`torchpipe.balance`."""
     return f"""{message}
 
 If your model is still under development, its optimal balance would change
-frequently. In this case, we highly recommend 'torch.distributed._pipeline.sync.balance' for
+frequently. In this case, we highly recommend 'torch.distributed.pipeline.sync.balance' for
 naive automatic balancing:
 
-  from torch.distributed._pipeline.sync import Pipe
-  from torch.distributed._pipeline.sync.balance import balance_by_time
+  from torch.distributed.pipeline.sync import Pipe
+  from torch.distributed.pipeline.sync.balance import balance_by_time
 
   partitions = torch.cuda.device_count()
   sample = torch.empty(...)
@@ -58,7 +58,7 @@ naive automatic balancing:
 """
 
 
-def verify_module(module: nn.Sequential) -> None:
+def _verify_module(module: nn.Sequential) -> None:
     if not isinstance(module, nn.Sequential):
         raise TypeError("module must be nn.Sequential to be partitioned")
 
@@ -207,7 +207,7 @@ class Pipe(Module):
         if checkpoint not in ["always", "except_last", "never"]:
             raise ValueError("checkpoint is not one of 'always', 'except_last', or 'never'")
 
-        verify_module(module)
+        _verify_module(module)
 
         # Verify if the underlying skippable modules satisfy integrity. The
         # integrity can be verified before forward() because it is static.
