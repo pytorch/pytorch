@@ -75,7 +75,6 @@ class TestIterableDatasetBasic(TestCase):
             self.assertEqual(os.path.basename(rec[0]), os.path.basename(temp_file))
             self.assertEqual(rec[1].read(), open(temp_file, 'rb').read())
         self.assertEqual(count, len(self.temp_files))
-        dataset3.reset()
 
     def test_readfilesfromzip_iterable_dataset(self):
         temp_dir = self.temp_dir.name
@@ -94,7 +93,6 @@ class TestIterableDatasetBasic(TestCase):
             self.assertEqual(os.path.basename(rec[0]), os.path.basename(temp_file))
             self.assertEqual(rec[1].read(), open(temp_file, 'rb').read())
         self.assertEqual(count, len(self.temp_files))
-        dataset3.reset()
 
 
 if __name__ == '__main__':
