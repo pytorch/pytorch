@@ -124,7 +124,9 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   }
   at::assert_no_internal_overlap(result);
 
-  const Tensor* pnotSkippedTensor = [](TensorList tensors) -> const Tensor* {
+  // pnotSkipedTensor raw pointer is low-overhead version of c10::Optional<Tensor&>
+  // Returned pointer always to one of the elements of `tensors` TensorList
+  const Tensor* pnotSkippedTensor = [](const TensorList& tensors) -> const Tensor* {
     for (auto const &tensor : tensors) {
       if (should_skip(tensor)) {
         continue;
