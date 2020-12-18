@@ -272,7 +272,7 @@ class EventList(list):
     def export_stacks(self, path: str, metric: str):
         if metric not in self.supported_export_stacks_metrics():
             raise ValueError("metric should be one of: " +
-                str(self.supported_export_stacks_metrics()))
+                    str(self.supported_export_stacks_metrics()))
         translate_table = str.maketrans(" ;\t\n", "____")
         with open(path, 'w') as f:
             for evt in self:
@@ -546,7 +546,7 @@ class profile(object):
         self._check_finish()
         if metric not in self.supported_export_stacks_metrics():
             raise ValueError("metric should be one of: " +
-                str(self.supported_export_stacks_metrics()))
+                    str(self.supported_export_stacks_metrics()))
         assert self.function_events is not None, "Empty profiling results"
         assert self.with_stack, "export_stacks() requires with_stack=True"
         return self.function_events.export_stacks(path, metric)
