@@ -80,6 +80,12 @@ namespace jit {
   _(TK_TIMES_EQ, "*=", "*=")                     \
   _(TK_DIV_EQ, "/=", "/=")                       \
   _(TK_MOD_EQ, "%=", "%=")                       \
+  _(TK_BIT_OR_EQ, "|=", "|=")                    \
+  _(TK_BIT_AND_EQ, "&=", "&=")                   \
+  _(TK_BIT_XOR_EQ, "^=", "^=")                   \
+  _(TK_LSHIFT_EQ, "<<=", "<<=")                  \
+  _(TK_RSHIFT_EQ, ">>=", ">>=")                  \
+  _(TK_POW_EQ, "**=", "**=")                     \
   _(TK_GLOBAL, "global", "global")               \
   _(TK_BUILT_IN, "built-in", "")                 \
   _(TK_SUBSCRIPT, "subscript", "")               \
