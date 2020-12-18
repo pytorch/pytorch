@@ -102,6 +102,7 @@ namespace jit {
   _(TK_ASSERT, "assert", "assert")               \
   _(TK_DOTS, "dots", "...")                      \
   _(TK_LIST_COMP, "list comprehension", "")      \
+  _(TK_DICT_COMP, "dict comprehension", "")      \
   _(TK_BREAK, "break", "break")                  \
   _(TK_CONTINUE, "continue", "continue")         \
   _(TK_DELETE, "del", "del")                     \
@@ -377,8 +378,8 @@ struct Token {
 };
 
 struct Lexer {
-  explicit Lexer(const std::shared_ptr<Source>& source)
-      : source(source),
+  explicit Lexer(std::shared_ptr<Source> source)
+      : source(std::move(source)),
         pos(0),
         nesting(0),
         indent_stack(),

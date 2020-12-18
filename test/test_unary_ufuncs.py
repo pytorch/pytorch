@@ -16,7 +16,8 @@ from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, ops, dtypes, onlyCPU, onlyOnCPUAndCUDA,
-    onlyCUDA, dtypesIfCUDA, precisionOverride, skipCUDAIfRocm, dtypesIfCPU)
+    onlyCUDA, dtypesIfCUDA, precisionOverride, skipCUDAIfRocm, dtypesIfCPU,
+    OpDTypes)
 from torch.testing import (
     floating_types_and, integral_types, all_types_and_complex_and, floating_types)
 
@@ -435,7 +436,7 @@ class TestUnaryUfuncs(TestCase):
             with self.assertRaises(RuntimeError):
                 op(input, out=output)
 
-    @ops(unary_ufuncs)
+    @ops(unary_ufuncs, dtypes=OpDTypes.supported)
     def test_out_arg_all_dtypes(self, device, dtype, op):
         input = make_tensor((64, 64), dtype=dtype, device=device,
                             low=op.domain[0], high=op.domain[1])
@@ -856,18 +857,6 @@ class TestUnaryUfuncs(TestCase):
         torch.nn.functional.hardswish(inputTensorCpy, inplace=True)
         self.assertEqual(inputTensorCpy, expectedOutputTensor)
 
-    @onlyCPU
-    @dtypes(torch.float, torch.double)
-    def test_sigmoid(self, device, dtype):
-        # TODO: why not simulate math.sigmoid like with rsqrt?
-        inputValues = [-1000, -1, 0, 0.5, 1, 2, 1000]
-        expectedOutput = [0.0000, 0.2689, 0.5, 0.6225, 0.7311, 0.8808, 1.000]
-        precision_4dps = 0.0002
-
-        self.assertEqual(torch.tensor(inputValues, dtype=dtype, device=device).sigmoid(),
-                         torch.tensor(expectedOutput, dtype=dtype, device=device),
-                         atol=precision_4dps, rtol=0)
-
     @precisionOverride({torch.bfloat16: 1e-2, torch.float: 0.0002, torch.double: 0.0002})
     @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16)
     @dtypes(torch.float, torch.double)
@@ -1228,7 +1217,7 @@ class TestUnaryUfuncs(TestCase):
         for num in abs_zeros:
             self.assertGreater(math.copysign(1.0, num), 0.0)
 
-    @dtypes(torch.float)
+    @dtypes(*torch.testing.get_all_fp_dtypes())
     def test_isfinite_isinf_isnan(self, device, dtype):
         vals = (-float('inf'), float('inf'), float('nan'), -1, 0, 1)
 
@@ -1236,7 +1225,7 @@ class TestUnaryUfuncs(TestCase):
         self.compare_with_numpy(torch.isinf, np.isinf, vals, device, dtype)
         self.compare_with_numpy(torch.isnan, np.isnan, vals, device, dtype)
 
-    @dtypes(torch.long)
+    @dtypes(torch.int8, torch.int16, torch.int32, torch.int64)
     def test_isfinite_isinf_isnan_int(self, device, dtype):
         vals = (-1, 0, 1)
 
@@ -1308,7 +1297,7 @@ class TestUnaryUfuncs(TestCase):
             with self.assertRaisesRegex(RuntimeError, 'does not support non-boolean outputs'):
                 torch_op(t, out=out)
 
-    @dtypes(torch.complex64)
+    @dtypes(torch.complex64, torch.complex128)
     def test_isfinite_isinf_isnan_complex(self, device, dtype):
         vals = (
             complex(-float('inf'), float('inf')),
@@ -1781,7 +1770,6 @@ _types_no_half = [
 # TODO: all these should be replaced with OpInfos
 torch_op_tests = [
     _TorchMathTestMeta('exp'),
-    _TorchMathTestMeta('expm1'),
     _TorchMathTestMeta('floor'),
     _TorchMathTestMeta('ceil'),
     _TorchMathTestMeta('rad2deg'),

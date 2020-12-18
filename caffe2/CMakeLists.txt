@@ -310,6 +310,17 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       target_link_libraries(tensorpipe_agent PRIVATE torch c10d tensorpipe fmt::fmt-header-only)
       add_dependencies(tensorpipe_agent torch c10d)
       if(USE_TENSORPIPE)
+        if(USE_CUDA)
+          target_compile_definitions(tensorpipe_agent PUBLIC USE_CUDA)
+        endif()
+
+        if(USE_ROCM)
+          target_compile_definitions(tensorpipe_agent PRIVATE
+            USE_ROCM
+            __HIP_PLATFORM_HCC__
+          )
+        endif()
+
         target_compile_definitions(tensorpipe_agent PUBLIC USE_TENSORPIPE)
         target_link_libraries(tensorpipe_agent PRIVATE tensorpipe)
         add_dependencies(tensorpipe_agent tensorpipe)
@@ -504,59 +515,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   endif()
 
   if(USE_CUDA OR USE_ROCM)
-    list(APPEND Caffe2_GPU_HIP_JIT_FUSERS_SRCS
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp
-      ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
-      ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/arith.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/compute_at.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/codegen.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/dispatch.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/expr_evaluator.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/executor.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/executor_kernel_arg.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/executor_launch_params.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/executor_utils.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/fusion.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/graph_fuser.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/index_compute.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/instrumentation.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_base_nodes.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_cloner.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_graphviz.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_nodes.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_iostream.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/iter_visitor.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel_cache.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel_ir.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel_ir_builder.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel_ir_printer.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_index.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_alias_memory.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_insert_syncs.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_loops.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_thread_predicate.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_unroll.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_utils.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_validation.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower2device.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/manager.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/mutator.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/parser.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/partition.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/predicate_compute.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/register_interface.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/scheduler.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/shape_inference.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/tensor_view.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/transform_iter.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/transform_replay.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/transform_rfactor.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/type.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/cuda_codegen.cpp
-    )
+    append_filelist("libtorch_cuda_core_sources" Caffe2_GPU_HIP_JIT_FUSERS_SRCS)
   endif()
 
   if(USE_CUDA)
@@ -770,6 +729,49 @@ elseif(USE_CUDA)
   endif()
 endif()
 
+if(USE_CUDA OR USE_ROCM)
+  if(USE_CUDA)
+    set(TORCHLIB_FLAVOR torch_cuda)
+  elseif(USE_ROCM)
+    set(TORCHLIB_FLAVOR torch_hip)
+  endif()
+
+  # The list of NVFUSER runtime files
+  list(APPEND NVFUSER_RUNTIME_FILES
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_reduction.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/broadcast.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/fp16_support.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/grid_reduction.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/helpers.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/random_numbers.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/tensor.cu
+  )
+
+  file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/include/nvfuser_resources")
+
+  # "stringify" NVFUSER runtime sources
+  # (generate C++ header files embedding the original input as a string literal)
+  set(NVFUSER_STRINGIFY_TOOL "${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/tools/stringify_file.py")
+  foreach(src ${NVFUSER_RUNTIME_FILES})
+    get_filename_component(filename ${src} NAME_WE)
+    set(dst "${CMAKE_BINARY_DIR}/include/nvfuser_resources/${filename}.h")
+    add_custom_command(
+      COMMENT "Stringify NVFUSER runtime source file"
+      OUTPUT ${dst}
+      DEPENDS ${src}
+      COMMAND ${PYTHON_EXECUTABLE} ${NVFUSER_STRINGIFY_TOOL} -i ${src} -o ${dst}
+    )
+    add_custom_target(nvfuser_rt_${filename} DEPENDS ${dst})
+    add_dependencies(${TORCHLIB_FLAVOR} nvfuser_rt_${filename})
+
+    # also generate the resource headers during the configuration step
+    # (so tools like clang-tidy can run w/o requiring a real build)
+    execute_process(COMMAND
+      ${PYTHON_EXECUTABLE} ${NVFUSER_STRINGIFY_TOOL} -i ${src} -o ${dst})
+  endforeach()
+
+  target_include_directories(${TORCHLIB_FLAVOR} PRIVATE "${CMAKE_BINARY_DIR}/include")
+endif()
 
 if(NOT MSVC AND USE_XNNPACK)
   TARGET_LINK_LIBRARIES(torch_cpu PRIVATE fxdiv)

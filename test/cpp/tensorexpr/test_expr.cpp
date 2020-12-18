@@ -164,24 +164,6 @@ TEST(Expr, DoubleTest) {
   ASSERT_EQ(eval.value<double>(), 2 + (3 * 3 + 4));
 }
 
-TEST(Expr, DisallowBoolArithmetic) {
-  KernelScope kernel_scope;
-  VarHandle x("x", kBool);
-  VarHandle y("y", kBool);
-  std::string error{"arithmetic binary operations on Bool not supported"};
-  ASSERT_THROWS_WITH((x + y), error);
-  ASSERT_THROWS_WITH((x - y), error);
-  ASSERT_THROWS_WITH((x * y), error);
-  ASSERT_THROWS_WITH((x / y), error);
-  ASSERT_THROWS_WITH((x & y), error);
-  ASSERT_THROWS_WITH((x | y), error);
-  ASSERT_THROWS_WITH((x ^ y), error);
-  ASSERT_THROWS_WITH((x << y), error);
-  ASSERT_THROWS_WITH((x >> y), error);
-  ASSERT_THROWS_WITH(Max::make(x, y, /*propagate_nans=*/true), error);
-  ASSERT_THROWS_WITH(Min::make(x, y, /*propagate_nans=*/true), error);
-}
-
 TEST(Expr, VectorAdd01) {
   KernelScope kernel_scope;
   const int kVectorSize = 8;
@@ -425,6 +407,12 @@ TEST(Expr, UnaryMath01) {
     float v_ref = test_config.ref_func(input_v);
     SimpleIRExprEval eval(v);
     ASSERT_NEAR(eval.value<float>(), v_ref, 1e-6);
+  }
+
+  for (float input_v : {std::nan("1"), 0., .5}) {
+    ExprHandle v = FloatImm::make(input_v);
+    SimpleIRExprEval eval(Intrinsics::make(kIsNan, v));
+    ASSERT_NEAR(eval.value<int>(), std::isnan(input_v), 0);
   }
 }
 
