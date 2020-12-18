@@ -2818,7 +2818,9 @@ Examples::
 pixel_unshuffle = _add_docstr(torch.pixel_unshuffle, r"""
 pixel_unshuffle(input, downscale_factor) -> Tensor
 
-Reverses the :class:`~torch.nn.PixelShuffle` operation by rearranging elements in a tensor of shape :math:`(*, C, H \times r, W \times r)` to a tensor of shape :math:`(*, C \times r^2, H, W)`, where r is a downscale factor.
+Reverses the :class:`~torch.nn.PixelShuffle` operation by rearranging elements in a
+tensor of shape :math:`(*, C, H \times r, W \times r)` to a tensor of shape
+:math:`(*, C \times r^2, H, W)`, where r is a downscale factor.
 
 See :class:`~torch.nn.PixelUnshuffle` for details.
 

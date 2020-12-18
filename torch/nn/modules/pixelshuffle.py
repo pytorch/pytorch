@@ -57,7 +57,9 @@ class PixelShuffle(Module):
 
 
 class PixelUnshuffle(Module):
-    r"""Reverses the :class:`~torch.nn.PixelShuffle` operation by rearranging elements in a tensor of shape :math:`(*, C, H \times r, W \times r)` to a tensor of shape :math:`(*, C \times r^2, H, W)`, where r is a downscale factor.
+    r"""Reverses the :class:`~torch.nn.PixelShuffle` operation by rearranging elements
+    in a tensor of shape :math:`(*, C, H \times r, W \times r)` to a tensor of shape
+    :math:`(*, C \times r^2, H, W)`, where r is a downscale factor.
 
     See the paper:
     `Real-Time Single Image and Video Super-Resolution Using an Efficient Sub-Pixel Convolutional Neural Network`_
