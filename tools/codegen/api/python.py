@@ -619,7 +619,7 @@ def argument_type_str(t: Type, *, simple_type: bool = False) -> str:
         elif str(t.elem) == 'Scalar':
             return f'ScalarList[{size}]' if size is not None else 'ScalarList'
         elif str(t.elem) == 'Tensor?':
-            return 'c10::List<c10::optional<Tensor>>'
+            return 'const c10::List<c10::optional<Tensor>>&'
         elif str(t.elem) == 'Dimname':
             return f'DimnameList[{size}]' if size is not None else 'DimnameList'
         elem = argument_type_str(t.elem, simple_type=simple_type)

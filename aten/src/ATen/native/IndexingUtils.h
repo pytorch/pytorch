@@ -16,7 +16,7 @@ static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, 
 }
 
 
-static std::vector<Tensor> expandTensors(const Tensor & self, torch::List<c10::optional<Tensor>> indices) {
+static std::vector<Tensor> expandTensors(const Tensor & self, const torch::List<c10::optional<Tensor>>& indices) {
   // If indices come in as ByteTensor or BoolTensor (masks), expand them into the equivalent indexing by LongTensors
   std::vector<Tensor> result;
   for (c10::optional<Tensor> index : indices) {
@@ -48,7 +48,7 @@ static std::vector<Tensor> expandTensors(const Tensor & self, torch::List<c10::o
 }
 
 
-static void checkIndexTensorTypes(torch::List<c10::optional<Tensor>> indices) {
+static void checkIndexTensorTypes(const torch::List<c10::optional<Tensor>>& indices) {
   for (c10::optional<Tensor> tensor : indices) {
     if (tensor.has_value() && tensor->defined()) {
       auto scalarType = tensor->scalar_type();
