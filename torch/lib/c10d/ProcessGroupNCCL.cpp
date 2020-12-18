@@ -1425,8 +1425,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier(
   std::vector<at::Device> devices;
 
   // Use user defined GPU device id if provided
-  if (opts.deviceId >= 0) {
-    devices.push_back(at::Device(at::DeviceType::CUDA, opts.deviceId));
+  if (!opts.devicesId.empty()) {
+    for (auto devicesIdx : opts.devicesId) {
+      devices.push_back(at::Device(at::DeviceType::CUDA, devicesIdx));
+    }
   } else if (usedDeviceIdxs_.empty()) {
     // This means there is not yet a NCCL collective being called
     // Here we have to use the best guesses and will use a single GPU to call

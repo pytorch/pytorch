@@ -362,8 +362,7 @@ def init_process_group(backend,
                        world_size=-1,
                        rank=-1,
                        store=None,
-                       group_name='',
-                       deviceId=None):
+                       group_name=''):
     """
     Initializes the default distributed process group, and this will also
     initialize the distributed package.
@@ -488,10 +487,7 @@ def init_process_group(backend,
     # barrier at the end to ensure that once we return from this method, all
     # process groups including global variables are updated correctly on all
     # ranks.
-    if deviceId is not None and backend != Backend.NCCL:
-        # Ignore deviceId for backend other than NCCL
-        deviceId = None
-    barrier(deviceId=deviceId)
+    barrier()
 
 def _new_process_group_helper(world_size,
                               rank,
@@ -2319,7 +2315,7 @@ def all_to_all(output_tensor_list,
 
 def barrier(group=group.WORLD,
             async_op=False,
-            deviceId=None):
+            devicesId=None):
     """
     Synchronizes all processes.
 
@@ -2329,6 +2325,8 @@ def barrier(group=group.WORLD,
     Arguments:
         group (ProcessGroup, optional): The process group to work on
         async_op (bool, optional): Whether this op should be an async op
+        devicesId (int or [int], optional): Single or List of device/GPU id
+                                            Valid only for NCCL backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -2338,9 +2336,12 @@ def barrier(group=group.WORLD,
         return
 
     opts = BarrierOptions()
-    if deviceId is not None:
-        opts.deviceId = deviceId
-
+    if devicesId is not None:
+        try:
+            if type(devicesId) is not list: devicesId = [ devicesId ]
+            opts.devicesId = devicesId
+        except AttributeError:
+            raise RuntimeError('devicesId not supported for the selected backend')
     if group == GroupMember.WORLD:
         default_pg = _check_default_pg()
         work = default_pg.barrier(opts=opts)

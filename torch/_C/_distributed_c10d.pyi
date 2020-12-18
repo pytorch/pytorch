@@ -77,7 +77,7 @@ class ReduceScatterOptions:
     timeout: timedelta
 
 class BarrierOptions:
-    deviceId: int
+    devicesId: List[int]
     timeout: timedelta
 
 class AllToAllOptions:
