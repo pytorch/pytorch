@@ -15,6 +15,10 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/utils/memory.h>
 
+C10_DEFINE_bool(
+    torch_jit_disable_cat,
+    false,
+    "disable aten::cat in TE fusion groups");
 namespace torch {
 namespace jit {
 
@@ -200,6 +204,11 @@ bool isSupported(Node* node) {
           return false;
         }
       }
+    }
+
+    if (FLAGS_torch_jit_disable_cat &&
+        node->matches("aten::cat(Tensor[] tensors, int dim=0) -> Tensor")) {
+      return false;
     }
 
     return true;
