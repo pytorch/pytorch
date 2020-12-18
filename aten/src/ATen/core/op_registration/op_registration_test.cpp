@@ -1872,13 +1872,11 @@ TEST(NewOperatorRegistrationTest, BackendSelectRedispatchesToCPU) {
   m.def("fn(Tensor self) -> Tensor");
   m.impl("fn", c10::kCPU, [&](const Tensor& x) { cpu_called = true; return x; });
   m.impl("fn", c10::DispatchKey::BackendSelect, [&](const Tensor& x) {
-          std::cout << "called backendSelect kernel!!" << std::endl;
      backend_generic_called = true;
      auto op = c10::Dispatcher::singleton().findSchema({"test::fn", ""}).value().typed<Tensor (const Tensor&)>();
      return c10::Dispatcher::singleton().redispatch<Tensor, const Tensor&>(op, c10::DispatchKey::BackendSelect, x);
    });
   auto x = c10::DispatchKeySet(c10::DispatchKeySet::FULL);
-  std::cout << "X = " << x << std::endl;
 
   auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
   ASSERT_TRUE(op.has_value());
