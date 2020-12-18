@@ -21,16 +21,20 @@ void main() {
   const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
 
   if (all(lessThan(pos, uBlock.size.xy))) {
-    const int base = 2*pos.x + uBlock.size.w * pos.y;
+    const int base_x = 2*pos.x;
+    const int base = base_x + uBlock.size.w * pos.y;
     const ivec4 index = base + uBlock.offset;
 
+    const vec4 mask = vec4(lessThan(vec4(base_x, base_x+1, base_x, base_x+1), vec4(uBlock.size.w/2)));
+    //const vec4 mask = vec4(base*10, base*10 + 1, base*10+2, base*10+3);
+    const vec4 outvec = vec4(
+        uBuffer.data[index.x],
+        uBuffer.data[index.y],
+        uBuffer.data[index.z],
+        uBuffer.data[index.w]);
     imageStore(
         uImage,
         pos,
-        vec4(
-            uBuffer.data[index.x],
-            uBuffer.data[index.y],
-            uBuffer.data[index.z],
-            uBuffer.data[index.w]));
+        mask*outvec);
   }
 }

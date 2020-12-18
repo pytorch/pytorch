@@ -21,10 +21,14 @@ void main() {
   const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
 
   if (all(lessThan(pos, uBlock.size.xy))) {
+    const int base_x = 2*pos.x;
     const vec4 texel = texelFetch(uImage, pos, 0);
 
-    const int base = 2*pos.x + uBlock.size.w * pos.y;
-    const ivec4 index = base + uBlock.offset;
+    const int base = base_x + uBlock.size.w * pos.y;
+    ivec4 index = base + uBlock.offset;
+
+    const ivec4 mask = ivec4(greaterThanEqual(vec4(base_x, base_x+1, base_x, base_x+1), vec4(uBlock.size.w/2)));
+    index += mask * ivec4(uBlock.size.y * uBlock.size.w + 1);
 
     uBuffer.data[index.x] = texel.r;
     uBuffer.data[index.y] = texel.g;

@@ -891,13 +891,13 @@ void vTensor::View::CMD::copy_buffer_to_image(
   }
   else {
     uint32_t plane = extents.data[0u] * extents.data[1u];
-    uvec4 offset = {
+    offset = {
       0u * plane,
       1u * plane,
       2u * plane,
       3u * plane,
     };
-    block_sz = 4 * plane;
+    block_sz = 4u * plane;
   }
   const struct {
     uvec3 extents;
@@ -969,13 +969,13 @@ void vTensor::View::CMD::copy_image_to_buffer(
   }
   else {
     uint32_t plane = extents.data[0u] * extents.data[1u];
-    uvec4 offset = {
+    offset = {
       0u * plane,
       1u * plane,
       2u * plane,
       3u * plane,
     };
-    block_sz = 4 * plane;
+    block_sz = 4u * plane;
   }
   const struct {
     uvec3 extents;
@@ -990,7 +990,7 @@ void vTensor::View::CMD::copy_image_to_buffer(
   view_.context_->dispatch(
       command_buffer(),
       {
-        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
       },

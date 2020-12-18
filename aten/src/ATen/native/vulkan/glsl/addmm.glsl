@@ -34,5 +34,11 @@ void main() {
         uOutput,
         pos,
         uBlock.multiplier.x * sum + uBlock.multiplier.y * texelFetch(uT, pos, 0));
+    /*
+    imageStore(
+        uOutput,
+        pos,
+        texelFetch(uM2, pos, 0));
+    */
   }
 }
