@@ -66,7 +66,7 @@ The distributed optimizer is completely written in Python and can be found at [o
 
 ### Onboarding Tasks
 
-A list of onboarding tasks can be found [here](https://github.com/pytorch/pytorch/issues?q=is%3Aopen+is%3Aissue+label%3A%22module%3A+rpc%22+label%3A%22topic%3A+bootcamp%22+) and [here](https://github.com/pytorch/pytorch/issues?q=is%3Aopen+is%3Aissue+label%3A%22module%3A+rpc%22+label%3Apt_distributed_rampup)
+A list of onboarding tasks can be found [here](https://github.com/pytorch/pytorch/issues?q=is%3Aopen+is%3Aissue+label%3Apt_distributed_rampup+).
 
 ## Running unit tests
 
@@ -75,6 +75,10 @@ All the unit tests can be found under the [test/distributed](../../test/distribu
 ```
 # Run the c10d unit test.
 python test/distributed/test_c10d.py
+
+# Run distributed tests, including tests for Distributed Data Parallel
+python test/run_test.py --verbose -i distributed/test_distributed_fork
+python test/run_test.py --verbose -i distributed/test_distributed_spawn
 
 # Run the RPC test suite for the TensorPipeAgent.
 python test/distributed/rpc/test_tensorpipe_agent.py

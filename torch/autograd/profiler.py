@@ -9,6 +9,8 @@ from operator import attrgetter
 
 from typing import Dict, List, Tuple, Optional
 
+import math
+
 try:
     # Available in Python >= 3.2
     from contextlib import ContextDecorator
@@ -37,10 +39,12 @@ class EventList(list):
     def __init__(self, *args, **kwargs):
         use_cuda = kwargs.pop('use_cuda', True)
         profile_memory = kwargs.pop('profile_memory', False)
+        with_flops = kwargs.pop('with_flops', False)
         super(EventList, self).__init__(*args, **kwargs)
         self._use_cuda = use_cuda
         self._profile_memory = profile_memory
         self._tree_built = False
+        self._with_flops = with_flops
 
     def _build_tree(self):
         self._populate_cpu_children()
@@ -191,6 +195,7 @@ class EventList(list):
             header=header,
             use_cuda=self._use_cuda,
             profile_memory=self._profile_memory,
+            with_flops=self._with_flops,
             top_level_events_only=top_level_events_only)
 
     def export_chrome_trace(self, path):
@@ -289,7 +294,11 @@ class EventList(list):
         for evt in self:
             stats[get_key(evt, group_by_input_shapes, group_by_stack_n)].add(evt)
 
-        avg_list = EventList(stats.values(), use_cuda=self._use_cuda, profile_memory=self._profile_memory)
+        avg_list = EventList(
+            stats.values(),
+            use_cuda=self._use_cuda,
+            profile_memory=self._profile_memory,
+            with_flops=self._with_flops)
         for evt in avg_list:
             evt.stack = evt.stack[:group_by_stack_n]
             if not group_by_input_shapes:
@@ -335,6 +344,11 @@ class profile(object):
             of nested function calls). But for higher level functions the total
             self cpu time might be artificially increased because of the shape
             collection.
+
+        with_flops (bool, optional): If with_flops is set, the profiler will estimate
+        the FLOPS (floating pointer operations per second) value using the operator's input shape
+        and total CPU time. This allows one to estimate the hardware performance. Currently,
+        this option only works for the GEMM and CONV operator, default: ``False``
 
         profile_memory (bool, optional): Whether to report memory usage, default: ``False``
 
@@ -383,6 +397,7 @@ class profile(object):
             enabled=True,
             use_cuda=False,
             record_shapes=False,
+            with_flops=False,
             profile_memory=False,
             with_stack=False,
             use_kineto=False,
@@ -394,6 +409,8 @@ class profile(object):
         self.function_events = None
         self.entered = False
         self.record_shapes = record_shapes
+        self.with_flops = with_flops
+        self.record_shapes |= self.with_flops
         self.profile_memory = profile_memory
         self.with_stack = with_stack
         self.use_cpu = use_cpu
@@ -459,7 +476,8 @@ class profile(object):
         self.function_events = EventList(
             parsed_results,
             use_cuda=self.use_cuda,
-            profile_memory=self.profile_memory)
+            profile_memory=self.profile_memory,
+            with_flops=self.with_flops)
         self.function_events._build_tree()
         return False
 
@@ -793,7 +811,7 @@ class FunctionEvent(FormattedTimesMixin):
             self, id, name, thread, start_us, end_us, fwd_thread=None, input_shapes=None,
             stack=None, scope=0, cpu_memory_usage=0, cuda_memory_usage=0, is_async=False,
             is_remote=False, sequence_nr=-1, node_id=-1, device_type=DeviceType.CPU, device_index=0,
-            is_legacy=False):
+            is_legacy=False, flops=None):
         self.id: int = id
         self.node_id: int = node_id
         self.name: str = name
@@ -815,6 +833,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.device_type: DeviceType = device_type
         self.device_index: int = device_index
         self.is_legacy: bool = is_legacy
+        self.flops: Optional[float] = flops
 
     def append_kernel(self, name, device, start, end):
         assert self.device_type == DeviceType.CPU
@@ -957,6 +976,7 @@ class FunctionEventAvg(FormattedTimesMixin):
         self.cpu_parent: Optional[FunctionEvent] = None
         self.device_type: DeviceType = DeviceType.CPU
         self.is_legacy: bool = False
+        self.flops: float = 0.0
 
     def add(self, other):
         if self.key is None:
@@ -986,6 +1006,10 @@ class FunctionEventAvg(FormattedTimesMixin):
         self.self_cpu_memory_usage += other.self_cpu_memory_usage
         self.self_cuda_memory_usage += other.self_cuda_memory_usage
         self.count += other.count
+        if self.flops is None:
+            self.flops = other.flops
+        elif other.flops is not None:
+            self.flops += other.flops
         return self
 
     def __iadd__(self, other):
@@ -1206,6 +1230,7 @@ def parse_legacy_records(thread_records):
                 cuda_memory_usage = cuda_memory_allocs[record_key]
                 is_async = start.thread_id() != record.thread_id()
                 is_remote_event = record.is_remote()
+                start_flops = start.flops()
 
                 fe = FunctionEvent(
                     id=record.handle(),
@@ -1225,6 +1250,7 @@ def parse_legacy_records(thread_records):
                     sequence_nr=start.sequence_nr(),
                     device_type=DeviceType.CPU,
                     is_legacy=True,
+                    flops=start_flops,
                 )
                 # note: async events have only cpu total time
                 if not is_async and start.has_cuda():
@@ -1347,6 +1373,7 @@ def build_table(
         row_limit=100,
         max_src_column_width=75,
         use_cuda=True,
+        with_flops=False,
         profile_memory=False,
         top_level_events_only=False):
     """Prints a summary of events (which can be a list of FunctionEvent or FunctionEventAvg)."""
@@ -1356,7 +1383,7 @@ def build_table(
     if sort_by is not None:
         events = EventList(sorted(
             events, key=lambda evt: getattr(evt, sort_by), reverse=True
-        ), use_cuda=use_cuda, profile_memory=profile_memory)
+        ), use_cuda=use_cuda, profile_memory=profile_memory, with_flops=with_flops)
 
     has_input_shapes = any(
         [(event.input_shapes is not None and len(event.input_shapes) > 0) for event in events])
@@ -1369,6 +1396,8 @@ def build_table(
 
     shapes_column_width = max([len(str(evt.input_shapes)) for evt in events]) + 4
     shapes_column_width = min(shapes_column_width, 45)
+
+    flops_column_width = DEFAULT_COLUMN_WIDTH
 
     src_column_width = None
     stacks = []
@@ -1425,6 +1454,20 @@ def build_table(
         header_sep_lst[0] += '-' * padding + (' ' * SPACING_SIZE)
         line_length_lst[0] += padding + SPACING_SIZE
 
+    def auto_scale_flops(flops):
+        flop_headers = [
+            'FLOPS',
+            'KFLOPS',
+            'MFLOPS',
+            'GFLOPS',
+            'TFLOPS',
+            'PFLOPS',
+        ]
+        assert flops > 0
+        log_flops = max(0, min(math.log10(flops) / 3, float(len(flop_headers) - 1)))
+        assert log_flops >= 0 and log_flops < len(flop_headers)
+        return (pow(10, (math.floor(log_flops) * -3.0)), flop_headers[int(log_flops)])
+
     add_column(name_column_width)
     for _ in headers[1:]:
         add_column(DEFAULT_COLUMN_WIDTH)
@@ -1436,6 +1479,24 @@ def build_table(
     if has_stack:
         headers.append('Source Location')
         add_column(src_column_width, text_dir='<')
+
+    if with_flops:
+        # Auto-scaling of flops header
+        US_IN_SECOND = 1000.0 * 1000.0  # cpu_time_total is in us
+        raw_flops = []
+        for evt in events:
+            if evt.flops > 0:
+                if evt.cuda_time_total != 0:
+                    evt.flops = float(evt.flops) / evt.cuda_time_total * US_IN_SECOND
+                else:
+                    evt.flops = float(evt.flops) / evt.cpu_time_total * US_IN_SECOND
+                raw_flops.append(evt.flops)
+        if len(raw_flops) != 0:
+            (flops_scale, flops_header) = auto_scale_flops(min(raw_flops))
+            headers.append(flops_header)
+            add_column(flops_column_width)
+        else:
+            with_flops = False  # can't find any valid flops
 
     row_format = row_format_lst[0]
     header_sep = header_sep_lst[0]
@@ -1524,6 +1585,11 @@ def build_table(
             row_values.append(evt.node_id)
         if has_input_shapes:
             row_values.append(str(evt.input_shapes)[:shapes_column_width])
+        if with_flops:
+            if evt.flops <= 0:
+                row_values.append("--")
+            else:
+                row_values.append('{0:8.3f}'.format(evt.flops * flops_scale))
         if has_stack:
             src_field = ""
             if len(evt.stack) > 0:
