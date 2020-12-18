@@ -573,6 +573,7 @@ class TestForeach(TestCase):
                     foreach_bin_op_(tensors, scalar)
                     self.assertEqual(res, tensors)
 
+    @skipCUDAIfRocm
     @dtypes(*torch.testing.get_all_dtypes())
     def test_complex_scalarlist(self, device, dtype):
         for N in N_values:
