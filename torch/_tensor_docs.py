@@ -3340,6 +3340,20 @@ sin_() -> Tensor
 In-place version of :meth:`~Tensor.sin`
 """)
 
+add_docstr_all('sinc',
+               r"""
+sinc() -> Tensor
+
+See :func:`torch.sinc`
+""")
+
+add_docstr_all('sinc_',
+               r"""
+sinc_() -> Tensor
+
+In-place version of :meth:`~Tensor.sinc`
+""")
+
 add_docstr_all('sinh',
                r"""
 sinh() -> Tensor
