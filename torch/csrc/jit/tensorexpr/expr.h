@@ -290,6 +290,7 @@ TORCH_API ExprHandle exp(const ExprHandle& v);
 TORCH_API ExprHandle expm1(const ExprHandle& v);
 TORCH_API ExprHandle fabs(const ExprHandle& v);
 TORCH_API ExprHandle log(const ExprHandle& v);
+TORCH_API ExprHandle fast_log(const ExprHandle& v);
 TORCH_API ExprHandle log2(const ExprHandle& v);
 TORCH_API ExprHandle log10(const ExprHandle& v);
 TORCH_API ExprHandle log1p(const ExprHandle& v);
