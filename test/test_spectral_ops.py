@@ -23,10 +23,6 @@ if TEST_NUMPY:
 if TEST_LIBROSA:
     import librosa
 
-# saves the torch.fft function that's clobbered by importing the torch.fft module
-fft_fn = torch.fft
-import torch.fft
-
 
 def _complex_stft(x, *args, **kwargs):
     # Transform real and imaginary components separably
@@ -99,21 +95,6 @@ def _stft_reference(x, hop_length, window):
 # Tests of functions related to Fourier analysis in the torch.fft namespace
 class TestFFT(TestCase):
     exact_dtype = True
-
-    @skipCPUIfNoMkl
-    @skipCUDAIfRocm
-    def test_fft_function_clobbered(self, device):
-        t = torch.randn((100, 2), device=device)
-        eager_result = fft_fn(t, 1)
-
-        def method_fn(t):
-            return t.fft(1)
-        scripted_method_fn = torch.jit.script(method_fn)
-
-        self.assertEqual(scripted_method_fn(t), eager_result)
-
-        with self.assertRaisesRegex(TypeError, "'module' object is not callable"):
-            torch.fft(t, 1)
 
     @skipCPUIfNoMkl
     @skipCUDAIfRocm
@@ -247,7 +228,7 @@ class TestFFT(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected a real input tensor"):
             torch.fft.rfft(t)
 
-        with self.assertRaisesRegex(RuntimeError, "Expected a real input tensor"):
+        with self.assertRaisesRegex(RuntimeError, "rfftn expects a real-valued input tensor"):
             torch.fft.rfftn(t)
 
         with self.assertRaisesRegex(RuntimeError, "Expected a real input tensor"):
@@ -498,7 +479,7 @@ class TestFFT(TestCase):
                 func(a, s=(10, 10, 10, 10))
 
         c = torch.complex(a, a)
-        with self.assertRaisesRegex(RuntimeError, "Expected a real input"):
+        with self.assertRaisesRegex(RuntimeError, "rfftn expects a real-valued input"):
             torch.fft.rfftn(c)
 
     # 2d-fft tests
@@ -610,7 +591,7 @@ class TestFFT(TestCase):
                 func(a, dim=(2, 3))
 
         c = torch.complex(a, a)
-        with self.assertRaisesRegex(RuntimeError, "Expected a real input"):
+        with self.assertRaisesRegex(RuntimeError, "rfftn expects a real-valued input"):
             torch.fft.rfft2(c)
 
     # Helper functions
@@ -690,53 +671,36 @@ class TestFFT(TestCase):
 
     # Legacy fft tests
     def _test_fft_ifft_rfft_irfft(self, device, dtype):
+        complex_dtype = {
+            torch.float16: torch.complex32,
+            torch.float32: torch.complex64,
+            torch.float64: torch.complex128
+        }[dtype]
+
         def _test_complex(sizes, signal_ndim, prepro_fn=lambda x: x):
-            x = prepro_fn(torch.randn(*sizes, dtype=dtype, device=device))
-            for normalized in (True, False):
-                res = x.fft(signal_ndim, normalized=normalized)
-                rec = res.ifft(signal_ndim, normalized=normalized)
+            x = prepro_fn(torch.randn(*sizes, dtype=complex_dtype, device=device))
+            dim = tuple(range(-signal_ndim, 0))
+            for norm in ('ortho', None):
+                res = torch.fft.fftn(x, dim=dim, norm=norm)
+                rec = torch.fft.ifftn(res, dim=dim, norm=norm)
                 self.assertEqual(x, rec, atol=1e-8, rtol=0, msg='fft and ifft')
-                res = x.ifft(signal_ndim, normalized=normalized)
-                rec = res.fft(signal_ndim, normalized=normalized)
+                res = torch.fft.ifftn(x, dim=dim, norm=norm)
+                rec = torch.fft.fftn(res, dim=dim, norm=norm)
                 self.assertEqual(x, rec, atol=1e-8, rtol=0, msg='ifft and fft')
 
         def _test_real(sizes, signal_ndim, prepro_fn=lambda x: x):
             x = prepro_fn(torch.randn(*sizes, dtype=dtype, device=device))
             signal_numel = 1
             signal_sizes = x.size()[-signal_ndim:]
-            for normalized, onesided in product((True, False), repeat=2):
-                res = x.rfft(signal_ndim, normalized=normalized, onesided=onesided)
-                if not onesided:  # check Hermitian symmetry
-                    def test_one_sample(res, test_num=10):
-                        idxs_per_dim = [torch.LongTensor(test_num).random_(s).tolist() for s in signal_sizes]
-                        for idx in zip(*idxs_per_dim):
-                            reflected_idx = tuple((s - i) % s for i, s in zip(idx, res.size()))
-                            idx_val = res.__getitem__(idx)
-                            reflected_val = res.__getitem__(reflected_idx)
-                            self.assertEqual(idx_val[0], reflected_val[0], msg='rfft hermitian symmetry on real part')
-                            self.assertEqual(idx_val[1], -reflected_val[1], msg='rfft hermitian symmetry on imaginary part')
-                    if len(sizes) == signal_ndim:
-                        test_one_sample(res)
-                    else:
-                        output_non_batch_shape = res.size()[-(signal_ndim + 1):]
-                        flatten_batch_res = res.view(-1, *output_non_batch_shape)
-                        nb = flatten_batch_res.size(0)
-                        test_idxs = torch.LongTensor(min(nb, 4)).random_(nb)
-                        for test_idx in test_idxs.tolist():
-                            test_one_sample(flatten_batch_res[test_idx])
-                    # compare with C2C
-                    xc = torch.stack([x, torch.zeros_like(x)], -1)
-                    xc_res = xc.fft(signal_ndim, normalized=normalized)
-                    self.assertEqual(res, xc_res)
-                test_input_signal_sizes = [signal_sizes]
-                rec = res.irfft(signal_ndim, normalized=normalized,
-                                onesided=onesided, signal_sizes=signal_sizes)
+            dim = tuple(range(-signal_ndim, 0))
+            for norm in (None, 'ortho'):
+                res = torch.fft.rfftn(x, dim=dim, norm=norm)
+                rec = torch.fft.irfftn(res, s=signal_sizes, dim=dim, norm=norm)
                 self.assertEqual(x, rec, atol=1e-8, rtol=0, msg='rfft and irfft')
-                if not onesided:  # check that we can use C2C ifft
-                    rec = res.ifft(signal_ndim, normalized=normalized)
-                    self.assertEqual(x, rec.select(-1, 0), atol=1e-8, rtol=0, msg='twosided rfft and ifft real')
-                    self.assertEqual(rec.select(-1, 1).abs().mean(), 0, atol=1e-8,
-                                     rtol=0, msg='twosided rfft and ifft imaginary')
+                res = torch.fft.fftn(x, dim=dim, norm=norm)
+                rec = torch.fft.ifftn(res, dim=dim, norm=norm)
+                x_complex = torch.complex(x, torch.zeros_like(x))
+                self.assertEqual(x_complex, rec, atol=1e-8, rtol=0, msg='fft and ifft (from real)')
 
         # contiguous case
         _test_real((100,), 1)
@@ -746,12 +710,12 @@ class TestFFT(TestCase):
         _test_real((50, 40, 70), 3)
         _test_real((30, 1, 50, 25, 20), 3)
 
-        _test_complex((100, 2), 1)
-        _test_complex((100, 100, 2), 1)
-        _test_complex((100, 100, 2), 2)
-        _test_complex((1, 20, 80, 60, 2), 2)
-        _test_complex((50, 40, 70, 2), 3)
-        _test_complex((6, 5, 50, 25, 20, 2), 3)
+        _test_complex((100,), 1)
+        _test_complex((100, 100), 1)
+        _test_complex((100, 100), 2)
+        _test_complex((1, 20, 80, 60), 2)
+        _test_complex((50, 40, 70), 3)
+        _test_complex((6, 5, 50, 25, 20), 3)
 
         # non-contiguous case
         _test_real((165,), 1, lambda x: x.narrow(0, 25, 100))  # input is not aligned to complex type
@@ -761,20 +725,10 @@ class TestFFT(TestCase):
         _test_real((65, 80, 115), 3, lambda x: x[10:60, 13:53, 10:80])
         _test_real((30, 20, 50, 25), 3, lambda x: x.transpose(1, 2).transpose(2, 3))
 
-        _test_complex((2, 100), 1, lambda x: x.t())
-        _test_complex((100, 2), 1, lambda x: x.expand(100, 100, 2))
-        _test_complex((300, 200, 3), 2, lambda x: x[:100, :100, 1:])  # input is not aligned to complex type
-        _test_complex((20, 90, 110, 2), 2, lambda x: x[:, 5:85].narrow(2, 5, 100))
-        _test_complex((40, 60, 3, 80, 2), 3, lambda x: x.transpose(2, 0).select(0, 2)[5:55, :, 10:])
-        _test_complex((30, 55, 50, 22, 2), 3, lambda x: x[:, 3:53, 15:40, 1:21])
-
-        # non-contiguous with strides not representable as aligned with complex type
-        _test_complex((50,), 1, lambda x: x.as_strided([5, 5, 2], [3, 2, 1]))
-        _test_complex((50,), 1, lambda x: x.as_strided([5, 5, 2], [4, 2, 2]))
-        _test_complex((50,), 1, lambda x: x.as_strided([5, 5, 2], [4, 3, 1]))
-        _test_complex((50,), 2, lambda x: x.as_strided([5, 5, 2], [3, 3, 1]))
-        _test_complex((50,), 2, lambda x: x.as_strided([5, 5, 2], [4, 2, 2]))
-        _test_complex((50,), 2, lambda x: x.as_strided([5, 5, 2], [4, 3, 1]))
+        _test_complex((100,), 1, lambda x: x.expand(100, 100))
+        _test_complex((20, 90, 110), 2, lambda x: x[:, 5:85].narrow(2, 5, 100))
+        _test_complex((40, 60, 3, 80), 3, lambda x: x.transpose(2, 0).select(0, 2)[5:55, :, 10:])
+        _test_complex((30, 55, 50, 22), 3, lambda x: x[:, 3:53, 15:40, 1:21])
 
     @skipCUDAIfRocm
     @skipCPUIfNoMkl
@@ -825,7 +779,7 @@ class TestFFT(TestCase):
             # Test that different GPU has different cache
             x0 = torch.randn(2, 3, 3, device=devices[0])
             x1 = x0.to(devices[1])
-            self.assertEqual(x0.rfft(2), x1.rfft(2))
+            self.assertEqual(torch.fft.rfftn(x0, dim=(-2, -1)), torch.fft.rfftn(x1, dim=(-2, -1)))
             # If a plan is used across different devices, the following line (or
             # the assert above) would trigger illegal memory access. Other ways
             # to trigger the error include
@@ -1117,18 +1071,18 @@ class TestFFT(TestCase):
 
         signal = torch.ones((2, 2, 2), device=device)
         signal_copy = signal.clone()
-        spectrum = signal.fft(2)
+        spectrum = torch.fft.fftn(signal, dim=(-2, -1))
         self.assertEqual(signal, signal_copy)
 
         spectrum_copy = spectrum.clone()
-        _ = torch.ifft(spectrum, 2)
+        _ = torch.fft.ifftn(spectrum, dim=(-2, -1))
         self.assertEqual(spectrum, spectrum_copy)
 
-        half_spectrum = torch.rfft(signal, 2)
+        half_spectrum = torch.fft.rfftn(signal, dim=(-2, -1))
         self.assertEqual(signal, signal_copy)
 
         half_spectrum_copy = half_spectrum.clone()
-        _ = torch.irfft(half_spectrum_copy, 2, signal_sizes=(2, 2))
+        _ = torch.fft.irfftn(half_spectrum_copy, s=(2, 2), dim=(-2, -1))
         self.assertEqual(half_spectrum, half_spectrum_copy)
 
     @onlyOnCPUAndCUDA

@@ -69,7 +69,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("stack", &LegacyEvent::stack)
       .def("scope", &LegacyEvent::scope)
       .def("correlation_id", &LegacyEvent::correlationId)
-      .def("start_us", &LegacyEvent::cpuUs);
+      .def("start_us", &LegacyEvent::cpuUs)
+      .def("flops", &LegacyEvent::flops);
 
   py::enum_<c10::DeviceType>(m, "DeviceType")
       .value("CPU", c10::DeviceType::CPU)
@@ -172,9 +173,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
     at::enableRecordFunction(enable);
   });
   m.def("_set_empty_test_observer", [](bool is_global, double sampling_prob) {
-    auto cb = at::RecordFunctionCallback(
-        [](const at::RecordFunction&) {},
-        [](const at::RecordFunction&) {})
+    auto cb = at::RecordFunctionCallback(nullptr)
       .needsInputs(true)
       .samplingProb(sampling_prob);
     if (is_global) {

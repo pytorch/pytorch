@@ -163,7 +163,8 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
   }
 
   auto torch_C_m = py::handle(torch_C_module).cast<py::module>();
-  auto m = torch_C_m.def_submodule("_distributed_c10d", "distributed c10d bindings");
+  auto m =
+      torch_C_m.def_submodule("_distributed_c10d", "distributed c10d bindings");
 
   auto module = py::handle(m).cast<py::module>();
 
@@ -184,14 +185,20 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
   shared_ptr_class_<::c10d::GradBucket>(module, "_GradBucket")
       .def(
           py::init<
+              size_t,
               const std::vector<Tensor>&,
               const std::vector<size_t>&,
               const std::vector<size_t>&,
               const std::vector<c10::IntArrayRef>&>(),
+          py::arg("index"),
           py::arg("tensors"),
           py::arg("offsets"),
           py::arg("lengths"),
           py::arg("sizes_list"))
+      .def(
+          "get_index",
+          &::c10d::GradBucket::getIndex,
+          py::call_guard<py::gil_scoped_release>())
       .def(
           "get_tensors",
           &::c10d::GradBucket::getTensors,
@@ -376,7 +383,7 @@ Arguments:
 
 Example::
     >>> import torch.distributed as dist
-    >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
+    >>> store = dist.TCPStore("127.0.0.1", 0, True, timedelta(seconds=30))
     >>> store.set("first_key", "first_value")
     >>> # Should return "first_value"
     >>> store.get("first_key")
@@ -404,7 +411,7 @@ Returns:
 
 Example::
     >>> import torch.distributed as dist
-    >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
+    >>> store = dist.TCPStore("127.0.0.1", 0, True, timedelta(seconds=30))
     >>> store.set("first_key", "first_value")
     >>> # Should return "first_value"
     >>> store.get("first_key")
@@ -428,7 +435,7 @@ Arguments:
 Example::
     >>> import torch.distributed as dist
     >>> # Using TCPStore as an example, other store types can also be used
-    >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
+    >>> store = dist.TCPStore("127.0.0.1", 0, True, timedelta(seconds=30))
     >>> store.add("first_key", 1)
     >>> store.add("first_key", 6)
     >>> # Should return 7
@@ -450,12 +457,12 @@ Arguments:
     key (str): The key to be deleted from the store
 
 Returns:
-    `true` if ``key`` was deleted, otherwise `false`.
+    `True` if ``key`` was deleted, otherwise `False`.
 
 Example::
     >>> import torch.distributed as dist
     >>> # Using TCPStore as an example, HashStore can also be used
-    >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
+    >>> store = dist.TCPStore("127.0.0.1", 0, True, timedelta(seconds=30))
     >>> store.set("first_key")
     >>> # This should return true
     >>> store.delete_key("first_key")
@@ -473,16 +480,15 @@ and :meth:`~torch.distributed.store.add` since one key is used to coordinate all
 the workers using the store.
 
 .. warning::
-    The ``num_keys`` API is only supported by the :class:`~torch.distributed.TCPStore` and :class:`~torch.distributed.HashStore`. Using this API
-    with the :class:`~torch.distributed.FileStore` will result in an exception.
+    When used with the :class:`~torch.distributed.TCPStore`, ``num_keys`` returns the number of keys written to the underlying file. If the store is destructed and another store is created with the same file, the original keys will be retained.
 
 Returns:
     The number of keys present in the store.
 
 Example::
     >>> import torch.distributed as dist
-    >>> # Using TCPStore as an example, HashStore can also be used
-    >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
+    >>> # Using TCPStore as an example, other store types can also be used
+    >>> store = dist.TCPStore("127.0.0.1", 0, True, timedelta(seconds=30))
     >>> store.set("first_key", "first_value")
     >>> # This should return 2
     >>> store.num_keys()
@@ -501,7 +507,7 @@ Arguments:
 Example::
     >>> import torch.distributed as dist
     >>> # Using TCPStore as an example, other store types can also be used
-    >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
+    >>> store = dist.TCPStore("127.0.0.1", 0, True, timedelta(seconds=30))
     >>> store.set_timeout(timedelta(seconds=10))
     >>> # This will throw an exception after 10 seconds
     >>> store.wait(["bad_key"])
@@ -523,7 +529,7 @@ Arguments:
 Example::
     >>> import torch.distributed as dist
     >>> # Using TCPStore as an example, other store types can also be used
-    >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
+    >>> store = dist.TCPStore("127.0.0.1", 0, True, timedelta(seconds=30))
     >>> # This will throw an exception after 30 seconds
     >>> store.wait(["bad_key"])
 )")
@@ -546,7 +552,7 @@ Arguments:
 Example::
     >>> import torch.distributed as dist
     >>> # Using TCPStore as an example, other store types can also be used
-    >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
+    >>> store = dist.TCPStore("127.0.0.1", 0, True, timedelta(seconds=30))
     >>> # This will throw an exception after 10 seconds
     >>> store.wait(["bad_key"], timedelta(seconds=10))
 )");
@@ -611,8 +617,8 @@ Arguments:
 
 Example::
     >>> import torch.distributed as dist
-    >>> server_store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
-    >>> client_store = dist.TCPStore("127.0.0.1", 0, false)
+    >>> server_store = dist.TCPStore("127.0.0.1", 0, True, timedelta(seconds=30))
+    >>> client_store = dist.TCPStore("127.0.0.1", 0, False)
     >>> # Use any of the store methods from either the client or server after initialization
     >>> server_store.set("first_key", "first_value")
     >>> client_store.get("first_key")
@@ -1095,7 +1101,8 @@ Arguments:
           &::c10d::ProcessGroup::Work::wait,
           py::arg("timeout") = kNoTimeout,
           py::call_guard<py::gil_scoped_release>())
-      .def("get_future",
+      .def(
+          "get_future",
           [](::c10d::ProcessGroup::Work& work)
               -> std::shared_ptr<jit::PythonFutureWrapper> {
             return std::make_shared<jit::PythonFutureWrapper>(work.getFuture());
@@ -1119,24 +1126,23 @@ Arguments:
                 >>> ddp_model._egister_comm_hook(state = None, hook = allreduce)
 
             .. warning ::
-                ``get_future`` API supports only NCCL backend and single-process single-device mode.
+                ``get_future`` API supports only NCCL backend.
                 The ``torch._C.Future`` object returned by this API can be used in
-                ``DistributedDataParallel.register_comm_hook``, but it is subject to some subtle
-                differences compared to ``torch.futures.Future`` due to compromises made for performance
-                reasons.
+                ``DistributedDataParallel.register_comm_hook``, and adds some CUDA-specific
+                features on top of ``torch.futures.Future``.
 
                 In the example above, ``allreduce`` work will be done on GPU using NCCL backend,
                 ``fut.wait()`` will return after synchronizing the appropriate NCCL streams
-                with PyTorch's default device streams to ensure we can have asynchronous CUDA
+                with PyTorch's current device streams to ensure we can have asynchronous CUDA
                 execution and it does not wait for the entire operation to complete on GPU. Note that
-                ``FutureNCCL``  does not support ``NCCL_BLOCKING_WAIT`` flag or NCCL's ``barrier()``.
+                ``CUDAFuture``  does not support ``NCCL_BLOCKING_WAIT`` flag or NCCL's ``barrier()``.
                 In addition, if a callback function was added by ``fut.then()``, it will wait until
                 ``WorkNCCL``'s NCCL streams synchronize with ``ProcessGroupNCCL``'s dedicated callback
                 stream and invoke the callback inline after running the callback on the callback stream.
-                ``fut.then()`` will return another ``FutureNCCL`` that holds the return value of the
+                ``fut.then()`` will return another ``CUDAFuture`` that holds the return value of the
                 callback and a ``CUDAEvent`` that recorded the callback stream.
 
-                Note that ``fut.done()`` returns if the enire operation is completed on the GPU.
+                Note that ``fut.done()`` returns only whether the operation has been enqueued on the GPU.
            )");
 
   module.def(
@@ -1258,7 +1264,6 @@ static const auto ProcessGroupWorkTorchBind =
               return work->wait();
             })
         .def("result", &::c10d::ProcessGroup::Work::result);
-
 
 // TODO: Support argument names in Python API.
 static const auto ProcessGroupTorchBind =

@@ -188,6 +188,9 @@ FOREACH_UNARY_OP(sinh);
 FOREACH_UNARY_OP(round);
 FOREACH_UNARY_OP(lgamma);
 FOREACH_UNARY_OP(frac);
+FOREACH_UNARY_OP(trunc);
+FOREACH_UNARY_OP(reciprocal);
+FOREACH_UNARY_OP(sigmoid);
 
 FOREACH_POINTWISE_OP_SCALAR(addcdiv);
 FOREACH_POINTWISE_OP_SCALAR(addcmul);
@@ -210,5 +213,13 @@ std::vector<Tensor> foreach_tensor_##NAME##_slow(TensorList tensors1, TensorList
 
 FOREACH_MAXIMUM_MINIMUM_OP(maximum)
 FOREACH_MAXIMUM_MINIMUM_OP(minimum)
+
+void foreach_tensor_zero_slow_(TensorList tensors) { 
+  check_foreach_api_restrictions(tensors);
+
+  for (auto& t : tensors) {
+    t.zero_();
+  }
+}
 
 }} // namespace at::native

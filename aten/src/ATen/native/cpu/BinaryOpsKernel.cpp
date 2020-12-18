@@ -21,7 +21,7 @@ using namespace vec256;
 
 // Note: Undefined behavior when performing addition is intentionally
 // ignored.
-void add_kernel(TensorIterator& iter, Scalar alpha_scalar) {
+void add_kernel(TensorIteratorBase& iter, Scalar alpha_scalar) {
   if (iter.dtype() == ScalarType::Bool) {
       using scalar_t = bool;
       auto alpha = alpha_scalar.to<scalar_t>();
@@ -529,7 +529,7 @@ void smooth_l1_kernel(TensorIterator& iter, double beta) {
 }
 
 void sigmoid_backward_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "sigmoid_backward_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "sigmoid_backward_cpu", [&]() {
     auto one_vec = Vec256<scalar_t>((scalar_t)(1));
     cpu_kernel_vec(iter,
       [=](scalar_t a, scalar_t b) -> scalar_t {
