@@ -66,7 +66,7 @@ class DDPCommHookType(Enum):
         comm_hook=powerSGD.powerSGD_hook,
         matrix_approximation_rank=2,
     )
-    # Batching can lead to a faster training in the cost of accuracy.
+    # Batching can lead to a faster training at the cost of accuracy.
     BATCHED_POWER_SGD = partial(
         _powerSGD_comm_hook_wrapper,
         comm_hook=powerSGD.batched_powerSGD_hook,
