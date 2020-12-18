@@ -460,13 +460,14 @@ class TestSortAndSelect(TestCase):
         self.assertEqual(val, expected_val, atol=0, rtol=0)
         self.assertEqual(ind, expected_ind, atol=0, rtol=0)
 
-    @onlyCUDA
-    def test_topk_float_cuda(self, device):
+    @onlyOnCPUAndCUDA
+    def test_topk_float_kk(self, device):
         # test topk when k=0, dtype=float, device='cuda'
         t = torch.rand(4, dtype=torch.float, device=device)
         val, idx = torch.topk(t, k=0, largest=False)
-        self.assertEqual(val, [])
-        self.assertEqual(idx, [])
+        self.assertEqual(val.size(), torch.Size([0]))
+        self.assertEqual(val.type(), t.type())
+        self.assertEqual(idx.size(), torch.Size([0]))
 
     def _test_unique_scalar_empty(self, dtype, device, f):
         # test scalar

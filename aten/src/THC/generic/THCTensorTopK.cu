@@ -20,9 +20,6 @@ void THCTensor_(topk)(THCState* state,
 
   THArgCheck(dim >= 0 && dim < numDims, 6, "dim not in range");
 
-  if (k == 0) {
-    return;
-  }
   int64_t sliceSize = THCTensor_(sizeLegacyNoScalars)(state, input_, dim);
   THArgCheck(k >= 0 && k <= sliceSize, 5, "k not in range for dimension");
 
@@ -36,6 +33,11 @@ void THCTensor_(topk)(THCState* state,
   }
   THCTensor_(resize)(state, topK, topKSize, {});
   THCudaLongTensor_resize(state, indices, topKSize, {});
+
+  if (k == 0) {
+    THCudaLongTensor_free(state, input);
+    return;
+  }
 
   // static_cast is required to ensure that the correct type (INDEX_T)
   // is provided to the kernel for the arguments.
