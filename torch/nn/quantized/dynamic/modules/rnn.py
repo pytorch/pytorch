@@ -553,8 +553,11 @@ class GRU(RNNBase):
         self.check_hidden_size(hidden, expected_hidden_size,
                                'Expected hidden size {}, got {}')
 
-    def forward_impl(self, input, hx, batch_sizes, max_batch_size, sorted_indices):
-        # type: (Tensor, Optional[Tensor], Optional[Tensor], int, Optional[Tensor]) -> Tuple[Tensor, Tensor]  # noqa
+    def forward_impl(
+        self, input: Tensor, hx: Optional[Tensor],
+        batch_sizes: Optional[Tensor], max_batch_size: int,
+        sorted_indices: Optional[Tensor]
+    ) -> Tuple[Tensor, Tensor]:
         if hx is None:
             num_directions = 2 if self.bidirectional else 1
             zeros = torch.zeros(self.num_layers * num_directions,
@@ -596,8 +599,9 @@ class GRU(RNNBase):
 
 
     @torch.jit.export
-    def forward_tensor(self, input, hx=None):
-        # type: (Tensor, Optional[Tensor]) -> Tuple[Tensor, Tensor]
+    def forward_tensor(
+        self, input: Tensor, hx: Optional[Tensor] = None
+    ) -> Tuple[Tensor, Tensor]:
         batch_sizes = None
         max_batch_size = input.size(0) if self.batch_first else input.size(1)
         sorted_indices = None
@@ -609,20 +613,22 @@ class GRU(RNNBase):
         return output, self.permute_hidden(hidden, unsorted_indices)
 
     @torch.jit.export
-    def forward_packed(self, input, hx=None):
-        # type: (PackedSequence, Optional[Tensor]) -> Tuple[PackedSequence, Tensor]  # noqa
-        input, batch_sizes, sorted_indices, unsorted_indices = input
+    def forward_packed(
+        self, input: PackedSequence, hx: Optional[Tensor] = None
+    ) -> Tuple[PackedSequence, Tensor]:  # noqa
+        input_, batch_sizes, sorted_indices, unsorted_indices = input
         max_batch_size = batch_sizes[0]
         max_batch_size = int(max_batch_size)
         output, hidden = self.forward_impl(
-            input, hx, batch_sizes, max_batch_size, sorted_indices)
+            input_, hx, batch_sizes, max_batch_size, sorted_indices)
 
         output = PackedSequence(output, batch_sizes,
                                 sorted_indices, unsorted_indices)
         return output, self.permute_hidden(hidden, unsorted_indices)
 
-    def permute_hidden(self, hx, permutation):
-        # type: (Tensor, Optional[Tensor]) -> Tensor
+    def permute_hidden(  # type: ignore
+        self, hx: Tensor, permutation: Optional[Tensor]
+    ) -> Tensor:
         if permutation is None:
             return hx
         return apply_permutation(hx, permutation)
