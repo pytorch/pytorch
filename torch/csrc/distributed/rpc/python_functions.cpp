@@ -61,36 +61,42 @@ std::shared_ptr<Operator> matchBuiltinOp(
     const py::kwargs& kwargs,
     Stack& stack) {
   Symbol symbol = Symbol::fromQualString(opName);
-  std::vector<std::shared_ptr<jit::Operator>> candidates;
 
+  std::shared_ptr<jit::Operator> matchedOperator;
   if (symbol.is_aten()) {
-    for (const auto& op : torch::jit::getAllOperatorsFor(symbol)) {
-      try {
-        // FIXME: This is temporary solution. We should at least refactor
-        // ``createStackForSchema`` to avoid throwing an error.
-        stack = torch::jit::createStackForSchema(
-            op->schema(), args, kwargs, c10::nullopt);
-      } catch (std::runtime_error& e) {
-        VLOG(1) << "Couldn't match schema: " << op->schema()
-                << " to args: " << args << " and kwargs: " << kwargs
-                << ", reason: " << e.what();
-        continue;
-      }
-
-      // Prefer C10 ops so that they go through C10 dispatch. We expect the
-      // total # of possible overloaded ops to be small (i.e. it is 10 for
-      // torch.add) so a worst-case linear search should not incur significant
-      // extra overhead.
+    // Prefer C10 ops so that they go through C10 dispatch. We expect the
+    // total # of possible overloaded ops (i.e. size of below ops list) to be
+    // small (i.e. it is 10 for torch.add) so a worst-case linear search should
+    // not incur significant extra overhead.
+    auto ops = torch::jit::getAllOperatorsFor(symbol);
+    std::vector<std::shared_ptr<torch::jit::Operator>> c10OpsForSymbol;
+    for (auto it = ops.begin(); it != ops.end();) {
+      std::shared_ptr<jit::Operator> op = *it;
       if (op->isC10Op()) {
-        return op;
+        c10OpsForSymbol.emplace_back(std::move(op));
+        it = ops.erase(it);
+      } else {
+        ++it;
       }
-      candidates.emplace_back(op);
     }
+
+    // Don't throw on failures in this call, since we are not examining on all
+    // operators here, and the matched operator may indeed not be a c10 op.
+    std::pair<std::shared_ptr<torch::jit::Operator>, torch::jit::Stack>
+        opWithStack;
+    try {
+      opWithStack = torch::jit::getOpWithStack(c10OpsForSymbol, args, kwargs);
+    } catch (const std::runtime_error& e) {
+      opWithStack = torch::jit::getOpWithStack(ops, args, kwargs);
+    }
+    matchedOperator = std::get<0>(opWithStack);
+    stack = std::get<1>(opWithStack);
   }
 
-  // Ensure that we generated some candidates.
+  // We should never hit this path, since if !matchedOperator, then the last
+  // call to getOpWithStack should have thrown.
   TORCH_CHECK(
-      !candidates.empty(),
+      matchedOperator != nullptr,
       "Failed to match operator name ",
       opName,
       " and arguments "
@@ -99,7 +105,8 @@ std::shared_ptr<Operator> matchBuiltinOp(
       ", kwargs: ",
       kwargs,
       ") to a builtin operator");
-  return candidates[0];
+
+  return matchedOperator;
 }
 
 std::shared_ptr<FutureMessage> sendPythonRemoteCall(
