@@ -415,7 +415,7 @@ class Graph:
                     type_expr: Optional[Any] = None) -> Node:
         """
         Insert a ``call_method`` ``Node`` into the ``Graph``. A ``call_method`` node
-        represents a call to a given method on the 0th element of `args.
+        represents a call to a given method on the 0th element of ``args``.
 
         Args:
 
@@ -549,7 +549,7 @@ class Graph:
                 _shadows_builtin_name(name)
 
         while candidate in self._used_names or illegal_shadowing_name(candidate):
-            match = re.match(r"(.*)_(\d+)", candidate)
+            match = re.match(r"(.*)_(\d+)$", candidate)
             if match is None:
                 candidate = candidate + '_1'
             else:
@@ -756,9 +756,9 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation}:
         """
         Runs various checks on this Graph to make sure it is well-formed. In
         particular:
-            - Checks Nodes have correct ownership (owned by this graph)
-            - Checks Nodes appear in topological order
-            - If ``root`` is provided, checks that targets exist in ``root``
+        - Checks Nodes have correct ownership (owned by this graph)
+        - Checks Nodes appear in topological order
+        - If ``root`` is provided, checks that targets exist in ``root``
 
         Args:
 

@@ -89,6 +89,7 @@ jit_core_sources = [
 core_sources_common = [
     "torch/csrc/autograd/profiler_legacy.cpp",
     "torch/csrc/autograd/profiler_kineto.cpp",
+    "torch/csrc/autograd/profiler_utils.cpp",
     "torch/csrc/jit/frontend/edit_distance.cpp",
     "torch/csrc/jit/frontend/string_to_type.cpp",
     "torch/csrc/jit/mobile/type_parser.cpp",
@@ -353,9 +354,8 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
 def libtorch_sources(gencode_pattern = ":generate-code[{}]"):
     return libtorch_generated_sources(gencode_pattern) + libtorch_core_sources + libtorch_distributed_sources + libtorch_extra_sources
 
-libtorch_cuda_sources = [
+libtorch_cuda_core_sources = [
     "torch/csrc/cuda/comm.cpp",
-    "torch/csrc/cuda/nccl.cpp",
     "torch/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp",
     "torch/csrc/autograd/profiler_cuda.cpp",
     "torch/csrc/autograd/functions/comm.cpp",
@@ -406,6 +406,10 @@ libtorch_cuda_sources = [
     "torch/csrc/jit/codegen/cuda/transform_rfactor.cpp",
     "torch/csrc/jit/codegen/cuda/type.cpp",
     "torch/csrc/jit/tensorexpr/cuda_codegen.cpp",
+]
+
+libtorch_cuda_sources = libtorch_cuda_core_sources + [
+    "torch/csrc/cuda/nccl.cpp",
 ]
 
 torch_cpp_srcs = [
@@ -472,6 +476,7 @@ libtorch_python_cuda_core_sources = [
     "torch/csrc/cuda/python_comm.cpp",
     "torch/csrc/cuda/Storage.cpp",
     "torch/csrc/cuda/Stream.cpp",
+    "torch/csrc/cuda/Graph.cpp",
     "torch/csrc/cuda/serialization.cpp",
     "torch/csrc/cuda/shared/cudart.cpp",
     "torch/csrc/cuda/shared/nvtx.cpp",
