@@ -468,15 +468,6 @@ ExprHandle promoteHalfToFloat(const ExprHandle& e) {
   }
 }
 
-ExprHandle promoteHalfToFloatAndIntegerToDefaultType(const ExprHandle& e) {
-  auto scalarType = static_cast<c10::ScalarType>(e.dtype().scalar_type());
-  if (c10::isIntegralType(scalarType, /*includeBool*/ true)) {
-    return promoteIntegerToDefaultType(e);
-  } else {
-    return promoteHalfToFloat(e);
-  }
-}
-
 bool TensorExprKernel::checkTypes(
     const ScalarType highType,
     const int typeConstraints) {
@@ -1180,7 +1171,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::fmod: {
       return computeTwoOperand(
           "aten_fmod", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return fmod(lhs, rhs);
+            return fmod(promoteHalfToFloat(lhs), promoteHalfToFloat(rhs));
           });
     } break;
 
@@ -1197,7 +1188,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
         return Mod::make(lhs, rhs);
       };
       auto fmodImpl = [](const ExprHandle& lhs, const ExprHandle& rhs) {
-        return fmod((rhs + fmod(lhs, rhs)), rhs);
+        auto lhs_t = promoteHalfToFloat(lhs);
+        auto rhs_t = promoteHalfToFloat(rhs);
+        return fmod((rhs_t + fmod(lhs_t, rhs_t)), rhs_t);
       };
       {
         auto const& n = v->node();
@@ -1295,7 +1288,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
           "aten_abs",
           v,
           [](const ExprHandle& a) {
-            return fabs(promoteHalfToFloatAndIntegerToDefaultType(a));
+            return tensorexpr::abs(promoteHalfToFloat(a));
           },
           kIntegralTypes | kFloatingPointTypes | kBoolType);
     } break;
