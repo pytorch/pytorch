@@ -20,6 +20,7 @@ from .hipify.hipify_python import get_hip_file_path, GeneratedFileCleaner
 from typing import List, Optional
 
 from setuptools.command.build_ext import build_ext
+from pkg_resources import packaging  # type: ignore
 
 
 IS_WINDOWS = sys.platform == 'win32'
@@ -1405,13 +1406,12 @@ def is_ninja_available():
     Returns ``True`` if the `ninja <https://ninja-build.org/>`_ build system is
     available on the system, ``False`` otherwise.
     '''
-    with open(os.devnull, 'wb') as devnull:
-        try:
-            subprocess.check_call('ninja --version'.split(), stdout=devnull)
-        except OSError:
-            return False
-        else:
-            return True
+    try:
+        subprocess.check_output('ninja --version'.split())
+    except Exception:
+        return False
+    else:
+        return True
 
 
 def verify_ninja_availability():
@@ -1562,7 +1562,7 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
             if arch.endswith('+PTX'):
                 flags.append(f'-gencode=arch=compute_{num},code=compute_{num}')
 
-    return list(set(flags))
+    return sorted(list(set(flags)))
 
 
 def _get_rocm_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
@@ -1893,8 +1893,21 @@ def _write_ninja_file(path,
 
     if with_cuda:
         cuda_compile_rule = ['rule cuda_compile']
+        nvcc_gendeps = ''
+        # --generate-dependencies-with-compile was added in CUDA 10.2.
+        # Compilation will work on earlier CUDA versions but header file
+        # dependencies are not correctly computed.
+        required_cuda_version = packaging.version.parse('10.2')
+        has_cuda_version = torch.version.cuda is not None
+        if has_cuda_version and packaging.version.parse(torch.version.cuda) >= required_cuda_version:
+            cuda_compile_rule.append('  depfile = $out.d')
+            cuda_compile_rule.append('  deps = gcc')
+            # Note: non-system deps with nvcc are only supported
+            # on Linux so use --generate-dependencies-with-compile
+            # to make this work on Windows too.
+            nvcc_gendeps = '--generate-dependencies-with-compile --dependency-output $out.d'
         cuda_compile_rule.append(
-            '  command = $nvcc $cuda_cflags -c $in -o $out $cuda_post_cflags')
+            f'  command = $nvcc {nvcc_gendeps} $cuda_cflags -c $in -o $out $cuda_post_cflags')
 
     # Emit one build rule per source to enable incremental build.
     build = []
