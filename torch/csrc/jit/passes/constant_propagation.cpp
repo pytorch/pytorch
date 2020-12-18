@@ -341,7 +341,8 @@ struct ConstantPropagator {
     auto allowed = JIT_BISECT();
     if (!allowed) {
       JIT_BISECT_LOG(
-          std::string("Stopped optimization at constant propagation"));
+          std::string("Stopped optimization at constant propagation"),
+          n->owningGraph()->toString());
       return;
     }
     bool runnable_inputs = runnableInputs(n);

@@ -52,6 +52,11 @@ static std::unordered_map<std::string, int64_t> parseJITBisectOption(
 
 bool is_bisect_enabled(const char* pass_name) {
   static const char* opt_limit = std::getenv("PYTORCH_OPT_LIMIT");
+  // if nothing is provided, let's allow everything
+  if (!opt_limit) {
+    return true;
+  }
+
   static const std::unordered_map<std::string, int64_t> passes_to_opt_limits =
       parseJITBisectOption(opt_limit);
   std::string pass{pass_name};
@@ -83,8 +88,9 @@ std::string jit_bisect_prefix(
   std::stringstream in_ss(in_str);
   std::stringstream out_ss;
   std::string line;
+  out_ss << prefix;
   while (std::getline(in_ss, line)) {
-    out_ss << prefix << line << std::endl;
+    out_ss << line << std::endl;
   }
 
   return out_ss.str();

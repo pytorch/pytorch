@@ -34,7 +34,7 @@ TORCH_API int64_t jit_bisect_level();
 
 static std::unordered_map<std::string, int64_t> passes_to_current_counter;
 
-// Prefix every line in a multiline string \p IN_STR with \p PREFIX.
+// Print prefix before the lines for the log
 TORCH_API std::string jit_bisect_prefix(
     const std::string& prefix,
     const std::string& in_str);
@@ -52,10 +52,9 @@ TORCH_API std::ostream& operator<<(std::ostream& out, int64_t level);
 #define JIT_BISECT(...) (is_bisect_enabled(__FILE__));
 
 #define JIT_BISECT_LOG(MSG, ...)                           \
-  if (is_bisect_enabled(__FILE__)) {                       \
     std::cerr << jit_bisect_prefix(                        \
         MSG, __FILE__, __LINE__, ::c10::str(__VA_ARGS__)); \
-  }
+
 
 } // namespace jit
 } // namespace torch
