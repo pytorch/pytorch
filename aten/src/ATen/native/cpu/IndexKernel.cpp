@@ -49,7 +49,9 @@ struct Indexer {
 };
 
 static bool is_constant_index(int ntensor, const int64_t* strides) {
-  AT_ASSERT(ntensor >= 3);
+  if (ntensor < 3) {
+    AT_ASSERT(ntensor >= 3);
+  }
   for (int arg = 2; arg < ntensor; arg++) {
     if (strides[arg] != 0) {
       return false;
