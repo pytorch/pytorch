@@ -7035,7 +7035,8 @@ a")
         else:
             g = test_dtype.graph_for(5)
             # first should have type set second should not
-            FileCheck().check("Float(requires_grad=1, device=cpu) = aten::tensor").check("Tensor(requires_grad=0) = aten::tensor").run(g)
+            FileCheck().check("Float(requires_grad=1, device=cpu) = aten::tensor") \
+                       .check("Tensor(requires_grad=0) = aten::tensor").run(g)
 
         @torch.jit.script
         def test_as_tensor_tensor_input(input):

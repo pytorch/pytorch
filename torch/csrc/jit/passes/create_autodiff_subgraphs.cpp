@@ -6,10 +6,8 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
-#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
-#include <torch/csrc/jit/runtime/graph_executor.h>
 
 namespace torch {
 namespace jit {
