@@ -286,7 +286,10 @@ dimensions and the value of the `ord` parameter.
 Args:
     input (Tensor): The input tensor. If dim is None, x must be 1-D or 2-D, unless :attr:`ord`
         is None. If both :attr:`dim` and :attr:`ord` are None, the 2-norm of the input flattened to 1-D
-        will be returned.
+        will be returned. Its data type must be either a floating point or complex type. For complex
+        inputs, the norm is calculated on of the absolute values of each element. If the input is
+        complex and neither :attr:`dtype` nor :attr:`out` is specified, the result's data type will
+        be the corresponding floating point type (e.g. float if :attr:`input` is complexfloat).
 
     ord (int, float, inf, -inf, 'fro', 'nuc', optional): The order of norm.
         inf refers to :attr:`float('inf')`, numpy's :attr:`inf` object, or any equivalent object.
@@ -398,6 +401,91 @@ Using the :attr:`dim` argument to compute matrix norms::
     tensor([ 3.7417, 11.2250])
     >>> LA.norm(m[0, :, :]), LA.norm(m[1, :, :])
     (tensor(3.7417), tensor(11.2250))
+""")
+
+cond = _add_docstr(_linalg.linalg_cond, r"""
+linalg.cond(input, p=None, *, out=None) -> Tensor
+
+Computes the condition number of a matrix :attr:`input`,
+or of each matrix in a batched :attr:`input`, using the matrix norm defined by :attr:`p`.
+For norms ``p = {'fro', 'nuc', inf, -inf, 1, -1}`` this is defined as the matrix norm of :attr:`input`
+times the matrix norm of the inverse of :attr:`input`. And for norms ``p = {None, 2, -2}`` this is defined as
+the ratio between the largest and smallest singular values.
+
+This function supports ``float``, ``double``, ``cfloat`` and ``cdouble`` dtypes for :attr:`input`.
+If the input is complex and neither :attr:`dtype` nor :attr:`out` is specified, the result's data type will
+be the corresponding floating point type (e.g. float if :attr:`input` is complexfloat).
+
+.. note:: For ``p = {None, 2, -2}`` the condition number is computed as the ratio between the largest
+          and smallest singular values computed using :func:`torch.linalg.svd`.
+          For these norms :attr:`input` may be a non-square matrix or batch of non-square matrices.
+          For other norms, however, :attr:`input` must be a square matrix or a batch of square matrices,
+          and if this requirement is not satisfied a RuntimeError will be thrown.
+
+.. note:: For ``p = {'fro', 'nuc', inf, -inf, 1, -1}`` if :attr:`input` is a non-invertible matrix then
+          a tensor containing infinity will be returned. If :attr:`input` is a batch of matrices and one
+          or more of them is not invertible then a RuntimeError will be thrown.
+
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+Args:
+    input (Tensor): the input matrix of size :math:`(m, n)` or the batch of matrices of size :math:`(*, m, n)`
+                    where `*` is one or more batch dimensions.
+
+    p (int, float, inf, -inf, 'fro', 'nuc', optional): the type of the matrix norm to use in the computations.
+        The following norms are supported:
+
+        =====  ============================
+        p      norm for matrices
+        =====  ============================
+        None   ratio of the largest singular value to the smallest singular value
+        'fro'  Frobenius norm
+        'nuc'  nuclear norm
+        inf    max(sum(abs(x), dim=1))
+        -inf   min(sum(abs(x), dim=1))
+        1      max(sum(abs(x), dim=0))
+        -1     min(sum(abs(x), dim=0))
+        2      ratio of the largest singular value to the smallest singular value
+        -2     ratio of the smallest singular value to the largest singular value
+        =====  ============================
+
+        Default: ``None``
+
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
+
+Examples::
+
+    >>> from torch import linalg as LA
+    >>> a = torch.tensor([[1., 0, -1], [0, 1, 0], [1, 0, 1]])
+    >>> LA.cond(a)
+    tensor(1.4142)
+    >>> LA.cond(a, 'fro')
+    tensor(3.1623)
+    >>> LA.cond(a, 'nuc')
+    tensor(9.2426)
+    >>> LA.cond(a, np.inf)
+    tensor(2.)
+    >>> LA.cond(a, -np.inf)
+    tensor(1.)
+    >>> LA.cond(a, 1)
+    tensor(2.)
+    >>> LA.cond(a, -1)
+    tensor(1.)
+    >>> LA.cond(a, 2)
+    tensor(1.4142)
+    >>> LA.cond(a, -2)
+    tensor(0.7071)
+
+    >>> a = torch.randn(3, 4, 4)
+    >>> LA.cond(a)
+    tensor([ 4.4739, 76.5234, 10.8409])
+
+    >>> a = torch.randn(3, 4, 4, dtype=torch.complex64)
+    >>> LA.cond(a)
+    tensor([ 5.9175, 48.4590,  5.6443])
+    >>> LA.cond(a, 1)
+    >>> tensor([ 11.6734+0.j, 105.1037+0.j,  10.1978+0.j])
 """)
 
 tensorinv = _add_docstr(_linalg.linalg_tensorinv, r"""

@@ -421,15 +421,15 @@ class Timer(object):
         if not isinstance(self._task_spec.stmt, str):
             raise ValueError("`collect_callgrind` currently only supports string `stmt`")
 
-        if self._language != Language.PYTHON:
-            raise NotImplementedError("C++ Callgrind is later in the stack.")
-
         # Check that the statement is valid. It doesn't guarantee success, but it's much
         # simpler and quicker to raise an exception for a faulty `stmt` or `setup` in
         # the parent process rather than the valgrind subprocess.
         self._timer.timeit(1)
+        is_python = (self._language == Language.PYTHON)
+        assert is_python or not self._globals
         return valgrind_timer_interface.wrapper_singleton().collect_callgrind(
             task_spec=self._task_spec,
             globals=self._globals,
             number=number,
-            collect_baseline=collect_baseline)
+            collect_baseline=collect_baseline and is_python,
+            is_python=is_python)

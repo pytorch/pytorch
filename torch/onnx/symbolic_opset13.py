@@ -1,3 +1,7 @@
+# EDITING THIS FILE? READ THIS FIRST!
+# see Note [Edit Symbolic Files] in symbolic_helper.py
+
+# This file exports ONNX ops for opset 13
 from torch.onnx.symbolic_helper import _block_list_in_opset
 import torch
 import torch.onnx.symbolic_helper as sym_help

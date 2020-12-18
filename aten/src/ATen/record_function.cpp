@@ -1,5 +1,6 @@
 #include <ATen/record_function.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <c10/macros/Macros.h>
 #include <algorithm>
 #include <cstdlib>
 #include <random>
@@ -29,24 +30,27 @@ std::atomic<int64_t> defaultNodeId(-1);
 std::atomic<uint64_t> next_thread_id_ {0};
 thread_local uint64_t current_thread_id_ = 0;
 
-thread_local bool tls_record_function_enabled_ = true;
-
 // Low probability constant
-const double kLowProb = 0.001;
-thread_local int tries_left_ = 0;
+static const double kLowProb = 0.001;
+struct CoinflipTLS {
+  int tries_left_;
+  std::mt19937 genGeo_;
+  std::mt19937 genZeroOne_;
+  std::geometric_distribution<int> distGeo_;
+  std::uniform_real_distribution<double> distZeroOne_;
+  CoinflipTLS();
+};
+
+CoinflipTLS::CoinflipTLS()
+    : tries_left_(0), genGeo_(std::random_device()()), genZeroOne_(std::random_device()()), distGeo_(kLowProb), distZeroOne_(0.0, 1.0) {}
+thread_local CoinflipTLS coinflip_tls_;
 
 int sample_geometric() {
-  static thread_local auto gen =
-      std::make_unique<std::mt19937>(std::random_device()());
-  std::geometric_distribution<int> dist(kLowProb);
-  return dist(*gen);
+  return coinflip_tls_.distGeo_(coinflip_tls_.genGeo_);
 }
 
 double sample_zero_one() {
-  static thread_local auto gen =
-      std::make_unique<std::mt19937>(std::random_device()());
-  std::uniform_real_distribution<double> dist(0.0, 1.0);
-  return dist(*gen);
+  return coinflip_tls_.distZeroOne_(coinflip_tls_.genZeroOne_);
 }
 
 } // namespace
@@ -62,6 +66,10 @@ void set_record_function_tls_(const RecordFunctionTLS& tls) {
 class CallbackManager {
  public:
   CallbackHandle addThreadLocalCallback(RecordFunctionCallback cb) {
+    if (cb.samplingProb() > kLowProb) {
+      // pre-sampling of RecordFunction with prob. kLowProb cannot be used
+      at::bumpRecordAllFunctions();
+    }
     // note: monotonically increasing callbacks_unique_id keeps
     // sorted_tls_callbacks_ sorted
     auto handle = next_unique_callback_handle();
@@ -70,6 +78,10 @@ class CallbackManager {
   }
 
   CallbackHandle addGlobalCallback(RecordFunctionCallback cb) {
+    if (cb.samplingProb() > kLowProb) {
+      // pre-sampling of RecordFunction with prob. kLowProb cannot be used
+      at::bumpRecordAllFunctions();
+    }
     auto handle = next_unique_callback_handle();
     sorted_global_callbacks_.emplace_back(std::move(cb), handle);
     return handle;
@@ -86,6 +98,10 @@ class CallbackManager {
           return el.second == handle;
         });
       if (it != cbs.end()) {
+        if (it->first.samplingProb() > kLowProb) {
+          // try to restore pre-sampling of RecordFunction
+          at::releaseRecordAllFunctions();
+        }
         // keeps it sorted
         cbs.erase(it);
         return true;
@@ -117,15 +133,66 @@ class CallbackManager {
     return !rf_tls_.sorted_tls_callbacks_.empty();
   }
 
+  // We need this function to be inlined: init() is a hot path and
+  // callbackShouldRun is even hotter because it's called multiple
+  // times per init(). Profiling shows that the function prologue is
+  // taking up a significant fraction of the time.
+  static bool C10_ALWAYS_INLINE callbackShouldRun(
+      const RecordFunctionCallback& cb, RecordScope scope, bool pre_sampled) {
+    TORCH_INTERNAL_ASSERT(
+        !pre_sampled || (cb.sampling_prob_ <= kLowProb),
+        "Incorrect usage of a pre-sampled RecordFunction with a high-frequency "
+        " or non-sampled callback");
+
+    // first check whether this callback is interested in
+    // the given scope type
+    if (!cb.checkScope(scope)) {
+      return false;
+    }
+    // if we have registered should_run_ function, use it
+    if (cb.should_run_) {
+      return cb.should_run_(cb);
+    }
+
+    // otherwise potentially do the sampling
+    double sampling_prob = cb.sampling_prob_;
+    if (pre_sampled) {
+      // adjust the sampling rate to account for kLowProb pre-sampling of
+      // the RecordFunction
+      sampling_prob /= kLowProb;
+    }
+
+    if (sampling_prob < 1.0) {
+      // model the low probability events as events happening
+      // with probability kLowProb followed by another sampling with
+      // probability (sampling_prob / kLowProb), then replace the coin
+      // flip for kLowProb with a thread local number of tries tries_left_
+      // sampled from the geometric distribution.
+      if (sampling_prob < kLowProb) {
+        if (coinflip_tls_.tries_left_ == 0) {
+          coinflip_tls_.tries_left_ = sample_geometric();
+          return (sample_zero_one() < sampling_prob / kLowProb);
+        } else {
+          --coinflip_tls_.tries_left_;
+          return false;
+        }
+      } else {
+        return (sample_zero_one() < sampling_prob);
+      }
+    }
+
+    return true;
+  }
+
   // init is called by RecordFunction in constructor to
   // determine which thread local and global callbacks are going
   // to be executed and whether any of them need inputs
-  inline void init(RecordFunction& rec_fn, RecordScope scope) {
+  inline void init(RecordFunction& rec_fn, RecordScope scope, bool pre_sampled) {
     bool found_needs_inputs = false;
     bool found_needs_ids = false;
 
     for (const auto& cb: rf_tls_.sorted_tls_callbacks_) {
-      if (cb.first.shouldRun(scope)) {
+      if (callbackShouldRun(cb.first, scope, pre_sampled)) {
         if (cb.first.needsInputs()) {
           found_needs_inputs = true;
         }
@@ -140,7 +207,7 @@ class CallbackManager {
     }
 
     for (const auto& cb: sorted_global_callbacks_) {
-      if (cb.first.shouldRun(scope)) {
+      if (callbackShouldRun(cb.first, scope, pre_sampled)) {
         if (cb.first.needsInputs()) {
           found_needs_inputs = true;
         }
@@ -266,38 +333,6 @@ namespace {
   }
 } // namespace
 
-bool RecordFunctionCallback::shouldRun(RecordScope scope) const {
-  // first check whether this callback is interested in
-  // the given scope type
-  if (!checkScope(scope)) {
-    return false;
-  }
-  // if we have registered should_run_ function, use it
-  if (should_run_) {
-    return should_run_(*this);
-  }
-  // otherwise potentially do the uniform sampling
-  if (sampling_prob_ != 1.0) {
-    // model the low probability events as events happening
-    // with prob. kLowProb followed by another sampling with
-    // prob. (sampling_prob_ / kLowProb), then replace the coin
-    // flip for kLowProb with a thread local number of tries tries_left_
-    // sampled from the geometric distribution
-    if (sampling_prob_ < kLowProb) {
-      if (tries_left_ == 0) {
-        tries_left_ = sample_geometric();
-        return (sample_zero_one() < sampling_prob_ / kLowProb);
-      } else {
-        --tries_left_;
-        return false;
-      }
-    } else {
-      return (sample_zero_one() < sampling_prob_);
-    }
-  }
-  return true;
-}
-
 RecordFunctionCallbacks _getTLSCallbacks() {
   return rf_tls_.sorted_tls_callbacks_;
 }
@@ -363,12 +398,12 @@ void enableRecordFunction(bool enable) {
   rf_tls_.tls_record_function_enabled_ = enable;
 }
 
-RecordFunction::RecordFunction(RecordScope scope) {
+RecordFunction::RecordFunction(RecordScope scope, bool pre_sampled) {
   auto* rf_tls_ptr = &rf_tls_;
   if (rf_tls_ptr->tls_record_function_enabled_) {
     auto& m = manager();
     if (!m.sorted_global_callbacks_.empty() || !rf_tls_ptr->sorted_tls_callbacks_.empty()) {
-      m.init(*this, scope);
+      m.init(*this, scope, pre_sampled);
     }
   }
 }
@@ -437,6 +472,51 @@ void RecordFunction::end() {
   if (isActive() && state_->called_start_callbacks_) {
     manager().runEndCallbacks(*this);
     state_.reset();
+  }
+}
+
+// RecordFunction pre-sampling
+namespace {
+// Whether to try to create RecordFunction on each call (>0) or
+// use pre-sampling (=0)
+std::atomic<int> global_record_all_functions_ {0};
+}
+
+void bumpRecordAllFunctions() {
+  global_record_all_functions_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void releaseRecordAllFunctions() {
+  TORCH_CHECK(global_record_all_functions_.fetch_sub(1, std::memory_order_relaxed) >= 0);
+}
+
+bool checkRecordAllFunctions() {
+  return (global_record_all_functions_.load(std::memory_order_relaxed) > 0);
+}
+
+bool shouldRunRecordFunction(bool* pre_sampled) {
+  auto* rf_tls_ptr = &rf_tls_;
+  if (rf_tls_ptr->sorted_tls_callbacks_.empty() && !manager().hasGlobalCallbacks()) {
+    *pre_sampled = false;
+    return false;
+  }
+  if (global_record_all_functions_.load(std::memory_order_relaxed) > 0) {
+    *pre_sampled = false;
+    return true;
+  }
+  if (!rf_tls_ptr->tls_record_function_enabled_) {
+    *pre_sampled = false;
+    return false;
+  }
+
+  *pre_sampled = true;
+  auto* coinflip_tls_ptr = &coinflip_tls_;
+  if (coinflip_tls_ptr->tries_left_ == 0) {
+    coinflip_tls_ptr->tries_left_ = sample_geometric();
+    return true;
+  } else {
+    --coinflip_tls_ptr->tries_left_;
+    return false;
   }
 }
 

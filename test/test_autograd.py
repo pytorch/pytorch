@@ -29,7 +29,7 @@ from torch.autograd.profiler import (profile, format_time, EventList,
                                      record_function, emit_nvtx)
 import torch.autograd.functional as autogradF
 from torch.utils.checkpoint import checkpoint
-from torch.testing._internal.common_utils import (TEST_MKL, TEST_WITH_ROCM, TestCase, run_tests, skipIfNoLapack,
+from torch.testing._internal.common_utils import (TestCase, run_tests, skipIfNoLapack,
                                                   suppress_warnings, slowTest,
                                                   load_tests, random_symmetric_matrix,
                                                   IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck)
@@ -57,9 +57,6 @@ def getattr_qualified(obj, qname, default=None):
     e.g. getattr(torch, 'fft.rfft')
     """
     path = qname.split('.')
-    if len(path) > 1 and path[0] == 'fft':
-        import torch.fft  # noqa: F401
-
     for name in path:
         obj = getattr(obj, name, _END_SENTINEL)
         if obj is _END_SENTINEL:
@@ -2615,27 +2612,6 @@ class TestAutograd(TestCase):
         self.assertTrue(torch.allclose(input1.grad, input2.grad, rtol=0.01, atol=0.0))
 
     @skipIfNoLapack
-    def test_cholesky_solve(self):
-        def _test_with_size(A_dims, B_dims, upper):
-            root = torch.rand(*A_dims).requires_grad_()
-            b = torch.rand(*B_dims).requires_grad_()
-
-            def func(root, b, upper):
-                if upper:
-                    A = root.triu()
-                else:
-                    A = root.tril()
-                return torch.cholesky_solve(b, A, upper)
-
-            gradcheck(func, [root, b, upper])
-            gradgradcheck(func, [root, b, upper])
-
-        for (a_size, b_size), upper in product([((3, 3), (3, 4)), ((3, 3), (3, 2)),
-                                                ((2, 3, 3), (2, 3, 4)), ((2, 3, 3), (2, 3, 2))],
-                                               [True, False]):
-            _test_with_size(a_size, b_size, upper)
-
-    @skipIfNoLapack
     def test_eig(self):
         def func(B):
             return torch.eig(B, eigenvectors=True)
@@ -2771,94 +2747,6 @@ class TestAutograd(TestCase):
 
         for upper, dims in product([True, False], [(3, 3), (5, 5)]):
             _test_with_size(upper, dims)
-
-    @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
-    def test_fft_ifft_rfft_irfft(self):
-        def _test_complex(sizes, signal_ndim):
-            x = torch.randn(sizes, requires_grad=True, dtype=torch.double)
-
-            for normalized in (True, False):
-                def fft(x):
-                    return x.fft(signal_ndim, normalized=normalized)
-
-                gradcheck(fft, [x])
-                gradgradcheck(fft, [x], gen_non_contig_grad_outputs=True)
-
-                def ifft(fx):
-                    return fx.ifft(signal_ndim, normalized=normalized)
-
-                # Use output of fft(x) for inverse fft, due to symmetry requirements
-                fx = fft(x).detach()
-                fx.requires_grad = True
-                gradcheck(ifft, [fx])
-                gradgradcheck(ifft, [fx], gen_non_contig_grad_outputs=True)
-
-        def _test_real(sizes, signal_ndim):
-            x = torch.randn(sizes, requires_grad=True, dtype=torch.double)
-            if x.dim() == signal_ndim:
-                start_dim = 0
-            else:
-                start_dim = 1
-            signal_sizes = x.size()[start_dim:start_dim + signal_ndim]
-
-            for normalized, onesided in product((True, False), repeat=2):
-                def rfft(x):
-                    return x.rfft(signal_ndim, normalized=normalized, onesided=onesided)
-
-                gradcheck(rfft, [x])
-                gradgradcheck(rfft, [x], gen_non_contig_grad_outputs=True)
-
-                # Generally speaking, irfft itself won't and can't pass the
-                # current gradcheck as it assumes the input follows conjugate
-                # symmetry, an requirement that is never true with our point
-                # numerical Jacobian estimate. Without input symmtry, irfft's
-                # behavior is undefined.
-                #
-                # Even onesided results can't remove all redundancy. For
-                # example, consider the .select(last_signal_dim, 0) slice.
-                # It is entirely represented in the onesided results (except
-                # for 1D), and will be reflected onto itself!
-                #
-                # So only 1D onesided irfft should pass grad check as it is
-                # guaranteed that the input has no symmetrical values.
-                #
-                # In other cases, we test a function that first uses rfft to
-                # generate a tensor that follows the conjugate symmetry irfft
-                # expects, and then feeds it into irfft. Since rfft is already
-                # tested above, we thereby verify the correctness of irfft.
-                if signal_ndim == 1 and onesided:
-                    def irfft(fx):
-                        return fx.irfft(signal_ndim, normalized=normalized,
-                                        onesided=onesided, signal_sizes=signal_sizes)
-
-                    # Use output of rfft(x) for inverse rfft, due to symmetry requirements
-                    fx = rfft(x).detach()
-                    fx.requires_grad = True
-                    gradcheck(irfft, [fx])
-                    gradgradcheck(irfft, [fx], gen_non_contig_grad_outputs=True)
-                else:
-                    # Test this function: f(x) = ifft(rfft(x) + rfft(z)), where
-                    # z is some fixed tensor of same size as x. rfft(z) term is
-                    # needed because otherwise f becomes identity.
-                    z = torch.randn(sizes, dtype=torch.double)
-                    fz = z.rfft(signal_ndim, normalized=normalized, onesided=onesided)
-
-                    def rfft_irfft(x):
-                        fx = x.rfft(signal_ndim, normalized=normalized, onesided=onesided)
-                        y = fx + fz
-                        return y.irfft(signal_ndim, normalized=normalized,
-                                       onesided=onesided, signal_sizes=signal_sizes)
-
-                    gradcheck(rfft_irfft, [x])
-                    gradgradcheck(rfft_irfft, [x], gen_non_contig_grad_outputs=True)
-
-        _test_real((2, 10), 1)
-        _test_real((2, 3, 4), 2)
-        _test_real((2, 3, 4, 3), 3)
-
-        _test_complex((2, 2, 10, 2), 1)
-        _test_complex((1, 2, 3, 4, 2), 2)
-        _test_complex((2, 1, 3, 4, 3, 2), 3)
 
     def test_gradcheck_fail_when_no_differentiable_outputs_and_num_grad_not_zero(self):
         def autograd_fn(input):
@@ -5039,7 +4927,7 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'tensor_split', 'matmul',
                 'bmm', 'mv', 'ger', 'diagonal', 'atan', 'angle', 'tanh', 'fill_', 'sub',
                 'exp', 'mean', 'inverse', 'triangular_solve', 'solve', 'addcmul',
-                'addcdiv', 'linalg.tensorinv', 'matrix_exp'] + separate_complex_tests
+                'addcdiv', 'linalg.tensorinv', 'matrix_exp', 'qr', ] + separate_complex_tests
 
 def add_test(
         name,
@@ -6293,10 +6181,6 @@ class TestAutogradDeviceType(TestCase):
                 self.assertEqual(x.grad.sum(), 1.)
                 self.assertEqual((x.grad == 1 / 3).sum(), 3)
 
-    # skip this test if running on rocm, because in cdist
-    # we use __shfl_down_sync on CUDA for fast reduction
-    # and it gives incorrect results on rocm platform
-    @skipCUDAIfRocm
     def test_cdist(self, device):
         def _test_cdist_for_size(sizex, sizey=None):
             if sizey is None:
@@ -6380,8 +6264,6 @@ class TestAutogradDeviceType(TestCase):
             m = torch.cat((asd, asd))
             m.sum().backward()
 
-    # NOTE: flaky on ROCm CI
-    @skipCUDAIfRocm
     def test_sparse_ctor_getter_backward(self, device):
         # See NOTE [ Sparse: autograd and API ] on the expected behavior of this test
         def _test(size, sparse_dim, nnz, device):
@@ -6702,7 +6584,6 @@ class TestAutogradDeviceType(TestCase):
         grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
         self.assertEqual(grad_cudnn, grad_native, atol=1e-4, rtol=0)
 
-    @skipCUDAIfRocm
     def test_leaky_relu_inplace_with_neg_slope(self, device):
         a = torch.tensor([-1., 1.], device=device, requires_grad=True)
         b = torch.nn.functional.leaky_relu_(a.clone(), -2)
@@ -6714,7 +6595,6 @@ class TestAutogradDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "call out-of-place version"):
             b.backward(torch.ones(2, device=device))
 
-    @skipCUDAIfRocm
     def test_leaky_relu_inplace_with_zero_slope(self, device):
         a = torch.tensor([-2., 0., 2.], device=device, requires_grad=True)
         b = torch.nn.functional.leaky_relu_(a.clone(), 0.0)
@@ -7240,15 +7120,16 @@ class TestAutogradDeviceType(TestCase):
         self.assertEqual(c.grad.stride(), (2, 1))
 
     def test_movedim(self, device):
-        x = torch.randn(4, 3, 2, 1, dtype=torch.double, device=device, requires_grad=True)
+        for fn in [torch.movedim, torch.moveaxis]:
+            x = torch.randn(4, 3, 2, 1, dtype=torch.double, device=device, requires_grad=True)
 
-        # Positive axis
-        gradcheck(lambda x: torch.movedim(x, (0, 1, 2, 3), (3, 2, 1, 0)), x)
-        gradgradcheck(lambda x: torch.movedim(x, (0, 1, 2, 3), (3, 2, 1, 0)), x)
+            # Positive axis
+            gradcheck(lambda x: fn(x, (0, 1, 2, 3), (3, 2, 1, 0)), x)
+            gradgradcheck(lambda x: fn(x, (0, 1, 2, 3), (3, 2, 1, 0)), x)
 
-        # Negative axis
-        gradcheck(lambda x: torch.movedim(x, (0, -1, -2, -3), (-3, -2, -1, -0)), x)
-        gradgradcheck(lambda x: torch.movedim(x, (0, -1, -2, -3), (-3, -2, -1, -0)), x)
+            # Negative axis
+            gradcheck(lambda x: fn(x, (0, -1, -2, -3), (-3, -2, -1, -0)), x)
+            gradgradcheck(lambda x: fn(x, (0, -1, -2, -3), (-3, -2, -1, -0)), x)
 
     def _test_atleast(self, device, torch_fn):
         # 0-dim
@@ -7436,9 +7317,7 @@ for test in method_tests():
 instantiate_device_type_tests(
     TestAutogradDeviceType,
     globals(),
-    # Exclude ROCM for now, there are a lot of failures.  See
-    # https://github.com/pytorch/pytorch/issues/30845
-    except_for='cuda' if TEST_WITH_ROCM else None
+    except_for=None
 )
 
 if __name__ == '__main__':
