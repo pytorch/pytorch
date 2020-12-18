@@ -29,7 +29,7 @@ from torch.autograd.profiler import (profile, format_time, EventList,
                                      record_function, emit_nvtx)
 import torch.autograd.functional as autogradF
 from torch.utils.checkpoint import checkpoint
-from torch.testing._internal.common_utils import (TEST_WITH_ROCM, TestCase, run_tests, skipIfNoLapack,
+from torch.testing._internal.common_utils import (TestCase, run_tests, skipIfNoLapack,
                                                   suppress_warnings, slowTest,
                                                   load_tests, random_symmetric_matrix,
                                                   IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck)
@@ -1160,6 +1160,187 @@ class TestAutograd(TestCase):
             self.assertFalse(torch.is_grad_enabled())
             enable_grad_context_manager_recursive(10)
             self.assertFalse(torch.is_grad_enabled())
+
+    def test_set_grad_coroutines(self):
+        @torch.no_grad()
+        def coro_no_grad(n=10):
+            self.assertFalse(torch.is_grad_enabled())
+            for i in range(n):
+                self.assertFalse(torch.is_grad_enabled())
+                r = yield i
+                self.assertFalse(torch.is_grad_enabled())
+                self.assertEqual(i, r)
+            self.assertFalse(torch.is_grad_enabled())
+
+        @torch.enable_grad()
+        def coro_enable_grad(n=10):
+            self.assertTrue(torch.is_grad_enabled())
+            for i in range(n):
+                self.assertTrue(torch.is_grad_enabled())
+                r = yield i
+                self.assertTrue(torch.is_grad_enabled())
+                self.assertEqual(i, r)
+            self.assertTrue(torch.is_grad_enabled())
+
+        with torch.enable_grad():
+            self.assertTrue(torch.is_grad_enabled())
+            coro, r = coro_no_grad(), None
+            try:
+                while True:
+                    self.assertTrue(torch.is_grad_enabled())
+                    r = coro.send(r)
+                    self.assertTrue(torch.is_grad_enabled())
+
+            except StopIteration:
+                pass
+
+        with torch.no_grad():
+            self.assertFalse(torch.is_grad_enabled())
+            coro, r = coro_enable_grad(), None
+            try:
+                while True:
+                    self.assertFalse(torch.is_grad_enabled())
+                    r = coro.send(r)
+                    self.assertFalse(torch.is_grad_enabled())
+
+            except StopIteration:
+                pass
+
+    def test_set_grad_coroutines_benign_exceptions(self):
+        class RecoverableException(Exception):
+            pass
+
+        @torch.no_grad()
+        def coro_no_grad(n=10):
+            has_raised = False
+            for i in range(n):
+                try:
+                    self.assertFalse(torch.is_grad_enabled())
+                    yield (-i if has_raised else i)
+
+                except RecoverableException:
+                    self.assertFalse(torch.is_grad_enabled())
+                    has_raised = True
+
+        @torch.enable_grad()
+        def coro_enable_grad(n=10):
+            has_raised = False
+            for i in range(n):
+                try:
+                    self.assertTrue(torch.is_grad_enabled())
+                    yield (-i if has_raised else i)
+
+                except RecoverableException:
+                    self.assertTrue(torch.is_grad_enabled())
+                    has_raised = True
+
+        with torch.enable_grad():
+            coro = coro_no_grad()
+            assert 0 == next(coro)
+            try:
+                while True:
+                    r = coro.throw(RecoverableException)
+                    self.assertLess(r, 0)
+
+            except StopIteration:
+                pass
+
+        with torch.no_grad():
+            coro = coro_enable_grad()
+            assert 0 == next(coro)
+            try:
+                while True:
+                    r = coro.throw(RecoverableException)
+                    self.assertLess(r, 0)
+
+            except StopIteration:
+                pass
+
+    def test_set_grad_coroutines_critical_exceptions(self):
+        class UnrecoverableException(Exception):
+            pass
+
+        class SecondaryException(Exception):
+            pass
+
+        @torch.no_grad()
+        def coro_no_grad(n=10):
+            has_raised = False
+            for i in range(n):
+                try:
+                    self.assertFalse(torch.is_grad_enabled())
+                    yield (-i if has_raised else i)
+
+                except UnrecoverableException:
+                    self.assertFalse(torch.is_grad_enabled())
+                    raise SecondaryException
+
+        @torch.enable_grad()
+        def coro_enable_grad(n=10):
+            has_raised = False
+            for i in range(n):
+                try:
+                    self.assertTrue(torch.is_grad_enabled())
+                    yield (-i if has_raised else i)
+
+                except UnrecoverableException:
+                    self.assertTrue(torch.is_grad_enabled())
+                    raise SecondaryException
+
+        with torch.enable_grad():
+            coro = coro_no_grad()
+            assert 0 == next(coro)
+            with self.assertRaises(SecondaryException):
+                coro.throw(UnrecoverableException)
+
+        with torch.no_grad():
+            coro = coro_enable_grad()
+            assert 0 == next(coro)
+            with self.assertRaises(SecondaryException):
+                coro.throw(UnrecoverableException)
+
+    def test_set_grad_coroutines_exit(self):
+        @torch.no_grad()
+        def coro_no_grad(state):
+            for i in range(10):
+                try:
+                    self.assertFalse(torch.is_grad_enabled())
+                    yield i
+
+                except GeneratorExit:
+                    self.assertFalse(torch.is_grad_enabled())
+                    state.add('GeneratorExit')
+                    raise
+
+        @torch.enable_grad()
+        def coro_enable_grad(state):
+            for i in range(10):
+                try:
+                    self.assertTrue(torch.is_grad_enabled())
+                    yield i
+
+                except GeneratorExit:
+                    self.assertTrue(torch.is_grad_enabled())
+                    state.add('GeneratorExit')
+                    raise
+
+        state = set()
+        with torch.enable_grad():
+            coro = coro_no_grad(state)
+            for i in range(5):
+                next(coro)
+
+            coro.close()
+        self.assertTrue('GeneratorExit' in state)
+
+        state = set()
+        with torch.no_grad():
+            coro = coro_enable_grad(state)
+            for i in range(5):
+                next(coro)
+
+            coro.close()
+        self.assertTrue('GeneratorExit' in state)
 
     def test_no_grad_python_function(self):
         """Python Functions should respect grad mode."""
@@ -4927,7 +5108,7 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'tensor_split', 'matmul',
                 'bmm', 'mv', 'ger', 'diagonal', 'atan', 'angle', 'tanh', 'fill_', 'sub',
                 'exp', 'mean', 'inverse', 'triangular_solve', 'solve', 'addcmul',
-                'addcdiv', 'linalg.tensorinv', 'matrix_exp'] + separate_complex_tests
+                'addcdiv', 'linalg.tensorinv', 'matrix_exp', 'qr', ] + separate_complex_tests
 
 def add_test(
         name,
@@ -6181,10 +6362,6 @@ class TestAutogradDeviceType(TestCase):
                 self.assertEqual(x.grad.sum(), 1.)
                 self.assertEqual((x.grad == 1 / 3).sum(), 3)
 
-    # skip this test if running on rocm, because in cdist
-    # we use __shfl_down_sync on CUDA for fast reduction
-    # and it gives incorrect results on rocm platform
-    @skipCUDAIfRocm
     def test_cdist(self, device):
         def _test_cdist_for_size(sizex, sizey=None):
             if sizey is None:
@@ -6268,8 +6445,6 @@ class TestAutogradDeviceType(TestCase):
             m = torch.cat((asd, asd))
             m.sum().backward()
 
-    # NOTE: flaky on ROCm CI
-    @skipCUDAIfRocm
     def test_sparse_ctor_getter_backward(self, device):
         # See NOTE [ Sparse: autograd and API ] on the expected behavior of this test
         def _test(size, sparse_dim, nnz, device):
@@ -6590,7 +6765,6 @@ class TestAutogradDeviceType(TestCase):
         grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
         self.assertEqual(grad_cudnn, grad_native, atol=1e-4, rtol=0)
 
-    @skipCUDAIfRocm
     def test_leaky_relu_inplace_with_neg_slope(self, device):
         a = torch.tensor([-1., 1.], device=device, requires_grad=True)
         b = torch.nn.functional.leaky_relu_(a.clone(), -2)
@@ -6602,7 +6776,6 @@ class TestAutogradDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "call out-of-place version"):
             b.backward(torch.ones(2, device=device))
 
-    @skipCUDAIfRocm
     def test_leaky_relu_inplace_with_zero_slope(self, device):
         a = torch.tensor([-2., 0., 2.], device=device, requires_grad=True)
         b = torch.nn.functional.leaky_relu_(a.clone(), 0.0)
@@ -7325,9 +7498,7 @@ for test in method_tests():
 instantiate_device_type_tests(
     TestAutogradDeviceType,
     globals(),
-    # Exclude ROCM for now, there are a lot of failures.  See
-    # https://github.com/pytorch/pytorch/issues/30845
-    except_for='cuda' if TEST_WITH_ROCM else None
+    except_for=None
 )
 
 if __name__ == '__main__':
