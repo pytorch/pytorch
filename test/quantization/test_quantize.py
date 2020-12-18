@@ -536,6 +536,26 @@ class TestPostTrainingStatic(QuantizationTestCase):
         self.assertTrue('QuantizedLinear' in str(model))
         self.checkQuantizedLinear(model.fc)
 
+    @skipIfNoFBGEMM
+    def test_dequant_stub(self):
+        m = QuantStubModel().eval()
+        prepare(m, inplace=True)
+        self.checkObservers(m)
+        convert(m, inplace=True)
+        self.assertEqual(type(m.quant), nnq.Quantize)
+        self.assertEqual(type(m.fc), nnq.Linear)
+        self.assertEqual(type(m.dequant), nnq.DeQuantize)
+
+        # check DeQuantStub is not swapped when it doesn't have a qconfig
+        m2 = QuantStubModel().eval()
+        m2.dequant.qconfig = None
+        prepare(m2, inplace=True)
+        self.checkObservers(m2)
+        convert(m2, inplace=True)
+        self.assertEqual(type(m2.quant), nnq.Quantize)
+        self.assertEqual(type(m2.fc), nnq.Linear)
+        self.assertEqual(type(m2.dequant), DeQuantStub)
+
 
     @skipIfNoFBGEMM
     def test_quantized_embedding_bag(self):
@@ -1219,6 +1239,49 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
         model(x)
         torch.quantization.convert(model, inplace=True)
         checkHooksIsPresent(model, False)
+
+    def test_add_scalar_uses_input_qparams(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quant = torch.quantization.QuantStub()
+                self.ff = torch.nn.quantized.FloatFunctional()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.ff.add_scalar(x, 1.0)
+                return x
+
+        m = M()
+        m.qconfig = torch.quantization.default_qconfig
+        mp = torch.quantization.prepare_qat(m)
+        mp(torch.randn(4, 4))
+        mq = torch.quantization.convert(mp)
+        res = mq(torch.randn(4, 4))
+        eps = 1e-5
+        self.assertTrue(torch.abs(mq.quant.scale - res.q_scale()) < eps)
+
+    def test_mul_scalar_uses_input_qparams(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quant = torch.quantization.QuantStub()
+                self.ff = torch.nn.quantized.FloatFunctional()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.ff.mul_scalar(x, 2.0)
+                return x
+
+        m = M()
+        m.qconfig = torch.quantization.default_qconfig
+        mp = torch.quantization.prepare_qat(m)
+        mp(torch.randn(4, 4))
+        mq = torch.quantization.convert(mp)
+        res = mq(torch.randn(4, 4))
+        eps = 1e-5
+        self.assertTrue(torch.abs(mq.quant.scale * 2 - res.q_scale()) < eps)
+
 
 class TestEagerModeOps(QuantizationTestCase):
     def _test_activation_op_impl(
