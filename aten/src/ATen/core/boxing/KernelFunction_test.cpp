@@ -334,7 +334,7 @@ void expectUnboxedCallingWithReturnWorks(const KernelFunction& func) {
   called_with_args = c10::nullopt;
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  int64_t result = func.call<int64_t, int64_t, int64_t>(dummy, 3, 4);
+  int64_t result = func.call<int64_t, int64_t, int64_t>(dummy, c10::DispatchKeySet(), 3, 4);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -347,7 +347,7 @@ void expectUnboxedCallingWithoutReturnWorks(const KernelFunction& func) {
   called_with_args = c10::nullopt;
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  func.call<void, int64_t, int64_t>(dummy, 3, 4);
+  func.call<void, int64_t, int64_t>(dummy, c10::DispatchKeySet(), 3, 4);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -360,7 +360,7 @@ void expectUnboxedCallingWithMultiReturnWorks(const KernelFunction& func) {
   called_with_args = c10::nullopt;
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  auto result = func.call<std::tuple<int64_t, int64_t>, int64_t, int64_t>(dummy, 3, 4);
+  auto result = func.call<std::tuple<int64_t, int64_t>, int64_t, int64_t>(dummy, c10::DispatchKeySet(), 3, 4);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -374,7 +374,7 @@ void expectInPlaceUnboxedCallingWorks(const KernelFunction& func) {
   OperatorHandle dummy = makeDummyOperatorHandle();
 
   auto t = at::zeros({1});
-  at::Tensor& t_out = func.call<at::Tensor&, at::Tensor&, at::Scalar>(dummy, t, 1.0f);
+  at::Tensor& t_out = func.call<at::Tensor&, at::Tensor&, at::Scalar>(dummy, c10::DispatchKeySet(), t, 1.0f);
 
   // should have updated first arg and returned it
   EXPECT_EQ(t.item().toFloat(), 1.0f);
@@ -385,7 +385,7 @@ void expectOutOfPlaceUnboxedCallingWorks(const KernelFunction& func) {
   OperatorHandle dummy = makeDummyOperatorHandle();
 
   auto t = at::zeros({1});
-  at::Tensor& t_out = func.call<at::Tensor&, at::Scalar, at::Tensor&>(dummy, 1.0f, t);
+  at::Tensor& t_out = func.call<at::Tensor&, at::Scalar, at::Tensor&>(dummy, c10::DispatchKeySet(), 1.0f, t);
 
   // should have updated out arg and returned it
   EXPECT_EQ(t.item().toFloat(), 1.0f);
@@ -402,7 +402,7 @@ void expectOutOfPlaceMultiUnboxedCallingWorks(const KernelFunction& func) {
 
   std::tuple<at::Tensor&, at::Tensor&> tup = func.call<
     std::tuple<at::Tensor&, at::Tensor&>, at::Tensor&, at::Tensor&, at::Scalar, at::Scalar
-  >(dummy, t1, t2, s1, s2);
+  >(dummy, c10::DispatchKeySet(), t1, t2, s1, s2);
 
   // kernel should have updated out args and returned them in a tuple
   EXPECT_EQ(t1.item().toFloat(), 1.0f);
@@ -427,7 +427,7 @@ void expectLegacyOutOfPlaceMultiUnboxedCallingWorks(const KernelFunction& func) 
 
   std::tuple<at::Tensor&, at::Tensor&> tup = func.call<
     std::tuple<at::Tensor&, at::Tensor&>, at::Scalar, at::Scalar, at::Tensor&, at::Tensor&
-  >(dummy, s1, s2, t1, t2);
+  >(dummy, c10::DispatchKeySet(), s1, s2, t1, t2);
 
   // kernel should have updated out args and returned them in a tuple
   EXPECT_EQ(t1.item().toFloat(), 1.0f);

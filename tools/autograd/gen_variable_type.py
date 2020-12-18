@@ -210,12 +210,12 @@ grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 
 CALL_DISPATCH_VIA_NAMESPACE = CodeTemplate("""\
 c10::Dispatcher::singleton()
-  .redispatch_withKey<${ret_and_arg_types}>(${redispatch_args})""")
+  .redispatch<${ret_and_arg_types}>(${redispatch_args})""")
 # at::${api_name}(${unpacked_args})""")
 
 CALL_DISPATCH_VIA_METHOD = CodeTemplate("""\
 c10::Dispatcher::singleton()
-  .redispatch_withKey<${ret_and_arg_types}>(${redispatch_args})""")
+  .redispatch<${ret_and_arg_types}>(${redispatch_args})""")
 # ${var}.${api_name}(${unpacked_method_args})""")
 
 # If the non-variable operation has return values, we use the `tmp` variable to hold the

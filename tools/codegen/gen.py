@@ -623,7 +623,7 @@ class ComputeFunction:
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
         .typed<{dispatcher_sig.type()}>();
-    return op.call_withKey({dispatcher_exprs_str});
+    return op.call({dispatcher_exprs_str});
 }}
 """
 
@@ -678,7 +678,7 @@ class ComputeTensorMethod:
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
         .typed<{dispatcher_sig.type()}>();
-    return op.call_withKey({dispatcher_exprs_str});
+    return op.call({dispatcher_exprs_str});
 }}
 """
 
@@ -834,7 +834,7 @@ DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::mult
     .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
     .typed<{dispatcher_sig.type()}>();
   {compute_dk}
-  return op.callWithDispatchKey_withKey(_dk, {', '.join(a.expr for a in dispatcher_exprs)});
+  return op.callWithDispatchKey_withKeys(_dk, {', '.join(a.expr for a in dispatcher_exprs)});
 }}
 """
         elif self.target is Target.REGISTRATION:

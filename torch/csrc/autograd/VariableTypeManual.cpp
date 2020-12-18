@@ -218,7 +218,7 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
       .findSchemaOrThrow("aten::copy_", "")
       .typed<Tensor & (Tensor &, const Tensor &, bool)>();
     c10::Dispatcher::singleton()
-      .redispatch_withKey<Tensor &, Tensor &, const Tensor &, bool>(op, ks & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther), self_, src_, non_blocking);
+      .redispatch<Tensor &, Tensor &, const Tensor &, bool>(op, ks & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther), self_, src_, non_blocking);
   }
   increment_version(self);
   rebase_history(self , std::move(grad_fn));
@@ -241,7 +241,7 @@ Tensor& resize_(
       .findSchemaOrThrow("aten::resize_", "")
       .typed<Tensor & (Tensor &, IntArrayRef, c10::optional<MemoryFormat>)>();
     c10::Dispatcher::singleton()
-      .redispatch_withKey<Tensor &, Tensor &, IntArrayRef, c10::optional<MemoryFormat>>(op, ks & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther), self_, size, std::move(optional_memory_format));
+      .redispatch<Tensor &, Tensor &, IntArrayRef, c10::optional<MemoryFormat>>(op, ks & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther), self_, size, std::move(optional_memory_format));
   }
   return self;
 }
@@ -263,7 +263,7 @@ Tensor& resize_as_(
       .findSchemaOrThrow("aten::resize_as_", "")
       .typed<Tensor & (Tensor &, const Tensor &, c10::optional<MemoryFormat>)>();
     c10::Dispatcher::singleton()
-      .redispatch_withKey<Tensor &, Tensor &, const Tensor &, c10::optional<MemoryFormat>>(op, ks & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther), self_, the_template_, std::move(optional_memory_format));
+      .redispatch<Tensor &, Tensor &, const Tensor &, c10::optional<MemoryFormat>>(op, ks & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther), self_, the_template_, std::move(optional_memory_format));
   }
   return self;
 }

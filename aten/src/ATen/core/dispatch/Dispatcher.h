@@ -123,7 +123,7 @@ public:
 
   // TODO: temp
   template<class Return, class... Args>
-  Return call_withKey(const TypedOperatorHandle<Return (Args...)>& op, Args... args) const;
+  Return call_withKeys(const TypedOperatorHandle<Return (Args...)>& op, Args... args) const;
 
   // Like call, but override the default DispatchKey calculation code,
   // instead dispatching straight to the provided DispatchKey
@@ -132,7 +132,7 @@ public:
 
   // TODO: temp
   template<class Return, class... Args>
-  Return callWithDispatchKey_withKey(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet dispatchKeySet, Args... args) const;
+  Return callWithDispatchKey_withKeys(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet dispatchKeySet, Args... args) const;
 
   // Like call, but intended for use in a redispatch: you are currently
   // in some currentDispatchKey, you have finished processing the key and
@@ -140,11 +140,11 @@ public:
   // This will mask out the current key *and all previous keys* from the
   // eligible set, and reinvoke the dispatcher.
   template<class Return, class... Args>
-  Return redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKey currentDispatchKey, Args... args) const;
+  Return redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet currentDispatchKeySet, Args... args) const;
 
   // TODO: temp
   template<class Return, class... Args>
-  Return redispatch_withKey(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet currentDispatchKeySet, Args... args) const;
+  Return redispatch_withKeys(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet currentDispatchKeySet, Args... args) const;
 
   // Invoke an operator via the boxed calling convention using an IValue stack
   void callBoxed(const OperatorHandle& op, Stack* stack) const;
@@ -362,8 +362,8 @@ public:
   }
 
   // TODO: temp
-  Return call_withKey(Args... args) const {
-    return c10::Dispatcher::singleton().call_withKey<Return, Args...>(*this, std::forward<Args>(args)...);
+  Return call_withKeys(Args... args) const {
+    return c10::Dispatcher::singleton().call_withKeys<Return, Args...>(*this, std::forward<Args>(args)...);
   }
 
   Return callWithDispatchKey(DispatchKeySet dispatchKeySet, Args... args) const {
@@ -371,8 +371,8 @@ public:
   }
 
   // TODO: temp
-  Return callWithDispatchKey_withKey(DispatchKeySet dispatchKeySet, Args... args) const {
-    return c10::Dispatcher::singleton().callWithDispatchKey_withKey<Return, Args...>(*this, dispatchKeySet, std::forward<Args>(args)...);
+  Return callWithDispatchKey_withKeys(DispatchKeySet dispatchKeySet, Args... args) const {
+    return c10::Dispatcher::singleton().callWithDispatchKey_withKeys<Return, Args...>(*this, dispatchKeySet, std::forward<Args>(args)...);
   }
 
 private:
@@ -426,14 +426,14 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
       }
     }
     // keeping the guard alive while executing the kernel
-    return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
+    return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
   }
 #endif  // PYTORCH_DISABLE_PER_OP_PROFILING
-  return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
+  return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
 }
 
 template<class Return, class... Args>
-inline Return Dispatcher::callWithDispatchKey_withKey(const TypedOperatorHandle<Return(Args...)>& op, DispatchKeySet dispatchKeySet, Args... args) const {
+inline Return Dispatcher::callWithDispatchKey_withKeys(const TypedOperatorHandle<Return(Args...)>& op, DispatchKeySet dispatchKeySet, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::isAliasDispatchKey(dispatchKeySet.highestPriorityTypeId()));
   const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKeySet.highestPriorityTypeId());
@@ -456,10 +456,10 @@ inline Return Dispatcher::callWithDispatchKey_withKey(const TypedOperatorHandle<
         }
       }
     }
-    return kernel.template call_withKey<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
+    return kernel.template call_withKeys<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
   }
 #endif  // PYTORCH_DISABLE_PER_OP_PROFILING
-  return kernel.template call_withKey<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
+  return kernel.template call_withKeys<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
 }
 
 template<class Return, class... Args>
@@ -475,32 +475,18 @@ inline Return Dispatcher::call(const TypedOperatorHandle<Return(Args...)>& op, A
 
 // TODO: temp
 template<class Return, class... Args>
-inline Return Dispatcher::call_withKey(const TypedOperatorHandle<Return(Args...)>& op, Args... args) const {
+inline Return Dispatcher::call_withKeys(const TypedOperatorHandle<Return(Args...)>& op, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   auto dispatchKeySet = op.operatorIterator_->op.dispatchKeyExtractor()
     .template getDispatchKeyUnboxed<Args...>(
       DispatchKeySet::FULL,
       args...
     );
-  return callWithDispatchKey_withKey<Return, Args...>(op, dispatchKeySet, args...);
+  return callWithDispatchKey_withKeys<Return, Args...>(op, dispatchKeySet, args...);
 }
 
 template<class Return, class... Args>
-inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKey currentDispatchKey, Args... args) const {
-  detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
-  auto currentDispatchKeySet = op.operatorIterator_->op.dispatchKeyExtractor()
-    .template getDispatchKeyUnboxed<Args...>(
-      DispatchKeySet(DispatchKeySet::FULL_AFTER, currentDispatchKey),
-      args...
-    );
-  // do not use RecordFunction on redispatch
-  const KernelFunction& kernel = op.operatorIterator_->op.lookup(currentDispatchKeySet.highestPriorityTypeId());
-  return kernel.template call_withKey<Return, Args...>(op, currentDispatchKeySet, std::forward<Args>(args)...);
-}
-
-// TODO: temp
-template<class Return, class... Args>
-inline Return Dispatcher::redispatch_withKey(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet currentDispatchKeySet, Args... args) const {
+inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet currentDispatchKeySet, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   //auto currentDispatchKeySet = op.operatorIterator_->op.dispatchKeyExtractor()
     //.template getDispatchKeyUnboxed<Args...>(
@@ -509,7 +495,21 @@ inline Return Dispatcher::redispatch_withKey(const TypedOperatorHandle<Return (A
     //);
   // do not use RecordFunction on redispatch
   const KernelFunction& kernel = op.operatorIterator_->op.lookup(currentDispatchKeySet.highestPriorityTypeId());
-  return kernel.template call_withKey<Return, Args...>(op, currentDispatchKeySet, std::forward<Args>(args)...);
+  return kernel.template call_withKeys<Return, Args...>(op, currentDispatchKeySet, std::forward<Args>(args)...);
+}
+
+// TODO: temp
+template<class Return, class... Args>
+inline Return Dispatcher::redispatch_withKeys(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet currentDispatchKeySet, Args... args) const {
+  detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
+  //auto currentDispatchKeySet = op.operatorIterator_->op.dispatchKeyExtractor()
+    //.template getDispatchKeyUnboxed<Args...>(
+      //DispatchKeySet(DispatchKeySet::FULL_AFTER, currentDispatchKey),
+      //args...
+    //);
+  // do not use RecordFunction on redispatch
+  const KernelFunction& kernel = op.operatorIterator_->op.lookup(currentDispatchKeySet.highestPriorityTypeId());
+  return kernel.template call_withKeys<Return, Args...>(op, currentDispatchKeySet, std::forward<Args>(args)...);
 }
 
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {

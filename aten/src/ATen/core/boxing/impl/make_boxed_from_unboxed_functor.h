@@ -457,8 +457,11 @@ namespace impl {
     static_assert(std::is_same<guts::typelist::typelist<ParameterTypes...>, typename guts::infer_function_traits_t<KernelFunctor>::parameter_types>::value,
       "Parameter types mismatch");
 
-    static ReturnType call(OperatorKernel* functor, ParameterTypes... args) {
+    static ReturnType call(OperatorKernel* functor, DispatchKeySet dispatchKeySet, ParameterTypes... args) {
       KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
+      // We're explicitly taking in a dispatchKeySet and not forwarding it to the registered kernel.
+      // This functor is used by all kernels that do not expect to take in a DispatchKeySet,
+      // i.e. pretty much all manually written kernels
       return (*functor_)(std::forward<ParameterTypes>(args)...);
     }
   };
@@ -469,24 +472,27 @@ namespace impl {
   // TODO: temp
   // this version of wrap_kernel_functor_unboxed explicitly removes the first argument from the function type
   // and passes in a DispatchKeySet.
-  //template<class KernelFunctor, class OpSignature>
-  //struct wrap_kernel_functor_unboxed_withKey_ final {};
+  template<class KernelFunctor, class OpSignature>
+  struct wrap_kernel_functor_unboxed_withKeys_ final {};
 
-  //template<class KernelFunctor, class ReturnType, class... ParameterTypes>
-  //struct wrap_kernel_functor_unboxed_withKey_<KernelFunctor, ReturnType(ParameterTypes...)> final {
-    //static_assert(std::is_same<ReturnType, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value,
-      //"Return type mismatch");
-    //static_assert(std::is_same<guts::typelist::typelist<ParameterTypes...>, typename guts::infer_function_traits_t<KernelFunctor>::parameter_types>::value,
-      //"Parameter types mismatch");
+  template<class KernelFunctor, class ReturnType, class... ParameterTypes>
+  struct wrap_kernel_functor_unboxed_withKeys_<KernelFunctor, ReturnType(ParameterTypes...)> final {
+    static_assert(std::is_same<ReturnType, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value,
+      "Return type mismatch");
+    static_assert(std::is_same<guts::typelist::typelist<DispatchKeySet, ParameterTypes...>, typename guts::infer_function_traits_t<KernelFunctor>::parameter_types>::value,
+      "Parameter types mismatch");
 
-    //static ReturnType call(OperatorKernel* functor, DispatchKeySet dispatchKeySet, ParameterTypes... args) {
-      //KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
-      //return (*functor_)(dispatchKeySet, std::forward<ParameterTypes>(args)...);
-    //}
-  //};
+    static ReturnType call(OperatorKernel* functor, DispatchKeySet dispatchKeySet, ParameterTypes... args) {
+      KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
+      // We're explicitly taking in a dispatchKeySet and forwarding it to the registered kernel.
+      // TODO: better note.
+      // TODO: maybe don't bother with explicitly removing the first arg from ParameterTypes with infer_function_traits?
+      return (*functor_)(dispatchKeySet, std::forward<ParameterTypes>(args)...);
+    }
+  };
 
-  //template<class KernelFunctor>
-  //using wrap_kernel_functor_unboxed_withKey = wrap_kernel_functor_unboxed_withKey_<KernelFunctor, typename guts::infer_function_traits_withKey_t<KernelFunctor>::func_type>;
+  template<class KernelFunctor>
+  using wrap_kernel_functor_unboxed_withKeys = wrap_kernel_functor_unboxed_withKeys_<KernelFunctor, typename guts::infer_function_traits_withKeys_t<KernelFunctor>::func_type>;
 } // namespace impl
 
 } // namespace c10

@@ -176,7 +176,7 @@ public:
   static CppFunction makeUnboxedOnly_withKeys(Func* f) {
     // TODO: Eliminate the necessity for this function entirely.
     return CppFunction(
-      c10::KernelFunction::makeFromUnboxedOnlyRuntimeFunction(f),
+      c10::KernelFunction::makeFromUnboxedOnlyRuntimeFunction_withKeys(f),
       /* cpp_signature */ c10::impl::CppSignature::make_withKeys<Func>(),
       /* schema */ nullptr
     );

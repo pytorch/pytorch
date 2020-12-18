@@ -96,10 +96,10 @@ public:
    * > Tensor result = func.call<Tensor, Tensor, bool>(tensor1, true);
    */
   template<class Return, class... Args>
-  Return call(const OperatorHandle& opHandle, Args... args) const;
+  Return call(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Args... args) const;
 
   template<class Return, class... Args>
-  Return call_withKey(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Args... args) const;
+  Return call_withKeys(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Args... args) const;
 
   /**
    * Create a KernelFunction from a boxed function.
@@ -149,6 +149,10 @@ public:
   template<class KernelFunctor>
   static KernelFunction makeFromUnboxedOnlyFunctor(std::unique_ptr<OperatorKernel> kernelFunctor);
 
+  // TODO: temp
+  template<class KernelFunctor>
+  static KernelFunction makeFromUnboxedOnlyFunctor_withKeys(std::unique_ptr<OperatorKernel> kernelFunctor);
+
   /**
    * Create a KernelFunction from an unboxed function.
    * This is usually better than KernelFunction::makeFromUnboxedRuntimeFunction
@@ -184,6 +188,10 @@ public:
   template<class FuncPtr>
   static KernelFunction makeFromUnboxedOnlyFunction(FuncPtr);
 
+  // TODO: temp
+  template<class FuncPtr>
+  static KernelFunction makeFromUnboxedOnlyFunction_withKeys(FuncPtr);
+
   /**
    * Create a KernelFunction from an unboxed function.
    * KernelFunction::makeFromUnboxedFunction is usually a better choice than
@@ -203,6 +211,10 @@ public:
 
   template<class FuncType>
   static KernelFunction makeFromUnboxedOnlyRuntimeFunction(FuncType* func);
+
+  // TODO: temp
+  template<class FuncType>
+  static KernelFunction makeFromUnboxedOnlyRuntimeFunction_withKeys(FuncType* func);
 
   static KernelFunction makeFallthrough();
   static KernelFunction makeAmbiguousAutogradOther();
