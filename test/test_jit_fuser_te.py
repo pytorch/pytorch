@@ -1354,12 +1354,17 @@ class TestTEFuser(JitTestCase):
                 continue
 
             inp = inp.to(device=device, dtype=dtype)
-            f = torch.jit.trace(lambda x: x.isnan(), (inp,))
-            warmup_forward(f, inp)
-            self.assertEqual(f(inp), inp.isnan())
-            self.assertLastGraphAllFused()
+            try:
+                f = torch.jit.trace(lambda x: x.isnan(), (inp,))
+                warmup_forward(f, inp)
+                self.assertEqual(f(inp), inp.isnan())
+                self.assertLastGraphAllFused()
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), 'isnan', device])
+                )
 
-    @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")
+    # @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")
     def test_unary_ops(self):
         def apply(fn):
             return lambda x: fn(x)
@@ -1389,7 +1394,6 @@ class TestTEFuser(JitTestCase):
             torch.tanh,
             torch.sqrt,
             torch.rsqrt,
-            # FIXME: Fails in IR Eval: torch.int8 abs cpu (1,)
             torch.abs,
             torch.ceil,
             torch.floor,
@@ -1419,12 +1423,10 @@ class TestTEFuser(JitTestCase):
                     " ".join(["Failed:", str(dtype), op.__name__, device, str(size)])
                 )
 
-    @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")
     def test_binary_ops(self):
         def apply(fn):
             return lambda x, y: fn(x, y)
 
-        # FIXME: Fails in IR Eval: torch.int8 and_ cpu
         binary_ops = [
             operator.__and__,
             operator.__or__,
