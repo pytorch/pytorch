@@ -29,7 +29,15 @@ RegisterOperators reg(
     {Operator(
          prim::profile,
          [](const Node* node) -> Operation {
-           auto callback = node->cast<ProfileOp>()->getCallback();
+           return [](Stack* stack) {
+             AT_ERROR(
+                 "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
+         prim::profile_ivalue,
+         [](const Node* node) -> Operation {
            return [](Stack* stack) {
              AT_ERROR(
                  "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
@@ -337,6 +345,34 @@ RegisterOperators reg(
          "prim::AutogradZero() -> Tensor",
          [](Stack* stack) { stack->emplace_back(at::Tensor()); },
          aliasAnalysisSpecialCase()),
+     Operator(
+         "prim::ReductionSizes(int[] size, int[] red_axes, bool keepdim = False) -> int[]",
+         [](Stack* stack) {
+           bool keepdim = pop(stack).toBool();
+           c10::List<int64_t> axes = pop(stack).toIntList();
+           c10::List<int64_t> size = pop(stack).toIntList();
+           if (keepdim) {
+             for (const auto& axis : axes) {
+               size.set(axis, 1);
+             }
+           } else {
+             int64_t index = 0;
+             auto iter = size.begin();
+             std::sort(axes.begin(), axes.end());
+             for (const auto& axis : axes) {
+               // move iter to the next axis
+               iter += axis - index;
+
+               // input iter points to axis and is updated to axis + 1
+               iter = size.erase(iter);
+
+               // update current index for iter
+               index = axis + 1;
+             }
+           }
+           push(stack, IValue(std::move(size)));
+         },
+         aliasAnalysisFromSchema()),
      Operator(
          "prim::BroadcastSizes(...) -> int[]",
          [](Stack* stack) {
@@ -683,10 +719,6 @@ RegisterOperators reg2({
 
     // `listContains<T>` is not implemented for non-primitive types
     // TODO: Add List[bool] once .to<c10::List<bool>> doesn't throw an error
-    Operator(
-        "aten::__contains__.int_list(int[] l, int item) -> bool",
-        listContains<int64_t>,
-        aliasAnalysisFromSchema()),
     Operator(
         "aten::__contains__.float_list(float[] l, float item) -> bool",
         listContains<double>,
