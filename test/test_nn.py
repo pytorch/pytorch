@@ -4649,6 +4649,14 @@ class TestNN(NNTestCase):
     def test_loss_equal_input_target_shape(self):
         self._test_loss_equal_input_target_shape(lambda x: x)
 
+    def test_mse_loss_correct(self):
+        for dtype in [torch.float, torch.cfloat]:
+            for N in range(1, 50, 10):
+                input = torch.rand(N, 3, 1024, 1024, dtype=dtype)
+                self.assertEqual(
+                    torch.nn.MSELoss()(input, torch.zeros_like(input)),
+                    (input * input).mean())
+
     def test_mse_loss_size_warning(self):
         i = torch.randn((10, 1), requires_grad=True)
         t = torch.randn((10,))
