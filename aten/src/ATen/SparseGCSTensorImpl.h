@@ -8,10 +8,7 @@
 #include <c10/util/Exception.h>
 
 namespace at {
-  
-// TODO: since many methods in SparseTensorImpl can be used by GCS sparse tensor directly
-// we probably should have some superclass between TensorImpl and GCSTensorImpl that is
-// shared between COO and GCS tensors.
+
 struct CAFFE2_API SparseGCSTensorImpl : public TensorImpl {
   Tensor pointers_;
   Tensor indices_;

@@ -983,7 +983,6 @@ class Tensor(torch._C._TensorBase):
         def apply_reduction(index, strides, dims):
             return sum(strides[k] * index[dims[k]] for k in range(len(dims)))
 
-        print("shape ", self.shape)
         shape = self.size()
         N = len(shape)
         # TODO: N=0, N=1
