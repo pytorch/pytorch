@@ -226,6 +226,14 @@ def prepare_fx(
            torch.nn.Conv2d: ConvReluQuantizeHandler,
            (torch.nn.ReLU, torch.nn.Conv2d): ConvReluQuantizeHandler,
         }
+
+        # By default, inputs and outputs of the graph are assumed to be in
+        # fp32. Providing `input_quantized_idxs` will set the inputs with the
+        # corresponding indices to be quantized. Providing
+        # `output_quantized_idxs` will set the outputs with the corresponding
+        # indices to be quantized.
+        "input_quantized_idxs": [0],
+        "output_quantized_idxs": [0],
       }
 
 
@@ -342,14 +350,6 @@ def convert_fx(
                  ObservedCustomModule: QuantizedCustomModule
              }
           }
-
-          # By default, inputs and outputs of the graph are assumed to be in
-          # fp32. Providing `input_quantized_idxs` will set the inputs with the
-          # corresponding indices to be quantized. Providing
-          # `output_quantized_idxs` will set the outputs with the corresponding
-          # indices to be quantized.
-          "input_quantized_idxs": [0],
-          "output_quantized_idxs": [0],
         }
 
     Return:
