@@ -120,7 +120,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
                 base = AnnotatedSingleLayerLinearModel(qengine)
                 base.qconfig = qconfig
                 keys_before = set(list(base.state_dict().keys()))
-                model = quantize(base, test_only_eval_fn, self.calib_data)
+                model = quantize(base, test_only_eval_fn, [self.calib_data])
                 checkQuantized(model)
                 keys_after = set(list(base.state_dict().keys()))
                 self.assertEqual(keys_before, keys_after)  # simple check that nothing changed
@@ -128,7 +128,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
                 # in-place version
                 model = AnnotatedSingleLayerLinearModel(qengine)
                 model.qconfig = qconfig
-                quantize(model, test_only_eval_fn, self.calib_data, inplace=True)
+                quantize(model, test_only_eval_fn, [self.calib_data], inplace=True)
                 checkQuantized(model)
 
     @skipIfNoFBGEMM
@@ -162,7 +162,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
 
             # test one line API
             model = quantize(AnnotatedTwoLayerLinearModel(), test_only_eval_fn,
-                             self.calib_data)
+                             [self.calib_data])
             checkQuantized(model)
 
     def test_nested1(self):
@@ -204,7 +204,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
 
                 # test one line API
                 model = quantize(AnnotatedNestedModel(qengine), test_only_eval_fn,
-                                 self.calib_data)
+                                 [self.calib_data])
                 checkQuantized(model)
 
 
@@ -245,7 +245,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
 
         # test one line API
         model = quantize(AnnotatedSubNestedModel(), test_only_eval_fn,
-                         self.calib_data)
+                         [self.calib_data])
         checkQuantized(model)
 
     def test_nested3(self):
@@ -287,7 +287,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
 
                 # test one line API
                 model = quantize(AnnotatedCustomConfigNestedModel(), test_only_eval_fn,
-                                 self.calib_data)
+                                 [self.calib_data])
                 checkQuantized(model)
 
     def test_skip_quant(self):
@@ -315,7 +315,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
                 checkQuantized(model)
 
                 # test one line API
-                model = quantize(AnnotatedSkipQuantModel(qengine), test_only_eval_fn, self.calib_data)
+                model = quantize(AnnotatedSkipQuantModel(qengine), test_only_eval_fn, [self.calib_data])
                 checkQuantized(model)
 
     @skipIfNoFBGEMM
@@ -341,7 +341,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
         checkQuantized(model)
 
         # test one line API
-        model = quantize(QuantStubModel(), test_only_eval_fn, self.calib_data)
+        model = quantize(QuantStubModel(), test_only_eval_fn, [self.calib_data])
         checkQuantized(model)
 
     def test_resnet_base(self):
@@ -352,10 +352,9 @@ class TestPostTrainingStatic(QuantizationTestCase):
             with override_quantized_engine(qengine):
                 qconfig = torch.quantization.get_default_qconfig(qengine)
                 model = ResNetBase().float().eval()
+                model.fuse_model()
                 model = QuantWrapper(model)
                 model.qconfig = qconfig
-                fuse_list = ['module.conv1', 'module.bn1', 'module.relu1']
-                fuse_modules(model, fuse_list, inplace=True)
                 model = prepare(model)
                 self.checkObservers(model)
                 test_only_eval_fn(model, self.img_data_2d)
@@ -365,6 +364,8 @@ class TestPostTrainingStatic(QuantizationTestCase):
                     self.assertEqual(type(model.module.conv1), nn.intrinsic.quantized.ConvReLU2d)
                     self.assertEqual(type(model.module.myop), nn.quantized.QFunctional)
                     self.assertEqual(type(model.module.avgpool), nn.AdaptiveAvgPool2d)
+                    self.assertEqual(type(model.module.fc), nnq.Linear)
+
                     test_only_eval_fn(model, self.img_data_2d)
                     self.checkNoQconfig(model)
 
@@ -400,7 +401,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
         checkQuantized(model)
 
         model_oneline = quantize(
-            NormalizationTestModel(), test_only_eval_fn, self.calib_data)
+            NormalizationTestModel(), test_only_eval_fn, [self.calib_data])
         checkQuantized(model)
 
     def test_save_load_state_dict(self):
@@ -463,7 +464,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
 
         # test one line API
         model_oneline = quantize(ActivationsTestModel(), test_only_eval_fn,
-                                 self.calib_data)
+                                 [self.calib_data])
         checkQuantized(model_oneline)
 
     @override_qengines
@@ -534,6 +535,26 @@ class TestPostTrainingStatic(QuantizationTestCase):
         self.assertTrue('QuantizedEmbedding' in str(model))
         self.assertTrue('QuantizedLinear' in str(model))
         self.checkQuantizedLinear(model.fc)
+
+    @skipIfNoFBGEMM
+    def test_dequant_stub(self):
+        m = QuantStubModel().eval()
+        prepare(m, inplace=True)
+        self.checkObservers(m)
+        convert(m, inplace=True)
+        self.assertEqual(type(m.quant), nnq.Quantize)
+        self.assertEqual(type(m.fc), nnq.Linear)
+        self.assertEqual(type(m.dequant), nnq.DeQuantize)
+
+        # check DeQuantStub is not swapped when it doesn't have a qconfig
+        m2 = QuantStubModel().eval()
+        m2.dequant.qconfig = None
+        prepare(m2, inplace=True)
+        self.checkObservers(m2)
+        convert(m2, inplace=True)
+        self.assertEqual(type(m2.quant), nnq.Quantize)
+        self.assertEqual(type(m2.fc), nnq.Linear)
+        self.assertEqual(type(m2.dequant), DeQuantStub)
 
 
     @skipIfNoFBGEMM
@@ -1083,7 +1104,7 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 checkQuantized(model)
 
                 model = quantize_qat(ManualLinearQATModel(qengine), test_only_train_fn,
-                                     self.train_data)
+                                     [self.train_data])
                 checkQuantized(model)
 
     def test_eval_only_fake_quant(self):
@@ -1123,7 +1144,7 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 checkQuantized(model)
 
                 model = ManualConvLinearQATModel()
-                model = quantize_qat(model, test_only_train_fn, self.img_data_2d_train)
+                model = quantize_qat(model, test_only_train_fn, [self.img_data_2d_train])
                 checkQuantized(model)
 
     def test_train_save_load_eval(self):
@@ -1218,6 +1239,49 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
         model(x)
         torch.quantization.convert(model, inplace=True)
         checkHooksIsPresent(model, False)
+
+    def test_add_scalar_uses_input_qparams(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quant = torch.quantization.QuantStub()
+                self.ff = torch.nn.quantized.FloatFunctional()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.ff.add_scalar(x, 1.0)
+                return x
+
+        m = M()
+        m.qconfig = torch.quantization.default_qconfig
+        mp = torch.quantization.prepare_qat(m)
+        mp(torch.randn(4, 4))
+        mq = torch.quantization.convert(mp)
+        res = mq(torch.randn(4, 4))
+        eps = 1e-5
+        self.assertTrue(torch.abs(mq.quant.scale - res.q_scale()) < eps)
+
+    def test_mul_scalar_uses_input_qparams(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quant = torch.quantization.QuantStub()
+                self.ff = torch.nn.quantized.FloatFunctional()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.ff.mul_scalar(x, 2.0)
+                return x
+
+        m = M()
+        m.qconfig = torch.quantization.default_qconfig
+        mp = torch.quantization.prepare_qat(m)
+        mp(torch.randn(4, 4))
+        mq = torch.quantization.convert(mp)
+        res = mq(torch.randn(4, 4))
+        eps = 1e-5
+        self.assertTrue(torch.abs(mq.quant.scale * 2 - res.q_scale()) < eps)
+
 
 class TestEagerModeOps(QuantizationTestCase):
     def _test_activation_op_impl(
@@ -1434,7 +1498,7 @@ class TestFusion(QuantizationTestCase):
         model = ModelForFusion(default_qat_qconfig).train()
         model = fuse_modules(model, [['conv1', 'bn1', 'relu1'],
                              ['sub1.conv', 'sub1.bn']])
-        model = quantize_qat(model, test_only_train_fn, self.img_data_1d_train)
+        model = quantize_qat(model, test_only_train_fn, [self.img_data_1d_train])
         with self.assertRaisesRegex(RuntimeError, "Could not run 'aten::native_batch_norm' with arguments from the 'QuantizedCPU'"):
             checkQuantized(model)
 
@@ -1514,7 +1578,7 @@ class TestFusion(QuantizationTestCase):
                              ['bn2', 'relu3'],
                              ['sub1.conv', 'sub1.bn'],
                              ['conv3', 'bn3', 'relu4']])
-        model = quantize(model, test_only_eval_fn, self.img_data_1d)
+        model = quantize(model, test_only_eval_fn, [self.img_data_1d])
         checkQuantized(model)
 
     def test_fusion_sequential_model_train(self):

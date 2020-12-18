@@ -225,6 +225,7 @@ class StoreTestBase(object):
         fs.add("key3", 4)
         fs.add("key3", 5)
         fs.add("key3", 6)
+        self.assertEqual(fs.num_keys(), self.num_keys_total)
         self.assertEqual(b"6", fs.get("key"))
         self.assertEqual(b"value0", fs.get("key0"))
         self.assertEqual(b"value1", fs.get("key1"))
@@ -233,6 +234,14 @@ class StoreTestBase(object):
 
     def test_set_get(self):
         self._test_set_get(self._create_store())
+
+    # This is the number of keys used in test_set_get. Adding this as a class
+    # property instead of hardcoding in the test since some Store
+    # implementations will have differing number of keys. In the base case,
+    # there will be 5 keys: key, key0, key1, key2, key3.
+    @property
+    def num_keys_total(self):
+        return 5
 
 
 class FileStoreTest(TestCase, StoreTestBase):
@@ -275,7 +284,6 @@ def create_tcp_store(addr):
     raise RuntimeError("Unable to find free port (tried %s)" % ", ".join(ports))
 
 
-@skip_if_win32()
 class TCPStoreTest(TestCase, StoreTestBase):
     def _create_store(self):
         store = create_tcp_store("localhost")
@@ -283,7 +291,11 @@ class TCPStoreTest(TestCase, StoreTestBase):
         return store
 
     def test_address_already_in_use(self):
-        with self.assertRaisesRegex(RuntimeError, "^Address already in use$"):
+        if sys.platform == 'win32':
+            err_msg_reg = "Only one usage of each socket address*"
+        else:
+            err_msg_reg = "^Address already in use$"
+        with self.assertRaisesRegex(RuntimeError, err_msg_reg):
             addr = "localhost"
             port = common.find_free_port()
 
@@ -292,6 +304,12 @@ class TCPStoreTest(TestCase, StoreTestBase):
             # object is not destroyed before the second object is created.
             store1 = c10d.TCPStore(addr, port, 1, True)  # noqa: F841
             store2 = c10d.TCPStore(addr, port, 1, True)  # noqa: F841
+
+    # The TCPStore has 6 keys in test_set_get. It contains the 5 keys added by
+    # the user and one additional key used for coordinate all the workers.
+    @property
+    def num_keys_total(self):
+        return 6
 
     def _test_numkeys_delkeys(self, fs):
         # We start off with one init key in the store to coordinate workers
@@ -321,8 +339,6 @@ class TCPStoreTest(TestCase, StoreTestBase):
     def test_numkeys_delkeys(self):
         self._test_numkeys_delkeys(self._create_store())
 
-
-@skip_if_win32()
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
         super(PrefixTCPStoreTest, self).setUp()
@@ -332,6 +348,13 @@ class PrefixTCPStoreTest(TestCase, StoreTestBase):
 
     def _create_store(self):
         return c10d.PrefixStore(self.prefix, self.tcpstore)
+
+    # The PrefixTCPStore has 6 keys in test_set_get. It contains the 5 keys
+    # added by the user and one additional key used for coordinate all the
+    # workers.
+    @property
+    def num_keys_total(self):
+        return 6
 
 
 class MyPythonStore(c10d.Store):
@@ -379,7 +402,6 @@ class RendezvousTest(TestCase):
             c10d.rendezvous("invalid://")
 
 
-@skip_if_win32()
 class RendezvousEnvTest(TestCase):
     @retry_on_connect_failures
     @requires_nccl()
@@ -3267,6 +3289,20 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             output = ddp(input)
             loss = criterion(output, target)
             loss.backward()
+
+    @requires_nccl()
+    @skip_if_not_multigpu
+    def test_pass_default_pg(self):
+        dist.init_process_group(
+            "nccl",
+            init_method=f"file://{self.file_name}",
+            world_size=self.world_size,
+            rank=self.rank,
+        )
+
+        default_pg = c10d.distributed_c10d._get_default_group()
+        dist.destroy_process_group(default_pg)
+        self.assertFalse(dist.is_initialized())
 
     @requires_nccl()
     @skip_if_not_multigpu

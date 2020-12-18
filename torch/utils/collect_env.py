@@ -43,7 +43,10 @@ def run(command):
                          stderr=subprocess.PIPE, shell=True)
     raw_output, raw_err = p.communicate()
     rc = p.returncode
-    enc = locale.getpreferredencoding()
+    if get_platform() == 'win32':
+        enc = 'oem'
+    else:
+        enc = locale.getpreferredencoding()
     output = raw_output.decode(enc)
     err = raw_err.decode(enc)
     return rc, output.strip(), err.strip()
@@ -70,7 +73,7 @@ def run_and_parse_first_match(run_lambda, command, regex):
 
 def get_conda_packages(run_lambda):
     if get_platform() == 'win32':
-        system_root = os.environ.get('SystemRoot', 'C:\\Windows')
+        system_root = os.environ.get('SYSTEMROOT', 'C:\\Windows')
         findstr_cmd = os.path.join(system_root, 'System32', 'findstr')
         grep_cmd = r'{} /R "torch numpy cudatoolkit soumith mkl magma"'.format(findstr_cmd)
     else:
@@ -125,7 +128,7 @@ def get_running_cuda_version(run_lambda):
 def get_cudnn_version(run_lambda):
     """This will return a list of libcudnn.so; it's hard to tell which one is being used"""
     if get_platform() == 'win32':
-        system_root = os.environ.get('SystemRoot', 'C:\\Windows')
+        system_root = os.environ.get('SYSTEMROOT', 'C:\\Windows')
         cuda_path = os.environ.get('CUDA_PATH', "%CUDA_PATH%")
         where_cmd = os.path.join(system_root, 'System32', 'where')
         cudnn_cmd = '{} /R "{}\\bin" cudnn*.dll'.format(where_cmd, cuda_path)
@@ -163,7 +166,15 @@ def get_nvidia_smi():
     # Note: nvidia-smi is currently available only on Windows and Linux
     smi = 'nvidia-smi'
     if get_platform() == 'win32':
-        smi = '"C:\\Program Files\\NVIDIA Corporation\\NVSMI\\%s"' % smi
+        system_root = os.environ.get('SYSTEMROOT', 'C:\\Windows')
+        program_files_root = os.environ.get('PROGRAMFILES', 'C:\\Program Files')
+        legacy_path = os.path.join(program_files_root, 'NVIDIA Corporation', 'NVSMI', smi)
+        new_path = os.path.join(system_root, 'System32', smi)
+        smis = [new_path, legacy_path]
+        for candidate_smi in smis:
+            if os.path.exists(candidate_smi):
+                smi = f'"{candidate_smi}"'
+                break
     return smi
 
 
@@ -185,7 +196,7 @@ def get_mac_version(run_lambda):
 
 
 def get_windows_version(run_lambda):
-    system_root = os.environ.get('SystemRoot', 'C:\\Windows')
+    system_root = os.environ.get('SYSTEMROOT', 'C:\\Windows')
     wmic_cmd = os.path.join(system_root, 'System32', 'Wbem', 'wmic')
     findstr_cmd = os.path.join(system_root, 'System32', 'findstr')
     return run_and_read_all(run_lambda, '{} os get Caption | {} /v Caption'.format(wmic_cmd, findstr_cmd))
@@ -236,7 +247,7 @@ def get_pip_packages(run_lambda):
     # People generally have `pip` as `pip` or `pip3`
     def run_with_pip(pip):
         if get_platform() == 'win32':
-            system_root = os.environ.get('SystemRoot', 'C:\\Windows')
+            system_root = os.environ.get('SYSTEMROOT', 'C:\\Windows')
             findstr_cmd = os.path.join(system_root, 'System32', 'findstr')
             grep_cmd = r'{} /R "numpy torch"'.format(findstr_cmd)
         else:

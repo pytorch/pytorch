@@ -68,7 +68,6 @@ EXPECTED_REMOTE_EVENTS = [
     "aten::relu",
     "aten::threshold",
     "aten::sigmoid",
-    "aten::sigmoid",
 ]
 
 # Remote operations are prefixed with the following string for RPC profiling.
@@ -317,6 +316,10 @@ def my_script_func(tensor):
 expected_err = "Expected error"
 def raise_func():
     raise ValueError(expected_err)
+
+expected_err_escape = "\nFirst line of error \n next line of error \n last line of error"
+def raise_func_escape():
+    raise ValueError(expected_err_escape)
 
 
 global_rref = None
@@ -607,14 +610,14 @@ class RpcTest(RpcAgentTestFixture):
     def test_rref_proxy_non_exist(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         rref = rpc.remote(dst, my_function, args=(torch.ones(2, 2), 1, 3))
-        msg = "non_exist is not an attribute of type"
-        with self.assertRaisesRegex(ValueError, msg):
+        msg = "has no attribute \'non_exist\'"
+        with self.assertRaisesRegex(AttributeError, msg):
             rref.rpc_sync().non_exist()
 
-        with self.assertRaisesRegex(ValueError, msg):
+        with self.assertRaisesRegex(AttributeError, msg):
             rref.rpc_async().non_exist()
 
-        with self.assertRaisesRegex(ValueError, msg):
+        with self.assertRaisesRegex(AttributeError, msg):
             rref.remote().non_exist()
 
     def _test_rref_proxy_tensor(self, dst):
@@ -1982,6 +1985,20 @@ class RpcTest(RpcAgentTestFixture):
         # Validate that trainers log errors when running functions.
         stderr_lines = err.getvalue()
         self.assertTrue(expected_err in stderr_lines)
+
+    @dist_init
+    def test_py_raise_in_user_func_escaped_str(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        fut = rpc.rpc_async(worker_name(dst_rank), raise_func_escape)
+        try:
+            fut.wait()
+        except ValueError as e:
+            msg = str(e)
+            # Ensure newlines are unescaped to provide a better repr of error.
+            self.assertEqual(msg, msg.encode("utf-8").decode("unicode_escape"))
+        else:
+            self.assertTrue(False, "expected raise_func_escape to raise ValueError.")
 
     @dist_init
     def test_nested_rpc(self):
@@ -4842,3 +4859,11 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         self.assertEqual(rref.to_here(), torch.ones(2).to(1))
 
         rpc.shutdown()
+
+    @dist_init
+    def test_op_with_invalid_args(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        with self.assertRaisesRegex(
+            RuntimeError, "Overloaded torch operator invoked from Python failed to many any schema"
+        ):
+            rpc.rpc_sync(dst, torch.add, args=())

@@ -40,7 +40,7 @@ VmaAllocator create_allocator(
 
   VmaAllocator allocator{};
   VK_CHECK(vmaCreateAllocator(&allocator_create_info, &allocator));
-  TORCH_CHECK(allocator, "Invalid VMA allocator!");
+  TORCH_CHECK(allocator, "Invalid VMA (Vulkan Memory Allocator) allocator!");
 
   return allocator;
 }
@@ -112,11 +112,11 @@ Resource::Memory::Scope::Scope(
     access_(access) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       allocator,
-      "Invalid VMA allocator!");
+      "Invalid VMA (Vulkan Memory Allocator) allocator!");
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       allocation,
-      "Invalid VMA allocation!");
+      "Invalid VMA (Vulkan Memory Allocator) allocation!");
 }
 
 void Resource::Memory::Scope::operator()(const void* const data) const {
@@ -224,7 +224,139 @@ void Resource::Fence::wait(const uint64_t timeout_nanoseconds) {
   }
 }
 
-Resource::Pool::Pool(const GPU& gpu)
+namespace {
+
+class Linear final : public Resource::Pool::Policy {
+ public:
+  Linear(
+      VkDeviceSize block_size,
+      uint32_t min_block_count,
+      uint32_t max_block_count);
+
+  virtual void enact(
+      VmaAllocator allocator,
+      const VkMemoryRequirements& memory_requirements,
+      VmaAllocationCreateInfo& allocation_create_info) override;
+
+ private:
+  struct Configuration final {
+    static constexpr uint32_t kReserve = 16u;
+  };
+
+  struct Entry final {
+    class Deleter final {
+     public:
+      explicit Deleter(VmaAllocator);
+      void operator()(VmaPool) const;
+
+     private:
+      VmaAllocator allocator_;
+    };
+
+    uint32_t memory_type_index;
+    Handle<VmaPool, Deleter> handle;
+  };
+
+  std::vector<Entry> pools_;
+
+  struct {
+    VkDeviceSize size;
+    uint32_t min;
+    uint32_t max;
+  } block_;
+};
+
+Linear::Entry::Deleter::Deleter(const VmaAllocator allocator)
+  : allocator_(allocator) {
+}
+
+void Linear::Entry::Deleter::operator()(const VmaPool pool) const {
+  vmaDestroyPool(allocator_, pool);
+}
+
+Linear::Linear(
+    const VkDeviceSize block_size,
+    const uint32_t min_block_count,
+    const uint32_t max_block_count)
+  : block_ {
+      block_size,
+      min_block_count,
+      max_block_count,
+    } {
+  pools_.reserve(Configuration::kReserve);
+}
+
+void Linear::enact(
+    const VmaAllocator allocator,
+    const VkMemoryRequirements& memory_requirements,
+    VmaAllocationCreateInfo& allocation_create_info) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      allocator,
+      "Invalid VMA (Vulkan Memory Allocator) allocator!");
+
+  uint32_t memory_type_index = 0u;
+  VK_CHECK(vmaFindMemoryTypeIndex(
+      allocator,
+      memory_requirements.memoryTypeBits,
+      &allocation_create_info,
+      &memory_type_index));
+
+  auto pool_itr = std::find_if(
+      pools_.begin(),
+      pools_.end(),
+      [memory_type_index](const Entry& entry) {
+    return entry.memory_type_index == memory_type_index;
+  });
+
+  if (pools_.end() == pool_itr) {
+    const VmaPoolCreateInfo pool_create_info{
+      memory_type_index,
+      VMA_POOL_CREATE_LINEAR_ALGORITHM_BIT,
+      block_.size,
+      block_.min,
+      block_.max,
+      0u,
+    };
+
+    VmaPool pool{};
+    VK_CHECK(vmaCreatePool(
+        allocator,
+        &pool_create_info,
+        &pool));
+
+    TORCH_CHECK(
+        pool,
+        "Invalid VMA (Vulkan Memory Allocator) memory pool!");
+
+    pools_.push_back({
+      memory_type_index,
+      {
+        pool,
+        Entry::Deleter(allocator),
+      },
+    });
+
+    pool_itr = std::prev(pools_.end());
+  }
+
+  allocation_create_info.pool = pool_itr->handle.get();
+}
+
+} // namespace
+
+std::unique_ptr<Resource::Pool::Policy> Resource::Pool::Policy::linear(
+    const VkDeviceSize block_size,
+    const uint32_t min_block_count,
+    const uint32_t max_block_count) {
+  return std::make_unique<Linear>(
+      block_size,
+      min_block_count,
+      max_block_count);
+}
+
+Resource::Pool::Pool(
+    const GPU& gpu,
+    std::unique_ptr<Policy> policy)
   : device_(gpu.device),
     allocator_(
         create_allocator(
@@ -232,6 +364,9 @@ Resource::Pool::Pool(const GPU& gpu)
           gpu.adapter->handle,
           device_),
         vmaDestroyAllocator),
+    memory_{
+      std::move(policy),
+    },
     buffer_{},
     image_{
       .sampler = Image::Sampler{gpu},
@@ -262,6 +397,7 @@ Resource::Pool::~Pool() {
 Resource::Pool::Pool(Pool&& pool)
   : device_(std::move(pool.device_)),
     allocator_(std::move(pool.allocator_)),
+    memory_(std::move(pool.memory_)),
     buffer_(std::move(pool.buffer_)),
     image_(std::move(pool.image_)),
     fence_(std::move(pool.fence_)) {
@@ -272,6 +408,7 @@ Resource::Pool& Resource::Pool::operator=(Pool&& pool) {
   if (&pool != this) {
     device_ = std::move(pool.device_);
     allocator_ = std::move(pool.allocator_);
+    memory_ = std::move(pool.memory_);
     buffer_ = std::move(pool.buffer_);
     image_ = std::move(pool.image_);
     fence_ = std::move(pool.fence_);
@@ -300,23 +437,49 @@ Resource::Buffer Resource::Pool::buffer(
     nullptr,
   };
 
-  const VmaAllocationCreateInfo allocation_create_info =
+  VkBuffer buffer{};
+  VK_CHECK(vkCreateBuffer(
+      device_,
+      &buffer_create_info,
+      nullptr,
+      &buffer));
+
+  TORCH_CHECK(
+      buffer,
+      "Invalid Vulkan buffer!");
+
+  VkMemoryRequirements memory_requirements{};
+  vkGetBufferMemoryRequirements(
+      device_,
+      buffer,
+      &memory_requirements);
+
+  VmaAllocationCreateInfo allocation_create_info =
       create_allocation_create_info(descriptor.usage.memory);
 
-  VkBuffer buffer{};
+  if (memory_.policy) {
+    memory_.policy->enact(
+        allocator_.get(),
+        memory_requirements,
+        allocation_create_info);
+  }
+
   VmaAllocation allocation{};
-  VmaAllocationInfo allocation_info{};
-
-  VK_CHECK(vmaCreateBuffer(
+  VK_CHECK(vmaAllocateMemory(
       allocator_.get(),
-      &buffer_create_info,
+      &memory_requirements,
       &allocation_create_info,
-      &buffer,
       &allocation,
-      &allocation_info));
+      nullptr));
 
-  TORCH_CHECK(buffer, "Invalid Vulkan buffer!");
-  TORCH_CHECK(allocation, "Invalid VMA allocation!");
+  TORCH_CHECK(
+      allocation,
+      "Invalid VMA (Vulkan Memory Allocator) allocation!");
+
+  VK_CHECK(vmaBindBufferMemory(
+      allocator_.get(),
+      allocation,
+      buffer));
 
   buffer_.pool.emplace_back(
       Buffer{
@@ -360,23 +523,49 @@ Resource::Image Resource::Pool::image(
     VK_IMAGE_LAYOUT_UNDEFINED,
   };
 
-  const VmaAllocationCreateInfo allocation_create_info =
+  VkImage image{};
+  VK_CHECK(vkCreateImage(
+      device_,
+      &image_create_info,
+      nullptr,
+      &image));
+
+  TORCH_CHECK(
+      image,
+      "Invalid Vulkan image!");
+
+  VkMemoryRequirements memory_requirements{};
+  vkGetImageMemoryRequirements(
+      device_,
+      image,
+      &memory_requirements);
+
+  VmaAllocationCreateInfo allocation_create_info =
       create_allocation_create_info(descriptor.usage.memory);
 
-  VkImage image{};
+  if (memory_.policy) {
+    memory_.policy->enact(
+        allocator_.get(),
+        memory_requirements,
+        allocation_create_info);
+  }
+
   VmaAllocation allocation{};
-  VmaAllocationInfo allocation_info{};
-
-  VK_CHECK(vmaCreateImage(
+  VK_CHECK(vmaAllocateMemory(
       allocator_.get(),
-      &image_create_info,
+      &memory_requirements,
       &allocation_create_info,
-      &image,
       &allocation,
-      &allocation_info));
+      nullptr));
 
-  TORCH_CHECK(image, "Invalid Vulkan image!");
-  TORCH_CHECK(allocation, "Invalid VMA allocation!");
+  TORCH_CHECK(
+      allocation,
+      "Invalid VMA (Vulkan Memory Allocator) allocation!");
+
+  VK_CHECK(vmaBindImageMemory(
+      allocator_.get(),
+      allocation,
+      image));
 
   const VkImageViewCreateInfo image_view_create_info{
     VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,

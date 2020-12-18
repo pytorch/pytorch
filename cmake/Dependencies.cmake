@@ -46,6 +46,8 @@ endif()
 # 3. If MSVC_Z7_OVERRIDE is ON, then /Zi and /ZI will be replaced with /Z7
 #    for Debug and RelWithDebInfo builds
 if(MSVC)
+  # skip unwanted includes from windows.h
+  add_definitions(-DWIN32_LEAN_AND_MEAN)
   foreach(flag_var
       CMAKE_C_FLAGS CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_MINSIZEREL
       CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_MINSIZEREL)
@@ -193,6 +195,21 @@ elseif(INTERN_USE_EIGEN_BLAS)
   set(USE_BLAS 1)
   include(${CMAKE_CURRENT_LIST_DIR}/External/EigenBLAS.cmake)
   list(APPEND Caffe2_DEPENDENCY_LIBS eigen_blas)
+endif()
+
+# ---[ FFTW
+set(AT_FFTW_ENABLED 0)
+set(USE_FFTW OFF)
+if(USE_FFTW OR NOT MKL_FOUND)
+  find_library(LIBFFTW3 fftw3)
+  if(LIBFFTW3)
+    find_path(FFTW3_INCLUDE_DIR NAMES fftw3.h ONLY_CMAKE_FIND_ROOT_PATH)
+    if(FFTW3_INCLUDE_DIR)
+      SET(AT_FFTW_ENABLED 1)
+      SET(USE_FFTW ON)
+      include_directories(${FFTW3_INCLUDE_DIR})
+    endif()
+  endif()
 endif()
 
 # ---[ Dependencies
@@ -1209,7 +1226,7 @@ if(USE_ROCM)
     endforeach()
 
     set(Caffe2_HIP_INCLUDE
-       ${thrust_INCLUDE_DIRS} ${hipcub_INCLUDE_DIRS} ${rocprim_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${roctracer_INCLUDE_DIRS} ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDE})
+       $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDE})
     # This is needed for library added by hip_add_library (same for hip_add_executable)
     hip_include_directories(${Caffe2_HIP_INCLUDE})
 
@@ -1498,8 +1515,6 @@ if(NOT INTERN_BUILD_MOBILE)
   if(MSVC)
     # we want to respect the standard, and we are bored of those **** .
     add_definitions(-D_CRT_SECURE_NO_DEPRECATE=1)
-    # skip unwanted includes from windows.h
-    add_definitions(-DWIN32_LEAN_AND_MEAN)
     list(APPEND CUDA_NVCC_FLAGS "-Xcompiler=/wd4819,/wd4503,/wd4190,/wd4244,/wd4251,/wd4275,/wd4522")
   endif()
 
@@ -1623,6 +1638,7 @@ if(NOT INTERN_BUILD_MOBILE)
     add_compile_options(-DUSE_GCC_GET_CPUID)
   endif()
 
+  find_package(VSX) # checks VSX
   find_package(AVX) # checks AVX and AVX2
 
   # we don't set -mavx and -mavx2 flags globally, but only for specific files
