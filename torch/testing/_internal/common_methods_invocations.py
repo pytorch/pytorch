@@ -896,6 +896,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_svd,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(
+               # gradgrad checks are slow
+               SkipInfo('TestGradients', 'test_fn_gradgrad', active_if=(not TEST_WITH_SLOW)),
                # cuda gradchecks are very slow
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
                SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),
