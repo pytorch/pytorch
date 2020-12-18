@@ -536,6 +536,26 @@ class TestPostTrainingStatic(QuantizationTestCase):
         self.assertTrue('QuantizedLinear' in str(model))
         self.checkQuantizedLinear(model.fc)
 
+    @skipIfNoFBGEMM
+    def test_dequant_stub(self):
+        m = QuantStubModel().eval()
+        prepare(m, inplace=True)
+        self.checkObservers(m)
+        convert(m, inplace=True)
+        self.assertEqual(type(m.quant), nnq.Quantize)
+        self.assertEqual(type(m.fc), nnq.Linear)
+        self.assertEqual(type(m.dequant), nnq.DeQuantize)
+
+        # check DeQuantStub is not swapped when it doesn't have a qconfig
+        m2 = QuantStubModel().eval()
+        m2.dequant.qconfig = None
+        prepare(m2, inplace=True)
+        self.checkObservers(m2)
+        convert(m2, inplace=True)
+        self.assertEqual(type(m2.quant), nnq.Quantize)
+        self.assertEqual(type(m2.fc), nnq.Linear)
+        self.assertEqual(type(m2.dequant), DeQuantStub)
+
 
     @skipIfNoFBGEMM
     def test_quantized_embedding_bag(self):

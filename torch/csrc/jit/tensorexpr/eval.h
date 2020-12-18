@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
@@ -337,9 +338,12 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     std::vector<T> result_v(lhs_v.size());
     for (size_t i = 0; i < lhs_v.size(); i++) {
       switch (op_type) {
-        case IRNodeType::kLshift:
-          result_v[i] = lhs_v[i] << rhs_v[i];
+        case IRNodeType::kLshift: {
+          typename std::make_unsigned<T>::type a =
+              static_cast<typename std::make_unsigned<T>::type>(lhs_v[i]);
+          result_v[i] = a << rhs_v[i];
           break;
+        }
         case IRNodeType::kRshift:
           result_v[i] = lhs_v[i] >> rhs_v[i];
           break;
@@ -839,12 +843,17 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       } else if (inp_dtype == ScalarType::Half) {
         throw unsupported_dtype(); // TODO
       }
-    } else if (ty == ScalarType::Float) {
-      visit_intrinsics_helper<float, float>(v);
-    } else if (ty == ScalarType::Double) {
-      visit_intrinsics_helper<double, double>(v);
     } else {
-      throw unsupported_dtype();
+      switch (ty) {
+#define TYPE_CASE(Type, Name)               \
+  case ScalarType::Name:                    \
+    visit_intrinsics_helper<Type, Type>(v); \
+    break;
+        AT_FORALL_SCALAR_TYPES(TYPE_CASE);
+#undef TYPE_CASE
+        default:
+          throw unsupported_dtype();
+      }
     }
   }
 
@@ -907,7 +916,11 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     apply_mutator(&intrinsics_expander);
   }
 
-  template <typename TReturn, typename TInput>
+  template <
+      typename TReturn,
+      typename TInput,
+      typename std::enable_if<std::is_floating_point<TInput>::value, int>::
+          type = 0>
   static TReturn compute_intrinsics(IntrinsicsOp op_type, TInput v) {
     switch (op_type) {
       case kSin:
@@ -930,8 +943,8 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
         return std::tanh(v);
       case kExp:
         return std::exp(v);
-      case kFabs:
-        return std::fabs(v);
+      case kAbs:
+        return std::abs(v);
       case kExpm1:
         return std::expm1(v);
       case kLog:
@@ -967,6 +980,26 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
         return std::isnan(v);
       default:
         throw std::runtime_error("Invalid op_type: " + c10::to_string(op_type));
+    }
+  }
+
+  template <
+      typename TReturn,
+      typename TInput,
+      typename std::enable_if<std::is_integral<TInput>::value, int>::type = 0>
+  static TReturn compute_intrinsics(IntrinsicsOp op_type, TInput v) {
+    switch (op_type) {
+      case kAbs: {
+        // internal tool complains about calling `abs` on unsigned, the
+        // following makes the tool happy
+        using X =
+            std::conditional_t<std::is_unsigned<TInput>::value, int, TInput>;
+        return std::is_unsigned<TInput>::value ? v
+                                               : std::abs(static_cast<X>(v));
+      }
+      default:
+        throw std::runtime_error(
+            "Invalid integral op_type: " + c10::to_string(op_type));
     }
   }
 
