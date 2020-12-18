@@ -79,7 +79,7 @@ class TestGradients(TestCase):
                 self.assertTrue(gradcheck(partial_fn, (*sample.input,) + sample.args,
                                           check_grad_dtypes=True))
             elif check == 'gradgradcheck':
-                self.assertTrue(gradgradcheck(partial_fn, (*sample.input,) + sample.args, 
+                self.assertTrue(gradgradcheck(partial_fn, (*sample.input,) + sample.args,
                                               gen_non_contig_grad_outputs=False,
                                               check_grad_dtypes=True))
                 self.assertTrue(gradgradcheck(partial_fn, (*sample.input,) + sample.args,
@@ -105,11 +105,13 @@ class TestGradients(TestCase):
         self._skip_helper(op, dtype)
         self._grad_test_helper(device, dtype, op, op.get_op())
 
-    @dtypes(torch.double, torch.cdouble)
-    @ops(op_db)
-    def test_method_grad(self, device, dtype, op):
-        self._skip_helper(op, dtype)
-        self._grad_test_helper(device, dtype, op, op.get_method())
+    # Method grad (and gradgrad, see below) tests are disabled since they're
+    #   costly and redundant with function grad (and gradgad) tests
+    # @dtypes(torch.double, torch.cdouble)
+    # @ops(op_db)
+    # def test_method_grad(self, device, dtype, op):
+    #     self._skip_helper(op, dtype)
+    #     self._grad_test_helper(device, dtype, op, op.get_method())
 
     @dtypes(torch.double, torch.cdouble)
     @ops(op_db)
@@ -126,11 +128,13 @@ class TestGradients(TestCase):
         self._skip_helper(op, dtype)
         self._gradgrad_test_helper(device, dtype, op, op.get_op())
 
-    @dtypes(torch.double, torch.cdouble)
-    @ops(op_db)
-    def test_method_gradgrad(self, device, dtype, op):
-        self._skip_helper(op, dtype)
-        self._gradgrad_test_helper(device, dtype, op, op.get_method())
+    # Method gradgrad (and grad, see above) tests are disabled since they're
+    #   costly and redundant with function gradgrad (and grad) tests
+    # @dtypes(torch.double, torch.cdouble)
+    # @ops(op_db)
+    # def test_method_gradgrad(self, device, dtype, op):
+    #     self._skip_helper(op, dtype)
+    #     self._gradgrad_test_helper(device, dtype, op, op.get_method())
 
     @dtypes(torch.double, torch.cdouble)
     @ops(op_db)
@@ -143,9 +147,9 @@ class TestGradients(TestCase):
 
 # Tests operators for consistency between JIT and eager, also checks
 #   correctness of JIT specific alias schemas and intended
-#   autodifferentiation behavior. 
+#   autodifferentiation behavior.
 # Inherits from JitCommonTestCase instead of TestCase directly to share
-#   functionality with original test_jit.py method operator tests 
+#   functionality with original test_jit.py method operator tests
 class TestCommon(JitCommonTestCase):
     exact_dtype = True
 
@@ -170,7 +174,7 @@ class TestCommon(JitCommonTestCase):
 
     # Tests that the forward and backward passes of operations produce the
     #   same values for the cross-product of op variants (method, inplace)
-    #   against eager's gold standard op function variant 
+    #   against eager's gold standard op function variant
     @ops(op_db)
     def test_variant_consistency_eager(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
