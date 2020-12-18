@@ -11,7 +11,7 @@ import pytest
 import torch
 from torch import nn, optim
 
-from torch.distributed._pipeline.sync.batchnorm import DeferredBatchNorm
+from torch.distributed.pipeline.sync.batchnorm import DeferredBatchNorm
 
 CHUNKS = 4
 
