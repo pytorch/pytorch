@@ -93,8 +93,8 @@ static inline void check_cat_shape_except_dim(const Tensor & first, const Tensor
     if (dim == dimension) {
       continue;
     }
-    int64_t first_dim_size = first.sizes()[dim];
-    int64_t second_dim_size = second.sizes()[dim];
+    int64_t first_dim_size = first.size(dim);
+    int64_t second_dim_size = second.size(dim);
     TORCH_CHECK(first_dim_size == second_dim_size, "Sizes of tensors must match except in dimension ",
                 dimension, ". Got ", first_dim_size, " and ", second_dim_size, " in dimension ", dim,
                 " (The offending index is ", index, ")");
@@ -161,7 +161,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
       continue;
     }
     check_cat_shape_except_dim(notSkippedTensor, tensor, dim, i);
-    cat_dim_size += tensor.sizes()[dim];
+    cat_dim_size += tensor.size(dim);
 
     if (!tensor.is_contiguous(first_tensor_mem_format)) {
       allContiguous = false;
@@ -197,7 +197,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
       result.is_contiguous(first_tensor_mem_format) &&
       no_type_promotion) {
     const auto& source_slice = notSkippedTensor;
-    auto slice_dim_size = source_slice.sizes()[dim];
+    auto slice_dim_size = source_slice.size(dim);
     auto result_slice = result.narrow(dim, 0, slice_dim_size);
     auto result_slice_data = result_slice.data_ptr();
     auto result_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
@@ -226,7 +226,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
       if (should_skip(tensor)) {
         continue;
       }
-      auto slice_dim_size = tensor.sizes()[dim];
+      auto slice_dim_size = tensor.size(dim);
       auto result_slice = result.narrow(dim, offset, slice_dim_size);
 
       auto iter = TensorIteratorConfig()
