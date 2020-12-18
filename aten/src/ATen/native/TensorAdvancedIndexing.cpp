@@ -206,7 +206,7 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
   }
 }
 
-static AdvancedIndex make_info(Tensor self, torch::List<c10::optional<at::Tensor>> orig) {
+static AdvancedIndex make_info(Tensor self, const torch::List<c10::optional<at::Tensor>>& orig) {
   checkIndexTensorTypes(orig);
   // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
   auto indices = expandTensors(self, orig);
@@ -281,7 +281,7 @@ static TensorIterator make_index_out_iterator(const AdvancedIndex& info, Tensor&
   return config.build();
 }
 
-Tensor index(const Tensor & self, torch::List<c10::optional<Tensor>> indices) {
+Tensor index(const Tensor & self, const torch::List<c10::optional<Tensor>>& indices) {
   TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
 
   auto info = make_info(self, indices);
@@ -290,7 +290,7 @@ Tensor index(const Tensor & self, torch::List<c10::optional<Tensor>> indices) {
   return iter.output();
 }
 
-Tensor quantized_index(const Tensor & self, torch::List<c10::optional<Tensor>> indices) {
+Tensor quantized_index(const Tensor & self, const torch::List<c10::optional<Tensor>>& indices) {
   TORCH_INTERNAL_ASSERT(
       self.qscheme() == c10::kPerTensorAffine ||
       self.qscheme() == c10::kPerTensorSymmetric,
@@ -311,7 +311,7 @@ Tensor quantized_index(const Tensor & self, torch::List<c10::optional<Tensor>> i
       res, self.q_scale(), self.q_zero_point(), self.scalar_type());
 }
 
-Tensor& index_out(Tensor& result, const Tensor & self, torch::List<c10::optional<Tensor>> indices) {
+Tensor& index_out(Tensor& result, const Tensor & self, const torch::List<c10::optional<Tensor>>& indices) {
   TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   at::assert_no_internal_overlap(result);
   at::assert_no_overlap(result, self);
@@ -327,11 +327,11 @@ Tensor& index_out(Tensor& result, const Tensor & self, torch::List<c10::optional
   return result;
 }
 
-Tensor index_put(const Tensor & self, torch::List<c10::optional<Tensor>> indices, const Tensor & value, bool accumulate) {
+Tensor index_put(const Tensor & self, const torch::List<c10::optional<Tensor>>& indices, const Tensor & value, bool accumulate) {
   return self.clone(at::MemoryFormat::Preserve).index_put_(indices, value, accumulate);
 }
 
-Tensor & _index_put_impl_(Tensor & self, torch::List<c10::optional<Tensor>> indices, const Tensor & value, const bool accumulate, const bool unsafe) {
+Tensor & _index_put_impl_(Tensor & self, const torch::List<c10::optional<Tensor>>& indices, const Tensor & value, const bool accumulate, const bool unsafe) {
   TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   if (at::has_internal_overlap(self) == MemOverlap::YES) {
     TORCH_WARN(
@@ -360,7 +360,7 @@ Tensor & _index_put_impl_(Tensor & self, torch::List<c10::optional<Tensor>> indi
 }
 
 
-Tensor & index_put_(Tensor & self, torch::List<c10::optional<Tensor>> indices, const Tensor & value, const bool accumulate) {
+Tensor & index_put_(Tensor & self, const torch::List<c10::optional<Tensor>>& indices, const Tensor & value, const bool accumulate) {
   return at::_index_put_impl_(self, indices, value, accumulate, /*unsafe=*/false);
 }
 
