@@ -84,7 +84,7 @@ inline bool variable_excluded_from_dispatch() {
 //
 // Note that Tensor can also be NULL, i.e. it is not associated with any underlying TensorImpl, and
 // special care must be taken to handle this.
-class CAFFE2_API Tensor {
+class TORCH_API Tensor {
  public:
   Tensor(){};
   // This constructor should not be used by end users and is an implementation
