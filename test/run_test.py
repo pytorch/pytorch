@@ -889,7 +889,7 @@ def main():
             print_to_stderr(err_message)
     finally:
         if options.coverage:
-            from coveage import Coverage
+            from coverage import Coverage
             cwd = os.getcwd()
             test_dir = os.path.dirname(os.path.abspath(__file__))
             try:
