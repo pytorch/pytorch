@@ -4039,6 +4039,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(32, 3, 64)
         self.run_test(UnfoldModule(), x)
 
+    @skipIfUnsupportedOpsetVersion([13])
     def test_prelu(self):
         class PReluModel(torch.nn.Module):
             def __init__(self):
@@ -4090,6 +4091,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randint(10, (2, 3))
         self.run_test(FModModel(), x)
 
+    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_glu(self):
         class GluModel(torch.nn.Module):
