@@ -4627,7 +4627,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             rpc_backend_options=options,
         )
 
-        x = torch.ones(2).to(torch.uint8).to(device)
+        x = torch.zeros(2).to(torch.uint8).to(device)
         y = torch.ones(2).to(torch.uint8).to(device)
 
         ret = rpc.rpc_sync(
@@ -4640,17 +4640,18 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         torch.cuda.synchronize(0)
         torch.cuda.synchronize(1)
         self.assertEqual(ret.device.index, device)
-        self.assertEqual(ret, (torch.ones(2) + torch.ones(2)).to(torch.uint8).to(device))
+        self.assertEqual(ret, (torch.ones(2) + torch.zeros(2)).to(torch.uint8).to(device))
         rpc.shutdown()
 
     @staticmethod
     def _gpu_add_given_gpu_x(x, y, d):
         if all([x.is_cuda, x.device.index == d, y.is_cuda, y.device.index == d]):
-            return x + y
+            z = x + y
+            return z
         else:
             raise ValueError("Wrong device affinity")
 
-    @unittest.skip("Skipping until Tensorpipe supports non default GPUs")
+    #@unittest.skip("Skipping until Tensorpipe supports non default GPUs")
     @skip_if_lt_x_gpu(2)
     def test_device_maps_non_default_gpu(self):
         torch.zeros(2).to(0).to(1)
@@ -4668,25 +4669,98 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         )
 
         # it would hang if I uncomment the if below...
-        #if self.rank == 0:
-        x = torch.ones(2).to(torch.uint8).to(device)
-        y = torch.ones(2).to(torch.uint8).to(device)
-        # TODO: remove syncs
-        torch.cuda.synchronize(0)
-        torch.cuda.synchronize(1)
-        ret = rpc.rpc_sync(
-            dst,
-            TensorPipeAgentRpcTest._gpu_add_given_gpu_x,
-            args=(x, x, device)
-        )
+        if self.rank == 0:
 
-        torch.cuda.synchronize(0)
-        torch.cuda.synchronize(1)
-        print("+++++ ret is ", ret)
-        self.assertEqual(ret.device.index, device)
-        self.assertEqual(ret, (torch.ones(2) + torch.ones(2)).to(torch.uint8).to(device))
-        print("done !!!!!!!!!!!!!!")
+            x = torch.zeros(2).to(torch.uint8).to(device)
+            y = torch.ones(2).to(torch.uint8).to(device)
+            # TODO: remove syncs
+            torch.cuda.synchronize(0)
+            torch.cuda.synchronize(1)
+            ret = rpc.rpc_sync(
+                dst,
+                TensorPipeAgentRpcTest._gpu_add_given_gpu_x,
+                args=(x, x, device)
+            )
 
+            torch.cuda.synchronize(0)
+            torch.cuda.synchronize(1)
+            #print("+++++ ret is ", ret)
+            self.assertEqual(ret.device.index, device)
+            self.assertEqual(ret, (torch.zeros(2) + torch.zeros(2)).to(torch.uint8).to(device))
+            #print("done !!!!!!!!!!!!!!")
+
+
+        rpc.shutdown()
+
+    #@unittest.skip("Skipping until Tensorpipe supports non default GPUs")
+    @skip_if_lt_x_gpu(2)
+    def test_device_maps_default_to_non_default(self):
+        #torch.cuda.init()
+        options = self.rpc_backend_options
+        dst = worker_name((self.rank + 1) % self.world_size)
+
+        src_d = 1
+        dst_d = 1
+
+        # it would hang if I uncomment the if below...
+        if self.rank == 0:
+            torch.zeros(2).to(src_d).to(dst_d)
+            options.set_device_map(worker_name(1), {src_d: dst_d})
+
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_backend_options=options,
+            )
+
+            x = torch.ones(2).to(torch.uint8).to(src_d)
+            y = torch.zeros(2).to(torch.uint8).to(dst_d)
+            # TODO: remove syncs
+            torch.cuda.synchronize(0)
+            torch.cuda.synchronize(1)
+            ret = rpc.rpc_sync(
+                worker_name(1),
+                TensorPipeAgentRpcTest._gpu_add_given_gpu_x,
+                args=(x, x, dst_d)
+            )
+
+            torch.cuda.synchronize(0)
+            torch.cuda.synchronize(1)
+            #print("+++++ ret is ", ret)
+            self.assertEqual(ret.device.index, src_d)
+            self.assertEqual(ret, (torch.ones(2) + torch.ones(2)).to(torch.uint8).to(src_d))
+
+            """
+            for _ in range(10):
+                x = torch.ones(2).to(torch.uint8).to(0)
+                y = torch.zeros(2).to(torch.uint8).to(0)
+                # TODO: remove syncs
+                torch.cuda.synchronize(0)
+                torch.cuda.synchronize(1)
+                ret = rpc.rpc_sync(
+                    dst,
+                    TensorPipeAgentRpcTest._gpu_add_given_gpu_x,
+                    args=(x, y, 1)
+                )
+
+                torch.cuda.synchronize(0)
+                torch.cuda.synchronize(1)
+                print("+++++ ret is ", ret)
+                self.assertEqual(ret.device.index, 0)
+                self.assertEqual(ret, (torch.ones(2) + torch.zeros(2)).to(torch.uint8).to(0))
+            """
+        else:
+            if self.rank == 1:
+                torch.zeros(2).to(dst_d).to(src_d)
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_backend_options=options,
+            )
         rpc.shutdown()
 
     @staticmethod
@@ -4697,6 +4771,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             raise ValueError("Wrong device affinity")
 
     def _test_device_maps_multi_gpu(self, dst):
+        torch.cuda.init()
         options = self.rpc_backend_options
         options.set_device_map(dst, {0: 1})
         options.set_device_map(dst, {1: 0})
@@ -4717,13 +4792,15 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
                 TensorPipeAgentRpcTest._gpu_add_multi_gpu,
                 args=(x, y)
             )
+
+            torch.cuda.synchronize(0)
+            torch.cuda.synchronize(1)
             self.assertEqual(rets[0].device, torch.device(1))
             self.assertEqual(rets[1].device, torch.device(0))
             self.assertEqual(rets[0], (torch.zeros(2) + torch.ones(2)).to(1))
             self.assertEqual(rets[1], (torch.zeros(2) - torch.ones(2)).to(0))
         rpc.shutdown()
 
-    @unittest.skip("Skipping until Tensorpipe supports non default GPUs")
     @skip_if_lt_x_gpu(2)
     def test_device_maps_multi_gpu(self):
         dst = worker_name((self.rank + 1) % self.world_size)
@@ -4742,7 +4819,6 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         else:
             raise ValueError("Wrong device affinity")
 
-    @unittest.skip("Skipping until Tensorpipe supports non default GPUs")
     @skip_if_lt_x_gpu(2)
     def test_device_maps_in_options(self):
         dst = worker_name((self.rank + 1) % self.world_size)
@@ -4859,13 +4935,11 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         ret = rpc.rpc_sync(dst, torch.add, args=(torch.ones(2), 1))
         self.assertEqual(ret, torch.ones(2) + 1)
 
-    @unittest.skip("Skipping until Tensorpipe supports non default GPUs")
     @skip_if_lt_x_gpu(1)
     @dist_init
     def test_device_maps_missing_config(self):
         self._test_device_maps_missing_config(RPCExecMode.SYNC)
 
-    @unittest.skip("Skipping until Tensorpipe supports non default GPUs")
     @skip_if_lt_x_gpu(1)
     def test_device_maps_missing_config_not_timeout(self):
         dst = worker_name((self.rank + 1) % self.world_size)
@@ -4888,39 +4962,33 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
 
         self.assertTrue(tok - tik < timeout)
 
-    @unittest.skip("Skipping until Tensorpipe supports non default GPUs")
     @skip_if_lt_x_gpu(1)
     @dist_init
     def test_device_maps_missing_config_loop(self):
         for _ in range(self.rpc_backend_options.num_worker_threads + 5):
             self._test_device_maps_missing_config(RPCExecMode.SYNC)
 
-    @unittest.skip("Skipping until Tensorpipe supports non default GPUs")
     @skip_if_lt_x_gpu(1)
     @dist_init
     def test_device_maps_missing_config_response(self):
         self._test_device_maps_missing_config_response(RPCExecMode.SYNC)
 
-    @unittest.skip("Skipping until Tensorpipe supports non default GPUs")
     @skip_if_lt_x_gpu(1)
     @dist_init
     def test_device_maps_missing_config_response_loop(self):
         for _ in range(self.rpc_backend_options.num_worker_threads + 5):
             self._test_device_maps_missing_config_response(RPCExecMode.SYNC)
 
-    @unittest.skip("Skipping until Tensorpipe supports non default GPUs")
     @skip_if_lt_x_gpu(1)
     @dist_init
     def test_device_maps_missing_config_remote(self):
         self._test_device_maps_missing_config(RPCExecMode.REMOTE)
 
-    @unittest.skip("Skipping until Tensorpipe supports non default GPUs")
     @skip_if_lt_x_gpu(1)
     @dist_init
     def test_device_maps_missing_config_remote_response(self):
         self._test_device_maps_missing_config_response(RPCExecMode.REMOTE)
 
-    @unittest.skip("Skipping until Tensorpipe supports non default GPUs")
     @skip_if_lt_x_gpu(2)
     def test_device_maps_remote(self):
         options = self.rpc_backend_options
@@ -4984,7 +5052,6 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             )
             self.assertEqual(ret, 2 * x)
 
-    @unittest.skip("Skipping until Tensorpipe supports non default GPUs")
     @skip_if_lt_x_gpu(2)
     def test_custom_stream(self):
         self._test_custom_stream(self._test_stream_sync, {"cuda:0": "cuda:1"})
