@@ -4824,6 +4824,52 @@ class TestONNXRuntime(unittest.TestCase):
         target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
         self.run_test(NLLModel(), (input, target))
 
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_binary_cross_entropy_with_logits(self):
+        x = torch.randn(5)
+        y = torch.randn(5)
+        self._bce_logits_loss(x, y)
+
+        x = torch.randn(2, 3, 5, 7)
+        y = torch.randn(2, 3, 5, 7)
+        self._bce_logits_loss(x, y)
+
+        x = torch.FloatTensor([[-0.4089, -1.2471, 0.5907], [-0.4897, -0.8267, -0.7349], [0.5241, -0.1246, -0.4751]])
+        y = torch.FloatTensor([[0, 1, 1], [0, 0, 1], [1, 0, 1]])
+        self._bce_logits_loss(x, y)
+
+        x = torch.randn(3, 3, requires_grad=True)
+        y = torch.empty(3, 3).random_(2)
+        weight = torch.tensor([3], dtype=torch.float)
+        pos_weight = torch.ones([1])
+        self._bce_logits_loss(x, y, weight, pos_weight)
+
+    def _bce_logits_loss(self, x, y, weight=None, pos_weight=None):
+        class BCEWithLogitsLossNone(torch.nn.Module):
+            def forward(self, input, target):
+                return torch.nn.functional.binary_cross_entropy_with_logits(input, target, reduction='none')
+
+        self.run_test(BCEWithLogitsLossNone(), input=(x, y))
+
+        class BCEWithLogitsLossMean(torch.nn.Module):
+            def forward(self, input, target):
+                return torch.nn.functional.binary_cross_entropy_with_logits(input, target, reduction='mean')
+
+        self.run_test(BCEWithLogitsLossNone(), input=(x, y))
+
+        class BCEWithLogitsLossSum(torch.nn.Module):
+            def forward(self, input, target):
+                return torch.nn.functional.binary_cross_entropy_with_logits(input, target, reduction='sum')
+
+        self.run_test(BCEWithLogitsLossNone(), input=(x, y))
+
+        class BCEWithLogitsLossWithWeights(torch.nn.Module):
+            def forward(self, input, target, weight, pos_weight):
+                return torch.nn.functional.binary_cross_entropy_with_logits(input, target, weight=weight, pos_weight=pos_weight, reduction='sum')
+
+        self.run_test(BCEWithLogitsLossWithWeights(), input=(x, y, weight, pos_weight))
+
+
     def test_torch_mm(self):
         class M(torch.nn.Module):
             def forward(self, mat1, mat2):
