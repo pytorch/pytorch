@@ -196,9 +196,6 @@ m.impl("${unqual_operator_name_with_overload}",
 UNPACK_TENSOR = CodeTemplate("""\
 auto${ref} ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos});""")
 
-LEGACY_WRAP_OPTIONS = CodeTemplate("""\
-auto ${arg_name}_ = TensorOptions(${arg_name});""")
-
 DECLARE_GRAD_FN = CodeTemplate("""\
 std::shared_ptr<${op}> grad_fn;
 """)
@@ -844,7 +841,7 @@ def emit_body(declaration):
 
 def unpack_args(env, declaration):
     def requires_unpack(arg):
-        return 'Tensor' in arg['dynamic_type']
+        return 'Tensor' in arg['dynamic_type'] and 'c10::optional' not in arg['type']
 
     body = []
     unpacked_args = []
@@ -858,16 +855,15 @@ def unpack_args(env, declaration):
 
         dynamic_type = arg['dynamic_type']
         assert 'TensorOptions' not in dynamic_type, "VariableKernel shouldn't take TensorOptions"
-        is_nullable = arg.get('is_nullable', False)
-        ref = (not is_nullable) and dynamic_type not in ['TensorList', 'const c10::List<c10::optional<Tensor>>&']
-        suffix = '_opt' if is_nullable and dynamic_type not in ['TensorList', 'const c10::List<c10::optional<Tensor>>&'] else ''
-
-        body.append(UNPACK_TENSOR.substitute(
-            arg_name=arg['name'],
-            arg_pos=i,
-            suffix=suffix,
-            ref='&' if ref else '',
-        ))
+                is_nullable = arg.get('is_nullable', False)
+                ref = (not is_nullable) and dynamic_type != 'TensorList'
+                suffix = '_opt' if is_nullable and dynamic_type != 'TensorList' else ''
+                body.append(UNPACK_TENSOR.substitute(
+                    arg_name=arg['name'],
+                    arg_pos=i,
+                    suffix=suffix,
+                    ref='&' if ref else '',
+                ))
 
         unpacked_args.append(arg['name'] + '_')
         unpacked_args_simple_type[arg['name'] + '_'] = arg['simple_type']
