@@ -11,9 +11,9 @@ import torch
 from torch import nn
 import torch.cuda
 
-from torch.distributed._pipeline.sync.checkpoint import Checkpointing, checkpoint, is_checkpointing, is_recomputing
-from torch.distributed._pipeline.sync.dependency import fork, join
-from torch.distributed._pipeline.sync.microbatch import Batch
+from torch.distributed.pipeline.sync.checkpoint import Checkpointing, checkpoint, is_checkpointing, is_recomputing
+from torch.distributed.pipeline.sync.dependency import fork, join
+from torch.distributed.pipeline.sync.microbatch import Batch
 
 devices = ["cpu"]
 if torch.cuda.is_available():
