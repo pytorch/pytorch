@@ -2,6 +2,7 @@
 #include <ATen/cpu/vec256/vec256.h>
 #include <ATen/native/Unfold2d.h>
 #include <ATen/native/cpu/Loops.h>
+#include <ATen/native/cpu/utils.h>
 #include <cmath>
 
 namespace at {
@@ -109,6 +110,66 @@ static void unfolded2d_acc(
   });
 }
 
+template <typename scalar_t>
+static void unfolded2d_acc_channels_last(
+    scalar_t* finput_data,
+    scalar_t* input_data,
+    int64_t kH,
+    int64_t kW,
+    int64_t dH,
+    int64_t dW,
+    int64_t padH,
+    int64_t padW,
+    int64_t batch_size,
+    int64_t n_input_plane,
+    int64_t input_height,
+    int64_t input_width,
+    int64_t output_height,
+    int64_t output_width) {
+  at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
+    for (int64_t n = start; n < end; n++) {
+      for (int64_t y = 0; y < output_height; y++) {
+        for (int64_t x = 0; x < output_width; x++) {
+          scalar_t* src = finput_data + n * output_height * output_width * kH * kW * n_input_plane +
+              y * output_width * kH * kW * n_input_plane + x * kH * kW * n_input_plane;
+          scalar_t* dst = input_data + n * input_height * input_width * n_input_plane;
+
+          if (padW > 0 || padH > 0) {
+            for (int64_t kh = 0; kh < kH; kh++) {
+              for (int64_t kw = 0; kw < kW; kw++) {
+                int64_t iy = y * dH - padH + kh;
+                int64_t ix = x * dW - padW + kw;
+                if (iy < 0 || iy >= input_height || ix < 0 || ix >= input_width) {
+                } else {
+                  scalar_t* dst_slice = dst + iy * input_width * n_input_plane + ix * n_input_plane;
+                  scalar_t* src_slice = src + kh * kW * n_input_plane + kw * n_input_plane;
+                  cadd(dst_slice,
+                       dst_slice,
+                       src_slice,
+                       n_input_plane);
+                }
+              }
+            }
+          } else {
+            for (int64_t kh = 0; kh < kH; kh++) {
+              for (int64_t kw = 0; kw < kW; kw++) {
+                int64_t iy = y * dH + kh;
+                int64_t ix = x * dW + kw;
+                scalar_t* dst_slice = dst + iy * input_width * n_input_plane + ix * n_input_plane;
+                scalar_t* src_slice = src + kh * kW * n_input_plane + kw * n_input_plane;
+                cadd(dst_slice,
+                     dst_slice,
+                     src_slice,
+                     n_input_plane);
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
 /* note: due to write issues, this one cannot be parallelized as well as
  * unfolded2d_copy */
 void unfolded2d_acc_kernel(
@@ -143,6 +204,44 @@ void unfolded2d_acc_kernel(
             dW,
             padH,
             padW,
+            n_input_plane,
+            input_height,
+            input_width,
+            output_height,
+            output_width);
+      });
+}
+
+void unfolded2d_acc_channels_last_kernel(
+    Tensor& finput,
+    Tensor& input,
+    int64_t kH,
+    int64_t kW,
+    int64_t dH,
+    int64_t dW,
+    int64_t padH,
+    int64_t padW,
+    int64_t batch_size,
+    int64_t n_input_plane,
+    int64_t input_height,
+    int64_t input_width,
+    int64_t output_height,
+    int64_t output_width) {
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      at::ScalarType::BFloat16, input.scalar_type(), "unfolded2d_acc_channels_last", [&] {
+        scalar_t* finput_data = finput.data_ptr<scalar_t>();
+        scalar_t* input_data = input.data_ptr<scalar_t>();
+
+        unfolded2d_acc_channels_last(
+            finput_data,
+            input_data,
+            kH,
+            kW,
+            dH,
+            dW,
+            padH,
+            padW,
+            batch_size,
             n_input_plane,
             input_height,
             input_width,
@@ -255,6 +354,68 @@ static void unfolded2d_copy(
       });
 }
 
+template <typename scalar_t>
+static void unfolded2d_copy_channels_last(
+    scalar_t* input_data,
+    scalar_t* finput_data,
+    int64_t kH,
+    int64_t kW,
+    int64_t dH,
+    int64_t dW,
+    int64_t padH,
+    int64_t padW,
+    int64_t batch_size,
+    int64_t n_input_plane,
+    int64_t input_height,
+    int64_t input_width,
+    int64_t output_height,
+    int64_t output_width) {
+  // algorithm on channels last is dual problem to contiguous format...
+  at::parallel_for(0, batch_size * output_height * output_width, 0, [&](int64_t start, int64_t end) {
+    int64_t n = 0;
+    int64_t y = 0;
+    int64_t x = 0;
+    data_index_init(start, n, batch_size, y, output_height, x, output_width);
+
+    for (int64_t k = start; k < end; k++) {
+      scalar_t* dst = finput_data + n * output_height * output_width * kH * kW * n_input_plane +
+          y * output_width * kH * kW * n_input_plane + x * kH * kW * n_input_plane;
+      scalar_t* src = input_data + n * input_height * input_width * n_input_plane;
+
+      if (padW > 0 || padH > 0) {
+        for (int64_t kh = 0; kh < kH; kh++) {
+          for (int64_t kw = 0; kw < kW; kw++) {
+            int64_t iy = y * dH - padH + kh;
+            int64_t ix = x * dW - padW + kw;
+            if (iy < 0 || iy >= input_height || ix < 0 || ix >= input_width) {
+              memset(dst + kh * kW * n_input_plane + kw * n_input_plane,
+                    0,
+                    sizeof(scalar_t) * n_input_plane);
+            } else {
+              memcpy(dst + kh * kW * n_input_plane + kw * n_input_plane,
+                     src + iy * input_width * n_input_plane + ix * n_input_plane,
+                     sizeof(scalar_t) * n_input_plane);
+            }
+          }
+        }
+      } else {
+        for (int64_t kh = 0; kh < kH; kh++) {
+          for (int64_t kw = 0; kw < kW; kw++) {
+            int64_t iy = y * dH + kh;
+            int64_t ix = x * dW + kw;
+            memcpy(dst + kh * kW * n_input_plane + kw * n_input_plane,
+                   src + iy * input_width * n_input_plane + ix * n_input_plane,
+                   sizeof(scalar_t) * n_input_plane);
+          }
+        }
+      }
+
+      // move on to next output index
+      data_index_step(n, batch_size, y, output_height, x, output_width);
+    }
+  });
+}
+
 void unfolded2d_copy_kernel(
     Tensor& finput,
     Tensor& input,
@@ -297,10 +458,50 @@ void unfolded2d_copy_kernel(
       });
 }
 
+void unfolded2d_copy_channels_last_kernel(
+    Tensor& finput,
+    Tensor& input,
+    int64_t kH,
+    int64_t kW,
+    int64_t dH,
+    int64_t dW,
+    int64_t padH,
+    int64_t padW,
+    int64_t batch_size,
+    int64_t n_input_plane,
+    int64_t input_height,
+    int64_t input_width,
+    int64_t output_height,
+    int64_t output_width) {
+  AT_DISPATCH_ALL_TYPES_AND(
+      at::ScalarType::BFloat16, input.scalar_type(), "unfolded2d_copy_channels_last", [&] {
+        scalar_t* input_data = input.data_ptr<scalar_t>();
+        scalar_t* finput_data = finput.data_ptr<scalar_t>();
+
+        unfolded2d_copy_channels_last(
+            input_data,
+            finput_data,
+            kH,
+            kW,
+            dH,
+            dW,
+            padH,
+            padW,
+            batch_size,
+            n_input_plane,
+            input_height,
+            input_width,
+            output_height,
+            output_width);
+      });
+}
+
 } // namespace
 
 REGISTER_DISPATCH(unfolded2d_copy_stub, &unfolded2d_copy_kernel);
+REGISTER_DISPATCH(unfolded2d_copy_channels_last_stub, &unfolded2d_copy_channels_last_kernel);
 REGISTER_DISPATCH(unfolded2d_acc_stub, &unfolded2d_acc_kernel);
+REGISTER_DISPATCH(unfolded2d_acc_channels_last_stub, &unfolded2d_acc_channels_last_kernel);
 
 } // namespace native
 } // namespace at

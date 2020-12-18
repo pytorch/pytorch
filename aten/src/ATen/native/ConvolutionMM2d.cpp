@@ -124,15 +124,30 @@ static inline void slow_conv2d_shape_check(
   }
 }
 
-static Tensor view_weight_2d(const Tensor& weight_) {
-  Tensor weight = weight_.contiguous();
+static Tensor view_weight_2d(const Tensor& weight_,
+    at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) {
+  Tensor weight = weight_.contiguous(memory_format);
+  if (memory_format == at::MemoryFormat::ChannelsLast) {
+    const int64_t s1 = weight.size(0); // OC
+    const int64_t s2 = weight.size(1) * weight.size(2) * weight.size(3); // KH * KW * IC
+    return weight.as_strided({s1, s2}, {s2, 1});
+  }
   if (weight.dim() == 4) {
-    const int64_t s1 = weight.size(0);
-    const int64_t s2 = weight.size(1) * weight.size(2) * weight.size(3);
+    const int64_t s1 = weight.size(0); // OC
+    const int64_t s2 = weight.size(1) * weight.size(2) * weight.size(3); // IC * KH * KW
     return weight.view({s1, s2});
   } else {
     return weight;
   }
+}
+
+// activation on channels last memory format
+static Tensor view_channels_last_2d(const Tensor& self) {
+  TORCH_CHECK(self.is_contiguous(at::MemoryFormat::ChannelsLast),
+      "expect input tensor in channels last format");
+  const int64_t s1 = self.size(0) * self.size(2) * self.size(3); // N * H * W
+  const int64_t s2 = self.size(1); // C
+  return self.as_strided({s1, s2}, {s2, 1});
 }
 
 static void slow_conv2d_update_output_frame(
@@ -197,6 +212,69 @@ static void slow_conv2d_update_output_frame(
   }
 }
 
+static void slow_conv2d_update_output_channels_last(
+    Tensor& input,
+    Tensor& output,
+    const Tensor& weight,
+    const Tensor& bias,
+    Tensor& finput,
+    int64_t kernel_height,
+    int64_t kernel_width,
+    int64_t stride_height,
+    int64_t stride_width,
+    int64_t pad_height,
+    int64_t pad_width,
+    int64_t n_input_plane,
+    int64_t input_height,
+    int64_t input_width,
+    int64_t n_output_plane,
+    int64_t output_height,
+    int64_t output_width) {
+  // Note: channels last memory format:
+  //   im2col: x {N*IH*IW, IC} => fx {N*OH*OW, KW*KW*IC}
+  //   gemm: y {N*OW*OW, OC} = fx {N*OH*OW, KW*KW*IC} * w.t {KH*KW*IC, OC}
+  // so basically we can fold batch_size into gemm, no need to separate per batch dimension.
+  //
+  auto output2d = view_channels_last_2d(output);
+  auto input2d = view_channels_last_2d(input);
+
+  if ((input.ndimension() == 4) && (kernel_height == 1) && (stride_height == 1) && (pad_height == 0) &&
+      (kernel_width == 1) && (stride_width == 1) && (pad_width == 0)) {
+    auto weight_new = weight.view({n_output_plane, n_input_plane}).t();
+    if (bias.defined()) {
+      output.copy_(bias.unsqueeze(-1).unsqueeze(-1));
+      output2d.addmm_(input2d, weight_new, 1, 1);
+    } else {
+      at::mm_out(output2d, input2d, weight_new);
+    }
+    return;
+  }
+
+  unfolded2d_copy_channels_last_stub(
+      kCPU,
+      finput,
+      input,
+      kernel_height,
+      kernel_width,
+      stride_height,
+      stride_width,
+      pad_height,
+      pad_width,
+      input.size(0),
+      n_input_plane,
+      input_height,
+      input_width,
+      output_height,
+      output_width);
+
+  if (bias.defined()) {
+    output.copy_(bias.unsqueeze(-1).unsqueeze(-1));
+    output2d.addmm_(finput, weight.t(), 1, 1);
+  } else {
+    output2d.addmm_(finput, weight.t(), 0, 1);
+  }
+}
+
 void slow_conv2d_backward_update_grad_input_frame(
     Tensor& grad_input,
     const Tensor& grad_output,
@@ -230,10 +308,43 @@ void slow_conv2d_backward_update_grad_input_frame(
       grad_output.size(2));
 }
 
+void slow_conv2d_backward_update_grad_input_channels_last(
+    Tensor& grad_input,
+    const Tensor& grad_output,
+    const Tensor& weight,
+    Tensor& fgrad_input,
+    int64_t kernel_height,
+    int64_t kernel_width,
+    int64_t stride_height,
+    int64_t stride_width,
+    int64_t pad_height,
+    int64_t pad_width) {
+  auto grad_output_2d = view_channels_last_2d(grad_output); // {N*OH*OW, OC}
+  fgrad_input.addmm_(grad_output_2d, weight, 0, 1); // {N*OW*OW, KH*KW*IC}
+
+  grad_input.zero_();
+  unfolded2d_acc_channels_last_stub(
+      kCPU,
+      fgrad_input,
+      grad_input,
+      kernel_height,
+      kernel_width,
+      stride_height,
+      stride_width,
+      pad_height,
+      pad_width,
+      grad_input.size(0),
+      grad_input.size(1),
+      grad_input.size(2),
+      grad_input.size(3),
+      grad_output.size(2),
+      grad_output.size(3));
+}
+
 void slow_conv2d_backward_out_cpu_template(
     Tensor& grad_input,
-    const Tensor& grad_output_,
-    const Tensor& input_,
+    const Tensor& grad_output,
+    const Tensor& input,
     const Tensor& weight_,
     const Tensor& finput,
     Tensor& fgrad_input,
@@ -247,10 +358,14 @@ void slow_conv2d_backward_out_cpu_template(
   const int64_t stride_height = stride[0];
   const int64_t stride_width = stride[1];
 
-  const Tensor weight = view_weight_2d(weight_);
+  bool use_channels_last = input.suggest_memory_format() == at::MemoryFormat::ChannelsLast ||
+      weight_.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
+  auto memory_format = use_channels_last ? at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
+
+  const Tensor weight = view_weight_2d(weight_, memory_format);
   slow_conv2d_shape_check(
-      input_,
-      grad_output_,
+      input,
+      grad_output,
       weight,
       Tensor(),
       kernel_height,
@@ -261,13 +376,28 @@ void slow_conv2d_backward_out_cpu_template(
       pad_width,
       false);
 
-  const Tensor input = input_.contiguous();
-  const Tensor grad_output = grad_output_.contiguous();
-  grad_input.resize_as_(input);
+  grad_input.resize_as_(input, memory_format);
   fgrad_input.resize_as_(finput);
   fgrad_input.zero_();
-  const Tensor tweight = weight.transpose(0, 1);
+
+  if (use_channels_last) {
+    slow_conv2d_backward_update_grad_input_channels_last(
+        grad_input,
+        grad_output,
+        weight,
+        fgrad_input,
+        kernel_height,
+        kernel_width,
+        stride_height,
+        stride_width,
+        pad_height,
+        pad_width);
+
+    return;
+  }
+
   const int64_t batch_size = input.size(0);
+  const Tensor tweight = weight.transpose(0, 1);
   at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
     NoGradGuard no_grad;
     AutoNonVariableTypeMode non_variable_type_mode;
@@ -322,20 +452,31 @@ void slow_conv2d_backward_parameters_frame(
   }
 }
 
+void slow_conv2d_backward_parameters_channels_last(
+    Tensor& grad_weight,
+    Tensor& grad_bias,
+    const Tensor& grad_output,
+    const Tensor& finput) {
+  auto grad_output_2d = view_channels_last_2d(grad_output); // {N*OH*OW, OC}
+  if (grad_weight.defined()) {
+    grad_weight.addmm_(grad_output_2d.t(), finput);
+  }
+
+  if (grad_bias.defined()) {
+    grad_bias.copy_(grad_output_2d.sum(0));
+  }
+}
+
 static void slow_conv2d_backward_parameters_out_cpu_template(
     Tensor& grad_weight,
     Tensor& grad_bias,
-    const Tensor& input_,
-    const Tensor& grad_output_,
+    const Tensor& input,
+    const Tensor& grad_output,
     const Tensor& finput,
     Tensor fgrad_input,
     IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding) {
-  CheckedFrom c = "slow_conv2d_backward_parameters_cpu";
-  auto grad_weight_arg = TensorArg(grad_weight, "grad_weight_arg", 0);
-  auto grad_bias_arg = TensorArg(grad_bias, "grad_bias_arg", 0);
-
   const int64_t kernel_height = kernel_size[0];
   const int64_t kernel_width = kernel_size[1];
   const int64_t pad_height = padding[0];
@@ -343,19 +484,23 @@ static void slow_conv2d_backward_parameters_out_cpu_template(
   const int64_t stride_height = stride[0];
   const int64_t stride_width = stride[1];
 
+  auto memory_format = input.suggest_memory_format();
+
   Tensor grad_weight_2d;
   if (grad_weight.defined()) {
-    checkContiguous(c, grad_weight_arg);
-    grad_weight_2d = view_weight_2d(grad_weight);
+    TORCH_CHECK(grad_weight.is_contiguous(memory_format),
+        "slow_conv2d_backward_parameters_cpu: grad_weight is non-contiguous");
+    grad_weight_2d = view_weight_2d(grad_weight, memory_format);
   }
 
   if (grad_bias.defined()) {
-    checkContiguous(c, grad_bias_arg);
+    TORCH_CHECK(grad_bias.is_contiguous(),
+        "slow_conv2d_backward_parameters_cpu: grad_bias is non-contiguous");
   }
 
   slow_conv2d_shape_check(
-      input_,
-      grad_output_,
+      input,
+      grad_output,
       grad_weight_2d,
       grad_bias,
       kernel_height,
@@ -366,8 +511,11 @@ static void slow_conv2d_backward_parameters_out_cpu_template(
       pad_width,
       true);
 
-  auto input = input_.contiguous();
-  auto grad_output = grad_output_.contiguous();
+  if (memory_format == at::MemoryFormat::ChannelsLast) {
+    slow_conv2d_backward_parameters_channels_last(
+        grad_weight_2d, grad_bias, grad_output, finput);
+    return;
+  }
 
   const int64_t batch_size = input.size(0);
   for (int64_t t = 0; t < batch_size; t++) {
@@ -401,7 +549,11 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_forward_out_cpu(
   const int64_t stride_height = stride[0];
   const int64_t stride_width = stride[1];
 
-  const Tensor weight_2d = view_weight_2d(weight_);
+  bool use_channels_last = self.suggest_memory_format() == at::MemoryFormat::ChannelsLast ||
+      weight_.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
+  auto memory_format = use_channels_last ? at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
+
+  const Tensor weight_2d = view_weight_2d(weight_, memory_format);
 
   slow_conv2d_shape_check(
       self,
@@ -416,7 +568,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_forward_out_cpu(
       pad_width,
       false);
 
-  const Tensor input = self.contiguous();
+  const Tensor input = self.contiguous(memory_format);
   const int64_t ndim = input.dim();
   const int64_t dim_planes = 1;
   const int64_t dim_height = 2;
@@ -426,24 +578,55 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_forward_out_cpu(
   const int64_t input_height = input.size(dim_height);
   const int64_t input_width = input.size(dim_width);
   const int64_t n_output_plane = weight_2d.size(0);
-  const int64_t output_height =
-      (input_height + 2 * pad_height - kernel_height) / stride_height + 1;
-  const int64_t output_width =
-      (input_width + 2 * pad_width - kernel_width) / stride_width + 1;
-
+  const int64_t output_height = (input_height + 2 * pad_height - kernel_height) / stride_height + 1;
+  const int64_t output_width = (input_width + 2 * pad_width - kernel_width) / stride_width + 1;
   const int64_t batch_size = input.size(0);
 
-  if ((input.ndimension() == 4) && (kernel_height == 1) && (stride_height == 1) && (pad_height == 0) &&
-      (kernel_width == 1) && (stride_width == 1) && (pad_width == 0)) {
+  // resize output buffer according to memory format.
+  output.resize_({batch_size, n_output_plane, output_height, output_width}, memory_format);
+
+  bool skip_unfolding = (input.ndimension() == 4) && (kernel_height == 1) && (stride_height == 1) && (pad_height == 0) &&
+      (kernel_width == 1) && (stride_width == 1) && (pad_width == 0);
+
+  if (use_channels_last) {
+    if (skip_unfolding) {
+      finput = view_channels_last_2d(input).detach();
+    } else {
+      finput.resize_({batch_size * output_height * output_width,
+                      kernel_height * kernel_width * n_input_plane});
+    }
+
+    slow_conv2d_update_output_channels_last(
+        const_cast<Tensor&>(input),
+        output,
+        weight_2d,
+        bias,
+        finput,
+        kernel_height,
+        kernel_width,
+        stride_height,
+        stride_width,
+        pad_height,
+        pad_width,
+        n_input_plane,
+        input_height,
+        input_width,
+        n_output_plane,
+        output_height,
+        output_width);
+
+    return std::tuple<Tensor&, Tensor&, Tensor&>(output, finput, fgrad_input);
+  }
+
+  if (skip_unfolding) {
     finput =
         input.view({batch_size, n_input_plane, output_height * output_width})
             .detach();
   } else {
-     finput.resize_({batch_size,
-                  n_input_plane * kernel_height * kernel_width,
-                  output_height * output_width});
+    finput.resize_({batch_size,
+                    n_input_plane * kernel_height * kernel_width,
+                    output_height * output_width});
   }
-  output.resize_({batch_size, n_output_plane, output_height, output_width});
 
   at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
     NoGradGuard no_grad;
@@ -503,7 +686,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cpu(
     Tensor& grad_input,
     Tensor& grad_weight,
     Tensor& grad_bias,
-    const Tensor& grad_output,
+    const Tensor& grad_output_,
     const Tensor& self,
     const Tensor& weight,
     IntArrayRef kernel_size,
@@ -511,6 +694,9 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cpu(
     IntArrayRef padding,
     const Tensor& finput,
     const Tensor& fgrad_input) {
+  auto memory_format = self.suggest_memory_format();
+  auto grad_output = grad_output_.contiguous(memory_format);
+
   if (grad_input.defined()) {
     slow_conv2d_backward_out_cpu_template(
         grad_input,
@@ -525,7 +711,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cpu(
   }
 
   if (grad_weight.defined()) {
-    grad_weight.resize_(weight.sizes());
+    grad_weight.resize_(weight.sizes(), memory_format);
     grad_weight.zero_();
   }
 
