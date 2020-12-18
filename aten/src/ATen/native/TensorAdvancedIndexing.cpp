@@ -290,7 +290,7 @@ Tensor index(const Tensor & self, torch::List<c10::optional<Tensor>> indices) {
   return iter.output();
 }
 
-Tensor quantized_index(const Tensor & self, TensorList indices) {
+Tensor quantized_index(const Tensor & self, torch::List<c10::optional<Tensor>> indices) {
   TORCH_INTERNAL_ASSERT(
       self.qscheme() == c10::kPerTensorAffine ||
       self.qscheme() == c10::kPerTensorSymmetric,

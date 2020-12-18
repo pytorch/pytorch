@@ -118,6 +118,20 @@ for (size_t i=0; i<${tensorlist_name}.size(); i++) {
 }
 """)
 
+SAVE_OPTIONALTENSORLIST_STORAGE = CodeTemplate("""\
+std::vector<c10::optional<Storage>> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
+for (const c10::optional<Tensor>& tensor : ${tensorlist_name})
+  ${tensorlist_name}_storage_saved.push_back(
+    tensor.has_value() && tensor->has_storage() ? c10::optional<Storage>(tensor->storage()) : c10::nullopt);
+""")
+
+ENFORCE_SAME_OPTIONALTENSORLIST_STORAGE = CodeTemplate("""\
+for (size_t i=0; i<${tensorlist_name}.size(); i++) {
+  if (${tensorlist_name}_storage_saved[i].has_value())
+    AT_ASSERT(${tensorlist_name}_storage_saved[i].value().is_alias_of(static_cast<c10::optional<Tensor>>(${tensorlist_name}[i])->storage()));
+}
+""")
+
 SAVE_TENSOR_IMPL = CodeTemplate("""\
 c10::intrusive_ptr<TensorImpl> ${tensor_name}_impl_saved;
 if (${tensor_name}.defined()) ${tensor_name}_impl_saved = ${tensor_name}.getIntrusivePtr();
@@ -137,6 +151,21 @@ ENFORCE_SAME_TENSORLIST_IMPL = CodeTemplate("""\
 for (size_t i=0; i<${tensorlist_name}.size(); i++) {
   if (${tensorlist_name}_impl_saved[i])
     AT_ASSERT(${tensorlist_name}_impl_saved[i] == ${tensorlist_name}[i].getIntrusivePtr());
+}
+""")
+
+SAVE_OPTIONALTENSORLIST_IMPL = CodeTemplate("""\
+std::vector<c10::intrusive_ptr<TensorImpl>> ${tensorlist_name}_impl_saved(${tensorlist_name}.size());
+for (size_t i=0; i<${tensorlist_name}.size(); i++) {
+  c10::optional<Tensor> t = ${tensorlist_name}[i];
+  if (t.has_value() && t->defined()) ${tensorlist_name}_impl_saved[i] = t->getIntrusivePtr();
+}
+""")
+
+ENFORCE_SAME_OPTIONALTENSORLIST_IMPL = CodeTemplate("""\
+for (size_t i=0; i<${tensorlist_name}.size(); i++) {
+  if (${tensorlist_name}_impl_saved[i])
+    AT_ASSERT(${tensorlist_name}_impl_saved[i] == static_cast<c10::optional<Tensor>>(${tensorlist_name}[i])->getIntrusivePtr());
 }
 """)
 
@@ -175,6 +204,7 @@ std::shared_ptr<${op}> grad_fn;
 
 SETUP_ANY_REQUIRES_GRAD = CodeTemplate("""\
 auto _any_requires_grad = compute_requires_grad( ${args_with_derivatives} );
+(void)_any_requires_grad;
 """)
 
 SETUP_DERIVATIVE = CodeTemplate("""\
@@ -443,7 +473,7 @@ def emit_body(declaration):
         if func is None:
             return setup
 
-        has_tensorlist_arg = any(arg.type == 'TensorList' for arg in func.args_with_derivatives)
+        has_tensorlist_arg = any(arg.type in ['TensorList', 'c10::List<c10::optional<Tensor>>'] for arg in func.args_with_derivatives)
 
         # We don't want to save tensors if we know that they will never be used
         # when computing the derivative, so we add guards to those statements
@@ -492,7 +522,7 @@ def emit_body(declaration):
 
         setup.extend(save_variables(func.all_saved_inputs, False, guard_for))
         for arg in func.args_with_derivatives:
-            if arg.type == 'TensorList':
+            if arg.type in ['TensorList', 'c10::List<c10::optional<Tensor>>']:
                 setup.append(f'grad_fn->{arg.name}_size_ = {arg.name}.size();')
 
         return setup
@@ -531,7 +561,7 @@ def emit_body(declaration):
             return body
         for arg in differentiable_outputs:
             name = arg['name']
-            if arg['type'] == 'Tensor' or arg['type'] == 'TensorList':
+            if arg['type'] in ['Tensor', 'TensorList', 'c10::List<c10::optional<Tensor>>']:
                 body.append('throw_error_for_complex_autograd({}, "{}");'.format(name, base_name))
         return body
 
@@ -576,7 +606,7 @@ def emit_body(declaration):
                     expr = f'SavedVariable({var}, {str(is_output).lower()}, {is_inplace_view})'
                 else:
                     expr = f'SavedVariable({var}, {str(is_output).lower()})'
-            elif arg.type == 'TensorList':
+            elif arg.type in ['TensorList', 'c10::List<c10::optional<Tensor>>']:
                 name += '_'
                 expr = f'make_saved_variable_list({arg.name})'
             elif arg.type == 'IntArrayRef':
@@ -667,12 +697,12 @@ def emit_body(declaration):
                 # Single differentiable output (Tensor or Tensor[])
                 return_info = differentiable_outputs[0]
                 # We only support simple Tensor or a TensorList for functions that return views
-                if not return_info['dynamic_type'] in ['Tensor', 'TensorList']:
+                if not return_info['dynamic_type'] in ['Tensor', 'TensorList', 'c10::List<c10::optional<Tensor>>']:
                     raise RuntimeError("{} that return differentiable views can only return Tensor or Tensor[]".format(base_name))
                 # Only allow rebasing of the history if we return a single Tensor
                 # If we are in a no grad block, raise a warning
                 # See NOTE [ View + Inplace detection ] for more details about this logic
-                if return_info['dynamic_type'] == 'TensorList':
+                if return_info['dynamic_type'] in ['TensorList', 'c10::List<c10::optional<Tensor>>']:
                     if base_name in MULTI_OUTPUT_SAFE_FUNCTIONS:
                         creation_meta = "CreationMeta::MULTI_OUTPUT_SAFE"
                     else:
@@ -707,6 +737,11 @@ def emit_body(declaration):
                                         SAVE_TENSORLIST_IMPL.substitute(tensorlist_name=arg)]
                     enforce_same_ptrs_stmts += [ENFORCE_SAME_TENSORLIST_STORAGE.substitute(tensorlist_name=arg),
                                                 ENFORCE_SAME_TENSORLIST_IMPL.substitute(tensorlist_name=arg)]
+                elif simple_type == 'c10::List<c10::optional<Tensor>>':
+                    save_ptrs_stmts += [SAVE_OPTIONALTENSORLIST_STORAGE.substitute(tensorlist_name=arg),
+                                        SAVE_OPTIONALTENSORLIST_IMPL.substitute(tensorlist_name=arg)]
+                    enforce_same_ptrs_stmts += [ENFORCE_SAME_OPTIONALTENSORLIST_STORAGE.substitute(tensorlist_name=arg),
+                                                ENFORCE_SAME_OPTIONALTENSORLIST_IMPL.substitute(tensorlist_name=arg)]
                 elif simple_type == 'Tensor':
                     save_ptrs_stmts += [SAVE_TENSOR_STORAGE.substitute(tensor_name=arg),
                                         SAVE_TENSOR_IMPL.substitute(tensor_name=arg)]
@@ -822,8 +857,8 @@ def unpack_args(env, declaration):
         dynamic_type = arg['dynamic_type']
         assert 'TensorOptions' not in dynamic_type, "VariableKernel shouldn't take TensorOptions"
         is_nullable = arg.get('is_nullable', False)
-        ref = (not is_nullable) and dynamic_type not in ['TensorList']
-        suffix = '_opt' if is_nullable and dynamic_type != 'TensorList' else ''
+        ref = (not is_nullable) and dynamic_type not in ['TensorList', 'c10::List<c10::optional<Tensor>>']
+        suffix = '_opt' if is_nullable and dynamic_type not in ['TensorList', 'c10::List<c10::optional<Tensor>>'] else ''
 
         body.append(UNPACK_TENSOR.substitute(
             arg_name=arg['name'],
