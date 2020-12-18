@@ -81,14 +81,19 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
 
     if input is None:
         input = torch.randn(batch_size, 3, 224, 224, requires_grad=True)
-
     with torch.no_grad():
         if isinstance(input, torch.Tensor):
             input = (input,)
         # In-place operators will update input tensor data as well.
         # Thus inputs are replicated before every forward call.
-        input_copy = copy.deepcopy(input)
-        output = model(*input_copy)
+        if isinstance(input, dict):
+            input = (input,)
+        input_args = copy.deepcopy(input)
+        input_kwargs = {}
+        if isinstance(input_args[-1], dict):
+            input_kwargs = input_args[-1]
+            input_args = input_args[:-1]
+        output = model(*input_args, **input_kwargs)
         if isinstance(output, torch.Tensor):
             output = (output,)
 
@@ -459,7 +464,7 @@ class TestONNXRuntime(unittest.TestCase):
                 return x_out
 
         x = {torch.tensor(1.): torch.randn(1, 2, 3)}
-        self.run_test(MyModel(), (x,))
+        self.run_test(MyModel(), (x, {}))
 
     @disableScriptTest()
     def test_dict_str(self):
@@ -470,7 +475,101 @@ class TestONNXRuntime(unittest.TestCase):
                 return x_out
 
         x = {"test_key_in": torch.randn(1, 2, 3)}
-        self.run_test(MyModel(), (x,))
+        self.run_test(MyModel(), (x, {}))
+
+    def test_optional_inputs_with_no_optionals(self):
+        class NoOptionalModel(torch.nn.Module):
+            def forward(self, input):
+                return input
+
+        # Without empty optional arguments dictionary
+        x = torch.randn(2, 3)
+        self.run_test(NoOptionalModel(), (x,))
+        # With empty optional arguments dictionary
+        y = torch.randn(2, 3)
+        self.run_test(NoOptionalModel(), (y, {}))
+
+    def test_optional_inputs_with_mixed_optionals(self):
+        class MixedModel(torch.nn.Module):
+            def forward(self, x, y=None, z=None):
+                if y is not None:
+                    return x + y
+                if z is not None:
+                    return x + z
+                return x
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+        z = torch.randn(2, 3)
+        # Without optional arguments dictionary
+        self.run_test(MixedModel(), (x, y, None))
+        self.run_test(MixedModel(), (x, None, z))
+        # With optional arguments dictionary
+        self.run_test(MixedModel(), (x, {'y': y, 'z': None}))
+        self.run_test(MixedModel(), (x, {'y': None, 'z': z}))
+        self.run_test(MixedModel(), (x, {'z': z}))
+        self.run_test(MixedModel(), (x, {'y': y}))
+
+    def test_optional_inputs_with_all_optionals(self):
+        class AllOptionalModel(torch.nn.Module):
+            def forward(self, y=None, z=None):
+                if y is not None:
+                    return y
+                if z is not None:
+                    return z
+
+        y = torch.randn(2, 3)
+        # Without optional arguments dictionary
+        self.run_test(AllOptionalModel(), (y, None))
+        # With optional arguments dictionary
+        self.run_test(AllOptionalModel(), {'y': y, 'z': None})
+
+    def test_input_names_with_optional_args(self):
+        class NoOptionalModel(torch.nn.Module):
+            def forward(self, input):
+                return input
+
+        # Without empty optional arguments dictionary
+        x = torch.randn(2, 3)
+        self.run_test(NoOptionalModel(), (x,), input_names=['input_x'])      
+        # With empty optional arguments dictionary
+        y = torch.randn(2, 3)
+        self.run_test(NoOptionalModel(), (y, {}))
+
+        class MixedModel(torch.nn.Module):
+            def forward(self, x, y=None, z=None):
+                if y is not None:
+                    return x + y
+                if z is not None:
+                    return x + z
+                return x
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+        z = torch.randn(2, 3)
+        # Without optional arguments dictionary
+        self.run_test(MixedModel(), (x, y, None), input_names=['input_x', 'input_y'])
+        self.run_test(MixedModel(), (x, None, z), input_names=['input_x', 'input_z'])
+
+        # With optional arguments dictionary
+        self.run_test(MixedModel(), (x, {'y': y, 'z': None}), input_names=['input_x', 'input_y'])
+        self.run_test(MixedModel(), (x, {'y': None, 'z': z}), input_names=['input_x', 'input_z'])
+
+        class AllOptionalModel(torch.nn.Module):
+            def forward(self, y=None, z=None):
+                if y is not None:
+                    return y
+                if z is not None:
+                    return z
+
+        y = torch.randn(2, 3)
+        z = torch.randn(2, 3)
+        # Without optional arguments dictionary
+        self.run_test(AllOptionalModel(), (y, None), input_names=['input_y'])
+        self.run_test(AllOptionalModel(), (None, z), input_names=['input_z'])
+        # With optional arguments dictionary
+        self.run_test(AllOptionalModel(), {'y': y, 'z': None}, input_names=['input_y'])
+        self.run_test(AllOptionalModel(), {'y': None, 'z': z}, input_names=['input_z'])
 
     @disableScriptTest()
     def test_none_as_input(self):
@@ -1193,6 +1292,14 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(DynamicSliceExportMod(), x,
                       dynamic_axes={'input_1': [0, 1, 2],
                                     'output_1': [0, 1, 2]})
+
+    def test_square(self):
+        class Square(torch.nn.Module):
+            def forward(self, x):
+                return torch.square(x)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(Square(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_arange_dynamic(self):
@@ -4883,6 +4990,24 @@ class TestONNXRuntime(unittest.TestCase):
                       output_names=['output_1'],
                       dynamic_axes={'output_1': [0, 1]})
 
+    @skipIfONNXShapeInference(False)
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_if_list(self):
+        class IfModel(torch.nn.Module):
+            def forward(self, x, y, cond):
+                res = []
+                if cond:
+                    res = res + [x]
+                else:
+                    res = res + [y]
+                # TODO: remove torch.stack once graph sequence output is supported.
+                return torch.stack(res)
+
+        x = torch.randn(2, 3)
+        y = torch.randn(3, 3)
+        cond = torch.tensor(1, dtype=torch.bool)
+        self.run_test(torch.jit.script(IfModel()), (x, y, cond))
+
     def test_onnx_proto_checker(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -5388,6 +5513,12 @@ TestONNXRuntime_opset12_IRv4 = type(str("TestONNXRuntime_opset12_IRv4"),
                                     dict(TestONNXRuntime.__dict__, opset_version=12,
                                          keep_initializers_as_inputs=False))
 
+# opset 13 tests
+TestONNXRuntime_opset13 = type(str("TestONNXRuntime_opset13"),
+                               (unittest.TestCase,),
+                               dict(TestONNXRuntime.__dict__, opset_version=13,
+                                    keep_initializers_as_inputs=False,
+                                    onnx_shape_inference=True))
 
 # opset 9 tests, with use_new_jit_passes=True for using new jit API,
 # and with keep_initializers_as_inputs=False for IR version 4 style export.

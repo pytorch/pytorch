@@ -674,7 +674,7 @@ ccache -M 25Gi
 ```
 
 To check this is working, do two clean builds of pytorch in a row. The second
-build should be substantially and noticeably faster than the first build.
+build should be substantially and noticeably faster than the first build. If this doesn't seem to be the case, check that each of the symlinks above actually link to your installation of `ccache`. For example, if you followed the first option and installed `ccache` from source on a Linux machine, running `readlink -e $(which g++)` should return `~/ccache/bin/ccache`.
 
 
 #### Use a faster linker

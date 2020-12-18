@@ -3649,5 +3649,91 @@ TEST(LoopNest, DeadStoreEliminationWithIntermediates) {
   torch::jit::testing::FileCheck().run(expected_ir2, oss.str());
 }
 
+TEST(LoopNest, CompoundTensorSimple) {
+  KernelScope kernel_scope;
+
+  BufHandle a_buf("A", {10, 5}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle x("x", kInt);
+  VarHandle y("y", kInt);
+  auto for_body1 = Block::make({Store::make(a_buf, {i, j}, i * j, 1)});
+  auto inner_for1 = For::make(j, 0, 5, for_body1);
+  auto outer_for1 = For::make(i, 0, 10, inner_for1);
+  auto for_body2 = Block::make(
+      {Store::make(a_buf, {x, y}, Load::make(a_buf, {x, y}, 1) + x + y, 1)});
+  auto inner_for2 = For::make(y, 0, 5, for_body2);
+  auto outer_for2 = For::make(x, 0, 10, inner_for2);
+  Block* body = Block::make({outer_for1, outer_for2});
+
+  Tensor* A = new CompoundTensor(a_buf.node(), {i.node(), j.node()}, body);
+
+  LoopNest l({A});
+  l.prepareForCodegen();
+
+  std::vector<int> a_data(50, 0);
+
+  Stmt* s = IRSimplifier::simplify(l.root_stmt());
+  SimpleIREvaluator cg(s, {A});
+
+  std::vector<int> a_ref(50, 0);
+
+  for (int i = 0; i < 10; ++i) {
+    for (int j = 0; j < 5; ++j) {
+      a_ref[i * 5 + j] = (i * j) + i + j;
+    }
+  }
+  cg.call({a_data});
+
+  assertAllEqual(a_data, a_ref);
+}
+
+TEST(LoopNest, CompoundTensorUsed) {
+  KernelScope kernel_scope;
+
+  BufHandle a_buf("A", {10, 5}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle x("x", kInt);
+  VarHandle y("y", kInt);
+  auto for_body1 = Block::make({Store::make(a_buf, {i, j}, i * j, 1)});
+  auto inner_for1 = For::make(j, 0, 5, for_body1);
+  auto outer_for1 = For::make(i, 0, 10, inner_for1);
+  auto for_body2 = Block::make(
+      {Store::make(a_buf, {x, y}, Load::make(a_buf, {x, y}, 1) + x + y, 1)});
+  auto inner_for2 = For::make(y, 0, 5, for_body2);
+  auto outer_for2 = For::make(x, 0, 10, inner_for2);
+  Block* body = Block::make({outer_for1, outer_for2});
+
+  Tensor* A = new CompoundTensor(a_buf.node(), {i.node(), j.node()}, body);
+  Tensor* B = Compute(
+      "B", {{10, "i"}, {3, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+        return A->call(i, j + 1) + A->call(i, j + 2);
+      });
+
+  LoopNest l({B});
+  ASSERT_FALSE(l.computeInline(A->buf()));
+  l.prepareForCodegen();
+
+  std::vector<int> a_data(50, 0);
+  std::vector<int> b_data(50, 0);
+
+  Stmt* s = IRSimplifier::simplify(l.root_stmt());
+  std::cout << *s << "\n ";
+  SimpleIREvaluator cg(s, {B});
+
+  std::vector<int> b_ref(50, 0);
+
+  auto AT = [](int i, int j) { return i * j + i + j; };
+  for (int i = 0; i < 10; ++i) {
+    for (int j = 0; j < 3; ++j) {
+      b_ref[i * 3 + j] = AT(i, j + 1) + AT(i, j + 2);
+    }
+  }
+  cg.call({b_data});
+
+  assertAllEqual(b_data, b_ref);
+}
+
 } // namespace jit
 } // namespace torch

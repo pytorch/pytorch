@@ -2,6 +2,7 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorMode.cu"
 #else
 
+#include <c10/cuda/CUDAException.h>
 #include <thrust/iterator/constant_iterator.h>
 
 void THCTensor_(calculateMode)(THCState *state,
@@ -235,14 +236,14 @@ void THCTensor_(mode)(THCState *state,
 
     // Macro that calls kernel --> note that we set the block dimensions here, and
     // the amount of shared memory
-  #define HANDLE_MODE(SIZE) \
-  { \
-    dim3 blockSize(SIZE / 2); \
-\
-    int memsize = (sizeof(scalar_t) * SIZE) + (2 * SIZE * sizeof(unsigned int)); \
-    computeMode<scalar_t, SIZE> \
-      <<<grid, blockSize, memsize, c10::cuda::getCurrentCUDAStream()>>>( \
-        THCTensor_(data)(state, contiguous), tiValues, tiIndices, sliceSize); \
+  #define HANDLE_MODE(SIZE)                                                             \
+  {                                                                                     \
+    const dim3 blockSize(SIZE / 2);                                                     \
+    const auto memsize = (sizeof(scalar_t) * SIZE) + (2 * SIZE * sizeof(unsigned int)); \
+    computeMode<scalar_t, SIZE>                                                         \
+      <<<grid, blockSize, memsize, c10::cuda::getCurrentCUDAStream()>>>(                \
+        THCTensor_(data)(state, contiguous), tiValues, tiIndices, sliceSize);           \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();                                                     \
   }
 
     // Tradeoff between compilation time and the number of specializations. Ideally we would have
