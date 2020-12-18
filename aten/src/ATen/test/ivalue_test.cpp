@@ -51,69 +51,88 @@ TEST(IValueTest, Basic) {
   ASSERT_EQ(tv.use_count(), 2);
 }
 
+static std::array<IValue, 5> makeSampleIValues() {
+  return { at::rand({3, 4}), "hello", 42, true, 1.5 };
+}
+
+static std::array<IValue, 5> makeMoreSampleIValues() {
+  return { at::rand({3, 4}), "goodbye", 23, false, 0.5 };
+}
+
+// IValue::operator== doesn't seem to work on Tensors.
+#define EXPECT_IVALUE_EQ(a, b)                          \
+  EXPECT_EQ((a).isTensor(), (b).isTensor());            \
+  if ((a).isTensor()) {                                 \
+    EXPECT_TRUE(a.toTensor().equal(b.toTensor()));      \
+  } else {                                              \
+    EXPECT_EQ(a, b);                                    \
+  }
+
 TEST(IValueTest, Swap) {
-  at::Tensor tv1 = at::rand({3, 4});
-  IValue tensor(tv1), scalar(42);
-  // swap() has special cases depending on which side is tensor or
-  // not. Exercise all 4 combinations.
-  tensor.swap(scalar);
-  tensor.swap(scalar);
-  tensor.swap(tensor);
-  scalar.swap(scalar);
+  // swap() has the following 3 cases: tensor, intrusive_ptr, or
+  // neither. Exercise all pairs of the three.
+
+  auto sampleInputs = makeSampleIValues();
+  auto sampleTargets = makeMoreSampleIValues();
+  for (const auto& input: sampleInputs) {
+    for (const auto& target: sampleTargets) {
+      IValue a(input);
+      IValue b(target);
+      EXPECT_IVALUE_EQ(a, input);
+      EXPECT_IVALUE_EQ(b, target);
+      a.swap(b);
+      EXPECT_IVALUE_EQ(a, target);
+      EXPECT_IVALUE_EQ(b, input);
+    }
+  }
+}
+
+TEST(IValueTest, CopyConstruct) {
+  auto sampleInputs = makeSampleIValues();
+  for (const IValue& v: sampleInputs) {
+    IValue copy(v);
+    EXPECT_IVALUE_EQ(copy, v);
+  }
 }
 
 TEST(IValueTest, MoveConstruct) {
-  at::Tensor t1 = at::rand({3, 4});
-
-  {
-    IValue sourceTensor(t1);
-    IValue target(std::move(sourceTensor));
-    EXPECT_TRUE(target.toTensor().equal(t1));
-    EXPECT_TRUE(sourceTensor.isNone());
+  auto sampleInputs = makeSampleIValues();
+  for (const IValue& v: sampleInputs) {
+    IValue source(v);
+    IValue target(std::move(source));
+    EXPECT_IVALUE_EQ(target, v);
+    EXPECT_TRUE(source.isNone());
   }
+}
 
-  {
-    IValue sourceScalar(42);
-    IValue target(std::move(sourceScalar));
-    EXPECT_EQ(target, IValue(42));
-    EXPECT_TRUE(sourceScalar.isNone());
+TEST(IValueTest, CopyAssign) {
+  auto sampleInputs = makeSampleIValues();
+  auto sampleTargets = makeMoreSampleIValues();
+
+  for (const IValue& input: sampleInputs) {
+    for (const IValue& target: sampleTargets) {
+      IValue copyTo(target);
+      IValue copyFrom(input);
+      copyTo = copyFrom;
+      EXPECT_IVALUE_EQ(copyTo, input);
+      EXPECT_IVALUE_EQ(copyFrom, input);
+      EXPECT_IVALUE_EQ(copyTo, copyFrom);
+    }
   }
 }
 
 TEST(IValueTest, MoveAssign) {
-  at::Tensor tv1 = at::rand({3, 4});
-  at::Tensor tv2 = at::rand({3, 4});
+  auto sampleInputs = makeSampleIValues();
+  auto sampleTargets = makeMoreSampleIValues();
 
-  // 1: tensor to tensor
-  {
-    IValue targetTensor(tv1), sourceTensor(tv2);
-    targetTensor = std::move(sourceTensor);
-    EXPECT_TRUE(targetTensor.toTensor().equal(tv2));
-    EXPECT_TRUE(sourceTensor.isNone());
-  }
-
-  // 2: tensor to scalar
-  {
-    IValue targetScalar(42), sourceTensor(tv1);
-    targetScalar = std::move(sourceTensor);
-    EXPECT_TRUE(targetScalar.toTensor().equal(tv1));
-    EXPECT_TRUE(sourceTensor.isNone());
-  }
-
-  // 3: scalar to tensor
-  {
-    IValue targetTensor(tv1), sourceScalar(42);
-    targetTensor = std::move(sourceScalar);
-    EXPECT_EQ(targetTensor, 42);
-    EXPECT_TRUE(sourceScalar.isNone());
-  }
-
-  // 4: scalar to scalar
-  {
-    IValue targetScalar(42), sourceScalar(43);
-    targetScalar = std::move(sourceScalar);
-    EXPECT_EQ(targetScalar, 43);
-    EXPECT_TRUE(sourceScalar.isNone());
+  for (const IValue& input: sampleInputs) {
+    for (const IValue& target: sampleTargets) {
+      IValue moveTo(target);
+      IValue moveFrom(input);
+      moveTo = std::move(moveFrom);
+      EXPECT_IVALUE_EQ(moveTo, input);
+      EXPECT_TRUE(moveFrom.isNone());
+    }
   }
 }
 

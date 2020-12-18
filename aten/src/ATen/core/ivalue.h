@@ -105,6 +105,7 @@ struct Capsule {
 #define TORCH_FORALL_TAGS(_) \
   _(None)                    \
   _(Tensor)                  \
+  _(Storage)                 \
   _(Double)                  \
   _(Int)                     \
   _(Bool)                    \
@@ -164,15 +165,13 @@ struct Capsule {
 struct CAFFE2_API IValue final {
   IValue(const IValue& rhs)
       : IValue(rhs.payload, rhs.tag, rhs.is_intrusive_ptr) {
-    if (is_intrusive_ptr && payload.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton()) {
-      c10::raw::intrusive_ptr::incref(payload.as_intrusive_ptr);
+    if (is_intrusive_ptr && payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton()) {
+      c10::raw::intrusive_ptr::incref(payload.u.as_intrusive_ptr);
     }
   }
 
   IValue(IValue&& rhs) noexcept : tag(rhs.tag), is_intrusive_ptr(rhs.is_intrusive_ptr) {
     moveFrom(std::move(rhs));
-    rhs.tag = Tag::None;
-    rhs.is_intrusive_ptr = false;
   }
 
   /// @private [doxygen private]
@@ -289,7 +288,7 @@ struct CAFFE2_API IValue final {
     }
 
     // Other types can be compared by their ptr value
-    return this->payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
+    return this->payload.u.as_intrusive_ptr == rhs.payload.u.as_intrusive_ptr;
   }
 
   /// @private [doxygen private]
@@ -298,10 +297,10 @@ struct CAFFE2_API IValue final {
       return 1;
     }
 
-    if (payload.as_intrusive_ptr == c10::UndefinedTensorImpl::singleton()) {
+    if (payload.u.as_intrusive_ptr == c10::UndefinedTensorImpl::singleton()) {
       return 0;
     }
-    return c10::raw::intrusive_ptr::use_count(payload.as_intrusive_ptr);
+    return c10::raw::intrusive_ptr::use_count(payload.u.as_intrusive_ptr);
   }
 
   /// @private [doxygen private]
@@ -319,10 +318,7 @@ struct CAFFE2_API IValue final {
       // make this abundantly clear.
       //
       // payload.as_tensor.~Tensor();
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wclass-memaccess"
-      memcpy(&payload, &rhs.payload, sizeof(payload));
-#pragma GCC diagnostic pop
+      copyNontensorPayload(rhs.payload, rhs.tag);
       new (&rhs.payload.as_tensor) at::Tensor(std::move(t));
     } else if (rhs.isTensor()) {
       rhs.swap(*this);
@@ -351,6 +347,20 @@ struct CAFFE2_API IValue final {
     return payload.as_tensor.unsafeGetTensorImpl();
   }
 
+  IValue(at::Storage s) : tag(Tag::Storage), is_intrusive_ptr(static_cast<bool>(s)) {
+    // Note: the undefined tensor is not refcounted, so while it
+    // is tagged as a tensor, is_intrusive_ptr is set to false.
+    // This is not an optional optimization: our incref call
+    // *will not* do the right thing when called on an
+    // undefined tensor.
+    payload.u.as_intrusive_ptr = null_to_undefined_tensor(s.unsafeReleaseStorageImpl());
+  }
+  bool isStorage() const {
+    return Tag::Storage == tag;
+  }
+  c10::Storage toStorage() &&;
+  c10::Storage toStorage() const&;
+
   const IValue& toIValue() const {
     return *this;
   }
@@ -363,7 +373,7 @@ struct CAFFE2_API IValue final {
       : tag(Tag::Blob), is_intrusive_ptr(true) {
     // TODO (after Tensor merge) If we pass in a Blob holding a Tensor, extract
     // and store it as a Tensor instead.
-    payload.as_intrusive_ptr = null_to_undefined_tensor(blob.release());
+    payload.u.as_intrusive_ptr = null_to_undefined_tensor(blob.release());
   }
 
   /// @private [doxygen private]
@@ -419,14 +429,14 @@ struct CAFFE2_API IValue final {
 
   // Double
   IValue(double d) : tag(Tag::Double), is_intrusive_ptr(false) {
-    payload.as_double = d;
+    payload.u.as_double = d;
   }
   bool isDouble() const {
     return Tag::Double == tag;
   }
   double toDouble() const {
     AT_ASSERT(isDouble());
-    return payload.as_double;
+    return payload.u.as_double;
   }
 
   // Future
@@ -455,7 +465,7 @@ struct CAFFE2_API IValue final {
 
   // Int
   IValue(int64_t i) : tag(Tag::Int), is_intrusive_ptr(false) {
-    payload.as_int = i;
+    payload.u.as_int = i;
   }
 
   // allow you to pass literals (3, 4) without ambiguity
@@ -467,7 +477,7 @@ struct CAFFE2_API IValue final {
 
   int64_t toInt() const {
     AT_ASSERT(isInt());
-    return payload.as_int;
+    return payload.u.as_int;
   }
 
   // Bool
@@ -476,9 +486,9 @@ struct CAFFE2_API IValue final {
     // Initializing entire payload stops valgrind's from reporting
     // "jump or move depends on uninitialised value" in IValue copy constructor
     // See https://github.com/pytorch/pytorch/issues/37117
-    payload.as_int = b;
+    payload.u.as_int = b;
 #else
-    payload.as_bool = b;
+    payload.u.as_bool = b;
 #endif
   }
   bool isBool() const {
@@ -486,7 +496,7 @@ struct CAFFE2_API IValue final {
   }
   bool toBool() const {
     AT_ASSERT(isBool());
-    return payload.as_bool;
+    return payload.u.as_bool;
   }
 
   // IntList
@@ -638,21 +648,21 @@ struct CAFFE2_API IValue final {
 
   // Device
   IValue(c10::Device d) : tag(Tag::Device), is_intrusive_ptr(false) {
-    payload.as_device.type = d.type();
-    payload.as_device.index = d.index();
+    payload.u.as_device.type = d.type();
+    payload.u.as_device.index = d.index();
   }
   bool isDevice() const {
     return Tag::Device == tag;
   }
   c10::Device toDevice() const {
     AT_ASSERT(isDevice());
-    return c10::Device(payload.as_device.type, payload.as_device.index);
+    return c10::Device(payload.u.as_device.type, payload.u.as_device.index);
   }
 
   //Stream
   IValue(c10::Stream stream)
     : tag(Tag::Stream), is_intrusive_ptr(false) {
-    payload.as_int = stream.pack();
+    payload.u.as_int = stream.pack();
   }
   c10::Stream toStream() &&;
   c10::Stream toStream() const &;
@@ -681,7 +691,7 @@ struct CAFFE2_API IValue final {
 
   // QScheme
   IValue(at::QScheme qscheme) : tag(Tag::Int), is_intrusive_ptr(false) {
-    payload.as_int = static_cast<int64_t>(qscheme);
+    payload.u.as_int = static_cast<int64_t>(qscheme);
   }
 
   at::QScheme toQScheme() const {
@@ -702,7 +712,7 @@ struct CAFFE2_API IValue final {
     // This is not an optional optimization: our incref call
     // *will not* do the right thing when called on an
     // undefined generator.
-    payload.as_intrusive_ptr = null_to_undefined_tensor(g.unsafeReleaseGeneratorImpl());
+    payload.u.as_intrusive_ptr = null_to_undefined_tensor(g.unsafeReleaseGeneratorImpl());
   }
   bool isGenerator() const {
     return Tag::Generator == tag;
@@ -743,14 +753,6 @@ struct CAFFE2_API IValue final {
   optional<T> toOptional();
 
   /// @private [doxygen private]
-  /// Only for use in generated code.
-  OptionalArray<int64_t> toOptionalIntArray();
-
-  /// @private [doxygen private]
-  /// Only for use in generated code.
-  OptionalArray<double> toOptionalDoubleArray();
-
-  /// @private [doxygen private]
   /// this is a shallow comparison of two IValues to test the object identity
   bool isSameIdentity(const IValue& rhs) const;
 
@@ -786,7 +788,7 @@ struct CAFFE2_API IValue final {
   const void* internalToPointer() const {
     TORCH_INTERNAL_ASSERT(
         isPtrType(), "Can only call internalToPointer() for pointer types");
-    return payload.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton() ? payload.as_intrusive_ptr : nullptr;
+    return payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton() ? payload.u.as_intrusive_ptr : nullptr;
   }
 
   TypePtr type() const;
@@ -800,7 +802,7 @@ struct CAFFE2_API IValue final {
       }
       // If it is not a Tensor, then two mutable IValues alias each other only
       // if they are the same pointer.
-      return val.payload.as_int;
+      return val.payload.u.as_int;
     }
   };
 
@@ -862,7 +864,7 @@ struct CAFFE2_API IValue final {
     // the compiler to generate the same code for each case. It is
     // surprisingly difficult to get this right.
     if (isTensor() || is_intrusive_ptr) {
-      c10::intrusive_ptr_target* p = isTensor() ? payload.as_tensor.unsafeGetTensorImpl() : payload.as_intrusive_ptr;
+      c10::intrusive_ptr_target* p = isTensor() ? payload.as_tensor.unsafeGetTensorImpl() : payload.u.as_intrusive_ptr;
       c10::intrusive_ptr<intrusive_ptr_target, c10::UndefinedTensorImpl>::reclaim(p);
       // No need to make this destructor call!
       // payload.as_tensor.~Tensor();
@@ -882,10 +884,7 @@ struct CAFFE2_API IValue final {
       //
       // rhs.payload.as_tensor.~Tensor();
     } else {
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wclass-memaccess"
-      memcpy(&payload, &rhs.payload, sizeof(payload));
-#pragma GCC diagnostic pop
+      copyNontensorPayload(rhs.payload, rhs.tag);
     }
     tag = rhs.tag;
     is_intrusive_ptr = rhs.is_intrusive_ptr;
@@ -893,26 +892,33 @@ struct CAFFE2_API IValue final {
   }
 
   void clearToNone() noexcept {
-    payload.as_int = 0;
+    payload.u.as_int = 0;
     tag = Tag::None;
     is_intrusive_ptr = false;
   }
 
   union Payload {
-    int64_t as_int;
-    double as_double;
-    bool as_bool;
-    // Invariant: never nullptr; null state is represented as
-    // c10::UndefinedTensorImpl::singleton() for consistency of
-    // representation with Tensor.
-    c10::intrusive_ptr_target* as_intrusive_ptr;
+    // We use a nested union here so that we can make the copy easy
+    // and efficient in the non-tensor (i.e., trivially copyable)
+    // case. Specifically, we do not have to do a switch-on-tag to
+    // figure out which union member to assign; we can just use
+    // TriviallyCopyablePayload::operator=.
+    union TriviallyCopyablePayload {
+      TriviallyCopyablePayload() : as_int(0) {}
+      int64_t as_int;
+      double as_double;
+      bool as_bool;
+      // Invariant: never nullptr; null state is represented as
+      // c10::UndefinedTensorImpl::singleton() for consistency of
+      // representation with Tensor.
+      c10::intrusive_ptr_target* as_intrusive_ptr;
+      struct {
+        DeviceType type;
+        DeviceIndex index;
+      } as_device;
+    } u;
     at::Tensor as_tensor;
-    struct {
-      DeviceType type;
-      DeviceIndex index;
-    } as_device;
-
-    Payload() : as_int(0) {}
+    Payload() : u() {}
     ~Payload() {}
   };
 
@@ -920,11 +926,12 @@ struct CAFFE2_API IValue final {
     if (isTensor()) {
       new (&payload.as_tensor) at::Tensor(p.as_tensor);
     } else {
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wclass-memaccess"
-      memcpy(&payload, &p, sizeof(payload));
-#pragma GCC diagnostic pop
+      copyNontensorPayload(p, t);
     }
+  }
+
+  void copyNontensorPayload(const Payload& from, Tag t) noexcept {
+    payload.u = from.u;
   }
 
   Payload payload;
@@ -951,8 +958,8 @@ struct CAFFE2_API WeakIValue final {
       payload.as_intrusive_ptr = rhs.unsafeToTensorImpl();
       is_intrusive_ptr = true;
     } else {
-      static_assert(sizeof(payload) == sizeof(rhs.payload), "IValue and WeakIValue payload sizes don't match!");
-      memcpy(&payload, &rhs.payload, sizeof(payload));
+      static_assert(sizeof(payload) == sizeof(rhs.payload.u), "WeakIValue payload is out of sync");
+      memcpy(&payload, &rhs.payload.u, sizeof(payload));
     }
     if (is_intrusive_ptr) {
       if (payload.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton()) {
@@ -990,10 +997,8 @@ struct CAFFE2_API WeakIValue final {
   IValue lock() const {
     if (!is_intrusive_ptr) {
       IValue::Payload newPayload;
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wclass-memaccess"
-      memcpy(&newPayload, &payload, sizeof(newPayload));
-#pragma GCC diagnostic pop
+      static_assert(sizeof(payload) == sizeof(newPayload.u), "WeakIValue payload is out of sync");
+      memcpy(&newPayload.u, &payload, sizeof(payload));
       return IValue(newPayload, tag, false);
     }
     if (IValue::Tag::Tensor == tag) {
@@ -1012,9 +1017,9 @@ struct CAFFE2_API WeakIValue final {
           ? nullptr
           : payload.as_intrusive_ptr);
       IValue::Payload pl;
-      pl.as_intrusive_ptr = temp.lock().release();
+      pl.u.as_intrusive_ptr = temp.lock().release();
       temp.release();
-      if (!pl.as_intrusive_ptr) {
+      if (!pl.u.as_intrusive_ptr) {
         return IValue();
       } else {
         return IValue(pl, tag, true);
