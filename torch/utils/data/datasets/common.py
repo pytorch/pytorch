@@ -1,9 +1,7 @@
 import os
-import sys
 import fnmatch
 import warnings
-import zipfile
-from typing import List, Union, Iterable, Any, Callable
+from typing import List, Union, Iterable
 from io import BufferedIOBase
 
 
@@ -66,4 +64,3 @@ def validate_pathname_binary_tuple(data):
     if not isinstance(data[1], BufferedIOBase):
         return "pathname binary tuple should have BufferedIOBase based binary type, but got {}".format(type(data[1]))
     return ""
-
