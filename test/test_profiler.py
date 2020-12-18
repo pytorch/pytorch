@@ -51,7 +51,6 @@ class TestProfilerCUDA(TestCase):
         self.assertTrue(not (is_increasing and max_diff > 100 * 1024),
                         msg='memory usage is increasing, {}'.format(str(last_rss)))
 
-
 class TestProfiler(TestCase):
     def test_source(self):
         """Checks that source code attribution works for eager, TS and autograd mode
@@ -75,8 +74,8 @@ class TestProfiler(TestCase):
                 super(DummyModule, self).__init__()
                 self.conv = torch.nn.Conv2d(3, 2, kernel_size=1, stride=2, padding=3, bias=False)
 
-                def forward(self, x):
-                    return self.conv(x)
+            def forward(self, x):
+                return self.conv(x)
 
         mod = DummyModule()
 
