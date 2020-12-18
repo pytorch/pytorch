@@ -96,6 +96,11 @@ def le(g, input, other):
 
 @parse_args('v', 'i', 'v', 'v')
 def unfold(g, input, dimension, size, step):
+    size = sym_help._maybe_get_const(size, 'i')
+    step = sym_help._maybe_get_const(step, 'i')
+    if not sym_help._is_value(size) and not sym_help._is_value(step):
+        from torch.onnx.symbolic_opset9 import unfold as _unfold
+        return _unfold(g, input, dimension, size, step)
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
     sizes = sym_help._get_tensor_sizes(input)
