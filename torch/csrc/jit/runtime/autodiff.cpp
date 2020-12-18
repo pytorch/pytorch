@@ -45,7 +45,7 @@ bool needTrimGrad(Node* n) {
   return false;
 }
 
-bool isDifferentiable(Node* n) {
+bool isDifferentiable(const Node* n) {
   // TODO: scalar-tensor ops should be canonicalized
   static OperatorSet differentiable_ops = {
       "aten::thnn_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> (Tensor, Tensor, Tensor)",
@@ -89,7 +89,7 @@ bool isDifferentiable(Node* n) {
     return std::all_of(
         body->nodes().begin(),
         body->nodes().end(),
-        static_cast<bool (*)(Node*)>(isDifferentiable));
+        static_cast<bool (*)(const Node*)>(isDifferentiable));
   }
 
   // formulas are only defined with floating point scalars,
@@ -107,7 +107,7 @@ bool isDifferentiable(Graph& g) {
   return std::all_of(
       g.nodes().begin(),
       g.nodes().end(),
-      static_cast<bool (*)(Node*)>(isDifferentiable));
+      static_cast<bool (*)(const Node*)>(isDifferentiable));
 }
 
 // NB: Write gradient using torchscript
