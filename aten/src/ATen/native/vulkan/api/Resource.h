@@ -137,6 +137,12 @@ struct Resource final {
   // Image
   //
 
+  typedef enum VkImagePackFormat {
+    VK_IMAGE_PACK_NC4HW_3D = 0,
+    VK_IMAGE_PACK_NC4HW_2D = 1,
+    VK_IMAGE_PACK_H2W2 = 2,
+  } VkImagePackFormat;
+
   struct Image final {
     //
     // Sampler

@@ -52,7 +52,7 @@ vTensor pack_biases(
   vTensor v_bias{
       api::context(),
       &pool,
-      {weight_arg.sizes()[Layout::Parameter::width]},
+      {weight_arg.sizes()[Layout::Parameter::width], 1},
       weight_arg.options(),
   };
 
@@ -281,6 +281,7 @@ Tensor LinearOpContext::run(
       input.options(),
   };
 
+
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
@@ -294,7 +295,7 @@ Tensor LinearOpContext::run(
         vec2 multiplier;
       } block {
           v_output.extents(),
-          safe_downcast<int32_t>(v_input.sizes()[Layout::Parameter::width]),
+          safe_downcast<int32_t>(div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
           {
             alpha,
             beta,
