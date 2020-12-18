@@ -855,15 +855,15 @@ def unpack_args(env, declaration):
 
         dynamic_type = arg['dynamic_type']
         assert 'TensorOptions' not in dynamic_type, "VariableKernel shouldn't take TensorOptions"
-                is_nullable = arg.get('is_nullable', False)
-                ref = (not is_nullable) and dynamic_type != 'TensorList'
-                suffix = '_opt' if is_nullable and dynamic_type != 'TensorList' else ''
-                body.append(UNPACK_TENSOR.substitute(
-                    arg_name=arg['name'],
-                    arg_pos=i,
-                    suffix=suffix,
-                    ref='&' if ref else '',
-                ))
+        is_nullable = arg.get('is_nullable', False)
+        ref = (not is_nullable) and dynamic_type != 'TensorList'
+        suffix = '_opt' if is_nullable and dynamic_type != 'TensorList' else ''
+        body.append(UNPACK_TENSOR.substitute(
+            arg_name=arg['name'],
+            arg_pos=i,
+            suffix=suffix,
+            ref='&' if ref else '',
+        ))
 
         unpacked_args.append(arg['name'] + '_')
         unpacked_args_simple_type[arg['name'] + '_'] = arg['simple_type']
