@@ -474,7 +474,7 @@ def method_impl(
     signatures: List[str] = []
     dispatch: List[str] = []
     for overload_index, overload in enumerate(grouped_overloads):
-        signature = overload.signature.signature_str()
+        signature = overload.signature.signature_str().replace("const ", "").replace("&", "")
         signatures.append(f'{cpp_string(str(signature))},')
         dispatch_body = emit_dispatch_case(overload, namedtuple_typenames)
         dispatch.append(
