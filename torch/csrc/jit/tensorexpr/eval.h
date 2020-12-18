@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
@@ -912,7 +913,11 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     apply_mutator(&intrinsics_expander);
   }
 
-  template <typename TReturn, typename TInput>
+  template <
+      typename TReturn,
+      typename TInput,
+      typename std::enable_if<std::is_floating_point<TInput>::value, int>::
+          type = 0>
   static TReturn compute_intrinsics(IntrinsicsOp op_type, TInput v) {
     switch (op_type) {
       case kSin:
@@ -935,14 +940,8 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
         return std::tanh(v);
       case kExp:
         return std::exp(v);
-      case kAbs: {
-        // internal tool complains about calling `abs` on unsigned types,
-        // the following contraption makes the tool happy
-        using X =
-            std::conditional_t<std::is_unsigned<TInput>::value, int, TInput>;
-        return std::is_unsigned<TInput>::value ? v
-                                               : std::abs(static_cast<X>(v));
-      }
+      case kAbs:
+        return std::abs(v);
       case kExpm1:
         return std::expm1(v);
       case kLog:
@@ -971,16 +970,33 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
         return std::trunc(v);
       case kLgamma:
         return std::lgamma(v);
-      case kFrac: {
-        using X =
-            std::conditional_t<std::is_integral<TInput>::value, float, TInput>;
-        X intpart;
+      case kFrac:
+        TInput intpart;
         return std::modf(v, &intpart);
-      }
       case kIsNan:
         return std::isnan(v);
       default:
         throw std::runtime_error("Invalid op_type: " + c10::to_string(op_type));
+    }
+  }
+
+  template <
+      typename TReturn,
+      typename TInput,
+      typename std::enable_if<std::is_integral<TInput>::value, int>::type = 0>
+  static TReturn compute_intrinsics(IntrinsicsOp op_type, TInput v) {
+    switch (op_type) {
+      case kAbs: {
+        // internal tool complains about calling `abs` on unsigned, the
+        // following makes the tool happy
+        using X =
+            std::conditional_t<std::is_unsigned<TInput>::value, int, TInput>;
+        return std::is_unsigned<TInput>::value ? v
+                                               : std::abs(static_cast<X>(v));
+      }
+      default:
+        throw std::runtime_error(
+            "Invalid integral op_type: " + c10::to_string(op_type));
     }
   }
 
