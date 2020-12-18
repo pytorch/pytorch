@@ -266,8 +266,13 @@ class EventList(list):
             f.truncate()
             f.write("]")
 
+    def supported_export_stacks_metrics(self):
+        return ["self_cpu_time_total", "self_cuda_time_total"]
+
     def export_stacks(self, path: str, metric: str):
-        assert metric in ["self_cpu_time_total", "self_cuda_time_total"]
+        if metric not in self.supported_export_stacks_metrics():
+            raise ValueError("metric should be one of: " +
+                str(self.supported_export_stacks_metrics()))
         translate_table = str.maketrans(" ;\t\n", "____")
         with open(path, 'w') as f:
             for evt in self:
@@ -538,32 +543,23 @@ class profile(object):
     export_chrome_trace.__doc__ = EventList.export_chrome_trace.__doc__
 
     def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
-        """
-        Save stack traces in a file in a format suitable for visualization.
-        Arguments:
-            path   - save stacks file to this location
-            metric - metric to use: "self_cpu_time_total" or "self_cuda_time_total"
-
-        Example of using FlameGraph tool:
-          git clone https://github.com/brendangregg/FlameGraph
-          cd FlameGraph
-          ./flamegraph.pl --title "CPU time" --countname "us." profiler.stacks > perf_viz.svg
-        """
         self._check_finish()
-        assert metric in ["self_cpu_time_total", "self_cuda_time_total"]
-        assert self.function_events is not None
+        if metric not in self.supported_export_stacks_metrics():
+            raise ValueError("metric should be one of: " +
+                str(self.supported_export_stacks_metrics()))
+        assert self.function_events is not None, "Empty profiling results"
         assert self.with_stack, "export_stacks() requires with_stack=True"
         return self.function_events.export_stacks(path, metric)
 
     def key_averages(self, group_by_input_shape=False, group_by_stack_n=0):
         self._check_finish()
-        assert self.function_events is not None
+        assert self.function_events is not None, "Empty profiling results"
         return self.function_events.key_averages(group_by_input_shape, group_by_stack_n)
     key_averages.__doc__ = EventList.key_averages.__doc__
 
     def total_average(self):
         self._check_finish()
-        assert self.function_events is not None
+        assert self.function_events is not None, "Empty profiling results"
         return self.function_events.total_average()
     total_average.__doc__ = EventList.total_average.__doc__
 
