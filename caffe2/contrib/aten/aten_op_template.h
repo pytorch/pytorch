@@ -86,6 +86,7 @@ private:
 
   std::vector<at::Tensor> peekSlice(size_t i, size_t len, size_t N) {
     std::vector<at::Tensor> results;
+    results.reserve(len);
     for (size_t ii = i; ii < i + len; ++ii) {
       results.push_back(peek(ii, N));
     }
@@ -94,6 +95,7 @@ private:
 
   torch::List<c10::optional<at::Tensor>> peekSliceOptionals(size_t i, size_t len, size_t N) {
     torch::List<c10::optional<at::Tensor>> results;
+    results.reserve(len);
     for (size_t ii = i; ii < i + len; ++ii) {
       results.push_back(peek(ii, N));
     }

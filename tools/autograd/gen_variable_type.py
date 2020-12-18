@@ -128,7 +128,8 @@ for (const c10::optional<Tensor>& tensor : ${tensorlist_name})
 ENFORCE_SAME_OPTIONALTENSORLIST_STORAGE = CodeTemplate("""\
 for (size_t i=0; i<${tensorlist_name}.size(); i++) {
   if (${tensorlist_name}_storage_saved[i].has_value())
-    AT_ASSERT(${tensorlist_name}_storage_saved[i].value().is_alias_of(static_cast<c10::optional<Tensor>>(${tensorlist_name}[i])->storage()));
+    AT_ASSERT(${tensorlist_name}_storage_saved[i].value().is_alias_of(
+        static_cast<c10::optional<Tensor>>(${tensorlist_name}[i])->storage()));
 }
 """)
 
@@ -495,7 +496,8 @@ def emit_body(declaration):
         if func is None:
             return setup
 
-        has_tensorlist_arg = any(arg.type in ['TensorList', 'c10::List<c10::optional<Tensor>>'] for arg in func.args_with_derivatives)
+        has_tensorlist_arg = \
+            any(arg.type in ['TensorList', 'c10::List<c10::optional<Tensor>>'] for arg in func.args_with_derivatives)
 
         # We don't want to save tensors if we know that they will never be used
         # when computing the derivative, so we add guards to those statements

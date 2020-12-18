@@ -680,11 +680,11 @@ void addInputs(
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    List<c10::optional<at::Tensor>> value) {
+    const List<c10::optional<at::Tensor>>& value) {
   Graph* g = n->owningGraph();
   Node* list_node = nullptr;
-  list_node = g->insertNode(
-      g->createList(OptionalType::ofTensor(), fmap(value, getOptTensorValueTrace)));
+  list_node = g->insertNode(g->createList(
+      OptionalType::ofTensor(), fmap(value, getOptTensorValueTrace)));
   n->addInput(list_node->output());
 }
 
