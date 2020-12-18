@@ -73,6 +73,11 @@ PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.GLOO,
 ]
 
+# Allowlist of distributed backends where profiling is supported with use_cuda=True
+CUDA_PROFILING_SUPPORTED_BACKENDS = [
+    dist.Backend.GLOO
+]
+
 # Dummy NamedTuple data structures to test DDP support for NamedTuple types.
 EXPECTED_FIELDS = ("a", "b")
 TestNamedTupleInput_0 = namedtuple("NamedTuple", EXPECTED_FIELDS)
@@ -855,7 +860,8 @@ class DistributedTest:
         def test_send_recv_any_source(self):
             rank = dist.get_rank()
             tensor = _build_tensor(10, value=rank)
-            recv_ranks = set()
+            recv_ranks = list()
+            irecv_ranks = list()
 
             for dst in range(0, dist.get_world_size()):
                 if dst == rank:
@@ -863,19 +869,42 @@ class DistributedTest:
                     for dst in range(0, dist.get_world_size()):
                         if dst == rank:
                             continue
-                        output_tensor = _build_tensor(10, value=-1)
-                        sender = dist.recv(output_tensor)
 
-                        # Assert the scalar value "sender" that should be
-                        # equal to the rank of the sender is equal to all
-                        # values in the received tensor.
-                        self.assertTrue(output_tensor.eq(sender).all())
-                        recv_ranks.add(sender)
+                        for recv in ["recv", "irecv"]:
+                            output_tensor = _build_tensor(10, value=-1)
+
+                            if recv == "recv":
+                                sender = dist.recv(output_tensor)
+                                recv_ranks.append(sender)
+                            elif recv == "irecv":
+                                work = dist.irecv(output_tensor)
+                                work.wait()
+                                sender = work._source_rank()
+                                irecv_ranks.append(sender)
+
+                            # Assert the scalar value "sender" that should be
+                            # equal to the rank of the sender is equal to all
+                            # values in the received tensor.
+                            self.assertTrue(output_tensor.eq(sender).all())
                 else:
                     # Send mode
-                    dist.send(tensor, dst)
+                    dist.send(tensor, dst)  # recv
+                    dist.send(tensor, dst)  # irecv
 
-            self.assertEqual(len(recv_ranks), dist.get_world_size() - 1)
+            # Each rank would have 2 * (world_size - 1) sends, verify that
+            # globally we receive the same amount on the other end.
+            recv_ranks_tensor = torch.cat((torch.tensor(recv_ranks), torch.tensor(irecv_ranks)), 0)
+            global_recv_ranks = [torch.empty_like(recv_ranks_tensor) for _ in range(dist.get_world_size())]
+            dist.all_gather(global_recv_ranks, recv_ranks_tensor)
+            global_recv_ranks_list = []
+            for tensor in global_recv_ranks:
+                global_recv_ranks_list += tensor.tolist()
+
+            from itertools import groupby
+            global_recv_ranks_list.sort()
+            frequency = [len(list(group)) for key, group in groupby(global_recv_ranks_list)]
+            self.assertEqual(dist.get_world_size(), len(frequency))
+            self.assertEqual([2 * (dist.get_world_size() - 1)] * dist.get_world_size(), frequency)
             self._barrier()
 
         # SEND RECV WITH TAG
@@ -1289,12 +1318,22 @@ class DistributedTest:
                 self.assertEqual(result, [_build_tensor(src + 1, expected_value)])
             self._barrier()
 
-        def call_dist_op(self, profiling_title_postfix, is_async, op, *args, expect_event=True, secondary_op_call=None, **kwargs):
+        def call_dist_op(
+            self,
+            profiling_title_postfix,
+            is_async,
+            op,
+            *args,
+            expect_event=True,
+            secondary_op_call=None,
+            profile_cuda=False,
+            **kwargs,
+        ):
             op_calls = [lambda: op(*args, **kwargs)]
             if secondary_op_call is not None:
                 op_calls.append(secondary_op_call)
 
-            with torch.autograd.profiler.profile() as prof:
+            with torch.autograd.profiler.profile(use_cuda=profile_cuda) as prof:
                 works = [op_call() for op_call in op_calls]
                 if is_async:
                     for work in works:
@@ -1332,6 +1371,24 @@ class DistributedTest:
                 if cuda:
                     tensor = tensor.cuda(rank_to_GPU[rank][0])
                 self.call_dist_op(":all_reduce", async_op, dist.all_reduce, tensor, op, group_id, async_op=async_op)
+                # Currently, only Gloo backend has profiling tested with CUDA enabled.
+                # Only run cuda profiling test for one rank to speed up since
+                # running with different src_rank does not affect the correctness.
+                if (
+                    src == 0
+                    and cuda
+                    and dist.get_backend() in CUDA_PROFILING_SUPPORTED_BACKENDS
+                ):
+                    self.call_dist_op(
+                        ":all_reduce",
+                        async_op,
+                        dist.all_reduce,
+                        tensor,
+                        op,
+                        group_id,
+                        async_op=async_op,
+                        profile_cuda=True,
+                    )
 
             self._barrier()
 
@@ -2475,24 +2532,17 @@ class DistributedTest:
             expected_value,
         ):
             for src in group:
+                tensor_value = master_value if rank == src else worker_value
+                tensors = [
+                    _build_tensor(src + 1, tensor_value).cuda(device=i)
+                    for i in rank_to_GPU[rank]
+                ]
+                self.call_dist_op(
+                    "reduce", False, dist.reduce_multigpu, tensors, src, op, group_id,
+                    expect_event=len(tensors) == 1)
                 if rank == src:
-                    tensors = [
-                        _build_tensor(src + 1, master_value).cuda(device=i)
-                        for i in rank_to_GPU[rank]
-                    ]
-                    self.call_dist_op(
-                        "reduce", False, dist.reduce_multigpu, tensors, src, op, group_id,
-                        expect_event=len(tensors) == 1)
                     expected_tensor = _build_tensor(src + 1, expected_value)
                     self.assertEqual(tensors[0], expected_tensor)
-                else:
-                    tensors = [
-                        _build_tensor(src + 1, worker_value).cuda(device=i)
-                        for i in rank_to_GPU[rank]
-                    ]
-                    self.call_dist_op(
-                        "reduce", False, dist.reduce_multigpu, tensors, src, op, group_id,
-                        expect_event=len(tensors) == 1)
 
             self._barrier()
 

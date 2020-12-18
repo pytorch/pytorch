@@ -1836,21 +1836,16 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   auto gsigma = grads[1];
 
   auto u = raw_u;
-  // Currently torch.svd for complex dtypes returns the conjugate of V,
-  // while the backward formula is derived with just V (without the conjugation)
-  // therefore here we need to conjugate the V output of SVD and grads[2].
-  // Once https://github.com/pytorch/pytorch/issues/45821 is resolved
-  // extra .conj(), that are marked below in the code, shall be removed.
-  auto v = raw_v.conj();  // TODO: remove .conj()
+  auto v = raw_v;
   auto gu = grads[0];
-  auto gv = grads[2].conj();  // TODO: remove .conj()
+  auto gv = grads[2];
 
   if (!some) {
     // We ignore the free subspace here because possible base vectors cancel
     // each other, e.g., both -v and +v are valid base for a dimension.
     // Don't assume behavior of any particular implementation of svd.
     u = raw_u.narrow(-1, 0, k);
-    v = raw_v.narrow(-1, 0, k).conj();  // TODO: remove .conj()
+    v = raw_v.narrow(-1, 0, k);
     if (gu.defined()) {
       gu = gu.narrow(-1, 0, k);
     }
@@ -1858,13 +1853,11 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
       gv = gv.narrow(-1, 0, k);
     }
   }
-  auto vh = v.conj().transpose(-2, -1);
+  auto vt = v.transpose(-2, -1);
 
   Tensor sigma_term;
   if (gsigma.defined()) {
-    gsigma = gsigma.to(self.dtype());
-    // computes u @ diag(gsigma) @ vh
-    sigma_term = at::matmul(u * gsigma.unsqueeze(-2), vh);
+    sigma_term = at::matmul(u, at::matmul(gsigma.diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1), vt));
   } else {
     sigma_term = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
@@ -1874,11 +1867,11 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
     return sigma_term;
   }
 
-  auto uh = u.conj().transpose(-2, -1);
+  auto ut = u.transpose(-2, -1);
   auto im = at::eye(m, self.options());
   auto in = at::eye(n, self.options());
-  auto sigma_mat = sigma.diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).to(self.dtype());
-  auto sigma_mat_inv = sigma.pow(-1).diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).to(self.dtype());
+  auto sigma_mat = sigma.diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1);
+  auto sigma_mat_inv = sigma.pow(-1).diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1);
   auto sigma_sq = sigma.pow(2);
   auto F = sigma_sq.unsqueeze(-2) - sigma_sq.unsqueeze(-1);
   // The following two lines invert values of F, and fills the diagonal with 0s.
@@ -1890,36 +1883,24 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   Tensor u_term, v_term;
 
   if (gu.defined()) {
-    auto guh = gu.conj().transpose(-2, -1);
-    u_term = at::matmul(u, at::matmul(F.mul(at::matmul(uh, gu) - at::matmul(guh, u)), sigma_mat));
+    u_term = at::matmul(u, at::matmul(F.mul(at::matmul(ut, gu) - at::matmul(gu.transpose(-2, -1), u)), sigma_mat));
     if (m > k) {
-      u_term = u_term + at::matmul(im - at::matmul(u, uh), at::matmul(gu, sigma_mat_inv));
+      u_term = u_term + at::matmul(im - at::matmul(u, ut), at::matmul(gu, sigma_mat_inv));
     }
-    u_term = at::matmul(u_term, vh);
+    u_term = at::matmul(u_term, vt);
   } else {
     u_term = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   if (gv.defined()) {
-    auto gvh = gv.conj().transpose(-2, -1);
-    v_term = at::matmul(sigma_mat, at::matmul(F.mul(at::matmul(vh, gv) - at::matmul(gvh, v)), vh));
+    auto gvt = gv.transpose(-2, -1);
+    v_term = at::matmul(sigma_mat, at::matmul(F.mul(at::matmul(vt, gv) - at::matmul(gvt, v)), vt));
     if (n > k) {
-      v_term = v_term + at::matmul(sigma_mat_inv, at::matmul(gvh, in - at::matmul(v, vh)));
+      v_term = v_term + at::matmul(sigma_mat_inv, at::matmul(gvt, in - at::matmul(v, vt)));
     }
     v_term = at::matmul(u, v_term);
   } else {
     v_term = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  }
-
-  // for complex-valued input there is an additional term
-  // https://giggleliu.github.io/2019/04/02/einsumbp.html
-  // https://arxiv.org/abs/1909.02659
-  if (self.is_complex() && gu.defined()) {
-    // computes L = Identity.mul(uh @ gu)
-    Tensor L = at::matmul(uh, gu).diagonal(0, -2, -1).diag_embed(0, -2, -1);
-    L = L - L.conj().transpose(-2, -1);
-    Tensor imag_term = 0.5 * at::matmul(at::matmul(at::matmul(u, L), sigma_mat_inv), vh);
-    return u_term + sigma_term + v_term + imag_term;
   }
 
   return u_term + sigma_term + v_term;
@@ -2570,10 +2551,19 @@ infinitely_differentiable_native_layer_norm_backward(
     const Tensor& mean,
     const Tensor& rstd,
     const c10::optional<Tensor>& gamma,
-    int64_t M,
-    int64_t N,
+    IntArrayRef normalized_shape,
     double eps,
     std::array<bool, 3> grad_input_mask) {
+
+  const int normalized_ndim = normalized_shape.size();
+  const auto input_shape = X.sizes();
+  const auto input_ndim = X.dim();
+  const int axis = input_ndim - normalized_ndim;
+  const int64_t M =
+      at::prod_intlist(input_shape.cbegin(), input_shape.cbegin() + axis);
+  const int64_t N =
+      at::prod_intlist(input_shape.cbegin() + axis, input_shape.cend());
+
   Tensor dX;
   Tensor dgamma;
   Tensor dbeta;
