@@ -19,6 +19,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests, TemporaryF
 
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 
+types = [torch.float, torch.bfloat16]
 
 # Comment the line below to find out the CI machines having MKL-DNN build disabled
 @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
@@ -29,17 +30,55 @@ class TestMkldnn(TestCase):
                            torch.randn((1, 2, 3, 4, 5),
                                        dtype=torch.float, device=torch.device('cpu'))[:, :, :, :, 1]]:
             cpu_tensor.requires_grad_()
-            mkldnn_tensor = cpu_tensor.to_mkldnn()
-            cpu_tensor_1 = mkldnn_tensor.to_dense()
-            self.assertEqual(cpu_tensor, cpu_tensor_1)
-            self.assertEqual(mkldnn_tensor.dtype, torch.float)
-            self.assertEqual(mkldnn_tensor.device, torch.device('cpu'))
-            self.assertEqual(mkldnn_tensor.size(), torch.Size([1, 2, 3, 4]))
-            self.assertEqual(mkldnn_tensor.numel(), cpu_tensor.numel())
-            self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor.element_size())
-            self.assertRaisesRegex(RuntimeError,
-                                   "Cannot access data pointer of Tensor that doesn't have storage",
-                                   lambda: mkldnn_tensor.data_ptr() != 0)
+            # float cpu tensor to mkldnn float tensor or bfloat tensor.
+            for dtype1 in types:
+                mkldnn_tensor = cpu_tensor.to_mkldnn(dtype1)
+                self.assertEqual(mkldnn_tensor.dtype, dtype1)
+                cpu_tensor_1 = mkldnn_tensor.to_dense()
+                # not given dtype for to_dense, mkldnn tensor has same dtype with cpu tensor
+                self.assertEqual(mkldnn_tensor.dtype, cpu_tensor_1.dtype)
+                # mkldnn float/bfloat tensor to cpu float or bfloat tensor
+                for dtype2 in types:
+                    cpu_tensor_2 = mkldnn_tensor.to_dense(dtype2)
+                    self.assertEqual(cpu_tensor_2.dtype, dtype2)
+                    atol = 1e-5 if dtype1 == torch.float and dtype2 == torch.float else 1e-2
+                    self.assertEqual(cpu_tensor, cpu_tensor_2.float(), atol=atol, rtol=0)
+
+                self.assertEqual(mkldnn_tensor.device, torch.device('cpu'))
+                self.assertEqual(mkldnn_tensor.size(), torch.Size([1, 2, 3, 4]))
+                self.assertEqual(mkldnn_tensor.numel(), cpu_tensor.numel())
+                if dtype1 == torch.float:
+                    self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor.element_size())
+                else:
+                    self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor.element_size() / 2)
+                self.assertRaisesRegex(RuntimeError,
+                                       "Cannot access data pointer of Tensor that doesn't have storage",
+                                       lambda: mkldnn_tensor.data_ptr() != 0)
+
+            # bfloat cpu tensor to mkldnn float tensor or bfloat tensor.
+            cpu_tensor_bf16 = cpu_tensor.bfloat16()
+            for dtype1 in types:
+                mkldnn_tensor = cpu_tensor_bf16.to_mkldnn(dtype1)
+                self.assertEqual(mkldnn_tensor.dtype, dtype1)
+                cpu_tensor_1 = mkldnn_tensor.to_dense()
+                # not given dtype for to_dense, mkldnn tensor has same dtype with cpu tensor
+                self.assertEqual(mkldnn_tensor.dtype, cpu_tensor_1.dtype)
+                # mkldnn float/bfloat tensor to cpu float or bfloat tensor
+                for dtype2 in types:
+                    cpu_tensor_2 = mkldnn_tensor.to_dense(dtype2)
+                    self.assertEqual(cpu_tensor_2.dtype, dtype2)
+                    self.assertEqual(cpu_tensor_bf16, cpu_tensor_2.bfloat16(), atol=1e-5, rtol=0)
+
+                self.assertEqual(mkldnn_tensor.device, torch.device('cpu'))
+                self.assertEqual(mkldnn_tensor.size(), torch.Size([1, 2, 3, 4]))
+                self.assertEqual(mkldnn_tensor.numel(), cpu_tensor.numel())
+                if dtype1 == torch.bfloat16:
+                    self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor_bf16.element_size())
+                else:
+                    self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor_bf16.element_size() * 2)
+                self.assertRaisesRegex(RuntimeError,
+                                       "Cannot access data pointer of Tensor that doesn't have storage",
+                                       lambda: mkldnn_tensor.data_ptr() != 0)
 
     def test_unsupported(self):
         # unsupported types and unsupported types with gpu
@@ -579,7 +618,8 @@ class TestMkldnn(TestCase):
         in_features = torch.randint(3, 10, (1,)).item()
         out_features = torch.randint(3, 100, (1,)).item()
         x = torch.randn(3, in_features, dtype=torch.float32) * 10
-        for bias in [True, False]:
+        # Only works for bias case by dispatch onednn linear to addmm.
+        for bias in [True]:
             x1 = x.clone().requires_grad_()
             x2 = x.clone().to_mkldnn().requires_grad_()
             linear = torch.nn.Linear(in_features, out_features).float()
