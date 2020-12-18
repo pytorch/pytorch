@@ -123,8 +123,9 @@ void guardDifferentiableGraph(Node* dnode) {
     auto ty = gi[i]->type()->cast<TensorType>();
     if (ty) {
       auto n = gi[i]->uses().at(0).user;
-      TORCH_INTERNAL_ASSERT(n->kind() == prim::profile);
-      dnode->inputs().at(i)->setType(n->ty(attr::profiled_type));
+      if (n->kind() == prim::profile) {
+        dnode->inputs().at(i)->setType(n->ty(attr::profiled_type));
+      }
     }
   }
   insertTypeGuard(dnode, [](const TensorTypePtr& t) {
