@@ -331,6 +331,40 @@ class TestJit(JitTestCase):
             def dot(points, query, dim):
                 return (points * query).sum(dim)
 
+    def test_dict_comprehension(self):
+        def fn():
+            return {i : chr(i + 65) for i in range(4)}
+        self.checkScript(fn, ())
+
+    def test_dict_comprehension_with_type_annotation(self):
+        def fn():
+            d: Dict[int, str] = {i : chr(i + 65) for i in range(4)}
+            return d
+        self.checkScript(fn, ())
+
+        with self.assertRaisesRegex(RuntimeError, ""):
+            with self.assertRaisesRegex(AssertionError, "Expected Dict "
+                                        "type annotation for dict "
+                                        "comprehension, found "
+                                        "Tuple[int, str]"):
+                @torch.jit.script
+                def fn():
+                    d: Tuple[int, str] = {i : chr(i + 65) for i in range(4)}
+                    return d
+
+    def test_dict_comprehension_scope(self):
+        def comprehension_can_access_outer_scope_variables():
+            lst = ["foo", "bar", "baz"]
+            return {l : len(l) for l in lst}
+
+        self.checkScript(comprehension_can_access_outer_scope_variables, ())
+
+        with self.assertRaisesRegex(RuntimeError, "undefined value i"):
+            @torch.jit.script
+            def outer_scope_cannot_access_comprehension_variables():
+                d = {i : chr(i + 65) for i in range(4)}
+                i = i + 1
+
     def test_constants_pkl(self):
         # This test asserts that the serialization archive includes a `constants.pkl`
         # file. This file is used by `torch.load` to determine whether a zip file
@@ -15186,6 +15220,25 @@ dedent """
             @torch.jit.script
             def foo():
                 new_item = {'score': [1.0], 'ys': [1, 2, 3]}
+
+    def test_dict_invalid_annotations(self):
+        # Check for invalid value type annotation
+        def wrong_value_type(dictionary: Dict[str, torch.jit.ScriptModule]):
+            return
+        with self.assertRaisesRegex(ValueError, "Unknown type annotation"):
+            torch.jit.script(wrong_value_type)
+
+        # Check for invalid key type annotation
+        def wrong_key_type(dictionary: Dict[torch.jit.ScriptModule, str]):
+            return
+        with self.assertRaisesRegex(ValueError, "Unknown type annotation"):
+            torch.jit.script(wrong_key_type)
+
+        # Check for invalid key and value type annotation
+        def wrong_key_value_type(dictionary: Dict[torch.jit.ScriptModule, torch.jit.ScriptModule]):
+            return
+        with self.assertRaisesRegex(ValueError, "Unknown type annotation"):
+            torch.jit.script(wrong_key_value_type)
 
     def test_get_set_state_with_tensors(self):
         class M(torch.nn.Module):
