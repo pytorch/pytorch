@@ -160,6 +160,63 @@ TEST(LLVM, ByteToDoubleCastTest) {
   ASSERT_EQ(cg.value<double>(), 2);
 }
 
+TEST(LLVM, BitCast) {
+  constexpr int16_t ref16 = 1337;
+  constexpr int32_t ref32 = 1337;
+  constexpr int64_t ref64 = 1337;
+  at::Half reff16 = 1337.0f;
+  constexpr float reff32 = 1337.0f;
+  constexpr double reff64 = 1337.0f;
+
+  // this is broken
+  /*{
+    KernelScope kernel_scope;
+    at::Half k_;
+    at::Half* k = &k_;
+    *reinterpret_cast<int16_t*>(k) = ref16;
+    auto a = HalfImm::make(k);
+    auto b = BitCast::make(kShort, a);
+    LLVMExprEval cg(b);
+    ASSERT_EQ(cg.value<int16_t>(), ref16);
+  }*/
+
+  {
+    KernelScope kernel_scope;
+    float k = raw_bitcast<float>(ref32);
+    auto a = FloatImm::make(k);
+    auto b = BitCast::make(kInt, a);
+    LLVMExprEval cg(b);
+    ASSERT_EQ(cg.value<int32_t>(), ref32);
+  }
+
+  {
+    KernelScope kernel_scope;
+    double k = raw_bitcast<double>(ref64);
+    auto a = DoubleImm::make(k);
+    auto b = BitCast::make(kLong, a);
+    LLVMExprEval cg(b);
+    ASSERT_EQ(cg.value<int64_t>(), ref64);
+  }
+
+  {
+    KernelScope kernel_scope;
+    int64_t k = raw_bitcast<int64_t>(reff64);
+    auto a = LongImm::make(k);
+    auto b = BitCast::make(kDouble, a);
+    LLVMExprEval cg(b);
+    ASSERT_EQ(cg.value<double>(), reff64);
+  }
+
+  {
+    KernelScope kernel_scope;
+    int32_t k = raw_bitcast<int32_t>(reff32);
+    auto a = IntImm::make(k);
+    auto b = BitCast::make(kFloat, a);
+    LLVMExprEval cg(b);
+    ASSERT_EQ(cg.value<float>(), reff32);
+  }
+}
+
 TEST(LLVM, LetTest01) {
   KernelScope kernel_scope;
 
@@ -512,6 +569,32 @@ TEST(LLVM, VectorizerLoadStoreTest) {
   std::vector<void*> args({a_vec.data(), c_vec.data()});
   ASSERT_EQ(cg.value<int>(args), 0);
   assertAllEqual(c_vec, 21);
+}
+
+TEST(LLVM, VectorizeBitCast) {
+  KernelScope kernel_scope;
+  Placeholder a(BufHandle("A", {128}, kInt));
+
+  Tensor* c = Compute("c", {{128, "i"}}, [&](const VarHandle& i) {
+    return bitcast<float>(a.load(i));
+  });
+
+  Placeholder c_buf(BufHandle(c->buf()));
+  LoopNest l({c});
+  Stmt* s = l.root_stmt();
+  l.vectorize(dynamic_cast<Block*>(s)->front());
+  ASSERT_TRUE(dynamic_cast<For*>(dynamic_cast<Block*>(s)->front()) == nullptr);
+
+  LLVMCodeGen cg(s, {a, c_buf});
+
+  std::vector<int> a_vec(128);
+  std::vector<float> c_vec(128);
+  for (auto i = 0; i < 128; ++i) {
+    a_vec[i] = raw_bitcast<int>(1337.f);
+  }
+  std::vector<void*> args({a_vec.data(), c_vec.data()});
+  ASSERT_EQ(cg.value<int>(args), 0);
+  assertAllEqual(c_vec, 1337.f);
 }
 
 TEST(LLVM, MemcpyTest) {
