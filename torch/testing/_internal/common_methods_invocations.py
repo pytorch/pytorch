@@ -307,11 +307,11 @@ def sample_inputs_gather(op_info, device, dtype, requires_grad):
     return (SampleInput((make_tensor((M, S), device, dtype,
                                      low=None, high=None,
                                      requires_grad=requires_grad),
-                        0, gather_variable((S, S), 1, M, True))),
+                        0, gather_variable((S, S), 1, M, True, device=device))),
             SampleInput((make_tensor((M, S), device, dtype,
                                      low=None, high=None,
                                      requires_grad=requires_grad),
-                        1, gather_variable((M, S // 2), 0, S, True))),
+                        1, gather_variable((M, S // 2), 0, S, True, device=device))),
             SampleInput((make_tensor((), device, dtype,
                                      low=None, high=None,
                                      requires_grad=requires_grad),
@@ -331,7 +331,7 @@ def sample_inputs_index_select(op_info, device, dtype, requires_grad):
     return (SampleInput((make_tensor((S, S, S), device, dtype,
                                      low=None, high=None,
                                      requires_grad=requires_grad),
-                        0, index_variable(2, S))),
+                        0, index_variable(2, S, device=device))),
             SampleInput((make_tensor((), device, dtype,
                                      low=None, high=None,
                                      requires_grad=requires_grad),
@@ -341,6 +341,16 @@ def sample_inputs_index_select(op_info, device, dtype, requires_grad):
                                      requires_grad=requires_grad),
                         0, torch.tensor(0, dtype=torch.int64))),
             )
+
+def sample_movedim_moveaxis(op_info, device, dtype, requires_grad):
+    return (SampleInput((make_tensor((4, 3, 2, 1), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                        (0, 1, 2, 3), (3, 2, 1, 0))),
+            SampleInput((make_tensor((4, 3, 2, 1), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                        (0, -1, -2, -3), (-3, -2, -1, -0))))
 
 def np_unary_ufunc_integer_promotion_wrapper(fn):
     # Wrapper that passes PyTorch's default scalar
@@ -919,6 +929,28 @@ op_db: List[OpInfo] = [
                                     dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
                 ),
                 sample_inputs_func=sample_inputs_hstack_dstack_vstack),
+        OpInfo('movedim',
+                dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+                test_inplace_grad=False,
+                supports_tensor_out=False,
+                skips=(
+                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                    dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
+                        SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                                    dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
+                ),
+                sample_inputs_func=sample_movedim_moveaxis),
+        OpInfo('moveaxis',
+                dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+                test_inplace_grad=False,
+                supports_tensor_out=False,
+                skips=(
+                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                    dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
+                        SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                                    dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
+                ),
+                sample_inputs_func=sample_movedim_moveaxis),
 ]
 
 if TEST_SCIPY:
@@ -980,10 +1012,10 @@ if TEST_SCIPY:
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
 spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
 
-def index_variable(shape, max_indices):
+def index_variable(shape, max_indices, device=torch.device('cpu')):
     if not isinstance(shape, tuple):
         shape = (shape,)
-    index = torch.rand(*shape).mul_(max_indices).floor_().long()
+    index = torch.rand(*shape, device=device).mul_(max_indices).floor_().long()
     return index
 
 
@@ -995,14 +1027,14 @@ def index_perm_variable(shape, max_indices):
     return index
 
 
-def gather_variable(shape, index_dim, max_indices, duplicate=False):
+def gather_variable(shape, index_dim, max_indices, duplicate=False, device=torch.device('cpu')):
     assert len(shape) == 2
     assert index_dim < 2
     batch_dim = 1 - index_dim
-    index = torch.LongTensor(*shape)
+    index = torch.zeros(*shape, dtype=torch.long, device=device)
     for i in range(shape[index_dim]):
         index.select(index_dim, i).copy_(
-            torch.randperm(max_indices)[:shape[batch_dim]])
+            torch.randperm(max_indices, device=device)[:shape[batch_dim]])
     if duplicate:
         index.select(batch_dim, 0).copy_(index.select(batch_dim, 1))
     return index
