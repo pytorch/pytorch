@@ -168,6 +168,7 @@ private:
       DispatchKeySet eligibleKeys,
       DispatchKeySet ks
   ) const {
+      std::cout << "in dispatchKeySetToDispatchKey. nonFallthroughKeys=" << nonFallthroughKeys_ << std::endl;
     return impl::dispatchTypeId(ks,
       // Keys that are fallthrough should be skipped
         nonFallthroughKeys_

@@ -201,7 +201,7 @@ void expectBoxedCallingWithReturnWorks(const KernelFunction& func) {
   vector<IValue> stack {3, 4};
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  func.callBoxed(dummy, &stack);
+  func.callBoxed(dummy, c10::DispatchKeySet(), &stack);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -215,7 +215,7 @@ void expectBoxedCallingWithoutReturnWorks(const KernelFunction& func) {
   vector<IValue> stack {3, 4};
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  func.callBoxed(dummy, &stack);
+  func.callBoxed(dummy, c10::DispatchKeySet(), &stack);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -227,7 +227,7 @@ void expectBoxedCallingWithMultiReturnWorks(const KernelFunction& func) {
   vector<IValue> stack {3, 4};
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  func.callBoxed(dummy, &stack);
+  func.callBoxed(dummy, c10::DispatchKeySet(), &stack);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -248,7 +248,7 @@ void expectInPlaceBoxedCallingWorks(const KernelFunction& func) {
   auto t = at::zeros({1});
   auto s = 1.0f;
   vector<IValue> stack {t, s};
-  func.callBoxed(dummy, &stack);
+  func.callBoxed(dummy, c10::DispatchKeySet(), &stack);
 
   // kernel should have updated out arg and returned it
   EXPECT_EQ(t.item().toFloat(), 1.0f);
@@ -263,7 +263,7 @@ void expectOutOfPlaceBoxedCallingWorks(const KernelFunction& func) {
   auto s = 1.0f;
   auto t = at::zeros({1});
   vector<IValue> stack {s, t};
-  func.callBoxed(dummy, &stack);
+  func.callBoxed(dummy, c10::DispatchKeySet(), &stack);
 
   // kernel should have updated out arg and returned it on the stack
   EXPECT_EQ(t.item().toFloat(), 1.0f);
@@ -280,7 +280,7 @@ void expectOutOfPlaceMultiBoxedCallingWorks(const KernelFunction& func) {
   auto s1 = 1.0f;
   auto s2 = 2.0f;
   vector<IValue> stack {t1, t2, s1, s2};
-  func.callBoxed(dummy, &stack);
+  func.callBoxed(dummy, c10::DispatchKeySet(), &stack);
 
   // kernel should have updated output args and returned them on the stack
   EXPECT_EQ(t1.item().toFloat(), 1.0f);
@@ -300,7 +300,7 @@ void expectLegacyOutOfPlaceMultiBoxedCallingWorks(const KernelFunction& func) {
   auto t1 = at::zeros({1});
   auto t2 = at::zeros({1});
   vector<IValue> stack {s1, s2, t1, t2};
-  func.callBoxed(dummy, &stack);
+  func.callBoxed(dummy, c10::DispatchKeySet(), &stack);
 
   // kernel should have updated output args and returned them on the stack
   EXPECT_EQ(t1.item().toFloat(), 1.0f);
@@ -318,7 +318,7 @@ void expectBoxedCallingFailsWith(const KernelFunction& func, const char* errorMe
   OperatorHandle dummy = makeDummyOperatorHandle();
 
   expectThrows<c10::Error>([&] {
-    func.callBoxed(dummy, &stack);
+    func.callBoxed(dummy, c10::DispatchKeySet(), &stack);
   }, errorMessage);
 }
 

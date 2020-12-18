@@ -173,10 +173,11 @@ struct BoxedKernelWrapper<
     KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
     OperatorKernel* functor,
     const OperatorHandle& opHandle,
+    DispatchKeySet dispatchKeySet,
     Args... args
   ) {
     torch::jit::Stack stack = boxArgs(args...);
-    (*boxed_kernel_func)(functor, opHandle, &stack);
+    (*boxed_kernel_func)(functor, opHandle, dispatchKeySet, &stack);
 
     return guts::if_constexpr<!std::is_same<void, Result>::value>(
       [&] (auto delay_check) {
@@ -216,10 +217,11 @@ struct BoxedKernelWrapper<
     KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
     OperatorKernel* functor,
     const OperatorHandle& opHandle,
+    DispatchKeySet dispatchKeySet,
     at::Tensor& outArg, OtherArgs... otherArgs
   ) {
     torch::jit::Stack stack = boxArgs(outArg, otherArgs...);
-    (*boxed_kernel_func)(functor, opHandle, &stack);
+    (*boxed_kernel_func)(functor, opHandle, dispatchKeySet, &stack);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       stack.size() == 1,
       "Boxed kernel was expected to return a single value on the stack, ",
@@ -254,10 +256,11 @@ struct BoxedKernelWrapper<
     KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
     OperatorKernel* functor,
     const OperatorHandle& opHandle,
+    DispatchKeySet dispatchKeySet,
     FirstArg firstArg, RestArgs... restArgs
   ) {
     torch::jit::Stack stack = boxArgs(firstArg, restArgs...);
-    (*boxed_kernel_func)(functor, opHandle, &stack);
+    (*boxed_kernel_func)(functor, opHandle, dispatchKeySet, &stack);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       stack.size() == 1,
       "Boxed kernel was expected to return a single value on the stack, ",
@@ -304,13 +307,14 @@ struct BoxedKernelWrapper<
     KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
     OperatorKernel* functor,
     const OperatorHandle& opHandle,
+    DispatchKeySet dispatchKeySet,
     Args... args
   ) {
     using ArgTuple = std::tuple<Args...>;
     constexpr int RetCount = std::tuple_size<Result>();
 
     torch::jit::Stack stack = boxArgs(args...);
-    (*boxed_kernel_func)(functor, opHandle, &stack);
+    (*boxed_kernel_func)(functor, opHandle, dispatchKeySet, &stack);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       stack.size() == RetCount,
       "Boxed kernel was expected to return ", RetCount, " values on the stack, ",
@@ -359,13 +363,14 @@ struct BoxedKernelWrapper<
     KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
     OperatorKernel* functor,
     const OperatorHandle& opHandle,
+    DispatchKeySet dispatchKeySet,
     Args... args
   ) {
     using ArgTuple = std::tuple<Args...>;
     constexpr int RetCount = std::tuple_size<Result>();
 
     torch::jit::Stack stack = boxArgs(args...);
-    (*boxed_kernel_func)(functor, opHandle, &stack);
+    (*boxed_kernel_func)(functor, opHandle, dispatchKeySet, &stack);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       stack.size() == RetCount,
       "Boxed kernel was expected to return ", RetCount, " values on the stack, ",

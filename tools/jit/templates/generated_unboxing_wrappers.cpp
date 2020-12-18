@@ -94,7 +94,7 @@ std::array<bool, N> as_bool_array(const c10::List<bool>& list) {
 }
 
 KernelFunction::InternalBoxedKernelFunction *DUMMY_OPERATION =
-  [](c10::OperatorKernel *, const c10::OperatorHandle &, std::vector<c10::IValue> *) -> void {
+  [](c10::OperatorKernel *, const c10::OperatorHandle &, c10::DispatchKeySet, std::vector<c10::IValue> *) -> void {
     TORCH_CHECK(false, "Operator has been stripped in the custom build.")
   };
 

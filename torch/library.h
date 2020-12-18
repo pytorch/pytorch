@@ -152,7 +152,8 @@ public:
   //
   // TODO: temp
   explicit CppFunction(WithKeys, CppFunction&& f)
-    : func_(std::move(f.func_))
+    : dispatch_key_(std::move(f.dispatch_key_))
+    , func_(std::move(f.func_))
     , cpp_signature_(std::move(f.cpp_signature_))
     , schema_(std::move(f.schema_))
     , debug_(std::move(f.debug_))
@@ -573,7 +574,7 @@ public:
 
   template <typename Name, typename Dispatch, typename Func>
   Library& impl_withKeys(Name name, Dispatch&& key, Func&& raw_f) & {
-    return impl_withKeys(name, dispatch(std::forward<Dispatch>(key), std::forward<Func>(raw_f)));
+    return impl_withKeys(name, dispatch_withKeys(std::forward<Dispatch>(key), std::forward<Func>(raw_f)));
   }
 
   /// \private

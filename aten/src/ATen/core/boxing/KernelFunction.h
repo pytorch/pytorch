@@ -15,7 +15,7 @@ struct OperatorKernel;
 // no overhead to fallthrough to the next key.  See cpp file for some more
 // implementation notes; notably, this does NOT actually go through the
 // boxing/unboxing codepath.
-CAFFE2_API void fallthrough_kernel(OperatorKernel*, const OperatorHandle&, Stack*);
+CAFFE2_API void fallthrough_kernel(OperatorKernel*, const OperatorHandle&, DispatchKeySet, Stack*);
 
 // Note [Ambiguity in AutogradOther kernel]
 // This kernel implements reporting an error message when there're kernels registered
@@ -27,7 +27,7 @@ CAFFE2_API void fallthrough_kernel(OperatorKernel*, const OperatorHandle&, Stack
 //   See c10/core/DispatchKeySet.cpp for a list of backends mapped to AutogradOther.
 // Thus if backend extender indeed want to override Math kernel behavior, they should request
 // a dedicated Autograd key for their backend to resolve the ambiguity.
-CAFFE2_API void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHandle&, Stack*);
+CAFFE2_API void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHandle&, DispatchKeySet, Stack*);
 
 // Note [named_not_supported_kernel]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -36,7 +36,7 @@ CAFFE2_API void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHa
 // cased in the dispatcher to be triggered before we attempt boxing (so we can
 // give a good error message in cases when boxing is not supported).  When
 // boxing is universally supported this can be removed.
-[[noreturn]] CAFFE2_API void named_not_supported_kernel(OperatorKernel*, const OperatorHandle&, Stack*);
+[[noreturn]] CAFFE2_API void named_not_supported_kernel(OperatorKernel*, const OperatorHandle&, DispatchKeySet, Stack*);
 
 /**
  * KernelFunction is similar to std::function but stores a kernel function.
@@ -47,7 +47,7 @@ CAFFE2_API void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHa
 class CAFFE2_API KernelFunction final {
 public:
   // This is how boxed kernels are actually stored
-  using InternalBoxedKernelFunction = void(OperatorKernel*, const OperatorHandle&, Stack*);
+  using InternalBoxedKernelFunction = void(OperatorKernel*, const OperatorHandle&, DispatchKeySet, Stack*);
   // This is the public API for how boxed kernels are defined
   using BoxedKernelFunction = void(const OperatorHandle&, Stack*);
 
@@ -74,7 +74,7 @@ public:
    * >      [] (Tensor a, bool b) -> Tensor {...});
    * > Tensor result = func.callBoxed(stack);
    */
-  void callBoxed(const OperatorHandle& opHandle, Stack* stack) const;
+  void callBoxed(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Stack* stack) const;
 
   /**
    * Call the function in an unboxed way.
@@ -253,7 +253,7 @@ private:
   explicit KernelFunction(std::unique_ptr<OperatorKernel> functor, InternalBoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func);
 
   template<BoxedKernelFunction* func>
-  static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, Stack* stack);
+  static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack* stack);
 
   void checkBoxedKernel(const OperatorHandle& opHandle) const;
 

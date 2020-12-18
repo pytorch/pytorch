@@ -18,7 +18,9 @@ inline KernelFunction::KernelFunction(std::unique_ptr<OperatorKernel> functor, I
 {}
 
 template<KernelFunction::BoxedKernelFunction* func>
-inline void KernelFunction::make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, Stack* stack) {
+inline void KernelFunction::make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack* stack) {
+    // TODO: a version of this that actually plumbs the dispatch key set?
+    // Only needed if we actually codegen some redispatching kernels that use this
     func(opHandle, stack);
 }
 
@@ -31,9 +33,9 @@ inline bool KernelFunction::isFallthrough() const {
     return boxed_kernel_func_ == &fallthrough_kernel;
 }
 
-inline void KernelFunction::callBoxed(const OperatorHandle& opHandle, Stack* stack) const {
+inline void KernelFunction::callBoxed(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Stack* stack) const {
     checkBoxedKernel(opHandle);
-    (*boxed_kernel_func_)(functor_.get(), opHandle, stack);
+    (*boxed_kernel_func_)(functor_.get(), opHandle, dispatchKeySet, stack);
 }
 
 template<class Return, class... Args>
@@ -71,6 +73,7 @@ inline Return KernelFunction::call(const OperatorHandle& opHandle, DispatchKeySe
         boxed_kernel_func_,
         functor_.get(),
         opHandle,
+        dispatchKeySet,
         std::forward<Args>(args)...
     );
 }
@@ -91,11 +94,11 @@ inline Return KernelFunction::call_withKeys(const OperatorHandle& opHandle, Disp
         "Tried to call KernelFunction::call() on an uninitialized KernelFunction."
     );
 
-    // TODO: plumb TLS keys through boxed wrappers
     return impl::BoxedKernelWrapper<Return(Args...)>::call(
         boxed_kernel_func_,
         functor_.get(),
         opHandle,
+        dispatchKeySet,
         std::forward<Args>(args)...
     );
 }

@@ -184,7 +184,7 @@ auto result_ = (${first}).${name}(${args_with_tensor_options});
 """)
 
 CONSTRUCTOR = CodeTemplate("""\
-[](OperatorKernel* unboxedKernel, const OperatorHandle&, Stack* stack) {
+[](OperatorKernel* unboxedKernel, const OperatorHandle&, c10::DispatchKeySet, Stack* stack) {
     using namespace at;
     ${lvalues}
     ${call}
