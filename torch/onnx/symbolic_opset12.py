@@ -118,12 +118,13 @@ def unfold(g, input, dimension, size, step):
         perm.append(perm.pop(dimension))
 
         unsqueeze_list = []
-        loop_condition = g.op("Constant", value_t=torch.tensor(1))
+        loop_condition = g.op("Constant", value_t=torch.BoolTensor(1))
         loop_len = g.op("Min", low_size, hi_size)
         loop = g.op("Loop", loop_len, loop_condition)
 
         loop_block = _add_block(loop.node())
         block_input_iter = _add_input_to_block(loop_block)
+        cond = _add_input_to_block(loop_block)
 
         starts = loop_block.op("Gather", low_indices, block_input_iter)
         ends = loop_block.op("Gather", hi_indices, block_input_iter)
@@ -136,9 +137,9 @@ def unfold(g, input, dimension, size, step):
         unsqueeze_list.append(unsqueeze)
         concat = loop_block.op("Concat", *unsqueeze_list, axis_i=0)
 
-        _add_output_to_block(loop_block, loop_condition)
+        cond_out = loop_block.op("Cast", loop_condition, to_i=9)
+        _add_output_to_block(loop_block, cond_out)
         _add_output_to_block(loop_block, concat)
-        torch._C._jit_pass_fixup_onnx_loop_node_inputs(loop.node())
 
         loop_output = loop.node().output()
         perm = [0, 1, 2, 3, 4]
