@@ -17,6 +17,8 @@ jobs:
           architecture: x64
       - name: Checkout PyTorch
         uses: actions/checkout@v1
+        with:
+          ref: ${{ github.head_ref }}
       - name: Ensure consistent CircleCI YAML config
         run: |
           pip install -r requirements.txt
@@ -62,16 +64,8 @@ jobs:
           architecture: x64
       - name: Fetch PyTorch
         uses: actions/checkout@v1
-      - name: Checkout PR tip
-        run: |
-          set -eux
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            # We are on a PR, so actions/checkout leaves us on a merge commit.
-            # Check out the actual tip of the branch.
-            git checkout ${{ github.event.pull_request.head.sha }}
-          fi
-          echo ::set-output name=commit_sha::$(git rev-parse HEAD)
-        id: get_pr_tip
+        with:
+          ref: ${{ github.head_ref }}
       - name: Run flake8
         run: |
           set -eux
@@ -83,7 +77,7 @@ jobs:
         with:
           check_name: 'flake8-py3'
           linter_output_path: 'flake8-output.txt'
-          commit_sha: ${{ steps.get_pr_tip.outputs.commit_sha }}
+          commit_sha: ${{ github.head_ref }}
           regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorCode>\w\d+) (?<errorDesc>.*)'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -99,16 +93,8 @@ jobs:
           architecture: x64
       - name: Checkout PyTorch
         uses: actions/checkout@v1
-      - name: Checkout PR tip
-        run: |
-          set -eux
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            # We are on a PR, so actions/checkout leaves us on a merge commit.
-            # Check out the actual tip of the branch.
-            git checkout ${{ github.event.pull_request.head.sha }}
-          fi
-          echo ::set-output name=commit_sha::$(git rev-parse HEAD)
-        id: get_pr_tip
+        with:
+          ref: ${{ github.head_ref }}
       - name: Install dependencies
         run: |
           set -eux
@@ -184,7 +170,7 @@ jobs:
         with:
           check_name: 'clang-tidy'
           linter_output_path: 'clang-tidy-output.txt'
-          commit_sha: ${{ steps.get_pr_tip.outputs.commit_sha }}
+          commit_sha: ${{ github.head_ref }}
           regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorDesc>.*?) \[(?<errorCode>.*)\]'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -199,16 +185,8 @@ jobs:
           architecture: x64
       - name: Fetch PyTorch
         uses: actions/checkout@v1
-      - name: Checkout PR tip
-        run: |
-          set -eux
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            # We are on a PR, so actions/checkout leaves us on a merge commit.
-            # Check out the actual tip of the branch.
-            git checkout ${{ github.event.pull_request.head.sha }}
-          fi
-          echo ::set-output name=commit_sha::$(git rev-parse HEAD)
-        id: get_pr_tip
+        with:
+          ref: ${{ github.head_ref }}
       - name: Run cmakelint
         run: |
           set -eux
