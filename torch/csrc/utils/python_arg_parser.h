@@ -374,8 +374,6 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
       } else {
         res[idx] = THPUtils_unpackIndex(obj);
       }
-    } catch (const std::runtime_error& e) {
-        throw std::runtime_error(e.what());
     } catch (const std::exception &e) {
       throw TypeError("%s(): argument '%s' must be %s, but found element of type %s at pos %d",
           signature.name.c_str(), signature.params[i].name.c_str(),
@@ -401,8 +399,6 @@ inline std::vector<double> PythonArgs::getDoublelist(int i) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     try {
       res[idx] = THPUtils_unpackDouble(obj);
-    } catch (const std::runtime_error& e) {
-        throw std::runtime_error(e.what());
     } catch (const std::exception &e) {
       throw TypeError("%s(): argument '%s' must be %s, but found element of type %s at pos %d",
           signature.name.c_str(), signature.params[i].name.c_str(),

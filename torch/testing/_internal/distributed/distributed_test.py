@@ -73,6 +73,11 @@ PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.GLOO,
 ]
 
+# Allowlist of distributed backends where profiling is supported with use_cuda=True
+CUDA_PROFILING_SUPPORTED_BACKENDS = [
+    dist.Backend.GLOO
+]
+
 # Dummy NamedTuple data structures to test DDP support for NamedTuple types.
 EXPECTED_FIELDS = ("a", "b")
 TestNamedTupleInput_0 = namedtuple("NamedTuple", EXPECTED_FIELDS)
@@ -1313,12 +1318,22 @@ class DistributedTest:
                 self.assertEqual(result, [_build_tensor(src + 1, expected_value)])
             self._barrier()
 
-        def call_dist_op(self, profiling_title_postfix, is_async, op, *args, expect_event=True, secondary_op_call=None, **kwargs):
+        def call_dist_op(
+            self,
+            profiling_title_postfix,
+            is_async,
+            op,
+            *args,
+            expect_event=True,
+            secondary_op_call=None,
+            profile_cuda=False,
+            **kwargs,
+        ):
             op_calls = [lambda: op(*args, **kwargs)]
             if secondary_op_call is not None:
                 op_calls.append(secondary_op_call)
 
-            with torch.autograd.profiler.profile() as prof:
+            with torch.autograd.profiler.profile(use_cuda=profile_cuda) as prof:
                 works = [op_call() for op_call in op_calls]
                 if is_async:
                     for work in works:
@@ -1356,6 +1371,24 @@ class DistributedTest:
                 if cuda:
                     tensor = tensor.cuda(rank_to_GPU[rank][0])
                 self.call_dist_op(":all_reduce", async_op, dist.all_reduce, tensor, op, group_id, async_op=async_op)
+                # Currently, only Gloo backend has profiling tested with CUDA enabled.
+                # Only run cuda profiling test for one rank to speed up since
+                # running with different src_rank does not affect the correctness.
+                if (
+                    src == 0
+                    and cuda
+                    and dist.get_backend() in CUDA_PROFILING_SUPPORTED_BACKENDS
+                ):
+                    self.call_dist_op(
+                        ":all_reduce",
+                        async_op,
+                        dist.all_reduce,
+                        tensor,
+                        op,
+                        group_id,
+                        async_op=async_op,
+                        profile_cuda=True,
+                    )
 
             self._barrier()
 
@@ -2499,24 +2532,17 @@ class DistributedTest:
             expected_value,
         ):
             for src in group:
+                tensor_value = master_value if rank == src else worker_value
+                tensors = [
+                    _build_tensor(src + 1, tensor_value).cuda(device=i)
+                    for i in rank_to_GPU[rank]
+                ]
+                self.call_dist_op(
+                    "reduce", False, dist.reduce_multigpu, tensors, src, op, group_id,
+                    expect_event=len(tensors) == 1)
                 if rank == src:
-                    tensors = [
-                        _build_tensor(src + 1, master_value).cuda(device=i)
-                        for i in rank_to_GPU[rank]
-                    ]
-                    self.call_dist_op(
-                        "reduce", False, dist.reduce_multigpu, tensors, src, op, group_id,
-                        expect_event=len(tensors) == 1)
                     expected_tensor = _build_tensor(src + 1, expected_value)
                     self.assertEqual(tensors[0], expected_tensor)
-                else:
-                    tensors = [
-                        _build_tensor(src + 1, worker_value).cuda(device=i)
-                        for i in rank_to_GPU[rank]
-                    ]
-                    self.call_dist_op(
-                        "reduce", False, dist.reduce_multigpu, tensors, src, op, group_id,
-                        expect_event=len(tensors) == 1)
 
             self._barrier()
 
