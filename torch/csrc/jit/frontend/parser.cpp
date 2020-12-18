@@ -144,6 +144,16 @@ struct ParserImpl {
       } break;
       case '{': {
         L.next();
+        // If we have a dict literal, `keys` and `values` will store the keys
+        // and values used in the object's construction. EDGE CASE: We have a
+        // dict comprehension, so we'll get the first element of the dict
+        // comprehension in `keys` and a list comprehension in `values`.
+        // For example, `{i : chr(i + 65) for i in range(4)}` would give us
+        // `i` in `keys` and `chr(i + 65) for i in range(4)` in `values`.
+        // The optimal way of handling this case is to simply splice the new
+        // dict comprehension together from the existing list comprehension.
+        // Splicing prevents breaking changes to our API and does not require
+        // the use of global variables.
         std::vector<Expr> keys;
         std::vector<Expr> values;
         auto range = L.cur().range;
@@ -155,10 +165,16 @@ struct ParserImpl {
           } while (L.nextIf(','));
         }
         L.expect('}');
-        prefix = DictLiteral::create(
-            range,
-            List<Expr>::create(range, keys),
-            List<Expr>::create(range, values));
+        if (keys.size() == 1 && (*values.begin()).kind() == TK_LIST_COMP) {
+          ListComp lc(*values.begin());
+          prefix = DictComp::create(
+              range, *keys.begin(), lc.elt(), lc.target(), lc.iter());
+        } else {
+          prefix = DictLiteral::create(
+              range,
+              List<Expr>::create(range, keys),
+              List<Expr>::create(range, values));
+        }
       } break;
       case TK_STRINGLITERAL: {
         prefix = parseConcatenatedStringLiterals();
