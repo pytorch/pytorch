@@ -558,6 +558,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: sgn_
    .. automethod:: sin
    .. automethod:: sin_
+   .. automethod:: sinc
+   .. automethod:: sinc_
    .. automethod:: sinh
    .. automethod:: sinh_
    .. automethod:: asinh
