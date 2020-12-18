@@ -117,8 +117,7 @@ def format_trace_inputs(f: NativeFunction) -> str:
             else:
                 return [ADD_TRACE_INPUT.substitute(name=name, input=name)]
 
-    args: List[Union[Argument, TensorOptionsArguments]] = []
-    args = list(f.func.schema_order_arguments())
+    args: List[Union[Argument, TensorOptionsArguments]] = list(f.func.schema_order_arguments())
 
     if f.func.is_out_fn():
         # *_out functions take the result as a separate argument, but we don't want to
@@ -327,7 +326,7 @@ def emit_trace_body(f: NativeFunction) -> List[str]:
     dispatcher_sig = DispatcherSignature.from_schema(f.func)
     dispatcher_exprs = dispatcher_sig.exprs()
 
-    ret_and_arg_types = ', '.join([dispatcher_sig._returns_type] + [a.type for a in dispatcher_exprs])
+    ret_and_arg_types = ', '.join([dispatcher_sig.returns_type()] + [a.type.cpp_type() for a in dispatcher_exprs])
     redispatch_args = ', '.join(['op', 'c10::DispatchKey::Tracer'] + [a.expr for a in dispatcher_exprs])
 
     assign_return_values = f'{tie_return_values(f)} = ' \
@@ -364,7 +363,10 @@ def method_definition(f: NativeFunction) -> Optional[str]:
     if cpp.name(f.func) in MANUAL_TRACER:
         return None
 
-    formals = ', '.join(f'{cpp.argument_type(a)} {a.name}' for a in f.func.schema_order_arguments())
+    formals = ', '.join(
+        f'{cpp.argument_type(a, binds="__placeholder__").cpp_type()} {a.name}'
+        for a in f.func.schema_order_arguments()
+    )
 
     return METHOD_DEFINITION.substitute(
         return_type=cpp.returns_type(f.func.returns),

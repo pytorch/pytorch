@@ -68,6 +68,14 @@ using CellParamsSerializationType = std::tuple<
 struct CellParamsBase : torch::CustomClassHolder {
   virtual Tensor matmul_ih(const Tensor& input) const = 0;
   virtual Tensor matmul_hh(const Tensor& h) const = 0;
+  // by default doing nothing. CellParams will override this
+  // to define correct behavior for LSTMs with projections.
+  // This function is not pure virtual, because it's useful to
+  // provide this default implementation, so that all cell params
+  // that don't support projections work correctly (e.g. QuantizedCellParams variations)
+  virtual Tensor matmul_hr(const Tensor& h) const {
+    return h;
+  }
   virtual Tensor linear_ih(const Tensor& input_ih) const = 0;
   virtual Tensor linear_hh(const Tensor& input_hh) const = 0;
 
@@ -79,25 +87,34 @@ struct CellParamsBase : torch::CustomClassHolder {
 
 // Pretty much all cells we support take the same set of arguments, but threading those
 // 4 arguments manually is really annoying. Their lifetime is externally managed, so we only
-// pass this struct of references around.
+// pass this struct of references around. LSTMs with projections have 5th argument w_hr, for all
+// other models it's always going to be undefined.
 struct CellParams : public CellParamsBase {
   CellParams(
       const Tensor& _w_ih,
       const Tensor& _w_hh,
       const Tensor& _b_ih,
-      const Tensor& _b_hh)
-      : w_ih(_w_ih), w_hh(_w_hh), b_ih_(_b_ih), b_hh_(_b_hh){};
+      const Tensor& _b_hh,
+      const Tensor& _w_hr)
+      : w_ih(_w_ih), w_hh(_w_hh), b_ih_(_b_ih), b_hh_(_b_hh), w_hr(_w_hr) {};
 
   const Tensor& w_ih;
   const Tensor& w_hh;
   const Tensor& b_ih_; /* optional */
   const Tensor& b_hh_; /* optional */
+  const Tensor& w_hr;  /* only defined for LSTMs with projections */
 
   Tensor matmul_ih(const Tensor& input) const override {
     return at::matmul(input, w_ih.t());
   }
   Tensor matmul_hh(const Tensor& h) const override {
     return at::matmul(h, w_hh.t());
+  }
+  Tensor matmul_hr(const Tensor& h) const override {
+    if (w_hr.defined()) {
+      return at::matmul(h, w_hr.t());
+    }
+    return h;
   }
   Tensor linear_ih(const Tensor& input) const override {
     return at::linear(input, w_ih, b_ih_);
@@ -468,6 +485,9 @@ struct QRNNCellParamsWrapper {
   Tensor matmul_hh(const Tensor& h) const {
     return param_->matmul_hh(h);
   }
+  Tensor matmul_hr(const Tensor& h) const {
+    return param_->matmul_hr(h);
+  }
   Tensor linear_ih(const Tensor& input) const {
     return param_->linear_ih(input);
   }
@@ -509,18 +529,32 @@ static std::vector<T> unpair_vec(std::vector<pair_of<T>>&& vals) {
 }
 
 // Parses a flat list of parameter tensors into a list of CellParams
-static std::vector<CellParams> gather_params(TensorList params, bool has_biases) {
+static std::vector<CellParams> gather_params(TensorList params, bool has_biases, bool has_projections = false) {
   static at::Tensor undefined;
   std::vector<CellParams> result;
   if (has_biases) {
-    TORCH_CHECK(params.size() % 4 == 0, "got an incorrect number of RNN parameters");
-    for (size_t i = 0; i < params.size(); i += 4) {
-      result.emplace_back(params[i], params[i + 1], params[i + 2], params[i + 3]);
+    if (has_projections) {
+      TORCH_CHECK(params.size() % 5 == 0, "got an incorrect number of RNN parameters");
+      for (size_t i = 0; i < params.size(); i += 5) {
+        result.emplace_back(params[i], params[i + 1], params[i + 2], params[i + 3], params[i + 4]);
+      }
+    } else {
+      TORCH_CHECK(params.size() % 4 == 0, "got an incorrect number of RNN parameters");
+      for (size_t i = 0; i < params.size(); i += 4) {
+        result.emplace_back(params[i], params[i + 1], params[i + 2], params[i + 3], undefined);
+      }
     }
   } else {
-    TORCH_CHECK(params.size() % 2 == 0, "got an incorrect number of RNN parameters");
-    for (size_t i = 0; i < params.size(); i += 2) {
-      result.emplace_back(params[i], params[i + 1], undefined, undefined);
+    if (has_projections) {
+      TORCH_CHECK(params.size() % 3 == 0, "got an incorrect number of RNN parameters");
+      for (size_t i = 0; i < params.size(); i += 3) {
+        result.emplace_back(params[i], params[i + 1], undefined, undefined, params[i + 2]);
+      }
+    } else {
+      TORCH_CHECK(params.size() % 2 == 0, "got an incorrect number of RNN parameters");
+      for (size_t i = 0; i < params.size(); i += 2) {
+        result.emplace_back(params[i], params[i + 1], undefined, undefined, undefined);
+      }
     }
   }
   return result;
@@ -702,8 +736,10 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
       auto hgates = params.matmul_hh(hx);
       auto result = at::_thnn_fused_lstm_cell(
           igates, hgates, cx, params.b_ih(), params.b_hh());
+      // applying projections if w_hr is defined
+      auto hy = params.matmul_hr(std::get<0>(result));
       // Slice off the workspace argument (it's needed only for AD).
-      return std::make_tuple(std::move(std::get<0>(result)), std::move(std::get<1>(result)));
+      return std::make_tuple(std::move(hy), std::move(std::get<1>(result)));
     }
 
     const auto gates = params.linear_hh(hx).add_(
@@ -715,6 +751,7 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
     auto outgate = chunked_gates[3].sigmoid_();
     auto cy = (forgetgate * cx).add_(ingate * cellgate);
     auto hy = outgate * cy.tanh();
+    hy = params.matmul_hr(hy);
     return std::make_tuple(std::move(hy), std::move(cy));
   }
 
@@ -1404,8 +1441,10 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
             num_layers, dropout_p, train, bidirectional, batch_first);
     return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
   }
-
+  // if cells are of different size, that means projections are used
+  bool has_projections = (hx[0].size(2) != hx[1].size(2));
   if (use_miopen(_input, dropout_p)) {
+    TORCH_CHECK(!has_projections, "LSTM with projections is not supported with MIOpen");
     Tensor output, hy, cy;
     lstm_miopen_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
               num_layers, dropout_p, train, bidirectional, batch_first);
@@ -1413,7 +1452,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   }
   check_attributes(_input, _params, hx);
   auto input = batch_first ? _input.transpose(0, 1) : _input;
-  auto params = gather_params(_params, has_biases);
+  auto params = gather_params(_params, has_biases, has_projections);
   auto results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
       input, params, hx[0], hx[1], num_layers, dropout_p, train, bidirectional);
   if (batch_first) {
@@ -1433,8 +1472,10 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
             _params, has_biases, num_layers, dropout_p, train, bidirectional);
     return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
   }
-
+  // if cells are of different size, that means projections are used
+  bool has_projections = (hx[0].size(2) != hx[1].size(2));
   if (use_miopen(data, dropout_p)) {
+    TORCH_CHECK(!has_projections, "LSTM with projections is not supported with MIOpen");
     Tensor output, hy, cy;
     lstm_packed_miopen_stub(data.device().type(), output, hy, cy, data, batch_sizes, hx,
             _params, has_biases, num_layers, dropout_p, train, bidirectional);
@@ -1442,7 +1483,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   }
 
   PackedSequence input { data, batch_sizes };
-  auto params = gather_params(_params, has_biases);
+  auto params = gather_params(_params, has_biases, has_projections);
   auto result = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
       input, params, hx[0], hx[1], num_layers, dropout_p, train, bidirectional);
   auto & packed_output = std::get<0>(result);
@@ -1455,7 +1496,8 @@ std::tuple<Tensor, Tensor> lstm_cell(
     const Tensor& input, TensorList hx,
     const Tensor& w_ih, const Tensor& w_hh, const Tensor& b_ih, const Tensor& b_hh) {
   TORCH_CHECK(hx.size() == 2, "lstm_cell expects two hidden states");
-  return LSTMCell<CellParams>{}(input, std::make_tuple(hx[0], hx[1]), CellParams{w_ih, w_hh, b_ih, b_hh});
+  static at::Tensor undefined;
+  return LSTMCell<CellParams>{}(input, std::make_tuple(hx[0], hx[1]), CellParams{w_ih, w_hh, b_ih, b_hh, undefined});
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
@@ -1552,19 +1594,22 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_differentiable_gru_cell
 Tensor gru_cell(
     const Tensor& input, const Tensor& hx,
     const Tensor& w_ih, const Tensor& w_hh, const Tensor& b_ih, const Tensor& b_hh) {
-  return GRUCell<CellParams>{}(input, hx, CellParams{w_ih, w_hh, b_ih, b_hh});
+  static at::Tensor undefined;
+  return GRUCell<CellParams>{}(input, hx, CellParams{w_ih, w_hh, b_ih, b_hh, undefined});
 }
 
 Tensor rnn_tanh_cell(
     const Tensor& input, const Tensor& hx,
     const Tensor& w_ih, const Tensor& w_hh, const Tensor& b_ih, const Tensor& b_hh) {
-  return SimpleCell<tanh_f, CellParams>{}(input, hx, CellParams{w_ih, w_hh, b_ih, b_hh});
+  static at::Tensor undefined;
+  return SimpleCell<tanh_f, CellParams>{}(input, hx, CellParams{w_ih, w_hh, b_ih, b_hh, undefined});
 }
 
 Tensor rnn_relu_cell(
     const Tensor& input, const Tensor& hx,
     const Tensor& w_ih, const Tensor& w_hh, const Tensor& b_ih, const Tensor& b_hh) {
-  return SimpleCell<relu_f, CellParams>{}(input, hx, CellParams{w_ih, w_hh, b_ih, b_hh});
+  static at::Tensor undefined;
+  return SimpleCell<relu_f, CellParams>{}(input, hx, CellParams{w_ih, w_hh, b_ih, b_hh, undefined});
 }
 
 // Quantized implementations
@@ -1592,6 +1637,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input(
     params.emplace_back(static_cast<c10::intrusive_ptr<CellParamsBase>>(param));
   }
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
+  TORCH_CHECK(hx[0].size(2) == hx[1].size(2), "quantized LSTM with projections is not supported");
   auto result_dtype = dtype.has_value() ? dtype.value() : at::kChar;
   auto input = batch_first ? _input.transpose(0, 1) : _input;
   TORCH_CHECK(has_biases, "quantized LSTM requires biases");
@@ -1685,6 +1731,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data(
     params.emplace_back(static_cast<c10::intrusive_ptr<CellParamsBase>>(param));
   }
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
+  TORCH_CHECK(hx[0].size(2) == hx[1].size(2), "quantized LSTM with projections is not supported");
 
   auto result_dtype = dtype.has_value() ? dtype.value() : at::kChar;
 
