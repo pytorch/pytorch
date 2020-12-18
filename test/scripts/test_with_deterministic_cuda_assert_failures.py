@@ -5,8 +5,8 @@ import torch
 from torch.testing._internal.common_utils import (TestCase, run_tests)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
-# This test is added to ensure that test suite early terminates when 
-# CUDA assert was thrown since all subsequence test will fail. 
+# This test is added to ensure that test suite terminates early when 
+# CUDA assert was thrown since all subsequent test will fail. 
 # See: https://github.com/pytorch/pytorch/issues/49019
 # This test file should be invoked from test_testing.py
 class TestThatContainsCUDAAssertFailure(TestCase):
