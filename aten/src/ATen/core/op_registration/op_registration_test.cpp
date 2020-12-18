@@ -1732,9 +1732,9 @@ TEST(NewOperatorRegistrationTest, dispatchAutogradPrecedence) {
 }
 
 TEST(NewOperatorRegistrationTest, throwsWhenRegisterToBackendMapsToAutogradOther) {
-  bool SparseCPU_called, math_called = false;
+  bool sparsecpu_called, math_called = false;
   auto m = MAKE_TORCH_LIBRARY(test);
-  m.def("fn", torch::dispatch(c10::DispatchKey::SparseCPU, [&](const Tensor& x) { SparseCPU_called = true; return x; }));
+  m.def("fn", torch::dispatch(c10::DispatchKey::SparseCPU, [&](const Tensor& x) { sparsecpu_called = true; return x; }));
   m.impl("fn", c10::DispatchKey::Math, [&](const Tensor& x) { math_called = true; return x; });
 
   auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
@@ -1742,7 +1742,7 @@ TEST(NewOperatorRegistrationTest, throwsWhenRegisterToBackendMapsToAutogradOther
 
   {
     callOp(*op, dummyTensor(c10::DispatchKey::SparseCPU));
-    ASSERT_TRUE(SparseCPU_called);
+    ASSERT_TRUE(sparsecpu_called);
   }
 
   {
