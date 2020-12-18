@@ -37,13 +37,13 @@ THPLayout* layout_registry
 at::Backend get_backend(bool is_cuda, bool is_sparse) {
   if (is_cuda) {
     if (is_sparse){
-      return at::Backend::SparseCOO_CUDA;
+      return at::Backend::SparseCUDA;
     } else {
       return at::Backend::CUDA;
     }
   } else {
     if (is_sparse){
-      return at::Backend::SparseCOO_CPU;
+      return at::Backend::SparseCPU;
     } else {
       return at::Backend::CPU;
     }

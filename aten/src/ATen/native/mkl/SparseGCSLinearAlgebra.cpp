@@ -1,7 +1,7 @@
 #include <ATen/native/sparse/SparseGCSTensorMath.h>
 #include <ATen/SparseTensorUtils.h>
 
-#include <ATen/SparseCOOTensorImpl.h>
+#include <ATen/SparseTensorImpl.h>
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Dispatch.h>

@@ -274,7 +274,7 @@ TEST(PytorchToCaffe2, InplaceStrided) {
 
 TEST(PytorchToCaffe2, NonRegularTensor) {
   at::Tensor at_tensor =
-      at::empty({2, 3}, at::dtype<float>().layout(at::kSparseCOO));
+      at::empty({2, 3}, at::dtype<float>().layout(at::kSparse));
   ASSERT_TRUE(at_tensor.is_sparse());
   ASSERT_ANY_THROW(caffe2::Tensor c2_tensor(at_tensor));
 }

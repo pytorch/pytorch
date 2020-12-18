@@ -60,7 +60,7 @@ TEST(WireSerialize, CloneSparseTensors) {
   EXPECT_NE(&v2.get(0).storage(), &tiny.storage()); // Cloned.
   EXPECT_TRUE(torch::equal(v2.get(0), tiny));
 
-  at::Tensor sparse = at::empty({2, 3}, at::dtype<float>().layout(at::kSparseCOO));
+  at::Tensor sparse = at::empty({2, 3}, at::dtype<float>().layout(at::kSparse));
   auto v3 = torch::distributed::rpc::cloneSparseTensors({sparse});
   // There is no storage() to compare, but at least confirm equality.
   EXPECT_TRUE(v3.get(0).is_same(sparse));
@@ -95,8 +95,8 @@ TEST(WireSerialize, Errors) {
 
 // Enable this once JIT Pickler supports sparse tensors.
 TEST(WireSerialize, DISABLED_Sparse) {
-  at::Tensor main = at::empty({2, 3}, at::dtype<float>().layout(at::kSparseCOO));
-  auto ser = torch::distributed::rpc::wireSerialize({}, {main.to(at::kSparseCOO)});
+  at::Tensor main = at::empty({2, 3}, at::dtype<float>().layout(at::kSparse));
+  auto ser = torch::distributed::rpc::wireSerialize({}, {main.to(at::kSparse)});
   auto deser = torch::distributed::rpc::wireDeserialize(ser.data(), ser.size());
   EXPECT_TRUE(torch::equal(main, deser.second[0]));
 }

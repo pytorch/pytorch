@@ -1,8 +1,8 @@
-#include <ATen/native/sparse/SparseCOOTensorMath.h>
+#include <ATen/native/sparse/SparseTensorMath.h>
 
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
-#include <ATen/SparseCOOTensorImpl.h>
+#include <ATen/SparseTensorImpl.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/InitialTensorOptions.h>

@@ -334,7 +334,7 @@ struct C10_API TensorOptions {
 
   /// Returns if the layout is sparse
   bool is_sparse() const {
-    return layout_ == c10::Layout::SparseCOO;
+    return layout_ == c10::Layout::Sparse;
   }
 
   // For compatibility with legacy tensor.type() comparisons
@@ -631,12 +631,12 @@ inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::opti
             AT_ERROR("Unsupported device type for dense layout: ", device_.type());
         }
       }
-      case Layout::SparseCOO:
+      case Layout::Sparse:
         switch (device_.type()) {
           case DeviceType::CPU:
-            return DispatchKey::SparseCOO_CPU;
+            return DispatchKey::SparseCPU;
           case DeviceType::CUDA:
-            return DispatchKey::SparseCOO_CUDA;
+            return DispatchKey::SparseCUDA;
           case DeviceType::HIP:
             return DispatchKey::SparseHIP;
           default:
@@ -688,9 +688,9 @@ inline DeviceType computeDeviceType(DispatchKey tid) {
     return DeviceType::MSNPU;
   } else if (tid == DispatchKey::XLA) {
     return DeviceType::XLA;
-  } else if (tid == DispatchKey::SparseCOO_CPU) {
+  } else if (tid == DispatchKey::SparseCPU) {
     return DeviceType::CPU;
-  } else if (tid == DispatchKey::SparseCOO_CUDA) {
+  } else if (tid == DispatchKey::SparseCUDA) {
     return DeviceType::CUDA;
   } else if (tid == DispatchKey::SparseHIP) {
     return DeviceType::HIP;

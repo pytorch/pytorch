@@ -5,7 +5,7 @@
 #include <c10/util/Exception.h>
 
 namespace at {
-struct CAFFE2_API SparseCOOTensorImpl : public TensorImpl {
+struct CAFFE2_API SparseTensorImpl : public TensorImpl {
   // Stored in COO format, indices + values.
 
   // INVARIANTS:
@@ -31,7 +31,7 @@ struct CAFFE2_API SparseCOOTensorImpl : public TensorImpl {
 
 public:
   // Public for now...
-  explicit SparseCOOTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta);
+  explicit SparseTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta);
 
   int64_t nnz() const { return values_.size(0); }
   int64_t sparse_dim() const { return sparse_dim_; }
@@ -190,7 +190,7 @@ public:
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
       const c10::VariableVersion& version_counter,
       bool allow_tensor_metadata_change) const override {
-    auto impl = c10::make_intrusive<SparseCOOTensorImpl>(key_set(), dtype());
+    auto impl = c10::make_intrusive<SparseTensorImpl>(key_set(), dtype());
     copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
@@ -209,7 +209,7 @@ public:
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
       c10::VariableVersion&& version_counter,
       bool allow_tensor_metadata_change) const override {
-    auto impl = c10::make_intrusive<SparseCOOTensorImpl>(key_set(), dtype());
+    auto impl = c10::make_intrusive<SparseTensorImpl>(key_set(), dtype());
     copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
@@ -227,7 +227,7 @@ public:
    */
   void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override {
     AT_ASSERT(has_compatible_shallow_copy_type(impl->key_set()));
-    auto sparse_impl = static_cast<const SparseCOOTensorImpl*>(impl.get());
+    auto sparse_impl = static_cast<const SparseTensorImpl*>(impl.get());
     copy_tensor_metadata(
       /*src_impl=*/sparse_impl,
       /*dest_impl=*/this,
@@ -236,7 +236,7 @@ public:
     refresh_numel();
   }
 private:
-    explicit SparseCOOTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta, at::Tensor indices, at::Tensor values);
+    explicit SparseTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta, at::Tensor indices, at::Tensor values);
 
   /**
    * Copy the tensor metadata fields (e.g. sizes / strides / storage pointer / storage_offset)
@@ -245,8 +245,8 @@ private:
    * For usage of `version_counter` and `allow_tensor_metadata_change`, see NOTE [ TensorImpl Shallow-Copying ].
    */
   static void copy_tensor_metadata(
-      const SparseCOOTensorImpl* src_sparse_impl,
-      SparseCOOTensorImpl* dest_sparse_impl,
+      const SparseTensorImpl* src_sparse_impl,
+      SparseTensorImpl* dest_sparse_impl,
       const c10::VariableVersion& version_counter,
       bool allow_tensor_metadata_change) {
     TensorImpl::copy_tensor_metadata(src_sparse_impl, dest_sparse_impl, version_counter, allow_tensor_metadata_change);

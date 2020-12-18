@@ -3,13 +3,13 @@
 #include <ATen/Tensor.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/SparseTensorUtils.h>
-#include <ATen/SparseCOOTensorImpl.h>
+#include <ATen/SparseTensorImpl.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/Exception.h>
 
 namespace at {
   
-// TODO: since many methods in SparseCOOTensorImpl can be used by GCS sparse tensor directly
+// TODO: since many methods in SparseTensorImpl can be used by GCS sparse tensor directly
 // we probably should have some superclass between TensorImpl and GCSTensorImpl that is
 // shared between COO and GCS tensors.
 struct CAFFE2_API SparseGCSTensorImpl : public TensorImpl {

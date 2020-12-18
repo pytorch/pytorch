@@ -625,7 +625,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
     } else if (str == "torch.strided") {
       default_layout = at::Layout::Strided;
     } else if (str == "torch.sparse_coo") {
-      default_layout = at::Layout::SparseCOO;
+      default_layout = at::Layout::Sparse;
     } else {
       throw std::runtime_error("invalid default value for layout: " + str);
     }

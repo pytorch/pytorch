@@ -370,7 +370,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: add
-    SparseCOO_CPU, SparseCOO_CUDA: add_sparse
+    SparseCPU, SparseCUDA: add_sparse
     SparseGCS_CPU: add_sparse_gcs
     MkldnnCPU: mkldnn_add
 
@@ -379,15 +379,15 @@
   variants: method
   dispatch:
     CPU, CUDA: add_
-    SparseCOO_CPU, SparseCOO_CUDA: add_sparse_
+    SparseCPU, SparseCUDA: add_sparse_
     SparseGCS_CPU: add_sparse_gcs_
     MkldnnCPU: mkldnn_add_
 
 - func: add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: add_out
-    SparseCOO_CPU: add_out_sparse_cpu
-    SparseCOO_CUDA: add_out_sparse_cuda
+    SparseCPU: add_out_sparse_cpu
+    SparseCUDA: add_out_sparse_cuda
     SparseGCS_CPU: add_out_sparse_gcs_cpu
     MkldnnCPU: mkldnn_add_out
 
@@ -649,19 +649,19 @@
   variants: function, method
   dispatch:
     CPU, CUDA: asin
-    SparseCOO_CPU, SparseCOO_CUDA: asin_sparse
+    SparseCPU, SparseCUDA: asin_sparse
 
 - func: asin_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
     CPU, CUDA: asin_
-    SparseCOO_CPU, SparseCOO_CUDA: asin_sparse_
+    SparseCPU, SparseCUDA: asin_sparse_
 
 - func: asin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: asin_out
-    SparseCOO_CPU, SparseCOO_CUDA: asin_out_sparse
+    SparseCPU, SparseCUDA: asin_out_sparse
 
 # arcsin, alias of asin
 - func: arcsin(Tensor self) -> Tensor
@@ -949,27 +949,27 @@
   dispatch:
     CPU: bmm_cpu
     CUDA: bmm_cuda
-    SparseCOO_CPU: bmm_sparse_cpu
-    SparseCOO_CUDA: bmm_sparse_cuda
+    SparseCPU: bmm_sparse_cpu
+    SparseCUDA: bmm_sparse_cuda
 
 - func: _bmm(Tensor self, Tensor mat2, *, bool deterministic=False) -> Tensor
   use_c10_dispatcher: full
   variants: function
   dispatch:
-    SparseCOO_CUDA: _bmm_sparse_cuda
+    SparseCUDA: _bmm_sparse_cuda
 
 - func: bmm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CPU: bmm_out_cpu
     CUDA: bmm_out_cuda
-    SparseCOO_CPU: bmm_out_sparse_cpu
-    SparseCOO_CUDA: bmm_out_sparse_cuda
+    SparseCPU: bmm_out_sparse_cpu
+    SparseCUDA: bmm_out_sparse_cuda
 
 - func: _bmm.out(Tensor self, Tensor mat2, *, bool deterministic=False, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
-    SparseCOO_CUDA: _bmm_out_sparse_cuda
+    SparseCUDA: _bmm_out_sparse_cuda
 
 - func: broadcast_tensors(Tensor[] tensors) -> Tensor[]
   use_c10_dispatcher: full
@@ -1478,19 +1478,19 @@
   variants: function, method
   dispatch:
     CPU, CUDA: div
-    SparseCOO_CPU, SparseCOO_CUDA: div_sparse
+    SparseCPU, SparseCUDA: div_sparse
 
 - func: div_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
   dispatch:
     CPU, CUDA: div_
-    SparseCOO_CPU, SparseCOO_CUDA: div_sparse_
+    SparseCPU, SparseCUDA: div_sparse_
 
 - func: div.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: div_out
-    SparseCOO_CPU, SparseCOO_CUDA: div_out_sparse_zerodim
+    SparseCPU, SparseCUDA: div_out_sparse_zerodim
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: div.Scalar(Tensor self, Scalar other) -> Tensor
@@ -1659,7 +1659,7 @@
     CPU: empty_cpu
     CUDA: empty_cuda
     MkldnnCPU: empty_mkldnn
-    SparseCOO_CPU, SparseCOO_CUDA: empty_sparse
+    SparseCPU, SparseCUDA: empty_sparse
 
 - func: new_empty(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   use_c10_dispatcher: full
@@ -1881,19 +1881,19 @@
   variants: function, method
   dispatch:
     CPU, CUDA: floor_divide
-    SparseCOO_CPU, SparseCOO_CUDA: floor_divide_sparse
+    SparseCPU, SparseCUDA: floor_divide_sparse
 
 - func: floor_divide_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
   dispatch:
     CPU, CUDA: floor_divide_
-    SparseCOO_CPU, SparseCOO_CUDA: floor_divide_sparse_
+    SparseCPU, SparseCUDA: floor_divide_sparse_
 
 - func: floor_divide.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: floor_divide_out
-    SparseCOO_CPU, SparseCOO_CUDA: floor_divide_out_sparse_zerodim
+    SparseCPU, SparseCUDA: floor_divide_out_sparse_zerodim
 
 - func: floor_divide.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
@@ -2163,7 +2163,7 @@
   device_guard: False
   dispatch:
     CPU, CUDA: isnan
-    SparseCOO_CPU, SparseCOO_CUDA: isnan_sparse
+    SparseCPU, SparseCUDA: isnan_sparse
 
 - func: is_distributed(Tensor self) -> bool
   use_c10_dispatcher: full
@@ -2356,19 +2356,19 @@
   variants: function, method
   dispatch:
     CPU, CUDA: log1p
-    SparseCOO_CPU, SparseCOO_CUDA: log1p_sparse
+    SparseCPU, SparseCUDA: log1p_sparse
 
 - func: log1p_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
     CPU, CUDA: log1p_
-    SparseCOO_CPU, SparseCOO_CUDA: log1p_sparse_
+    SparseCPU, SparseCUDA: log1p_sparse_
 
 - func: log1p.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: log1p_out
-    SparseCOO_CPU, SparseCOO_CUDA: log1p_out_sparse
+    SparseCPU, SparseCUDA: log1p_out_sparse
 
 - func: log2(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -2798,13 +2798,13 @@
   dispatch:
     CPU: mm_cpu
     CUDA: mm_cuda
-    SparseCOO_CPU, SparseCOO_CUDA, SparseGCS_CPU: _sparse_mm
+    SparseCPU, SparseCUDA, SparseGCS_CPU: _sparse_mm
 
 - func: mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: mm_cpu_out
     CUDA: mm_out_cuda
-    SparseCOO_CPU, SparseCOO_CUDA: _sparse_mm_out
+    SparseCPU, SparseCUDA: _sparse_mm_out
     SparseGCS_CPU: _sparse_gcs_mm_out
 
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
@@ -2830,7 +2830,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: mul
-    SparseCOO_CPU, SparseCOO_CUDA: mul_sparse
+    SparseCPU, SparseCUDA: mul_sparse
     MkldnnCPU: mkldnn_mul
 
 - func: mul_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -2838,14 +2838,14 @@
   variants: method
   dispatch:
     CPU, CUDA: mul_
-    SparseCOO_CPU, SparseCOO_CUDA: mul_sparse_
+    SparseCPU, SparseCUDA: mul_sparse_
     MkldnnCPU: mkldnn_mul_
 
 - func: mul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: mul_out
-    SparseCOO_CPU: mul_out_sparse_cpu
-    SparseCOO_CUDA: mul_out_sparse_cuda
+    SparseCPU: mul_out_sparse_cpu
+    SparseCUDA: mul_out_sparse_cuda
     MkldnnCPU: mkldnn_mul_out
 
   # For C++ only, until we have conversion from C++ numbers to Tensor
@@ -2885,7 +2885,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: mv
-    SparseCOO_CPU, SparseCOO_CUDA, SparseGCS_CPU: mv_sparse
+    SparseCPU, SparseCUDA, SparseGCS_CPU: mv_sparse
 
 - func: mv.out(Tensor self, Tensor vec, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -2908,7 +2908,7 @@
   variants: method
   dispatch:
     CPU, CUDA: narrow_copy_dense
-    SparseCOO_CPU, SparseCOO_CUDA: narrow_copy_sparse
+    SparseCPU, SparseCUDA: narrow_copy_sparse
 
 - func: narrow(Tensor(a) self, int dim, int start, int length) -> Tensor(a)
   use_c10_dispatcher: full
@@ -3259,12 +3259,12 @@
   variants: function, method
   dispatch:
     CPU, CUDA: neg_
-    SparseCOO_CPU, SparseCOO_CUDA: neg_sparse_
+    SparseCPU, SparseCUDA: neg_sparse_
 
 - func: neg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: neg_out
-    SparseCOO_CPU, SparseCOO_CUDA: neg_out_sparse
+    SparseCPU, SparseCUDA: neg_out_sparse
 
 # Alias for neg
 - func: negative(Tensor self) -> Tensor
@@ -3683,8 +3683,8 @@
   dispatch:
     CPU: _sspaddmm_out_only_sparse
     CUDA: _sspaddmm_out_only_sparse_cuda
-    SparseCOO_CPU: _sspaddmm_out_cpu
-    SparseCOO_CUDA: _sspaddmm_out_cuda
+    SparseCPU: _sspaddmm_out_cpu
+    SparseCUDA: _sspaddmm_out_cuda
 
 - func: stack(Tensor[] tensors, int dim=0) -> Tensor
   use_c10_dispatcher: full
@@ -4265,12 +4265,12 @@
 - func: native_norm(Tensor self, Scalar p=2) -> Tensor
   use_c10_dispatcher: full
   dispatch:
-    SparseCOO_CPU, SparseCOO_CUDA: norm_sparse
+    SparseCPU, SparseCUDA: norm_sparse
 
 - func: native_norm.ScalarOpt_dim_dtype(Tensor self, Scalar? p, int[1] dim, bool keepdim, ScalarType? dtype) -> Tensor
   use_c10_dispatcher: full
   dispatch:
-    SparseCOO_CPU, SparseCOO_CUDA: norm_sparse
+    SparseCPU, SparseCUDA: norm_sparse
 
 # TODO: reduce signatures down to one when optional args is available
 - func: _sparse_sum(Tensor self) -> Tensor
@@ -4290,8 +4290,8 @@
 - func: _sparse_sum_backward(Tensor grad, Tensor self, int[] dim) -> Tensor
   use_c10_dispatcher: full
   dispatch:
-    SparseCOO_CPU: _sparse_sum_backward_cpu
-    SparseCOO_CUDA: _sparse_sum_backward_cuda
+    SparseCPU: _sparse_sum_backward_cpu
+    SparseCUDA: _sparse_sum_backward_cuda
 
 - func: _sparse_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   use_c10_dispatcher: full
@@ -4303,14 +4303,14 @@
 - func: _sparse_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   use_c10_dispatcher: full
   dispatch:
-    SparseCOO_CPU: softmax_sparse_cpu
-    SparseCOO_CUDA: softmax_sparse_cuda
+    SparseCPU: softmax_sparse_cpu
+    SparseCUDA: softmax_sparse_cuda
 
 - func: _sparse_softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
   use_c10_dispatcher: full
   dispatch:
-    SparseCOO_CPU: softmax_backward_sparse_cpu
-    SparseCOO_CUDA: softmax_backward_sparse_cuda
+    SparseCPU: softmax_backward_sparse_cpu
+    SparseCUDA: softmax_backward_sparse_cuda
 
 - func: _sparse_log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   use_c10_dispatcher: full
@@ -4322,14 +4322,14 @@
 - func: _sparse_log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   use_c10_dispatcher: full
   dispatch:
-    SparseCOO_CPU: log_softmax_sparse_cpu
-    SparseCOO_CUDA: log_softmax_sparse_cuda
+    SparseCPU: log_softmax_sparse_cpu
+    SparseCUDA: log_softmax_sparse_cuda
 
 - func: _sparse_log_softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
   use_c10_dispatcher: full
   dispatch:
-    SparseCOO_CPU: log_softmax_backward_sparse_cpu
-    SparseCOO_CUDA: log_softmax_backward_sparse_cuda
+    SparseCPU: log_softmax_backward_sparse_cpu
+    SparseCUDA: log_softmax_backward_sparse_cuda
 
 - func: norm.ScalarOpt_dtype(Tensor self, Scalar? p, *, ScalarType dtype) -> Tensor
   use_c10_dispatcher: full
@@ -4403,7 +4403,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: clone
-    SparseCOO_CPU, SparseCOO_CUDA: clone_sparse
+    SparseCPU, SparseCUDA: clone_sparse
     MkldnnCPU: mkldnn_clone
     QuantizedCPU, QuantizedCUDA: quantized_clone
 
@@ -4417,7 +4417,7 @@
   use_c10_dispatcher: full
   variants: function
   dispatch:
-    SparseCOO_CPU, SparseCOO_CUDA: resize_as_sparse_
+    SparseCPU, SparseCUDA: resize_as_sparse_
     SparseGCS_CPU: resize_as_sparse_gcs_
 
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
@@ -4425,27 +4425,27 @@
   variants: method, function
   dispatch:
     CPU, CUDA: zero_
-    SparseCOO_CPU, SparseCOO_CUDA: zero_sparse_
+    SparseCPU, SparseCUDA: zero_sparse_
     MkldnnCPU: mkldnn_zero_
 
 - func: sub.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: sub_out
-    SparseCOO_CPU, SparseCOO_CUDA: sub_out_sparse
+    SparseCPU, SparseCUDA: sub_out_sparse
 
 - func: sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
     CPU, CUDA: sub
-    SparseCOO_CPU, SparseCOO_CUDA: sub_sparse
+    SparseCPU, SparseCUDA: sub_sparse
 
 - func: sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
   dispatch:
     CPU, CUDA: sub_
-    SparseCOO_CPU, SparseCOO_CUDA: sub_sparse_
+    SparseCPU, SparseCUDA: sub_sparse_
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: sub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
@@ -4515,8 +4515,8 @@
   dispatch:
     CPU: addmm_cpu_out
     CUDA: addmm_out_cuda
-    SparseCOO_CPU: addmm_out_sparse_dense_cpu
-    SparseCOO_CUDA: addmm_out_sparse_dense_cuda
+    SparseCPU: addmm_out_sparse_dense_cpu
+    SparseCUDA: addmm_out_sparse_dense_cuda
     SparseGCS_CPU: addmm_out_sparse_gcs_dense_cpu
 
 - func: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
@@ -4525,8 +4525,8 @@
   dispatch:
     CPU: addmm_cpu
     CUDA: addmm_cuda
-    SparseCOO_CPU: addmm_sparse_dense_cpu
-    SparseCOO_CUDA: addmm_sparse_dense_cuda
+    SparseCPU: addmm_sparse_dense_cpu
+    SparseCUDA: addmm_sparse_dense_cuda
     SparseGCS_CPU: addmm_sparse_gcs_dense_cpu
 
 - func: addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
@@ -4537,8 +4537,8 @@
     CUDA: addmm__cuda
     # Warning!  For whatever reason, the inplace sparse addmm is NON
     # broadcasting
-    SparseCOO_CPU: s_addmm_sparse_dense_cpu_
-    SparseCOO_CUDA: s_addmm_sparse_dense_cuda_
+    SparseCPU: s_addmm_sparse_dense_cpu_
+    SparseCUDA: s_addmm_sparse_dense_cuda_
 
 # NOTE [ Sparse: autograd and API ]
 #
@@ -4670,37 +4670,37 @@
 - func: _sparse_coo_tensor_with_dims(int sparse_dim, int dense_dim, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
   use_c10_dispatcher: full
   dispatch:
-    SparseCOO_CPU, SparseCOO_CUDA: new_with_dims_sparse
+    SparseCPU, SparseCUDA: new_with_dims_sparse
 
 - func: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, int[] size, Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
   use_c10_dispatcher: full
   dispatch:
-    SparseCOO_CPU, SparseCOO_CUDA: new_with_dims_and_tensor_sparse
+    SparseCPU, SparseCUDA: new_with_dims_and_tensor_sparse
 
 - func: sparse_resize_(Tensor(a!) self, int[] size, int sparse_dim, int dense_dim) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    SparseCOO_CPU, SparseCOO_CUDA: sparse_resize_
+    SparseCPU, SparseCUDA: sparse_resize_
 
 - func: sparse_resize_and_clear_(Tensor(a!) self, int[] size, int sparse_dim, int dense_dim) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    SparseCOO_CPU, SparseCOO_CUDA: sparse_resize_and_clear_
+    SparseCPU, SparseCUDA: sparse_resize_and_clear_
 
 - func: sparse_mask(Tensor self, Tensor mask) -> Tensor
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    SparseCOO_CPU: sparse_mask_cpu
-    SparseCOO_CUDA: sparse_mask_cuda
+    SparseCPU: sparse_mask_cpu
+    SparseCUDA: sparse_mask_cuda
 
 - func: to_dense(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    SparseCOO_CPU, SparseCOO_CUDA, SparseGCS_CPU: sparse_to_dense
+    SparseCPU, SparseCUDA, SparseGCS_CPU: sparse_to_dense
     MkldnnCPU: mkldnn_to_dense
 
 - func: to_dense_backward(Tensor grad, Tensor input) -> Tensor
@@ -4710,7 +4710,7 @@
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    SparseCOO_CPU, SparseCOO_CUDA: sparse_dim_sparse
+    SparseCPU, SparseCUDA: sparse_dim_sparse
   device_guard: False
 
 # legacy method
@@ -4718,14 +4718,14 @@
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    SparseCOO_CPU, SparseCOO_CUDA: sparse_dim_sparse
+    SparseCPU, SparseCUDA: sparse_dim_sparse
   device_guard: False
 
 - func: dense_dim(Tensor self) -> int
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    SparseCOO_CPU, SparseCOO_CUDA: dense_dim_sparse
+    SparseCPU, SparseCUDA: dense_dim_sparse
   device_guard: False
 
 # legacy method
@@ -4733,14 +4733,14 @@
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    SparseCOO_CPU, SparseCOO_CUDA: dense_dim_sparse
+    SparseCPU, SparseCUDA: dense_dim_sparse
   device_guard: False
 
 - func: _nnz(Tensor self) -> int
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    SparseCOO_CPU, SparseCOO_CUDA: _nnz_sparse
+    SparseCPU, SparseCUDA: _nnz_sparse
     SparseGCS_CPU: _nnz_sparse_gcs
   device_guard: False
 
@@ -4748,28 +4748,28 @@
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    SparseCOO_CPU: coalesce_sparse_cpu
-    SparseCOO_CUDA: coalesce_sparse_cuda
+    SparseCPU: coalesce_sparse_cpu
+    SparseCUDA: coalesce_sparse_cuda
 
 - func: is_coalesced(Tensor self) -> bool
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    SparseCOO_CPU, SparseCOO_CUDA: is_coalesced_sparse
+    SparseCPU, SparseCUDA: is_coalesced_sparse
   device_guard: False
 
 - func: _indices(Tensor(a) self) -> Tensor(a)
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    SparseCOO_CPU, SparseCOO_CUDA: _indices_sparse
+    SparseCPU, SparseCUDA: _indices_sparse
   device_guard: False
 
 - func: _values(Tensor(a) self) -> Tensor(a)
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    SparseCOO_CPU, SparseCOO_CUDA: _values_sparse
+    SparseCPU, SparseCUDA: _values_sparse
   device_guard: False
 
 # This method doesn't do any check but only directly sets the flag. So it can be
@@ -4779,14 +4779,14 @@
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    SparseCOO_CPU, SparseCOO_CUDA: _coalesced_sparse_
+    SparseCPU, SparseCUDA: _coalesced_sparse_
   device_guard: False
 
 - func: indices(Tensor(a) self) -> Tensor(a)
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    SparseCOO_CPU, SparseCOO_CUDA: indices_sparse
+    SparseCPU, SparseCUDA: indices_sparse
     SparseGCS_CPU: indices_sparse_gcs
   device_guard: False
 
@@ -4794,7 +4794,7 @@
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    SparseCOO_CPU, SparseCOO_CUDA: values_sparse
+    SparseCPU, SparseCUDA: values_sparse
     SparseGCS_CPU: values_sparse_gcs
   device_guard: False
 
@@ -4814,20 +4814,20 @@
 
 - func: hspmm.out(Tensor mat1, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    SparseCOO_CPU: hspmm_out_sparse_cpu
-    SparseCOO_CUDA: hspmm_out_sparse_cuda
+    SparseCPU: hspmm_out_sparse_cpu
+    SparseCUDA: hspmm_out_sparse_cuda
 
 - func: hspmm(Tensor mat1, Tensor mat2) -> Tensor
   use_c10_dispatcher: full
   dispatch:
-    SparseCOO_CPU: hspmm_sparse_cpu
-    SparseCOO_CUDA: hspmm_sparse_cuda
+    SparseCPU: hspmm_sparse_cpu
+    SparseCUDA: hspmm_sparse_cuda
 
 - func: copy_sparse_to_sparse_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function
   dispatch:
-    SparseCOO_CPU, SparseCOO_CUDA: copy_sparse_
+    SparseCPU, SparseCUDA: copy_sparse_
 
 - func: unbind.int(Tensor(a) self, int dim=0) -> Tensor(a)[]
   use_c10_dispatcher: full
@@ -6128,8 +6128,8 @@
   dispatch:
     CPU: index_select_cpu_
     CUDA: index_select_cuda
-    SparseCOO_CPU: index_select_sparse
-    SparseCOO_CUDA: index_select_sparse
+    SparseCPU: index_select_sparse
+    SparseCUDA: index_select_sparse
 
 - func: index_select.dimname_out(Tensor self, Dimname dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -6854,7 +6854,7 @@
   variants: method, function
   dispatch:
     CPU, CUDA: any
-    SparseCOO_CPU, SparseCOO_CUDA: any_sparse
+    SparseCPU, SparseCUDA: any_sparse
 
 - func: renorm.out(Tensor self, Scalar p, int dim, Scalar maxnorm, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -6912,14 +6912,14 @@
 - func: pow.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: pow_out
-    SparseCOO_CPU, SparseCOO_CUDA: pow_out_sparse_scalar
+    SparseCPU, SparseCUDA: pow_out_sparse_scalar
 
 - func: pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
     CPU, CUDA: pow
-    SparseCOO_CPU, SparseCOO_CUDA: pow_sparse_scalar
+    SparseCPU, SparseCUDA: pow_sparse_scalar
 
 - func: float_power.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:

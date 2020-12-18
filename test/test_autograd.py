@@ -4022,7 +4022,7 @@ class TestAutograd(TestCase):
 
     def test_set_data_tensorimpl_type(self):
         # Dense tensor has impl of type `TensorImpl`, while sparse tensor has impl
-        # of type `SparseCOOTensorImpl`.
+        # of type `SparseTensorImpl`.
         x = torch.randn(1, 2)
         x_s = torch.sparse_coo_tensor(torch.zeros([1, 1]), torch.ones([1]))
         with self.assertRaisesRegex(RuntimeError, 'incompatible tensor type'):

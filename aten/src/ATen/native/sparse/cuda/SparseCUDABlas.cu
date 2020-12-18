@@ -2,7 +2,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/util/Exception.h>
 #include <ATen/cuda/Exceptions.h>
-#include <ATen/native/sparse/cuda/SparseCOO_CUDABlas.cuh>
+#include <ATen/native/sparse/cuda/SparseCUDABlas.cuh>
 #include <c10/cuda/CUDACachingAllocator.h>
 
 #include <TH/THGeneral.h>

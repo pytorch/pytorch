@@ -2,7 +2,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/SparseTensorUtils.h>
-#include <ATen/native/sparse/cuda/SparseCOO_CUDAApplyUtils.cuh>
+#include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 

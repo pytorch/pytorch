@@ -795,7 +795,7 @@ inline Tensor & _any(Tensor & result, TensorIterator & iter) {
 Tensor any(const Tensor& self) {
   TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
               "any only supports CPU AND CUDA device type, got: ", self.device().type());
-  TORCH_CHECK(self.layout() == Layout::Strided || self.layout() == Layout::SparseCOO,
+  TORCH_CHECK(self.layout() == Layout::Strided || self.layout() == Layout::Sparse,
               "any only supports strided AND sparse layout, got: ", self.layout());
 
   Tensor result = at::empty({0}, self.options());

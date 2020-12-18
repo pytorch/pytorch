@@ -5,12 +5,12 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAUtils.h>
-#include <ATen/native/sparse/SparseCOOTensorMath.h>
+#include <ATen/native/sparse/SparseTensorMath.h>
 #include <ATen/native/sparse/ParamUtils.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
-#include <ATen/native/sparse/cuda/SparseCOO_CUDAApplyUtils.cuh>
-#include <ATen/native/sparse/cuda/SparseCOO_CUDABlas.cuh>
+#include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
+#include <ATen/native/sparse/cuda/SparseCUDABlas.cuh>
 
 #include <THC/THCTensorMathPointwise.cuh>
 #include <THC/THCThrustAllocator.cuh>

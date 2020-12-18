@@ -1359,13 +1359,13 @@ TEST(NewOperatorRegistrationTest, dispatchWithMathKernel) {
 
   {
     math_called = false;
-    callOp(*op, dummyTensor(c10::DispatchKey::SparseCOO_CPU));
+    callOp(*op, dummyTensor(c10::DispatchKey::SparseCPU));
     ASSERT_TRUE(math_called);
   }
 
   {
     math_called = false;
-    callOp(*op, dummyTensor(c10::DispatchKey::SparseCOO_CPU, /*requires_grad=*/true));
+    callOp(*op, dummyTensor(c10::DispatchKey::SparseCPU, /*requires_grad=*/true));
     ASSERT_TRUE(math_called);
   }
 }
@@ -1538,14 +1538,14 @@ TEST(NewOperatorRegistrationTest, dispatchWithDefaultBackendKernel) {
 
   {
     called = false;
-    callOp(*op, dummyTensor(c10::DispatchKey::SparseCOO_CPU));
+    callOp(*op, dummyTensor(c10::DispatchKey::SparseCPU));
     ASSERT_TRUE(called);
   }
 
   {
     called = false;
     // AutogradCPU is fallthrough, calls CPU kernel
-    callOp(*op, dummyTensor(c10::DispatchKey::SparseCOO_CPU, /*requires_grad=*/true));
+    callOp(*op, dummyTensor(c10::DispatchKey::SparseCPU, /*requires_grad=*/true));
     ASSERT_TRUE(called);
   }
 }
@@ -1592,15 +1592,15 @@ TEST(NewOperatorRegistrationTest, dispatchWithDefaultBackendAndMathKernel) {
 
   {
     backend_called = math_called = false;
-    callOp(*op, dummyTensor(c10::DispatchKey::SparseCOO_CPU));
+    callOp(*op, dummyTensor(c10::DispatchKey::SparseCPU));
     ASSERT_TRUE(backend_called);
     ASSERT_FALSE(math_called);
   }
 
   {
     backend_called = math_called = false;
-    // AutogradOther is fallthrough, calls SparseCOO_CPU kernel
-    callOp(*op, dummyTensor(c10::DispatchKey::SparseCOO_CPU, /*requires_grad=*/true));
+    // AutogradOther is fallthrough, calls SparseCPU kernel
+    callOp(*op, dummyTensor(c10::DispatchKey::SparseCPU, /*requires_grad=*/true));
     ASSERT_FALSE(math_called);
     ASSERT_TRUE(backend_called);
   }
@@ -1732,22 +1732,22 @@ TEST(NewOperatorRegistrationTest, dispatchAutogradPrecedence) {
 }
 
 TEST(NewOperatorRegistrationTest, throwsWhenRegisterToBackendMapsToAutogradOther) {
-  bool SparseCOO_CPU_called, math_called = false;
+  bool SparseCPU_called, math_called = false;
   auto m = MAKE_TORCH_LIBRARY(test);
-  m.def("fn", torch::dispatch(c10::DispatchKey::SparseCOO_CPU, [&](const Tensor& x) { SparseCOO_CPU_called = true; return x; }));
+  m.def("fn", torch::dispatch(c10::DispatchKey::SparseCPU, [&](const Tensor& x) { SparseCPU_called = true; return x; }));
   m.impl("fn", c10::DispatchKey::Math, [&](const Tensor& x) { math_called = true; return x; });
 
   auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
   ASSERT_TRUE(op.has_value());
 
   {
-    callOp(*op, dummyTensor(c10::DispatchKey::SparseCOO_CPU));
-    ASSERT_TRUE(SparseCOO_CPU_called);
+    callOp(*op, dummyTensor(c10::DispatchKey::SparseCPU));
+    ASSERT_TRUE(SparseCPU_called);
   }
 
   {
     expectThrows<c10::Error>([&] {
-      callOp(*op, dummyTensor(c10::DispatchKey::SparseCOO_CPU, /*requires_grad=*/true));
+      callOp(*op, dummyTensor(c10::DispatchKey::SparseCPU, /*requires_grad=*/true));
     }, "test::fn has kernels registered to both Math and a backend mapped to AutogradOther.");
   }
 }

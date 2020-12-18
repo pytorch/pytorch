@@ -319,7 +319,7 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad, void *unused)
   auto& grad = ((THPVariable*)py_grad)->cdata;
   bool gradIsSparse = (var.dtype() == grad.dtype() &&
                        var.device().type() == grad.device().type() &&
-                       grad.layout() == kSparseCOO);
+                       grad.layout() == kSparse);
   THPUtils_assertRet(-1, grad.options().type_equal(var.options()) || gradIsSparse,
       "assigned grad has data of a different type");
   if (var.is_cuda()) {

@@ -3,7 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Layout.h>
 #include <ATen/Parallel.h>
-#include <ATen/SparseCOOTensorImpl.h>
+#include <ATen/SparseTensorImpl.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/SparseTensorUtils.h>
@@ -71,14 +71,14 @@ Tensor values_sparse(const Tensor& self) {
 /*** Helper methods ***/
 
 SparseTensor new_sparse(c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
-  AT_ASSERT(layout.has_value() && *layout == kSparseCOO);
+  AT_ASSERT(layout.has_value() && *layout == kSparse);
   DispatchKey dispatch_key;
   if (device_or_default(device).is_cuda()) {
-    dispatch_key = DispatchKey::SparseCOO_CUDA;
+    dispatch_key = DispatchKey::SparseCUDA;
   } else {
-    dispatch_key = DispatchKey::SparseCOO_CPU;
+    dispatch_key = DispatchKey::SparseCPU;
   }
-  return detail::make_tensor<SparseCOOTensorImpl>(
+  return detail::make_tensor<SparseTensorImpl>(
       DispatchKeySet(dispatch_key), scalarTypeToTypeMeta(dtype_or_default(dtype)));
 }
 
@@ -126,7 +126,7 @@ Tensor empty_sparse(IntArrayRef size, c10::optional<ScalarType> dtype, c10::opti
 
 /* Shape init */
 Tensor sparse_coo_tensor(ArrayRef<int64_t> size, const TensorOptions& options) {
-  return at::_sparse_coo_tensor_with_dims(size.size(), 0, size, options.layout(at::kSparseCOO));
+  return at::_sparse_coo_tensor_with_dims(size.size(), 0, size, options.layout(at::kSparse));
 }
 
 /* Pointer-copy init */
@@ -148,8 +148,8 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, const Ten
   Tensor values = expand_values_if_needed(values_);
 
   // arg checking
-  TORCH_CHECK(!options.has_layout() || options.layout() == kSparseCOO, "expected sparse layout, but got layout ", options.layout());
-  // the following checks are redundant because they are also checked in SparseCOOTensorImpl::set_indices_and_values_unsafe
+  TORCH_CHECK(!options.has_layout() || options.layout() == kSparse, "expected sparse layout, but got layout ", options.layout());
+  // the following checks are redundant because they are also checked in SparseTensorImpl::set_indices_and_values_unsafe
   // but we need to ensure them in order to infer the shape.
   TORCH_CHECK(indices.dim() == 2, "indices must be sparse_dim x nnz, but got: ", indices.sizes())
   TORCH_CHECK(!indices.is_sparse(), "expected indices to be a dense tensor, but got indices of layout ", indices.layout());
@@ -189,13 +189,13 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, const Ten
   }
 
   return at::_sparse_coo_tensor_with_dims_and_tensors(
-      sparse_dim, dense_dim, computed_sizes, indices, values, values.options().layout(kSparseCOO));
+      sparse_dim, dense_dim, computed_sizes, indices, values, values.options().layout(kSparse));
 }
 
 void _validate_sparse_coo_tensor_args(const Tensor& indices, const Tensor& values_, ArrayRef<int64_t> size) {
   Tensor values = expand_values_if_needed(values_);
 
-  // the following checks are redundant because they are also checked in SparseCOOTensorImpl::set_indices_and_values_unsafe
+  // the following checks are redundant because they are also checked in SparseTensorImpl::set_indices_and_values_unsafe
   // but we need to ensure them in order to infer the shape.
   TORCH_CHECK(indices.dim() == 2, "indices must be sparse_dim x nnz, but got: ", indices.sizes())
   TORCH_CHECK(!indices.is_sparse(), "expected indices to be a dense tensor, but got indices of layout ", indices.layout());
@@ -235,7 +235,7 @@ void _validate_sparse_coo_tensor_args(const Tensor& indices, const Tensor& value
 // NB: Got rid of the sizes == NULL case
 Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, ArrayRef<int64_t> size, const TensorOptions& options) {
   // arg checking
-  TORCH_CHECK(!options.has_layout() || options.layout() == kSparseCOO, "expected sparse layout, but got layout ", options.layout());
+  TORCH_CHECK(!options.has_layout() || options.layout() == kSparse, "expected sparse layout, but got layout ", options.layout());
 
   at::native::_validate_sparse_coo_tensor_args(indices, values, size);
   return at::native::_sparse_coo_tensor_unsafe(indices, values, size, options);
@@ -254,7 +254,7 @@ Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, A
   int64_t dense_dim = values.dim() - 1;
 
   return at::_sparse_coo_tensor_with_dims_and_tensors(
-      sparse_dim, dense_dim, size, indices, values, values.options().layout(kSparseCOO));
+      sparse_dim, dense_dim, size, indices, values, values.options().layout(kSparse));
 }
 
 // NB: Deleted newWithSizeNd variants
@@ -335,7 +335,7 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
   TORCH_CHECK(sparse_dim > 0 || self.dim() == 0, "sparse_dim must be >0 if dimensionality > 0");
   TORCH_CHECK(sparse_dim <= dims,
               "sparse_dim must be less than or equal to self.dim()");
-  at::TensorOptions sparse_options = self.options().layout(kSparseCOO);
+  at::TensorOptions sparse_options = self.options().layout(kSparse);
   std::vector<int64_t> sizes = self.sizes().vec();
 
   Tensor nz = self.nonzero().transpose(0, 1);
@@ -545,7 +545,7 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
 }
 
 SparseTensor sparse_mask_cpu(const Tensor& t, const SparseTensor& mask) {
-  SparseTensor r = at::empty({0}, t.options().layout(kSparseCOO));
+  SparseTensor r = at::empty({0}, t.options().layout(kSparse));
   sparse_mask_out_cpu(r, t, mask);
   return r;
 }

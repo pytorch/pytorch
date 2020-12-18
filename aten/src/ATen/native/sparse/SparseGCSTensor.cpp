@@ -3,7 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Layout.h>
 #include <ATen/Parallel.h>
-#include <ATen/SparseCOOTensorImpl.h>
+#include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseGCSTensorImpl.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/InitialTensorOptions.h>

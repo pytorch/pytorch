@@ -438,7 +438,7 @@ void Reducer::mark_variable_ready_sparse(VariableIndex index) {
   runGradCallbackForVariable(variable, [&](auto& grad) {
     TORCH_CHECK(grad.defined(), "Expected sparse gradient to be defined.");
     TORCH_CHECK(
-        grad.options().layout() == c10::kSparseCOO,
+        grad.options().layout() == c10::kSparse,
         "Expected variable to have sparse gradient.");
 
     // Sparse tensors cannot be grouped together with other sparse tensors

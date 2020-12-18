@@ -344,13 +344,13 @@ void check_base_legacy_new(c10::DispatchKey dispatch_key, at::Layout expected_la
                 " or ", c10::DispatchKey::HIP,
                 " or ", c10::DispatchKey::XLA,
                 " but got: ", dispatch_key);
-  } else if(expected_layout == c10::kSparseCOO) {
+  } else if(expected_layout == c10::kSparse) {
     // NOTE: no sparse XLA
-    TORCH_CHECK(dispatch_key == c10::DispatchKey::SparseCOO_CPU
-                || dispatch_key == c10::DispatchKey::SparseCOO_CUDA
+    TORCH_CHECK(dispatch_key == c10::DispatchKey::SparseCPU
+                || dispatch_key == c10::DispatchKey::SparseCUDA
                 || dispatch_key == c10::DispatchKey::SparseHIP,
-                "new(): expected DispatchKey: ", c10::DispatchKey::SparseCOO_CPU,
-                " or ", c10::DispatchKey::SparseCOO_CUDA,
+                "new(): expected DispatchKey: ", c10::DispatchKey::SparseCPU,
+                " or ", c10::DispatchKey::SparseCUDA,
                 " or ", c10::DispatchKey::SparseHIP,
                 " but got: ", dispatch_key);
   } else {
@@ -416,7 +416,7 @@ Tensor legacy_sparse_tensor_new(c10::DispatchKey dispatch_key, at::ScalarType sc
     "new(Tensor indices, Tensor values, IntArrayRef size, *, Device? device=None)",
     "new(IntArrayRef size, *, Device? device=None)",
   });
-  check_base_legacy_new(dispatch_key, c10::kSparseCOO);
+  check_base_legacy_new(dispatch_key, c10::kSparse);
   ParsedArgs<5> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
@@ -656,7 +656,7 @@ Tensor sparse_coo_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
     Tensor indices = internal_new_from_data(legacyExtractDispatchKey(values.key_set()), kLong, r.deviceOptional(3), r.pyobject(0),
                                             /*copy_variables=*/false, /*copy_numpy=*/true,
                                             /*type_inference=*/false);
-    return at::sparse_coo_tensor(indices, values, values.options().layout(at::kSparseCOO)).set_requires_grad(r.toBool(4));
+    return at::sparse_coo_tensor(indices, values, values.options().layout(at::kSparse)).set_requires_grad(r.toBool(4));
   } else if (r.idx == 1) {
     bool type_inference = r.isNone(3);
     const auto inferred_dispatch_key = denseTypeIdWithDefault(r, 4, dispatch_key);
@@ -668,12 +668,12 @@ Tensor sparse_coo_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
     Tensor indices = internal_new_from_data(legacyExtractDispatchKey(values.key_set()), kLong, r.deviceOptional(4), r.pyobject(0),
                                             /*copy_variables=*/false, /*copy_numpy=*/true,
                                             /*type_inference=*/false);
-    return at::sparse_coo_tensor(indices, values, r.intlist(2), values.options().layout(at::kSparseCOO)).set_requires_grad(r.toBool(5));
+    return at::sparse_coo_tensor(indices, values, r.intlist(2), values.options().layout(at::kSparse)).set_requires_grad(r.toBool(5));
   } else if (r.idx == 2) {
     const auto inferred_dispatch_key = typeIdWithDefault(r, 2, dispatch_key);
     const auto inferred_scalar_type = r.scalartypeWithDefault(1, scalar_type);
     at::OptionalDeviceGuard device_guard(r.deviceOptional(2));
-    return at::sparse_coo_tensor(r.intlist(0), options(inferred_dispatch_key, inferred_scalar_type).layout(at::kSparseCOO)).set_requires_grad(r.toBool(3));
+    return at::sparse_coo_tensor(r.intlist(0), options(inferred_dispatch_key, inferred_scalar_type).layout(at::kSparse)).set_requires_grad(r.toBool(3));
   }
   throw std::runtime_error("sparse_coo_tensor(): invalid arguments");
 }
@@ -704,7 +704,7 @@ Tensor _sparse_coo_tensor_unsafe_ctor(c10::DispatchKey dispatch_key, at::ScalarT
   Tensor indices = internal_new_from_data(legacyExtractDispatchKey(values.key_set()), kLong, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_INDICES),
                                           /*copy_variables=*/false, /*copy_numpy=*/true,
                                           /*type_inference=*/false);
-  return at::_sparse_coo_tensor_unsafe(indices, values, r.intlist(ARG_SIZE), values.options().layout(at::kSparseCOO)).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
+  return at::_sparse_coo_tensor_unsafe(indices, values, r.intlist(ARG_SIZE), values.options().layout(at::kSparse)).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
 }
 
 void _validate_sparse_coo_tensor_args(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {

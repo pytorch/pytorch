@@ -1,5 +1,5 @@
 #include <ATen/ATen.h>
-#include <ATen/SparseCOOTensorImpl.h>
+#include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseGCSTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/InitialTensorOptions.h>

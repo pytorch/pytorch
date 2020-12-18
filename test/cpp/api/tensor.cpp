@@ -80,8 +80,8 @@ TEST(TensorTest, ToTensorAndTensorAttributes) {
 //   auto tensor = at::empty({3, 4});
 //   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
 //
-//   tensor = tensor.to(at::kSparseCOO);
-//   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kSparseCOO);
+//   tensor = tensor.to(at::kSparse);
+//   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kSparse);
 //
 //   tensor = tensor.to(at::kStrided);
 //   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);

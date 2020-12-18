@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <ATen/SparseCOOTensorImpl.h>
+#include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseGCSTensorImpl.h>
 
 namespace at { namespace sparse {
@@ -12,16 +12,16 @@ using LongTensor = Tensor;
 using IntTensor = Tensor;
 using SparseType = Type;
 
-// This is an internal utility function for getting at the SparseCOOTensorImpl,
+// This is an internal utility function for getting at the SparseTensorImpl,
 // so that we can write sparse tensor specific accessors for special fields
 // in SparseTensor.  You should only use this for writing low level
-// setters/getters for SparseCOOTensorImpl fields; otherwise, you should use
+// setters/getters for SparseTensorImpl fields; otherwise, you should use
 // the low level setters/getters that were implemented using this.
 //
 // This may be called repeatedly, so make sure it's pretty cheap.
-template <typename SparseType=SparseCOOTensorImpl>
+template <typename SparseType=SparseTensorImpl>
 inline SparseType* get_sparse_impl(const SparseTensor& self) {
-  AT_ASSERTM(self.is_sparse(), "_internal_get_SparseCOOTensorImpl: not a sparse tensor");
+  AT_ASSERTM(self.is_sparse(), "_internal_get_SparseTensorImpl: not a sparse tensor");
   return static_cast<SparseType*>(self.unsafeGetTensorImpl());
 }
 

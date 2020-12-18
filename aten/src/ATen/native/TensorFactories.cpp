@@ -36,7 +36,7 @@ void window_function_checks(
     const TensorOptions& options,
     int64_t window_length) {
   TORCH_CHECK(
-      options.layout() != kSparseCOO,
+      options.layout() != kSparse,
       function_name,
       " is not implemented for sparse types, got: ",
       options);
@@ -248,7 +248,7 @@ Tensor empty_like(
       !(options.layout() != kStrided &&
           optional_memory_format.has_value()),
       "memory format option is only supported by strided tensors");
-  if (options.layout() == kSparseCOO && self.is_sparse()) {
+  if (options.layout() == kSparse && self.is_sparse()) {
     auto result = at::empty({0}, options); // to be resized
     result.sparse_resize_and_clear_(
         self.sizes(), self.sparse_dim(), self.dense_dim());
@@ -425,7 +425,7 @@ TensorOptions infer_full_options(
 } // anonymous namespace
 
 Tensor full(IntArrayRef size, Scalar fill_value, const TensorOptions& options) {
-  TORCH_CHECK(options.layout() != kSparseCOO,
+  TORCH_CHECK(options.layout() != kSparse,
     "full(...) is not implemented for sparse layout");
 
   auto result = at::empty(size, infer_full_options(fill_value, options));
@@ -847,7 +847,7 @@ Tensor zeros_like(
     const Tensor& self,
     const TensorOptions& options,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
-  if (options.layout() == kSparseCOO && self.is_sparse()) {
+  if (options.layout() == kSparse && self.is_sparse()) {
     TORCH_CHECK(
         !(optional_memory_format.has_value()),
         "memory format option is only supported by strided tensors");
@@ -1114,7 +1114,7 @@ Tensor full(
     optional<DimnameList> names,
     const TensorOptions& options) {
 
-  TORCH_CHECK(options.layout() != kSparseCOO,
+  TORCH_CHECK(options.layout() != kSparse,
     "full(...) is not implemented for sparse layout");
 
   auto result = at::empty(size, names, infer_full_options(fill_value, options));

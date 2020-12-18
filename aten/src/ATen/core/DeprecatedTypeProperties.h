@@ -31,7 +31,7 @@ class CAFFE2_API DeprecatedTypeProperties {
   }
 
   bool is_sparse() const {
-    return layout_from_backend(backend()) == kSparseCOO;
+    return layout_from_backend(backend()) == kSparse;
   }
 
   DeviceType device_type() const {

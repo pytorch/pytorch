@@ -1324,7 +1324,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
   }
 
   const auto& layout = inputs[0].layout();
-  if (layout == c10::kSparseCOO && opts.reduceOp != ReduceOp::SUM) {
+  if (layout == c10::kSparse && opts.reduceOp != ReduceOp::SUM) {
     invalidArgument(
         "unsupported reduction operation "
         "(allreduce of sparse tensors only works with ReduceOp.SUM)");
@@ -1337,7 +1337,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
     if (layout == c10::kStrided) {
       work = c10::make_intrusive<AsyncAllreduceWork>(
           std::move(context), inputs, opts.reduceOp, tag);
-    } else if (layout == c10::kSparseCOO) {
+    } else if (layout == c10::kSparse) {
       work = c10::make_intrusive<AsyncSparseAllreduceWork>(
           std::move(context), inputs, tag);
     } else {
@@ -1348,7 +1348,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
     if (layout == c10::kStrided) {
       work = c10::make_intrusive<AsyncAllreduceCUDAWork>(
           std::move(context), inputs, opts.reduceOp, tag);
-    } else if (layout == c10::kSparseCOO) {
+    } else if (layout == c10::kSparse) {
       work = c10::make_intrusive<AsyncSparseAllreduceCUDAWork>(
           std::move(context), inputs, tag);
     } else {

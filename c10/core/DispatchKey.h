@@ -46,7 +46,7 @@ enum class DispatchKey : uint8_t {
   // meaningful (e.g., it's valid to reorder these backends without changing
   // semantics).  The only situation when backend ordering is meaningful
   // is when the backend participates in multiple dispatch with another
-  // backend; e.g., CPU and SparseCOO_CPU (sparse must have
+  // backend; e.g., CPU and SparseCPU (sparse must have
   // higher priority).
 
   // Here are backends which you think of as traditionally specifying
@@ -99,8 +99,8 @@ enum class DispatchKey : uint8_t {
   // the corresponding dense tensors, and must be handled before them.
   MkldnnCPU, // registered at build/aten/src/ATen/RegisterMkldnnCPU.cpp
   // NB: not to be confused with MKLDNN, which is Caffe2 only
-  SparseCOO_CPU, // registered at build/aten/src/ATen/RegisterSparseCOO_CPU.cpp
-  SparseCOO_CUDA, // registered at build/aten/src/ATen/RegisterSparseCOO_CUDA.cpp
+  SparseCPU, // registered at build/aten/src/ATen/RegisterSparseCPU.cpp
+  SparseCUDA, // registered at build/aten/src/ATen/RegisterSparseCUDA.cpp
   SparseHIP, // TODO: I think this is not actually used, due to Note
              // [Masquerading as CUDA]
 

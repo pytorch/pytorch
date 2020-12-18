@@ -58,7 +58,7 @@ SparseTensor& sparse_mask_out_cuda(SparseTensor& r, const Tensor& t, const Spars
 }
 
 SparseTensor sparse_mask_cuda(const Tensor& t, const SparseTensor& mask) {
-  SparseTensor r = at::empty({0}, t.options().layout(kSparseCOO));
+  SparseTensor r = at::empty({0}, t.options().layout(kSparse));
   sparse_mask_out_cuda(r, t, mask);
   return r;
 }

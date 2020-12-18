@@ -23,7 +23,7 @@ namespace c10 {
  *
  * NB: The concept of 'Backend' here disagrees with the notion of backend
  * exposed to users in torch.backends.  Backend here is something like "CPU"
- * or "SparseCOO_CUDA"; backend in torch.backends is something like "MKL" or
+ * or "SparseCUDA"; backend in torch.backends is something like "MKL" or
  * "CUDNN".
  */
 enum class Backend {
@@ -31,8 +31,8 @@ enum class Backend {
   CUDA,
   HIP,
   FPGA,
-  SparseCOO_CPU,
-  SparseCOO_CUDA,
+  SparseCPU,
+  SparseCUDA,
   SparseGCS_CPU,
   SparseGCS_CUDA,
   SparseHIP,
@@ -50,15 +50,15 @@ enum class Backend {
 static inline Backend toSparse(Backend b) {
   switch (b) {
     case Backend::CPU:
-      return Backend::SparseCOO_CPU;
+      return Backend::SparseCPU;
     case Backend::CUDA:
-      return Backend::SparseCOO_CUDA;
+      return Backend::SparseCUDA;
     case Backend::HIP:
       return Backend::SparseHIP;
-    case Backend::SparseCOO_CPU:
-      return Backend::SparseCOO_CPU;
-    case Backend::SparseCOO_CUDA:
-      return Backend::SparseCOO_CUDA;
+    case Backend::SparseCPU:
+      return Backend::SparseCPU;
+    case Backend::SparseCUDA:
+      return Backend::SparseCUDA;
     case Backend::SparseHIP:
       return Backend::SparseHIP;
     default:
@@ -80,9 +80,9 @@ static inline Backend toDense(Backend b) {
       return Backend::MSNPU;
     case Backend::XLA:
       return Backend::XLA;
-    case Backend::SparseCOO_CPU:
+    case Backend::SparseCPU:
       return Backend::CPU;
-    case Backend::SparseCOO_CUDA:
+    case Backend::SparseCUDA:
       return Backend::CUDA;
     case Backend::SparseHIP:
       return Backend::HIP;
@@ -112,10 +112,10 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::Vulkan;
   } else if (t == DispatchKey::Metal) {
     return Backend::Metal;
-  } else if (t == DispatchKey::SparseCOO_CPU) {
-    return Backend::SparseCOO_CPU;
-  } else if (t == DispatchKey::SparseCOO_CUDA) {
-    return Backend::SparseCOO_CUDA;
+  } else if (t == DispatchKey::SparseCPU) {
+    return Backend::SparseCPU;
+  } else if (t == DispatchKey::SparseCUDA) {
+    return Backend::SparseCUDA;
   } else if (t == DispatchKey::SparseHIP) {
     return Backend::SparseHIP;
   } else if (t == DispatchKey::SparseGCS_CPU) {
@@ -149,10 +149,10 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::MSNPU;
     case Backend::XLA:
       return DispatchKey::XLA;
-    case Backend::SparseCOO_CPU:
-      return DispatchKey::SparseCOO_CPU;
-    case Backend::SparseCOO_CUDA:
-      return DispatchKey::SparseCOO_CUDA;
+    case Backend::SparseCPU:
+      return DispatchKey::SparseCPU;
+    case Backend::SparseCUDA:
+      return DispatchKey::SparseCUDA;
     case Backend::SparseHIP:
       return DispatchKey::SparseHIP;
     case Backend::SparseGCS_CPU:
@@ -190,9 +190,9 @@ static inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::MSNPU;
     case Backend::XLA:
       return DeviceType::XLA;
-    case Backend::SparseCOO_CPU:
+    case Backend::SparseCPU:
       return DeviceType::CPU;
-    case Backend::SparseCOO_CUDA:
+    case Backend::SparseCUDA:
       return DeviceType::CUDA;
     case Backend::SparseHIP:
       return DeviceType::HIP;
@@ -226,12 +226,12 @@ static inline Backend backendToCPU(Backend b) {
       return Backend::CPU;
     case Backend::FPGA:
       return Backend::CPU;
-    case Backend::SparseCOO_CPU:
-      return Backend::SparseCOO_CPU;
-    case Backend::SparseCOO_CUDA:
-      return Backend::SparseCOO_CPU;
+    case Backend::SparseCPU:
+      return Backend::SparseCPU;
+    case Backend::SparseCUDA:
+      return Backend::SparseCPU;
     case Backend::SparseHIP:
-      return Backend::SparseCOO_CPU;
+      return Backend::SparseCPU;
     case Backend::MSNPU:
     case Backend::XLA:
       return Backend::CPU;
@@ -257,10 +257,10 @@ static inline Backend backendToCUDA(Backend b) {
     case Backend::MSNPU:
     case Backend::XLA:
       return Backend::CUDA;
-    case Backend::SparseCOO_CPU:
-    case Backend::SparseCOO_CUDA:
+    case Backend::SparseCPU:
+    case Backend::SparseCUDA:
     case Backend::SparseHIP:
-      return Backend::SparseCOO_CUDA;
+      return Backend::SparseCUDA;
     case Backend::Undefined:
       return Backend::Undefined;
     default:
@@ -277,8 +277,8 @@ static inline Backend backendToHIP(Backend b) {
     case Backend::MSNPU:
     case Backend::XLA:
       return Backend::HIP;
-    case Backend::SparseCOO_CPU:
-    case Backend::SparseCOO_CUDA:
+    case Backend::SparseCPU:
+    case Backend::SparseCUDA:
     case Backend::SparseHIP:
       return Backend::SparseHIP;
     case Backend::Undefined:
@@ -303,10 +303,10 @@ static inline const char* toString(Backend b) {
       return "MSNPU";
     case Backend::XLA:
       return "XLA";
-    case Backend::SparseCOO_CPU:
-      return "SparseCOO_CPU";
-    case Backend::SparseCOO_CUDA:
-      return "SparseCOO_CUDA";
+    case Backend::SparseCPU:
+      return "SparseCPU";
+    case Backend::SparseCUDA:
+      return "SparseCUDA";
     case Backend::SparseHIP:
       return "SparseHIP";
     case Backend::MkldnnCPU:
@@ -326,8 +326,8 @@ static inline const char* toString(Backend b) {
 
 static inline bool isSparse(Backend b) {
   switch (b) {
-    case Backend::SparseCOO_CPU:
-    case Backend::SparseCOO_CUDA:
+    case Backend::SparseCPU:
+    case Backend::SparseCUDA:
     case Backend::SparseHIP:
       return true;
     default:
