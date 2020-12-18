@@ -331,6 +331,40 @@ class TestJit(JitTestCase):
             def dot(points, query, dim):
                 return (points * query).sum(dim)
 
+    def test_dict_comprehension(self):
+        def fn():
+            return {i : chr(i + 65) for i in range(4)}
+        self.checkScript(fn, ())
+
+    def test_dict_comprehension_with_type_annotation(self):
+        def fn():
+            d: Dict[int, str] = {i : chr(i + 65) for i in range(4)}
+            return d
+        self.checkScript(fn, ())
+
+        with self.assertRaisesRegex(RuntimeError, ""):
+            with self.assertRaisesRegex(AssertionError, "Expected Dict "
+                                        "type annotation for dict "
+                                        "comprehension, found "
+                                        "Tuple[int, str]"):
+                @torch.jit.script
+                def fn():
+                    d: Tuple[int, str] = {i : chr(i + 65) for i in range(4)}
+                    return d
+
+    def test_dict_comprehension_scope(self):
+        def comprehension_can_access_outer_scope_variables():
+            lst = ["foo", "bar", "baz"]
+            return {l : len(l) for l in lst}
+
+        self.checkScript(comprehension_can_access_outer_scope_variables, ())
+
+        with self.assertRaisesRegex(RuntimeError, "undefined value i"):
+            @torch.jit.script
+            def outer_scope_cannot_access_comprehension_variables():
+                d = {i : chr(i + 65) for i in range(4)}
+                i = i + 1
+
     def test_constants_pkl(self):
         # This test asserts that the serialization archive includes a `constants.pkl`
         # file. This file is used by `torch.load` to determine whether a zip file
@@ -3488,17 +3522,22 @@ def foo(x):
                     'buffers_r': ['B'],
                     'children': ['another', 'foo'],
                     'modules': ['a', 'another', 'bar', 'foo'],
-                    'named_attributes': [('another', 'another'),
+                    'named_attributes': [('_is_full_backward_hook', None),
+                                         ('another', 'another'),
                                          ('foo', 'foo'),
                                          ('name', 'a'),
                                          ('p', 'P'),
                                          ('training', True)],
-                    'named_attributes_r': [('another', 'another'),
+                    'named_attributes_r': [('_is_full_backward_hook', None),
+                                           ('another', 'another'),
+                                           ('another._is_full_backward_hook', None),
                                            ('another.name', 'another'),
                                            ('another.training', True),
                                            ('foo', 'foo'),
+                                           ('foo._is_full_backward_hook', None),
                                            ('foo.b', 'B'),
                                            ('foo.bar', 'bar'),
+                                           ('foo.bar._is_full_backward_hook', None),
                                            ('foo.bar.an_int', 4),
                                            ('foo.bar.name', 'bar'),
                                            ('foo.bar.training', True),
