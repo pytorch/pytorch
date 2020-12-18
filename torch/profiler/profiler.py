@@ -15,11 +15,10 @@ class ProfilerAction(Enum):
 
 def schedule(*, wait: int, warmup: int, active: int):
     """
-    Represents profiler behavior:
-      - wait for 'wait' steps
-      - do the warmup for the next 'warmup' steps
-      - do the active recording for the next 'active' steps
-      - repeat the cycle
+    Represents profiler behavior: wait for ``wait`` steps, then
+    do the warmup for the next ``warmup`` steps, then
+    do the active recording for the next ``active`` steps and then
+    repeat the cycle staring with the next step.
     """
     def schedule_fn(step: int) -> ProfilerAction:
         assert step >= 0
@@ -41,38 +40,43 @@ def schedule(*, wait: int, warmup: int, active: int):
 
 def _default_schedule_fn(_: int) -> ProfilerAction:
     """
-    Default profiler behavior - immediately start recording the events,
-    keep doing it on every step
+    Default profiler behavior - immediately starts recording the events,
+    keeps doing it on every profiler step.
     """
     return ProfilerAction.RECORD
 
 
 class profile(object):
     """
-    PyTorch profiler context manager.
+    Profiler context manager.
 
     Arguments:
-        activities - list of activity groups (CPU, CUDA);
-        schedule - a callable takes step (int) as a single parameter and returns
-          ProfilerAction value - specifies the profiler action on each step;
-        on_trace_ready (optional) - callable, called each time the trace is ready
-          during the profiling;
-        record_shapes - save information about operator's input shapes;
-        profile_memory - track tensor memory allocation/deallocation;
-        with_stack - save stack traces;
-        use_gpu - (deprecated, use activities)
 
-    Notes:
-     - profiler is using Kineto library - system profiler library, with support for CUPTI tracing
-     - with default schedule profiler immediately starts recording the events, a single trace produced
-       when context manager exits
-     - non-default profiler schedules can useful when tracing training loops, allowing users to enable
-       profiler on certain iterations (steps) and account for the warmup.
+    - ``activities`` - list of activity groups (CPU, CUDA) to use in profiling;
+    - ``schedule`` - callable that takes step (int) as a single parameter and returns
+      ``ProfilerAction`` value that specifies the profiler action on each step;
+    - ``on_trace_ready`` (optional) - callable, called each time the trace is ready
+      during the profiling;
+    - ``record_shapes`` - save information about operator's input shapes;
+    - ``profile_memory`` - track tensor memory allocation/deallocation;
+    - ``with_stack`` - save stack traces;
+    - ``use_gpu`` - (deprecated, use ``activities``).
 
-    Warning: enabling shape and stack tracing causes an additional overhead.
+    .. note::
+        Use ``torch.profiler.schedule`` to generate the callable schedule.
+        Non-default schedules are useful when profiling long training jobs
+        and allow the user to obtain multiple traces at the different iterations
+        of the training process.
+        The default schedule simply records all the events continuously for the
+        duration of the context manager.
+
+    .. note::
+        Enabling shape and stack tracing results in additional overhead.
 
     Examples:
-     - example that uses default schedule:
+
+    .. code-block:: python
+
         with torch.profiler.profile(
             activities=[
                 torch.profiler.ProfilerActivity.CPU,
@@ -82,18 +86,25 @@ class profile(object):
         print(p.key_averages().table(
             sort_by="self_cuda_time_total", row_limit=-1))
 
-     - the following example demonstrates the usage of schedule() and next_step():
-        def trace_handler(p):
-            print(p.key_averages().table(
+    Usimg the profiler's ``schedule``, ``on_trace_ready`` and ``next_step`` functions:
+
+    .. code-block:: python
+
+        # Non-default profiler schedule allows user to turn profiler on and off
+        # on different iterations of the training loop;
+        # trace_handler is called every time a new trace becomes available
+        def trace_handler(prof):
+            print(prof.key_averages().table(
                 sort_by="self_cuda_time_total", row_limit=-1))
-            # p.export_chrome_trace("/tmp/test_trace_" + str(called_num[0]) + ".json")
+            # prof.export_chrome_trace("/tmp/test_trace_" + str(prof.step()) + ".json")
 
         with torch.profiler.profile(
             activities=[
                 torch.profiler.ProfilerActivity.CPU,
                 torch.profiler.ProfilerActivity.CUDA],
 
-            # Profiler will skip the first step/iteration,
+            # In this example with wait=1, warmup=1, active=2,
+            # profiler will skip the first step/iteration,
             # start warming up on the second, record
             # the third and the forth iterations,
             # after which the trace will become available
@@ -105,11 +116,11 @@ class profile(object):
                 warmup=1,
                 active=2),
             on_trace_ready=trace_handler
-        ) as p:
-            for iter in range(N):
-                code_iteration_to_profile(iter)
-                # send a signal to the profiler that the next iteration has started
-                p.next_step()
+            ) as p:
+                for iter in range(N):
+                    code_iteration_to_profile(iter)
+                    # send a signal to the profiler that the next iteration has started
+                    p.next_step()
     """
     def __init__(
             self,
@@ -256,9 +267,8 @@ class profile(object):
         if self.current_action == ProfilerAction.WARMUP:
             self._start_trace()
             self._stop_trace()
-        elif self.current_action == ProfilerAction.RECORD:
-            self._stop_trace()
-        elif self.current_action == ProfilerAction.RECORD_AND_SAVE:
+        elif self.current_action in \
+                [ProfilerAction.RECORD, ProfilerAction.RECORD_AND_SAVE]:
             self._stop_trace()
             if self.on_trace_ready:
                 self.on_trace_ready(self)
