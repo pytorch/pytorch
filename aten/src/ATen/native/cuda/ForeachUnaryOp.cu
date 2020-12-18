@@ -177,9 +177,9 @@ struct Sigmoid {
     __device__ T operator()(T t) const { return (one / (one + std::exp(-t))); }
 };
 
-template<typename T>                                                 \
-struct Round {                                                       \
-    __device__ T operator()(T t) const { return std::nearbyint(t); } \
+template<typename T>
+struct Round {
+    __device__ T operator()(T t) const { return std::nearbyint(t); }
 };
 
 template<typename T>
