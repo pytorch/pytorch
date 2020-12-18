@@ -2,7 +2,6 @@
 #include <aten/src/ATen/InitialTensorOptions.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 
 namespace torch {
@@ -14,6 +13,38 @@ using namespace ::c10::onnx;
 
 namespace {
 const int ONNX_OPSET_13 = 13;
+const int ONNX_TYPE_BOOL = 9;
+
+Node* CreateCastToBoolNode(Value* val, Graph* graph) {
+  Node* cast_node = graph->create(onnx::Cast);
+  cast_node->addInput(val);
+  cast_node->i_(attr::to, ONNX_TYPE_BOOL);
+  cast_node->output()->setType(BoolType::get());
+  return cast_node;
+}
+
+Node* InsertCastForCond(Value* cond_val, Graph* graph, Node* consumer_node) {
+  // prev:  cond_val -> consumer_node
+  // after: cond_val -> cast -> consumer_node
+  // NOTE: The cast is required because operators like PyTorch Greater/Less
+  //       return tensor in type torch.uint8. However the type for condition
+  //       input in ONNX Loop must be bool.
+  Node* cast_node = CreateCastToBoolNode(cond_val, graph);
+  cast_node->insertBefore(consumer_node);
+
+  consumer_node->replaceInputWith(cond_val, cast_node->output());
+  return cast_node;
+}
+
+bool IsCondCastRequired(Value* cond_val) {
+  const auto& type = cond_val->type();
+  if (auto tt = type->cast<TensorType>()) {
+    if (auto scalar_type = tt->scalarType()) {
+      return *scalar_type != c10::kBool;
+    }
+  }
+  return !type->isSubtypeOf(BoolType::get());
+}
 
 bool IsErasableSequence(const Node* loop_node, size_t i) {
   TORCH_INTERNAL_ASSERT(loop_node->blocks().size() == 1);
@@ -161,9 +192,36 @@ void ConvertSequenceDependencies(Block* block, int opset_version) {
 }
 } // anonymous namespace
 
+void FixupONNXLoopNodeInputs(Node* node) {
+  if (node->kind() != ::c10::onnx::Loop) {
+    return;
+  }
+
+  auto* graph = node->owningGraph();
+
+  // add cast to condition input outside the loop.
+  Value* cond_val = node->inputs()[1];
+  if (IsCondCastRequired(cond_val))
+    InsertCastForCond(cond_val, graph, node);
+
+  // Setup Loop input cond and i.
+  TORCH_INTERNAL_ASSERT(node->blocks().size() == 1);
+  auto* sub_block = node->blocks()[0];
+  Value* cond = sub_block->insertInput(1, "cond");
+  cond->setType(BoolType::create());
+
+  Value* i = sub_block->inputs()[0];
+  i->setType(TensorType::fromNumberType(IntType::get()));
+
+  // add cast to condition input inside the loop.
+  Value* next_cond_val = sub_block->outputs()[0];
+  if (IsCondCastRequired(next_cond_val))
+    InsertCastForCond(next_cond_val, graph, sub_block->return_node());
+}
+
 std::vector<Value*> FixupONNXLoopNode(Node* node, int opset_version) {
   auto output_size = node->outputs().size();
-  updateLoopNodeInputs(node);
+  FixupONNXLoopNodeInputs(node);
   auto new_outputs = ConvertSequenceDependencies(node, opset_version);
   TORCH_INTERNAL_ASSERT(output_size == new_outputs.size());
   return new_outputs;

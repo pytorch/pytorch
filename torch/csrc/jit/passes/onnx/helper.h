@@ -14,8 +14,6 @@ static const int OPSET_VERSION_10 = 10;
 static const int OPSET_VERSION_11 = 11;
 static const int OPSET_VERSION_12 = 12;
 
-static const int ONNX_TYPE_BOOL = 9;
-
 using ValueToParamPairMap = std::map<Value*, std::pair<std::string, IValue>>;
 
 using ParamMap = std::map<std::string, IValue>;
@@ -33,10 +31,6 @@ void buildParamsMapFromValueToParamsMap(
 Node* addNodeToBlock(Block* block, Symbol kind, ArrayRef<Value*> inputs);
 
 Value* addInputToBlock(Block* block);
-
-void updateLoopNodeInputs(Node* node);
-
-Node* CreateCastToBoolNode(Value* val, Graph* graph);
 
 TORCH_API c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type);
 } // namespace jit

@@ -906,8 +906,6 @@ def _add_output_to_block(block, value):
     new_output = block.registerOutput(value)
     return new_output
 
-def _update_loop_inputs(node):
-    node.updateLoopInputs()
 
 # Note [Export inplace]
 # ~~~~~~~~~~~~~~~~~~~~~

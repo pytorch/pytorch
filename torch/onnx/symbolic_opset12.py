@@ -2,7 +2,7 @@
 import torch
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _parse_arg, _unimplemented
-from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block, _update_loop_inputs
+from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
 
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -138,7 +138,7 @@ def unfold(g, input, dimension, size, step):
 
         _add_output_to_block(loop_block, loop_condition)
         _add_output_to_block(loop_block, concat)
-        _update_loop_inputs(loop.node())
+        torch._C._jit_pass_fixup_onnx_loop_node_inputs(loop.node())
 
         loop_output = loop.node().output()
         perm = [0, 1, 2, 3, 4]
