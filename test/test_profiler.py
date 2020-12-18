@@ -240,5 +240,47 @@ class TestProfiler(TestCase):
         print(profiler_output)
         self.assertIn("FLOPS", profiler_output)
 
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_kineto_profiler_api(self):
+        called_num = [0]
+
+        with profile(use_cuda=True, use_kineto=True):
+            self.payload()
+
+        def trace_handler(p):
+            print(p.key_averages().table(
+                sort_by="self_cuda_time_total", row_limit=-1))
+            # p.export_chrome_trace("/tmp/test_trace_" + str(called_num[0]) + ".json")
+            called_num[0] += 1
+
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA],
+            schedule=torch.profiler.schedule(
+                wait=1,
+                warmup=1,
+                active=2),
+            on_trace_ready=trace_handler
+        ) as p:
+            for idx in range(8):
+                self.payload()
+                p.next_step()
+
+        self.assertEqual(called_num[0], 2)
+
+        # case without enable_pred
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA]
+        ) as p:
+            self.payload()
+            self.payload()
+        print(p.key_averages().table(
+            sort_by="self_cuda_time_total", row_limit=-1))
+
+
 if __name__ == '__main__':
     run_tests()
