@@ -136,7 +136,7 @@ void pushProfilingCallbacks() {
   auto state_ptr = getProfilerTLSState();
   TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
   auto handle = at::addThreadLocalCallback(at::RecordFunctionCallback(
-      [](const at::RecordFunction& fn) {
+      [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
         auto state_ptr = getProfilerTLSState();
         if (!state_ptr || state_ptr->config().state != ProfilerState::KINETO) {
           return std::make_unique<KinetoObserverContext>();
@@ -360,7 +360,7 @@ void ProfilerResult::save(const std::string& path) {
 
 bool kinetoAvailable() {
 #ifdef USE_KINETO
-  return true;
+  return at::hasCUDA();
 #else
   return false;
 #endif

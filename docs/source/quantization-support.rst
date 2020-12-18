@@ -105,7 +105,7 @@ Fused modules are provided for common patterns in CNNs. Combining several
 operations together (like convolution and relu) allows for better quantization
 accuracy
 
-    
+
 * `torch.nn.intrinsic` — float versions of the modules, can be swapped with
   quantized version 1 to 1:
 
@@ -172,7 +172,6 @@ Layers for the quantization-aware training
   * :func:`~torch.quantization.fuse_modules`
 
 * Functions for graph mode quantization:
-
   * :func:`~torch.quantization.quantize_jit` - Function for graph mode post training static quantization
   * :func:`~torch.quantization.quantize_dynamic_jit` - Function for graph mode post training dynamic quantization
 
@@ -322,5 +321,3 @@ Quantized dtypes and quantization schemes
   * :attr:`torch.quint8` — 8-bit unsigned integer
   * :attr:`torch.qint8` — 8-bit signed integer
   * :attr:`torch.qint32` — 32-bit signed integer
-
-
