@@ -6628,7 +6628,6 @@
     CUDA: foreach_tensor_exp_cuda
 
 - func: _foreach_zero_(Tensor(a!)[] self) -> ()
-  use_c10_dispatcher: full
   device_guard: False
   variants: function
   dispatch:
