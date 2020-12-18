@@ -192,11 +192,12 @@ void IrPrinter::visit(const kir::TensorIndex* node) {
 }
 
 void IrPrinter::visit(const kir::IterDomain* node) {
+  ir_str_ << varName(node, "id") << "[";
   if (node->isRFactorProduct()) {
     ir_str_ << "rfactor.";
   }
   ir_str_ << node->parallelType() << "." << node->iterType() << "("
-          << use(node->start()) << " .. " << use(node->rawExtent()) << ")";
+          << use(node->start()) << " .. " << use(node->rawExtent()) << ")]";
 }
 
 void IrPrinter::visit(const kir::TensorDomain*) {
