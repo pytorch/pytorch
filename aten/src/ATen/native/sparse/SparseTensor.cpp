@@ -14,6 +14,17 @@ namespace at { namespace native {
 
 using namespace at::sparse;
 
+namespace {
+torch::List<c10::optional<Tensor>> toListOfOptionalTensors(ArrayRef<Tensor> list) {
+  torch::List<c10::optional<Tensor>> result;
+  result.reserve(list.size());
+  for (const Tensor& a : list) {
+    result.push_back(a);
+  }
+  return result;
+}
+}
+
 
 /******************************************************************************
  * access methods
@@ -328,10 +339,7 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim){
 
   Tensor values;
   if (self.dim() > 0) {
-    torch::List<c10::optional<Tensor>> ix;
-    for (Tensor a : indices.chunk(indices.size(0), 0)) {
-      ix.push_back(std::move(a));
-    }
+    auto ix = toListOfOptionalTensors(indices.chunk(indices.size(0), 0));
     values = self.index(ix).squeeze(0).clone(at::MemoryFormat::Preserve);
   } else {
     AT_ASSERT(nz.sizes().equals({0, 1}));
