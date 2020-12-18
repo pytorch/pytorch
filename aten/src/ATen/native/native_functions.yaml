@@ -10124,12 +10124,14 @@
 
 - func: linalg_pinv.out(Tensor self, float rcond=1e-15, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     Math: linalg_pinv_out
 
 - func: linalg_pinv.out_rcond_tensor(Tensor self, Tensor rcond, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     Math: linalg_pinv_out
