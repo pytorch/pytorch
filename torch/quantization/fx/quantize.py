@@ -275,6 +275,7 @@ class Quantizer:
         #     <class 'torch.quantization.fx.quantize.Add'>),
         # }
         self.patterns: Optional[Dict[Pattern, QuantizeHandler]] = None
+        self.prepare_custom_config_dict: Dict[str, Any] = {}
 
 
     def _qat_swap_modules(
@@ -341,6 +342,7 @@ class Quantizer:
         """
         if prepare_custom_config_dict is None:
             prepare_custom_config_dict = {}
+        self.prepare_custom_config_dict = prepare_custom_config_dict
 
         additional_quant_patterns = \
             prepare_custom_config_dict.get("additional_quant_pattern", {})
@@ -396,12 +398,40 @@ class Quantizer:
         get_new_observer_name = get_new_attr_name_with_prefix(
             'activation_post_process_')
 
+        placeholder_node_seen_cnt = 0
+        output_node_seen_cnt = 0
+        input_quantized_idxs: List[int] = self.prepare_custom_config_dict.get(
+            "input_quantized_idxs", [])
+        output_quantized_idxs: List[int] = self.prepare_custom_config_dict.get(
+            "output_quantized_idxs", [])
+
         result_node : Optional[Node] = None
         for node in model.graph.nodes:
             if node.op == 'output':
+                # If this output is hardcoded to be quantized, insert an
+                # observer on the previous node if it does not already
+                # exist.
+                cur_output_node_idx = output_node_seen_cnt
+                output_node_seen_cnt += 1
+                if cur_output_node_idx in output_quantized_idxs:
+                    prev_node = node.args[0]
+                    assert isinstance(prev_node, Node), \
+                        ('hardcoding list/dict outputs to be quantized is ' +
+                         'not supported')
+                    if prev_node.name not in observed_node_names_set:
+                        assert self.qconfig_map is not None
+                        local_qconfig = self.qconfig_map[prev_node.name]
+                        assert local_qconfig is not None, \
+                            'qconfig of a node before a quantized output must exist'
+                        insert_observer(
+                            prev_node, local_qconfig.activation(),
+                            model, self.activation_post_process_map,
+                            env, observed_graph, load_arg, observed_node_names_set)
+
                 observed_graph.output(load_arg(node.args[0]))
                 result_node = node
                 continue
+
             if node.name in observed_node_names_set:
                 continue
 
@@ -425,6 +455,16 @@ class Quantizer:
                         matched_nodes)
             else:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
+
+            if node.op == 'placeholder':
+                # skip adding observers at the graph input if the input is
+                # overriden to be quantized
+                cur_placeholder_node_idx = placeholder_node_seen_cnt
+                placeholder_node_seen_cnt += 1
+                if cur_placeholder_node_idx in input_quantized_idxs:
+                    observed_node_names_set.add(node.name)
+                    continue
+
             insert_observer_for_input_arg_of_observed_node(
                 node, observed_node_names_set, quants,
                 model, self.activation_post_process_map, env,
@@ -441,6 +481,8 @@ class Quantizer:
             self.activation_post_process_map  # type: ignore
         observed._patterns = self.patterns  # type: ignore
         observed._qconfig_map = self.qconfig_map  # type: ignore
+        observed._prepare_custom_config_dict = \
+            self.prepare_custom_config_dict  # type: ignore
 
     def restore_state(self, observed: GraphModule) -> None:
         assert is_observed_module(observed), \
@@ -449,6 +491,8 @@ class Quantizer:
             observed._activation_post_process_map  # type: ignore
         self.patterns = observed._patterns  # type: ignore
         self.qconfig_map = observed._qconfig_map  # type: ignore
+        self.prepare_custom_config_dict = \
+            observed._prepare_custom_config_dict  # type: ignore
 
     def prepare(self, model: GraphModule, qconfig_dict: Any,
                 prepare_custom_config_dict: Dict[str, Any] = None,
@@ -655,9 +699,9 @@ class Quantizer:
         # by the user
         placeholder_node_seen_cnt = 0
         output_node_seen_cnt = 0
-        input_quantized_idxs: List[int] = convert_custom_config_dict.get(
+        input_quantized_idxs: List[int] = self.prepare_custom_config_dict.get(
             "input_quantized_idxs", [])
-        output_quantized_idxs: List[int] = convert_custom_config_dict.get(
+        output_quantized_idxs: List[int] = self.prepare_custom_config_dict.get(
             "output_quantized_idxs", [])
 
         for node in model.graph.nodes:
