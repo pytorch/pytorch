@@ -256,9 +256,10 @@ class profile(object):
 
         .. note::
             Example of using FlameGraph tool:
-            git clone https://github.com/brendangregg/FlameGraph
-            cd FlameGraph
-            ./flamegraph.pl --title "CPU time" --countname "us." profiler.stacks > perf_viz.svg
+
+            - git clone https://github.com/brendangregg/FlameGraph
+            - cd FlameGraph
+            - ./flamegraph.pl --title "CPU time" --countname "us." profiler.stacks > perf_viz.svg
         """
         assert self.profiler
         return self.profiler.export_stacks(path, metric)
