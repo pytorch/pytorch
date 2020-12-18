@@ -30,6 +30,9 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
            THCTensor *istarget,
            int64_t reduction)
 {
+  if (input->numel() == 0) {
+    return;
+  }
   THNN_(MultiLabelMarginCriterion_shapeCheck)(state, input, target);
   input = THCTensor_(newContiguous)(state, input);
   target = THCIndexTensor_(newContiguous)(state, target);
@@ -58,51 +61,49 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
   }
   else if(input->dim() == 2)
   {
-    if (input->numel() != 0) {
-      int nframe = input->size(0);
-      int dim = input->size(1);
-      dim3 blocks(input->size(0));
-      dim3 threads(MULTILABELMARGIN_THREADS);
+    int nframe = input->size(0);
+    int dim = input->size(1);
+    dim3 blocks(input->size(0));
+    dim3 threads(MULTILABELMARGIN_THREADS);
 
-      if (reduction != at::Reduction::None)
-      {
-        THCTensor *output_tmp = THCTensor_(newWithSize1d)(state, input->size(0));
-        THCTensor_(resize0d)(state, output);
+    if (reduction != at::Reduction::None)
+    {
+      THCTensor *output_tmp = THCTensor_(newWithSize1d)(state, input->size(0));
+      THCTensor_(resize0d)(state, output);
 
-        cunn_MultiLabelMarginCriterion_updateOutput_kernel<scalar_t, accreal>
-          <<<blocks, threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
-            THCTensor_(data)(state, output_tmp),
-            THCTensor_(data)(state, input),
-            THCIndexTensor_(data)(state, target),
-            THCTensor_(data)(state, istarget),
-            nframe, dim,
-            reduction == at::Reduction::Mean
-            );
-        THCudaCheck(cudaGetLastError());
-        auto t = THTensor_wrap(output_tmp);
-        auto r = THTensor_wrap(output);
-        at::native::sum_out(r, t, at::IntArrayRef(std::vector<int64_t>{}), false, r.scalar_type());
-        THCTensor_(free)(state, output_tmp);
-      }
-      else
-      {
-        THCTensor_(resize1d)(state, output, input->size(0));
+      cunn_MultiLabelMarginCriterion_updateOutput_kernel<scalar_t, accreal>
+        <<<blocks, threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
+          THCTensor_(data)(state, output_tmp),
+          THCTensor_(data)(state, input),
+          THCIndexTensor_(data)(state, target),
+          THCTensor_(data)(state, istarget),
+          nframe, dim,
+          reduction == at::Reduction::Mean
+          );
+      THCudaCheck(cudaGetLastError());
+      auto t = THTensor_wrap(output_tmp);
+      auto r = THTensor_wrap(output);
+      at::native::sum_out(r, t, at::IntArrayRef(std::vector<int64_t>{}), false, r.scalar_type());
+      THCTensor_(free)(state, output_tmp);
+    }
+    else
+    {
+      THCTensor_(resize1d)(state, output, input->size(0));
 
-        cunn_MultiLabelMarginCriterion_updateOutput_kernel<scalar_t, accreal>
-          <<<blocks, threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
-            THCTensor_(data)(state, output),
-            THCTensor_(data)(state, input),
-            THCIndexTensor_(data)(state, target),
-            THCTensor_(data)(state, istarget),
-            nframe, dim,
-            false
-            );
-        THCudaCheck(cudaGetLastError());
-      }
+      cunn_MultiLabelMarginCriterion_updateOutput_kernel<scalar_t, accreal>
+        <<<blocks, threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
+          THCTensor_(data)(state, output),
+          THCTensor_(data)(state, input),
+          THCIndexTensor_(data)(state, target),
+          THCTensor_(data)(state, istarget),
+          nframe, dim,
+          false
+          );
+      THCudaCheck(cudaGetLastError());
     }
   }
   else {
-    TORCH_INTERNAL_ASSERT(false, "Expected 2D input with non-zero batch dim, or 1D input with non-zero dim, but got sizes: ", 
+    TORCH_CHECK(false, "Expected 2D input with optional zero batch dim, or 1D input with non-zero dims, but got sizes: ", 
       input->sizes());
   }
 
@@ -120,6 +121,9 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
             THCTensor *istarget,
             int64_t reduction)
 {
+  if (input->numel() == 0) {
+    return;
+  }
   input = THCTensor_(newContiguous)(state, input);
   target = THCIndexTensor_(newContiguous)(state, target);
   istarget = THCTensor_(newContiguous)(state, istarget);
@@ -157,24 +161,23 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
     THArgCheck((istarget->dim() == 2) && (istarget->size(0) == nframe)
                && (istarget->size(1) == dim), 3, "inconsistent isTarget size");
 
-    if (input->numel() != 0) {
-      dim3 blocks(gradInput->size(0));
-      dim3 threads(MULTILABELMARGIN_THREADS);
+    dim3 blocks(gradInput->size(0));
+    dim3 threads(MULTILABELMARGIN_THREADS);
 
-      cunn_MultiLabelMarginCriterion_updateGradInput_kernel<scalar_t, accreal>
-        <<<blocks, threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
-          THCTensor_(data)(state, gradInput),
-          THCTensor_(data)(state, gradOutput),
-          THCTensor_(data)(state, input),
-          THCIndexTensor_(data)(state, target),
-          THCTensor_(data)(state, istarget),
-          gradInput->size(0), gradInput->size(1),
-          reduction == at::Reduction::Mean,
-          reduction != at::Reduction::None);
-    } 
+    cunn_MultiLabelMarginCriterion_updateGradInput_kernel<scalar_t, accreal>
+      <<<blocks, threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
+        THCTensor_(data)(state, gradInput),
+        THCTensor_(data)(state, gradOutput),
+        THCTensor_(data)(state, input),
+        THCIndexTensor_(data)(state, target),
+        THCTensor_(data)(state, istarget),
+        gradInput->size(0), gradInput->size(1),
+        reduction == at::Reduction::Mean,
+        reduction != at::Reduction::None);
   }
   else {
-    AT_ERROR("Expected 2D input with non-zero batch dim, or 1D input with non-zero dim, but got sizes: ", gradInput->sizes());
+    TORCH_CHECK(false, "Expected 2D input with optional zero batch dim, or 1D input with non-zero dims, but got sizes: ",
+      gradInput->sizes());
   }
 
   THCudaCheck(cudaGetLastError());

@@ -10674,32 +10674,29 @@ class TestNNDeviceType(NNTestCase):
 
 
     @onlyOnCPUAndCUDA
-    def test_MarginLoss_empty(self, device):
+    @dtypes(torch.float, torch.double)
+    def test_MarginLoss_empty(self, device, dtype):
         for mod, x, y in [
                 (torch.nn.MultiMarginLoss().to(device),
-                 torch.randn(0, 10, requires_grad=True, device=device),
+                 torch.randn(0, 10, requires_grad=True, device=device, dtype=dtype),
                  torch.ones(0, device=device).type(torch.long)),
                 (torch.nn.MultiLabelMarginLoss().to(device),
-                 torch.randn(0, 10, requires_grad=True, device=device),
+                 torch.randn(0, 10, requires_grad=True, device=device, dtype=dtype),
                  torch.ones(0, 10, device=device).type(torch.long))]:
 
             out = mod(x, y)
             out.sum().backward()
 
             self.assertEqual(x, torch.zeros_like(x))
-
-            for p in mod.parameters():
-                if p.requires_grad:
-                    self.assertEqual(p.grad, torch.zeros_like(p.grad))
             self.assertEqual(x.grad, torch.zeros_like(x))
 
             with self.assertRaisesRegex(RuntimeError, 'Expected'):
-                x = torch.randn(0, requires_grad=True)
+                x = torch.randn(0, requires_grad=True, dtype=dtype)
                 y = torch.ones(10).type(torch.long)
                 mod(x, y)
 
             with self.assertRaisesRegex(RuntimeError, 'Expected'):
-                x = torch.randn(10, 0, requires_grad=True)
+                x = torch.randn(10, 0, requires_grad=True, dtype=dtype)
                 y = torch.ones(10, 0).type(torch.long)
                 mod(x, y)
 
