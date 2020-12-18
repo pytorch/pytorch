@@ -2183,10 +2183,11 @@ class TestLinalg(TestCase):
             torch.linalg.pinv(a, out=out)
 
         # device of rcond and input should match
-        wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
-        rcond = torch.full((), 1e-2, device=wrong_device)
-        with self.assertRaisesRegex(RuntimeError, "Expected rcond and input to be on the same device"):
-            torch.linalg.pinv(a, rcond=rcond)
+        if torch.cuda.is_available():
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            rcond = torch.full((), 1e-2, device=wrong_device)
+            with self.assertRaisesRegex(RuntimeError, "Expected rcond and input to be on the same device"):
+                torch.linalg.pinv(a, rcond=rcond)
 
         # rcond can't be complex
         rcond = torch.full((), 1j, device=device)
