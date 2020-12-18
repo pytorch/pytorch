@@ -3522,17 +3522,22 @@ def foo(x):
                     'buffers_r': ['B'],
                     'children': ['another', 'foo'],
                     'modules': ['a', 'another', 'bar', 'foo'],
-                    'named_attributes': [('another', 'another'),
+                    'named_attributes': [('_is_full_backward_hook', None),
+                                         ('another', 'another'),
                                          ('foo', 'foo'),
                                          ('name', 'a'),
                                          ('p', 'P'),
                                          ('training', True)],
-                    'named_attributes_r': [('another', 'another'),
+                    'named_attributes_r': [('_is_full_backward_hook', None),
+                                           ('another', 'another'),
+                                           ('another._is_full_backward_hook', None),
                                            ('another.name', 'another'),
                                            ('another.training', True),
                                            ('foo', 'foo'),
+                                           ('foo._is_full_backward_hook', None),
                                            ('foo.b', 'B'),
                                            ('foo.bar', 'bar'),
+                                           ('foo.bar._is_full_backward_hook', None),
                                            ('foo.bar.an_int', 4),
                                            ('foo.bar.name', 'bar'),
                                            ('foo.bar.training', True),
@@ -6884,6 +6889,61 @@ a")
                 else:
                     with self.assertRaisesRegex(RuntimeError, 'division by 0'):
                         foo(i, j)
+
+    # Testing bitwise shorthand aug assignment
+    def test_bool_augassign_bitwise_or(self):
+        def func(a: bool, b: bool) -> bool:
+            a |= b
+            return a
+
+        self.checkScript(func, (True, False), optimize=True)
+        self.checkScript(func, (True, True), optimize=True)
+        self.checkScript(func, (False, False), optimize=True)
+        self.checkScript(func, (False, True), optimize=True)
+
+    def test_bool_augassign_bitwise_and(self):
+        def func(a: bool, b: bool) -> bool:
+            a &= b
+            return a
+
+        self.checkScript(func, (True, False), optimize=True)
+        self.checkScript(func, (True, True), optimize=True)
+        self.checkScript(func, (False, False), optimize=True)
+        self.checkScript(func, (False, True), optimize=True)
+
+    def test_bool_augassign_bitwise_xor(self):
+        def func(a: bool, b: bool) -> bool:
+            a ^= b
+            return a
+
+        self.checkScript(func, (True, False), optimize=True)
+        self.checkScript(func, (True, True), optimize=True)
+        self.checkScript(func, (False, False), optimize=True)
+        self.checkScript(func, (False, True), optimize=True)
+
+    def test_number_augassign_bitwise_lshift(self):
+        def func() -> int:
+            z = 8
+            z <<= 2
+            return z
+
+        self.checkScript(func, (), optimize=True)
+
+    def test_number_augassign_bitwise_rshift(self):
+        def func() -> int:
+            z = 8
+            z >>= 2
+            return z
+
+        self.checkScript(func, (), optimize=True)
+
+    def test_number_augassign_bitwise_pow(self):
+        def func() -> float:
+            z = 8
+            z **= 2
+            return z
+
+        self.checkScript(func, (), optimize=True)
 
     def test_number_augassign(self):
         def func():
