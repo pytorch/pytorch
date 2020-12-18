@@ -89,12 +89,29 @@ void ClipRangesGatherRangesLengthsToOffsets(
   fuse.runOnGraph(graph);
 }
 
+void ClipRangesGatherSigridHash(std::shared_ptr<torch::jit::Graph>& graph) {
+  // TODO:: check restrictions for inputs; outputs not used elsewhere
+  std::string pattern = R"IR(
+    graph(%a, %b, %c, %d, %e, %f, %g):
+        %y0 : Tensor, %y1 : Tensor = fb::clip_ranges_gather_lengths_to_offsets(%a, %b, %c, %d)
+        %y2 : Tensor = fb::sigrid_hash(%y0, %e, %f, %g)
+        return (%y2, %y1))IR";
+  std::string fused_pattern = R"IR(
+    graph(%a, %b, %c, %d, %e, %f, %g):
+        %off : Tensor, %out : Tensor = fb::clip_ranges_gather_sigrid_hash_offsets(%b, %a, %c, %e, %f, %g, %d)
+        return (%out, %off))IR";
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, fused_pattern);
+  fuse.runOnGraph(graph);
+}
+
 void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
 #ifdef FBCODE_CAFFE2
   ConcatAddMulReplaceNaNClip(graph);
   CastedBatchOneHotLengths(graph);
   ConcatBatchMatMulBatchGather(graph);
   ClipRangesGatherRangesLengthsToOffsets(graph);
+  ClipRangesGatherSigridHash(graph);
 #endif
 }
 
