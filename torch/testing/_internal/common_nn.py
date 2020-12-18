@@ -5043,7 +5043,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
         # and nn.EmbeddingBag. Instead, we call `self.check_jacobian`, which
         # is a slightly different version of gradcheck that can handle this.
         if self.has_sparse_gradients:
-            assert len(input_tuple) == 1
+            assert num_inputs == 1
             test_input_jacobian = torch.is_floating_point(input_tuple[0])
             test_case.check_jacobian(module, input_tuple[0], test_input_jacobian)
         else:
@@ -5086,7 +5086,8 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
             test_case.assertEqual(output, output_ip)
             grad = output.data.clone().normal_()
             if input.grad is not None:
-                input.grad.data.zero_()
+                with torch.no_grad():
+                    input.grad.zero_()
             output.backward(grad)
             output_ip.backward(grad)
             test_case.assertEqual(input.grad, input_ip.grad)
