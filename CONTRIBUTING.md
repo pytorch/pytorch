@@ -754,7 +754,7 @@ than Linux, which are worth keeping in mind when fixing these problems.
 1. Symbols are NOT exported by default on Windows; instead, you have to explicitly
    mark a symbol as exported/imported in a header file with `__declspec(dllexport)` /
    `__declspec(dllimport)`. We have codified this pattern into a set of macros
-   which follow the convention `*_API`, e.g., `CAFFE2_API` inside Caffe2 and ATen.
+   which follow the convention `*_API`, e.g., `TORCH_API` inside Caffe2, Aten and Torch.
    (Every separate shared library needs a unique macro name, because symbol visibility
    is on a per shared library basis. See c10/macros/Macros.h for more details.)
 
