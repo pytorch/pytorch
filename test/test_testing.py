@@ -442,7 +442,9 @@ class TestTesting(TestCase):
     @slowTest
     def test_cuda_assert_should_stop_test_suite(self, device):
         # This test is slow because it spawn another process to run another test suite.
+        import os
         import subprocess
+        import sys
         curdir = os.path.dirname(os.path.abspath(__file__))
         test_path = os.path.join(curdir, 'scripts', 'test_with_deterministic_cuda_assert_failures.py')
 
