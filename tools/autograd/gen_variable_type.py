@@ -188,6 +188,7 @@ std::shared_ptr<${op}> grad_fn;
 
 SETUP_ANY_REQUIRES_GRAD = CodeTemplate("""\
 auto _any_requires_grad = compute_requires_grad( ${args_with_derivatives} );
+(void)_any_requires_grad;
 """)
 
 SETUP_DERIVATIVE = CodeTemplate("""\
