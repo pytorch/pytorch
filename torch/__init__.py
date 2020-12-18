@@ -21,7 +21,11 @@ if sys.version_info < (3,):
 from ._utils import _import_dotted_name
 from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
     USE_RTLD_GLOBAL_WITH_LIBTORCH, USE_GLOBAL_DEPS
-from .version import __version__
+# TODO(torchpy) figure out how to freeze version.py in fbcode build
+if sys.executable == 'i_am_torchpy':
+    __version__ = "torchpy-1.8"
+else:
+    from .version import __version__
 from ._six import string_classes as _string_classes
 
 from typing import Set, Type, TYPE_CHECKING
@@ -132,7 +136,9 @@ if sys.platform == 'win32':
 
 # See Note [Global dependencies]
 def _load_global_deps():
-    if platform.system() == 'Windows':
+    # TODO(torchpy): we use `__file__` here, which is incompatible with libinterpreter's
+    # freezing scheme. Figure out a real alternative.
+    if platform.system() == 'Windows' or sys.executable == 'i_am_torchpy':
         return
 
     lib_name = 'libtorch_global_deps' + ('.dylib' if platform.system() == 'Darwin' else '.so')
@@ -494,7 +500,9 @@ from ._tensor_str import set_printoptions
 ################################################################################
 
 def manager_path():
-    if platform.system() == 'Windows':
+    # TODO(torchpy): we use `__file__` here, which is incompatible with libinterpreter's
+    # freezing scheme. Figure out a real alternative.
+    if platform.system() == 'Windows' or sys.executable == 'i_am_torchpy':
         return b""
     path = get_file_path('torch', 'bin', 'torch_shm_manager')
     prepare_multiprocessing_environment(get_file_path('torch'))

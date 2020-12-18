@@ -9,5 +9,7 @@ def set_module(obj, mod):
         raise TypeError("The mod argument should be a string")
     obj.__module__ = mod
 
+# TODO(torchpy): we use `__file__` here, which is incompatible with libinterpreter's
+# freezing scheme. Figure out a real alternative.
 #: Path to folder containing CMake definitions for Torch package
-cmake_prefix_path = _osp.join(_osp.dirname(_osp.dirname(__file__)), 'share', 'cmake')
+# cmake_prefix_path = _osp.join(_osp.dirname(_osp.dirname(__file__)), 'share', 'cmake')

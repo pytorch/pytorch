@@ -232,6 +232,7 @@ cmake_dependent_option(
 option(USE_TBB "Use TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
+option(USE_DEPLOY "Enable torch deploy feature" OFF)
 
 # Since TensorPipe does not support Windows, set it to OFF when WIN32 detected
 # On Windows platform, if user does not install libuv in build conda env and
@@ -906,3 +907,10 @@ endif()
 
 include(cmake/Summary.cmake)
 caffe2_print_configuration_summary()
+
+# ---[ Torch Deployment Prototype
+# Currently does not build correctly with cuda or distributed,
+# has only been tested on linux
+if(USE_DEPLOY)
+  add_subdirectory(torch/csrc/deploy)
+endif()

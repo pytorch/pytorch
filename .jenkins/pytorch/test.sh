@@ -339,6 +339,11 @@ test_vec256() {
   fi
 }
 
+test_torch_deploy() {
+  SIMPLE_MODEL_PATH=torch/csrc/deploy/example/simple.pt LIBINTERPRETER_PATH=build/lib/libinterpreter.so build/bin/interpreter_test
+  assert_git_not_dirty
+}
+
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
@@ -374,6 +379,8 @@ elif [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4
   # test cpp extension for xenial + cuda 9.2 + gcc 5.4 to make sure
   # cpp extension can be built correctly under this old env
   test_cpp_extensions
+elif [[ "${BUILD_ENVIRONMENT}" ==  pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7* ]]; then
+  test_torch_deploy
 else
   install_torchvision
   test_python_shard1

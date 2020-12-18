@@ -97,6 +97,8 @@ torch/test/
 torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h
 torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h
 torch/version.py
+torchpy/interpreter/frozen
+torchpy/interpreter/python_path.h
 # Root level file used in CI to specify certain env configs.
 # E.g., see .circleci/config.yaml
 env

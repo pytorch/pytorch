@@ -186,7 +186,7 @@ int64_t CudaIPCSentData::counter_value() {
   return *counter_ptr_;
 }
 
-at::DataPtr GetNewRefCountedSentData(void* data, at::Device device) {
+TORCH_API at::DataPtr GetNewRefCountedSentData(void* data, at::Device device) {
   {
     std::lock_guard<std::mutex> lock(
         cuda_ipc_global_entities.ref_counters_mutex_);
@@ -228,7 +228,7 @@ at::DataPtr GetNewRefCountedSentData(void* data, at::Device device) {
   return at::DataPtr(data, sent_data, CudaIPCSentDataDelete, device);
 }
 
-bool CudaIPCCollect() {
+TORCH_API bool CudaIPCCollect() {
   bool freed_memory = cuda_ipc_global_entities.CudaIPCSentDataLimbo_.collect();
   if (cuda_ipc_global_entities.CudaIPCSentDataLimbo_.size() == 0) {
     cuda_ipc_global_entities.safe_clean_current_file();

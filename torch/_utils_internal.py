@@ -1,6 +1,7 @@
 
 import os
 import inspect
+import sys
 import tempfile
 
 # this arbitrary-looking assortment of functionality is provided here
@@ -8,11 +9,13 @@ import tempfile
 # use is the FB build environment, where this source file is replaced
 # by an equivalent.
 
-if os.path.basename(os.path.dirname(__file__)) == 'shared':
-    torch_parent = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-else:
-    torch_parent = os.path.dirname(os.path.dirname(__file__))
-
+# TODO(torchpy): we use `__file__` here, which is incompatible with libinterpreter's
+# freezing scheme. Figure out a real alternative.
+if not sys.executable == 'i_am_torchpy':
+    if os.path.basename(os.path.dirname(__file__)) == 'shared':
+        torch_parent = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    else:
+        torch_parent = os.path.dirname(os.path.dirname(__file__))
 
 def get_file_path(*path_components):
     return os.path.join(torch_parent, *path_components)
