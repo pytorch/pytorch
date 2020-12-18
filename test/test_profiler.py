@@ -284,7 +284,10 @@ class TestProfiler(TestCase):
 
     def test_export_stacks(self):
         with profile(with_stack=True, use_kineto=kineto_available()) as p:
-            self.payload()
+            x = torch.randn(10, 10)
+            y = torch.randn(10, 10)
+            z = torch.mm(x, y)
+            z = z + y
 
         with tempfile.NamedTemporaryFile(mode="w+") as f:
             p.export_stacks(f.name)

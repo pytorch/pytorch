@@ -543,21 +543,19 @@ class profile(object):
 
     def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
         self._check_finish()
-        if metric not in self.supported_export_stacks_metrics():
-            raise ValueError("metric should be one of: " + str(self.supported_export_stacks_metrics()))
-        assert self.function_events is not None, "Empty profiling results"
+        assert self.function_events is not None, "Expected profiling results"
         assert self.with_stack, "export_stacks() requires with_stack=True"
         return self.function_events.export_stacks(path, metric)
 
     def key_averages(self, group_by_input_shape=False, group_by_stack_n=0):
         self._check_finish()
-        assert self.function_events is not None, "Empty profiling results"
+        assert self.function_events is not None, "Expected profiling results"
         return self.function_events.key_averages(group_by_input_shape, group_by_stack_n)
     key_averages.__doc__ = EventList.key_averages.__doc__
 
     def total_average(self):
         self._check_finish()
-        assert self.function_events is not None, "Empty profiling results"
+        assert self.function_events is not None, "Expected profiling results"
         return self.function_events.total_average()
     total_average.__doc__ = EventList.total_average.__doc__
 
