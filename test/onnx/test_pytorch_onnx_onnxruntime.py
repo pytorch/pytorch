@@ -4855,17 +4855,18 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, input, target):
                 return torch.nn.functional.binary_cross_entropy_with_logits(input, target, reduction='mean')
 
-        self.run_test(BCEWithLogitsLossNone(), input=(x, y))
+        self.run_test(BCEWithLogitsLossMean(), input=(x, y))
 
         class BCEWithLogitsLossSum(torch.nn.Module):
             def forward(self, input, target):
                 return torch.nn.functional.binary_cross_entropy_with_logits(input, target, reduction='sum')
 
-        self.run_test(BCEWithLogitsLossNone(), input=(x, y))
+        self.run_test(BCEWithLogitsLossSum(), input=(x, y))
 
         class BCEWithLogitsLossWithWeights(torch.nn.Module):
             def forward(self, input, target, weight, pos_weight):
-                return torch.nn.functional.binary_cross_entropy_with_logits(input, target, weight=weight, pos_weight=pos_weight, reduction='sum')
+                return torch.nn.functional.binary_cross_entropy_with_logits(input, target, weight=weight, 
+                                                                            pos_weight=pos_weight, reduction='mean')
 
         self.run_test(BCEWithLogitsLossWithWeights(), input=(x, y, weight, pos_weight))
 

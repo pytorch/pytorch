@@ -61,9 +61,9 @@ def binary_cross_entropy_with_logits(g, input, target, weight, pos_weight, reduc
     sub_1_y = sub(g, p, target)
     log_1_x = log(g, sub_1_x)
     if pos_weight is None or pos_weight.node().mustBeNone():
-        output = neg(g, add(g, mul(g, target, log_sig_x), mul(g, sub_1_y, log_1_x) ) )
+        output = neg(g, add(g, mul(g, target, log_sig_x), mul(g, sub_1_y, log_1_x)))
     else:
-        output = neg(g, add(g, mul(g, mul(g, target, log_sig_x), pos_weight), mul(g, sub_1_y, log_1_x) ) )
+        output = neg(g, add(g, mul(g, mul(g, target, log_sig_x), pos_weight), mul(g, sub_1_y, log_1_x)))
 
     if weight is not None and not sym_help._is_none(weight):
         output = mul(g, weight, output)
