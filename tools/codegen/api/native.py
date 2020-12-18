@@ -1,10 +1,10 @@
 from tools.codegen.model import *
 
-from tools.codegen.api.types import NativeArgument
+from tools.codegen.api.types import *
 import tools.codegen.api.cpp as cpp
 from tools.codegen import local
 
-from typing import Union, Sequence, Tuple, List
+from typing import Union, Sequence, List
 
 # This file describes the translation of JIT schema to the native functions API.
 # This looks a lot like the C++ API (which makes historical sense, because the
@@ -27,38 +27,33 @@ def name(func: FunctionSchema) -> str:
         name += f'_{func.name.overload_name}'
     return name
 
-def argumenttype_type(t: Type, *, mutable: bool) -> str:
+def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
     if str(t) == 'Tensor?':
         if mutable:
-            return 'Tensor &'
+            return MutRefCType(BaseCType('Tensor', binds))
         else:
-            return 'const Tensor &'
+            return ConstRefCType(BaseCType('Tensor', binds))
     elif str(t) == 'Tensor?[]':
-        return 'TensorList'
-    return cpp.argumenttype_type(t, mutable=mutable)
+        return BaseCType('TensorList', binds)
+    return cpp.argumenttype_type(t, mutable=mutable, binds=binds)
 
 def returns_type(rs: Sequence[Return]) -> str:
     return cpp.returns_type(rs)
 
-def argument_type(a: Argument) -> str:
-    return argumenttype_type(a.type, mutable=a.is_write)
+def argument_type(a: Argument, *, binds: ArgName) -> CType:
+    return argumenttype_type(a.type, mutable=a.is_write, binds=binds)
 
-def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments]) -> Sequence[NativeArgument]:
+def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments]) -> List[Binding]:
     if isinstance(a, Argument):
-        return [NativeArgument(
-            type=argument_type(a),
+        return [Binding(
+            ctype=argument_type(a, binds=a.name),
             name=a.name,
             default=cpp.default_expr(a.default, a.type) if a.default is not None else None,
             argument=a,
         )]
     elif isinstance(a, SelfArgument):
         # Erase SelfArgument from the distinction
-        return [NativeArgument(
-            type=argument_type(a.argument),
-            name=a.argument.name,
-            default=None,
-            argument=a.argument,
-        )]
+        return argument(a.argument)
     elif isinstance(a, TensorOptionsArguments):
         if local.use_c10_dispatcher() in [UseC10Dispatcher.hacky_wrapper_for_legacy_signatures,
                                           UseC10Dispatcher.with_codegenerated_unboxing_wrapper]:
@@ -68,8 +63,8 @@ def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments]) -> Sequen
                 default = '{}'
             elif a.dtype.default == "long":
                 default = 'at::kLong'  # TODO: this is wrong
-            return [NativeArgument(
-                type='const TensorOptions &',
+            return [Binding(
+                ctype=ConstRefCType(BaseCType('TensorOptions', 'options')),
                 name='options',
                 default=default,
                 argument=a,
@@ -77,26 +72,26 @@ def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments]) -> Sequen
         else:
             assert local.use_c10_dispatcher() == UseC10Dispatcher.full
             return [
-                NativeArgument(
-                    type='c10::optional<ScalarType>',
+                Binding(
+                    ctype=OptionalCType(BaseCType('ScalarType', 'dtype')),
                     name='dtype',
                     default='{}',
                     argument=a,
                 ),
-                NativeArgument(
-                    type='c10::optional<Layout>',
+                Binding(
+                    ctype=OptionalCType(BaseCType('Layout', 'layout')),
                     name='layout',
                     default='{}',
                     argument=a,
                 ),
-                NativeArgument(
-                    type='c10::optional<Device>',
+                Binding(
+                    ctype=OptionalCType(BaseCType('Device', 'device')),
                     name='device',
                     default='{}',
                     argument=a,
                 ),
-                NativeArgument(
-                    type='c10::optional<bool>',
+                Binding(
+                    ctype=OptionalCType(BaseCType('bool', 'pin_memory')),
                     name='pin_memory',
                     default='{}',
                     argument=a,
@@ -104,7 +99,7 @@ def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments]) -> Sequen
     else:
         assert_never(a)
 
-def arguments(func: FunctionSchema) -> Tuple[NativeArgument, ...]:
+def arguments(func: FunctionSchema) -> List[Binding]:
     args: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
     if local.use_c10_dispatcher() is UseC10Dispatcher.full:
         args.extend(func.arguments.non_out)
@@ -112,4 +107,4 @@ def arguments(func: FunctionSchema) -> Tuple[NativeArgument, ...]:
     else:
         args.extend(func.arguments.out)
         args.extend(func.arguments.non_out)
-    return tuple(i for arg in args for i in argument(arg))
+    return [r for arg in args for r in argument(arg)]

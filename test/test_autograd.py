@@ -1161,6 +1161,187 @@ class TestAutograd(TestCase):
             enable_grad_context_manager_recursive(10)
             self.assertFalse(torch.is_grad_enabled())
 
+    def test_set_grad_coroutines(self):
+        @torch.no_grad()
+        def coro_no_grad(n=10):
+            self.assertFalse(torch.is_grad_enabled())
+            for i in range(n):
+                self.assertFalse(torch.is_grad_enabled())
+                r = yield i
+                self.assertFalse(torch.is_grad_enabled())
+                self.assertEqual(i, r)
+            self.assertFalse(torch.is_grad_enabled())
+
+        @torch.enable_grad()
+        def coro_enable_grad(n=10):
+            self.assertTrue(torch.is_grad_enabled())
+            for i in range(n):
+                self.assertTrue(torch.is_grad_enabled())
+                r = yield i
+                self.assertTrue(torch.is_grad_enabled())
+                self.assertEqual(i, r)
+            self.assertTrue(torch.is_grad_enabled())
+
+        with torch.enable_grad():
+            self.assertTrue(torch.is_grad_enabled())
+            coro, r = coro_no_grad(), None
+            try:
+                while True:
+                    self.assertTrue(torch.is_grad_enabled())
+                    r = coro.send(r)
+                    self.assertTrue(torch.is_grad_enabled())
+
+            except StopIteration:
+                pass
+
+        with torch.no_grad():
+            self.assertFalse(torch.is_grad_enabled())
+            coro, r = coro_enable_grad(), None
+            try:
+                while True:
+                    self.assertFalse(torch.is_grad_enabled())
+                    r = coro.send(r)
+                    self.assertFalse(torch.is_grad_enabled())
+
+            except StopIteration:
+                pass
+
+    def test_set_grad_coroutines_benign_exceptions(self):
+        class RecoverableException(Exception):
+            pass
+
+        @torch.no_grad()
+        def coro_no_grad(n=10):
+            has_raised = False
+            for i in range(n):
+                try:
+                    self.assertFalse(torch.is_grad_enabled())
+                    yield (-i if has_raised else i)
+
+                except RecoverableException:
+                    self.assertFalse(torch.is_grad_enabled())
+                    has_raised = True
+
+        @torch.enable_grad()
+        def coro_enable_grad(n=10):
+            has_raised = False
+            for i in range(n):
+                try:
+                    self.assertTrue(torch.is_grad_enabled())
+                    yield (-i if has_raised else i)
+
+                except RecoverableException:
+                    self.assertTrue(torch.is_grad_enabled())
+                    has_raised = True
+
+        with torch.enable_grad():
+            coro = coro_no_grad()
+            assert 0 == next(coro)
+            try:
+                while True:
+                    r = coro.throw(RecoverableException)
+                    self.assertLess(r, 0)
+
+            except StopIteration:
+                pass
+
+        with torch.no_grad():
+            coro = coro_enable_grad()
+            assert 0 == next(coro)
+            try:
+                while True:
+                    r = coro.throw(RecoverableException)
+                    self.assertLess(r, 0)
+
+            except StopIteration:
+                pass
+
+    def test_set_grad_coroutines_critical_exceptions(self):
+        class UnrecoverableException(Exception):
+            pass
+
+        class SecondaryException(Exception):
+            pass
+
+        @torch.no_grad()
+        def coro_no_grad(n=10):
+            has_raised = False
+            for i in range(n):
+                try:
+                    self.assertFalse(torch.is_grad_enabled())
+                    yield (-i if has_raised else i)
+
+                except UnrecoverableException:
+                    self.assertFalse(torch.is_grad_enabled())
+                    raise SecondaryException
+
+        @torch.enable_grad()
+        def coro_enable_grad(n=10):
+            has_raised = False
+            for i in range(n):
+                try:
+                    self.assertTrue(torch.is_grad_enabled())
+                    yield (-i if has_raised else i)
+
+                except UnrecoverableException:
+                    self.assertTrue(torch.is_grad_enabled())
+                    raise SecondaryException
+
+        with torch.enable_grad():
+            coro = coro_no_grad()
+            assert 0 == next(coro)
+            with self.assertRaises(SecondaryException):
+                coro.throw(UnrecoverableException)
+
+        with torch.no_grad():
+            coro = coro_enable_grad()
+            assert 0 == next(coro)
+            with self.assertRaises(SecondaryException):
+                coro.throw(UnrecoverableException)
+
+    def test_set_grad_coroutines_exit(self):
+        @torch.no_grad()
+        def coro_no_grad(state):
+            for i in range(10):
+                try:
+                    self.assertFalse(torch.is_grad_enabled())
+                    yield i
+
+                except GeneratorExit:
+                    self.assertFalse(torch.is_grad_enabled())
+                    state.add('GeneratorExit')
+                    raise
+
+        @torch.enable_grad()
+        def coro_enable_grad(state):
+            for i in range(10):
+                try:
+                    self.assertTrue(torch.is_grad_enabled())
+                    yield i
+
+                except GeneratorExit:
+                    self.assertTrue(torch.is_grad_enabled())
+                    state.add('GeneratorExit')
+                    raise
+
+        state = set()
+        with torch.enable_grad():
+            coro = coro_no_grad(state)
+            for i in range(5):
+                next(coro)
+
+            coro.close()
+        self.assertTrue('GeneratorExit' in state)
+
+        state = set()
+        with torch.no_grad():
+            coro = coro_enable_grad(state)
+            for i in range(5):
+                next(coro)
+
+            coro.close()
+        self.assertTrue('GeneratorExit' in state)
+
     def test_no_grad_python_function(self):
         """Python Functions should respect grad mode."""
         x = torch.ones(5, 5, requires_grad=True)

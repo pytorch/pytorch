@@ -2,6 +2,7 @@ import pickle
 import torch
 import warnings
 import contextlib
+import time
 from torch._six import string_classes
 from datetime import timedelta
 from typing import Dict, Optional, Tuple, Union
@@ -172,6 +173,26 @@ _default_pg_init_method = None
 # Process group count for default naming
 _group_count = 0
 
+STORE_BASED_BARRIER_PREFIX = "store_based_barrier_key"
+
+def _store_based_barrier(rank, store, timeout):
+    """
+    Barrier based on store which is used for synchronizing processes after
+    ``init_process_group`` or ``new_group``. Intended to be used only with
+    those two methods and is not a generic alternative to ``barrier()``.
+    """
+    store_key = "{}:{}".format(STORE_BASED_BARRIER_PREFIX, _group_count)
+    store.add(store_key, 1)
+
+    # Now wait for all workers to check in with the store.
+    world_size = get_world_size()
+    worker_count = int(store.get(store_key))
+    start = time.time()
+    while worker_count != world_size:
+        time.sleep(0.01)
+        worker_count = int(store.get(store_key))
+        if timedelta(seconds=(time.time() - start)) > timeout:
+            raise RuntimeError("Timed out initializing process group")
 
 def _rank_not_in_group(group: ProcessGroup):
     """
@@ -382,7 +403,8 @@ def init_process_group(backend,
                                      Mutually exclusive with ``store``.
         world_size (int, optional): Number of processes participating in
                                     the job. Required if ``store`` is specified.
-        rank (int, optional): Rank of the current process.
+        rank (int, optional): Rank of the current process (it should be a
+                              number between 0 and ``world_size``-1).
                               Required if ``store`` is specified.
         store(Store, optional): Key/value store accessible to all workers, used
                                 to exchange connection/address information.
@@ -474,7 +496,13 @@ def init_process_group(backend,
     # barrier at the end to ensure that once we return from this method, all
     # process groups including global variables are updated correctly on all
     # ranks.
-    barrier()
+    if backend == Backend.MPI:
+        # MPI doesn't have store.
+        barrier()
+    else:
+        # Use store based barrier here since barrier() used a bunch of
+        # default devices and messes up NCCL internal state.
+        _store_based_barrier(rank, store, timeout)
 
 def _new_process_group_helper(world_size,
                               rank,
@@ -695,7 +723,7 @@ def isend(tensor,
 
 
 def irecv(tensor,
-          src,
+          src=None,
           group=None,
           tag=0):
     """
@@ -703,7 +731,8 @@ def irecv(tensor,
 
     Arguments:
         tensor (Tensor): Tensor to fill with received data.
-        src (int): Source rank.
+        src (int, optional): Source rank. Will receive from any
+            process if unspecified.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match recv with remote send
@@ -718,11 +747,18 @@ def irecv(tensor,
         return
 
     if group is None or group is GroupMember.WORLD:
-        default_pg = _get_default_group()
-        return default_pg.recv([tensor], src, tag)
+        pg = _get_default_group()
     else:
-        group_src_rank = _get_group_rank(group, src)
-        return group.recv([tensor], group_src_rank, tag)
+        pg = group
+
+    if src is None:
+        return pg.recv_anysource([tensor], tag)
+    else:
+        if pg is GroupMember.WORLD:
+            return pg.recv([tensor], src, tag)
+        else:
+            group_src_rank = _get_group_rank(pg, src)
+            return pg.recv([tensor], group_src_rank, tag)
 
 
 def send(tensor,
@@ -2443,6 +2479,12 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
     # barrier at the end to ensure that once we return from this method, all
     # process groups including global variables are updated correctly on all
     # ranks.
-    barrier()
+    if backend == Backend.MPI:
+        # MPI doesn't have store.
+        barrier()
+    else:
+        # Use store based barrier here since barrier() used a bunch of
+        # default devices and messes up NCCL internal state.
+        _store_based_barrier(group_rank, default_store, timeout)
 
     return pg

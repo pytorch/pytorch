@@ -809,6 +809,7 @@ inline IValue toIValue(
       return toTypeInferredIValue(obj);
     case TypeKind::FunctionType:
     case TypeKind::GeneratorType:
+    case TypeKind::StorageType:
     case TypeKind::QuantizerType:
     case TypeKind::VarType:
     case TypeKind::QSchemeType:
@@ -877,6 +878,15 @@ inline IValue argumentToIValue(
             argumentPosition,
             py::repr(object)),
         "\nCast error details: ",
+        error.what()));
+  } catch (const py::error_already_set& error) {
+    throw schema_match_error(c10::str(
+        schema.formatTypeMismatchMsg(
+            argument,
+            friendlyTypeName(object),
+            argumentPosition,
+            py::repr(object)),
+        "\n Python error details: ",
         error.what()));
   }
 }
@@ -1244,20 +1254,18 @@ inline py::object invokeScriptMethodFromPython(
       });
 }
 
-inline py::object invokeOperatorFromPython(
+inline std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     const std::vector<std::shared_ptr<Operator>>& operations,
     py::args args,
     const py::kwargs& kwargs) {
   Stack stack;
-
   if (operations.size() == 1) {
-    const Operator& op = *operations.at(0);
+    std::shared_ptr<Operator> op = operations.at(0);
     // Create a stack full of the arguments and keyword arguments.
     stack = createStackForSchema(
-        op.schema(), std::move(args), kwargs, c10::nullopt);
+        op->schema(), std::move(args), kwargs, c10::nullopt);
 
-    pybind11::gil_scoped_release no_gil_guard;
-    op.getOperation()(&stack);
+    return std::make_pair(op, stack);
   } else {
     std::vector<schema_match_error> errors;
     std::shared_ptr<Operator> found_op = nullptr;
@@ -1279,6 +1287,17 @@ inline py::object invokeOperatorFromPython(
       throw std::runtime_error(ss.str());
     }
 
+    return std::make_pair(found_op, stack);
+  }
+}
+inline py::object invokeOperatorFromPython(
+    const std::vector<std::shared_ptr<Operator>>& operations,
+    py::args args,
+    const py::kwargs& kwargs) {
+  auto opWithStack = getOpWithStack(operations, args, kwargs);
+  std::shared_ptr<Operator> found_op = std::get<0>(opWithStack);
+  Stack stack = std::get<1>(opWithStack);
+  {
     pybind11::gil_scoped_release no_gil_guard;
     found_op->getOperation()(&stack);
   }
