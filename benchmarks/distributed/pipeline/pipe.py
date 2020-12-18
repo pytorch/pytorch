@@ -1,5 +1,3 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All rights reserved.
-
 import argparse
 import logging
 import math
@@ -133,12 +131,8 @@ def make_model(args, device, ntokens):
 
 def train(lm_dataloader, model, criterion, optimizer, vocab_size, args):
     model.train()
-    from functools import reduce
-    import operator
 
-    num_params = reduce(operator.add, (reduce(operator.mul, x.size()) for x in model.parameters()))
-    logging.info(f"training model, #prams = {num_params}")
-    vocab_size = 10000  # FIXME
+    vocab_size = 10000
     total_loss = 0.0
     start_time = time.time()
     word_counter = 0
