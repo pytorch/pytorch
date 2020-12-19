@@ -152,8 +152,6 @@ class SerializationMixin(object):
             self._test_serialization_assert(b, c)
         with TemporaryFileName() as fname:
             torch.save(b, fname)
-            with io.open(fname, 'r') as f:
-                f.seek(0)
             c = torch.load(fname)
             self._test_serialization_assert(b, c)
         # test non-ascii encoding of bytes arrays/strings
