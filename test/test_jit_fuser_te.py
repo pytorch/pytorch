@@ -1281,6 +1281,7 @@ class TestTEFuser(JitTestCase):
             self.assertEqual(ref, mod.forward(x))
             self.assertLastGraphAllFused()
 
+    @unittest.skip("temp disabled")
     def test_masked_fill(self):
         # check scalar overload
         def foo(x, mask):
