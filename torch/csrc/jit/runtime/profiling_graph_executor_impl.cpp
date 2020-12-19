@@ -126,9 +126,26 @@ bool guardDifferentiableGraph(Node* dnode) {
     if (ty) {
       auto n = gi[i]->uses().at(0).user;
       auto dni = dnode->inputs().at(i);
+      GRAPH_DEBUG("found first user of ", i, " as ", *n);
       if (n->kind() == prim::profile) {
+        GRAPH_DEBUG(
+            "setting input ", i, " to type ", *n->ty(attr::profiled_type));
         dni->setType(n->ty(attr::profiled_type));
+      } else if (dni->node()->kind() == prim::DifferentiableGraph) {
+        // The profiling node might have been absorbed in a preceding
+        // differentiable graph and thus not (not ideal for fusing either),
+        // see TestAutodiffSubgraphSlicing.test_does_not_create_cycles.
+        // Alternatives to this special casing could be specializing the types
+        // before autodiff or duplicating profile nodes for autodiff outputs
+        // but that should be done while creating subgraphs and would be
+        // a mess.
+        // XXX TODO: revisit the alternatives
+        Value* o = dni->node()->g(attr::Subgraph)->outputs().at(dni->offset());
+        if (o->node()->kind() == prim::profile) {
+          dni->setType(o->node()->ty(attr::profiled_type));
+        }
       }
+
       // we check if the optional is defined
       all_requires_grad_defined &=
           dni->type()->cast<TensorType>()->requiresGrad().has_value();
@@ -415,8 +432,10 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     GRAPH_DEBUG("After CreateAutodiffSubgraphs\n", *copy);
     size_t idx = 0;
     for (Node* dnode : diff_nodes) {
-      GRAPH_DEBUG("Optimizing diff node ", idx);
+      GRAPH_DEBUG("Optimizing diff node ", idx, " in ", *copy);
       if (!guardDifferentiableGraph(dnode)) {
+        GRAPH_DEBUG("Could not guardDifferentiableGraph ", idx, " in ", *copy);
+        idx++;
         continue;
       }
       GRAPH_DEBUG("After guardDifferentiableGraph:\n", *copy);
