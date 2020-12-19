@@ -18,7 +18,7 @@ class OnnxExporter;
 
 // Split SparseLengthsSumSparse into SparseLengthsSumSparseLookup +
 // SparseLengthsSum
-CAFFE2_API void splitSparseLengthsSumSparse(NetDef* net, const Workspace& ws);
+TORCH_API void splitSparseLengthsSumSparse(NetDef* net, const Workspace& ws);
 
 struct OnnxifiTransformerOptions final : public BackendTransformOptions {
   explicit OnnxifiTransformerOptions() : BackendTransformOptions() {}
@@ -49,7 +49,7 @@ struct OnnxifiTransformerOptions final : public BackendTransformOptions {
   std::unordered_map<int, ShapeInfoMap> shape_hints_per_bs;
 };
 
-class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
+class TORCH_API OnnxifiTransformer final : public BackendTransformerBase {
  public:
   explicit OnnxifiTransformer(const OnnxifiTransformerOptions& opts);
   ~OnnxifiTransformer() override;
