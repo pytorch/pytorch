@@ -322,7 +322,7 @@ def np_binary_ufunc_integer_promotion_wrapper(fn):
     #   PyTorch and NumPy on the type promotion for binary
     #   functions
     #      inputs         NumPy     PyTorch
-    #    bool  bool       int8       bool
+    #    bool  bool       vary        bool
     #   int16 float16    float32    float16
     #   int32 float16    float64    float16
     #   int64 float16    float64    float16
