@@ -969,15 +969,11 @@ class Quantizer:
                    (activation_is_statically_quantized(qconfig) or is_weight):
                     act_post_process_ctr = qconfig.weight if is_weight else \
                         qconfig.activation
-                    quants[arg.name] = (
-                        DefaultQuantizeHandler(self, arg), qconfig)
                     # overwrite the constructor from qconfig
                     act_post_process_ctr = \
                         get_default_output_activation_post_process_map().get(
                             matched_pattern,
                             act_post_process_ctr)
-                    # overwrite previous activation post process constructor if
-                    # necessary
                     quants[arg.name] = (
                         DefaultQuantizeHandler(self, arg), act_post_process_ctr)
             return visit_arg
