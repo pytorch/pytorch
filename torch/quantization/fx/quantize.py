@@ -61,7 +61,7 @@ from .qconfig_utils import *
 
 import warnings
 
-from typing import Optional, Dict, Any, List, Union, Tuple, Set, Callable
+from typing import Optional, Dict, Any, List, Tuple, Set, Callable
 
 # Define helper types
 MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,
