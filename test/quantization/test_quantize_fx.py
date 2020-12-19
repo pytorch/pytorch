@@ -1344,7 +1344,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
             }
             self.checkGraphModeFxOp(
                 conv, self.img_data_dict[2], QuantType.STATIC,
-                print_debug_info=True,
                 prepare_expected_node_occurrence=expected_node_occurrence,
             )
 
