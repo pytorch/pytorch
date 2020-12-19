@@ -282,6 +282,7 @@ class TestProfiler(TestCase):
         print(p.key_averages().table(
             sort_by="self_cuda_time_total", row_limit=-1))
 
+    @unittest.skipIf(IS_WINDOWS, "Disabled on windows (permissions)")
     def test_export_stacks(self):
         with profile(with_stack=True, use_kineto=kineto_available()) as p:
             x = torch.randn(10, 10)
