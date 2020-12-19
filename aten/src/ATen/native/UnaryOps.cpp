@@ -308,8 +308,8 @@ Tensor& digamma_out(Tensor& result, const Tensor& self) { return unary_op_impl_o
 Tensor digamma(const Tensor& self) { return unary_op_impl(self, digamma_out); }
 Tensor& digamma_(Tensor& self) { return unary_op_impl_(self, digamma_out); }
 
-Tensor& reciprocal_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, reciprocal_stub); }
-Tensor reciprocal(const Tensor& self) { return unary_op_impl(self, at::reciprocal_out); }
+Tensor& reciprocal_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, reciprocal_stub); }
+Tensor reciprocal(const Tensor& self) { return unary_op_impl_float(self, reciprocal_stub); }
 Tensor& reciprocal_(Tensor& self) { return unary_op_impl_(self, at::reciprocal_out); }
 
 Tensor& rsqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, rsqrt_stub); }
