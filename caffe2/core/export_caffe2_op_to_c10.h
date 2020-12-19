@@ -180,7 +180,7 @@ inline FunctionSchema make_function_schema_for_c10(const char* schema_str) {
 #define C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(OperatorName)   \
   namespace caffe2 {                                        \
   namespace _c10_ops {                                      \
-  CAFFE2_API const FunctionSchema& schema_##OperatorName(); \
+  TORCH_API const FunctionSchema& schema_##OperatorName(); \
   }                                                         \
   }
 
