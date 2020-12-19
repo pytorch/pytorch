@@ -316,7 +316,7 @@ class KLDivLoss(_Loss):
 
     .. math::
         l(x,y) = L = \{ l_1,\dots,l_N \}, \quad
-        l_n = y_n \cdot \left( \log y_n - x_n \right)
+        l_n = y_n \cdot \left( \log y_n - \log x_n \right)
 
     where the index :math:`N` spans all dimensions of ``input`` and :math:`L` has the same
     shape as ``input``. If :attr:`reduction` is not ``'none'`` (default ``'mean'``), then:
