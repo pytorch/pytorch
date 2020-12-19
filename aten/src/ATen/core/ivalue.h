@@ -318,13 +318,13 @@ struct CAFFE2_API IValue final {
       // make this abundantly clear.
       //
       // payload.as_tensor.~Tensor();
-      copyNontensorPayload(rhs.payload, rhs.tag);
+      payload.u = rhs.payload.u;
       new (&rhs.payload.as_tensor) at::Tensor(std::move(t));
     } else if (rhs.isTensor()) {
       rhs.swap(*this);
       return;
     } else {
-      std::swap(reinterpret_cast<char(&)[sizeof(payload)]>(*&payload), reinterpret_cast<char(&)[sizeof(payload)]>(*&rhs.payload));
+      std::swap(payload.u, rhs.payload.u);
     }
     std::swap(is_intrusive_ptr, rhs.is_intrusive_ptr);
     std::swap(tag, rhs.tag);
@@ -883,7 +883,7 @@ struct CAFFE2_API IValue final {
       //
       // rhs.payload.as_tensor.~Tensor();
     } else {
-      copyNontensorPayload(rhs.payload, rhs.tag);
+      payload.u = rhs.payload.u;
     }
     tag = rhs.tag;
     is_intrusive_ptr = rhs.is_intrusive_ptr;
@@ -925,12 +925,8 @@ struct CAFFE2_API IValue final {
     if (isTensor()) {
       new (&payload.as_tensor) at::Tensor(p.as_tensor);
     } else {
-      copyNontensorPayload(p, t);
+      payload.u = p.u;
     }
-  }
-
-  void copyNontensorPayload(const Payload& from, Tag t) noexcept {
-    payload.u = from.u;
   }
 
   Payload payload;
@@ -940,7 +936,7 @@ struct CAFFE2_API IValue final {
 };
 
 struct CAFFE2_API WeakIValue final {
-  WeakIValue() : payload{0}, tag(IValue::Tag::None), is_intrusive_ptr(false) {}
+  WeakIValue() : tag(IValue::Tag::None), is_intrusive_ptr(false) {}
 
   WeakIValue(const WeakIValue& rhs)
       : payload(rhs.payload),
@@ -957,8 +953,7 @@ struct CAFFE2_API WeakIValue final {
       payload.as_intrusive_ptr = rhs.unsafeToTensorImpl();
       is_intrusive_ptr = true;
     } else {
-      static_assert(sizeof(payload) == sizeof(rhs.payload.u), "WeakIValue payload is out of sync");
-      memcpy(&payload, &rhs.payload.u, sizeof(payload));
+      payload = rhs.payload.u;
     }
     if (is_intrusive_ptr) {
       if (payload.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton()) {
@@ -996,8 +991,7 @@ struct CAFFE2_API WeakIValue final {
   IValue lock() const {
     if (!is_intrusive_ptr) {
       IValue::Payload newPayload;
-      static_assert(sizeof(payload) == sizeof(newPayload.u), "WeakIValue payload is out of sync");
-      memcpy(&newPayload.u, &payload, sizeof(payload));
+      newPayload.u = payload;
       return IValue(newPayload, tag, false);
     }
     if (IValue::Tag::Tensor == tag) {
@@ -1052,18 +1046,7 @@ struct CAFFE2_API WeakIValue final {
   }
 
  private:
-  union Payload {
-    int64_t as_int;
-    double as_double;
-    bool as_bool;
-    // Invariant: never nullptr; null state is represented as
-    // UndefinedTensorImpl::singleton() for consistency with Tensor.
-    c10::intrusive_ptr_target* as_intrusive_ptr;
-    struct {
-      DeviceType type;
-      DeviceIndex index;
-    } as_device;
-  };
+  using Payload = IValue::Payload::TriviallyCopyablePayload;
   Payload payload;
   IValue::Tag tag;
   bool is_intrusive_ptr;
