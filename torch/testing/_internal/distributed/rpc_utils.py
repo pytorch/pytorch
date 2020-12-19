@@ -14,9 +14,6 @@ from torch.testing._internal.distributed.ddp_under_dist_autograd_test import (
     DdpComparisonTest,
     DdpUnderDistAutogradTest,
 )
-from torch.testing._internal.distributed.pipe_with_ddp_test import (
-    PipeWithDDPTest,
-)
 from torch.testing._internal.distributed.nn.api.remote_module_test import (
     RemoteModuleTest,
 )
@@ -123,7 +120,6 @@ GENERIC_TESTS = [
     RemoteModuleTest,
     DdpUnderDistAutogradTest,
     DdpComparisonTest,
-    PipeWithDDPTest,
 ]
 
 
