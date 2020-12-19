@@ -983,7 +983,6 @@ class Quantizer:
          node_name -> (QuantizeHandler instance (always DefaultQuantizeHandler),
          activation_post_process (observer/fake_quantize module) constructor)
         """
-        # quants: Dict[str, Any] = {}
         quants: Dict[str, Tuple[DefaultQuantizeHandler, Callable]] = {}
 
         def visit(node, matched_pattern, qconfig):
