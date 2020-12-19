@@ -671,6 +671,9 @@ class QuantizationTestCase(TestCase):
                 prepare_custom_config_dict=prepare_custom_config_dict)
             if not quant_type == QuantType.DYNAMIC:
                 prepared(*inputs)
+            # debug only
+            # print(prepared)
+            # return
 
             self.checkGraphModuleNodes(
                 prepared, prepare_expected_node,
@@ -685,10 +688,12 @@ class QuantizationTestCase(TestCase):
             qgraph_to_check = qgraph_debug if debug else qgraph
             if print_debug_info:
                 print()
-                print('quant type:', quant_type)
-                print('original model:', model)
+                print('quant type:\n', quant_type)
+                print('original model:\n', model)
                 print()
-                print('quantized model:', qgraph_to_check)
+                print('prepared model:\n', prepared)
+                print()
+                print('quantized model:\n', qgraph_to_check)
                 self.printGraphModule(qgraph_to_check)
                 print()
             self.checkGraphModuleNodes(
