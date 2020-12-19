@@ -103,11 +103,8 @@ def unfold(g, input, dimension, size, step):
         return _unfold(g, input, dimension, size, step)
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
-    sizes = sym_help._get_tensor_sizes(input)
-    try:
-        sizedim = sizes[dimension]
-    except Exception:
-        sizedim = None
+
+    sizedim = sym_help._get_tensor_dim_size(input, dimension)
     if sizedim is not None:
         low_start = g.op("Constant", value_t=torch.tensor(0))
         low_end = g.op("Constant", value_t=torch.tensor(sizedim))
@@ -118,12 +115,13 @@ def unfold(g, input, dimension, size, step):
         low_size = sym_help._size_helper(g, low_indices, g.op("Constant", value_t=torch.tensor(0)))
         hi_size = sym_help._size_helper(g, hi_indices, g.op("Constant", value_t=torch.tensor(0)))
 
-        ndim = len(sizes)
+        ndim = sym_help._get_tensor_rank(input)
         perm = list(range(0, ndim))
         perm.append(perm.pop(dimension))
 
         unsqueeze_list = []
-        loop_condition = g.op("Constant", value_t=torch.BoolTensor(1))
+        loop_condition = g.op("Constant", value_t=torch.tensor(1))
+        loop_condition = g.op("Cast", loop_condition, to_i=9)
         loop_len = g.op("Min", low_size, hi_size)
         loop = g.op("Loop", loop_len, loop_condition)
 

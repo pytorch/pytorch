@@ -897,7 +897,8 @@ def embedding_bag(g,
     if scale_grad_by_freq and sym_help._training_mode:
         return sym_help._onnx_unsupported('embedding_bag with scale_grad_by_freq for training mode')
 
-    loop_condition = g.op("Constant", value_t=torch.BoolTensor(1))
+    loop_condition = g.op("Constant", value_t=torch.tensor(1))
+    loop_condition = g.op("Cast", loop_condition, to_i=9)
     zero = g.op("Constant", value_t=torch.tensor([0]))
 
     indices_len = g.op("Unsqueeze",
