@@ -3,7 +3,6 @@ import gc
 import io
 import unittest
 
-import tempfile
 import torch
 import torch.nn as nn
 import torch.optim

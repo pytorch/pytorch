@@ -1,6 +1,5 @@
 
 import torch
-import tempfile
 from torch.utils import ThroughputBenchmark
 from torch.testing import assert_allclose
 
