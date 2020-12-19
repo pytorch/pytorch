@@ -21,7 +21,7 @@ namespace at { namespace native {
  * NOTE: if this is generally useful we may want to move this to its own header.
  */
 template <typename T>
-struct CAFFE2_API IntrusivePtrTargetWrapper : c10::intrusive_ptr_target {
+struct TORCH_API IntrusivePtrTargetWrapper : c10::intrusive_ptr_target {
 private:
   T target_;
 
