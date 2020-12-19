@@ -345,7 +345,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
 
   py::class_<::c10d::BarrierOptions>(module, "BarrierOptions")
       .def(py::init<>())
-      .def_readwrite("devicesId", &::c10d::BarrierOptions::devicesId)
+      .def_readwrite("device_ids", &::c10d::BarrierOptions::device_ids)
       .def_readwrite("timeout", &::c10d::BarrierOptions::timeout);
 
   py::class_<::c10d::AllToAllOptions>(module, "AllToAllOptions")

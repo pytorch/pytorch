@@ -429,9 +429,6 @@ def init_process_group(backend,
             might result in subsequent CUDA operations running on corrupted
             data. Only one of these two environment variables should be set.
         group_name (str, optional, deprecated): Group name.
-        deviceId (int, optional): device Id in case of NCCL backend
-            deviceId is used to specify the GPU number to be used for barrier
-            operation. By default; for rank 0 , cuda 0 will be used and so on.
 
     To enable ``backend == Backend.MPI``, PyTorch needs to be built from source
     on a system that supports MPI.
@@ -2365,7 +2362,7 @@ def all_to_all(output_tensor_list,
 
 def barrier(group=GroupMember.WORLD,
             async_op=False,
-            devicesId=None):
+            device_ids=None):
 
     """
     Synchronizes all processes.
@@ -2377,8 +2374,8 @@ def barrier(group=GroupMember.WORLD,
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
-        devicesId (int or [int], optional): Single or List of device/GPU id
-                                            Valid only for NCCL backend.
+        device_ids ([int], optional): List of device/GPU ids
+                                      Valid only for NCCL backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -2388,12 +2385,16 @@ def barrier(group=GroupMember.WORLD,
         return
 
     opts = BarrierOptions()
-    if devicesId is not None:
+    if device_ids is not None:
         try:
-            if type(devicesId) is not list: devicesId = [ devicesId ]
-            opts.devicesId = devicesId
+            if isinstance(device_ids, list):
+                opts.device_ids = device_ids
+            else:
+                raise RuntimeError("Invalid function argument: "
+                                   "device_ids type should be List[int]")
         except AttributeError:
-            raise RuntimeError('devicesId not supported for the selected backend')
+            raise RuntimeError("Function argument device_ids not supported "
+                               "for the selected backend {}".format(get_backend(group)))
     if group is None:
         default_pg = _get_default_group()
         work = default_pg.barrier(opts=opts)
