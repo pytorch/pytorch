@@ -180,14 +180,14 @@ inline at::Generator IValue::toGenerator() const& {
 
 namespace ivalue {
 
-void CAFFE2_API
+void TORCH_API
 checkCustomClassType(const Type* expected_type, const Type* actual_type);
 
 template <typename T>
 using Shared = c10::intrusive_ptr<T>;
 
 // string
-struct CAFFE2_API ConstantString final : c10::intrusive_ptr_target {
+struct TORCH_API ConstantString final : c10::intrusive_ptr_target {
  private:
   const std::string str_;
 
@@ -200,14 +200,14 @@ struct CAFFE2_API ConstantString final : c10::intrusive_ptr_target {
   operator const std::string&() const {
     return string();
   }
-  CAFFE2_API friend std::ostream& operator<<(
+  TORCH_API friend std::ostream& operator<<(
       std::ostream& out,
       const ConstantString& v);
 };
 
 struct Future;
 
-struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
+struct TORCH_API Tuple : c10::intrusive_ptr_target {
  private:
   std::vector<IValue> elements_;
   mutable std::shared_ptr<TupleType>
@@ -254,7 +254,7 @@ struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
     return c10::get_hash(t.elements());
   }
 
-  CAFFE2_API friend bool operator==(
+  TORCH_API friend bool operator==(
       const ivalue::Tuple& lhs,
       const ivalue::Tuple& rhs);
 
@@ -283,7 +283,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
 
  public:
   explicit Future(TypePtr type) : type_(type) {}
-  struct CAFFE2_API FutureError final : public std::exception {
+  struct TORCH_API FutureError final : public std::exception {
     explicit FutureError(std::string&& error_msg_)
         : error_msg(std::move(error_msg_)) {}
 
@@ -485,7 +485,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     return eptr_;
   }
 
-  CAFFE2_API friend std::ostream& operator<<(
+  TORCH_API friend std::ostream& operator<<(
       std::ostream& out,
       const Future& v);
 
@@ -573,11 +573,11 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
 
 // Input is a list of Futures with the same target type.
 // Output is a Future to the List of completed Futures.
-CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
+TORCH_API intrusive_ptr<ivalue::Future> collectAll(
     c10::List<c10::intrusive_ptr<ivalue::Future>> srcs);
 // Input is a List of Futures with the same target type.
 // Output is a Future that will be updated with a seen value.
-CAFFE2_API intrusive_ptr<ivalue::Future> collectAny(
+TORCH_API intrusive_ptr<ivalue::Future> collectAny(
     c10::List<c10::intrusive_ptr<ivalue::Future>> srcs);
 
 // User-defined object.
@@ -692,11 +692,11 @@ struct ivalue::EnumHolder : c10::intrusive_ptr_target {
       const ivalue::EnumHolder& lhs,
       const ivalue::EnumHolder& rhs);
 
-  CAFFE2_API friend std::ostream& operator<<(
+  TORCH_API friend std::ostream& operator<<(
       std::ostream& out,
       const EnumHolder& v);
 
-  CAFFE2_API const std::string qualifiedClassName() const;
+  TORCH_API const std::string qualifiedClassName() const;
 
   const std::string unqualifiedClassName() const;
 
