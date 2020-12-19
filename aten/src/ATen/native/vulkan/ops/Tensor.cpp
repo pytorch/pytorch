@@ -232,7 +232,7 @@ uvec3 image_extents(const IntArrayRef sizes) {
 
   switch (sizes.size()) {
     case 1:
-      width = div_up(sizes[0], INT64_C(4));
+      width = div_up(sizes[0], INT64_C(2));
       break;
 
     case 2:
@@ -879,7 +879,7 @@ void vTensor::View::CMD::copy_buffer_to_image(
   api::Shader::Descriptor kernel = VK_KERNEL(nchw_to_image);
 
   if (type == VK_IMAGE_TYPE_2D) {
-    uint32_t plane = sizes[Layout::Parameter::width];
+    uint32_t plane = sizes[sizes.size()-1];
     offset = {
       0,
       1,
