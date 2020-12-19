@@ -117,7 +117,7 @@ void div_kernel(TensorIterator& iter) {
 
 void remainder_kernel(TensorIterator& iter) {
   if (isIntegralType(iter.common_dtype(), /*includeBool*/ true)) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "remainder_cpu", [&]() {
+    AT_DISPATCH_INTEGRAL_TYPES_AND(kBool, iter.common_dtype(), "remainder_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
         TORCH_CHECK(b != 0, "ZeroDivisionError");
         scalar_t r = a % b;
@@ -640,7 +640,7 @@ void mse_kernel(TensorIterator& iter) {
 
 void fmod_kernel(TensorIterator& iter) {
   if (isIntegralType(iter.common_dtype(), /*includeBool=*/ true)) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "fmod_cpu", [&]() {
+    AT_DISPATCH_INTEGRAL_TYPES_AND(kBool, iter.common_dtype(), "fmod_cpu", [&]() {
       cpu_kernel(iter, [=](scalar_t x, scalar_t d) -> scalar_t {
         TORCH_CHECK(d != 0, "ZeroDivisionError");
         return x % d;
