@@ -1347,10 +1347,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 prepare_expected_node_occurrence=expected_node_occurrence,
             )
 
-    # currently doesn't work because:
-    # F.linear calls torch.linear
-    # the torch.linear call does not include bias
-    # something somewhere in node_arg_is_bias is not accounting for this
     def test_linear_functional_bias_not_observed(self):
         data = (torch.rand((1, 4), dtype=torch.float),)
         for bias in [True, False]:
