@@ -260,7 +260,6 @@ BIAS_INDEX_DICT = {
     torch.nn.functional.conv3d : [2],
 }
 
-# TODO(before land): bias is an optional keyword argument, verify this is handled
 def node_arg_is_bias(node: Node, arg: Any) -> bool:
     if isinstance(node, Node) and node.op == 'call_function' and \
             node.target in BIAS_INDEX_DICT:

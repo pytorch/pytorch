@@ -671,9 +671,6 @@ class QuantizationTestCase(TestCase):
                 prepare_custom_config_dict=prepare_custom_config_dict)
             if not quant_type == QuantType.DYNAMIC:
                 prepared(*inputs)
-            # debug only
-            # print(prepared)
-            # return
 
             self.checkGraphModuleNodes(
                 prepared, prepare_expected_node,
