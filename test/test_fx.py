@@ -21,6 +21,8 @@ from typing import Any, Callable, Dict, NamedTuple, List, Optional, Tuple, Union
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, IS_WINDOWS, IS_SANDCASTLE, IS_MACOS
 from torch.testing._internal.jit_utils import JitTestCase
 
+from fx.named_tup import MyNamedTup
+
 try:
     from torchvision.models import resnet18
     HAS_TORCHVISION = True
@@ -1139,6 +1141,15 @@ class TestFX(JitTestCase):
         m = M()
         self.checkGraphModule(m, ())
 
+    def test_namedtuple_return_qualname(self):
+        class NamedTupReturn(torch.nn.Module):
+            def forward(self, x):
+                return MyNamedTup(x, x)
+
+        traced = symbolic_trace(NamedTupReturn())
+        input = torch.rand(3, 4)
+        self.assertEqual(traced(input), MyNamedTup(input, input))
+
     def test_torchbind_class_attribute_in_fx(self):
         if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS:
             self.skipTest("torch.classes._TorchScriptTesting._StackString is registered, skipping")
@@ -1160,6 +1171,8 @@ class TestFX(JitTestCase):
                 return Pair(x, x)
 
         traced = symbolic_trace(NamedTupReturn())
+        input = torch.rand(3, 4)
+        self.assertEqual(traced(input), Pair(input, input))
 
 if __name__ == '__main__':
     run_tests()

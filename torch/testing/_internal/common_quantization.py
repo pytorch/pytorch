@@ -360,7 +360,8 @@ class QuantizationTestCase(TestCase):
         if hasattr(module, 'qconfig') and module.qconfig is not None and \
            ((is_leaf_module(module) and not isinstance(module, torch.nn.Sequential)
             and type(module) in propagate_qconfig_list) or
-           type(module) in float_to_observed_module_class_mapping.keys()):
+           type(module) in float_to_observed_module_class_mapping.keys()) and \
+           not isinstance(module, torch.quantization.DeQuantStub):
             self.assertTrue(hasattr(module, 'activation_post_process'),
                             'module: ' + str(type(module)) + ' do not have observer')
         # we don't need to check observers for child modules of the
