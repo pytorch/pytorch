@@ -252,21 +252,23 @@ def node_arg_is_weight(node: Node, arg: Any) -> bool:
                 return True
     return False
 
-# A dictionary for querying the weight index for a given op
-# TODO(future PR): handle linear
-BIAS_INDEX_DICT = {
-    torch.nn.functional.conv1d : [2],
-    torch.nn.functional.conv2d : [2],
-    torch.nn.functional.conv3d : [2],
+CONV_OPS_WITH_BIAS = {
+    torch.nn.functional.conv1d,
+    torch.nn.functional.conv2d,
+    torch.nn.functional.conv3d,
 }
+CONV_BIAS_ARG_INDEX = 2
 
 def node_arg_is_bias(node: Node, arg: Any) -> bool:
-    if isinstance(node, Node) and node.op == 'call_function' and \
-            node.target in BIAS_INDEX_DICT:
-        for i, node_arg in enumerate(node.args):
-            if arg is node_arg and i in \
-                    BIAS_INDEX_DICT[node.target]:  # type: ignore
-                return True
+    if isinstance(node, Node) and node.op == 'call_function':
+        if node.target in CONV_OPS_WITH_BIAS:
+            for i, node_arg in enumerate(node.args):
+                if arg is node_arg and i == CONV_BIAS_ARG_INDEX:
+                    return True
+        elif node.target is torch.nn.functional.linear:
+            for kwarg_name, kwarg_value in node.kwargs.items():
+                if kwarg_name == 'bias' and arg is kwarg_value:
+                    return True
     return False
 
 # weight prepacking ops
