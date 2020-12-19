@@ -33,7 +33,7 @@ void checkCustomClassType(const Type* expected_type, const Type* actual_type) {
               expected_type->repr_str());
 }
 
-CAFFE2_API c10::intrusive_ptr<ConstantString> ConstantString::create(
+TORCH_API c10::intrusive_ptr<ConstantString> ConstantString::create(
     std::string str_) {
   return c10::make_intrusive<ConstantString>(std::move(str_));
 }
@@ -76,6 +76,8 @@ TypePtr IValue::type() const {
       return NoneType::get();
     case Tag::Tensor:
       return TensorType::create(toTensor());
+    case Tag::Storage:
+      return StorageType::get();
     case Tag::Double:
       return FloatType::get();
     case Tag::Int:
@@ -260,6 +262,8 @@ IValue IValue::equals(const IValue& rhs) const {
         return false;
       }
       return lhs.toTensor().eq(rhs.toTensor());
+    case Tag::Storage:
+      return rhs.isStorage() && lhs.toStorage().unsafeGetStorageImpl() == rhs.toStorage().unsafeGetStorageImpl();
     case Tag::Double:
       return rhs.isDouble() && lhs.toDouble() == rhs.toDouble();
     case Tag::Int:
@@ -309,6 +313,8 @@ size_t IValue::hash(const IValue& v) {
     case Tag::Tensor:
       // Tensor __hash__ is equivalent to `id()`, so take the pointer value of
       // the tensor to emulate it
+      return c10::get_hash(v.payload.as_int);
+    case Tag::Storage:
       return c10::get_hash(v.payload.as_int);
     case Tag::Int:
       return c10::get_hash(v.payload.as_int);
@@ -647,6 +653,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << v.toNone();
     case IValue::Tag::Tensor:
       return out << v.toTensor();
+    case IValue::Tag::Storage:
+      return out << v.toStorage().unsafeGetStorageImpl();
     case IValue::Tag::Double: {
       double d = v.toDouble();
       int c = std::fpclassify(d);
@@ -879,7 +887,7 @@ getClassConverter() {
   return classConverter;
 }
 
-CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
+TORCH_API intrusive_ptr<ivalue::Future> collectAll(
     List<intrusive_ptr<ivalue::Future>> srcs) {
   struct Ctx {
     explicit Ctx(List<intrusive_ptr<ivalue::Future>> srcs)
@@ -911,7 +919,7 @@ CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
   return ctx->dstFuture;
 }
 
-CAFFE2_API intrusive_ptr<ivalue::Future> collectAny(
+TORCH_API intrusive_ptr<ivalue::Future> collectAny(
     List<intrusive_ptr<ivalue::Future>> srcs) {
   if (srcs.empty()) {
     auto res = make_intrusive<ivalue::Future>(NoneType::get());
