@@ -66,8 +66,8 @@ class BinaryOpSparseFuzzer(Fuzzer):
                     ) for i in range(3)
                 ],
                 FuzzedParameter(
-                    name="nnz",
-                    distribution={5: 0.4, 10: 0.3, 15: 0.3},
+                    name="density",
+                    distribution={0.1: 0.4, 0.05: 0.3, 0.01: 0.3},
                 ),
                 FuzzedParameter(
                     name="coalesced",
@@ -82,7 +82,7 @@ class BinaryOpSparseFuzzer(Fuzzer):
                     size=("k0", "k1", "k2"),
                     dim_parameter="dim_parameter",
                     sparse_dim="sparse_dim",
-                    nnz="nnz",
+                    density="density",
                     coalesced="coalesced",
                     min_elements=4 * 1024,
                     max_elements=32 * 1024 ** 2,
@@ -94,7 +94,7 @@ class BinaryOpSparseFuzzer(Fuzzer):
                     size=("y_k0", "y_k1", "y_k2"),
                     dim_parameter="dim_parameter",
                     sparse_dim="sparse_dim",
-                    nnz="nnz",
+                    density="density",
                     coalesced="coalesced",
                     min_elements=4 * 1024,
                     max_elements=32 * 1024 ** 2,

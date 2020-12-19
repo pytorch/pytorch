@@ -55,8 +55,8 @@ class UnaryOpSparseFuzzer(Fuzzer):
                     ) for i in range(3)
                 ],
                 FuzzedParameter(
-                    name="nnz",
-                    distribution={5: 0.4, 10: 0.3, 15: 0.3},
+                    name="density",
+                    distribution={0.1: 0.4, 0.05: 0.3, 0.01: 0.3},
                 ),
                 FuzzedParameter(
                     name="coalesced",
@@ -72,7 +72,7 @@ class UnaryOpSparseFuzzer(Fuzzer):
                     sparse_dim="sparse_dim",
                     min_elements=4 * 1024,
                     max_elements=32 * 1024 ** 2,
-                    nnz="nnz",
+                    density="density",
                     coalesced="coalesced",
                     dtype=dtype,
                     cuda=cuda,
