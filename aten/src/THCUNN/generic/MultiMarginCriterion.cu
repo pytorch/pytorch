@@ -3,21 +3,27 @@
 #else
 
 static inline void THNN_(MultiMarginCriterion_shapeCheck)(
-  THCState *state,
-  THCTensor *input, THCTensor *target) {
-if (input->dim() <= 1) {
-int dim = input->dim() == 0 ? 1 : input->size(0);
-int target_size = target->dim() == 0 ? 1 : target->size(0);
-TORCH_CHECK(!target->is_empty() && (target->dim() <= 1) && (target_size == dim),
-  "inconsistent target size: ", target->sizes(), " for input of size: ", input->sizes());
-} else if (input->dim() == 2) {
-  int nframe = input->size(0);
-  int dim = input->size(1);
-  TORCH_CHECK((input->size(1) != 0) && (target->dim() == 2) && (target->size(0) == nframe) && (target->size(1) == dim),
-  "inconsistent target size: ", target->sizes(), " for input of size: ", input->sizes());
-} else {
-  TORCH_CHECK(false, "non-empty vector or matrix expected, got size: ", input->sizes());
-}
+                         THCState *state,
+                         THCTensor *input, THCTensor *target) {
+  int64_t nframe, dim;
+  int64_t ndims = input->dim();
+  bool valid_inputs = (ndims == 2 && input->size(1) != 0) || (ndims == 1 && input->size(0) != 0) || ndims == 0;
+  if (ndims <= 1) {
+    nframe = 1;
+    dim = ndims == 0 ? 1 : input->size(0);
+  } else {
+    nframe = input->size(0);
+    dim = input->size(1);
+  }
+
+  TORCH_CHECK(
+    valid_inputs,
+    "Expected non-empty vector or matrix with optional 0-dim batch size, but got: ",
+    input->sizes());
+  TORCH_CHECK(
+      valid_inputs && target->dim() <= 1 && target->numel() == nframe,
+      "inconsistent target size, got: ",
+      target->sizes());
 }
 
 // TODO: improve error messages
