@@ -889,12 +889,20 @@ def main():
             print_to_stderr(err_message)
     finally:
         if options.coverage:
+            from coverage import Coverage
+            cwd = os.getcwd()
             test_dir = os.path.dirname(os.path.abspath(__file__))
-            if not PYTORCH_COLLECT_COVERAGE:
-                shell(['coverage', 'combine'], cwd=test_dir)
-                shell(['coverage', 'html'], cwd=test_dir)
-            else:
-                shell(['coverage', 'combine', '--append'], cwd=test_dir)
+            try:
+                os.chdir(test_dir)
+                cov = Coverage()
+                if PYTORCH_COLLECT_COVERAGE:
+                    cov.load()
+                cov.combine(strict=False)
+                cov.save()
+                if not PYTORCH_COLLECT_COVERAGE:
+                    cov.html_report()
+            finally:
+                os.chdir(cwd)
 
     if options.continue_through_error and has_failed:
         for err in failure_messages:
