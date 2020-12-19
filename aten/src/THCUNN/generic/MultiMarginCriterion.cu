@@ -2,6 +2,24 @@
 #define THC_GENERIC_FILE "THCUNN/generic/MultiMarginCriterion.cu"
 #else
 
+static inline void THNN_(MultiMarginCriterion_shapeCheck)(
+  THCState *state,
+  THCTensor *input, THCTensor *target) {
+if (input->dim() <= 1) {
+int dim = input->dim() == 0 ? 1 : input->size(0);
+int target_size = target->dim() == 0 ? 1 : target->size(0);
+TORCH_CHECK(!target->is_empty() && (target->dim() <= 1) && (target_size == dim),
+  "inconsistent target size: ", target->sizes(), " for input of size: ", input->sizes());
+} else if (input->dim() == 2) {
+  int nframe = input->size(0);
+  int dim = input->size(1);
+  TORCH_CHECK((input->size(1) != 0) && (target->dim() == 2) && (target->size(0) == nframe) && (target->size(1) == dim),
+  "inconsistent target size: ", target->sizes(), " for input of size: ", input->sizes());
+} else {
+  TORCH_CHECK(false, "non-empty vector or matrix expected, got size: ", input->sizes());
+}
+}
+
 // TODO: improve error messages
 void THNN_(MultiMarginCriterion_updateOutput)(
            THCState *state,
@@ -13,6 +31,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
            THCTensor *weights,
            accreal margin_)
 {
+  THNN_(MultiMarginCriterion_shapeCheck)(state, input, target);
   if (input->numel() == 0) {
     return;
   }
@@ -154,14 +173,17 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
            THCTensor *weights,
            accreal margin_)
 {
+  THNN_(MultiMarginCriterion_shapeCheck)(state, input, target);
+  input = THCTensor_(newContiguous)(state, input);
+  THCTensor_(resizeAs)(state, gradInput, input);
   if (input->numel() == 0) {
+    THCTensor_(free)(state, input);
     return;
   }
   scalar_t margin = ScalarConvert<accreal, scalar_t>::to(margin_);
   THCUNN_assertSameGPU(state, 3, input, gradInput, target);
-  input = THCTensor_(newContiguous)(state, input);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
-  THCTensor_(resizeAs)(state, gradInput, input);
+
   if(weights)
     weights = THCTensor_(newContiguous)(state, weights);
 
