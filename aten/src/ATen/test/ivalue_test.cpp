@@ -403,5 +403,28 @@ TEST(IValueTest, EnumEquality) {
   );
 }
 
+TEST(IValueTest, isPtrType) {
+  IValue tensor(at::rand({3, 4}));
+  IValue integer(42);
+  IValue str("hello");
+
+  EXPECT_TRUE(tensor.isPtrType());
+  EXPECT_FALSE(integer.isPtrType());
+  EXPECT_TRUE(str.isPtrType());
+}
+
+TEST(IValueTest, isAliasOf) {
+  auto sampleIValues = makeSampleIValues();
+  for (auto& iv: sampleIValues) {
+    for (auto& iv2: sampleIValues) {
+      if (&iv == &iv2 && iv.isPtrType()) {
+        EXPECT_TRUE(iv.isAliasOf(iv2));
+      } else {
+        EXPECT_FALSE(iv.isAliasOf(iv2));
+      }
+    }
+  }
+}
+
 // TODO(gmagogsfm): Add type conversion test?
 } // namespace c10

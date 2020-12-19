@@ -273,13 +273,6 @@ struct CAFFE2_API IValue final {
       return false;
     }
 
-    if (!this->is_intrusive_ptr) {
-      // Primitive types don't alias anything
-      return false;
-    }
-
-    AT_ASSERT(rhs.is_intrusive_ptr);
-
     // Tensors should be compared based on internal storage
     if (this->isTensor()) {
       const auto thisTensor = this->toTensor();
@@ -287,12 +280,23 @@ struct CAFFE2_API IValue final {
       return thisTensor.is_alias_of(rhsTensor);
     }
 
+    if (!this->is_intrusive_ptr) {
+      // Primitive types don't alias anything
+      return false;
+    }
+
+    AT_ASSERT(rhs.is_intrusive_ptr);
+
     // Other types can be compared by their ptr value
     return this->payload.u.as_intrusive_ptr == rhs.payload.u.as_intrusive_ptr;
   }
 
   /// @private [doxygen private]
   size_t use_count() const noexcept {
+    if (isTensor()) {
+      return payload.as_tensor.use_count();
+    }
+
     if (!is_intrusive_ptr) {
       return 1;
     }
@@ -780,7 +784,7 @@ struct CAFFE2_API IValue final {
       const IValue& v);
 
   bool isPtrType() const {
-    return is_intrusive_ptr;
+    return isTensor() || is_intrusive_ptr;
   }
 
   /// @private [doxygen private]
