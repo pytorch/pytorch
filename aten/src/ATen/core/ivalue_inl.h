@@ -1301,8 +1301,6 @@ inline bool IValue::isSameIdentity(const IValue& rhs) const {
     // for bool type, do equality check
     return this->toBool() == rhs.toBool();
   } else if (this->isTensor() && rhs.isTensor()) {
-    // for tensor type, just check the as_intrusive_ptr since is_intrusive_ptr
-    // is false for undefined tensor
     return this->payload.as_tensor.is_same(rhs.payload.as_tensor);
   } else if (this->isTensor() && rhs.isNone()) {
     // special case: undefined tensor and None are the same identity
