@@ -291,7 +291,7 @@ class TestProfiler(TestCase):
 
         with TemporaryFileName(mode="w+") as fname:
             p.export_stacks(fname)
-            with io.open(fname, 'rb') as f:
+            with io.open(fname, 'r') as f:
                 lines = f.readlines()
             assert len(lines) > 0, "Empty stacks file"
             for line in lines:
