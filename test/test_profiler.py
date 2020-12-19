@@ -2,6 +2,7 @@ import collections
 import gc
 import unittest
 
+import tempfile
 import torch
 import torch.nn as nn
 import torch.optim
@@ -280,6 +281,26 @@ class TestProfiler(TestCase):
             self.payload()
         print(p.key_averages().table(
             sort_by="self_cuda_time_total", row_limit=-1))
+
+    def test_export_stacks(self):
+        with profile(with_stack=True, use_kineto=kineto_available()) as p:
+            x = torch.randn(10, 10)
+            y = torch.randn(10, 10)
+            z = torch.mm(x, y)
+            z = z + y
+
+        with tempfile.NamedTemporaryFile(mode="w+") as f:
+            p.export_stacks(f.name)
+            lines = f.readlines()
+            assert len(lines) > 0, "Empty stacks file"
+            for line in lines:
+                is_int = False
+                try:
+                    assert int(line.split(" ")[-1]) > 0, "Invalid stacks record"
+                    is_int = True
+                except ValueError:
+                    pass
+                assert is_int, "Invalid stacks record"
 
 
 if __name__ == '__main__':

@@ -245,6 +245,25 @@ class profile(object):
         assert self.profiler
         return self.profiler.export_chrome_trace(path)
 
+    def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
+        """
+        Save stack traces in a file in a format suitable for visualization.
+
+        Arguments:
+
+        - ``path`` - save stacks file to this location;
+        - ``metric`` - metric to use: "self_cpu_time_total" or "self_cuda_time_total"
+
+        .. note::
+            Example of using FlameGraph tool:
+
+            - git clone https://github.com/brendangregg/FlameGraph
+            - cd FlameGraph
+            - ./flamegraph.pl --title "CPU time" --countname "us." profiler.stacks > perf_viz.svg
+        """
+        assert self.profiler
+        return self.profiler.export_stacks(path, metric)
+
     def key_averages(self, group_by_input_shape: bool = False, group_by_stack_n: int = 0):
         """
         Averages events, grouping them by operator name and (optionally) input shapes and
