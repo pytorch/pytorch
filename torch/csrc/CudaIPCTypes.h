@@ -9,6 +9,11 @@
 #include <c10/util/Logging.h>
 #include <cuda_runtime_api.h>
 #include <cstddef>
+#define STR_HELPER(x) #x
+#define STR(x) STR_HELPER(x)
+#pragma message "content of TORCH_API: " STR(TORCH_API)
+#undef STR_HELPER
+#undef STR
 namespace torch {
 
 TORCH_API bool CudaIPCCollect();
