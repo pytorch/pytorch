@@ -64,9 +64,6 @@ import warnings
 from typing import Optional, Dict, Any, List, Union, Tuple, Set, Callable
 
 # Define helper types
-
-QConfigAny = Union[torch.quantization.QConfig,
-                   torch.quantization.QConfigDynamic, None]
 MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,
                     QConfigAny]
 

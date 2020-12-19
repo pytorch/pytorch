@@ -1,6 +1,12 @@
-from .utils import _parent_name
+import torch
 from collections import OrderedDict
+from typing import Union, Callable, Any
 import re
+
+from .utils import _parent_name
+
+QConfigAny = Union[torch.quantization.QConfig,
+                   torch.quantization.QConfigDynamic, None]
 
 def get_flattened_qconfig_dict(qconfig_dict):
     """ flatten the global, object_type and module_name qconfig
@@ -50,9 +56,12 @@ def convert_dict_to_ordered_dict(qconfig_dict):
     _convert_to_ordered_dict('module_name_regex', qconfig_dict)
     _convert_to_ordered_dict('module_name', qconfig_dict)
 
-def get_object_type_qconfig(qconfig_dict, object_type, fallback_qconfig):
+def get_object_type_qconfig(
+        qconfig_dict: Any,
+        object_type: Union[Callable, str],
+        fallback_qconfig: QConfigAny) -> QConfigAny:
     # object_type can be
-    # 1. Module type (call_module)
+    # 1. module type (call_module)
     # 2. function (call_function)
     # 3. string (call_method)
     return qconfig_dict['object_type'].get(
