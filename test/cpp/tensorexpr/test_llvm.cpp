@@ -217,6 +217,38 @@ TEST(LLVM, BitCast) {
   }
 }
 
+TEST(LLVM, fastLogFloat) {
+  KernelScope kernel_scope;
+  const int kTotalSize = 128 * 128;
+  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
+  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+
+  VarHandle index = VarHandle("index", kInt);
+  ExprHandle load_a = a_buf.load(index);
+  Stmt* store_b = b_buf.store({index}, fast_log(load_a));
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
+
+  PaddedBuffer<float> a_v(kTotalSize);
+  PaddedBuffer<float> b_v(kTotalSize);
+
+  for (int i = 0; i < kTotalSize; ++i) {
+    a_v(i) = at::randn({1}).item().to<float>();
+  }
+
+  LLVMCodeGen ir_eval(stmt, {a_buf, b_buf});
+  ir_eval.call({a_v, b_v});
+
+  for (int i = 0; i < kTotalSize; ++i) {
+    auto test = b_v(i);
+    auto ref = std::log(a_v(i));
+    if (std::isnan(ref)) {
+      ASSERT_EQ(std::isnan(test), true);
+    } else {
+      ASSERT_FLOAT_EQ(test, ref);
+    }
+  }
+}
+
 TEST(LLVM, LetTest01) {
   KernelScope kernel_scope;
 
