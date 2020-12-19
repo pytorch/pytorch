@@ -9,9 +9,4 @@ TH_API void THTensor_(multinomialAliasSetup)(THTensor *prob_dist, THLongTensor *
 TH_API void THTensor_(multinomialAliasDraw)(THLongTensor *self, THTensor *q, THLongTensor *J, int n_sample, c10::optional<at::Generator> _generator);
 #endif
 
-#if defined(TH_REAL_IS_BYTE)
-TH_API void THTensor_(getRNGState)(at::Generator _generator, THTensor *self);
-TH_API void THTensor_(setRNGState)(at::Generator _generator, THTensor *self);
-#endif
-
 #endif

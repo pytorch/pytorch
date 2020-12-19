@@ -17,6 +17,8 @@ struct TORCH_API CPUGeneratorImpl : public c10::GeneratorImpl {
   void set_current_seed(uint64_t seed) override;
   uint64_t current_seed() const override;
   uint64_t seed() override;
+  void set_state(c10::TensorImpl& new_state) override;
+  c10::intrusive_ptr<c10::TensorImpl> state() const override;
   static DeviceType device_type();
   uint32_t random();
   uint64_t random64();
