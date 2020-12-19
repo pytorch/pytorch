@@ -79,6 +79,10 @@ struct TORCH_API BroadcastingVmapTransform {
   static VmapPhysicalViewVec logicalToPhysical(TensorList logical_tensors);
 };
 
+// Forward declared, if you're reading this file head to toe, don't worry about
+// it yet.
+struct VmapPhysicalToLogicalMap;
+
 // NOTE: [What is a VmapPhysicalView?]
 // VmapPhysicalView represents a physical view on a Tensor.
 //
@@ -115,23 +119,13 @@ struct TORCH_API VmapPhysicalView {
   VmapDimVector getPhysicalDims(IntArrayRef logical_dims) const;
   int64_t getPhysicalDim(int64_t logical_dim) const;
 
+  // Returns a VmapPhysicalToLogicalMap object. This can be used for
+  // mapping a physical tensor to a new logical tensor (BatchedTensor)
+  VmapPhysicalToLogicalMap getPhysicalToLogicalMap() const;
+
   // Maps a logical shape to a physical shape by pre-pending the batch
   // sizes to the logical shape.
   VmapDimVector getPhysicalShape(IntArrayRef logical_shape) const;
-
-  // Maps a physical tensor to a new logical tensor (BatchedTensor),
-  // using the mapping info stored in this VmapPhysicalView.
-  // Assumes that all of the "batch dimensions" are at the front
-  // of the physical tensor.
-  Tensor newLogicalFromPhysical(const Tensor& physical) const;
-
-  // Given a vector of physical tensors,
-  // 1. maps each tensor to a new logical tensor using the mapping info stored
-  //    in this VmapPhysicalView. Assumes that all of the "batch dimensions"
-  //    are at the front of the physical tensors.
-  // 2. stores the new logical tensors back into the passed-in vector. This is
-  //    to avoid additional dynamic allocations.
-  void makeLogicalFromPhysicalListInplace(std::vector<Tensor>& physical_tensors) const;
 
   int64_t numBatchDims() const;
 
@@ -140,6 +134,32 @@ struct TORCH_API VmapPhysicalView {
 
   std::bitset<kVmapNumLevels> levels_;
   Tensor tensor_;
+};
+
+// Convenience struct used for mapping a physical tensor (a non-BatchedTensor)
+// to a logical one (BatchedTensor). It holds some levels that are used to do the
+// mapping and assumes that the batch dimensions in the physical tensor all
+// occur at the front of the tensor.
+struct TORCH_API VmapPhysicalToLogicalMap {
+  VmapPhysicalToLogicalMap(std::bitset<kVmapNumLevels> levels): levels_(levels) {}
+
+  // Maps a physical tensor to a new logical tensor (BatchedTensor).
+  // Assumes that all of the "batch dimensions" are at the front
+  // of the physical tensor. For example, given:
+  // - x = rank-4 Tensor with size 2, 3, 5, 7
+  // - levels = (2, 4)
+  // Returns:
+  // - BatchedTensor(x, bdims=[(dim=0,lvl=2), (dim=1, lvl=4)])
+  Tensor apply(const Tensor& physical_tensor) const;
+
+  // Given a vector of physical tensors,
+  // 1. maps each tensor to a new logical tensor. Assumes that all of the
+  //    "batch dimensions" are at the front of the physical tensors.
+  // 2. stores the new logical tensors back into the passed-in vector. This is
+  //    to avoid additional dynamic allocations.
+  void applyInplace(std::vector<Tensor>& physical_tensors) const;
+
+  std::bitset<kVmapNumLevels> levels_;
 };
 
 
