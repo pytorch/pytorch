@@ -360,14 +360,13 @@ Resource::Pool::Pool(
   : device_(gpu.device),
     allocator_(
         create_allocator(
-          gpu.adapter->runtime->instance(),
-          gpu.adapter->handle,
-          device_),
+            gpu.adapter->runtime->instance(),
+            gpu.adapter->handle,
+            device_),
         vmaDestroyAllocator),
     memory_{
       std::move(policy),
     },
-    buffer_{},
     image_{
       .sampler = Image::Sampler{gpu},
     },
@@ -401,7 +400,7 @@ Resource::Pool::Pool(Pool&& pool)
     buffer_(std::move(pool.buffer_)),
     image_(std::move(pool.image_)),
     fence_(std::move(pool.fence_)) {
-  pool.device_ = VK_NULL_HANDLE;
+  pool.invalidate();
 }
 
 Resource::Pool& Resource::Pool::operator=(Pool&& pool) {
@@ -413,7 +412,7 @@ Resource::Pool& Resource::Pool::operator=(Pool&& pool) {
     image_ = std::move(pool.image_);
     fence_ = std::move(pool.fence_);
 
-    pool.device_ = VK_NULL_HANDLE;
+    pool.invalidate();
   };
 
   return *this;
@@ -676,6 +675,11 @@ void Resource::Pool::purge() {
   fence_.in_use = 0u;
   image_.pool.clear();
   buffer_.pool.clear();
+}
+
+void Resource::Pool::invalidate() {
+  device_ = VK_NULL_HANDLE;
+  allocator_.reset();
 }
 
 } // namespace api

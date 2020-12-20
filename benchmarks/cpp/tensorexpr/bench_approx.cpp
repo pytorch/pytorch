@@ -8,8 +8,8 @@
 using namespace torch::jit::tensorexpr;
 
 static void log_sleef(benchmark::State& state) {
-	KernelScope ks;
-	auto N = VarHandle("N", kInt);
+  KernelScope ks;
+  auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
   torch::jit::tensorexpr::Tensor* B =
       Compute("B", {N}, [&](const VarHandle& i) {
@@ -24,7 +24,7 @@ static void log_sleef(benchmark::State& state) {
   args.emplace_back(B);
   args.emplace_back(A);
   args.emplace_back(N);
-	LLVMCodeGen cg(s, args);
+  LLVMCodeGen cg(s, args);
   at::Tensor A_t = torch::abs(torch::randn({state.range(0)}));
   at::Tensor B_t = torch::randn({state.range(0)});
   auto B_ref = at::log(A_t);
@@ -33,13 +33,13 @@ static void log_sleef(benchmark::State& state) {
   for (auto _ : state) {
     cg.call({B_t.data_ptr<float>(), A_t.data_ptr<float>(), state.range(0)});
   }
-	state.counters["log/s"] = benchmark::Counter(
-			uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
+  state.counters["log/s"] = benchmark::Counter(
+      uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
 }
 
 static void log_fast(benchmark::State& state) {
-	KernelScope ks;
-	auto N = VarHandle("N", kInt);
+  KernelScope ks;
+  auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
   torch::jit::tensorexpr::Tensor* B =
       Compute("B", {N}, [&](const VarHandle& i) {
@@ -54,7 +54,7 @@ static void log_fast(benchmark::State& state) {
   args.emplace_back(B);
   args.emplace_back(A);
   args.emplace_back(N);
-	LLVMCodeGen cg(s, args);
+  LLVMCodeGen cg(s, args);
   at::Tensor A_t = torch::abs(torch::randn({state.range(0)}));
   at::Tensor B_t = torch::randn({state.range(0)});
   auto B_ref = at::log(A_t);
@@ -63,28 +63,28 @@ static void log_fast(benchmark::State& state) {
   for (auto _ : state) {
     cg.call({B_t.data_ptr<float>(), A_t.data_ptr<float>(), state.range(0)});
   }
-	state.counters["log/s"] = benchmark::Counter(
-			uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
+  state.counters["log/s"] = benchmark::Counter(
+      uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
 }
 
 static void log_aten(benchmark::State& state) {
   at::Tensor A_t = torch::abs(torch::randn({state.range(0)}));
   at::Tensor B_t = torch::randn({state.range(0)});
   for (auto _ : state) {
-		at::native::log_out(B_t, A_t);
+    at::native::log_out(B_t, A_t);
   }
-	state.counters["log/s"] = benchmark::Counter(
-			uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
+  state.counters["log/s"] = benchmark::Counter(
+      uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
 }
 
 static void logit_fast(benchmark::State& state) {
-	KernelScope ks;
-	auto N = VarHandle("N", kInt);
+  KernelScope ks;
+  auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
   torch::jit::tensorexpr::Tensor* B =
       Compute("B", {N}, [&](const VarHandle& i) {
-					auto A_elem = A.load(i);
-					return fast_log(A_elem / (FloatImm::make(1.0f) - A_elem));
+          auto A_elem = A.load(i);
+          return fast_log(A_elem / (FloatImm::make(1.0f) - A_elem));
       });
   LoopNest ln({B});
   ln.prepareForCodegen();
@@ -95,7 +95,7 @@ static void logit_fast(benchmark::State& state) {
   args.emplace_back(B);
   args.emplace_back(A);
   args.emplace_back(N);
-	LLVMCodeGen cg(s, args);
+  LLVMCodeGen cg(s, args);
   at::Tensor A_t = torch::abs(torch::randn({state.range(0)}));
   at::Tensor B_t = torch::randn({state.range(0)});
   auto B_ref = at::logit(A_t);
@@ -104,18 +104,18 @@ static void logit_fast(benchmark::State& state) {
   for (auto _ : state) {
     cg.call({B_t.data_ptr<float>(), A_t.data_ptr<float>(), state.range(0)});
   }
-	state.counters["logit/s"] = benchmark::Counter(
-			uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
+  state.counters["logit/s"] = benchmark::Counter(
+      uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
 }
 
 static void logit_aten(benchmark::State& state) {
   at::Tensor A_t = torch::abs(torch::randn({state.range(0)}));
   at::Tensor B_t = torch::randn({state.range(0)});
   for (auto _ : state) {
-		at::native::logit_out(B_t, A_t);
+    at::native::logit_out(B_t, A_t);
   }
-	state.counters["logit/s"] = benchmark::Counter(
-			uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
+  state.counters["logit/s"] = benchmark::Counter(
+      uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
 }
 
 BENCHMARK(log_sleef)
