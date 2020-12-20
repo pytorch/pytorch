@@ -898,8 +898,7 @@ op_db: List[OpInfo] = [
                SkipInfo('TestGradients', 'test_fn_gradgrad', active_if=(not TEST_WITH_SLOW)),
                # cuda gradchecks are very slow
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
-               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),
-               SkipInfo('TestGradients', 'test_fn_grad', device_type='cuda'))),
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'))),
     OpInfo('pinverse',
            op=torch.pinverse,
            dtypes=floating_and_complex_types(),
