@@ -225,13 +225,13 @@ class TestFFT(TestCase):
     def test_fft_invalid_dtypes(self, device):
         t = torch.randn(64, device=device, dtype=torch.complex128)
 
-        with self.assertRaisesRegex(RuntimeError, "Expected a real input tensor"):
+        with self.assertRaisesRegex(RuntimeError, "rfft expects a real input tensor"):
             torch.fft.rfft(t)
 
         with self.assertRaisesRegex(RuntimeError, "rfftn expects a real-valued input tensor"):
             torch.fft.rfftn(t)
 
-        with self.assertRaisesRegex(RuntimeError, "Expected a real input tensor"):
+        with self.assertRaisesRegex(RuntimeError, "ihfft expects a real input tensor"):
             torch.fft.ihfft(t)
 
     @skipCUDAIfRocm
@@ -344,14 +344,9 @@ class TestFFT(TestCase):
 
         # Test errors on invalid out dtypes
         x = torch.rand(10, device=device, dtype=torch.float32)
-        for out_dtype in (torch.int16, torch.float32, torch.complex64):
-            if out_dtype.is_floating_point:
-                funcs = complex_fft_funcs
-            elif out_dtype.is_complex:
-                funcs = real_fft_funcs
-            else:
-                funcs = fft_funcs
-
+        for out_dtype, funcs in [(torch.int16, fft_funcs),
+                                 (torch.float32, complex_fft_funcs),
+                                 (torch.complex64, real_fft_funcs)]:
             out = torch.empty((), device=device, dtype=out_dtype)
 
             for func in funcs:
@@ -489,10 +484,10 @@ class TestFFT(TestCase):
                      torch.fft.rfftn, torch.fft.irfftn)
 
         for func in fft_funcs:
-            with self.assertRaisesRegex(RuntimeError, "FFT dims must be unique"):
+            with self.assertRaisesRegex(RuntimeError, "dims must be unique"):
                 func(a, dim=(0, 1, 0))
 
-            with self.assertRaisesRegex(RuntimeError, "FFT dims must be unique"):
+            with self.assertRaisesRegex(RuntimeError, "dims must be unique"):
                 func(a, dim=(2, -1))
 
             with self.assertRaisesRegex(RuntimeError, "dim and shape .* same length"):
@@ -604,10 +599,10 @@ class TestFFT(TestCase):
                      torch.fft.rfft2, torch.fft.irfft2)
 
         for func in fft_funcs:
-            with self.assertRaisesRegex(RuntimeError, "FFT dims must be unique"):
+            with self.assertRaisesRegex(RuntimeError, "dims must be unique"):
                 func(a, dim=(0, 0))
 
-            with self.assertRaisesRegex(RuntimeError, "FFT dims must be unique"):
+            with self.assertRaisesRegex(RuntimeError, "dims must be unique"):
                 func(a, dim=(2, -1))
 
             with self.assertRaisesRegex(RuntimeError, "dim and shape .* same length"):

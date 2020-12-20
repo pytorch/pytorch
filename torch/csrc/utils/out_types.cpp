@@ -3,6 +3,8 @@
 namespace torch {
 namespace utils {
 
+// Used by python binding codegen to ensure any TensorOptions arguments are consistent
+// with the out tensor's options
 void check_out_type_matches(const at::Tensor& result,
                             at::ScalarType scalarType, bool scalarType_is_none,
                             c10::optional<at::Layout> layout,

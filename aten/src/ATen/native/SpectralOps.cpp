@@ -102,12 +102,12 @@ Tensor resize_fft_input(Tensor x, IntArrayRef dims, IntArrayRef sizes) {
 }
 
 // Complex to real FFT
-Tensor fft_c2r(Tensor out, Tensor input, c10::optional<int64_t> n_opt,
+Tensor fft_c2r(c10::string_view function_name,
+               Tensor out, Tensor input, c10::optional<int64_t> n_opt,
                int64_t unwrapped_dim, c10::optional<std::string> norm_str,
                bool forward) {
-  TORCH_CHECK(!out.defined() || out.is_floating_point(), forward ? "ih" : "ir",
-              "fft expects a (real) floating point output tensor, but got ",
-              out.scalar_type());
+  TORCH_CHECK(!out.defined() || out.is_floating_point(), function_name,
+              " expects a floating point output tensor, but got ", out.scalar_type());
   input = promote_tensor_fft(input, /*require_complex=*/true);
   const auto input_dim = input.dim();
   const auto dim = maybe_wrap_dim(unwrapped_dim, input_dim);
@@ -129,12 +129,14 @@ Tensor fft_c2r(Tensor out, Tensor input, c10::optional<int64_t> n_opt,
 }
 
 // Real to complex FFT
-Tensor fft_r2c(Tensor out, Tensor input, c10::optional<int64_t> n_opt,
+Tensor fft_r2c(c10::string_view function_name,
+               Tensor out, Tensor input, c10::optional<int64_t> n_opt,
                int64_t unwrapped_dim, c10::optional<std::string> norm_str,
                bool forward, bool onesided) {
-  TORCH_CHECK(!input.is_complex(), "Expected a real input tensor to FFT");
-  TORCH_CHECK(!out.defined() || out.is_complex(), forward ? "r" : "h",
-              "fft expects a complex output tensor, but got ", out.scalar_type());
+  TORCH_CHECK(!input.is_complex(), function_name,
+              " expects a real input tensor, but got ", input.scalar_type());
+  TORCH_CHECK(!out.defined() || out.is_complex(), function_name,
+              " expects a complex output tensor, but got ", out.scalar_type());
   input = promote_tensor_fft(input);
   const auto input_dim = input.dim();
   const auto dim = maybe_wrap_dim(unwrapped_dim, input_dim);
@@ -162,10 +164,12 @@ Tensor fft_r2c(Tensor out, Tensor input, c10::optional<int64_t> n_opt,
 }
 
 // Complex to complex FFT
-Tensor fft_c2c(Tensor out, Tensor input, c10::optional<int64_t> n_opt,
+Tensor fft_c2c(c10::string_view function_name,
+               Tensor out, Tensor input, c10::optional<int64_t> n_opt,
                int64_t unwrapped_dim, c10::optional<std::string> norm_str,
                bool forward) {
-  TORCH_CHECK(input.is_complex(), "Expected a complex input tensor to FFT");
+  TORCH_CHECK(input.is_complex(), function_name,
+              " expects a complex input tensor, but got ", input.scalar_type());
   const auto input_dim = input.dim();
   const auto dim = maybe_wrap_dim(unwrapped_dim, input_dim);
   const auto n = n_opt.value_or(input.sizes()[dim]);
@@ -175,7 +179,8 @@ Tensor fft_c2c(Tensor out, Tensor input, c10::optional<int64_t> n_opt,
   }
   const auto norm = norm_from_string(norm_str, forward);
   if (out.defined()) {
-    TORCH_CHECK(out.is_complex(), "fft expects a complex output tensor, but got ", out.scalar_type());
+    TORCH_CHECK(out.is_complex(), function_name,
+                " expects a complex output tensor, but got ", out.scalar_type());
     return at::_fft_c2c_out(out, input, dim, static_cast<int64_t>(norm), forward);
   } else {
     return at::_fft_c2c(input, dim, static_cast<int64_t>(norm), forward);
@@ -252,13 +257,14 @@ ShapeAndDims canonicalize_fft_shape_and_dim_args(
 
 // Complex to complex n-dimensional fft
 Tensor fftn_c2c(
+    c10::string_view function_name,
     Tensor out, const Tensor& input, IntArrayRef shape,
     IntArrayRef dim, c10::optional<std::string> norm_str, bool forward) {
-  TORCH_CHECK(input.is_complex(), "Expected a complex input tensor to FFT");
+  TORCH_CHECK(input.is_complex(), function_name, " expects a complex input tensor, but got", input.scalar_type());
   Tensor x = resize_fft_input(input, dim, shape);
   const auto norm = norm_from_string(norm_str, forward);
   if (out.defined()) {
-    TORCH_CHECK(out.is_complex(), "fft expects a complex output tensor, but got ", out.scalar_type());
+    TORCH_CHECK(out.is_complex(), function_name, " expects a complex output tensor, but got ", out.scalar_type());
     return at::_fft_c2c_out(out, x, dim, static_cast<int64_t>(norm), forward);
   } else {
     return at::_fft_c2c(x, dim, static_cast<int64_t>(norm), forward);
@@ -271,16 +277,16 @@ Tensor fftn_c2c(
 Tensor fft_fft(const Tensor& self, c10::optional<int64_t> n, int64_t dim,
                c10::optional<std::string> norm) {
   return self.is_complex() ?
-    fft_c2c({}, self, n, dim, norm, /*forward=*/true) :
-    fft_r2c({}, self, n, dim, norm, /*forward=*/true, /*onesided=*/false);
+    fft_c2c("fft", {}, self, n, dim, norm, /*forward=*/true) :
+    fft_r2c("fft", {}, self, n, dim, norm, /*forward=*/true, /*onesided=*/false);
 }
 
 Tensor& fft_fft_out(Tensor& out, const Tensor& self, c10::optional<int64_t> n,
                     int64_t dim, c10::optional<std::string> norm) {
   if (self.is_complex()) {
-    fft_c2c(out, self, n, dim, norm, /*forward=*/true);
+    fft_c2c("fft", out, self, n, dim, norm, /*forward=*/true);
   } else {
-    fft_r2c(out, self, n, dim, norm, /*forward=*/true, /*onesided=*/false);
+    fft_r2c("fft", out, self, n, dim, norm, /*forward=*/true, /*onesided=*/false);
   }
   return out;
 }
@@ -288,61 +294,61 @@ Tensor& fft_fft_out(Tensor& out, const Tensor& self, c10::optional<int64_t> n,
 Tensor fft_ifft(const Tensor& self, c10::optional<int64_t> n, int64_t dim,
                 c10::optional<std::string> norm) {
   return self.is_complex() ?
-    fft_c2c({}, self, n, dim, norm, /*forward=*/false) :
-    fft_r2c({}, self, n, dim, norm, /*forward=*/false, /*onesided=*/false);
+    fft_c2c("ifft", {}, self, n, dim, norm, /*forward=*/false) :
+    fft_r2c("ifft", {}, self, n, dim, norm, /*forward=*/false, /*onesided=*/false);
 }
 
 Tensor& fft_ifft_out(Tensor& out, const Tensor& self, c10::optional<int64_t> n,
                      int64_t dim, c10::optional<std::string> norm) {
   if (self.is_complex()) {
-    fft_c2c(out, self, n, dim, norm, /*forward=*/false);
+    fft_c2c("ifft", out, self, n, dim, norm, /*forward=*/false);
   } else {
-    fft_r2c(out, self, n, dim, norm, /*forward=*/false, /*onesided=*/false);
+    fft_r2c("ifft", out, self, n, dim, norm, /*forward=*/false, /*onesided=*/false);
   }
   return out;
 }
 
 Tensor fft_rfft(const Tensor& self, c10::optional<int64_t> n, int64_t dim,
                 c10::optional<std::string> norm) {
-  return fft_r2c({}, self, n, dim, norm, /*forward=*/true, /*onesided=*/true);
+  return fft_r2c("rfft", {}, self, n, dim, norm, /*forward=*/true, /*onesided=*/true);
 }
 
 Tensor& fft_rfft_out(Tensor& out, const Tensor& self, c10::optional<int64_t> n,
                      int64_t dim, c10::optional<std::string> norm) {
-  fft_r2c(out, self, n, dim, norm, /*forward=*/true, /*onesided=*/true);
+  fft_r2c("rfft", out, self, n, dim, norm, /*forward=*/true, /*onesided=*/true);
   return out;
 }
 
 Tensor fft_irfft(const Tensor& self, c10::optional<int64_t> n, int64_t dim,
                  c10::optional<std::string> norm) {
-  return fft_c2r({}, self, n, dim, norm, /*forward=*/false);
+  return fft_c2r("irfft", {}, self, n, dim, norm, /*forward=*/false);
 }
 
 Tensor& fft_irfft_out(Tensor& out, const Tensor& self, c10::optional<int64_t> n,
                   int64_t dim, c10::optional<std::string> norm) {
-  fft_c2r(out, self, n, dim, norm, /*forward=*/false);
+  fft_c2r("irfft", out, self, n, dim, norm, /*forward=*/false);
   return out;
 }
 
 Tensor fft_hfft(const Tensor& self, c10::optional<int64_t> n, int64_t dim,
                 c10::optional<std::string> norm) {
-  return fft_c2r({}, self, n, dim, norm, /*forward=*/true);
+  return fft_c2r("hfft", {}, self, n, dim, norm, /*forward=*/true);
 }
 
 Tensor& fft_hfft_out(Tensor& out, const Tensor& self, c10::optional<int64_t> n,
                      int64_t dim, c10::optional<std::string> norm) {
-  fft_c2r(out, self, n, dim, norm, /*forward=*/true);
+  fft_c2r("hfft", out, self, n, dim, norm, /*forward=*/true);
   return out;
 }
 
 Tensor fft_ihfft(const Tensor& self, c10::optional<int64_t> n, int64_t dim,
                  c10::optional<std::string> norm) {
-  return fft_r2c({}, self, n, dim, norm, /*forward=*/false, /*onesided=*/true);
+  return fft_r2c("ihfft", {}, self, n, dim, norm, /*forward=*/false, /*onesided=*/true);
 }
 
 Tensor& fft_ihfft_out(Tensor& out, const Tensor& self, c10::optional<int64_t> n,
                      int64_t dim, c10::optional<std::string> norm) {
-  fft_r2c(out, self, n, dim, norm, /*forward=*/false, /*onesided=*/true);
+  fft_r2c("ihfft", out, self, n, dim, norm, /*forward=*/false, /*onesided=*/true);
   return out;
 }
 
@@ -352,7 +358,7 @@ Tensor fft_fftn(const Tensor& self, c10::optional<IntArrayRef> s,
   auto desc = canonicalize_fft_shape_and_dim_args(self, s, dim);
   // TODO: For real input, perform rfftn then mirror with conjugate symmetry
   Tensor input = promote_tensor_fft(self, /*require_complex=*/true);
-  return fftn_c2c({}, input, desc.shape, desc.dim, norm, /*forward=*/true);
+  return fftn_c2c("fftn", {}, input, desc.shape, desc.dim, norm, /*forward=*/true);
 }
 
 Tensor& fft_fftn_out(Tensor& out, const Tensor& self,
@@ -362,7 +368,7 @@ Tensor& fft_fftn_out(Tensor& out, const Tensor& self,
   auto desc = canonicalize_fft_shape_and_dim_args(self, s, dim);
   // TODO: For real input, perform rfftn then mirror with conjugate symmetry
   Tensor input = promote_tensor_fft(self, /*require_complex=*/true);
-  fftn_c2c(out, input, desc.shape, desc.dim, norm, /*forward=*/true);
+  fftn_c2c("fftn", out, input, desc.shape, desc.dim, norm, /*forward=*/true);
   return out;
 }
 
@@ -371,7 +377,7 @@ Tensor fft_ifftn(const Tensor& self, c10::optional<IntArrayRef> s,
                 c10::optional<std::string> norm) {
   auto desc = canonicalize_fft_shape_and_dim_args(self, s, dim);
   Tensor input = promote_tensor_fft(self, /*require_complex=*/true);
-  return fftn_c2c({}, input, desc.shape, desc.dim, norm, /*forward=*/false);
+  return fftn_c2c("ifftn", {}, input, desc.shape, desc.dim, norm, /*forward=*/false);
 }
 
 Tensor& fft_ifftn_out(Tensor& out, const Tensor& self,
@@ -380,7 +386,7 @@ Tensor& fft_ifftn_out(Tensor& out, const Tensor& self,
                       c10::optional<std::string> norm) {
   auto desc = canonicalize_fft_shape_and_dim_args(self, s, dim);
   Tensor input = promote_tensor_fft(self, /*require_complex=*/true);
-  fftn_c2c(out, input, desc.shape, desc.dim, norm, /*forward=*/false);
+  fftn_c2c("ifftn", out, input, desc.shape, desc.dim, norm, /*forward=*/false);
   return out;
 }
 
@@ -437,7 +443,7 @@ static Tensor fft_irfftn_impl(Tensor out, const Tensor& self,
   Tensor x = resize_fft_input(input, desc.dim, desc.shape);
   const auto norm = norm_from_string(norm_str, /*forward=*/false);
   if (out.defined()) {
-    TORCH_CHECK(out.is_floating_point(), "irfftn expects a (real) floating point output tensor, but got ", out.scalar_type());
+    TORCH_CHECK(out.is_floating_point(), "irfftn expects a floating point output tensor, but got ", out.scalar_type());
     return at::_fft_c2r_out(out, x, desc.dim, static_cast<int64_t>(norm), last_dim_size);
   } else {
     return at::_fft_c2r(x, desc.dim, static_cast<int64_t>(norm), last_dim_size);

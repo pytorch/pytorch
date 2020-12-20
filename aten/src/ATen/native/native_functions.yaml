@@ -2174,6 +2174,7 @@
     CUDA: _fft_r2c_cufft
 
 - func: _fft_r2c.out(Tensor self, int[] dim, int normalization, bool onesided, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: _fft_r2c_mkl_out
@@ -2188,6 +2189,7 @@
     CUDA: _fft_c2r_cufft
 
 - func: _fft_c2r.out(Tensor self, int[] dim, int normalization, int last_dim_size, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: _fft_c2r_mkl_out
@@ -2202,6 +2204,7 @@
     CUDA: _fft_c2c_cufft
 
 - func: _fft_c2c.out(Tensor self, int[] dim, int normalization, bool forward, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: _fft_c2c_mkl_out
@@ -9917,6 +9920,7 @@
   variants: function
 
 - func: fft_fft.out(Tensor self, int? n=None, int dim=-1, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: fft
   variants: function
 
@@ -9926,6 +9930,7 @@
   variants: function
 
 - func: fft_ifft.out(Tensor self, int? n=None, int dim=-1, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: fft
   variants: function
 
@@ -9935,6 +9940,7 @@
   variants: function
 
 - func: fft_rfft.out(Tensor self, int? n=None, int dim=-1, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: fft
   variants: function
 
@@ -9944,6 +9950,7 @@
   variants: function
 
 - func: fft_irfft.out(Tensor self, int? n=None, int dim=-1, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: fft
   variants: function
 
@@ -9953,6 +9960,7 @@
   variants: function
 
 - func: fft_hfft.out(Tensor self, int? n=None, int dim=-1, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: fft
   variants: function
 
@@ -9962,6 +9970,7 @@
   variants: function
 
 - func: fft_ihfft.out(Tensor self, int? n=None, int dim=-1, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: fft
   variants: function
 
@@ -9971,6 +9980,7 @@
   variants: function
 
 - func: fft_fft2.out(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: fft
   variants: function
 
@@ -9980,6 +9990,7 @@
   variants: function
 
 - func: fft_ifft2.out(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: fft
   variants: function
 
@@ -9989,6 +10000,7 @@
   variants: function
 
 - func: fft_rfft2.out(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: fft
   variants: function
 
@@ -9998,6 +10010,7 @@
   variants: function
 
 - func: fft_irfft2.out(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: fft
   variants: function
 
@@ -10007,6 +10020,7 @@
   variants: function
 
 - func: fft_fftn.out(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: fft
   variants: function
 
@@ -10016,6 +10030,7 @@
   variants: function
 
 - func: fft_ifftn.out(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: fft
   variants: function
 
@@ -10025,6 +10040,7 @@
   variants: function
 
 - func: fft_rfftn.out(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: fft
   variants: function
 
@@ -10034,6 +10050,7 @@
   variants: function
 
 - func: fft_irfftn.out(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: fft
   variants: function
 
@@ -10043,6 +10060,7 @@
   variants: function
 
 - func: fft_fftfreq.out(int n, float d=1.0, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: fft
   variants: function
 
@@ -10052,6 +10070,7 @@
   variants: function
 
 - func: fft_rfftfreq.out(int n, float d=1.0, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: fft
   variants: function
 
