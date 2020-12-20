@@ -3,6 +3,7 @@ import unittest
 import traceback
 import os
 import string
+from typing import Tuple
 
 
 # This file implements expect tests (also known as "golden" tests).
@@ -139,7 +140,8 @@ RE_EXPECT = re.compile(r"^(?P<suffix>[^\n]*?)"
                        r"(?P<raw>r?)", re.DOTALL)
 
 
-def replace_string_literal(src, lineno, new_string):
+def replace_string_literal(src : str, lineno : int,
+                           new_string : str) -> Tuple[str, int]:
     r"""
     Replace a triple quoted string literal with new contents.
     Only handles printable ASCII correctly at the moment.  This
