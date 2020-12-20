@@ -159,6 +159,9 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
             ob_dict = compare_model_stub_fx(
                 float_model, q_model, module_swap_list, data
             )
+            expected_ob_dict_keys = {"conv.stats"}
+            print(ob_dict.keys())
+            self.assertTrue(ob_dict.keys() == expected_ob_dict_keys)
             self.assertEqual(len(ob_dict), 1)
             for k, v in ob_dict.items():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
@@ -204,6 +207,9 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
             ob_dict = compare_model_stub_fx(
                 float_model, q_model, module_swap_list, data
             )
+            expected_ob_dict_keys = {"fc1.stats"}
+
+            self.assertTrue(ob_dict.keys() == expected_ob_dict_keys)
             self.assertEqual(len(ob_dict), 1)
             for k, v in ob_dict.items():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))

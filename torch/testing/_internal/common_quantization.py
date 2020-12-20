@@ -1255,11 +1255,16 @@ class ModelForFusion(nn.Module):
 
 class ConvBNReLU(nn.Sequential):
     def __init__(self):
-        super().__init__(
-            nn.Conv2d(3, 3, 1, 1, bias=False),
-            nn.BatchNorm2d(3),
-            nn.ReLU(inplace=False)
-        )
+        super(ConvBNReLU, self).__init__()
+        self.conv = torch.nn.Conv2d(3, 5, 3, bias=False).to(dtype=torch.float)
+        self.bn = torch.nn.BatchNorm2d(5).to(dtype=torch.float)
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.bn(x)
+        x = self.relu(x)
+        return x
 
 class ModelWithSequentialFusion(nn.Module):
     def __init__(self):

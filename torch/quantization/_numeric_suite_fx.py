@@ -7,7 +7,12 @@ import torch.nn.quantized.dynamic as nnqd
 from torch.fx import GraphModule  # type: ignore
 from torch.fx import map_arg  # type: ignore
 from torch.fx.graph import Graph
-from torch.quantization._numeric_suite import get_logger_dict, Shadow, ShadowLogger
+from torch.quantization._numeric_suite import (
+    get_logger_dict,
+    prepare_model_with_stubs,
+    compare_weights,
+    ShadowLogger,
+)
 from torch.quantization.fx.quantize import _remove_qconfig, is_activation_post_process
 
 
@@ -46,34 +51,6 @@ def remove_qconfig_observer_fx(model):
     return model
 
 
-def _find_match(str_list, key_str, postfix):
-    split_str = key_str.split(".")
-    if split_str[-1] == postfix:
-        match_string = "".join(key_str.split(".")[0:-1])
-        for s2 in str_list:
-            pattern1 = "".join(s2.split(".")[0:-1])
-            pattern2 = "".join(s2.split(".")[0:-2])
-            if match_string == pattern1:
-                return s2
-            if match_string == pattern2:
-                return s2
-
-        # For matching "fc.weight" and "fc._packed_params._packed_params"
-        if postfix == "_packed_params":
-            match_string = "".join(key_str.split(".")[0:-2])
-            if len(match_string) == 0:
-                return None
-            for s2 in str_list:
-                pattern1 = "".join(s2.split(".")[0:-1])
-                pattern2 = "".join(s2.split(".")[0:-2])
-                if match_string == pattern1:
-                    return s2
-                if match_string == pattern2:
-                    return s2
-    else:
-        return None
-
-
 def compare_weights_fx(float_dict, quantized_dict):
     r"""Compare the weights of the float module with its corresponding quantized
     module. Return a dict with key corresponding to module names and each entry being
@@ -103,41 +80,7 @@ def compare_weights_fx(float_dict, quantized_dict):
     torch._C._log_api_usage_once(
         "quantization_api._numeric_suite_fx.compare_weights_fx"
     )
-    weight_dict: Dict[str, Dict] = {}
-    for key in quantized_dict:
-        match_key = _find_match(float_dict, key, "weight")
-        if match_key is not None:
-            weight_dict[key] = {}
-            weight_dict[key]["float"] = float_dict[match_key]
-            weight_dict[key]["quantized"] = quantized_dict[key]
-            continue
-
-        # For matching "fc.weight" and "fc._packed_params._packed_params"
-        match_key = _find_match(float_dict, key, "_packed_params")
-        if match_key is not None:
-            weight_dict[key] = {}
-            weight_dict[key]["float"] = float_dict[match_key]
-            weight_dict[key]["quantized"] = quantized_dict[key][0]
-
-        # For LSTM
-        split_str = key.split(".")
-        if split_str[-1] == "param" and split_str[-3] == "_all_weight_values":
-            layer = split_str[-2]
-            module_name = ".".join(split_str[:-3])
-            float_weight_ih_key = module_name + ".weight_ih_l" + layer
-            float_weight_hh_key = module_name + ".weight_hh_l" + layer
-            if float_weight_ih_key in float_dict and float_weight_hh_key in float_dict:
-                weight_dict[key] = {}
-                weight_dict[key]["float"] = float_dict[float_weight_ih_key]
-                weight_dict[key]["quantized"] = (
-                    quantized_dict[key].__getstate__()[0][4][0].__getstate__()[0][0]
-                )
-                weight_dict[key]["float"] = float_dict[float_weight_hh_key]
-                weight_dict[key]["quantized"] = (
-                    quantized_dict[key].__getstate__()[0][4][1].__getstate__()[0][0]
-                )
-
-    return weight_dict
+    return compare_weights(float_dict, quantized_dict)
 
 
 def prepare_model_with_stubs_fx(float_module, q_module, module_swap_list, Logger):
@@ -159,26 +102,7 @@ def prepare_model_with_stubs_fx(float_module, q_module, module_swap_list, Logger
     torch._C._log_api_usage_once(
         "quantization_api._numeric_suite.prepare_model_with_stubs_fx"
     )
-
-    float_module_children = {}
-    for name, mod in float_module.named_children():
-        float_module_children[name] = mod
-
-    reassign = {}
-    for name, mod in q_module.named_children():
-        if name not in float_module_children:
-            continue
-
-        float_mod = float_module_children[name]
-
-        if type(float_mod) not in module_swap_list:
-            prepare_model_with_stubs_fx(float_mod, mod, module_swap_list, Logger)
-
-        if type(float_mod) in module_swap_list:
-            reassign[name] = Shadow(mod, float_mod, Logger)
-
-    for key, value in reassign.items():
-        q_module._modules[key] = value
+    return prepare_model_with_stubs(float_module, q_module, module_swap_list, Logger)
 
 
 def compare_model_stub_fx(
@@ -217,7 +141,6 @@ def compare_model_stub_fx(
     torch._C._log_api_usage_once(
         "quantization_api._numeric_suite.compare_model_stub_fx"
     )
-
     float_model = remove_qconfig_observer_fx(float_model)
     prepare_model_with_stubs_fx(float_model, q_model, module_swap_list, Logger)
     q_model(*data)
