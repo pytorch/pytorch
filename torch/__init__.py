@@ -1,7 +1,7 @@
 
 r"""
 The torch package contains data structures for multi-dimensional
-tensors and defines mathematical operations over these tensors.
+tensors. It also  defines mathematical operations that can be performed over these tensors.
 Additionally, it provides many utilities for efficient serializing of
 Tensors and arbitrary types, and other useful utilities.
 
@@ -417,50 +417,40 @@ def is_deterministic():
 from .tensor import Tensor
 from .storage import _StorageBase
 
-
-class DoubleStorage(_C.DoubleStorageBase, _StorageBase):
+class BFloat16Storage(_C.BFloat16StorageBase, _StorageBase):
     pass
-
-
-class FloatStorage(_C.FloatStorageBase, _StorageBase):
-    pass
-
-
-class HalfStorage(_C.HalfStorageBase, _StorageBase):
-    pass
-
-
-class LongStorage(_C.LongStorageBase, _StorageBase):
-    pass
-
-
-class IntStorage(_C.IntStorageBase, _StorageBase):
-    pass
-
-
-class ShortStorage(_C.ShortStorageBase, _StorageBase):
-    pass
-
-
-class CharStorage(_C.CharStorageBase, _StorageBase):
-    pass
-
-
-class ByteStorage(_C.ByteStorageBase, _StorageBase):
-    pass
-
 
 class BoolStorage(_C.BoolStorageBase, _StorageBase):
     pass
 
+class ByteStorage(_C.ByteStorageBase, _StorageBase):
+    pass
 
-class BFloat16Storage(_C.BFloat16StorageBase, _StorageBase):
+class CharStorage(_C.CharStorageBase, _StorageBase):
     pass
 
 class ComplexDoubleStorage(_C.ComplexDoubleStorageBase, _StorageBase):
     pass
 
 class ComplexFloatStorage(_C.ComplexFloatStorageBase, _StorageBase):
+    pass
+
+class DoubleStorage(_C.DoubleStorageBase, _StorageBase):
+    pass
+
+class FloatStorage(_C.FloatStorageBase, _StorageBase):
+    pass
+
+class HalfStorage(_C.HalfStorageBase, _StorageBase):
+    pass
+
+class IntStorage(_C.IntStorageBase, _StorageBase):
+    pass
+
+class LongStorage(_C.LongStorageBase, _StorageBase):
+    pass
+
+class ShortStorage(_C.ShortStorageBase, _StorageBase):
     pass
 
 class QUInt8Storage(_C.QUInt8StorageBase, _StorageBase):
@@ -535,18 +525,18 @@ from .functional import *
 # Remove unnecessary members
 ################################################################################
 
-del DoubleStorageBase
-del FloatStorageBase
-del LongStorageBase
-del IntStorageBase
-del ShortStorageBase
-del CharStorageBase
-del ByteStorageBase
-del BoolStorageBase
-del QUInt8StorageBase
 del BFloat16StorageBase
+del BoolStorageBase
+del ByteStorageBase
+del CharStorageBase
 del ComplexDoubleStorageBase
 del ComplexFloatStorageBase
+del DoubleStorageBase
+del FloatStorageBase
+del IntStorageBase
+del LongStorageBase
+del ShortStorageBase
+del QUInt8StorageBase
 del QUInt4x2StorageBase
 
 ################################################################################
