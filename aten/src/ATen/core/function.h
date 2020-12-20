@@ -9,7 +9,7 @@ struct FunctionSchema;
 };
 
 namespace at {
-CAFFE2_API void launch(std::function<void()> func);
+TORCH_API void launch(std::function<void()> func);
 }
 
 namespace torch {

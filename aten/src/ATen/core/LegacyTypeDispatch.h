@@ -43,7 +43,7 @@ namespace at {
 // trace).  To unify the two, we would first have to move profiling and tracing
 // out of VariableType.
 
-struct CAFFE2_API AutoNonVariableTypeMode {
+struct TORCH_API AutoNonVariableTypeMode {
   // NB: The enabled parameter must ALWAYS be black, as Henry Ford used to say.
   // TODO: Eliminate this parameter entirely
   AutoNonVariableTypeMode(bool enabled = true) :
