@@ -17,7 +17,7 @@ from .file_baton import FileBaton
 from ._cpp_extension_versioner import ExtensionVersioner
 from .hipify import hipify_python
 from .hipify.hipify_python import get_hip_file_path, GeneratedFileCleaner
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from setuptools.command.build_ext import build_ext
 from pkg_resources import packaging  # type: ignore
@@ -980,7 +980,7 @@ def library_paths(cuda: bool = False) -> List[str]:
 
 
 def load(name,
-         sources: List[str],
+         sources: Union[str, List[str]],
          extra_cflags=None,
          extra_cuda_cflags=None,
          extra_ldflags=None,
