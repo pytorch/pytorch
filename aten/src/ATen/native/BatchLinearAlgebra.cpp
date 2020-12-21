@@ -670,22 +670,22 @@ Tensor& linalg_cholesky_out(Tensor &result, const Tensor &self) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<typename scalar_t>
-static void apply_cholesky_inverse(Tensor& self, bool upper, std::vector<int64_t>& infos) {
+static void apply_cholesky_inverse(Tensor& input, bool upper, std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
   AT_ERROR("cholesky_inverse: LAPACK library not found in compilation");
 #else
   char uplo = upper ? 'U' : 'L';
 
-  auto self_data = self.data_ptr<scalar_t>();
-  auto self_matrix_stride = matrixStride(self);
-  auto batch_size = batchCount(self);
-  auto n = self.size(-2);
+  auto input_data = input.data_ptr<scalar_t>();
+  auto input_matrix_stride = matrixStride(input);
+  auto batch_size = batchCount(input);
+  auto n = input.size(-2);
   auto lda = std::max<int64_t>(1, n);
 
   int info;
   for (int64_t i = 0; i < batch_size; i++) {
-    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
-    lapackCholeskyInverse<scalar_t>(uplo, n, self_working_ptr, lda, &info);
+    scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
+    lapackCholeskyInverse<scalar_t>(uplo, n, input_working_ptr, lda, &info);
     infos[i] = info;
     if (info != 0) {
       return;

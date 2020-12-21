@@ -1559,20 +1559,20 @@ Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-static void apply_cholesky_inverse(Tensor& self, bool upper, std::vector<int64_t>& infos) {
+static void apply_cholesky_inverse(Tensor& input, bool upper, std::vector<int64_t>& infos) {
 #ifndef USE_MAGMA
   AT_ERROR("cholesky_inverse: MAGMA library not found in "
       "compilation. Please rebuild with MAGMA.");
 #else
   magma_uplo_t uplo = upper ? MagmaUpper : MagmaLower;
 
-  auto self_data = self.data_ptr<scalar_t>();
-  magma_int_t n = magma_int_cast(self.size(-2), "self.size(-2)");
+  auto input_data = input.data_ptr<scalar_t>();
+  magma_int_t n = magma_int_cast(input.size(-2), "input.size(-2)");
   auto lda = std::max<magma_int_t>(1, n);
 
-  if (self.dim() == 2) {
+  if (input.dim() == 2) {
     magma_int_t info = 0;
-    magmaCholeskyInverse<scalar_t>(uplo, n, self_data, lda, &info);
+    magmaCholeskyInverse<scalar_t>(uplo, n, input_data, lda, &info);
     infos[0] = info;
   } else {
     TORCH_CHECK(false, "Batched version is not implemented for CUDA.")
@@ -1580,19 +1580,19 @@ static void apply_cholesky_inverse(Tensor& self, bool upper, std::vector<int64_t
 #endif
 }
 
-Tensor _cholesky_inverse_helper_cuda(const Tensor& self, bool upper) {
-  std::vector<int64_t> infos(batchCount(self), 0);
-  Tensor self_working_copy = cloneBatchedColumnMajor(self);
+Tensor _cholesky_inverse_helper_cuda(const Tensor& input, bool upper) {
+  std::vector<int64_t> infos(batchCount(input), 0);
+  Tensor input_working_copy = cloneBatchedColumnMajor(input);
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "cholesky_inverse_cuda", [&]{
-    apply_cholesky_inverse<scalar_t>(self_working_copy, upper, infos);
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "cholesky_inverse_cuda", [&]{
+    apply_cholesky_inverse<scalar_t>(input_working_copy, upper, infos);
   });
-  if (self.dim() > 2) {
+  if (input.dim() > 2) {
     batchCheckErrors(infos, "cholesky_inverse_cuda");
   } else {
     singleCheckErrors(infos[0], "cholesky_inverse_cuda");
   }
-  return self_working_copy;
+  return input_working_copy;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
