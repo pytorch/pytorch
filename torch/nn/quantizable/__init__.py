@@ -1,1 +1,1 @@
-from .modules import LSTM, LSTMCell
+from .modules import *

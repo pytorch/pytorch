@@ -3,9 +3,6 @@ from typing import Optional, Tuple
 
 import torch
 from torch import Tensor
-import torch.nn as nn
-
-from ...quantized.modules.functional_modules import FloatFunctional
 
 """
 We will recreate all the RNN modules as we require the modules to be decomposed
@@ -13,7 +10,7 @@ into its building blocks to be able to observe.
 """
 
 class LSTMCell(torch.nn.Module):
-    _FLOAT_MODULE = nn.LSTMCell
+    _FLOAT_MODULE = torch.nn.LSTMCell
     # There are multiple outputs in the forward -- we don't want to observe!
     do_not_observe: bool = True
 
@@ -23,15 +20,15 @@ class LSTMCell(torch.nn.Module):
         self.hidden_size = hidden_dim
         self.bias = bias
 
-        self.igates = nn.Linear(input_dim, 4 * hidden_dim, bias=bias)
-        self.hgates = nn.Linear(hidden_dim, 4 * hidden_dim, bias=bias)
-        self.gates = FloatFunctional()
+        self.igates = torch.nn.Linear(input_dim, 4 * hidden_dim, bias=bias)
+        self.hgates = torch.nn.Linear(hidden_dim, 4 * hidden_dim, bias=bias)
+        self.gates = torch.nn.quantized.FloatFunctional()
 
-        self.fgate_cx = FloatFunctional()
-        self.igate_cgate = FloatFunctional()
-        self.fgate_cx_igate_cgate = FloatFunctional()
+        self.fgate_cx = torch.nn.quantized.FloatFunctional()
+        self.igate_cgate = torch.nn.quantized.FloatFunctional()
+        self.fgate_cx_igate_cgate = torch.nn.quantized.FloatFunctional()
 
-        self.ogate_cy = FloatFunctional()
+        self.ogate_cy = torch.nn.quantized.FloatFunctional()
 
     def forward(self, x: Tensor, hidden: Optional[Tuple[Tensor, Tensor]] = None) -> Tuple[Tensor, Tensor]:
         if hidden is None or hidden == (None, None):
@@ -72,12 +69,12 @@ class LSTMCell(torch.nn.Module):
         hidden_size = wh.shape[1]
         cell = cls(input_dim=input_size, hidden_dim=hidden_size,
                    bias=(bi is not None))
-        cell.igates.weight = nn.Parameter(wi)
+        cell.igates.weight = torch.nn.Parameter(wi)
         if bi is not None:
-            cell.igates.bias = nn.Parameter(bi)
-        cell.hgates.weight = nn.Parameter(wh)
+            cell.igates.bias = torch.nn.Parameter(bi)
+        cell.hgates.weight = torch.nn.Parameter(wh)
         if bh is not None:
-            cell.hgates.bias = nn.Parameter(bh)
+            cell.hgates.bias = torch.nn.Parameter(bh)
         return cell
 
     @classmethod
@@ -91,7 +88,7 @@ class LSTMCell(torch.nn.Module):
         return observed
 
 
-class _LSTMSingleLayer(nn.Module):
+class _LSTMSingleLayer(torch.nn.Module):
     def __init__(self, input_dim, hidden_dim, bias=True):
         super().__init__()
         self.cell = LSTMCell(input_dim, hidden_dim, bias=bias)
@@ -112,7 +109,7 @@ class _LSTMSingleLayer(nn.Module):
         return layer
 
 
-class _LSTMLayer(nn.Module):
+class _LSTMLayer(torch.nn.Module):
     def __init__(self, input_dim, hidden_dim, bias=True, batch_first=False,
                  bidirectional=False):
         super().__init__()
@@ -186,8 +183,8 @@ class _LSTMLayer(nn.Module):
         return layer
 
 
-class LSTM(nn.Module):
-    _FLOAT_MODULE = nn.LSTM
+class LSTM(torch.nn.Module):
+    _FLOAT_MODULE = torch.nn.LSTM
     # There are multiple outputs in the forward -- we don't want to observe!
     do_not_observe: bool = True
 
@@ -212,7 +209,7 @@ class LSTM(nn.Module):
                              "zeroed")
         if dropout > 0:
             warnings.warn("dropout option for quantizable LSTM is ignored. "
-                          "If you are training, please, use  nn.LSTM version "
+                          "If you are training, please, use nn.LSTM version "
                           "followed by `prepare` step.")
             if num_layers == 1:
                 warnings.warn("dropout option adds dropout after all but last "
@@ -227,7 +224,7 @@ class LSTM(nn.Module):
             layers.append(_LSTMLayer(self.hidden_size, self.hidden_size,
                                     self.bias, batch_first=False,
                                     bidirectional=self.bidirectional))
-        self.layers = nn.ModuleList(layers)
+        self.layers = torch.nn.ModuleList(layers)
 
     def forward(self, x, hidden=None):
         if self.batch_first:
