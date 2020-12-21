@@ -534,6 +534,42 @@ class TestQuantizeFx(QuantizationTestCase):
         m = convert_fx(m)
         m(dict_input)
 
+    @override_qengines
+    def test_attention(self):
+        """ Make sure quantization runs for a corner case in attention module
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv(x)
+                q, k, v = x.chunk(3, dim=0)
+                q = q.contiguous().view(-1, 1).transpose(0, 1)
+                k = k.contiguous().view(-1, 1).transpose(0, 1)
+                v = v.contiguous().view(-1, 1).transpose(0, 1)
+                torch._assert(
+                    k.size(1) == 1, "key size should be equal to 1"
+                )
+                r = torch.mm(k, v)
+                return q * k + r
+
+        tensor_input = torch.randn(3, 1, 1, 1)
+        m = M().eval()
+        qconfig_dict = {
+            "": None,
+            "object_type": [
+                (nn.Conv2d, default_qconfig),
+                ("chunk", None)
+            ]
+        }
+        # make sure it runs
+        m = prepare_fx(m, qconfig_dict)
+        m(tensor_input)
+        m = convert_fx(m)
+        m(tensor_input)
+
     def test_standalone_module(self):
         class StandaloneModule(torch.nn.Module):
             def __init__(self):
