@@ -1382,8 +1382,8 @@ TEST(Reductions, ReduceInlineConsumer) {
   Stmt* stmt1 = IRSimplifier::simplify(l1.root_stmt());
   Stmt* stmt2 = IRSimplifier::simplify(l2.root_stmt());
 
-  SimpleIREvaluator eval1(stmt1, a_buf, b_buf, y);
-  SimpleIREvaluator eval2(stmt2, a_buf, b_buf, y);
+  SimpleIREvaluator eval1(stmt1, {a_buf, b_buf, y});
+  SimpleIREvaluator eval2(stmt2, {a_buf, b_buf, y});
 
   PaddedBuffer<float> y_1(M);
   PaddedBuffer<float> y_2(M);
@@ -1440,8 +1440,8 @@ TEST(Reductions, ReduceInlineReducerInternal) {
   Stmt* stmt1 = IRSimplifier::simplify(l1.root_stmt());
   Stmt* stmt2 = IRSimplifier::simplify(l2.root_stmt());
 
-  SimpleIREvaluator eval1(stmt1, a_buf, b_buf, y);
-  SimpleIREvaluator eval2(stmt2, a_buf, b_buf, y);
+  SimpleIREvaluator eval1(stmt1, {a_buf, b_buf, y});
+  SimpleIREvaluator eval2(stmt2, {a_buf, b_buf, y});
 
   PaddedBuffer<float> y_1(M);
   PaddedBuffer<float> y_2(M);
