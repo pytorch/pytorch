@@ -2,7 +2,7 @@ import torch
 import numpy as np
 
 import unittest
-from itertools import product, permutations
+from itertools import product, permutations, combinations
 from functools import partial
 import random
 
@@ -1038,6 +1038,34 @@ class TestOldViewOps(TestCase):
                 actual = torch.broadcast_shapes(s0, s1)
                 self.assertEqual(expected, actual)
 
+    # Skip BFloat16 since numpy does not support it
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False))
+    def test_broadcast_to(self, device, dtype):
+        def can_broadcast(s0, s1):
+            # s0.dim() <= s1.dim(), reverse s0 and s1 to compare trailing dimension
+            s0 = tuple(reversed(s0))
+            s1 = tuple(reversed(s1))
+            for i in range(len(s0)):
+                if s0[i] != 1 and s0[i] != s1[i]:
+                    return False
+            return True
+
+        sizes = (
+            (), (1,), (2,), (1, 1), (3, 1), (3, 2), (4, 1, 1), (4, 3, 2)
+        )
+        for s0, s1 in combinations(sizes, r=2):
+            t = make_tensor(s0, device, dtype, low=-9, high=9)
+            t_np = t.cpu().numpy()
+
+            if can_broadcast(s0, s1):
+                res = torch.broadcast_to(t, s1)
+                np_res = np.broadcast_to(t_np, s1)
+                self.assertEqual(res, np_res)
+            else:
+                with self.assertRaisesRegex(RuntimeError,
+                                            r"The expanded size of the tensor \(\d\) "
+                                            r"must match the existing size \(\d\)"):
+                    torch.broadcast_to(t, s1)
 
     def test_view(self, device):
         tensor = torch.rand(15, device=device)
