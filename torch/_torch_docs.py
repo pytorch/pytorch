@@ -3078,7 +3078,6 @@ Example::
             [5, 6, 7, 8]])
 """.format(**common_args))
 
-# TODO: see https://github.com/pytorch/pytorch/issues/43667
 add_docstr(torch.gather,
            r"""
 gather(input, dim, index, *, sparse_grad=False, out=None) -> Tensor
@@ -3101,13 +3100,15 @@ Args:
     input (Tensor): the source tensor
     dim (int): the axis along which to index
     index (LongTensor): the indices of elements to gather
-    sparse_grad(bool,optional): If ``True``, gradient w.r.t. :attr:`input` will be a sparse tensor.
+
+Keyword arguments:
+    sparse_grad (bool, optional): If ``True``, gradient w.r.t. :attr:`input` will be a sparse tensor.
     out (Tensor, optional): the destination tensor
 
 Example::
 
-    >>> t = torch.tensor([[1,2],[3,4]])
-    >>> torch.gather(t, 1, torch.tensor([[0,0],[1,0]]))
+    >>> t = torch.tensor([[1, 2], [3, 4]])
+    >>> torch.gather(t, 1, torch.tensor([[0, 0], [1, 0]]))
     tensor([[ 1,  1],
             [ 4,  3]])
 """)
@@ -5884,7 +5885,7 @@ Examples::
             [2, 6]],
 
             [[1, 5],
-            [3, 7]]])    
+            [3, 7]]])
 """.format(**common_args))
 
 add_docstr(torch.swapaxes, r"""
@@ -5914,7 +5915,7 @@ Examples::
             [2, 6]],
 
             [[1, 5],
-            [3, 7]]])    
+            [3, 7]]])
 """.format(**common_args))
 
 add_docstr(torch.narrow,
@@ -6481,15 +6482,15 @@ add_docstr(torch.float_power,
            r"""
 float_power(input, exponent, *, out=None) -> Tensor
 
-Raises :attr:`input` to the power of :attr:`exponent`, elementwise, in double precision. 
-If neither input is complex returns a ``torch.float64`` tensor, 
+Raises :attr:`input` to the power of :attr:`exponent`, elementwise, in double precision.
+If neither input is complex returns a ``torch.float64`` tensor,
 and if one or more inputs is complex returns a ``torch.complex128`` tensor.
 
-.. note:: 
-    This function always computes in double precision, unlike :func:`torch.pow`, 
+.. note::
+    This function always computes in double precision, unlike :func:`torch.pow`,
     which implements more typical :ref:`type promotion <type-promotion-doc>`.
-    This is useful when the computation needs to be performed in a wider or more precise dtype, 
-    or the results of the computation may contain fractional values not representable in the input dtypes, 
+    This is useful when the computation needs to be performed in a wider or more precise dtype,
+    or the results of the computation may contain fractional values not representable in the input dtypes,
     like when an integer base is raised to a negative integer exponent.
 
 Args:
@@ -9805,21 +9806,21 @@ If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
 add_docstr(torch.tile, r"""
 tile(input, reps) -> Tensor
 
-Constructs a tensor by repeating the elements of :attr:`input`. 
+Constructs a tensor by repeating the elements of :attr:`input`.
 The :attr:`reps` argument specifies the number of repetitions
 in each dimension.
 
 If :attr:`reps` specifies fewer dimensions than :attr:`input` has, then
 ones are prepended to :attr:`reps` until all dimensions are specified.
 For example, if :attr:`input` has shape (8, 6, 4, 2) and :attr:`reps`
-is (2, 2), then :attr:`reps` is treated as (1, 1, 2, 2). 
+is (2, 2), then :attr:`reps` is treated as (1, 1, 2, 2).
 
-Analogously, if :attr:`input` has fewer dimensions than :attr:`reps` 
-specifies, then :attr:`input` is treated as if it were unsqueezed at 
-dimension zero until it has as many dimensions as :attr:`reps` specifies. 
+Analogously, if :attr:`input` has fewer dimensions than :attr:`reps`
+specifies, then :attr:`input` is treated as if it were unsqueezed at
+dimension zero until it has as many dimensions as :attr:`reps` specifies.
 For example, if :attr:`input` has shape (4, 2) and :attr:`reps`
-is (3, 3, 2, 2), then :attr:`input` is treated as if it had the 
-shape (1, 1, 4, 2). 
+is (3, 3, 2, 2), then :attr:`input` is treated as if it had the
+shape (1, 1, 4, 2).
 
 .. note::
 
