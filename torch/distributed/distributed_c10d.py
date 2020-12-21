@@ -2487,9 +2487,9 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
     # process groups including global variables are updated correctly on all
     # ranks.
     if backend == Backend.MPI or not (
-        isinstance(store, TCPStore) or
-        isinstance(store, FileStore) or
-        isinstance(store, HashStore)
+        isinstance(default_store, TCPStore) or
+        isinstance(default_store, FileStore) or
+        isinstance(default_store, HashStore)
     ):
         # MPI doesn't have store.
         barrier()
