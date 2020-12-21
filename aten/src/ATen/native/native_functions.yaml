@@ -1027,6 +1027,12 @@
   use_c10_dispatcher: full
   device_guard: False
 
+- func: broadcast_to(Tensor(a) self, int[] size) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    Math: broadcast_to
+
 - func: cat(Tensor[] tensors, int dim=0) -> Tensor
   use_c10_dispatcher: full
   dispatch:
@@ -2976,6 +2982,17 @@
 
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
   use_c10_dispatcher: full
+
+- func: _sparse_sparse_matmul(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  dispatch:
+    SparseCPU: sparse_sparse_matmul_cpu
+    SparseCUDA: sparse_sparse_matmul_cuda
+
+- func: _sparse_matrix_mask_helper(Tensor t, Tensor mask_indices) -> Tensor
+  dispatch:
+    SparseCPU: sparse_matrix_mask_helper_cpu
+    SparseCUDA: sparse_matrix_mask_helper_cuda
 
 - func: mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
   use_c10_dispatcher: full
@@ -10132,6 +10149,26 @@
   variants: function
   dispatch:
     Math: linalg_cond_out
+
+- func: _linalg_solve_out_helper_(Tensor(a!) self, Tensor(b!) other, Tensor(c!) infos) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: _linalg_solve_out_helper_cpu
+    CUDA: _linalg_solve_out_helper_cuda
+
+- func: linalg_solve(Tensor input, Tensor other) -> Tensor
+  python_module: linalg
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    DefaultBackend: linalg_solve
+
+- func: linalg_solve.out(Tensor input, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  dispatch:
+    DefaultBackend: linalg_solve_out
 
 - func: linalg_tensorinv(Tensor self, int ind=2) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures

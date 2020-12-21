@@ -989,8 +989,8 @@ struct to_ir {
   }
 
   void emitReturn(const Return& stmt) {
-    Value* result = emitExpr(stmt.expr());
     TypePtr result_type = def_stack_.back().declared_return_type_;
+    Value* result = emitExpr(stmt.expr(), result_type);
     // result type is annotated, every return must convert to that type
     if (result_type) {
       // this guard skips implicit conversion from None -> Tensor for the return
@@ -1251,10 +1251,12 @@ struct to_ir {
     return graph->create(kind, n_outputs)->setSourceRange(loc);
   }
 
-  Value* emitTernaryIf(const TernaryIf& expr) {
+  Value* emitTernaryIf(
+      const TernaryIf& expr,
+      const TypePtr& type_hint = nullptr) {
     CondValue cond_value = emitCondExpr(expr.cond());
-    auto true_expr = [&] { return emitExpr(expr.true_expr()); };
-    auto false_expr = [&] { return emitExpr(expr.false_expr()); };
+    auto true_expr = [&] { return emitExpr(expr.true_expr(), type_hint); };
+    auto false_expr = [&] { return emitExpr(expr.false_expr(), type_hint); };
     return emitIfExpr(expr.range(), cond_value, true_expr, false_expr);
   }
 
@@ -3012,7 +3014,15 @@ struct to_ir {
     // Push the source range of a call in case compiling this function
     // triggers an error
     ErrorReport::CallStack::update_pending_range(tree.range());
-    return emitSugaredExpr(tree, 1, type_hint)->asValue(tree.range(), method);
+    Value* out_val =
+        emitSugaredExpr(tree, 1, type_hint)->asValue(tree.range(), method);
+    // AnyType is the only user-exposed type which we don't unify to from
+    // its subtypes, so we add a cast for use cases like
+    // x : Any = 1 if cond else "str"
+    if (type_hint == AnyType::get() && out_val->type() != AnyType::get()) {
+      out_val = graph->insertUncheckedCast(out_val, type_hint);
+    }
+    return out_val;
   }
 
   NodeKind reverseComparision(NodeKind kind) {
@@ -3347,7 +3357,7 @@ struct to_ir {
         return graph->insertConstant(IValue(), tree->range());
       } break;
       case TK_IF_EXPR: {
-        return emitTernaryIf(TernaryIf(tree));
+        return emitTernaryIf(TernaryIf(tree), type_hint);
       } break;
       case TK_STRINGLITERAL: {
         return emitStringLiteral(StringLiteral(tree));

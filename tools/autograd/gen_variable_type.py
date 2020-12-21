@@ -79,7 +79,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'take', 'fill_',
     'exp', 'nonzero', 'mean', 'inverse', 'solve', 'linalg_cholesky', 'addcmul', 'addcdiv',
     'matrix_exp', 'linalg_eigh', 'cholesky_solve', 'qr', 'svd',
-    '_fft_c2c', '_fft_r2c',
+    '_fft_c2c', '_fft_r2c', 'linalg_solve',
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
