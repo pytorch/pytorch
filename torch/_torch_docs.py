@@ -7264,6 +7264,20 @@ Example::
     tensor([    nan,  1.8351,  0.8053,     nan])
 """.format(**common_args))
 
+add_docstr(torch.scatter,
+           r"""
+scatter(input, dim, index, src) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.scatter_`
+""")
+
+add_docstr(torch.scatter_add,
+           r"""
+scatter_add(input, dim, index, src) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.scatter_add_`
+""")
+
 add_docstr(torch.set_flush_denormal,
            r"""
 set_flush_denormal(mode) -> bool
