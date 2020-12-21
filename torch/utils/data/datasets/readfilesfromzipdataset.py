@@ -32,6 +32,7 @@ class ReadFilesFromZipIterableDataset(IterableDataset):
             validate_pathname_binary_tuple(data)
             pathname, data_stream = data
             try:
+                # typing.cast is used here to silence mypy's type checker
                 zips = zipfile.ZipFile(cast(IO[bytes], data_stream))
                 for zipinfo in zips.infolist():
                     # major version should always be 3 here.
@@ -47,6 +48,7 @@ class ReadFilesFromZipIterableDataset(IterableDataset):
                     # zipfile handle won't be released until all the extracted file objs are destroyed.
                     # Add `# type: ignore` to silence mypy's type checker
                     extracted_fobj.source_zipfile_ref = zips  # type: ignore
+                    # typing.cast is used here to silence mypy's type checker
                     yield (inner_pathname, cast(BufferedIOBase, extracted_fobj))
             except Exception as e:
                 warnings.warn(
