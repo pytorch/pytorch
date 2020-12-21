@@ -1558,8 +1558,14 @@ Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+/*
+Computes the inverse of a symmetric (Hermitian) positive-definite matrix n-by-n matrix 'input' using the Cholesky factorization
+This is an in-place routine, content of 'input' is overriden.
+'infos' is an int Tensors containing error codes for each matrix in the batched input.
+For more information see MAGMA's documentation for POTRI routine.
+*/
 template <typename scalar_t>
-static void apply_cholesky_inverse(Tensor& input, bool upper, std::vector<int64_t>& infos) {
+static void apply_cholesky_inverse(Tensor& input, Tensor& infos, bool upper) {
 #ifndef USE_MAGMA
   AT_ERROR("cholesky_inverse: MAGMA library not found in "
       "compilation. Please rebuild with MAGMA.");
@@ -1571,28 +1577,23 @@ static void apply_cholesky_inverse(Tensor& input, bool upper, std::vector<int64_
   auto lda = std::max<magma_int_t>(1, n);
 
   if (input.dim() == 2) {
-    magma_int_t info = 0;
-    magmaCholeskyInverse<scalar_t>(uplo, n, input_data, lda, &info);
-    infos[0] = info;
+    TORCH_INTERNAL_ASSERT(infos.device() == at::kCPU);
+    magmaCholeskyInverse<scalar_t>(uplo, n, input_data, lda, infos.data_ptr<magma_int_t>());
   } else {
     TORCH_CHECK(false, "Batched version is not implemented for CUDA.")
   }
 #endif
 }
 
-Tensor _cholesky_inverse_helper_cuda(const Tensor& input, bool upper) {
-  std::vector<int64_t> infos(batchCount(input), 0);
-  Tensor input_working_copy = cloneBatchedColumnMajor(input);
-
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "cholesky_inverse_cuda", [&]{
-    apply_cholesky_inverse<scalar_t>(input_working_copy, upper, infos);
+// This is a type dispatching helper function for 'apply_cholesky_inverse'
+Tensor& _cholesky_inverse_out_helper_cuda(Tensor &result, Tensor& infos, bool upper) {
+  // This function calculates the inverse matrix in-place
+  // result should be in column major order and contain matrices to invert
+  // the content of result is overriden by 'apply_cholesky_inverse'
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "cholesky_inverse_out_cuda", [&]{
+    apply_cholesky_inverse<scalar_t>(result, infos, upper);
   });
-  if (input.dim() > 2) {
-    batchCheckErrors(infos, "cholesky_inverse_cuda");
-  } else {
-    singleCheckErrors(infos[0], "cholesky_inverse_cuda");
-  }
-  return input_working_copy;
+  return result;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -669,66 +669,103 @@ Tensor& linalg_cholesky_out(Tensor &result, const Tensor &self) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+/*
+Computes the inverse of a symmetric (Hermitian) positive-definite matrix n-by-n matrix 'input' using the Cholesky factorization
+This is an in-place routine, content of 'input' is overriden.
+'infos' is an int Tensors containing error codes for each matrix in the batched input.
+For more information see LAPACK's documentation for POTRI routine.
+*/
 template<typename scalar_t>
-static void apply_cholesky_inverse(Tensor& input, bool upper, std::vector<int64_t>& infos) {
+static void apply_cholesky_inverse(Tensor& input, Tensor& infos, bool upper) {
 #ifndef USE_LAPACK
   AT_ERROR("cholesky_inverse: LAPACK library not found in compilation");
 #else
   char uplo = upper ? 'U' : 'L';
 
   auto input_data = input.data_ptr<scalar_t>();
+  auto infos_data = infos.data_ptr<int>();
   auto input_matrix_stride = matrixStride(input);
   auto batch_size = batchCount(input);
   auto n = input.size(-2);
   auto lda = std::max<int64_t>(1, n);
 
-  int info;
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
-    lapackCholeskyInverse<scalar_t>(uplo, n, input_working_ptr, lda, &info);
-    infos[i] = info;
-    if (info != 0) {
-      return;
-    }
+    int* info_working_ptr = &infos_data[i];
+    lapackCholeskyInverse<scalar_t>(uplo, n, input_working_ptr, lda, info_working_ptr);
   }
 #endif
 }
 
-Tensor _cholesky_inverse_helper_cpu(const Tensor& input, bool upper) {
-  std::vector<int64_t> infos(batchCount(input), 0);
-  auto input_working_copy = cloneBatchedColumnMajor(input);
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "cholesky_inverse_cpu", [&]{
-    apply_cholesky_inverse<scalar_t>(input_working_copy, upper, infos);
+// This is a type dispatching helper function for 'apply_cholesky_inverse'
+Tensor& _cholesky_inverse_out_helper_cpu(Tensor &result, Tensor& infos, bool upper) {
+  // This function calculates the inverse matrix in-place
+  // result should be in column major order and contain matrices to invert
+  // the content of result is overriden by 'apply_cholesky_inverse'
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "cholesky_inverse_out_cpu", [&]{
+    apply_cholesky_inverse<scalar_t>(result, infos, upper);
   });
-  if (input.dim() > 2) {
-    batchCheckErrors(infos, "cholesky_inverse_cpu");
-  } else {
-    singleCheckErrors(infos[0], "cholesky_inverse_cpu");
-  }
-  return input_working_copy;
+  return result;
 }
 
-Tensor cholesky_inverse(const Tensor &input, bool upper) {
+Tensor& cholesky_inverse_out_info(Tensor& result, Tensor& infos, const Tensor& input, bool upper) {
   squareCheckInputs(input);
+  TORCH_CHECK(result.scalar_type() == input.scalar_type(),
+    "result dtype ", result.scalar_type(), " does not match input dtype ", input.scalar_type());
+  TORCH_CHECK(result.device() == input.device(),
+    "result device ", result.device(), " does not match input device ", input.device());
+  TORCH_INTERNAL_ASSERT(infos.scalar_type() == at::kInt);
 
-  auto raw_cholesky_inverse_output = at::_cholesky_inverse_helper(input, upper);
+  // if result has no elements we can modify it
+  if (result.numel() == 0) {
+    at::native::resize_as_(result, input.transpose(-2, -1), MemoryFormat::Contiguous);
+    result.transpose_(-2, -1);
+  } else {
+    // Resize messes up the strides and we expect strictly column major order, so let's not use at::native::resize_output
+    TORCH_CHECK(result.sizes().equals(input.sizes()),
+    "result shape ", result.sizes(), " does not match input shape ", input.sizes());
+  }
 
+  TORCH_CHECK(result.transpose(-2, -1).is_contiguous(), "result tensor must be in batched column major order (Fortran contiguous).");
+  result.copy_(input);
+
+  at::native::resize_output(infos, {std::max<int64_t>(1, batchCount(input))});
+  infos.fill_(0);
+
+  result = at::_cholesky_inverse_out_helper_(result, infos, upper);
+
+  // LAPACK/MAGMA writes to only upper/lower part of the matrix leaving the other side unchanged.
   // TODO: implement efficient non-allocating copy of the upper part of the matrix to the lower part and lower -> upper
   if (upper) {
-    raw_cholesky_inverse_output.triu_();
-    return raw_cholesky_inverse_output + at::triu(raw_cholesky_inverse_output, 1).transpose(-2, -1);
+    result.triu_();
+    result += at::triu(result, 1).transpose(-2, -1);
   } else {
-    raw_cholesky_inverse_output.tril_();
-    return raw_cholesky_inverse_output + at::tril(raw_cholesky_inverse_output, -1).transpose(-2, -1);
+    result.tril_();
+    result += at::tril(result, -1).transpose(-2, -1);
   }
+  return result;
 }
 
 Tensor& cholesky_inverse_out(Tensor &result, const Tensor &input, bool upper) {
-  TORCH_CHECK(result.scalar_type() == input.scalar_type(),
-    "result dtype ", result.scalar_type(), " does not match input dtype ", input.scalar_type());
-  Tensor result_tmp = at::cholesky_inverse(input);
-  at::native::resize_output(result, result_tmp.sizes());
-  result.copy_(result_tmp);
+  // MAGMA doesn't have batched version of cholesky_inverse implemented.
+  // Single matrix routine requires 'infos' to reside in CPU memory,
+  // therefore we create 'infos' only on CPU for now.
+  // This should be changed once batched version for CUDA is implemented.
+  auto infos = at::empty({0}, input.options().dtype(kInt).device(kCPU));
+  result = cholesky_inverse_out_info(result, infos, input, upper);
+
+  // Now check LAPACK/MAGMA error codes
+  if (result.dim() > 2) {
+    batchCheckErrors(infos, "cholesky_inverse");
+  } else {
+    singleCheckErrors(infos.item().toInt(), "cholesky_inverse");
+  }
+  return result;
+}
+
+Tensor cholesky_inverse(const Tensor &input, bool upper) {
+  Tensor result = at::empty({0}, input.options());
+  result = at::cholesky_inverse_out(result, input, upper);
   return result;
 }
 

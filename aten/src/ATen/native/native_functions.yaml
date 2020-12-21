@@ -6692,12 +6692,12 @@
     CPU: _solve_helper_cpu
     CUDA: _solve_helper_cuda
 
-- func: _cholesky_inverse_helper(Tensor self, bool upper) -> Tensor
+- func: _cholesky_inverse_out_helper_(Tensor(a!) self, Tensor(b!) infos, bool upper) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function
   dispatch:
-    CPU: _cholesky_inverse_helper_cpu
-    CUDA: _cholesky_inverse_helper_cuda
+    CPU: _cholesky_inverse_out_helper_cpu
+    CUDA: _cholesky_inverse_out_helper_cuda
 
 - func: cholesky_inverse(Tensor self, bool upper=False) -> Tensor
   use_c10_dispatcher: full
