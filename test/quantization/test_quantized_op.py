@@ -2511,10 +2511,10 @@ class TestDynamicQuantizedLinear(TestCase):
 class TestDynamicQuantizedRNNOp(TestCase):
     """Tests the correctness of the dynamic quantized lstm/gru."""
 
-    def _get_rnn_inputs(self, seq_len, num_batches, input_size, hidden_size, num_directions):
+    def _get_rnn_inputs(self, seq_len, num_batches, input_size, hidden_size, num_directions, reduce_range):
         # For Input (seq_len, batch, input_size)
         X = torch.randn(seq_len, num_batches, input_size)
-        s, z = _calculate_dynamic_qparams(X, torch.quint8, reduce_range=True)
+        s, z = _calculate_dynamic_qparams(X, torch.quint8, reduce_range)
         Xq = torch.quantize_per_tensor(X, s, z, torch.quint8)
 
         # For H and C: (num_layers(1) * num_directions, batch, hidden_size)
@@ -2526,9 +2526,9 @@ class TestDynamicQuantizedRNNOp(TestCase):
             H = torch.zeros(num_directions, num_batches, hidden_size)
             C = torch.zeros(num_directions, num_batches, hidden_size)
 
-        s, z = _calculate_dynamic_qparams(H, torch.quint8, reduce_range=True)
+        s, z = _calculate_dynamic_qparams(H, torch.quint8, reduce_range)
         Hq = torch.quantize_per_tensor(H, s, z, torch.quint8)
-        s, z = _calculate_dynamic_qparams(C, torch.quint8, reduce_range=True)
+        s, z = _calculate_dynamic_qparams(C, torch.quint8, reduce_range)
         Cq = torch.quantize_per_tensor(C, s, z, torch.quint8)
         return Xq, Hq, Cq
 
@@ -2571,7 +2571,11 @@ class TestDynamicQuantizedRNNOp(TestCase):
                 if torch.backends.quantized.engine == 'qnnpack' and dtype == torch.float16:
                     continue
 
-                Xq, Hq, Cq = self._get_rnn_inputs(seq_len, num_batches, input_size, hidden_size, num_directions)
+                if torch.backends.quantized.engine == 'qnnpack':
+                    reduce_range = False
+                else:
+                    reduce_range = True
+                Xq, Hq, Cq = self._get_rnn_inputs(seq_len, num_batches, input_size, hidden_size, num_directions, reduce_range)
                 Wq1, Wq2, b1, b2 = self._get_rnn_weights_and_bias(input_size,
                                                                   hidden_size,
                                                                   num_directions,
@@ -2580,7 +2584,7 @@ class TestDynamicQuantizedRNNOp(TestCase):
                 if dtype == torch.qint8:
                     packed_ih = torch.ops.quantized.linear_prepack(Wq1, b1)
                     packed_hh = torch.ops.quantized.linear_prepack(Wq2, b2)
-                    cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(packed_ih, packed_hh, b1, b2, True)
+                    cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(packed_ih, packed_hh, b1, b2, reduce_range)
                     W_ref1 = Wq1.dequantize()
                     W_ref2 = Wq2.dequantize()
 
@@ -2700,7 +2704,12 @@ class TestDynamicQuantizedRNNOp(TestCase):
                 if torch.backends.quantized.engine == 'qnnpack' and dtype == torch.float16:
                     continue
 
-                Xq, Hq, Cq = self._get_rnn_inputs(seq_len, num_batches, input_size, hidden_size, 1)
+                if torch.backends.quantized.engine == 'qnnpack':
+                    reduce_range = False
+                else:
+                    reduce_range = True
+
+                Xq, Hq, Cq = self._get_rnn_inputs(seq_len, num_batches, input_size, hidden_size, 1, reduce_range)
                 Wq1, Wq2, b1, b2 = self._get_rnn_weights_and_bias(input_size, hidden_size, 1, per_channel_quant, rnn_type)
                 if dtype == torch.qint8:
                     packed_ih = torch.ops.quantized.linear_prepack(Wq1, b1)
