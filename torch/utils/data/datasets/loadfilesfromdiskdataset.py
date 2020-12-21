@@ -1,7 +1,7 @@
 from torch.utils.data.dataset import IterableDataset
 from torch.utils.data.datasets.common import get_file_binaries_from_pathnames
-
-from typing import Iterable, Iterator
+from typing import Iterable, Iterator, Tuple
+from io import BufferedIOBase
 
 class LoadFilesFromDiskIterableDataset(IterableDataset):
     r""" :class:`LoadFilesFromDiskIterableDataset`.
@@ -15,13 +15,13 @@ class LoadFilesFromDiskIterableDataset(IterableDataset):
 
     def __init__(
             self,
-            dataset : Iterable,
+            dataset : Iterable[str],
             length : int = -1):
         super().__init__()
         self.dataset : Iterable = dataset
         self.length : int = length
 
-    def __iter__(self) -> Iterator[tuple] :
+    def __iter__(self) -> Iterator[Tuple[str, BufferedIOBase]] :
         yield from get_file_binaries_from_pathnames(self.dataset)
 
     def __len__(self):
