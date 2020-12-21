@@ -1927,19 +1927,19 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    def test_svd_no_singularvectors(self, device):
+    @dtypes(torch.float)
+    def test_svd_no_singularvectors(self, device, dtype):
         for size in [(5, 5), (5, 20), (20, 5)]:
-            a = torch.randn(*size, device=device)
+            a = torch.randn(*size, device=device, dtype=dtype)
             u, s_expect, v = torch.svd(a)
             u, s_actual, v = torch.svd(a, compute_uv=False)
             self.assertEqual(s_expect, s_actual, msg="Singular values don't match")
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    def test_svd_lowrank(self, device):
+    @dtypes(torch.double)
+    def test_svd_lowrank(self, device, dtype):
         from torch.testing._internal.common_utils import random_lowrank_matrix, random_sparse_matrix
-
-        dtype = torch.double
 
         def run_subtest(actual_rank, matrix_size, batches, device, svd_lowrank, **options):
             density = options.pop('density', 1)
