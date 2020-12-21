@@ -304,7 +304,7 @@ def powerSGD_hook(
         for p, q, tensor in zip(ps, qs, high_rank_tensors):
             torch.matmul(p, q.t(), out=tensor)
         if torch.cuda.is_available():
-            torch.cuda.synchronize()
+            torch.cuda.synchronize(device)
 
         if state.use_error_feedback:
             # Memorize the local errors.
@@ -494,7 +494,7 @@ def batched_powerSGD_hook(
             # Memorize the local errors.
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
         if torch.cuda.is_available():
-            torch.cuda.synchronize()
+            torch.cuda.synchronize(device)
         if not state.warm_start:
             state.p_memory_dict.clear()
             state.q_memory_dict.clear()
