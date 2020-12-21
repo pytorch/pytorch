@@ -1011,21 +1011,26 @@ void initJitScriptBindings(PyObject* module) {
             self.type()->addMethod(fn);
             didFinishEmitModule(self);
           })
-      .def("_get_forward_hooks", [](const Module& m) {
-        std::vector<StrongFunctionPtr> funcs;
-        for (auto& hook : m.type()->getForwardHooks()) {
-          funcs.emplace_back(StrongFunctionPtr(m.type()->compilation_unit(), hook));
-        }
-        return funcs;
-        })
-      .def("_get_forward_pre_hooks", [](const Module& m) {
-        std::vector<StrongFunctionPtr> funcs;
-        for (auto& pre_hook : m.type()->getForwardPreHooks()) {
-          funcs.emplace_back(
-              StrongFunctionPtr(m.type()->compilation_unit(), pre_hook));
-        }
-        return funcs;
-      })
+      .def(
+          "_get_forward_hooks",
+          [](const Module& m) {
+            std::vector<StrongFunctionPtr> funcs;
+            for (auto& hook : m.type()->getForwardHooks()) {
+              funcs.emplace_back(
+                  StrongFunctionPtr(m.type()->compilation_unit(), hook));
+            }
+            return funcs;
+          })
+      .def(
+          "_get_forward_pre_hooks",
+          [](const Module& m) {
+            std::vector<StrongFunctionPtr> funcs;
+            for (auto& pre_hook : m.type()->getForwardPreHooks()) {
+              funcs.emplace_back(
+                  StrongFunctionPtr(m.type()->compilation_unit(), pre_hook));
+            }
+            return funcs;
+          })
       .def_property_readonly(
           "code",
           [](Module& self) {
