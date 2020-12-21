@@ -31,7 +31,7 @@ class ReadFilesFromTarIterableDataset(IterableDataset):
             validate_pathname_binary_tuple(data)
             pathname, data_stream = data
             try:
-                # cast is used here to silence mypy's type checker only
+                # typing.cast is used here to silence mypy's type checker
                 tar = tarfile.open(fileobj=cast(Optional[IO[bytes]], data_stream), mode="r:*")
                 for tarinfo in tar:
                     if not tarinfo.isfile():
@@ -45,7 +45,7 @@ class ReadFilesFromTarIterableDataset(IterableDataset):
                     # tarfile handle won't be released until all the extracted file objs are destroyed.
                     # Add `# type: ignore` to silence mypy's type checker
                     extracted_fobj.source_tarfile_ref = tar  # type: ignore
-                    # cast is used here to silence mypy's type checker only
+                    # typing.cast is used here to silence mypy's type checker
                     yield (inner_pathname, cast(BufferedIOBase, extracted_fobj))
             except Exception as e:
                 warnings.warn(
