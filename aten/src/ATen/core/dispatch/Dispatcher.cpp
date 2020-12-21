@@ -295,9 +295,9 @@ void Dispatcher::checkInvariants() const {
   }
 }
 
-void Dispatcher::setManuallyBoxedKernelFor_(const OperatorHandle& op, KernelFunction::InternalBoxedKernelFunction* func) {
+void Dispatcher::setManuallyBoxedKernelFor_(const OperatorHandle& op, KernelFunction::InternalBoxedKernelFunction* func, bool newCallingConvention) {
   std::lock_guard<std::mutex> lock(mutex_);
-  op.operatorIterator_->op.setManuallyBoxedKernel_(*this, func);
+  op.operatorIterator_->op.setManuallyBoxedKernel_(*this, func, newCallingConvention);
   // NB: Do not need to set manually boxed kernel for backend fallbacks
 }
 

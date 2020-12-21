@@ -279,6 +279,7 @@ inline CppFunction dispatch(c10::DispatchKey k, Func&& raw_f) {
 // TODO: temp
 template <typename Func>
 inline CppFunction dispatch_withKeys(c10::DispatchKey k, Func&& raw_f) {
+    // TODO: don't actually need this... use default move constructor
   CppFunction f(CppFunction::WithKeys::WITH_KEYS, std::forward<Func>(raw_f));
   if (k == c10::DispatchKey::CatchAll) {
     f.dispatch_key_ = c10::nullopt;
@@ -598,7 +599,7 @@ public:
   Library& impl_UNBOXED_withKeys(Name name, Func* raw_f) & {
     // TODO: Remove this overload once the makeUnboxedOnly incidence rate
     // goes way down
-    return impl(name, CppFunction::makeUnboxedOnly_withKeys(raw_f));
+    return impl_withKeys(name, CppFunction::makeUnboxedOnly_withKeys(raw_f));
   }
 
   // These overloads cover cases when a SelectiveStr (see Note [Selective build])

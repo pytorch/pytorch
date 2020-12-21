@@ -205,8 +205,14 @@ public:
   // This function is a temporary hack that allows generated_unboxing_wrappers.cpp to register its codegen'ed
   // unboxing wrapper for aten operators. We still need those for some operators because not all work
   // with the templated unboxing logic yet.
+  // This function is used to uniformly set a boxed kernel on every KernelFunction that the OperatorKernel holds
+  // Unfortunately, this is no longer valid as not every kernel has the same calling convention / signature.
+  // Specifically, codegen'd kernels that are written to plumb TLS keys through the dispatcher have an extra
+  // DispatchKeySet argument in front.
+  // This function is used to separately set the boxed kernel with the new calling convention to the appropriate keys.
+  // This should all go away when generate_unboxing_wrappers is blowtorched.
   // TODO Delete setBoxedKernelFor_ once all operators work with the templated boxing logic
-  void setManuallyBoxedKernelFor_(const OperatorHandle& op, KernelFunction::InternalBoxedKernelFunction* func);
+  void setManuallyBoxedKernelFor_(const OperatorHandle& op, KernelFunction::InternalBoxedKernelFunction* func, bool newCallingConvention);
 
   // ------------------------------------------------------------------------
   //

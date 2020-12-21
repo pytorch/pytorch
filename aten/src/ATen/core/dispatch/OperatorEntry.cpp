@@ -22,6 +22,7 @@ OperatorEntry::OperatorEntry(OperatorName&& operator_name)
 , dispatchTable_()
 , dispatchKeyExtractor_(DispatchKeyExtractor::makeUninitialized())
 , manuallyBoxedKernel_()
+, manuallyBoxedKernel_newCallingConvention_()
 , kernels_()
 , cpp_signature_()
 , is_observed_(ObservedOperators::isObserved(name_))
@@ -123,7 +124,21 @@ std::list<AnnotatedKernel>::iterator OperatorEntry::registerKernel(
   }
 
   if (manuallyBoxedKernel_.has_value()) {
-    kernel.setManuallyBoxedKernel_(*manuallyBoxedKernel_);
+    TORCH_INTERNAL_ASSERT(manuallyBoxedKernel_newCallingConvention_.has_value(),
+        "\nmanuallyBoxedKernel_ is set but manuallyBoxedKernel_newCallingConvention_ is not.\n",
+        "They are expected to either both be set or both not be set.\n",
+        "  operator: ", (this->schema_.has_value() ? toString(this->schema_->schema) : toString(name_)), "\n",
+        "    ", (this->schema_.has_value() ? this->schema_->debug : "no debug info"), "\n",
+        "  kernel: ", cpp_signature->name(), "\n",
+        "    dispatch key: ", toString(dispatch_key), "\n",
+        "    ", debug, "\n"
+    );
+    auto keysWithNewCallingConvention = c10::autograd_dispatch_keyset | DispatchKeySet(DispatchKey::Autograd) | DispatchKeySet(DispatchKey::Tracer);
+    if (dispatch_key.has_value() && keysWithNewCallingConvention.has(*dispatch_key)) {
+      kernel.setManuallyBoxedKernel_(*manuallyBoxedKernel_newCallingConvention_);
+    } else {
+      kernel.setManuallyBoxedKernel_(*manuallyBoxedKernel_);
+    }
   }
 
   k.emplace_front(std::move(kernel), std::move(inferred_function_schema), std::move(debug));
@@ -331,13 +346,22 @@ void OperatorEntry::updateDispatchTableFull_(const c10::Dispatcher& dispatcher) 
   }
 }
 
-void OperatorEntry::setManuallyBoxedKernel_(const c10::Dispatcher& dispatcher, KernelFunction::InternalBoxedKernelFunction* func) {
-  TORCH_INTERNAL_ASSERT(!manuallyBoxedKernel_);
-  manuallyBoxedKernel_ = func;
+void OperatorEntry::setManuallyBoxedKernel_(const c10::Dispatcher& dispatcher, KernelFunction::InternalBoxedKernelFunction* func, bool newCallingConvention) {
+  auto keysWithNewCallingConvention = c10::autograd_dispatch_keyset | DispatchKeySet(DispatchKey::Autograd) | DispatchKeySet(DispatchKey::Tracer);
+  if (newCallingConvention) {
+    TORCH_INTERNAL_ASSERT(!manuallyBoxedKernel_newCallingConvention_);
+    manuallyBoxedKernel_newCallingConvention_ = func;
+  } else {
+    TORCH_INTERNAL_ASSERT(!manuallyBoxedKernel_);
+    manuallyBoxedKernel_ = func;
+  }
 
   for (auto& kv : kernels_) {
     for (auto& k : kv.second) {
-      k.kernel.setManuallyBoxedKernel_(func);
+      // kernels registered to the above dispatch keys (autograd/tracing) should get a boxed kernel with the new calling convention
+      if (newCallingConvention == keysWithNewCallingConvention.has(kv.first)) {
+        k.kernel.setManuallyBoxedKernel_(func);
+      }
     }
   }
   // Refresh entries in dispatchTable_

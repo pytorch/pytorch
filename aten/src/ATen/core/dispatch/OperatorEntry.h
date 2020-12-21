@@ -152,7 +152,7 @@ public:
   // unboxing wrapper for aten operators. We still need those for some operators because not all work
   // with the templated unboxing logic yet.
   // TODO Delete setManuallyBoxedKernel_ once all operators work with the templated boxing logic
-  void setManuallyBoxedKernel_(const c10::Dispatcher& dispatcher, KernelFunction::InternalBoxedKernelFunction* func);
+  void setManuallyBoxedKernel_(const c10::Dispatcher& dispatcher, KernelFunction::InternalBoxedKernelFunction* func, bool newCallingConvention);
 
   // Asserts that the given FuncType is correct for calling this operator in an unboxed way.
   template<class FuncType>
@@ -194,6 +194,7 @@ private:
   // with the templated unboxing logic yet.
   // TODO Delete manuallyBoxedKernel_ once all operators work with the templated boxing logic
   c10::optional<KernelFunction::InternalBoxedKernelFunction*> manuallyBoxedKernel_;
+  c10::optional<KernelFunction::InternalBoxedKernelFunction*> manuallyBoxedKernel_newCallingConvention_;
 
   // kernels_ stores all registered kernels for the corresponding dispatch key
   // and catchAllKernels_ stores the catch-all kernels.
