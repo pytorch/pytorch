@@ -12,6 +12,7 @@
 #include <ATen/core/TensorAccessor.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
+#include <c10/core/WrapDimMinimal.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Deprecated.h>
 #include <c10/util/Optional.h>
@@ -82,7 +83,7 @@ inline bool variable_excluded_from_dispatch() {
 //
 // Note that Tensor can also be NULL, i.e. it is not associated with any underlying TensorImpl, and
 // special care must be taken to handle this.
-class CAFFE2_API Tensor {
+class TORCH_API Tensor {
  public:
   Tensor(){};
   // This constructor should not be used by end users and is an implementation
@@ -121,6 +122,18 @@ class CAFFE2_API Tensor {
     } else {
       return __dispatch_contiguous(memory_format);
     }
+  }
+
+  int64_t size(int64_t dim) const {
+    // false is passed to maybe_wrap_dim so behavior is identical to array access (but with wrapping)
+    dim = c10::maybe_wrap_dim(dim, this->dim(), false);
+    return sizes()[dim];
+  }
+
+  int64_t stride(int64_t dim) const {
+    // false is passed to maybe_wrap_dim so behavior is identical to array access (but with wrapping)
+    dim = c10::maybe_wrap_dim(dim, this->dim(), false);
+    return strides()[dim];
   }
 
   TensorImpl * unsafeGetTensorImpl() const {
