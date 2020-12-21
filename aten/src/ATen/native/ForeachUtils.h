@@ -87,7 +87,7 @@ bool has_same_attributes(Device expected_device, caffe2::TypeMeta expected_dtype
   return true;
 }
 
-bool will_promote_tensor(const Tensor& tensor, Scalar scalar, bool division_op = false) {
+bool will_promote_tensor(const Tensor& tensor, Scalar scalar, bool promote_integer_inputs_to_float = false) {
   // complex scalar + integral or boolean tensor will result in complex tensor
   if (scalar.isComplex() && at::isIntegralType(tensor.scalar_type(), /*includeBool*/ true)) {
     return true;
@@ -109,7 +109,7 @@ bool will_promote_tensor(const Tensor& tensor, Scalar scalar, bool division_op =
   }
 
   // In case of division, integer inputs will result in float
-  if (division_op) {
+  if (promote_integer_inputs_to_float) {
     if (at::isIntegralType(tensor.scalar_type(), /*includeBool*/ true)) {
       return true;
     }
@@ -117,7 +117,7 @@ bool will_promote_tensor(const Tensor& tensor, Scalar scalar, bool division_op =
   return false;
 }
 
-bool can_use_fast_route(TensorList tensors, ArrayRef<Scalar> scalars, bool division_op = false) {
+bool can_use_fast_route(TensorList tensors, ArrayRef<Scalar> scalars, bool promote_integer_inputs_to_float = false) {
 #ifdef __HIP_PLATFORM_HCC__
   return false;
 #else
@@ -130,7 +130,7 @@ bool can_use_fast_route(TensorList tensors, ArrayRef<Scalar> scalars, bool divis
     }
 
     auto scalarsIndex = scalars.size() == 1 ? 0 : i;
-    if (will_promote_tensor(tensors[i], scalars[scalarsIndex], division_op)) {
+    if (will_promote_tensor(tensors[i], scalars[scalarsIndex], promote_integer_inputs_to_float)) {
       return false;
     }
 
@@ -146,7 +146,7 @@ bool can_use_fast_route(TensorList tensors, ArrayRef<Scalar> scalars, bool divis
 #endif
 }
 
-bool can_use_fast_route(TensorList tensors1, TensorList tensors2, bool division_op = false) {
+bool can_use_fast_route(TensorList tensors1, TensorList tensors2, bool promote_integer_inputs_to_float = false) {
 #ifdef __HIP_PLATFORM_HCC__
   return false;
 #else
@@ -159,7 +159,7 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, bool division_
     }
 
     // In case of division, integer inputs will result in float
-    if (division_op) {
+    if (promote_integer_inputs_to_float) {
       if (at::isIntegralType(tensors1[i].scalar_type(), /*includeBool*/ true)) {
         return false;
       }
