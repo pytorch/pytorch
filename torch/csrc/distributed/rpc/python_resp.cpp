@@ -25,6 +25,13 @@ std::unique_ptr<PythonResp> PythonResp::fromMessage(const Message& message) {
   return std::make_unique<PythonResp>(std::move(serializedPyObj));
 }
 
+std::unique_ptr<PythonResp> PythonResp::fromIValue(IValue&& messageIValue) {
+  std::string payload = Message::getPayload(messageIValue);
+  std::vector<Tensor> tensors = Message::getTensors(messageIValue);
+  SerializedPyObj serializedPyObj(std::move(payload), std::move(tensors));
+  return std::make_unique<PythonResp>(std::move(serializedPyObj));
+}
+
 const SerializedPyObj& PythonResp::serializedPyObj() const {
   return serializedPyObj_;
 }

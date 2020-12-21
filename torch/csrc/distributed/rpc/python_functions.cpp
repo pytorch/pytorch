@@ -24,7 +24,8 @@ namespace rpc {
 
 namespace {
 
-IValue toIValue(const Message& message) {
+IValue toPyIValue(IValue&& messageIValue) {
+  Message message(std::move(messageIValue));
   MessageType msgType = message.type();
   auto response = deserializeResponse(message, msgType);
   switch (msgType) {
@@ -128,7 +129,7 @@ std::shared_ptr<FutureMessage> sendPythonRemoteCall(
 using namespace torch::distributed::autograd;
 
 c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
-    const std::shared_ptr<FutureMessage>& futureResponseMessage,
+    std::shared_ptr<FutureMessage> futureResponseMessage,
     bool hasValue) {
   if (hasValue) {
     c10::intrusive_ptr<JitFuture> jitFuture =
@@ -141,8 +142,9 @@ c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
             jitFuture->setError(
                 std::make_exception_ptr(*futureResponseMessage->error()));
           } else {
+            auto ivalue = futureResponseMessage->constValue().toIValue();
             jitFuture->markCompleted(
-                toIValue(futureResponseMessage->constValue()));
+                toPyIValue(std::move(ivalue)));
           }
         }));
 

@@ -18,7 +18,7 @@ namespace rpc {
 // discarded and then set the FutureIValue using an empty IValue or the given
 // FutureError if there is an error.
 c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
-    const std::shared_ptr<FutureMessage>& futureResponseMessage,
+    std::shared_ptr<FutureMessage> futureResponseMessage,
     bool hasValue = true);
 
 c10::intrusive_ptr<JitFuture> pyRpcBuiltin(

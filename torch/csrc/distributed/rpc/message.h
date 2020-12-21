@@ -108,6 +108,8 @@ class TORCH_API Message final {
       MessageType type,
       int64_t id);
 
+  Message(IValue&& ivalue);
+
   Message(const Message& other);
   Message(Message&& other) noexcept;
   Message& operator=(Message const& rhs) &;
@@ -133,6 +135,12 @@ class TORCH_API Message final {
   // dropped during message serialization.
   int64_t id() const;
   void setId(int64_t id);
+
+  IValue toIValue() const;
+
+  static MessageType getType(const IValue& messageIValue);
+  static std::vector<torch::Tensor> getTensors(const IValue& messageIValue);
+  static const std::string& getPayload(const IValue& messageIValue);
 
  private:
   std::vector<char> payload_;

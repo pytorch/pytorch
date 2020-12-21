@@ -2307,6 +2307,7 @@ class RpcTest(RpcAgentTestFixture):
         dst = worker_name((self.rank + 1) % self.world_size)
         rref = rpc.remote(dst, torch.add, args=(torch.ones(2), 1))
 
+
         with torch.autograd.profiler.profile() as p:
             t = rref._get_type()
 

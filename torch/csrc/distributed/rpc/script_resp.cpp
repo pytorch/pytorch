@@ -40,6 +40,19 @@ std::unique_ptr<ScriptResp> ScriptResp::fromMessage(const Message& message) {
   return std::make_unique<ScriptResp>(std::move(value));
 }
 
+std::unique_ptr<ScriptResp> ScriptResp::fromIValue(IValue&& messageIValue) {
+  const auto& payloadStr = Message::getPayload(messageIValue);
+  auto payload = payloadStr.data();
+  auto payload_size = payloadStr.length();
+  auto tensors = Message::getTensors(messageIValue);
+  auto value = jit::unpickle(
+      payload,
+      payload_size,
+      *RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
+      &tensors);
+  return std::make_unique<ScriptResp>(std::move(value));
+}
+
 } // namespace rpc
 } // namespace distributed
 } // namespace torch

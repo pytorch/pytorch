@@ -4,6 +4,14 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+namespace {
+constexpr static int kTensorsIndex = 0;
+constexpr static int kPayloadIndex = 1;
+constexpr static int kIdIndex = 2;
+constexpr static int kTypeIndex = 3;
+
+}
+
 Message::Message() = default;
 
 Message::Message(
@@ -21,6 +29,15 @@ Message::Message(
       tensors_(std::move(tensors)),
       type_(type),
       id_(id) {}
+
+Message::Message(IValue&& ivalue) {
+  auto&& elements = ivalue.toTuple()->elements();
+  const auto& payloadRef = elements[kPayloadIndex].toStringRef();
+  payload_ = std::vector<char>(payloadRef.begin(), payloadRef.end());
+  tensors_ = elements[kTensorsIndex].toTensorVector();
+  type_ = (MessageType)elements[kTypeIndex].toInt();
+  id_ = elements[kIdIndex].toInt();
+}
 
 Message::Message(const Message& other) = default;
 
@@ -91,6 +108,17 @@ void Message::setId(int64_t id) {
   id_ = id;
 }
 
+IValue Message::toIValue() const {
+  std::vector<IValue> ivalues;
+  ivalues.reserve(4);
+  ivalues.emplace_back(tensors_);
+  std::string payload(payload_.begin(), payload_.end());
+  ivalues.emplace_back(std::move(payload));
+  ivalues.emplace_back(id_);
+  ivalues.emplace_back((int64_t)type_);
+  return c10::ivalue::Tuple::create(std::move(ivalues));
+}
+
 Message createExceptionResponse(const std::exception& e, int64_t id) {
   return createExceptionResponse(e.what(), id);
 }
@@ -102,6 +130,18 @@ Message createExceptionResponse(const std::string& exceptionStr, int64_t id) {
       std::vector<torch::Tensor>(),
       MessageType::EXCEPTION,
       id);
+}
+
+MessageType Message::getType(const IValue& ivalue) {
+  return (MessageType)ivalue.toTuple()->elements()[kTypeIndex].toInt();
+}
+
+std::vector<torch::Tensor> Message::getTensors(const IValue& ivalue) {
+  return ivalue.toTuple()->elements()[kTensorsIndex].toTensorVector();
+}
+
+const std::string& Message::getPayload(const IValue& ivalue) {
+  return ivalue.toTuple()->elements()[kPayloadIndex].toStringRef();
 }
 
 } // namespace rpc

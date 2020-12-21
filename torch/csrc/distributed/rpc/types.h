@@ -50,6 +50,7 @@ using RRefId = GloballyUniqueId;
 using ForkId = GloballyUniqueId;
 using ProfilingId = GloballyUniqueId;
 
+// TODO: convert this into an IValue?
 struct TORCH_API SerializedPyObj final {
   SerializedPyObj(std::string&& payload, std::vector<at::Tensor>&& tensors)
       : payload_(std::move(payload)), tensors_(std::move(tensors)) {}
