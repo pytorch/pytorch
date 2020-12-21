@@ -104,10 +104,8 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
         if isinstance(output, torch.Tensor):
             output = (output,)
 
-        if isinstance(input[-1], dict):
+        if not dict_check and isinstance(input[-1], dict):
             input = input + ({},)
-        else:
-            input = input
 
         ort_sess = convert_to_onnx(model, input=input, opset_version=self.opset_version,
                                    example_outputs=output, do_constant_folding=do_constant_folding,
