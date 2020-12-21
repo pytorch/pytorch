@@ -1583,7 +1583,7 @@ TEST(Reductions, ReductionCacheBodyAccess) {
   oss << *result;
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(scale_local, float, {1, 32, 12});
+#CHECK: Allocate(scale_local, float, {384});
 #CHECK: for (int j = 0; j < 32; j++) {
 #CHECK:   for (int k = 0; k < 12; k++) {
 #CHECK:     scale_local[k + 12 * j] = scale[(k + 384 * l1) + 12 * j];

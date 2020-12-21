@@ -1,3 +1,5 @@
+#pragma once
+
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/mobile/function.h>
 
