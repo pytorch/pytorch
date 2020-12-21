@@ -4,7 +4,7 @@
 
 /* Returns the mode, and index of the mode, for the set of values
  * along a given dimension in the input tensor. */
-THC_API void THCTensor_(mode)(THCState *state,
+TORCH_CUDA_API void THCTensor_(mode)(THCState *state,
                               THCTensor *values,
                               THCudaLongTensor *indices,
                               THCTensor *input,
