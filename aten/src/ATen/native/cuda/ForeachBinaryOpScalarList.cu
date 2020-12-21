@@ -49,7 +49,7 @@ void foreach_binary_op_(TensorList tensors, at::ArrayRef<Scalar> scalars) {
 #define FOREACH_BINARY_OP_SCALARLIST(NAME, OP)                                                                          \
 void foreach_tensor_##NAME##_scalarlist_kernel_cuda_(TensorList tensors, at::ArrayRef<Scalar> scalars) {                \
     check_foreach_api_restrictions(tensors, scalars);                                                                   \
-    if (!can_use_fast_route(tensors, scalars)) {                                                                        \
+    if (!can_use_fast_route({tensors}, scalars)) {                                                                      \
         return at::native::foreach_tensor_##NAME##_scalarlist_kernel_slow_(tensors, scalars);                           \
     }                                                                                                                   \
                                                                                                                         \
@@ -58,7 +58,7 @@ void foreach_tensor_##NAME##_scalarlist_kernel_cuda_(TensorList tensors, at::Arr
                                                                                                                         \
 std::vector<Tensor> foreach_tensor_##NAME##_scalarlist_kernel_cuda(TensorList tensors, at::ArrayRef<Scalar> scalars) {  \
     check_foreach_api_restrictions(tensors, scalars);                                                                   \
-    if (!can_use_fast_route(tensors, scalars)) {                                                                        \
+    if (!can_use_fast_route({tensors}, scalars)) {                                                                      \
         return at::native::foreach_tensor_##NAME##_scalarlist_kernel_slow(tensors, scalars);                            \
     }                                                                                                                   \
                                                                                                                         \
@@ -99,7 +99,7 @@ void foreach_tensor_sub_scalarlist_kernel_cuda_(TensorList tensors, at::ArrayRef
               "Subtraction, the `-` operator, with a bool tensor is not supported. "
               "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
 
-    if (!can_use_fast_route(tensors, scalars)) {
+    if (!can_use_fast_route({tensors}, scalars)) {
         return at::native::foreach_tensor_sub_scalarlist_kernel_slow_(tensors, scalars);
     }
 
@@ -116,7 +116,7 @@ std::vector<Tensor> foreach_tensor_sub_scalarlist_kernel_cuda(TensorList tensors
               "Subtraction, the `-` operator, with a bool tensor is not supported. "
               "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
 
-    if (!can_use_fast_route(tensors, scalars)) {
+    if (!can_use_fast_route({tensors}, scalars)) {
         return at::native::foreach_tensor_sub_scalarlist_kernel_slow(tensors, scalars);
     }
 
