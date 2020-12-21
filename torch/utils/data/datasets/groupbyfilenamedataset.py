@@ -1,19 +1,18 @@
 from torch.utils.data.dataset import IterableDataset
-from typing import Dict, List, Tuple, Callable, Iterable, Iterator
+from typing import Dict, List, Tuple, Any, Callable, Iterable, Iterator
 
 import os
 import functools
-from io import BufferedIOBase
 
 
-def default_group_key_fn(dataitem : Tuple[str, BufferedIOBase]):
+def default_group_key_fn(dataitem : Tuple[str, Any]):
     return os.path.splitext(dataitem[0])[0]
 
 
-def default_sort_data_fn(datalist : List[Tuple[str, BufferedIOBase]]):
+def default_sort_data_fn(datalist : List[Tuple[str, Any]]):
     txt_ext = ['.json', '.jsn', '.txt', '.text']
 
-    def cmp_fn(a : Tuple[str, BufferedIOBase], b : Tuple[str, BufferedIOBase]):
+    def cmp_fn(a : Tuple[str, Any], b : Tuple[str, Any]):
         a_is_txt = os.path.splitext(a[0])[1] in txt_ext
         b_is_txt = os.path.splitext(b[0])[1] in txt_ext
 
@@ -51,20 +50,20 @@ class GroupByFilenameIterableDataset(IterableDataset):
 
     def __init__(
             self,
-            dataset : Iterable,
+            dataset : Iterable[Tuple[str, Any]],
             group_size : int = 1,
             max_buffer_size : int = 10,
             group_key_fn : Callable = default_group_key_fn,
             sort_data_fn : Callable = default_sort_data_fn,
             length: int = -1):
         super().__init__()
-        self.dataset : Iterable = dataset
+        self.dataset : Iterable[Tuple[str, Any]] = dataset
         self.group_size : int = group_size
         self.max_buffer_size : int = max_buffer_size
         self.group_key_fn : Callable = group_key_fn
         self.sort_data_fn : Callable = sort_data_fn
         self.curr_buffer_size : int = 0
-        self.stream_buffer : Dict[str, List[Tuple[str, BufferedIOBase]]] = {}
+        self.stream_buffer : Dict[str, List[Tuple[str, Any]]] = {}
         self.length : int = length
 
 

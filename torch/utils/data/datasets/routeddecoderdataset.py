@@ -4,7 +4,8 @@ from torch.utils.data.datasets.decoder import (
     basichandlers as decoder_basichandlers,
     imagehandler as decoder_imagehandler)
 
-from typing import Iterable, Iterator, Union, List
+from typing import Iterable, Iterator, Union, List, Tuple, Any, Callable
+from io import BufferedIOBase
 
 class RoutedDecoderIterableDataset(IterableDataset):
     r""" :class:`RoutedDecoderIterableDataset`.
@@ -19,22 +20,22 @@ class RoutedDecoderIterableDataset(IterableDataset):
 
     def __init__(
             self,
-            dataset : Iterable,
+            dataset : Iterable[Tuple[str, BufferedIOBase]],
             *,
-            decoders : Union[None, List[str]] = None,
+            decoders : Union[None, List[Callable]] = None,
             length: int = -1):
         super().__init__()
-        self.dataset : Iterable = dataset
+        self.dataset : Iterable[Tuple[str, BufferedIOBase]] = dataset
         if decoders:
             self.decoder = Decoder(decoders)
         else:
             self.decoder = Decoder([decoder_basichandlers, decoder_imagehandler('torch')])
         self.length : int = length
 
-    def add_decoder(self, decoder) -> None:
+    def add_decoder(self, decoder : Callable) -> None:
         self.decoder.add_decoder(decoder)
 
-    def __iter__(self) -> Iterator[tuple]:
+    def __iter__(self) -> Iterator[Tuple[str, Any]]:
         for data in self.dataset:
             pathname = data[0]
             result = self.decoder(data)
