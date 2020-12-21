@@ -51,9 +51,9 @@ inline c10::Half div_value(c10::Half lhs, c10::Half rhs) {
 
 class SimpleIREvaluatorImpl : public IRVisitor {
  public:
-  SimpleIREvaluatorImpl(){};
+  SimpleIREvaluatorImpl() = default;
 
-  ~SimpleIREvaluatorImpl() override {}
+  ~SimpleIREvaluatorImpl() override = default;
 
   void bindBuf(const Var* var, void* ptr) {
     buffer_mapping_[var] = ptr;
@@ -921,6 +921,7 @@ SimpleIREvaluator::SimpleIREvaluator(
   impl_ = std::make_unique<SimpleIREvaluatorImpl>();
   expand_intrinsics();
 }
+
 SimpleIREvaluator::~SimpleIREvaluator() {}
 
 void SimpleIREvaluator::call(const std::vector<CallArg>& args) {
