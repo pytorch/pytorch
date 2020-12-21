@@ -840,7 +840,7 @@ class TestFakeQuantize(TestCase):
         Y = _fake_quantize_per_tensor_affine_reference(
             X, scale, zero_point, quant_min, quant_max).to(device)
         Y_prime = torch._fake_quantize_learnable_per_tensor_affine(
-            X, scale, zero_point, quant_min, quant_max, 1.).to(device)
+            X, scale, zero_point, quant_min, quant_max).to(device)
         tolerance = 1e-2
         self.assertTrue(
             torch.allclose(Y, Y_prime, rtol=tolerance, atol=tolerance),
@@ -865,7 +865,7 @@ class TestFakeQuantize(TestCase):
         scale.requires_grad_()
         zero_point.requires_grad_()
         Y_prime = torch._fake_quantize_learnable_per_tensor_affine(
-            X, scale, zero_point, quant_min, quant_max, 1.)
+            X, scale, zero_point, quant_min, quant_max)
         dout = torch.rand(X.shape, dtype=torch.float).to(device)
         dX, dScale, dZeroPoint = _fake_quantize_learnable_per_tensor_affine_grad_reference(
             dout, X, scale, zero_point, quant_min, quant_max, device)
@@ -908,7 +908,7 @@ class TestFakeQuantize(TestCase):
                 X, scale, zero_point, quant_min, quant_max).to(device)
             for grad_factor in [0.1, 1.0, 10.0]:
                 Y_prime = torch._fake_quantize_learnable_per_tensor_affine(
-                    X, scale, zero_point, quant_min, quant_max, grad_factor).to(device)
+                    X, scale, zero_point, quant_min, quant_max).to(device)
                 self.assertTrue(
                     torch.allclose(Y, Y_prime, rtol=tolerance, atol=tolerance),
                     "Expected kernel forward function to have results match the reference forward function")
@@ -952,7 +952,7 @@ class TestFakeQuantize(TestCase):
             zero_point.requires_grad_()
             for grad_factor in [0.1, 1.0, 10.0]:
                 Y_prime = torch._fake_quantize_learnable_per_tensor_affine(
-                    X, scale, zero_point, quant_min, quant_max, grad_factor).to(device)
+                    X, scale, zero_point, quant_min, quant_max).to(device)
                 dout = torch.rand(X.shape, dtype=torch.float).to(device)
                 dX, dScale, dZeroPoint = _fake_quantize_learnable_per_tensor_affine_grad_reference(
                     dout, X, scale, zero_point, quant_min, quant_max, device)
@@ -1219,7 +1219,7 @@ class TestFakeQuantize(TestCase):
                 X_curr, scale_curr, zero_point_curr, axis, quant_min, quant_max).to(device)
             for grad_factor in [0.1, 1.0, 10.0]:
                 Y_prime = torch._fake_quantize_learnable_per_channel_affine(
-                    X_curr, scale_curr, zero_point_curr, axis, quant_min, quant_max, grad_factor).to(device)
+                    X_curr, scale_curr, zero_point_curr, axis, quant_min, quant_max).to(device)
                 self.assertTrue(
                     torch.allclose(Y, Y_prime, rtol=tolerance, atol=tolerance),
                     "Expected kernel forward function to have results match the reference forward function")
@@ -1290,7 +1290,7 @@ class TestFakeQuantize(TestCase):
 
             for grad_factor in [0.1, 1.0, 10.0]:
                 Y_prime = torch._fake_quantize_learnable_per_channel_affine(
-                    X_curr, scale_curr, zero_point_curr, axis, quant_min, quant_max, grad_factor).to(device)
+                    X_curr, scale_curr, zero_point_curr, axis, quant_min, quant_max).to(device)
 
                 dout = torch.rand(X_curr.shape, dtype=torch.float).to(device)
                 dX, dScale, dZeroPoint = _fake_quantize_learnable_per_channel_affine_grad_reference(
@@ -1363,7 +1363,7 @@ class TestFakeQuantize(TestCase):
         Y = _fake_quantize_per_channel_affine_reference(
             X, scale, zero_point, axis, quant_min, quant_max).to(device)
         Y_prime = torch._fake_quantize_learnable_per_channel_affine(
-            X, scale, zero_point, axis, quant_min, quant_max, 1.).to(device)
+            X, scale, zero_point, axis, quant_min, quant_max).to(device)
         tolerance = 1e-2
         self.assertTrue(
             torch.allclose(Y, Y_prime, rtol=tolerance, atol=tolerance),
@@ -1389,7 +1389,7 @@ class TestFakeQuantize(TestCase):
         zero_point.requires_grad_()
 
         Y_prime = torch._fake_quantize_learnable_per_channel_affine(
-            X, scale, zero_point, axis, quant_min, quant_max, 1.).to(device)
+            X, scale, zero_point, axis, quant_min, quant_max).to(device)
 
         dout = torch.rand(X.shape, dtype=torch.float).to(device)
         dX, dScale, dZeroPoint = _fake_quantize_learnable_per_channel_affine_grad_reference(
