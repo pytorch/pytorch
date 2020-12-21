@@ -1210,8 +1210,8 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         except StopIteration:
             return
 
-        # Every worker will get chance to get data, but if there is other worker
-        # who has less data to process, that worker get indices next
+        # Every worker will get chance to get indices, but if there is other worker
+        # who has less data to process, that worker gets indices next
         worker_queue_idx = next(self._worker_queue_idx_cycle)
         worker_queue_size = float('inf')
 
@@ -1225,7 +1225,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 worker_queue_idx = i
             if worker_queue_size == 0:
                 break
-        # print("Queue size of selected queue: ", worker_queue_size)
+
         # Check if worker at worker_queue_idx is not exhausted
         if worker_queue_size != float('inf'):
             self._index_queues[worker_queue_idx].put((self._send_idx, index))
