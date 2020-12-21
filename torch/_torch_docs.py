@@ -625,9 +625,10 @@ Args:
 Keyword args:
     {out}
 
-.. note::  From version 1.8 onwards, the angle function returns `PI` for negative real numbers,
-           and `0` for zero and postive real numbers. Prior to version 1.8, the function would
-           return `0` for all real numbers and `NaN`.
+.. note:: Starting in PyTorch 1.8, angle returns pi for negative real numbers,
+          zero for non-negative real numbers, and propagates NaNs. Previously
+          the function would return zero for all real numbers and not propagate
+          floating-point NaNs.
 
 Example::
 
