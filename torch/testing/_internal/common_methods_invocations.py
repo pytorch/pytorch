@@ -609,12 +609,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_tensor_out=False,
            test_inplace_grad=False,
-           sample_inputs_func=sample_inputs_broadcast_to,
-           skips=(
-               # RuntimeError: "isfinite" not implemented for 'BFloat16'
-               SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                        dtypes=[torch.bfloat16]),
-           )),
+           sample_inputs_func=sample_inputs_broadcast_to),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
