@@ -1027,6 +1027,12 @@
   use_c10_dispatcher: full
   device_guard: False
 
+- func: broadcast_to(Tensor(a) self, int[] size) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    Math: broadcast_to
+
 - func: cat(Tensor[] tensors, int dim=0) -> Tensor
   use_c10_dispatcher: full
   dispatch:
