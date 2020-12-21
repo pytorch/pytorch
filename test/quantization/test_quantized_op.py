@@ -2814,8 +2814,8 @@ class TestPTQRNN(TestCase):
 
                 # Prepare
                 lstm.qconfig = torch.quantization.get_default_qconfig(qengine)
-                lstm_prepared = torch.quantization.prepare(lstm,
-                    prepare_custom_config_dict=custom_module_config)
+                lstm_prepared = torch.quantization.prepare(
+                    lstm, prepare_custom_config_dict=custom_module_config)
                 self.assertTrue(hasattr(lstm_prepared[0], 'layers'))
                 self.assertEqual(num_layers, len(lstm_prepared[0].layers))
 

@@ -1,5 +1,6 @@
 import numbers
 from typing import Optional, Tuple
+import warnings
 
 import torch
 from torch import Tensor
@@ -98,8 +99,8 @@ class _LSTMSingleLayer(torch.nn.Module):
         for xx in x:
             hidden = self.cell(xx, hidden)
             result.append(hidden[0])
-        result = torch.stack(result, 0)
-        return result, hidden
+        result_tensor = torch.stack(result, 0)
+        return result_tensor, hidden
 
     @classmethod
     def from_params(cls, *args, **kwargs):
@@ -218,12 +219,12 @@ class LSTM(torch.nn.Module):
                               "and num_layers={}".format(dropout, num_layers))
 
         layers = [_LSTMLayer(self.input_size, self.hidden_size,
-                            self.bias, batch_first=False,
-                            bidirectional=self.bidirectional)]
+                             self.bias, batch_first=False,
+                             bidirectional=self.bidirectional)]
         for layer in range(1, num_layers):
             layers.append(_LSTMLayer(self.hidden_size, self.hidden_size,
-                                    self.bias, batch_first=False,
-                                    bidirectional=self.bidirectional))
+                                     self.bias, batch_first=False,
+                                     bidirectional=self.bidirectional))
         self.layers = torch.nn.ModuleList(layers)
 
     def forward(self, x, hidden=None):
@@ -253,23 +254,23 @@ class LSTM(torch.nn.Module):
         for idx in range(self.num_layers):
             x, hidden[idx] = self.layers[idx](x, hidden[idx])
 
-        hx = []
-        cx = []
+        hx_list = []
+        cx_list = []
         for idx in range(self.num_layers):
-            hx.append(hidden[idx][0])
-            cx.append(hidden[idx][1])
-        hx = torch.stack(hx)
-        cx = torch.stack(cx)
+            hx_list.append(hidden[idx][0])
+            cx_list.append(hidden[idx][1])
+        hx_tensor = torch.stack(hx_list)
+        cx_tensor = torch.stack(cx_list)
 
         # We are creating another dimension for bidirectional case
         # need to collapse it
-        hx = hx.reshape(-1, *hx.shape[-2:])
-        cx = cx.reshape(-1, *hx.shape[-2:])
+        hx_tensor = hx_tensor.reshape(-1, *hx_tensor.shape[-2:])
+        cx_tensor = cx_tensor.reshape(-1, *cx_tensor.shape[-2:])
 
         if self.batch_first:
             x = x.transpose(0, 1)
 
-        return x, (hx, cx)
+        return x, (hx_tensor, cx_tensor)
 
     @classmethod
     def from_float(cls, other, qconfig=None):
@@ -281,7 +282,7 @@ class LSTM(torch.nn.Module):
         observed.qconfig = getattr(other, 'qconfig', qconfig)
         for idx in range(other.num_layers):
             observed.layers[idx] = _LSTMLayer.from_float(other, idx, qconfig,
-                                                        batch_first=False)
+                                                         batch_first=False)
         observed.eval()
         observed = torch.quantization.prepare(observed, inplace=True)
         return observed
