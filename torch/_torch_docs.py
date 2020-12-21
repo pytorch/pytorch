@@ -7475,7 +7475,7 @@ Computes the normalized sinc of :attr:`input.`
 .. math::
     \text{out}_{i} =
     \begin{cases}
-      1, & \text{if}\ \text{out}_{i}=0 \\
+      1, & \text{if}\ \text{input}_{i}=0 \\
       \sin(\pi \text{input}_{i}) / (\pi \text{input}_{i}), & \text{otherwise}
     \end{cases}
 """ + r"""
