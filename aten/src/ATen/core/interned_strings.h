@@ -39,6 +39,7 @@ namespace c10 {
   _(prim, FunctionalGraph)           \
   _(prim, DifferentiableGraph)       \
   _(prim, TensorExprGroup)           \
+  _(prim, StaticSubgraph)            \
   _(prim, If)                        \
   _(prim, Jump) /* debug */          \
   _(prim, JumpNZ) /* debug */        \
@@ -57,7 +58,7 @@ namespace c10 {
   _(prim, ReturnStmt)                \
   _(prim, BreakStmt)                 \
   _(prim, ContinueStmt)              \
-  _(prim, ListComprehensionScope)    \
+  _(prim, ComprehensionScope)        \
   _(prim, Store)                     \
   _(prim, AutogradZero)              \
   _(prim, AutogradAnyNonZero)        \
@@ -139,6 +140,7 @@ namespace c10 {
   _(prim, HasAttr)                   \
   _(prim, profile)                   \
   _(prim, profile_optional)          \
+  _(prim, profile_ivalue)            \
   _(prim, AddStatValue)              \
   _(prim, TimePoint)                 \
   _(prim, CallFunction)              \
@@ -225,6 +227,7 @@ namespace c10 {
   _(aten, lt_)                       \
   _(aten, less)                      \
   _(aten, less_)                     \
+  _(aten, isnan)                     \
   _(aten, mul)                       \
   _(aten, mul_)                      \
   _(aten, multiply)                  \
@@ -432,7 +435,7 @@ const std::string& domain_prefix();
 // A Symbol is like an interned string, but with a little extra
 // structure; it is namespaced via SymbolNamespace and the resulting
 // intern pointers support efficient namespace testing.
-struct CAFFE2_API Symbol {
+struct TORCH_API Symbol {
   explicit constexpr Symbol() : value(0) {};
   explicit constexpr Symbol(unique_t uniq)
   : value(uniq) {}

@@ -13,7 +13,7 @@ namespace at {
  *
  * We'll use QTensor in code or documentation to refer to a Tensor with QTensorImpl.
  */
-struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
+struct TORCH_API QTensorImpl : public c10::TensorImpl {
  public:
   QTensorImpl(
       Storage&& storage,

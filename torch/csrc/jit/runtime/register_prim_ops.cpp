@@ -679,6 +679,12 @@ RegisterOperators reg(
            push(stack, x != y);
          },
          aliasAnalysisFromSchema()),
+     // We define aten::dequantize in both native_functions.yaml and here,
+     // however, aten::dequantize.any defined here overrides
+     // aten::dequantize.tensors in native_functions.yaml. The variants here
+     // are only for graph mode quantization, and they should be removed once
+     // we deprecate graph mode quantization, and use the variants in
+     // native_functions.yaml.
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
              "aten::dequantize.tensor(Tensor qtensor) -> Tensor"),
@@ -686,6 +692,14 @@ RegisterOperators reg(
            at::Tensor qtensor;
            pop(stack, qtensor);
            push(stack, at::dequantize(qtensor));
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "aten::dequantize.list(Tensor[] qtensors) -> Tensor[]"),
+         [](Stack* stack) {
+           auto qtensors = pop(stack).toTensorVector();
+           push(stack, at::dequantize(qtensors));
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
@@ -821,6 +835,11 @@ RegisterOperators reg(
            push(stack, ss.str());
            return 0;
          },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "aten::__contains__.int_list(int[] l, int item) -> bool"),
+         listContains<int64_t>,
          aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(

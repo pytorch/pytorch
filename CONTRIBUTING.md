@@ -674,7 +674,7 @@ ccache -M 25Gi
 ```
 
 To check this is working, do two clean builds of pytorch in a row. The second
-build should be substantially and noticeably faster than the first build.
+build should be substantially and noticeably faster than the first build. If this doesn't seem to be the case, check that each of the symlinks above actually link to your installation of `ccache`. For example, if you followed the first option and installed `ccache` from source on a Linux machine, running `readlink -e $(which g++)` should return `~/ccache/bin/ccache`.
 
 
 #### Use a faster linker
@@ -754,7 +754,7 @@ than Linux, which are worth keeping in mind when fixing these problems.
 1. Symbols are NOT exported by default on Windows; instead, you have to explicitly
    mark a symbol as exported/imported in a header file with `__declspec(dllexport)` /
    `__declspec(dllimport)`. We have codified this pattern into a set of macros
-   which follow the convention `*_API`, e.g., `CAFFE2_API` inside Caffe2 and ATen.
+   which follow the convention `*_API`, e.g., `TORCH_API` inside Caffe2, Aten and Torch.
    (Every separate shared library needs a unique macro name, because symbol visibility
    is on a per shared library basis. See c10/macros/Macros.h for more details.)
 
@@ -891,7 +891,7 @@ which is in PyTorch's `requirements.txt`.
 ## Pre-commit tidy/linting hook
 
 We use clang-tidy and flake8 (installed with flake8-bugbear,
-flake8-comprehensions, flake8-mypy, and flake8-pyi) to perform additional
+flake8-comprehensions, flake8-pyi, and others) to perform additional
 formatting and semantic checking of code. We provide a pre-commit git hook for
 performing these checks, before a commit is created:
 
