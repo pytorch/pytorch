@@ -1538,6 +1538,11 @@ reciprocal(input, *, out=None) -> Tensor
 
 Returns a new tensor with the reciprocal of the elements of :attr:`input`
 
+.. note::
+    Unlike NumPy's reciprocal, torch.reciprocal supports integral inputs. Integral
+    inputs to reciprocal are automatically :ref:`promoted <type-promotion-doc>` to
+    the default scalar type.
+
 .. math::
     \text{out}_{i} = \frac{1}{\text{input}_{i}}
 """ + r"""
@@ -2025,6 +2030,11 @@ Example::
     tensor([ 0.1632,  1.1835, -0.6979, -0.7325])
     >>> torch.cosh(a)
     tensor([ 1.0133,  1.7860,  1.2536,  1.2805])
+
+.. note::
+   When :attr:`input` is on the CPU, the implementation of torch.cosh may use
+   the Sleef library, which rounds very large results to infinity or negative
+   infinity. See `here <https://sleef.org/purec.xhtml>`_ for details.
 """.format(**common_args))
 
 add_docstr(torch.cross,
@@ -7453,6 +7463,34 @@ Example::
     tensor([-0.5194,  0.1343, -0.4032, -0.2711])
 """.format(**common_args))
 
+add_docstr(torch.sinc,
+           r"""
+sinc(input, *, out=None) -> Tensor
+
+Computes the normalized sinc of :attr:`input.`
+
+.. math::
+    \text{out}_{i} =
+    \begin{cases}
+      1, & \text{if}\ \text{out}_{i}=0 \\
+      \sin(\pi \text{input}_{i}) / (\pi \text{input}_{i}), & \text{otherwise}
+    \end{cases}
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    tensor([ 0.2252, -0.2948,  1.0267, -1.1566])
+    >>> torch.sinc(a)
+    tensor([ 0.9186,  0.8631, -0.0259, -0.1300])
+""".format(**common_args))
+
 add_docstr(torch.sinh,
            r"""
 sinh(input, *, out=None) -> Tensor
@@ -7476,6 +7514,11 @@ Example::
     tensor([ 0.5380, -0.8632, -0.1265,  0.9399])
     >>> torch.sinh(a)
     tensor([ 0.5644, -0.9744, -0.1268,  1.0845])
+
+.. note::
+   When :attr:`input` is on the CPU, the implementation of torch.sinh may use
+   the Sleef library, which rounds very large results to infinity or negative
+   infinity. See `here <https://sleef.org/purec.xhtml>`_ for details.
 """.format(**common_args))
 
 add_docstr(torch.sort,

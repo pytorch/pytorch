@@ -67,6 +67,16 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     return value_;
   }
 
+  Value value() const {
+    return value_;
+  }
+
+  void clear() {
+    eval_context_.clear();
+    buffer_mapping_.clear();
+    internal_buffers_.clear();
+  }
+
   TORCH_API void visit(const Add* v) override {
     visit_binary_op(v);
   }
@@ -210,9 +220,12 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     std::vector<T> result_v(lhs_v.size());
     for (size_t i = 0; i < lhs_v.size(); i++) {
       switch (op_type) {
-        case IRNodeType::kLshift:
-          result_v[i] = lhs_v[i] << rhs_v[i];
+        case IRNodeType::kLshift: {
+          typename std::make_unsigned<T>::type a =
+              static_cast<typename std::make_unsigned<T>::type>(lhs_v[i]);
+          result_v[i] = a << rhs_v[i];
           break;
+        }
         case IRNodeType::kRshift:
           result_v[i] = lhs_v[i] >> rhs_v[i];
           break;
@@ -295,8 +308,14 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
     if (expr_type == IRNodeType::kLshift || expr_type == IRNodeType::kRshift) {
       switch (lhs_v.dtype().scalar_type()) {
-        case ScalarType::Int:
-          value_ = shift_binary_op<int>(lhs_v, rhs_v, expr_type);
+#define TYPE_CASE(Type, Name)                                \
+  case ScalarType::Name:                                     \
+    value_ = shift_binary_op<Type>(lhs_v, rhs_v, expr_type); \
+    break;
+        AT_FORALL_INT_TYPES(TYPE_CASE);
+#undef TYPE_CASE
+        case ScalarType::Bool:
+          value_ = shift_binary_op<unsigned char>(lhs_v, rhs_v, expr_type);
           break;
         default:
           throw unsupported_dtype();
@@ -659,20 +678,20 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     throw unimplemented_lowering(v);
   }
 
-  template <typename T>
+  template <typename TReturn, typename TInput>
   void visit_intrinsics_helper(const Intrinsics* v) {
     std::vector<Value> values(v->nparams());
     for (int i = 0; i < v->nparams(); i++) {
       v->param(i)->accept(this);
       values[i] = this->value();
     }
-    std::vector<T> v1;
+    std::vector<TInput> v1;
     if (values.size() >= 1ULL) {
-      v1 = values[0].as_vec<T>();
+      v1 = values[0].as_vec<TInput>();
     }
-    std::vector<T> v2;
+    std::vector<TInput> v2;
     if (values.size() >= 2ULL) {
-      v2 = values[1].as_vec<T>();
+      v2 = values[1].as_vec<TInput>();
       if (v1.size() != v2.size()) {
         throw malformed_input("value size mismatch in Intrinsics", v);
       }
@@ -682,14 +701,14 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       throw unimplemented_lowering(v);
     }
 
-    std::vector<T> result(v1.size(), -1);
+    std::vector<TReturn> result(v1.size(), -1);
     if (values.size() == 1ULL) {
       for (size_t i = 0; i < v1.size(); i++) {
-        result[i] = compute_intrinsics<T>(v->op_type(), v1[i]);
+        result[i] = compute_intrinsics<TReturn>(v->op_type(), v1[i]);
       }
     } else {
       for (size_t i = 0; i < v1.size(); i++) {
-        result[i] = compute_intrinsics<T>(v->op_type(), v1[i], v2[i]);
+        result[i] = compute_intrinsics<TReturn>(v->op_type(), v1[i], v2[i]);
       }
     }
     value_ = Value(result);
@@ -697,12 +716,26 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
   TORCH_API void visit(const Intrinsics* v) override {
     auto ty = v->dtype().scalar_type();
-    if (ty == ScalarType::Float) {
-      visit_intrinsics_helper<float>(v);
-    } else if (ty == ScalarType::Double) {
-      visit_intrinsics_helper<double>(v);
+    if (v->op_type() == kIsNan) {
+      auto inp_dtype = v->params().at(0)->dtype().scalar_type();
+      if (inp_dtype == ScalarType::Float) {
+        visit_intrinsics_helper<int, float>(v);
+      } else if (inp_dtype == ScalarType::Double) {
+        visit_intrinsics_helper<int, double>(v);
+      } else if (inp_dtype == ScalarType::Half) {
+        throw unsupported_dtype(); // TODO
+      }
     } else {
-      throw unsupported_dtype();
+      switch (ty) {
+#define TYPE_CASE(Type, Name)               \
+  case ScalarType::Name:                    \
+    visit_intrinsics_helper<Type, Type>(v); \
+    break;
+        AT_FORALL_SCALAR_TYPES(TYPE_CASE);
+#undef TYPE_CASE
+        default:
+          throw unsupported_dtype();
+      }
     }
   }
 
@@ -755,19 +788,13 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     }
   }
 
-  Value value() const {
-    return value_;
-  }
-
-  void clear() {
-    eval_context_.clear();
-    buffer_mapping_.clear();
-    internal_buffers_.clear();
-  }
-
  private:
-  template <typename T>
-  static T compute_intrinsics(IntrinsicsOp op_type, T v) {
+  template <
+      typename TReturn,
+      typename TInput,
+      typename std::enable_if<std::is_floating_point<TInput>::value, int>::
+          type = 0>
+  static TReturn compute_intrinsics(IntrinsicsOp op_type, TInput v) {
     switch (op_type) {
       case kSin:
         return std::sin(v);
@@ -789,8 +816,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
         return std::tanh(v);
       case kExp:
         return std::exp(v);
-      case kFabs:
-        return std::fabs(v);
+      case kAbs:
+        return std::abs(v);
       case kExpm1:
         return std::expm1(v);
       case kLog:
@@ -820,15 +847,47 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       case kLgamma:
         return std::lgamma(v);
       case kFrac:
-        T intpart;
+        TInput intpart;
         return std::modf(v, &intpart);
+      case kIsNan:
+        return std::isnan(v);
       default:
         throw std::runtime_error("Invalid op_type: " + c10::to_string(op_type));
     }
   }
 
-  template <typename T>
-  static T compute_intrinsics(IntrinsicsOp op_type, T v1, T v2) {
+  template <
+      typename TReturn,
+      typename TInput,
+      typename std::enable_if<std::is_integral<TInput>::value, int>::type = 0>
+  static TReturn compute_intrinsics(IntrinsicsOp op_type, TInput v) {
+    switch (op_type) {
+      case kAbs: {
+        // internal tool complains about calling `abs` on unsigned, the
+        // following makes the tool happy
+        using X =
+            std::conditional_t<std::is_unsigned<TInput>::value, int, TInput>;
+        return std::is_unsigned<TInput>::value ? v
+                                               : std::abs(static_cast<X>(v));
+      }
+      default:
+        throw std::runtime_error(
+            "Invalid integral op_type: " + c10::to_string(op_type));
+    }
+  }
+
+  // specialization for float -> int ops (just kIsNan currently)
+  int compute_intrinsics(IntrinsicsOp op_type, float v) {
+    switch (op_type) {
+      case kIsNan:
+        return std::isnan(v);
+      default:
+        throw std::runtime_error("Invalid op_type: " + c10::to_string(op_type));
+    }
+  }
+
+  template <typename TReturn, typename TInput>
+  TReturn compute_intrinsics(IntrinsicsOp op_type, TInput v1, TInput v2) {
     switch (op_type) {
       case kPow:
         return std::pow(v1, v2);
