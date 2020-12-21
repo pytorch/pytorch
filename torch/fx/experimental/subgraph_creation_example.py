@@ -161,7 +161,7 @@ def split_module(
 
         # Emit call in base graph to this submodule
 
-        output_val = base_mod_graph.call_module(submod_name, [base_mod_env[name] for name in partition.inputs])  # type: ignore
+        output_val = base_mod_graph.call_module(submod_name, tuple(base_mod_env[name] for name in partition.inputs))  # type: ignore
         if len(partition.outputs) > 1:
             # Unpack multiple return values from submodule
             output_val_proxy = torch.fx.proxy.Proxy(output_val)  # type: ignore
