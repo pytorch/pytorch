@@ -2,10 +2,14 @@ import collections
 import gc
 import unittest
 
+import tempfile
 import torch
 import torch.nn as nn
+import torch.optim
+import torch.utils.data
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, TEST_WITH_ASAN, IS_WINDOWS)
+import torch.autograd.profiler as profiler
 from torch.autograd.profiler import profile
 from torch.autograd import kineto_available
 
@@ -14,6 +18,7 @@ try:
     HAS_PSUTIL = True
 except ImportError:
     HAS_PSUTIL = False
+import pickle
 
 
 @unittest.skipIf(not HAS_PSUTIL, "Requires psutil to run")
@@ -128,6 +133,176 @@ class TestProfiler(TestCase):
         self.assertTrue(found_gemm)
         self.assertTrue(found_memcpy)
         # p.export_chrome_trace("/tmp/test_trace.json")
+
+    def test_high_level_trace(self):
+        """Checks that python side high level events are recorded.
+        """
+        class RepeatedDataset(torch.utils.data.Dataset):
+            def __init__(self, N, D_in, D_out):
+                self.N = N
+                self.x = torch.randn(N, D_in)
+                self.y = torch.randn(N, D_out)
+
+            def __len__(self):
+                return self.N
+
+            def __getitem__(self, idx):
+                return self.x, self.y
+
+        class TwoLayerNet(torch.nn.Module):
+            def __init__(self, D_in, H, D_out):
+                super(TwoLayerNet, self).__init__()
+                self.linear1 = torch.nn.Linear(D_in, H)
+                self.linear2 = torch.nn.Linear(H, D_out)
+
+            def forward(self, x):
+                h_relu = self.linear1(x).clamp(min=0)
+                y_pred = self.linear2(h_relu)
+                return y_pred
+
+        class CustomSGD(torch.optim.SGD):
+            def __init__(self, *args, **kwargs):
+                super(CustomSGD, self).__init__(*args, **kwargs)
+
+        def train():
+            for _, data in enumerate(dataloader):
+                x, y = data[0], data[1]
+                y_pred = model(x)
+                loss = criterion(y_pred, y)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+        N, D_in, H, D_out = 8, 10, 5, 2
+        model = TwoLayerNet(D_in, H, D_out)
+        criterion = torch.nn.MSELoss(reduction='sum')
+        optimizer = torch.optim.SGD(model.parameters(), lr=1e-4)
+        ds = RepeatedDataset(N, D_in, D_out)
+        dataloader = torch.utils.data.DataLoader(ds, batch_size=1)
+
+        try:
+            train()
+        except Exception:
+            self.assertTrue(False, "Expected no exception without profiling.")
+
+        # Create multiple instances, expect each func is hooked only one time.
+        # Nested wrappers(repeated patching) will make following test fail.
+        optimizer_duplicate = torch.optim.SGD(model.parameters(), lr=1e-4)
+        dataloader_duplicate = torch.utils.data.DataLoader(ds, batch_size=1)
+
+        def judge(expected_event_count, prof):
+            actual_event_count = {}
+            for e in prof.function_events:
+                if "#" in e.name:
+                    key = e.name
+                    if key in expected_event_count.keys():
+                        actual_event_count[key] = actual_event_count.setdefault(key, 0) + 1
+            for key, count in expected_event_count.items():
+                self.assertTrue((key in actual_event_count.keys()) and (count == actual_event_count[key]))
+
+        with profile() as prof:
+            train()
+        expected_event_count = {
+            # "+1" because the final iteration will enter __next__ but skip the loop body.
+            "enumerate(DataLoader)#_SingleProcessDataLoaderIter.__next__": (N + 1),
+            "Optimizer.step#SGD.step": N,
+            "Optimizer.zero_grad#SGD.zero_grad": N
+        }
+        judge(expected_event_count, prof)
+
+        # Test on pickle/unpickle. Expect to work in multi-processing.
+        optimizer = pickle.loads(pickle.dumps(optimizer))
+        with profile() as prof:
+            train()
+        judge(expected_event_count, prof)
+
+        # Test on customized optimizer.
+        optimizer = CustomSGD(model.parameters(), lr=1e-4)
+        with profile() as prof:
+            train()
+        expected_event_count = {
+            "enumerate(DataLoader)#_SingleProcessDataLoaderIter.__next__": (N + 1),
+            "Optimizer.step#CustomSGD.step": N,
+            "Optimizer.zero_grad#CustomSGD.zero_grad": N
+        }
+        judge(expected_event_count, prof)
+
+    def test_flops(self):
+        model = torch.nn.Sequential(
+            nn.Conv2d(16, 33, 18),
+            nn.ReLU(),
+            nn.Linear(243, 243),
+            nn.ReLU(),
+        )
+        inputs = torch.randn(40, 16, 18, 260)
+        with profiler.profile(record_shapes=True, with_flops=True) as prof:
+            model(inputs)
+        profiler_output = prof.key_averages(group_by_input_shape=True).table(sort_by="cpu_time_total", row_limit=10)
+        print(profiler_output)
+        self.assertIn("FLOPS", profiler_output)
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_kineto_profiler_api(self):
+        called_num = [0]
+
+        with profile(use_cuda=True, use_kineto=True):
+            self.payload()
+
+        def trace_handler(p):
+            print(p.key_averages().table(
+                sort_by="self_cuda_time_total", row_limit=-1))
+            # p.export_chrome_trace("/tmp/test_trace_" + str(called_num[0]) + ".json")
+            called_num[0] += 1
+
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA],
+            schedule=torch.profiler.schedule(
+                wait=1,
+                warmup=1,
+                active=2),
+            on_trace_ready=trace_handler
+        ) as p:
+            for idx in range(8):
+                self.payload()
+                p.next_step()
+
+        self.assertEqual(called_num[0], 2)
+
+        # case without enable_pred
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA]
+        ) as p:
+            self.payload()
+            self.payload()
+        print(p.key_averages().table(
+            sort_by="self_cuda_time_total", row_limit=-1))
+
+    @unittest.skipIf(IS_WINDOWS, "Disabled on windows (permissions)")
+    def test_export_stacks(self):
+        with profile(with_stack=True, use_kineto=kineto_available()) as p:
+            x = torch.randn(10, 10)
+            y = torch.randn(10, 10)
+            z = torch.mm(x, y)
+            z = z + y
+
+        with tempfile.NamedTemporaryFile(mode="w+") as f:
+            p.export_stacks(f.name)
+            lines = f.readlines()
+            assert len(lines) > 0, "Empty stacks file"
+            for line in lines:
+                is_int = False
+                try:
+                    assert int(line.split(" ")[-1]) > 0, "Invalid stacks record"
+                    is_int = True
+                except ValueError:
+                    pass
+                assert is_int, "Invalid stacks record"
+
 
 if __name__ == '__main__':
     run_tests()

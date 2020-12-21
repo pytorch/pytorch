@@ -464,9 +464,13 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
     r"""Short-time Fourier transform (STFT).
 
     .. warning::
-        Setting :attr:`return_complex` explicitly will be required in a future
-        PyTorch release. Set it to False to preserve the current behavior or
-        True to return a complex output.
+        From version 1.8.0, :attr:`return_complex` must always be given
+        explicitly for real inputs and `return_complex=False` has been
+        deprecated. Strongly prefer `return_complex=True` as in a future
+        pytorch release, this function will only return complex tensors.
+
+        Note that :func:`torch.view_as_real` can be used to recover a real
+        tensor with an extra last dimension for real and imaginary components.
 
     The STFT computes the Fourier transform of short overlapping windows of the
     input. This giving frequency components of the signal as they change over
@@ -618,6 +622,10 @@ def istft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
             can either be complex (``channel``, ``fft_size``, ``n_frame``), or real
             (``channel``, ``fft_size``, ``n_frame``, 2) where the ``channel``
             dimension is optional.
+
+            .. deprecated:: 1.8.0
+               Real input is deprecated, use complex inputs as returned by
+               ``stft(..., return_complex=True)`` instead.
         n_fft (int): Size of Fourier transform
         hop_length (Optional[int]): The distance between neighboring sliding window frames.
             (Default: ``n_fft // 4``)
@@ -1293,7 +1301,13 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         more consistent with NumPy's numpy.linalg.norm.
 
     Args:
-        input (Tensor): the input tensor
+        input (Tensor): The input tensor. Its data type must be either a floating
+            point or complex type. For complex inputs, the norm is calculated using the
+            absolute value of each element. If the input is complex and neither
+            :attr:`dtype` nor :attr:`out` is specified, the result's data type will
+            be the corresponding floating point type (e.g. float if :attr:`input` is
+            complexfloat).
+
         p (int, float, inf, -inf, 'fro', 'nuc', optional): the order of norm. Default: ``'fro'``
             The following norms can be calculated:
 

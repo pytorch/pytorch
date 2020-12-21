@@ -160,6 +160,8 @@ class TORCH_API LSTMImpl : public detail::RNNImplBase<LSTMImpl> {
  protected:
   void check_forward_args(const Tensor& input, std::tuple<Tensor, Tensor> hidden, const Tensor& batch_sizes) const;
 
+  std::tuple<int64_t, int64_t, int64_t> get_expected_cell_size(const Tensor& input, const Tensor& batch_sizes) const;
+
   std::tuple<Tensor, Tensor> permute_hidden(std::tuple<Tensor, Tensor> hx, const Tensor& permutation) const;
 
   std::tuple<Tensor, std::tuple<Tensor, Tensor>> forward_helper(

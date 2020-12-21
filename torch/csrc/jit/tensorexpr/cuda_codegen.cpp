@@ -287,8 +287,12 @@ void CudaPrinter::visit(const Intrinsics* v) {
   if (returnType == ScalarType::Half || returnType == ScalarType::Float) {
     func_name = func_name + "f";
   }
-  if (v->op_type() == IntrinsicsOp::kFabs && is_integral(returnType)) {
-    func_name = "abs";
+  if (v->op_type() == IntrinsicsOp::kAbs && !is_integral(returnType)) {
+    // since kAbs's func_name is `abs`, prefix `f` for floating point
+    func_name = "f" + func_name;
+  }
+  if (v->op_type() == IntrinsicsOp::kIsNan) {
+    func_name = "isnan";
   }
 
   os() << func_name << "(";
