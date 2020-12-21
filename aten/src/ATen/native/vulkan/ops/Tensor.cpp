@@ -547,7 +547,7 @@ class vTensor::View::CMD final {
       const Image::Object& image,
       Buffer::Object& buffer);
 
-  void submit(Fence fence);
+  void submit(Fence& fence);
 
  private:
   api::Command::Buffer& command_buffer();
@@ -871,11 +871,13 @@ void vTensor::View::CMD::copy_image_to_buffer(
       view_.context_->resource().pool.uniform(block).object);
 }
 
-void vTensor::View::CMD::submit(api::Resource::Fence fence) {
+void vTensor::View::CMD::submit(api::Resource::Fence& fence) {
   if (command_buffer_) {
+    fence = allocate_fence(view_.pool_);
+
     view_.context_->command().pool.submit(
         view_.context_->gpu().queue,
-        &command_buffer(),
+        command_buffer_,
         1u,
         fence);
   }
@@ -1060,7 +1062,7 @@ vTensor::Buffer& vTensor::View::staging(
 }
 
 vTensor::Fence& vTensor::View::fence() const {
-  return (fence_ = allocate_fence(pool_));
+  return fence_;
 }
 
 vTensor::Memory& vTensor::View::wait() const {

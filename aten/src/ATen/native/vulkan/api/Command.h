@@ -14,6 +14,8 @@ namespace vulkan {
 namespace api {
 
 struct Command final {
+  class Pool;
+
   //
   // Buffer
   //
@@ -40,6 +42,8 @@ struct Command final {
     void dispatch(const Shader::WorkGroup& global_work_group);
 
    private:
+    friend class Pool;
+
     void barrier();
     void invalidate();
 

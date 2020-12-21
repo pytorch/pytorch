@@ -128,29 +128,6 @@ Descriptor::Set::Set(
       "Invalid Vulkan descriptor set!");
 }
 
-void Descriptor::Set::update(const Item& item) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device_ && descriptor_set_,
-      "This descriptor set is in an invalid state! "
-      "Potential reason: This descriptor set is moved from.");
-
-  const auto items_itr = std::find_if(
-      bindings_.items.begin(),
-      bindings_.items.end(),
-      [binding = item.binding](const Item& other) {
-        return other.binding == binding;
-      });
-
-  if (bindings_.items.end() == items_itr) {
-     bindings_.items.emplace_back(item);
-  }
-  else {
-    *items_itr = item;
-  }
-
-  bindings_.dirty = true;
-}
-
 Descriptor::Set::Set(Set&& set)
   : device_(std::move(set.device_)),
     descriptor_set_(std::move(set.descriptor_set_)),
@@ -302,12 +279,34 @@ void Descriptor::Set::invalidate() {
   descriptor_set_ = VK_NULL_HANDLE;
 }
 
+void Descriptor::Set::update(const Item& item) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_ && descriptor_set_,
+      "This descriptor set is in an invalid state! "
+      "Potential reason: This descriptor set is moved from.");
+
+  const auto items_itr = std::find_if(
+      bindings_.items.begin(),
+      bindings_.items.end(),
+      [binding = item.binding](const Item& other) {
+        return other.binding == binding;
+      });
+
+  if (bindings_.items.end() == items_itr) {
+     bindings_.items.emplace_back(item);
+  }
+  else {
+    *items_itr = item;
+  }
+
+  bindings_.dirty = true;
+}
+
 Descriptor::Pool::Pool(const GPU& gpu)
   : device_(gpu.device),
     descriptor_pool_(
         create_descriptor_pool(gpu.device),
-        VK_DELETER(DescriptorPool)(device_)),
-    set_{} {
+        VK_DELETER(DescriptorPool)(device_)) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_,
       "Invalid Vulkan device!");

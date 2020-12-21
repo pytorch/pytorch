@@ -192,6 +192,11 @@ VkFence Resource::Fence::handle(const bool add_to_waitlist) const {
       "Invalid Vulkan fence!");
 
   const VkFence fence = pool->fence_.pool[id].get();
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      fence,
+      "Invalid Vulkan fence!");
+
   if (add_to_waitlist) {
     pool->fence_.waitlist.push_back(fence);
   }
@@ -376,23 +381,6 @@ Resource::Pool::Pool(
   fence_.pool.reserve(Configuration::kReserve);
 }
 
-Resource::Pool::~Pool() {
-  try {
-    if (device_ && allocator_) {
-      purge();
-    }
-  }
-  catch (const std::exception& e) {
-    LOG(WARNING)
-        << "Vulkan: Resource pool destructor raised an exception!  Error: "
-        << e.what();
-  }
-  catch (...) {
-    LOG(WARNING)
-        << "Vulkan: Resource pool destructor raised an unknown exception!";
-  }
-}
-
 Resource::Pool::Pool(Pool&& pool)
   : device_(std::move(pool.device_)),
     allocator_(std::move(pool.allocator_)),
@@ -416,6 +404,23 @@ Resource::Pool& Resource::Pool::operator=(Pool&& pool) {
   };
 
   return *this;
+}
+
+Resource::Pool::~Pool() {
+  try {
+    if (device_ && allocator_) {
+      purge();
+    }
+  }
+  catch (const std::exception& e) {
+    LOG(WARNING)
+        << "Vulkan: Resource pool destructor raised an exception!  Error: "
+        << e.what();
+  }
+  catch (...) {
+    LOG(WARNING)
+        << "Vulkan: Resource pool destructor raised an unknown exception!";
+  }
 }
 
 Resource::Buffer Resource::Pool::buffer(

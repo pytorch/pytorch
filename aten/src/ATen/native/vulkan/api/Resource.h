@@ -31,6 +31,15 @@ struct Resource final {
     };
 
     /*
+      Barrier
+    */
+
+    struct Barrier final {
+      VkAccessFlags src;
+      VkAccessFlags dst;
+    };
+
+    /*
       Access
     */
 
@@ -65,15 +74,6 @@ struct Resource final {
         Access::Flags kAccess,
         typename Pointer = Access::Pointer<Type, kAccess>>
     Handle<Pointer> map() &;
-
-    /*
-      Barrier
-    */
-
-    struct Barrier final {
-      VkAccessFlags src;
-      VkAccessFlags dst;
-    };
 
     VmaAllocator allocator;
     VmaAllocation allocation;

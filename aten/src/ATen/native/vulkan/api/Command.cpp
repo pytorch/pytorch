@@ -456,7 +456,7 @@ void Command::Pool::submit(
     if (stream_.handle() == command_buffer) {
       if (fence) {
         stream_.end();
-        stream_ = Buffer{};
+        stream_.invalidate();
       }
       else {
         // Skip
@@ -469,19 +469,21 @@ void Command::Pool::submit(
     }
   }
 
-  const VkSubmitInfo submit_info{
-    VK_STRUCTURE_TYPE_SUBMIT_INFO,
-    nullptr,
-    0u,
-    nullptr,
-    nullptr,
-    command_buffers.size(),
-    command_buffers.data(),
-    0u,
-    nullptr,
-  };
+  if (!command_buffers.empty()) {
+    const VkSubmitInfo submit_info{
+      VK_STRUCTURE_TYPE_SUBMIT_INFO,
+      nullptr,
+      0u,
+      nullptr,
+      nullptr,
+      command_buffers.size(),
+      command_buffers.data(),
+      0u,
+      nullptr,
+    };
 
-  VK_CHECK(vkQueueSubmit(queue, 1u, &submit_info, fence.handle()));
+    VK_CHECK(vkQueueSubmit(queue, 1u, &submit_info, fence.handle()));
+  }
 }
 
 void Command::Pool::invalidate() {
