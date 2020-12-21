@@ -106,8 +106,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalar_cuda(TensorList input, Tensor
     check_foreach_api_restrictions(input, tensors1, tensors2);                                                                        \
     bool has_integral = has_int_or_bool_tensor(input);                                                                                \
                                                                                                                                       \
-    /* MTA doesnt support different return type than input one */                                                                     \
-    if (!can_use_fast_route(input, tensors1, tensors2, scalar) || has_integral) {                                                     \
+    if (!can_use_fast_route({input, tensors1, tensors2}, {scalar}) || has_integral) {                                                 \
         return at::native::foreach_tensor_##NAME##_scalar_slow(input, tensors1, tensors2, scalar);                                    \
     }                                                                                                                                 \
                                                                                                                                       \
@@ -119,7 +118,7 @@ void foreach_tensor_##NAME##_scalar_cuda_(TensorList input, TensorList tensors1,
     bool has_integral = has_int_or_bool_tensor(input);                                                                                \
                                                                                                                                       \
     /* MTA doesnt support different return type than input one */                                                                     \
-    if (!can_use_fast_route(input, tensors1, tensors2, scalar) || has_integral) {                                                     \
+    if (!can_use_fast_route({input, tensors1, tensors2}, {scalar}) || has_integral) {                                                 \
         return at::native::foreach_tensor_##NAME##_scalar_slow_(input, tensors1, tensors2, scalar);                                   \
     }                                                                                                                                 \
                                                                                                                                       \
@@ -133,7 +132,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalarlist_cuda(TensorList input, Te
     bool has_integral = has_int_or_bool_tensor(input);                                                                                                   \
                                                                                                                                                          \
     /* MTA doesnt support different return type than input one */                                                                                        \
-    if (!can_use_fast_route(input, tensors1, tensors2, scalars) || has_integral) {                                                                       \
+    if (!can_use_fast_route({input, tensors1, tensors2}, scalars) || has_integral) {                                                                     \
         return at::native::foreach_tensor_##NAME##_scalarlist_slow(input, tensors1, tensors2, scalars);                                                  \
     }                                                                                                                                                    \
                                                                                                                                                          \
@@ -145,7 +144,7 @@ void foreach_tensor_##NAME##_scalarlist_cuda_(TensorList input, TensorList tenso
     bool has_integral = has_int_or_bool_tensor(input);                                                                                                   \
                                                                                                                                                          \
     /* MTA doesnt support different return type than input one */                                                                                        \
-    if (!can_use_fast_route(input, tensors1, tensors2, scalars) || has_integral) {                                                                       \
+    if (!can_use_fast_route({input, tensors1, tensors2}, scalars) || has_integral) {                                                                     \
         return at::native::foreach_tensor_##NAME##_scalarlist_slow_(input, tensors1, tensors2, scalars);                                                 \
     }                                                                                                                                                    \
                                                                                                                                                          \
@@ -162,7 +161,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_cuda(TensorList tensors1, TensorList
     check_foreach_api_restrictions(tensors1, tensors2);                                                                       \
     TORCH_CHECK(!tensors1[0].is_complex(), "foreach_maximum/foreach_minimum is not supported for complex inputs");            \
                                                                                                                               \
-    if (!can_use_fast_route(tensors1, tensors2)) {                                                                            \
+    if (!can_use_fast_route({tensors1, tensors2})) {                                                                          \
         return at::native::foreach_tensor_##NAME##_slow(tensors1, tensors2);                                                  \
     }                                                                                                                         \
                                                                                                                               \

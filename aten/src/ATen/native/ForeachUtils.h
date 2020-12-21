@@ -117,56 +117,28 @@ bool will_promote_tensor(const Tensor& tensor, Scalar scalar, bool division_op =
   return false;
 }
 
-bool can_use_fast_route(TensorList tensors) {
-#ifdef __HIP_PLATFORM_HCC__
-  return false;
-#else
-  auto expected_device = tensors[0].device();
-  auto expected_dtype = tensors[0].dtype();
-
-  for (auto t : tensors) {
-    if (!has_same_attributes(expected_device, expected_dtype, {t})) {
-      return false;
-    }
-  }
-
-  return true;
-#endif
-}
-
-bool can_use_fast_route(TensorList tensors, Scalar scalar, bool division_op = false) {
-#ifdef __HIP_PLATFORM_HCC__
-  return false;
-#else
-  auto expected_device = tensors[0].device();
-  auto expected_dtype = tensors[0].dtype();
-
-  for (auto t : tensors) {
-    if (!has_same_attributes(expected_device, expected_dtype, {t})) {
-      return false;
-    }
-
-    if (will_promote_tensor(t, scalar, division_op)) {
-      return false;
-    }
-  }
-
-  return true;
-#endif
-}
-
 bool can_use_fast_route(TensorList tensors, ArrayRef<Scalar> scalars, bool division_op = false) {
 #ifdef __HIP_PLATFORM_HCC__
   return false;
 #else
+  auto expected_device = tensors[0].device();
+  auto expected_dtype = tensors[0].dtype();
+
   for (int i = 0; i < tensors.size(); i++) {
-    if (will_promote_tensor(tensors[i], scalars[i], division_op)) {
+    if (!has_same_attributes(expected_device, expected_dtype, tensors[i])) {
+      return false;
+    }
+
+    auto scalarsIndex = scalars.size() == 1 ? 0 : i;
+    if (will_promote_tensor(tensors[i], scalars[scalarsIndex], division_op)) {
       return false;
     }
 
     // Complex scalar list is not supported.
-    if (scalars[i].isComplex() || at::isComplexType(tensors[i].scalar_type())) {
-      return false;
+    if (scalars.size() > 1) {
+      if (scalars[i].isComplex() || at::isComplexType(tensors[i].scalar_type())) {
+        return false;
+      }
     }
   }
 
@@ -198,67 +170,41 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, bool division_
 #endif
 }
 
-bool can_use_fast_route(TensorList tensors1, TensorList tensors2, Scalar scalar) {
+bool can_use_fast_route(std::vector<TensorList> tensorLists, ArrayRef<Scalar> scalars = {}) {
 #ifdef __HIP_PLATFORM_HCC__
   return false;
 #else
-  auto expected_device = tensors1[0].device();
-  auto expected_dtype = tensors1[0].dtype();
+  if (tensorLists.size() == 0) {
+    return false;
+  }
 
-  for (int64_t i = 0; i < tensors1.size(); i++) {
-    if (!has_same_attributes(expected_device, expected_dtype, {tensors1[i], tensors2[i]})) {
+  auto expected_device = tensorLists[0][0].device();
+  auto expected_dtype = tensorLists[0][0].dtype();
+
+  for (int i=0; i < tensorLists[0].size(); i++) {
+    std::vector<Tensor> tempTensors; 
+    for (int j=0; j < tensorLists.size(); j++) {
+      tempTensors.push_back(tensorLists[j][i]);
+    }
+    
+    if (!has_same_attributes(expected_device, expected_dtype, tempTensors)) {
       return false;
     }
 
-    if (will_promote_tensor(tensors1[i], scalar)) {
-      return false;
+    // We check only tensorLists at index 0 as there no use cases for other indexes yet.
+    if (scalars.size() == 1) {
+      if (will_promote_tensor(tensorLists[0][i], scalars[0])) {
+        return false;
+      }
+    } else if (scalars.size() > 1) {
+      if (will_promote_tensor(tensorLists[0][i], scalars[i])) {
+        return false;
+      }
     }
   }
 
   return true;
 #endif
-}
-
-bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList tensors3) {
-#ifdef __HIP_PLATFORM_HCC__
-  return false;
-#else
-  auto expected_device = tensors1[0].device();
-  auto expected_dtype = tensors1[0].dtype();
-
-  for (int64_t i = 0; i < tensors1.size(); i++) {
-    if (!has_same_attributes(expected_device, expected_dtype, {tensors1[i], tensors2[i], tensors3[i]})) {
-      return false;
-    }
-  }
-
-  return true;
-#endif
-}
-
-bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList tensors3, Scalar scalar) {
-#ifdef __HIP_PLATFORM_HCC__
-  return false;
-#else
-  auto expected_device = tensors1[0].device();
-  auto expected_dtype = tensors1[0].dtype();
-
-  for (int64_t i = 0; i < tensors1.size(); i++) {
-    if (!has_same_attributes(expected_device, expected_dtype, {tensors1[i], tensors2[i], tensors3[i]})) {
-      return false;
-    }
-
-    if (will_promote_tensor(tensors1[i], scalar)) {
-      return false;
-    }
-  }
-
-  return true;
-#endif
-}
-
-bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList tensors3, ArrayRef<Scalar> scalars) {
-  return can_use_fast_route(tensors1, tensors2, tensors3);
 }
 
 }

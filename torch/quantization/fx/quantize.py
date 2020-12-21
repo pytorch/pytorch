@@ -61,12 +61,9 @@ from .qconfig_utils import *
 
 import warnings
 
-from typing import Optional, Dict, Any, List, Union, Tuple, Set, Callable
+from typing import Optional, Dict, Any, List, Tuple, Set, Callable
 
 # Define helper types
-
-QConfigAny = Union[torch.quantization.QConfig,
-                   torch.quantization.QConfigDynamic, None]
 MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,
                     QConfigAny]
 
@@ -302,7 +299,7 @@ class Quantizer:
                 # precedence: [TODO] module_name_qconfig (need scope support
                 # from fx)
                 # > function_qconfig > global_qconfig
-                function_qconfig = get_function_qconfig(
+                function_qconfig = get_object_type_qconfig(
                     qconfig_dict, node.target, global_qconfig)
                 self.qconfig_map[node.name] = function_qconfig
             elif node.op == 'call_method':
@@ -318,6 +315,7 @@ class Quantizer:
                         "qconfig for value {}".format(node.name))
                     qconfig = get_qconfig(
                         self.modules, qconfig_dict, '', global_qconfig)
+                qconfig = get_object_type_qconfig(qconfig_dict, node.target, qconfig)
                 self.qconfig_map[node.name] = qconfig
             elif node.op == 'call_module':
                 module_qconfig = get_qconfig(
