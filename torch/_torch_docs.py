@@ -1542,6 +1542,11 @@ reciprocal(input, *, out=None) -> Tensor
 
 Returns a new tensor with the reciprocal of the elements of :attr:`input`
 
+.. note::
+    Unlike NumPy's reciprocal, torch.reciprocal supports integral inputs. Integral
+    inputs to reciprocal are automatically :ref:`promoted <type-promotion-doc>` to
+    the default scalar type.
+
 .. math::
     \text{out}_{i} = \frac{1}{\text{input}_{i}}
 """ + r"""
@@ -7462,6 +7467,34 @@ Example::
     tensor([-0.5194,  0.1343, -0.4032, -0.2711])
 """.format(**common_args))
 
+add_docstr(torch.sinc,
+           r"""
+sinc(input, *, out=None) -> Tensor
+
+Computes the normalized sinc of :attr:`input.`
+
+.. math::
+    \text{out}_{i} =
+    \begin{cases}
+      1, & \text{if}\ \text{out}_{i}=0 \\
+      \sin(\pi \text{input}_{i}) / (\pi \text{input}_{i}), & \text{otherwise}
+    \end{cases}
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    tensor([ 0.2252, -0.2948,  1.0267, -1.1566])
+    >>> torch.sinc(a)
+    tensor([ 0.9186,  0.8631, -0.0259, -0.1300])
+""".format(**common_args))
+
 add_docstr(torch.sinh,
            r"""
 sinh(input, *, out=None) -> Tensor
@@ -8014,7 +8047,7 @@ add_docstr(torch.svd,
 svd(input, some=True, compute_uv=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
 This function returns a namedtuple ``(U, S, V)`` which is the singular value
-decomposition of a input real matrix or batches of real matrices :attr:`input` such that
+decomposition of a input matrix or batches of matrices :attr:`input` such that
 :math:`input = U \times diag(S) \times V^T`.
 
 If :attr:`some` is ``True`` (default), the method returns the reduced
@@ -8025,6 +8058,8 @@ will be :math:`(*, n, n)`.
 
 If :attr:`compute_uv` is ``False``, the returned `U` and `V` matrices will be zero matrices
 of shape :math:`(m \times m)` and :math:`(n \times n)` respectively. :attr:`some` will be ignored here.
+
+Supports real-valued and complex-valued input.
 
 .. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
           then the singular values of each matrix in the batch is returned in descending order.
@@ -8049,6 +8084,9 @@ of shape :math:`(m \times m)` and :math:`(n \times n)` respectively. :attr:`some
 
 .. note:: When :attr:`compute_uv` = ``False``, backward cannot be performed since `U` and `V`
           from the forward pass is required for the backward operation.
+
+.. note:: With the complex-valued input the backward operation works correctly only
+          for gauge invariant loss functions. Please look at `Gauge problem in AD`_ for more details.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
@@ -8087,6 +8125,8 @@ Example::
     >>> u, s, v = torch.svd(a_big)
     >>> torch.dist(a_big, torch.matmul(torch.matmul(u, torch.diag_embed(s)), v.transpose(-2, -1)))
     tensor(2.6503e-06)
+
+.. _Gauge problem in AD: https://re-ra.xyz/Gauge-Problem-in-Automatic-Differentiation/
 """)
 
 add_docstr(torch.symeig,

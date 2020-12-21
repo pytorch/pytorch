@@ -906,52 +906,6 @@ class TestUnaryUfuncs(TestCase):
             input_noncontig, inplace=True), expected_output_noncontig,
             atol=atol, rtol=rtol)
 
-    # Opinfo reciprocal
-    @onlyCPU
-    @dtypes(torch.float, torch.double)
-    def test_reciprocal(self, device, dtype):
-        a = torch.randn(100, 89, device=device, dtype=dtype)
-        res_div = 1 / a
-        res_reciprocal = a.clone()
-        res_reciprocal.reciprocal_()
-        self.assertEqual(res_reciprocal, res_div)
-
-    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
-    def test_reciprocal_complex(self, device, dtype):
-        t = torch.randn(10, 10, dtype=dtype, device=device)
-        expected = torch.from_numpy(np.reciprocal(t.cpu().numpy()))
-        actual = torch.reciprocal(t).cpu()
-        self.assertEqual(expected, actual)
-
-    @onlyCUDA
-    @dtypes(torch.complex64, torch.complex128)
-    def test_reciprocal_complex_extremal(self, device, dtype):
-        vals = (
-            # Inf and Zeros
-            complex(float('inf'), float('inf')),
-            complex(float('inf'), 0.),
-            complex(0., float('inf')),
-            complex(0., 0.),
-
-            # Nans and Zeros
-            complex(float('nan'), 0.),
-            complex(0., float('nan')),
-            complex(float('nan'), float('nan')),
-
-            # Inf and Nans
-            complex(float('nan'), float('inf')),
-            complex(float('inf'), float('nan')),
-
-            # Extremal and Normal Number
-            complex(float('nan'), 2.0),
-            complex(float('inf'), 2.0),
-            complex(2.0, float('nan')),
-            complex(2.0, float('inf')),
-            complex(2.0, 0.0),
-            complex(0.0, 2.0))
-
-        self.compare_with_numpy(torch.reciprocal, np.reciprocal, vals, device, dtype)
-
     # do ops like threshold need a test_unary(_nonufunc) test suite?
     @onlyCPU
     @dtypes(*torch.testing.get_all_math_dtypes('cpu'))

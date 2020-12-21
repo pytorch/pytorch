@@ -3723,6 +3723,23 @@
   dispatch:
     CPU, CUDA: sin_out
 
+- func: sinc(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    DefaultBackend: sinc
+
+- func: sinc_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    DefaultBackend: sinc_
+
+- func: sinc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  dispatch:
+    CPU, CUDA: sinc_out
+
 - func: sinh(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -5454,11 +5471,6 @@
   dispatch:
     CPU: set_cpu_
     CUDA: set_cuda_
-
-- func: set_quantizer_(Tensor(a!) self, ConstQuantizerPtr quantizer) -> Tensor(a!)
-  variants: method
-  dispatch:
-    QuantizedCPU, QuantizedCUDA: set_quantizer_
 
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
   use_c10_dispatcher: full
