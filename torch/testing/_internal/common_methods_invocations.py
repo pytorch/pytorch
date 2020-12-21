@@ -271,6 +271,20 @@ class UnaryUfuncInfo(OpInfo):
         #   outside a function's domain.
         self._domain_eps = 1e-5
 
+def sample_inputs_tensor_split(op_info, device, dtype, requires_grad):
+    return (SampleInput(make_tensor((S, S, S), device, dtype,
+                                    low=None, high=None,
+                                    requires_grad=requires_grad),
+                        args=(torch.tensor([1, 2, 3]),),),
+            SampleInput(make_tensor((S, S, S), device, dtype,
+                                    low=None, high=None,
+                                    requires_grad=requires_grad),
+                        args=(torch.tensor(1),),),
+            SampleInput(make_tensor((S, S, S), device, dtype,
+                                    low=None, high=None,
+                                    requires_grad=requires_grad),
+                        args=(torch.tensor([1, 2, 3]),),
+                        kwargs=dict(dim=1)),)
 
 def sample_inputs_addmm(op_info, device, dtype, requires_grad):
     return (SampleInput((make_tensor((S, S), device, dtype,
@@ -868,6 +882,13 @@ op_db: List[OpInfo] = [
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                 active_if=(IS_MACOS or IS_WINDOWS)),
                    )),
+    OpInfo('tensor_split',
+           dtypes=all_types_and_complex_and(torch.bool),
+           dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+           supports_tensor_out=False,
+           test_inplace_grad=False,
+           sample_inputs_func=sample_inputs_tensor_split,),
     UnaryUfuncInfo('exp2',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.exp2),
                    dtypes=all_types_and(torch.bool, torch.half),
