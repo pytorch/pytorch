@@ -14,39 +14,6 @@ class TestForeach(TestCase):
         (torch._foreach_div, torch._foreach_div_, torch.div),
     ]
 
-    unary_ops = [
-        # foreach_op, foreach_op_, torch_op, bf16, complex64/128
-        (torch._foreach_sqrt, torch._foreach_sqrt_, torch.sqrt, True , True),
-        (torch._foreach_exp, torch._foreach_exp_, torch.exp, True, True),
-        (torch._foreach_acos, torch._foreach_acos_, torch.acos, False, True),
-        (torch._foreach_asin, torch._foreach_asin_, torch.asin, False, True),
-        (torch._foreach_atan, torch._foreach_atan_, torch.atan, False, True),
-        (torch._foreach_cos, torch._foreach_cos_, torch.cos, True, True),
-        (torch._foreach_cosh, torch._foreach_cosh_, torch.cosh, False, True),
-        (torch._foreach_log, torch._foreach_log_, torch.log, True, True),
-        (torch._foreach_log10, torch._foreach_log10_, torch.log10, True, True),
-        (torch._foreach_log2, torch._foreach_log2_, torch.log2, True, True),
-        (torch._foreach_neg, torch._foreach_neg_, torch.neg, True, True),
-        (torch._foreach_tan, torch._foreach_tan_, torch.tan, False, True),
-        (torch._foreach_tanh, torch._foreach_tanh_, torch.tanh, True, True),
-        (torch._foreach_sin, torch._foreach_sin_, torch.sin, False, True),
-        (torch._foreach_sinh, torch._foreach_sinh_, torch.sinh, False, True),
-        (torch._foreach_ceil, torch._foreach_ceil_, torch.ceil, False, False),
-        (torch._foreach_erf, torch._foreach_erf_, torch.erf, True, False),
-        (torch._foreach_erfc, torch._foreach_erfc_, torch.erfc, False, False),
-        (torch._foreach_expm1, torch._foreach_expm1_, torch.expm1, False, False),
-        (torch._foreach_floor, torch._foreach_floor_, torch.floor, False, False),
-        (torch._foreach_log1p, torch._foreach_log1p_, torch.log1p, True, False),
-        (torch._foreach_round, torch._foreach_round_, torch.round, False, False),
-        (torch._foreach_frac, torch._foreach_frac_, torch.frac, False, False),
-        (torch._foreach_reciprocal, torch._foreach_reciprocal_, torch.reciprocal, True, True),
-        (torch._foreach_sigmoid, torch._foreach_sigmoid_, torch.sigmoid, True, False),
-        (torch._foreach_trunc, torch._foreach_trunc_, torch.trunc, False, False),
-
-        # See test_abs
-        # (torch._foreach_abs, torch._foreach_abs_, torch.abs, True, True),
-    ]
-
     def _get_test_data(self, device, dtype, N):
         if dtype in [torch.bfloat16, torch.bool, torch.float16]:
             tensors = [torch.randn(N, N, device=device).to(dtype) for _ in range(N)]
@@ -153,54 +120,881 @@ class TestForeach(TestCase):
     #
     # Unary ops
     #
-    @dtypes(*(torch.testing.floating_and_complex_types_and(torch.bfloat16, torch.half)))
-    def test_unary_ops(self, device, dtype):
-        for fe_op, fe_op_, torch_op, support_bfloat16, support_complex in self.unary_ops:
-            for N in N_values:
-                tensors1 = self._get_test_data(device, dtype, N)
-                # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
-                control_dtype = torch.float32 if (self.device_type == 'cuda' and
-                                                  (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_neg(self, device, dtype):
+        for N in N_values:
+            tensors = self._get_test_data(device, dtype, N)
 
-                if self.device_type == 'cpu' and dtype == torch.half and torch_op not in [torch.neg, torch.frac, torch.reciprocal]:
-                    with self.assertRaisesRegex(RuntimeError, r"not implemented for \'Half\'"):
-                        expected = [torch_op(tensors1[i]) for i in range(N)]
+            # Negation, the `-` operator, on a bool tensor is not supported.
+            if dtype == torch.bool:
+                with self.assertRaisesRegex(RuntimeError, "Negation, the `-` operator, on a bool tensor is not supported"):
+                    expected = [torch.neg(tensors[i]) for i in range(N)]
 
-                    with self.assertRaisesRegex(RuntimeError, r"not implemented for \'Half\'"):
-                        res = fe_op(tensors1)
-                    break
+                with self.assertRaisesRegex(RuntimeError, "Negation, the `-` operator, on a bool tensor is not supported"):
+                    res = torch._foreach_neg(tensors)
 
-                if dtype == torch.bfloat16 and not support_bfloat16:
-                    if self.device_type == 'cuda' or torch_op in [torch.sinh, torch.cosh]:
-                        with self.assertRaisesRegex(RuntimeError, r"not implemented for \'BFloat16\'"):
-                            expected = [torch_op(tensors1[i]) for i in range(N)]
+                with self.assertRaisesRegex(RuntimeError, "Negation, the `-` operator, on a bool tensor is not supported"):
+                    torch._foreach_neg_(tensors)
 
-                        with self.assertRaisesRegex(RuntimeError, r"not implemented for \'BFloat16\'"):
-                            res = fe_op(tensors1)
-                        break
+                continue
 
-                if dtype in [torch.complex64, torch.complex128] and not support_complex:
-                    if not (self.device_type == 'cpu' and torch_op in [torch.sigmoid]):
-                        # not using assertRaisesRegex due to different error messages
-                        with self.assertRaises(RuntimeError):
-                            expected = [torch_op(tensors1[i]) for i in range(N)]
+            expected = [torch.neg(tensors[i]) for i in range(N)]
+            res = torch._foreach_neg(tensors)
+            torch._foreach_neg_(tensors)
+            self.assertEqual(res, expected)
+            self.assertEqual(tensors, expected)
 
-                        with self.assertRaises(RuntimeError):
-                            res = fe_op(tensors1)
-                        break
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_sqrt(self, device, dtype):
+        for N in N_values:
+            tensors = self._get_test_data(device, dtype, N)
 
-                expected = [torch_op(tensors1[i].to(dtype=control_dtype)).to(dtype=dtype) for i in range(N)]
-                res = fe_op(tensors1)
-                if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
-                    self.assertEqual(res, expected, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
+            if dtype in [torch.half] and self.device_type == 'cpu' or\
+               dtype in torch.testing.integral_types_and(torch.bool) and self.device_type == 'cuda':
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_sqrt(tensors)
 
-                    fe_op_(tensors1)
-                    self.assertEqual(res, tensors1)
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_sqrt_(tensors)
+                continue
+
+            expected = [torch.sqrt(tensors[i]) for i in range(N)]
+            res = torch._foreach_sqrt(tensors)
+            self.assertEqual(res, expected)
+
+            if dtype in torch.testing.integral_types_and(torch.bool):
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    [tensors[i].sqrt_() for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    torch._foreach_sqrt_(tensors)
+            else:
+                torch._foreach_sqrt_(tensors)
+                self.assertEqual(tensors, expected)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_exp(self, device, dtype):
+        for N in N_values:
+            tensors = self._get_test_data(device, dtype, N)
+
+            if dtype in torch.testing.integral_types_and(torch.bool) or \
+               dtype in [torch.half] and self.device_type == 'cpu':
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    expected = [torch.exp(tensors[i]) for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_exp(tensors)
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_exp_(tensors)
+                continue
+
+            expected = [torch.exp(tensors[i]) for i in range(N)]
+            res = torch._foreach_exp(tensors)
+            torch._foreach_exp_(tensors)
+            self.assertEqual(res, expected)
+            self.assertEqual(tensors, expected)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_acos(self, device, dtype):
+        for N in N_values:
+            tensors = self._get_test_data(device, dtype, N)
+
+            if dtype in [torch.half] and self.device_type == 'cpu' or \
+               dtype in [torch.bfloat16] and self.device_type == 'cuda' or \
+               dtype in torch.testing.integral_types_and(torch.bool) and self.device_type == 'cuda':
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_acos(tensors)
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_acos_(tensors)
+                continue
+
+            # out of place
+            expected = [torch.acos(tensors[i]) for i in range(N)]
+            res = torch._foreach_acos(tensors)
+            self.assertEqual(res, expected)
+
+            # In-place
+            if dtype in torch.testing.integral_types_and(torch.bool):
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    [tensors[i].acos_() for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    torch._foreach_acos_(tensors)
+            else:
+                torch._foreach_acos_(tensors)
+                self.assertEqual(tensors, expected)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_asin(self, device, dtype):
+        for N in N_values:
+            tensors = self._get_test_data(device, dtype, N)
+
+            # if dtype in torch.testing.integral_types_and(torch.bool) or \
+            if dtype in [torch.half] and self.device_type == 'cpu' or \
+               dtype in [torch.bfloat16] and self.device_type == 'cuda' or \
+               dtype in torch.testing.integral_types_and(torch.bool) and self.device_type == 'cuda':
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_asin(tensors)
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_asin_(tensors)
+                continue
+
+            # out of place
+            expected = [torch.asin(tensors[i]) for i in range(N)]
+            res = torch._foreach_asin(tensors)
+            self.assertEqual(res, expected)
+
+            # In-place
+            if dtype in torch.testing.integral_types_and(torch.bool):
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    [tensors[i].asin_() for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    torch._foreach_asin_(tensors)
+            else:
+                torch._foreach_asin_(tensors)
+                self.assertEqual(tensors, expected)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_atan(self, device, dtype):
+        for N in N_values:
+            tensors = self._get_test_data(device, dtype, N)
+
+            if dtype in [torch.half] and self.device_type == 'cpu' or \
+               dtype in [torch.bfloat16] and self.device_type == 'cuda' or \
+               dtype in torch.testing.integral_types_and(torch.bool) and self.device_type == 'cuda':
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_atan(tensors)
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_atan_(tensors)
+                continue
+
+            # out of place
+            expected = [torch.atan(tensors[i]) for i in range(N)]
+            res = torch._foreach_atan(tensors)
+            self.assertEqual(res, expected)
+
+            # In-place
+            if dtype in torch.testing.integral_types_and(torch.bool):
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    [tensors[i].atan_() for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    torch._foreach_atan_(tensors)
+            else:
+                torch._foreach_atan_(tensors)
+                self.assertEqual(tensors, expected)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_cosh(self, device, dtype):
+        for N in N_values:
+            tensors = self._get_test_data(device, dtype, N)
+
+            if dtype in [torch.half] and self.device_type == 'cpu' or \
+               dtype in [torch.bfloat16] or \
+               dtype in torch.testing.integral_types_and(torch.bool) and self.device_type == 'cuda':
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_cosh(tensors)
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_cosh_(tensors)
+                continue
+
+            # out of place
+            expected = [torch.cosh(tensors[i]) for i in range(N)]
+            res = torch._foreach_cosh(tensors)
+            self.assertEqual(res, expected)
+
+            # In-place
+            if dtype in torch.testing.integral_types_and(torch.bool):
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    [tensors[i].cosh_() for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    torch._foreach_cosh_(tensors)
+            else:
+                torch._foreach_cosh_(tensors)
+                self.assertEqual(tensors, expected)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_sin(self, device, dtype):
+        for N in N_values:
+            tensors = self._get_test_data(device, dtype, N)
+
+            if dtype in [torch.half] and self.device_type == 'cpu' or \
+               dtype in [torch.bfloat16] and self.device_type == 'cuda' or \
+               dtype in torch.testing.integral_types_and(torch.bool) and self.device_type == 'cuda':
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_sin(tensors)
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_sin_(tensors)
+                continue
+
+            # out of place
+            expected = [torch.sin(tensors[i]) for i in range(N)]
+            res = torch._foreach_sin(tensors)
+            self.assertEqual(res, expected)
+
+            # In-place
+            if dtype in torch.testing.integral_types_and(torch.bool):
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    [tensors[i].sin_() for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    torch._foreach_sin_(tensors)
+            else:
+                torch._foreach_sin_(tensors)
+                self.assertEqual(tensors, expected)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_sinh(self, device, dtype):
+        for N in N_values:
+            tensors = self._get_test_data(device, dtype, N)
+
+            if dtype in [torch.half] and self.device_type == 'cpu' or \
+               dtype in [torch.bfloat16] or \
+               dtype in torch.testing.integral_types_and(torch.bool) and self.device_type == 'cuda':
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_sinh(tensors)
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_sinh_(tensors)
+                continue
+
+            # out of place
+            expected = [torch.sinh(tensors[i]) for i in range(N)]
+            res = torch._foreach_sinh(tensors)
+            self.assertEqual(res, expected)
+
+            # In-place
+            if dtype in torch.testing.integral_types_and(torch.bool):
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    [tensors[i].sinh_() for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    torch._foreach_sinh_(tensors)
+            else:
+                torch._foreach_sinh_(tensors)
+                self.assertEqual(tensors, expected)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_tan(self, device, dtype):
+        for N in N_values:
+            tensors = self._get_test_data(device, dtype, N)
+
+            if dtype in [torch.half] and self.device_type == 'cpu' or \
+               dtype in [torch.bfloat16] and self.device_type == 'cuda' or \
+               dtype in torch.testing.integral_types_and(torch.bool) and self.device_type == 'cuda':
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_tan(tensors)
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_tan_(tensors)
+                continue
+
+            # out of place
+            expected = [torch.tan(tensors[i]) for i in range(N)]
+            res = torch._foreach_tan(tensors)
+            self.assertEqual(res, expected)
+
+            # In-place
+            if dtype in torch.testing.integral_types_and(torch.bool):
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    [tensors[i].tan_() for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    torch._foreach_tan_(tensors)
+            else:
+                torch._foreach_tan_(tensors)
+                self.assertEqual(tensors, expected)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_cos(self, device, dtype):
+        for N in N_values:
+            tensors = self._get_test_data(device, dtype, N)
+
+            if dtype in [torch.half] and self.device_type == 'cpu' or \
+               dtype in torch.testing.integral_types_and(torch.bool) and self.device_type == 'cuda':
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_cos(tensors)
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_cos_(tensors)
+                continue
+
+            # out of place
+            expected = [torch.cos(tensors[i]) for i in range(N)]
+            res = torch._foreach_cos(tensors)
+            self.assertEqual(res, expected)
+
+            # In-place
+            if dtype in torch.testing.integral_types_and(torch.bool):
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    [tensors[i].cos_() for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    torch._foreach_cos_(tensors)
+            else:
+                torch._foreach_cos_(tensors)
+                self.assertEqual(tensors, expected)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_log(self, device, dtype):
+        for N in N_values:
+            tensors = self._get_test_data(device, dtype, N)
+
+            if dtype in [torch.half] and self.device_type == 'cpu' or \
+               dtype in torch.testing.integral_types_and(torch.bool) and self.device_type == 'cuda':
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_log(tensors)
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_log_(tensors)
+                continue
+
+            # out of place
+            expected = [torch.log(tensors[i]) for i in range(N)]
+            res = torch._foreach_log(tensors)
+            self.assertEqual(res, expected)
+
+            # In-place
+            if dtype in torch.testing.integral_types_and(torch.bool):
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    [tensors[i].log_() for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    torch._foreach_log_(tensors)
+            else:
+                torch._foreach_log_(tensors)
+                self.assertEqual(tensors, expected)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_log10(self, device, dtype):
+        for N in N_values:
+            tensors = self._get_test_data(device, dtype, N)
+
+            if dtype in [torch.half] and self.device_type == 'cpu' or \
+               dtype in torch.testing.integral_types_and(torch.bool) and self.device_type == 'cuda':
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_log10(tensors)
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_log10_(tensors)
+                continue
+
+            # out of place
+            expected = [torch.log10(tensors[i]) for i in range(N)]
+            res = torch._foreach_log10(tensors)
+            self.assertEqual(res, expected)
+
+            # In-place
+            if dtype in torch.testing.integral_types_and(torch.bool):
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    [tensors[i].log10_() for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    torch._foreach_log10_(tensors)
+            else:
+                torch._foreach_log10_(tensors)
+                self.assertEqual(tensors, expected)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_log2(self, device, dtype):
+        for N in N_values:
+            tensors = self._get_test_data(device, dtype, N)
+
+            if dtype in [torch.half] and self.device_type == 'cpu' or \
+               dtype in torch.testing.integral_types_and(torch.bool) and self.device_type == 'cuda':
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_log2(tensors)
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_log2_(tensors)
+                continue
+
+            # out of place
+            expected = [torch.log2(tensors[i]) for i in range(N)]
+            res = torch._foreach_log2(tensors)
+            self.assertEqual(res, expected)
+
+            # In-place
+            if dtype in torch.testing.integral_types_and(torch.bool):
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    [tensors[i].log2_() for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    torch._foreach_log2_(tensors)
+            else:
+                torch._foreach_log2_(tensors)
+                self.assertEqual(tensors, expected)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_tanh(self, device, dtype):
+        for N in N_values:
+            tensors = self._get_test_data(device, dtype, N)
+
+            if dtype in [torch.half] and self.device_type == 'cpu' or \
+               dtype in torch.testing.integral_types_and(torch.bool) and self.device_type == 'cuda':
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_tanh(tensors)
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_tanh_(tensors)
+                continue
+
+            # out of place
+            expected = [torch.tanh(tensors[i]) for i in range(N)]
+            res = torch._foreach_tanh(tensors)
+            self.assertEqual(res, expected)
+
+            # In-place
+            if dtype in torch.testing.integral_types_and(torch.bool):
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    [tensors[i].tanh_() for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    torch._foreach_tanh_(tensors)
+            else:
+                torch._foreach_tanh_(tensors)
+                self.assertEqual(tensors, expected)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_ceil(self, device, dtype):
+        for N in N_values:
+            tensors = self._get_test_data(device, dtype, N)
+
+            # complex
+            if dtype in [torch.complex64, torch.complex128]:
+                with self.assertRaisesRegex(RuntimeError, "ceil is not supported for complex inputs"):
+                    expected = [torch.ceil(tensors[i]) for i in range(N)]
+
+                if self.device_type == 'cuda':
+                    with self.assertRaisesRegex(RuntimeError, "not implemented for"):
+                        torch._foreach_ceil(tensors)
+
+                    with self.assertRaisesRegex(RuntimeError, "not implemented for"):
+                        torch._foreach_ceil_(tensors)
+                    continue
                 else:
-                    self.assertEqual(res, expected)
+                    with self.assertRaisesRegex(RuntimeError, "ceil is not supported for complex inputs"):
+                        torch._foreach_ceil(tensors)
 
-                    fe_op_(tensors1)
-                    self.assertEqual(res, tensors1)
+                    with self.assertRaisesRegex(RuntimeError, "ceil is not supported for complex inputs"):
+                        torch._foreach_ceil_(tensors)
+                    continue
+
+            # half and float16
+            if dtype in [torch.bfloat16] and self.device_type == 'cuda' or \
+               dtype in [torch.float16] and self.device_type == 'cpu':
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    expected = [torch.ceil(tensors[i]) for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_ceil(tensors)
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_ceil_(tensors)
+                continue
+
+            # integral + bool
+            if dtype in torch.testing.integral_types_and(torch.bool):
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    expected = [torch.ceil(tensors[i]) for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_ceil(tensors)
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_ceil_(tensors)
+                continue
+
+            # out of place
+            expected = [torch.ceil(tensors[i]) for i in range(N)]
+            res = torch._foreach_ceil(tensors)
+            self.assertEqual(res, expected)
+
+            # In-place
+            if dtype in torch.testing.integral_types_and(torch.bool):
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    [tensors[i].ceil_() for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    torch._foreach_ceil_(tensors)
+            else:
+                torch._foreach_ceil_(tensors)
+                self.assertEqual(tensors, expected)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_erf(self, device, dtype):
+        for N in N_values:
+            tensors = self._get_test_data(device, dtype, N)
+
+            if dtype in [torch.half] and self.device_type == 'cpu' or \
+               dtype in [torch.complex64, torch.complex128] or \
+               dtype in torch.testing.integral_types_and(torch.bool) and self.device_type == 'cuda':
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_erf(tensors)
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_erf_(tensors)
+                continue
+
+            # out of place
+            expected = [torch.erf(tensors[i]) for i in range(N)]
+            res = torch._foreach_erf(tensors)
+            self.assertEqual(res, expected)
+
+            # In-place
+            if dtype in torch.testing.integral_types_and(torch.bool):
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    [tensors[i].erf_() for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    torch._foreach_erf_(tensors)
+            else:
+                torch._foreach_erf_(tensors)
+                self.assertEqual(tensors, expected)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_erfc(self, device, dtype):
+        for N in N_values:
+            tensors = self._get_test_data(device, dtype, N)
+
+            if dtype in [torch.half] and self.device_type == 'cpu' or \
+               dtype in [torch.complex64, torch.complex128] or \
+               dtype in [torch.bfloat16] and self.device_type == 'cuda' or \
+               dtype in torch.testing.integral_types_and(torch.bool) and self.device_type == 'cuda':
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_erfc(tensors)
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_erfc_(tensors)
+                continue
+
+            # out of place
+            expected = [torch.erfc(tensors[i]) for i in range(N)]
+            res = torch._foreach_erfc(tensors)
+            self.assertEqual(res, expected)
+
+            # In-place
+            if dtype in torch.testing.integral_types_and(torch.bool):
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    [tensors[i].erfc_() for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    torch._foreach_erfc_(tensors)
+            else:
+                torch._foreach_erfc_(tensors)
+                self.assertEqual(tensors, expected)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_expm1(self, device, dtype):
+        for N in N_values:
+            tensors = self._get_test_data(device, dtype, N)
+
+            if dtype in [torch.half] and self.device_type == 'cpu' or \
+               dtype in [torch.complex64, torch.complex128] or \
+               dtype in [torch.bfloat16] and self.device_type == 'cuda' or \
+               dtype in torch.testing.integral_types_and(torch.bool) and self.device_type == 'cuda':
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_expm1(tensors)
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_expm1_(tensors)
+                continue
+
+            # out of place
+            expected = [torch.expm1(tensors[i]) for i in range(N)]
+            res = torch._foreach_expm1(tensors)
+            self.assertEqual(res, expected)
+
+            # In-place
+            if dtype in torch.testing.integral_types_and(torch.bool):
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    [tensors[i].expm1_() for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    torch._foreach_expm1_(tensors)
+            else:
+                torch._foreach_expm1_(tensors)
+                self.assertEqual(tensors, expected)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_floor(self, device, dtype):
+        for N in N_values:
+            tensors = self._get_test_data(device, dtype, N)
+
+            # complex
+            if dtype in [torch.complex64, torch.complex128]:
+                with self.assertRaisesRegex(RuntimeError, "floor is not supported for complex inputs"):
+                    expected = [torch.floor(tensors[i]) for i in range(N)]
+
+                # complex
+                if self.device_type == 'cuda':
+                    with self.assertRaisesRegex(RuntimeError, "not implemented for"):
+                        torch._foreach_floor(tensors)
+
+                    with self.assertRaisesRegex(RuntimeError, "not implemented for"):
+                        torch._foreach_floor_(tensors)
+                    continue
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "floor is not supported for complex inputs"):
+                        torch._foreach_floor(tensors)
+
+                    with self.assertRaisesRegex(RuntimeError, "floor is not supported for complex inputs"):
+                        torch._foreach_floor_(tensors)
+                    continue
+
+            # half, bfloat16, integral + bool 
+            if dtype in [torch.half] and self.device_type == 'cpu' or \
+               dtype in [torch.bfloat16] and self.device_type == 'cuda' or \
+               dtype in torch.testing.integral_types_and(torch.bool):
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    expected = [torch.floor(tensors[i]) for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_floor(tensors)
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_floor_(tensors)
+                continue
+
+            # out of place
+            expected = [torch.floor(tensors[i]) for i in range(N)]
+            res = torch._foreach_floor(tensors)
+            self.assertEqual(res, expected)
+
+            # In-place
+            if dtype in torch.testing.integral_types_and(torch.bool):
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    [tensors[i].floor_() for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    torch._foreach_floor_(tensors)
+            else:
+                torch._foreach_floor_(tensors)
+                self.assertEqual(tensors, expected)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_log1p(self, device, dtype):
+        for N in N_values:
+            tensors = self._get_test_data(device, dtype, N)
+
+            if dtype in [torch.half] and self.device_type == 'cpu' or \
+               dtype in [torch.complex64, torch.complex128] or \
+               dtype in torch.testing.integral_types_and(torch.bool) and self.device_type == 'cuda':
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_log1p(tensors)
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_log1p_(tensors)
+                continue
+
+            # out of place
+            expected = [torch.log1p(tensors[i]) for i in range(N)]
+            res = torch._foreach_log1p(tensors)
+            self.assertEqual(res, expected)
+
+            # In-place
+            if dtype in torch.testing.integral_types_and(torch.bool):
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    [tensors[i].log1p_() for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    torch._foreach_log1p_(tensors)
+            else:
+                torch._foreach_log1p_(tensors)
+                self.assertEqual(tensors, expected)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_round(self, device, dtype):
+        for N in N_values:
+            tensors = self._get_test_data(device, dtype, N)
+
+            if dtype in [torch.half] and self.device_type == 'cpu' or \
+               dtype in [torch.bfloat16] and self.device_type == 'cuda' or \
+               dtype in [torch.complex64, torch.complex128] or \
+               dtype in torch.testing.integral_types_and(torch.bool):
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    expected = [torch.round(tensors[i]) for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_round(tensors)
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_round_(tensors)
+                continue
+
+            # out of place
+            expected = [torch.round(tensors[i]) for i in range(N)]
+            res = torch._foreach_round(tensors)
+            self.assertEqual(res, expected)
+
+            # In-place
+            if dtype in torch.testing.integral_types_and(torch.bool):
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    [tensors[i].round_() for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    torch._foreach_round_(tensors)
+            else:
+                torch._foreach_round_(tensors)
+                self.assertEqual(tensors, expected)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_frac(self, device, dtype):
+        for N in N_values:
+            tensors = self._get_test_data(device, dtype, N)
+
+            if dtype in [torch.bfloat16] and self.device_type == 'cuda' or \
+               dtype in [torch.complex64, torch.complex128] or \
+               dtype in torch.testing.integral_types_and(torch.bool):
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    expected = [torch.frac(tensors[i]) for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_frac(tensors)
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_frac_(tensors)
+                continue
+
+            # out of place
+            expected = [torch.frac(tensors[i]) for i in range(N)]
+            res = torch._foreach_frac(tensors)
+            self.assertEqual(res, expected)
+
+            # In-place
+            if dtype in torch.testing.integral_types_and(torch.bool):
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    [tensors[i].frac_() for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    torch._foreach_frac_(tensors)
+            else:
+                torch._foreach_frac_(tensors)
+                self.assertEqual(tensors, expected)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_reciprocal(self, device, dtype):
+        for N in N_values:
+            tensors = self._get_test_data(device, dtype, N)
+
+            if dtype in torch.testing.integral_types_and(torch.bool) and self.device_type == 'cuda':
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_reciprocal(tensors)
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_reciprocal_(tensors)
+                continue
+
+            # out of place
+            expected = [torch.reciprocal(tensors[i]) for i in range(N)]
+            res = torch._foreach_reciprocal(tensors)
+            self.assertEqual(res, expected)
+
+            # In-place
+            if dtype in torch.testing.integral_types_and(torch.bool):
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    [tensors[i].reciprocal_() for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    torch._foreach_reciprocal_(tensors)
+            else:
+                torch._foreach_reciprocal_(tensors)
+                self.assertEqual(tensors, expected)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_sigmoid(self, device, dtype):
+        for N in N_values:
+            tensors = self._get_test_data(device, dtype, N)
+
+            if dtype in [torch.half] and self.device_type == 'cpu' or \
+               dtype in [torch.complex64, torch.complex128] and self.device_type == 'cuda' or \
+               dtype in torch.testing.integral_types_and(torch.bool) and self.device_type == 'cuda':
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_sigmoid(tensors)
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_sigmoid_(tensors)
+                continue
+
+            # out of place
+            expected = [torch.sigmoid(tensors[i]) for i in range(N)]
+            res = torch._foreach_sigmoid(tensors)
+            self.assertEqual(res, expected)
+
+            # In-place
+            if dtype in torch.testing.integral_types_and(torch.bool):
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    [tensors[i].sigmoid_() for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    torch._foreach_sigmoid_(tensors)
+            else:
+                torch._foreach_sigmoid_(tensors)
+                self.assertEqual(tensors, expected)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_trunc(self, device, dtype):
+        for N in N_values:
+            tensors = self._get_test_data(device, dtype, N)
+
+            # complex
+            if dtype in [torch.complex64, torch.complex128]:
+                with self.assertRaisesRegex(RuntimeError, "trunc is not supported for complex inputs"):
+                    expected = [torch.trunc(tensors[i]) for i in range(N)]
+
+                if self.device_type == 'cuda':
+                    with self.assertRaisesRegex(RuntimeError, "not implemented for"):
+                        torch._foreach_trunc(tensors)
+
+                    with self.assertRaisesRegex(RuntimeError, "not implemented for"):
+                        torch._foreach_trunc_(tensors)
+                    continue
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "trunc is not supported for complex inputs"):
+                        torch._foreach_trunc(tensors)
+
+                    with self.assertRaisesRegex(RuntimeError, "trunc is not supported for complex inputs"):
+                        torch._foreach_trunc_(tensors)
+                    continue
+
+            # float16, bfloat16, integral + bool
+            if dtype in [torch.float16] and self.device_type == 'cpu' or \
+               dtype in [torch.bfloat16] and self.device_type == 'cuda' or \
+               dtype in torch.testing.integral_types_and(torch.bool):
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    expected = [torch.trunc(tensors[i]) for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_trunc(tensors)
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented"):
+                    torch._foreach_trunc_(tensors)
+                continue
+
+            # out of place
+            expected = [torch.trunc(tensors[i]) for i in range(N)]
+            res = torch._foreach_trunc(tensors)
+            self.assertEqual(res, expected)
+
+            # In-place
+            if dtype in torch.testing.integral_types_and(torch.bool):
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    [tensors[i].trunc_() for i in range(N)]
+
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to the desired output type"):
+                    torch._foreach_trunc_(tensors)
+            else:
+                torch._foreach_trunc_(tensors)
+                self.assertEqual(tensors, expected)
 
     # Separate test for abs due to a lot of special cases
     # Absolute value of a complex number a + bj is defined as sqrt(a^2 + b^2), i.e. a floating point
