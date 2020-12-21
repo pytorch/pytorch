@@ -2,6 +2,7 @@ import pickle
 import torch
 import warnings
 import contextlib
+import sys
 import time
 from torch._six import string_classes
 from datetime import timedelta
@@ -19,7 +20,6 @@ from torch._C._distributed_c10d import (
     BroadcastOptions,
     FileStore,
     GatherOptions,
-    HashStore,
     PrefixStore,
     ProcessGroup,
     ReduceOptions,
@@ -29,6 +29,11 @@ from torch._C._distributed_c10d import (
     Store,
     TCPStore,
 )
+
+if sys.platform != 'win32':
+    from torch._C._distributed_c10d import (
+        HashStore,
+    )
 
 
 _MPI_AVAILABLE = True
@@ -502,7 +507,7 @@ def init_process_group(backend,
     if backend == Backend.MPI or not (
         isinstance(store, TCPStore) or
         isinstance(store, FileStore) or
-        isinstance(store, HashStore)
+        (sys.platform != 'win32' and isinstance(store, HashStore))
     ):
         # MPI doesn't have store.
         barrier()
@@ -2489,7 +2494,7 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
     if backend == Backend.MPI or not (
         isinstance(default_store, TCPStore) or
         isinstance(default_store, FileStore) or
-        isinstance(default_store, HashStore)
+        (sys.platform != 'win32' and isinstance(default_store, HashStore))
     ):
         # MPI doesn't have store.
         barrier()
