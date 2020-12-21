@@ -3,10 +3,10 @@ import warnings
 
 import torch
 from torch.testing._internal.common_utils import (TestCase, run_tests)
-from torch.utils.data import IterableDataset
+from torch.utils.data import IterableDataset, RandomSampler
 from torch.utils.data.datasets import \
     (CollateIterableDataset, BatchIterableDataset, ListDirFilesIterableDataset,
-     LoadFilesFromDiskIterableDataset)
+     LoadFilesFromDiskIterableDataset, SamplerIterableDataset)
 
 
 def create_temp_dir_and_files():
@@ -139,6 +139,25 @@ class TestFunctionalIterableDataset(TestCase):
         batch_ds_nolen = BatchIterableDataset(ds_nolen, batch_size=5)
         with self.assertRaises(NotImplementedError):
             len(batch_ds_nolen)
+
+    def test_sampler_dataset(self):
+        arrs = range(10)
+        ds = IterDatasetWithLen(arrs)
+        # Default SequentialSampler
+        sampled_ds = SamplerIterableDataset(ds)
+        self.assertEqual(len(sampled_ds), 10)
+        i = 0
+        for x in sampled_ds:
+            self.assertEqual(x, i)
+            i += 1
+
+        # RandomSampler
+        random_sampled_ds = SamplerIterableDataset(ds, sampler=RandomSampler, replacement=True)
+
+        # Requires `__len__` to build SamplerDataset
+        ds_nolen = IterDatasetWithoutLen(arrs)
+        with self.assertRaises(AssertionError):
+            sampled_ds = SamplerIterableDataset(ds_nolen)
 
 
 if __name__ == '__main__':
