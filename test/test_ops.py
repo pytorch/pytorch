@@ -76,7 +76,14 @@ class TestGradients(TestCase):
 
         samples = op.sample_inputs(device, dtype, requires_grad=True)
         for sample in samples:
-            partial_fn = partial(variant, **sample.kwargs)
+            if sample.output_process_fn_grad is not None:
+                out_fn = sample.output_process_fn_grad
+
+                def variant_out_fn(*args, **kwargs):
+                    return out_fn(variant(*args, **kwargs))
+            else:
+                variant_out_fn = variant
+            partial_fn = partial(variant_out_fn, **sample.kwargs)
             if check == 'gradcheck':
                 self.assertTrue(gradcheck(partial_fn, (*sample.input,) + sample.args,
                                           check_grad_dtypes=True))
