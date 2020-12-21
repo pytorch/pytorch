@@ -659,7 +659,7 @@ class TestForeach(TestCase):
                 res = foreach_bin_op(tensors, scalars)
                 self.assertEqual(expected, res)
 
-                if dtype in torch.testing.integral_types_and(torch.bool) and foreach_bin_op == foreach_bin_op == torch._foreach_div:
+                if dtype in torch.testing.integral_types_and(torch.bool) and foreach_bin_op == torch._foreach_div:
                     with self.assertRaisesRegex(RuntimeError, "can't be cast to the desired output"):
                         foreach_bin_op_(tensors, scalars)
                 else:

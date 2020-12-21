@@ -119,14 +119,14 @@ struct functor_name {                                                \
 #define OP_CUSTOM_FUNCTOR(function, op_name, functor_name)                \
 std::vector<Tensor> foreach_tensor_##op_name##_cuda(TensorList tensors) { \
     check_foreach_api_restrictions(tensors);                              \
-    if (!can_use_fast_route(tensors)) {                                   \
+    if (!can_use_fast_route({tensors})) {                                 \
         return at::native::foreach_tensor_##op_name##_slow(tensors);      \
     }                                                                     \
     return function<functor_name>(tensors);                               \
 }                                                                         \
 void foreach_tensor_##op_name##_cuda_(TensorList tensors) {               \
     check_foreach_api_restrictions(tensors);                              \
-    if (!can_use_fast_route(tensors)) {                                   \
+    if (!can_use_fast_route({tensors})) {                                 \
         return at::native::foreach_tensor_##op_name##_slow_(tensors);     \
     }                                                                     \
                                                                           \
@@ -197,7 +197,7 @@ OP_CUSTOM_FUNCTOR(floating_complex_half_bfloat16, reciprocal, Reciprocal)
 std::vector<Tensor> foreach_tensor_neg_cuda(TensorList tensors) {
     check_foreach_api_restrictions(tensors);
 
-    if (!can_use_fast_route(tensors)) {
+    if (!can_use_fast_route({tensors})) {
         return at::native::foreach_tensor_neg_slow(tensors);
     }
 
@@ -207,7 +207,7 @@ std::vector<Tensor> foreach_tensor_neg_cuda(TensorList tensors) {
 void foreach_tensor_neg_cuda_(TensorList tensors) {
     check_foreach_api_restrictions(tensors);
 
-    if (!can_use_fast_route(tensors)) {
+    if (!can_use_fast_route({tensors})) {
         return at::native::foreach_tensor_neg_slow_(tensors);
     }
 
@@ -231,7 +231,7 @@ std::vector<Tensor> foreach_tensor_abs_cuda(TensorList tensors) {
         }
     }
 
-    if (!can_use_fast_route(tensors) || has_complex) {
+    if (!can_use_fast_route({tensors}) || has_complex) {
         return at::native::foreach_tensor_abs_slow(tensors);
     }
 
@@ -247,7 +247,7 @@ void foreach_tensor_abs_cuda_(TensorList tensors) {
         }
     }
 
-    if (!can_use_fast_route(tensors) || has_complex) {
+    if (!can_use_fast_route({tensors}) || has_complex) {
         return at::native::foreach_tensor_abs_slow_(tensors);
     }
 
@@ -257,7 +257,7 @@ void foreach_tensor_abs_cuda_(TensorList tensors) {
 void foreach_tensor_zero_cuda_(TensorList tensors) {
     check_foreach_api_restrictions(tensors);
 
-    if (!can_use_fast_route(tensors)) {
+    if (!can_use_fast_route({tensors})) {
         return at::native::foreach_tensor_zero_slow_(tensors);
     }
 
