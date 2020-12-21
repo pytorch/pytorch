@@ -45,15 +45,20 @@ def addmm(mat: Tensor, mat1: Tensor, mat2: Tensor,
 def mm(mat1: Tensor, mat2: Tensor) -> Tensor:
     r"""
     Performs a matrix multiplication of the sparse matrix :attr:`mat1`
-    and dense matrix :attr:`mat2`. Similar to :func:`torch.mm`, If :attr:`mat1` is a
+    and the (sparse or strided) matrix :attr:`mat2`. Similar to :func:`torch.mm`, If :attr:`mat1` is a
     :math:`(n \times m)` tensor, :attr:`mat2` is a :math:`(m \times p)` tensor, out will be a
-    :math:`(n \times p)` dense tensor. :attr:`mat1` need to have `sparse_dim = 2`.
+    :math:`(n \times p)` tensor. :attr:`mat1` need to have `sparse_dim = 2`.
     This function also supports backward for both matrices. Note that the gradients of
     :attr:`mat1` is a coalesced sparse tensor.
 
     Args:
-        mat1 (Tensor): the first sparse matrix to be multiplied
-        mat2 (Tensor): the second dense matrix to be multiplied
+        mat1 (SparseTensor): the first sparse matrix to be multiplied
+        mat2 (Tensor): the second matrix to be multiplied, which could be sparse or dense 
+
+    Shape:
+        The format of the output tensor of this function follows: 
+        - sparse x sparse -> sparse
+        - sparse x dense -> dense
 
     Example::
 
@@ -81,6 +86,8 @@ def mm(mat1: Tensor, mat2: Tensor) -> Tensor:
                values=tensor([ 0.1394, -0.6415, -2.1639,  0.1394, -0.6415, -2.1639]),
                size=(2, 3), nnz=6, layout=torch.sparse_coo)
     """
+    if mat1.is_sparse and mat2.is_sparse:
+        return torch._sparse_sparse_matmul(mat1, mat2)
     return torch._sparse_mm(mat1, mat2)
 
 
