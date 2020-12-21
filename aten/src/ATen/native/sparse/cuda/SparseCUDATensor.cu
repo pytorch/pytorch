@@ -52,10 +52,10 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
 
   // indices will be modified by Thrust, so we have to clone or use new storage
   // here.
-  LongTensor indices1D = flatten_indices(self._indices(), self.sizes(), true);
+  Tensor indices1D = flatten_indices(self._indices(), self.sizes(), true);
 
-  LongTensor origIndices = at::empty({nnz}, self._indices().options());
-  LongTensor uniqueOffsets = at::empty({nnz}, self._indices().options());
+  Tensor origIndices = at::empty({nnz}, self._indices().options());
+  Tensor uniqueOffsets = at::empty({nnz}, self._indices().options());
 
   typedef thrust::device_ptr<int64_t> thrust_ptr;
   thrust_ptr indicesIter(indices1D.data_ptr<int64_t>());
@@ -126,14 +126,14 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
 
   ////////////////////////////////////////////////////////////
   // unflatten indices if necessary
-  LongTensor newIndices;
+  Tensor newIndices;
   if (sparse_dim == 1) {
     newIndices = indices1D;
   } else {
     newIndices = at::empty({sparse_dim, newNnz}, origIndices.options());
     for (int64_t d = sparse_dim - 1; d >= 0; d--) {
       // NB: Not a select, so I can preserve the outer dimension
-      LongTensor indicesSlice = newIndices.narrow(0, d, 1);
+      Tensor indicesSlice = newIndices.narrow(0, d, 1);
       // Note for the porting guide: THCTensor_(copy) does NOT do normal
       // broadcasting logic; instead, it will blast the elements from one
       // to the other so long as the numel is the same
