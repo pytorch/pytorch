@@ -196,7 +196,7 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
     Value* forward_input;
 
     if (have_pre_hooks || have_hooks) {
-      // convert forward args into tuple for forward_pre_hook
+      // convert forward args into tuple for forward hooks 
       for (const auto& sv : args) {
         arg_values.push_back(sv.value(*caller.graph()));
       }
@@ -215,11 +215,12 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
                                   ->expect<ClassType>()
                                   ->getForwardPreHooks()) {
         std::vector<NamedValue> pre_hook_args;
+        // add self argument here
+        pre_hook_args.emplace_back(NamedValue(self_));
         pre_hook_args.emplace_back(NamedValue(forward_input));
-        Value* pre_hook_output =
-            attr(loc, caller, hook->name())
-                ->call(loc, caller, pre_hook_args, kwargs, n_binders)
-                ->asValue(loc, caller);
+        Value* pre_hook_output = FunctionValue(hook)
+                  .call(loc, caller, pre_hook_args, kwargs, n_binders)
+                  ->asValue(loc, caller);
         if (pre_hook_output->node()->output(0)->type() != NoneType::get()) {
           forward_input = pre_hook_output;
         }
@@ -250,12 +251,12 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
                                   ->getForwardHooks()) {
         // convert input and output
         std::vector<NamedValue> hook_args;
+        hook_args.emplace_back(NamedValue(self_));
         hook_args.emplace_back(NamedValue(forward_input));
         hook_args.emplace_back(NamedValue(forward_output));
-        Value* forward_hook_output =
-            attr(loc, caller, hook->name())
-                ->call(loc, caller, hook_args, kwargs, n_binders)
-                ->asValue(loc, caller);
+        Value* forward_hook_output = FunctionValue(hook)
+                  .call(loc, caller, hook_args, kwargs, n_binders)
+                  ->asValue(loc, caller);
         if (forward_hook_output->node()->output(0)->type() != NoneType::get()) {
           forward_output = forward_hook_output;
         }
