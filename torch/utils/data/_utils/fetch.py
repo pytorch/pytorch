@@ -43,7 +43,7 @@ class _MapDatasetFetcher(_BaseDatasetFetcher):
         if self.auto_collation:
             try:
                 data = self.dataset[possibly_batched_index]
-            except:
+            except Exception:
                 data = [self.dataset[idx] for idx in possibly_batched_index]
         else:
             data = self.dataset[possibly_batched_index]
