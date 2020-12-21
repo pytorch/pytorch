@@ -1086,6 +1086,10 @@
   use_c10_dispatcher: full
   variants: function, method
 
+- func: tensor_split.tensor_indices_or_sections(Tensor(a) self, Tensor tensor_indices_or_sections, int dim=0) -> Tensor(a)[]
+  use_c10_dispatcher: full
+  variants: function, method
+
 - func: clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -3722,6 +3726,23 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: sin_out
+
+- func: sinc(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    DefaultBackend: sinc
+
+- func: sinc_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    DefaultBackend: sinc_
+
+- func: sinc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  dispatch:
+    CPU, CUDA: sinc_out
 
 - func: sinh(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -7605,7 +7626,6 @@
 
 - func: _foreach_zero_(Tensor(a!)[] self) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_zero_slow_
@@ -10016,6 +10036,26 @@
   variants: function
   dispatch:
     Math: linalg_cond_out
+
+- func: _linalg_solve_out_helper_(Tensor(a!) self, Tensor(b!) other, Tensor(c!) infos) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: _linalg_solve_out_helper_cpu
+    CUDA: _linalg_solve_out_helper_cuda
+
+- func: linalg_solve(Tensor input, Tensor other) -> Tensor
+  python_module: linalg
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    DefaultBackend: linalg_solve
+
+- func: linalg_solve.out(Tensor input, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  dispatch:
+    DefaultBackend: linalg_solve_out
 
 - func: linalg_tensorinv(Tensor self, int ind=2) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
