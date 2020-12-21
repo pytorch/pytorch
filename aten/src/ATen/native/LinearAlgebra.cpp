@@ -8,6 +8,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/LinearAlgebra.h>
+#include <ATen/native/IndexingUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/LegacyTHFunctionsCPU.h>
@@ -22,17 +23,6 @@
 
 namespace at {
 namespace native {
-
-namespace {
-torch::List<c10::optional<Tensor>> toListOfOptionalTensors(ArrayRef<Tensor> list) {
-  torch::List<c10::optional<Tensor>> result;
-  result.reserve(list.size());
-  for (const Tensor& a : list) {
-    result.push_back(a);
-  }
-  return result;
-}
-}
 
 DEFINE_DISPATCH(addr_stub);
 
