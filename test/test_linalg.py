@@ -2117,7 +2117,7 @@ class TestLinalg(TestCase):
             self.assertEqual(USV.S, np_s)
             assert is_empty(USV.V)
             # check linalg.svd vs linalg.svd(out=...)
-            out = (torch.Tensor(), torch.empty_like(USV.S), torch.Tensor())
+            out = (torch.empty_like(USV.U), torch.empty_like(USV.S), torch.empty_like(USV.V))
             USV = torch.linalg.svd(t, full_matrices, compute_uv=False, out=out)
             assert USV.U is out[0]
             assert USV.S is out[1]
