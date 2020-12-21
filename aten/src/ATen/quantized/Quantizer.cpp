@@ -207,4 +207,8 @@ Tensor PerChannelAffineFloatQParamsQuantizer::dequantize(Tensor qtensor) {
 
 Quantizer::~Quantizer() {}
 
+C10_EXPORT void set_quantizer_(const Tensor& self, ConstQuantizerPtr quantizer) {
+  get_qtensorimpl(self)->set_quantizer_(quantizer);
+}
+
 } // namespace at
