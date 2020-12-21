@@ -508,12 +508,20 @@ class TestForeach(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "ceil is not supported for complex inputs"):
                     expected = [torch.ceil(tensors[i]) for i in range(N)]
 
-                with self.assertRaisesRegex(RuntimeError, "not implemented for"):
-                    torch._foreach_ceil(tensors)
+                if self.device_type == 'cuda':
+                    with self.assertRaisesRegex(RuntimeError, "not implemented for"):
+                        torch._foreach_ceil(tensors)
 
-                with self.assertRaisesRegex(RuntimeError, "not implemented for"):
-                    torch._foreach_ceil_(tensors)
-                continue
+                    with self.assertRaisesRegex(RuntimeError, "not implemented for"):
+                        torch._foreach_ceil_(tensors)
+                    continue
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "ceil is not supported for complex inputs"):
+                        torch._foreach_ceil(tensors)
+
+                    with self.assertRaisesRegex(RuntimeError, "ceil is not supported for complex inputs"):
+                        torch._foreach_ceil_(tensors)
+                    continue
 
             # half and float16
             if dtype in [torch.bfloat16] and self.device_type == 'cuda' or \
@@ -667,12 +675,20 @@ class TestForeach(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "floor is not supported for complex inputs"):
                     expected = [torch.floor(tensors[i]) for i in range(N)]
 
-                with self.assertRaisesRegex(RuntimeError, "not implemented for"):
-                    torch._foreach_floor(tensors)
+                if self.device_type == 'cuda':
+                    with self.assertRaisesRegex(RuntimeError, "not implemented for"):
+                        torch._foreach_floor(tensors)
 
-                with self.assertRaisesRegex(RuntimeError, "not implemented for"):
-                    torch._foreach_floor_(tensors)
-                continue
+                    with self.assertRaisesRegex(RuntimeError, "not implemented for"):
+                        torch._foreach_floor_(tensors)
+                    continue
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "floor is not supported for complex inputs"):
+                        torch._foreach_floor(tensors)
+
+                    with self.assertRaisesRegex(RuntimeError, "floor is not supported for complex inputs"):
+                        torch._foreach_floor_(tensors)
+                    continue
 
             # half, bfloat16, integral + bool 
             if dtype in [torch.half] and self.device_type == 'cpu' or \
@@ -811,17 +827,6 @@ class TestForeach(TestCase):
         for N in N_values:
             tensors = self._get_test_data(device, dtype, N)
 
-            if dtype in torch.testing.integral_types_and(torch.bool):
-                with self.assertRaisesRegex(RuntimeError, "not implemented"):
-                    expected = [torch.reciprocal(tensors[i]) for i in range(N)]
-
-                with self.assertRaisesRegex(RuntimeError, "not implemented"):
-                    torch._foreach_reciprocal(tensors)
-
-                with self.assertRaisesRegex(RuntimeError, "not implemented"):
-                    torch._foreach_reciprocal_(tensors)
-                continue
-
             # out of place
             expected = [torch.reciprocal(tensors[i]) for i in range(N)]
             res = torch._foreach_reciprocal(tensors)
@@ -881,12 +886,20 @@ class TestForeach(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "trunc is not supported for complex inputs"):
                     expected = [torch.trunc(tensors[i]) for i in range(N)]
 
-                with self.assertRaisesRegex(RuntimeError, "not implemented for"):
-                    torch._foreach_trunc(tensors)
+                if self.device_type == 'cuda':
+                    with self.assertRaisesRegex(RuntimeError, "not implemented for"):
+                        torch._foreach_trunc(tensors)
 
-                with self.assertRaisesRegex(RuntimeError, "not implemented for"):
-                    torch._foreach_trunc_(tensors)
-                continue
+                    with self.assertRaisesRegex(RuntimeError, "not implemented for"):
+                        torch._foreach_trunc_(tensors)
+                    continue
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "trunc is not supported for complex inputs"):
+                        torch._foreach_trunc(tensors)
+
+                    with self.assertRaisesRegex(RuntimeError, "trunc is not supported for complex inputs"):
+                        torch._foreach_trunc_(tensors)
+                    continue
 
             # float16, bfloat16, integral + bool
             if dtype in [torch.float16] and self.device_type == 'cpu' or \
