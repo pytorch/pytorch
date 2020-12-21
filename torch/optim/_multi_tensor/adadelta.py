@@ -1,5 +1,6 @@
 import torch
 from ..optimizer import Optimizer
+from collections import defaultdict
 
 class Adadelta(Optimizer):
     """Implements Adadelta algorithm.
@@ -97,3 +98,26 @@ class Adadelta(Optimizer):
             torch._foreach_addcmul_(acc_deltas, deltas, deltas, value=1 - rho)
 
         return loss
+
+    # TODO: refactor to a base class once foreach ops are in a good shape.
+    def zero_grad(self, set_to_none: bool = False):
+        per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is not None:
+                    if set_to_none:
+                        p.grad = None
+                    else:
+                        if p.grad.grad_fn is not None:
+                            p.grad.detach_()
+                        else:
+                            p.grad.requires_grad_(False)
+
+                        if p.grad.is_sparse:
+                            p.grad.zero_()
+                        else:
+                            per_device_and_dtype_grads[p.grad.device][p.grad.dtype].append(p.grad)
+
+            for _, per_dtype_grads in per_device_and_dtype_grads.items():
+                for grads in per_dtype_grads.values():
+                    torch._foreach_zero_(grads)
