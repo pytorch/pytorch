@@ -427,15 +427,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
             cpp_module.setattr(name, scripted)
             script_module._modules[name] = scripted
 
-        # 3. Copy the python forward and pre_forward hooks from the original 'nn_module'
-        #     to the new ScriptModule. This is done so when the top most module is called
-        #     from eager the hooks will be envoked.
-        for hook in nn_module._forward_hooks.values():
-            script_module.register_forward_hook(hook)
-        for pre_hook in nn_module._forward_pre_hooks.values():
-            script_module.register_forward_pre_hook(pre_hook)
-
-        # 4. Copy @ignored/@unused methods and attrs from the original `nn_module` to the new ScriptModule.
+        # 3. Copy @ignored/@unused methods and attrs from the original `nn_module` to the new ScriptModule.
         #    This ensures we can access these Python methods on the ScriptModule.
         for name in dir(nn_module):
             item = getattr(nn_module, name, None)
@@ -460,6 +452,14 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         create_hooks_from_stubs(concrete_type, hook_stubs, pre_hook_stubs)
         torch._C._run_emit_module_hook(cpp_module)
         concrete_type_store.methods_compiled.add(concrete_type)
+
+    # Copy the python now ScriptFunction forward and pre_forward hooks 
+    # to the new ScriptModule to allow the hooks to be run from eager
+    for idx, fn in enumerate(script_module._c._get_forward_pre_hooks()):
+        script_module._forward_pre_hooks[idx] = fn
+    for idx, fn in enumerate(script_module._c._get_forward_hooks()):
+        script_module._forward_hooks[idx] = fn
+
 
     # Special handling so methods like __len__ work in script methods on classes derived from containers
     if isinstance(nn_module, (torch.nn.ModuleList, torch.nn.Sequential, torch.nn.ModuleDict)) and \
@@ -655,13 +655,8 @@ def get_hook_stubs(nn_module):
     """
     check_module_initialized(nn_module)
 
-    hook_stubs = []
-    for hook in nn_module._forward_hooks.values():
-        hook_stubs.append(make_stub(hook, hook.__name__))
-
-    pre_hook_stubs = []
-    for pre_hook in nn_module._forward_pre_hooks.values():
-        pre_hook_stubs.append(make_stub(pre_hook, pre_hook.__name__))
+    hook_stubs = [make_stub(hook, hook.__name__) for hook in nn_module._forward_hooks.values()]
+    pre_hook_stubs = [make_stub(pre_hook, pre_hook.__name__) for pre_hook in nn_module._forward_pre_hooks.values()]
 
     return hook_stubs, pre_hook_stubs
 
@@ -743,9 +738,9 @@ def wrap_cpp_module(cpp_module):
             setattr(script_module, name, wrap_cpp_module(cpp_module))
         script_module._concrete_type = torch._C.ConcreteModuleType.from_jit_type(script_module._c._type())
 
-        for idx, fn in enumerate(torch._C._get_forward_pre_hooks(script_module._c)):
+        for idx, fn in enumerate(script_module._c._get_forward_pre_hooks()):
             script_module._forward_pre_hooks[idx] = fn
-        for idx, fn in enumerate(torch._C._get_forward_hooks(script_module._c)):
+        for idx, fn in enumerate(script_module._c._get_forward_hooks()):
             script_module._forward_hooks[idx] = fn
 
     return torch.jit.RecursiveScriptModule._construct(cpp_module, init_fn)

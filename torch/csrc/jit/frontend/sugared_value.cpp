@@ -151,7 +151,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     }
   } else if (auto classType = value_->type()->cast<ClassType>()) {
     // This is a class, emit the proper attribute lookup
-    if (auto method = classType->findCallable(field)) {
+    if (auto method = classType->findMethod(field)) {
       return std::make_shared<MethodValue>(getValue(), field);
     }
     if (classType->hasAttribute(field)) {
@@ -625,6 +625,13 @@ std::shared_ptr<SugaredValue> ClassValue::attr(
     const SourceRange& loc,
     Function& m,
     const std::string& field) {
+  // Allow import_source.cpp to resolve calls to a submodule's
+  // hooks. Edge case because normally you wouldn't allow a module to 
+  // call functions of a submodule
+  if (Function* hook = type_->findHook(field)) {
+    return std::make_shared<FunctionValue>(hook);
+  }
+  
   if (field != "__new__") {
     throw ErrorReport(loc) << "Tried to lookup unknown attribute on class "
                            << type_->annotation_str();

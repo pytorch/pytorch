@@ -2293,18 +2293,14 @@ struct CAFFE2_API ClassType : public NamedType {
 
   void addForwardPreHook(torch::jit::Function* pre_hook_ptr);
   void addForwardHook(torch::jit::Function* hook_ptr);
-  torch::jit::Function* findForwardPreHook(const std::string& name) const;
-  torch::jit::Function& getForwardPreHook(const std::string& name) const;
-  torch::jit::Function* findForwardHook(const std::string& name) const;
-  torch::jit::Function& getForwardHook(const std::string& name) const;
-  std::vector<torch::jit::Function*>& getForwardHooks();
-  std::vector<torch::jit::Function*>& getForwardPreHooks();
+  const std::vector<torch::jit::Function*>& getForwardHooks();
+  const std::vector<torch::jit::Function*>& getForwardPreHooks();
 
   void addMethod(torch::jit::Function* method);
   torch::jit::Function* findMethod(const std::string& name) const;
   torch::jit::Function& getMethod(const std::string& name) const;
-  torch::jit::Function* findCallable(const std::string& name) const;
-  torch::jit::Function& getCallable(const std::string& name) const;
+  torch::jit::Function* findHook(const std::string& name) const;
+  torch::jit::Function& getHook(const std::string& name) const;
   bool hasMethod(const std::string& name) const;
 
   // [Internal Only] Remove method from the ClassType
@@ -2368,9 +2364,9 @@ struct CAFFE2_API ClassType : public NamedType {
   // List of methods associated with this class.
   std::vector<torch::jit::Function*> methods_;
 
-  // List of hooks to be ran before/after forward
-  std::vector<torch::jit::Function*> forward_hooks;
-  std::vector<torch::jit::Function*> forward_pre_hooks;
+  // List of hooks to be run before/after forward
+  std::vector<torch::jit::Function*> forward_hooks_;
+  std::vector<torch::jit::Function*> forward_pre_hooks_;
   
   // List of properties exposed by this class.
   std::vector<Property> properties_;
