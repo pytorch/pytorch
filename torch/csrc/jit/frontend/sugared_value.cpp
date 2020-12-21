@@ -626,12 +626,12 @@ std::shared_ptr<SugaredValue> ClassValue::attr(
     Function& m,
     const std::string& field) {
   // Allow import_source.cpp to resolve calls to a submodule's
-  // hooks. Edge case because normally you wouldn't allow a module to 
+  // hooks. Edge case because normally you wouldn't allow a module to
   // call functions of a submodule
   if (Function* hook = type_->findHook(field)) {
     return std::make_shared<FunctionValue>(hook);
   }
-  
+
   if (field != "__new__") {
     throw ErrorReport(loc) << "Tried to lookup unknown attribute on class "
                            << type_->annotation_str();

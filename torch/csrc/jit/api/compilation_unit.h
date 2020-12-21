@@ -234,10 +234,10 @@ struct TORCH_API CompilationUnit {
         // Classes can have multiple pointers to the same hook,
         // need to make sure to not delete it twice
         std::unordered_set<Function*> hooks_to_delete;
-        for (auto hook: cls->getForwardHooks()){
+        for (auto hook : cls->getForwardHooks()) {
           hooks_to_delete.insert(hook);
         }
-        for (auto pre_hook: cls->getForwardPreHooks()){
+        for (auto pre_hook : cls->getForwardPreHooks()) {
           hooks_to_delete.insert(pre_hook);
         }
         for (auto hook : hooks_to_delete) {
