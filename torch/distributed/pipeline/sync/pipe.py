@@ -137,64 +137,81 @@ MOVING_DENIED = TypeError("denied to move parameters and buffers, " "because Pip
 
 class Pipe(Module):
     """Wraps an arbitrary :class:`nn.Sequential <torch.nn.Sequential>` module
-    to train on Pipe_. If the module requires lots of memory, Pipe will be
-    very efficient.
-    ::
+    to train on using synchronous pipeline parallelism. If the module requires
+    lots of memory and doesn't fit on a single GPU, pipeline parallelism is a
+    useful technique to employ for training.
 
-        model = nn.Sequential(a, b, c, d)
-        model = Pipe(model, chunks=8)
-        output = model(input)
+    The implementation is based on the torchgpipe_ paper.
 
-    .. _Pipe: https://arxiv.org/abs/2004.09910
+    .. _torchgpipe: https://arxiv.org/abs/2004.09910
 
     Pipe combines pipeline parallelism with checkpointing to reduce peak
     memory required to train while minimizing device under-utilization.
 
-    You should place all the modules on the appropriate devices before passing
-    them to this API and wrap them into an ``nn.Sequential`` module defining the
+    You should place all the modules on the appropriate devices and wrap them
+    into an :class:`nn.Sequential <torch.nn.Sequential>` module defining the
     desired order of execution.
 
-    Args:
-        module (``torch.nn.Sequential``):
-            Sequential module to be parallelized using pipelining. Each module
+    Arguments:
+        module (:class:`nn.Sequential <torch.nn.Sequential>`):
+            sequential module to be parallelized using pipelining. Each module
             in the sequence has to have all of its parameters on a single
             device. Each module in the sequence has to either be an nn.Module
-            or ``nn.Sequential`` (to combine multiple sequential modules on a single
-            device)
-
-    Keyword Args:
+            or :class:`nn.Sequential <torch.nn.Sequential>` (to combine multiple
+            sequential modules on a single device)
         chunks (int):
             number of micro-batches (default: ``1``)
         checkpoint (str):
             when to enable checkpointing, one of ``'always'``,
-            ``'except_last'``, or ``'never'`` (default: ``'except_last'``)
+            ``'except_last'``, or ``'never'`` (default: ``'except_last'``).
+            ``'never'`` disables checkpointing completely, ``'except_last'``
+            enables checkpointing for all micro-batches except the last one
+            and ``'always'`` enables checkpointing for all micro-batches.
         deferred_batch_norm (bool):
-            whether to use deferred BatchNorm moving statistics (default:
-            :data:`False`, see :ref:`Deferred Batch Normalization` for more
-            details)
+            whether to use deferred ``BatchNorm`` moving statistics (default:
+            :data:`False`). If set to :data:`True`, we track statistics across
+            multiple micro-batches to update the running statistics per
+            mini-batch.
 
     Raises:
         TypeError:
             the module is not a :class:`nn.Sequential <torch.nn.Sequential>`.
         ValueError:
             invalid arguments
-        IndexError:
-            the number of devices is fewer than the number of partitions.
 
+    Example::
+        Pipeline of two FC layers across GPUs 0 and 1.
+
+        >>> fc1 = nn.Linear(16, 8).cuda(0)
+        >>> fc2 = nn.Linear(8, 4).cuda(1)
+        >>> model = nn.Sequential(fc1, fc2)
+        >>> model = Pipe(model, chunks=8)
+        >>> input = torch.rand(16, 16).cuda(0)
+        >>> output_rref = model(input)
+
+    .. note::
+        You can wrap a :class:`Pipe` model with
+        :class:`torch.nn.parallel.DistributedDataParallel` only when the
+        checkpoint parameter of :class:`Pipe` is ``'never'``.
+
+    .. note::
+        :class:`Pipe` only supports intra-node pipelining currently, but
+        will be expanded to support inter-node pipelining in the future.
+        The forward function returns an :class:`~torch.distributed.rpc.RRef`
+        to allow for inter-node pipelining in the future, where the output
+        might be on a remote host. For intra-node pipelinining you can use
+        :meth:`~torch.distributed.rpc.RRef.local_value` to retrieve the
+        output locally.
+
+    .. warning::
+        :class:`Pipe` is experimental and subject to change.
     """
-
-    #: The number of micro-batches.
-    chunks: int = 1
-
-    #: The checkpoint mode to determine when to enable checkpointing. It is one
-    #: of ``'always'``, ``'except_last'``, or ``'never'``.
-    checkpoint: str = "except_last"
 
     def __init__(
         self,
         module: nn.Sequential,
-        chunks: int = chunks,
-        checkpoint: str = checkpoint,
+        chunks: int = 1,
+        checkpoint: str = "except_last",
         deferred_batch_norm: bool = False,
     ) -> None:
         super().__init__()
@@ -306,21 +323,30 @@ class Pipe(Module):
 
         return self._copy_streams
 
-    def forward(self, input: TensorOrTensors) -> RRef[TensorOrTensors]:  # type: ignore
-        """:class:`Pipe` is a fairly transparent module wrapper. It doesn't
+    def forward(self, input) -> RRef:  # type: ignore
+        """
+        Processes a single input mini-batch through the pipe and returns an
+        :class:`~torch.distributed.rpc.RRef` pointing to the output.
+        :class:`Pipe` is a fairly transparent module wrapper. It doesn't
         modify the input and output signature of the underlying module. But
         there's type restriction. Input and output have to be a
         :class:`~torch.Tensor` or a sequence of tensors. This restriction is
         applied at partition boundaries too.
 
-        Args:
-            input (torch.Tensor or Sequence[torch.Tensor]): input mini-batch
+        The input tensor is split into multiple micro-batches based on the
+        ``chunks`` parameter used to initialize :class:`Pipe`. The batch size
+        is assumed to be the first dimension of the tensor and if the batch
+        size is less than ``chunks``, the number of micro-batches is equal to
+        the batch size.
+
+        Arguments:
+            input (torch.Tensor or sequence of :class:`~torch.Tensor`): input mini-batch
 
         Returns:
             :class:`~torch.distributed.rpc.RRef` to the output of the mini-batch
 
         Raises:
-            TypeError: input is not a tensor or tensors.
+            TypeError: input is not a tensor or sequence of tensors.
 
         """
         microbatch.check(input)

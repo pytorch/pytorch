@@ -1252,19 +1252,22 @@ by :attr:`indices_or_sections`. This function is based on NumPy's
 
 Args:
     input (Tensor): the tensor to split
-    indices_or_sections (int or (list(int))):
-        If :attr:`indices_or_sections` is an integer ``n``, :attr:`input` is split
-        into ``n`` sections along dimension :attr:`dim`. If :attr:`input` is divisible
-        by ``n`` along dimension :attr:`dim`, each section will be of equal size,
-        :code:`input.size(dim) / n`. If :attr:`input` is not divisible by ``n``, the
-        sizes of the first :code:`int(input.size(dim) % n)` sections will have size
-        :code:`int(input.size(dim) / n) + 1`, and the rest will have size
-        :code:`int(input.size(dim) / n)`.
+    indices_or_sections (Tensor, int or list or tuple of ints):
+        If :attr:`indices_or_sections` is an integer ``n`` or a zero dimensional long tensor
+        with value ``n``, :attr:`input` is split into ``n`` sections along dimension :attr:`dim`.
+        If :attr:`input` is divisible by ``n`` along dimension :attr:`dim`, each
+        section will be of equal size, :code:`input.size(dim) / n`. If :attr:`input`
+        is not divisible by ``n``, the sizes of the first :code:`int(input.size(dim) % n)`
+        sections will have size :code:`int(input.size(dim) / n) + 1`, and the rest will
+        have size :code:`int(input.size(dim) / n)`.
 
-        If :attr:`indices_or_sections` is a list of ints, :attr:`input` is split along
-        dimension :attr:`dim` at each of the indices in the list. For instance,
-        :code:`indices_or_sections=[2, 3]` and :code:`dim=0` would result in the tensors
-        :code:`input[:2]`, :code:`input[2:3]`, and :code:`input[3:]`.
+        If :attr:`indices_or_sections` is a list or tuple of ints, or a one-dimensional long
+        tensor, then :attr:`input` is split along dimension :attr:`dim` at each of the indices
+        in the list, tuple or tensor. For instance, :code:`indices_or_sections=[2, 3]` and :code:`dim=0`
+        would result in the tensors :code:`input[:2]`, :code:`input[2:3]`, and :code:`input[3:]`.
+
+        If indices_or_sections is a tensor, it must be a zero-dimensional or one-dimensional
+        long tensor on the CPU.
 
     dim (int, optional): dimension along which to split the tensor. Default: ``0``
 
@@ -5889,7 +5892,7 @@ Examples::
             [2, 6]],
 
             [[1, 5],
-            [3, 7]]])    
+            [3, 7]]])
 """.format(**common_args))
 
 add_docstr(torch.swapaxes, r"""
@@ -5919,7 +5922,7 @@ Examples::
             [2, 6]],
 
             [[1, 5],
-            [3, 7]]])    
+            [3, 7]]])
 """.format(**common_args))
 
 add_docstr(torch.narrow,
@@ -6486,15 +6489,15 @@ add_docstr(torch.float_power,
            r"""
 float_power(input, exponent, *, out=None) -> Tensor
 
-Raises :attr:`input` to the power of :attr:`exponent`, elementwise, in double precision. 
-If neither input is complex returns a ``torch.float64`` tensor, 
+Raises :attr:`input` to the power of :attr:`exponent`, elementwise, in double precision.
+If neither input is complex returns a ``torch.float64`` tensor,
 and if one or more inputs is complex returns a ``torch.complex128`` tensor.
 
-.. note:: 
-    This function always computes in double precision, unlike :func:`torch.pow`, 
+.. note::
+    This function always computes in double precision, unlike :func:`torch.pow`,
     which implements more typical :ref:`type promotion <type-promotion-doc>`.
-    This is useful when the computation needs to be performed in a wider or more precise dtype, 
-    or the results of the computation may contain fractional values not representable in the input dtypes, 
+    This is useful when the computation needs to be performed in a wider or more precise dtype,
+    or the results of the computation may contain fractional values not representable in the input dtypes,
     like when an integer base is raised to a negative integer exponent.
 
 Args:
@@ -8043,7 +8046,7 @@ add_docstr(torch.svd,
 svd(input, some=True, compute_uv=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
 This function returns a namedtuple ``(U, S, V)`` which is the singular value
-decomposition of a input real matrix or batches of real matrices :attr:`input` such that
+decomposition of a input matrix or batches of matrices :attr:`input` such that
 :math:`input = U \times diag(S) \times V^T`.
 
 If :attr:`some` is ``True`` (default), the method returns the reduced
@@ -8054,6 +8057,8 @@ will be :math:`(*, n, n)`.
 
 If :attr:`compute_uv` is ``False``, the returned `U` and `V` matrices will be zero matrices
 of shape :math:`(m \times m)` and :math:`(n \times n)` respectively. :attr:`some` will be ignored here.
+
+Supports real-valued and complex-valued input.
 
 .. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
           then the singular values of each matrix in the batch is returned in descending order.
@@ -8078,6 +8083,9 @@ of shape :math:`(m \times m)` and :math:`(n \times n)` respectively. :attr:`some
 
 .. note:: When :attr:`compute_uv` = ``False``, backward cannot be performed since `U` and `V`
           from the forward pass is required for the backward operation.
+
+.. note:: With the complex-valued input the backward operation works correctly only
+          for gauge invariant loss functions. Please look at `Gauge problem in AD`_ for more details.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
@@ -8116,6 +8124,8 @@ Example::
     >>> u, s, v = torch.svd(a_big)
     >>> torch.dist(a_big, torch.matmul(torch.matmul(u, torch.diag_embed(s)), v.transpose(-2, -1)))
     tensor(2.6503e-06)
+
+.. _Gauge problem in AD: https://re-ra.xyz/Gauge-Problem-in-Automatic-Differentiation/
 """)
 
 add_docstr(torch.symeig,
@@ -9838,21 +9848,21 @@ If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
 add_docstr(torch.tile, r"""
 tile(input, reps) -> Tensor
 
-Constructs a tensor by repeating the elements of :attr:`input`. 
+Constructs a tensor by repeating the elements of :attr:`input`.
 The :attr:`reps` argument specifies the number of repetitions
 in each dimension.
 
 If :attr:`reps` specifies fewer dimensions than :attr:`input` has, then
 ones are prepended to :attr:`reps` until all dimensions are specified.
 For example, if :attr:`input` has shape (8, 6, 4, 2) and :attr:`reps`
-is (2, 2), then :attr:`reps` is treated as (1, 1, 2, 2). 
+is (2, 2), then :attr:`reps` is treated as (1, 1, 2, 2).
 
-Analogously, if :attr:`input` has fewer dimensions than :attr:`reps` 
-specifies, then :attr:`input` is treated as if it were unsqueezed at 
-dimension zero until it has as many dimensions as :attr:`reps` specifies. 
+Analogously, if :attr:`input` has fewer dimensions than :attr:`reps`
+specifies, then :attr:`input` is treated as if it were unsqueezed at
+dimension zero until it has as many dimensions as :attr:`reps` specifies.
 For example, if :attr:`input` has shape (4, 2) and :attr:`reps`
-is (3, 3, 2, 2), then :attr:`input` is treated as if it had the 
-shape (1, 1, 4, 2). 
+is (3, 3, 2, 2), then :attr:`input` is treated as if it had the
+shape (1, 1, 4, 2).
 
 .. note::
 
