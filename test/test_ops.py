@@ -79,7 +79,7 @@ class TestGradients(TestCase):
                 self.assertTrue(gradcheck(partial_fn, (*sample.input,) + sample.args,
                                           check_grad_dtypes=True))
             elif check == 'gradgradcheck':
-                self.assertTrue(gradgradcheck(partial_fn, (*sample.input,) + sample.args, 
+                self.assertTrue(gradgradcheck(partial_fn, (*sample.input,) + sample.args,
                                               gen_non_contig_grad_outputs=False,
                                               check_grad_dtypes=True))
                 self.assertTrue(gradgradcheck(partial_fn, (*sample.input,) + sample.args,
@@ -105,11 +105,13 @@ class TestGradients(TestCase):
         self._skip_helper(op, dtype)
         self._grad_test_helper(device, dtype, op, op.get_op())
 
-    @dtypes(torch.double, torch.cdouble)
-    @ops(op_db)
-    def test_method_grad(self, device, dtype, op):
-        self._skip_helper(op, dtype)
-        self._grad_test_helper(device, dtype, op, op.get_method())
+    # Method grad (and gradgrad, see below) tests are disabled since they're
+    #   costly and redundant with function grad (and gradgad) tests
+    # @dtypes(torch.double, torch.cdouble)
+    # @ops(op_db)
+    # def test_method_grad(self, device, dtype, op):
+    #     self._skip_helper(op, dtype)
+    #     self._grad_test_helper(device, dtype, op, op.get_method())
 
     @dtypes(torch.double, torch.cdouble)
     @ops(op_db)
@@ -126,11 +128,13 @@ class TestGradients(TestCase):
         self._skip_helper(op, dtype)
         self._gradgrad_test_helper(device, dtype, op, op.get_op())
 
-    @dtypes(torch.double, torch.cdouble)
-    @ops(op_db)
-    def test_method_gradgrad(self, device, dtype, op):
-        self._skip_helper(op, dtype)
-        self._gradgrad_test_helper(device, dtype, op, op.get_method())
+    # Method gradgrad (and grad, see above) tests are disabled since they're
+    #   costly and redundant with function gradgrad (and grad) tests
+    # @dtypes(torch.double, torch.cdouble)
+    # @ops(op_db)
+    # def test_method_gradgrad(self, device, dtype, op):
+    #     self._skip_helper(op, dtype)
+    #     self._gradgrad_test_helper(device, dtype, op, op.get_method())
 
     @dtypes(torch.double, torch.cdouble)
     @ops(op_db)
@@ -143,9 +147,9 @@ class TestGradients(TestCase):
 
 # Tests operators for consistency between JIT and eager, also checks
 #   correctness of JIT specific alias schemas and intended
-#   autodifferentiation behavior. 
+#   autodifferentiation behavior.
 # Inherits from JitCommonTestCase instead of TestCase directly to share
-#   functionality with original test_jit.py method operator tests 
+#   functionality with original test_jit.py method operator tests
 class TestCommon(JitCommonTestCase):
     exact_dtype = True
 
@@ -170,7 +174,7 @@ class TestCommon(JitCommonTestCase):
 
     # Tests that the forward and backward passes of operations produce the
     #   same values for the cross-product of op variants (method, inplace)
-    #   against eager's gold standard op function variant 
+    #   against eager's gold standard op function variant
     @ops(op_db)
     def test_variant_consistency_eager(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
@@ -231,69 +235,63 @@ class TestCommon(JitCommonTestCase):
         for sample in samples:
 
             # Acquires variants to test
+            func = op.get_op()
             method = op.get_method()
             inplace = op.get_inplace()
-            variants = (v for v in (method, inplace) if v is not None)
-
-            # Adds function variant to variant list
-            # TODO: inplace tests currently fail
-            # variants = (v for v in (op, method, inplace) if v is not None)
-            variants = (v for v in (op, method) if v is not None)
+            variants = {
+                'function': func, 'method': method,
+                # TODO: inplace tests currently fail
+                # 'inplace': inplace,
+            }
 
             # Test traced and scripted consistency
-            for variant in variants:
+            for func_type, variant in variants.items():
+                if variant is None:
+                    continue
+
                 # Create accessor for script function variant
-                if variant is op:
-                    name = op.name
-                    func_type = 'function'
-                elif variant is method:
-                    name = op.name
-                    func_type = 'method'
-                else:  # variant is inplace
-                    assert variant is inplace
-                    name = op.name + "_"
-                    func_type = 'inplace'
+                name = op.name + '_' if func_type == 'inplace' else op.name
 
                 # run with disable_autodiff_subgraph_inlining(True) to test
                 #   autodiff support. Context manager forces the graph to contain
                 #   DifferentiableGraph nodes if they are present
                 with disable_autodiff_subgraph_inlining():
                     def fn(*inputs, **kwargs):
-                        attr = getattr(inputs[0], name)
-                        output = attr(*inputs[1:], **kwargs)
+                        output = func(*inputs, **kwargs)
                         return op.output_func(output)
 
                     # bfloat16 grad doesn't work for some operators
                     dtypes_to_grad_check = floating_and_complex_types_and(torch.half) \
-                        if op.skip_bfloat16_grad else floating_and_complex_types_and(torch.half, torch.bfloat16) 
+                        if op.skip_bfloat16_grad else floating_and_complex_types_and(torch.half, torch.bfloat16)
 
                     # Check scripted forward, grad, and grad grad
                     script_fn = create_script_fn(self, name, func_type, op.output_func)
 
-                    check_against_reference(self, 
+                    check_against_reference(self,
                                             script_fn,
-                                            fn, 
-                                            (*sample.input,) + sample.args, 
-                                            sample.kwargs, 
+                                            fn,
+                                            (*sample.input,) + sample.args,
+                                            sample.kwargs,
                                             no_grad=(dtype not in dtypes_to_grad_check))
 
                     # Check traced forward, grad, and grad grad
                     traced_fn = create_traced_fn(self, variant)
-                    check_against_reference(self, 
+                    check_against_reference(self,
                                             traced_fn,
-                                            fn, 
-                                            (*sample.input,) + sample.args, 
-                                            sample.kwargs, 
+                                            fn,
+                                            (*sample.input,) + sample.args,
+                                            sample.kwargs,
                                             no_grad=(dtype not in dtypes_to_grad_check))
 
                     # Check alias annotation schema for correctness (make
                     #   sure inputs that aren't supposed to be modified aren't)
-                    # Note: only runs in float32 and int64 because schema isn't affected by dtype, 
+                    # Note: only runs in float32 and int64 because schema isn't affected by dtype,
                     #   so running it on all dtypes is would be excessive
                     if dtype in [torch.float32, torch.int32]:
-                        check_alias_annotation(name, (*sample.input,) + sample.args, sample.kwargs)
+                        check_alias_annotation(name, (*sample.input,) + sample.args, sample.kwargs,
+                                               func_type=func_type, aten_name=op.aten_name)
 
-                    # Check autodifferentiation of nodes for traced and scripted graphs, only need to check once per sample 
+                    # Check autodifferentiation of nodes for traced and scripted graphs, only need to check once per sample
                     if dtype is torch.float32:
                         # Sandcastle doesn't fuse nodes
                         if IS_SANDCASTLE:

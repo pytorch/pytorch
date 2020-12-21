@@ -6,7 +6,6 @@
 
 // MAGMA (i.e. CUDA implementation of LAPACK functions)
 THC_API void THCTensor_(gels)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor *b_, THCTensor *a_);
-THC_API void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, THCTensor *a_, bool eigenvectors);
 THC_API void THCTensor_(potri)(THCState *state, THCTensor *ra_, THCTensor *a, bool upper);
 THC_API void THCTensor_(geqrf)(THCState *state, THCTensor *ra_, THCTensor *rtau_, THCTensor *a_);
 
