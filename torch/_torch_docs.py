@@ -8045,7 +8045,7 @@ add_docstr(torch.svd,
            r"""
 svd(input, some=True, compute_uv=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
-Compute the singular value decomposition of either a matrix or batch of
+Computes the singular value decomposition of either a matrix or batch of
 matrices :attr:`input`." The singular value decomposition is represented as a
 namedtuple ``(U, S, V)``, such that :math:`input = U \times diag(S) \times
 V^T`, where :math:`V^T` is the transpose of ``V``. If the inputs are batches, then
