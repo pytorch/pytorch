@@ -93,16 +93,12 @@ static inline void check_cat_shape_except_dim(const Tensor & first, const Tensor
     if (dim == dimension) {
       continue;
     }
-    int64_t first_dim_size = first.sizes()[dim];
-    int64_t second_dim_size = second.sizes()[dim];
+    int64_t first_dim_size = first.size(dim);
+    int64_t second_dim_size = second.size(dim);
     TORCH_CHECK(first_dim_size == second_dim_size, "Sizes of tensors must match except in dimension ",
                 dimension, ". Got ", first_dim_size, " and ", second_dim_size, " in dimension ", dim,
                 " (The offending index is ", index, ")");
   }
-}
-
-static bool should_skip(const Tensor& t) {
-  return t.numel() == 0 && t.dim() == 1;
 }
 
 Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
@@ -113,6 +109,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   // FIXME: warn if this is the case
   bool allSkipped = true;
   bool allContiguous = true;
+  Tensor notSkippedTensor;
 
   // Inputs cannot alias the output tensor
   for (int64_t i = 0; i < tensors.size(); i++) {
@@ -124,21 +121,19 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   }
   at::assert_no_internal_overlap(result);
 
-  const Tensor* pnotSkippedTensor = [](TensorList tensors) -> const Tensor* {
-    for (auto const &tensor : tensors) {
-      if (should_skip(tensor)) {
-        continue;
-      }
-      // we've found a non-empty tensor
-      return &tensor;
+  auto should_skip = [](const Tensor& t) { return t.numel() == 0 && t.dim() == 1; };
+  for (auto const &tensor : tensors) {
+    if (should_skip(tensor)) {
+      continue;
     }
-    return nullptr;
-  }(tensors);
-
-  if (!pnotSkippedTensor) {
+    // we've found a non-empty tensor
+    allSkipped = false;
+    notSkippedTensor = tensor;
+    break;
+  }
+  if (allSkipped) {
     return result;
   }
-  const Tensor& notSkippedTensor = *pnotSkippedTensor;
 
   TORCH_CHECK(tensors.size() > 0, "expected a non-empty list of Tensors");
   TORCH_CHECK(dim <= notSkippedTensor.dim(), "dimension ", dim, "out of range");
@@ -161,7 +156,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
       continue;
     }
     check_cat_shape_except_dim(notSkippedTensor, tensor, dim, i);
-    cat_dim_size += tensor.sizes()[dim];
+    cat_dim_size += tensor.size(dim);
 
     if (!tensor.is_contiguous(first_tensor_mem_format)) {
       allContiguous = false;
@@ -196,8 +191,8 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   if (reuse_iterator &&
       result.is_contiguous(first_tensor_mem_format) &&
       no_type_promotion) {
-    const auto& source_slice = notSkippedTensor;
-    auto slice_dim_size = source_slice.sizes()[dim];
+    auto source_slice = notSkippedTensor;
+    auto slice_dim_size = source_slice.size(dim);
     auto result_slice = result.narrow(dim, 0, slice_dim_size);
     auto result_slice_data = result_slice.data_ptr();
     auto result_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
@@ -226,7 +221,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
       if (should_skip(tensor)) {
         continue;
       }
-      auto slice_dim_size = tensor.sizes()[dim];
+      auto slice_dim_size = tensor.size(dim);
       auto result_slice = result.narrow(dim, offset, slice_dim_size);
 
       auto iter = TensorIteratorConfig()
@@ -520,7 +515,7 @@ std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
 }
 
 std::vector<Tensor> tensor_split(const Tensor& self, int64_t sections, int64_t dim) {
-  TORCH_CHECK(self.dim() > 0, "expected at least a 1-dimensional tensor");
+  TORCH_CHECK(self.dim() > 0, "tensor_split expected at least a 1-dimensional tensor, but got a tensor with ", self.dim()," dims");
   int64_t dim_ = maybe_wrap_dim(dim, self.dim());
   TORCH_CHECK(sections > 0, "number of sections must be larger than 0, got ", sections);
   std::vector<Tensor> splits(sections);
@@ -536,7 +531,7 @@ std::vector<Tensor> tensor_split(const Tensor& self, int64_t sections, int64_t d
 }
 
 std::vector<Tensor> tensor_split(const Tensor& self, IntArrayRef indices, int64_t dim) {
-  TORCH_CHECK(self.dim() > 0, "expected at least a 1-dimensional tensor");
+  TORCH_CHECK(self.dim() > 0, "tensor_split expected at least a 1-dimensional tensor, but got a tensor with ", self.dim()," dims");
   int64_t dim_ = maybe_wrap_dim(dim, self.dim());
   int64_t num_indices = indices.size();
   std::vector<Tensor> splits(num_indices + 1);
@@ -548,6 +543,28 @@ std::vector<Tensor> tensor_split(const Tensor& self, IntArrayRef indices, int64_
   }
   splits[num_indices] = at::slice(self, dim_, start_idx, self.size(dim_));
   return splits;
+}
+
+std::vector<Tensor> tensor_split(const Tensor& self, const Tensor& tensor_indices_or_sections, int64_t dim) {
+  TORCH_CHECK(self.dim() > 0, "tensor_split expected at least a 1-dimensional tensor, but got a tensor with ", self.dim()," dims");
+  auto split_device = tensor_indices_or_sections.device();
+  TORCH_CHECK(split_device == kCPU,
+    "tensor_split expected tensor_indices_or_sections to be on cpu, but it's on ", split_device);
+  auto split_dtype = tensor_indices_or_sections.scalar_type();
+  TORCH_CHECK(split_dtype == at::kLong,
+    "tensor_split expected tensor_indices_or_sections to have dtype of long, but got ", split_dtype);
+  auto split_dim = tensor_indices_or_sections.dim();
+  TORCH_CHECK(split_dim == 1 || split_dim == 0,
+    "tensor_split expected tensor_indices_or_sections to be a zero-dimensional or one-dimensional tensor, but got a tensor with ", split_dim, " dims");
+
+  if (split_dim == 0) {
+    int64_t sections = tensor_indices_or_sections.item<int64_t>();
+    return self.tensor_split(sections, dim);
+  } else {
+    auto indices_data = tensor_indices_or_sections.data_ptr<int64_t>();
+    std::vector<int64_t> indices(indices_data, indices_data + tensor_indices_or_sections.numel());
+    return self.tensor_split(indices, dim);
+  }
 }
 
 std::vector<Tensor> unsafe_chunk(const Tensor& self, int64_t chunks, int64_t dim) {
