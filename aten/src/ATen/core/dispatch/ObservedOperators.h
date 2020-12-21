@@ -4,7 +4,7 @@
 
 namespace c10 {
 
-struct CAFFE2_API ObservedOperators {
+struct TORCH_API ObservedOperators {
   ObservedOperators() = delete;
 
   static bool isObserved(const OperatorName& name);

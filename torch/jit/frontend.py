@@ -14,6 +14,7 @@ from torch._C._jit_tree_views import (
     ListLiteral, TupleLiteral, DictLiteral, Const,
     StringLiteral, ListComp, Attribute, BinOp, UnaryOp,
     SliceExpr, Subscript, TernaryIf, With, WithItem, Property,
+    DictComp,
 )
 from torch._utils_internal import get_source_lines_and_file
 
@@ -388,6 +389,12 @@ class StmtBuilder(Builder):
         ast.Mult: '*',
         ast.Div: '/',
         ast.Mod: '%',
+        ast.BitOr: '|',
+        ast.BitAnd: '&',
+        ast.BitXor: '^',
+        ast.LShift: '<<',
+        ast.RShift: '>>',
+        ast.Pow: '**',
     }
 
     @staticmethod
@@ -417,12 +424,9 @@ class StmtBuilder(Builder):
 
     @staticmethod
     def build_Delete(ctx, stmt):
-        if len(stmt.targets) > 1:
-            source_range = ctx.make_range(stmt.lineno, stmt.col_offset,
-                                          stmt.col_offset + len("del"))
-            raise NotSupportedError(
-                source_range, 'del with more than one operand is not supported')
-        return Delete(build_expr(ctx, stmt.targets[0]))
+        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("del"))
+
+        return Delete(r, [build_expr(ctx, target) for target in stmt.targets])
 
     @staticmethod
     def build_Return(ctx, stmt):
@@ -813,17 +817,33 @@ class ExprBuilder(Builder):
     @staticmethod
     def build_ListComp(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset)
-        if (len(stmt.generators) > 1):
-            raise NotSupportedError(r, "multiple comprehension generators not supported yet")
+        if (len(stmt.generators) != 1):
+            raise NotSupportedError(r, "Only a single generator is currently supported")
 
         if (len(stmt.generators[0].ifs) != 0):
-            raise NotSupportedError(r, "comprehension ifs not supported yet")
+            raise NotSupportedError(r, "Comprehension ifs are not supported yet")
 
         elt_expr = build_expr(ctx, stmt.elt)
         target_expr = build_expr(ctx, stmt.generators[0].target)
-
         iter_expr = build_expr(ctx, stmt.generators[0].iter)
+
         return ListComp(r, elt_expr, target_expr, iter_expr)
+
+    @staticmethod
+    def build_DictComp(ctx, stmt):
+        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset)
+        if (len(stmt.generators) != 1):
+            raise NotSupportedError(r, "Only a single generator is currently supported")
+
+        if (len(stmt.generators[0].ifs) != 0):
+            raise NotSupportedError(r, "Comprehension ifs are not supported yet")
+
+        key_expr = build_expr(ctx, stmt.key)
+        value_expr = build_expr(ctx, stmt.value)
+        target_expr = build_expr(ctx, stmt.generators[0].target)
+        iter_expr = build_expr(ctx, stmt.generators[0].iter)
+
+        return DictComp(r, key_expr, value_expr, target_expr, iter_expr)
 
     @staticmethod
     def build_Starred(ctx, expr):

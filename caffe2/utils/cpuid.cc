@@ -7,10 +7,10 @@ const CpuId& GetCpuId() {
   return cpuid_singleton;
 }
 
-CAFFE2_API uint32_t CpuId::f1c_ = 0;
-CAFFE2_API uint32_t CpuId::f1d_ = 0;
-CAFFE2_API uint32_t CpuId::f7b_ = 0;
-CAFFE2_API uint32_t CpuId::f7c_ = 0;
+TORCH_API uint32_t CpuId::f1c_ = 0;
+TORCH_API uint32_t CpuId::f1d_ = 0;
+TORCH_API uint32_t CpuId::f7b_ = 0;
+TORCH_API uint32_t CpuId::f7c_ = 0;
 
 CpuId::CpuId() {
 #ifdef _MSC_VER
