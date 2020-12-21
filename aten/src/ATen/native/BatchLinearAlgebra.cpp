@@ -49,6 +49,12 @@ extern "C" void cpotrf_(char *uplo, int *n, std::complex<float> *a, int *lda, in
 extern "C" void dpotrf_(char *uplo, int *n, double *a, int *lda, int *info);
 extern "C" void spotrf_(char *uplo, int *n, float *a, int *lda, int *info);
 
+// potri
+extern "C" void zpotri_(char *uplo, int *n, std::complex<double> *a, int *lda, int *info);
+extern "C" void cpotri_(char *uplo, int *n, std::complex<float> *a, int *lda, int *info);
+extern "C" void dpotri_(char *uplo, int *n, double *a, int *lda, int *info);
+extern "C" void spotri_(char *uplo, int *n, float *a, int *lda, int *info);
+
 // trtrs
 extern "C" void ztrtrs_(char *uplo, char *trans, char *diag, int *n, int *nrhs, std::complex<double> *a, int *lda, std::complex<double> *b, int *ldb, int *info);
 extern "C" void ctrtrs_(char *uplo, char *trans, char *diag, int *n, int *nrhs, std::complex<float> *a, int *lda, std::complex<float> *b, int *ldb, int *info);
@@ -120,6 +126,9 @@ void lapackCholeskySolve(char uplo, int n, int nrhs, scalar_t *a, int lda, scala
 
 template<class scalar_t>
 void lapackCholesky(char uplo, int n, scalar_t *a, int lda, int *info);
+
+template<class scalar_t>
+void lapackCholeskyInverse(char uplo, int n, scalar_t *a, int lda, int *info);
 
 template<class scalar_t>
 void lapackTriangularSolve(char uplo, char trans, char diag, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, int *info);
@@ -222,6 +231,22 @@ template<> void lapackCholesky<double>(char uplo, int n, double *a, int lda, int
 
 template<> void lapackCholesky<float>(char uplo, int n, float *a, int lda, int *info) {
   spotrf_(&uplo, &n, a, &lda, info);
+}
+
+template<> void lapackCholeskyInverse<c10::complex<double>>(char uplo, int n, c10::complex<double> *a, int lda, int *info) {
+  zpotri_(&uplo, &n, reinterpret_cast<std::complex<double>*>(a), &lda, info);
+}
+
+template<> void lapackCholeskyInverse<c10::complex<float>>(char uplo, int n, c10::complex<float> *a, int lda, int *info) {
+  cpotri_(&uplo, &n, reinterpret_cast<std::complex<float>*>(a), &lda, info);
+}
+
+template<> void lapackCholeskyInverse<double>(char uplo, int n, double *a, int lda, int *info) {
+  dpotri_(&uplo, &n, a, &lda, info);
+}
+
+template<> void lapackCholeskyInverse<float>(char uplo, int n, float *a, int lda, int *info) {
+  spotri_(&uplo, &n, a, &lda, info);
 }
 
 template<> void lapackTriangularSolve<c10::complex<double>>(char uplo, char trans, char diag, int n, int nrhs, c10::complex<double> *a, int lda, c10::complex<double> *b, int ldb, int *info) {
@@ -637,6 +662,71 @@ Tensor& linalg_cholesky_out(Tensor &result, const Tensor &self) {
   TORCH_CHECK(result.scalar_type() == self.scalar_type(),
     "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
   Tensor result_tmp = at::linalg_cholesky(self);
+  at::native::resize_output(result, result_tmp.sizes());
+  result.copy_(result_tmp);
+  return result;
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template<typename scalar_t>
+static void apply_cholesky_inverse(Tensor& self, bool upper, std::vector<int64_t>& infos) {
+#ifndef USE_LAPACK
+  AT_ERROR("cholesky_inverse: LAPACK library not found in compilation");
+#else
+  char uplo = upper ? 'U' : 'L';
+
+  auto self_data = self.data_ptr<scalar_t>();
+  auto self_matrix_stride = matrixStride(self);
+  auto batch_size = batchCount(self);
+  auto n = self.size(-2);
+  auto lda = std::max<int64_t>(1, n);
+
+  int info;
+  for (int64_t i = 0; i < batch_size; i++) {
+    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
+    lapackCholeskyInverse<scalar_t>(uplo, n, self_working_ptr, lda, &info);
+    infos[i] = info;
+    if (info != 0) {
+      return;
+    }
+  }
+#endif
+}
+
+Tensor _cholesky_inverse_helper_cpu(const Tensor& input, bool upper) {
+  std::vector<int64_t> infos(batchCount(input), 0);
+  auto input_working_copy = cloneBatchedColumnMajor(input);
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "cholesky_inverse_cpu", [&]{
+    apply_cholesky_inverse<scalar_t>(input_working_copy, upper, infos);
+  });
+  if (input.dim() > 2) {
+    batchCheckErrors(infos, "cholesky_inverse_cpu");
+  } else {
+    singleCheckErrors(infos[0], "cholesky_inverse_cpu");
+  }
+  return input_working_copy;
+}
+
+Tensor cholesky_inverse(const Tensor &input, bool upper) {
+  squareCheckInputs(input);
+
+  auto raw_cholesky_inverse_output = at::_cholesky_inverse_helper(input, upper);
+
+  // TODO: implement efficient non-allocating copy of the upper part of the matrix to the lower part and lower -> upper
+  if (upper) {
+    raw_cholesky_inverse_output.triu_();
+    return raw_cholesky_inverse_output + at::triu(raw_cholesky_inverse_output, 1).transpose(-2, -1);
+  } else {
+    raw_cholesky_inverse_output.tril_();
+    return raw_cholesky_inverse_output + at::tril(raw_cholesky_inverse_output, -1).transpose(-2, -1);
+  }
+}
+
+Tensor& cholesky_inverse_out(Tensor &result, const Tensor &input, bool upper) {
+  TORCH_CHECK(result.scalar_type() == input.scalar_type(),
+    "result dtype ", result.scalar_type(), " does not match input dtype ", input.scalar_type());
+  Tensor result_tmp = at::cholesky_inverse(input);
   at::native::resize_output(result, result_tmp.sizes());
   result.copy_(result_tmp);
   return result;

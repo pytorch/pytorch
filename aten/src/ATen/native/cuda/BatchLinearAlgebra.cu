@@ -96,6 +96,11 @@ void magmaCholeskyBatched(
     magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue);
 
 template<class scalar_t>
+void magmaCholeskyInverse(
+    magma_uplo_t uplo, magma_int_t n, scalar_t* dA,
+    magma_int_t ldda, magma_int_t* info);
+
+template<class scalar_t>
 void magmaTriangularSolve(
     magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
     scalar_t* dA, magma_int_t ldda, scalar_t* dB, magma_int_t lddb);
@@ -659,6 +664,42 @@ void magmaCholeskyBatched<c10::complex<float>>(
     magma_uplo_t uplo, magma_int_t n, c10::complex<float>** dA_array, magma_int_t ldda,
     magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
   magma_cpotrf_batched(uplo, n, reinterpret_cast<magmaFloatComplex**>(dA_array), ldda, info_array, batchsize, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaCholeskyInverse<double>(
+    magma_uplo_t uplo, magma_int_t n, double* dA,
+    magma_int_t ldda, magma_int_t* info) {
+  MagmaStreamSyncGuard guard;
+  magma_dpotri_gpu(uplo, n, dA, ldda, info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaCholeskyInverse<float>(
+    magma_uplo_t uplo, magma_int_t n, float* dA,
+    magma_int_t ldda, magma_int_t* info) {
+  MagmaStreamSyncGuard guard;
+  magma_spotri_gpu(uplo, n, dA, ldda, info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaCholeskyInverse<c10::complex<double>>(
+    magma_uplo_t uplo, magma_int_t n, c10::complex<double>* dA,
+    magma_int_t ldda, magma_int_t* info) {
+  MagmaStreamSyncGuard guard;
+  magma_zpotri_gpu(uplo, n, reinterpret_cast<magmaDoubleComplex*>(dA), ldda, info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaCholeskyInverse<c10::complex<float>>(
+    magma_uplo_t uplo, magma_int_t n, c10::complex<float>* dA,
+    magma_int_t ldda, magma_int_t* info) {
+  MagmaStreamSyncGuard guard;
+  magma_cpotri_gpu(uplo, n, reinterpret_cast<magmaFloatComplex*>(dA), ldda, info);
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
@@ -1513,6 +1554,45 @@ Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
   } else {
     return self_working_copy;
   }
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template <typename scalar_t>
+static void apply_cholesky_inverse(Tensor& self, bool upper, std::vector<int64_t>& infos) {
+#ifndef USE_MAGMA
+  AT_ERROR("cholesky_inverse: MAGMA library not found in "
+      "compilation. Please rebuild with MAGMA.");
+#else
+  magma_uplo_t uplo = upper ? MagmaUpper : MagmaLower;
+
+  auto self_data = self.data_ptr<scalar_t>();
+  magma_int_t n = magma_int_cast(self.size(-2), "self.size(-2)");
+  auto lda = std::max<magma_int_t>(1, n);
+
+  if (self.dim() == 2) {
+    magma_int_t info = 0;
+    magmaCholeskyInverse<scalar_t>(uplo, n, self_data, lda, &info);
+    infos[0] = info;
+  } else {
+    TORCH_CHECK(false, "Batched version is not implemented for CUDA.")
+  }
+#endif
+}
+
+Tensor _cholesky_inverse_helper_cuda(const Tensor& self, bool upper) {
+  std::vector<int64_t> infos(batchCount(self), 0);
+  Tensor self_working_copy = cloneBatchedColumnMajor(self);
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "cholesky_inverse_cuda", [&]{
+    apply_cholesky_inverse<scalar_t>(self_working_copy, upper, infos);
+  });
+  if (self.dim() > 2) {
+    batchCheckErrors(infos, "cholesky_inverse_cuda");
+  } else {
+    singleCheckErrors(infos[0], "cholesky_inverse_cuda");
+  }
+  return self_working_copy;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

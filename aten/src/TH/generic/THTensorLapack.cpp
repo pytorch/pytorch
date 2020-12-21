@@ -191,65 +191,6 @@ void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
   if (free_b) c10::raw::intrusive_ptr::decref(b);
 }
 
-void THTensor_(copyUpLoTriangle)(THTensor *a, char uplo)
-{
-  THArgCheck(THTensor_nDimensionLegacyAll(a) == 2, 1, "A should be 2 dimensional");
-  THArgCheck(a->size(0) == a->size(1), 1, "A should be square");
-
-  int n = a->size(0);
-
-  /* Build full matrix */
-  scalar_t *p = a->data<scalar_t>();
-  int64_t i, j;
-
-  /* Upper Triangular Case */
-  if (uplo == 'U')
-  {
-    /* Clear lower triangle (excluding diagonals) */
-    for (i=0; i<n; i++) {
-     for (j=i+1; j<n; j++) {
-        p[n*i + j] = p[n*j+i];
-      }
-    }
-  }
-  /* Lower Triangular Case */
-  else if (uplo == 'L')
-  {
-    /* Clear upper triangle (excluding diagonals) */
-    for (i=0; i<n; i++) {
-      for (j=0; j<i; j++) {
-        p[n*i + j] = p[n*j+i];
-      }
-    }
-  }
-}
-
-void THTensor_(potri)(THTensor *ra_, THTensor *a, bool upper)
-{
-  char uplo = upper ? 'U' : 'L';
-  if (a == NULL) a = ra_;
-  THArgCheck(THTensor_nDimension(a) == 2, 1, "A should be 2 dimensional");
-  THArgCheck(!a->is_empty(), 1, "A should not be empty");
-  THArgCheck(a->size(0) == a->size(1), 1, "A should be square");
-
-  int n, lda, info;
-  THTensor *ra__ = NULL;
-
-  ra__ = THTensor_(cloneColumnMajor)(ra_, a);
-
-  n = THTensor_(size)(ra__, 0);
-  lda = n;
-
-  /* Run inverse */
-  THLapack_(potri)(uplo, n, ra__->data<scalar_t>(), lda, &info);
-  THLapackCheckWithCleanup("Lapack Error %s : A(%d,%d) is 0, A cannot be factorized",
-                           THCleanup(c10::raw::intrusive_ptr::decref(ra__);),
-                           "potri", info, info);
-
-  THTensor_(copyUpLoTriangle)(ra__, uplo);
-  THTensor_(freeCopyTo)(ra__, ra_);
-}
-
 /*
   The geqrf function does the main work of QR-decomposing a matrix.
   However, rather than producing a Q matrix directly, it produces a sequence of
