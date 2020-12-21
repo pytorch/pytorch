@@ -316,7 +316,7 @@ def np_unary_ufunc_integer_promotion_wrapper(fn):
 
     return wrapped_fn
 
-def np_binary_ufunc_integer_promotion_wrapper(fn):
+def np_binary_ufunc_type_promotion_wrapper(fn):
     # Wrapper that passes PyTorch's default scalar
     #   type as an argument to the wrapped NumPy
     #   binary ufunc when given an integer input .
@@ -337,6 +337,10 @@ def np_binary_ufunc_integer_promotion_wrapper(fn):
     #   int64 float16    float64    float16
     #   int32 float32    float64    float32
     #   int64 float32    float64    float32
+    #
+    # Another special case only on Windows platform:
+    # torch tensor wrapper for integer scalar is int64
+    # numpy wrapper for integer scalar is int32
 
     # Helper to get the unified type between PyTorch
     #    and NumPy
@@ -346,6 +350,8 @@ def np_binary_ufunc_integer_promotion_wrapper(fn):
             if x.dtype in [np.bool, np.uint8, np.int8, np.int16, np.int32, np.int64] and \
                     type(y) == float:
                 return torch_to_numpy_dtype_dict[torch.get_default_dtype()]
+            if IS_WINDOWS and type(x) == int:
+                return torch_to_numpy_dtype_dict[torch.promote_types(x.dtype, torch.int64)]
             return None
         if x.dtype == np.bool and y.dtype == np.bool:
             return np.bool
@@ -363,7 +369,7 @@ def np_binary_ufunc_integer_promotion_wrapper(fn):
         if utype is not None:
             # Can not do fn(x, y, dtype=utype), since some NumPy operations
             #   don't support all dtypes as signature
-            #   e.g. can not np.fmod(x, y, dtype=np.bool)
+            #   e.g. np.fmod(x, y, dtype=np.bool) is not valid
             def new_fn(x, y):
                 v = fn(x, y)
                 return v.astype(utype)

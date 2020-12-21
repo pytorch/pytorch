@@ -18,7 +18,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCPU, deviceCountAtLeast, precisionOverride, onlyOnCPUAndCUDA,
     skipCUDAIfRocm)
 from torch.testing._internal.common_methods_invocations import (
-    np_binary_ufunc_integer_promotion_wrapper)
+    np_binary_ufunc_type_promotion_wrapper)
 
 # TODO: remove this
 def _generate_input(shape, dtype, device, with_extremal):
@@ -1391,7 +1391,7 @@ class TestBinaryUfuncs(TestCase):
         def _helper(x, mod):
             np_x = x.cpu().numpy()
             np_mod = mod.cpu().numpy() if torch.is_tensor(mod) else mod
-            ref_fn = np_binary_ufunc_integer_promotion_wrapper(np.fmod)
+            ref_fn = np_binary_ufunc_type_promotion_wrapper(np.fmod)
             exp = ref_fn(np_x, np_mod)
             exp = torch.from_numpy(exp)
             res = torch.fmod(x, mod)
