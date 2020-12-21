@@ -4,6 +4,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/ExpandUtils.h>
 
+#include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/cpu/zmath.h>
@@ -72,6 +73,16 @@ extern "C" void cheev_(char *jobz, char *uplo, int *n, std::complex<float> *a, i
 extern "C" void dsyev_(char *jobz, char *uplo, int *n, double *a, int *lda, double *w, double *work, int *lwork, int *info);
 extern "C" void ssyev_(char *jobz, char *uplo, int *n, float *a, int *lda, float *w, float *work, int *lwork, int *info);
 
+// syevd
+extern "C" void zheevd_(char *jobz, char *uplo, int *n, std::complex<double> *a, int *lda, double *w, std::complex<double> *work, int *lwork, double *rwork, int *lrwork, int *iwork, int *liwork, int *info);
+extern "C" void cheevd_(char *jobz, char *uplo, int *n, std::complex<float> *a, int *lda, float *w, std::complex<float> *work, int *lwork, float *rwork, int *lrwork, int *iwork, int *liwork, int *info);
+extern "C" void dsyevd_(char *jobz, char *uplo, int *n, double *a, int *lda, double *w, double *work, int *lwork, int *iwork, int *liwork, int *info);
+extern "C" void ssyevd_(char *jobz, char *uplo, int *n, float *a, int *lda, float *w, float *work, int *lwork, int *iwork, int *liwork, int *info);
+
+// geev
+extern "C" void dgeev_(char *jobvl, char *jobvr, int *n, double *a, int *lda, double *wr, double *wi, double* vl, int *ldvl, double *vr, int *ldvr, double *work, int *lwork, int *info);
+extern "C" void sgeev_(char *jobvl, char *jobvr, int *n, float *a, int *lda, float *wr, float *wi, float* vl, int *ldvl, float *vr, int *ldvr, float *work, int *lwork, int *info);
+
 // gesdd
 extern "C" void zgesdd_(char *jobz, int *m, int *n, std::complex<double> *a, int *lda,
                         double *s, std::complex<double> *u, int *ldu, std::complex<double> *vt, int *ldvt, std::complex<double> *work, int *lwork, double *rwork, int *iwork, int *info);
@@ -121,6 +132,9 @@ void lapackOrgqr(int m, int n, int k, scalar_t *a, int lda, scalar_t *tau, scala
 
 template<class scalar_t, class value_t=scalar_t>
 void lapackSymeig(char jobz, char uplo, int n, scalar_t *a, int lda, value_t *w, scalar_t *work, int lwork, value_t *rwork, int *info);
+
+template<class scalar_t, class value_t=scalar_t>
+void lapackSyevd(char jobz, char uplo, int n, scalar_t *a, int lda, value_t *w, scalar_t *work, int lwork, value_t *rwork, int lrwork, int *iwork, int liwork, int *info);
 
 template<class scalar_t, class value_t=scalar_t>
 void lapackSvd(char jobz, int m, int n, scalar_t *a, int lda,
@@ -276,6 +290,34 @@ template<> void lapackSymeig<float>(char jobz, char uplo, int n, float *a, int l
   ssyev_(&jobz, &uplo, &n, a, &lda, w, work, &lwork, info);
 }
 
+template<> void lapackSyevd<c10::complex<double>, double>(char jobz, char uplo, int n, c10::complex<double> *a, int lda, double *w, c10::complex<double> *work, int lwork, double *rwork, int lrwork, int *iwork, int liwork, int *info) {
+  zheevd_(&jobz, &uplo, &n, reinterpret_cast<std::complex<double>*>(a), &lda, w, reinterpret_cast<std::complex<double>*>(work), &lwork, rwork, &lrwork, iwork, &liwork, info);
+}
+
+template<> void lapackSyevd<c10::complex<float>, float>(char jobz, char uplo, int n, c10::complex<float> *a, int lda, float *w, c10::complex<float> *work, int lwork, float *rwork, int lrwork, int *iwork, int liwork, int *info) {
+  cheevd_(&jobz, &uplo, &n, reinterpret_cast<std::complex<float>*>(a), &lda, w, reinterpret_cast<std::complex<float>*>(work), &lwork, rwork, &lrwork, iwork, &liwork, info);
+}
+
+template<> void lapackSyevd<double>(char jobz, char uplo, int n, double *a, int lda, double *w, double *work, int lwork, double *rwork, int lrwork, int *iwork, int liwork, int *info) {
+  (void)rwork;  // unused
+  (void)lrwork;  // unused
+  dsyevd_(&jobz, &uplo, &n, a, &lda, w, work, &lwork, iwork, &liwork, info);
+}
+
+template<> void lapackSyevd<float>(char jobz, char uplo, int n, float *a, int lda, float *w, float *work, int lwork, float *rwork, int lrwork, int *iwork, int liwork, int *info) {
+  (void)rwork;  // unused
+  (void)lrwork;  // unused
+  ssyevd_(&jobz, &uplo, &n, a, &lda, w, work, &lwork, iwork, &liwork, info);
+}
+
+template<> void lapackEig<double>(char jobvl, char jobvr, int n, double *a, int lda, double *wr, double *wi, double* vl, int ldvl, double *vr, int ldvr, double *work, int lwork, int *info) {
+  dgeev_(&jobvl, &jobvr, &n, a, &lda, wr, wi, vl, &ldvl, vr, &ldvr, work, &lwork, info);
+}
+
+template<> void lapackEig<float>(char jobvl, char jobvr, int n, float *a, int lda, float *wr, float *wi, float* vl, int ldvl, float *vr, int ldvr, float *work, int lwork, int *info) {
+  sgeev_(&jobvl, &jobvr, &n, a, &lda, wr, wi, vl, &ldvl, vr, &ldvr, work, &lwork, info);
+}
+
 template<> void lapackSvd<c10::complex<double>, double>(char jobz, int m, int n, c10::complex<double> *a, int lda,
                                   double *s, c10::complex<double> *u, int ldu, c10::complex<double> *vt, int ldvt, c10::complex<double> *work, int lwork, double *rwork, int *iwork, int *info) {
   zgesdd_(&jobz, &m, &n, reinterpret_cast<std::complex<double>*>(a), &lda, s, reinterpret_cast<std::complex<double>*>(u), &ldu,
@@ -320,8 +362,18 @@ template<> void lapackLuSolve<float>(char trans, int n, int nrhs, float *a, int 
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+/*
+Computes the solution to a system of linear equations
+  A X = B,
+where A is an n-by-n matrix and X and B are n-by-nrhs matrices.
+Note that B is required to be a matrix, the usual, vector case, is obtained with nrhs = 1.
+Above description is for non-batched input, the batched input is also supported.
+This is an in-place routine, content of both A and b are overriden.
+'infos' is an int Tensor containing error codes for each matrix in the batched input.
+For more information see LAPACK's documentation for GESV routine.
+*/
 template<typename scalar_t>
-static void apply_solve(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
+static void apply_solve(Tensor& b, Tensor& A, Tensor& infos) {
 #ifndef USE_LAPACK
   AT_ERROR("solve: LAPACK library not found in compilation");
 #else
@@ -332,20 +384,17 @@ static void apply_solve(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
   auto batch_size = batchCount(A);
   auto n = A.size(-2);
   auto nrhs = b.size(-1);
-  auto lda = std::max(int64_t{1}, n);
+  auto lda = std::max<int64_t>(1, n);
 
-  auto ipiv = at::empty({n}, b.options().dtype(kInt));
+  auto ipiv = at::empty({lda}, b.options().dtype(kInt));
   auto ipiv_data = ipiv.data_ptr<int>();
+  auto infos_data = infos.data_ptr<int>();
 
-  int info;
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
     scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
-    lapackSolve<scalar_t>(n, nrhs, A_working_ptr, lda, ipiv_data, b_working_ptr, lda, &info);
-    infos[i] = info;
-    if (info != 0) {
-      return;
-    }
+    int* info_working_ptr = &infos_data[i];
+    lapackSolve<scalar_t>(n, nrhs, A_working_ptr, lda, ipiv_data, b_working_ptr, lda, info_working_ptr);
   }
 #endif
 }
@@ -353,14 +402,14 @@ static void apply_solve(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
 std::tuple<Tensor, Tensor> _solve_helper_cpu(const Tensor& self, const Tensor& A) {
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
-  std::vector<int64_t> infos(batchCount(self), 0);
+  auto infos = at::empty({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt));
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "solve_cpu", [&]{
     apply_solve<scalar_t>(self_working_copy, A_working_copy, infos);
   });
   if (self.dim() > 2) {
     batchCheckErrors(infos, "solve_cpu");
   } else {
-    singleCheckErrors(infos[0], "solve_cpu");
+    singleCheckErrors(infos.item().toInt(), "solve_cpu");
   }
   return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
 }
@@ -382,6 +431,99 @@ std::tuple<Tensor&,Tensor&> solve_out(Tensor& solution, Tensor& lu, const Tensor
   solution.resize_as_(solution_tmp).copy_(solution_tmp);
   lu.resize_as_(lu_tmp).copy_(lu_tmp);
   return std::tuple<Tensor&, Tensor&>(solution, lu);
+}
+
+
+// This is a type dispatching helper function for 'apply_solve'
+Tensor& _linalg_solve_out_helper_cpu(Tensor& result, Tensor& input, Tensor& infos) {
+  // 'result' and 'input' should be in column major order (it should be checked before calling this function)
+  // the content of 'result', 'input' and 'infos' is overriden by 'apply_solve'
+  // 'result' should contain data of 'other' tensor (right-hand-side of the linear system of equations)
+  // 'input' should contain data of original 'input' tensor (left-hand-side of the linear system of equations)
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "linalg_solve_out_cpu", [&]{
+    apply_solve<scalar_t>(result, input, infos);
+  });
+  return result;
+}
+
+// Solves a system of linear equations matmul(input, x) = other in-place
+// LAPACK/MAGMA error codes are saved in 'infos' tensor, they are not checked here
+static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor& input, const Tensor& other) {
+  TORCH_CHECK(infos.scalar_type() == kInt,
+    "infos dtype ", infos.scalar_type(), " does not match the expected dtype ", kInt);
+  TORCH_CHECK(result.scalar_type() == input.scalar_type(),
+    "result dtype ", result.scalar_type(), " does not match input dtype ", input.scalar_type());
+  TORCH_CHECK(input.scalar_type() == other.scalar_type(),
+    "input dtype ", input.scalar_type(), " does not match other dtype ", other.scalar_type());
+
+  TORCH_CHECK(input.dim() >= 2,
+           "input should have at least 2 dimensions, but has ", input.dim(), " dimensions instead");
+  TORCH_CHECK(other.dim() >= 1,
+           "other should have at least 1 dimension, but has ", other.dim(), " dimensions instead");
+
+  // NumPy works for 1-dimensional 'other' or batch of 1-dimensional tensors, we need to unsqueeze it
+  // because 2-dimensional tensors are expected in the implementation
+  auto expected_batched_rhs_shape = IntArrayRef(input.sizes().data(), input.dim()-1);  // A.shape[:-1]
+  bool is_rhs_broadcasted = other.dim() == 1 || (input.dim()-1 == other.dim() && other.sizes().equals(expected_batched_rhs_shape));
+  Tensor other_ = is_rhs_broadcasted ? other.unsqueeze(-1) : other;
+
+  // _linalg_broadcast_batch_dims also includes linearSolveCheckInputs
+  // it checks for squareness of 'input' and 'shape' compatibility of 'other' and 'input'
+  Tensor other_broadcasted, input_broadcasted;
+  std::tie(other_broadcasted, input_broadcasted) = _linalg_broadcast_batch_dims(other_, input, "linalg_solve");
+
+  // if result has no elements we can modify it
+  if (result.numel() == 0) {
+    at::native::resize_as_(result, other_broadcasted.transpose(-2, -1), MemoryFormat::Contiguous);
+    result.transpose_(-2, -1);
+  } else {
+    // Resize messes up the strides and we expect strictly column major order, so let's not use at::native::resize_output
+    TORCH_CHECK(result.sizes().equals(other_broadcasted.sizes()),
+      "result shape ", result.sizes(), " does not match broadcasted other shape ", other_broadcasted.sizes());
+  }
+
+  TORCH_CHECK(result.transpose(-2, -1).is_contiguous(), "result tensor must be in batched column major order (Fortran contiguous).");
+  result.copy_(other_broadcasted);
+
+  auto input_working_copy = cloneBatchedColumnMajor(input_broadcasted);
+  at::native::resize_output(infos, {std::max<int64_t>(1, batchCount(input_broadcasted))});
+  // if input is empty infos might not get filled; make sure infos doesn't contain garbage then
+  if (input.numel() == 0) {
+    infos.fill_(0);
+  }
+  result = at::_linalg_solve_out_helper_(result, input_working_copy, infos);
+
+  // NumPy works for 1-dimensional 'other', we need to squeeze the result in this case
+  if (is_rhs_broadcasted) {
+    result.squeeze_(-1);
+  }
+
+  return result;
+}
+
+// Solves a system of linear equations matmul(input, x) = other in-place
+Tensor& linalg_solve_out(Tensor& result, const Tensor& input, const Tensor& other) {
+  auto infos = at::empty({0}, input.options().dtype(kInt));
+  result = linalg_solve_out_info(result, infos, input, other);
+
+  // Now check LAPACK/MAGMA error codes
+  // batchCheckErrors(Tensor, char*) calls 'infos = infos.to(kCPU)'
+  auto expected_batched_rhs_shape = IntArrayRef(input.sizes().data(), input.dim()-1);  // A.shape[:-1]
+  bool is_rhs_broadcasted = other.dim() == 1 || (input.dim()-1 == other.dim() && other.sizes().equals(expected_batched_rhs_shape));
+  if (is_rhs_broadcasted ? result.dim() > 1 : result.dim() > 2) {
+    batchCheckErrors(infos, "linalg_solve");
+  } else {
+    singleCheckErrors(infos.item().toInt(), "linalg_solve");
+  }
+
+  return result;
+}
+
+// Solves a system of linear equations matmul(input, x) = other
+Tensor linalg_solve(const Tensor& input, const Tensor& other) {
+  Tensor result = at::empty({0}, input.options());
+  result = at::linalg_solve_out(result, input, other);
+  return result;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -879,6 +1021,157 @@ std::tuple<Tensor&,Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& self, boo
   return std::tuple<Tensor&, Tensor&>(Q, R);
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ syevd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+// This function computes eigenvalues 'w' and eigenvectors 'v' of the input that is stored initially in 'v'
+// The computation is done in-place: 'v' stores the input and will be overriden, 'w' should be an allocated empty array
+// compute_v controls whether eigenvectors should be computed
+// uplo_str controls the portion of input matrix to consider in computations, allowed values are "u", "U", "l", "L"
+// infos is used to store information for possible checks for error
+// This function doesn't do any error checks and it's assumed that every argument is valid
+template <typename scalar_t>
+static void apply_syevd(Tensor& w, Tensor& v, bool compute_v, const std::string& uplo_str, std::vector<int64_t>& infos) {
+#ifndef USE_LAPACK
+  AT_ERROR("syevd: LAPACK library not found in compilation");
+#else
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
+
+  auto v_data = v.data_ptr<scalar_t>();
+  auto w_data = w.data_ptr<value_t>();
+  auto v_matrix_stride = matrixStride(v);
+  auto w_stride = w.size(-1);
+  auto batch_size = batchCount(v);
+  auto n = v.size(-1);
+  auto lda = std::max(int64_t{1}, n);
+
+  // NumPy allows lowercase input for UPLO argument
+  // It is assumed that uplo_str is either "U" or "L"
+  char uplo = std::toupper(uplo_str[0]);
+  char jobz = compute_v ? 'V' : 'N';
+
+  // Using 'int' instead of int32_t or int64_t is consistent with the current LAPACK interface
+  // It really should be changed in the future to something like lapack_int that depends on the specific LAPACK library that is linked
+  // or switch to supporting only 64-bit indexing by default.
+  int info;
+  int lwork = -1;
+  int lrwork = -1;
+  int liwork = -1;
+  scalar_t work_query;
+  value_t rwork_query;
+  int iwork_query;
+
+  // Run lapackSyevd once, first to get the optimum work size.
+  // Since we deal with batches of matrices with the same dimensions, doing this outside
+  // the main loop saves (batch_size - 1) workspace queries which would provide the same result
+  // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
+  lapackSyevd<scalar_t, value_t>(jobz, uplo, n, v_data, lda, w_data, &work_query, lwork, &rwork_query, lrwork, &iwork_query, liwork, &info);
+
+  lwork = std::max<int>(1, real_impl<scalar_t, value_t>(work_query));
+  Tensor work = at::empty({lwork}, v.options());
+  liwork = std::max<int>(1, iwork_query);
+  Tensor iwork = at::empty({liwork}, at::kInt);
+
+  Tensor rwork;
+  value_t* rwork_data = nullptr;
+  if (isComplexType(at::typeMetaToScalarType(v.dtype()))) {
+    lrwork = std::max<int>(1, rwork_query);
+    rwork = at::empty({lrwork}, w.options());
+    rwork_data = rwork.data_ptr<value_t>();
+  }
+
+  // Now call lapackSyevd for each matrix in the batched input
+  for (auto i = decltype(batch_size){0}; i < batch_size; i++) {
+    scalar_t* v_working_ptr = &v_data[i * v_matrix_stride];
+    value_t* w_working_ptr = &w_data[i * w_stride];
+    lapackSyevd<scalar_t, value_t>(jobz, uplo, n, v_working_ptr, lda, w_working_ptr, work.data_ptr<scalar_t>(), lwork, rwork_data, lrwork, iwork.data_ptr<int>(), liwork, &info);
+    infos[i] = info;
+    // The current behaviour for Linear Algebra functions to raise an error if something goes wrong or input doesn't satisfy some requirement
+    // therefore return early since further computations will be wasted anyway
+    if (info != 0) {
+      return;
+    }
+  }
+#endif
+}
+
+// This function computes eigenvalues 'w' and eigenvectors 'v' of the tensor 'self'
+// compute_eigenvectors controls whether eigenvectors should be computed
+// uplo controls the portion of input matrix to consider in computations, allowed values are "u", "U", "l", "L"
+// This function prepares correct input for 'apply_syevd' and checks for possible errors using 'infos'
+std::tuple<Tensor, Tensor> _syevd_helper_cpu(const Tensor& self, bool compute_eigenvectors, std::string uplo) {
+  std::vector<int64_t> infos(batchCount(self), 0);
+
+  auto self_sizes = self.sizes().vec();
+  self_sizes.pop_back();
+  ScalarType dtype = toValueType(typeMetaToScalarType(self.dtype()));
+  auto eigvals = at::empty(self_sizes, self.options().dtype(dtype));
+
+  auto eigvecs = cloneBatchedColumnMajor(self);
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "syevd_cpu", [&]{
+    apply_syevd<scalar_t>(eigvals, eigvecs, compute_eigenvectors, uplo, infos);
+  });
+
+  if (self.dim() > 2) {
+    batchCheckErrors(infos, "syevd_cpu");
+  } else {
+    singleCheckErrors(infos[0], "syevd_cpu");
+  }
+  if (compute_eigenvectors) {
+    return std::tuple<Tensor, Tensor>(eigvals, eigvecs);
+  } else {
+    return std::tuple<Tensor, Tensor>(eigvals, at::empty({0}, self.options()));
+  }
+}
+
+std::tuple<Tensor, Tensor> linalg_eigh(const Tensor& self, std::string uplo) {
+  squareCheckInputs(self);
+  checkUplo(uplo);
+  return at::_syevd_helper(self, /*compute_eigenvectors=*/true, uplo);
+}
+
+// TODO: it's possible to make the _out variant to be a primal function and implement linalg_eigh on top of _out
+// TODO: implement _out variant avoiding copy and using already allocated storage directly
+std::tuple<Tensor&, Tensor&> linalg_eigh_out(Tensor& eigvals, Tensor& eigvecs, const Tensor& self, std::string uplo) {
+  TORCH_CHECK(eigvecs.scalar_type() == self.scalar_type(),
+    "eigvecs dtype ", eigvecs.scalar_type(), " does not match self dtype ", self.scalar_type());
+  ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
+  TORCH_CHECK(eigvals.scalar_type() == real_dtype,
+    "eigvals dtype ", eigvals.scalar_type(), " does not match self dtype ", real_dtype);
+
+  Tensor eigvals_tmp, eigvecs_tmp;
+  std::tie(eigvals_tmp, eigvecs_tmp) = at::linalg_eigh(self, uplo);
+
+  at::native::resize_output(eigvals, eigvals_tmp.sizes());
+  eigvals.copy_(eigvals_tmp);
+  at::native::resize_output(eigvecs, eigvecs_tmp.sizes());
+  eigvecs.copy_(eigvecs_tmp);
+
+  return std::tuple<Tensor&, Tensor&>(eigvals, eigvecs);
+}
+
+Tensor linalg_eigvalsh(const Tensor& self, std::string uplo) {
+  squareCheckInputs(self);
+  checkUplo(uplo);
+  Tensor eigvals, eigvecs;
+  std::tie(eigvals, eigvecs) = at::_syevd_helper(self, /*compute_eigenvectors=*/false, uplo);
+  return eigvals;
+}
+
+// TODO: it's possible to make the _out variant to be a primal function and implement linalg_eigvalsh on top of _out
+// TODO: implement _out variant avoiding copy and using already allocated storage directly
+Tensor& linalg_eigvalsh_out(Tensor& result, const Tensor& self, std::string uplo) {
+  ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
+  TORCH_CHECK(result.scalar_type() == real_dtype,
+    "result dtype ", result.scalar_type(), " does not match self dtype ", real_dtype);
+
+  Tensor result_tmp = at::linalg_eigvalsh(self, uplo);
+
+  at::native::resize_output(result, result_tmp.sizes());
+  result.copy_(result_tmp);
+
+  return result;
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ symeig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
@@ -973,6 +1266,46 @@ std::tuple<Tensor&, Tensor&> symeig_out(Tensor& vals, Tensor& vecs, const Tensor
   vals.resize_as_(vals_tmp).copy_(vals_tmp);
   vecs.resize_as_(vecs_tmp).copy_(vecs_tmp);
   return std::tuple<Tensor&, Tensor&>(vals, vecs);
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+DEFINE_DISPATCH(eig_stub);
+
+std::tuple<Tensor&, Tensor&> eig_out(Tensor& e, Tensor& v, const Tensor& self, bool eigenvectors) {
+  TORCH_CHECK(self.dim() == 2, "input should be 2 dimensional");
+  TORCH_CHECK(self.size(0) == self.size(1), "input should be square");
+  TORCH_CHECK(self.isfinite().all().item<bool>(), "input should not contain infs or NaNs");
+  TORCH_CHECK(e.dtype() == self.dtype(), "Expected 'e' to have dtype ", self.dtype(), " but got ", e.dtype());
+  if (eigenvectors)
+      TORCH_CHECK(v.dtype() == self.dtype(), "Expected 'v' to have dtype ", self.dtype(), " but got ", v.dtype());
+  int64_t n = self.size(-1);
+
+  at::native::resize_output(e, {n, 2});
+  if (eigenvectors) {
+      at::native::resize_output(v, self.sizes());
+  }
+
+  // optimization: if self is empty, we can immediately return the empty
+  // tensors, instead of getting empty tensors from eig_helper
+  if (self.numel() == 0) {
+      return std::tuple<Tensor&, Tensor&>(e, v);
+  }
+
+  Tensor vals_, vecs_;
+  std::tie(vals_, vecs_) = eig_stub(self.device().type(), self, eigenvectors);
+  e.copy_(vals_);
+  if (eigenvectors) {
+    v.copy_(vecs_);
+  }
+  return std::tuple<Tensor&, Tensor&>(e, v);
+}
+
+std::tuple<Tensor,Tensor> eig(const Tensor& self, bool eigenvectors) {
+  Tensor e = at::empty({0}, self.options());
+  Tensor v = at::empty({0}, self.options());
+  at::eig_out(e, v, self, eigenvectors);
+  return std::tuple<Tensor, Tensor>(e, v);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ svd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1135,7 +1468,7 @@ Tensor _lu_solve_helper_cpu(const Tensor& self, const Tensor& LU_data, const Ten
   if (self.numel() == 0 || LU_data.numel() == 0) {
     return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lu_solve_cpu", [&]{
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "lu_solve_cpu", [&]{
     apply_lu_solve<scalar_t>(self_working_copy, LU_data_working_copy, LU_pivots_working_copy, infos);
   });
   if (self.dim() > 2) {

@@ -20,6 +20,22 @@ inline Tensor det(const Tensor& self) {
   return torch::linalg_det(self);
 }
 
+inline std::tuple<Tensor, Tensor> eigh(const Tensor& self, std::string uplo) {
+  return torch::linalg_eigh(self, uplo);
+}
+
+inline std::tuple<Tensor&, Tensor&> eigh_out(Tensor& eigvals, Tensor& eigvecs, const Tensor& self, std::string uplo) {
+  return torch::linalg_eigh_out(eigvals, eigvecs, self, uplo);
+}
+
+inline Tensor eigvalsh(const Tensor& self, std::string uplo) {
+  return torch::linalg_eigvalsh(self, uplo);
+}
+
+inline Tensor& eigvalsh_out(Tensor& result, const Tensor& self, std::string uplo) {
+  return torch::linalg_eigvalsh_out(result, self, uplo);
+}
+
 inline Tensor norm(const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return torch::linalg_norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
@@ -34,6 +50,22 @@ inline Tensor& norm_out(Tensor& result, const Tensor& self, optional<Scalar> opt
 
 inline Tensor& norm_out(Tensor& result, const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return torch::linalg_norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
+}
+
+inline Tensor matrix_rank(const Tensor input, optional<double> tol, bool hermitian) {
+  return torch::linalg_matrix_rank(input, tol, hermitian);
+}
+
+inline Tensor& matrix_rank_out(Tensor& result, const Tensor input, optional<double> tol, bool hermitian) {
+  return torch::linalg_matrix_rank_out(result, input, tol, hermitian);
+}
+
+inline Tensor solve(const Tensor& input, const Tensor& other) {
+  return torch::linalg_solve(input, other);
+}
+
+inline Tensor& solve_out(Tensor& result, const Tensor& input, const Tensor& other) {
+  return torch::linalg_solve_out(result, input, other);
 }
 
 inline Tensor tensorinv(const Tensor& self, int64_t ind) {
@@ -79,6 +111,28 @@ inline Tensor linalg_det(const Tensor& self) {
   return detail::det(self);
 }
 
+/// Computes eigenvalues and eigenvectors
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.eigh
+inline std::tuple<Tensor, Tensor> eigh(const Tensor& self, std::string uplo) {
+  return detail::eigh(self, uplo);
+}
+
+inline std::tuple<Tensor&, Tensor&> eigh_out(Tensor& eigvals, Tensor& eigvecs, const Tensor& self, std::string uplo) {
+  return detail::eigh_out(eigvals, eigvecs, self, uplo);
+}
+
+/// Computes eigenvalues
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.eigvalsh
+inline Tensor eigvalsh(const Tensor& self, std::string uplo) {
+  return detail::eigvalsh(self, uplo);
+}
+
+inline Tensor& eigvalsh_out(Tensor& result, const Tensor& self, std::string uplo) {
+  return detail::eigvalsh_out(result, self, uplo);
+}
+
 inline Tensor linalg_norm(const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
@@ -93,6 +147,26 @@ inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, optional<Scal
 
 inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
+}
+
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.matrix_rank
+inline Tensor matrix_rank(const Tensor input, optional<double> tol, bool hermitian) {
+  return detail::matrix_rank(input, tol, hermitian);
+}
+
+inline Tensor& matrix_rank_out(Tensor& result, const Tensor input, optional<double> tol, bool hermitian) {
+  return detail::matrix_rank_out(result, input, tol, hermitian);
+}
+
+/// Computes a tensor `x` such that `matmul(input, x) = other`.
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.solve
+inline Tensor solve(const Tensor& input, const Tensor& other) {
+  return detail::solve(input, other);
+}
+
+inline Tensor& solve_out(Tensor& result, const Tensor& input, const Tensor& other) {
+  return detail::solve_out(result, input, other);
 }
 
 /// Computes the inverse of a tensor

@@ -3,7 +3,6 @@
 import argparse
 import copy
 from datetime import datetime
-import importlib
 import modulefinder
 import os
 import shutil
@@ -22,6 +21,7 @@ from typing import Dict, Optional
 TESTS = [
     'test_autograd',
     'benchmark_utils/test_benchmark_utils',
+    'test_binary_ufuncs',
     'test_bundled_inputs',
     'test_complex',
     'test_cpp_api_parity',
@@ -35,11 +35,13 @@ TESTS = [
     'test_jit_cuda_fuser',
     'test_cuda_primary_ctx',
     'test_dataloader',
+    'test_dataset',
     'distributed/test_data_parallel',
     'distributed/test_distributed_fork',
     'distributed/test_distributed_spawn',
     'distributions/test_constraints',
     'distributions/test_distributions',
+    'test_dispatch',
     'test_expecttest',
     'test_foreach',
     'test_indexing',
@@ -63,20 +65,26 @@ TESTS = [
     'test_quantization',
     'test_spectral_ops',
     'test_serialization',
+    'test_shape_ops',
     'test_show_pickle',
+    'test_sort_and_select',
     'test_tensor_creation_ops',
+    'test_testing',
     'test_torch',
     'test_type_info',
     'test_type_hints',
     'test_unary_ufuncs',
     'test_utils',
+    'test_view_ops',
     'test_vmap',
     'test_namedtuple_return_api',
+    'test_numpy_interop',
     'test_jit_profiling',
     'test_jit_legacy',
     'test_jit_fuser_legacy',
     'test_tensorboard',
     'test_namedtensor',
+    'test_reductions',
     'test_type_promotion',
     'test_jit_disabled',
     'test_function_schema',
@@ -97,54 +105,57 @@ TESTS = [
     'test_fx_experimental',
     'test_functional_autograd_benchmark',
     'test_package',
-    'distributed/_pipeline/sync/skip/test_api',
-    'distributed/_pipeline/sync/skip/test_gpipe',
-    'distributed/_pipeline/sync/skip/test_inspect_skip_layout',
-    'distributed/_pipeline/sync/skip/test_leak',
-    'distributed/_pipeline/sync/skip/test_portal',
-    'distributed/_pipeline/sync/skip/test_stash_pop',
-    'distributed/_pipeline/sync/skip/test_tracker',
-    'distributed/_pipeline/sync/skip/test_verify_skippables',
-    'distributed/_pipeline/sync/test_balance',
-    'distributed/_pipeline/sync/test_bugs',
-    'distributed/_pipeline/sync/test_checkpoint',
-    'distributed/_pipeline/sync/test_copy',
-    'distributed/_pipeline/sync/test_deferred_batch_norm',
-    'distributed/_pipeline/sync/test_dependency',
-    'distributed/_pipeline/sync/test_inplace',
-    'distributed/_pipeline/sync/test_microbatch',
-    'distributed/_pipeline/sync/test_phony',
-    'distributed/_pipeline/sync/test_pipe',
-    'distributed/_pipeline/sync/test_pipeline',
-    'distributed/_pipeline/sync/test_stream',
-    'distributed/_pipeline/sync/test_transparency',
-    'distributed/_pipeline/sync/test_worker',
+    'distributed/pipeline/sync/skip/test_api',
+    'distributed/pipeline/sync/skip/test_gpipe',
+    'distributed/pipeline/sync/skip/test_inspect_skip_layout',
+    'distributed/pipeline/sync/skip/test_leak',
+    'distributed/pipeline/sync/skip/test_portal',
+    'distributed/pipeline/sync/skip/test_stash_pop',
+    'distributed/pipeline/sync/skip/test_tracker',
+    'distributed/pipeline/sync/skip/test_verify_skippables',
+    'distributed/pipeline/sync/test_balance',
+    'distributed/pipeline/sync/test_bugs',
+    'distributed/pipeline/sync/test_checkpoint',
+    'distributed/pipeline/sync/test_copy',
+    'distributed/pipeline/sync/test_deferred_batch_norm',
+    'distributed/pipeline/sync/test_dependency',
+    'distributed/pipeline/sync/test_inplace',
+    'distributed/pipeline/sync/test_microbatch',
+    'distributed/pipeline/sync/test_phony',
+    'distributed/pipeline/sync/test_pipe',
+    'distributed/pipeline/sync/test_pipeline',
+    'distributed/pipeline/sync/test_stream',
+    'distributed/pipeline/sync/test_transparency',
+    'distributed/pipeline/sync/test_worker',
 ]
 
 # Tests need to be run with pytest.
 USE_PYTEST_LIST = [
-    'distributed/_pipeline/sync/skip/test_api',
-    'distributed/_pipeline/sync/skip/test_gpipe',
-    'distributed/_pipeline/sync/skip/test_inspect_skip_layout',
-    'distributed/_pipeline/sync/skip/test_leak',
-    'distributed/_pipeline/sync/skip/test_portal',
-    'distributed/_pipeline/sync/skip/test_stash_pop',
-    'distributed/_pipeline/sync/skip/test_tracker',
-    'distributed/_pipeline/sync/skip/test_verify_skippables',
-    'distributed/_pipeline/sync/test_balance',
-    'distributed/_pipeline/sync/test_bugs',
-    'distributed/_pipeline/sync/test_checkpoint',
-    'distributed/_pipeline/sync/test_copy',
-    'distributed/_pipeline/sync/test_deferred_batch_norm',
-    'distributed/_pipeline/sync/test_dependency',
-    'distributed/_pipeline/sync/test_inplace',
-    'distributed/_pipeline/sync/test_microbatch',
-    'distributed/_pipeline/sync/test_phony',
-    'distributed/_pipeline/sync/test_pipe',
-    'distributed/_pipeline/sync/test_pipeline',
-    'distributed/_pipeline/sync/test_stream',
-    'distributed/_pipeline/sync/test_transparency',
-    'distributed/_pipeline/sync/test_worker',
+    'distributed/pipeline/sync/skip/test_api',
+    'distributed/pipeline/sync/skip/test_gpipe',
+    'distributed/pipeline/sync/skip/test_inspect_skip_layout',
+    'distributed/pipeline/sync/skip/test_leak',
+    'distributed/pipeline/sync/skip/test_portal',
+    'distributed/pipeline/sync/skip/test_stash_pop',
+    'distributed/pipeline/sync/skip/test_tracker',
+    'distributed/pipeline/sync/skip/test_verify_skippables',
+    'distributed/pipeline/sync/test_balance',
+    'distributed/pipeline/sync/test_bugs',
+    'distributed/pipeline/sync/test_checkpoint',
+    'distributed/pipeline/sync/test_copy',
+    'distributed/pipeline/sync/test_deferred_batch_norm',
+    'distributed/pipeline/sync/test_dependency',
+    'distributed/pipeline/sync/test_inplace',
+    'distributed/pipeline/sync/test_microbatch',
+    'distributed/pipeline/sync/test_phony',
+    'distributed/pipeline/sync/test_pipe',
+    'distributed/pipeline/sync/test_pipeline',
+    'distributed/pipeline/sync/test_stream',
+    'distributed/pipeline/sync/test_transparency',
+    'distributed/pipeline/sync/test_worker',
+    'distributions/test_constraints',
+    'distributions/test_transforms',
+    'distributions/test_utils',
 ]
 
 WINDOWS_BLOCKLIST = [
@@ -153,6 +164,28 @@ WINDOWS_BLOCKLIST = [
     'distributed/rpc/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/test_distributed_fork',
+    'distributed/pipeline/sync/skip/test_api',
+    'distributed/pipeline/sync/skip/test_gpipe',
+    'distributed/pipeline/sync/skip/test_inspect_skip_layout',
+    'distributed/pipeline/sync/skip/test_leak',
+    'distributed/pipeline/sync/skip/test_portal',
+    'distributed/pipeline/sync/skip/test_stash_pop',
+    'distributed/pipeline/sync/skip/test_tracker',
+    'distributed/pipeline/sync/skip/test_verify_skippables',
+    'distributed/pipeline/sync/test_balance',
+    'distributed/pipeline/sync/test_bugs',
+    'distributed/pipeline/sync/test_checkpoint',
+    'distributed/pipeline/sync/test_copy',
+    'distributed/pipeline/sync/test_deferred_batch_norm',
+    'distributed/pipeline/sync/test_dependency',
+    'distributed/pipeline/sync/test_inplace',
+    'distributed/pipeline/sync/test_microbatch',
+    'distributed/pipeline/sync/test_phony',
+    'distributed/pipeline/sync/test_pipe',
+    'distributed/pipeline/sync/test_pipeline',
+    'distributed/pipeline/sync/test_stream',
+    'distributed/pipeline/sync/test_transparency',
+    'distributed/pipeline/sync/test_worker',
 ]
 
 ROCM_BLOCKLIST = [
@@ -181,11 +214,6 @@ RUN_PARALLEL_BLOCKLIST = [
     'test_cuda_primary_ctx',
 ] + [test for test in TESTS if test.startswith('distributed/')]
 
-# These tests use some specific pytest feature like parameterized testing or
-# fixtures that cannot be run by unittest
-PYTEST_TESTS = [
-    'distributions/test_constraints'
-]
 
 # These tests are slow enough that it's worth calculating whether the patch
 # touched any related files first.
@@ -197,9 +225,17 @@ SLOW_TESTS = [
     'test_jit_legacy',
     'test_dataloader',
     'test_overrides',
+    'test_linalg',
     'test_jit',
     'test_jit_profiling',
     'test_torch',
+    'test_binary_ufuncs'
+    'test_numpy_interop',
+    'test_reductions',
+    'test_shape_ops',
+    'test_sort_and_select',
+    'test_testing',
+    'test_view_ops',
     'distributed/nn/jit/test_instantiator',
     'distributed/test_distributed_fork',
     'distributed/rpc/test_process_group_agent',
@@ -221,28 +257,28 @@ SLOW_TESTS = [
     'test_quantization',
     'test_determination',
     'test_futures',
-    'distributed/_pipeline/sync/skip/test_api',
-    'distributed/_pipeline/sync/skip/test_gpipe',
-    'distributed/_pipeline/sync/skip/test_inspect_skip_layout',
-    'distributed/_pipeline/sync/skip/test_leak',
-    'distributed/_pipeline/sync/skip/test_portal',
-    'distributed/_pipeline/sync/skip/test_stash_pop',
-    'distributed/_pipeline/sync/skip/test_tracker',
-    'distributed/_pipeline/sync/skip/test_verify_skippables',
-    'distributed/_pipeline/sync/test_balance',
-    'distributed/_pipeline/sync/test_bugs',
-    'distributed/_pipeline/sync/test_checkpoint',
-    'distributed/_pipeline/sync/test_copy',
-    'distributed/_pipeline/sync/test_deferred_batch_norm',
-    'distributed/_pipeline/sync/test_dependency',
-    'distributed/_pipeline/sync/test_inplace',
-    'distributed/_pipeline/sync/test_microbatch',
-    'distributed/_pipeline/sync/test_phony',
-    'distributed/_pipeline/sync/test_pipe',
-    'distributed/_pipeline/sync/test_pipeline',
-    'distributed/_pipeline/sync/test_stream',
-    'distributed/_pipeline/sync/test_transparency',
-    'distributed/_pipeline/sync/test_worker',
+    'distributed/pipeline/sync/skip/test_api',
+    'distributed/pipeline/sync/skip/test_gpipe',
+    'distributed/pipeline/sync/skip/test_inspect_skip_layout',
+    'distributed/pipeline/sync/skip/test_leak',
+    'distributed/pipeline/sync/skip/test_portal',
+    'distributed/pipeline/sync/skip/test_stash_pop',
+    'distributed/pipeline/sync/skip/test_tracker',
+    'distributed/pipeline/sync/skip/test_verify_skippables',
+    'distributed/pipeline/sync/test_balance',
+    'distributed/pipeline/sync/test_bugs',
+    'distributed/pipeline/sync/test_checkpoint',
+    'distributed/pipeline/sync/test_copy',
+    'distributed/pipeline/sync/test_deferred_batch_norm',
+    'distributed/pipeline/sync/test_dependency',
+    'distributed/pipeline/sync/test_inplace',
+    'distributed/pipeline/sync/test_microbatch',
+    'distributed/pipeline/sync/test_phony',
+    'distributed/pipeline/sync/test_pipe',
+    'distributed/pipeline/sync/test_pipeline',
+    'distributed/pipeline/sync/test_stream',
+    'distributed/pipeline/sync/test_transparency',
+    'distributed/pipeline/sync/test_worker',
 ]
 _DEP_MODULES_CACHE: Dict[str, set] = {}
 
@@ -263,7 +299,7 @@ if dist.is_available():
             'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3',
             'TEST_REPORT_SOURCE_OVERRIDE': 'dist-nccl'
         }
-    if not TEST_WITH_ROCM and dist.is_gloo_available():
+    if dist.is_gloo_available():
         DISTRIBUTED_TESTS_CONFIG['gloo'] = {
             'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3',
             'TEST_REPORT_SOURCE_OVERRIDE': 'dist-gloo'
@@ -411,7 +447,7 @@ def test_distributed(test_module, test_directory, options):
                 init_str = "with {} init_method"
                 with_init = init_str.format("file" if with_init_file else "env")
                 print_to_stderr(
-                    'Running distributed tests for the {} backend{}'.format(
+                    'Running distributed tests for the {} backend {}'.format(
                         backend, with_init))
             os.environ['TEMP_DIR'] = tmp_dir
             os.environ['BACKEND'] = backend
@@ -640,9 +676,6 @@ def get_selected_tests(options):
         options.exclude.extend(JIT_EXECUTOR_TESTS)
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
-    # exclude PYTEST_TESTS if pytest not installed.
-    if importlib.util.find_spec('pytest') is None:
-        selected_tests = exclude_tests(PYTEST_TESTS, selected_tests, 'PyTest not found.')
 
     if sys.platform == 'win32' and not options.ignore_win_blocklist:
         target_arch = os.environ.get('VSCMD_ARG_TGT_ARCH')
@@ -857,12 +890,20 @@ def main():
             print_to_stderr(err_message)
     finally:
         if options.coverage:
+            from coverage import Coverage
+            cwd = os.getcwd()
             test_dir = os.path.dirname(os.path.abspath(__file__))
-            if not PYTORCH_COLLECT_COVERAGE:
-                shell(['coverage', 'combine'], cwd=test_dir)
-                shell(['coverage', 'html'], cwd=test_dir)
-            else:
-                shell(['coverage', 'combine', '--append'], cwd=test_dir)
+            try:
+                os.chdir(test_dir)
+                cov = Coverage()
+                if PYTORCH_COLLECT_COVERAGE:
+                    cov.load()
+                cov.combine(strict=False)
+                cov.save()
+                if not PYTORCH_COLLECT_COVERAGE:
+                    cov.html_report()
+            finally:
+                os.chdir(cwd)
 
     if options.continue_through_error and has_failed:
         for err in failure_messages:

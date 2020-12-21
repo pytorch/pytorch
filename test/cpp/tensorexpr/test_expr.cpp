@@ -1,14 +1,14 @@
 #include <gtest/gtest.h>
 
-#include "test/cpp/tensorexpr/test_base.h"
+#include <test/cpp/tensorexpr/test_base.h>
 
-#include "test/cpp/tensorexpr/padded_buffer.h"
-#include "test/cpp/tensorexpr/test_utils.h"
-#include "torch/csrc/jit/tensorexpr/eval.h"
-#include "torch/csrc/jit/tensorexpr/ir.h"
-#include "torch/csrc/jit/tensorexpr/ir_printer.h"
-#include "torch/csrc/jit/tensorexpr/loopnest.h"
-#include "torch/csrc/jit/tensorexpr/tensor.h"
+#include <test/cpp/tensorexpr/padded_buffer.h>
+#include <test/cpp/tensorexpr/test_utils.h>
+#include <torch/csrc/jit/tensorexpr/eval.h>
+#include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_printer.h>
+#include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <torch/csrc/jit/tensorexpr/tensor.h>
 
 #include <cmath>
 #include <sstream>
@@ -164,24 +164,6 @@ TEST(Expr, DoubleTest) {
   ASSERT_EQ(eval.value<double>(), 2 + (3 * 3 + 4));
 }
 
-TEST(Expr, DisallowBoolArithmetic) {
-  KernelScope kernel_scope;
-  VarHandle x("x", kBool);
-  VarHandle y("y", kBool);
-  std::string error{"arithmetic binary operations on Bool not supported"};
-  ASSERT_THROWS_WITH((x + y), error);
-  ASSERT_THROWS_WITH((x - y), error);
-  ASSERT_THROWS_WITH((x * y), error);
-  ASSERT_THROWS_WITH((x / y), error);
-  ASSERT_THROWS_WITH((x & y), error);
-  ASSERT_THROWS_WITH((x | y), error);
-  ASSERT_THROWS_WITH((x ^ y), error);
-  ASSERT_THROWS_WITH((x << y), error);
-  ASSERT_THROWS_WITH((x >> y), error);
-  ASSERT_THROWS_WITH(Max::make(x, y, /*propagate_nans=*/true), error);
-  ASSERT_THROWS_WITH(Min::make(x, y, /*propagate_nans=*/true), error);
-}
-
 TEST(Expr, VectorAdd01) {
   KernelScope kernel_scope;
   const int kVectorSize = 8;
@@ -320,9 +302,9 @@ TEST(Expr, IntrinsicsDtypes) {
   std::vector<double> b_ref(N, 10.0);
 
   VarHandle i("i", kInt);
-  auto fabs_expr = For::make(i, 0, N, b.store({i}, fabs(a.load(i))));
+  auto abs_expr = For::make(i, 0, N, b.store({i}, tensorexpr::abs(a.load(i))));
 
-  SimpleIREvaluator ir_eval(fabs_expr, a, b);
+  SimpleIREvaluator ir_eval(abs_expr, a, b);
   ir_eval(a_buffer, b_buffer);
 
   ASSERT_EQ(a_buffer.size(), N);
@@ -395,7 +377,7 @@ TEST(Expr, UnaryMath01) {
        [](float v) { return std::tanh(v); }},
       {[](const ExprHandle& v) { return exp(v); },
        [](float v) { return std::exp(v); }},
-      {[](const ExprHandle& v) { return fabs(v); },
+      {[](const ExprHandle& v) { return tensorexpr::abs(v); },
        [](float v) { return std::fabs(v); }},
       {[](const ExprHandle& v) { return log(v); },
        [](float v) { return std::log(v); }},
@@ -425,6 +407,12 @@ TEST(Expr, UnaryMath01) {
     float v_ref = test_config.ref_func(input_v);
     SimpleIRExprEval eval(v);
     ASSERT_NEAR(eval.value<float>(), v_ref, 1e-6);
+  }
+
+  for (float input_v : {std::nan("1"), 0., .5}) {
+    ExprHandle v = FloatImm::make(input_v);
+    SimpleIRExprEval eval(Intrinsics::make(kIsNan, v));
+    ASSERT_NEAR(eval.value<int>(), std::isnan(input_v), 0);
   }
 }
 

@@ -23,7 +23,7 @@
 #     differentiable subcomponents.
 #
 
-from .utils import CodeTemplate, nested_dict, write
+from .utils import CodeTemplate, nested_dict, write, make_out_api_name_faithful
 from .gen_autograd import VIEW_FUNCTIONS, VIEW_FUNCTIONS_WITH_METADATA_CHANGE, \
     MULTI_OUTPUT_SAFE_FUNCTIONS, RETURNS_VIEWS_OF_INPUT
 from .gen_autograd_functions import uses_single_grad
@@ -70,14 +70,16 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'repeat', 'expand', 'flip', 'fliplr', 'flipud', 'rot90', 'transpose',
     'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
     'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_', 'eq_',
-    'ne_', 'add', '__radd__', 'sum', '_conj', 'sin', 'cos', 'mul', 'sinh',
+    'ne_', 'add', '__radd__', 'sum', '_conj', 'sin', 'cos', 'mul', 'sinc', 'sinh',
     'cosh', '__rmul__', 'sgn', 'asin', 'acos', 'sub', 'div', 'cat', 'view_as_complex',
     'neg', 'complex', 'select', '_s_where', 'as_strided', 'slice', 'constant_pad_nd',
     'unbind', 'split', 'split_with_sizes', 'unsafe_split', 'split_with_sizes_backward',
     'dot', 'vdot', 'cholesky', 'triangular_solve', 'mm', '_unsafe_view', 'mv', 'ger',
     'bmm', 'diagonal', 'alias', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
     'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'take', 'fill_',
-    'exp', 'nonzero', 'mean', 'inverse', 'solve', 'linalg_cholesky', 'addcmul', 'addcdiv'
+    'exp', 'nonzero', 'mean', 'inverse', 'solve', 'linalg_cholesky', 'addcmul', 'addcdiv',
+    'matrix_exp', 'linalg_eigh', 'cholesky_solve', 'qr', 'svd',
+    '_fft_c2c', '_fft_r2c', 'linalg_solve',
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
@@ -186,6 +188,7 @@ std::shared_ptr<${op}> grad_fn;
 
 SETUP_ANY_REQUIRES_GRAD = CodeTemplate("""\
 auto _any_requires_grad = compute_requires_grad( ${args_with_derivatives} );
+(void)_any_requires_grad;
 """)
 
 SETUP_DERIVATIVE = CodeTemplate("""\
@@ -613,8 +616,13 @@ def emit_body(declaration):
     def emit_dispatch_call(api_name, input_base, unpacked_args):
         """ Dispatch call via function in a namespace or method on Tensor."""
         if 'namespace' in declaration['method_of']:
+            if declaration['use_c10_dispatcher'] in ['hacky_wrapper_for_legacy_signatures', 'full']:
+                dispatcher_api_name = make_out_api_name_faithful(api_name)
+            else:
+                assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
+                dispatcher_api_name = api_name
             call = CALL_DISPATCH_VIA_NAMESPACE.substitute(
-                api_name=api_name,
+                api_name=dispatcher_api_name,
                 unpacked_args=unpacked_args)
         else:
             call = CALL_DISPATCH_VIA_METHOD.substitute(
@@ -696,8 +704,9 @@ def emit_body(declaration):
                         creation_meta = "CreationMeta::MULTI_OUTPUT_SAFE"
                     else:
                         creation_meta = "CreationMeta::MULTI_OUTPUT_NODE"
-                    rhs_value = ("as_view(/* base */ {}, /* output */ {}, /* is_differentiable */ true, "
-                                 "/* creation_meta */ {})").format(view_info, var, creation_meta)
+                    call += ("as_view(/* base */ {}, /* output */ {}, /* is_differentiable */ true, "
+                             "/* creation_meta */ {});\n").format(view_info, var, creation_meta)
+                    rhs_value = 'std::move({})'.format(var)
                 else:
                     call += emit_view_lambda()
                     creation_meta = "GradMode::is_enabled() ? CreationMeta::DEFAULT: CreationMeta::NO_GRAD_MODE"
