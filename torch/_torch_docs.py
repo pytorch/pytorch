@@ -5473,7 +5473,7 @@ add_docstr(torch.argmin,
            r"""
 argmin(input, dim=None, keepdim=False) -> LongTensor
 
-Returns the indices of the minimum values of a tensor.
+Returns the indices of the minimum value(s) of the flattened tensor or along a dimension
 
 This is the second value returned by :meth:`torch.min`. See its
 documentation for the exact semantics of this method.
