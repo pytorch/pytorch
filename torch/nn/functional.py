@@ -2448,7 +2448,7 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
     See :class:`~torch.nn.BCELoss` for details.
 
     Args:
-        input: Tensor of arbitrary shape
+        input: Tensor of arbitrary shape(logistic sigmoid values)
         target: Tensor of the same shape as input
         weight (Tensor, optional): a manual rescaling weight
                 if provided it's repeated to match input tensor shape
@@ -2506,7 +2506,7 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=No
     See :class:`~torch.nn.BCEWithLogitsLoss` for details.
 
     Args:
-        input: Tensor of arbitrary shape
+        input: Tensor of arbitrary shape(logits values,aka inverse of logistic sigmoid function)
         target: Tensor of the same shape as input
         weight (Tensor, optional): a manual rescaling weight
             if provided it's repeated to match input tensor shape
