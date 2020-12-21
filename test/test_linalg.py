@@ -1872,9 +1872,9 @@ class TestLinalg(TestCase):
     def test_svd(self, device, dtype):
         def run_test(dims, some, compute_uv):
             x = torch.randn(*dims, dtype=dtype, device=device)
-            outu = torch.tensor((), dtype=dtype, device=device)
-            outs = torch.tensor((), dtype=dtype, device=device)
-            outv = torch.tensor((), dtype=dtype, device=device)
+            outu = torch.empty(0, dtype=dtype, device=device)
+            outs = torch.empty(0, dtype=dtype, device=device)
+            outv = torch.empty(0, dtype=dtype, device=device)
             torch.svd(x, some=some, compute_uv=compute_uv, out=(outu, outs, outv))
 
             if compute_uv:
