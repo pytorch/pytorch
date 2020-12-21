@@ -283,6 +283,15 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad):
                                     low=None, high=None,
                                     requires_grad=False))),)
 
+def np_sinc_with_fp16_as_fp32(x):
+    # Wraps numpy's sinc function so that fp16 values are promoted to fp32
+    # before sinc is invoked. Context: numpy's sinc returns NaN when evaluated
+    # at 0 for fp16.
+    if x.dtype == np.float16:
+        return np.sinc(x.astype(np.float32))
+    else:
+        return np.sinc(x)
+
 def np_unary_ufunc_integer_promotion_wrapper(fn):
     # Wrapper that passes PyTorch's default scalar
     #   type as an argument to the wrapped NumPy
@@ -405,13 +414,11 @@ def sample_inputs_svd(op_info, device, dtype, requires_grad=False):
             lambda usv: (abs(usv[0]), usv[1], abs(usv[2][..., :, :(S - 2)]))),  # 'wide'
         (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:, :(S - 2)],
             lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'tall'
-        (random_fullrank_matrix_distinct_singular_value(M, dtype=dtype).to(device),
-            lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'large'
-        (random_fullrank_matrix_distinct_singular_value(S, 3, dtype=dtype).to(device),
+        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype).to(device),
             lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'batched'
-        (random_fullrank_matrix_distinct_singular_value(S, 3, dtype=dtype).to(device)[..., :(S - 2), :],
+        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype).to(device)[..., :(S - 2), :],
             lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'wide_batched'
-        (random_fullrank_matrix_distinct_singular_value(S, 3, dtype=dtype).to(device)[..., :, :(S - 2)],
+        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype).to(device)[..., :, :(S - 2)],
             lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'tall_batched'
     )
     test_cases2 = (  # some=False
@@ -419,9 +426,9 @@ def sample_inputs_svd(op_info, device, dtype, requires_grad=False):
             lambda usv: (abs(usv[0]), usv[1], abs(usv[2][:, :(S - 2)]))),  # 'wide_all'
         (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:, :(S - 2)],
             lambda usv: (abs(usv[0][:, :(S - 2)]), usv[1], abs(usv[2]))),  # 'tall_all'
-        (random_fullrank_matrix_distinct_singular_value(S, 3, 3, dtype=dtype).to(device)[..., :(S - 2), :],
+        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype).to(device)[..., :(S - 2), :],
             lambda usv: (abs(usv[0]), usv[1], abs(usv[2][..., :, :(S - 2)]))),  # 'wide_all_batched'
-        (random_fullrank_matrix_distinct_singular_value(S, 3, 3, dtype=dtype).to(device)[..., :, :(S - 2)],
+        (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype).to(device)[..., :, :(S - 2)],
             lambda usv: (abs(usv[0][..., :, :(S - 2)]), usv[1], abs(usv[2]))),  # 'tall_all_batched'
     )
 
@@ -581,12 +588,7 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    promotes_integers_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
-                   test_inplace_grad=False,
-                   skips=(
-                       # RuntimeError: "isfinite" not implemented for 'BFloat16'
-                       SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                                device_type='cuda', dtypes=[torch.bfloat16]),
-                   )),
+                   test_inplace_grad=False),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -790,6 +792,26 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.float], active_if=TEST_WITH_ROCM),
                    )),
+    UnaryUfuncInfo('sinc',
+                   ref=np_sinc_with_fp16_as_fp32,
+                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+                   skip_bfloat16_grad=True,
+                   handles_large_floats=False,
+                   handles_complex_extremals=False,
+                   promotes_integers_to_float=True,
+                   decorators=(precisionOverride({torch.bfloat16: 1e-2,
+                                                  torch.float16: 1e-2}),),
+                   skips=(
+                       # Reference: https://github.com/pytorch/pytorch/issues/49133
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.cfloat]),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.float], active_if=TEST_WITH_ROCM),
+                   )),
     UnaryUfuncInfo('sinh',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.sinh),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool),
@@ -863,15 +885,28 @@ op_db: List[OpInfo] = [
                        # Reference: https://github.com/pytorch/pytorch/pull/48926#issuecomment-739734774
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cpu', dtypes=[torch.bfloat16]),
-                       # RuntimeError: "isfinite" not implemented for 'BFloat16'
-                       SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                                device_type='cpu', dtypes=[torch.bfloat16]),
                    )),
     UnaryUfuncInfo('nan_to_num',
                    ref=np.nan_to_num,
                    dtypes=all_types_and(torch.half, torch.bool),
                    dtypesIfCPU=None,
                    dtypesIfCUDA=None),
+    UnaryUfuncInfo('reciprocal',
+                   ref=np_unary_ufunc_integer_promotion_wrapper(np.reciprocal),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfCPU=None,
+                   dtypesIfCUDA=None,
+                   assert_autodiffed=True,
+                   skip_bfloat16_grad=True,
+                   promotes_integers_to_float=True,
+                   skips=(
+                       # Reference: https://github.com/pytorch/pytorch/issues/45690
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.cfloat, torch.cdouble]),
+                       # Reference: https://github.com/pytorch/pytorch/pull/49102#issuecomment-744604601
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.bfloat16]),
+                   )),
     UnaryUfuncInfo('sqrt',
                    ref=np.sqrt,
                    domain=(0, float('inf')),
@@ -902,7 +937,13 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            supports_tensor_out=False,
            sample_inputs_func=sample_inputs_svd,
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           skips=(
+               # gradgrad checks are slow
+               SkipInfo('TestGradients', 'test_fn_gradgrad', active_if=(not TEST_WITH_SLOW)),
+               # cuda gradchecks are very slow
+               # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'))),
     OpInfo('pinverse',
            op=torch.pinverse,
            dtypes=floating_and_complex_types(),
@@ -936,7 +977,6 @@ if TEST_SCIPY:
                        dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                        dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                        promotes_integers_to_float=True,
-                       skip_bfloat16_grad=True,
                        assert_autodiffed=True,
                        test_complex_grad=False),  # Reference: https://github.com/pytorch/pytorch/issues/48552
         UnaryUfuncInfo('erf',
@@ -1267,10 +1307,6 @@ def method_tests():
         ('atan2', (S, S, S), ((S,),), 'broadcast_rhs'),
         ('atan2', (S,), ((S, S, S),), 'broadcast_lhs'),
         ('atan2', (S, 1, S), ((S, S),), 'broadcast_all'),
-        ('reciprocal', torch.rand(S, S, S) + 0.1, NO_ARGS, '', (True,)),
-        ('reciprocal', uniform_scalar(0.1, requires_grad=True), NO_ARGS, 'scalar', (True,)),
-        ('reciprocal', torch.randn(S, S, S, dtype=torch.cdouble) + 0.1, NO_ARGS, 'complex', (True,)),
-        ('reciprocal', uniform_scalar(0.1j), NO_ARGS, 'complex_scalar', (True,)),
         ('round', (S, S, S), NO_ARGS, '', (True,)),
         ('round', (), NO_ARGS, 'scalar', (True,)),
         ('sign', (S, S, S), NO_ARGS),

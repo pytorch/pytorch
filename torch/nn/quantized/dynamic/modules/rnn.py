@@ -221,7 +221,8 @@ class RNNBase(torch.nn.Module):
         supported_scalar_types = [torch.qint8, torch.float16]
         if dtype not in supported_scalar_types:
             raise RuntimeError('Unsupported dtype for dynamic RNN quantization: {}'.format(dtype))
-
+        # RNNBase can be either LSTM or GRU
+        qRNNBase: Union[LSTM, GRU]
         if mod.mode == 'LSTM':
             qRNNBase = LSTM(mod.input_size, mod.hidden_size, mod.num_layers,
                             mod.bias, mod.batch_first, mod.dropout, mod.bidirectional, dtype)

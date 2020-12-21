@@ -69,7 +69,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("stack", &LegacyEvent::stack)
       .def("scope", &LegacyEvent::scope)
       .def("correlation_id", &LegacyEvent::correlationId)
-      .def("start_us", &LegacyEvent::cpuUs);
+      .def("start_us", &LegacyEvent::cpuUs)
+      .def("flops", &LegacyEvent::flops);
 
   py::enum_<c10::DeviceType>(m, "DeviceType")
       .value("CPU", c10::DeviceType::CPU)
