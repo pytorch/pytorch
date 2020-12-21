@@ -22,7 +22,9 @@ from torch.testing._internal.common_utils import \
      random_symmetric_pd_matrix, make_nonzero_det,
      random_fullrank_matrix_distinct_singular_value, set_rng_seed,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
-     torch_to_numpy_dtype_dict, TEST_WITH_SLOW, version_atleast)
+     torch_to_numpy_dtype_dict, TEST_WITH_SLOW)
+
+from distutils.version import LooseVersion
 
 if TEST_SCIPY:
     import scipy.special
@@ -868,7 +870,7 @@ if TEST_SCIPY:
                        skips=(
                            # Reference: https://github.com/pytorch/pytorch/pull/49155#issuecomment-742664611
                            SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                    active_if=not version_atleast(scipy.__version__, required_version="1.4.0")),
+                                    active_if=LooseVersion(scipy.__version__) < "1.4.0"),
                        )
                        )
     ]
