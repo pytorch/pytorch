@@ -340,9 +340,10 @@ use_c10_dispatcher: 'hacky_wrapper_for_legacy_signatures'
 ```
 
 This will indicate the level of integration with the c10 dispatcher.
-For any new ops, please set this to 'full'. This requires the
-operator function signature to be aligned with the function schema
-in native_functions.yaml, i.e.
+For any new ops, please set this to 'full'. This is also the default,
+so you can just omit it.
+This requires the operator function signature to be aligned with the
+function schema in native_functions.yaml, i.e.
 - out arguments have to be in the end of the argument list instead of in the beginning
 - TensorOptions are taken as separate arguments
 ```
