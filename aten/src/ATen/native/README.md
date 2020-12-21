@@ -356,10 +356,10 @@ function schema in native_functions.yaml, i.e.
 - optional tensors are taken as `const c10::optional<Tensor>&` instead of `Tensor`
 Some of our kernels are still written in a legacy way, not doing those things,
 and need an adapter to work with the dispatcher calling convention. For those, we use
-`use_c10_dispatcher: hacky_wrapper_for_legacy_signatures` to codegenerate
-a corresponding adapter around them in the operator registration call that translates
-between the APIs. Over time, we will migrate all those kernels to the new calling convention
-and hacky_wrapper will die. Please don't use it for new operators.
+`use_c10_dispatcher: hacky_wrapper_for_legacy_signatures` to codegenerate a corresponding
+adapter around them in the operator registration call. Over time, we will migrate all
+those kernels to the new calling convention and hacky_wrapper will die.
+Please don't use it for new operators.
 
 ### `manual_kernel_registration`
 
