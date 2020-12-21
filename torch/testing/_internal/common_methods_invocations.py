@@ -350,7 +350,7 @@ def np_binary_ufunc_type_promotion_wrapper(fn):
             if x.dtype in [np.bool, np.uint8, np.int8, np.int16, np.int32, np.int64] and \
                     type(y) == float:
                 return torch_to_numpy_dtype_dict[torch.get_default_dtype()]
-            if IS_WINDOWS and type(x) == int:
+            if IS_WINDOWS and type(y) == int:
                 return torch_to_numpy_dtype_dict[torch.promote_types(x.dtype, torch.int64)]
             return None
         if x.dtype == np.bool and y.dtype == np.bool:
