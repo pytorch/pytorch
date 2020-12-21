@@ -47,7 +47,7 @@ static std::unordered_map<std::string, int64_t> parseJITOptLimitOption(
   return passes_to_opt_limits;
 }
 
-bool bisect(const char* pass_name) {
+bool opt_limit(const char* pass_name) {
   static const char* opt_limit = std::getenv("PYTORCH_JIT_OPT_LIMIT");
   // if nothing is provided, let's allow everything
   if (!opt_limit) {

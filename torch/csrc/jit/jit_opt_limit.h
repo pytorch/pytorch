@@ -38,9 +38,9 @@ struct Graph;
 
 static std::unordered_map<std::string, int64_t> passes_to_current_counter;
 
-TORCH_API bool bisect(const char* pass_name);
+TORCH_API bool opt_limit(const char* pass_name);
 
-#define JIT_BISECT() bisect(__FILE__);
+#define JIT_OPT_LIMIT() opt_limit(__FILE__);
 
 } // namespace jit
 } // namespace torch
