@@ -257,8 +257,10 @@ Value* CloneValueFromListConstruct(Value* v, std::shared_ptr<Graph> n_graph) {
 }
 
 // Clone the node n for the new graph.
-Node* CloneNodeToGraph(Node* n, std::shared_ptr<Graph> n_graph) {
-  auto clone_node = n_graph->createClone(n, [&n_graph](Value* v) {
+Node* CloneNodeToGraph(Node* n, std::shared_ptr<Graph> n_graph, const ParamMap& params_dict) {
+  auto vals_to_params_map =
+      buildValueToParamsMap(n->owningGraph()->block(), params_dict);
+  auto clone_node = n_graph->createClone(n, [&n_graph, &vals_to_params_map](Value* v) {
     auto v_n = v->node();
     switch (v_n->kind()) {
       case ::c10::onnx::Constant: {
@@ -442,13 +444,13 @@ void FetchBlockInputMetadataFromParent(Block* b) {
   }
 }
 
-void ONNXShapeTypeInference(Block* b, int opset_version) {
+void ONNXShapeTypeInference(Block* b, const ParamMap& params_dict, int opset_version) {
   FetchBlockInputMetadataFromParent(b);
   for (auto n : b->nodes()) {
     for (auto subblock : n->blocks()) {
-      ONNXShapeTypeInference(subblock, opset_version);
+      ONNXShapeTypeInference(subblock, params_dict, opset_version);
     }
-    ONNXShapeTypeInference(n, opset_version);
+    ONNXShapeTypeInference(n, params_dict, opset_version);
   }
 }
 
