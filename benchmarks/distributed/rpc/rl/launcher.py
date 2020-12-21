@@ -40,7 +40,8 @@ parser.add_argument('--batch', type=str2bool, default=True)
 parser.add_argument('--state_size', type=str, default='10,20,10')
 parser.add_argument('--nlayers', type=int, default=5)
 parser.add_argument('--out_features', type=int, default=10)
-parser.add_argument('--graph_variable', type=str, default='world_size')
+# parser.add_argument('--graph_variable', type=str, default='world_size')
+parser.add_argument('--output_file_path', type=str, default='benchmark_report')
 
 args = parser.parse_args()
 args = vars(args)
@@ -69,15 +70,17 @@ def run_worker(rank, world_size, master_addr, master_port, batch, state_size, nl
 
 
 def main():
+    find_graph_variable(args)
+    #args come back with proper types, one of them as an array, and args.graph_variable set
     GRAPH_VARIABLES = {
         'world_size':[10,20,40], 
         'batch': [True, False], 
         'state_size': ['10,20,10', '15,20,25'], 
         'nlayers': [5, 10], 
         'out_features': [10, 20]}
-    if args['graph_variable'] in GRAPH_VARIABLES.keys():
+    if args['graph_variable'] in GRAPH_VARIABLES.keys(): #if args.graph_variable
         x_axis_name = args['graph_variable']
-        x_axis_variables = GRAPH_VARIABLES[x_axis_name]
+        x_axis_variables = GRAPH_VARIABLES[x_axis_name] #= args.[x_axis_name]
         ctx = mp.get_context('spawn')
         queue = ctx.SimpleQueue()
         benchmark_runs = []
