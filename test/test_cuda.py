@@ -1818,7 +1818,7 @@ class TestCuda(TestCase):
                     self.assertEqual(b.grad, grad * a)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    @unittest.skipIf(not IS_SANDCASTLE, "Does not work on Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE, "Does not work on Sandcastle")
     def test_cuda_init_race(self):
         # See https://github.com/pytorch/pytorch/issues/16559
         import subprocess
