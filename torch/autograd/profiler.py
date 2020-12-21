@@ -266,6 +266,25 @@ class EventList(list):
             f.truncate()
             f.write("]")
 
+    def supported_export_stacks_metrics(self):
+        return ["self_cpu_time_total", "self_cuda_time_total"]
+
+    def export_stacks(self, path: str, metric: str):
+        if metric not in self.supported_export_stacks_metrics():
+            raise ValueError("metric should be one of: " + str(self.supported_export_stacks_metrics()))
+        translate_table = str.maketrans(" ;\t\n", "____")
+        with open(path, 'w') as f:
+            for evt in self:
+                if evt.stack and len(evt.stack) > 0:
+                    metric_value = getattr(evt, metric)
+                    if int(metric_value) > 0:
+                        stack_str = ""
+                        for entry in reversed(evt.stack):
+                            stack_str += entry.translate(translate_table)
+                            stack_str += ";"
+                        stack_str = stack_str[:-1] + " " + str(int(metric_value))
+                        f.write(stack_str + "\n")
+
     def key_averages(self, group_by_input_shapes=False, group_by_stack_n=0):
         """Averages all function events over their keys.
 
@@ -522,15 +541,21 @@ class profile(object):
             return self.function_events.export_chrome_trace(path)
     export_chrome_trace.__doc__ = EventList.export_chrome_trace.__doc__
 
+    def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
+        self._check_finish()
+        assert self.function_events is not None, "Expected profiling results"
+        assert self.with_stack, "export_stacks() requires with_stack=True"
+        return self.function_events.export_stacks(path, metric)
+
     def key_averages(self, group_by_input_shape=False, group_by_stack_n=0):
         self._check_finish()
-        assert self.function_events is not None
+        assert self.function_events is not None, "Expected profiling results"
         return self.function_events.key_averages(group_by_input_shape, group_by_stack_n)
     key_averages.__doc__ = EventList.key_averages.__doc__
 
     def total_average(self):
         self._check_finish()
-        assert self.function_events is not None
+        assert self.function_events is not None, "Expected profiling results"
         return self.function_events.total_average()
     total_average.__doc__ = EventList.total_average.__doc__
 
