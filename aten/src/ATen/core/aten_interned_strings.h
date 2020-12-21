@@ -72,6 +72,7 @@ _(aten, _embedding_bag_sparse_backward) \
 _(aten, _erf) \
 _(aten, _erfc) \
 _(aten, _exp) \
+_(aten, _exp2) \
 _(aten, _expm1) \
 _(aten, _fft_with_size) \
 _(aten, _fill) \
@@ -79,6 +80,7 @@ _(aten, _floor) \
 _(aten, _fused_dropout) \
 _(aten, _indexCopy) \
 _(aten, _indices) \
+_(aten, _ldexp) \
 _(aten, _linspace) \
 _(aten, _local_scalar) \
 _(aten, _local_scalar_dense) \
@@ -132,11 +134,8 @@ _(aten, _sum_cuda) \
 _(aten, _tan) \
 _(aten, _tanh) \
 _(aten, _tanh_forward) \
-_(aten, _th_baddbmm) \
-_(aten, _th_bmm) \
 _(aten, _th_get_device) \
 _(aten, _th_kthvalue) \
-_(aten, _th_median) \
 _(aten, _th_mode) \
 _(aten, _th_prod) \
 _(aten, _th_sigmoid) \
@@ -239,6 +238,7 @@ _(aten, combinations) \
 _(aten, _conj) \
 _(aten, conj) \
 _(aten, complex) \
+_(aten, copysign) \
 _(aten, polar) \
 _(aten, constant_pad_nd) \
 _(aten, contiguous) \
@@ -291,8 +291,6 @@ _(aten, fill_diagonal_) \
 _(aten, digamma) \
 _(aten, dim) \
 _(aten, dist) \
-_(aten, div) \
-_(aten, div_) \
 _(aten, dot) \
 _(aten, dropout) \
 _(aten, dstack) \
@@ -373,6 +371,10 @@ _(aten, hstack) \
 _(aten, hypot) \
 _(aten, i0) \
 _(aten, i0_) \
+_(aten, igamma) \
+_(aten, igamma_) \
+_(aten, igammac) \
+_(aten, igammac_) \
 _(aten, ifft) \
 _(aten, index) \
 _(aten, index_add) \
@@ -381,6 +383,7 @@ _(aten, index_fill) \
 _(aten, index_put) \
 _(aten, index_select) \
 _(aten, indices) \
+_(aten, inner) \
 _(aten, instance_norm) \
 _(aten, inverse) \
 _(aten, irfft) \
@@ -400,6 +403,7 @@ _(aten, isreal) \
 _(aten, istft) \
 _(aten, isposinf) \
 _(aten, isneginf) \
+_(aten, kaiser_window) \
 _(aten, kl_div) \
 _(aten, kl_div_backward) \
 _(aten, kthvalue) \
@@ -463,6 +467,7 @@ _(aten, max_unpool3d_forward) \
 _(aten, max_values) \
 _(aten, mean) \
 _(aten, median) \
+_(aten, nanmedian) \
 _(aten, meshgrid) \
 _(aten, min) \
 _(aten, min_values) \
@@ -492,8 +497,7 @@ _(aten, mode) \
 _(aten, mse_loss) \
 _(aten, mse_loss_backward) \
 _(aten, mse_loss_forward) \
-_(aten, mul) \
-_(aten, mul_) \
+_(aten, msort) \
 _(aten, multi_margin_loss) \
 _(aten, multi_margin_loss_backward) \
 _(aten, multi_margin_loss_forward) \
@@ -504,6 +508,7 @@ _(aten, multinomial) \
 _(aten, mv) \
 _(aten, mvlgamma) \
 _(aten, nansum) \
+_(aten, nan_to_num) \
 _(aten, narrow) \
 _(aten, narrow_copy) \
 _(aten, native_batch_norm) \
@@ -528,6 +533,7 @@ _(aten, nll_loss2d_forward) \
 _(aten, nll_loss_backward) \
 _(aten, nll_loss_forward) \
 _(aten, nonzero) \
+_(aten, nonzero_numpy) \
 _(aten, norm) \
 _(aten, norm_except_dim) \
 _(aten, normal) \
@@ -542,19 +548,20 @@ _(aten, _euclidean_dist) \
 _(aten, pdist) \
 _(aten, cdist) \
 _(aten, permute) \
-_(aten, movedim) \
 _(aten, pin_memory) \
 _(aten, pinverse) \
 _(aten, pixel_shuffle) \
 _(aten, poisson) \
 _(aten, polygamma) \
 _(aten, pow) \
+_(aten, float_power) \
 _(aten, prelu) \
 _(aten, prelu_backward) \
 _(aten, prod) \
 _(aten, put) \
 _(aten, qr) \
 _(aten, quantile) \
+_(aten, nanquantile) \
 _(aten, rad2deg) \
 _(aten, rand) \
 _(aten, rand_like) \
@@ -565,6 +572,7 @@ _(aten, randn_like) \
 _(aten, random) \
 _(aten, randperm) \
 _(aten, range) \
+_(aten, ravel) \
 _(aten, reciprocal) \
 _(aten, reflection_pad1d) \
 _(aten, reflection_pad1d_backward) \
@@ -612,7 +620,9 @@ _(aten, sigmoid) \
 _(aten, sign) \
 _(aten, signbit) \
 _(aten, silu) \
+_(aten, sgn) \
 _(aten, sin) \
+_(aten, sinc) \
 _(aten, sinh) \
 _(aten, size) \
 _(aten, sizes) \
@@ -663,7 +673,7 @@ _(aten, tan) \
 _(aten, tanh) \
 _(aten, tensor) \
 _(aten, tensordot) \
-_(aten, th_addmm) \
+_(aten, tensor_split) \
 _(aten, th_clone) \
 _(aten, th_norm) \
 _(aten, th_pow) \
@@ -673,6 +683,7 @@ _(aten, th_zero) \
 _(aten, thnn_conv2d) \
 _(aten, thnn_conv2d_backward) \
 _(aten, thnn_conv2d_forward) \
+_(aten, tile) \
 _(aten, slow_conv3d) \
 _(aten, slow_conv3d_backward) \
 _(aten, slow_conv3d_forward) \
@@ -694,7 +705,6 @@ _(aten, to_sparse) \
 _(aten, to_dense) \
 _(aten, topk) \
 _(aten, trace) \
-_(aten, transpose) \
 _(aten, triangular_solve) \
 _(aten, tril) \
 _(aten, triplet_margin_loss) \
@@ -733,7 +743,6 @@ _(aten, vander) \
 _(aten, var) \
 _(aten, view) \
 _(aten, view_as) \
-_(aten, vstack) \
 _(aten, where) \
 _(aten, zero) \
 _(aten, zeros) \
@@ -778,6 +787,7 @@ _(attr, ceil_mode) \
 _(attr, checked_signal_sizes) \
 _(attr, chunks) \
 _(attr, columns) \
+_(attr, column_stack) \
 _(attr, complex_input) \
 _(attr, complex_output) \
 _(attr, condition) \
@@ -900,6 +910,7 @@ _(attr, maxnorm) \
 _(attr, maximum) \
 _(attr, mean) \
 _(attr, median) \
+_(attr, nanmedian) \
 _(attr, min) \
 _(attr, min_indices) \
 _(attr, min_val) \

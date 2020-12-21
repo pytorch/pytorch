@@ -18,6 +18,17 @@
 
 namespace pytorch_jni {
 
+c10::DeviceType deviceJniCodeToDeviceType(jint deviceJniCode) {
+  if (deviceJniCode == kDeviceCPU) {
+    return at::kCPU;
+  } else if (deviceJniCode == kDeviceVulkan) {
+    return at::kVulkan;
+  }
+
+  facebook::jni::throwNewJavaException(
+      facebook::jni::gJavaLangIllegalArgumentException, "Unknown device");
+}
+
 bool Trace::is_initialized_ = false;
 
 #if defined(TRACE_ENABLED) && defined(__ANDROID__)
@@ -289,9 +300,10 @@ facebook::jni::local_ref<JIValue> JIValue::newJIValueFromAtIValue(
         JIValue::javaClassStatic()
             ->getStaticMethod<facebook::jni::local_ref<JIValue>(
                 facebook::jni::local_ref<TensorHybrid::javaobject>)>("from");
+    const auto& tensor = ivalue.toTensor();
     return jMethodTensor(
         JIValue::javaClassStatic(),
-        TensorHybrid::newJTensorFromAtTensor(ivalue.toTensor()));
+        TensorHybrid::newJTensorFromAtTensor(tensor.cpu()));
   } else if (ivalue.isBool()) {
     static auto jMethodBool =
         JIValue::javaClassStatic()

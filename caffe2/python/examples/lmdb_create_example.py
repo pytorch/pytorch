@@ -1,9 +1,9 @@
 ## @package lmdb_create_example
 # Module caffe2.python.examples.lmdb_create_example
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import argparse
 import numpy as np

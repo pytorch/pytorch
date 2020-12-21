@@ -9,12 +9,15 @@ struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
       const std::shared_ptr<Graph>& graph,
       std::string function_name);
 
-  ExecutionPlan getPlanFor(Stack& stack, size_t remaining_bailout_depth)
+  const ExecutionPlan& getPlanFor(Stack& stack, size_t remaining_bailout_depth)
       override;
   GraphExecutorState getDebugState() override;
   ~ProfilingGraphExecutorImpl() override = default;
 
  private:
+  const ExecutionPlan& getOptimizedPlanFor(
+      Stack& stack,
+      size_t remaining_bailout_depth);
   void runProfilingInsensitiveOptimizations(std::shared_ptr<Graph>& graph);
   void runProfilingOptimizations(std::shared_ptr<Graph>& graph);
   void replaceFallbackGraphWithFallbackFunction(Block* b);
@@ -22,6 +25,8 @@ struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   c10::optional<ExecutionPlan>
       profiling_plan_; // plan to run in order to profiling the code
   c10::optional<ExecutionPlan> optimized_plan_;
+  // this plan is used if getGraphExecutorOptimize is unset
+  c10::optional<ExecutionPlan> fallback_plan_;
   // fallback functions are inserted for tensorexpr fusion groups
   // and by specialize_autogradzero. Whenever, at runtime, input
   // tensor don't match profiled properties, fallback functions are called

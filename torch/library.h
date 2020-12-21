@@ -81,7 +81,7 @@ class class_;
 ///
 /// This class erases the type of the passed in function, but durably records
 /// the type via an inferred schema for the function.
-class CAFFE2_API CppFunction final {
+class TORCH_API CppFunction final {
   // TODO: This is morally the same thing as KernelRegistrationConfig, but it's
   // opaque to the user.
 
@@ -99,7 +99,7 @@ public:
   /// This overload accepts compile time function pointers, e.g., `CppFunction(TORCH_FN(add_impl))`
   template <typename FuncPtr>
   explicit CppFunction(FuncPtr f, std::enable_if_t<c10::is_compile_time_function_pointer<FuncPtr>::value, std::nullptr_t> = nullptr)
-    : func_(c10::KernelFunction::makeFromUnboxedRuntimeFunction(f.func_ptr()))
+    : func_(c10::KernelFunction::makeFromUnboxedFunction(f))
     , cpp_signature_(c10::impl::CppSignature::make<typename FuncPtr::FuncType>())
     // TODO: Don't go through WrapRuntimeKernelFunctor
     , schema_(c10::detail::inferFunctionSchemaFromFunctor<c10::impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<typename FuncPtr::FuncType>>>())
@@ -367,7 +367,7 @@ namespace detail {
 /// }
 /// ```
 ///
-class CAFFE2_API Library final {
+class TORCH_API Library final {
 public:
   /// \private
   ///
@@ -543,7 +543,7 @@ public:
   }
   template <typename Func>
   Library& impl_UNBOXED(detail::SelectiveStr<true> name, Func* raw_f) & {
-    return impl_UNBOXED(name.operator const char*(), std::forward<Func>(raw_f));
+    return impl(name.operator const char*(), CppFunction::makeUnboxedOnly(raw_f));
   }
 
   /// Register a fallback implementation for all operators which will be used
@@ -643,7 +643,7 @@ public:
 /// for any given namespace.
 #define TORCH_LIBRARY(ns, m) \
   static void TORCH_LIBRARY_init_ ## ns (torch::Library&); \
-  static torch::detail::TorchLibraryInit TORCH_LIBRARY_static_init_ ## ns ( \
+  static const torch::detail::TorchLibraryInit TORCH_LIBRARY_static_init_ ## ns ( \
     torch::Library::DEF, \
     &TORCH_LIBRARY_init_ ## ns, \
     #ns, c10::nullopt, __FILE__, __LINE__ \
@@ -653,16 +653,28 @@ public:
 /// \private
 ///
 /// This macro is a version of TORCH_LIBRARY() that doesn't enforce that there
-/// is only one library (it is a "fragment").  This should ONLY be used
-/// inside the PerOpRegistration.cpp file (as its name suggests).
-#define TORCH_LIBRARY_FRAGMENT_THIS_API_IS_FOR_PER_OP_REGISTRATION_ONLY(ns, m) \
-  static void TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## k (torch::Library&); \
-  static torch::detail::TorchLibraryInit TORCH_LIBRARY_FRAGMENT_static_init_ ## ns ## _ ## k ( \
+/// is only one library (it is a "fragment").  This is used inside the
+/// PerOpRegistration.cpp file, as well as in places where all op registrations
+/// within the same namespace cannot be easily put into one macro block
+/// (this is mostly the case for custom ops in fbcode that were ported from
+/// the old API)
+#define TORCH_LIBRARY_FRAGMENT(ns,  m) _TORCH_LIBRARY_FRAGMENT(ns, m, C10_UID)
+
+/// \private
+///
+/// The above macro requires an extra unique identifier (uid) to prevent variable name collisions
+/// This can happen if TORCH_LIBRARY_FRAGMENT is called multiple times with the same namespace
+/// in the same translation unit.
+/// Note that the TORCH_LIBRARY variant doesn't run into this problem, because it enforces
+/// that it can only be called once for a given namespace.
+#define _TORCH_LIBRARY_FRAGMENT(ns, m, uid) \
+  static void C10_CONCATENATE(TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _, uid) (torch::Library&); \
+  static const torch::detail::TorchLibraryInit C10_CONCATENATE(TORCH_LIBRARY_FRAGMENT_static_init_ ## ns ## _, uid) ( \
     torch::Library::FRAGMENT, \
-    &TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## k, \
+    &C10_CONCATENATE(TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _, uid), \
     #ns, c10::nullopt, __FILE__, __LINE__ \
   ); \
-  void TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## k (torch::Library& m)
+  void C10_CONCATENATE(TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _, uid) (torch::Library& m)
 
 /// Macro for defining a function that will be run at static
 /// initialization time to define operator overrides for dispatch key
@@ -704,18 +716,25 @@ public:
 ///
 // NB: if the dispatch key is not whitelisted, we simply omit the Library
 // call entirely
-#define TORCH_LIBRARY_IMPL(ns, k, m) \
-  static void TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k (torch::Library&); \
-  static torch::detail::TorchLibraryInit TORCH_LIBRARY_IMPL_static_init_ ## ns ## _ ## k ( \
+#define TORCH_LIBRARY_IMPL(ns, k, m) _TORCH_LIBRARY_IMPL(ns, k, m, C10_UID)
+
+/// \private
+///
+/// The above macro requires an extra unique identifier (uid) to prevent variable name collisions.
+/// This can happen if TORCH_LIBRARY_IMPL is called multiple times with the same namespace
+/// and dispatch key in the same translation unit.
+#define _TORCH_LIBRARY_IMPL(ns, k, m, uid) \
+  static void C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k ## _, uid) (torch::Library&); \
+  static const torch::detail::TorchLibraryInit C10_CONCATENATE(TORCH_LIBRARY_IMPL_static_init_ ## ns ## _ ## k ## _, uid) ( \
     torch::Library::IMPL, \
     c10::guts::if_constexpr<c10::impl::dispatch_key_whitelist_check(c10::DispatchKey::k)>( \
-      []() { return & TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k; }, \
+      []() { return & C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k ## _, uid); }, \
       []() { return [](torch::Library&) -> void {}; } \
     ), \
     #ns, c10::make_optional(c10::DispatchKey::k), \
     __FILE__, __LINE__ \
   ); \
-  void TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k (torch::Library& m)
+  void C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k ## _, uid) (torch::Library& m)
 
 
 // These are variants of the macros above which are to be used for testing (they

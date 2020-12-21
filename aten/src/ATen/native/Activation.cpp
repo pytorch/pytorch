@@ -224,6 +224,13 @@ Tensor silu_backward(
   return grad_input;
 }
 
+Tensor math_silu_backward(
+    const Tensor& grad_output,
+    const Tensor& input) {
+  auto input_sigmoid = at::sigmoid(input);
+  return grad_output * (input_sigmoid * (1 + input * (1 - input_sigmoid)));
+}
+
 template <typename scalar_t>
 inline void _rrelu_with_noise_train(
     Tensor& output,
@@ -717,6 +724,15 @@ Tensor gelu_backward_cpu(const Tensor& grad, const Tensor& self) {
   auto it = TensorIterator::binary_op(dX, grad, self);
   GeluBackwardKernel(kCPU, it);
   return dX;
+}
+
+Tensor infinitely_differentiable_gelu_backward(
+    const Tensor& grad,
+    const Tensor& self) {
+  constexpr double kAlpha = M_2_SQRTPI * M_SQRT1_2 * 0.5;
+  Tensor cdf = (1.0 + (self * M_SQRT1_2).erf_()).mul_(0.5);
+  Tensor pdf = (-0.5 * self * self).exp_();
+  return cdf.addcmul_(self, pdf, kAlpha).mul_(grad);
 }
 
 Tensor& leaky_relu_out(

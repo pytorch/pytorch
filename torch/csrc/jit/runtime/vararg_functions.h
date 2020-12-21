@@ -11,6 +11,8 @@ void tupleUnpack(Stack& stack);
 
 void format(Stack& stack, size_t num_inputs);
 
+void percentFormat(Stack& stack, size_t num_inputs);
+
 void listUnpack(Stack& stack, size_t num_outputs);
 
 void tupleConstruct(Stack& stack, size_t num_inputs);
@@ -20,11 +22,17 @@ void namedTupleConstruct(
     at::TupleTypePtr type,
     size_t num_inputs);
 
-void listConstruct(Stack& stack, at::ListTypePtr list_type, size_t num_inputs);
+void listConstruct(
+    Stack& stack,
+    const at::ListTypePtr& list_type,
+    size_t num_inputs);
 
-void dictConstruct(Stack& stack, at::DictTypePtr type, size_t num_inputs);
+void dictConstruct(
+    Stack& stack,
+    const at::DictTypePtr& type,
+    size_t num_inputs);
 
-void createObject(Stack& stack, at::ClassTypePtr type);
+void createObject(Stack& stack, const at::ClassTypePtr& type);
 
 void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types);
 

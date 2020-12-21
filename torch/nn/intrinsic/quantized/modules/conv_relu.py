@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import torch
 import torch.nn.intrinsic
@@ -17,7 +16,7 @@ class ConvReLU1d(nnq.Conv1d):
         Same as torch.nn.quantized.Conv1d
 
     """
-    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU1d
+    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU1d  # type: ignore[assignment]
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
@@ -40,6 +39,10 @@ class ConvReLU1d(nnq.Conv1d):
 
     @classmethod
     def from_float(cls, mod):
+        if type(mod) == torch.nn.intrinsic.qat.ConvBnReLU1d:
+            mod.weight, mod.bias = fuse_conv_bn_weights(
+                mod.weight, mod.bias, mod.bn.running_mean, mod.bn.running_var,
+                mod.bn.eps, mod.bn.weight, mod.bn.bias)
         return super(ConvReLU1d, cls).from_float(mod)
 
 class ConvReLU2d(nnq.Conv2d):
@@ -52,7 +55,7 @@ class ConvReLU2d(nnq.Conv2d):
         Same as torch.nn.quantized.Conv2d
 
     """
-    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU2d
+    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU2d  # type: ignore[assignment]
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
@@ -91,7 +94,7 @@ class ConvReLU3d(nnq.Conv3d):
     Attributes: Same as torch.nn.quantized.Conv3d
 
     """
-    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU3d
+    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU3d  # type: ignore[assignment]
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,

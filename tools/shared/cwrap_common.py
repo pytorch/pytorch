@@ -130,7 +130,7 @@ class Function(object):
         self.arguments.append(arg)
 
     def __repr__(self):
-        return self.name + '(' + ', '.join(map(lambda a: a.__repr__(), self.arguments)) + ')'
+        return self.name + '(' + ', '.join(a.__repr__() for a in self.arguments) + ')'
 
 
 class Argument(object):
@@ -151,13 +151,13 @@ def parse_header(path):
     # Remove empty lines and prebackend directives
     lines = filter(lambda l: l and not l.startswith('#'), lines)
     # Remove line comments
-    lines = map(lambda l: l.partition('//'), lines)
+    lines = (l.partition('//') for l in lines)
     # Select line and comment part
-    lines = map(lambda l: (l[0].strip(), l[2].strip()), lines)
+    lines = ((l[0].strip(), l[2].strip()) for l in lines)
     # Remove trailing special signs
-    lines = map(lambda l: (l[0].rstrip(');').rstrip(','), l[1]), lines)
+    lines = ((l[0].rstrip(');').rstrip(','), l[1]) for l in lines)
     # Split arguments
-    lines = map(lambda l: (l[0].split(','), l[1]), lines)
+    lines = ((l[0].split(','), l[1]) for l in lines)
     # Flatten lines
     new_lines = []
     for l, c in lines:
@@ -166,7 +166,7 @@ def parse_header(path):
     lines = new_lines
     del new_lines
     # Remove unnecessary whitespace
-    lines = map(lambda l: (l[0].strip(), l[1]), lines)
+    lines = ((l[0].strip(), l[1]) for l in lines)
     # Remove empty lines
     lines = filter(lambda l: l[0], lines)
     generic_functions = []

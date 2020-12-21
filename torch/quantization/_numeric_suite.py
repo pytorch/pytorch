@@ -1,29 +1,14 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 from torch.quantization import prepare
+from typing import Dict
 
-from .default_mappings import (
-    _EXCLUDE_QCONFIG_PROPAGATE_LIST,
-    _INCLUDE_QCONFIG_PROPAGATE_LIST,
-    DEFAULT_DYNAMIC_MODULE_MAPPING,
-    DEFAULT_MODULE_MAPPING,
-    DEFAULT_QAT_MODULE_MAPPING,
+from .quantization_mappings import (
+    get_default_compare_output_module_list,
 )
-
-
-DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_ALLOWED_LIST = (
-    set(DEFAULT_MODULE_MAPPING.values())
-    | set(DEFAULT_QAT_MODULE_MAPPING.values())
-    | set(DEFAULT_DYNAMIC_MODULE_MAPPING.values())
-    | set(DEFAULT_MODULE_MAPPING.keys())
-    | set(DEFAULT_QAT_MODULE_MAPPING.keys())
-    | set(DEFAULT_DYNAMIC_MODULE_MAPPING.keys())
-    | _INCLUDE_QCONFIG_PROPAGATE_LIST
-) - _EXCLUDE_QCONFIG_PROPAGATE_LIST
 
 NON_LEAF_MODULE_TO_ADD_OBSERVER_ALLOW_LIST = {
     nnqd.Linear,
@@ -82,7 +67,8 @@ def compare_weights(float_dict, quantized_dict):
         a dictionary with two keys 'float' and 'quantized', containing the float and
         quantized weights
     """
-    weight_dict = {}
+    torch._C._log_api_usage_once("quantization_api._numeric_suite.compare_weights")
+    weight_dict: Dict[str, Dict] = {}
     for key in quantized_dict:
         match_key = _find_match(float_dict, key, "weight")
         if match_key is not None:
@@ -157,8 +143,9 @@ def get_logger_dict(mod, prefix=""):
     Return:
         target_dict: the dictionary used to save all logger stats
     """
+    torch._C._log_api_usage_once("quantization_api._numeric_suite.get_logger_dict")
 
-    target_dict = {}
+    target_dict: Dict[str, Dict] = {}
     _get_logger_dict_helper(mod, target_dict, prefix)
     return target_dict
 
@@ -182,23 +169,16 @@ class ShadowLogger(Logger):
 
     def __init__(self):
         super(ShadowLogger, self).__init__()
-        self.stats["float"] = None
-        self.stats["quantized"] = None
+        self.stats["float"] = []
+        self.stats["quantized"] = []
 
     def forward(self, x, y):
         if len(x) > 1:
             x = x[0]
         if len(y) > 1:
             y = y[0]
-        if self.stats["quantized"] is None:
-            self.stats["quantized"] = x.detach()
-        else:
-            self.stats["quantized"] = torch.cat((self.stats["quantized"], x.detach()))
-
-        if self.stats["float"] is None:
-            self.stats["float"] = y.detach()
-        else:
-            self.stats["float"] = torch.cat((self.stats["float"], y.detach()))
+        self.stats["quantized"].append(x.detach())
+        self.stats["float"].append(y.detach())
 
 
 class OutputLogger(Logger):
@@ -207,13 +187,11 @@ class OutputLogger(Logger):
 
     def __init__(self):
         super(OutputLogger, self).__init__()
-        self.stats["tensor_val"] = None
+        self.stats["tensor_val"] = []
+
 
     def forward(self, x):
-        if self.stats["tensor_val"] is None:
-            self.stats["tensor_val"] = x
-        else:
-            self.stats["tensor_val"] = torch.cat((self.stats["tensor_val"], x))
+        self.stats["tensor_val"].append(x)
         return x
 
 
@@ -320,6 +298,7 @@ def prepare_model_with_stubs(float_module, q_module, module_swap_list, Logger):
         Logger: type of logger to be used in shadow module to process the outputs of
             quantized module and its float shadow module
     """
+    torch._C._log_api_usage_once("quantization_api._numeric_suite.prepare_model_with_stubs")
 
     float_module_children = {}
     for name, mod in float_module.named_children():
@@ -375,6 +354,7 @@ def compare_model_stub(
         Logger: type of logger to be used in shadow module to process the outputs of
             quantized module and its float shadow module
     """
+    torch._C._log_api_usage_once("quantization_api._numeric_suite.compare_model_stub")
     prepare_model_with_stubs(float_model, q_model, module_swap_list, Logger)
     q_model(*data)
     ob_dict = get_logger_dict(q_model)
@@ -393,9 +373,10 @@ def get_matching_activations(float_module, q_module):
         entry being a dictionary with two keys 'float' and 'quantized', containing
         the matching float and quantized activations
     """
+    torch._C._log_api_usage_once("quantization_api._numeric_suite.get_matching_activations")
     float_dict = get_logger_dict(float_module)
     quantized_dict = get_logger_dict(q_module)
-    act_dict = {}
+    act_dict: Dict[str, Dict] = {}
     for key in quantized_dict:
         match_key = _find_match(sorted(float_dict, reverse=True), key, "stats")
         if match_key is not None:
@@ -409,7 +390,7 @@ def prepare_model_outputs(
     float_module,
     q_module,
     Logger=OutputLogger,
-    allow_list=DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_ALLOWED_LIST,
+    allow_list=None
 ):
     r"""Prepare the model by attaching the logger to both float module
     and quantized module if they are in the allow_list.
@@ -420,6 +401,10 @@ def prepare_model_outputs(
         Logger: type of logger to be attached to float_module and q_module
         allow_list: list of module types to attach logger
     """
+    torch._C._log_api_usage_once("quantization_api._numeric_suite.prepare_model_outputs")
+    if allow_list is None:
+        allow_list = get_default_compare_output_module_list()
+
     qconfig_debug = torch.quantization.QConfig(activation=Logger, weight=None)
     float_module.qconfig = qconfig_debug
     prepare(float_module, inplace=True, allow_list=allow_list)
@@ -437,7 +422,7 @@ def compare_model_outputs(
     q_model,
     *data,
     Logger=OutputLogger,
-    allow_list=DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_ALLOWED_LIST,
+    allow_list=None
 ):
     r"""Compare output activations between float and quantized models at
     corresponding locations for the same input. Return a dict with key corresponding
@@ -463,6 +448,9 @@ def compare_model_outputs(
         and each entry being a dictionary with two keys 'float' and 'quantized',
         containing the matching float and quantized activations
     """
+    torch._C._log_api_usage_once("quantization_api._numeric_suite.compare_model_outputs")
+    if allow_list is None:
+        allow_list = get_default_compare_output_module_list()
     prepare_model_outputs(float_model, q_model, Logger, allow_list)
     float_model(*data)
     q_model(*data)

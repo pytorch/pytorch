@@ -1,12 +1,13 @@
 import os
 import io
+import pathlib
 import sys
 import random
 import torch
 from itertools import product as product
 from torch import Tensor
 from torch.testing._internal.common_utils import TemporaryFileName
-from typing import NamedTuple
+from typing import NamedTuple, Optional
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -128,8 +129,7 @@ class TestSaveLoad(JitTestCase):
         except Exception as e:
             self.skipTest("Failed to load fixture!")
 
-        self._verify_no("aten::div", v3_module)
-        self._verify_count("aten::true_divide", v3_module, 3)
+        self._verify_count("aten::div", v3_module, 3)  # true_divide aliases to div
         self._verify_count("aten::floor_divide", v3_module, 3)
 
         current_module = self._save_load_module(MyModule)
@@ -172,8 +172,7 @@ class TestSaveLoad(JitTestCase):
         except Exception as e:
             self.skipTest("Failed to load fixture!")
 
-        self._verify_no("aten::div", v3_module)
-        self._verify_count("aten::true_divide", v3_module, 1)
+        self._verify_count("aten::div", v3_module, 1)  # true_divide aliases to div
         self._verify_count("aten::floor_divide", v3_module, 1)
 
         current_module = self._save_load_module(MyModule)
@@ -218,8 +217,7 @@ class TestSaveLoad(JitTestCase):
         except Exception as e:
             self.skipTest("Failed to load fixture!")
 
-        self._verify_no("aten::div", v3_module)
-        self._verify_count("aten::true_divide", v3_module, 1)
+        self._verify_count("aten::div", v3_module, 1)  # true_divide aliases to div
         self._verify_count("aten::floor_divide", v3_module, 1)
 
         current_module = self._save_load_module(MyModule)
@@ -278,8 +276,7 @@ class TestSaveLoad(JitTestCase):
             self.skipTest("Failed to load fixture!")
 
         for m in (v3_module_float, v3_module_int):
-            self._verify_no("aten::div", m)
-            self._verify_count("aten::true_divide", m, 1)
+            self._verify_count("aten::div", m, 1)  # true_divide aliases to div
             self._verify_count("aten::floor_divide", m, 1)
 
         current_module_float = self._save_load_module(MyModuleFloat)
@@ -363,16 +360,14 @@ class TestSaveLoad(JitTestCase):
                 else:
                     fn_result = self._try_fn(fn, a, b)
 
-                if not a.is_floating_point():
-                    # NOTE: Torchscript rewrites the module forward into
-                    #   torch.reciprocal(a) * b, but torch.reciprocal is
-                    #   implemented for integer dtypes.
-                    self.assertTrue(m_result, Exception)
-                    self.assertTrue('"reciprocal_cpu" not implemented for' in str(m_result))
-                elif isinstance(m_result, Exception):
-                    self.assertTrue(fn_result, Exception)
-                else:
+                if isinstance(m_result, Exception):
+                    self.assertTrue(isinstance(fn_result, Exception))
+                elif fn is torch.div or a.is_floating_point():
                     self.assertEqual(m_result, fn_result)
+                else:
+                    # Skip when fn is not torch.div and a is integral because
+                    # historic_div_scalar_int performs floored division
+                    pass
 
             if isinstance(b, float):
                 _helper(v3_module_float, historic_div_scalar_float_reciprocal)
@@ -414,8 +409,7 @@ class TestSaveLoad(JitTestCase):
             self.skipTest("Failed to load fixture!")
 
         for m in (v3_module_float, v3_module_int):
-            self._verify_no("aten::div", m)
-            self._verify_count("aten::true_divide", m, 1)
+            self._verify_count("aten::div", m, 1)  # true_divide aliases to div
             self._verify_count("aten::floor_divide", m, 1)
 
         current_module_float = self._save_load_module(MyModuleFloat)
@@ -925,3 +919,65 @@ class TestSaveLoad(JitTestCase):
         with self.assertRaises(RuntimeError):
             extra_files['bar'] = ''
             torch.jit.load(buffer, _extra_files=extra_files)
+
+    def test_save_load_using_pathlib(self):
+        class MyMod(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return 2 * a
+
+        m = MyMod()
+
+        # Save then load.
+        with TemporaryFileName() as fname:
+            path = pathlib.Path(fname)
+            m.save(path)
+            m2 = torch.jit.load(path)
+
+        x = torch.tensor([1., 2., 3., 4.])
+        self.assertTrue(torch.equal(m(x), m2(x)))
+
+    def test_save_nonexit_file(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return 2 * x
+
+        script_module = torch.jit.script(Foo())
+        with self.assertRaises(RuntimeError):
+            script_module.save("NonExist/path/test.pt")
+
+    def test_save_namedtuple_input_only(self):
+        """
+        Even if a NamedTuple is only used as an input argument, saving and
+        loading should work correctly.
+        """
+        global FooTuple  # see [local resolution in python]
+
+        class FooTuple(NamedTuple):
+            a: int
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x: FooTuple) -> torch.Tensor:
+                return torch.tensor(3)
+
+        m_loaded = self.getExportImportCopy(torch.jit.script(MyModule()))
+        output = m_loaded(FooTuple(a=5))
+        self.assertEqual(output, torch.tensor(3))
+
+    def test_save_namedtuple_output_only(self):
+        """
+        Even if a NamedTuple is only used as an output argument, saving and
+        loading should work correctly.
+        """
+        global FooTuple  # see [local resolution in python]
+
+        class FooTuple(NamedTuple):
+            a: int
+
+        class MyModule(torch.nn.Module):
+            def forward(self) -> Optional[FooTuple]:
+                return None
+
+        m_loaded = self.getExportImportCopy(torch.jit.script(MyModule()))
+        output = m_loaded()
+        self.assertEqual(output, None)

@@ -7,6 +7,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 void OptOutMutator::mutate(Fusion* fusion) {
   std::vector<Expr*> orig_exprs = fusion->exprs();
@@ -198,6 +199,7 @@ Statement* OptOutMutator::mutate(kir::IfThenElse* ite) {
   return ite;
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

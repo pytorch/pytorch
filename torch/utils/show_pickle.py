@@ -4,6 +4,7 @@ import pickle
 import pprint
 import zipfile
 import fnmatch
+from typing import IO, BinaryIO, Union
 
 
 class FakeObject(object):
@@ -44,7 +45,7 @@ class FakeClass(object):
     def __init__(self, module, name):
         self.module = module
         self.name = name
-        self.__new__ = self.fake_new
+        self.__new__ = self.fake_new  # type: ignore
 
     def __repr__(self):
         return f"{self.module}.{self.name}"
@@ -56,7 +57,7 @@ class FakeClass(object):
         return FakeObject(self.module, self.name, args[1:])
 
 
-class DumpUnpickler(pickle._Unpickler):
+class DumpUnpickler(pickle._Unpickler):  # type: ignore
     def find_class(self, module, name):
         return FakeClass(module, name)
 
@@ -67,6 +68,7 @@ class DumpUnpickler(pickle._Unpickler):
     def dump(cls, in_stream, out_stream):
         value = cls(in_stream).load()
         pprint.pprint(value, stream=out_stream)
+        return value
 
 
 def main(argv, output_stream=None):
@@ -84,6 +86,7 @@ def main(argv, output_stream=None):
         return 2
 
     fname = argv[1]
+    handle: Union[IO[bytes], BinaryIO]
     if "@" not in fname:
         with open(fname, "rb") as handle:
             DumpUnpickler.dump(handle, output_stream)
@@ -110,6 +113,6 @@ if __name__ == "__main__":
     # I've tested on the following versions:
     #   3.7.4
     if True:
-        pprint.PrettyPrinter._dispatch[FakeObject.__repr__] = FakeObject.pp_format
+        pprint.PrettyPrinter._dispatch[FakeObject.__repr__] = FakeObject.pp_format  # type: ignore
 
     sys.exit(main(sys.argv))

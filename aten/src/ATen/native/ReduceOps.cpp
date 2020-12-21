@@ -1,6 +1,7 @@
 #include <ATen/native/ReduceOps.h>
 
 #include <ATen/ATen.h>
+#include <ATen/AccumulateType.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/WrapDimUtils.h>
@@ -89,6 +90,18 @@ Tensor cumsum(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) 
   return result;
 }
 
+Tensor& cumsum_(Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
+  TORCH_CHECK(
+          !dtype.has_value() || (self.scalar_type() == dtype.value()),
+          "provided dtype must match the dtype of self tensor in cumsum. Got ",
+          toString(self.scalar_type()),
+          " and ",
+          toString(dtype.value()),
+          ".");
+
+  return at::_cumsum_out(self, self, dim);
+}
+
 Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
   // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
   TORCH_CHECK(
@@ -126,6 +139,18 @@ Tensor cumprod(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype)
   return result;
 }
 
+Tensor& cumprod_(Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
+    TORCH_CHECK(
+            !dtype.has_value() || (self.scalar_type() == dtype.value()),
+            "provided dtype must match the dtype of self tensor in cumprod. Got ",
+            toString(self.scalar_type()),
+            " and ",
+            toString(dtype.value()),
+            ".");
+
+    return at::_cumprod_out(self, self, dim);
+}
+
 Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
   // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
   TORCH_CHECK(
@@ -141,6 +166,137 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::option
   }
   namedinference::propagate_names(result, self);
   return result;
+}
+
+static Tensor sum_scan_exclusive(const Tensor& x, int64_t dim) {
+  Tensor ret = at::cumsum(-x, dim);
+
+  int64_t end_idx = ret.size(dim) - 1;
+  Tensor ret_sum = ret.narrow(dim, end_idx, 1).clone(at::MemoryFormat::Preserve);
+  ret -= ret_sum.expand_as(ret);
+  ret += x;
+  return ret;
+}
+
+Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim) {
+  /*
+    There are two algorithms to do this. The first one
+    is very efficient, but works only when there are no
+    nonzero elements in the input.
+
+    The second one is much more complex, but it doesn't
+    assume anything on the input. The main downside is
+    that it takes time O(n^2), where n = input.size(self.dim)
+    (i.e. the length of the cumulative product). This is in
+    contrast to the forward pass and the efficient algorithm,
+    which are both O(n).
+
+    The second algorithm is a simple application of the chain
+    rule. If x is an n-dimensional vector, and y = cumprod(x),
+    and F is the final cost, then
+
+    dF / dx_k = sum_j (dF / dy_j) * (dy_j / dx_k)   (1)
+
+    The term dF / dy_j is just grad_output[j] (assuming again
+    everything is one-dimensional).
+
+    The term (dy_j / dx_k) is easilly seen to be
+
+    if j >= k
+      dy_j / dx_k = prod_{1 <= i <= j, i != k} x_i
+    else:
+      dy_j / dx_k = 0
+
+    Note that the indicator (j>=k) can be taken out
+    by replacing the sum in (1) with a sum from
+    j = k to n.
+
+    Thus,
+    df / dx_k = sum_{k <= j <= n} grad_output[j] * (dy_j / dx_k)
+
+    with
+    dy_j / dx_k = prod_{1 <= i <= j, i != k} x_i     (2)
+
+    Note that this last term is just the cumulative product
+    with k omitted. Thus, if x_k (the input) is nonzero, we can
+    just express this as
+
+    dy_j / dx_k = (prod_{1 <= i <= j} x_i) / x_k
+                = y_j / x_k
+
+    So therefore,
+
+    df / dx_k = sum_{k <= j <= n} grad_output[j] * y_j / x_k
+
+    so
+
+    grad_output = sum_scan_exclusiv(grad_output * output) / input
+
+    If the input is nonzero, we need to calculate the dy_j / dx_k
+    by using the formula (2), called in the code omitted_products.
+
+    The way the code calculates it is simply by noting that
+
+    prod_{1 <= i <= j, i != k} x_i
+        = (prod_{1 <= i <= k} x_i) * (prod_{k + 1 <= i <= j} x_i)
+
+    the first term is calculated as prods_until_k, which since
+    doesn't depend in j is easy to vectorize.
+
+    The second term (indexed by j) is the cumulative product of
+    x_{k+1}, x_{k+2}, ..., x_n, and it's named in the code
+    prods_from_k_pkus_1, and it's calculated as a cumprod.
+
+    In order to vectorize this properly, we need to add to
+    omitted_products the dimensions where k > j, and therefore
+    dy_j / dx_k = 0, which is done right after the assert.
+  */
+
+  if (input.dim() == 0 || input.numel() == 0) {
+    return grad;
+  }
+  dim = at::maybe_wrap_dim(dim, input.sizes().size());
+  int64_t dim_size = input.size(dim);
+  if (dim_size == 1) {
+    return grad;
+  }
+
+  // Simple case with nonzero elements in the input
+  if ((input != 0).all().item<uint8_t>()) {
+    Tensor result = at::cumprod(input, dim);
+    return sum_scan_exclusive(result * grad, dim) / input;
+  }
+
+  auto ones_size = input.sizes().vec();
+  ones_size[dim] = 1;
+  Tensor ones = at::ones({1}, grad.options()).expand(ones_size);
+  Tensor grad_input = at::zeros(input.sizes(), grad.options());
+  Tensor prods_from_k_plus_1;
+  Tensor omitted_products;
+  for (int k = 0; k < dim_size; ++k) {
+    if (k == 0) {
+      prods_from_k_plus_1 = at::cumprod(input.slice(dim, k + 1), dim);
+      omitted_products = at::cat({ones, prods_from_k_plus_1}, dim);
+    } else if (k == dim_size - 1) {
+      Tensor prods_until_k = at::prod(input.slice(dim, 0, k), dim, true);
+      omitted_products = prods_until_k;
+    } else {
+      Tensor prods_until_k = at::prod(input.slice(dim, 0, k), dim, true);
+      prods_from_k_plus_1 = at::cumprod(input.slice(dim, k+1), dim);
+      omitted_products = prods_until_k.expand_as(prods_from_k_plus_1) * prods_from_k_plus_1;
+      omitted_products = at::cat({prods_until_k, omitted_products}, dim);
+    }
+
+    // At this point omitted_products is the same size
+    // as input, except on the dimension dim where it's
+    // dim_size - k
+    AT_ASSERT(omitted_products.size(dim) == dim_size - k);
+
+    grad_input.select(dim, k).copy_(
+        at::sum(grad.slice(dim, k) * omitted_products,dim));
+  }
+
+  return grad_input;
 }
 
 // Implement std::is_nan<IntegralType> for MSVC.
@@ -248,6 +404,16 @@ std::tuple<Tensor, Tensor> cummin(const Tensor& self, int64_t dim) {
   at::cummin_out(values, indices, self, dim);
   return std::make_tuple(values, indices);
 }
+
+Tensor cummaxmin_backward(const Tensor& grad, const Tensor& input, const Tensor& indices, int64_t dim) {
+  if (input.numel() == 0) {
+    return input;
+  }
+  auto result = at::zeros(input.sizes(), input.options());
+  return result.scatter_add_(dim, indices, grad);
+}
+
+
 // ALL REDUCE #################################################################
 
 static ScalarType get_dtype(Tensor& result, const Tensor& self, optional<ScalarType> dtype,
@@ -329,6 +495,40 @@ static Tensor& prod_out_impl(Tensor& result, const Tensor& self, IntArrayRef dim
   } else {
     prod_stub(iter.device_type(), iter);
   }
+  return result;
+}
+
+// NOTE: this could be implemented via diag and sum, but this has perf problems,
+// see https://github.com/pytorch/pytorch/pull/47305,
+Tensor trace_cpu(const Tensor& self) {
+  Tensor result;
+  ScalarType dtype = get_dtype(result, self, c10::nullopt, true);
+  result = at::empty({}, self.options().dtype(dtype));
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "trace", [&] {
+    using accscalar_t = at::acc_type<scalar_t, false>;
+    accscalar_t sum = 0;
+    const auto* t_data = self.data_ptr<scalar_t>();
+
+    int64_t t_stride_0, t_stride_1, t_diag_size;
+
+    TORCH_CHECK(self.dim() == 2, "trace: expected a matrix, but got tensor with dim ", self.dim());
+
+    t_stride_0 = self.stride(0);
+    t_stride_1 = self.stride(1);
+
+    t_diag_size = std::min(self.size(0), self.size(1));
+    for (int64_t i = 0; i < t_diag_size; i++) {
+      sum += t_data[i * (t_stride_0 + t_stride_1)];
+    }
+
+    // all integer types get promoted to kLong
+    if (result.scalar_type() == at::kLong) {
+      *result.data_ptr<int64_t>() = sum;
+    } else {
+      *result.data_ptr<scalar_t>() = sum;
+    }
+  });
+
   return result;
 }
 
@@ -460,22 +660,23 @@ Tensor& logsumexp_out(Tensor& result, const Tensor& self, DimnameList dims, bool
 
 static Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> opt_p,
                                IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  auto p = opt_p.value_or(2.0);
-  TORCH_CHECK(!(p.toDouble() == 2 && self.is_complex()), "norm with p=2 not supported for complex tensors");
+  auto p = opt_p.value_or(2.0).to<double>();
   TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
               "norm only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "norm only supports strided layout, got: ", self.layout());
 
-  ScalarType scalarType = opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
+  ScalarType in_dtype = opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
   TORCH_CHECK(
-      at::isFloatingType(scalarType) || at::isComplexType(scalarType),
-      "Can only calculate the mean of floating types. Got ",
-      toString(scalarType),
+      at::isFloatingType(in_dtype) || at::isComplexType(in_dtype),
+      "Can only calculate the norm of floating point and complex dtypes. Got ",
+      toString(in_dtype),
       " instead.");
 
-  ScalarType dtype = get_dtype(result, self, opt_dtype, true);
-  auto iter = make_reduction("norm", result, self, dim, keepdim, dtype);
+  ScalarType out_dtype = result.defined() ? result.scalar_type() : (opt_dtype.has_value() ? opt_dtype.value() : toValueType(self.scalar_type()));
+
+  auto iter = make_reduction("norm", result, self, dim, keepdim, in_dtype, out_dtype);
+
   if (iter.numel() == 0) {
     result.zero_();
   } else {
@@ -554,8 +755,6 @@ Tensor all(const Tensor& self) {
               "all only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "all only supports strided layout, got: ", self.layout());
-  TORCH_CHECK(self.scalar_type() == at::ScalarType::Byte || self.scalar_type() == at::ScalarType::Bool,
-    "all only supports torch.uint8 and torch.bool dtypes");
 
   Tensor result = at::empty({0}, self.options());
   auto iter = make_reduction(
@@ -573,8 +772,7 @@ Tensor &all_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
               "all only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "all only supports strided layout, got: ", self.layout());
-  TORCH_CHECK(self.scalar_type() == at::ScalarType::Byte || self.scalar_type() == at::ScalarType::Bool,
-    "all only supports torch.uint8 and torch.bool dtypes");
+
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial(result, self, 1, dim, keepdim)) {
     return result;
@@ -600,8 +798,6 @@ Tensor any(const Tensor& self) {
               "any only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided || self.layout() == Layout::Sparse,
               "any only supports strided AND sparse layout, got: ", self.layout());
-  TORCH_CHECK(self.scalar_type() == at::ScalarType::Byte || self.scalar_type() == at::ScalarType::Bool,
-    "all only supports torch.uint8 and torch.bool dtypes");
 
   Tensor result = at::empty({0}, self.options());
   auto iter = make_reduction(
@@ -619,8 +815,7 @@ Tensor &any_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
               "any only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "any only supports strided layout, got: ", self.layout());
-  TORCH_CHECK(self.scalar_type() == at::ScalarType::Byte || self.scalar_type() == at::ScalarType::Bool,
-    "all only supports torch.uint8 and torch.bool dtypes");
+
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial(result, self, 0, dim, keepdim)) {
     return result;
@@ -867,8 +1062,8 @@ Tensor var(const Tensor& self, bool unbiased) {
     return trivial_return.value();
   }
 
-  // NOTE: CPU performance significantly regressed when attempting to port to ATen, 
-  //   so this dispatches differently based on device type. 
+  // NOTE: CPU performance significantly regressed when attempting to port to ATen,
+  //   so this dispatches differently based on device type.
   //   See https://github.com/pytorch/pytorch/pull/43858.
   if (self.device().type() == kCPU) {
     return at::_var(self, unbiased);
@@ -899,8 +1094,8 @@ Tensor std(const Tensor& self, bool unbiased) {
     return trivial_return.value();
   }
 
-  // NOTE: CPU performance significantly regressed when attempting to port to ATen, 
-  //   so this dispatches differently based on device type. 
+  // NOTE: CPU performance significantly regressed when attempting to port to ATen,
+  //   so this dispatches differently based on device type.
   //   See https://github.com/pytorch/pytorch/pull/43858.
   if (self.device().type() == kCPU) {
     return at::_std(self, unbiased);
@@ -980,11 +1175,17 @@ Tensor& logcumsumexp_out(Tensor& result, const Tensor& self, Dimname dim) {
 Tensor cumsum(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
   return at::cumsum(self, dimname_to_position(self, dim), dtype);
 }
+Tensor& cumsum_(Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
+    return native::cumsum_(self, dimname_to_position(self, dim), dtype);
+}
 Tensor& cumsum_out(Tensor& result, const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
   return at::cumsum_out(result, self, dimname_to_position(self, dim), dtype);
 }
 Tensor cumprod(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
   return at::cumprod(self, dimname_to_position(self, dim), dtype);
+}
+Tensor& cumprod_(Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
+    return native::cumprod_(self, dimname_to_position(self, dim), dtype);
 }
 Tensor& cumprod_out(Tensor& result, const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
   return at::cumprod_out(result, self, dimname_to_position(self, dim), dtype);

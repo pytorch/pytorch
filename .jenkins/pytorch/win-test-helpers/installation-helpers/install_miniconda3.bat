@@ -12,4 +12,11 @@ call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Minic
 if "%REBUILD%"=="" (
   call conda install -y -q python=%PYTHON_VERSION% numpy cffi pyyaml boto3
   call conda install -y -q -c conda-forge cmake
+  call conda install -y -q -c conda-forge libuv=1.39
 )
+
+:: Get installed libuv path
+@echo off
+set libuv_ROOT=%CONDA_PARENT_DIR%\Miniconda3\Library
+@echo on
+echo libuv_ROOT=%libuv_ROOT%

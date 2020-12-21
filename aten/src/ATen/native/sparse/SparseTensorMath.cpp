@@ -42,6 +42,12 @@ namespace {
     return csr;
   }
 
+  inline SparseTensor get_result_tensor_for_unary_op(const SparseTensor& input) {
+    if (c10::isIntegralType(input.scalar_type(), /*includeBool=*/true)) {
+      return at::empty_like(input, input.options().dtype(c10::get_default_dtype()));
+    }
+    return at::empty_like(input);
+  }
 }
 
 // --------------------------------------------------------------------
@@ -95,16 +101,21 @@ SparseTensor& mul_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scal
 // log1p(SparseTensor)
 // --------------------------------------------------------------------
 
-// TODO: add in-place variant
+// In-place log1p on uncoalesced tensors is not supported since the operation is not a linear map.
+// Values of uncoalesced tensor corresponding to the same indices are summed
+// and log1p(summed_value) != log1p(v1) + log1p(v2)
 
 SparseTensor& log1p_out_sparse(SparseTensor& r, const SparseTensor& t) {
-  AT_ASSERT(r.is_sparse());
-  AT_ASSERT(t.is_sparse());
+  TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
+  TORCH_CHECK(t.is_sparse(), "Tensor should be sparse");
+  TORCH_CHECK(
+      !c10::isIntegralType(r.scalar_type(), /*includeBool=*/true),
+      "log1p: result type cannot be Integral, got:",
+      r.scalar_type());
 
   if (is_same_tensor(r, t)) {
     // don't have in-place log1p for uncoalesced input because coalesce() is not in-place
-    TORCH_CHECK(
-      r.is_coalesced(), "log1p: in-place on uncoalesced tensors is not supported yet!");
+    TORCH_CHECK(r.is_coalesced(), "log1p: in-place on uncoalesced tensors is not supported");
   }
   else {
     copy_sparse_to_sparse_(r, t.coalesce());
@@ -113,9 +124,66 @@ SparseTensor& log1p_out_sparse(SparseTensor& r, const SparseTensor& t) {
   return r;
 }
 
+SparseTensor log1p_sparse(const SparseTensor& t) {
+  auto result = get_result_tensor_for_unary_op(t);
+  return log1p_out_sparse(result, t);
+}
+
 SparseTensor& log1p_sparse_(SparseTensor& t) {
-  TORCH_CHECK(t.is_coalesced(), "log1p: in-place on uncoalesced tensors is not supported yet!");
   return log1p_out_sparse(t, t);
+}
+
+// --------------------------------------------------------------------
+// neg(SparseTensor)
+// --------------------------------------------------------------------
+
+SparseTensor& neg_out_sparse(SparseTensor& r, const SparseTensor& t) {
+  TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
+  TORCH_CHECK(t.is_sparse(), "Tensor should be sparse");
+
+  // copy_sparse_ does not perform the copy if it is the same tensor
+  copy_sparse_to_sparse_(r, t);
+  r._values().neg_();
+  return r;
+}
+
+SparseTensor& neg_sparse_(SparseTensor& t) {
+  return neg_out_sparse(t, t);
+}
+
+// --------------------------------------------------------------------
+// asin(SparseTensor)
+// --------------------------------------------------------------------
+
+// In-place asin on uncoalesced tensors is not supported since the operation is not a linear map.
+// Values of uncoalesced tensor corresponding to the same indices are summed
+// and asin(summed_value) != asin(v1) + asin(v2)
+
+SparseTensor& asin_out_sparse(SparseTensor& r, const SparseTensor& t) {
+  TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
+  TORCH_CHECK(t.is_sparse(), "Tensor should be sparse");
+  TORCH_CHECK(
+      !c10::isIntegralType(r.scalar_type(), /*includeBool=*/true),
+      "asin: result type cannot be Integral, got:",
+      r.scalar_type());
+
+  if (is_same_tensor(r, t)) {
+    // don't have in-place asin for uncoalesced input because coalesce() is not in-place, see above comment
+    TORCH_CHECK(r.is_coalesced(), "asin: in-place on uncoalesced tensors is not supported");
+  } else {
+    copy_sparse_to_sparse_(r, t.coalesce());
+  }
+  r._values().asin_();
+  return r;
+}
+
+SparseTensor asin_sparse(const SparseTensor& t) {
+  auto result = get_result_tensor_for_unary_op(t);
+  return asin_out_sparse(result, t);
+}
+
+SparseTensor& asin_sparse_(SparseTensor& t) {
+  return asin_out_sparse(t, t);
 }
 
 // --------------------------------------------------------------------
@@ -173,7 +241,7 @@ static SparseTensor& coalesce_(SparseTensor& tensor) {
 // values=[1., 1.] (after truncation), which sum to 2.f instead of 3.f.
 // To perform floor division the sparse tensor must be coalesced first.
 
-SparseTensor& div_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, const Tensor& value) {
+SparseTensor& div_out_sparse_zerodim(const SparseTensor& t, const Tensor& value, SparseTensor& r) {
   TORCH_CHECK(value.dim() == 0, "Sparse division requires a scalar or ",
     "zero-dim dense tensor divisor (got shape ", value.sizes(), " for divisor)");
   TORCH_CHECK(!value.is_sparse(), "Sparse division requires a scalar or ",
@@ -207,74 +275,19 @@ SparseTensor& div_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, con
 
 Tensor div_sparse(const Tensor& self, const Tensor& value) {
   auto commonDtype = at::result_type(self, value);
+  if (c10::isIntegralType(commonDtype, /*include_bool=*/true)) {
+    commonDtype = typeMetaToScalarType(at::get_default_dtype());
+  }
   Tensor result = at::empty({0}, self.options().dtype(commonDtype));
-  return div_out_sparse_zerodim(result, self, value);
+  return div_out_sparse_zerodim(self, value, result);
 }
 
 Tensor& div_sparse_(Tensor& self, const Tensor& value) {
-  return div_out_sparse_zerodim(self, self, value);
+  return div_out_sparse_zerodim(self, value, self);
 }
 
 SparseTensor& div_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scalar value) {
-  return div_out_sparse_zerodim(r, t, wrapped_scalar_tensor(value));
-}
-
-// --------------------------------------------------------------------
-// true_divide(SparseTensor, Scalar)
-// --------------------------------------------------------------------
-
-SparseTensor& true_divide_out_sparse_zerodim(
-    SparseTensor& result,
-    const SparseTensor& dividend,
-    const Tensor& divisor) {
-  TORCH_CHECK(divisor.dim() == 0, "Sparse true division requires a scalar or ",
-    "zero-dim dense tensor divisor (got shape ", divisor.sizes(), " for divisor)");
-  TORCH_CHECK(!divisor.is_sparse(), "Sparse true division requires a scalar or ",
-    "zero-dim dense tensor divisor (got a sparse divisor)");
-
-  AT_ASSERT(result.is_sparse());
-  AT_ASSERT(dividend.is_sparse());
-
-  // Short-circuits if result and dividend are the same tensor
-  if (is_same_tensor(result, dividend)) {
-    Tensor result_values = result._values();
-    at::true_divide_out(result_values, result_values, divisor);
-  } else {
-    Tensor dividend_tmp = dividend;
-    result.resize_as_(dividend_tmp);
-    auto indices = result._indices();
-    indices.resize_as_(dividend_tmp._indices());
-    indices.copy_(dividend_tmp._indices());
-    Tensor result_values = result._values();
-    at::true_divide_out(result_values, dividend_tmp._values(), divisor);
-    get_sparse_impl(result)->set_nnz_and_narrow(dividend_tmp._nnz());
-    result._coalesced_(dividend_tmp.is_coalesced());
-  }
-
-  return result;
-}
-
-Tensor true_divide_sparse(const Tensor& self, const Tensor& value) {
-  auto commonDtype = at::result_type(self, value);
-
-  // Ensures floating dtype
-  if (isIntegralType(commonDtype, /*includeBool=*/ true)) {
-    commonDtype = typeMetaToScalarType(c10::get_default_dtype());
-  }
-
-  Tensor result = at::empty({0}, self.options().dtype(commonDtype));
-  return true_divide_out_sparse_zerodim(result, self, value);
-}
-
-SparseTensor& true_divide_out_sparse_scalar(
-    SparseTensor& result,
-    const SparseTensor& dividend,
-    Scalar divisor) {
-  return true_divide_out_sparse_zerodim(result, dividend, wrapped_scalar_tensor(divisor));
-}
-
-Tensor& true_divide_sparse_(Tensor& self, const Tensor& divisor) {
-  return true_divide_out_sparse_zerodim(self, self, divisor);
+  return div_out_sparse_zerodim(t, wrapped_scalar_tensor(value), r);
 }
 
 // --------------------------------------------------------------------
@@ -385,7 +398,7 @@ Tensor norm_sparse(const SparseTensor& self, optional<Scalar> p, IntArrayRef dim
 
 Tensor mv_sparse(const SparseTensor& self, const Tensor& vec)
 {
-  TORCH_CHECK(self.ndimension() == 2 && 
+  TORCH_CHECK(self.ndimension() == 2 &&
               vec.ndimension() == 1,
               "mv: two tensor dim should be 2 and 1, but got ",
               "SparseTensor Dim: ", self.ndimension(), "Tensor Dim: ", vec.ndimension());
@@ -1095,7 +1108,8 @@ SparseTensor& _sspaddmm_out_cpu(
       "sspaddmm: Argument #1: Expected dim 1 size ", dim_k, ", got ", t.size(1));
 
   int64_t nnz        = sparse._nnz();
-  LongTensor indices = sparse._indices();
+  // We have to make indices contiguous as we use indices.data_ptr in _to_csr which assumes row-contiguous storage
+  LongTensor indices = sparse._indices().contiguous();
   Tensor values      = sparse._values();
 
   LongTensor csr = _to_csr(indices.data_ptr<int64_t>(), dim_i, nnz);

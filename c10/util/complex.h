@@ -257,7 +257,12 @@ struct alignas(sizeof(T) * 2) complex {
   }
 #endif
 
-  constexpr T real() const {
+  // consistent with NumPy behavior
+  explicit constexpr operator bool() const {
+    return real() || imag();
+  }
+
+  C10_HOST_DEVICE constexpr T real() const {
     return real_;
   }
   constexpr void real(T value) {

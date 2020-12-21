@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/MaxPooling.h>
 #include <ATen/native/Pool.h>
@@ -97,7 +98,12 @@ Tensor max_pool1d(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
-  if (self.requires_grad() || !self.device().is_cpu()) {
+  if (self.is_quantized()) {
+    return at::quantized_max_pool1d(
+        self, kernel_size, stride, padding, dilation, ceil_mode);
+  }
+  if ((self.requires_grad() && at::GradMode::is_enabled()) ||
+      !self.device().is_cpu()) {
     // Needs indices for grad and with_indices defines CUDA dispatch
     return std::get<0>(at::max_pool1d_with_indices(
         self, kernel_size, stride, padding, dilation, ceil_mode));

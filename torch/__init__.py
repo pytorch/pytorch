@@ -12,6 +12,7 @@ on an NVIDIA GPU with compute capability >= 3.0.
 import os
 import sys
 import platform
+import textwrap
 import ctypes
 
 if sys.version_info < (3,):
@@ -193,6 +194,31 @@ else:
 if TYPE_CHECKING:
     import torch._C as _C
 
+# Check to see if we can load C extensions, and if not provide some guidance
+# on what the problem might be.
+try:
+    # _initExtension is chosen (arbitrarily) as a sentinel.
+    from torch._C import _initExtension
+except ImportError:
+    import torch._C as _C_for_compiled_check
+
+    # The __file__ check only works for Python 3.7 and above.
+    if sys.version_info >= (3, 7) and _C_for_compiled_check.__file__ is None:
+        raise ImportError(textwrap.dedent('''
+            Failed to load PyTorch C extensions:
+                It appears that PyTorch has loaded the `torch/_C` folder
+                of the PyTorch repository rather than the C extensions which
+                are expected in the `torch._C` namespace. This can occur when
+                using the `install` workflow. e.g.
+                    $ python setup.py install && python -c "import torch"
+
+                This error can generally be solved using the `develop` workflow
+                    $ python setup.py develop && python -c "import torch"  # This should succeed
+                or by running Python from a different directory.
+            ''').strip()) from None
+    raise  # If __file__ is not None the cause is unknown, so just re-raise.
+
+
 __all__ += [name for name in dir(_C)
             if name[0] != '_' and
             not name.endswith('Base')]
@@ -300,14 +326,16 @@ def set_default_dtype(d):
     _C._set_default_dtype(d)
 
 def set_deterministic(d):
-    r""" Sets whether native PyTorch operations must use deterministic
-    algorithms. When True, operations without deterministic algorithms
-    will throw a :class:RuntimeError when called.
+    r""" Sets whether PyTorch operations must use "deterministic"
+    algorithms. That is, algorithms which, given the same input, and when
+    run on the same software and hardware, always produce the same output.
+    When True, operations will use deterministic algorithms when available,
+    and if only nondeterministic algorithms are available they will throw a
+    :class:RuntimeError when called.
 
     .. warning::
-        This feature is a beta feature, so it does not affect every
-        nondeterministic operation yet. The following operations are
-        affected by this flag.
+        This feature is in beta, and its design and implementation may change
+        in the future.
 
     The following normally-nondeterministic operations will act
     deterministically when `d=True`:
@@ -331,11 +359,13 @@ def set_deterministic(d):
         * :class:`torch.nn.FractionalMaxPool2d` when called on a CUDA tensor that requires grad
         * :class:`torch.nn.FractionalMaxPool3d` when called on a CUDA tensor that requires grad
         * :func:`torch.nn.functional.interpolate` when called on a CUDA tensor that requires grad
-            and one of the following modes is used:
-            - `linear`
-            - `bilinear`
-            - `bicubic`
-            - `trilinear`
+          and one of the following modes is used:
+
+          - `linear`
+          - `bilinear`
+          - `bicubic`
+          - `trilinear`
+
         * :class:`torch.nn.ReflectionPad1d` when called on a CUDA tensor that requires grad
         * :class:`torch.nn.ReflectionPad2d` when called on a CUDA tensor that requires grad
         * :class:`torch.nn.ReplicationPad1d` when called on a CUDA tensor that requires grad
@@ -346,10 +376,13 @@ def set_deterministic(d):
         * :class:`torch.nn.EmbeddingBag` when called on a CUDA tensor that requires grad
         * :func:`torch.scatter_add_` when called on a CUDA tensor
         * :func:`torch.index_add_` when called on a CUDA tensor
+        * :func:`torch.index_copy`
         * :func:`torch.index_select` when called on a CUDA tensor that requires grad
         * :func:`torch.repeat_interleave` when called on a CUDA tensor that requires grad
         * :func:`torch.histc` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor
+        * :func:`torch.kthvalue` with called on a CUDA tensor
+        * :func:`torch.median` with indices output when called on a CUDA tensor
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
     10.2 or greater, unless the environment variable `CUBLAS_WORKSPACE_CONFIG=:4096:8`
@@ -439,11 +472,13 @@ class QInt8Storage(_C.QInt8StorageBase, _StorageBase):
 class QInt32Storage(_C.QInt32StorageBase, _StorageBase):
     pass
 
+class QUInt4x2Storage(_C.QUInt4x2StorageBase, _StorageBase):
+    pass
 
 _storage_classes = {
     DoubleStorage, FloatStorage, LongStorage, IntStorage, ShortStorage,
     CharStorage, ByteStorage, HalfStorage, BoolStorage, QUInt8Storage, QInt8Storage,
-    QInt32Storage, BFloat16Storage, ComplexFloatStorage, ComplexDoubleStorage
+    QInt32Storage, BFloat16Storage, ComplexFloatStorage, ComplexDoubleStorage, QUInt4x2Storage
 }
 
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
@@ -477,9 +512,9 @@ del manager_path
 # is not a good way to fix this problem.  Perhaps, try to redesign VariableFunctions
 # so that this import is good enough
 if TYPE_CHECKING:
-    # Some type signatures pulled in from _VariableFunctions here clash with 
+    # Some type signatures pulled in from _VariableFunctions here clash with
     # signatures already imported. For now these clashes are ignored; see
-    # PR #43339 for details.  
+    # PR #43339 for details.
     from torch._C._VariableFunctions import *  # type: ignore
 
 for name in dir(_C._VariableFunctions):
@@ -512,6 +547,21 @@ del QUInt8StorageBase
 del BFloat16StorageBase
 del ComplexDoubleStorageBase
 del ComplexFloatStorageBase
+del QUInt4x2StorageBase
+
+################################################################################
+# Define _assert
+################################################################################
+
+# needs to be before the submodule imports to avoid circular dependencies
+def _assert(condition, message):
+    r"""A wrapper around Python's assert which is symbolically traceable.
+    """
+    from .overrides import has_torch_function, handle_torch_function
+
+    if type(condition) is not torch.Tensor and has_torch_function((condition,)):
+        return handle_torch_function(_assert, (condition,), condition, message)
+    assert condition, message
 
 ################################################################################
 # Import most common subpackages
@@ -520,12 +570,13 @@ del ComplexFloatStorageBase
 import torch.cuda
 import torch.autograd
 from torch.autograd import no_grad, enable_grad, set_grad_enabled
-# import torch.fft  # TODO: enable once torch.fft() is removed
+import torch.fft
 import torch.futures
 import torch.nn
 import torch.nn.intrinsic
 import torch.nn.quantized
 import torch.optim
+import torch.optim._multi_tensor
 import torch.multiprocessing
 import torch.sparse
 import torch.utils.backcompat
@@ -545,6 +596,7 @@ import torch.quantization
 import torch.utils.data
 import torch.__config__
 import torch.__future__
+import torch.profiler
 
 _C._init_names(list(torch._storage_classes))
 

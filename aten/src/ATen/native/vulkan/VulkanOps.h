@@ -49,6 +49,34 @@ void max_pool2d(
     const int dilationH,
     const int dilationW);
 
+void avg_pool2d(
+    VulkanTensor& output,
+    const VulkanTensor& input,
+    const int iH,
+    const int iW,
+    const int oH,
+    const int oW,
+    const int _n,
+    const int _c,
+    const int kH,
+    const int kW,
+    const int dH,
+    const int dW,
+    const int padH,
+    const int padW);
+
+VulkanTensor transpose(
+    const VulkanTensor& input,
+    const int64_t dim0,
+    const int64_t dim1);
+
+VulkanTensor slice(
+    const VulkanTensor& input,
+    const int64_t dim,
+    const int64_t start,
+    const int64_t end,
+    const int64_t step);
+
 VulkanTensor reshape_copy(
     const VulkanTensor& input,
     std::vector<int64_t> shape);
@@ -63,6 +91,10 @@ void add(
     const VulkanTensor& input0,
     const VulkanTensor& input1,
     float alpha);
+
+void mul(VulkanTensor& output, const VulkanTensor& input, const float s);
+
+void add(VulkanTensor& output, const VulkanTensor& input, const float s);
 
 void conv2d_prepack_weights(
     VulkanTensor& output,

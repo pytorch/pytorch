@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
+#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
@@ -29,40 +30,65 @@
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 
-C10_DECLARE_bool();
-
 C10_DEFINE_bool(
     torch_jit_enable_new_executor,
     true,
     "If this flag is set to false TorchScript will be using the legacy/original executor");
 
+C10_DEFINE_bool(
+    torch_jit_disable_warning_prints,
+    false,
+    "Disables warning.warn prints in TorchScript graph");
+
+constexpr size_t kDefaultNumProfiledRuns = 1;
+constexpr size_t kDefaultBailoutDepth = 20;
+
+C10_DEFINE_int64(
+    torch_jit_num_profiled_runs,
+    kDefaultNumProfiledRuns,
+    "Number of profiling runs");
+C10_DEFINE_int64(
+    torch_jit_bailout_depth,
+    kDefaultBailoutDepth,
+    "Number of re-specializations");
+
 namespace torch {
 namespace jit {
 
-// TODO: keep the else clause for trial runs
-#if defined(FBCODE_CAFFE2) || defined(C10_MOBILE)
+#if defined(C10_MOBILE)
 static std::atomic<bool> executor_mode{true};
 static std::atomic<bool> profiling_mode{false};
 #else
 static std::atomic<bool> executor_mode{true};
-static std::atomic<bool> profiling_mode{false};
+static std::atomic<bool> profiling_mode{true};
 #endif
 
-static std::atomic<size_t> num_profiled_runs{1};
-static std::atomic<size_t> bailout_depth{1};
+static std::atomic<size_t> num_profiled_runs{kDefaultNumProfiledRuns};
+static std::atomic<size_t> bailout_depth{kDefaultBailoutDepth};
 
 std::atomic<bool>& getProfilingMode() {
   return profiling_mode;
 }
+
 std::atomic<bool>& getExecutorMode() {
   return executor_mode;
 }
 
 std::atomic<size_t>& getNumProfiledRuns() {
+  // Initialize num_profiled_runs from command-line flag.
+  static const size_t init = []() {
+    return num_profiled_runs = FLAGS_torch_jit_num_profiled_runs;
+  }();
+  (void)init; // Silence clang-tidy.
   return num_profiled_runs;
 }
 
 std::atomic<size_t>& getBailoutDepth() {
+  // Initialize bailout_depth from command-line flag.
+  static const size_t init = []() {
+    return bailout_depth = FLAGS_torch_jit_bailout_depth;
+  }();
+  (void)init; // Silence clang-tidy.
   return bailout_depth;
 }
 
@@ -109,8 +135,8 @@ void runPreAutodiffPassPipeline(std::shared_ptr<Graph>& graph) {
       "Before InsertGuards (beginning of runPreAutodiffPassPipeline)\n",
       *graph);
 
-  if (tensorExprFuserEnabled()) {
-    // With TE fuser we don't generate bailouts
+  if (tensorExprFuserEnabled() || RegisterCudaFuseGraph::isRegistered()) {
+    // With TE fuser or nvfuser, we don't generate bailouts
     LowerGradOf(*graph);
     GRAPH_DEBUG("After LowerGradOf, before specializeAutogradZero\n", *graph);
   } else {
@@ -253,7 +279,7 @@ void runDiffGraphPasses(std::shared_ptr<Graph>& graph) {
       BatchMM(graph);
       GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
 
-      FuseTensorExprs(graph);
+      FuseTensorExprs(graph, getFusionGroupInlining() ? 2 : 1);
       GRAPH_DEBUG(
           "After Fusion, before RemoveTensorTypeSpecializations\n", *graph);
 
@@ -312,7 +338,7 @@ void runNoGradOptimizations(std::shared_ptr<Graph>& graph) {
       BatchMM(graph);
       GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
 
-      FuseTensorExprs(graph);
+      FuseTensorExprs(graph, getFusionGroupInlining() ? 2 : 1);
       GRAPH_DEBUG(
           "After Fusion, before RemoveTensorTypeSpecializations\n", *graph);
 
@@ -370,7 +396,9 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     InlineAutodiffSubgraphs(
         copy,
         getAutodiffSubgraphInlining() ? autodiffSubgraphInlineThreshold : 1);
-    GRAPH_DEBUG("After InlineAutodiffSubgraphs\n", *copy);
+    RemoveProfilingNodes(copy);
+    GRAPH_DEBUG(
+        "After InlineAutodiffSubgraphs and Removing Profiling Nodes\n", *copy);
   } else {
     runNoGradOptimizations(copy);
   }
@@ -444,11 +472,25 @@ ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(
     std::string function_name)
     : GraphExecutorImplBase(graph, std::move(function_name)) {}
 
-ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
+const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     Stack& stack,
     size_t remaining_bailout_depth) {
-  std::lock_guard<std::mutex> lock(compile_mutex);
   GRAPH_DEBUG("Running ProfilingGraphExecutorImpl ", this);
+
+  // no opt mode
+  if (!getGraphExecutorOptimize()) {
+    if (!fallback_plan_) {
+      auto copy = graph->copy();
+      GRAPH_DEBUG(
+          "Before LowerGradOf (beginning of runNooptPassPipeline)\n", *graph);
+      LowerGradOf(*copy);
+      GRAPH_DEBUG("After LowerGradOf, before RemoveExpands\n", *graph);
+      RemoveExpands(copy);
+      fallback_plan_ = ExecutionPlan(copy, function_name_);
+      GRAPH_DUMP("NoOpt Graph: ", copy);
+    }
+    return *fallback_plan_;
+  }
 
   // if tensorExprFuserEnabled() returns true we need to persist the very first
   // time ProfilingGraphExecutorImpl is called, so we can update it correctly
@@ -457,11 +499,6 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   // object in interpreter.
   if (!remaining_bailout_depth_.has_value() || !tensorExprFuserEnabled()) {
     remaining_bailout_depth_ = remaining_bailout_depth;
-  }
-
-  if (optimized_plan_) {
-    GRAPH_DUMP("plan already optimized:", (*optimized_plan_).graph);
-    return *optimized_plan_;
   }
 
   // simple executor
@@ -495,11 +532,23 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   // specialize_autogradzero if one exists
   replaceFallbackGraphWithFallbackFunction(copy->block());
   GRAPH_DUMP("Optimized Graph: ", copy);
-  // cache
-  GRAPH_DUMP("Optimized Graph: ", copy);
   optimized_plan_ =
       ExecutionPlan(copy, function_name_, *remaining_bailout_depth_);
   return *optimized_plan_;
+}
+
+const ExecutionPlan& ProfilingGraphExecutorImpl::getPlanFor(
+    Stack& stack,
+    size_t remaining_bailout_depth) {
+  std::lock_guard<std::mutex> lock(compile_mutex);
+
+  // IMPORTANT: This is a hot path of calling a torchscript function. Try not to
+  // add any code above this.
+  if (optimized_plan_) {
+    return *optimized_plan_;
+  }
+
+  return getOptimizedPlanFor(stack, remaining_bailout_depth);
 }
 
 GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {

@@ -65,60 +65,40 @@ graph {
     }
   }
   node {
-    input: "6"
     output: "7"
-    name: "Cast_6"
+    name: "Constant_6"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        data_type: 7
+        raw_data: "\030\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "7"
+    input: "6"
+    output: "8"
+    name: "Div_7"
+    op_type: "Div"
+  }
+  node {
+    input: "8"
+    output: "9"
+    name: "Cast_8"
     op_type: "Cast"
     attribute {
       name: "to"
-      i: 11
+      i: 7
       type: INT
     }
   }
   node {
-    output: "8"
-    name: "Constant_7"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
-        data_type: 11
-        raw_data: "\000\000\000\000\000\000\360?"
-      }
-      type: TENSOR
-    }
-  }
-  node {
-    input: "8"
-    input: "7"
-    output: "9"
-    name: "Div_8"
-    op_type: "Div"
-  }
-  node {
-    output: "10"
-    name: "Constant_9"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
-        data_type: 11
-        raw_data: "\000\000\000\000\000\0008@"
-      }
-      type: TENSOR
-    }
-  }
-  node {
     input: "9"
-    input: "10"
-    output: "11"
-    name: "Mul_10"
-    op_type: "Mul"
-  }
-  node {
-    input: "11"
-    output: "12"
-    name: "Cast_11"
+    output: "10"
+    name: "Cast_9"
     op_type: "Cast"
     attribute {
       name: "to"
@@ -128,8 +108,8 @@ graph {
   }
   node {
     input: "3"
-    output: "13"
-    name: "Unsqueeze_12"
+    output: "11"
+    name: "Unsqueeze_10"
     op_type: "Unsqueeze"
     attribute {
       name: "axes"
@@ -138,21 +118,21 @@ graph {
     }
   }
   node {
+    input: "10"
+    output: "12"
+    name: "Unsqueeze_11"
+    op_type: "Unsqueeze"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+  }
+  node {
+    input: "11"
     input: "12"
-    output: "14"
-    name: "Unsqueeze_13"
-    op_type: "Unsqueeze"
-    attribute {
-      name: "axes"
-      ints: 0
-      type: INTS
-    }
-  }
-  node {
-    input: "13"
-    input: "14"
-    output: "15"
-    name: "Concat_14"
+    output: "13"
+    name: "Concat_12"
     op_type: "Concat"
     attribute {
       name: "axis"
@@ -162,9 +142,9 @@ graph {
   }
   node {
     input: "0"
-    input: "15"
-    output: "16"
-    name: "Reshape_15"
+    input: "13"
+    output: "14"
+    name: "Reshape_13"
     op_type: "Reshape"
   }
   name: "torch-jit-export"
@@ -191,7 +171,7 @@ graph {
     }
   }
   output {
-    name: "16"
+    name: "14"
     type {
       tensor_type {
         elem_type: 1

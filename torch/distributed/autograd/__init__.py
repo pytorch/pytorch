@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import sys
 import torch
@@ -11,6 +10,20 @@ def is_available():
 if is_available() and not torch._C._dist_autograd_init():
     raise RuntimeError("Failed to initialize torch.distributed.autograd")
 
+if is_available():
+    from torch._C._distributed_autograd import (
+        get_gradients,
+        backward,
+        _init,
+        _new_context,
+        _release_context,
+        _get_max_id,
+        _is_valid_context,
+        _retrieve_context,
+        _current_context,
+        _get_debug_info,
+        DistAutogradContext,
+    )
 
 class context(object):
     '''

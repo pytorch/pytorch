@@ -40,6 +40,20 @@ void genericAddInput(Node* n, T value) {
 }
 
 template <typename T>
+void genericAddOptionalInput(
+    Node* n,
+    const char* name,
+    const c10::optional<T>& value) {
+  if (value) {
+    jit::tracer::addInputs(n, name, *value);
+  } else {
+    Graph* g = n->owningGraph();
+    Value* none = g->insertNode(g->createNone())->output();
+    n->addInput(none);
+  }
+}
+
+template <typename T>
 void badArgType(const T& v) {
   AT_ERROR(
       "Found an unsupported argument type in the JIT tracer: ",
@@ -544,32 +558,14 @@ void addInputs(Node* n, const char* name, c10::optional<int64_t> value) {
 void addInputs(Node* n, const char* name, bool value) {
   detail::genericAddInput(n, value);
 }
-void addInputs(
-    Node* n,
-    const char* name /* unused */,
-    const c10::optional<bool>& value) {
-  if (value) {
-    detail::genericAddInput(n, *value);
-  } else {
-    Graph* g = n->owningGraph();
-    Value* none = g->insertNode(g->createNone())->output();
-    n->addInput(none);
-  }
+void addInputs(Node* n, const char* name, const c10::optional<bool>& value) {
+  detail::genericAddOptionalInput(n, name, value);
 }
 void addInputs(Node* n, const char* name, double value) {
   detail::genericAddInput(n, value);
 }
-void addInputs(
-    Node* n,
-    const char* name /* unused */,
-    const c10::optional<double>& value) {
-  if (value) {
-    detail::genericAddInput(n, *value);
-  } else {
-    Graph* g = n->owningGraph();
-    Value* none = g->insertNode(g->createNone())->output();
-    n->addInput(none);
-  }
+void addInputs(Node* n, const char* name, const c10::optional<double>& value) {
+  detail::genericAddOptionalInput(n, name, value);
 }
 void addInputs(Node* n, const char* name, const at::Scalar& value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
@@ -584,16 +580,16 @@ void addInputs(
     Node* n,
     const char* name,
     const c10::optional<at::Scalar>& value) {
-  if (value) {
-    detail::genericAddInput(n, *value);
-  } else {
-    Graph* g = n->owningGraph();
-    Value* none = g->insertNode(g->createNone())->output();
-    n->addInput(none);
-  }
+  detail::genericAddOptionalInput(n, name, value);
 }
 void addInputs(Node* n, const char* name, const std::string& value) {
   detail::genericAddInput(n, value);
+}
+void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<std::string>& value) {
+  detail::genericAddOptionalInput(n, name, value);
 }
 void addInputs(Node* n, const char* name, const at::Tensor& value) {
   n->addInput(getValueTrace(value));
@@ -602,13 +598,7 @@ void addInputs(
     Node* n,
     const char* name,
     const c10::optional<at::Tensor>& value) {
-  if (value.has_value()) {
-    addInputs(n, name, *value);
-  } else {
-    Graph* g = n->owningGraph();
-    Value* none = g->insertNode(g->createNone())->output();
-    n->addInput(none);
-  }
+  detail::genericAddOptionalInput(n, name, value);
 }
 void addInputs(
     Node* n,
@@ -624,6 +614,9 @@ void addInputs(
 void addInputs(Node* n, const char* name, at::Device value) {
   detail::genericAddInput(n, value);
 }
+void addInputs(Node* n, const char* name, c10::Stream stream) {
+  detail::genericAddInput(n, static_cast<int64_t>(stream.pack()));
+}
 void addInputs(Node* n, const char* name, at::Layout value) {
   detail::genericAddInput(n, static_cast<int64_t>(value));
 }
@@ -637,37 +630,19 @@ void addInputs(
     Node* n,
     const char* name,
     const c10::optional<at::MemoryFormat>& value) {
-  if (value) {
-    detail::genericAddInput(n, static_cast<int64_t>(*value));
-  } else {
-    Graph* g = n->owningGraph();
-    Value* none = g->insertNode(g->createNone())->output();
-    n->addInput(none);
-  }
+  detail::genericAddOptionalInput(n, name, value);
 }
 void addInputs(
     Node* n,
     const char* name,
     const c10::optional<at::Layout>& value) {
-  if (value.has_value()) {
-    detail::genericAddInput(n, static_cast<int64_t>(*value));
-  } else {
-    Graph* g = n->owningGraph();
-    Value* none = g->insertNode(g->createNone())->output();
-    n->addInput(none);
-  }
+  detail::genericAddOptionalInput(n, name, value);
 }
 void addInputs(
     Node* n,
     const char* name,
     const c10::optional<at::Device>& value) {
-  if (value.has_value()) {
-    detail::genericAddInput(n, value);
-  } else {
-    Graph* g = n->owningGraph();
-    Value* none = g->insertNode(g->createNone())->output();
-    n->addInput(none);
-  }
+  detail::genericAddOptionalInput(n, name, value);
 }
 void addInputs(
     Node* n,
@@ -679,13 +654,7 @@ void addInputs(
     Node* n,
     const char* name,
     const c10::optional<at::ScalarType>& value) {
-  if (value.has_value()) {
-    detail::genericAddInput(n, static_cast<int64_t>(*value));
-  } else {
-    Graph* g = n->owningGraph();
-    Value* none = g->insertNode(g->createNone())->output();
-    n->addInput(none);
-  }
+  detail::genericAddOptionalInput(n, name, value);
 }
 
 void addInputs(
@@ -730,15 +699,6 @@ void addInputs(
   }
 }
 
-void addInputs(Node* n, const char* name, const at::TensorOptions& options) {
-  // [TensorOptions in script] - update this when you change how we schematize
-  // TensorOptions
-  addInputs(n, name, options.dtype_opt());
-  addInputs(n, name, options.layout());
-  addInputs(n, name, options.device());
-  addInputs(n, name, options.pinned_memory());
-}
-
 void addInputs(Node* n, const char* name, at::IntArrayRef value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
   std::vector<Value*> info = ArgumentStash::hasIntArrayRef(name)
@@ -767,13 +727,7 @@ void addInputs(
     Node* n,
     const char* name,
     const c10::optional<at::IntArrayRef>& opt_value) {
-  if (opt_value.has_value()) {
-    return addInputs(n, name, *opt_value);
-  } else {
-    Graph* g = n->owningGraph();
-    Value* none = g->insertNode(g->createNone())->output();
-    n->addInput(none);
-  }
+  detail::genericAddOptionalInput(n, name, opt_value);
 }
 
 void addInputs(Node* n, const char* name, ArrayRef<double> value) {
@@ -791,13 +745,7 @@ void addInputs(
     Node* n,
     const char* name,
     const c10::optional<c10::ArrayRef<double>>& opt_value) {
-  if (opt_value.has_value()) {
-    return addInputs(n, name, *opt_value);
-  } else {
-    Graph* g = n->owningGraph();
-    Value* none = g->insertNode(g->createNone())->output();
-    n->addInput(none);
-  }
+  detail::genericAddOptionalInput(n, name, opt_value);
 }
 
 void addInputs(
@@ -965,6 +913,18 @@ void recordSourceLocation(Node* n) {
 }
 void setRecordSourceLocation(void (*v)(Node*)) {
   record_source_location.store(v);
+}
+
+std::vector<StackEntry> defaultPythonCallstack() {
+  return std::vector<StackEntry>();
+}
+std::atomic<decltype(&defaultPythonCallstack)> python_callstack_fn(
+    defaultPythonCallstack);
+std::vector<StackEntry> pythonCallstack() {
+  return python_callstack_fn.load()();
+}
+void setPythonCallstack(std::vector<StackEntry> (*v)()) {
+  python_callstack_fn.store(v);
 }
 
 void defaultWarn(const std::string& str) {

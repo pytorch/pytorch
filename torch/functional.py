@@ -9,6 +9,7 @@ from ._lowrank import svd_lowrank, pca_lowrank
 from .overrides import has_torch_function, handle_torch_function
 from ._jit_internal import boolean_dispatch, List
 from ._jit_internal import _overload as overload
+from torch._autograd_functions import _LU
 
 Tensor = torch.Tensor
 from torch import _VF
@@ -18,6 +19,7 @@ __all__ = [
     'atleast_2d',
     'atleast_3d',
     'align_tensors',
+    'broadcast_shapes',
     'broadcast_tensors',
     'cartesian_prod',
     'block_diag',
@@ -69,6 +71,39 @@ def broadcast_tensors(*tensors):
         if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
             return handle_torch_function(broadcast_tensors, tensors, *tensors)
     return _VF.broadcast_tensors(tensors)  # type: ignore
+
+
+def broadcast_shapes(*shapes):
+    r"""broadcast_shapes(*shapes) -> Size
+
+    Similar to :func:`broadcast_tensors` but for shapes.
+
+    This is equivalent to
+    ``torch.broadcast_tensors(*map(torch.empty, shapes))[0].shape``
+    but avoids the need create to intermediate tensors. This is useful for
+    broadcasting tensors of common batch shape but different rightmost shape,
+    e.g. to broadcast mean vectors with covariance matrices.
+
+    Example::
+
+        >>> torch.broadcast_shapes((2,), (3, 1), (1, 1, 1))
+        torch.Size([1, 3, 2])
+
+    Args:
+        \*shapes (torch.Size): Shapes of tensors.
+
+    Returns:
+        shape (torch.Size): A shape compatible with all input shapes.
+
+    Raises:
+        RuntimeError: If shapes are incompatible.
+    """
+    # TODO Movie this to C++ once the jit has better support for torch.Size.
+    with torch.no_grad():
+        scalar = torch.zeros((), device="cpu")
+        tensors = [scalar.expand(shape) for shape in shapes]
+        tensors = broadcast_tensors(*tensors)
+        return tensors[0].shape
 
 
 def split(tensor, split_size_or_sections, dim=0):
@@ -240,7 +275,7 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
             # product(*map(lambda x: list(range(x)), shape[:-2])) when issue 33781 is fixed
             indices = _indices_product(shape[:-2])
             for idx in indices:
-                final_order = [i for i in range(m)]  # noqa: C416 TODO: rewrite as list(range(m))
+                final_order = list(range(m))
                 for k, j in enumerate(_index_tensor_with_indices_list(LU_pivots_zero_idx, idx)):
                     final_order[k], final_order[j] = final_order[j], final_order[k]
                 # TODO: remove _index_tensor_with_indices_list when TorchScript supports indexing Tensor with list
@@ -248,7 +283,7 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
                 p_idx.copy_(p_idx.index_select(1, torch.as_tensor(final_order, device=LU_pivots.device)))
         else:
             P = torch.eye(m, device=LU_data.device, dtype=LU_data.dtype)
-            final_order = [i for i in range(m)]  # noqa: C416 TODO: rewrite as list(range(m))
+            final_order = list(range(m))
             for k, j, in enumerate(LU_pivots_zero_idx):
                 final_order[k], final_order[j] = final_order[j], final_order[k]
             P = P.index_select(1, torch.as_tensor(final_order, device=LU_pivots.device))
@@ -261,76 +296,107 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
 def einsum(equation, *operands):
     r"""einsum(equation, *operands) -> Tensor
 
-This function provides a way of computing multilinear expressions (i.e. sums of products) using the
-Einstein summation convention.
+    Sums the product of the elements of the input :attr:`operands` along dimensions specified using a notation
+    based on the Einstein summation convention.
 
-Args:
-    equation (string): The equation is given in terms of lower case letters (indices) to be associated
-           with each dimension of the operands and result. The left hand side lists the operands
-           dimensions, separated by commas. There should be one index letter per tensor dimension.
-           The right hand side follows after `->` and gives the indices for the output.
-           If the `->` and right hand side are omitted, it implicitly defined as the alphabetically
-           sorted list of all indices appearing exactly once in the left hand side.
-           The indices not apprearing in the output are summed over after multiplying the operands
-           entries.
-           If an index appears several times for the same operand, a diagonal is taken.
-           Ellipses `...` represent a fixed number of dimensions. If the right hand side is inferred,
-           the ellipsis dimensions are at the beginning of the output.
-    operands (Tensor): The operands to compute the Einstein sum of.
+    Einsum allows computing many common multi-dimensional linear algebraic array operations by representing them
+    in a short-hand format based on the Einstein summation convention, given by :attr:`equation`. The details of 
+    this format are described below, but the general idea is to label every dimension of the input :attr:`operands`
+    with some subscript and define which subscripts are part of the output. The output is then computed by summing
+    the product of the elements of the :attr:`operands` along the dimensions whose subscripts are not part of the
+    output. For example, matrix multiplication can be computed using einsum as `torch.einsum("ij,jk->ik", A, B)`.
+    Here, j is the summation subscript and i and k the output subscripts (see section below for more details on why).
 
-.. note::
+    Equation:
 
-    This function does not optimize the given expression, so a different formula for the same computation may
-    run faster or consume less memory. Projects like opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/)
-    can optimize the formula for you.
+        The :attr:`equation` string specifies the subscripts (lower case letters `['a', 'z']`) for each dimension of
+        the input :attr:`operands` in the same order as the dimensions, separating subcripts for each operand by a
+        comma (','), e.g. `'ij,jk'` specify subscripts for two 2D operands. The dimensions labeled with the same subscript
+        must be broadcastable, that is, their size must either match or be `1`. The exception is if a subscript is
+        repeated for the same input operand, in which case the dimensions labeled with this subscript for this operand
+        must match in size and the operand will be replaced by its diagonal along these dimensions. The subscripts that
+        appear exactly once in the :attr:`equation` will be part of the output, sorted in increasing alphabetical order.
+        The output is computed by multiplying the input :attr:`operands` element-wise, with their dimensions aligned based
+        on the subscripts, and then summing out the dimensions whose subscripts are not part of the output.
 
-Examples::
+        Optionally, the output subscripts can be explicitly defined by adding an arrow ('->') at the end of the equation
+        followed by the subscripts for the output. For instance, the following equation computes the transpose of a
+        matrix multiplication: 'ij,jk->ki'. The output subscripts must appear at least once for some input operand and
+        at most once for the output.
 
-    >>> x = torch.randn(5)
-    >>> y = torch.randn(4)
-    >>> torch.einsum('i,j->ij', x, y)  # outer product
-    tensor([[-0.0570, -0.0286, -0.0231,  0.0197],
-            [ 1.2616,  0.6335,  0.5113, -0.4351],
-            [ 1.4452,  0.7257,  0.5857, -0.4984],
-            [-0.4647, -0.2333, -0.1883,  0.1603],
-            [-1.1130, -0.5588, -0.4510,  0.3838]])
+        Ellipsis ('...') can be used in place of subscripts to broadcast the dimensions covered by the ellipsis.
+        Each input operand may contain at most one ellipsis which will cover the dimensions not covered by subscripts,
+        e.g. for an input operand with 5 dimensions, the ellipsis in the equation `'ab...c'` cover the third and fourth
+        dimensions. The ellipsis does not need to cover the same number of dimensions across the :attr:`operands` but the
+        'shape' of the ellipsis (the size of the dimensions covered by them) must broadcast together. If the output is not
+        explicitly defined with the arrow ('->') notation, the ellipsis will come first in the output (left-most dimensions),
+        before the subscript labels that appear exactly once for the input operands. e.g. the following equation implements
+        batch matrix multiplication `'...ij,...jk'`.
 
+        A few final notes: the equation may contain whitespaces between the different elements (subscripts, ellipsis,
+        arrow and comma) but something like `'. . .'` is not valid. An empty string `''` is valid for scalar operands.
 
-    >>> A = torch.randn(3,5,4)
-    >>> l = torch.randn(2,5)
-    >>> r = torch.randn(2,4)
-    >>> torch.einsum('bn,anm,bm->ba', l, A, r) # compare torch.nn.functional.bilinear
-    tensor([[-0.3430, -5.2405,  0.4494],
-            [ 0.3311,  5.5201, -3.0356]])
+    .. note::
 
+        ``torch.einsum`` handles ellipsis ('...') differently from NumPy in that it allows dimensions
+        covered by the ellipsis to be summed over, that is, ellipsis are not required to be part of the output.
 
-    >>> As = torch.randn(3,2,5)
-    >>> Bs = torch.randn(3,5,4)
-    >>> torch.einsum('bij,bjk->bik', As, Bs) # batch matrix multiplication
-    tensor([[[-1.0564, -1.5904,  3.2023,  3.1271],
-             [-1.6706, -0.8097, -0.8025, -2.1183]],
+    .. note::
 
-            [[ 4.2239,  0.3107, -0.5756, -0.2354],
-             [-1.4558, -0.3460,  1.5087, -0.8530]],
+        This function does not optimize the given expression, so a different formula for the same computation may
+        run faster or consume less memory. Projects like opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/)
+        can optimize the formula for you.
 
-            [[ 2.8153,  1.8787, -4.3839, -1.2112],
-             [ 0.3728, -2.1131,  0.0921,  0.8305]]])
+    Args:
+        equation (string): The subscripts for the Einstein summation.
+        operands (Tensor): The operands to compute the Einstein sum of.
 
-    >>> A = torch.randn(3, 3)
-    >>> torch.einsum('ii->i', A) # diagonal
-    tensor([-0.7825,  0.8291, -0.1936])
+    Examples::
 
-    >>> A = torch.randn(4, 3, 3)
-    >>> torch.einsum('...ii->...i', A) # batch diagonal
-    tensor([[-1.0864,  0.7292,  0.0569],
-            [-0.9725, -1.0270,  0.6493],
-            [ 0.5832, -1.1716, -1.5084],
-            [ 0.4041, -1.1690,  0.8570]])
+        # trace
+        >>> torch.einsum('ii', torch.randn(4, 4))
+        tensor(-1.2104)
 
-    >>> A = torch.randn(2, 3, 4, 5)
-    >>> torch.einsum('...ij->...ji', A).shape # batch permute
-    torch.Size([2, 3, 5, 4])
-"""
+        # diagonal
+        >>> torch.einsum('ii->i', torch.randn(4, 4))
+        tensor([-0.1034,  0.7952, -0.2433,  0.4545])
+
+        # outer product
+        >>> x = torch.randn(5)
+        >>> y = torch.randn(4)
+        >>> torch.einsum('i,j->ij', x, y)
+        tensor([[ 0.1156, -0.2897, -0.3918,  0.4963],
+                [-0.3744,  0.9381,  1.2685, -1.6070],
+                [ 0.7208, -1.8058, -2.4419,  3.0936],
+                [ 0.1713, -0.4291, -0.5802,  0.7350],
+                [ 0.5704, -1.4290, -1.9323,  2.4480]])
+
+        # batch matrix multiplication
+        >>> As = torch.randn(3,2,5)
+        >>> Bs = torch.randn(3,5,4)
+        >>> torch.einsum('bij,bjk->bik', As, Bs)
+        tensor([[[-1.0564, -1.5904,  3.2023,  3.1271],
+                [-1.6706, -0.8097, -0.8025, -2.1183]],
+
+                [[ 4.2239,  0.3107, -0.5756, -0.2354],
+                [-1.4558, -0.3460,  1.5087, -0.8530]],
+
+                [[ 2.8153,  1.8787, -4.3839, -1.2112],
+                [ 0.3728, -2.1131,  0.0921,  0.8305]]])
+
+        # batch permute
+        >>> A = torch.randn(2, 3, 4, 5)
+        >>> torch.einsum('...ij->...ji', A).shape 
+        torch.Size([2, 3, 5, 4])
+
+        # equivalent to torch.nn.functional.bilinear
+        >>> A = torch.randn(3,5,4)
+        >>> l = torch.randn(2,5)
+        >>> r = torch.randn(2,4)
+        >>> torch.einsum('bn,anm,bm->ba', l, A, r)
+        tensor([[-0.3430, -5.2405,  0.4494],
+                [ 0.3311,  5.5201, -3.0356]])
+    """
     if not torch.jit.is_scripting():
         if any(type(t) is not Tensor for t in operands) and has_torch_function(operands):
             return handle_torch_function(einsum, operands, equation, *operands)
@@ -350,38 +416,37 @@ if TYPE_CHECKING:
         return _meshgrid(*tensors)
 else:
     def meshgrid(*tensors):
+        r"""Take :math:`N` tensors, each of which can be either scalar or 1-dimensional
+        vector, and create :math:`N` N-dimensional grids, where the :math:`i` :sup:`th` grid is defined by
+        expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
+
+        Args:
+            tensors (list of Tensor): list of scalars or 1 dimensional tensors. Scalars will be
+                treated as tensors of size :math:`(1,)` automatically
+
+        Returns:
+            seq (sequence of Tensors): If the input has :math:`k` tensors of size
+            :math:`(N_1,), (N_2,), \ldots , (N_k,)`, then the output would also have :math:`k` tensors,
+            where all tensors are of size :math:`(N_1, N_2, \ldots , N_k)`.
+
+        Example::
+
+            >>> x = torch.tensor([1, 2, 3])
+            >>> y = torch.tensor([4, 5, 6])
+            >>> grid_x, grid_y = torch.meshgrid(x, y)
+            >>> grid_x
+            tensor([[1, 1, 1],
+                    [2, 2, 2],
+                    [3, 3, 3]])
+            >>> grid_y
+            tensor([[4, 5, 6],
+                    [4, 5, 6],
+                    [4, 5, 6]])
+        """
         return _meshgrid(*tensors)
 
 
 def _meshgrid(*tensors):
-    r"""Take :math:`N` tensors, each of which can be either scalar or 1-dimensional
-vector, and create :math:`N` N-dimensional grids, where the :math:`i` :sup:`th` grid is defined by
-expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
-
-
-    Args:
-        tensors (list of Tensor): list of scalars or 1 dimensional tensors. Scalars will be
-        treated as tensors of size :math:`(1,)` automatically
-
-    Returns:
-        seq (sequence of Tensors): If the input has :math:`k` tensors of size
-        :math:`(N_1,), (N_2,), \ldots , (N_k,)`, then the output would also have :math:`k` tensors,
-        where all tensors are of size :math:`(N_1, N_2, \ldots , N_k)`.
-
-    Example::
-
-        >>> x = torch.tensor([1, 2, 3])
-        >>> y = torch.tensor([4, 5, 6])
-        >>> grid_x, grid_y = torch.meshgrid(x, y)
-        >>> grid_x
-        tensor([[1, 1, 1],
-                [2, 2, 2],
-                [3, 3, 3]])
-        >>> grid_y
-        tensor([[4, 5, 6],
-                [4, 5, 6],
-                [4, 5, 6]])
-    """
     if not torch.jit.is_scripting():
         if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
             return handle_torch_function(meshgrid, tensors, *tensors)
@@ -391,10 +456,27 @@ expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
     return _VF.meshgrid(tensors)  # type: ignore
 
 
-def stft(input, n_fft, hop_length=None, win_length=None, window=None,
-         center=True, pad_mode='reflect', normalized=False, onesided=True):
-    # type: (Tensor, int, Optional[int], Optional[int], Optional[Tensor], bool, str, bool, bool) -> Tensor
+def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
+         win_length: Optional[int] = None, window: Optional[Tensor] = None,
+         center: bool = True, pad_mode: str = 'reflect', normalized: bool = False,
+         onesided: Optional[bool] = None,
+         return_complex: Optional[bool] = None) -> Tensor:
     r"""Short-time Fourier transform (STFT).
+
+    .. warning::
+        From version 1.8.0, :attr:`return_complex` must always be given
+        explicitly for real inputs and `return_complex=False` has been
+        deprecated. Strongly prefer `return_complex=True` as in a future
+        pytorch release, this function will only return complex tensors.
+
+        Note that :func:`torch.view_as_real` can be used to recover a real
+        tensor with an extra last dimension for real and imaginary components.
+
+    The STFT computes the Fourier transform of short overlapping windows of the
+    input. This giving frequency components of the signal as they change over
+    time. The interface of this function is modeled after the librosa_ stft function.
+
+    .. _librosa: https://librosa.org/doc/latest/generated/librosa.stft.html
 
     Ignoring the optional batch dimension, this method computes the following
     expression:
@@ -432,20 +514,27 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
       :attr:`center` is ``True``. See :meth:`torch.nn.functional.pad` for
       all available options. Default is ``"reflect"``.
 
-    * If :attr:`onesided` is ``True`` (default), only values for :math:`\omega`
-      in :math:`\left[0, 1, 2, \dots, \left\lfloor \frac{\text{n\_fft}}{2} \right\rfloor + 1\right]`
-      are returned because the real-to-complex Fourier transform satisfies the
-      conjugate symmetry, i.e., :math:`X[m, \omega] = X[m, \text{n\_fft} - \omega]^*`.
+    * If :attr:`onesided` is ``True`` (default for real input), only values for
+      :math:`\omega` in :math:`\left[0, 1, 2, \dots, \left\lfloor
+      \frac{\text{n\_fft}}{2} \right\rfloor + 1\right]` are returned because
+      the real-to-complex Fourier transform satisfies the conjugate symmetry,
+      i.e., :math:`X[m, \omega] = X[m, \text{n\_fft} - \omega]^*`.
+      Note if the input or window tensors are complex, then :attr:`onesided`
+      output is not possible.
 
     * If :attr:`normalized` is ``True`` (default is ``False``), the function
       returns the normalized STFT results, i.e., multiplied by :math:`(\text{frame\_length})^{-0.5}`.
 
-    Returns the real and the imaginary parts together as one tensor of size
-    :math:`(* \times N \times T \times 2)`, where :math:`*` is the optional
-    batch size of :attr:`input`, :math:`N` is the number of frequencies where
-    STFT is applied, :math:`T` is the total number of frames used, and each pair
-    in the last dimension represents a complex number as the real part and the
-    imaginary part.
+    * If :attr:`return_complex` is ``True`` (default if input is complex), the
+      return is a ``input.dim() + 1`` dimensional complex tensor. If ``False``,
+      the output is a ``input.dim() + 2`` dimensional real tensor where the last
+      dimension represents the real and imaginary components.
+
+    Returns either a complex tensor of size :math:`(* \times N \times T)` if
+    :attr:`return_complex` is true, or a real tensor of size :math:`(* \times N
+    \times T \times 2)`. Where :math:`*` is the optional batch size of
+    :attr:`input`, :math:`N` is the number of frequencies where STFT is applied
+    and :math:`T` is the total number of frames used.
 
     .. warning::
       This function changed signature at version 0.4.1. Calling with the
@@ -468,7 +557,11 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
         normalized (bool, optional): controls whether to return the normalized STFT results
              Default: ``False``
         onesided (bool, optional): controls whether to return half of results to
-            avoid redundancy Default: ``True``
+            avoid redundancy for real inputs.
+            Default: ``True`` for real :attr:`input` and :attr:`window`, ``False`` otherwise.
+        return_complex (bool, optional): whether to return a complex tensor, or
+            a real tensor with an extra last dimension for the real and
+            imaginary components.
 
     Returns:
         Tensor: A tensor containing the STFT result with shape described above
@@ -479,20 +572,23 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
             return handle_torch_function(
                 stft, (input,), input, n_fft, hop_length=hop_length, win_length=win_length,
                 window=window, center=center, pad_mode=pad_mode, normalized=normalized,
-                onesided=onesided)
+                onesided=onesided, return_complex=return_complex)
     # TODO: after having proper ways to map Python strings to ATen Enum, move
     #       this and F.pad to ATen.
     if center:
         signal_dim = input.dim()
         extended_shape = [1] * (3 - signal_dim) + list(input.size())
         pad = int(n_fft // 2)
-        input = F.pad(input.view(extended_shape), (pad, pad), pad_mode)
+        input = F.pad(input.view(extended_shape), [pad, pad], pad_mode)
         input = input.view(input.shape[-signal_dim:])
-    return _VF.stft(input, n_fft, hop_length, win_length, window, normalized, onesided)  # type: ignore
+    return _VF.stft(input, n_fft, hop_length, win_length, window,  # type: ignore
+                    normalized, onesided, return_complex)
 
-def istft(input, n_fft, hop_length=None, win_length=None, window=None,
-          center=True, normalized=False, onesided=True, length=None):
-    # type: (Tensor, int, Optional[int], Optional[int], Optional[Tensor], bool, bool, bool, Optional[int]) -> Tensor
+def istft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
+          win_length: Optional[int] = None, window: Optional[Tensor] = None,
+          center: bool = True, normalized: bool = False,
+          onesided: Optional[bool] = None, length: Optional[int] = None,
+          return_complex: bool = False) -> Tensor:
     r"""Inverse short time Fourier Transform. This is expected to be the inverse of :func:`~torch.stft`.
     It has the same parameters (+ additional optional parameter of :attr:`length`) and it should return the
     least squares estimation of the original signal. The algorithm will check using the NOLA condition (
@@ -500,7 +596,7 @@ def istft(input, n_fft, hop_length=None, win_length=None, window=None,
 
     Important consideration in the parameters :attr:`window` and :attr:`center` so that the envelop
     created by the summation of all the windows is never zero at certain point in time. Specifically,
-    :math:`\sum_{t=-\infty}^{\infty} w^2[n-t\times hop\_length] \cancel{=} 0`.
+    :math:`\sum_{t=-\infty}^{\infty} |w|^2[n-t\times hop\_length] \cancel{=} 0`.
 
     Since :func:`~torch.stft` discards elements at the end of the signal if they do not fit in a frame,
     ``istft`` may return a shorter signal than the original signal (can occur if :attr:`center` is False
@@ -523,7 +619,13 @@ def istft(input, n_fft, hop_length=None, win_length=None, window=None,
 
     Arguments:
         input (Tensor): The input tensor. Expected to be output of :func:`~torch.stft`,
-            either 3D (``fft_size``, ``n_frame``, 2) or 4D (``channel``, ``fft_size``, ``n_frame``, 2).
+            can either be complex (``channel``, ``fft_size``, ``n_frame``), or real
+            (``channel``, ``fft_size``, ``n_frame``, 2) where the ``channel``
+            dimension is optional.
+
+            .. deprecated:: 1.8.0
+               Real input is deprecated, use complex inputs as returned by
+               ``stft(..., return_complex=True)`` instead.
         n_fft (int): Size of Fourier transform
         hop_length (Optional[int]): The distance between neighboring sliding window frames.
             (Default: ``n_fft // 4``)
@@ -534,9 +636,15 @@ def istft(input, n_fft, hop_length=None, win_length=None, window=None,
             centered at time :math:`t \times \text{hop\_length}`.
             (Default: ``True``)
         normalized (bool): Whether the STFT was normalized. (Default: ``False``)
-        onesided (bool): Whether the STFT is onesided. (Default: ``True``)
+        onesided (Optional[bool]): Whether the STFT was onesided.
+            (Default: ``True`` if ``n_fft != fft_size`` in the input size)
         length (Optional[int]): The amount to trim the signal by (i.e. the
             original signal length). (Default: whole signal)
+        return_complex (Optional[bool]):
+            Whether the output should be complex, or if the input should be
+            assumed to derive from a real signal and window.
+            Note that this is incompatible with ``onesided=True``.
+            (Default: ``False``)
 
     Returns:
         Tensor: Least squares estimation of the original signal of size (..., signal_length)
@@ -546,9 +654,10 @@ def istft(input, n_fft, hop_length=None, win_length=None, window=None,
             return handle_torch_function(
                 istft, (input,), input, n_fft, hop_length=hop_length, win_length=win_length,
                 window=window, center=center, normalized=normalized, onesided=onesided,
-                length=length)
+                length=length, return_complex=return_complex)
 
-    return _VF.istft(input, n_fft, hop_length, win_length, window, center, normalized, onesided, length)  # type: ignore
+    return _VF.istft(input, n_fft, hop_length, win_length, window, center,  # type: ignore
+                     normalized, onesided, length, return_complex)
 
 
 del torch.unique_dim
@@ -840,7 +949,7 @@ unique_consecutive = boolean_dispatch(
 unique_consecutive.__doc__ = _unique_consecutive_impl.__doc__
 
 
-def tensordot(a, b, dims=2):
+def tensordot(a, b, dims=2, out=None):
     r"""Returns a contraction of a and b over multiple dimensions.
 
     :attr:`tensordot` implements a generalized matrix product.
@@ -848,7 +957,7 @@ def tensordot(a, b, dims=2):
     Args:
       a (Tensor): Left tensor to contract
       b (Tensor): Right tensor to contract
-      dims (int or tuple of two lists of integers): number of dimensions to
+      dims (int or Tuple[List[int]] containing two lists): number of dimensions to
          contract or explicit lists of dimensions for :attr:`a` and
          :attr:`b` respectively
 
@@ -883,6 +992,12 @@ def tensordot(a, b, dims=2):
                 [ 3.3161,  0.0704,  5.0187, -0.4079, -4.3126,  4.8744],
                 [ 0.8223,  3.9445,  3.2168, -0.2400,  3.4117,  1.7780]])
 
+        >>> a = torch.randn(3, 5, 4, 6)
+        >>> b = torch.randn(6, 4, 5, 3)
+        >>> torch.tensordot(a, b, dims=([2, 1, 3], [1, 2, 0]))
+        tensor([[  7.7193,  -2.4867, -10.3204],
+                [  1.5513, -14.4737,  -6.5113],
+                [ -0.2850,   4.2573,  -3.5997]])
     """
     if not torch.jit.is_scripting():
         if (type(a) is not Tensor or type(b) is not Tensor) and has_torch_function((a, b)):
@@ -897,7 +1012,10 @@ def tensordot(a, b, dims=2):
             raise RuntimeError(f"tensordot expects dims >= 0, but got dims={dims}")
         dims_a = list(range(-dims, 0))
         dims_b = list(range(dims))
-    return _VF.tensordot(a, b, dims_a, dims_b)  # type: ignore
+    if out is None:
+        return _VF.tensordot(a, b, dims_a, dims_b)  # type: ignore
+    else:
+        return _VF.tensordot(a, b, dims_a, dims_b, out=out)  # type: ignore
 
 def cartesian_prod(*tensors):
     """Do cartesian product of the given sequence of tensors. The behavior is similar to
@@ -1175,27 +1293,49 @@ else:
 def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
     r"""Returns the matrix norm or vector norm of a given tensor.
 
+    .. warning::
+
+        torch.norm is deprecated and may be removed in a future PyTorch release.
+        Use :func:`torch.linalg.norm` instead, but note that :func:`torch.linalg.norm`
+        has a different signature and slightly different behavior that is
+        more consistent with NumPy's numpy.linalg.norm.
+
     Args:
-        input (Tensor): the input tensor
+        input (Tensor): The input tensor. Its data type must be either a floating
+            point or complex type. For complex inputs, the norm is calculated using the
+            absolute value of each element. If the input is complex and neither
+            :attr:`dtype` nor :attr:`out` is specified, the result's data type will
+            be the corresponding floating point type (e.g. float if :attr:`input` is
+            complexfloat).
+
         p (int, float, inf, -inf, 'fro', 'nuc', optional): the order of norm. Default: ``'fro'``
             The following norms can be calculated:
 
-            =====  ============================  ==========================
-            ord    matrix norm                   vector norm
-            =====  ============================  ==========================
-            None   Frobenius norm                2-norm
-            'fro'  Frobenius norm                --
-            'nuc'  nuclear norm                  --
-            Other  as vec norm when dim is None  sum(abs(x)**ord)**(1./ord)
-            =====  ============================  ==========================
+            ======  ==============  ==========================
+            ord     matrix norm     vector norm
+            ======  ==============  ==========================
+            'fro'   Frobenius norm  --
+            'nuc'   nuclear norm    --
+            Number  --              sum(abs(x)**ord)**(1./ord)
+            ======  ==============  ==========================
 
-        dim (int, 2-tuple of ints, 2-list of ints, optional): If it is an int,
-            vector norm will be calculated, if it is 2-tuple of ints, matrix norm
-            will be calculated. If the value is None, matrix norm will be calculated
-            when the input tensor only has two dimensions, vector norm will be
-            calculated when the input tensor only has one dimension. If the input
-            tensor has more than two dimensions, the vector norm will be applied to
-            last dimension.
+            The vector norm can be calculated across any number of dimensions.
+            The corresponding dimensions of :attr:`input` are flattened into
+            one dimension, and the norm is calculated on the flattened
+            dimension.
+
+            Frobenius norm produces the same result as ``p=2`` in all cases
+            except when :attr:`dim` is a list of three or more dims, in which
+            case Frobenius norm throws an error.
+
+            Nuclear norm can only be calculated across exactly two dimensions.
+
+        dim (int, tuple of ints, list of ints, optional):
+            Specifies which dimension or dimensions of :attr:`input` to
+            calculate the norm across. If :attr:`dim` is ``None``, the norm will
+            be calculated across all dimensions of :attr:`input`. If the norm
+            type indicated by :attr:`p` does not support the specified number of
+            dimensions, an error will occur.
         keepdim (bool, optional): whether the output tensors have :attr:`dim`
             retained or not. Ignored if :attr:`dim` = ``None`` and
             :attr:`out` = ``None``. Default: ``False``
@@ -1205,6 +1345,12 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
             returned tensor. If specified, the input tensor is casted to
             :attr:'dtype' while performing the operation. Default: None.
 
+    .. note::
+        Even though ``p='fro'`` supports any number of dimensions, the true
+        mathematical definition of Frobenius norm only applies to tensors with
+        exactly two dimensions. :func:`torch.linalg.norm` with ``ord='fro'`` aligns
+        with the mathematical definition, since it can only be applied across
+        exactly two dimensions.
 
     Example::
 
@@ -1232,6 +1378,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         >>> torch.norm(d[0, :, :]), torch.norm(d[1, :, :])
         (tensor(3.7417), tensor(11.2250))
     """
+
     if not torch.jit.is_scripting():
         if type(input) is not Tensor and has_torch_function((input,)):
             return handle_torch_function(
@@ -1265,7 +1412,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
                 raise ValueError("dtype argument is not supported in frobenius norm")
 
             if _dim is None:
-                _dim = [i for i in range(ndim)]  # noqa: C416 TODO: rewrite as list(range(m))
+                _dim = list(range(ndim))
             if out is None:
                 return _VF.frobenius_norm(input, _dim, keepdim=keepdim)  # type: ignore
             else:
@@ -1286,7 +1433,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         raise RuntimeError(f"only valid string values are 'fro' and 'nuc', found {p}")
     else:
         if _dim is None:
-            _dim = [i for i in range(ndim)]  # noqa: C416 TODO: rewrite as list(range(m))
+            _dim = list(range(ndim))
 
         if out is None:
             if dtype is None:
@@ -1364,6 +1511,10 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
     .. note::
        ``L``, ``U``, and ``P`` can be derived using :func:`torch.lu_unpack`.
 
+    .. warning::
+        The LU factorization does have backward support,
+        but only for square inputs of full rank.
+
     Arguments:
         A (Tensor): the tensor to factor of size :math:`(*, m, n)`
         pivot (bool, optional): controls whether pivoting is done. Default: ``True``
@@ -1379,7 +1530,12 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
 
             - **factorization** (*Tensor*): the factorization of size :math:`(*, m, n)`
 
-            - **pivots** (*IntTensor*): the pivots of size :math:`(*, m)`
+            - **pivots** (*IntTensor*): the pivots of size :math:`(*, \text{min}(m, n))`.
+              ``pivots`` stores all the intermediate transpositions of rows.
+              The final permutation ``perm`` could be reconstructed by
+              applying ``swap(perm[i], perm[pivots[i] - 1])`` for ``i = 0, ..., pivots.size(-1) - 1``,
+              where ``perm`` is initially the identity permutation of :math:`m` elements
+              (essentially this is what :func:`torch.lu_unpack` is doing).
 
             - **infos** (*IntTensor*, *optional*): if :attr:`get_infos` is ``True``, this is a tensor of
               size :math:`(*)` where non-zero values indicate whether factorization for the matrix or
@@ -1405,9 +1561,25 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
         ...   print('LU factorization succeeded for all samples!')
         LU factorization succeeded for all samples!
     """
+    if not torch._jit_internal.is_scripting():
+        if A.requires_grad:
+            if not (A.size(-2) == A.size(-1) and A.dtype.is_floating_point):
+                raise ValueError(
+                    'lu.backward works only with batches of squared full-rank matrices'
+                    ' of floating types.'
+                )
+
+            return _LU.apply(A, pivot, get_infos)
+    else:
+        if A.requires_grad:
+            raise RuntimeError(
+                'Script and require gradients is not supported at the moment.'
+                'If you just want to do the forward, use .detach()'
+                'on the input before calling the function.'
+            )
+
     # If get_infos is True, then we don't need to check for errors and vice versa
     return torch._lu_with_info(A, pivot=pivot, check_errors=(not get_infos))
-
 
 if TYPE_CHECKING:
     _ListOrSeq = Sequence[Tensor]

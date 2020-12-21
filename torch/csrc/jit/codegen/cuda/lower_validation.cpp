@@ -1,5 +1,6 @@
-
 #include <torch/csrc/jit/codegen/cuda/lower_validation.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
+#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
@@ -7,8 +8,11 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 void validateIr(Fusion* fusion) {
+  FUSER_PERF_SCOPE("validateIr");
+
   FusionGuard fg(fusion);
 
   auto used_vals = DependencyCheck::getAllValsBetween(
@@ -66,6 +70,7 @@ void validateIr(Fusion* fusion) {
   }
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

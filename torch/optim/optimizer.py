@@ -5,6 +5,7 @@ import torch
 from copy import deepcopy
 from itertools import chain
 import warnings
+import functools
 
 
 class _RequiredParameter(object):
@@ -34,6 +35,8 @@ class Optimizer(object):
         torch._C._log_api_usage_once("python.optimizer")
         self.defaults = defaults
 
+        self._hook_for_profile()
+
         if isinstance(params, torch.Tensor):
             raise TypeError("params argument given to the optimizer should be "
                             "an iterable of Tensors or dicts, but got " +
@@ -60,6 +63,7 @@ class Optimizer(object):
 
     def __setstate__(self, state):
         self.__dict__.update(state)
+        self._hook_for_profile()  # To support multiprocessing pickle/unpickle.
 
     def __repr__(self):
         format_string = self.__class__.__name__ + ' ('
@@ -71,6 +75,24 @@ class Optimizer(object):
                     format_string += '    {0}: {1}\n'.format(key, group[key])
         format_string += ')'
         return format_string
+
+    def _hook_for_profile(self):
+        self._zero_grad_profile_name = "Optimizer.zero_grad#{}.zero_grad".format(self.__class__.__name__)
+
+        def profile_hook_step(func):
+
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                obj, *_ = args
+                profile_name = "Optimizer.step#{}.step".format(obj.__class__.__name__)
+                with torch.autograd.profiler.record_function(profile_name):
+                    return func(*args, **kwargs)
+            return wrapper
+
+        hooked = getattr(self.__class__.step, "hooked", None)
+        if not hooked:
+            self.__class__.step = profile_hook_step(self.__class__.step)
+            self.__class__.step.hooked = True
 
     def state_dict(self):
         r"""Returns the state of the optimizer as a :class:`dict`.
@@ -165,31 +187,34 @@ class Optimizer(object):
         self.__setstate__({'state': state, 'param_groups': param_groups})
 
     def zero_grad(self, set_to_none: bool = False):
-        r"""Set the gradients of all optimized :class:`torch.Tensor` s to zero.
+        r"""Sets the gradients of all optimized :class:`torch.Tensor` s to zero.
 
         Arguments:
-            set_to_none (bool): instead of setting to zero, set the grad to None.
+            set_to_none (bool): instead of setting to zero, set the grads to None.
                 This is will in general have lower memory footprint, and can modestly improve performance.
                 However, it changes certain behaviors. For example:
-                1. When user tries to access the gradient value and perform manual ops on it.
-                A None attribute or a Tensor full of 0s will be different.
-                2. If the user requests `zero_grad(set_to_none=True)` followed by a backward pass, `.grad` s
+                1. When the user tries to access a gradient and perform manual ops on it,
+                a None attribute or a Tensor full of 0s will behave differently.
+                2. If the user requests ``zero_grad(set_to_none=True)`` followed by a backward pass, ``.grad``\ s
                 are guaranteed to be None for params that did not receive a gradient.
-                3. `torch.optim` optimizers have a different behavior if the gradient is 0 or None
-                (in one case it does the step with a gradient of 0 and in the other it skip
+                3. ``torch.optim`` optimizers have a different behavior if the gradient is 0 or None
+                (in one case it does the step with a gradient of 0 and in the other it skips
                 the step altogether).
         """
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is not None:
-                    if set_to_none:
-                        p.grad = None
-                    else:
-                        if p.grad.grad_fn is not None:
-                            p.grad.detach_()
+        if not hasattr(self, "_zero_grad_profile_name"):
+            self._hook_for_profile()
+        with torch.autograd.profiler.record_function(self._zero_grad_profile_name):
+            for group in self.param_groups:
+                for p in group['params']:
+                    if p.grad is not None:
+                        if set_to_none:
+                            p.grad = None
                         else:
-                            p.grad.requires_grad_(False)
-                        p.grad.zero_()
+                            if p.grad.grad_fn is not None:
+                                p.grad.detach_()
+                            else:
+                                p.grad.requires_grad_(False)
+                            p.grad.zero_()
 
     def step(self, closure):
         r"""Performs a single optimization step (parameter update).

@@ -12,6 +12,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 class ThreadPredicateMap;
 
@@ -179,7 +180,7 @@ IterDomain* getTermIDInMap(
     std::unordered_map<IterDomain*, IterDomain*> p2c_root_map);
 
 } // namespace loop_utils
-
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

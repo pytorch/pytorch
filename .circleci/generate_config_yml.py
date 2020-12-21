@@ -11,7 +11,6 @@ import sys
 from collections import namedtuple
 
 import cimodel.data.binary_build_definitions as binary_build_definitions
-import cimodel.data.caffe2_build_definitions as caffe2_build_definitions
 import cimodel.data.pytorch_build_definitions as pytorch_build_definitions
 import cimodel.data.simple.android_definitions
 import cimodel.data.simple.bazel_definitions
@@ -23,6 +22,7 @@ import cimodel.data.simple.macos_definitions
 import cimodel.data.simple.mobile_definitions
 import cimodel.data.simple.nightly_android
 import cimodel.data.simple.nightly_ios
+import cimodel.data.simple.anaconda_prune_defintions
 import cimodel.data.windows_build_definitions as windows_build_definitions
 import cimodel.lib.miniutils as miniutils
 import cimodel.lib.miniyaml as miniyaml
@@ -91,10 +91,10 @@ def gen_build_workflows_tree():
         cimodel.data.simple.mobile_definitions.get_workflow_jobs,
         cimodel.data.simple.ge_config_tests.get_workflow_jobs,
         cimodel.data.simple.bazel_definitions.get_workflow_jobs,
-        caffe2_build_definitions.get_workflow_jobs,
         cimodel.data.simple.binary_smoketest.get_workflow_jobs,
         cimodel.data.simple.nightly_ios.get_workflow_jobs,
         cimodel.data.simple.nightly_android.get_workflow_jobs,
+        cimodel.data.simple.anaconda_prune_defintions.get_workflow_jobs,
         windows_build_definitions.get_windows_workflows,
         binary_build_definitions.get_post_upload_jobs,
         binary_build_definitions.get_binary_smoke_test_jobs,
@@ -124,12 +124,10 @@ YAML_SOURCES = [
     File("nightly-binary-build-defaults.yml"),
     Header("Build parameters"),
     File("build-parameters/pytorch-build-params.yml"),
-    File("build-parameters/caffe2-build-params.yml"),
     File("build-parameters/binary-build-params.yml"),
     File("build-parameters/promote-build-params.yml"),
     Header("Job specs"),
     File("job-specs/pytorch-job-specs.yml"),
-    File("job-specs/caffe2-job-specs.yml"),
     File("job-specs/binary-job-specs.yml"),
     File("job-specs/job-specs-custom.yml"),
     File("job-specs/job-specs-promote.yml"),

@@ -2,8 +2,66 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor_int8.h"
 #include "caffe2/utils/string_utils.h"
+#include <cctype>
 
 namespace caffe2 {
+
+namespace {
+bool isNumber(const std::string& s) {
+  bool empty = true;
+  for (const char c : s) {
+    if (std::isalpha(c)) {
+      return false;
+    }
+    if (!std::isspace(c)) {
+      empty = false;
+    }
+  }
+  return !empty;
+}
+
+std::string toLower(const std::string& s) {
+  std::string t;
+  t.resize(s.size());
+  for (size_t i = 0; i < t.size(); i++) {
+    t[i] = std::tolower(s[i]);
+  }
+  return t;
+}
+
+TensorProto_DataType toTensorProtoDataType(const std::string& in) {
+  std::string s = toLower(in);
+  if (s == "uint8") {
+    return TensorProto_DataType_UINT8;
+  } else if (s == "int8") {
+    return TensorProto_DataType_INT8;
+  } else if (s == "uint16") {
+    return TensorProto_DataType_UINT16;
+  } else if (s == "int16") {
+    return TensorProto_DataType_INT16;
+  } else if (s == "int32") {
+    return TensorProto_DataType_INT32;
+  } else if (s == "int64") {
+    return TensorProto_DataType_INT64;
+  } else if (s == "float16" || s == "half") {
+    return TensorProto_DataType_FLOAT16;
+  } else if (s == "float") {
+    return TensorProto_DataType_FLOAT;
+  } else if (s == "double") {
+    return TensorProto_DataType_DOUBLE;
+  } else if (s == "byte") {
+    return TensorProto_DataType_BYTE;
+  } else if (s == "string") {
+    return TensorProto_DataType_STRING;
+  } else if (s == "bool") {
+    return TensorProto_DataType_BOOL;
+  } else if (s == "hash") {
+    return TensorProto_DataType_ZERO_COLLISION_HASH;
+  }
+  // return default data type, float
+  return TensorProto_DataType_FLOAT;
+}
+} // namespace
 
 ShapeInfo getShapeInfoFromBlob(const Blob* blob) {
   ShapeInfo shape_info;
@@ -138,14 +196,24 @@ void parseShapeInfoMapFromString(
     const auto& name = kv[0];
 
     TensorShape shape;
-    if (name.find("int8") != std::string::npos) {
-      shape.set_data_type(TensorProto_DataType_UINT8);
+    size_t size = kv.size();
+    CAFFE_ENFORCE_GT(size, 1);
+    if (!isNumber(kv[size - 1])) {
+      // last value is the type
+      shape.set_data_type(toTensorProtoDataType(kv[size - 1]));
+      size--;
     } else {
-      shape.set_data_type(TensorProto_DataType_FLOAT);
+      if (name.find("int8") != std::string::npos) {
+        // Kept for backwards compatibility.
+        // Set type explicitly to overwrite it.
+        shape.set_data_type(TensorProto_DataType_UINT8);
+      } else {
+        shape.set_data_type(TensorProto_DataType_FLOAT);
+      }
     }
 
     bool valid = true;
-    for (int i = 1; i < kv.size(); i++) {
+    for (int i = 1; i < size; i++) {
       auto dim = kv[i];
       try {
         shape.add_dims(std::stoi(dim));

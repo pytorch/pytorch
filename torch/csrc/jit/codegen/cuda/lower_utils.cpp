@@ -2,6 +2,10 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
+#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
+#include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 
 #include <algorithm>
@@ -9,7 +13,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
-
+namespace cuda {
 namespace scope_utils {
 
 // START SCOPE HELPER SYSTEMS
@@ -48,7 +52,7 @@ class scopePushBack : private OptInDispatch {
   }
 
   void handle(kir::IfThenElse* ite) final {
-    ite->body().push_back(expr_);
+    ite->thenBody().push_back(expr_);
   }
 
   void handle(Expr* expr) final {
@@ -76,7 +80,7 @@ class scopeInsertBefore : private OptInDispatch {
   }
 
   void handle(kir::IfThenElse* ite) final {
-    ite->body().insert_before(ref_, expr_);
+    ite->thenBody().insert_before(ref_, expr_);
   }
 
   void handle(Expr* expr) final {
@@ -107,7 +111,7 @@ class ExprInScope : private OptInDispatch {
   }
 
   void handle(kir::IfThenElse* ite) final {
-    if (ite->body().contains(expr_)) {
+    if (ite->thenBody().contains(expr_)) {
       contains_ = true;
     }
   }
@@ -166,15 +170,15 @@ class CloneLoopNest : public OptOutMutator {
   Expr* to_clone_ = nullptr;
 
   Statement* mutate(kir::ForLoop* fl) final {
-    std::vector<Expr*> mutated_exprs;
+    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+    const auto parent_scope =
+        fl == to_clone_ ? parent_scope_ : fl->parentScope();
+    auto new_loop = ir_builder.create<kir::ForLoop>(
+        fl->index(), fl->iter_domain(), parent_scope);
     for (Expr* expr : fl->body().exprs()) {
-      mutated_exprs.push_back(ir_utils::asExpr(OptOutMutator::mutate(expr)));
+      new_loop->body().push_back(ir_utils::asExpr(OptOutMutator::mutate(expr)));
     }
-    if (fl == to_clone_)
-      return new kir::ForLoop(
-          fl->index(), fl->iter_domain(), mutated_exprs, parent_scope_);
-    return new kir::ForLoop(
-        fl->index(), fl->iter_domain(), mutated_exprs, fl->parentScope());
+    return new_loop;
   }
 
   CloneLoopNest(Expr* _to_clone, Expr* _parent_scope)
@@ -223,7 +227,7 @@ class ReplaceExprsInScope : public OptOutDispatch {
   }
 
   void handle(kir::IfThenElse* ite) final {
-    handleScope(ite->body());
+    handleScope(ite->thenBody());
     handleScope(ite->elseBody());
   }
 
@@ -246,7 +250,7 @@ class FirstInnerMostScope : private OptInDispatch {
   }
 
   void handle(kir::IfThenElse* ite) final {
-    for (auto expr : ite->body().exprs()) {
+    for (auto expr : ite->thenBody().exprs()) {
       if (ir_utils::isScope(expr)) {
         active_scope = expr;
         return;
@@ -323,15 +327,19 @@ Expr* getParent(Expr* scope) {
 
 // Open a new inner most for loop
 kir::ForLoop* openFor(Expr* scope, IterDomain* id) {
-  const auto kir_id = kir::lowerValue(id)->as<kir::IterDomain>();
+  kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+  const auto kir_id = GpuLower::lowerValue(id)->as<kir::IterDomain>();
   kir::ForLoop* new_scope = nullptr;
   if (id->isThread()) {
     std::stringstream ss;
     ss << id->getParallelType();
-    new_scope = new kir::ForLoop(
-        new kir::NamedScalar(ss.str(), DataType::Int), kir_id, {}, scope);
+    new_scope = ir_builder.create<kir::ForLoop>(
+        ir_builder.create<kir::NamedScalar>(ss.str(), DataType::Int),
+        kir_id,
+        scope);
   } else {
-    new_scope = new kir::ForLoop(new kir::Int(c10::nullopt), kir_id, {}, scope);
+    new_scope = ir_builder.create<kir::ForLoop>(
+        ir_builder.create<kir::Int>(c10::nullopt), kir_id, scope);
   }
   if (scope != nullptr)
     pushBack(scope, new_scope);
@@ -601,8 +609,16 @@ ParallelTypeBitmap getParallelBroadcastDomains(
 
   ParallelTypeBitmap parallel_broadcast;
   const auto& iter_domains = out_tv->domain()->domain();
+  // If the output is on shared memory, assume that all subsequent
+  // reads from all threads in its CTA can be done with no parallel
+  // broadcast. Only one thread will write to shared memory followed
+  // by a proper _syncthreads.
+  const bool output_smem = out_tv->getMemoryType() == MemoryType::Shared;
   for (auto id : iter_domains) {
-    if (id->isBroadcast() && id->isThread()) {
+    if (!id->isBroadcast()) {
+      continue;
+    }
+    if (id->isBlockDim() || (!output_smem && id->isThreadDim())) {
       parallel_broadcast.set(id->getParallelType(), true);
     }
   }
@@ -633,7 +649,7 @@ std::pair<kir::ForLoop*, int64_t> getAllocPoint(
     // Grab the axis ID
 
     auto ca_id = tv->getComputeAtAxis(tv_i).first;
-    auto kir_ca_id = kir::lowerValue(ca_id)->as<kir::IterDomain>();
+    auto kir_ca_id = GpuLower::lowerValue(ca_id)->as<kir::IterDomain>();
 
     loops_it =
         std::find_if(loops_it, loops.end(), [&kir_ca_id](const auto& loop) {
@@ -643,7 +659,7 @@ std::pair<kir::ForLoop*, int64_t> getAllocPoint(
 
     if (loops_it == loops.end()) {
       for (auto loop : loops) {
-        std::cout << loop->iter_domain() << "  ";
+        std::cout << kir::toString(loop->iter_domain()) << "  ";
       }
       std::cout << std::endl;
     }
@@ -701,7 +717,7 @@ IterDomain* getTermIDInMap(
 }
 
 } // namespace loop_utils
-
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

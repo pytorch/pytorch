@@ -83,7 +83,14 @@ Tensor& mean_out_quantized_cpu(
     c10::optional<ScalarType> opt_dtype) {
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
-      self.scalar_type() == kQUInt8) {
+      self.scalar_type() == kQUInt8 &&
+      // QNNPACK currently is only supported for NCHW + dim=(2, 3)
+      // Remove these checks after generic version is implemented.
+      self.ndimension() == 4 &&
+      dim.size() == 2 &&
+      dim[0] == 2 &&
+      dim[1] == 3
+     ){
     result = qnnpack_mean(self, dim);
     return result;
   }

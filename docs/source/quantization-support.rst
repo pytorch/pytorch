@@ -105,7 +105,7 @@ Fused modules are provided for common patterns in CNNs. Combining several
 operations together (like convolution and relu) allows for better quantization
 accuracy
 
-    
+
 * `torch.nn.intrinsic` — float versions of the modules, can be swapped with
   quantized version 1 to 1:
 
@@ -172,7 +172,6 @@ Layers for the quantization-aware training
   * :func:`~torch.quantization.fuse_modules`
 
 * Functions for graph mode quantization:
-
   * :func:`~torch.quantization.quantize_jit` - Function for graph mode post training static quantization
   * :func:`~torch.quantization.quantize_dynamic_jit` - Function for graph mode post training dynamic quantization
 
@@ -255,7 +254,6 @@ Quantized version of standard NN layers.
 * :class:`~torch.nn.quantized.Conv3d` — 3D convolution
 * :class:`~torch.nn.quantized.Linear` — Linear (fully-connected) layer
 * :class:`~torch.nn.MaxPool2d` — 2D max pooling
-* :class:`~torch.nn.quantized.ReLU` — Rectified linear unit
 * :class:`~torch.nn.quantized.ReLU6` — Rectified linear unit with cut-off at
   quantized representation of 6
 * :class:`~torch.nn.quantized.ELU` — ELU
@@ -294,7 +292,6 @@ quantization output parameters)
 * :func:`~torch.nn.quantized.functional.interpolate` — Down-/up- sampler
 * :func:`~torch.nn.quantized.functional.linear` — Linear (fully-connected) op
 * :func:`~torch.nn.quantized.functional.max_pool2d` — 2D max pooling
-* :func:`~torch.nn.quantized.functional.relu` — Rectified linear unit
 * :func:`~torch.nn.quantized.functional.elu` — ELU
 * :func:`~torch.nn.quantized.functional.hardsigmoid` — Hardsigmoid
 * :func:`~torch.nn.quantized.functional.hardswish` — Hardswish
@@ -324,5 +321,3 @@ Quantized dtypes and quantization schemes
   * :attr:`torch.quint8` — 8-bit unsigned integer
   * :attr:`torch.qint8` — 8-bit signed integer
   * :attr:`torch.qint32` — 32-bit signed integer
-
-

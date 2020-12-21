@@ -110,7 +110,7 @@ C10_EXPORT void Gemm<float, CPUContext>(
           return;
         default:
           LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for trans_B";
-          return;  // The line above calls `abort()`. Should never reach here.
+          return; // The line above calls `abort()`. Should never reach here.
       }
     }
     case CblasTrans: {
@@ -127,7 +127,7 @@ C10_EXPORT void Gemm<float, CPUContext>(
           return;
         default:
           LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for trans_B";
-          return;  // The line above calls `abort()`. Should never reach here.
+          return; // The line above calls `abort()`. Should never reach here.
       }
     }
     default:
@@ -177,7 +177,7 @@ C10_EXPORT void GemmEx<float, CPUContext>(
           return;
         default:
           LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for trans_B";
-          return;  // The line above calls `abort()`. Should never reach here.
+          return; // The line above calls `abort()`. Should never reach here.
       }
     }
     case CblasTrans: {
@@ -201,7 +201,7 @@ C10_EXPORT void GemmEx<float, CPUContext>(
           return;
         default:
           LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for trans_B";
-          return;  // The line above calls `abort()`. Should never reach here.
+          return; // The line above calls `abort()`. Should never reach here.
       }
     }
     default:
@@ -1065,11 +1065,23 @@ DEFINE_BROADCAST_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
 
 #undef DELEGATE_BROADCAST_BINARY_FUNCTION
 
+namespace {
+// incrementIfNotMax increments the number if the value is not max for that
+// datatype. This ensures that the value never overflows.
+template <typename T>
+inline T incrementIfNotMax(T a) {
+  if (a == std::numeric_limits<T>::max()) {
+    return a;
+  }
+  return a + 1;
+}
+} // namespace
+
 #define CAFFE2_RAND_UNIFORM_REAL(T)                                      \
   template <>                                                            \
   C10_EXPORT void RandUniform<T, CPUContext>(                            \
       const size_t n, const T a, const T b, T* r, CPUContext* context) { \
-    std::uniform_real_distribution<T> distribution(a, b);                \
+    at::uniform_real_distribution<T> distribution(a, b);                 \
     for (size_t i = 0; i < n; ++i) {                                     \
       r[i] = distribution(context->RandGenerator());                     \
     }                                                                    \
@@ -1078,14 +1090,15 @@ CAFFE2_RAND_UNIFORM_REAL(float);
 CAFFE2_RAND_UNIFORM_REAL(double);
 #undef CAFFE2_RAND_UNIFORM_REAL
 
-#define CAFFE2_RAND_UNIFORM_CHAR(T)                                        \
-  template <>                                                              \
-  C10_EXPORT void RandUniform<T, CPUContext>(                              \
-      const size_t n, const T a, const T b, T* r, CPUContext* context) {   \
-    std::uniform_int_distribution<short> distribution((short)a, (short)b); \
-    for (size_t i = 0; i < n; ++i) {                                       \
-      r[i] = static_cast<T>(distribution(context->RandGenerator()));       \
-    }                                                                      \
+#define CAFFE2_RAND_UNIFORM_CHAR(T)                                      \
+  template <>                                                            \
+  C10_EXPORT void RandUniform<T, CPUContext>(                            \
+      const size_t n, const T a, const T b, T* r, CPUContext* context) { \
+    at::uniform_int_from_to_distribution<short> distribution(            \
+        incrementIfNotMax(b - a), a);                                    \
+    for (size_t i = 0; i < n; ++i) {                                     \
+      r[i] = static_cast<T>(distribution(context->RandGenerator()));     \
+    }                                                                    \
   }
 CAFFE2_RAND_UNIFORM_CHAR(int8_t);
 CAFFE2_RAND_UNIFORM_CHAR(uint8_t);
@@ -1095,7 +1108,10 @@ CAFFE2_RAND_UNIFORM_CHAR(uint8_t);
   template <>                                                            \
   C10_EXPORT void RandUniform<T, CPUContext>(                            \
       const size_t n, const T a, const T b, T* r, CPUContext* context) { \
-    std::uniform_int_distribution<T> distribution(a, b);                 \
+    at::uniform_int_from_to_distribution<T> distribution(                \
+        incrementIfNotMax(                                               \
+            static_cast<uint64_t>(b) - static_cast<uint64_t>(a)),        \
+        a);                                                              \
     for (size_t i = 0; i < n; ++i) {                                     \
       r[i] = distribution(context->RandGenerator());                     \
     }                                                                    \
@@ -1135,7 +1151,7 @@ CAFFE2_RAND_UNIFORM_INT(uint64_t);
       auto remaining_numbers = n - 1 - i;                                 \
       double mean = (sum - current_sum) / (remaining_numbers + 1);        \
       double stdev = std::min(mean - a, b - mean);                        \
-      std::normal_distribution<double> distribution{mean, stdev / 4.0};   \
+      at::normal_distribution<double> distribution{mean, stdev / 4.0};    \
       T value, remaining_sum_test;                                        \
       do {                                                                \
         value = distribution(context->RandGenerator());                   \
@@ -1350,7 +1366,8 @@ CAFFE2_RAND_SYNTHETIC_DATA(uint64_t);
       CAFFE_ENFORCE_EQ(                                              \
           m, avoid_set.size(), "AC10_EXPORT void should be unique"); \
     }                                                                \
-    std::uniform_int_distribution<T> distribution(a, b);             \
+    at::uniform_int_from_to_distribution<T> distribution(            \
+        incrementIfNotMax(b - a), a);                                \
     T v = 0;                                                         \
     for (size_t i = 0; i < n; ++i) {                                 \
       do {                                                           \
@@ -1372,7 +1389,7 @@ C10_EXPORT void RandGaussian<float, CPUContext>(
     const float std,
     float* r,
     CPUContext* context) {
-  std::normal_distribution<float> distribution(mean, std);
+  at::normal_distribution<float> distribution(mean, std);
   for (size_t i = 0; i < n; ++i) {
     r[i] = distribution(context->RandGenerator());
   }

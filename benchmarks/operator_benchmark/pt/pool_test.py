@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import operator_benchmark as op_bench
 import torch
 import torch.nn as nn
@@ -46,13 +41,13 @@ pool_1d_ops_list = op_bench.op_list(
 
 class Pool1dBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, kernel, stride, N, C, L, device, op_func):
-        self.input = torch.rand(N, C, L, device=device)
-        self.kernel = kernel
-        self.stride = stride
-        self.op_func = op_func(self.kernel, stride=self.stride)
+        self.inputs = {
+            "input": torch.rand(N, C, L, device=device)
+        }
+        self.op_func = op_func(kernel, stride=stride)
 
-    def forward(self):
-        return self.op_func(self.input)
+    def forward(self, input):
+        return self.op_func(input)
 
 
 op_bench.generate_pt_tests_from_op_list(pool_1d_ops_list,
@@ -103,14 +98,14 @@ pool_2d_ops_list = op_bench.op_list(
 
 class Pool2dBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, kernel, stride, N, C, H, W, device, op_func):
-        self.input = torch.rand(N, C, H, W, device=device)
-        self.kernel = kernel
-        self.stride = stride
-        self.op_func = op_func(self.kernel, stride=self.stride)
+        self.inputs = {
+            "input": torch.rand(N, C, H, W, device=device)
+        }
+        self.op_func = op_func(kernel, stride=stride)
 
 
-    def forward(self):
-        return self.op_func(self.input)
+    def forward(self, input):
+        return self.op_func(input)
 
 
 op_bench.generate_pt_tests_from_op_list(pool_2d_ops_list,
@@ -163,13 +158,13 @@ pool_3d_ops_list = op_bench.op_list(
 
 class Pool3dBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, kernel, stride, N, C, D, H, W, device, op_func):
-        self.input = torch.rand(N, C, D, H, W, device=device)
-        self.kernel = kernel
-        self.stride = stride
-        self.op_func = op_func(self.kernel, stride=self.stride)
+        self.inputs = {
+            "input": torch.rand(N, C, D, H, W, device=device)
+        }
+        self.op_func = op_func(kernel, stride=stride)
 
-    def forward(self):
-        return self.op_func(self.input)
+    def forward(self, input):
+        return self.op_func(input)
 
 
 op_bench.generate_pt_tests_from_op_list(pool_3d_ops_list,
