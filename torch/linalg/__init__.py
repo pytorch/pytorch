@@ -406,13 +406,13 @@ Using the :attr:`dim` argument to compute matrix norms::
 svd = _add_docstr(_linalg.linalg_svd, r"""
 linalg.svd(input, full_matrices=True, compute_uv=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
-Compute the singular value decomposition of either a matrix or batch of
+Computes the singular value decomposition of either a matrix or batch of
 matrices :attr:`input`." The singular value decomposition is represented as a
 namedtuple ``(U, S, Vh)``, such that :math:`input = U \times diag(S) \times
-Vh`. If the inputs are batches, then returns batched outputs for all of ``U``,
-``S`` and ``Vh``.
+Vh`. If :attr:`input` is a batch of tensors, then ``U``, ``S``, and ``Vh`` are
+also batched with the same batch dimensions as :attr:`input`.
 
-The original tensor can be reconstructed by::
+When :attr:`input` is a tensor, it can be reconstructed by::
 
     U @ diag(S) @ Vh
 

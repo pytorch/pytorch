@@ -8048,10 +8048,11 @@ svd(input, some=True, compute_uv=True, *, out=None) -> (Tensor, Tensor, Tensor)
 Computes the singular value decomposition of either a matrix or batch of
 matrices :attr:`input`." The singular value decomposition is represented as a
 namedtuple ``(U, S, V)``, such that :math:`input = U \times diag(S) \times
-V^T`, where :math:`V^T` is the transpose of ``V``. If the inputs are batches, then
-returns batched outputs for all of ``U``, `S`` and ``V``.
+V^T`, where :math:`V^T` is the transpose of ``V``. If :attr:`input` is a batch
+of tensors, then ``U``, ``S``, and ``V`` are also batched with the same batch
+dimensions as :attr:`input`.
 
-The original tensor can be reconstructed by::
+When :attr:`input` is a tensor, it can be reconstructed by::
 
     U @ diag(S) @ V.T
 
@@ -8068,20 +8069,21 @@ argument has no effect when :attr:`compute_uv` is False.
 The dtypes of ``U`` and ``V`` are the same as :attr:`input`'s. ``S`` will
 always be real-valued, even if :attr:`input` is complex.
 
-.. warning:: ``torch.svd`` is deprecated. Please use :meth:`~torch.linalg.svd`
-             instead, which provides a better compatibility with
+.. warning:: ``torch.svd`` is deprecated. Please use ``torch.linalg.``
+             :func:`~torch.linalg.svd` instead, which is similar to NumPy's
              ``numpy.linalg.svd``.
 
-.. note:: **Differences with** :meth:`~torch.linalg.svd`:
+.. note:: **Differences with** ``torch.linalg.`` :func:`~torch.linalg.svd`:
 
-             * :attr:`some` is the opposite of :meth:`~torch.linalg.svd`'s
-               :attr:`full_matricies`. Note that default value for both is
-               ``True``, so the default behavior is effectively the opposite.
+             * :attr:`some` is the opposite of ``torch.linalg.``
+               :func:`~torch.linalg.svd`'s :attr:`full_matricies`. Note that
+               default value for both is ``True``, so the default behavior is
+               effectively the opposite.
 
-             * it returns ``V``, whereas :meth:`~torch.linalg.svd` returns
-               ``Vh``. The result is that when using :meth:`~torch.svd` you
-               need to manually transpose ``V`` in order to reconstruct the
-               original matrix.
+             * it returns ``V``, whereas ``torch.linalg.``
+               :func:`~torch.linalg.svd` returns ``Vh``. The result is that
+               when using ``svd`` you need to manually transpose
+               ``V`` in order to reconstruct the original matrix.
 
              * If :attr:`compute_uv=False`, it returns zero-filled tensors for
                ``U`` and ``Vh``, whereas :meth:`~torch.linalg.svd` returns
