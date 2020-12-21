@@ -942,6 +942,10 @@
 - func: tensor_split.indices(Tensor(a) self, int[] indices, int dim=0) -> Tensor(a)[]
   variants: function, method
 
+- func: tensor_split.tensor_indices_or_sections(Tensor(a) self, Tensor tensor_indices_or_sections, int dim=0) -> Tensor(a)[]
+  use_c10_dispatcher: full
+  variants: function, method
+
 - func: clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
   variants: function, method
   dispatch:
@@ -3246,6 +3250,23 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: sin_out
+
+- func: sinc(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    DefaultBackend: sinc
+
+- func: sinc_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    DefaultBackend: sinc_
+
+- func: sinc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  dispatch:
+    CPU, CUDA: sinc_out
 
 - func: sinh(Tensor self) -> Tensor
   variants: function, method
