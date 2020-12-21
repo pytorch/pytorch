@@ -1,5 +1,6 @@
 #include <ATen/native/vulkan/ops/Mm.h>
 #include <ATen/native/vulkan/ops/Persistent.h>
+#include <ATen/native/vulkan/ops/Packing.h>
 
 namespace at {
 namespace native {
@@ -272,21 +273,31 @@ Tensor LinearOpContext::run(
       "combination with the provided weight and bias tensors are unsupported by "
       "Vulkan impl.");
 
-  vTensor v_output{
+  uint32_t out_h = v_input.sizes()[Layout::Parameter::height];
+  uint32_t out_w = packed_.v_weight.sizes()[Layout::Parameter::width];
+
+  vTensor v_output_packed {
       context,
       {
-          v_input.sizes()[Layout::Parameter::height],
-          packed_.v_weight.sizes()[Layout::Parameter::width],
+        4,
+        div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2)),
+        div_up(packed_.v_weight.sizes()[Layout::Parameter::width], INT64_C(2)),
       },
       input.options(),
   };
 
+  api::Command::Buffer input_pack_buffer = context->command().pool.allocate();
+  input_pack_buffer.begin();
+  vTensor v_input_packed = pack_image2d_h2w2(v_input, context, input_pack_buffer);
+  vTensor v_weight_packed = pack_image2d_h2w2(packed_.v_weight, context, input_pack_buffer);
+  vTensor v_bias_packed = pack_image2d_h2w2(packed_.v_bias, context, input_pack_buffer);
+  input_pack_buffer.end();
+  input_pack_buffer.submit(context->gpu().queue);
 
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
-    if (v_output.has_image() &&
-        v_input.has_image() &&
+    if (v_input.has_image() &&
         packed_.v_weight.has_image() &&
         packed_.v_bias.has_image()) {
       const struct {
@@ -294,7 +305,7 @@ Tensor LinearOpContext::run(
         int32_t K;
         vec2 multiplier;
       } block {
-          v_output.extents(),
+          v_output_packed.extents(),
           safe_downcast<int32_t>(div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
           {
             alpha,
@@ -312,28 +323,31 @@ Tensor LinearOpContext::run(
               VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
           VK_KERNEL(addmm),
-          v_output.extents(),
+          v_output_packed.extents(),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
-          v_output.image(
+          v_output_packed.image(
               command_buffer,
               vTensor::Stage::Compute,
               vTensor::Access::Write),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          v_input.image(
+          v_input_packed.image(
               command_buffer,
-              vTensor::Stage::Compute),
+              vTensor::Stage::Compute,
+              vTensor::Access::Read),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          packed_.v_weight.image(
+          v_weight_packed.image(
               command_buffer,
-              vTensor::Stage::Compute),
+              vTensor::Stage::Compute,
+              vTensor::Access::Read),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          packed_.v_bias.image(
+          v_bias_packed.image(
               command_buffer,
-              vTensor::Stage::Compute),
+              vTensor::Stage::Compute,
+              vTensor::Access::Read),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);
@@ -344,6 +358,12 @@ Tensor LinearOpContext::run(
   }
   command_buffer.end();
   command_buffer.submit(context->gpu().queue);
+
+  api::Command::Buffer output_unpack_buffer = context->command().pool.allocate();
+  output_unpack_buffer.begin();
+  vTensor v_output = unpack_image2d_h2w2(v_output_packed, out_h, out_w, context, output_unpack_buffer);
+  output_unpack_buffer.end();
+  output_unpack_buffer.submit(context->gpu().queue);
 
   return convert(v_output);
 }

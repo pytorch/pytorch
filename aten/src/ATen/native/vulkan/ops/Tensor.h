@@ -275,7 +275,6 @@ class vTensor final {
     const TensorOptions& options() const;
     IntArrayRef sizes() const;
     IntArrayRef strides() const;
-    VkImageType img_type() const;
 
    private:
     class CMD;
@@ -368,7 +367,6 @@ class vTensor final {
     TensorOptions options_;
     c10::SmallVector<int64_t, 6u> sizes_;
     c10::SmallVector<int64_t, 6u> strides_;
-    VkImageType img_type_;
 
    private:
     // Debug

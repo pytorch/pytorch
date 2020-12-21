@@ -232,12 +232,12 @@ uvec3 image_extents(const IntArrayRef sizes) {
 
   switch (sizes.size()) {
     case 1:
-      width = div_up(sizes[0], INT64_C(2));
+      width = sizes[0];
       break;
 
     case 2:
-      width = div_up(sizes[1], INT64_C(2));
-      height = div_up(sizes[0], INT64_C(2));
+      width = sizes[1];
+      height = sizes[0];
       break;
 
     case 3:
@@ -267,7 +267,6 @@ uvec3 image_extents(const IntArrayRef sizes) {
 
 vTensor::Image allocate_image(
     api::Resource::Pool* const pool,
-    const VkImageType img_type,
     const VkExtent3D& extents,
     const TensorOptions& options) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
@@ -275,22 +274,15 @@ vTensor::Image allocate_image(
       "Invalid Vulkan resource pool!");
 
   verify(options);
-
-  VkImageViewType view_type;
-  switch (img_type) {
-    case VK_IMAGE_TYPE_1D:
-      view_type = VK_IMAGE_VIEW_TYPE_1D;
-      break;
-    case VK_IMAGE_TYPE_2D:
-      view_type = VK_IMAGE_VIEW_TYPE_2D;
-      break;
-
-    default:
-      view_type = VK_IMAGE_VIEW_TYPE_3D;
-      break;
+  VkImageType image_type = VK_IMAGE_TYPE_3D;
+  VkImageViewType image_view_type = VK_IMAGE_VIEW_TYPE_3D;
+  if (extents.depth == 1) {
+    image_type = VK_IMAGE_TYPE_2D;
+    image_view_type = VK_IMAGE_VIEW_TYPE_2D;
   }
+
   return pool->image({
-      img_type,
+      image_type,
       vk_format(options.dtype()),
       extents,
       // Usage
@@ -305,7 +297,7 @@ vTensor::Image allocate_image(
       },
       // View
       {
-        view_type,
+        image_view_type,
         vk_format(options.dtype()),
       },
       // Sampler
@@ -546,14 +538,6 @@ vTensor::View::View(
     options_(options),
     sizes_(sizes),
     strides_(sizes.size()) {
-
-  if (sizes.size() <= 2)
-  {
-    img_type_ = VK_IMAGE_TYPE_2D;
-  }
-  else {
-    img_type_ = VK_IMAGE_TYPE_3D;
-  }
   ops::verify(options);
 }
 
@@ -593,15 +577,11 @@ class vTensor::View::CMD final {
   void copy_buffer_to_image(
       State& state,
       const Buffer::Object& buffer,
-      Image::Object& image,
-      const IntArrayRef sizes,
-      const VkImageType type);
+      Image::Object& image);
 
   void copy_image_to_buffer(
       State& state,
       const Image::Object& image,
-      const IntArrayRef sizes,
-      const VkImageType type,
       Buffer::Object& buffer);
 
   void submit(Fence fence = {});
@@ -848,9 +828,7 @@ void vTensor::View::CMD::copy_staging_to_buffer(
 void vTensor::View::CMD::copy_buffer_to_image(
     State& state,
     const Buffer::Object& buffer,
-    Image::Object& image,
-    const IntArrayRef sizes,
-    const VkImageType type) {
+    Image::Object& image) {
   if (state.is_clean(Component::Image)) {
     return;
   }
@@ -873,40 +851,21 @@ void vTensor::View::CMD::copy_buffer_to_image(
         }));
 
   const uvec3 extents = view_.extents();
+  const uint32_t plane = extents.data[0u] * extents.data[1u];
 
-  uint32_t block_sz;
-  uvec4 offset;
-  api::Shader::Descriptor kernel = VK_KERNEL(nchw_to_image);
-
-  if (type == VK_IMAGE_TYPE_2D) {
-    uint32_t plane = sizes[sizes.size()-1];
-    offset = {
-      0,
-      1,
-      plane,
-      plane + 1,
-    };
-    block_sz = 2 * plane;
-    kernel = VK_KERNEL(hw_to_image2d);
-  }
-  else {
-    uint32_t plane = extents.data[0u] * extents.data[1u];
-    offset = {
-      0u * plane,
-      1u * plane,
-      2u * plane,
-      3u * plane,
-    };
-    block_sz = 4u * plane;
-  }
   const struct {
     uvec3 extents;
     uint32_t block;
     uvec4 offset;
   } block {
     extents,
-    block_sz,
-    offset,
+    4u * plane,
+    {
+      0u * plane,
+      1u * plane,
+      2u * plane,
+      3u * plane,
+    },
   };
 
   view_.context_->dispatch(
@@ -916,7 +875,7 @@ void vTensor::View::CMD::copy_buffer_to_image(
         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
       },
-      kernel,
+      VK_KERNEL(nchw_to_image),
       extents,
       image,
       buffer,
@@ -926,8 +885,6 @@ void vTensor::View::CMD::copy_buffer_to_image(
 void vTensor::View::CMD::copy_image_to_buffer(
     State& state,
     const Image::Object& image,
-    const IntArrayRef sizes,
-    const VkImageType type,
     Buffer::Object& buffer) {
   if (state.is_clean(Component::Buffer)) {
     return;
@@ -951,40 +908,21 @@ void vTensor::View::CMD::copy_image_to_buffer(
         }));
 
   const uvec3 extents = view_.extents();
+  const uint32_t plane = extents.data[0u] * extents.data[1u];
 
-  uint32_t block_sz;
-  uvec4 offset;
-  api::Shader::Descriptor kernel = VK_KERNEL(image_to_nchw);
-
-  if (type == VK_IMAGE_TYPE_2D) {
-    uint32_t plane = sizes[Layout::Parameter::width];
-    offset = {
-      0,
-      1,
-      plane,
-      plane + 1,
-    };
-    block_sz = 2 * plane;
-    kernel = VK_KERNEL(image2d_to_hw);
-  }
-  else {
-    uint32_t plane = extents.data[0u] * extents.data[1u];
-    offset = {
-      0u * plane,
-      1u * plane,
-      2u * plane,
-      3u * plane,
-    };
-    block_sz = 4u * plane;
-  }
   const struct {
     uvec3 extents;
     uint32_t block;
     uvec4 offset;
   } block {
     extents,
-    block_sz,
-    offset,
+    4u * plane,
+    {
+      0u * plane,
+      1u * plane,
+      2u * plane,
+      3u * plane,
+    },
   };
 
   view_.context_->dispatch(
@@ -994,8 +932,8 @@ void vTensor::View::CMD::copy_image_to_buffer(
         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
       },
-      kernel,
-      extents,
+      VK_KERNEL(image_to_nchw),
+      view_.extents(),
       image,
       buffer,
       view_.context_->resource().pool.uniform(block).object);
@@ -1053,8 +991,6 @@ vTensor::Buffer& vTensor::View::buffer(
       command_buffer.copy_image_to_buffer(
           state_,
           image(command_buffer, Stage::Compute, Access::Read).object,
-          sizes(),
-          img_type_,
           buffer().object);
     }
     else {
@@ -1090,7 +1026,6 @@ vTensor::Image& vTensor::View::image() const {
   if (!image_ && state_.is_available(Component::Image)) {
     image_ = allocate_image(
         pool_,
-        img_type_,
         vk_extent(extents()),
         options());
   }
@@ -1124,9 +1059,7 @@ vTensor::Image& vTensor::View::image(
     command_buffer.copy_buffer_to_image(
         state_,
         buffer(command_buffer, stage, Access::Read).object,
-        image().object,
-        sizes(),
-        img_type_);
+        image().object);
   }
 
   command_buffer.barrier(
