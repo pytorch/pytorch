@@ -384,7 +384,7 @@ Arguments:
 Example::
     >>> import torch.distributed as dist
     >>> from datetime import timedelta
-    >>> store = dist.TCPStore("127.0.0.1", 1234, 1, True, timedelta(seconds=30))
+    >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
     >>> store.set("first_key", "first_value")
     >>> # Should return "first_value"
     >>> store.get("first_key")
@@ -413,7 +413,7 @@ Returns:
 Example::
     >>> import torch.distributed as dist
     >>> from datetime import timedelta
-    >>> store = dist.TCPStore("127.0.0.1", 1234, 1, True, timedelta(seconds=30))
+    >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
     >>> store.set("first_key", "first_value")
     >>> # Should return "first_value"
     >>> store.get("first_key")
@@ -438,7 +438,7 @@ Example::
     >>> import torch.distributed as dist
     >>> from datetime import timedelta
     >>> # Using TCPStore as an example, other store types can also be used
-    >>> store = dist.TCPStore("127.0.0.1", 1234, 1, True, timedelta(seconds=30))
+    >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
     >>> store.add("first_key", 1)
     >>> store.add("first_key", 6)
     >>> # Should return 7
@@ -466,7 +466,7 @@ Example::
     >>> import torch.distributed as dist
     >>> from datetime import timedelta
     >>> # Using TCPStore as an example, HashStore can also be used
-    >>> store = dist.TCPStore("127.0.0.1", 1234, 1, True, timedelta(seconds=30))
+    >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
     >>> store.set("first_key")
     >>> # This should return true
     >>> store.delete_key("first_key")
@@ -493,7 +493,7 @@ Example::
     >>> import torch.distributed as dist
     >>> from datetime import timedelta
     >>> # Using TCPStore as an example, other store types can also be used
-    >>> store = dist.TCPStore("127.0.0.1", 1234, 1, True, timedelta(seconds=30))
+    >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
     >>> store.set("first_key", "first_value")
     >>> # This should return 2
     >>> store.num_keys()
@@ -513,7 +513,7 @@ Example::
     >>> import torch.distributed as dist
     >>> from datetime import timedelta
     >>> # Using TCPStore as an example, other store types can also be used
-    >>> store = dist.TCPStore("127.0.0.1", 1234, 1, True, timedelta(seconds=30))
+    >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
     >>> store.set_timeout(timedelta(seconds=10))
     >>> # This will throw an exception after 10 seconds
     >>> store.wait(["bad_key"])
@@ -536,7 +536,7 @@ Example::
     >>> import torch.distributed as dist
     >>> from datetime import timedelta
     >>> # Using TCPStore as an example, other store types can also be used
-    >>> store = dist.TCPStore("127.0.0.1", 1234, 1, True, timedelta(seconds=30))
+    >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
     >>> # This will throw an exception after 30 seconds
     >>> store.wait(["bad_key"])
 )")
@@ -560,7 +560,7 @@ Example::
     >>> import torch.distributed as dist
     >>> from datetime import timedelta
     >>> # Using TCPStore as an example, other store types can also be used
-    >>> store = dist.TCPStore("127.0.0.1", 1234, 1, True, timedelta(seconds=30))
+    >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
     >>> # This will throw an exception after 10 seconds
     >>> store.wait(["bad_key"], timedelta(seconds=10))
 )");
