@@ -198,18 +198,19 @@ FOREACH_POINTWISE_OP_SCALAR(addcmul);
 FOREACH_POINTWISE_OP_SCALARLIST(addcdiv);
 FOREACH_POINTWISE_OP_SCALARLIST(addcmul);
 
-#define FOREACH_MAXIMUM_MINIMUM_OP(NAME)                                                     \
-std::vector<Tensor> foreach_tensor_##NAME##_slow(TensorList tensors1, TensorList tensors2) { \
-  check_foreach_api_restrictions(tensors1, tensors2);                                        \
-                                                                                             \
-  std::vector<Tensor> result;                                                                \
-  result.reserve(tensors1.size());                                                           \
-  for (size_t i = 0; i < tensors1.size(); i++) {                                             \
-    result.emplace_back(at::NAME(tensors1[i], tensors2[i]));                                 \
-  }                                                                                          \
-                                                                                             \
-  return result;                                                                             \
-}                                                                                            \
+#define FOREACH_MAXIMUM_MINIMUM_OP(NAME)                                                                          \
+std::vector<Tensor> foreach_tensor_##NAME##_slow(TensorList tensors1, TensorList tensors2) {                      \
+  check_foreach_api_restrictions(tensors1, tensors2);                                                             \
+  TORCH_CHECK(!tensors1[0].is_complex(), "foreach_maximum/foreach_minimum is not supported for complex inputs");  \
+                                                                                                                  \
+  std::vector<Tensor> result;                                                                                     \
+  result.reserve(tensors1.size());                                                                                \
+  for (size_t i = 0; i < tensors1.size(); i++) {                                                                  \
+    result.emplace_back(at::NAME(tensors1[i], tensors2[i]));                                                      \
+  }                                                                                                               \
+                                                                                                                  \
+  return result;                                                                                                  \
+}                                                                                                                 \
 
 FOREACH_MAXIMUM_MINIMUM_OP(maximum)
 FOREACH_MAXIMUM_MINIMUM_OP(minimum)

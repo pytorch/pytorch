@@ -1054,25 +1054,32 @@ class TestForeach(TestCase):
                 return
         self._test_pointwise_op(device, dtype, torch._foreach_addcdiv, torch._foreach_addcdiv_, torch.addcdiv)
 
-    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=False))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_min_max(self, device, dtype):
         for N in N_values:
             tensors1 = self._get_test_data(device, dtype, N)
             tensors2 = self._get_test_data(device, dtype, N)
 
-            # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
-            control_dtype = torch.float32 if (self.device_type == 'cuda' and
-                                              (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
+            if dtype in [torch.complex64, torch.complex128]:
+                with self.assertRaisesRegex(RuntimeError, "maximum does not support complex inputs."):
+                    [torch.max(tensors1[i], tensors2[i]) for i in range(N)]
 
-            expected_max = [torch.max(tensors1[i].to(dtype=control_dtype),
-                                      tensors2[i].to(dtype=control_dtype)).to(dtype=dtype) for i in range(N)]
+                with self.assertRaisesRegex(RuntimeError, "minimum does not support complex inputs."):
+                    [torch.min(tensors1[i], tensors2[i]) for i in range(N)]
 
-            expected_min = [torch.min(tensors1[i].to(dtype=control_dtype),
-                                      tensors2[i].to(dtype=control_dtype)).to(dtype=dtype) for i in range(N)]
+                with self.assertRaisesRegex(RuntimeError, "foreach_maximum/foreach_minimum is not supported for complex inputs"):
+                    torch._foreach_maximum(tensors1, tensors2)
 
+                with self.assertRaisesRegex(RuntimeError, "foreach_maximum/foreach_minimum is not supported for complex inputs"):
+                    torch._foreach_minimum(tensors1, tensors2)
+
+                continue
+
+            expected_max = [torch.max(tensors1[i], tensors2[i]) for i in range(N)]
             res_max = torch._foreach_maximum(tensors1, tensors2)
             self.assertEqual(res_max, expected_max)
 
+            expected_min = [torch.min(tensors1[i], tensors2[i]) for i in range(N)]
             res_min = torch._foreach_minimum(tensors1, tensors2)
             self.assertEqual(res_min, expected_min)
 

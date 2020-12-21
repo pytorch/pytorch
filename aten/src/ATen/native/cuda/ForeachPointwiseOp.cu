@@ -149,39 +149,41 @@ FOREACH_POINTWISE_OP_SCALAR(addcdiv, std::divides);
 FOREACH_POINTWISE_OP_SCALARLIST(addcmul, std::multiplies);
 FOREACH_POINTWISE_OP_SCALARLIST(addcdiv, std::divides);
 
-#define FOREACH_MAXIMUM_MINIMUM_OP(NAME, OP)                                                               \
-std::vector<Tensor> foreach_tensor_##NAME##_cuda(TensorList tensors1, TensorList tensors2) {               \
-    check_foreach_api_restrictions(tensors1, tensors2);                                                    \
-    if (!can_use_fast_route({tensors1, tensors2})) {                                                       \
-        return at::native::foreach_tensor_##NAME##_slow(tensors1, tensors2);                               \
-    }                                                                                                      \
-                                                                                                           \
-    std::vector<std::vector<at::Tensor>> tensor_lists;                                                     \
-    std::vector<at::Tensor> vec_res;                                                                       \
-    vec_res.reserve(tensors1.size());                                                                      \
-    for (const auto& t: tensors1) {                                                                        \
-        vec_res.emplace_back(at::native::empty_like(t));                                                   \
-    }                                                                                                      \
-                                                                                                           \
-    tensor_lists.emplace_back(tensors1.vec());                                                             \
-    tensor_lists.emplace_back(tensors2.vec());                                                             \
-    tensor_lists.emplace_back(std::move(vec_res));                                                         \
-                                                                                                           \
-    AT_DISPATCH_ALL_TYPES_AND(kHalf, tensors1[0].scalar_type(), "foreach_maximum_minimum_op_cuda", [&]() { \
-        using opmath_t = get_opmath_t<scalar_t>::opmath_t;                                                 \
-        auto op = []  GPU_LAMBDA (opmath_t a, opmath_t b) -> opmath_t {                                    \
-            opmath_t c = a OP b ? a : b;                                                                   \
-            if (_isnan(a)) {                                                                               \
-              c = a;                                                                                       \
-            }                                                                                              \
-            return c;};                                                                                    \
-        multi_tensor_apply<3>(tensor_lists,                                                                \
-                              PointwiseOpListFunctor<scalar_t, 3>(),                                       \
-                              op);                                                                         \
-    });                                                                                                    \
-                                                                                                           \
-    return tensor_lists[2];                                                                                \
-}                                                                                                          \
+#define FOREACH_MAXIMUM_MINIMUM_OP(NAME, OP)                                                                                  \
+std::vector<Tensor> foreach_tensor_##NAME##_cuda(TensorList tensors1, TensorList tensors2) {                                  \
+    check_foreach_api_restrictions(tensors1, tensors2);                                                                       \
+    TORCH_CHECK(!tensors1[0].is_complex(), "foreach_maximum/foreach_minimum is not supported for complex inputs");            \
+                                                                                                                              \
+    if (!can_use_fast_route({tensors1, tensors2})) {                                                                          \
+        return at::native::foreach_tensor_##NAME##_slow(tensors1, tensors2);                                                  \
+    }                                                                                                                         \
+                                                                                                                              \
+    std::vector<std::vector<at::Tensor>> tensor_lists;                                                                        \
+    std::vector<at::Tensor> vec_res;                                                                                          \
+    vec_res.reserve(tensors1.size());                                                                                         \
+    for (const auto& t: tensors1) {                                                                                           \
+        vec_res.emplace_back(at::native::empty_like(t));                                                                      \
+    }                                                                                                                         \
+                                                                                                                              \
+    tensor_lists.emplace_back(tensors1.vec());                                                                                \
+    tensor_lists.emplace_back(tensors2.vec());                                                                                \
+    tensor_lists.emplace_back(std::move(vec_res));                                                                            \
+                                                                                                                              \
+    AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, kBFloat16, tensors1[0].scalar_type(), "foreach_maximum_minimum_op_cuda", [&]() { \
+        using opmath_t = get_opmath_t<scalar_t>::opmath_t;                                                                    \
+        auto op = []  GPU_LAMBDA (opmath_t a, opmath_t b) -> opmath_t {                                                       \
+            opmath_t c = a OP b ? a : b;                                                                                      \
+            if (_isnan(a)) {                                                                                                  \
+              c = a;                                                                                                          \
+            }                                                                                                                 \
+            return c;};                                                                                                       \
+        multi_tensor_apply<3>(tensor_lists,                                                                                   \
+                              PointwiseOpListFunctor<scalar_t, 3>(),                                                          \
+                              op);                                                                                            \
+    });                                                                                                                       \
+                                                                                                                              \
+    return tensor_lists[2];                                                                                                   \
+}                                                                                                                             \
 
 FOREACH_MAXIMUM_MINIMUM_OP(maximum, >)
 FOREACH_MAXIMUM_MINIMUM_OP(minimum, <)
