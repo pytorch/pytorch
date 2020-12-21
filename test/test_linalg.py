@@ -867,23 +867,61 @@ class TestLinalg(TestCase):
     # as expected, according to the function's documentation
     @skipCUDAIfNoMagma
     def test_norm_dtype(self, device):
-        def run_test_case(input_size, ord, keepdim, from_dtype, to_dtype, compare_dtype):
+        def run_test_case(input_size, ord, keepdim, from_dtype, to_dtype):
+            # Determine the best dtype to use for comparisons between tensors
+            # of two different types
+            def get_compare_dtype(type0, type1):
+                types_32bit_based = [torch.float, torch.cfloat]
+                is_complex = type0.is_complex or type1.is_complex
+
+                if type0 in types_32bit_based or type1 in types_32bit_based:
+                    return torch.cfloat if is_complex else torch.float
+                else:
+                    return torch.cdouble if is_complex else torch.double
+
+            compare_dtype = get_compare_dtype(from_dtype, to_dtype)
+
+            def get_value_type(dtype):
+                if dtype == torch.cfloat:
+                    return torch.float
+                elif dtype == torch.cdouble:
+                    return torch.double
+                elif dtype == torch.complex32:
+                    return torch.float16
+                else:
+                    return dtype
+
             msg = (
                 f'input_size={input_size}, ord={ord}, keepdim={keepdim}, '
                 f'from_dtype={from_dtype}, to_dtype={to_dtype}')
             input = torch.randn(*input_size, dtype=from_dtype, device=device)
-            result = torch.linalg.norm(input, ord, keepdim=keepdim, dtype=from_dtype)
-            self.assertEqual(result.dtype, from_dtype, msg=msg)
-            result_converted = torch.linalg.norm(input, ord, keepdim=keepdim, dtype=to_dtype)
-            self.assertEqual(result_converted.dtype, to_dtype, msg=msg)
-            self.assertEqual(result.to(compare_dtype), result_converted.to(compare_dtype), msg=msg)
+            result = torch.linalg.norm(input, ord, keepdim=keepdim)
+            if from_dtype.is_complex:
+                # By default, norm downgrades a complex input to the corresponding real number type
+                self.assertEqual(result.dtype, get_value_type(from_dtype), msg=msg)
+            else:
+                self.assertEqual(result.dtype, from_dtype, msg=msg)
 
-            result_out_converted = torch.empty_like(result_converted)
-            torch.linalg.norm(input, ord, keepdim=keepdim, dtype=to_dtype, out=result_out_converted)
-            self.assertEqual(result_out_converted.dtype, to_dtype, msg=msg)
-            self.assertEqual(result_converted, result_out_converted, msg=msg)
+            result_out = torch.empty((), dtype=to_dtype, device=device)
+            torch.linalg.norm(input, ord, keepdim=keepdim, out=result_out)
+            self.assertEqual(result_out.dtype, to_dtype, msg=msg)
+            self.assertEqual(result.to(compare_dtype), result_out.to(compare_dtype), msg=msg)
 
-        ord_vector = [0, 1, -1, 2, -2, 3, -3, 4.5, -4.5, inf, -inf, None]
+            result_with_dtype = torch.linalg.norm(input, ord, keepdim=keepdim, dtype=to_dtype)
+            self.assertEqual(result_with_dtype.dtype, to_dtype, msg=msg)
+
+            if from_dtype.is_complex:
+                result_convert_first = torch.linalg.norm(input.to(to_dtype), ord, keepdim=keepdim)
+                self.assertEqual(result_with_dtype.to(compare_dtype), result_convert_first.to(compare_dtype), msg=msg)
+            else:
+                self.assertEqual(result.to(compare_dtype), result_with_dtype.to(compare_dtype), msg=msg)
+
+            result_out_with_dtype = torch.empty_like(result_with_dtype)
+            torch.linalg.norm(input, ord, keepdim=keepdim, dtype=to_dtype, out=result_out_with_dtype)
+            self.assertEqual(result_out_with_dtype.dtype, to_dtype, msg=msg)
+            self.assertEqual(result_with_dtype, result_out_with_dtype, msg=msg)
+
+        ord_vector = [0, 0.1, -0.1, 1, -1, 2, -2, 3, -3, 4.5, -4.5, inf, -inf, None]
         ord_matrix = ['fro', 'nuc', 1, -1, 2, -2, inf, -inf, None]
         S = 10
         test_cases = [
@@ -893,15 +931,16 @@ class TestLinalg(TestCase):
         for keepdim in [True, False]:
             for input_size, ord_settings in test_cases:
                 for ord in ord_settings:
-                    # float to double
-                    run_test_case(input_size, ord, keepdim, torch.float, torch.double, torch.float)
-                    # double to float
-                    run_test_case(input_size, ord, keepdim, torch.double, torch.double, torch.float)
+                    dtypes = [torch.float, torch.double, torch.cfloat, torch.cdouble]
+                    for from_dtype, to_dtype in itertools.product(dtypes, dtypes):
+                        run_test_case(input_size, ord, keepdim, from_dtype, to_dtype)
 
         # Make sure that setting dtype != out.dtype raises an error
         dtype_pairs = [
             (torch.float, torch.double),
             (torch.double, torch.float),
+            (torch.cfloat, torch.cdouble),
+            (torch.cdouble, torch.cfloat),
         ]
         for keepdim in [True, False]:
             for input_size, ord_settings in test_cases:
@@ -1008,11 +1047,6 @@ class TestLinalg(TestCase):
         for input_size in input_sizes:
             input = torch.randn(*input_size, dtype=dtype, device=device)
             for p in norm_types:
-                # frobenius norm not supported for complex tensors
-                if dtype.is_complex and p == 'fro':
-                    with self.assertRaisesRegex(RuntimeError, "frobenius norm not supported for complex tensors"):
-                        torch.linalg.cond(input, p)
-                    continue
                 run_test_case(input, p)
 
         # test empty batch sizes
@@ -1040,7 +1074,7 @@ class TestLinalg(TestCase):
         for input_size in input_sizes:
             input = torch.randn(*input_size, dtype=dtype, device=device)
             for p in ['fro', 2]:
-                expected_dtype = a.real.dtype if dtype.is_complex and p == 2 else dtype
+                expected_dtype = a.real.dtype if dtype.is_complex else dtype
                 expected = torch.zeros(input_size[:-2], dtype=expected_dtype, device=device)
                 actual = torch.linalg.cond(input, p)
                 self.assertEqual(actual, expected)
@@ -1068,7 +1102,7 @@ class TestLinalg(TestCase):
         # if non-empty out tensor with wrong shape is passed a warning is given
         a = torch.ones((2, 2), dtype=dtype, device=device)
         for p in ['fro', 2]:
-            real_dtype = a.real.dtype if dtype.is_complex and p == 2 else dtype
+            real_dtype = a.real.dtype if dtype.is_complex else dtype
             out = torch.empty(a.shape, dtype=real_dtype, device=device)
             with warnings.catch_warnings(record=True) as w:
                 # Trigger warning
@@ -1231,8 +1265,7 @@ class TestLinalg(TestCase):
                 for ord in ord_settings:
                     run_error_test_case(input, ord, dim, keepdim, error_type, error_regex)
 
-    # Test complex number inputs for linalg.norm. Some cases are not supported yet, so
-    # this test also verifies that those cases raise an error.
+    # Test complex number inputs for linalg.norm
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.cfloat, torch.cdouble)
@@ -1241,72 +1274,91 @@ class TestLinalg(TestCase):
             return "complex norm failed for input size %s, ord=%s, keepdim=%s, dim=%s" % (
                 input_size, ord, keepdim, dim)
 
-        if self.device_type == 'cpu':
-            supported_vector_ords = [0, 1, 3, inf, -1, -2, -3, -inf]
-            supported_matrix_ords = ['nuc', 1, 2, inf, -1, -2, -inf]
-            unsupported_vector_ords = [
-                (2, r'norm with p=2 not supported for complex tensors'),
-                (None, r'norm with p=2 not supported for complex tensors'),
-            ]
-            unsupported_matrix_ords = [
-                ('fro', r'frobenius norm not supported for complex tensors'),
-                (None, r'norm with p=2 not supported for complex tensors'),
-            ]
-
-        elif self.device_type == 'cuda':
-            supported_vector_ords = [inf, -inf]
-            supported_matrix_ords = [1, inf, -1, -inf]
-            unsupported_vector_ords = [
-                (0, r'norm_cuda" not implemented for \'Complex'),
-                (1, r'norm_cuda" not implemented for \'Complex'),
-                (2, r'norm with p=2 not supported for complex tensors'),
-                (-1, r'norm_cuda" not implemented for \'Complex'),
-                (-2, r'norm_cuda" not implemented for \'Complex'),
-                (None, r'norm with p=2 not supported for complex tensors'),
-            ]
-            unsupported_matrix_ords = [
-                (None, r'norm with p=2 not supported for complex tensors'),
-                ('fro', r'frobenius norm not supported for complex tensors'),
-            ]
+        vector_ords = [None, 0, 1, 2, 3, inf, -1, -2, -3, -inf]
+        matrix_ords = [None, 'fro', 'nuc', 1, 2, inf, -1, -2, -inf]
 
         # Test supported ords
         for keepdim in [False, True]:
             # vector norm
             x = torch.randn(25, device=device, dtype=dtype)
             xn = x.cpu().numpy()
-            for ord in supported_vector_ords:
+            for ord in vector_ords:
                 res = torch.linalg.norm(x, ord, keepdim=keepdim).cpu()
                 expected = np.linalg.norm(xn, ord, keepdims=keepdim)
                 msg = gen_error_message(x.size(), ord, keepdim)
                 self.assertEqual(res.shape, expected.shape, msg=msg)
                 self.assertEqual(res, expected, msg=msg)
+
+                res_out = torch.Tensor().to(device)
+                torch.linalg.norm(x, ord, keepdim=keepdim, out=res_out)
+                self.assertEqual(res_out.shape, expected.shape, msg=msg)
+                self.assertEqual(res_out.cpu(), expected, msg=msg)
 
             # matrix norm
             x = torch.randn(25, 25, device=device, dtype=dtype)
             xn = x.cpu().numpy()
-            for ord in supported_matrix_ords:
-                # TODO: Need to fix abort when nuclear norm is given cdouble input:
-                #       "double free or corruption (!prev) Aborted (core dumped)"
-                if ord == 'nuc' and dtype == torch.cdouble:
-                    continue
+            for ord in matrix_ords:
                 res = torch.linalg.norm(x, ord, keepdim=keepdim).cpu()
                 expected = np.linalg.norm(xn, ord, keepdims=keepdim)
                 msg = gen_error_message(x.size(), ord, keepdim)
                 self.assertEqual(res.shape, expected.shape, msg=msg)
                 self.assertEqual(res, expected, msg=msg)
 
-        # Test unsupported ords
-        # vector norm
-        x = torch.randn(25, device=device, dtype=dtype)
-        for ord, error_msg in unsupported_vector_ords:
-            with self.assertRaisesRegex(RuntimeError, error_msg):
-                torch.linalg.norm(x, ord)
+                res_out = torch.Tensor().to(device)
+                torch.linalg.norm(x, ord, keepdim=keepdim, out=res_out)
+                self.assertEqual(res_out.shape, expected.shape, msg=msg)
+                self.assertEqual(res_out.cpu(), expected, msg=msg)
 
-        # matrix norm
-        x = torch.randn(25, 25, device=device, dtype=dtype)
-        for ord, error_msg in unsupported_matrix_ords:
-            with self.assertRaisesRegex(RuntimeError, error_msg):
-                torch.linalg.norm(x, ord)
+    # Test complex number inputs for linalg.norm
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.cfloat, torch.cdouble)
+    def test_norm_complex_autograd(self, device, dtype):
+        def gen_error_message(input_size, ord, keepdim, dim=None):
+            return "complex norm autograd failed for input size %s, ord=%s, keepdim=%s, dim=%s" % (
+                input_size, ord, keepdim, dim)
+
+        if dtype == torch.cfloat:
+            dtype_real = torch.float
+        elif dtype == torch.cdouble:
+            dtype_real = torch.double
+        else:
+            raise RuntimeError(f'dtype not supported in this test: {dtype}')
+
+        vector_ords = [None, 0, 1, 2, 3, inf, -1, -2, -3, -inf]
+        matrix_ords = [None, 'fro', 1, inf, -1, -inf]
+
+        # TODO: Fix autograd for matrix orders 'nuc', 2, and -2 by adding complex
+        #       support to svd's backward method. Once this is done, these ords
+        #       should be added to `matrix_ords` above
+        # Update: svd's backward now works with https://github.com/pytorch/pytorch/pull/47761
+        # However run_test_case doesn't work for 'matrix_ords_unsupported' cases
+        # because singular values of 'x' and 'x_real' can be different and so is their norms based on singular values
+        matrix_ords_unsupported = ['nuc', 2, -2]
+
+        def run_test_case(x, ord, keepdim):
+            res = torch.linalg.norm(x, ord, keepdim=keepdim)
+            res.backward()
+
+            x_real = x.clone().detach().abs().requires_grad_(True)
+            res_real = torch.linalg.norm(x_real, ord, keepdim=keepdim)
+            res_real.backward()
+
+            msg = gen_error_message(x.size(), ord, keepdim)
+
+            self.assertEqual(res.shape, res_real.shape, msg=msg)
+            self.assertEqual(res, res_real, msg=msg)
+            self.assertEqual(x.grad.abs(), x_real.grad, msg=msg)
+
+        # Test supported ords
+        for keepdim in [False, True]:
+            for ord in vector_ords:
+                x = torch.randn(25, dtype=dtype, device=device, requires_grad=True)
+                run_test_case(x, ord, keepdim)
+
+            for ord in matrix_ords:
+                x = torch.randn(25, 25, dtype=dtype, device=device, requires_grad=True)
+                run_test_case(x, ord, keepdim)
 
     # Test that linal.norm gives the same result as numpy when inputs
     # contain extreme values (inf, -inf, nan)
@@ -1370,12 +1422,6 @@ class TestLinalg(TestCase):
                 with self.assertRaises(RuntimeError):
                     torch.linalg.norm(input, ord, dim, keepdim)
             else:
-                if dtype in [torch.cfloat, torch.cdouble] and ord in [2, None]:
-                    # TODO: Once these ord values have support for complex numbers,
-                    #       remove this error test case
-                    with self.assertRaises(RuntimeError):
-                        torch.linalg.norm(input, ord, dim, keepdim)
-                    return
                 result_numpy = np.linalg.norm(input_numpy, ord, dim, keepdim)
                 result = torch.linalg.norm(input, ord, dim, keepdim)
                 self.assertEqual(result, result_numpy, msg=msg)
@@ -1402,12 +1448,6 @@ class TestLinalg(TestCase):
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_norm_matrix_degenerate_shapes(self, device, dtype):
         def run_test_case(input, ord, dim, keepdim, should_error):
-            if dtype in [torch.cfloat, torch.cdouble] and ord in ['fro', None]:
-                # TODO: Once these ord values have support for complex numbers,
-                #       remove this error test case
-                with self.assertRaises(RuntimeError):
-                    torch.linalg.norm(input, ord, dim, keepdim)
-                return
             msg = f'input.size()={input.size()}, ord={ord}, dim={dim}, keepdim={keepdim}, dtype={dtype}'
             input_numpy = input.cpu().numpy()
             if should_error:
@@ -1495,8 +1535,8 @@ class TestLinalg(TestCase):
         self.assertEqual(ee[:, 1], torch.zeros(ee.shape[0], dtype=dtype))  # imaginary part
         self.assertEqual(vv, np_v)
 
-    @onlyCPU
     @skipCPUIfNoLapack
+    @skipCUDAIfNoMagma
     @dtypes(torch.double, torch.float)
     def test_eig_reuse(self, device, dtype):
         X = torch.randn(4, 4, dtype=dtype, device=device)
@@ -1512,15 +1552,15 @@ class TestLinalg(TestCase):
             atol = 1e-8
             rtol = 0
         self.assertEqual(X, Xhat, atol=atol, rtol=rtol, msg='VeV\' wrong')
-        self.assertFalse(v.is_contiguous(), 'V is contiguous')
+        self.assertTrue(v.is_contiguous(), 'V is not contiguous')
 
         torch.eig(X, True, out=(e, v))
         Xhat = torch.mm(v, torch.mm(e.select(1, 0).diag(), v.t()))
         self.assertEqual(X, Xhat, atol=atol, rtol=rtol, msg='VeV\' wrong')
-        self.assertFalse(v.is_contiguous(), 'V is contiguous')
+        self.assertTrue(v.is_contiguous(), 'V is not contiguous')
 
-    @onlyCPU
     @skipCPUIfNoLapack
+    @skipCUDAIfNoMagma
     @dtypes(torch.double, torch.float)
     def test_eig_non_contiguous(self, device, dtype):
         X = torch.randn(4, 4, dtype=dtype, device=device)
@@ -1546,19 +1586,19 @@ class TestLinalg(TestCase):
         # test invalid input
         self.assertRaisesRegex(
             RuntimeError,
-            'A should be 2 dimensional',
+            'input should be 2 dimensional',
             lambda: torch.eig(torch.ones((2))))
         self.assertRaisesRegex(
             RuntimeError,
-            'A should be square',
+            'input should be square',
             lambda: torch.eig(torch.ones((2, 3))))
         self.assertRaisesRegex(
             RuntimeError,
-            'A should not contain infs or NaNs',
+            'input should not contain infs or NaNs',
             lambda: torch.eig(np.inf * torch.ones((2, 2))))
         self.assertRaisesRegex(
             RuntimeError,
-            'A should not contain infs or NaNs',
+            'input should not contain infs or NaNs',
             lambda: torch.eig(np.nan * torch.ones((2, 2))))
 
     @skipCUDAIfNoMagma
@@ -1668,39 +1708,26 @@ class TestLinalg(TestCase):
             return "complex norm failed for input size %s, p=%s, keepdim=%s, dim=%s" % (
                 input_size, p, keepdim, dim)
 
-        if device == 'cpu':
-            for keepdim in [False, True]:
-                # vector norm
-                x = torch.randn(25, device=device) + 1j * torch.randn(25, device=device)
-                xn = x.cpu().numpy()
-                for p in [0, 1, 3, inf, -1, -2, -3, -inf]:
-                    res = x.norm(p, keepdim=keepdim).cpu()
-                    expected = np.linalg.norm(xn, p, keepdims=keepdim)
-                    msg = gen_error_message(x.size(), p, keepdim)
-                    self.assertEqual(res.shape, expected.shape, msg=msg)
-                    self.assertEqual(res, expected, msg=msg)
+        for keepdim in [False, True]:
+            # vector norm
+            x = torch.randn(25, device=device) + 1j * torch.randn(25, device=device)
+            xn = x.cpu().numpy()
+            for p in [0, 1, 2, 3, inf, -1, -2, -3, -inf]:
+                res = x.norm(p, keepdim=keepdim).cpu()
+                expected = np.linalg.norm(xn, p, keepdims=keepdim)
+                msg = gen_error_message(x.size(), p, keepdim)
+                self.assertEqual(res.shape, expected.shape, msg=msg)
+                self.assertEqual(res, expected, msg=msg)
 
-                # matrix norm
-                x = torch.randn(25, 25, device=device) + 1j * torch.randn(25, 25, device=device)
-                xn = x.cpu().numpy()
-                for p in ['nuc']:
-                    res = x.norm(p, keepdim=keepdim).cpu()
-                    expected = np.linalg.norm(xn, p, keepdims=keepdim)
-                    msg = gen_error_message(x.size(), p, keepdim)
-                    self.assertEqual(res.shape, expected.shape, msg=msg)
-                    self.assertEqual(res, expected, msg=msg)
-
-            # TODO: remove error test and add functionality test above when 2-norm support is added
-            with self.assertRaisesRegex(RuntimeError, r'norm with p=2 not supported for complex tensors'):
-                x = torch.randn(2, device=device, dtype=torch.complex64).norm(p=2)
-
-            # TODO: remove error test and add functionality test above when frobenius support is added
-            with self.assertRaisesRegex(RuntimeError, r'frobenius norm not supported for complex tensors'):
-                x = torch.randn(2, 2, device=device, dtype=torch.complex64).norm(p='fro')
-
-        elif device == 'cuda':
-            with self.assertRaisesRegex(RuntimeError, r'"norm_cuda" not implemented for \'ComplexFloat\''):
-                (1j * torch.randn(25)).norm()
+            # matrix norm
+            x = torch.randn(25, 25, device=device) + 1j * torch.randn(25, 25, device=device)
+            xn = x.cpu().numpy()
+            for p in ['nuc', 'fro']:
+                res = x.norm(p, keepdim=keepdim).cpu()
+                expected = np.linalg.norm(xn, p, keepdims=keepdim)
+                msg = gen_error_message(x.size(), p, keepdim)
+                self.assertEqual(res.shape, expected.shape, msg=msg)
+                self.assertEqual(res, expected, msg=msg)
 
     # Ensure torch.norm with p='fro' and p=2 give the same results for mutually supported input combinations
     @dtypes(torch.float)
@@ -1895,6 +1922,7 @@ class TestLinalg(TestCase):
             self.assertEqual(x, x_exp)
 
     @slowTest
+    @skipCUDAIf(True, "See https://github.com/pytorch/pytorch/issues/48996")
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -2588,7 +2616,7 @@ class TestLinalg(TestCase):
             self.assertEqual(torch.matrix_rank(aaT, True), np.linalg.matrix_rank(aaT.cpu().numpy(), True))
             self.assertEqual(torch.matrix_rank(aaT, 0.01, True), np.linalg.matrix_rank(aaT.cpu().numpy(), 0.01, True))
 
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.cdouble)
     def test_einsum(self, device, dtype):
         def check(equation, *operands):
             ref = np.einsum(equation, *[operand.cpu().numpy() for operand in operands])
@@ -2646,6 +2674,7 @@ class TestLinalg(TestCase):
         check("ii", H)                      # trace
         check("ii->i", H)                   # diagonal
         check('iji->j', I)                  # non-contiguous trace
+        check('ngrg...->nrg...', torch.rand((2, 1, 3, 1, 4), device=device, dtype=dtype))
 
         # Test ellipsis
         check("i...->...", H)
@@ -2663,6 +2692,56 @@ class TestLinalg(TestCase):
 
         # with strided tensors
         check("bn,anm,bm->ba", l[:, ::2], w[:, ::2, ::2], r[:, ::2])
+
+    @dtypes(torch.double, torch.cdouble)
+    def test_einsum_random(self, device, dtype):
+        def check(equation, *operands):
+            ref = np.einsum(equation, *[op.cpu().numpy() for op in operands])
+            res = torch.einsum(equation, operands)
+            self.assertEqual(res.cpu(), torch.from_numpy(np.array(ref)))
+
+        for _ in range(20):
+            # Create a random number of input operands, each with a random
+            # number of dimensions randomly labeled.
+            op_labels = []
+            valid_labels = set()
+            for _ in range(random.randint(1, 3)):
+                labels = np.random.randint(0, 10, random.randint(1, 5))
+                op_labels.append(labels)
+                valid_labels.update(labels)
+            label_size = np.random.randint(1, 5, 10)
+            ell_sizes = np.random.randint(1, 5, 3)
+
+            # Build equation and tensors from input operand labels.
+            ops = []
+            equation = ''
+            for labels in op_labels:
+                sizes = [label_size[label] for label in labels]
+                labels = [chr(ord('a') + label) for label in labels]
+
+                # Add ellipsis dimensions at random
+                ell_num_dim = random.randint(0, 3)
+                if ell_num_dim > 0:
+                    ell_index = random.randint(0, len(labels))
+                    sizes[ell_index:ell_index] = ell_sizes[-ell_num_dim:]
+                    labels.insert(ell_index, "...")
+
+                equation += ''.join(labels) + ','
+                ops.append(torch.rand(sizes, device=device, dtype=dtype))
+            equation = equation[:-1]
+
+            # Test with implicit output
+            check(equation, *ops)
+
+            # Randomly choose some labels to be part of the output
+            out_labels = np.unique(np.random.choice(list(valid_labels), random.randint(1, len(valid_labels))))
+            out_labels = [chr(ord('a') + label) for label in out_labels]
+            ell_index = random.randint(0, len(out_labels))
+            out_labels.insert(ell_index, '...')
+            equation += '->' + ''.join(out_labels)
+
+            # Randomly test the output
+            check(equation, *ops)
 
     def test_einsum_corner_cases(self, device):
         def check(equation, *operands, expected_output):
@@ -3960,7 +4039,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         torch_fn = lambda x: torch.mm(x, x)  # noqa: E731
         self.compare_with_numpy(torch_fn, np_fn, sx[0])
 
-    @precisionOverride({torch.half: 0.005, torch.bfloat16: 0.05})
+    @precisionOverride({torch.half: 0.05, torch.bfloat16: 0.05})
     @skipCUDAIf(torch.version.cuda == "10.1", "flaky on CUDA 10.1")
     @onlyOnCPUAndCUDA
     @dtypes(*torch.testing.get_all_fp_dtypes(), *torch.testing.get_all_complex_dtypes())
@@ -3986,17 +4065,26 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             return (d[0], d[1], d[2])
 
         def generate_inputs():
+            # transposed tensors
             for perm1, perm2 in itertools.product(itertools.permutations((0, 1, 2)), repeat=2):
                 b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
                 b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1)
                 b1 = b1.permute(perm1).contiguous().permute(invert_perm(perm1))
                 b2 = b2.permute(perm2).contiguous().permute(invert_perm(perm2))
                 yield b1, b2
+            # broadcasting tensors
             for b1, b2, b3, b4, b5, b6 in itertools.product((True, False), repeat=6):
                 shape1 = (num_batches if b1 else 1, M if b2 else 1, N if b3 else 1)
                 shape2 = (num_batches if b4 else 1, N if b5 else 1, O if b6 else 1)
                 b1 = make_tensor(shape1, device, dtype, low=-1, high=1).expand(num_batches, M, N)
                 b2 = make_tensor(shape2, device, dtype, low=-1, high=1).expand(num_batches, N, O)
+                yield b1, b2
+            # zero-sized tensors
+            for z1, z2, z3, z4 in itertools.product((True, False), repeat=4):
+                shape1 = (num_batches if z1 else 0, M if z2 else 0, N if z3 else 0)
+                shape2 = (num_batches if z1 else 0, N if z3 else 0, O if z4 else 0)
+                b1 = torch.randn(shape1, dtype=dtype, device=device)
+                b2 = torch.randn(shape2, dtype=dtype, device=device)
                 yield b1, b2
 
         for (b1, b2), perm3 in itertools.product(generate_inputs(), itertools.permutations((0, 1, 2))):
@@ -4178,6 +4266,17 @@ else:
                 ).to(device=device, dtype=dtype).sum(0)
                 out_tensor = torch.zeros_like(ref)
                 yield b1, b2, ref, out_tensor
+            # zero-sized tensors
+            for z1, z2, z3, z4 in itertools.product((True, False), repeat=4):
+                shape1 = (num_batches if z1 else 0, M if z2 else 0, N if z3 else 0)
+                shape2 = (num_batches if z1 else 0, N if z3 else 0, O if z4 else 0)
+                b1 = make_tensor(shape1, device, dtype, low=-1, high=1)
+                b2 = make_tensor(shape2, device, dtype, low=-1, high=1)
+                ref = torch.from_numpy(
+                    b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()
+                ).to(device=device, dtype=dtype).sum(0)
+                out_tensor = torch.zeros_like(ref)
+                yield b1, b2, ref, out_tensor
 
         for b1, b2, ref, out_tensor in generate_tensor():
             self._test_addbmm_baddbmm("addbmm", b1, b2, ref, out_tensor)
@@ -4225,6 +4324,16 @@ else:
                 shape2 = (num_batches if s4 else 1, N if s5 else 1, O if s6 else 1)
                 b1 = make_tensor(shape1, device, dtype, low=-1, high=1).expand(num_batches, M, N)
                 b2 = make_tensor(shape2, device, dtype, low=-1, high=1).expand(num_batches, N, O)
+                ref = torch.from_numpy(
+                    b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()).to(device=device, dtype=dtype)
+                out_tensor = torch.zeros_like(ref)
+                yield b1, b2, ref, out_tensor
+            # zero-sized tensors
+            for z1, z2, z3, z4 in itertools.product((True, False), repeat=4):
+                shape1 = (num_batches if z1 else 0, M if z2 else 0, N if z3 else 0)
+                shape2 = (num_batches if z1 else 0, N if z3 else 0, O if z4 else 0)
+                b1 = make_tensor(shape1, device, dtype, low=-2, high=2)
+                b2 = make_tensor(shape2, device, dtype, low=-2, high=2)
                 ref = torch.from_numpy(
                     b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()).to(device=device, dtype=dtype)
                 out_tensor = torch.zeros_like(ref)

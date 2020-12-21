@@ -70,7 +70,7 @@ struct DimCounter {
   int64_t offset;
 };
 
-struct CAFFE2_API OperandInfo {
+struct TORCH_API OperandInfo {
   using StrideVector = SmallVector<int64_t, 6>;
   OperandInfo() {}
   explicit OperandInfo(Tensor t) : tensor(std::move(t)) {
@@ -141,7 +141,7 @@ enum class FastSetupType : uint8_t {
 class TensorIteratorConfig;
 struct TensorIterator;
 
-struct CAFFE2_API TensorIteratorBase : public impl::MetaBase {
+struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   using DimMask = std::bitset<64>;
   using PtrVector = SmallVector<char*, 4>;
   using StrideVector = SmallVector<int64_t, 6>;
@@ -297,6 +297,10 @@ struct CAFFE2_API TensorIteratorBase : public impl::MetaBase {
     return true;
   }
 
+  void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) override;
+
+  void build_binary_op(const Tensor& out, const Tensor& a, const Tensor& b);
+
 protected:
   // Mutable reference as it moves tensors out of TensorIteratorConfig
   void populate_operands(TensorIteratorConfig&);
@@ -399,9 +403,12 @@ protected:
 
   // From TensorIteratorConfig
   bool is_reduction_ = false;
+
+  /// Set by populate_operands(), says if we're handling meta tensors
+  bool is_meta_ = false;
 };
 
-struct CAFFE2_API TensorIterator final : public TensorIteratorBase {
+struct TORCH_API TensorIterator final : public TensorIteratorBase {
   TensorIterator() : TensorIteratorBase() {}
   // Slicing is OK, TensorIterator guaranteed NOT to have any fields
   TensorIterator(const TensorIteratorBase& iter) : TensorIteratorBase(iter) {}
@@ -415,10 +422,11 @@ struct CAFFE2_API TensorIterator final : public TensorIteratorBase {
   static TensorIterator reduce_op(Tensor& out, const Tensor& a);
   static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
 
+  const Tensor& maybe_get_output(int64_t output_idx) override;
   void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) override;
 };
 
-class CAFFE2_API TensorIteratorConfig final {
+class TORCH_API TensorIteratorConfig final {
 public:
   friend struct TensorIteratorBase;
   friend struct TensorIterator;
@@ -524,8 +532,8 @@ private:
 /// A container-like struct that acts as if it contains splits of a
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover
 /// the original TensorIterator.
-struct CAFFE2_API SplitUntil32Bit {
-  struct CAFFE2_API iterator {
+struct TORCH_API SplitUntil32Bit {
+  struct TORCH_API iterator {
     iterator() {};
     iterator(const TensorIteratorBase& iter);
     iterator(iterator&&) = default;

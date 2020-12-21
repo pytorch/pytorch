@@ -247,10 +247,10 @@ static void logical_not_kernel(TensorIterator& iter) {
 }
 
 static void reciprocal_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "reciprocal_cpu", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "reciprocal_cpu", [&]() {
     cpu_kernel_vec(
         iter,
-        [=](scalar_t a) -> scalar_t { return static_cast<scalar_t>(1.0) / a; },
+        [=](scalar_t a) __ubsan_ignore_float_divide_by_zero__ -> scalar_t { return static_cast<scalar_t>(1.0) / a; },
         [=](Vec256<scalar_t> a) { return a.reciprocal(); });
   });
 }
@@ -277,7 +277,7 @@ static void sign_kernel(TensorIterator& iter){
           [=](scalar_t a) -> scalar_t { return (0 < a) - (a < 0); },
           [=](Vec256<scalar_t> self_vec){
 
-              // Comparision operators returns bitmask.
+              // Comparison operators returns bitmask.
               auto left = Vec256<scalar_t>::blendv(zero_vec, one_vec, zero_vec < self_vec);
               auto right = Vec256<scalar_t>::blendv(zero_vec, one_vec, self_vec < zero_vec);
 
@@ -299,6 +299,21 @@ static void sgn_kernel(TensorIterator& iter){
       iter,
       [=](scalar_t a) -> scalar_t { return sgn_impl(a); },
       [=](Vec256<scalar_t> a) { return a.sgn(); });
+  });
+}
+
+static void sinc_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.common_dtype(), "sinc_cpu", [&]() {
+    cpu_kernel(
+        iter,
+        [=](scalar_t a) -> scalar_t {
+          if (a == scalar_t(0)) {
+            return scalar_t(1);
+          } else {
+            scalar_t product = scalar_t(M_PI) * a;
+            return std::sin(product) / product;
+          }
+        });
   });
 }
 
@@ -677,6 +692,7 @@ REGISTER_DISPATCH(neg_stub, &neg_kernel);
 REGISTER_DISPATCH(sign_stub, &sign_kernel);
 REGISTER_DISPATCH(signbit_stub, &signbit_kernel);
 REGISTER_DISPATCH(sgn_stub, &sgn_kernel);
+REGISTER_DISPATCH(sinc_stub, &sinc_kernel);
 REGISTER_DISPATCH(sinh_stub, &sinh_kernel);
 REGISTER_DISPATCH(cosh_stub, &cosh_kernel);
 REGISTER_DISPATCH(acosh_stub, &acosh_kernel);

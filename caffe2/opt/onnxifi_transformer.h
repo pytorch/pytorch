@@ -18,7 +18,7 @@ class OnnxExporter;
 
 // Split SparseLengthsSumSparse into SparseLengthsSumSparseLookup +
 // SparseLengthsSum
-CAFFE2_API void splitSparseLengthsSumSparse(NetDef* net, const Workspace& ws);
+TORCH_API void splitSparseLengthsSumSparse(NetDef* net, const Workspace& ws);
 
 struct OnnxifiTransformerOptions final : public BackendTransformOptions {
   explicit OnnxifiTransformerOptions() : BackendTransformOptions() {}
@@ -49,7 +49,7 @@ struct OnnxifiTransformerOptions final : public BackendTransformOptions {
   std::unordered_map<int, ShapeInfoMap> shape_hints_per_bs;
 };
 
-class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
+class TORCH_API OnnxifiTransformer final : public BackendTransformerBase {
  public:
   explicit OnnxifiTransformer(const OnnxifiTransformerOptions& opts);
   ~OnnxifiTransformer() override;
@@ -81,6 +81,12 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
       const std::unordered_set<std::string>& weights_in_ws,
       const ShapeInfoMap& shape_hints_max_bs,
       const std::unordered_map<int, ShapeInfoMap> &shape_hints_per_bs);
+
+  // Check that output shape hints are present to ensure we can pass them to
+  // OnnxifiOp
+  bool canPassOutputShapeHintsPerBs(
+      const OperatorDef& op,
+      const std::unordered_map<int, ShapeInfoMap>& shape_hints_per_bs) const;
 
   // We already have all the ops and external inputs and outputs!
   OperatorDef buildOnnxifiOp(

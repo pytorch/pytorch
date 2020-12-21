@@ -26,7 +26,7 @@ using at::UndefinedTensorImpl;
  *
  * NB: See TensorImpl for documentation on these methods.
  */
-class CAFFE2_API Tensor final {
+class TORCH_API Tensor final {
  private:
   enum Unsafe { IDoWantAliasing };
   Tensor(const Tensor& other, Unsafe _) : impl_(other.getIntrusivePtr()) {}
@@ -530,10 +530,10 @@ class CAFFE2_API Tensor final {
  * this will not do anything if the
  * Tensor already has correct size and data type
  */
-CAFFE2_API void
+TORCH_API void
 ReinitializeTensor(Tensor* t, at::IntArrayRef dims, at::TensorOptions options);
 
-CAFFE2_API void ReinitializeAndCopyFrom(
+TORCH_API void ReinitializeAndCopyFrom(
     Tensor* t,
     at::TensorOptions options,
     const Tensor& src,
@@ -564,7 +564,7 @@ void TensorVectorResize(
     DeviceType type);
 
 // Tensor factory function
-CAFFE2_API Tensor empty(at::IntArrayRef dims, at::TensorOptions options);
+TORCH_API Tensor empty(at::IntArrayRef dims, at::TensorOptions options);
 
 /**
  * @brief Creates a CPU tensor, and fills its contents with the given values.
@@ -585,7 +585,7 @@ Tensor TensorCPUFromValues(at::IntArrayRef dims, at::ArrayRef<T> values) {
 vector<int64_t>
 GetTensorInfo(const void* c, size_t* capacity, DeviceOption* device);
 
-class CAFFE2_API TensorPrinter {
+class TORCH_API TensorPrinter {
  public:
   explicit TensorPrinter(
       const std::string& tensor_name = "",

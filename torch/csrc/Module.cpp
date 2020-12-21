@@ -153,27 +153,28 @@ static PyObject * THPModule_crashIfCsrcASAN(PyObject *module, PyObject *arg) {
           "but got %s", THPUtils_typename(arg));
   //NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
   volatile char x[3];
-  x[static_cast<int>(THPUtils_unpackLong(arg))] = 0;
-  return PyLong_FromLong(x[0]);
+  x[THPUtils_unpackInt(arg)] = 0;
+  //NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
+  return THPUtils_packInt32(x[0]);
 }
 
 static PyObject * THPModule_crashIfCsrcUBSAN(PyObject *module, PyObject *arg) {
   THPUtils_assert(THPUtils_checkLong(arg), "crash_if_csrc_ubsan expects an int, "
           "but got %s", THPUtils_typename(arg));
-  int32_t x = static_cast<int>(THPUtils_unpackLong(arg));
+  int32_t x = THPUtils_unpackInt(arg);
   double y = 1.0 / x;
-  return PyLong_FromLong((int)y);
+  return THPUtils_packInt32((int)y);
 }
 
 static PyObject * THPModule_crashIfATenASAN(PyObject *module, PyObject *arg) {
   THPUtils_assert(THPUtils_checkLong(arg), "crash_if_aten_asan expects an int, "
           "but got %s", THPUtils_typename(arg));
-  return PyLong_FromLong(at::_crash_if_asan(static_cast<int>(THPUtils_unpackLong(arg))));
+  return THPUtils_packInt32(at::_crash_if_asan(THPUtils_unpackInt(arg)));
 }
 
 static PyObject * THPModule_getNumThreads(PyObject *module, PyObject *noargs)
 {
-  return PyLong_FromLong(at::get_num_threads());
+  return THPUtils_packInt32(at::get_num_threads());
 }
 
 static PyObject * THPModule_setNumThreads(PyObject *module, PyObject *arg)
@@ -188,7 +189,7 @@ static PyObject * THPModule_setNumThreads(PyObject *module, PyObject *arg)
 
 static PyObject * THPModule_getNumInteropThreads(PyObject *module, PyObject *noargs)
 {
-  return PyLong_FromLong(at::get_num_interop_threads());
+  return THPUtils_packInt32(at::get_num_interop_threads());
 }
 
 static PyObject * THPModule_setNumInteropThreads(PyObject *module, PyObject *arg)
@@ -646,6 +647,7 @@ bool THCPComplexFloatStorage_init(PyObject *module);
 
 void THCPStream_init(PyObject *module);
 void THCPEvent_init(PyObject *module);
+void THCPGraph_init(PyObject *module);
 
 #ifdef USE_CUDA
 PyMethodDef* THCPModule_methods();
@@ -786,6 +788,7 @@ PyObject* initModule() {
 
   THCPStream_init(module);
   THCPEvent_init(module);
+  THCPGraph_init(module);
 #endif
 
   auto set_module_attr = [&](const char* name, PyObject* v, bool incref = true) {

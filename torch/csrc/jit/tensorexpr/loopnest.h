@@ -53,7 +53,7 @@ class TORCH_API LoopNest {
 
   bool computeInline(Stmt* s);
   bool computeInline(const Buf* b);
-  void inlineIntermediateBufs();
+  void inlineIntermediateBufs(bool inline_output_buffers);
 
   static void splitWithTail(For* f, int factor);
   static void splitWithTail(
@@ -107,6 +107,7 @@ class TORCH_API LoopNest {
       For* f,
       const std::unordered_map<std::string, const Buf*>& map);
 
+  void eliminateDeadStores();
   void prepareForCodegen();
 
   // Find the inner-most loops and vectorize them. Currently, this only works
