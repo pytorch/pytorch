@@ -1026,7 +1026,6 @@ Example:
     tensor([ 0,  1, -4], dtype=torch.int8)
 """.format(**common_args))
 
-# TODO: see https://github.com/pytorch/pytorch/issues/43667
 add_docstr(torch.bmm,
            r"""
 bmm(input, mat2, *, deterministic=False, out=None) -> Tensor
@@ -2934,7 +2933,6 @@ Example::
     tensor([ 0.,  1.])
 """.format(**common_args))
 
-# TODO: see https://github.com/pytorch/pytorch/issues/43667
 add_docstr(torch.eye,
            r"""
 eye(n, m=None, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
@@ -2943,6 +2941,8 @@ Returns a 2-D tensor with ones on the diagonal and zeros elsewhere.
 
 Args:
     n (int): the number of rows
+
+Keyword arguments:
     m (int, optional): the number of columns with default being :attr:`n`
     {out}
     {dtype}
@@ -4174,7 +4174,6 @@ Example::
     tensor([ 0.5724,  0.0000, -0.1208])
 """.format(**common_args))
 
-# TODO: update kwargs formatting (see https://github.com/pytorch/pytorch/issues/43667)
 add_docstr(torch.linspace, r"""
 linspace(start, end, steps, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
@@ -4201,6 +4200,8 @@ Args:
     start (float): the starting value for the set of points
     end (float): the ending value for the set of points
     steps (int): size of the constructed tensor
+
+Keyword arguments:
     {out}
     {dtype}
     {layout}
@@ -4537,7 +4538,6 @@ Example::
     tensor([ True,  True, False, False])
 """.format(**common_args))
 
-# TODO: update kwargs formatting (see https://github.com/pytorch/pytorch/issues/43667)
 add_docstr(torch.logspace, """
 logspace(start, end, steps, base=10.0, *, \
          out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
@@ -4568,7 +4568,9 @@ Args:
     start (float): the starting value for the set of points
     end (float): the ending value for the set of points
     steps (int): size of the constructed tensor
-    base (float): base of the logarithm function. Default: ``10.0``.
+
+Keyword arguments:
+    base (float, optional): base of the logarithm function. Default: ``10.0``.
     {out}
     {dtype}
     {layout}
@@ -5469,9 +5471,9 @@ Example::
 
 add_docstr(torch.argmin,
            r"""
-argmin(input) -> LongTensor
+argmin(input, dim=None, keepdim=False) -> LongTensor
 
-Returns the indices of the minimum value of all elements in the :attr:`input` tensor.
+Returns the indices of the minimum values of a tensor.
 
 This is the second value returned by :meth:`torch.min`. See its
 documentation for the exact semantics of this method.
@@ -5481,26 +5483,7 @@ documentation for the exact semantics of this method.
 Args:
     {input}
 
-Example::
-
-    >>> a = torch.randn(4, 4)
-    >>> a
-    tensor([[ 0.1139,  0.2254, -0.1381,  0.3687],
-            [ 1.0100, -1.1975, -0.0102, -0.4732],
-            [-0.9240,  0.1207, -0.7506, -1.0213],
-            [ 1.7809, -1.2960,  0.9384,  0.1438]])
-    >>> torch.argmin(a)
-    tensor(13)
-
-.. function:: argmin(input, dim, keepdim=False) -> LongTensor
-
-Returns the indices of the minimum values of a tensor across a dimension.
-
-This is the second value returned by :meth:`torch.min`. See its
-documentation for the exact semantics of this method.
-
-Args:
-    {input}
+Keyword args:
     {dim} If ``None``, the argmin of the flattened input is returned.
     {keepdim} Ignored if ``dim=None``.
 
@@ -5512,8 +5495,15 @@ Example::
             [ 1.0100, -1.1975, -0.0102, -0.4732],
             [-0.9240,  0.1207, -0.7506, -1.0213],
             [ 1.7809, -1.2960,  0.9384,  0.1438]])
+    >>> torch.argmin(a)
+    tensor(13)
     >>> torch.argmin(a, dim=1)
     tensor([ 2,  1,  3,  1])
+    >>> torch.argmin(a, dim=1, keepdim=True)
+    tensor([[2],
+            [1],
+            [3],
+            [1]])
 """.format(**single_dim_common))
 
 add_docstr(torch.mm,
@@ -5660,10 +5650,10 @@ in the output tensors having 1 fewer dimension than :attr:`input`.
 
 Args:
     {input}
-    {dim}
-    {keepdim}
 
 Keyword args:
+    {dim}
+    {keepdim}
     out (tuple, optional): the result tuple of two output tensors (values, indices)
 
 Example::
@@ -6328,7 +6318,6 @@ Example::
 
 """.format(**common_args))
 
-# TODO: see https://github.com/pytorch/pytorch/issues/43667
 add_docstr(torch.ones,
            r"""
 ones(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
@@ -6339,6 +6328,8 @@ by the variable argument :attr:`size`.
 Args:
     size (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
+
+Keyword arguments:
     {out}
     {dtype}
     {layout}
@@ -6356,7 +6347,6 @@ Example::
 
 """.format(**factory_common_args))
 
-# TODO: see https://github.com/pytorch/pytorch/issues/43667
 add_docstr(torch.ones_like,
            r"""
 ones_like(input, *, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
@@ -6372,6 +6362,8 @@ Returns a tensor filled with the scalar value `1`, with the same size as
 
 Args:
     {input}
+
+Keyword arguments:
     {dtype}
     {layout}
     {device}
@@ -7882,10 +7874,10 @@ will squeeze the tensor to the shape :math:`(A \times B)`.
 
 Args:
     {input}
-    dim (int, optional): if given, the input will be squeezed only in
-           this dimension
 
 Keyword args:
+    dim (int, optional): if given, the input will be squeezed only in
+           this dimension
     {out}
 
 Example::
@@ -7914,6 +7906,8 @@ via the biased estimator. Otherwise, Bessel's correction will be used.
 
 Args:
     {input}
+
+Keyword args:
     unbiased (bool): whether to use the unbiased estimation or not
 
 Example::
@@ -7938,10 +7932,10 @@ via the biased estimator. Otherwise, Bessel's correction will be used.
 Args:
     {input}
     {dim}
-    unbiased (bool): whether to use the unbiased estimation or not
-    {keepdim}
 
 Keyword args:
+    unbiased (bool): whether to use the unbiased estimation or not
+    {keepdim}
     {out}
 
 Example::
@@ -7967,6 +7961,8 @@ via the biased estimator. Otherwise, Bessel's correction will be used.
 
 Args:
     {input}
+
+Keyword args:
     unbiased (bool): whether to use the unbiased estimation or not
 
 Example::
@@ -7991,6 +7987,8 @@ via the biased estimator. Otherwise, Bessel's correction will be used.
 Args:
     {input}
     {dim}
+
+Keyword args:
     unbiased (bool): whether to use the unbiased estimation or not
     {keepdim}
 
@@ -8260,10 +8258,10 @@ If :attr:`upper` is ``False``, then lower triangular portion is used.
 Args:
     input (Tensor): the input tensor of size :math:`(*, n, n)` where `*` is zero or more
                     batch dimensions consisting of symmetric matrices.
-    eigenvectors(boolean, optional): controls whether eigenvectors have to be computed
-    upper(boolean, optional): controls whether to consider upper-triangular or lower-triangular region
 
 Keyword args:
+    eigenvectors(bool, optional): controls whether eigenvectors have to be computed
+    upper(boolean, optional): controls whether to consider upper-triangular or lower-triangular region
     out (tuple, optional): the output tuple of (Tensor, Tensor)
 
 Returns:
@@ -8583,6 +8581,8 @@ The boolean option :attr:`sorted` if ``True``, will make sure that the returned
 Args:
     {input}
     k (int): the k in "top-k"
+
+Keyword args:
     dim (int, optional): the dimension to sort along
     largest (bool, optional): controls whether to return largest or
            smallest elements
@@ -8668,6 +8668,8 @@ Args:
                 :math:`*` is zero of more batch dimensions (:math:`b`)
     A (Tensor): the input triangular coefficient matrix of size :math:`(*, m, m)`
                 where :math:`*` is zero or more batch dimensions
+
+Keyword args:
     upper (bool, optional): whether to solve the upper-triangular system
         of equations (default) or the lower-triangular system of equations. Default: ``True``.
     transpose (bool, optional): whether :math:`A` should be transposed before
@@ -9001,6 +9003,8 @@ biased estimator. Otherwise, Bessel's correction will be used.
 
 Args:
     {input}
+
+Keyword args:
     unbiased (bool): whether to use the unbiased estimation or not
 
 Example::
@@ -9025,6 +9029,8 @@ biased estimator. Otherwise, Bessel's correction will be used.
 Args:
     {input}
     {dim}
+
+Keyword args:
     unbiased (bool): whether to use the unbiased estimation or not
     {keepdim}
 
@@ -9054,6 +9060,8 @@ biased estimator. Otherwise, Bessel's correction will be used.
 
 Args:
     {input}
+
+Keyword args:
     unbiased (bool): whether to use the unbiased estimation or not
 
 Example::
@@ -9077,6 +9085,8 @@ biased estimator. Otherwise, Bessel's correction will be used.
 Args:
     {input}
     {dim}
+
+Keyword args:
     {keepdim}
     unbiased (bool): whether to use the unbiased estimation or not
 
@@ -9490,8 +9500,10 @@ Please look at `Moore-Penrose inverse`_ for more details
 
 Arguments:
     input (Tensor): The input tensor of size :math:`(*, m, n)` where :math:`*` is zero or more batch dimensions
-    rcond (float): A floating point value to determine the cutoff for small singular values.
-                   Default: 1e-15
+
+Keyword arguments:
+    rcond (float, optional): A floating point value to determine the cutoff for
+        small singular values. Default: ``1e-15``.
 
 Returns:
     The pseudo-inverse of :attr:`input` of dimensions :math:`(*, n, m)`
@@ -9755,6 +9767,8 @@ matrix with a geometric progression in each row is named for Alexandre-Theophile
 
 Arguments:
     x (Tensor): 1-D input tensor.
+
+Keyword args:
     N (int, optional): Number of columns in the output. If N is not specified,
         a square array is returned :math:`(N = len(x))`.
     increasing (bool, optional): Order of the powers of the columns. If True,
@@ -9818,6 +9832,8 @@ python's `itertools.combinations` when `with_replacement` is set to `False`, and
 
 Arguments:
     input (Tensor): 1D vector.
+
+Keyword arguments:
     r (int, optional): number of elements to combine
     with_replacement (boolean, optional): whether to allow duplication in combination
 
@@ -9887,6 +9903,8 @@ As above, but the sample points are spaced uniformly at a distance of `dx`.
 
 Arguments:
     y (Tensor): The values of the function to integrate
+
+Keyword args:
     dx (float): The distance between points at which `y` is sampled.
     dim (int): The dimension along which to integrate.
         By default, use the last dimension.
@@ -9911,6 +9929,8 @@ Args:
     {input}
     repeats (Tensor or int): The number of repetitions for each element.
         repeats is broadcasted to fit the shape of the given axis.
+
+Keyword args:
     dim (int, optional): The dimension along which to repeat values.
         By default, use the flattened input array, and return a flat output
         array.
