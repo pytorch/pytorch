@@ -3149,36 +3149,39 @@ Reducing with the addition operation is the same as using
 
 Args:
     dim (int): the axis along which to index
-    index (LongTensor): the indices of elements to scatter,
-      can be either empty or the same size of src.
-      When empty, the operation returns identity
-    src (Tensor): the source element(s) to scatter,
-      incase `value` is not specified
-    value (float): the source element(s) to scatter,
-      incase `src` is not specified
-    reduce (string): reduction operation to apply,
-      can be either 'add' or 'multiply'.
+    index (LongTensor): the indices of elements to scatter, can be either empty
+        or the same size of ``src``. When empty, the operation returns
+        ``self`` unchanged.
+    src (Tensor or float): the source element(s) to scatter.
+    reduce (str, optional): reduction operation to apply, can be either
+        ``'add'`` or ``'multiply'``.
 
 Example::
 
-    >>> x = torch.rand(2, 5)
-    >>> x
-    tensor([[ 0.3992,  0.2908,  0.9044,  0.4850,  0.6004],
-            [ 0.5735,  0.9006,  0.6797,  0.4152,  0.1732]])
-    >>> torch.zeros(3, 5).scatter_(0, torch.tensor([[0, 1, 2, 0, 0], [2, 0, 0, 1, 2]]), x)
-    tensor([[ 0.3992,  0.9006,  0.6797,  0.4850,  0.6004],
-            [ 0.0000,  0.2908,  0.0000,  0.4152,  0.0000],
-            [ 0.5735,  0.0000,  0.9044,  0.0000,  0.1732]])
+    >>> src = torch.arange(1, 11).reshape((2, 5))
+    >>> src
+    tensor([[ 1,  2,  3,  4,  5],
+            [ 6,  7,  8,  9, 10]])
+    >>> index = torch.tensor([[0, 1, 2, 0]])
+    >>> torch.zeros(3, 5, dtype=src.dtype).scatter_(0, index, src)
+    tensor([[1, 0, 0, 4, 0],
+            [0, 2, 0, 0, 0],
+            [0, 0, 3, 0, 0]])
+    >>> index = torch.tensor([[0, 1, 2], [0, 1, 4]])
+    >>> torch.zeros(3, 5, dtype=src.dtype).scatter_(1, index, src)
+    tensor([[1, 2, 3, 0, 0],
+            [6, 7, 0, 0, 8],
+            [0, 0, 0, 0, 0]])
 
-    >>> z = torch.zeros(2, 4).scatter_(1, torch.tensor([[2], [3]]), 1.23)
-    >>> z
-    tensor([[ 0.0000,  0.0000,  1.2300,  0.0000],
-            [ 0.0000,  0.0000,  0.0000,  1.2300]])
+    >>> torch.full((2, 4), 2.).scatter_(1, torch.tensor([[2], [3]]),
+    ...            1.23, reduce='multiply')
+    tensor([[2.0000, 2.0000, 2.4600, 2.0000],
+            [2.0000, 2.0000, 2.0000, 2.4600]])
+    >>> torch.full((2, 4), 2.).scatter_(1, torch.tensor([[2], [3]]),
+    ...            1.23, reduce='add')
+    tensor([[2.0000, 2.0000, 3.2300, 2.0000],
+            [2.0000, 2.0000, 2.0000, 3.2300]])
 
-    >>> z = torch.ones(2, 4).scatter_(1, torch.tensor([[2], [3]]), 1.23, reduce='multiply')
-    >>> z
-    tensor([[1.0000, 1.0000, 1.2300, 1.0000],
-            [1.0000, 1.0000, 1.0000, 1.2300]])
 """)
 
 add_docstr_all('scatter_add_',
