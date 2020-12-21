@@ -335,9 +335,16 @@ Tensor& sgn_out(Tensor& result, const Tensor& self) {
 Tensor sgn(const Tensor& self) { return unary_op_impl(self, at::sgn_out); }
 Tensor& sgn_(Tensor& self) { return unary_op_impl_(self, at::sgn_out); }
 
-Tensor& sin_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, sin_stub); }
-Tensor sin(const Tensor& self) { return unary_op_impl_float(self, sin_stub); }
-Tensor& sin_(Tensor& self) { return unary_op_impl_(self, at::sin_out); }
+Tensor& sin_out(
+    Tensor& result,
+    const Tensor& self,
+    c10::optional<ScalarType> dtype) {
+  return unary_op_impl_float_out(result, self, sin_stub);
+}
+Tensor sin(const Tensor& self, c10::optional<ScalarType> dtype) {
+  return unary_op_impl_float(self, sin_stub);
+}
+Tensor& sin_(Tensor& self) { return at::sin_out(self, self, {}); }
 
 Tensor& cos_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, cos_stub); }
 Tensor cos(const Tensor& self) { return unary_op_impl_float(self, cos_stub); }

@@ -70,6 +70,12 @@ Tensor sum_batching_rule(const Tensor& self, IntArrayRef dims, bool keepdim, opt
   return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
+Tensor sin_batching_rule(const Tensor& self, optional<ScalarType> dtype) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto result = at::sin(self_physical.tensor(), dtype);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
+}
+
 bool isPhysicalScalarTensor(const Tensor& logical_tensor) {
   if (logical_tensor.dim() > 0) {
     return false;
@@ -1040,6 +1046,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("clamp", clamp_batching_rule);
   m.impl("clamp_min", clamp_min_batching_rule);
   m.impl("clamp_max", clamp_max_batching_rule);
+  m.impl("sin", sin_batching_rule);
 
   // unary pointwise, out-of-place, no additional arguments.
 #define UNARY_POINTWISE(op) m.impl(#op, \
@@ -1069,7 +1076,6 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   UNARY_POINTWISE(rsqrt);
   UNARY_POINTWISE(sigmoid);
   UNARY_POINTWISE(sign);
-  UNARY_POINTWISE(sin);
   UNARY_POINTWISE(sinh);
   UNARY_POINTWISE(sqrt);
   UNARY_POINTWISE(tan);

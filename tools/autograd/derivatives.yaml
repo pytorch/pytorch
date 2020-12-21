@@ -958,7 +958,7 @@
 - name: sgn(Tensor self) -> Tensor
   self: sgn_backward(result, grad, self)
 
-- name: sin(Tensor self) -> Tensor
+- name: sin(Tensor self, *, ScalarType? dtype=None) -> Tensor
   self: grad * self.cos().conj()
 
 - name: sinc(Tensor self) -> Tensor
