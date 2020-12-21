@@ -21,7 +21,7 @@ namespace at {
 
 class Tensor;
 
-class CAFFE2_API Context {
+class TORCH_API Context {
  public:
   Context();
 
@@ -225,13 +225,13 @@ class CAFFE2_API Context {
   std::unique_ptr<THHState, void(*)(THHState*)> thh_state;
 };
 
-CAFFE2_API Context& globalContext();
+TORCH_API Context& globalContext();
 
 static inline void init() {
   globalContext();
 }
 
-CAFFE2_API Allocator* getCPUAllocator();
+TORCH_API Allocator* getCPUAllocator();
 
 static inline DeprecatedTypeProperties& getDeprecatedTypeProperties(Backend p, ScalarType s) {
   return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
