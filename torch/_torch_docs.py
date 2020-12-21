@@ -3472,7 +3472,7 @@ Args:
     range (tuple of floats, optional): Defines the lower and upper ends of the
         range. Default: use the min and max values of the Tensor.
     weights (Tensor, optional): Weight for each value in the input tensor.
-        Must have the shape as :attr:`input.
+        Must have the shape as :attr:`input`.
     density (bool): If ``False``, the result will contain the (weighted) number
         of samples in each bin. If ``True``, the (weighted) number of samples is
         divided by the sum of all (weighted) samples and the volume of the bin.
