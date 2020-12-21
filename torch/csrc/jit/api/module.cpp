@@ -164,8 +164,6 @@ IValue Module::operator()(std::vector<IValue> inputs) {
     hook_inputs.emplace_back(tuple_input);
     hook_inputs.emplace_back(outputs);
 
-    Kwargs output_param;
-    output_param["outputs"] = outputs;
     auto hook_result = Method(_ivalue(), hook)(hook_inputs);
     if (!hook_result.isNone()) {
       outputs = hook_result;

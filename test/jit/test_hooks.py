@@ -2,7 +2,7 @@ import os
 import sys
 
 import torch
-from typing import Any, List, Tuple
+from typing import List, Tuple
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -99,7 +99,7 @@ class TestHooks(JitTestCase):
         m.register_forward_hook(forward_hook)
 
         self.checkModule(m, ())
-    
+
     def test_submodule_hook_and_pre_hook_no_IO(self):
         m = OuterModuleNoIO("outer_mod_name", "inner_mod_name")
 
@@ -424,7 +424,7 @@ class TestHooks(JitTestCase):
 
         err_msg = (
             r"Can't define hook: foo on class: .+ "
-            "because a method with that name already exists."
+            "because a method or hook with that name already exists."
         )
         with self.assertRaisesRegex(RuntimeError, err_msg,):
             torch.jit.script(m)

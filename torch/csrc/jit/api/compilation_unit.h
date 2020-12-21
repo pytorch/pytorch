@@ -46,7 +46,7 @@ struct Self {
 // are used to implement their Methods
 
 struct TORCH_API CompilationUnit {
-  enum FunctionType { method, hook, pre_hook };
+  enum class FunctionType { Method, Hook, PreHook };
   // constructor that takes a set of functions to compile using the native
   // resolver
   explicit CompilationUnit(const std::string& source);
@@ -233,29 +233,20 @@ struct TORCH_API CompilationUnit {
         }
         // Classes can have multiple pointers to the same hook,
         // need to make sure to not delete it twice
-        std::set<Function*> already_deleted;
-        for (auto hook : cls->getForwardHooks()) {
-          // Tombstone the hook in the compilation unit.
-          if (already_deleted.count(hook) == 0) {
-            auto it = dict_.find(hook->qualname());
-            if (it != dict_.end()) {
-              functions_[it->second] = nullptr;
-              // Erase in our big lookup table
-              dict_.erase(it);
-            }
-            already_deleted.insert(hook);
-          }
+        std::unordered_set<Function*> hooks_to_delete;
+        for (auto hook: cls->getForwardHooks()){
+          hooks_to_delete.insert(hook);
         }
-        for (auto pre_hook : cls->getForwardPreHooks()) {
+        for (auto pre_hook: cls->getForwardPreHooks()){
+          hooks_to_delete.insert(pre_hook);
+        }
+        for (auto hook : hooks_to_delete) {
           // Tombstone the hook in the compilation unit.
-          if (already_deleted.count(pre_hook) == 0) {
-            auto it = dict_.find(pre_hook->qualname());
-            if (it != dict_.end()) {
-              functions_[it->second] = nullptr;
-              // Erase in our big lookup table
-              dict_.erase(it);
-            }
-            already_deleted.insert(pre_hook);
+          auto it = dict_.find(hook->qualname());
+          if (it != dict_.end()) {
+            functions_[it->second] = nullptr;
+            // Erase in our big lookup table
+            dict_.erase(it);
           }
         }
       }
@@ -301,7 +292,7 @@ struct TORCH_API CompilationUnit {
       const Self* self,
       const std::unordered_map<std::string, Function*>& function_table,
       bool shouldMangle = false,
-      FunctionType type = FunctionType::method) const;
+      FunctionType type = FunctionType::Method) const;
 
   // Define a property on \p self.
   struct PropertyPair;
