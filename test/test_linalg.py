@@ -1937,7 +1937,6 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_svd_lowrank(self, device):
-        import torch
         from torch.testing._internal.common_utils import random_lowrank_matrix, random_sparse_matrix
 
         dtype = torch.double
