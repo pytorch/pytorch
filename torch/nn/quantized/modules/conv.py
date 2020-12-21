@@ -54,6 +54,15 @@ class _ConvNd(nn.Module):
         self.scale = 1.0
         self.zero_point = 0
 
+    def set_weight_bias(self, qweight, bias_float):
+        raise NotImplementedError
+
+    def bias(self):
+        raise NotImplementedError
+
+    def _weight_bias(self):
+        raise NotImplementedError
+
     def extra_repr(self):
         s = ('{in_channels}, {out_channels}, kernel_size={kernel_size}'
              ', stride={stride}, scale={scale}, zero_point={zero_point}')
@@ -155,7 +164,8 @@ class _ConvNd(nn.Module):
         assert weight_post_process.dtype == torch.qint8, \
             'Weight observer must have a dtype of qint8'
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
-        qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
+        # the __init__ call used is the one from derived classes and not the one from _ConvNd
+        qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,  # type: ignore[call-arg]
                     mod.stride, mod.padding, mod.dilation, mod.groups,
                     mod.bias is not None, mod.padding_mode)
         qconv.set_weight_bias(qweight, mod.bias)
@@ -481,9 +491,10 @@ class _ConvTransposeNd(_ConvNd):
             mod (Module): a float module, either produced by torch.quantization
               utilities or provided by the user
         """
-        assert type(mod) == cls._FLOAT_MODULE, \
-            ' nnq.' + cls.__name__ + '.from_float only works for ' + \
-            cls._FLOAT_MODULE.__name__
+        # derived classes override cls._FLOAT_MODULE attribute
+        msg = ' nnq.' + cls.__name__ + '.from_float only works for ' + \
+              cls._FLOAT_MODULE.__name__  # type: ignore[attr-defined]
+        assert type(mod) == cls._FLOAT_MODULE, msg  # type: ignore[attr-defined]
         assert hasattr(mod, 'qconfig'), \
             'Input float module must have qconfig defined.'
         weight_post_process = mod.qconfig.weight()
@@ -492,7 +503,8 @@ class _ConvTransposeNd(_ConvNd):
         assert weight_post_process.dtype == torch.qint8, \
             'Weight observer must have a dtype of qint8'
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
-        qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
+        # the __init__ call used is the one from derived classes and not the one from _ConvTransposeNd
+        qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,  # type: ignore[call-arg]
                     mod.stride, mod.padding, mod.output_padding, mod.groups,
                     mod.bias is not None, mod.dilation, mod.padding_mode)
         qconv.set_weight_bias(qweight, mod.bias)
