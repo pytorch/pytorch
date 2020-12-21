@@ -5621,8 +5621,8 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (images, features),
                       input_names=["input1", "input2", "input3", "input4", "input5", "input6"],
                       dynamic_axes={"input1": [0, 1, 2, 3], "input2": [0, 1, 2, 3],
-                                     "input3": [0, 1, 2, 3], "input4": [0, 1, 2, 3],
-                                     "input5": [0, 1, 2, 3], "input6": [0, 1, 2, 3]},
+                                    "input3": [0, 1, 2, 3], "input4": [0, 1, 2, 3],
+                                    "input5": [0, 1, 2, 3], "input6": [0, 1, 2, 3]},
                       test_with_inputs=[(images2, test_features)])
 
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -5682,7 +5682,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (images, features),
                       input_names=["input1", "input2", "input3", "input4", "input5", "input6"],
                       dynamic_axes={"input1": [0, 1, 2, 3], "input2": [0, 1, 2, 3], "input3": [0, 1, 2, 3],
-                                     "input4": [0, 1, 2, 3], "input5": [0, 1, 2, 3], "input6": [0, 1, 2, 3]},
+                                    "input4": [0, 1, 2, 3], "input5": [0, 1, 2, 3], "input6": [0, 1, 2, 3]},
                       test_with_inputs=[(images2, test_features)])
 
 
