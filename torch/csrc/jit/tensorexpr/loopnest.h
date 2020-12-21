@@ -49,7 +49,7 @@ class TORCH_API LoopNest {
   Stmt* getLoopBodyFor(Tensor*) const;
   bool hasLoopBodyFor(Tensor*) const;
 
-  void vectorize(Stmt*);
+  static void vectorize(For*);
 
   bool computeInline(Stmt* s);
   bool computeInline(const Buf* b);
