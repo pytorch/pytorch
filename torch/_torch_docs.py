@@ -4345,15 +4345,15 @@ Keyword arguments:
 
 add_docstr(torch.xlogy,
            r"""
-xlogy(self, other, *, out=None) -> Tensor
+xlogy(input, other, *, out=None) -> Tensor
 
-Computes ``self * log(other)`` with the following cases.
+Computes ``input * log(other)`` with the following cases.
 
 .. math::
     \text{out}_{i} = \begin{cases}
         \text{NaN} & \text{if } \text{other}_{i} = \text{NaN} \\
-        0 & \text{if } \text{self}_{i} = 0.0 \\
-        self_i * \log{(other_i)} & \text{otherwise}
+        0 & \text{if } \text{input}_{i} = 0.0 \\
+        \text{input}_i * \log{(\text{other}_i)} & \text{otherwise}
     \end{cases}
 
 Similar to SciPy's `scipy.special.xlogy`.
@@ -4361,10 +4361,10 @@ Similar to SciPy's `scipy.special.xlogy`.
 """ + r"""
 
 Args:
-    self (Number or Tensor)
+    input (Number or Tensor)
     other (Number or Tensor)
 
-.. note:: At least one of :attr:`self` or :attr:`other` must be a tensor.
+.. note:: At least one of :attr:`input` or :attr:`other` must be a tensor.
 
 Keyword args:
     {out}
