@@ -1029,8 +1029,6 @@ if TEST_SCIPY:
         UnaryUfuncInfo('digamma',
                        ref=scipy.special.digamma,
                        decorators=(precisionOverride({torch.float16: 5e-1}),),
-                       skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                                       device_type='cuda', dtypes=[torch.float16]),),
                        dtypes=all_types_and(torch.bool),
                        dtypesIfCPU=all_types_and(torch.bool),
                        dtypesIfCUDA=all_types_and(torch.bool, torch.half),
