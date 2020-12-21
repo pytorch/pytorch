@@ -13,7 +13,8 @@ from .utils import _single, _pair, _triple, _reverse_repeat_tuple
 from torch._torch_docs import reproducibility_notes
 
 from ..common_types import _size_1_t, _size_2_t, _size_3_t
-from typing import Optional, List, Tuple, Sequence, Protocol
+from typing_extensions import Protocol
+from typing import Optional, List, Tuple, Sequence
 
 convolution_notes = \
     {"groups_note": r"""* :attr:`groups` controls the connections between inputs and outputs.
