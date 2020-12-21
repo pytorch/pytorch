@@ -627,12 +627,12 @@ Example::
     >>> import torch.distributed as dist
     >>> from datetime import timedelta
     >>> # Run on process 1 (server)
-    >>> store = dist.TCPStore("127.0.0.1", 1234, 2, True, timedelta(seconds=30))
+    >>> server_store = dist.TCPStore("127.0.0.1", 1234, 2, True, timedelta(seconds=30))
     >>> # Run on process 2 (client)
-    >>> store = dist.TCPStore("127.0.0.1", 1234, 2, False)
+    >>> client_store = dist.TCPStore("127.0.0.1", 1234, 2, False)
     >>> # Use any of the store methods from either the client or server after initialization
-    >>> store.set("first_key", "first_value")
-    >>> store.get("first_key")
+    >>> server_store.set("first_key", "first_value")
+    >>> client_store.get("first_key")
       )")
       .def(
           py::init<
@@ -644,6 +644,8 @@ Example::
           py::arg("host_name"),
           py::arg("port"),
           py::arg("world_size"),
+          // using noconvert() requires this argument to be True or False
+          // prevents accidental implicit conversion to bool
           py::arg("is_master").noconvert(),
           py::arg("timeout") =
               std::chrono::milliseconds(::c10d::Store::kDefaultTimeout));
