@@ -3,11 +3,15 @@
 #include <c10/core/DeviceType.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <ATen/autocast_mode.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/utils/wrap_outputs.h>
+#include <torch/csrc/autograd/utils/python_arg_parsing.h>
+#include <torch/csrc/utils/pycfunction_helpers.h>
 
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   using namespace torch::autograd::profiler;
@@ -230,6 +234,26 @@ static PyObject * autocast_decrement_nesting(PyObject* _unused, PyObject *arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * set_forward_AD_enabled(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (!PyBool_Check(arg)) {
+    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
+  }
+  setForwardADEnabled(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * is_forward_AD_enabled(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (isForwardADEnabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * set_grad_enabled(PyObject* _unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   if (!PyBool_Check(arg)) {
@@ -270,10 +294,34 @@ static PyObject * is_anomaly_mode_enabled(PyObject* _unused, PyObject *arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * python_enter_dual_level(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  // It is unlikely that the depth of forward nesting will overflow int64_t so we
+  // just static cast here.
+  return utils::wrap(static_cast<int64_t>(forward_ad::enter_dual_level()));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * python_exit_dual_level(PyObject* _unused, PyObject* args, PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "exit_dual_level(int64_t level)"
+  });
+
+  ParsedArgs<1> parsed_args;
+  auto _r = parser.parse(args, kwargs, parsed_args);
+
+  forward_ad::exit_dual_level(_r.toInt64(0));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 // autograd methods on torch._C
 static PyMethodDef methods[] = { // NOLINT
   {"_set_grad_enabled", set_grad_enabled, METH_O, nullptr},
   {"is_grad_enabled", is_grad_enabled, METH_NOARGS, nullptr},
+  {"_set_forward_AD_enabled", set_forward_AD_enabled, METH_O, nullptr},
+  {"_is_forward_AD_enabled", is_forward_AD_enabled, METH_NOARGS, nullptr},
   {"set_autocast_enabled", set_autocast_enabled, METH_O, nullptr},
   {"is_autocast_enabled", is_autocast_enabled, METH_NOARGS, nullptr},
   {"clear_autocast_cache", clear_autocast_cache, METH_NOARGS, nullptr},
@@ -281,6 +329,8 @@ static PyMethodDef methods[] = { // NOLINT
   {"autocast_decrement_nesting", autocast_decrement_nesting, METH_NOARGS, nullptr},
   {"set_anomaly_enabled", set_anomaly_mode_enabled, METH_O, nullptr},
   {"is_anomaly_enabled", is_anomaly_mode_enabled, METH_NOARGS, nullptr},
+  {"_enter_dual_level", python_enter_dual_level, METH_NOARGS, nullptr},
+  {"_exit_dual_level", castPyCFunctionWithKeywords(python_exit_dual_level), METH_VARARGS | METH_KEYWORDS, nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 
