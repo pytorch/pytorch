@@ -87,21 +87,21 @@ TEST(TensorIndexingTest, TestAdvancedIndexingWithListOfTensor) {
   {
     torch::Tensor tensor = torch::randn({20, 20});
     torch::Tensor index = torch::arange(10, torch::kLong).cpu();
-    torch::Tensor result_with_array_ref = tensor.index(torch::List<torch::Tensor>({index}));
+    torch::Tensor result_with_array_ref = tensor.index(torch::List<c10::optional<torch::Tensor>>({index}));
     torch::Tensor result_with_init_list = tensor.index({index});
     ASSERT_TRUE(result_with_array_ref.equal(result_with_init_list));
   }
   {
     torch::Tensor tensor = torch::randn({20, 20});
     torch::Tensor index = torch::arange(10, torch::kLong).cpu();
-    torch::Tensor result_with_array_ref = tensor.index_put_(torch::List<torch::Tensor>({index}), torch::ones({20}));
+    torch::Tensor result_with_array_ref = tensor.index_put_(torch::List<c10::optional<torch::Tensor>>({index}), torch::ones({20}));
     torch::Tensor result_with_init_list = tensor.index_put_({index}, torch::ones({20}));
     ASSERT_TRUE(result_with_array_ref.equal(result_with_init_list));
   }
   {
     torch::Tensor tensor = torch::randn({20, 20});
     torch::Tensor index = torch::arange(10, torch::kLong).cpu();
-    torch::Tensor result_with_array_ref = tensor.index_put_(torch::List<torch::Tensor>({index}), torch::ones({1, 20}));
+    torch::Tensor result_with_array_ref = tensor.index_put_(torch::List<c10::optional<torch::Tensor>>({index}), torch::ones({1, 20}));
     torch::Tensor result_with_init_list = tensor.index_put_({index}, torch::ones({1, 20}));
     ASSERT_TRUE(result_with_array_ref.equal(result_with_init_list));
   }
