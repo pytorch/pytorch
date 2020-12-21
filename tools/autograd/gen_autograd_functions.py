@@ -201,7 +201,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
 
     def emit_derivative(
         derivative: Derivative,
-        args_with_derivatives: Sequence[CppArgument],
+        args_with_derivatives: Sequence[Binding],
     ) -> Tuple[bool, str]:
         formula = derivative.formula
         var_names = derivative.var_names
