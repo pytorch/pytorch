@@ -33,8 +33,6 @@ inline std::vector<Tensor> unpack_list(at::ArrayRef<SavedVariable> xs) {
 }
 
 inline c10::List<c10::optional<Tensor>> unpack_opt_list(at::ArrayRef<SavedVariable> xs) {
-  // NB: we must explicitly do the conversion in the lambda, otherwise template
-  // deduction will give a Tensor of Variable which is not convertible
   torch::List<c10::optional<Tensor>> result;
   result.reserve(xs.size());
   for (const SavedVariable& v : xs) {
