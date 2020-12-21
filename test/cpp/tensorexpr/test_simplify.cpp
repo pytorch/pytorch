@@ -1,10 +1,10 @@
 #include <gtest/gtest.h>
-#include "test/cpp/tensorexpr/test_base.h"
+#include <test/cpp/tensorexpr/test_base.h>
 
-#include "test/cpp/tensorexpr/test_utils.h"
-#include "torch/csrc/jit/tensorexpr/hash_provider.h"
-#include "torch/csrc/jit/tensorexpr/ir_simplifier.h"
-#include "torch/csrc/jit/tensorexpr/loopnest.h"
+#include <test/cpp/tensorexpr/test_utils.h>
+#include <torch/csrc/jit/tensorexpr/hash_provider.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/loopnest.h>
 
 #include <cmath>
 
@@ -180,7 +180,7 @@ TEST(Simplify, ConstantFoldIntrinsics) {
   ExprHandle modHandle = Intrinsics::make(kFmod, c, sinHandle);
   ExprHandle logHandle = Intrinsics::make(kLog10, modHandle);
   ExprHandle rndHandle = Intrinsics::make(kRound, logHandle);
-  ExprHandle fn = Intrinsics::make(kFabs, rndHandle);
+  ExprHandle fn = Intrinsics::make(kAbs, rndHandle);
 
   ExprHandle newF = IRSimplifier::simplify(fn);
   ASSERT_NE(newF.AsNode<FloatImm>(), nullptr);

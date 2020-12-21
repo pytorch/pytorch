@@ -468,11 +468,19 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
   auto win_length = win_lengthOpt.value_or(n_fft);
   const bool return_complex = return_complexOpt.value_or(
       self.is_complex() || (window.defined() && window.is_complex()));
-  if (!return_complexOpt && !return_complex) {
-    TORCH_WARN_ONCE("stft will require the return_complex parameter be explicitly "
-                    " specified in a future PyTorch release. Use return_complex=False "
-                    " to preserve the current behavior or return_complex=True to return "
-                    " a complex output.");
+  if (!return_complex) {
+    TORCH_CHECK(return_complexOpt.has_value(),
+        "stft requires the return_complex parameter be given for real inputs."
+        "You should pass return_complex=True to opt-in to complex dtype returns "
+        "(which will be required in a future pytorch release). "
+      );
+
+    TORCH_WARN_ONCE(
+        "stft with return_complex=False is deprecated. In a future pytorch "
+        "release, stft will return complex tensors for all inputs, and "
+        "return_complex=False will raise an error.\n"
+        "Note: you can still call torch.view_as_real on the complex output to "
+        "recover the old return format.");
   }
 
   if (!at::isFloatingType(self.scalar_type()) && !at::isComplexType(self.scalar_type())) {

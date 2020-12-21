@@ -102,7 +102,7 @@ struct BuiltinOpFunction : public Function {
 
   std::string pretty_print_schema() const override {
     TORCH_INTERNAL_ASSERT(false);
-    return ""; // TODO: suppress unreachable code warning
+    return "";
   }
 
   Function& setSchema(c10::FunctionSchema schema) override {

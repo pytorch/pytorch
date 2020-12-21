@@ -17,6 +17,7 @@
 #include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
+#include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/cuda/python_comm.h>
 #include <torch/csrc/Generator.h>
@@ -77,7 +78,7 @@ PyObject * THCPModule_getDevice_wrap(PyObject *self, PyObject *noargs)
   HANDLE_TH_ERRORS
   torch::utils::cuda_lazy_init();
   auto device = static_cast<int>(c10::cuda::current_device());
-  return PyLong_FromLong(device);
+  return THPUtils_packInt32(device);
   END_HANDLE_TH_ERRORS
 }
 
@@ -85,7 +86,7 @@ PyObject * THCPModule_getDeviceCount_wrap(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   poison_fork();
-  return PyLong_FromLong(at::cuda::device_count());
+  return THPUtils_packUInt64(at::cuda::device_count());
   END_HANDLE_TH_ERRORS
 }
 
@@ -150,7 +151,7 @@ PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *obj)
 
 PyObject * THCPModule_getCompiledVersion(PyObject *self, PyObject *noargs)
 {
-  return PyLong_FromLong((long) CUDA_VERSION);
+  return THPUtils_packInt64((int64_t) CUDA_VERSION);
 }
 
 PyObject * THCPModule_cudaHostAllocator(PyObject *_unused, PyObject *noargs)
