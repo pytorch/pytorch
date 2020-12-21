@@ -360,7 +360,8 @@ class QuantizationTestCase(TestCase):
         if hasattr(module, 'qconfig') and module.qconfig is not None and \
            ((is_leaf_module(module) and not isinstance(module, torch.nn.Sequential)
             and type(module) in propagate_qconfig_list) or
-           type(module) in float_to_observed_module_class_mapping.keys()):
+           type(module) in float_to_observed_module_class_mapping.keys()) and \
+           not isinstance(module, torch.quantization.DeQuantStub):
             self.assertTrue(hasattr(module, 'activation_post_process'),
                             'module: ' + str(type(module)) + ' do not have observer')
         # we don't need to check observers for child modules of the
@@ -609,7 +610,11 @@ class QuantizationTestCase(TestCase):
                                expected_node_list=None,
                                debug=False,
                                print_debug_info=False,
-                               custom_qconfig=None):
+                               custom_qconfig=None,
+                               prepare_expected_node=None,
+                               prepare_expected_node_occurrence=None,
+                               prepare_expected_node_list=None,
+                               prepare_custom_config_dict=None):
             """ Quantizes model with graph mode quantization on fx and check if the
                 quantized model contains the quantized_node
 
@@ -628,6 +633,14 @@ class QuantizationTestCase(TestCase):
                                 NodeSpec.call_module(nnq.Conv2d),
                                 NodeSpec.call_function(F.hardtanh_),
                                 NodeSpec.call_method('dequantize')]
+                    debug: if True, enables debug mode
+                    print_debug_info: if True, prints debug info
+                    custom_qconfig: overrides default qconfig
+                    prepare_expected_node: same as expected_node, but for prepare
+                    prepare_expected_node_occurrence: same as
+                        expected_node_occurrence, but for prepare
+                    prepare_expected_node_list: same as expected_node_list, but
+                        for prepare
             """
             # TODO: make img_data a single example instead of a list
             if type(inputs) == list:
@@ -653,9 +666,16 @@ class QuantizationTestCase(TestCase):
                 prepare = prepare_fx
 
             qconfig_dict = {'': qconfig}
-            prepared = prepare(model, qconfig_dict)
+            prepared = prepare(
+                model, qconfig_dict,
+                prepare_custom_config_dict=prepare_custom_config_dict)
             if not quant_type == QuantType.DYNAMIC:
                 prepared(*inputs)
+
+            self.checkGraphModuleNodes(
+                prepared, prepare_expected_node,
+                prepare_expected_node_occurrence, prepare_expected_node_list)
+
             prepared_copy = copy.deepcopy(prepared)
             qgraph = convert_fx(prepared)
             qgraph_debug = convert_fx(prepared_copy, debug=True)

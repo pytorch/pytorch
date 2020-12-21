@@ -290,6 +290,27 @@ Tensor index(const Tensor & self, TensorList indices) {
   return iter.output();
 }
 
+Tensor quantized_index(const Tensor & self, TensorList indices) {
+  TORCH_INTERNAL_ASSERT(
+      self.qscheme() == c10::kPerTensorAffine ||
+      self.qscheme() == c10::kPerTensorSymmetric,
+      "Indexing is only supported for per-Tensor quantized Tensors.");
+
+  // For now, this is a naive implementation which does dq -> index -> q.
+  // TODO(future PR): improve performance by removing the copies.
+  const auto& self_dq = self.dequantize();
+
+  TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
+
+  auto info = make_info(self_dq, indices);
+  auto iter = make_index_iterator(info);
+  index_stub(iter.device_type(), iter, info.indexed_sizes, info.indexed_strides);
+  at::Tensor res = iter.output();
+
+  return at::quantize_per_tensor(
+      res, self.q_scale(), self.q_zero_point(), self.scalar_type());
+}
+
 Tensor& index_out(Tensor& result, const Tensor & self, TensorList indices) {
   TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   at::assert_no_internal_overlap(result);
