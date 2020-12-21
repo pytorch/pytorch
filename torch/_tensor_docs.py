@@ -3126,8 +3126,13 @@ the same number of dimensions. It is also required that
 ``index.size(d) <= self.size(d)`` for all dimensions ``d != dim``.
 
 Moreover, as for :meth:`~Tensor.gather`, the values of :attr:`index` must be
-between ``0`` and ``self.size(dim) - 1`` inclusive, and all values in a row
-along the specified dimension :attr:`dim` must be unique.
+between ``0`` and ``self.size(dim) - 1`` inclusive.
+
+.. warning::
+
+    When indices are not unique, the behaviour is non-deterministic (one of the
+    values from ``src`` will be picked arbitrarily) and the gradient will be
+    incorrect!
 
 Additionally accepts an optional :attr:`reduce` argument that allows
 specification of an optional reduction operation, which is applied to all
@@ -3209,6 +3214,10 @@ dimensions ``d``, and that ``index.size(d) <= self.size(d)`` for all dimensions
 Note:
     {forward_reproducibility_note}
 
+.. warning::
+
+    When indices are not unique, the gradient will be incorrect!
+
 Args:
     dim (int): the axis along which to index
     index (LongTensor): the indices of elements to scatter and add,
@@ -3218,14 +3227,17 @@ Args:
 
 Example::
 
-    >>> x = torch.rand(2, 5)
-    >>> x
-    tensor([[0.7404, 0.0427, 0.6480, 0.3806, 0.8328],
-            [0.7953, 0.2009, 0.9154, 0.6782, 0.9620]])
-    >>> torch.ones(3, 5).scatter_add_(0, torch.tensor([[0, 1, 2, 0, 0], [2, 0, 0, 1, 2]]), x)
-    tensor([[1.7404, 1.2009, 1.9154, 1.3806, 1.8328],
-            [1.0000, 1.0427, 1.0000, 1.6782, 1.0000],
-            [1.7953, 1.0000, 1.6480, 1.0000, 1.9620]])
+    >>> src = torch.ones((2, 5))
+    >>> index = torch.tensor([[0, 1, 2, 0, 0]])
+    >>> torch.zeros(3, 5, dtype=src.dtype).scatter_add_(0, index, src)
+    tensor([[1., 0., 0., 1., 1.],
+            [0., 1., 0., 0., 0.],
+            [0., 0., 1., 0., 0.]])
+    >>> index = torch.tensor([[0, 1, 2, 0, 0], [0, 1, 2, 2, 2]])
+    >>> torch.zeros(3, 5, dtype=src.dtype).scatter_add_(0, index, src)
+    tensor([[2., 0., 0., 1., 1.],
+            [0., 2., 0., 0., 0.],
+            [0., 0., 2., 1., 1.]])
 
 """.format(**reproducibility_notes))
 
