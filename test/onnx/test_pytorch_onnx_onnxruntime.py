@@ -5574,12 +5574,7 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, boxes, size):
                 return ops.boxes.clip_boxes_to_image(boxes, size.shape)
 
-        '''
-        self.run_model(Module(), [(boxes, size), (boxes, size_2)],
-                       input_names=["boxes", "size"],
-                       dynamic_axes={"size": [0, 1]})
-        '''                       
-        self.run_test(Module(), boxes, size),
+        self.run_test(Module(), (boxes, size),
                       input_names=["boxes", "size"],
                       dynamic_axes={"size": [0, 1]},
                       test_with_inputs=[(boxes, size_2)])
