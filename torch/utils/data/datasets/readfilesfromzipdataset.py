@@ -1,6 +1,7 @@
 from torch.utils.data.dataset import IterableDataset
 from torch.utils.data.datasets.common import validate_pathname_binary_tuple
-from typing import Iterable, Iterator
+from typing import Iterable, Iterator, Tuple, IO, cast
+from io import BufferedIOBase
 
 import os
 import sys
@@ -10,31 +11,28 @@ import warnings
 class ReadFilesFromZipIterableDataset(IterableDataset):
     r""" :class:`ReadFilesFromZipIterableDataset`.
 
-    IterableDataset to extract zip binary streams from input iterables
-    yield pathname and extracted binary stream in a tuple.
+    IterableDataset to extract zip binary streams from input iterable which contains tuples of
+    pathname and zip binary stream, yields pathname and extracted binary stream in a tuple.
     args:
         dataset: Iterable dataset that provides pathname and zip binary stream in tuples
         length: a nominal length of the dataset
     """
     def __init__(
             self,
-            dataset : Iterable,
+            dataset : Iterable[Tuple[str, BufferedIOBase]],
             length : int = -1):
         super().__init__()
-        self.dataset : Iterable = dataset
+        self.dataset : Iterable[Tuple[str, BufferedIOBase]] = dataset
         self.length : int = length
 
-    def __iter__(self) -> Iterator[tuple]:
+    def __iter__(self) -> Iterator[Tuple[str, BufferedIOBase]]:
         if not isinstance(self.dataset, Iterable):
-            warnings.warn("dataset must be Iterable type but got {}".format(type(self.dataset)))
-            raise TypeError
+            raise TypeError("dataset must be Iterable type but got {}".format(type(self.dataset)))
         for data in self.dataset:
-            ret = validate_pathname_binary_tuple(data)
-            if ret:
-                warnings.warn("got invalid pathname and binary record ({}), abort!".format(ret))
-                raise TypeError
+            validate_pathname_binary_tuple(data)
+            pathname, data_stream = data
             try:
-                zips = zipfile.ZipFile(data[1])
+                zips = zipfile.ZipFile(cast(IO[bytes], data_stream))
                 for zipinfo in zips.infolist():
                     # major version should always be 3 here.
                     if sys.version_info[1] >= 6:
@@ -44,15 +42,15 @@ class ReadFilesFromZipIterableDataset(IterableDataset):
                         continue
 
                     extracted_fobj = zips.open(zipinfo)
-                    inner_pathname = os.path.normpath(os.path.join(data[0], zipinfo.filename))
+                    inner_pathname = os.path.normpath(os.path.join(pathname, zipinfo.filename))
                     # Add a reference of the source zipfile into extracted_fobj, so the source
                     # zipfile handle won't be released until all the extracted file objs are destroyed.
                     # Add `# type: ignore` to silence mypy's type checker
                     extracted_fobj.source_zipfile_ref = zips  # type: ignore
-                    yield (inner_pathname, extracted_fobj)
+                    yield (inner_pathname, cast(BufferedIOBase, extracted_fobj))
             except Exception as e:
                 warnings.warn(
-                    "Unable to extract files from corrupted zipfile stream {} due to: {}, abort!".format(data[0], e))
+                    "Unable to extract files from corrupted zipfile stream {} due to: {}, abort!".format(pathname, e))
                 raise e
 
 

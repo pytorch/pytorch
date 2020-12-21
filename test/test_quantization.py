@@ -14,7 +14,7 @@ from quantization.test_quantized_op import TestDynamicQuantizedLinear  # noqa: F
 from quantization.test_quantized_op import TestComparatorOps  # noqa: F401
 from quantization.test_quantized_op import TestPadding  # noqa: F401
 from quantization.test_quantized_op import TestQuantizedEmbeddingOps  # noqa: F401
-
+from quantization.test_quantized_op import TestDynamicQuantizedRNNOp  # noqa: F401
 # Quantized Functional
 from quantization.test_quantized_functional import TestQuantizedFunctional  # noqa: F401
 
