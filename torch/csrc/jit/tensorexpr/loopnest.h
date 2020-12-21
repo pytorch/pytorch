@@ -53,7 +53,7 @@ class TORCH_API LoopNest {
 
   bool computeInline(Stmt* s);
   bool computeInline(const Buf* b);
-  void inlineIntermediateBufs();
+  void inlineIntermediateBufs(bool inline_output_buffers);
 
   static void splitWithTail(For* f, int factor);
   static void splitWithTail(

@@ -579,21 +579,24 @@ class DefaultNode(QuantizeHandler):
                 load_arg(quantized=[0])(node.args),
                 load_arg(quantized=False)(node.kwargs))
         else:
+            assert node.op == "call_function"
             # call_function
             scale, zero_point = activation_post_process.calculate_qparams()
             scale = float(scale)
             zero_point = int(zero_point)
 
+            assert not isinstance(node.target, str), "Expecting node.target for "
+            "call_function to be a function instead of a string"
             quantized_op = get_quantized_operator(node.target)
             args = load_arg(quantized=[0])(node.args)
-            kwargs = {**load_arg(quantized=False)(node.kwargs), 'output_scale': scale, 'output_zero_point': zero_point}
+            kwargs = {**load_arg(quantized=False)(node.kwargs), "output_scale": scale, "output_zero_point": zero_point}
             if quantized_op in ARGS_TO_SKIP:
                 args_to_skip = ARGS_TO_SKIP[quantized_op]
                 for arg in args_to_skip:
                     if arg in kwargs:
                         kwargs.pop(arg)
             return quantizer.quantized_graph.create_node(
-                'call_function', quantized_op, args, kwargs)
+                "call_function", quantized_op, args, kwargs)
 
 # TODO: elu is using scale/zero_point instead of output_scale, output_zero_point
 @register_quant_pattern(torch.nn.functional.elu)
