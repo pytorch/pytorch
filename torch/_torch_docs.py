@@ -2941,9 +2941,9 @@ Returns a 2-D tensor with ones on the diagonal and zeros elsewhere.
 
 Args:
     n (int): the number of rows
+    m (int, optional): the number of columns with default being :attr:`n`
 
 Keyword arguments:
-    m (int, optional): the number of columns with default being :attr:`n`
     {out}
     {dtype}
     {layout}
@@ -4568,9 +4568,9 @@ Args:
     start (float): the starting value for the set of points
     end (float): the ending value for the set of points
     steps (int): size of the constructed tensor
+    base (float, optional): base of the logarithm function. Default: ``10.0``.
 
 Keyword arguments:
-    base (float, optional): base of the logarithm function. Default: ``10.0``.
     {out}
     {dtype}
     {layout}
@@ -5482,8 +5482,6 @@ documentation for the exact semantics of this method.
 
 Args:
     {input}
-
-Keyword args:
     {dim} If ``None``, the argmin of the flattened input is returned.
     {keepdim} Ignored if ``dim=None``.
 
@@ -5650,10 +5648,10 @@ in the output tensors having 1 fewer dimension than :attr:`input`.
 
 Args:
     {input}
-
-Keyword args:
     {dim}
     {keepdim}
+
+Keyword args:
     out (tuple, optional): the result tuple of two output tensors (values, indices)
 
 Example::
@@ -7874,10 +7872,10 @@ will squeeze the tensor to the shape :math:`(A \times B)`.
 
 Args:
     {input}
-
-Keyword args:
     dim (int, optional): if given, the input will be squeezed only in
            this dimension
+
+Keyword args:
     {out}
 
 Example::
@@ -7906,8 +7904,6 @@ via the biased estimator. Otherwise, Bessel's correction will be used.
 
 Args:
     {input}
-
-Keyword args:
     unbiased (bool): whether to use the unbiased estimation or not
 
 Example::
@@ -7932,10 +7928,10 @@ via the biased estimator. Otherwise, Bessel's correction will be used.
 Args:
     {input}
     {dim}
-
-Keyword args:
     unbiased (bool): whether to use the unbiased estimation or not
     {keepdim}
+
+Keyword args:
     {out}
 
 Example::
@@ -7961,8 +7957,6 @@ via the biased estimator. Otherwise, Bessel's correction will be used.
 
 Args:
     {input}
-
-Keyword args:
     unbiased (bool): whether to use the unbiased estimation or not
 
 Example::
@@ -7987,8 +7981,6 @@ via the biased estimator. Otherwise, Bessel's correction will be used.
 Args:
     {input}
     {dim}
-
-Keyword args:
     unbiased (bool): whether to use the unbiased estimation or not
     {keepdim}
 
@@ -8258,10 +8250,10 @@ If :attr:`upper` is ``False``, then lower triangular portion is used.
 Args:
     input (Tensor): the input tensor of size :math:`(*, n, n)` where `*` is zero or more
                     batch dimensions consisting of symmetric matrices.
-
-Keyword args:
     eigenvectors(bool, optional): controls whether eigenvectors have to be computed
     upper(boolean, optional): controls whether to consider upper-triangular or lower-triangular region
+
+Keyword args:
     out (tuple, optional): the output tuple of (Tensor, Tensor)
 
 Returns:
@@ -8581,8 +8573,6 @@ The boolean option :attr:`sorted` if ``True``, will make sure that the returned
 Args:
     {input}
     k (int): the k in "top-k"
-
-Keyword args:
     dim (int, optional): the dimension to sort along
     largest (bool, optional): controls whether to return largest or
            smallest elements
@@ -8668,8 +8658,6 @@ Args:
                 :math:`*` is zero of more batch dimensions (:math:`b`)
     A (Tensor): the input triangular coefficient matrix of size :math:`(*, m, m)`
                 where :math:`*` is zero or more batch dimensions
-
-Keyword args:
     upper (bool, optional): whether to solve the upper-triangular system
         of equations (default) or the lower-triangular system of equations. Default: ``True``.
     transpose (bool, optional): whether :math:`A` should be transposed before
@@ -9003,8 +8991,6 @@ biased estimator. Otherwise, Bessel's correction will be used.
 
 Args:
     {input}
-
-Keyword args:
     unbiased (bool): whether to use the unbiased estimation or not
 
 Example::
@@ -9029,8 +9015,6 @@ biased estimator. Otherwise, Bessel's correction will be used.
 Args:
     {input}
     {dim}
-
-Keyword args:
     unbiased (bool): whether to use the unbiased estimation or not
     {keepdim}
 
@@ -9060,8 +9044,6 @@ biased estimator. Otherwise, Bessel's correction will be used.
 
 Args:
     {input}
-
-Keyword args:
     unbiased (bool): whether to use the unbiased estimation or not
 
 Example::
@@ -9085,8 +9067,6 @@ biased estimator. Otherwise, Bessel's correction will be used.
 Args:
     {input}
     {dim}
-
-Keyword args:
     {keepdim}
     unbiased (bool): whether to use the unbiased estimation or not
 
@@ -9280,7 +9260,7 @@ Example::
 
 add_docstr(torch.full_like,
            """
-full_like(input, fill_value, \\*, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
+full_like(input, fill_value, \\*, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
 memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor with the same size as :attr:`input` filled with :attr:`fill_value`.
@@ -9499,9 +9479,8 @@ Please look at `Moore-Penrose inverse`_ for more details
     Batched version for complex inputs is only supported on the CPU.
 
 Arguments:
-    input (Tensor): The input tensor of size :math:`(*, m, n)` where :math:`*` is zero or more batch dimensions
-
-Keyword arguments:
+    input (Tensor): The input tensor of size :math:`(*, m, n)` where :math:`*` is
+        zero or more batch dimensions.
     rcond (float, optional): A floating point value to determine the cutoff for
         small singular values. Default: ``1e-15``.
 
@@ -9767,8 +9746,6 @@ matrix with a geometric progression in each row is named for Alexandre-Theophile
 
 Arguments:
     x (Tensor): 1-D input tensor.
-
-Keyword args:
     N (int, optional): Number of columns in the output. If N is not specified,
         a square array is returned :math:`(N = len(x))`.
     increasing (bool, optional): Order of the powers of the columns. If True,
@@ -9832,8 +9809,6 @@ python's `itertools.combinations` when `with_replacement` is set to `False`, and
 
 Arguments:
     input (Tensor): 1D vector.
-
-Keyword arguments:
     r (int, optional): number of elements to combine
     with_replacement (boolean, optional): whether to allow duplication in combination
 
@@ -9929,8 +9904,6 @@ Args:
     {input}
     repeats (Tensor or int): The number of repetitions for each element.
         repeats is broadcasted to fit the shape of the given axis.
-
-Keyword args:
     dim (int, optional): The dimension along which to repeat values.
         By default, use the flattened input array, and return a flat output
         array.

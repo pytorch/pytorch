@@ -840,8 +840,6 @@ class MultiheadAttention(Module):
     Args:
         embed_dim: total dimension of the model.
         num_heads: parallel attention heads.
-
-    Keyword Args:
         dropout: a Dropout layer on attn_output_weights. Default: 0.0.
         bias: add bias as module parameter. Default: True.
         add_bias_kv: add bias to the key and value sequences at dim=0.
@@ -930,8 +928,6 @@ class MultiheadAttention(Module):
     Args:
         query, key, value: map a query and a set of key-value pairs to an output.
             See "Attention Is All You Need" for more details.
-
-    Keyword args:
         key_padding_mask: if provided, specified padding elements in the key will
             be ignored by the attention. When given a binary mask and a value is True,
             the corresponding value on the attention layer will be ignored. When given
