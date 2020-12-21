@@ -83,7 +83,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                    example_outputs=None, do_constant_folding=True,
                    dynamic_axes=None, test_with_inputs=None,
                    input_names=None, output_names=None,
-                   fixed_batch_size=False):
+                   fixed_batch_size=False, dict_check=True):
     model.eval()
 
     if input is None:
@@ -97,12 +97,17 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
             input = (input,)
         input_args = copy.deepcopy(input)
         input_kwargs = {}
-        if isinstance(input_args[-1], dict):
+        if dict_check and isinstance(input_args[-1], dict):
             input_kwargs = input_args[-1]
             input_args = input_args[:-1]
         output = model(*input_args, **input_kwargs)
         if isinstance(output, torch.Tensor):
             output = (output,)
+
+        if isinstance(input[-1], dict):
+            input = input + ({},)
+        else:
+            input = input
 
         ort_sess = convert_to_onnx(model, input=input, opset_version=self.opset_version,
                                    example_outputs=output, do_constant_folding=do_constant_folding,
@@ -212,14 +217,14 @@ class TestONNXRuntime(unittest.TestCase):
 
     def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=True,
                  batch_size=2, use_gpu=True, dynamic_axes=None, test_with_inputs=None,
-                 input_names=None, output_names=None, fixed_batch_size=False):
+                 input_names=None, output_names=None, fixed_batch_size=False, dict_check=True):
         def _run_test(m):
             return run_model_test(self, m, batch_size=batch_size,
                                   input=input, use_gpu=use_gpu, rtol=rtol, atol=atol,
                                   do_constant_folding=do_constant_folding,
                                   dynamic_axes=dynamic_axes, test_with_inputs=test_with_inputs,
                                   input_names=input_names, output_names=output_names,
-                                  fixed_batch_size=fixed_batch_size)
+                                  fixed_batch_size=fixed_batch_size, dict_check=dict_check)
         if self.is_script_test_enabled and self.use_new_jit_passes:
             script_model = torch.jit.script(model)
             _run_test(script_model)
@@ -5584,7 +5589,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         input = torch.rand(3, 100, 200), torch.rand(3, 200, 200)
         input_test = torch.rand(3, 100, 200), torch.rand(3, 200, 200)
-        self.run_test(TransformModule(), (input,), test_with_inputs=(input_test,))
+        self.run_test(TransformModule(), (input,), test_with_inputs=[(input_test,)])
 
     def get_features(self, images):
         s0, s1 = images.shape[-2:]
@@ -5623,7 +5628,8 @@ class TestONNXRuntime(unittest.TestCase):
                       dynamic_axes={"input1": [0, 1, 2, 3], "input2": [0, 1, 2, 3],
                                     "input3": [0, 1, 2, 3], "input4": [0, 1, 2, 3],
                                     "input5": [0, 1, 2, 3], "input6": [0, 1, 2, 3]},
-                      test_with_inputs=[(images2, test_features)])
+                      test_with_inputs=[(images2, test_features)],
+                      dict_check=False)
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_multi_scale_roi_align(self):
@@ -5683,7 +5689,8 @@ class TestONNXRuntime(unittest.TestCase):
                       input_names=["input1", "input2", "input3", "input4", "input5", "input6"],
                       dynamic_axes={"input1": [0, 1, 2, 3], "input2": [0, 1, 2, 3], "input3": [0, 1, 2, 3],
                                     "input4": [0, 1, 2, 3], "input5": [0, 1, 2, 3], "input6": [0, 1, 2, 3]},
-                      test_with_inputs=[(images2, test_features)])
+                      test_with_inputs=[(images2, test_features)],
+                      dict_check=False)
 
 
 def make_test(name, base, layer, bidirectional, initial_state,
