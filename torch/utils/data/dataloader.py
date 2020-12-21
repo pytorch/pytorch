@@ -1210,8 +1210,8 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         except StopIteration:
             return
 
-        # Every worker will get chance to get indices, but if there is other worker
-        # who has less data to process, that worker gets indices next
+        # Every worker will get chance to get indices, but if there is other worker,
+        # which has less data to process, that worker gets indices next
         worker_queue_idx = next(self._worker_queue_idx_cycle)
         worker_queue_size = float('inf')
 
