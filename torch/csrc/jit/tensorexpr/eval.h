@@ -104,7 +104,7 @@ class TORCH_API SimpleIREvaluator : public CodeGen {
 
   ~SimpleIREvaluator() override;
 
-  TORCH_API void call(const std::vector<CallArg>& args) override;
+  void call(const std::vector<CallArg>& args) override;
 
   template <typename... Ts>
   void operator()(const Ts&... ts) {
