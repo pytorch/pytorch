@@ -1730,7 +1730,7 @@ TEST(LoopNest, LoopNestComputeAt_2) {
     const std::string& verification_pattern =
         R"IR(
 # CHECK: for (int cy = 0; cy < H; cy++)
-# CHECK:   Allocate(temp, int, {2, W + 1})
+# CHECK:   Allocate(temp, int, {2 * (W + 1)})
 # CHECK:   for
 # CHECK:     for
 # CHECK:   for (int cx = 0; cx < W; cx++)
@@ -1762,7 +1762,7 @@ TEST(LoopNest, LoopNestComputeAt_2) {
         R"IR(
 # CHECK: for (int cy = 0; cy < H; cy++)
 # CHECK:   for (int cx = 0; cx < W; cx++)
-# CHECK:     Allocate(temp, int, {2, 2})
+# CHECK:     Allocate(temp, int, {4})
 # CHECK:     for
 # CHECK:       for
 # CHECK-NOT: prod[
@@ -1847,7 +1847,7 @@ TEST(LoopNest, LoopNestComputeAt_3) {
 # CHECK:   for (int cx = 0; cx < W; cx++)
 # CHECK:     C[
 # CHECK: for (int dy = 0; dy < H; dy++)
-# CHECK:   Allocate(temp, int, {1, W})
+# CHECK:   Allocate(temp, int, {W})
 # CHECK:   for (int dx = 0; dx < W; dx++)
 # CHECK-NOT: A[)IR";
     torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
@@ -1884,7 +1884,7 @@ TEST(LoopNest, LoopNestComputeAt_3) {
 # CHECK:     C[
 # CHECK: for (int dy = 0; dy < H; dy++)
 # CHECK:   for (int dx = 0; dx < W; dx++)
-# CHECK:     Allocate(temp, int, {1, 1})
+# CHECK:     Allocate(temp, int, {1})
 # CHECK-NOT: A[)IR";
     torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -3286,14 +3286,14 @@ TEST(LoopNest, CacheReadsSimple) {
   // just this once: verify the whole thing.
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(A, int, {64, 64});
+#CHECK: Allocate(A, int, {4096});
 #CHECK: for (int i
 #CHECK:  for (int j
 #CHECK:   A[
 #CHECK:  }
 #CHECK: }
 #CHECK: for (int i_1
-#CHECK:  Allocate(A_local, int, {1, 10});
+#CHECK:  Allocate(A_local, int, {10});
 #CHECK:  for (int j_1
 #CHECK:   A_local[j_1] = A[
 #CHECK:  }
@@ -3357,7 +3357,7 @@ TEST(LoopNest, CacheReadsOuter) {
   oss << *result;
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(A_local, int, {21, 11});
+#CHECK: Allocate(A_local, int, {231});
 #CHECK: A_local[j_1 + 11 * i_1] =
 #CHECK: B[10 * i_2 + j_2] = (A_local[(j_2 + 11 * i_2) + 12]) + (A_local[j_2 + 11 * i_2]);
       )IR";
@@ -3408,7 +3408,7 @@ TEST(LoopNest, CacheReadsInternal) {
   oss << *result;
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(A_local, int, {2, 11});
+#CHECK: Allocate(A_local, int, {22});
 #CHECK: A_local[j_1 + 11 * i_2] =
 #CHECK: B[10 * i_1 + j_2] = (A_local[j_2]) + (A_local[j_2 + 12]);
       )IR";
@@ -3460,7 +3460,7 @@ TEST(LoopNest, CacheReadsInner) {
   oss << *result;
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(A_local, int, {5, 2});
+#CHECK: Allocate(A_local, int, {10});
 #CHECK: A_local[2 * i_2 + j_2] =
 #CHECK: B[10 * i_1 + j_1] = (A_local[8]) + (A_local[1]);
       )IR";
@@ -3512,7 +3512,7 @@ TEST(LoopNest, CacheWritesSimple) {
   oss << *result;
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(A_local, int, {1, 64});
+#CHECK: Allocate(A_local, int, {64});
 #CHECK: for (int j = 0; j < 64
 #CHECK:   A_local[j] = i * j;
 #CHECK: for (int j_1 = 0; j_1 < 64
