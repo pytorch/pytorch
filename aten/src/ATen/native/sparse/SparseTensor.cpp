@@ -7,24 +7,13 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/native/IndexingUtils.h>
 
 #include <TH/THBlasUtils.h>
 
 namespace at { namespace native {
 
 using namespace at::sparse;
-
-namespace {
-torch::List<c10::optional<Tensor>> toListOfOptionalTensors(ArrayRef<Tensor> list) {
-  torch::List<c10::optional<Tensor>> result;
-  result.reserve(list.size());
-  for (const Tensor& a : list) {
-    result.push_back(a);
-  }
-  return result;
-}
-}
-
 
 /******************************************************************************
  * access methods
