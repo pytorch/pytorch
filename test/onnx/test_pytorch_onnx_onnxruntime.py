@@ -226,52 +226,6 @@ class TestONNXRuntime(unittest.TestCase):
 
         _run_test(model)
 
-    def run_model(self, model, inputs_list, tolerate_small_mismatch=False, do_constant_folding=True, dynamic_axes=None,
-                  output_names=None, input_names=None):
-        model.eval()
-
-        onnx_io = io.BytesIO()
-        if isinstance(inputs_list[0][-1], dict):
-            torch_onnx_input = inputs_list[0] + ({},)
-        else:
-            torch_onnx_input = inputs_list[0]
-        # export to onnx with the first input
-        torch.onnx.export(model, torch_onnx_input, onnx_io,
-                          do_constant_folding=do_constant_folding, opset_version=self.opset_version,
-                          dynamic_axes=dynamic_axes, input_names=input_names, output_names=output_names)
-        # validate the exported model with onnx runtime
-        for test_inputs in inputs_list:
-            with torch.no_grad():
-                if isinstance(test_inputs, torch.Tensor) or \
-                   isinstance(test_inputs, list):
-                    test_inputs = (test_inputs,)
-                test_ouputs = model(*test_inputs)
-                if isinstance(test_ouputs, torch.Tensor):
-                    test_ouputs = (test_ouputs,)
-            self.ort_validate(onnx_io, test_inputs, test_ouputs, tolerate_small_mismatch)
-
-    def ort_validate(self, onnx_io, inputs, outputs, tolerate_small_mismatch=False):
-
-        inputs, _ = torch.jit._flatten(inputs)
-        outputs, _ = torch.jit._flatten(outputs)
-
-        inputs = list(map(to_numpy, inputs))
-        outputs = list(map(to_numpy, outputs))
-
-        ort_session = onnxruntime.InferenceSession(onnx_io.getvalue())
-        # compute onnxruntime output prediction
-        ort_inputs = dict((ort_session.get_inputs()[i].name, inpt) for i, inpt in enumerate(inputs))
-        ort_outs = ort_session.run(None, ort_inputs)
-
-        for i in range(0, len(outputs)):
-            try:
-                torch.testing.assert_allclose(outputs[i], ort_outs[i], rtol=1e-03, atol=1e-05)
-            except AssertionError as error:
-                if tolerate_small_mismatch:
-                    self.assertIn("(0.00%)", str(error), str(error))
-                else:
-                    raise
-
     def run_model_test_with_external_data(self, model, input, rtol=0.001, atol=1e-7,
                                           example_outputs=None, do_constant_folding=True,
                                           dynamic_axes=None, input_names=None, output_names=None,
@@ -2823,21 +2777,6 @@ class TestONNXRuntime(unittest.TestCase):
 
         input = torch.randn((10, 16, 16))
         self.run_test(LSTMModel(), (input,))
-
-    @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()  # scripting prim_dtype
-    def test_lstm_proj_no_hidden(self):
-        class LSTMModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.rnn = torch.nn.LSTM(input_size=16, hidden_size=16, proj_size=8)
-
-            def forward(self, x):
-                return self.rnn(x)
-
-        input = torch.randn((10, 16, 16))
-        with self.assertRaises(RuntimeError):
-            self.run_test(LSTMModel(), (input,))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     @disableScriptTest()
@@ -5559,7 +5498,6 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, boxes, scores):
                 return ops.nms(boxes, scores, 0.5)
 
-        # self.run_model(Module(), [(boxes, scores)])
         self.run_test(Module(), (boxes, scores))
 
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -5584,7 +5522,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.rand(1, 1, 10, 10, dtype=torch.float32)
         single_roi = torch.tensor([[0, 0, 0, 4, 4]], dtype=torch.float32)
         model = ops.RoIAlign((5, 5), 1, 2)
-        # self.run_model(model, [(x, single_roi)])
         self.run_test(model, (x, single_roi))
 
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -5592,25 +5529,21 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.rand(1, 1, 10, 10, dtype=torch.float32)
         single_roi = torch.tensor([[0, 1.5, 1.5, 3, 3]], dtype=torch.float32)
         model = ops.RoIAlign((5, 5), 1, 2, aligned=True)
-        # self.run_model(model, [(x, single_roi)])
         self.run_test(model, (x, single_roi))
 
         x = torch.rand(1, 1, 10, 10, dtype=torch.float32)
         single_roi = torch.tensor([[0, 0.2, 0.3, 4.5, 3.5]], dtype=torch.float32)
         model = ops.RoIAlign((5, 5), 0.5, 3, aligned=True)
-        # self.run_model(model, [(x, single_roi)])
         self.run_test(model, (x, single_roi))
 
         x = torch.rand(1, 1, 10, 10, dtype=torch.float32)
         single_roi = torch.tensor([[0, 0.2, 0.3, 4.5, 3.5]], dtype=torch.float32)
         model = ops.RoIAlign((5, 5), 1.8, 2, aligned=True)
-        # self.run_model(model, [(x, single_roi)])
         self.run_test(model, (x, single_roi))
 
         x = torch.rand(1, 1, 10, 10, dtype=torch.float32)
         single_roi = torch.tensor([[0, 0.2, 0.3, 4.5, 3.5]], dtype=torch.float32)
         model = ops.RoIAlign((2, 2), 2.5, 0, aligned=True)
-        # self.run_model(model, [(x, single_roi)])
         self.run_test(model, (x, single_roi))
 
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -5620,7 +5553,6 @@ class TestONNXRuntime(unittest.TestCase):
         pool_h = 5
         pool_w = 5
         model = ops.RoIPool((pool_h, pool_w), 2)
-        # self.run_model(model, [(x, rois)])
         self.run_test(model, (x, rois))
 
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -5635,10 +5567,6 @@ class TestONNXRuntime(unittest.TestCase):
 
         input = torch.rand(3, 10, 20)
         input_test = torch.rand(3, 100, 150)
-        '''
-        self.run_model(TransformModule(), [(input,), (input_test,)],
-                       input_names=["input1"], dynamic_axes={"input1": [0, 1, 2]})
-        '''
         self.run_test(TransformModule(), (input,),
                       input_names=["input1"], dynamic_axes={"input1": [0, 1, 2]},
                       test_with_inputs=[(input_test,)])
@@ -5656,7 +5584,6 @@ class TestONNXRuntime(unittest.TestCase):
 
         input = torch.rand(3, 100, 200), torch.rand(3, 200, 200)
         input_test = torch.rand(3, 100, 200), torch.rand(3, 200, 200)
-        # self.run_model(TransformModule(), [(input,), (input_test,)])
         self.run_test(TransformModule(), (input,), test_with_inputs=(input_test,))
 
     def get_features(self, images):
@@ -5691,13 +5618,6 @@ class TestONNXRuntime(unittest.TestCase):
         model.eval()
         model(images, features)
 
-        '''
-        self.run_model(model, [(images, features), (images2, test_features)], tolerate_small_mismatch=True,
-                       input_names=["input1", "input2", "input3", "input4", "input5", "input6"],
-                       dynamic_axes={"input1": [0, 1, 2, 3], "input2": [0, 1, 2, 3],
-                                     "input3": [0, 1, 2, 3], "input4": [0, 1, 2, 3],
-                                     "input5": [0, 1, 2, 3], "input6": [0, 1, 2, 3]})
-        '''
         self.run_test(model, (images, features),
                       input_names=["input1", "input2", "input3", "input4", "input5", "input6"],
                       dynamic_axes={"input1": [0, 1, 2, 3], "input2": [0, 1, 2, 3],
@@ -5729,7 +5649,6 @@ class TestONNXRuntime(unittest.TestCase):
         boxes1 = torch.rand(6, 4) * 256
         boxes1[:, 2:] += boxes1[:, :2]
 
-        # self.run_model(TransformModule(), [(i, [boxes],), (i1, [boxes1],)])
         self.run_test(TransformModule(), (i, [boxes],), test_with_inputs=[(i1, [boxes1],)])
 
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -5760,18 +5679,12 @@ class TestONNXRuntime(unittest.TestCase):
         model.eval()
         model(images, features)
 
-        '''
-        self.run_model(model, [(images, features), (images2, test_features)], tolerate_small_mismatch=True,
-                       input_names=["input1", "input2", "input3", "input4", "input5", "input6"],
-                       dynamic_axes={"input1": [0, 1, 2, 3], "input2": [0, 1, 2, 3], "input3": [0, 1, 2, 3],
-                                     "input4": [0, 1, 2, 3], "input5": [0, 1, 2, 3], "input6": [0, 1, 2, 3]})
-        '''
         self.run_test(model, (images, features),
                       input_names=["input1", "input2", "input3", "input4", "input5", "input6"],
                       dynamic_axes={"input1": [0, 1, 2, 3], "input2": [0, 1, 2, 3], "input3": [0, 1, 2, 3],
                                      "input4": [0, 1, 2, 3], "input5": [0, 1, 2, 3], "input6": [0, 1, 2, 3]},
                       test_with_inputs=[(images2, test_features)])
-        
+
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout,
