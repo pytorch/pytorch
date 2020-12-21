@@ -20,10 +20,10 @@ enum class TensorIndexType { None, Ellipsis, Integer, Boolean, Slice, Tensor };
 
 constexpr c10::nullopt_t None = c10::nullopt;
 
-struct CAFFE2_API EllipsisIndexType final { EllipsisIndexType() {} };
-CAFFE2_API extern const EllipsisIndexType Ellipsis;
+struct TORCH_API EllipsisIndexType final { EllipsisIndexType() {} };
+TORCH_API extern const EllipsisIndexType Ellipsis;
 
-struct CAFFE2_API Slice final {
+struct TORCH_API Slice final {
  public:
   // This mirrors `__PySlice_Unpack` in torch/csrc/utils/python_compat.h
   Slice(
@@ -73,7 +73,7 @@ struct CAFFE2_API Slice final {
   int64_t step_;
 };
 
-CAFFE2_API std::ostream& operator<<(std::ostream& stream, const Slice& slice);
+TORCH_API std::ostream& operator<<(std::ostream& stream, const Slice& slice);
 
 // `at::indexing::TensorIndex` is used for converting C++ tensor indices such as
 // `{None, "...", Ellipsis, 0, true, Slice(1, None, 2), torch::tensor({1, 2})}`
@@ -100,7 +100,7 @@ CAFFE2_API std::ostream& operator<<(std::ostream& stream, const Slice& slice);
 // `:3:2`                  | `Slice(None, 3, 2)`
 // `1:3:2`                 | `Slice(1, 3, 2)`
 // `torch.tensor([1, 2])`) | `torch::tensor({1, 2})`
-struct CAFFE2_API TensorIndex final {
+struct TORCH_API TensorIndex final {
   // Case 1: `at::indexing::None`
   TensorIndex(c10::nullopt_t) : type_(TensorIndexType::None) {}
 
@@ -175,8 +175,8 @@ struct CAFFE2_API TensorIndex final {
   TensorIndexType type_;
 };
 
-CAFFE2_API std::ostream& operator<<(std::ostream& stream, const TensorIndex& tensor_index);
-CAFFE2_API std::ostream& operator<<(std::ostream& stream, const std::vector<TensorIndex>& tensor_indices);
+TORCH_API std::ostream& operator<<(std::ostream& stream, const TensorIndex& tensor_index);
+TORCH_API std::ostream& operator<<(std::ostream& stream, const std::vector<TensorIndex>& tensor_indices);
 
 namespace impl {
 static inline Tensor applySlice(

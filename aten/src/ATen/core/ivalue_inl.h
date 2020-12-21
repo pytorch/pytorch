@@ -28,6 +28,7 @@ struct IValue;
 struct ClassType;
 struct TupleType;
 struct EnumType;
+struct InferredType;
 
 // For custom class __init__ registration, we need to pass in a function
 // that looks like this: [](IValue x, args...)
@@ -137,6 +138,15 @@ inline at::Tensor IValue::toTensor() const& {
   AT_ASSERT(isTensor(), "Expected Tensor but got ", tagKind());
   return at::Tensor(toIntrusivePtr<at::TensorImpl, at::UndefinedTensorImpl>());
 }
+inline c10::Storage IValue::toStorage() && {
+  AT_ASSERT(isStorage(), "Expected Storage but got ", tagKind());
+  return c10::Storage(
+      moveToIntrusivePtr<at::StorageImpl>());
+}
+inline c10::Storage IValue::toStorage() const& {
+  AT_ASSERT(isStorage(), "Expected Storage but got ", tagKind());
+  return c10::Storage(toIntrusivePtr<at::StorageImpl>());
+}
 inline c10::Stream IValue::toStream() && {
   return c10::Stream::unpack(payload.as_int);
 }
@@ -171,14 +181,14 @@ inline at::Generator IValue::toGenerator() const& {
 
 namespace ivalue {
 
-void CAFFE2_API
+void TORCH_API
 checkCustomClassType(const Type* expected_type, const Type* actual_type);
 
 template <typename T>
 using Shared = c10::intrusive_ptr<T>;
 
 // string
-struct CAFFE2_API ConstantString final : c10::intrusive_ptr_target {
+struct TORCH_API ConstantString final : c10::intrusive_ptr_target {
  private:
   const std::string str_;
 
@@ -191,14 +201,14 @@ struct CAFFE2_API ConstantString final : c10::intrusive_ptr_target {
   operator const std::string&() const {
     return string();
   }
-  CAFFE2_API friend std::ostream& operator<<(
+  TORCH_API friend std::ostream& operator<<(
       std::ostream& out,
       const ConstantString& v);
 };
 
 struct Future;
 
-struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
+struct TORCH_API Tuple : c10::intrusive_ptr_target {
  private:
   std::vector<IValue> elements_;
   mutable std::shared_ptr<TupleType>
@@ -245,7 +255,7 @@ struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
     return c10::get_hash(t.elements());
   }
 
-  CAFFE2_API friend bool operator==(
+  TORCH_API friend bool operator==(
       const ivalue::Tuple& lhs,
       const ivalue::Tuple& rhs);
 
@@ -274,7 +284,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
 
  public:
   explicit Future(TypePtr type) : type_(type) {}
-  struct CAFFE2_API FutureError final : public std::exception {
+  struct TORCH_API FutureError final : public std::exception {
     explicit FutureError(std::string&& error_msg_)
         : error_msg(std::move(error_msg_)) {}
 
@@ -422,33 +432,6 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     return fut;
   }
 
-  // Some subclasses deal with CUDA tensors and must inform the CUDA caching
-  // allocator of which CUDA streams each DataPtr is used in. If the value held
-  // by the future is a Python object we need to acquire the GIL when extracting
-  // these DataPtrs. Since this file cannot depend on Python, we allow users to
-  // provide a "custom" extractor. Look for example at the PythonFutureWrapper.
-  using DataPtrExtractor =
-      std::function<std::vector<std::reference_wrapper<const at::DataPtr>>(
-          const at::IValue&)>;
-  virtual void setDataPtrExtractor(DataPtrExtractor data_ptr_extractor) {}
-
-  // Expose the default implementation so that external ones can defer to it.
-  static std::vector<std::reference_wrapper<const at::DataPtr>>
-  defaultDataPtrExtractor(const at::IValue& value) {
-    at::IValue::HashAliasedIValues sub_values;
-    // Prefer getSubValues() over visit() as the latter is a silent no-op for
-    // some unsupported types, whereas the former at least fails loudly.
-    value.getSubValues(sub_values);
-
-    std::vector<std::reference_wrapper<const at::DataPtr>> res;
-    for (const at::IValue& sub_value : sub_values) {
-      if (sub_value.isTensor()) {
-        res.emplace_back(sub_value.toTensor().storage().data_ptr());
-      }
-    }
-    return res;
-  };
-
   // Tries to retrieve the error message from std::exception_ptr.
   std::string tryRetrieveErrorMessage() {
     TORCH_CHECK(hasError(), "No error present on the future.");
@@ -476,7 +459,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     return eptr_;
   }
 
-  CAFFE2_API friend std::ostream& operator<<(
+  TORCH_API friend std::ostream& operator<<(
       std::ostream& out,
       const Future& v);
 
@@ -564,11 +547,11 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
 
 // Input is a list of Futures with the same target type.
 // Output is a Future to the List of completed Futures.
-CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
+TORCH_API intrusive_ptr<ivalue::Future> collectAll(
     c10::List<c10::intrusive_ptr<ivalue::Future>> srcs);
 // Input is a List of Futures with the same target type.
 // Output is a Future that will be updated with a seen value.
-CAFFE2_API intrusive_ptr<ivalue::Future> collectAny(
+TORCH_API intrusive_ptr<ivalue::Future> collectAny(
     c10::List<c10::intrusive_ptr<ivalue::Future>> srcs);
 
 // User-defined object.
@@ -665,6 +648,10 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
 struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
  public:
   virtual PyObject* getPyObject() = 0;
+  virtual c10::InferredType tryToInferType() = 0;
+  virtual IValue toIValue(const TypePtr& type, c10::optional<int32_t> N = c10::nullopt) = 0;
+  virtual std::string toStr() = 0;
+
   virtual ~PyObjectHolder(){};
 };
 
@@ -683,11 +670,11 @@ struct ivalue::EnumHolder : c10::intrusive_ptr_target {
       const ivalue::EnumHolder& lhs,
       const ivalue::EnumHolder& rhs);
 
-  CAFFE2_API friend std::ostream& operator<<(
+  TORCH_API friend std::ostream& operator<<(
       std::ostream& out,
       const EnumHolder& v);
 
-  CAFFE2_API const std::string qualifiedClassName() const;
+  TORCH_API const std::string qualifiedClassName() const;
 
   const std::string unqualifiedClassName() const;
 
@@ -743,6 +730,7 @@ inline const ivalue::Object& IValue::toObjectRef() const {
     return this->method_name();            \
   }
 DEFINE_TO(at::Tensor, toTensor)
+DEFINE_TO(at::Storage, toStorage)
 DEFINE_TO(c10::Stream, toStream)
 DEFINE_TO(float, toDouble)
 DEFINE_TO(double, toDouble)

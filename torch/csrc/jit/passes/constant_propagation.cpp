@@ -8,7 +8,6 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/node_hashing.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/jit_opt_bisect.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
@@ -60,16 +59,16 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
       isinstance(stack, n->tys(attr::types));
     } break;
     default: {
-      const auto& the_operator = n->getOperator();
-      if (the_operator.schema().is_vararg()) {
+      const auto maybe_schema = n->maybeSchema();
+      if (maybe_schema && maybe_schema->is_vararg()) {
         // vararg schemas require the number of inputs at the top of the stack
         // but this is broken in other places in constant prop, so disable it
         // for now
         return c10::nullopt;
       }
 
-      auto op = n->getOperation();
       try {
+        auto op = n->getOperation();
         op(&stack);
       } catch (...) {
         return c10::nullopt;
@@ -338,13 +337,6 @@ struct ConstantPropagator {
   }
 
   void ConstantPropagation(Node* n) {
-    auto allowed = JIT_BISECT();
-    if (!allowed) {
-      JIT_BISECT_LOG(
-          std::string("Stopped optimization at constant propagation"),
-          n->owningGraph()->toString());
-      return;
-    }
     bool runnable_inputs = runnableInputs(n);
     if (n->kind() == prim::If) {
       // inline node if we can, otherwise check for simplified outputs

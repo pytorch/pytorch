@@ -3,7 +3,6 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/jit_opt_bisect.h>
 #include <torch/csrc/utils/memory.h>
 
 #include <unordered_map>
@@ -260,14 +259,6 @@ class DeadCodeEliminator {
 
   // Delete all unmarked nodes.
   void sweep(Block* block, bool recurse) {
-    auto allowed = JIT_BISECT();
-    if (!allowed) {
-      JIT_BISECT_LOG(
-        std::string("Stop deleting because of opt limitation"),
-        block->owningGraph()->toString());
-      return;
-    }
-
     auto nodes = block->nodes().reverse();
     for (auto it = nodes.begin(); it != nodes.end(); it++) {
       auto node = *it;
