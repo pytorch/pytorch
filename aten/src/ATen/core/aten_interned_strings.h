@@ -622,6 +622,7 @@ _(aten, signbit) \
 _(aten, silu) \
 _(aten, sgn) \
 _(aten, sin) \
+_(aten, sinc) \
 _(aten, sinh) \
 _(aten, size) \
 _(aten, sizes) \

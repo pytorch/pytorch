@@ -6,6 +6,7 @@
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
+#include <ATen/MemoryOverlap.h>
 #include <THC/THCDeviceUtils.cuh> // only for THCRoundUp?
 #include <THC/THCNumerics.cuh>
 #include <THC/THCScanUtils.cuh>
@@ -261,6 +262,8 @@ void kthvalue_cuda_template(
       "cannot perform reduction function kthvalue",
       " on tensor with no elements because the operation does not have an identity");
   TORCH_CHECK(k >= 1 && k <= slicesize, "selected number k out of range");
+
+  at::assert_no_overlap(self, values);
 
   _reduction_with_indices_allocate_or_resize_output(
       values, indices, self, dim, keepdim);
