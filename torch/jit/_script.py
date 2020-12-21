@@ -711,8 +711,6 @@ if _enabled:
         "extra_repr",
         "_slow_forward",
         "_tracing_name",
-        "register_forward_pre_hook",
-        "register_forward_hook",
         "eval",
         "train",
     }

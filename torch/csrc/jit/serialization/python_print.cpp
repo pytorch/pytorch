@@ -1072,7 +1072,7 @@ struct PythonPrintImpl {
 
         if (auto selfClass = self->type()->cast<ClassType>()) {
           deps_table_.add(selfClass);
-          const Function& method = selfClass->getCallable(node->s(attr::name));
+          const Function& method = selfClass->getMethod(node->s(attr::name));
           TORCH_INTERNAL_ASSERT(
               method.qualname() ==
               QualifiedName(selfClass->name()->qualifiedName(), methodName));

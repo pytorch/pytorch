@@ -170,8 +170,8 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   // is called directly. Used to insure modules have different types
   // when they have different python hooks
   // Actual hooks are added to ClassType directly during compilation
-  std::vector<std::string> forward_hook_ids;
-  std::vector<std::string> forward_pre_hook_ids;
+  std::vector<std::string> forwardHookIds_;
+  std::vector<std::string> forwardPreHookIds_;
 
   // If something is a ModuleDict/ModuleList, it means:
   //   1. The order of the submodules matters for comparing the type

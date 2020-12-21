@@ -4083,9 +4083,9 @@ std::unique_ptr<Function> CompilationUnit::define(
       std::move(name), std::make_shared<Graph>(), creator);
   if (self) {
     // Register this as a method on `self`'s type
-    if (CompilationUnit::FunctionType::hook == type) {
+    if (CompilationUnit::FunctionType::Hook == type) {
       self->getClassType()->addForwardHook(fn.get());
-    } else if (CompilationUnit::FunctionType::pre_hook == type) {
+    } else if (CompilationUnit::FunctionType::PreHook == type) {
       self->getClassType()->addForwardPreHook(fn.get());
     } else {
       self->getClassType()->addMethod(fn.get());
@@ -4143,7 +4143,7 @@ std::vector<Function*> CompilationUnit::define(
         self,
         function_table,
         shouldMangle,
-        CompilationUnit::FunctionType::method);
+        CompilationUnit::FunctionType::Method);
 
     record_function(std::move(fn));
   }
@@ -4187,12 +4187,13 @@ std::vector<Function*> CompilationUnit::define_hooks(
     // check if hook name is already defined on module as method
     if (existing_hook == nullptr) {
       TORCH_CHECK(
-          self->getClassType()->findCallable(name) == nullptr,
+          self->getClassType()->findMethod(name) == nullptr && 
+          self->getClassType()->findHook(name) == nullptr,
           "Can't define hook: ",
           name,
           " on class: ",
           self->getClassType()->repr_str(),
-          " because a method with that name already exists.");
+          " because a method or hook with that name already exists.");
     }
     return existing_hook;
   };
@@ -4214,7 +4215,7 @@ std::vector<Function*> CompilationUnit::define_hooks(
         self,
         function_table,
         shouldMangle,
-        CompilationUnit::FunctionType::hook);
+        CompilationUnit::FunctionType::Hook);
 
     function_table[fn->name()] = fn.get();
     functions.emplace_back(fn.get());
@@ -4240,7 +4241,7 @@ std::vector<Function*> CompilationUnit::define_hooks(
         self,
         function_table,
         shouldMangle,
-        CompilationUnit::FunctionType::pre_hook);
+        CompilationUnit::FunctionType::PreHook);
 
     function_table[fn->name()] = fn.get();
     functions.emplace_back(fn.get());
