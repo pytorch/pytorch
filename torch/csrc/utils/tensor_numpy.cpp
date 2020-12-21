@@ -138,7 +138,7 @@ at::Tensor tensor_from_numpy(PyObject* obj, bool warn_if_not_writeable/*=true*/)
       "The given NumPy array is not writeable, and PyTorch does "
       "not support non-writeable tensors. Writing to this tensor is not "
       "supported and will result in undefined behavior. "
-      " You may want to copy the "
+      "You may want to copy the "
       "array to protect its data or make it writeable before converting it to " 
       "a tensor. "
       "This type of warning will be suppressed for the rest of this program.");
