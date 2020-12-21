@@ -3124,6 +3124,7 @@ This is the reverse operation of the manner described in :meth:`~Tensor.gather`.
 the same number of dimensions. It is also required that
 ``index.size(d) <= src.size(d)`` for all dimensions ``d``, and that
 ``index.size(d) <= self.size(d)`` for all dimensions ``d != dim``.
+Note that ``index`` and ``src`` do not broadcast.
 
 Moreover, as for :meth:`~Tensor.gather`, the values of :attr:`index` must be
 between ``0`` and ``self.size(dim) - 1`` inclusive.
@@ -3209,7 +3210,7 @@ For a 3-D tensor, :attr:`self` is updated as::
 :attr:`self`, :attr:`index` and :attr:`src` should have same number of
 dimensions. It is also required that ``index.size(d) <= src.size(d)`` for all
 dimensions ``d``, and that ``index.size(d) <= self.size(d)`` for all dimensions
-``d != dim``.
+``d != dim``. Note that ``index`` and ``src`` do not broadcast.
 
 Note:
     {forward_reproducibility_note}

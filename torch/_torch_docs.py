@@ -3094,8 +3094,9 @@ If :attr:`input` is an n-dimensional tensor with size
 :math:`(x_0, x_1..., x_{i-1}, x_i, x_{i+1}, ..., x_{n-1})`
 and ``dim = i``, then :attr:`index` must be an :math:`n`-dimensional tensor with
 size :math:`(x_0, x_1, ..., x_{i-1}, y, x_{i+1}, ..., x_{n-1})` where :math:`y \geq 1`
-and :attr:`out` will have the same size as :attr:`index`.
-""" + r"""
+and :attr:`out` will have the same size as :attr:`index`.  Note that ``input``
+and ``index`` do not broadcast against each other.
+
 Args:
     input (Tensor): the source tensor
     dim (int): the axis along which to index
