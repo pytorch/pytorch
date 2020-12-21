@@ -1128,7 +1128,7 @@ def dispatch_lambda_exprs(
             # [old codegen]
             # TODO: make this part of something more general, or get rid of it.
             # optional<ArrayRef<T>> are special. The PythonArgParser returns an
-            # optional<c<T>>, which cannot be implicitly converted to
+            # optional<vector<T>>, which cannot be implicitly converted to
             # optional<ArrayRef<T>>. One needs to unwrap the optional and rewrap.
             inits.extend([
                 f'auto __{name} = {arg_parser_expr};',
