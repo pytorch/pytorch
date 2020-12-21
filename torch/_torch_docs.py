@@ -4353,7 +4353,7 @@ Computes ``input * log(other)`` with the following cases.
     \text{out}_{i} = \begin{cases}
         \text{NaN} & \text{if } \text{other}_{i} = \text{NaN} \\
         0 & \text{if } \text{input}_{i} = 0.0 \\
-        \text{input}_i * \log{(\text{other}_i)} & \text{otherwise}
+        \text{input}_{i} * \log{(\text{other}_{i})} & \text{otherwise}
     \end{cases}
 
 Similar to SciPy's `scipy.special.xlogy`.
