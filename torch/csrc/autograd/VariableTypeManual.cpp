@@ -89,7 +89,7 @@ void _backward(
   // instead of us having to unwrap it to Tensor _gradient here.
   Tensor _gradient = gradient.has_value() ? *gradient : Tensor();
   std::vector<torch::autograd::Variable> input_vars(inputs.begin(), inputs.end());
-  torch::autograd::backward({self}, {_gradient}, std::move(keep_graph), create_graph, input_vars);
+  torch::autograd::backward({self}, {_gradient}, keep_graph, create_graph, input_vars);
 }
 
 void set_data(Tensor & self, const Tensor & new_data) {
@@ -192,7 +192,6 @@ void retain_grad(Tensor & self) {
 
 // We don't have an outplace copy, so this can't be generated automatically
 Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
-  jit::Value* output = nullptr;
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
   auto& self_ = unpack(self, "self", 0);
@@ -226,7 +225,7 @@ Tensor& resize_(
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    self_.resize_(size, std::move(optional_memory_format));
+    self_.resize_(size, optional_memory_format);
   }
   return self;
 }
@@ -242,7 +241,7 @@ Tensor& resize_as_(
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    at::resize_as_(self_, the_template_, std::move(optional_memory_format));
+    at::resize_as_(self_, the_template_, optional_memory_format);
   }
   return self;
 }
