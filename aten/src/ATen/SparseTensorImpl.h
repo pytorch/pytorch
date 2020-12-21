@@ -5,7 +5,7 @@
 #include <c10/util/Exception.h>
 
 namespace at {
-struct CAFFE2_API SparseTensorImpl : public TensorImpl {
+struct TORCH_API SparseTensorImpl : public TensorImpl {
   // Stored in COO format, indices + values.
 
   // INVARIANTS:
