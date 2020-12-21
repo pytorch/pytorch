@@ -70,7 +70,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'repeat', 'expand', 'flip', 'fliplr', 'flipud', 'rot90', 'transpose',
     'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
     'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_', 'eq_',
-    'ne_', 'add', '__radd__', 'sum', '_conj', 'sin', 'cos', 'mul', 'sinh',
+    'ne_', 'add', '__radd__', 'sum', '_conj', 'sin', 'cos', 'mul', 'sinc', 'sinh',
     'cosh', '__rmul__', 'sgn', 'asin', 'acos', 'sub', 'div', 'cat', 'view_as_complex',
     'neg', 'complex', 'select', '_s_where', 'as_strided', 'slice', 'constant_pad_nd',
     'unbind', 'split', 'split_with_sizes', 'unsafe_split', 'split_with_sizes_backward',
@@ -78,8 +78,8 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'bmm', 'diagonal', 'alias', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
     'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'take', 'fill_',
     'exp', 'nonzero', 'mean', 'inverse', 'solve', 'linalg_cholesky', 'addcmul', 'addcdiv',
-    'matrix_exp', 'linalg_eigh', 'cholesky_solve', 'qr',
-    '_fft_c2c', '_fft_r2c', 'stack', 'gather', 'index_select', 'index_add_'
+    'matrix_exp', 'linalg_eigh', 'cholesky_solve', 'qr', 'svd', '_fft_c2c', '_fft_r2c',
+    'stack', 'gather', 'index_select', 'index_add_'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.

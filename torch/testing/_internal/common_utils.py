@@ -1807,8 +1807,16 @@ def do_test_empty_full(self, dtypes, layout, device):
                                             dtype=int64_dtype, layout=layout, device=device, requires_grad=False),
                             int64_dtype, layout, device, fv + 5, False)
 
+# this helper method is to recursively
+# clone the tensor-type input of operators tested by OpInfo
+def clone_input_helper(input):
+    if isinstance(input, torch.Tensor):
+        return torch.clone(input)
 
+    if isinstance(input, Sequence):
+        return tuple(map(clone_input_helper, input))
 
+    return input
 
 THESE_TAKE_WAY_TOO_LONG = {
     'test_Conv3d_groups',
