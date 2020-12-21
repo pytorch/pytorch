@@ -41,7 +41,10 @@ class _MapDatasetFetcher(_BaseDatasetFetcher):
 
     def fetch(self, possibly_batched_index):
         if self.auto_collation:
-            data = [self.dataset[idx] for idx in possibly_batched_index]
+            try:
+                data = self.dataset[possibly_batched_index]
+            except:
+                data = [self.dataset[idx] for idx in possibly_batched_index]
         else:
             data = self.dataset[possibly_batched_index]
         return self.collate_fn(data)
