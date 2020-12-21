@@ -10108,7 +10108,7 @@
 - func: linalg_svd(Tensor self, bool full_matrices=True, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor V)
   python_module: linalg
   use_c10_dispatcher: full
-  variants: method, function
+  variants: function
 
 - func: linalg_cond(Tensor self, Scalar? p=None) -> Tensor
   use_c10_dispatcher: full
