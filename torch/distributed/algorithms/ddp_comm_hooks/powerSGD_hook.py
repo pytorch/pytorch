@@ -268,7 +268,8 @@ def powerSGD_hook(
 
         for p, q, tensor in zip(ps, qs, high_rank_tensors):
             torch.matmul(p, q.t(), out=tensor)
-            assert not torch.any(torch.isnan(tensor))
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
 
         if state.use_error_feedback:
             # Memorize the local errors.
@@ -414,7 +415,8 @@ def batched_powerSGD_hook(
         if state.use_error_feedback:
             # Memorize the local errors.
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
-            assert not torch.any(torch.isnan(state.error_dict[bucket_index]))
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
         ret = input_tensor.resize_(total_length)
         return [ret]
 
