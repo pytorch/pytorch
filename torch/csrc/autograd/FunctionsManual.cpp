@@ -12,6 +12,7 @@
 #include <ATen/BatchedTensorImpl.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ScalarOps.h>
+#include <ATen/SparseTensorUtils.h>
 
 #include <ciso646>
 #include <algorithm>
@@ -626,6 +627,57 @@ Tensor _sparse_addmm_sparse_backward(const Tensor& grad, const Tensor& sparse_, 
   auto sparse = sparse_.coalesce();
   Tensor grad_sparse = maybe_multiply(grad.mm(dense.t()), alpha);
   return grad_sparse.sparse_mask(sparse);
+}
+
+// This function return a new SparseTensor with values from Tensor `input` filtered by indices of `mask`
+// and values are ignored. `input` and `mask` are sparse matrices, a sparse tensor with sparse_dim=2 and  dense_dim=2,  
+// and they must have the same shape.
+// Note that the `output` must have the same `indices` as the `mask` so we are using just a clone. 
+// However, to get `values` we have to use specific helper function for CPU/CUDA and use the `mask` data to filter `values`
+// That's why we created this `_sparse_matrix_mask_helper` function. 
+Tensor _sparse_matrix_mask(const Tensor& input, const Tensor& mask){
+  Tensor output = at::native::empty_like(mask);
+  Tensor mask_indices = mask._indices().clone();
+  Tensor r_values;
+  if (mask._nnz() == 0) {
+    r_values = at::native::zeros_like(mask._values());
+  } else {
+    r_values = _sparse_matrix_mask_helper(input, mask_indices.contiguous());
+  }
+  at::sparse::get_sparse_impl(output)->set_indices_and_values_unsafe(mask_indices, r_values);
+  return output;
+}
+
+Tensor sparse_sparse_matmul_backward(
+    const Tensor& grad,
+    const Tensor& a,
+    const Tensor& b,
+    int64_t grad_order) {
+  /*
+  To implement the backward algorithm for sparse matrix-matrix matmul (SPMM) we can start from the following definition 
+  for dense tensors:
+  
+  c = a @ b 
+      then 
+  a_grad = c_grad @ b^T
+  b_grad = a^T @ c_grad
+
+  So for sparse matrices we can use the following definition:
+  
+  if grad_order == 0:
+      a_grad = sparse_matrix_mask(c_grad @ b^T, mask=a) 
+  else:
+      b_grad = sparse_matrix_mask(a^T @ c_grad, mask=b) 
+  */
+  TORCH_CHECK(
+      grad_order == 0 || grad_order == 1,
+      ": grad_order not in [0, 1] at sparse_sparse_matmul_backward function");
+  if (grad_order == 0) {
+    auto a_grad = _sparse_sparse_matmul(grad, b.t());
+    return _sparse_matrix_mask(a_grad.coalesce(), a.coalesce()); 
+  } 
+  auto b_grad = _sparse_sparse_matmul(a.t(), grad);
+  return _sparse_matrix_mask(b_grad.coalesce(), b.coalesce()); 
 }
 
 Tensor renorm_backward(const Tensor & grad, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
