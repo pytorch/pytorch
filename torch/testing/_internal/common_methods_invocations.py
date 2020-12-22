@@ -1095,6 +1095,12 @@ if TEST_SCIPY:
                        dtypes=all_types_and(torch.bool),
                        dtypesIfCPU=all_types_and(torch.bool),
                        dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+                       skips=(
+                           # In some cases, output is NaN (for input close to
+                           # negative integers) especially due to reduced precision
+                           # in float16 and NaN's can't be tested for equality.
+                           SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                    device='cuda', dtypes=[torch.float16]),),
                        promotes_integers_to_float=True)
     ]
     op_db = op_db + op_db_scipy_reference
