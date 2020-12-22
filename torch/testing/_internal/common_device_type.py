@@ -11,7 +11,7 @@ import os
 import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, DeterministicGuard
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing import \
     (get_all_dtypes)
@@ -171,7 +171,7 @@ except ImportError:
 
 def _construct_test_name(test_name, op, device_type, dtype):
     if op is not None:
-        test_name += "_" + op.name
+        test_name += "_" + op.name.replace('.', '_')
 
     test_name += "_" + device_type
 
@@ -186,6 +186,9 @@ def _construct_test_name(test_name, op, device_type, dtype):
 
 class DeviceTypeTestBase(TestCase):
     device_type: str = 'generic_device_type'
+
+    # Flag to disable test suite early due to unrecoverable error such as CUDA error.
+    _stop_test_suite = False
 
     # Precision is a thread-local setting since it may be overridden per test
     _tls = threading.local()
@@ -271,6 +274,11 @@ class DeviceTypeTestBase(TestCase):
                     self.precision = self._get_precision_override(test_fn, dtype)
                     args = (arg for arg in (device_arg, dtype, op) if arg is not None)
                     result = test_fn(self, *args)
+                except RuntimeError as rte:
+                    if 'CUDA error: device-side assert triggered' in rte.__repr__():
+                        self._stop_test_suite = True
+                    # raise the runtime error as is.
+                    raise rte
                 finally:
                     self.precision = guard_precision
 
@@ -312,6 +320,12 @@ class DeviceTypeTestBase(TestCase):
             dtypes = tuple(dtypes) if dtypes is not None else (None,)
             for dtype in dtypes:
                 instantiate_test_helper(cls, name, test=test, dtype=dtype, op=None)
+
+    def run(self, result=None):
+        super().run(result=result)
+        # Early terminate test if _stop_test_suite is set.
+        if self._stop_test_suite:
+            result.stop()
 
 
 class CPUTestBase(DeviceTypeTestBase):
@@ -790,24 +804,21 @@ class expectedAlertNondeterministic:
         @wraps(fn)
         def efail_fn(slf, device, *args, **kwargs):
             if self.device_type is None or self.device_type == slf.device_type:
-                deterministic_restore = torch.is_deterministic()
-                torch.set_deterministic(True)
-                try:
-                    if self.fn_has_device_arg:
-                        fn(slf, device, *args, **kwargs)
+                with DeterministicGuard(True):
+                    try:
+                        if self.fn_has_device_arg:
+                            fn(slf, device, *args, **kwargs)
+                        else:
+                            fn(slf, *args, **kwargs)
+                    except RuntimeError as e:
+                        if self.error_message not in str(e):
+                            slf.fail(
+                                'expected non-deterministic error message to start with "'
+                                + self.error_message
+                                + '" but got this instead: "' + str(e) + '"')
+                        return
                     else:
-                        fn(slf, *args, **kwargs)
-                except RuntimeError as e:
-                    torch.set_deterministic(deterministic_restore)
-                    if self.error_message not in str(e):
-                        slf.fail(
-                            'expected non-deterministic error message to start with "'
-                            + self.error_message
-                            + '" but got this instead: "' + str(e) + '"')
-                    return
-                else:
-                    torch.set_deterministic(deterministic_restore)
-                    slf.fail('expected a non-deterministic error, but it was not raised')
+                        slf.fail('expected a non-deterministic error, but it was not raised')
 
             if self.fn_has_device_arg:
                 return fn(slf, device, *args, **kwargs)

@@ -25,7 +25,7 @@ c10::optional<std::string> maybeConvertToString(const py::object& obj) {
 struct SourceRangeFactory {
   SourceRangeFactory(
       std::string text,
-      py::object filename,
+      const py::object& filename,
       size_t file_lineno,
       size_t leading_whitespace_chars)
       : source_(std::make_shared<Source>(
@@ -200,9 +200,10 @@ void initTreeViewBindings(PyObject* module) {
             r, wrap_list(r, std::move(params)), wrap_maybe(r, return_type));
       }));
 
-  py::class_<Delete, Stmt>(m, "Delete").def(py::init([](Expr expr) {
-    return Delete::create(expr);
-  }));
+  py::class_<Delete, Stmt>(m, "Delete")
+      .def(py::init([](const SourceRange& range, std::vector<Expr> targets) {
+        return Delete::create(range, wrap_list(range, std::move(targets)));
+      }));
 
   py::class_<WithItem, Expr>(m, "WithItem")
       .def(py::init([](const SourceRange& range, const Expr& target, Var* var) {
@@ -227,12 +228,13 @@ void initTreeViewBindings(PyObject* module) {
             wrap_maybe(li.range(), type));
       }));
   py::class_<AugAssign, Stmt>(m, "AugAssign")
-      .def(py::init([](const Expr& lhs, std::string kind_str, const Expr& rhs) {
-        const auto& r = lhs.range();
-        auto kind =
-            AugAssignKind(Compound::create(stringToKind(kind_str), r, {}));
-        return AugAssign::create(r, lhs, kind, rhs);
-      }));
+      .def(py::init(
+          [](const Expr& lhs, const std::string& kind_str, const Expr& rhs) {
+            const auto& r = lhs.range();
+            auto kind =
+                AugAssignKind(Compound::create(stringToKind(kind_str), r, {}));
+            return AugAssign::create(r, lhs, kind, rhs);
+          }));
   py::class_<Return, Stmt>(m, "Return")
       .def(py::init([](const SourceRange& range, Expr* value) {
         return Return::create(
@@ -282,7 +284,7 @@ void initTreeViewBindings(PyObject* module) {
             wrap_list(range, std::move(targets)),
             wrap_list(range, std::move(body)));
       }));
-  py::class_<For, Stmt>(m, "For").def(py::init([](const SourceRange range,
+  py::class_<For, Stmt>(m, "For").def(py::init([](const SourceRange& range,
                                                   std::vector<Expr>& targets,
                                                   std::vector<Expr>& itrs,
                                                   std::vector<Stmt> body) {
@@ -301,25 +303,26 @@ void initTreeViewBindings(PyObject* module) {
           [](const Ident& name) { return Var::create(name.range(), name); }))
       .def_property_readonly("name", [](const Var& var) { return var.name(); });
   py::class_<BinOp, Expr>(m, "BinOp")
-      .def(py::init([](std::string kind, const Expr& lhs, const Expr& rhs) {
-        return BinOp::create(lhs.range(), stringToKind(kind), lhs, rhs);
-      }));
+      .def(py::init(
+          [](const std::string& kind, const Expr& lhs, const Expr& rhs) {
+            return BinOp::create(lhs.range(), stringToKind(kind), lhs, rhs);
+          }));
   // NB: we take range here, because unary ops precede their exprs, so we need
   // to include them
   py::class_<UnaryOp, Expr>(m, "UnaryOp")
-      .def(py::init(
-          [](const SourceRange& range, std::string kind, const Expr& expr) {
-            auto resolved_kind = stringToKind(kind);
-            resolved_kind =
-                resolved_kind == '-' ? TK_UNARY_MINUS : resolved_kind;
-            return UnaryOp::create(range, resolved_kind, expr);
-          }));
+      .def(py::init([](const SourceRange& range,
+                       const std::string& kind,
+                       const Expr& expr) {
+        auto resolved_kind = stringToKind(kind);
+        resolved_kind = resolved_kind == '-' ? TK_UNARY_MINUS : resolved_kind;
+        return UnaryOp::create(range, resolved_kind, expr);
+      }));
   py::class_<Const, Expr>(m, "Const")
-      .def(py::init([](const SourceRange& range, std::string value) {
+      .def(py::init([](const SourceRange& range, const std::string& value) {
         return Const::create(range, value);
       }));
   py::class_<StringLiteral, Expr>(m, "StringLiteral")
-      .def(py::init([](const SourceRange& range, std::string value) {
+      .def(py::init([](const SourceRange& range, const std::string& value) {
         return StringLiteral::create(range, value);
       }));
   py::class_<Apply, Expr>(m, "Apply")
@@ -348,6 +351,14 @@ void initTreeViewBindings(PyObject* module) {
                        const Expr& target,
                        const Expr& iter) {
         return ListComp::create(range, elt, target, iter);
+      }));
+  py::class_<DictComp, Expr>(m, "DictComp")
+      .def(py::init([](const SourceRange& range,
+                       const Expr& key,
+                       const Expr& value,
+                       const Expr& target,
+                       const Expr& iter) {
+        return DictComp::create(range, key, value, target, iter);
       }));
   py::class_<ListLiteral, Expr>(m, "ListLiteral")
       .def(py::init([](const SourceRange& range, std::vector<Expr> args) {
@@ -383,7 +394,7 @@ void initTreeViewBindings(PyObject* module) {
                 wrap_maybe(range, step));
           }));
   py::class_<Starred, Expr>(m, "Starred")
-      .def(py::init([](const SourceRange& range, Expr expr) {
+      .def(py::init([](const SourceRange& range, const Expr& expr) {
         return Starred::create(range, expr);
       }));
   py::class_<Maybe<Expr>, TreeView>(m, "EmptyTypeAnnotation")

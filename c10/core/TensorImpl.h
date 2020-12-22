@@ -136,6 +136,8 @@ struct C10_API AutogradMetaInterface {
   virtual bool requires_grad() const = 0;
   virtual at::Tensor& mutable_grad() = 0;
   virtual const at::Tensor& grad() const = 0;
+  virtual const at::Tensor& fw_grad(uint64_t level, const at::Tensor& self) const = 0;
+  virtual void set_fw_grad(const at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op) = 0;
   virtual ~AutogradMetaInterface();
 };
 
@@ -599,6 +601,42 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   const at::Tensor& grad() const;
 
   /**
+   * Return the accumulated gradient of a tensor. This gradient is computed
+   * using forward mode AD.
+   *
+   * This is an internal API that should never be used by end users.
+   *
+   * The API is as follows:
+   *   - "level" allows to specify the level of forward AD nesting for which the
+   *     gradient should be returned. Note that since levels are not fully
+   *     supported yet, this argument should be 0. See documentation for
+   *     torch::autograd::enter_dual_level for more details about forward AD nesting.
+   *   - "self" should represent the Tensor whose forward grad is accessed. It is
+   *     required when dealing with view.
+   */
+  const at::Tensor& fw_grad(uint64_t level, const at::Tensor& self) const;
+
+  /**
+   * Sets the forward gradient for this Tensor.
+   * The given Tensor might not be used directly and its content will be copied.
+   *
+   * This is an internal API that should never be used by end users.
+   *
+   * The API is as follows:
+   *   - "new_grad" is a Tensor containing the new value of the gradient that should
+   *     be set
+   *   - "self" should reprensent the Tensor whose forward grad is accessed. It is
+   *     required when dealing with view.
+   *   - "level" allows to specify the level of forward AD nesting for which the
+   *     gradient should be set. Note that since levels are not fully supported
+   *     yet, this argument should be 0. See documentation for torch::autograd::enter_dual_level
+   *     for more details about forward AD nesting.
+   *   - "is_inplace_op" is a boolean flag that tells if this gradient was generated
+   *     by an inplace operation or an out of place one. This allows better error checking.
+   */
+  void set_fw_grad(const at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op);
+
+  /**
    * Return a typed data pointer to the actual data which this tensor refers to.
    * This checks that the requested type (from the template parameter) matches
    * the internal type of the tensor.
@@ -935,18 +973,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
       const c10::VariableVersion& version_counter,
-      bool allow_tensor_metadata_change) const {
-    auto impl = c10::make_intrusive<TensorImpl>(
-        Storage(storage()), key_set_, data_type_);
-    copy_tensor_metadata(
-      /*src_impl=*/this,
-      /*dest_impl=*/impl.get(),
-      /*version_counter=*/version_counter,
-      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-    impl->refresh_numel();
-    impl->refresh_contiguous();
-    return impl;
-  }
+      bool allow_tensor_metadata_change) const;
+
+  /**
+   * Return a TensorImpl that is a shallow-copy of this TensorImpl.
+   *
+   * For usage of `version_counter` and `allow_tensor_metadata_change`,
+   * see NOTE [ TensorImpl Shallow-Copying ].
+   */
+  virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
+      c10::VariableVersion&& version_counter,
+      bool allow_tensor_metadata_change) const;
 
   /**
    * Shallow-copies data from another TensorImpl into this TensorImpl.
@@ -967,6 +1004,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   void set_version_counter(
     const c10::VariableVersion& version_counter) noexcept {
     version_counter_ = version_counter;
+  }
+
+  void set_version_counter(
+    c10::VariableVersion&& version_counter) noexcept {
+    version_counter_ = std::move(version_counter);
   }
 
   const c10::VariableVersion& version_counter() const noexcept {
@@ -1581,6 +1623,24 @@ protected:
       const c10::VariableVersion& version_counter,
       bool allow_tensor_metadata_change);
 
+  /**
+   * Copy the tensor metadata fields (e.g. sizes / strides / storage pointer / storage_offset)
+   * from one TensorImpl to another TensorImpl.
+   *
+   * For usage of `version_counter` and `allow_tensor_metadata_change`, see NOTE [ TensorImpl Shallow-Copying ].
+   */
+  static void copy_tensor_metadata(
+      const TensorImpl* src_impl,
+      TensorImpl* dest_impl,
+      c10::VariableVersion&& version_counter,
+      bool allow_tensor_metadata_change);
+
+private:
+  static void copy_tensor_metadata_except_version_counter(
+      const TensorImpl* src_impl,
+      TensorImpl* dest_impl,
+      bool allow_tensor_metadata_change);
+
 protected:
   // Error message to show when the user tries to change tensor metadata on
   // Tensor created from .data or .detach().
@@ -1684,7 +1744,7 @@ protected:
     is_channels_last_contiguous_ = false;
     is_channels_last_3d_ = false;
     is_channels_last_3d_contiguous_ = false;
-    is_non_overlapping_and_dense_ = false;
+    is_non_overlapping_and_dense_ = true;
     is_wrapped_number_ = false;
     allow_tensor_metadata_change_ = true;
     reserved_ = false;
