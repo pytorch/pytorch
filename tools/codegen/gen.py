@@ -834,7 +834,7 @@ DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::mult
     .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
     .typed<{dispatcher_sig.type()}>();
   {compute_dk}
-  return op.callWithDispatchKey_withKeys(_dk, {', '.join(a.expr for a in dispatcher_exprs)});
+  return op.callWithDispatchKey(_dk, {', '.join(a.expr for a in dispatcher_exprs)});
 }}
 """
         elif self.target is Target.REGISTRATION:

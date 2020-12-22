@@ -126,10 +126,6 @@ public:
   template<class Return, class... Args>
   Return callWithDispatchKey(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet dispatchKeySet, Args... args) const;
 
-  // TODO: temp
-  template<class Return, class... Args>
-  Return callWithDispatchKey_withKeys(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet dispatchKeySet, Args... args) const;
-
   // Like call, but intended for use in a redispatch: you are currently
   // in some currentDispatchKey, you have finished processing the key and
   // you now want to redispatch to the next dispatch key in the chain.
@@ -375,11 +371,6 @@ public:
     return c10::Dispatcher::singleton().callWithDispatchKey<Return, Args...>(*this, dispatchKeySet, std::forward<Args>(args)...);
   }
 
-  // TODO: temp
-  Return callWithDispatchKey_withKeys(DispatchKeySet dispatchKeySet, Args... args) const {
-    return c10::Dispatcher::singleton().callWithDispatchKey_withKeys<Return, Args...>(*this, dispatchKeySet, std::forward<Args>(args)...);
-  }
-
 private:
   explicit TypedOperatorHandle(std::list<Dispatcher::OperatorDef>::iterator operatorIterator)
   : OperatorHandle(std::move(operatorIterator)) {}
@@ -431,36 +422,6 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
       }
     }
     // keeping the guard alive while executing the kernel
-    return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
-  }
-#endif  // PYTORCH_DISABLE_PER_OP_PROFILING
-  return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
-}
-
-template<class Return, class... Args>
-inline Return Dispatcher::callWithDispatchKey_withKeys(const TypedOperatorHandle<Return(Args...)>& op, DispatchKeySet dispatchKeySet, Args... args) const {
-  detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::isAliasDispatchKey(dispatchKeySet.highestPriorityTypeId()));
-  const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKeySet.highestPriorityTypeId());
-#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-  bool pre_sampled = false;
-  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
-    at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
-    if (C10_UNLIKELY(guard.isActive())) {
-      auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
-      if (shouldRecord(dispatchKey) && op.operatorIterator_->op.isObserved()) {
-        int64_t seq_num = -1;
-        if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
-          seq_num = at::sequence_number::peek();
-        }
-        if (guard.needsInputs()) {
-          torch::jit::Stack stack = impl::boxArgs(args...);
-          guard.before(op, stack, seq_num);
-        } else {
-          guard.before(op, seq_num);
-        }
-      }
-    }
     return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
   }
 #endif  // PYTORCH_DISABLE_PER_OP_PROFILING
