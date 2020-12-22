@@ -17,6 +17,8 @@
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
 
+#include <torch/script.h>
+
 #include <caffe2/serialize/inline_container.h>
 
 #include <ATen/ATen.h>
@@ -33,6 +35,14 @@ char const* toString(OpCode op);
 
 namespace {
 
+struct MyHash
+{
+  std::size_t operator()(const IValue& value) const {
+    auto h = value.hash(value);
+    return h;
+//    return value.hash(value); // Insert your hash here
+  }
+};
 ExportModuleExtraFilesHook& GetExtraFilesHook() {
   static ExportModuleExtraFilesHook func = nullptr;
   return func;
@@ -356,9 +366,20 @@ class ScriptModuleSerializer {
     // so loading the code does not depend on loading the data
     std::vector<IValue> ivalue_constants(
         constant_table_.begin(), constant_table_.end());
+
+    at::Tensor t = torch::tensor({1, 1, 1, 1, 1, 1, 1, 100});
+    IValue b(false);
+//    IValue c()
+    ivalue_constants.push_back(b);
+    ivalue_constants.push_back(t);
+
+
+    std::unordered_set<IValue, MyHash> constants_from_bytecode;
+    constants_from_bytecode.insert(ivalue_constants.begin(), ivalue_constants.end());
+
     writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
     if (bytecode_format) {
-      writeByteCode(module, save_mobile_debug_info);
+      writeByteCode(module, save_mobile_debug_info, constants_from_bytecode);
       writeMobileMetadata(module, extra_files);
     }
 
@@ -486,7 +507,7 @@ class ScriptModuleSerializer {
     }
   }
 
-  void writeByteCode(const Module& module, bool save_mobile_debug_info) {
+  void writeByteCode(const Module& module, bool save_mobile_debug_info, std::unordered_set<IValue, MyHash> constants_from_bytecode) {
     std::vector<c10::IValue> elements;
     elements.emplace_back(
         static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
@@ -499,7 +520,25 @@ class ScriptModuleSerializer {
 
     moduleMethodsTuple(
         module, elements, debug_info_elements, save_mobile_debug_info);
-    auto telements = Tup(std::move(elements));
+//    auto telements = Tup(std::move(elements));
+    at::Tensor telements = torch::tensor({1, 1, 1, 1, 1, 1, 1, 200});
+    IValue b(false);
+    elements.push_back(b);
+
+    elements.push_back(telements);
+    for(const auto& element: elements) {
+      if (constants_from_bytecode.find(element) != constants_from_bytecode.end()) {
+        std::cout << "find one" << std::endl;
+      } else {
+        auto tag = element.tagKind();
+        std::cout << "no, tag is " << tag <<  std::endl;
+        element.dump();
+      }
+    }
+//    constants_from_bytecode.insert(elements.begin(), elements.end());
+    auto s = constants_from_bytecode.size();
+    std::cout << s << std::endl;
+
     writeArchive("bytecode", telements);
     if (save_mobile_debug_info) {
       auto debug_info_telements = Tup(std::move(debug_info_elements.value()));

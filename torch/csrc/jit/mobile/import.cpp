@@ -290,6 +290,10 @@ mobile::Module BytecodeDeserializer::deserialize(
   if (reader_->hasRecord("mobile_debug.pkl")) {
     debug_info_bvals = readArchive("mobile_debug", mcu).toTuple()->elements();
   }
+  c10::optional<std::vector<IValue>> constant_values;
+  if (reader_->hasRecord("constants.pkl")) {
+    constant_values = readArchive("constants", mcu).toTuple()->elements();
+  }
   parseMethods(bvals, debug_info_bvals, *mcu);
   auto meta_dict = readMobileMetadata(mcu);
   return mobile::Module(readArchive("data", mcu).toObject(), meta_dict, mcu);
