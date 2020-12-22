@@ -152,7 +152,7 @@ static_assert(kProducedBytecodeVersion >= kProducedFileFormatVersion,
 // handle an updated operator.
 constexpr uint64_t kMinSupportedBytecodeVersion = 0x3L;
 
-class CAFFE2_API PyTorchStreamReader final {
+class TORCH_API PyTorchStreamReader final {
  public:
   explicit PyTorchStreamReader(const std::string& file_name);
   explicit PyTorchStreamReader(std::istream* in);
@@ -184,7 +184,7 @@ class CAFFE2_API PyTorchStreamReader final {
   int64_t version_;
 };
 
-class CAFFE2_API PyTorchStreamWriter final {
+class TORCH_API PyTorchStreamWriter final {
  public:
   explicit PyTorchStreamWriter(std::string archive_name);
   explicit PyTorchStreamWriter(

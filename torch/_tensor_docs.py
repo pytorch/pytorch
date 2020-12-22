@@ -769,6 +769,13 @@ bitwise_xor_() -> Tensor
 In-place version of :meth:`~Tensor.bitwise_xor`
 """)
 
+add_docstr_all('broadcast_to',
+               r"""
+broadcast_to(shape) -> Tensor
+
+See :func:`torch.broadcast_to`.
+""")
+
 add_docstr_all('logical_and',
                r"""
 logical_and() -> Tensor
@@ -3359,6 +3366,20 @@ add_docstr_all('sin_',
 sin_() -> Tensor
 
 In-place version of :meth:`~Tensor.sin`
+""")
+
+add_docstr_all('sinc',
+               r"""
+sinc() -> Tensor
+
+See :func:`torch.sinc`
+""")
+
+add_docstr_all('sinc_',
+               r"""
+sinc_() -> Tensor
+
+In-place version of :meth:`~Tensor.sinc`
 """)
 
 add_docstr_all('sinh',

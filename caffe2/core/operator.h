@@ -48,10 +48,10 @@ struct FunctionSchema;
 
 namespace caffe2 {
 
-class CAFFE2_API OperatorBase;
+class TORCH_API OperatorBase;
 typedef ObserverBase<OperatorBase> OperatorObserver;
 
-class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
+class TORCH_API OperatorBase : public Observable<OperatorBase> {
  public:
   explicit OperatorBase(const OperatorDef& operator_def, Workspace* ws);
 
@@ -1325,9 +1325,9 @@ typedef c10::Registry<
     std::unique_ptr<OperatorBase>,
     const OperatorDef&,
     Workspace*>* (*RegistryFunction)();
-CAFFE2_API std::map<DeviceType, OperatorRegistry*>* gDeviceTypeRegistry();
+TORCH_API std::map<DeviceType, OperatorRegistry*>* gDeviceTypeRegistry();
 
-struct CAFFE2_API DeviceTypeRegisterer {
+struct TORCH_API DeviceTypeRegisterer {
   explicit DeviceTypeRegisterer(DeviceType type, RegistryFunction func) {
     if (gDeviceTypeRegistry()->count(type)) {
       std::cerr << "Device type " << DeviceTypeName(type)
@@ -1467,7 +1467,7 @@ struct StaticLinkingProtector {
 // specific engines that only implement a subset of the features required by
 // the original operator schema.
 // TODO(jiayq): make more feature-complete exception message.
-class CAFFE2_API UnsupportedOperatorFeature : public std::exception {
+class TORCH_API UnsupportedOperatorFeature : public std::exception {
  public:
   UnsupportedOperatorFeature(const string& msg) : msg_(msg) {}
   const char* what() const noexcept override {
@@ -1488,12 +1488,12 @@ class CAFFE2_API UnsupportedOperatorFeature : public std::exception {
 
 // Creates an operator with the given operator definition.
 // Throws on error and never returns nullptr
-CAFFE2_API unique_ptr<OperatorBase> CreateOperator(
+TORCH_API unique_ptr<OperatorBase> CreateOperator(
     const OperatorDef& operator_def,
     Workspace* ws,
     int net_position = OperatorBase::kNoNetPositionSet);
 
-CAFFE2_API const std::string OpRegistryKey(
+TORCH_API const std::string OpRegistryKey(
     const std::string& op_type,
     const std::string& engine = "");
 
@@ -1505,50 +1505,50 @@ using PerOpEnginePrefType =
     CaffeMap<DeviceType, CaffeMap<std::string, EnginePrefType>>;
 // {device_type -> EnginePrefType}
 using GlobalEnginePrefType = CaffeMap<DeviceType, EnginePrefType>;
-CAFFE2_API void SetPerOpEnginePref(
+TORCH_API void SetPerOpEnginePref(
     const PerOpEnginePrefType& per_op_engine_pref);
-CAFFE2_API void SetGlobalEnginePref(
+TORCH_API void SetGlobalEnginePref(
     const GlobalEnginePrefType& global_engine_pref);
-CAFFE2_API void SetEnginePref(
+TORCH_API void SetEnginePref(
     const PerOpEnginePrefType& per_op_engine_pref,
     const GlobalEnginePrefType& global_engine_pref);
-CAFFE2_API void SetOpEnginePref(
+TORCH_API void SetOpEnginePref(
     const std::string& op_type,
     const CaffeMap<DeviceType, EnginePrefType>& op_pref);
 
-CAFFE2_API void LoadInt8TensorInfoOfBlob(
+TORCH_API void LoadInt8TensorInfoOfBlob(
     std::vector<float>* scale,
     std::vector<float>* offset,
     uint32_t* axis,
     const Blob* b);
 
-CAFFE2_API TensorShape GetTensorShapeOfBlob(const Blob* b);
+TORCH_API TensorShape GetTensorShapeOfBlob(const Blob* b);
 
-CAFFE2_API TensorShapes InferBlobShapesAndTypes(
+TORCH_API TensorShapes InferBlobShapesAndTypes(
     CaffeMap<string, TensorShape>& blob_desc,
     const vector<NetDef*>& nets);
 
-CAFFE2_API TensorShapes InferBlobShapesAndTypesFromWorkspace(
+TORCH_API TensorShapes InferBlobShapesAndTypesFromWorkspace(
     Workspace* ws,
     const vector<NetDef*>& nets);
 
-CAFFE2_API TensorShapes InferBlobShapesAndTypesFromMap(
+TORCH_API TensorShapes InferBlobShapesAndTypesFromMap(
     const CaffeMap<std::string, std::vector<int64_t>>& blob_dimensions,
     const vector<NetDef*>& nets);
 
-CAFFE2_API TensorShapes InferBlobShapesAndTypesFromMap(
+TORCH_API TensorShapes InferBlobShapesAndTypesFromMap(
     const CaffeMap<std::string, std::vector<int64_t>>& blob_dimensions,
     const CaffeMap<std::string, TensorProto_DataType>& blob_types,
     const vector<NetDef*>& nets);
 
-CAFFE2_API std::map<string, std::pair<DeviceOption, DeviceOption>>
+TORCH_API std::map<string, std::pair<DeviceOption, DeviceOption>>
 ValidateTensorDevices(OperatorBase& op, const OperatorDef& op_def);
 
 // Get a set of registered operator names
-CAFFE2_API std::set<std::string> GetRegisteredOperators();
+TORCH_API std::set<std::string> GetRegisteredOperators();
 
 // Operator logging capabilities
-CAFFE2_API void SetOperatorLogger(
+TORCH_API void SetOperatorLogger(
     std::function<void(const OperatorDef&)> tracer);
 std::function<void(const OperatorDef&)> GetOperatorLogger();
 
