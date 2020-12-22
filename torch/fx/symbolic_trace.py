@@ -1,15 +1,41 @@
+import functools
 import inspect
 from types import CodeType, FunctionType
 from typing import Any, Dict, Optional, Tuple, List, Callable, Union
 import torch
 from torch._C import ScriptObject  # type: ignore
 
-from .node import Argument
+from .node import Argument, map_aggregate
 from .graph import Graph
 from .graph_module import GraphModule
-from .proxy import TracerBase
+from .proxy import TracerBase, Proxy
 
 HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
+# wrap_fn and wrap_fn_impl are used to implement the behavior of
+# torch.fx.wrap. `_wrap_fn_impl` is installed during tracing.
+_wrap_fn = None
+def _wrap_fn_impl(orig_function, args, kwargs):
+    """
+    Given an ``orig_function`` to invoke, search the args and kwargs for
+    a Proxy object. If there is one, emit a ``call_function`` node to
+    preserve the call to this leaf function directly. Otherwise, just
+    return the results of this function call, as this function is not
+    being traced.
+    """
+    proxy = None
+
+    def find_proxy(x):
+        nonlocal proxy
+        if isinstance(x, Proxy):
+            proxy = x
+
+    map_aggregate(args, find_proxy)
+    map_aggregate(kwargs, find_proxy)
+
+    if proxy is not None:
+        return proxy.tracer.create_proxy('call_function', orig_function, args, kwargs)
+    else:
+        return orig_function(*args, **kwargs)
 
 def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
     co = fn.__code__
@@ -307,13 +333,48 @@ class Tracer(TracerBase):
             # Seems to be a mypy limitation: https://github.com/python/mypy/issues/2427
             torch.nn.Module.__getattr__ = module_getattr_wrapper  # type: ignore
             torch.nn.Module.__call__ = module_call_wrapper
+            # Install _wrap_fn_impl so that we can properly record calls to
+            # leaf functions, i.e. functions decorated with @fx.wrap
+            global _wrap_fn
+            _wrap_fn = _wrap_fn_impl
+
             self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
                              type_expr=fn.__annotations__.get('return', None))
         finally:
+            _wrap_fn = None
             torch.nn.Module.__call__ = orig_call
             torch.nn.Module.__getattr__ = orig_getattr  # type: ignore
         return self.graph
 
+def wrap(orig_function):
+    """
+    A decorator that can be put on existing functions to use them in fx.
+
+        @torch.fx.wrap
+        def my_custom_function(x, y):
+            return x * x + y * y
+
+        sqrt = torch.fx.wrap(math.sqrt)
+
+    When called during symbolic tracing, the function will be inserted in the
+    graph rather than tracing it. When called outside of tracing,
+    the function will execute normally.
+    """
+
+    @functools.wraps(orig_function)
+    def wrapped(*args, **kwargs):
+        """
+        Wrapper checks for if `_wrap_fn` is installed with an implementation.
+        If not, symbolic tracing is not occuring. If so, symbolic tracing is
+        occuring and we should delegate to this impl to potentally record this
+        invocation.
+        """
+        global _wrap_fn
+        if _wrap_fn is not None:
+            return _wrap_fn(orig_function, args, kwargs)
+        else:
+            return orig_function(*args, **kwargs)
+    return wrapped
 
 def symbolic_trace(root : Union[torch.nn.Module, Callable]) -> GraphModule:
     """Symbolic tracing API
