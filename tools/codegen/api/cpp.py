@@ -101,7 +101,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
         elif str(t.elem) == 'Dimname':
             return BaseCType("DimnameList", binds)
         elif str(t.elem) == 'Tensor?':
-            return BaseCType("const c10::List<c10::optional<Tensor>>&", binds)
+            return BaseCType("const c10::List<c10::optional<Tensor>> &", binds)
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
         # TODO: explicitly qualify namespace here
         return BaseCType(f"ArrayRef<{elem.cpp_type()}>", binds)
