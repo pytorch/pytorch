@@ -5116,11 +5116,25 @@ class TestONNXRuntime(unittest.TestCase):
 
         self.run_test(BCEWithLogitsLossNone(), input=(x, y))
 
+        class BCEWithLogitsLossNoneWeights(torch.nn.Module):
+            def forward(self, input, target, weight, pos_weight):
+                return torch.nn.functional.binary_cross_entropy_with_logits(input, target, weight=weight,
+                                                                            pos_weight=pos_weight, reduction='none')
+
+        self.run_test(BCEWithLogitsLossNoneWeights(), input=(x, y, weight, pos_weight))
+
         class BCEWithLogitsLossMean(torch.nn.Module):
             def forward(self, input, target):
                 return torch.nn.functional.binary_cross_entropy_with_logits(input, target, reduction='mean')
 
         self.run_test(BCEWithLogitsLossMean(), input=(x, y))
+
+        class BCEWithLogitsLossMeanWeights(torch.nn.Module):
+            def forward(self, input, target, weight, pos_weight):
+                return torch.nn.functional.binary_cross_entropy_with_logits(input, target, weight=weight,
+                                                                            pos_weight=pos_weight, reduction='mean')
+
+        self.run_test(BCEWithLogitsLossMeanWeights(), input=(x, y, weight, pos_weight))
 
         class BCEWithLogitsLossSum(torch.nn.Module):
             def forward(self, input, target):
@@ -5128,12 +5142,12 @@ class TestONNXRuntime(unittest.TestCase):
 
         self.run_test(BCEWithLogitsLossSum(), input=(x, y))
 
-        class BCEWithLogitsLossWithWeights(torch.nn.Module):
+        class BCEWithLogitsLossSumWeights(torch.nn.Module):
             def forward(self, input, target, weight, pos_weight):
                 return torch.nn.functional.binary_cross_entropy_with_logits(input, target, weight=weight,
-                                                                            pos_weight=pos_weight, reduction='mean')
+                                                                            pos_weight=pos_weight, reduction='sum')
 
-        self.run_test(BCEWithLogitsLossWithWeights(), input=(x, y, weight, pos_weight))
+        self.run_test(BCEWithLogitsLossSumWeights(), input=(x, y, weight, pos_weight))
 
 
     def test_torch_mm(self):
