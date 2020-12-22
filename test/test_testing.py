@@ -442,14 +442,45 @@ class TestTesting(TestCase):
     @slowTest
     def test_cuda_assert_should_stop_test_suite(self, device):
         # This test is slow because it spawn another process to run another test suite.
-        import os
         import subprocess
         import sys
-        curdir = os.path.dirname(os.path.abspath(__file__))
-        test_path = os.path.join(curdir, 'scripts', 'test_with_deterministic_cuda_assert_failures.py')
+
+        problematic_test_script = """\
+#!/usr/bin/env python
+
+import torch
+
+from torch.testing._internal.common_utils import (TestCase, run_tests)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+
+# This test is added to ensure that test suite terminates early when
+# CUDA assert was thrown since all subsequent test will fail.
+# See: https://github.com/pytorch/pytorch/issues/49019
+# This test file should be invoked from test_testing.py
+class TestThatContainsCUDAAssertFailure(TestCase):
+
+    def test_throw_unrecoverable_cuda_exception(self, device):
+        x = torch.rand(10, device=device)
+        # cause unrecoverable CUDA exception, recoverable on CPU
+        y = x[torch.tensor([25])].cpu()
+
+    def test_trivial_passing_test_case_on_cpu_cuda(self, device):
+        x1 = torch.tensor([0., 1.], device=device)
+        x2 = torch.tensor([0., 1.], device='cpu')
+        self.assertEqual(x1, x2)
+
+instantiate_device_type_tests(
+    TestThatContainsCUDAAssertFailure,
+    globals(),
+    except_for=None
+)
+
+if __name__ == '__main__':
+    run_tests()
+"""
 
         # Test running of cuda assert test suite should early terminate.
-        p = subprocess.run([sys.executable, test_path], capture_output=True, timeout=120)
+        p = subprocess.run([sys.executable, '-c', problematic_test_script], capture_output=True, timeout=120)
         # should capture CUDA error
         self.assertIn('CUDA error: device-side assert triggered', p.stderr.decode('ascii'))
         # should run only 3 tests - 2 CPUs and 1 CUDA (remaining CUDA test should skip)
