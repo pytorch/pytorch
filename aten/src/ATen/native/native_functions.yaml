@@ -105,6 +105,20 @@
   manual_kernel_registration: True
   variants: method
 
+- func: _fw_primal(Tensor(a) self, int level) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: method
+  dispatch:
+    DefaultBackend: _fw_primal
+
+- func: make_dual(Tensor(a) primal, Tensor tangent, int level) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: function
+
+- func: unpack_dual(Tensor(a) dual, int level) -> (Tensor(a) primal, Tensor tangent)
+  use_c10_dispatcher: full
+  variants: function
+
 - func: rename_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
