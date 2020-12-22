@@ -2084,20 +2084,62 @@ class TestLinalg(TestCase):
     @onlyOnCPUAndCUDA   # TODO: XLA doesn't raise exception
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_inverse_errors(self, device, dtype):
-        for torch_inverse in [torch.inverse, torch.linalg.inv]:
-            # inverse expects batches of square matrices as input
-            with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
-                torch_inverse(torch.randn(2, 3, 4, 3))
+        # inverse expects batches of square matrices as input
+        with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
+            torch.inverse(torch.randn(2, 3, 4, 3))
 
-            # if input is not invertible, RuntimeError is raised mentioning the first non-invertible batch
-            def run_test_singular_input(batch_dim, n):
-                x = torch.eye(3, 3, dtype=dtype, device=device).reshape((1, 3, 3)).repeat(batch_dim, 1, 1)
-                x[n, -1, -1] = 0
-                with self.assertRaisesRegex(RuntimeError, rf'For batch {n}: U\(3,3\) is zero'):
-                    torch_inverse(x)
+        # if input is not invertible, RuntimeError is raised mentioning the first non-invertible batch
+        def run_test_singular_input(batch_dim, n):
+            x = torch.eye(3, 3, dtype=dtype, device=device).reshape((1, 3, 3)).repeat(batch_dim, 1, 1)
+            x[n, -1, -1] = 0
+            with self.assertRaisesRegex(RuntimeError, rf'For batch {n}: U\(3,3\) is zero'):
+                torch.inverse(x)
 
-            for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
-                run_test_singular_input(*params)
+        for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
+            run_test_singular_input(*params)
+
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_inv_errors(self, device, dtype):
+        # inv expects batches of square matrices as input
+        a = torch.randn(2, 3, 4, 3, dtype=dtype, device=device)
+        with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
+            torch.linalg.inv(a)
+
+	    # inv requires the input to be at least 2 dimensional tensor
+        a = torch.randn(2, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "must have at least 2 dimensions"):
+            torch.linalg.inv(a)
+
+        # if input is not invertible, RuntimeError is raised mentioning the first non-invertible batch
+        def run_test_singular_input(batch_dim, n):
+            a = torch.eye(3, 3, dtype=dtype, device=device).reshape((1, 3, 3)).repeat(batch_dim, 1, 1)
+            a[n, -1, -1] = 0
+            with self.assertRaisesRegex(RuntimeError, rf"For batch {n}: U\(3,3\) is zero"):
+                torch.linalg.inv(a)
+
+        for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
+            run_test_singular_input(*params)
+
+        # if non-empty out tensor with wrong shape is passed an error is thrown
+        a = torch.randn(2, 3, 3, device=device, dtype=dtype)
+        out = torch.empty(1, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "does not match input shape"):
+            torch.linalg.inv(a, out=out)
+
+        # dtypes should match
+        out = torch.empty_like(a).to(torch.int)
+        with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match input dtype"):
+            torch.linalg.inv(a, out=out)
+
+        # device should match
+        if torch.cuda.is_available():
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out = torch.empty(0, device=wrong_device, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, "does not match input device"):
+                torch.linalg.inv(a, out=out)
+
 
     # TODO: implement tests using OpInfo
     # This test is here insead of method_tests of common_methods_invocations.py because
