@@ -34,8 +34,6 @@ class CoordinatorBase:
 
             ob_ref.rpc_sync().set_state(state_size, batch)
 
-        self.agent_rref.rpc_sync().store_ob_rrefs(self.ob_rrefs)
-
         self.agent_rref.rpc_sync().set_world(
             batch_size, state_size, nlayers, out_features, self.batch)
 
@@ -82,6 +80,8 @@ class CoordinatorBase:
 
         benchmark_metrics = {'agent latency': {}, 'agent throughput': {}, 'observer latency': {}, 'observer throughput': {}}
 
+
+        print("For batch size {0}".format(self.batch_size))
         print("\nAgent Latency - ", len(agent_latency_final))
         agent_latency_final = sorted(agent_latency_final)
         for p in [50, 75, 90, 95]:

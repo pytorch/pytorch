@@ -43,7 +43,6 @@ class AgentBase:
         self.running_reward = 0
         self.eps = 1e-7
 
-        self.ob_rrefs = []   # Observer RRef
         self.rewards = {}
 
         self.future_actions = torch.futures.Future()
@@ -80,9 +79,6 @@ class AgentBase:
         self.state_size = state_size
         self.states = torch.zeros(self.batch_size, *state_size)
 
-    def store_ob_rrefs(self, ob_rrefs):
-        for ob_rref in ob_rrefs:
-            self.ob_rrefs.append(ob_rref)
 
 
     @staticmethod
