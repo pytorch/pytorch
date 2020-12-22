@@ -1232,7 +1232,7 @@ class AbstractTestCases:
                         src = torch.randn(num_copy - 1)
                         with self.assertRaises(RuntimeError):
                             dest.masked_scatter_(mask, src)
-            self.assertEqual(len(w), 27)
+            self.assertEqual(len(w), 20)
 
             warn = 'masked_scatter_ received a mask with dtype torch.uint8,'
             for wi in w:
