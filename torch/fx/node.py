@@ -63,7 +63,7 @@ class Node:
         # The public API for this is `all_input_nodes`, this private attribute
         # should not be accessed directly.
         self._input_nodes : Dict[Node, None] = {}
-        _update_args_kwargs_DO_NOT_CALL(self, map_arg(args, lambda x: x), map_arg(kwargs, lambda x: x))  # type: ignore
+        self.__update_args_kwargs(map_arg(args, lambda x: x), map_arg(kwargs, lambda x: x))  # type: ignore
 
         # All of the nodes that use the value produced by this Node
         # Note one user may correspond to several uses, e.g. the node fo ``x + x``
@@ -159,9 +159,9 @@ class Node:
         depends on the node's opcode. See the ``fx.Graph`` docstring for more
         information.
         """
-        # DO NOT CALL `_update_args_kwargs_DO_NOT_CALL` directly. THe correct way to
+        # DO NOT CALL `__update_args_kwargs` directly. The correct way to
         # set `args` is via direct assignment, i.e. `node.args = new_args`
-        _update_args_kwargs_DO_NOT_CALL(self, map_arg(a, lambda x: x), self._kwargs)  # type: ignore
+        self.__update_args_kwargs(map_arg(a, lambda x: x), self._kwargs)  # type: ignore
 
     @property
     def kwargs(self) -> Dict[str, Argument]:
@@ -182,9 +182,9 @@ class Node:
         depends on the node's opcode. See the ``fx.Graph`` docstring for more
         information.
         """
-        # DO NOT CALL `_update_args_kwargs_DO_NOT_CALL` directly. THe correct way to
+        # DO NOT CALL `__update_args_kwargs` directly. The correct way to
         # set `args` is via direct assignment, i.e. `node.kwargs = new_kwargs`
-        _update_args_kwargs_DO_NOT_CALL(self, self._args, map_arg(k, lambda x: x))  # type: ignore
+        self.__update_args_kwargs(self._args, map_arg(k, lambda x: x))  # type: ignore
 
     @property
     def all_input_nodes(self) -> List['Node']:
@@ -199,6 +199,23 @@ class Node:
             ``Node``, in that order.
         """
         return list(self._input_nodes.keys())
+
+    def __update_args_kwargs(self, new_args : Tuple['Argument', ...], new_kwargs : Dict[str, 'Argument']):
+        """
+        This API is internal. Do *not* call it directly.
+        """
+        self._args = new_args
+        self._kwargs = new_kwargs
+
+        for old_use in self._input_nodes.keys():
+            old_use.users.pop(self)
+
+        self._input_nodes = {}
+        map_arg(self._args, lambda n: self._input_nodes.setdefault(n))
+        map_arg(self._kwargs, lambda n: self._input_nodes.setdefault(n))
+
+        for new_use in self._input_nodes.keys():
+            new_use.users.setdefault(self)
 
     def __repr__(self) -> str:
         return self.name
@@ -227,27 +244,10 @@ class Node:
             new_kwargs = map_arg(use_node.kwargs, maybe_replace_node)
             assert isinstance(new_args, tuple)
             assert isinstance(new_kwargs, dict)
-            _update_args_kwargs_DO_NOT_CALL(use_node, new_args, new_kwargs)
+            use_node.__update_args_kwargs(new_args, new_kwargs)
 
         assert len(self.users) == 0
         return to_process
-
-def _update_args_kwargs_DO_NOT_CALL(self, new_args : Tuple['Argument', ...], new_kwargs : Dict[str, 'Argument']):
-    """
-    This API is internal. Do *not* call it directly.
-    """
-    self._args = new_args
-    self._kwargs = new_kwargs
-
-    for old_use in self._input_nodes.keys():
-        old_use.users.pop(self)
-
-    self._input_nodes = {}
-    map_arg(self._args, lambda n: self._input_nodes.setdefault(n))
-    map_arg(self._kwargs, lambda n: self._input_nodes.setdefault(n))
-
-    for new_use in self._input_nodes.keys():
-        new_use.users.setdefault(self)
 
 def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
     """ Apply fn to each Node appearing arg. arg may be a list, tuple, slice, or dict with string keys. """
