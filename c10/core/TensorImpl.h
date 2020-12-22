@@ -242,6 +242,12 @@ struct C10_API VariableVersion {
   }
 };
 
+#ifdef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
+#define TENSORIMPL_MAYBE_VIRTUAL
+#else
+#define TENSORIMPL_MAYBE_VIRTUAL virtual
+#endif
+
 /**
  * The low-level representation of a tensor, which contains a pointer
  * to a storage (which contains the actual data) and metadata (e.g., sizes and
@@ -410,7 +416,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * is no longer true; numel always accurately reports the product
    * of sizes of a tensor.
    */
-  virtual int64_t numel() const {
+  TENSORIMPL_MAYBE_VIRTUAL int64_t numel() const {
 #ifdef DEBUG
     TORCH_INTERNAL_ASSERT(compute_numel() == numel_);
 #endif
