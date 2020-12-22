@@ -510,5 +510,4 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("_version", CppFunction::makeFallthrough());
   m.impl("requires_grad_", CppFunction::makeFallthrough());
   m.impl("retain_grad", CppFunction::makeFallthrough());
-  m.impl("_fw_primal", CppFunction::makeFallthrough());
 }
