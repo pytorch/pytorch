@@ -110,7 +110,7 @@ class DataLoader(Generic[T_co]):
         worker_init_fn (callable, optional): If not ``None``, this will be called on each
             worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
             input, after seeding and before data loading. (default: ``None``)
-        prefetch_factor (int, optional, keyword-only arg): Number of sample loaded
+        prefetch_factor (int, optional, keyword-only arg): Number of samples loaded
             in advance by each worker. ``2`` means there will be a total of
             2 * num_workers samples prefetched across all workers. (default: ``2``)
         persistent_workers (bool, optional): If ``True``, the data loader will not shutdown
@@ -498,6 +498,7 @@ class _BaseDataLoaderIter(object):
         self._base_seed = torch.empty((), dtype=torch.int64).random_(generator=loader.generator).item()
         self._persistent_workers = loader.persistent_workers
         self._num_yielded = 0
+        self._profile_name = "enumerate(DataLoader)#{}.__next__".format(self.__class__.__name__)
 
     def __iter__(self) -> '_BaseDataLoaderIter':
         return self
@@ -514,22 +515,23 @@ class _BaseDataLoaderIter(object):
         raise NotImplementedError
 
     def __next__(self) -> Any:
-        if self._sampler_iter is None:
-            self._reset()
-        data = self._next_data()
-        self._num_yielded += 1
-        if self._dataset_kind == _DatasetKind.Iterable and \
-                self._IterableDataset_len_called is not None and \
-                self._num_yielded > self._IterableDataset_len_called:
-            warn_msg = ("Length of IterableDataset {} was reported to be {} (when accessing len(dataloader)), but {} "
-                        "samples have been fetched. ").format(self._dataset, self._IterableDataset_len_called,
-                                                              self._num_yielded)
-            if self._num_workers > 0:
-                warn_msg += ("For multiprocessing data-loading, this could be caused by not properly configuring the "
-                             "IterableDataset replica at each worker. Please see "
-                             "https://pytorch.org/docs/stable/data.html#torch.utils.data.IterableDataset for examples.")
-            warnings.warn(warn_msg)
-        return data
+        with torch.autograd.profiler.record_function(self._profile_name):
+            if self._sampler_iter is None:
+                self._reset()
+            data = self._next_data()
+            self._num_yielded += 1
+            if self._dataset_kind == _DatasetKind.Iterable and \
+                    self._IterableDataset_len_called is not None and \
+                    self._num_yielded > self._IterableDataset_len_called:
+                warn_msg = ("Length of IterableDataset {} was reported to be {} (when accessing len(dataloader)), but {} "
+                            "samples have been fetched. ").format(self._dataset, self._IterableDataset_len_called,
+                                                                  self._num_yielded)
+                if self._num_workers > 0:
+                    warn_msg += ("For multiprocessing data-loading, this could be caused by not properly configuring the "
+                                 "IterableDataset replica at each worker. Please see "
+                                 "https://pytorch.org/docs/stable/data.html#torch.utils.data.IterableDataset for examples.")
+                warnings.warn(warn_msg)
+            return data
 
     next = __next__  # Python 2 compatibility
 

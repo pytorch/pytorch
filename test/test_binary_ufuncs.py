@@ -322,6 +322,7 @@ class TestBinaryUfuncs(TestCase):
         t *= 1
         t /= 1
         t //= 1
+        t %= 1
         self.assertEqual(expected, t.data_ptr())
 
     def check_internal_mem_overlap(self, inplace_op, num_inputs,
@@ -786,10 +787,7 @@ class TestBinaryUfuncs(TestCase):
         def _wrapped_div_scalar(a):
             return a / 5
 
-        # NOTE: this will fail when given an integer input, since
-        #   the JIT implements division as
-        #   torch.reciprocal(a) * 5, and reciprocal is only
-        #   implemented for float types.
+        # NOTE: the JIT implements division as torch.reciprocal(a) * 5
         def _wrapped_rdiv_scalar(a):
             return 5 / a
 
@@ -819,12 +817,7 @@ class TestBinaryUfuncs(TestCase):
                 if a == 0:
                     continue
 
-                if a_t.is_floating_point():
-                    self.assertEqual(5 / a, scripted_rdiv_scalar(a_t))
-                else:
-                    with self.assertRaises(RuntimeError):
-                        scripted_rdiv_scalar(a_t)
-
+                self.assertEqual(5 / a, scripted_rdiv_scalar(a_t))
 
                 # Handles Issue 45199 (see comment above)
                 if a_t.is_floating_point():

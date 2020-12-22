@@ -220,6 +220,7 @@ _(aten, blackman_window) \
 _(aten, block_diag) \
 _(aten, bmm) \
 _(aten, broadcast_tensors) \
+_(aten, broadcast_to) \
 _(aten, cartesian_prod) \
 _(aten, cat) \
 _(aten, cauchy) \
@@ -383,6 +384,7 @@ _(aten, index_fill) \
 _(aten, index_put) \
 _(aten, index_select) \
 _(aten, indices) \
+_(aten, inner) \
 _(aten, instance_norm) \
 _(aten, inverse) \
 _(aten, irfft) \
@@ -496,6 +498,7 @@ _(aten, mode) \
 _(aten, mse_loss) \
 _(aten, mse_loss_backward) \
 _(aten, mse_loss_forward) \
+_(aten, msort) \
 _(aten, multi_margin_loss) \
 _(aten, multi_margin_loss_backward) \
 _(aten, multi_margin_loss_forward) \
@@ -620,6 +623,7 @@ _(aten, signbit) \
 _(aten, silu) \
 _(aten, sgn) \
 _(aten, sin) \
+_(aten, sinc) \
 _(aten, sinh) \
 _(aten, size) \
 _(aten, sizes) \

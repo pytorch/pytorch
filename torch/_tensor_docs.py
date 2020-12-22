@@ -769,6 +769,13 @@ bitwise_xor_() -> Tensor
 In-place version of :meth:`~Tensor.bitwise_xor`
 """)
 
+add_docstr_all('broadcast_to',
+               r"""
+broadcast_to(shape) -> Tensor
+
+See :func:`torch.broadcast_to`.
+""")
+
 add_docstr_all('logical_and',
                r"""
 logical_and() -> Tensor
@@ -1555,6 +1562,12 @@ add_docstr_all('ger',
 ger(vec2) -> Tensor
 
 See :func:`torch.ger`
+""")
+
+add_docstr_all('inner', r"""
+inner(other) -> Tensor
+
+See :func:`torch.inner`.
 """)
 
 add_docstr_all('outer', r"""
@@ -3334,6 +3347,20 @@ sin_() -> Tensor
 In-place version of :meth:`~Tensor.sin`
 """)
 
+add_docstr_all('sinc',
+               r"""
+sinc() -> Tensor
+
+See :func:`torch.sinc`
+""")
+
+add_docstr_all('sinc_',
+               r"""
+sinc_() -> Tensor
+
+In-place version of :meth:`~Tensor.sinc`
+""")
+
 add_docstr_all('sinh',
                r"""
 sinh() -> Tensor
@@ -3374,6 +3401,13 @@ add_docstr_all('sort',
 sort(dim=-1, descending=False) -> (Tensor, LongTensor)
 
 See :func:`torch.sort`
+""")
+
+add_docstr_all('msort',
+               r"""
+msort() -> Tensor
+
+See :func:`torch.msort`
 """)
 
 add_docstr_all('argsort',
@@ -4341,33 +4375,6 @@ istft(n_fft, hop_length=None, win_length=None, window=None,
  center=True, normalized=False, onesided=True, length=None) -> Tensor
 
 See :func:`torch.istft`
-""")
-
-add_docstr_all('fft', r"""
-fft(signal_ndim, normalized=False) -> Tensor
-
-See :func:`torch.fft`
-""")
-
-add_docstr_all('ifft',
-               r"""
-ifft(signal_ndim, normalized=False) -> Tensor
-
-See :func:`torch.ifft`
-""")
-
-add_docstr_all('rfft',
-               r"""
-rfft(signal_ndim, normalized=False, onesided=True) -> Tensor
-
-See :func:`torch.rfft`
-""")
-
-add_docstr_all('irfft',
-               r"""
-irfft(signal_ndim, normalized=False, onesided=True, signal_sizes=None) -> Tensor
-
-See :func:`torch.irfft`
 """)
 
 add_docstr_all('det',

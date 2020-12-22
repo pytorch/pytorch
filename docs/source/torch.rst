@@ -1,7 +1,7 @@
 torch
 =====
 The torch package contains data structures for multi-dimensional
-tensors and mathematical operations over these are defined.
+tensors and defines mathematical operations over these tensors.
 Additionally, it provides many utilities for efficient serializing of
 Tensors and arbitrary types, and other useful utilities.
 
@@ -340,6 +340,7 @@ Pointwise Ops
     sign
     signbit
     sin
+    sinc
     sinh
     sqrt
     square
@@ -414,6 +415,7 @@ Comparison Ops
     not_equal
     sort
     topk
+    msort
 
 
 Spectral Ops
@@ -422,10 +424,6 @@ Spectral Ops
     :toctree: generated
     :nosignatures:
 
-    fft
-    ifft
-    rfft
-    irfft
     stft
     istft
     bartlett_window
@@ -448,6 +446,7 @@ Other Operations
     bincount
     block_diag
     broadcast_tensors
+    broadcast_to
     broadcast_shapes
     bucketize
     cartesian_prod
@@ -511,6 +510,7 @@ BLAS and LAPACK Operations
     eig
     geqrf
     ger
+    inner
     inverse
     det
     logdet

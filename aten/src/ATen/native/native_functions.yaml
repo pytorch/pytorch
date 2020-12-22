@@ -106,15 +106,19 @@
   variants: method
 
 - func: rename_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: method
 
 - func: rename(Tensor(a) self, Dimname[]? names) -> Tensor(a)
+  use_c10_dispatcher: full
   variants: method
 
 - func: align_to(Tensor(a) self, Dimname[] names) -> Tensor(a)
+  use_c10_dispatcher: full
   variants: method
 
 - func: align_to.ellipsis_idx(Tensor(a) self, Dimname[] order, int ellipsis_idx) -> Tensor(a)
+  use_c10_dispatcher: full
   variants: method
 
 - func: align_as(Tensor self, Tensor other) -> Tensor
@@ -125,6 +129,7 @@
   use_c10_dispatcher: full
 
 - func: refine_names(Tensor(a) self, Dimname[] names) -> Tensor(a)
+  use_c10_dispatcher: full
   variants: method
 
 - func: _use_cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank) -> bool
@@ -140,17 +145,17 @@
 - func: _use_cudnn_rnn_flatten_weight() -> bool
   use_c10_dispatcher: full
 
-- func: _cudnn_rnn_flatten_weight(Tensor[] weight_arr, int weight_stride0, int input_size, int mode, int hidden_size, int num_layers, bool batch_first, bool bidirectional) -> Tensor
+- func: _cudnn_rnn_flatten_weight(Tensor[] weight_arr, int weight_stride0, int input_size, int mode, int hidden_size, int proj_size, int num_layers, bool batch_first, bool bidirectional) -> Tensor
   use_c10_dispatcher: full
   dispatch:
     CUDA: _cudnn_rnn_flatten_weight
 
-- func: _cudnn_rnn(Tensor input, Tensor[] weight, int weight_stride0, Tensor? weight_buf, Tensor hx, Tensor? cx, int mode, int hidden_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+- func: _cudnn_rnn(Tensor input, Tensor[] weight, int weight_stride0, Tensor? weight_buf, Tensor hx, Tensor? cx, int mode, int hidden_size, int proj_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CUDA: _cudnn_rnn
 
-- func: _cudnn_rnn_backward(Tensor input, Tensor[] weight, int weight_stride0, Tensor weight_buf, Tensor hx, Tensor? cx, Tensor output, Tensor? grad_output, Tensor? grad_hy, Tensor? grad_cy, int mode, int hidden_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state, Tensor reserve, bool[4] output_mask) -> (Tensor, Tensor, Tensor, Tensor[])
+- func: _cudnn_rnn_backward(Tensor input, Tensor[] weight, int weight_stride0, Tensor weight_buf, Tensor hx, Tensor? cx, Tensor output, Tensor? grad_output, Tensor? grad_hy, Tensor? grad_cy, int mode, int hidden_size, int proj_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state, Tensor reserve, bool[4] output_mask) -> (Tensor, Tensor, Tensor, Tensor[])
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CUDA: _cudnn_rnn_backward
@@ -165,6 +170,7 @@
   variants: function
 
 - func: _fused_dropout(Tensor self, float p, Generator? generator=None) -> (Tensor, Tensor)
+  use_c10_dispatcher: full
   variants: function
   dispatch:
     CUDA: fused_dropout_cuda
@@ -230,6 +236,7 @@
     DefaultBackend: abs_
 
 - func: abs.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: abs_out
 
@@ -268,6 +275,7 @@
   variants: method
 
 - func: absolute.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: angle(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -276,6 +284,7 @@
     DefaultBackend: angle
 
 - func: angle.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: angle_out
 
@@ -298,11 +307,13 @@
     DefaultBackend: sgn
 
 - func: sgn_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     DefaultBackend: sgn_
 
 - func: sgn.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: sgn_out
 
@@ -319,6 +330,7 @@
   variants: function, method
 
 - func: conj.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: conj_out
 
@@ -341,6 +353,7 @@
     DefaultBackend: acos_
 
 - func: acos.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: acos_out
 
@@ -354,6 +367,7 @@
   variants: function, method
 
 - func: arccos.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: avg_pool1d(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
   use_c10_dispatcher: full
@@ -367,6 +381,7 @@
 
 - func: add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
+  structured_delegate: add.out
   variants: function, method
   dispatch:
     CPU, CUDA: add
@@ -376,12 +391,16 @@
 - func: add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
+  structured_delegate: add.out
   dispatch:
     CPU, CUDA: add_
     SparseCPU, SparseCUDA: add_sparse_
     MkldnnCPU: mkldnn_add_
 
 - func: add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: add_out
     SparseCPU: add_out_sparse_cpu
@@ -401,6 +420,7 @@
     CPU: add_relu_
 
 - func: _add_relu.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: add_relu_out
@@ -431,6 +451,7 @@
     CPU, CUDA: addmv_
 
 - func: addmv.out(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: addmv_out
 
@@ -454,6 +475,7 @@
     DefaultBackend: addr_
 
 - func: addr.out(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: addr_out
     Math: math_addr_out
@@ -475,13 +497,16 @@
     CPU, CUDA: all
 
 - func: all.out(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: all_out
 
 - func: all.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: all.dimname_out(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: allclose(Tensor self, Tensor other, float rtol=1e-05, float atol=1e-08, bool equal_nan=False) -> bool
   use_c10_dispatcher: full
@@ -494,13 +519,16 @@
     CPU, CUDA: any
 
 - func: any.out(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: any_out
 
 - func: any.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: any.dimname_out(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: arange(Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -512,8 +540,10 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: arange.out(Scalar end, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: arange.start_out(Scalar start, Scalar end, Scalar step=1, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: arange_cpu_out
     CUDA: arange_cuda_out
@@ -533,6 +563,7 @@
     CPU, CUDA: argmax
 
 - func: argmax.out(Tensor self, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: argmax_out
 
@@ -543,6 +574,7 @@
     CPU, CUDA: argmin
 
 - func: argmin.out(Tensor self, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: argmin_out
 
@@ -559,6 +591,7 @@
     DefaultBackend: acosh_
 
 - func: acosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: acosh_out
 
@@ -572,6 +605,7 @@
   variants: function, method
 
 - func: arccosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: asinh(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -586,6 +620,7 @@
     DefaultBackend: asinh_
 
 - func: asinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: asinh_out
 
@@ -599,6 +634,7 @@
   variants: function, method
 
 - func: arcsinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: atanh(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -613,6 +649,7 @@
     DefaultBackend: atanh_
 
 - func: atanh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: atanh_out
 
@@ -626,6 +663,7 @@
   variants: function, method
 
 - func: arctanh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
   use_c10_dispatcher: full
@@ -636,6 +674,7 @@
   device_guard: False
 
 - func: as_strided_(Tensor(a!) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   device_guard: False
   dispatch:
@@ -656,6 +695,7 @@
     SparseCPU, SparseCUDA: asin_sparse_
 
 - func: asin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: asin_out
     SparseCPU, SparseCUDA: asin_out_sparse
@@ -670,6 +710,7 @@
   variants: function, method
 
 - func: arcsin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: atan(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -684,6 +725,7 @@
     DefaultBackend: atan_
 
 - func: atan.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: atan_out
 
@@ -697,6 +739,7 @@
   variants: function, method
 
 - func: arctan.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: atleast_1d(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -740,6 +783,7 @@
   variants: function
 
 - func: baddbmm.out(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: baddbmm_out_cpu
@@ -767,21 +811,25 @@
 
 # Sample bernoulli with values in `self` as probability.
 - func: bernoulli(Tensor self, *, Generator? generator=None) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
   dispatch:
     DefaultBackend: bernoulli
 
 - func: bernoulli.out(Tensor self, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU, CUDA: bernoulli_out
 
 - func: bernoulli_.Tensor(Tensor(a!) self, Tensor p, *, Generator? generator=None) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: method
   dispatch:
     CPU, CUDA: bernoulli_
 
 - func: bernoulli_.float(Tensor(a!) self, float p=0.5, *, Generator? generator=None) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: method
   dispatch:
     CPU, CUDA: bernoulli_
@@ -790,6 +838,7 @@
 # There is no default valid on `p` here because it would introduce ambiguity
 # with `bernoulli(Tensor self, *, Generator? generator=None)` declaration.
 - func: bernoulli.p(Tensor self, float p, *, Generator? generator=None) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias) -> Tensor
@@ -804,6 +853,7 @@
     CUDA: binary_cross_entropy_cuda
 
 - func: binary_cross_entropy.out(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   variants: function
   dispatch:
@@ -819,6 +869,7 @@
     CUDA: binary_cross_entropy_backward_cuda
 
 - func: binary_cross_entropy_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   variants: function
   dispatch:
@@ -851,6 +902,7 @@
   variants: method
 
 - func: bitwise_not.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: bitwise_not_out
 
@@ -867,6 +919,7 @@
     CPU, CUDA: copysign_
 
 - func: copysign.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: copysign_out
 
@@ -891,6 +944,7 @@
   variants: method
 
 - func: logical_not.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: logical_not_out
 
@@ -903,6 +957,7 @@
   variants: method
 
 - func: logical_xor.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: logical_xor_out
 
@@ -915,6 +970,7 @@
   variants: method
 
 - func: logical_and.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: logical_and_out
 
@@ -927,6 +983,7 @@
   variants: method
 
 - func: logical_or.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: logical_or_out
 
@@ -952,6 +1009,7 @@
     SparseCUDA: _bmm_sparse_cuda
 
 - func: bmm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: bmm_out_cpu
@@ -960,6 +1018,7 @@
     SparseCUDA: bmm_out_sparse_cuda
 
 - func: _bmm.out(Tensor self, Tensor mat2, *, bool deterministic=False, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     SparseCUDA: _bmm_out_sparse_cuda
@@ -968,18 +1027,27 @@
   use_c10_dispatcher: full
   device_guard: False
 
+- func: broadcast_to(Tensor(a) self, int[] size) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    Math: broadcast_to
+
 - func: cat(Tensor[] tensors, int dim=0) -> Tensor
   use_c10_dispatcher: full
   dispatch:
     DefaultBackend: cat
 
 - func: cat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: cat_out
 
 - func: cat.names(Tensor[] tensors, Dimname dim) -> Tensor
+  use_c10_dispatcher: full
 
 - func: cat.names_out(Tensor[] tensors, Dimname dim, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: block_diag(Tensor[] tensors) -> Tensor
   use_c10_dispatcher: full
@@ -998,6 +1066,7 @@
     DefaultBackend: ceil_
 
 - func: ceil.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: ceil_out
 
@@ -1023,6 +1092,10 @@
   use_c10_dispatcher: full
   variants: function, method
 
+- func: tensor_split.tensor_indices_or_sections(Tensor(a) self, Tensor tensor_indices_or_sections, int dim=0) -> Tensor(a)[]
+  use_c10_dispatcher: full
+  variants: function, method
+
 - func: clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -1037,6 +1110,7 @@
     DefaultBackend: clamp_
 
 - func: clamp.out(Tensor self, Scalar? min=None, Scalar? max=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: clamp_out
 
@@ -1053,6 +1127,7 @@
     DefaultBackend: clamp_max_
 
 - func: clamp_max.out(Tensor self, Scalar max, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: clamp_max_out
 
@@ -1069,6 +1144,7 @@
     DefaultBackend: clamp_min_
 
 - func: clamp_min.out(Tensor self, Scalar min, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: clamp_min_out
 
@@ -1078,9 +1154,11 @@
   variants: function, method
 
 - func: clip_(Tensor(a!) self, Scalar? min=None, Scalar? max=None) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
 
 - func: clip.out(Tensor self, Scalar? min=None, Scalar? max=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: cudnn_is_acceptable(Tensor self) -> bool
   use_c10_dispatcher: full
@@ -1093,6 +1171,7 @@
     DefaultBackend: complex
 
 - func: complex.out(Tensor real, Tensor imag, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: complex_out
 
@@ -1103,6 +1182,7 @@
     DefaultBackend: polar
 
 - func: polar.out(Tensor abs, Tensor angle, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: polar_out
 
@@ -1115,6 +1195,7 @@
 - func: contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> Tensor(a)
   use_c10_dispatcher: full
   variants: method
+  manual_cpp_binding: True
 
 - func: convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -1192,6 +1273,7 @@
     DefaultBackend: cos_
 
 - func: cos.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: cos_out
 
@@ -1208,6 +1290,7 @@
     DefaultBackend: cosh_
 
 - func: cosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: cosh_out
 
@@ -1328,15 +1411,19 @@
     DefaultBackend: cummax
 
 - func: cummax.out(Tensor self, int dim, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: cummax_out
 
 - func: cummax.dimname(Tensor self, Dimname dim) -> (Tensor values, Tensor indices)
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: cummax.dimname_out(Tensor self, Dimname dim, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _cummax_helper(Tensor self, Tensor(a!) values, Tensor(b!) indices, int dim) -> ()
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: cummax_helper_cpu
@@ -1349,15 +1436,19 @@
     DefaultBackend: cummin
 
 - func: cummin.out(Tensor self, int dim, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: cummin_out
 
 - func: cummin.dimname(Tensor self, Dimname dim) -> (Tensor values, Tensor indices)
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: cummin.dimname_out(Tensor self, Dimname dim, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _cummin_helper(Tensor self, Tensor(a!) values, Tensor(b!) indices, int dim) -> ()
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: cummin_helper_cpu
@@ -1381,16 +1472,20 @@
     DefaultBackend: cumprod_
 
 - func: cumprod.out(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: cumprod_out
 
 - func: cumprod.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: cumprod_.dimname(Tensor(a!) self, Dimname dim, *, ScalarType? dtype=None) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: method
 
 - func: cumprod.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: cumprod_backward(Tensor grad, Tensor input, int dim) -> Tensor
   use_c10_dispatcher: full
@@ -1410,16 +1505,20 @@
     DefaultBackend: cumsum_
 
 - func: cumsum.out(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: cumsum_out
 
 - func: cumsum.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: cumsum_.dimname(Tensor(a!) self, Dimname dim, *, ScalarType? dtype=None) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: method
 
 - func: cumsum.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: ctc_loss.IntList(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0, int reduction=Mean, bool zero_infinity=False) -> Tensor
   use_c10_dispatcher: full
@@ -1455,6 +1554,7 @@
     DefaultBackend: diagonal
 
 - func: diagonal.Dimname(Tensor(a) self, *, Dimname outdim, Dimname dim1, Dimname dim2, int offset=0) -> Tensor(a)
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: diagonal_backward(Tensor grad, int[] input_sizes, int offset, int dim1, int dim2) -> Tensor
@@ -1481,6 +1581,7 @@
     SparseCPU, SparseCUDA: div_sparse_
 
 - func: div.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: full
   dispatch:
     CPU, CUDA: div_out
     SparseCPU, SparseCUDA: div_out_sparse_zerodim
@@ -1508,6 +1609,7 @@
   variants: method
 
 - func: divide.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: divide.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
@@ -1527,6 +1629,7 @@
   variants: method
 
 - func: true_divide.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: true_divide.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
@@ -1544,6 +1647,7 @@
     CUDA: dot_cuda
 
 - func: dot.out(Tensor self, Tensor tensor, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: dot_out
 
@@ -1555,6 +1659,7 @@
     CUDA: vdot_cuda
 
 - func: vdot.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: vdot_out
 
@@ -1610,6 +1715,7 @@
     Math: row_stack
 
 - func: row_stack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     Math: row_stack_out
 
@@ -1644,6 +1750,7 @@
   use_c10_dispatcher: full
 
 - func: empty.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   device_guard: False
 
 - func: empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
@@ -1659,6 +1766,7 @@
   variants: method
 
 - func: new_empty_strided(Tensor self, int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
 
 - func: new_full(Tensor self, int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -1702,6 +1810,7 @@
     QuantizedCPU, QuantizedCUDA: empty_quantized
 
 - func: empty.out(int[] size, *, MemoryFormat? memory_format=None, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   device_guard: False
 
 - func: empty_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
@@ -1727,6 +1836,7 @@
     DefaultBackend: erf_
 
 - func: erf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: erf_out
 
@@ -1743,6 +1853,7 @@
     DefaultBackend: erfc_
 
 - func: erfc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: erfc_out
 
@@ -1759,6 +1870,7 @@
     DefaultBackend: exp_
 
 - func: exp.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: exp_out
 
@@ -1775,6 +1887,7 @@
     DefaultBackend: exp2_
 
 - func: exp2.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: exp2_out
 
@@ -1791,6 +1904,7 @@
     DefaultBackend: expm1_
 
 - func: expm1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: expm1_out
 
@@ -1813,11 +1927,13 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: eye.out(int n, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: eye_out_cpu
     CUDA: eye_out_cuda
 
 - func: eye.m_out(int n, int m, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: eye_out_cpu
     CUDA: eye_out_cuda
@@ -1827,18 +1943,23 @@
   variants: function, method
 
 - func: flatten.named_out_dim(Tensor(a) self, int start_dim, int end_dim, Dimname out_dim) -> Tensor(a)
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: flatten.using_names(Tensor(a) self, Dimname start_dim, Dimname end_dim, Dimname out_dim) -> Tensor(a)
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: flatten.DimnameList(Tensor(a) self, Dimname[] dims, Dimname out_dim) -> Tensor(a)
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: unflatten.int(Tensor(a) self, int dim, int[] sizes, Dimname[]? names=None) -> Tensor(a)
+  use_c10_dispatcher: full
   variants: method
 
 - func: unflatten.Dimname(Tensor(a) self, Dimname dim, int[] sizes, Dimname[] names) -> Tensor(a)
+  use_c10_dispatcher: full
   variants: method
 
 - func: fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)
@@ -1866,6 +1987,7 @@
     DefaultBackend: floor_
 
 - func: floor.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: floor_out
 
@@ -1884,6 +2006,7 @@
     SparseCPU, SparseCUDA: floor_divide_sparse_
 
 - func: floor_divide.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: floor_divide_out
     SparseCPU, SparseCUDA: floor_divide_out_sparse_zerodim
@@ -1909,16 +2032,19 @@
     DefaultBackend: frac_
 
 - func: frac.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: frac_out
 
 - func: full.names(int[] size, Scalar fill_value, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   device_guard: False
 
 - func: full(int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: full.out(int[] size, Scalar fill_value, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: full_like(Tensor self, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -1929,6 +2055,7 @@
     CPU: from_file
 
 - func: gcd.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: gcd_out
 
@@ -1941,6 +2068,7 @@
   variants: function, method
 
 - func: lcm.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: lcm_out
 
@@ -2047,28 +2175,29 @@
   dispatch:
     CPU, CUDA: native_group_norm_backward
 
-- func: ifft(Tensor self, int signal_ndim, bool normalized=False) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-
-- func: rfft(Tensor self, int signal_ndim, bool normalized=False, bool onesided=True) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-
-- func: irfft(Tensor self, int signal_ndim, bool normalized=False, bool onesided=True, int[] signal_sizes=[]) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-
-- func: _fft_with_size(Tensor self, int signal_ndim, bool complex_input, bool complex_output, bool inverse, int[] checked_signal_sizes, bool normalized, bool onesided, int[] output_sizes) -> Tensor
-  use_c10_dispatcher: full
-  variants: function
-
-- func: _fft_with_size.norm_modes(Tensor self, int signal_ndim, bool complex_input, bool complex_output, bool inverse, int[] checked_signal_sizes, int normalization, bool onesided, int[] output_sizes) -> Tensor
+# Real to complex forward FFT
+- func: _fft_r2c(Tensor self, int[] dim, int normalization, bool onesided) -> Tensor
   use_c10_dispatcher: full
   variants: function
   dispatch:
-    CPU: _fft_mkl
-    CUDA: _fft_cufft
+    CPU: _fft_r2c_mkl
+    CUDA: _fft_r2c_cufft
+
+# Complex to real inverse FFT
+- func: _fft_c2r(Tensor self, int[] dim, int normalization, int last_dim_size) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: _fft_c2r_mkl
+    CUDA: _fft_c2r_cufft
+
+# Standard complex to complex FFT (forward or backward)
+- func: _fft_c2c(Tensor self, int[] dim, int normalization, bool forward) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: _fft_c2c_mkl
+    CUDA: _fft_c2c_cufft
 
 - func: _cufft_get_plan_cache_size(int device_index) -> int
   use_c10_dispatcher: full
@@ -2086,6 +2215,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: index
+    QuantizedCPU: quantized_index
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
   # NB: The following functions are declared in aten/src/ATen/templates/TensorBody.h and defined in aten/src/ATen/TensorIndexing.cpp:
   # - Tensor Tensor::index(ArrayRef<TensorIndex> indices)
@@ -2102,9 +2232,11 @@
   variants: function, method
 
 - func: index_copy_.dimname(Tensor(a!) self, Dimname dim, Tensor index, Tensor source) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: method
 
 - func: index_copy.dimname(Tensor self, Dimname dim, Tensor index, Tensor source) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)
@@ -2136,6 +2268,7 @@
     DefaultBackend: inverse
 
 - func: inverse.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: inverse_out
 
@@ -2204,11 +2337,13 @@
     CUDA: kl_div_backward_cuda
 
 - func: kron(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
   dispatch:
     Math: kron
 
 - func: kron.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     Math: kron_out
 
@@ -2219,26 +2354,29 @@
     DefaultBackend: kthvalue
 
 - func: kthvalue.values(Tensor self, int k, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: kthvalue_out_cpu
     CUDA: kthvalue_out_cuda
 
 - func: kthvalue.dimname(Tensor self, int k, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: kthvalue.dimname_out(Tensor self, int k, Dimname dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
-- func: native_layer_norm(Tensor input, Tensor? weight, Tensor? bias, int M, int N, float eps) -> (Tensor, Tensor, Tensor)
+- func: native_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> (Tensor, Tensor, Tensor)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: layer_norm_cpu
     CUDA: layer_norm_cuda
     Math: math_native_layer_norm
 
-- func: native_layer_norm_backward(Tensor grad_out, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, int M, int N, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+- func: native_layer_norm_backward(Tensor grad_out, Tensor input, int[] normalized_shape, Tensor mean, Tensor rstd, Tensor? weight, Tensor? bias, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: layer_norm_backward_cpu
@@ -2257,6 +2395,7 @@
     DefaultBackend: nan_to_num_
 
 - func: nan_to_num.out(Tensor self, float? nan=None, float? posinf=None, float? neginf=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: nan_to_num_out
 
@@ -2303,11 +2442,13 @@
   variants: function, method
 
 - func: ldexp.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: linspace(Scalar start, Scalar end, int? steps=None, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: linspace.out(Scalar start, Scalar end, int? steps=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: linspace_cpu_out
     CUDA: linspace_cuda_out
@@ -2325,6 +2466,7 @@
     DefaultBackend: log_
 
 - func: log.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: log_out
 
@@ -2341,6 +2483,7 @@
     DefaultBackend: log10_
 
 - func: log10.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: log10_out
 
@@ -2359,6 +2502,7 @@
     SparseCPU, SparseCUDA: log1p_sparse_
 
 - func: log1p.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: log1p_out
     SparseCPU, SparseCUDA: log1p_out_sparse
@@ -2376,10 +2520,12 @@
     DefaultBackend: log2_
 
 - func: log2.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: log2_out
 
 - func: logaddexp.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: logaddexp_out
 
@@ -2390,6 +2536,7 @@
     DefaultBackend: logaddexp
 
 - func: logaddexp2.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: logaddexp2_out
 
@@ -2409,6 +2556,7 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: logspace.out(Scalar start, Scalar end, int? steps=None, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: logspace_cpu_out
     CUDA: logspace_cuda_out
@@ -2419,6 +2567,7 @@
   variants: function, method
 
 - func: log_softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: _log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
@@ -2440,6 +2589,7 @@
     CUDA: _logcumsumexp_cuda
 
 - func: _logcumsumexp.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: _logcumsumexp_out_cpu
     CUDA: _logcumsumexp_out_cuda
@@ -2451,13 +2601,16 @@
     DefaultBackend: logcumsumexp
 
 - func: logcumsumexp.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: logcumsumexp_out
 
 - func: logcumsumexp.dimname(Tensor self, Dimname dim) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: logcumsumexp.dimname_out(Tensor self, Dimname dim, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
@@ -2466,13 +2619,16 @@
     DefaultBackend: logsumexp
 
 - func: logsumexp.out(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: logsumexp_out
 
 - func: logsumexp.names(Tensor self, Dimname[1] dim, bool keepdim=False) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: logsumexp.names_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, float margin=0.0, int reduction=Mean) -> Tensor
   use_c10_dispatcher: full
@@ -2482,6 +2638,7 @@
   variants: function, method
 
 - func: matmul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: matrix_rank.tol(Tensor self, float tol, bool symmetric=False) -> Tensor
   use_c10_dispatcher: full
@@ -2515,10 +2672,12 @@
     CPU, CUDA: _aminmax
 
 - func: _compute_linear_combination(Tensor input, Tensor coefficients) -> Tensor
+  use_c10_dispatcher: full
   dispatch:
     CPU, CUDA: _compute_linear_combination
 
 - func: _compute_linear_combination.out(Tensor input, Tensor coefficients, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: _compute_linear_combination_out
 
@@ -2529,13 +2688,16 @@
     DefaultBackend: max
 
 - func: max.dim_max(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: max_out
 
 - func: max.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: max.names_dim_max(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: value_selecting_reduction_backward(Tensor grad, int dim, Tensor indices, int[] sizes, bool keepdim) -> Tensor
   use_c10_dispatcher: full
@@ -2549,6 +2711,7 @@
     DefaultBackend: amax
 
 - func: amax.out(Tensor self, int[1] dim=[], bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: amax_out
 
@@ -2602,14 +2765,17 @@
     QuantizedCPU: mean_quantized_cpu
 
 - func: mean.out(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: mean_out_cpu_gpu
     QuantizedCPU: mean_out_quantized_cpu
 
 - func: mean.names_dim(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: mean.names_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: median(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -2625,14 +2791,17 @@
     DefaultBackend: median
 
 - func: median.dim_values(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: median_out_cpu
     CUDA: median_out_cuda
 
 - func: median.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: median.names_dim_values(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: nanmedian(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -2648,14 +2817,17 @@
     DefaultBackend: nanmedian
 
 - func: nanmedian.dim_values(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: nanmedian_out_cpu
     CUDA: nanmedian_out_cuda
 
 - func: nanmedian.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: nanmedian.names_dim_values(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: min.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   use_c10_dispatcher: full
@@ -2664,13 +2836,16 @@
     DefaultBackend: min
 
 - func: min.dim_min(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) min, Tensor(b!) min_indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: min_out
 
 - func: min.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: min.names_dim_min(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) min, Tensor(b!) min_indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: amin(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
@@ -2679,6 +2854,7 @@
     DefaultBackend: amin
 
 - func: amin.out(Tensor self, int[1] dim=[], bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: amin_out
 
@@ -2794,6 +2970,7 @@
     SparseCPU, SparseCUDA: _sparse_mm
 
 - func: mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: mm_cpu_out
     CUDA: mm_out_cuda
@@ -2802,6 +2979,17 @@
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
   use_c10_dispatcher: full
 
+- func: _sparse_sparse_matmul(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  dispatch:
+    SparseCPU: sparse_sparse_matmul_cpu
+    SparseCUDA: sparse_sparse_matmul_cuda
+
+- func: _sparse_matrix_mask_helper(Tensor t, Tensor mask_indices) -> Tensor
+  dispatch:
+    SparseCPU: sparse_matrix_mask_helper_cpu
+    SparseCUDA: sparse_matrix_mask_helper_cuda
+
 - func: mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
   use_c10_dispatcher: full
   variants: function, method
@@ -2809,13 +2997,16 @@
     CPU, CUDA: mode
 
 - func: mode.values(Tensor self, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: mode_out
 
 - func: mode.dimname(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: mode.dimname_out(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: mul.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
@@ -2834,6 +3025,7 @@
     MkldnnCPU: mkldnn_mul_
 
 - func: mul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: mul_out
     SparseCPU: mul_out_sparse_cpu
@@ -2863,6 +3055,7 @@
   variants: method
 
 - func: multiply.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: multiply.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
@@ -2880,6 +3073,7 @@
     SparseCPU, SparseCUDA: mv_sparse
 
 - func: mv.out(Tensor self, Tensor vec, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: mv_out
 
@@ -2920,6 +3114,7 @@
     MkldnnCPU: mkldnn_batch_norm
 
 - func: native_batch_norm.out(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, *, Tensor(a!) out, Tensor(b!) save_mean, Tensor(c!) save_invstd) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CUDA: batch_norm_cuda_out
 
@@ -2934,6 +3129,7 @@
     CUDA: batch_norm_elemt_cuda
 
 - func: batch_norm_elemt.out(Tensor input, Tensor? weight, Tensor? bias, Tensor mean, Tensor invstd, float eps, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CUDA: batch_norm_elemt_cuda_out
 
@@ -2995,12 +3191,14 @@
   variants: function
 
 - func: ones.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   device_guard: False
 
 - func: ones(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: ones.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: ones_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -3115,6 +3313,7 @@
     DefaultBackend: rad2deg_
 
 - func: rad2deg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: rad2deg_out
 
@@ -3131,6 +3330,7 @@
     DefaultBackend: deg2rad_
 
 - func: deg2rad.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: deg2rad_out
 
@@ -3138,19 +3338,24 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: rand.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   device_guard: False
 
 - func: rand.generator_with_names(int[] size, *, Generator? generator, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   device_guard: False
 
 - func: rand(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: rand.generator(int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: rand.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: rand.generator_out(int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: rand_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -3159,19 +3364,25 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randint.generator(int high, int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randint.low(int low, int high, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randint.low_generator(int low, int high, int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randint.out(int high, int[] size, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randint.generator_out(int high, int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randint.low_out(int low, int high, int[] size, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randint.low_generator_out(int low, int high, int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randint_like(Tensor self, int high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -3183,16 +3394,21 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randn.generator(int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randn.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   device_guard: False
 
 - func: randn.generator_with_names(int[] size, *, Generator? generator, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   device_guard: False
 
 - func: randn.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randn.generator_out(int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randn_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -3201,10 +3417,13 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randperm.generator(int n, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randperm.out(int n, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randperm.generator_out(int n, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: randperm_out_cpu
     CUDA: randperm_out_cuda
@@ -3216,6 +3435,7 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: range.out(Scalar start, Scalar end, Scalar step=1, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: range_cpu_out
     CUDA: range_cuda_out
@@ -3237,6 +3457,7 @@
     DefaultBackend: reciprocal_
 
 - func: reciprocal.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: reciprocal_out
 
@@ -3254,6 +3475,7 @@
     SparseCPU, SparseCUDA: neg_sparse_
 
 - func: neg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: neg_out
     SparseCPU, SparseCUDA: neg_out_sparse
@@ -3268,6 +3490,7 @@
   variants: function, method
 
 - func: negative.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: repeat(Tensor self, int[] repeats) -> Tensor
   use_c10_dispatcher: full
@@ -3319,13 +3542,16 @@
     DefaultBackend: round_
 
 - func: round.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: round_out
     CUDA: round_out
 
 - func: rrelu(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
+  use_c10_dispatcher: full
 
 - func: rrelu_(Tensor(a!) self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
+  use_c10_dispatcher: full
 
 - func: relu(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -3402,10 +3628,12 @@
     DefaultBackend: rsqrt_
 
 - func: rsqrt.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: rsqrt_out
 
 - func: select.Dimname(Tensor(a) self, Dimname dim, int index) -> Tensor(a)
+  use_c10_dispatcher: full
   variants: function, method
   device_guard: False
 
@@ -3450,6 +3678,7 @@
     DefaultBackend: silu_
 
 - func: silu.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: silu_out
@@ -3457,6 +3686,9 @@
 - func: silu_backward(Tensor grad_output, Tensor self) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
+  dispatch:
+    CPU, CUDA: silu_backward
+    Math: math_silu_backward
 
 - func: sigmoid(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -3474,6 +3706,7 @@
     MkldnnCPU: mkldnn_sigmoid_
 
 - func: sigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: sigmoid_out
 
@@ -3490,6 +3723,7 @@
     CPU, CUDA: logit_
 
 - func: logit.out(Tensor self, float? eps=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: logit_out
 
@@ -3506,8 +3740,26 @@
     DefaultBackend: sin_
 
 - func: sin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: sin_out
+
+- func: sinc(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    DefaultBackend: sinc
+
+- func: sinc_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    DefaultBackend: sinc_
+
+- func: sinc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  dispatch:
+    CPU, CUDA: sinc_out
 
 - func: sinh(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -3522,6 +3774,7 @@
     DefaultBackend: sinh_
 
 - func: sinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: sinh_out
 
@@ -3553,10 +3806,12 @@
 
 - func: size.int(Tensor self, int dim) -> int
   use_c10_dispatcher: full
-  variants: function, method
+  variants: function
   device_guard: False
+  manual_cpp_binding: True
 
 - func: size.Dimname(Tensor self, Dimname dim) -> int
+  use_c10_dispatcher: full
   variants: function, method
   device_guard: False
 
@@ -3588,6 +3843,7 @@
   variants: function, method
 
 - func: softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: _softmax(Tensor self, int dim, bool half_to_float) -> Tensor
@@ -3646,6 +3902,7 @@
     DefaultBackend: squeeze
 
 - func: squeeze.dimname(Tensor(a) self, Dimname dim) -> Tensor(a)
+  use_c10_dispatcher: full
   variants: function, method
   device_guard: False
 
@@ -3664,6 +3921,7 @@
     DefaultBackend: squeeze_
 
 - func: squeeze_.dimname(Tensor(a!) self, Dimname dim) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: method
   device_guard: False
 
@@ -3672,6 +3930,7 @@
   variants: function, method
 
 - func: sspaddmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: _sspaddmm_out_only_sparse
     CUDA: _sspaddmm_out_only_sparse_cuda
@@ -3684,6 +3943,7 @@
     DefaultBackend: stack
 
 - func: stack.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: stack_out
 
@@ -3691,16 +3951,19 @@
   use_c10_dispatcher: full
 
 - func: hstack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: vstack(Tensor[] tensors) -> Tensor
   use_c10_dispatcher: full
 
 - func: vstack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: dstack(Tensor[] tensors) -> Tensor
   use_c10_dispatcher: full
 
 - func: dstack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 # The signature is designed to be consistent with librosa except that it is
 # missing the `pad_mode` and `center` arguments, which are taken care of at
@@ -3716,10 +3979,12 @@
 
 - func: stride.int(Tensor self, int dim) -> int
   use_c10_dispatcher: full
-  variants: function, method
+  variants: function
   device_guard: False
+  manual_cpp_binding: True
 
 - func: stride.Dimname(Tensor self, Dimname dim) -> int
+  use_c10_dispatcher: full
   variants: function, method
   device_guard: False
 
@@ -3736,13 +4001,16 @@
     CPU, CUDA: sum
 
 - func: sum.dim_DimnameList(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: sum.IntList_out(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: sum_out
 
 - func: sum.DimnameList_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: nansum(Tensor self, *, ScalarType? dtype=None) -> Tensor
   use_c10_dispatcher: full
@@ -3757,6 +4025,7 @@
     CPU, CUDA: nansum
 
 - func: nansum.IntList_out(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: nansum_out
 
@@ -3778,6 +4047,7 @@
     DefaultBackend: sqrt_
 
 - func: sqrt.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: sqrt_out
 
@@ -3814,16 +4084,20 @@
     CPU, CUDA: std_mean
 
 - func: std_mean.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
+  use_c10_dispatcher: full
   variants: function
 
 - func: std.out(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: std_out
 
 - func: std.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: std.names_out(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: prod(Tensor self, *, ScalarType? dtype=None) -> Tensor
   use_c10_dispatcher: full
@@ -3838,13 +4112,16 @@
     CPU, CUDA: prod
 
 - func: prod.int_out(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: prod_out
 
 - func: prod.dim_Dimname(Tensor self, Dimname dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: prod.Dimname_out(Tensor self, Dimname dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: t(Tensor(a) self) -> Tensor(a)
   use_c10_dispatcher: full
@@ -3873,6 +4150,7 @@
     DefaultBackend: tan_
 
 - func: tan.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: tan_out
 
@@ -3890,6 +4168,7 @@
     DefaultBackend: tanh_
 
 - func: tanh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: tanh_out
 
@@ -3898,6 +4177,7 @@
   variants: function
 
 - func: tensordot.out(Tensor self, Tensor other, int[] dims_self, int[] dims_other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU, CUDA: tensordot_out
@@ -3919,6 +4199,7 @@
     CUDA: threshold__cuda
 
 - func: threshold.out(Tensor self, Scalar threshold, Scalar value, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: threshold_out
     CUDA: threshold_out_cuda
@@ -3942,6 +4223,7 @@
     DefaultBackend: transpose
 
 - func: transpose.Dimname(Tensor(a) self, Dimname dim0, Dimname dim1) -> Tensor(a)
+  use_c10_dispatcher: full
   variants: function, method
   device_guard: False
 
@@ -4026,6 +4308,7 @@
     DefaultBackend: trunc_
 
 - func: trunc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: trunc_out
 
@@ -4039,6 +4322,7 @@
   variants: function, method
 
 - func: fix.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: type_as(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
@@ -4122,13 +4406,16 @@
     CPU, CUDA: var
 
 - func: var.out(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: var_out
 
 - func: var.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: var.names_out(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
   use_c10_dispatcher: full
@@ -4143,6 +4430,7 @@
     CPU, CUDA: var_mean
 
 - func: var_mean.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
+  use_c10_dispatcher: full
   variants: function
 
 - func: view_as(Tensor(a) self, Tensor other) -> Tensor(a)
@@ -4206,12 +4494,14 @@
   variants: function
 
 - func: zeros.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   device_guard: False
 
 - func: zeros(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: zeros.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: zeros_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -4224,6 +4514,7 @@
     CUDA: _standard_gamma_grad_cuda
 
 - func: _standard_gamma(Tensor self, Generator? generator=None) -> Tensor
+  use_c10_dispatcher: full
   variants: function
   dispatch:
     CPU: _s_gamma_cpu
@@ -4236,17 +4527,20 @@
     CUDA: _dirichlet_grad_cuda
 
 - func: _sample_dirichlet(Tensor self, Generator? generator=None) -> Tensor
+  use_c10_dispatcher: full
   variants: function
   dispatch:
     CPU: _s_dirichlet_cpu
     CUDA: _s_dirichlet_cuda
 
 - func: poisson(Tensor self, Generator? generator=None) -> Tensor
+  use_c10_dispatcher: full
   dispatch:
     CPU: _s_poisson_cpu
     CUDA: _s_poisson_cuda
 
 - func: binomial(Tensor count, Tensor prob, Generator? generator=None) -> Tensor
+  use_c10_dispatcher: full
   dispatch:
     CPU: _s_binomial_cpu
     CUDA: _s_binomial_cuda
@@ -4290,6 +4584,7 @@
   variants: function
 
 - func: _sparse_softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+  use_c10_dispatcher: full
   variants: function
 
 - func: _sparse_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
@@ -4309,6 +4604,7 @@
   variants: function
 
 - func: _sparse_log_softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+  use_c10_dispatcher: full
   variants: function
 
 - func: _sparse_log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
@@ -4348,22 +4644,28 @@
     DefaultBackend: norm
 
 - func: norm.dtype_out(Tensor self, Scalar? p, int[1] dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: norm_out
 
 - func: norm.out(Tensor self, Scalar? p, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: norm_out
 
 - func: norm.names_ScalarOpt_dim_dtype(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: norm.names_ScalarOpt_dim(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim=False) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: norm.names_dtype_out(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: norm.names_out(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: frobenius_norm(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -4374,6 +4676,7 @@
   variants: function
 
 - func: frobenius_norm.out(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
 
 - func: nuclear_norm(Tensor self, bool keepdim=False) -> Tensor
@@ -4381,6 +4684,7 @@
   variants: function
 
 - func: nuclear_norm.out(Tensor self, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
 
 - func: nuclear_norm.dim(Tensor self, int[2] dim, bool keepdim=False) -> Tensor
@@ -4388,6 +4692,7 @@
   variants: function
 
 - func: nuclear_norm.dim_out(Tensor self, int[2] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
 
 - func: clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
@@ -4414,6 +4719,7 @@
     MkldnnCPU: mkldnn_zero_
 
 - func: sub.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: sub_out
     SparseCPU, SparseCUDA: sub_out_sparse
@@ -4447,6 +4753,7 @@
 
 # subtract, alias for sub
 - func: subtract.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: subtract.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
@@ -4472,6 +4779,7 @@
     CPU, CUDA: rsub
 
 - func: heaviside.out(Tensor self, Tensor values, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: heaviside_out
 
@@ -4480,6 +4788,7 @@
   variants: function, method
 
 - func: heaviside_(Tensor(a!) self, Tensor values) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
@@ -4497,6 +4806,7 @@
     DefaultBackend: _sparse_addmm
 
 - func: addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: addmm_cpu_out
     CUDA: addmm_out_cuda
@@ -4678,7 +4988,7 @@
     SparseCPU: sparse_mask_cpu
     SparseCUDA: sparse_mask_cuda
 
-- func: to_dense(Tensor self) -> Tensor
+- func: to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
   use_c10_dispatcher: full
   variants: method
   dispatch:
@@ -4778,6 +5088,7 @@
   device_guard: False
 
 - func: hspmm.out(Tensor mat1, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     SparseCPU: hspmm_out_sparse_cpu
     SparseCUDA: hspmm_out_sparse_cuda
@@ -4801,6 +5112,7 @@
     DefaultBackend: unbind
 
 - func: unbind.Dimname(Tensor(a) self, Dimname dim) -> Tensor(a)[]
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor
@@ -4815,7 +5127,7 @@
   dispatch:
     CPU, CUDA: dense_to_sparse
 
-- func: to_mkldnn(Tensor self) -> Tensor
+- func: to_mkldnn(Tensor self, ScalarType? dtype=None) -> Tensor
   use_c10_dispatcher: full
   variants: method
   dispatch:
@@ -5152,12 +5464,14 @@
 # wrappers for legacy TH methods
 
 - func: set_.source_Storage(Tensor(a!) self, Storage source) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: method
   device_guard: False
   dispatch:
     CPU, CUDA: set_
 
 - func: set_.source_Storage_storage_offset(Tensor(a!) self, Storage source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: method
   device_guard: False
   dispatch:
@@ -5178,11 +5492,6 @@
   dispatch:
     CPU: set_cpu_
     CUDA: set_cuda_
-
-- func: set_quantizer_(Tensor(a!) self, ConstQuantizerPtr quantizer) -> Tensor(a!)
-  variants: method
-  dispatch:
-    QuantizedCPU, QuantizedCUDA: set_quantizer_
 
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
   use_c10_dispatcher: full
@@ -5251,6 +5560,7 @@
   variants: function, method
 
 - func: index_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor source) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: index_fill_.int_Scalar(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
@@ -5275,15 +5585,19 @@
   variants: function, method
 
 - func: index_fill_.Dimname_Scalar(Tensor(a!) self, Dimname dim, Tensor index, Scalar value) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: method
 
 - func: index_fill_.Dimname_Tensor(Tensor(a!) self, Dimname dim, Tensor index, Tensor value) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: method
 
 - func: index_fill.Dimname_Scalar(Tensor self, Dimname dim, Tensor index, Scalar value) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: index_fill.Dimname_Tensor(Tensor self, Dimname dim, Tensor index, Tensor value) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: scatter_.src(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
@@ -5307,9 +5621,11 @@
   variants: function, method
 
 - func: scatter.dimname_src(Tensor self, Dimname dim, Tensor index, Tensor src) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: scatter.dimname_value(Tensor self, Dimname dim, Tensor index, Scalar value) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: scatter_.reduce(Tensor(a!) self, int dim, Tensor index, Tensor src, *, str reduce) -> Tensor(a!)
@@ -5335,6 +5651,7 @@
   variants: function, method
 
 - func: scatter_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor src) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: eq_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
@@ -5350,11 +5667,13 @@
     DefaultBackend: eq_
 
 - func: bitwise_and.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU, CUDA: bitwise_and_out
 
 - func: bitwise_and.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU, CUDA: bitwise_and_out
@@ -5392,11 +5711,13 @@
   variants: method
 
 - func: bitwise_or.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU, CUDA: bitwise_or_out
 
 - func: bitwise_or.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU, CUDA: bitwise_or_out
@@ -5434,11 +5755,13 @@
   variants: method
 
 - func: bitwise_xor.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU, CUDA: bitwise_xor_out
 
 - func: bitwise_xor.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU, CUDA: bitwise_xor_out
@@ -5621,20 +5944,18 @@
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    CPU: addbmm_cpu_
-    CUDA: addbmm__cuda
+    CPU, CUDA: addbmm_
 
 - func: addbmm.out(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
-    CPU: addbmm_cpu_out
-    CUDA: addbmm_out_cuda
+    CPU, CUDA: addbmm_out
 
 - func: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: addbmm_cpu
-    CUDA: addbmm_cuda
+    CPU, CUDA: addbmm
 
 - func: addcdiv_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
   use_c10_dispatcher: full
@@ -5643,41 +5964,49 @@
     DefaultBackend: addcdiv_
 
 - func: random_.from(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: method
   dispatch:
     CPU, CUDA: random_
 
 - func: random_.to(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: method
   dispatch:
     CPU, CUDA: random_
 
 - func: random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: method
   dispatch:
     CPU, CUDA: random_
 
 - func: uniform_(Tensor(a!) self, float from=0, float to=1, *, Generator? generator=None) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: method
   dispatch:
     CPU, CUDA: uniform_
 
 - func: cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: method
   dispatch:
     CPU, CUDA: cauchy_
 
 - func: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: method
   dispatch:
     CPU, CUDA: log_normal_
 
 - func: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: method
   dispatch:
     CPU, CUDA: exponential_
 
 - func: geometric_(Tensor(a!) self, float p, *, Generator? generator=None) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: method
   dispatch:
     CPU, CUDA: geometric_
@@ -5685,6 +6014,7 @@
 # wrappers for TH functions
 
 - func: diag.out(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: diag_cpu_out
     CUDA: diag_cuda_out
@@ -5701,6 +6031,7 @@
   device_guard: False
 
 - func: cross.out(Tensor self, Tensor other, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: cross_out
 
@@ -5711,6 +6042,7 @@
     CPU, CUDA: cross
 
 - func: triu.out(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: triu_cpu_out
     CUDA: triu_cuda_out
@@ -5722,6 +6054,7 @@
     DefaultBackend: triu
 
 - func: tril.out(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: tril_cpu_out
     CUDA: tril_cuda_out
@@ -5757,6 +6090,7 @@
   device_guard: False
 
 - func: ne.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: ne_out
     QuantizedCPU: ne_out_quantized_cpu
@@ -5769,6 +6103,7 @@
     QuantizedCPU: ne_quantized_cpu
 
 - func: ne.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: ne_out
     QuantizedCPU: ne_out_quantized_cpu
@@ -5794,12 +6129,14 @@
 
 # not_equal, alias for torch.ne
 - func: not_equal.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: not_equal.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
 
 - func: not_equal.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: not_equal.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
@@ -5814,6 +6151,7 @@
   variants: method
 
 - func: eq.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: eq_out
     QuantizedCPU: eq_out_quantized_cpu
@@ -5826,6 +6164,7 @@
     QuantizedCPU: eq_quantized_cpu
 
 - func: eq.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: eq_out
     QuantizedCPU: eq_out_quantized_cpu
@@ -5838,6 +6177,7 @@
     QuantizedCPU: eq_quantized_cpu
 
 - func: ge.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: ge_out
     QuantizedCPU: ge_out_quantized_cpu
@@ -5850,6 +6190,7 @@
     QuantizedCPU: ge_quantized_cpu
 
 - func: ge.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: ge_out
     QuantizedCPU: ge_out_quantized_cpu
@@ -5875,12 +6216,14 @@
 
 # greater_equal, alias for torch.ge
 - func: greater_equal.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: greater_equal.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
 
 - func: greater_equal.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: greater_equal.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
@@ -5895,6 +6238,7 @@
   variants: method
 
 - func: le.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: le_out
     QuantizedCPU: le_out_quantized_cpu
@@ -5907,6 +6251,7 @@
     QuantizedCPU: le_quantized_cpu
 
 - func: le.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: le_out
     QuantizedCPU: le_out_quantized_cpu
@@ -5932,12 +6277,14 @@
 
 # less_equal, alias for torch.le
 - func: less_equal.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: less_equal.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
 
 - func: less_equal.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: less_equal.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
@@ -5952,6 +6299,7 @@
   variants: method
 
 - func: gt.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: gt_out
     QuantizedCPU: gt_out_quantized_cpu
@@ -5964,6 +6312,7 @@
     QuantizedCPU: gt_quantized_cpu
 
 - func: gt.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: gt_out
     QuantizedCPU: gt_out_quantized_cpu
@@ -5989,12 +6338,14 @@
 
 #  greater, alias for torch.gt
 - func: greater.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: greater.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
 
 - func: greater.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: greater.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
@@ -6009,6 +6360,7 @@
   variants: method
 
 - func: lt.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: lt_out
     QuantizedCPU: lt_out_quantized_cpu
@@ -6021,6 +6373,7 @@
     QuantizedCPU: lt_quantized_cpu
 
 - func: lt.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: lt_out
     QuantizedCPU: lt_out_quantized_cpu
@@ -6046,12 +6399,14 @@
 
 #  less, alias for torch.lt
 - func: less.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: less.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
 
 - func: less.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: less.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
@@ -6066,6 +6421,7 @@
   variants: method
 
 - func: take.out(Tensor self, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: take_out_cpu
     CUDA: take_out_cuda
@@ -6083,6 +6439,7 @@
   device_guard: False
 
 - func: index_select.out(Tensor self, int dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: index_select_out_cpu_
     CUDA: index_select_out_cuda
@@ -6097,8 +6454,10 @@
     SparseCUDA: index_select_sparse
 
 - func: index_select.dimname_out(Tensor self, Dimname dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: index_select.dimname(Tensor self, Dimname dim, Tensor index) -> Tensor
+  use_c10_dispatcher: full
   variants: method, function
 
 - func: index_select_backward(Tensor grad, int[] self_sizes, int dim, Tensor index) -> Tensor
@@ -6107,6 +6466,7 @@
   device_guard: False
 
 - func: masked_select.out(Tensor self, Tensor mask, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: masked_select_out_cpu
     CUDA: masked_select_out_cuda
@@ -6124,6 +6484,7 @@
   device_guard: False
 
 - func: nonzero.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: legacy::cpu::_th_nonzero_out
     CUDA: nonzero_out_cuda
@@ -6140,6 +6501,7 @@
   variants: method, function
 
 - func: gather.out(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: gather_out_cpu_cuda
     CUDA: gather_out_cpu_cuda
@@ -6156,14 +6518,17 @@
   device_guard: False
 
 - func: gather.dimname_out(Tensor self, Dimname dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: gather.dimname(Tensor self, Dimname dim, Tensor index, *, bool sparse_grad=False) -> Tensor
+  use_c10_dispatcher: full
   variants: method, function
 
 - func: _gather_sparse_backward(Tensor self, int dim, Tensor index, Tensor grad) -> Tensor
   use_c10_dispatcher: full
 
 - func: addcmul.out(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: addcmul_out
 
@@ -6180,6 +6545,7 @@
     DefaultBackend: addcmul_
 
 - func: addcdiv.out(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: addcdiv_out
 
@@ -6190,6 +6556,7 @@
     DefaultBackend: addcdiv
 
 - func: lstsq.X(Tensor self, Tensor A, *, Tensor(a!) X, Tensor(b!) qr) -> (Tensor(a!) solution, Tensor(b!) QR)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: legacy::cpu::_th_gels_out
     CUDA: legacy::cuda::_th_gels_out
@@ -6202,6 +6569,7 @@
     CUDA: legacy::cuda::_th_gels
 
 - func: triangular_solve.X(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) -> (Tensor(a!) solution, Tensor(b!) cloned_coefficient)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: triangular_solve_out
 
@@ -6219,6 +6587,7 @@
     CUDA: _triangular_solve_helper_cuda
 
 - func: symeig.e(Tensor self, bool eigenvectors=False, bool upper=True, *, Tensor(a!) e, Tensor(b!) V) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: symeig_out
 
@@ -6236,18 +6605,18 @@
     CUDA: _symeig_helper_cuda
 
 - func: eig.e(Tensor self, bool eigenvectors=False, *, Tensor(a!) e, Tensor(b!) v) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
-    CPU: legacy::cpu::_th_eig_out
-    CUDA: eig_cuda_out
+    DefaultBackend: eig_out
 
 - func: eig(Tensor self, bool eigenvectors=False) -> (Tensor eigenvalues, Tensor eigenvectors)
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_eig
-    CUDA: eig_cuda
+    DefaultBackend: eig
 
 - func: svd.U(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: svd_out
 
@@ -6287,6 +6656,7 @@
   device_guard: False
 
 - func: cholesky.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: cholesky_out
 
@@ -6304,6 +6674,7 @@
     CUDA: _cholesky_helper_cuda
 
 - func: cholesky_solve.out(Tensor self, Tensor input2, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: cholesky_solve_out
 
@@ -6327,6 +6698,7 @@
     DefaultBackend: solve
 
 - func: solve.solution(Tensor self, Tensor A, *, Tensor(a!) solution, Tensor(b!) lu) -> (Tensor(a!) solution, Tensor(b!) LU)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: solve_out
 
@@ -6338,6 +6710,7 @@
     CUDA: _solve_helper_cuda
 
 - func: cholesky_inverse.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: legacy::cpu::_th_potri_out
     CUDA: legacy::cuda::_th_potri_out
@@ -6350,6 +6723,7 @@
     CUDA: legacy::cuda::_th_potri
 
 - func: qr.Q(Tensor self, bool some=True, *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: qr_out
 
@@ -6367,6 +6741,7 @@
     CUDA: _qr_helper_cuda
 
 - func: geqrf.a(Tensor self, *, Tensor(a!) a, Tensor(b!) tau) -> (Tensor(a!) a, Tensor(b!) tau)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: legacy::cpu::_th_geqrf_out
     CUDA: legacy::cuda::_th_geqrf_out
@@ -6379,6 +6754,7 @@
     CUDA: legacy::cuda::_th_geqrf
 
 - func: orgqr.out(Tensor self, Tensor input2, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: legacy::cpu::_th_orgqr_out
 
@@ -6389,6 +6765,7 @@
     CPU: legacy::cpu::_th_orgqr
 
 - func: ormqr.out(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: legacy::cpu::_th_ormqr_out
 
@@ -6406,6 +6783,7 @@
     CUDA: _lu_with_info_cuda
 
 - func: lu_solve.out(Tensor self, Tensor LU_data, Tensor LU_pivots, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: lu_solve_out
 
@@ -6424,10 +6802,12 @@
 
 # TODO: remove dispatch section when porting TH CUDA to ATen
 - func: multinomial.out(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: multinomial_out
 
 - func: multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor
+  use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU, CUDA: multinomial
@@ -6440,12 +6820,14 @@
     CUDA: legacy::cuda::_th_multinomial_alias_setup
 
 - func: _multinomial_alias_draw(Tensor J, Tensor q, int num_samples, *, Generator? generator=None) -> Tensor
+  use_c10_dispatcher: full
   variants: function
   dispatch:
     CPU: legacy::cpu::_th_multinomial_alias_draw
     CUDA: legacy::cuda::_th_multinomial_alias_draw
 
 - func: lgamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: _lgamma_out_cpu
     CUDA: _lgamma_out_cuda
@@ -6457,6 +6839,7 @@
     CPU, CUDA: lgamma
 
 - func: digamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: digamma_out
 
@@ -6467,6 +6850,7 @@
     CPU, CUDA: digamma
 
 - func: polygamma.out(int n, Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: polygamma_out
 
@@ -6490,6 +6874,7 @@
     CUDA: _erfinv__cuda
 
 - func: erfinv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: _erfinv_out_cpu
     CUDA: _erfinv_out_cuda
@@ -6507,6 +6892,7 @@
     DefaultBackend: i0_
 
 - func: i0.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: i0_out
 
@@ -6523,6 +6909,7 @@
     DefaultBackend: sign_
 
 - func: sign.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: sign_out
 
@@ -6531,6 +6918,7 @@
   variants: function, method
 
 - func: signbit.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: signbit_out
     CUDA: signbit_out
@@ -6542,6 +6930,7 @@
     DefaultBackend: dist
 
 - func: atan2.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: atan2_out
 
@@ -6552,11 +6941,13 @@
     CPU, CUDA: atan2
 
 - func: lerp.Scalar_out(Tensor self, Tensor end, Scalar weight, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: lerp_cpu_scalar_out
     CUDA: lerp_cuda_scalar_out
 
 - func: lerp.Tensor_out(Tensor self, Tensor end, Tensor weight, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: lerp_cpu_tensor_out
     CUDA: lerp_cuda_tensor_out
@@ -6576,6 +6967,7 @@
     CUDA: lerp_cuda_tensor
 
 - func: histc.out(Tensor self, int bins=100, Scalar min=0, Scalar max=0, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: legacy::cpu::_th_histc_out
     CUDA: _histc_out_cuda
@@ -6588,6 +6980,7 @@
     CUDA: _histc_cuda
 
 - func: fmod.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: fmod_out
 
@@ -6598,6 +6991,7 @@
     CPU, CUDA: fmod
 
 - func: fmod.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: fmod_out
 
@@ -6608,6 +7002,7 @@
     CPU, CUDA: fmod
 
 - func: hypot.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: hypot_out
 
@@ -6618,11 +7013,13 @@
     CPU, CUDA: hypot
 
 - func: hypot_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     DefaultBackend: hypot_
 
 - func: igamma.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: igamma_out
 
@@ -6633,11 +7030,13 @@
     CPU, CUDA: igamma
 
 - func: igamma_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     CPU, CUDA: igamma_
 
 - func: igammac.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: igammac_out
 
@@ -6648,11 +7047,13 @@
     CPU, CUDA: igammac
 
 - func: igammac_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: method
   dispatch:
     CPU, CUDA: igammac_
 
 - func: nextafter.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: nextafter_out
 
@@ -6663,11 +7064,13 @@
     CPU, CUDA: nextafter
 
 - func: nextafter_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     DefaultBackend: nextafter_
 
 - func: remainder.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: remainder_out
 
@@ -6678,6 +7081,7 @@
     CPU, CUDA: remainder
 
 - func: remainder.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: remainder_out
 
@@ -6708,6 +7112,7 @@
     CPU, CUDA: maximum
 
 - func: maximum.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: maximum_out
 
@@ -6718,6 +7123,7 @@
   variants: method, function
 
 - func: max.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: minimum(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
@@ -6726,42 +7132,49 @@
     CPU, CUDA: minimum
 
 - func: minimum.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: minimum_out
 
 # binary min, alias for minimum
 # NOTE: min is not an alias for minimum, since there is also unary min
 - func: min.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: min.other(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
 
 - func: quantile.scalar_out(Tensor self, float q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: quantile.scalar(Tensor self, float q, int? dim=None, bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
 
 - func: quantile.out(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: quantile(Tensor self, Tensor q, int? dim=None, bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
 
 - func: nanquantile.scalar_out(Tensor self, float q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: nanquantile.scalar(Tensor self, float q, int? dim=None, bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
 
 - func: nanquantile.out(Tensor self, Tensor q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: nanquantile(Tensor self, Tensor q, int? dim=None, bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
 
 - func: sort.values(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: sort_out_cpu
     CUDA: legacy::cuda::_th_sort_out
@@ -6775,18 +7188,33 @@
     QuantizedCPU: sort_quantized_cpu
 
 - func: sort.dimname_values(Tensor self, Dimname dim, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: sort.dimname(Tensor self, Dimname dim, bool descending=False) -> (Tensor values, Tensor indices)
+  use_c10_dispatcher: full
   variants: method, function
+
+- func: msort.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  dispatch:
+    Math: msort_out
+
+- func: msort(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: method, function
+  dispatch:
+    Math: msort
 
 - func: argsort(Tensor self, int dim=-1, bool descending=False) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
 
 - func: argsort.dimname(Tensor self, Dimname dim, bool descending=False) -> Tensor
+  use_c10_dispatcher: full
   variants: method, function
 
 - func: topk.values(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: topk_out_cpu
     CUDA: legacy::cuda::_th_topk_out
@@ -6812,6 +7240,7 @@
     SparseCPU, SparseCUDA: any_sparse
 
 - func: renorm.out(Tensor self, Scalar p, int dim, Scalar maxnorm, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: legacy::cpu::_th_renorm_out
     CUDA: legacy::cuda::_th_renorm_out
@@ -6846,6 +7275,7 @@
     QuantizedCPU: equal_quantized_cpu
 
 - func: pow.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: pow_out
 
@@ -6856,6 +7286,7 @@
     CPU, CUDA: pow
 
 - func: pow.Scalar_out(Scalar self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: pow_out
 
@@ -6865,6 +7296,7 @@
     CPU, CUDA: pow
 
 - func: pow.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: pow_out
     SparseCPU, SparseCUDA: pow_out_sparse_scalar
@@ -6877,6 +7309,7 @@
     SparseCPU, SparseCUDA: pow_sparse_scalar
 
 - func: float_power.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     Math: float_power_out
 
@@ -6887,6 +7320,7 @@
     Math: float_power
 
 - func: float_power.Scalar_out(Scalar self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     Math: float_power_out
 
@@ -6896,6 +7330,7 @@
     Math: float_power
 
 - func: float_power.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     Math: float_power_out
 
@@ -6918,37 +7353,46 @@
     Math: float_power_
 
 - func: normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)
+  use_c10_dispatcher: full
   variants: method
   dispatch:
     CPU, CUDA: normal_
 
 - func: normal.Tensor_float_out(Tensor mean, float std=1, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: normal_out
 
 - func: normal.Tensor_float(Tensor mean, float std=1, *, Generator? generator=None) -> Tensor
+  use_c10_dispatcher: full
   dispatch:
     CPU, CUDA: normal
 
 - func: normal.float_Tensor_out(float mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: normal_out
 
 - func: normal.float_Tensor(float mean, Tensor std, *, Generator? generator=None) -> Tensor
+  use_c10_dispatcher: full
   dispatch:
     CPU, CUDA: normal
 
 - func: normal.Tensor_Tensor_out(Tensor mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: normal_out
 
 - func: normal.Tensor_Tensor(Tensor mean, Tensor std, *, Generator? generator=None) -> Tensor
+  use_c10_dispatcher: full
   dispatch:
     CPU, CUDA: normal
 
 - func: normal.float_float(float mean, float std, int[] size, *, Generator? generator=None, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: normal.float_float_out(float mean, float std, int[] size, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: alias(Tensor(a) self) -> Tensor(a)
   use_c10_dispatcher: full
@@ -6969,6 +7413,7 @@
     CUDA: _cumsum_cuda
 
 - func: _cumsum.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: _cumsum_out_cpu
     CUDA: _cumsum_out_cuda
@@ -6980,6 +7425,7 @@
     CUDA: _cumprod_cuda
 
 - func: _cumprod.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: _cumprod_out_cpu
     CUDA: _cumprod_out_cuda
@@ -6996,7 +7442,6 @@
 
 - func: _amp_foreach_non_finite_check_and_unscale_(Tensor(a!)[] self, Tensor(b!) found_inf, Tensor inv_scale) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CUDA: _amp_foreach_non_finite_check_and_unscale_cuda_
@@ -7015,6 +7460,7 @@
     QuantizedCPU: cat_quantized_cpu
 
 - func: _cat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: _cat_out_cpu
     CUDA: cat_out_cuda
@@ -7022,7 +7468,6 @@
 
 - func: _foreach_add.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_add_scalar_kernel_slow
@@ -7030,7 +7475,6 @@
 
 - func: _foreach_add_.Scalar(Tensor(a!)[] self, Scalar scalar) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_add_scalar_kernel_slow_
@@ -7038,7 +7482,6 @@
 
 - func: _foreach_sub.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_sub_scalar_kernel_slow
@@ -7046,7 +7489,6 @@
 
 - func: _foreach_sub_.Scalar(Tensor(a!)[] self, Scalar scalar) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_sub_scalar_kernel_slow_
@@ -7054,7 +7496,6 @@
 
 - func: _foreach_mul.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_mul_scalar_kernel_slow
@@ -7062,7 +7503,6 @@
 
 - func: _foreach_mul_.Scalar(Tensor(a!)[] self, Scalar scalar) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_mul_scalar_kernel_slow_
@@ -7070,7 +7510,6 @@
 
 - func: _foreach_div.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_div_scalar_kernel_slow
@@ -7078,7 +7517,6 @@
 
 - func: _foreach_div_.Scalar(Tensor(a!)[] self, Scalar scalar) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_div_scalar_kernel_slow_
@@ -7086,7 +7524,6 @@
 
 - func: _foreach_add.List(Tensor[] tensors1, Tensor[] tensors2, *, Scalar alpha=1) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_add_list_kernel_slow
@@ -7094,7 +7531,6 @@
 
 - func: _foreach_add_.List(Tensor(a!)[] self, Tensor[] other, *, Scalar alpha=1) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_add_list_kernel_slow_
@@ -7102,7 +7538,6 @@
 
 - func: _foreach_sub.List(Tensor[] tensors1, Tensor[] tensors2, *, Scalar alpha=1) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_sub_list_kernel_slow
@@ -7110,7 +7545,6 @@
 
 - func: _foreach_sub_.List(Tensor(a!)[] self, Tensor[] other, *, Scalar alpha=1) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_sub_list_kernel_slow_
@@ -7118,7 +7552,6 @@
 
 - func: _foreach_mul.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_mul_list_kernel_slow
@@ -7126,7 +7559,6 @@
 
 - func: _foreach_mul_.List(Tensor(a!)[] self, Tensor[] other) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_mul_list_kernel_slow_
@@ -7134,7 +7566,6 @@
 
 - func: _foreach_div.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_div_list_kernel_slow
@@ -7142,7 +7573,6 @@
 
 - func: _foreach_div_.List(Tensor(a!)[] self, Tensor[] other) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_div_list_kernel_slow_
@@ -7150,7 +7580,6 @@
 
 - func: _foreach_add.ScalarList(Tensor[] tensors, float[] scalars) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_add_scalarlist_kernel_slow
@@ -7158,7 +7587,6 @@
 
 - func: _foreach_add_.ScalarList(Tensor(a!)[] self, float[] scalars) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_add_scalarlist_kernel_slow_
@@ -7166,7 +7594,6 @@
 
 - func: _foreach_sub.ScalarList(Tensor[] tensors, float[] scalars) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_sub_scalarlist_kernel_slow
@@ -7174,7 +7601,6 @@
 
 - func: _foreach_sub_.ScalarList(Tensor(a!)[] self, float[] scalars) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_sub_scalarlist_kernel_slow_
@@ -7182,7 +7608,6 @@
 
 - func: _foreach_div.ScalarList(Tensor[] tensors, float[] scalars) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_div_scalarlist_kernel_slow
@@ -7190,7 +7615,6 @@
 
 - func: _foreach_div_.ScalarList(Tensor(a!)[] self, float[] scalars) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_div_scalarlist_kernel_slow_
@@ -7198,7 +7622,6 @@
 
 - func: _foreach_mul.ScalarList(Tensor[] tensors, float[] scalars) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_mul_scalarlist_kernel_slow
@@ -7206,7 +7629,6 @@
 
 - func: _foreach_mul_.ScalarList(Tensor(a!)[] self, float[] scalars) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_mul_scalarlist_kernel_slow_
@@ -7214,15 +7636,20 @@
 
 - func: _foreach_exp(Tensor[] tensors) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_exp_slow
     CUDA: foreach_tensor_exp_cuda
 
+- func: _foreach_zero_(Tensor(a!)[] self) -> ()
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_zero_slow_
+    CUDA: foreach_tensor_zero_cuda_
+
 - func: _foreach_exp_(Tensor(a!)[] self) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_exp_slow_
@@ -7230,7 +7657,6 @@
 
 - func: _foreach_sqrt(Tensor[] tensors) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_sqrt_slow
@@ -7238,7 +7664,6 @@
 
 - func: _foreach_sqrt_(Tensor(a!)[] self) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_sqrt_slow_
@@ -7246,7 +7671,6 @@
 
 - func: _foreach_abs(Tensor[] tensors) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_abs_slow
@@ -7254,7 +7678,6 @@
 
 - func: _foreach_abs_(Tensor(a!)[] self) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_abs_slow_
@@ -7262,7 +7685,6 @@
 
 - func: _foreach_acos(Tensor[] tensors) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_acos_slow
@@ -7270,7 +7692,6 @@
 
 - func: _foreach_acos_(Tensor(a!)[] self) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_acos_slow_
@@ -7278,7 +7699,6 @@
 
 - func: _foreach_asin(Tensor[] tensors) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_asin_slow
@@ -7286,7 +7706,6 @@
 
 - func: _foreach_asin_(Tensor(a!)[] self) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_asin_slow_
@@ -7294,7 +7713,6 @@
 
 - func: _foreach_atan(Tensor[] tensors) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_atan_slow
@@ -7302,7 +7720,6 @@
 
 - func: _foreach_atan_(Tensor(a!)[] self) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_atan_slow_
@@ -7310,7 +7727,6 @@
 
 - func: _foreach_ceil(Tensor[] tensors) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_ceil_slow
@@ -7318,7 +7734,6 @@
 
 - func: _foreach_ceil_(Tensor(a!)[] self) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_ceil_slow_
@@ -7326,7 +7741,6 @@
 
 - func: _foreach_cos(Tensor[] tensors) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_cos_slow
@@ -7334,7 +7748,6 @@
 
 - func: _foreach_cos_(Tensor(a!)[] self) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_cos_slow_
@@ -7342,7 +7755,6 @@
 
 - func: _foreach_cosh(Tensor[] tensors) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_cosh_slow
@@ -7350,7 +7762,6 @@
 
 - func: _foreach_cosh_(Tensor(a!)[] self) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_cosh_slow_
@@ -7358,7 +7769,6 @@
 
 - func: _foreach_erf(Tensor[] tensors) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_erf_slow
@@ -7366,7 +7776,6 @@
 
 - func: _foreach_erf_(Tensor(a!)[] self) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_erf_slow_
@@ -7374,7 +7783,6 @@
 
 - func: _foreach_erfc(Tensor[] tensors) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_erfc_slow
@@ -7382,7 +7790,6 @@
 
 - func: _foreach_erfc_(Tensor(a!)[] self) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_erfc_slow_
@@ -7390,7 +7797,6 @@
 
 - func: _foreach_expm1(Tensor[] tensors) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_expm1_slow
@@ -7398,7 +7804,6 @@
 
 - func: _foreach_expm1_(Tensor(a!)[] self) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_expm1_slow_
@@ -7406,7 +7811,6 @@
 
 - func: _foreach_floor(Tensor[] tensors) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_floor_slow
@@ -7414,7 +7818,6 @@
 
 - func: _foreach_floor_(Tensor(a!)[] self) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_floor_slow_
@@ -7422,7 +7825,6 @@
 
 - func: _foreach_log(Tensor[] tensors) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_log_slow
@@ -7430,7 +7832,6 @@
 
 - func: _foreach_log_(Tensor(a!)[] self) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_log_slow_
@@ -7438,7 +7839,6 @@
 
 - func: _foreach_log10(Tensor[] tensors) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_log10_slow
@@ -7446,7 +7846,6 @@
 
 - func: _foreach_log10_(Tensor(a!)[] self) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_log10_slow_
@@ -7454,7 +7853,6 @@
 
 - func: _foreach_log1p(Tensor[] tensors) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_log1p_slow
@@ -7462,7 +7860,6 @@
 
 - func: _foreach_log1p_(Tensor(a!)[] self) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_log1p_slow_
@@ -7470,7 +7867,6 @@
 
 - func: _foreach_log2(Tensor[] tensors) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_log2_slow
@@ -7478,7 +7874,6 @@
 
 - func: _foreach_log2_(Tensor(a!)[] self) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_log2_slow_
@@ -7486,7 +7881,6 @@
 
 - func: _foreach_neg(Tensor[] tensors) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_neg_slow
@@ -7494,7 +7888,6 @@
 
 - func: _foreach_neg_(Tensor(a!)[] self) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_neg_slow_
@@ -7502,7 +7895,6 @@
 
 - func: _foreach_tan(Tensor[] tensors) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_tan_slow
@@ -7510,7 +7902,6 @@
 
 - func: _foreach_tan_(Tensor(a!)[] self) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_tan_slow_
@@ -7518,7 +7909,6 @@
 
 - func: _foreach_tanh(Tensor[] tensors) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_tanh_slow
@@ -7526,7 +7916,6 @@
 
 - func: _foreach_tanh_(Tensor(a!)[] self) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_tanh_slow_
@@ -7534,7 +7923,6 @@
 
 - func: _foreach_sin(Tensor[] tensors) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_sin_slow
@@ -7542,7 +7930,6 @@
 
 - func: _foreach_sin_(Tensor(a!)[] self) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_sin_slow_
@@ -7550,7 +7937,6 @@
 
 - func: _foreach_sinh(Tensor[] tensors) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_sinh_slow
@@ -7558,7 +7944,6 @@
 
 - func: _foreach_sinh_(Tensor(a!)[] self) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_sinh_slow_
@@ -7566,7 +7951,6 @@
 
 - func: _foreach_round(Tensor[] tensors) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_round_slow
@@ -7574,7 +7958,6 @@
 
 - func: _foreach_round_(Tensor(a!)[] self) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_round_slow_
@@ -7582,7 +7965,6 @@
 
 - func: _foreach_lgamma(Tensor[] tensors) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_lgamma_slow
@@ -7590,7 +7972,6 @@
 
 - func: _foreach_lgamma_(Tensor(a!)[] self) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_lgamma_slow_
@@ -7598,7 +7979,6 @@
 
 - func: _foreach_frac(Tensor[] tensors) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_frac_slow
@@ -7606,15 +7986,55 @@
 
 - func: _foreach_frac_(Tensor(a!)[] self) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_frac_slow_
     CUDA: foreach_tensor_frac_cuda_
 
+- func: _foreach_reciprocal(Tensor[] tensors) -> Tensor[]
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_reciprocal_slow
+    CUDA: foreach_tensor_reciprocal_cuda
+
+- func: _foreach_reciprocal_(Tensor(a!)[] self) -> ()
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_reciprocal_slow_
+    CUDA: foreach_tensor_reciprocal_cuda_
+
+- func: _foreach_sigmoid(Tensor[] tensors) -> Tensor[]
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_sigmoid_slow
+    CUDA: foreach_tensor_sigmoid_cuda
+
+- func: _foreach_sigmoid_(Tensor(a!)[] self) -> ()
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_sigmoid_slow_
+    CUDA: foreach_tensor_sigmoid_cuda_
+
+- func: _foreach_trunc(Tensor[] tensors) -> Tensor[]
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_trunc_slow
+    CUDA: foreach_tensor_trunc_cuda
+
+- func: _foreach_trunc_(Tensor(a!)[] self) -> ()
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_trunc_slow_
+    CUDA: foreach_tensor_trunc_cuda_
+
 - func: _foreach_addcdiv_.Scalar(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_addcdiv_scalar_slow_
@@ -7622,7 +8042,6 @@
 
 - func: _foreach_addcmul_.Scalar(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_addcmul_scalar_slow_
@@ -7630,7 +8049,6 @@
 
 - func: _foreach_addcdiv_.ScalarList(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, float[] scalars) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_addcdiv_scalarlist_slow_
@@ -7638,7 +8056,6 @@
 
 - func: _foreach_addcmul_.ScalarList(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, float[] scalars) -> ()
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_addcmul_scalarlist_slow_
@@ -7646,7 +8063,6 @@
 
 - func: _foreach_addcdiv.Scalar(Tensor[] input, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_addcdiv_scalar_slow
@@ -7654,7 +8070,6 @@
 
 - func: _foreach_addcmul.Scalar(Tensor[] input, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_addcmul_scalar_slow
@@ -7662,7 +8077,6 @@
 
 - func: _foreach_addcdiv.ScalarList(Tensor[] input, Tensor[] tensor1, Tensor[] tensor2, float[] scalars) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_addcdiv_scalarlist_slow
@@ -7670,7 +8084,6 @@
 
 - func: _foreach_addcmul.ScalarList(Tensor[] input, Tensor[] tensor1, Tensor[] tensor2, float[] scalars) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_addcmul_scalarlist_slow
@@ -7678,7 +8091,6 @@
 
 - func: _foreach_maximum.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_maximum_slow
@@ -7686,7 +8098,6 @@
 
 - func: _foreach_minimum.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
   use_c10_dispatcher: full
-  device_guard: False
   variants: function
   dispatch:
     CPU: foreach_tensor_minimum_slow
@@ -7699,6 +8110,7 @@
     CUDA: legacy::cuda::_th_mode
 
 - func: _mode.values(Tensor self, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: legacy::cpu::_th_mode_out
     CUDA: legacy::cuda::_th_mode_out
@@ -7710,6 +8122,7 @@
     CUDA: bucketize_cuda
 
 - func: bucketize.Tensor_out(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: bucketize_out_cpu
     CUDA: bucketize_out_cuda
@@ -7727,6 +8140,7 @@
     CUDA: searchsorted_cuda
 
 - func: searchsorted.Tensor_out(Tensor sorted_sequence, Tensor self, *, bool out_int32=False, bool right=False, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: searchsorted_out_cpu
     CUDA: searchsorted_out_cuda
@@ -7740,6 +8154,7 @@
 ## NN wrappers
 
 - func: mse_loss.out(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: mse_loss_out
@@ -7751,6 +8166,7 @@
     CPU, CUDA: mse_loss
 
 - func: mse_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: mse_loss_backward_out
@@ -7762,6 +8178,7 @@
     CPU, CUDA: mse_loss_backward
 
 - func: l1_loss.out(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     DefaultBackend: l1_loss_out
@@ -7773,6 +8190,7 @@
     DefaultBackend: l1_loss
 
 - func: l1_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: l1_loss_backward_out
@@ -7784,6 +8202,7 @@
     DefaultBackend: l1_loss_backward
 
 - func: multi_margin_loss.out(Tensor self, Tensor target, Scalar p=1, Scalar margin=1, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: multi_margin_loss_cpu_out
@@ -7797,6 +8216,7 @@
     CUDA: legacy::cuda::_thnn_multi_margin_loss_forward
 
 - func: multi_margin_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, Scalar p, Scalar margin, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: multi_margin_loss_cpu_backward_out
@@ -7810,6 +8230,7 @@
     CUDA: legacy::cuda::_thnn_multi_margin_loss_backward
 
 - func: multilabel_margin_loss.out(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
 
 - func: multilabel_margin_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
@@ -7817,6 +8238,7 @@
   python_module: nn
 
 - func: multilabel_margin_loss_forward.output(Tensor self, Tensor target, int reduction, *, Tensor(a!) output, Tensor(b!) is_target) -> (Tensor(a!), Tensor(b!))
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: multilabel_margin_loss_forward_out_cpu
@@ -7830,6 +8252,7 @@
     CUDA: legacy::cuda::_thnn_multilabel_margin_loss_forward
 
 - func: multilabel_margin_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, Tensor is_target, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: multilabel_margin_loss_backward_cpu_out
@@ -7843,6 +8266,7 @@
     CUDA: legacy::cuda::_thnn_multilabel_margin_loss_backward
 
 - func: nll_loss.out(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
 
 - func: nll_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100) -> Tensor
@@ -7850,6 +8274,7 @@
   python_module: nn
 
 - func: nll_loss_forward.output(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, *, Tensor(a!) output, Tensor(b!) total_weight) -> (Tensor(a!), Tensor(b!))
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: nll_loss_forward_out_cpu
@@ -7863,6 +8288,7 @@
     CUDA: legacy::cuda::_thnn_nll_loss_forward
 
 - func: nll_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: nll_loss_backward_out_cpu
@@ -7876,6 +8302,7 @@
     CUDA: legacy::cuda::_thnn_nll_loss_backward
 
 - func: nll_loss2d.out(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
 
 - func: nll_loss2d(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100) -> Tensor
@@ -7883,6 +8310,7 @@
   python_module: nn
 
 - func: nll_loss2d_forward.output(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, *, Tensor(a!) output, Tensor(b!) total_weight) -> (Tensor(a!), Tensor(b!))
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: nll_loss2d_forward_out_cpu
@@ -7896,6 +8324,7 @@
     CUDA: legacy::cuda::_thnn_nll_loss2d_forward
 
 - func: nll_loss2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: nll_loss2d_backward_out_cpu
@@ -7909,6 +8338,7 @@
     CUDA: legacy::cuda::_thnn_nll_loss2d_backward
 
 - func: smooth_l1_loss.out(Tensor self, Tensor target, int reduction=Mean, float beta=1.0, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: smooth_l1_loss_out
@@ -7921,6 +8351,7 @@
     CPU, CUDA: smooth_l1_loss
 
 - func: smooth_l1_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, float beta, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: smooth_l1_loss_backward_out
@@ -7933,6 +8364,7 @@
     DefaultBackend: smooth_l1_loss_backward
 
 - func: soft_margin_loss.out(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     DefaultBackend: soft_margin_loss_out
@@ -7944,6 +8376,7 @@
     DefaultBackend: soft_margin_loss
 
 - func: soft_margin_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     DefaultBackend: soft_margin_loss_backward_out
@@ -7955,6 +8388,7 @@
     DefaultBackend: soft_margin_loss_backward
 
 - func: elu.out(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: elu_out
@@ -7966,6 +8400,7 @@
     CPU, CUDA: elu
 
 - func: elu_backward.grad_input(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, Tensor output, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: elu_backward_out
@@ -7983,6 +8418,7 @@
     DefaultBackend: elu_
 
 - func: glu.out(Tensor self, int dim=-1, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: glu_out
@@ -7996,6 +8432,7 @@
     CUDA: legacy::cuda::_thnn_glu_forward
 
 - func: glu_backward.grad_input(Tensor grad_output, Tensor self, int dim, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: glu_backward_out
@@ -8009,6 +8446,7 @@
     CUDA: legacy::cuda::_thnn_glu_backward
 
 - func: hardsigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: hardsigmoid_out
@@ -8033,6 +8471,7 @@
     CPU, CUDA: hardsigmoid_backward
 
 - func: hardtanh.out(Tensor self, Scalar min_val=-1, Scalar max_val=1, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: hardtanh_out
@@ -8046,6 +8485,7 @@
     QuantizedCPU: hardtanh_quantized_cpu
 
 - func: hardtanh_backward.grad_input(Tensor grad_output, Tensor self, Scalar min_val, Scalar max_val, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: hardtanh_backward_out
@@ -8064,6 +8504,7 @@
     QuantizedCPU: hardtanh_quantized_cpu_
 
 - func: hardswish.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: hardswish_out
@@ -8087,6 +8528,7 @@
     CPU, CUDA: hardswish_backward
 
 - func: leaky_relu.out(Tensor self, Scalar negative_slope=0.01, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: leaky_relu_out
@@ -8113,6 +8555,7 @@
     QuantizedCPU: leaky_relu_quantized_cpu_
 
 - func: log_sigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
 
 - func: log_sigmoid(Tensor self) -> Tensor
@@ -8120,6 +8563,7 @@
   python_module: nn
 
 - func: log_sigmoid_forward.output(Tensor self, *, Tensor(a!) output, Tensor(b!) buffer) -> (Tensor(a!), Tensor(b!))
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: log_sigmoid_forward_out_cpu
@@ -8133,6 +8577,7 @@
     CUDA: legacy::cuda::_thnn_log_sigmoid_forward
 
 - func: log_sigmoid_backward.grad_input(Tensor grad_output, Tensor self, Tensor buffer, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: log_sigmoid_backward_out_cpu
@@ -8146,12 +8591,14 @@
     CUDA: legacy::cuda::_thnn_log_sigmoid_backward
 
 - func: rrelu_with_noise.out(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: rrelu_with_noise_out_cpu
     CUDA: legacy::cuda::_thnn_rrelu_with_noise_forward_out
 
 - func: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
+  use_c10_dispatcher: full
   python_module: nn
   dispatch:
     CPU: rrelu_with_noise_cpu
@@ -8164,12 +8611,14 @@
     DefaultBackend: rrelu_with_noise_backward
 
 - func: rrelu_with_noise_(Tensor(a!) self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
+  use_c10_dispatcher: full
   python_module: nn
   dispatch:
     CPU: rrelu_with_noise_cpu_
     CUDA: legacy::cuda::_thnn_rrelu_with_noise_forward_
 
 - func: softplus.out(Tensor self, Scalar beta=1, Scalar threshold=20, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: softplus_out
@@ -8181,6 +8630,7 @@
     CPU, CUDA: softplus
 
 - func: softplus_backward.grad_input(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold, Tensor output, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: softplus_backward_out
@@ -8192,6 +8642,7 @@
     CPU, CUDA: softplus_backward
 
 - func: softshrink.out(Tensor self, Scalar lambd=0.5, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: softshrink_out
@@ -8203,6 +8654,7 @@
     CPU, CUDA: softshrink
 
 - func: softshrink_backward.grad_input(Tensor grad_output, Tensor self, Scalar lambd, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: softshrink_backward_out
@@ -8214,6 +8666,7 @@
     CPU, CUDA: softshrink_backward
 
 - func: adaptive_avg_pool2d.out(Tensor self, int[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: adaptive_avg_pool2d_out_cpu
@@ -8243,6 +8696,7 @@
     CUDA: adaptive_avg_pool2d_backward_cuda
 
 - func: adaptive_avg_pool3d.out(Tensor self, int[3] output_size, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: adaptive_avg_pool3d_out_cpu
@@ -8258,6 +8712,7 @@
     QuantizedCPU: adaptive_avg_pool3d_quantized_cpu
 
 - func: adaptive_avg_pool3d_backward.grad_input(Tensor grad_output, Tensor self, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: adaptive_avg_pool3d_backward_out_cpu
@@ -8272,6 +8727,7 @@
 
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool2d.out(Tensor self, int[2] output_size, *, Tensor(a!) out, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: adaptive_max_pool2d_out_cpu
@@ -8286,6 +8742,7 @@
     CUDA: adaptive_max_pool2d_cuda
 
 - func: adaptive_max_pool2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: adaptive_max_pool2d_backward_out_cpu
@@ -8300,6 +8757,7 @@
 
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool3d.out(Tensor self, int[3] output_size, *, Tensor(a!) out, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: adaptive_max_pool3d_out_cpu
@@ -8314,6 +8772,7 @@
     CUDA: adaptive_max_pool3d_cuda
 
 - func: adaptive_max_pool3d_backward.grad_input(Tensor grad_output, Tensor self, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: adaptive_max_pool3d_backward_out_cpu
@@ -8327,6 +8786,7 @@
     CUDA: adaptive_max_pool3d_backward_cuda
 
 - func: avg_pool2d.out(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: avg_pool2d_out_cpu
@@ -8343,6 +8803,7 @@
     QuantizedCPU: avg_pool2d_quantized_cpu
 
 - func: avg_pool2d_backward.grad_input(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad, int? divisor_override, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: avg_pool2d_backward_out_cpu
@@ -8356,6 +8817,7 @@
     CUDA: avg_pool2d_backward_cuda
 
 - func: avg_pool3d.out(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: avg_pool3d_out_cpu
@@ -8372,6 +8834,7 @@
     QuantizedCPU: avg_pool3d_quantized_cpu
 
 - func: avg_pool3d_backward.grad_input(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, int? divisor_override, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: avg_pool3d_backward_out_cpu
@@ -8386,6 +8849,7 @@
 
 # Return: (Tensor output, Tensor indices)
 - func: fractional_max_pool2d.output(Tensor self, int[2] kernel_size, int[2] output_size, Tensor random_samples, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: fractional_max_pool2d_out_cpu
@@ -8400,6 +8864,7 @@
     CUDA: fractional_max_pool2d_cuda
 
 - func: fractional_max_pool2d_backward.grad_input(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] output_size, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: fractional_max_pool2d_backward_out_cpu
@@ -8414,6 +8879,7 @@
 
 # Return: (Tensor output, Tensor indices)
 - func: fractional_max_pool3d.output(Tensor self, int[3] kernel_size, int[3] output_size, Tensor random_samples, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: fractional_max_pool3d_out_cpu
@@ -8428,6 +8894,7 @@
     CUDA: fractional_max_pool3d_cuda
 
 - func: fractional_max_pool3d_backward.grad_input(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] output_size, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: fractional_max_pool3d_backward_out_cpu
@@ -8442,6 +8909,7 @@
 
 # Return: (Tensor output, Tensor indices)
 - func: max_pool2d_with_indices.out(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False, *, Tensor(a!) out, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: max_pool2d_with_indices_out_cpu
@@ -8456,6 +8924,7 @@
     CUDA: max_pool2d_with_indices_cuda
 
 - func: max_pool2d_with_indices_backward.grad_input(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool ceil_mode, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: max_pool2d_with_indices_backward_out_cpu
@@ -8470,6 +8939,7 @@
 
 # Return: (Tensor output, Tensor indices)
 - func: max_pool3d_with_indices.out(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False, *, Tensor(a!) out, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: max_pool3d_with_indices_out_cpu
@@ -8484,6 +8954,7 @@
     CUDA: max_pool3d_with_indices_cuda
 
 - func: max_pool3d_with_indices_backward.grad_input(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, int[3] dilation, bool ceil_mode, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: max_pool3d_with_indices_backward_out_cpu
@@ -8497,6 +8968,7 @@
     CUDA: max_pool3d_with_indices_backward_cuda
 
 - func: max_unpool2d.out(Tensor self, Tensor indices, int[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: max_unpooling2d_forward_out_cpu
@@ -8510,6 +8982,7 @@
     CUDA: max_unpooling2d_forward_cuda
 
 - func: max_unpool2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor indices, int[2] output_size, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: max_unpooling2d_backward_out_cpu
@@ -8523,6 +8996,7 @@
     CUDA: max_unpooling2d_backward_cuda
 
 - func: max_unpool3d.out(Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: max_unpooling3d_forward_out_cpu
@@ -8536,6 +9010,7 @@
     CUDA: max_unpooling3d_forward_cuda
 
 - func: max_unpool3d_backward.grad_input(Tensor grad_output, Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: max_unpooling3d_backward_out_cpu
@@ -8549,6 +9024,7 @@
     CUDA: max_unpooling3d_backward_cuda
 
 - func: reflection_pad1d.out(Tensor self, int[2] padding, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, QuantizedCPU: reflection_pad1d_out_cpu
@@ -8562,6 +9038,7 @@
     CUDA: reflection_pad1d_cuda
 
 - func: reflection_pad1d_backward.grad_input(Tensor grad_output, Tensor self, int[2] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: reflection_pad1d_backward_out_cpu
@@ -8575,6 +9052,7 @@
     CUDA: reflection_pad1d_backward_cuda
 
 - func: reflection_pad2d.out(Tensor self, int[4] padding, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, QuantizedCPU: reflection_pad2d_out_cpu
@@ -8588,6 +9066,7 @@
     CUDA: reflection_pad2d_cuda
 
 - func: reflection_pad2d_backward.grad_input(Tensor grad_output, Tensor self, int[4] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: reflection_pad2d_backward_out_cpu
@@ -8601,6 +9080,7 @@
     CUDA: reflection_pad2d_backward_cuda
 
 - func: replication_pad1d.out(Tensor self, int[2] padding, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: replication_pad1d_out_cpu
@@ -8614,6 +9094,7 @@
     CUDA: replication_pad1d_cuda
 
 - func: replication_pad1d_backward.grad_input(Tensor grad_output, Tensor self, int[2] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: replication_pad1d_backward_out_cpu
@@ -8627,6 +9108,7 @@
     CUDA: replication_pad1d_backward_cuda
 
 - func: replication_pad2d.out(Tensor self, int[4] padding, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: replication_pad2d_out_cpu
@@ -8640,6 +9122,7 @@
     CUDA: replication_pad2d_cuda
 
 - func: replication_pad2d_backward.grad_input(Tensor grad_output, Tensor self, int[4] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: replication_pad2d_backward_out_cpu
@@ -8653,6 +9136,7 @@
     CUDA: replication_pad2d_backward_cuda
 
 - func: replication_pad3d.out(Tensor self, int[6] padding, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: replication_pad3d_out_cpu
@@ -8666,6 +9150,7 @@
     CUDA: replication_pad3d_cuda
 
 - func: replication_pad3d_backward.grad_input(Tensor grad_output, Tensor self, int[6] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: replication_pad3d_backward_out_cpu
@@ -8779,6 +9264,7 @@
 
 # NOTE: all of the non-"vec" upsample overloads are only kept for backward compatibility.
 - func: upsample_linear1d.out(Tensor self, int[1] output_size, bool align_corners, float? scales=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: upsample_linear1d_out_cpu
@@ -8792,6 +9278,7 @@
     CUDA: upsample_linear1d_cuda
 
 - func: upsample_linear1d_backward.grad_input(Tensor grad_output, int[1] output_size, int[3] input_size, bool align_corners, float? scales=None, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: upsample_linear1d_backward_out_cpu
@@ -8805,6 +9292,7 @@
     CUDA: upsample_linear1d_backward_cuda
 
 - func: upsample_bilinear2d.out(Tensor self, int[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: upsample_bilinear2d_out_cpu
@@ -8819,6 +9307,7 @@
     QuantizedCPU: upsample_bilinear2d_quantized_cpu
 
 - func: upsample_bilinear2d_backward.grad_input(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: upsample_bilinear2d_backward_out_cpu
@@ -8832,6 +9321,7 @@
     CUDA: upsample_bilinear2d_backward_cuda
 
 - func: upsample_bicubic2d.out(Tensor self, int[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: upsample_bicubic2d_out_cpu
@@ -8845,6 +9335,7 @@
     CUDA: upsample_bicubic2d_cuda
 
 - func: upsample_bicubic2d_backward.grad_input(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: upsample_bicubic2d_backward_out_cpu
@@ -8858,6 +9349,7 @@
     CUDA: upsample_bicubic2d_backward_cuda
 
 - func: upsample_trilinear3d.out(Tensor self, int[3] output_size, bool align_corners, float? scales_d=None, float? scales_h=None, float? scales_w=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: upsample_trilinear3d_out_cpu
@@ -8871,6 +9363,7 @@
     CUDA: upsample_trilinear3d_cuda
 
 - func: upsample_trilinear3d_backward.grad_input(Tensor grad_output, int[3] output_size, int[5] input_size, bool align_corners, float? scales_d=None, float? scales_h=None, float? scales_w=None, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: upsample_trilinear3d_backward_out_cpu
@@ -8884,6 +9377,7 @@
     CUDA: upsample_trilinear3d_backward_cuda
 
 - func: upsample_nearest1d.out(Tensor self, int[1] output_size, float? scales=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   structured: True
   dispatch:
@@ -8896,6 +9390,7 @@
   structured_delegate: upsample_nearest1d.out
 
 - func: upsample_nearest1d_backward.grad_input(Tensor grad_output, int[1] output_size, int[3] input_size, float? scales=None, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   structured: True
   dispatch:
@@ -8908,6 +9403,7 @@
   structured_delegate: upsample_nearest1d_backward.grad_input
 
 - func: upsample_nearest2d.out(Tensor self, int[2] output_size, float? scales_h=None, float? scales_w=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: upsample_nearest2d_out_cpu
@@ -8922,6 +9418,7 @@
     QuantizedCPU: upsample_nearest2d_quantized_cpu
 
 - func: upsample_nearest2d_backward.grad_input(Tensor grad_output, int[2] output_size, int[4] input_size, float? scales_h=None, float? scales_w=None, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: upsample_nearest2d_backward_out_cpu
@@ -8935,6 +9432,7 @@
     CUDA: upsample_nearest2d_backward_cuda
 
 - func: upsample_nearest3d.out(Tensor self, int[3] output_size, float? scales_d=None, float? scales_h=None, float? scales_w=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: upsample_nearest3d_out_cpu
@@ -8949,6 +9447,7 @@
     QuantizedCPU: upsample_nearest3d_quantized_cpu
 
 - func: upsample_nearest3d_backward.grad_input(Tensor grad_output, int[3] output_size, int[5] input_size, float? scales_d=None, float? scales_h=None, float? scales_w=None, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: upsample_nearest3d_backward_out_cpu
@@ -8962,6 +9461,7 @@
     CUDA: upsample_nearest3d_backward_cuda
 
 - func: sigmoid_backward.grad_input(Tensor grad_output, Tensor output, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: sigmoid_backward_out
@@ -8973,6 +9473,7 @@
     CPU, CUDA: sigmoid_backward
 
 - func: logit_backward.grad_input(Tensor grad_output, Tensor self, float? eps=None, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: logit_backward_out
@@ -8984,6 +9485,7 @@
     CPU, CUDA: logit_backward
 
 - func: tanh_backward.grad_input(Tensor grad_output, Tensor output, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: tanh_backward_out
@@ -9013,6 +9515,7 @@
 # make the operational distinction clear.
 
 - func: slow_conv_transpose2d.out(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int[2] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: slow_conv_transpose2d_out_cpu
@@ -9025,7 +9528,8 @@
     CPU: slow_conv_transpose2d_cpu
     CUDA: slow_conv_transpose2d_cuda
 
-- func: slow_conv_transpose2d_backward.grad_output(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, Tensor columns, Tensor ones, *, Tensor(a!)? grad_input, Tensor(b!)? grad_weight, Tensor(c!)? grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+- func: slow_conv_transpose2d_backward.grad_output(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, Tensor columns, Tensor ones, *, Tensor(a!) grad_input, Tensor(b!) grad_weight, Tensor(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: slow_conv_transpose2d_backward_out_cpu
@@ -9039,6 +9543,7 @@
     CUDA: slow_conv_transpose2d_backward_cuda
 
 - func: slow_conv_transpose3d.out(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] output_padding=0, int[3] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: slow_conv_transpose3d_out_cpu
@@ -9051,7 +9556,8 @@
     CPU: slow_conv_transpose3d_cpu
     CUDA: slow_conv_transpose3d_cuda
 
-- func: slow_conv_transpose3d_backward.grad_output(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] output_padding, int[3] dilation, Tensor finput, Tensor fgrad_input, *, Tensor(a!)? grad_input, Tensor(b!)? grad_weight, Tensor(c!)? grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+- func: slow_conv_transpose3d_backward.grad_output(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] output_padding, int[3] dilation, Tensor finput, Tensor fgrad_input, *, Tensor(a!) grad_input, Tensor(b!) grad_weight, Tensor(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: slow_conv_transpose3d_backward_out_cpu
@@ -9065,6 +9571,7 @@
     CUDA: slow_conv_transpose3d_backward_cuda
 
 - func: thnn_conv2d.out(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
 
 - func: thnn_conv2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0) -> Tensor
@@ -9072,6 +9579,7 @@
   python_module: nn
 
 - func: thnn_conv2d_forward.output(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, *, Tensor(a!) output, Tensor(b!) finput, Tensor(c!) fgrad_input) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: slow_conv2d_forward_out_cpu
@@ -9084,7 +9592,8 @@
     CPU: slow_conv2d_forward_cpu
     CUDA: legacy::cuda::_thnn_conv2d_forward
 
-- func: thnn_conv2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, Tensor finput, Tensor fgrad_input, *, Tensor(a!)? grad_input, Tensor(b!)? grad_weight, Tensor(c!)? grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+- func: thnn_conv2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, Tensor finput, Tensor fgrad_input, *, Tensor(a!) grad_input, Tensor(b!) grad_weight, Tensor(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: slow_conv2d_backward_out_cpu
@@ -9098,6 +9607,7 @@
     CUDA: slow_conv2d_backward_cuda
 
 - func: thnn_conv_depthwise2d.out(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
 
 - func: thnn_conv_depthwise2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1) -> Tensor
@@ -9105,6 +9615,7 @@
   python_module: nn
 
 - func: thnn_conv_depthwise2d_forward.out(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] dilation, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CUDA: legacy::cuda::_thnn_conv_depthwise2d_forward_out
@@ -9115,7 +9626,8 @@
   dispatch:
     CUDA: legacy::cuda::_thnn_conv_depthwise2d_forward
 
-- func: thnn_conv_depthwise2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, *, Tensor(a!)? grad_input, Tensor(b!)? grad_weight) -> (Tensor(a!), Tensor(b!))
+- func: thnn_conv_depthwise2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, *, Tensor(a!) grad_input, Tensor(b!) grad_weight) -> (Tensor(a!), Tensor(b!))
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CUDA: thnn_conv_depthwise2d_backward_out
@@ -9127,6 +9639,7 @@
     CUDA: thnn_conv_depthwise2d_backward
 
 - func: slow_conv3d.out(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
 
 - func: slow_conv3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0) -> Tensor
@@ -9134,6 +9647,7 @@
   python_module: nn
 
 - func: slow_conv3d_forward.output(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, int[3] padding, *, Tensor(a!) output, Tensor(b!) finput, Tensor(c!) fgrad_input) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: slow_conv3d_forward_out_cpu
@@ -9144,7 +9658,8 @@
   dispatch:
     CPU: slow_conv3d_forward_cpu
 
-- func: slow_conv3d_backward.grad_input(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, Tensor finput, Tensor fgrad_input, *, Tensor(a!)? grad_input, Tensor(b!)? grad_weight, Tensor(c!)? grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+- func: slow_conv3d_backward.grad_input(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, Tensor finput, Tensor fgrad_input, *, Tensor(a!) grad_input, Tensor(b!) grad_weight, Tensor(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: slow_conv3d_backward_out_cpu
@@ -9184,6 +9699,7 @@
     CUDA: slow_conv_dilated3d_backward_cuda
 
 - func: col2im.out(Tensor self, int[2] output_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: col2im_out_cpu
@@ -9197,6 +9713,7 @@
     CUDA: col2im_cuda
 
 - func: col2im_backward.grad_input(Tensor grad_output, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: col2im_backward_out_cpu
@@ -9215,10 +9732,12 @@
     Math: column_stack
 
 - func: column_stack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     Math: column_stack_out
 
 - func: im2col.out(Tensor self, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: im2col_out_cpu
@@ -9232,6 +9751,7 @@
     CUDA: im2col_cuda
 
 - func: im2col_backward.grad_input(Tensor grad_output, int[2] input_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride, *, Tensor(a!) grad_input) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU: im2col_backward_out_cpu
@@ -9265,6 +9785,7 @@
   variants: function, method
 
 - func: isposinf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: isposinf_out
 
@@ -9273,6 +9794,7 @@
   variants: function, method
 
 - func: isneginf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: isneginf_out
 
@@ -9301,69 +9823,73 @@
 # torch.fft.fft
 # NOTE: NOT an alias for torch.fft, which has different semantics
 - func: fft_fft(Tensor self, int? n=None, int dim=-1, str? norm=None) -> Tensor
-  python_module: fft
   use_c10_dispatcher: full
+  python_module: fft
   variants: function
 
 - func: fft_ifft(Tensor self, int? n=None, int dim=-1, str? norm=None) -> Tensor
-  python_module: fft
   use_c10_dispatcher: full
+  python_module: fft
   variants: function
 
 - func: fft_rfft(Tensor self, int? n=None, int dim=-1, str? norm=None) -> Tensor
-  python_module: fft
   use_c10_dispatcher: full
+  python_module: fft
   variants: function
 
 - func: fft_irfft(Tensor self, int? n=None, int dim=-1, str? norm=None) -> Tensor
-  python_module: fft
   use_c10_dispatcher: full
+  python_module: fft
   variants: function
 
 - func: fft_hfft(Tensor self, int? n=None, int dim=-1, str? norm=None) -> Tensor
-  python_module: fft
   use_c10_dispatcher: full
+  python_module: fft
   variants: function
 
 - func: fft_ihfft(Tensor self, int? n=None, int dim=-1, str? norm=None) -> Tensor
-  python_module: fft
   use_c10_dispatcher: full
+  python_module: fft
   variants: function
 
 - func: fft_fft2(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None) -> Tensor
+  use_c10_dispatcher: full
   python_module: fft
   variants: function
 
 - func: fft_ifft2(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None) -> Tensor
+  use_c10_dispatcher: full
   python_module: fft
   variants: function
 
 - func: fft_rfft2(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None) -> Tensor
+  use_c10_dispatcher: full
   python_module: fft
   variants: function
 
 - func: fft_irfft2(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None) -> Tensor
+  use_c10_dispatcher: full
   python_module: fft
   variants: function
 
 - func: fft_fftn(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None) -> Tensor
-  python_module: fft
   use_c10_dispatcher: full
+  python_module: fft
   variants: function
 
 - func: fft_ifftn(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None) -> Tensor
-  python_module: fft
   use_c10_dispatcher: full
+  python_module: fft
   variants: function
 
 - func: fft_rfftn(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None) -> Tensor
-  python_module: fft
   use_c10_dispatcher: full
+  python_module: fft
   variants: function
 
 - func: fft_irfftn(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None) -> Tensor
-  python_module: fft
   use_c10_dispatcher: full
+  python_module: fft
   variants: function
 
 - func: fft_fftfreq(int n, float d=1.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -9377,18 +9903,14 @@
   variants: function
 
 - func: fft_fftshift(Tensor self, int[1]? dim=None) -> Tensor
-  python_module: fft
   use_c10_dispatcher: full
+  python_module: fft
   variants: function
 
 - func: fft_ifftshift(Tensor self, int[1]? dim=None) -> Tensor
+  use_c10_dispatcher: full
   python_module: fft
-  use_c10_dispatcher: full
   variants: function
-
-- func: fft(Tensor self, int signal_ndim, bool normalized=False) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
 
 ## Functions for linear algebra and the torch.linalg namespace
 # Note [linalg namespace binding]
@@ -9400,13 +9922,14 @@
 # See linalg_det as an example.
 
 - func: linalg_cholesky(Tensor self) -> Tensor
-  python_module: linalg
   use_c10_dispatcher: full
+  python_module: linalg
   variants: function
   dispatch:
     DefaultBackend: linalg_cholesky
 
 - func: linalg_cholesky.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: linalg
   variants: function
   dispatch:
@@ -9414,8 +9937,8 @@
 
 # torch.linalg.det, alias for torch.det
 - func: linalg_det(Tensor self) -> Tensor
-  python_module: linalg
   use_c10_dispatcher: full
+  python_module: linalg
   variants: function
 
 - func: det(Tensor self) -> Tensor
@@ -9432,28 +9955,37 @@
     CUDA: _syevd_helper_cuda
 
 - func: linalg_eigh(Tensor self, str UPLO="L") -> (Tensor eigenvalues, Tensor eigenvectors)
-  python_module: linalg
   use_c10_dispatcher: full
+  python_module: linalg
   variants: function
   dispatch:
     DefaultBackend: linalg_eigh
 
 - func: linalg_eigh.eigvals(Tensor self, str UPLO="L", *, Tensor(a!) eigvals, Tensor(b!) eigvecs) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: linalg
   dispatch:
     DefaultBackend: linalg_eigh_out
 
 - func: linalg_eigvalsh(Tensor self, str UPLO="L") -> Tensor
-  python_module: linalg
   use_c10_dispatcher: full
+  python_module: linalg
   variants: function
   dispatch:
     DefaultBackend: linalg_eigvalsh
 
 - func: linalg_eigvalsh.out(Tensor self, str UPLO='L', *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: linalg
   dispatch:
     DefaultBackend: linalg_eigvalsh_out
+
+- func: inner(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: inner.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 # torch.outer, alias for torch.ger
 - func: outer(Tensor self, Tensor vec2) -> Tensor
@@ -9461,6 +9993,7 @@
   variants: function, method
 
 - func: outer.out(Tensor self, Tensor vec2, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: ger(Tensor self, Tensor vec2) -> Tensor
   use_c10_dispatcher: full
@@ -9469,56 +10002,115 @@
     DefaultBackend: ger
 
 - func: ger.out(Tensor self, Tensor vec2, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     DefaultBackend: ger_out
 
 - func: linalg_norm(Tensor self, Scalar? ord=None, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  use_c10_dispatcher: full
   python_module: linalg
   variants: function
 
 - func: linalg_norm.ord_str(Tensor self, str ord, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  use_c10_dispatcher: full
   python_module: linalg
   variants: function
 
 - func: linalg_norm.out(Tensor self, Scalar? ord=None, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: linalg
   variants: function
 
 - func: linalg_norm.ord_str_out(Tensor self, str ord, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: linalg
   variants: function
 
+- func: linalg_cond(Tensor self, Scalar? p=None) -> Tensor
+  use_c10_dispatcher: full
+  python_module: linalg
+  variants: function
+  dispatch:
+    Math: linalg_cond
+
+- func: linalg_cond.out(Tensor self, Scalar? p=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  python_module: linalg
+  variants: function
+  dispatch:
+    Math: linalg_cond_out
+
+- func: linalg_cond.p_str(Tensor self, str p) -> Tensor
+  use_c10_dispatcher: full
+  python_module: linalg
+  variants: function
+  dispatch:
+    Math: linalg_cond
+
+- func: linalg_cond.p_str_out(Tensor self, str p, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  python_module: linalg
+  variants: function
+  dispatch:
+    Math: linalg_cond_out
+
+- func: _linalg_solve_out_helper_(Tensor(a!) self, Tensor(b!) other, Tensor(c!) infos) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: _linalg_solve_out_helper_cpu
+    CUDA: _linalg_solve_out_helper_cuda
+
+- func: linalg_solve(Tensor input, Tensor other) -> Tensor
+  python_module: linalg
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    DefaultBackend: linalg_solve
+
+- func: linalg_solve.out(Tensor input, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  dispatch:
+    DefaultBackend: linalg_solve_out
+
 - func: linalg_tensorinv(Tensor self, int ind=2) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: linalg
   variants: function
   dispatch:
     Math: linalg_tensorinv
 
 - func: linalg_tensorinv.out(Tensor self, int ind=2, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: linalg
   variants: function
   dispatch:
     Math: linalg_tensorinv_out
 
 - func: linalg_tensorsolve(Tensor self, Tensor other, int[]? dims=None) -> Tensor
+  use_c10_dispatcher: full
   python_module: linalg
   variants: function
   dispatch:
     Math: linalg_tensorsolve
 
 - func: linalg_tensorsolve.out(Tensor self, Tensor other, int[]? dims=None, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: linalg
   variants: function
   dispatch:
     Math: linalg_tensorsolve_out
 
 - func: linalg_matrix_rank(Tensor self, float? tol=None, bool hermitian=False) -> Tensor
+  use_c10_dispatcher: full
   python_module: linalg
   variants: function
   dispatch:
     Math: linalg_matrix_rank
 
 - func: linalg_matrix_rank.out(Tensor self, float? tol=None, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: linalg
   variants: function
   dispatch:
