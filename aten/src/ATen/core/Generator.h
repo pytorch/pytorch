@@ -56,7 +56,7 @@
 
 namespace at {
 
-struct CAFFE2_API Generator {
+struct TORCH_API Generator {
   Generator() {}
 
   explicit Generator(c10::intrusive_ptr<c10::GeneratorImpl> gen_impl)

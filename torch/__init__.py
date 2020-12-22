@@ -596,6 +596,7 @@ import torch.quantization
 import torch.utils.data
 import torch.__config__
 import torch.__future__
+import torch.profiler
 
 _C._init_names(list(torch._storage_classes))
 
