@@ -631,6 +631,8 @@ static Tensor& linalg_inv_out_info(Tensor& result, Tensor& infos_lu, Tensor& inf
     "infos_getri dtype ", infos_getri.scalar_type(), " does not match the expected dtype ", kInt);
   TORCH_CHECK(result.scalar_type() == input.scalar_type(),
     "result dtype ", result.scalar_type(), " does not match input dtype ", input.scalar_type());
+  TORCH_CHECK(result.device() == input.device(),
+    "result device ", result.device(), " does not match input device ", input.device());
 
   // if result has no elements we can modify it
   if (result.numel() == 0) {
