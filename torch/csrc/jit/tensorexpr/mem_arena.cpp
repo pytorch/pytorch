@@ -45,6 +45,7 @@ KernelScope::~KernelScope() {
   }
   KernelArena::SetCurrentKernelArena(old_kernel_arena_);
 }
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

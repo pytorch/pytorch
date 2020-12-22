@@ -1253,19 +1253,8 @@ void initJITBindings(PyObject* module) {
     return fut->wait();
   });
 
+  // Tensor Expr Classes
   py::class_<tensorexpr::KernelScope>(m, "KernelScope").def(py::init<>());
-
-  py::class_<tensorexpr::Placeholder>(m, "Placeholder")
-      .def(py::init<
-           const std::string&,
-           const tensorexpr::Dtype&,
-           std::vector<tensorexpr::ExprHandle>&>())
-      .def(
-          "load",
-          [](tensorexpr::Placeholder& self,
-             const std::vector<tensorexpr::ExprHandle>& v) {
-            return self.load(v);
-          });
 
   auto dtype_class = py::class_<tensorexpr::Dtype>(m, "Dtype");
 
@@ -1285,10 +1274,30 @@ void initJITBindings(PyObject* module) {
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, EXPRHANDLE_CTOR)
 #undef EXPRHANDLE_CTOR
 
+  py::class_<tensorexpr::VarHandle, tensorexpr::ExprHandle>(m, "VarHandle");
+  py::class_<tensorexpr::BufHandle, tensorexpr::ExprHandle>(m, "BufHandle");
+
+  py::class_<tensorexpr::Placeholder>(m, "Placeholder")
+      .def(py::init<
+           const std::string&,
+           const tensorexpr::Dtype&,
+           std::vector<tensorexpr::ExprHandle>&>())
+      .def(
+          "load",
+          [](tensorexpr::Placeholder& self,
+             const std::vector<tensorexpr::ExprHandle>& v) {
+            return self.load(v);
+          });
+  py::class_<tensorexpr::Tensor>(m, "Tensor")
+      .def(
+          "load",
+          [](tensorexpr::Tensor& self,
+             const std::vector<tensorexpr::ExprHandle>& v) {
+            return self.call(v);
+          });
   py::class_<tensorexpr::DimArg>(m, "DimArg")
       .def(py::init<const tensorexpr::ExprHandle&>())
       .def(py::init<const tensorexpr::ExprHandle&, const std::string&>());
-
   m.def(
       "Compute",
       [](const std::string& func_name,
@@ -1335,17 +1344,6 @@ void initJITBindings(PyObject* module) {
       },
       py::return_value_policy::reference);
 
-  py::class_<tensorexpr::VarHandle, tensorexpr::ExprHandle>(m, "VarHandle");
-  py::class_<tensorexpr::BufHandle, tensorexpr::ExprHandle>(m, "BufHandle");
-
-  py::class_<tensorexpr::Tensor>(m, "Tensor")
-      .def(
-          "load",
-          [](tensorexpr::Tensor& self,
-             const std::vector<tensorexpr::ExprHandle>& v) {
-            return self.call(v);
-          });
-
   py::class_<tensorexpr::Stmt>(m, "Stmt").def(
       "__str__", [](const tensorexpr::Stmt& self) {
         std::stringstream ss;
@@ -1357,6 +1355,7 @@ void initJITBindings(PyObject* module) {
   py::class_<tensorexpr::LoopNest>(m, "LoopNest")
       .def(py::init<const std::vector<tensorexpr::Tensor*>&>())
       .def("vectorize_inner_loops", &tensorexpr::LoopNest::vectorizeInnerLoops)
+      .def("prepare_for_codegen", &tensorexpr::LoopNest::prepareForCodegen)
       .def(
           "get_loop_body_for",
           &tensorexpr::LoopNest::getLoopBodyFor,
@@ -1428,36 +1427,38 @@ void initJITBindings(PyObject* module) {
       },
       py::return_value_policy::reference);
 
+  py::class_<tensorexpr::CodeGen>(m, "CodeGen")
+      .def(
+          "call",
+          [](tensorexpr::CodeGen& self, const std::vector<at::Tensor>& values) {
+            std::vector<tensorexpr::CodeGen::CallArg> value_ptrs;
+            for (const auto& value : values) {
+              value_ptrs.emplace_back(
+                  tensorexpr::CodeGen::CallArg(value.data_ptr()));
+            }
+            self.call(value_ptrs);
+          });
+  py::class_<tensorexpr::SimpleIREvaluator, tensorexpr::CodeGen>(
+      m, "SimpleIREvaluator");
+  py::class_<tensorexpr::LLVMCodeGen, tensorexpr::CodeGen>(m, "LLVMCodeGen");
+
   py::class_<tensorexpr::CodeGen::BufferArg>(m, "BufferArg")
       .def(py::init<const tensorexpr::Placeholder&>())
       .def(py::init<tensorexpr::Tensor*>())
       .def(py::init<const tensorexpr::VarHandle&>());
 
   m.def(
-      "execute_llvm",
-      [](tensorexpr::Stmt* stmt,
-         const std::vector<at::Tensor>& values,
+      "tensorexpr_codegen",
+      [](const std::string& name,
+         tensorexpr::Stmt* stmt,
          const std::vector<tensorexpr::CodeGen::BufferArg>& args) {
-        std::vector<void*> value_ptrs;
-        // TODO: contiguity?
-        for (const auto& value : values) {
-          value_ptrs.push_back(value.data_ptr());
+        tensorexpr::CodeGen* cg = nullptr;
+        if (name == "llvm") {
+          cg = new tensorexpr::LLVMCodeGen(stmt, args);
+        } else {
+          cg = new tensorexpr::SimpleIREvaluator(stmt, args);
         }
-        tensorexpr::LLVMCodeGen ir_eval(stmt, args);
-
-        ir_eval.value<int>(value_ptrs.data());
-      });
-  m.def(
-      "execute_ireval",
-      [](tensorexpr::Stmt* stmt,
-         const std::vector<at::Tensor>& values,
-         const std::vector<tensorexpr::CodeGen::BufferArg>& args) {
-        std::vector<void*> value_ptrs;
-        for (const auto& value : values) {
-          value_ptrs.push_back(value.data_ptr());
-        }
-        tensorexpr::SimpleIREvaluator ir_eval(stmt, args);
-        //         ir_eval.call(value_ptrs.data());
+        return cg;
       });
 
   m.def(

@@ -1,4 +1,5 @@
 import torch
+import time
 
 class kernel_arena_scope(object):
     def __enter__(self):
@@ -30,11 +31,14 @@ with kernel_arena_scope():
     print(stmt)
 
     loops_x = loopnest.get_loops_for(X)
-    (o, i, t) = loopnest.split_with_tail(loops_x[0], 11)
+    (o, i, t) = loopnest.split_with_tail(loops_x[1], 11)
     stmt = torch._C.simplify_ir(loopnest.root_stmt())
     print(stmt)
 
     loopnest.vectorize_inner_loops()
+    stmt = torch._C.simplify_ir(loopnest.root_stmt())
+    print(stmt)
+    loopnest.prepare_for_codegen()
     stmt = torch._C.simplify_ir(loopnest.root_stmt())
     print(stmt)
 
@@ -43,10 +47,20 @@ with kernel_arena_scope():
     tX = torch.empty(64, 32)
     tY = torch.empty(64, 32)
 
-    torch._C.execute_llvm(stmt, [tA, tB, tX, tY], [torch._C.BufferArg(x) for x in [A, B, X, Y]])
-    torch._C.execute_ireval(stmt, [tA, tB, tX, tY], [torch._C.BufferArg(x) for x in [A, B, X, Y]])
+    cg = torch._C.tensorexpr_codegen('llvm', stmt, [torch._C.BufferArg(x) for x in [A, B, X, Y]])
+
+    # warmup
+    for _ in range(10):
+        cg.call([tA, tB, tX, tY])
+
+    start = time.time()
+    for _ in range(100000):
+        cg.call([tA, tB, tX, tY])
+    end = time.time()
 
     print(tX)
     print(tY)
+
+    print('Time: ', end-start)
 
 print('fin')
