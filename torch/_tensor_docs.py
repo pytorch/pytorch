@@ -3135,6 +3135,10 @@ between ``0`` and ``self.size(dim) - 1`` inclusive.
     values from ``src`` will be picked arbitrarily) and the gradient will be
     incorrect!
 
+.. note::
+
+    The backward pass is implemented only for ``src.shape == index.shape``.
+
 Additionally accepts an optional :attr:`reduce` argument that allows
 specification of an optional reduction operation, which is applied to all
 values in the tensor :attr:`src` into :attr:`self` at the indicies
@@ -3214,6 +3218,10 @@ dimensions ``d``, and that ``index.size(d) <= self.size(d)`` for all dimensions
 
 Note:
     {forward_reproducibility_note}
+
+.. note::
+
+    The backward pass is implemented only for ``src.shape == index.shape``.
 
 Args:
     dim (int): the axis along which to index
