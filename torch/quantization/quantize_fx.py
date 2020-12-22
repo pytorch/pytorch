@@ -179,12 +179,18 @@ def prepare_fx(
         # These modules are symbolically traced and quantized as one unit
         "standalone_module_name": [
            # module_name, qconfig_dict, prepare_custom_config_dict
-           ("submodule.standalone", None, None)
+           ("submodule.standalone",
+            None,  # qconfig_dict for the prepare function called in the submodule,
+                   # None means use qconfig from parent qconfig_dict
+            {"input_quantized_idxs": [], "output_quantized_idxs": []})  # prepare_custom_config_dict
         ],
 
         "standalone_module_class": [
             # module_class, qconfig_dict, prepare_custom_config_dict
-            (StandaloneModule, None, None)
+            (StandaloneModule,
+             None,  # qconfig_dict for the prepare function called in the submodule,
+                    # None means use qconfig from parent qconfig_dict
+            {"input_quantized_idxs": [0], "output_quantized_idxs": [0]})  # prepare_custom_config_dict
         ],
 
         # user will manually define the corresponding observed
