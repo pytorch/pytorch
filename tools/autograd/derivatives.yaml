@@ -978,6 +978,10 @@
   self: solve_backward_self(grad, self, A)
   A: solve_backward_A(grad, self, A, solution)
 
+- name: linalg_solve(Tensor input, Tensor other) -> Tensor
+  input: solve_backward_A(grad, other, input, result)
+  other: solve_backward_self(grad, other, input)
+
 - name: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), true)
   output_differentiability: [True, False]
@@ -1348,6 +1352,10 @@
 
 - name: _sparse_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   self: _sparse_softmax_backward_data(grad, result, dim, self)
+
+- name: _sparse_sparse_matmul(Tensor self, Tensor other) -> Tensor
+  self: sparse_sparse_matmul_backward(grad, self, other, 0)
+  other: sparse_sparse_matmul_backward(grad, self, other, 1)
 
 - name: softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor
   self: softplus_backward(grad, self, beta, threshold, result)

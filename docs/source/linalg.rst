@@ -20,5 +20,6 @@ Functions
 .. autofunction:: matrix_rank
 .. autofunction:: norm
 .. autofunction:: svd
+.. autofunction:: solve
 .. autofunction:: tensorinv
 .. autofunction:: tensorsolve

@@ -1130,7 +1130,7 @@ void magmaLuSolveBatched<c10::complex<float>>(
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-static void apply_solve(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
+static void apply_solve(Tensor& b, Tensor& A, Tensor& infos) {
 #ifndef USE_MAGMA
 AT_ERROR("solve: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
@@ -1143,22 +1143,20 @@ AT_ERROR("solve: MAGMA library not found in "
 
   if (b.dim() == 2) {
     auto ipiv = at::empty({n}, at::kInt);
-    magma_int_t info = 0;
+    infos = infos.to(at::kCPU);  // magmaSolve requires infos tensor to live on CPU
     magmaSolve<scalar_t>(n, nrhs, A_data, lda, ipiv.data_ptr<magma_int_t>(),
-                        b_data, lda, &info);
-    infos[0] = info;
+                        b_data, lda, infos.data_ptr<magma_int_t>());
   } else {
+    auto infos_data = infos.data_ptr<magma_int_t>();
     auto A_mat_stride = matrixStride(A);
     auto b_mat_stride = matrixStride(b);
     magma_int_t batch_size = magma_int_cast(batchCount(A), "batchCount");
 
-    magma_int_t* info_array;
     magma_int_t* ipiv_data;
     magma_int_t** ipiv_array;
     scalar_t** A_array;
     scalar_t** b_array;
 
-    ALLOCATE_ARRAY(info_array, magma_int_t, batch_size);
     ALLOCATE_ARRAY(ipiv_data, magma_int_t, batch_size * n);
     ALLOCATE_ARRAY(ipiv_array, magma_int_t*, batch_size);
     ALLOCATE_ARRAY(A_array, scalar_t*, batch_size);
@@ -1182,7 +1180,7 @@ AT_ERROR("solve: MAGMA library not found in "
       scalar_t** A_array_cur = &A_array[mini_idx];
       scalar_t** b_array_cur = &b_array[mini_idx];
       magma_int_t** ipiv_array_cur = &ipiv_array[mini_idx];
-      magma_int_t* info_array_cur = &info_array[mini_idx];
+      magma_int_t* info_array_cur = &infos_data[mini_idx];
 
       magmaSolveBatched<scalar_t>(
           n, nrhs, A_array_cur, lda, ipiv_array_cur, b_array_cur, lda,
@@ -1194,11 +1192,7 @@ AT_ERROR("solve: MAGMA library not found in "
     if (batch_size % batch_limit != 0) {
       magmaSolveBatched<scalar_t>(
           n, nrhs, &A_array[mini_idx], lda, &ipiv_array[mini_idx], &b_array[mini_idx], lda,
-          &info_array[mini_idx], batch_size % batch_limit, magma_queue);
-    }
-
-    for (int64_t i = 0; i < batch_size; i++) {
-      infos[i] = info_array[i];
+          &infos_data[mini_idx], batch_size % batch_limit, magma_queue);
     }
   }
 #endif
@@ -1207,16 +1201,28 @@ AT_ERROR("solve: MAGMA library not found in "
 std::tuple<Tensor, Tensor> _solve_helper_cuda(const Tensor& self, const Tensor& A) {
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
-  std::vector<int64_t> infos(batchCount(self), 0);
+  auto infos = at::empty({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt));
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "solve_cuda", [&]{
     apply_solve<scalar_t>(self_working_copy, A_working_copy, infos);
   });
   if (self.dim() > 2) {
     batchCheckErrors(infos, "solve_cuda");
   } else {
-    singleCheckErrors(infos[0], "solve_cuda");
+    singleCheckErrors(infos.item().toInt(), "solve_cuda");
   }
   return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
+}
+
+// This is a type dispatching helper function for 'apply_solve'
+Tensor& _linalg_solve_out_helper_cuda(Tensor& result, Tensor& input, Tensor& infos) {
+  // 'result' and 'input' should be in column major order (it should be checked before calling this function)
+  // the content of 'result', 'input' and 'infos' is overriden by 'apply_solve'
+  // 'result' should contain data of 'other' tensor (right-hand-side of the linear system of equations)
+  // 'input' should contain data of origianl 'input' tensor (left-hand-side of the linear system)
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "linalg_solve_out_cpu", [&]{
+    apply_solve<scalar_t>(result, input, infos);
+  });
+  return result;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
