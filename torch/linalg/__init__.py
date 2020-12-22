@@ -493,7 +493,7 @@ linalg.pinv(input, rcond=1e-15, hermitian=False) -> Tensor
 
 Computes the pseudo-inverse (also known as the Moore-Penrose inverse) of a matrix :attr:`input`,
 or of each matrix in a batched :attr:`input`.
-The pseudo-inverse is computed using singular value decomposition (see :func:`torch.linalg.svd`) by default.
+The pseudo-inverse is computed using singular value decomposition (see :func:`torch.svd`) by default.
 If :attr:`hermitian` is ``True``, then :attr:`input` is assumed to be Hermitian (symmetric if real-valued),
 and the computation of the pseudo-inverse is done by obtaining the eigenvalues and eigenvectors
 (see :func:`torch.linalg.eigh`).
@@ -511,7 +511,8 @@ Args:
     input (Tensor): the input matrix of size :math:`(m, n)` or the batch of matrices of size :math:`(*, m, n)`
                     where `*` is one or more batch dimensions.
     rcond (float, Tensor, optional): the tolerance value to determine the cutoff for small singular values. Default: 1e-15
-                                     :attr:`rcond` must be broadcastable to singular values of :attr:`input`.
+                                     :attr:`rcond` must be broadcastable to the singular values of :attr:`input`
+                                     as returned by :func:`torch.svd`.
     hermitian(bool, optional): indicates whether :attr:`input` is Hermitian. Default: ``False``
 
 Examples::
