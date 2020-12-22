@@ -1049,18 +1049,7 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            supports_tensor_out=False,
            sample_inputs_func=sample_inputs_linalg_pinv,
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
-           skips=(
-               # TODO: RuntimeError: svd does not support automatic differentiation for outputs with complex dtype.
-               # TODO: Add complex types here
-               # See https://github.com/pytorch/pytorch/pull/47761
-               SkipInfo('TestGradients', 'test_fn_grad', dtypes=[torch.cdouble]),
-               SkipInfo('TestGradients', 'test_fn_gradgrad', dtypes=[torch.cdouble]),
-               SkipInfo('TestGradients', 'test_method_grad', dtypes=[torch.cdouble]),
-               SkipInfo('TestGradients', 'test_method_gradgrad', dtypes=[torch.cdouble]),
-               SkipInfo('TestCommon', 'test_variant_consistency_eager', dtypes=[torch.cfloat, torch.cdouble]),
-               SkipInfo('TestCommon', 'test_variant_consistency_jit', dtypes=[torch.cfloat, torch.cdouble])),
-           ),
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
     HermitianOpInfo('linalg.pinv',
                     variant_test_name='hermitian',
                     aten_name='linalg_pinv',

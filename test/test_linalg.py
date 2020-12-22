@@ -2190,30 +2190,6 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "rcond tensor of complex type is not supported"):
             torch.linalg.pinv(a, rcond=rcond)
 
-    # TODO: RuntimeError: svd does not support automatic differentiation for outputs with complex dtype.
-    # See https://github.com/pytorch/pytorch/pull/47761
-    @unittest.expectedFailure
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.complex128)
-    def test_pinv_autograd_complex_xfailed(self, device, dtype):
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
-
-        n = 5
-        batches = (2, 3)
-        # using .to(device) instead of device=device because @xwang233 claims it's faster
-        a = random_fullrank_matrix_distinct_singular_value(n, *batches, dtype=dtype).to(device)
-        a.requires_grad_()
-
-        def func(a, hermitian):
-            if hermitian:
-                a = a + a.conj().transpose(-2, -1)
-            return torch.linalg.pinv(a, hermitian=hermitian)
-
-        for hermitian in [False, True]:
-            gradcheck(func, [a, hermitian])
-            gradgradcheck(func, [a, hermitian])
-
     def solve_test_helper(self, A_dims, b_dims, device, dtype):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
