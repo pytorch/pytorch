@@ -27,6 +27,8 @@ class ProfileRegistry {
 
   bool shouldProfileNode(const Node* node) {
     std::lock_guard<std::mutex> guard(mutex_);
+    // to guard differentiable graphs, we want profiling information
+    // (in particular requires_grad) for nodes handled by autodiff
     if (isDifferentiable(node)) {
       return true;
     }

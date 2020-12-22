@@ -28,6 +28,8 @@ from test_jit import backward_graph, all_backward_graphs, get_lstm_inputs, get_m
 
 from torch.testing._internal.te_utils import CudaCodeGenExecuted
 
+from jit.test_fuser_common import TestFuserCommon  # noqa: F401
+
 FUSION_GROUP = 'prim::TensorExprGroup'
 LLVM_ENABLED = torch._C._llvm_enabled()
 
@@ -1795,20 +1797,6 @@ class TestTEFuser(JitTestCase):
         self.assertAllFused(script.graph_for(a, s))
         script = self.checkScript(eager_st, (s, b))
         self.assertAllFused(script.graph_for(s, b))
-
-    def test_autodiff_fallback(self):
-        for rq in [True, False]:
-            @torch.jit.script
-            def fn(x):
-                return torch.max(x**2.0, x**3.0)
-
-            x = torch.randn(5, requires_grad=not rq)
-            # cause optimization to be created
-            for i in range(5):
-                fn(x)
-            # test fallback when optimization is not applicable
-            y = fn(torch.randn(5, requires_grad=rq))
-            self.assertEqual(y.requires_grad, rq)
 
 if __name__ == '__main__':
     run_tests()

@@ -7,6 +7,9 @@ from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH
 from torch.testing._internal.codegen.random_topo_test import runDefaultTestWithSeed
 
 from test_jit import JitTestCase, RUN_CUDA
+
+from jit.test_fuser_common import TestFuserCommon  # noqa: F401
+
 import itertools
 import numpy as np
 
@@ -69,23 +72,6 @@ class TestCudaFuser(JitTestCase):
         o = op(*args)
         self.assertEqual(o, jit_o)
         self.assertGraphContains(jit_op.graph_for(*args), FUSION_GUARD)
-
-    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
-                     "Requires fusion optimization pass to be effective")
-    def test_autodiff_fallback(self):
-        for rq in [True, False]:
-            @torch.jit.script
-            def fn(x):
-                return torch.max(x**2.0, x**3.0)
-
-            x = torch.randn(5, requires_grad=not rq)
-            # cause optimization to be created
-            for i in range(5):
-                fn(x)
-            # test fallback when optimization is not applicable
-            y = fn(torch.randn(5, requires_grad=rq))
-            self.assertEqual(y.requires_grad, rq)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
