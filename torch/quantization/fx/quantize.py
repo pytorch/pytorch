@@ -986,16 +986,13 @@ class Quantizer:
             def visit_arg(arg):
                 is_weight = node_arg_is_weight(node, arg)
                 is_bias = node_arg_is_bias(node, arg)
-                should_add_handler = (
-                    # qconfig must be set to observe
-                    qconfig is not None and (
-                        # either activations or weights can be observed
-                        activation_is_statically_quantized(qconfig) or
-                        is_weight
-                    ) and
-                    # bias should not be observed
-                    (not is_bias)
+                is_activation = not (is_weight or is_bias)
+                should_add_handler = qconfig is not None and (
+                    (is_activation and
+                        activation_is_statically_quantized(qconfig)) or
+                    (is_weight and weight_is_statically_quantized(qconfig))
                 )
+
                 if should_add_handler:
                     act_post_process_ctr = qconfig.weight if is_weight else \
                         qconfig.activation

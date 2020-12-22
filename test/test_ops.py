@@ -4,7 +4,7 @@ import torch
 
 from torch.testing import floating_and_complex_types_and
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, IS_SANDCASTLE)
+    (TestCase, run_tests, IS_SANDCASTLE, clone_input_helper)
 from torch.testing._internal.common_methods_invocations import \
     (op_db)
 from torch.testing._internal.common_device_type import \
@@ -218,12 +218,18 @@ class TestCommon(JitCommonTestCase):
                 if (variant is inplace and op.promotes_integers_to_float and
                         dtype in (torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)):
                     try:
-                        variant_forward = variant(*(input.clone() for input in sample.input), *sample.args, **sample.kwargs)
+                        variant_forward = variant(*(clone_input_helper(input) for input in sample.input),
+                                                  *sample.args,
+                                                  **sample.kwargs)
                     except Exception as e:
                         continue
                     self.fail("Inplace operation on integer tensor that should be promoted to float didn't fail!")
                 # Compares variant's forward
-                variant_forward = variant(*(input.clone() for input in sample.input), *sample.args, **sample.kwargs)
+                # Note: copy the tensor-type inputs when testing inplace operation
+                variant_forward = variant(*(clone_input_helper(input) if variant is inplace else input
+                                            for input in sample.input),
+                                          *sample.args,
+                                          **sample.kwargs)
                 self.assertEqual(variant_forward, expected_forward)
 
                 # Compares variant's backward
