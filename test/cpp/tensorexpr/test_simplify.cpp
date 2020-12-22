@@ -4369,7 +4369,7 @@ TEST(Simplify, SimplifyBroadcastTermExpander) {
       {Ramp::make(0, 1, num_lanes)},
       simplified,
       Broadcast::make(ExprHandle(1), num_lanes));
-  SimpleIREvaluator eval(store, buf);
+  SimpleIREvaluator eval(store, {buf});
   std::vector<int> output(num_lanes);
   eval(output);
   for (int i = 0; i < num_lanes; ++i) {
