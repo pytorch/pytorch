@@ -51,7 +51,7 @@ Sections start with a reference to the source file where the code related to the
   - [Interpreter](#interpreter)
   - [Graph Executor](#graph-executor)
   - [JIT Logging](#jit-logging)
-  - [JIT Optimization Limitter](#jit-opt-limit)
+  - [JIT Optimization Limitter](#jit-optimization-limitter)
   - [DifferentiableGraphOp](#differentiablegraphop)
   - [Interpreter](#interpreter-1)
   - [FusionGroup](#fusiongroup)
