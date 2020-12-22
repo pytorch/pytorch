@@ -181,8 +181,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.is_deterministic,
         torch.set_deterministic,
         torch.unify_type_list,
-        torch.make_dual,
-        torch.unpack_dual,
         Tensor.__delitem__,
         Tensor.__dir__,
         Tensor.__getattribute__,
