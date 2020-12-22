@@ -12,7 +12,7 @@ aten_native_yaml = os.path.join(path, '../aten/src/ATen/native/native_functions.
 all_operators_with_namedtuple_return = {
     'max', 'min', 'median', 'nanmedian', 'mode', 'kthvalue', 'svd', 'symeig', 'eig',
     'qr', 'geqrf', 'solve', 'slogdet', 'sort', 'topk', 'lstsq',
-    'triangular_solve', 'cummax', 'cummin', 'linalg_eigh', 'linalg_slogdet'
+    'triangular_solve', 'cummax', 'cummin', 'linalg_eigh', "unpack_dual", 'linalg_slogdet'
 }
 
 
@@ -66,6 +66,7 @@ class TestNamedTupleAPI(unittest.TestCase):
             op(operators=['lstsq'], input=(a,), names=('solution', 'QR'), hasout=True),
             op(operators=['linalg_eigh'], input=("L",), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['linalg_slogdet'], input=(), names=('sign', 'logabsdet'), hasout=True),
+            op(operators=['unpack_dual'], input=(a, 0), names=('primal', 'tangent'), hasout=False),
         ]
 
         for op in operators:
@@ -76,7 +77,9 @@ class TestNamedTupleAPI(unittest.TestCase):
                     for i, name in enumerate(op.names):
                         self.assertIs(getattr(ret, name), ret[i])
                 else:
-                    ret = getattr(a, f)(*op.input)
+                    # Handle op that are not methods
+                    func = getattr(a, f) if hasattr(a, f) else getattr(torch, f)
+                    ret = func(*op.input)
                     for i, name in enumerate(op.names):
                         self.assertIs(getattr(ret, name), ret[i])
                     if op.hasout:
