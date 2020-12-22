@@ -7,13 +7,12 @@ from torch import Tensor
 from torch.nn.parameter import Parameter, UninitializedParameter
 from .. import functional as F
 from .. import init
-from .lazy import LazyModuleMixin, _LazyProtocol
+from .lazy import LazyModuleMixin
 from .module import Module
 from .utils import _single, _pair, _triple, _reverse_repeat_tuple
 from torch._torch_docs import reproducibility_notes
 
 from ..common_types import _size_1_t, _size_2_t, _size_3_t
-from typing_extensions import Protocol
 from typing import Optional, List, Tuple, Sequence
 
 convolution_notes = \
@@ -1003,19 +1002,17 @@ class _ConvTransposeMixin(_ConvTransposeNd):
 # TODO: ConvTranspose2dMap
 
 
-class _LazyConvXdMixinProtocol(_LazyProtocol, Protocol):
+class _LazyConvXdMixin(LazyModuleMixin):
     groups: int
     transposed: bool
-    weight: UninitializedParameter
     in_channels: int
     out_channels: int 
     kernel_size: Tuple[int, ...]
-
-
-class _LazyConvXdMixin(_LazyConvXdMixinProtocol, LazyModuleMixin):
+    weight: UninitializedParameter
 
     def reset_parameters(self) -> None:
-        if not self.has_uninitialized_params() and self.in_channels != 0:
+        # has_uninitialized_params is defined in parent class and it is using a protocol on self
+        if not self.has_uninitialized_params() and self.in_channels != 0:  # type: ignore[misc]
             # "type:ignore[..]" is required because mypy thinks that "reset_parameters" is undefined
             # super class. Turns out that it is defined in _ConvND which is inherited by any class
             # that also inherits _LazyConvXdMixin
@@ -1023,7 +1020,8 @@ class _LazyConvXdMixin(_LazyConvXdMixinProtocol, LazyModuleMixin):
 
     # Signature of "initialize_parameters" is incompatible with the definition in supertype LazyModuleMixin
     def initialize_parameters(self, input) -> None:  # type: ignore[override]
-        if self.has_uninitialized_params():
+        # defined by parent class but using a protocol
+        if self.has_uninitialized_params():  # type: ignore[misc]
             self.in_channels = input.shape[1]
             if self.in_channels % self.groups != 0:
                 raise ValueError('in_channels must be divisible by groups')
