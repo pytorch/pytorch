@@ -34,16 +34,13 @@ from .utils import (
     get_linear_prepack_op_for_dtype,
 )
 
+from .quantization_types import QuantizerCls
+
 from abc import ABC, abstractmethod
 import operator
 import warnings
 
 from typing import Any, Callable, Dict
-
-# This is the Quantizer class instance from torch/quantization/fx/quantize.py.
-# Define separately to prevent circular imports.
-# TODO(future PR): improve this.
-QuantizerCls = Any
 
 # -------------------------
 # Pattern Registrations
