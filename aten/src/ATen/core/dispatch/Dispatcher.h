@@ -121,10 +121,6 @@ public:
   template<class Return, class... Args>
   Return call(const TypedOperatorHandle<Return (Args...)>& op, Args... args) const;
 
-  // TODO: temp
-  template<class Return, class... Args>
-  Return call_withKeys(const TypedOperatorHandle<Return (Args...)>& op, Args... args) const;
-
   // Like call, but override the default DispatchKey calculation code,
   // instead dispatching straight to the provided DispatchKey
   template<class Return, class... Args>
@@ -375,11 +371,6 @@ public:
     return c10::Dispatcher::singleton().call<Return, Args...>(*this, std::forward<Args>(args)...);
   }
 
-  // TODO: temp
-  Return call_withKeys(Args... args) const {
-    return c10::Dispatcher::singleton().call_withKeys<Return, Args...>(*this, std::forward<Args>(args)...);
-  }
-
   Return callWithDispatchKey(DispatchKeySet dispatchKeySet, Args... args) const {
     return c10::Dispatcher::singleton().callWithDispatchKey<Return, Args...>(*this, dispatchKeySet, std::forward<Args>(args)...);
   }
@@ -470,10 +461,10 @@ inline Return Dispatcher::callWithDispatchKey_withKeys(const TypedOperatorHandle
         }
       }
     }
-    return kernel.template call_withKeys<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
+    return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
   }
 #endif  // PYTORCH_DISABLE_PER_OP_PROFILING
-  return kernel.template call_withKeys<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
+  return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
 }
 
 template<class Return, class... Args>
@@ -487,18 +478,6 @@ inline Return Dispatcher::call(const TypedOperatorHandle<Return(Args...)>& op, A
   return callWithDispatchKey<Return, Args...>(op, dispatchKeySet, args...);
 }
 
-// TODO: temp
-template<class Return, class... Args>
-inline Return Dispatcher::call_withKeys(const TypedOperatorHandle<Return(Args...)>& op, Args... args) const {
-  detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
-  auto dispatchKeySet = op.operatorIterator_->op.dispatchKeyExtractor()
-    .template getDispatchKeyUnboxed<Args...>(
-      DispatchKeySet::FULL,
-      args...
-    );
-  return callWithDispatchKey_withKeys<Return, Args...>(op, dispatchKeySet, args...);
-}
-
 template<class Return, class... Args>
 inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKey currentDispatchKey, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
@@ -509,21 +488,16 @@ inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>
     );
   // do not use RecordFunction on redispatch
   const KernelFunction& kernel = op.operatorIterator_->op.lookup(currentDispatchKeySet.highestPriorityTypeId());
-  return kernel.template call_withKeys<Return, Args...>(op, currentDispatchKeySet, std::forward<Args>(args)...);
+  return kernel.template call<Return, Args...>(op, currentDispatchKeySet, std::forward<Args>(args)...);
 }
 
 // TODO: temp
 template<class Return, class... Args>
 inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet currentDispatchKeySet, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
-  //auto currentDispatchKeySet = op.operatorIterator_->op.dispatchKeyExtractor()
-    //.template getDispatchKeyUnboxed<Args...>(
-      //DispatchKeySet(DispatchKeySet::FULL_AFTER, currentDispatchKey),
-      //args...
-    //);
   // do not use RecordFunction on redispatch
   const KernelFunction& kernel = op.operatorIterator_->op.lookup(currentDispatchKeySet.highestPriorityTypeId());
-  return kernel.template call_withKeys<Return, Args...>(op, currentDispatchKeySet, std::forward<Args>(args)...);
+  return kernel.template call<Return, Args...>(op, currentDispatchKeySet, std::forward<Args>(args)...);
 }
 
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {

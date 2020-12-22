@@ -480,7 +480,7 @@ namespace impl {
     static_assert(!std::is_same<FirstParam, DispatchKeySet>::value,
       "wrap_kernel_functor_unboxed expects the first argument of the schema NOT to be a DispatchKeySet. "
       "If your kernel signature's first argument is a DispatchKeySet (and you plan to compute dispatch keys "
-      "explictly in your kernel), you should register it with impl_withKeys().");
+      "explicitly in your kernel), you should register it with impl_withKeys().");
     static_assert(std::is_same<ReturnType, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value,
       "Return type mismatch");
     static_assert(std::is_same<guts::typelist::typelist<FirstParam, ParameterTypes...>, typename guts::infer_function_traits_t<KernelFunctor>::parameter_types>::value,

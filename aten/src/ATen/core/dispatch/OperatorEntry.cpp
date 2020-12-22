@@ -133,7 +133,21 @@ std::list<AnnotatedKernel>::iterator OperatorEntry::registerKernel(
         "    dispatch key: ", toString(dispatch_key), "\n",
         "    ", debug, "\n"
     );
-    auto keysWithNewCallingConvention = c10::autograd_dispatch_keyset | DispatchKeySet(DispatchKey::Autograd) | DispatchKeySet(DispatchKey::Tracer);
+    // NOTE: this logic can be deleted when we blowtorch setManuallyBoxedKernel_.
+    // This list of keys must be kept in sync with the set of keys that are codegen'd in gen.py
+    auto keysWithNewCallingConvention =
+        DispatchKeySet(DispatchKey::Autograd) |
+        DispatchKeySet(DispatchKey::CPU) |
+        DispatchKeySet(DispatchKey::SparseCPU) |
+        DispatchKeySet(DispatchKey::MkldnnCPU) |
+        DispatchKeySet(DispatchKey::CUDA) |
+        DispatchKeySet(DispatchKey::SparseCUDA) |
+        DispatchKeySet(DispatchKey::QuantizedCPU) |
+        DispatchKeySet(DispatchKey::QuantizedCUDA) |
+        DispatchKeySet(DispatchKey::Math) |
+        DispatchKeySet(DispatchKey::DefaultBackend) |
+        DispatchKeySet(DispatchKey::Meta) |
+        DispatchKeySet(DispatchKey::Tracer);
     if (dispatch_key.has_value() && keysWithNewCallingConvention.has(*dispatch_key)) {
       kernel.setManuallyBoxedKernel_(*manuallyBoxedKernel_newCallingConvention_);
     } else {
@@ -347,7 +361,21 @@ void OperatorEntry::updateDispatchTableFull_(const c10::Dispatcher& dispatcher) 
 }
 
 void OperatorEntry::setManuallyBoxedKernel_(const c10::Dispatcher& dispatcher, KernelFunction::InternalBoxedKernelFunction* func, bool newCallingConvention) {
-  auto keysWithNewCallingConvention = c10::autograd_dispatch_keyset | DispatchKeySet(DispatchKey::Autograd) | DispatchKeySet(DispatchKey::Tracer);
+  // NOTE: this logic can be deleted when we blowtorch setManuallyBoxedKernel_.
+  // This list of keys must be kept in sync with the set of keys that are codegen'd in gen.py
+  auto keysWithNewCallingConvention =
+    DispatchKeySet(DispatchKey::Autograd) |
+    DispatchKeySet(DispatchKey::CPU) |
+    DispatchKeySet(DispatchKey::SparseCPU) |
+    DispatchKeySet(DispatchKey::MkldnnCPU) |
+    DispatchKeySet(DispatchKey::CUDA) |
+    DispatchKeySet(DispatchKey::SparseCUDA) |
+    DispatchKeySet(DispatchKey::QuantizedCPU) |
+    DispatchKeySet(DispatchKey::QuantizedCUDA) |
+    DispatchKeySet(DispatchKey::Math) |
+    DispatchKeySet(DispatchKey::DefaultBackend) |
+    DispatchKeySet(DispatchKey::Meta) |
+    DispatchKeySet(DispatchKey::Tracer);
   if (newCallingConvention) {
     TORCH_INTERNAL_ASSERT(!manuallyBoxedKernel_newCallingConvention_);
     manuallyBoxedKernel_newCallingConvention_ = func;

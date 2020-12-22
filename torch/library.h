@@ -149,8 +149,9 @@ public:
     , schema_(c10::detail::inferFunctionSchemaFromFunctor_withKeys<c10::impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>())
     , debug_()
     {}
-  //
-  // TODO: temp
+
+  // This is only necesssary because of the fact that impl() and impl_withKeys() are templated to accept any Func type,
+  // including a CppFunction which then gets move constructed.
   explicit CppFunction(WithKeys, CppFunction&& f)
     : dispatch_key_(std::move(f.dispatch_key_))
     , func_(std::move(f.func_))

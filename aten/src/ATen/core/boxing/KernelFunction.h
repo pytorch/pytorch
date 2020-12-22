@@ -98,9 +98,6 @@ public:
   template<class Return, class... Args>
   Return call(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Args... args) const;
 
-  template<class Return, class... Args>
-  Return call_withKeys(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Args... args) const;
-
   /**
    * Create a KernelFunction from a boxed function.
    *
