@@ -2107,7 +2107,7 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
             torch.linalg.inv(a)
 
-	    # inv requires the input to be at least 2 dimensional tensor
+        # inv requires the input to be at least 2 dimensional tensor
         a = torch.randn(2, device=device, dtype=dtype)
         with self.assertRaisesRegex(RuntimeError, "must have at least 2 dimensions"):
             torch.linalg.inv(a)
