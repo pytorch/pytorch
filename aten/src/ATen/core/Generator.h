@@ -99,7 +99,7 @@ struct TORCH_API Generator {
   uint64_t seed() { return impl_->seed(); }
 
   // Implementation not inlined to prevent cycle reference between
-  // `ATen/core/Generator.h` and `ATen/core/Generator.h`
+  // `ATen/core/Generator.h` and `ATen/core/Tensor.h`
   void set_state(at::Tensor& new_state);
 
   at::Tensor state() const;

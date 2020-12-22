@@ -173,13 +173,13 @@ void CPUGeneratorImpl::set_state(c10::TensorImpl& new_state) {
       double_normal_sample = c10::optional<double>(legacy_pod->normal_y);
     }
   } else {
-    AT_ERROR("Expected either a THGeneratorState of size ", size_legacy,
-             " or a THGeneratorStateNew of size ", size_current,
+    AT_ERROR("Expected either a CPUGeneratorStateLegacy of size ", size_legacy,
+             " or a CPUGeneratorState of size ", size_current,
              " but found the input RNG state size to be ", new_state_size);
   }
 
   // construct engine_
-  // Note that legacy THGeneratorState stored a state array of 64 bit uints, whereas in our
+  // Note that CPUGeneratorStateLegacy stored a state array of 64 bit uints, whereas in our
   // redefined mt19937, we have changed to a state array of 32 bit uints. Hence, we are
   // doing a std::copy.
   at::mt19937_data_pod rng_data;
