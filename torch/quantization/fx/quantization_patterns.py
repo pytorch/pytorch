@@ -277,6 +277,38 @@ class ConvRelu(QuantizeHandler):
                 return quantizer.quantized_graph.create_node(
                     'call_function', torch.ops.quantized.conv2d, qconv_args, kwargs)
 
+@register_quant_pattern(torch.nn.ConvTranspose1d)
+@register_quant_pattern(torch.nn.ConvTranspose2d)
+class ConvTransposeQuantizeHandler(QuantizeHandler):
+    def __init__(self, quantizer: QuantizerCls, node: Node):
+        super().__init__(quantizer, node)
+        assert node.op == 'call_module', \
+            'ConvTranspose{n}d is not implemented for functionals yet'
+        self.conv_t_node = node
+        self.conv_t = quantizer.modules[self.conv_t_node.target]
+
+    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
+                debug: bool = False,
+                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+        if convert_custom_config_dict is None:
+            convert_custom_config_dict = {}
+        additional_static_quant_mapping = \
+            convert_custom_config_dict.get("static", {})
+        # 1. attach activation post process to module
+        self.conv_t.activation_post_process = \
+            quantizer.activation_post_process_map[node.name]
+        qconv_t_cls = get_static_quant_module_class(
+            type(self.conv_t), additional_static_quant_mapping)
+        quantized = qconv_t_cls.from_float(self.conv_t)
+        parent_name, name = _parent_name(self.conv_t_node.target)
+        setattr(quantizer.modules[parent_name], name, quantized)
+        return quantizer.quantized_graph.create_node(
+            'call_module',
+            self.conv_t_node.target,
+            (load_arg(quantized=True)(self.conv_t_node.args[0]),),
+            {})
+        return node
+
 # handle linear, maybe followed by relu
 @register_quant_pattern(torch.nn.Linear)
 @register_quant_pattern(torch.nn.functional.linear)

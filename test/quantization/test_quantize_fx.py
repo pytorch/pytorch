@@ -78,6 +78,7 @@ import itertools
 import operator
 import unittest
 import io
+from typing import Callable
 
 class TestFuseFx(QuantizationTestCase):
     def test_fuse_conv_bn_relu(self):
@@ -2360,6 +2361,50 @@ class TestQuantizeFxOps(QuantizationTestCase):
                                      [-155, 100],
                                      [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1)
         self._test_rnn_impl(qconfigs, RNNDynamicModel, module_type_strs, module_types, sample_input)
+
+    def _test_conv_transpose_impl(
+            self, float_cls: Callable, q_cls: Callable, data: torch.Tensor):
+        if 'qnnpack' not in torch.backends.quantized.supported_engines:
+            return
+        torch.backends.quantized.engine = 'qnnpack'
+        # Create fp32 versions of FX and Eager models
+        m1 = torch.nn.Sequential(float_cls(1, 1, 1))
+        m2 = torch.nn.Sequential(float_cls(1, 1, 1))
+        m2.load_state_dict(m1.state_dict())
+        m2 = torch.quantization.QuantWrapper(m2)
+        # FX graph
+        q_result1 = self.checkGraphModeFxOp(
+            m1, (data,), QuantType.STATIC,
+            expected_node_occurrence={
+                ns.call_module(q_cls): 1,
+            })
+        # Eager
+        m2.qconfig = get_default_qconfig(torch.backends.quantized.engine)
+        m2.eval()
+        m2p = torch.quantization.prepare(m2)
+        m2p(data)
+        m2q = torch.quantization.convert(m2p)
+        q_result2 = m2q(data)
+        # verify results match
+        self.assertTrue(torch.allclose(q_result1, q_result2))
+
+    def test_conv_transpose_1d(self):
+        self._test_conv_transpose_impl(
+            torch.nn.ConvTranspose1d, nnq.ConvTranspose1d, torch.randn(4, 1, 4))
+
+    def test_conv_transpose_2d(self):
+        self._test_conv_transpose_impl(
+            torch.nn.ConvTranspose2d, nnq.ConvTranspose2d, torch.randn(4, 1, 4, 4))
+
+    # TODO: remove
+    def test_conv_transpose_eager(self):
+        m = torch.nn.Sequential(torch.nn.ConvTranspose2d(1, 1, 1))
+        m.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+        print(m.qconfig)
+        mp = torch.quantization.prepare(m)
+        mp(torch.randn(4, 1, 4, 4))
+        mq = torch.quantization.convert(mp)
+        print(mq)
 
 
 class TestQuantizeFxModels(QuantizationTestCase):
