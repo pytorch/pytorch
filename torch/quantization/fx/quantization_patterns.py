@@ -537,6 +537,8 @@ ARGS_TO_SKIP = {
     torch._ops.ops.quantized.instance_norm:
     ['running_mean', 'running_var', 'use_input_stats', 'momentum'],
 }
+@register_quant_pattern(torch.nn.ConvTranspose1d)
+@register_quant_pattern(torch.nn.ConvTranspose2d)
 @register_quant_pattern(torch.nn.ELU)
 @register_quant_pattern(torch.nn.LeakyReLU)
 @register_quant_pattern(torch.nn.Hardswish)
@@ -594,16 +596,6 @@ class DefaultNode(QuantizeHandler):
                         kwargs.pop(arg)
             return quantizer.quantized_graph.create_node(
                 "call_function", quantized_op, args, kwargs)
-
-@register_quant_pattern(torch.nn.ConvTranspose1d)
-@register_quant_pattern(torch.nn.ConvTranspose2d)
-# thin wrapper around DefaultNode for a nice error message for functionals, until
-# they are supported
-class ConvTransposeQuantizeHandler(DefaultNode):
-    def __init__(self, quantizer: QuantizerCls, node: Node):
-        super().__init__(quantizer, node)
-        assert node.op == 'call_module', \
-            'ConvTranspose{n}d is not implemented for functionals yet'
 
 # TODO: elu is using scale/zero_point instead of output_scale, output_zero_point
 @register_quant_pattern(torch.nn.functional.elu)
