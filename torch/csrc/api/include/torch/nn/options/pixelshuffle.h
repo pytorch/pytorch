@@ -28,7 +28,7 @@ struct TORCH_API PixelShuffleOptions {
 /// PixelUnshuffle model(PixelUnshuffleOptions(5));
 /// ```
 struct TORCH_API PixelUnshuffleOptions {
-  PixelUnshuffleOptions(int64_t downscale_factor)
+  /* implicit */ PixelUnshuffleOptions(int64_t downscale_factor)
       : downscale_factor_(downscale_factor) {}
 
   /// Factor to decrease spatial resolution by
