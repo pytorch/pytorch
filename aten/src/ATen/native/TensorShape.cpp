@@ -78,6 +78,10 @@ Tensor& set_cpu_(Tensor& result) {
   return result;
 }
 
+Tensor broadcast_to(const Tensor& self, IntArrayRef size) {
+  return self.expand(size);
+}
+
 std::vector<Tensor> broadcast_tensors(TensorList tensors) {
   return expand_outplace(tensors);
 }
@@ -515,7 +519,7 @@ std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
 }
 
 std::vector<Tensor> tensor_split(const Tensor& self, int64_t sections, int64_t dim) {
-  TORCH_CHECK(self.dim() > 0, "expected at least a 1-dimensional tensor");
+  TORCH_CHECK(self.dim() > 0, "tensor_split expected at least a 1-dimensional tensor, but got a tensor with ", self.dim()," dims");
   int64_t dim_ = maybe_wrap_dim(dim, self.dim());
   TORCH_CHECK(sections > 0, "number of sections must be larger than 0, got ", sections);
   std::vector<Tensor> splits(sections);
@@ -531,7 +535,7 @@ std::vector<Tensor> tensor_split(const Tensor& self, int64_t sections, int64_t d
 }
 
 std::vector<Tensor> tensor_split(const Tensor& self, IntArrayRef indices, int64_t dim) {
-  TORCH_CHECK(self.dim() > 0, "expected at least a 1-dimensional tensor");
+  TORCH_CHECK(self.dim() > 0, "tensor_split expected at least a 1-dimensional tensor, but got a tensor with ", self.dim()," dims");
   int64_t dim_ = maybe_wrap_dim(dim, self.dim());
   int64_t num_indices = indices.size();
   std::vector<Tensor> splits(num_indices + 1);
@@ -543,6 +547,28 @@ std::vector<Tensor> tensor_split(const Tensor& self, IntArrayRef indices, int64_
   }
   splits[num_indices] = at::slice(self, dim_, start_idx, self.size(dim_));
   return splits;
+}
+
+std::vector<Tensor> tensor_split(const Tensor& self, const Tensor& tensor_indices_or_sections, int64_t dim) {
+  TORCH_CHECK(self.dim() > 0, "tensor_split expected at least a 1-dimensional tensor, but got a tensor with ", self.dim()," dims");
+  auto split_device = tensor_indices_or_sections.device();
+  TORCH_CHECK(split_device == kCPU,
+    "tensor_split expected tensor_indices_or_sections to be on cpu, but it's on ", split_device);
+  auto split_dtype = tensor_indices_or_sections.scalar_type();
+  TORCH_CHECK(split_dtype == at::kLong,
+    "tensor_split expected tensor_indices_or_sections to have dtype of long, but got ", split_dtype);
+  auto split_dim = tensor_indices_or_sections.dim();
+  TORCH_CHECK(split_dim == 1 || split_dim == 0,
+    "tensor_split expected tensor_indices_or_sections to be a zero-dimensional or one-dimensional tensor, but got a tensor with ", split_dim, " dims");
+
+  if (split_dim == 0) {
+    int64_t sections = tensor_indices_or_sections.item<int64_t>();
+    return self.tensor_split(sections, dim);
+  } else {
+    auto indices_data = tensor_indices_or_sections.data_ptr<int64_t>();
+    std::vector<int64_t> indices(indices_data, indices_data + tensor_indices_or_sections.numel());
+    return self.tensor_split(indices, dim);
+  }
 }
 
 std::vector<Tensor> unsafe_chunk(const Tensor& self, int64_t chunks, int64_t dim) {

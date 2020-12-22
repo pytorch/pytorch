@@ -20,5 +20,6 @@ Functions
 .. autofunction:: eigvalsh
 .. autofunction:: matrix_rank
 .. autofunction:: norm
+.. autofunction:: solve
 .. autofunction:: tensorinv
 .. autofunction:: tensorsolve
