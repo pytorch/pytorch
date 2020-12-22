@@ -180,7 +180,7 @@ void cpu_masked_scatter_kernel(TensorIterator& iter, const Tensor& source) {
       if (!is_mask_bool) {
         TORCH_CHECK(mask_value == 0 || mask_value == 1, "Mask tensor can take 0 and 1 values only");
       }
-      TORCH_CHECK(source_cntr <= numel, "Number of elements of source < number of ones in mask");
+      TORCH_CHECK(source_cntr < numel, "Number of elements of source < number of ones in mask");
       if (mask_value) {
         *(scalar_t*)(dst + dst_stride * i) = *(source_ptr);
         source_ptr++;
