@@ -672,6 +672,13 @@ class QuantizationTestCase(TestCase):
             if not quant_type == QuantType.DYNAMIC:
                 prepared(*inputs)
 
+            if print_debug_info:
+                print()
+                print('quant type:\n', quant_type)
+                print('original model:\n', model)
+                print()
+                print('prepared model:\n', prepared)
+
             self.checkGraphModuleNodes(
                 prepared, prepare_expected_node,
                 prepare_expected_node_occurrence, prepare_expected_node_list)
@@ -684,11 +691,6 @@ class QuantizationTestCase(TestCase):
 
             qgraph_to_check = qgraph_debug if debug else qgraph
             if print_debug_info:
-                print()
-                print('quant type:\n', quant_type)
-                print('original model:\n', model)
-                print()
-                print('prepared model:\n', prepared)
                 print()
                 print('quantized model:\n', qgraph_to_check)
                 self.printGraphModule(qgraph_to_check)
