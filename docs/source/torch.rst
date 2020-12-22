@@ -340,6 +340,7 @@ Pointwise Ops
     sign
     signbit
     sin
+    sinc
     sinh
     sqrt
     square
@@ -445,6 +446,7 @@ Other Operations
     bincount
     block_diag
     broadcast_tensors
+    broadcast_to
     broadcast_shapes
     bucketize
     cartesian_prod

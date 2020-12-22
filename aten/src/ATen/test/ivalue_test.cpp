@@ -426,5 +426,112 @@ TEST(IValueTest, isAliasOf) {
   }
 }
 
+TEST(IValueTest, internalToPointer) {
+  IValue tensor(at::rand({3, 4}));
+  IValue str("hello");
+
+  EXPECT_EQ(tensor.internalToPointer(), tensor.unsafeToTensorImpl());
+  EXPECT_NE(str.internalToPointer(), nullptr);
+
+  IValue nullStr((c10::intrusive_ptr<ivalue::ConstantString>()));
+  ASSERT_TRUE(nullStr.isString());
+  EXPECT_EQ(nullStr.internalToPointer(), nullptr);
+}
+
+TEST(IValueTest, IdentityComparisonAndHashing) {
+  at::Tensor t1 = at::rand({3, 4});
+  at::Tensor t2 = at::rand({3, 4});
+  IValue tv1(t1), tv2(t2);
+  IValue tv1b(t1);
+
+  EXPECT_EQ(tv1.hash(), tv1b.hash());
+  EXPECT_NE(tv1.hash(), tv2.hash());
+
+  EXPECT_TRUE(tv1.is(tv1));
+  EXPECT_TRUE(tv1.is(tv1b));
+  EXPECT_TRUE(tv1b.is(tv1));
+  EXPECT_TRUE(tv2.is(tv2));
+
+  EXPECT_FALSE(tv1.is(tv2));
+  EXPECT_FALSE(tv2.is(tv1));
+
+  IValue none;
+  IValue undefinedTensor((at::Tensor()));
+
+  EXPECT_TRUE(none.is(undefinedTensor));
+  EXPECT_TRUE(undefinedTensor.is(none));
+
+  // Is this a bug? We should probably have a is b => a.hash() == b.hash()
+  EXPECT_NE(none.hash(), undefinedTensor.hash());
+
+  auto sampleIValues = makeSampleIValues();
+  auto sampleIValues2 = makeSampleIValues();
+  auto moreSampleIValues = makeMoreSampleIValues();
+
+  ASSERT_EQ(sampleIValues.size(), moreSampleIValues.size());
+  for (int ii = 0; ii < sampleIValues.size(); ++ii) {
+    // Constant strings will have the same pointer value.
+    if (sampleIValues[ii].isPtrType() && !sampleIValues[ii].isString()) {
+      EXPECT_NE(sampleIValues[ii].hash(), sampleIValues2[ii].hash());
+    } else {
+      EXPECT_EQ(sampleIValues[ii].hash(), sampleIValues2[ii].hash());
+    }
+    EXPECT_NE(sampleIValues[ii].hash(), moreSampleIValues[ii].hash());
+  }
+}
+
+TEST(IValueTest, getSubValues) {
+  // Scalars have no subvalues.
+  IValue integer(42), float_(1.5);
+
+  IValue::HashAliasedIValues subvalues;
+
+  integer.getSubValues(subvalues);
+  EXPECT_TRUE(subvalues.empty());
+
+  subvalues.clear();
+
+  float_.getSubValues(subvalues);
+  EXPECT_TRUE(subvalues.empty());
+
+  subvalues.clear();
+
+  at::Tensor t1(at::rand({3, 4})), t2(at::rand({3, 4}));
+  IValue tv1(t1), tv2(t2);
+  IValue list(std::vector<at::Tensor>{t1, t2});
+  IValue tuple(ivalue::Tuple::create({tv1, tv2}));
+
+  std::unordered_map<int64_t, at::Tensor> m;
+  m[1] = t1;
+  m[2] = t2;
+
+  IValue dict(std::move(m));
+
+  auto objType = ClassType::create(nullopt, {});
+  objType->addAttribute("t1", tv1.type());
+  objType->addAttribute("t2", tv2.type());
+
+  auto o = ivalue::Object::create(StrongTypePtr(0, objType), 2);
+  o->setSlot(0, tv1);
+  o->setSlot(1, tv2);
+
+  IValue object(o);
+  tv1.getSubValues(subvalues);
+  EXPECT_EQ(subvalues.size(), 1);
+  EXPECT_EQ(subvalues.count(tv1), 1);
+
+  subvalues.clear();
+
+  for (auto& container: {list, tuple, dict, object}) {
+    container.getSubValues(subvalues);
+    EXPECT_EQ(subvalues.size(), 3);
+    EXPECT_EQ(subvalues.count(container), 1);
+    EXPECT_EQ(subvalues.count(tv1), 1);
+    EXPECT_EQ(subvalues.count(tv2), 1);
+
+    subvalues.clear();
+  }
+}
+
 // TODO(gmagogsfm): Add type conversion test?
 } // namespace c10
