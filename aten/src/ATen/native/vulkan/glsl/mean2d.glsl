@@ -23,19 +23,15 @@ void main() {
   if (all(lessThan(pos, uBlock.size.xyz))) {
     vec4 sum = vec4(0);
 
-    const int z = pos.x + uBlock.size.x * pos.y;
-    const int zi = z / 4;
-    const int zo = z % 4;
-
     for (int y = 0; y < uBlock.isize.y; ++y) {
       for (int x = 0; x < uBlock.isize.x; ++x) {
-        sum += texelFetch(uInput, ivec3(x, y, zi), 0);
+        sum += texelFetch(uInput, ivec3(x, y, pos.z), 0);
       }
     }
 
     imageStore(
         uOutput,
         pos,
-        vec4(sum[zo], 0, 0, 0) / uBlock.size.w);
+        vec4(sum / uBlock.size.w));
   }
 }

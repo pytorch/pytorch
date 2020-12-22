@@ -273,8 +273,10 @@ Tensor LinearOpContext::run(
       "combination with the provided weight and bias tensors are unsupported by "
       "Vulkan impl.");
 
-  uint32_t out_h = v_input.sizes()[Layout::Parameter::height];
-  uint32_t out_w = packed_.v_weight.sizes()[Layout::Parameter::width];
+  c10::SmallVector<int64_t, 4u> output_sizes{
+      v_input.sizes()[Layout::Parameter::height],
+      packed_.v_weight.sizes()[Layout::Parameter::width],
+  };
 
   vTensor v_output_packed {
       context,
@@ -361,7 +363,7 @@ Tensor LinearOpContext::run(
 
   api::Command::Buffer output_unpack_buffer = context->command().pool.allocate();
   output_unpack_buffer.begin();
-  vTensor v_output = unpack_image2d_h2w2(v_output_packed, out_h, out_w, context, output_unpack_buffer);
+  vTensor v_output = unpack_image2d_h2w2(v_output_packed, output_sizes, context, output_unpack_buffer);
   output_unpack_buffer.end();
   output_unpack_buffer.submit(context->gpu().queue);
 
