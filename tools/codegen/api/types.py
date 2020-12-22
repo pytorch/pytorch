@@ -31,14 +31,16 @@ class BaseCType:
     type: str
     name: ArgName
 
-    def cpp_type(self) -> str:
+    def cpp_type(self, *, strip_ref: bool = False) -> str:
         return self.type
 
 @dataclass(frozen=True)
 class ConstRefCType:
     elem: 'CType'
 
-    def cpp_type(self) -> str:
+    def cpp_type(self, *, strip_ref: bool = False) -> str:
+        if strip_ref:
+            return self.elem.cpp_type(strip_ref=strip_ref)
         return f'const {self.elem.cpp_type()} &'
 
     @property
@@ -49,7 +51,9 @@ class ConstRefCType:
 class MutRefCType:
     elem: 'CType'
 
-    def cpp_type(self) -> str:
+    def cpp_type(self, *, strip_ref: bool = False) -> str:
+        if strip_ref:
+            return self.elem.cpp_type(strip_ref=strip_ref)
         return f'{self.elem.cpp_type()} &'
 
     @property
@@ -60,7 +64,8 @@ class MutRefCType:
 class OptionalCType:
     elem: 'CType'
 
-    def cpp_type(self) -> str:
+    def cpp_type(self, *, strip_ref: bool = False) -> str:
+        # Do not pass `strip_ref` recursively.
         return f'c10::optional<{self.elem.cpp_type()}>'
 
     @property

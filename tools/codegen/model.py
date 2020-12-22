@@ -563,11 +563,14 @@ class FunctionSchema:
         - Out arguments are stripped
         - Mutability annotations are stripped  (this is sound
           because you cannot overload on mutability annotation)
+        - Default values are stripped since they are not overloadable
+        - Return names are stripped since they are not overloadable and
+          some variants have return names but some not
         """
 
         def strip_ret_annotation(r: Return) -> Return:
             return Return(
-                name=r.name,
+                name=None,
                 type=r.type,
                 annotation=None,
             )
@@ -971,7 +974,7 @@ class Arguments:
             return Argument(
                 name=a.name,
                 type=a.type,
-                default=a.default,  # hmmm
+                default=None,
                 annotation=None,
             )
 
