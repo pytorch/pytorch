@@ -141,7 +141,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
     compute_index_ranges: List[str] = []
 
     for arg in info.args_with_derivatives:
-        if arg.type == 'TensorList' or arg.type == 'const c10::List<c10::optional<Tensor>>&':
+        if arg.type == 'TensorList' or arg.type == 'const c10::List<c10::optional<Tensor>> &':
             size = f'{arg.name}_size_'
             saved_list_sizes.append(f'size_t {arg.name}_size_;')
         else:
@@ -166,7 +166,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             release_variables.append(f'{name}_released_ = true;')
             unpack.append(f'auto {name} = unpack_list({name}_);')
             asserts.append(f'TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);')
-        elif var.type == 'c10::List<c10::optional<Tensor>>&':
+        elif var.type == 'c10::List<c10::optional<Tensor>>':
             saved_variables.append(f'std::vector<SavedVariable> {name}_;')
             saved_variables.append(f'bool {name}_released_ = false;')
             # Just clear() is sufficient, we don't need to loop and clear each variable.
