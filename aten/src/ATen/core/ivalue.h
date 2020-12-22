@@ -785,7 +785,7 @@ struct TORCH_API IValue final {
       const IValue& v);
 
   bool isPtrType() const {
-    return isTensor() || is_intrusive_ptr;
+    return (isTensor() && payload.as_tensor.defined()) || is_intrusive_ptr;
   }
 
   /// @private [doxygen private]
