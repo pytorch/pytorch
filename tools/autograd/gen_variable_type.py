@@ -387,7 +387,7 @@ def gen_variable_type_shard(
             assert f.is_abstract, msg
 
     fm.write_with_template(output_name, template_name, lambda: {
-        'generated_comment': f'@generated from {fm.template_dir}/{template_name}',
+        'generated_comment': '@' + f'generated from {fm.template_dir}/{template_name}',
         'type_derived_method_declarations': type_declarations,
         'type_derived_method_definitions': type_definitions,
         'wrapper_registrations': wrapper_registrations,
@@ -712,7 +712,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 # Single differentiable output (Tensor or Tensor[])
                 return_info = differentiable_outputs[0]
                 # We only support simple Tensor or a TensorList for functions that return views
-                if not return_info.type.is_tensor_like():
+                if not is_tensor_type(return_info.type) and not is_tensor_list_type(return_info.type):
                     raise RuntimeError(f'{base_name} that return differentiable views can only return Tensor or Tensor[]')
                 # Only allow rebasing of the history if we return a single Tensor
                 # If we are in a no grad block, raise a warning
@@ -929,9 +929,11 @@ def dispatch_strategy(fn: NativeFunctionWithDifferentiabilityInfo) -> str:
         return 'use_type'
 
 def is_tensor_type(t: Type) -> bool:
+    # TODO: Should handle optional here?
     return t.is_tensor_like() and t.is_list_like() is None
 
 def is_tensor_list_type(t: Type) -> bool:
+    # TODO: Should handle optional here?
     return t.is_tensor_like() and t.is_list_like() is not None
 
 def modifies_arguments(f: NativeFunction) -> bool:
