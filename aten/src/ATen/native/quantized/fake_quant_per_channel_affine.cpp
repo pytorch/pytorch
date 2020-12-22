@@ -179,7 +179,8 @@ Tensor _fake_quantize_learnable_per_channel_affine(
     const Tensor& zero_point,
     int64_t axis,
     int64_t quant_min,
-    int64_t quant_max) {
+    int64_t quant_max,
+    double grad_factor) {
   Tensor zero_point_rounded = zero_point.to(at::kLong);
   return native::fake_quantize_per_channel_affine(
     self, scale, zero_point_rounded, axis, quant_min, quant_max);
@@ -192,7 +193,8 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
     const Tensor& zero_point,
     int64_t axis,
     int64_t quant_min,
-    int64_t quant_max) {
+    int64_t quant_max,
+    double grad_factor) {
   /* The gradients for scale and zero point are calculated as below:
      Let Xfq be the fake quantized version of X.
      Let Xq be the quantized version of X (clamped at qmin and qmax).
@@ -269,7 +271,7 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
     .build();
 
   fake_quant_grad_learnable_channel_stub(
-    X.device().type(), iter, quant_min, quant_max);
+    X.device().type(), iter, quant_min, quant_max, grad_factor);
 
   auto numElements = X.ndimension() - 1;
 
