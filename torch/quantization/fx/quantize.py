@@ -66,6 +66,7 @@ from typing import Optional, Dict, Any, List, Tuple, Set, Callable
 # Define helper types
 MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,
                     QConfigAny]
+MatchResult = str
 
 # ------------------------
 # Helper Functions
