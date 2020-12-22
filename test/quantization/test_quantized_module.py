@@ -1016,6 +1016,55 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
             self.check_eager_serialization(cell_dq, ref_dq, [x])
             self.check_weight_bias_api(cell_dq, weight_keys, bias_keys)
 
+    @override_qengines
+    def test_gru_api(self):
+        r"""Test execution and serialization for dynamic quantized lstm modules on int8 and fp16
+        """
+        # Check that module matches the numerics of the op and ensure that module can be
+        # instantiated for all engines and dtypes
+
+        for dtype in [torch.qint8, torch.float16]:
+            if dtype == torch.float16 and torch.backends.quantized.engine == "qnnpack":
+                # fp16 dynamic quant is not supported for qnnpack
+                continue
+                # Test default instantiation
+            seq_len = 4
+            batch = 2
+            input_size = 3
+            hidden_size = 7
+            num_layers = 2
+            bias = True
+            bidirectional = False
+
+            x = torch.rand(seq_len, batch, input_size)
+            h = torch.rand(num_layers * (bidirectional + 1), batch, hidden_size)
+
+
+            cell_dq = torch.nn.quantized.dynamic.GRU(input_size=input_size,
+                                                     hidden_size=hidden_size,
+                                                     num_layers=num_layers,
+                                                     bias=bias,
+                                                     batch_first=False,
+                                                     dropout=0.0,
+                                                     bidirectional=bidirectional,
+                                                     dtype=dtype)
+
+            _all_params = ([m.param for m in cell_dq._all_weight_values])
+            result = torch.quantized_gru(x,
+                                         h,
+                                         _all_params,
+                                         cell_dq.bias,
+                                         cell_dq.num_layers,
+                                         float(cell_dq.dropout),
+                                         False,
+                                         bidirectional,
+                                         False)
+
+
+            y, h = cell_dq(x, h)
+            self.assertEqual(result[0], y, msg="GRU module API failed")
+            self.assertEqual(result[1], h, msg="GRU module API failed")
+
     @given(
         dtype=st.sampled_from([torch.qint8, torch.float16]),
     )

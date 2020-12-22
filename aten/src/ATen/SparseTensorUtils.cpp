@@ -78,17 +78,17 @@ Tensor flatten_indices_by_dims(const Tensor& indices, const IntArrayRef& sizes, 
 }
 
 Tensor coo_to_csr(const int64_t* indices, int64_t dim, int64_t nnz) {
-  /* 
-    Find the CSR representation for a row `indices` from the COO format 
+  /*
+    Find the CSR representation for a row `indices` from the COO format
     Inputs:
       `indices` is the row pointer from COO indices
-      `dim` is the row dimensionality 
-      `nnz` is the number of non-zeros 
-    
-    Output: 
+      `dim` is the row dimensionality
+      `nnz` is the number of non-zeros
+
+    Output:
       `csr` is a compressed row array in a CSR format
   */
-  Tensor csr = native::zeros({dim + 1}, kLong);
+  Tensor csr = at::zeros({dim + 1}, kLong);
 
   // TODO: eliminate this conditional when zero-size dims supported correctly
   if (nnz > 0) {

@@ -353,12 +353,7 @@ class Vectorizer : public IRMutator {
   const Expr* start_ = nullptr;
 };
 
-void LoopNest::vectorize(Stmt* stmt) {
-  For* f = dynamic_cast<For*>(stmt);
-  if (!f) {
-    return;
-  }
-
+void LoopNest::vectorize(For* f) {
   Block* b = dynamic_cast<Block*>(f->get_parent());
   if (!b) {
     return;
