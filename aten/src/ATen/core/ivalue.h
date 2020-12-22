@@ -162,7 +162,7 @@ struct Capsule {
 ///   // `my_ivalue` is tagged as an int and cannot be used as another type
 ///   torch::Tensor my_tensor = my_ivalue.toTensor()
 /// \endrst
-struct CAFFE2_API IValue final {
+struct TORCH_API IValue final {
   IValue(const IValue& rhs)
       : IValue(rhs.payload, rhs.tag, rhs.is_intrusive_ptr) {
     if (is_intrusive_ptr && payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton()) {
@@ -779,7 +779,7 @@ struct CAFFE2_API IValue final {
   // This is different from `repr()` in that there is no expectation that we can
   // exactly reconstruct an IValue from the output; feel free to use a
   // concise/pretty form
-  CAFFE2_API friend std::ostream& operator<<(
+  TORCH_API friend std::ostream& operator<<(
       std::ostream& out,
       const IValue& v);
 
@@ -791,7 +791,12 @@ struct CAFFE2_API IValue final {
   const void* internalToPointer() const {
     TORCH_INTERNAL_ASSERT(
         isPtrType(), "Can only call internalToPointer() for pointer types");
-    return payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton() ? payload.u.as_intrusive_ptr : nullptr;
+    if (isTensor()) {
+      return payload.as_tensor.unsafeGetTensorImpl();
+    } else {
+      return payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton()
+        ? payload.u.as_intrusive_ptr : nullptr;
+    }
   }
 
   TypePtr type() const;
@@ -939,7 +944,7 @@ struct CAFFE2_API IValue final {
   friend struct WeakIValue;
 };
 
-struct CAFFE2_API WeakIValue final {
+struct TORCH_API WeakIValue final {
   WeakIValue() : tag(IValue::Tag::None), is_intrusive_ptr(false) {}
 
   WeakIValue(const WeakIValue& rhs)

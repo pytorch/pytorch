@@ -67,7 +67,7 @@ enum class TypeKind {
 #undef DEFINE_TYPE
 };
 
-CAFFE2_API const char* typeKindToString(TypeKind kind);
+TORCH_API const char* typeKindToString(TypeKind kind);
 
 struct Type;
 using TypePtr = std::shared_ptr<Type>;
@@ -79,7 +79,7 @@ using ConstTypePtr = std::shared_ptr<const Type>;
 using TypePrinter =
     std::function<c10::optional<std::string>(const ConstTypePtr&)>;
 
-struct CAFFE2_API Type : std::enable_shared_from_this<Type> {
+struct TORCH_API Type : std::enable_shared_from_this<Type> {
  private:
   TypeKind kind_;
 
@@ -212,7 +212,7 @@ struct AnyType;
 using AnyTypePtr = std::shared_ptr<AnyType>;
 // Any is the top of the type hierarchy, all other types are subtypes
 // T <: Any, forall T
-struct CAFFE2_API AnyType : public Type {
+struct TORCH_API AnyType : public Type {
   static AnyTypePtr create() {
     return AnyTypePtr(
         new AnyType()); // NOLINT(modernize-make-shared)
@@ -284,7 +284,7 @@ using OptionalTypePtr = std::shared_ptr<OptionalType>;
 // 1. Optional[T] <: Optional[R] iff T <: R
 // 2. T <: Optional[R] if T <: R
 // 3. None <: Optional[T] for all T
-struct CAFFE2_API OptionalType
+struct TORCH_API OptionalType
     : public SingleElementType<TypeKind::OptionalType, OptionalType> {
   static OptionalTypePtr create(TypePtr element) {
     TORCH_INTERNAL_ASSERT(element, "OptionalType requires valid TypePtr");
@@ -356,7 +356,7 @@ inline c10::optional<T> merge_primitive(
 // `stride_indices` A contiguity marker on the smallest stride (c0) indicates
 // the stride is precisely 1, otherwise a contiguity marker means that $stride_n
 // = size_{n-1}*stride_{n-1}$
-struct CAFFE2_API Stride {
+struct TORCH_API Stride {
   Stride() {}
   Stride(
       const c10::optional<size_t>& stride_index,
@@ -401,7 +401,7 @@ inline c10::optional<Stride> merge_primitive(
   return r;
 }
 
-struct CAFFE2_API ShapeSymbol {
+struct TORCH_API ShapeSymbol {
   // needed for use in `std::map`
   ShapeSymbol() : value_(-1) {}
   // is this symbol a fixed/static dimension
@@ -426,7 +426,7 @@ struct CAFFE2_API ShapeSymbol {
   static ShapeSymbol newSymbol() {
     return fromStaticSize(-static_cast<int64_t>(++num_symbols));
   };
-  friend CAFFE2_API std::ostream& operator<<(
+  friend TORCH_API std::ostream& operator<<(
       std::ostream& os,
       const ShapeSymbol& s);
 
@@ -447,7 +447,7 @@ inline ShapeSymbol merge_primitive(
 
 // Shape of a Tensor represented with ShapeSymbol's. Unranked, ranked unknown
 // dims, partially known and fully known shapes are all supported.
-struct CAFFE2_API SymbolicShape {
+struct TORCH_API SymbolicShape {
   // Unranked shape constructor.
   SymbolicShape() : dims_(c10::nullopt) {}
 
@@ -576,7 +576,7 @@ struct VaryingShape {
     return dims_;
   }
 
-  CAFFE2_API VaryingShape merge(const VaryingShape& other) const;
+  TORCH_API VaryingShape merge(const VaryingShape& other) const;
 
   c10::optional<std::vector<T>> concrete_sizes() const {
     if (!dims_) {
@@ -611,7 +611,7 @@ struct VaryingShape {
 struct TensorType;
 using TensorTypePtr = std::shared_ptr<TensorType>;
 // This type represents a single Tensor with a specific size
-struct CAFFE2_API TensorType : public Type {
+struct TORCH_API TensorType : public Type {
   static TensorTypePtr create(const at::Tensor& t);
 
   // used by TensorType::create(size_t dim) which in turn used by
@@ -864,7 +864,7 @@ struct CAFFE2_API TensorType : public Type {
 
 struct ListType;
 using ListTypePtr = std::shared_ptr<ListType>;
-struct CAFFE2_API ListType
+struct TORCH_API ListType
     : public SingleElementType<TypeKind::ListType, ListType> {
   // It's not exactly a singleton, but there should be exactly one instance of
   // List[T] for every T
@@ -906,7 +906,7 @@ struct CAFFE2_API ListType
 
 struct DictType;
 using DictTypePtr = std::shared_ptr<DictType>;
-struct CAFFE2_API DictType : public Type {
+struct TORCH_API DictType : public Type {
   friend struct Type;
   static const TypeKind Kind = TypeKind::DictType;
 
@@ -988,7 +988,7 @@ struct CAFFE2_API DictType : public Type {
 struct FutureType;
 using FutureTypePtr = std::shared_ptr<FutureType>;
 
-struct CAFFE2_API FutureType
+struct TORCH_API FutureType
     : public SingleElementType<TypeKind::FutureType, FutureType> {
   friend struct Type;
   template <typename... T>
@@ -1030,7 +1030,7 @@ struct CAFFE2_API FutureType
 struct RRefType;
 using RRefTypePtr = std::shared_ptr<RRefType>;
 
-struct CAFFE2_API RRefType
+struct TORCH_API RRefType
     : public SingleElementType<TypeKind::RRefType, RRefType> {
   friend struct Type;
   template <typename... T>
@@ -1064,7 +1064,7 @@ struct NamedType;
 using NamedTypePtr = std::shared_ptr<NamedType>;
 using ConstNamedTypePtr = std::shared_ptr<const NamedType>;
 
-struct CAFFE2_API NamedType : public Type {
+struct TORCH_API NamedType : public Type {
   NamedType(TypeKind tk, c10::optional<QualifiedName> name)
       : Type(tk), name_(std::move(name)) {
     TORCH_INTERNAL_ASSERT(
@@ -1091,7 +1091,7 @@ private:
 // static types in named types to reconstruct type tags of loaded
 // values. Lifting this restriction requires solving the serialization
 // problem first.
-CAFFE2_API void checkNoAny(
+TORCH_API void checkNoAny(
     const Type& base,
     const char* what,
     const std::string& attrname,
@@ -1101,7 +1101,7 @@ struct TupleType;
 using TupleTypePtr = std::shared_ptr<TupleType>;
 using NameList = std::vector<std::string>;
 // This type represents a Tuple
-struct CAFFE2_API TupleType : public NamedType {
+struct TORCH_API TupleType : public NamedType {
   static TupleTypePtr createNamed(const c10::optional<c10::QualifiedName>& name,
       const std::vector<std::string>& field_names,
       const std::vector<TypePtr>& types);
@@ -1172,7 +1172,7 @@ struct CAFFE2_API TupleType : public NamedType {
 struct EnumType;
 using EnumTypePtr = std::shared_ptr<EnumType>;
 using EnumNameValue = std::pair<std::string, IValue>;
-struct CAFFE2_API EnumType : public NamedType {
+struct TORCH_API EnumType : public NamedType {
   friend struct Type;
   static const TypeKind Kind = TypeKind::EnumType;
 
@@ -1258,7 +1258,7 @@ struct CAFFE2_API EnumType : public NamedType {
 // EnumType <: AnyEnumType for all Enums
 struct AnyEnumType;
 using AnyEnumTypePtr = std::shared_ptr<AnyEnumType>;
-struct CAFFE2_API AnyEnumType : public Type {
+struct TORCH_API AnyEnumType : public Type {
   static AnyEnumTypePtr create() {
     return AnyEnumTypePtr(
         new AnyEnumType()); // NOLINT(modernize-make-shared)
@@ -1284,7 +1284,7 @@ using NumberTypePtr = std::shared_ptr<NumberType>;
 // Subtype hierarchy for Number Types (NumberType as the base type):
 // IntType <: NumberType
 // FloatType <: NumberType
-struct CAFFE2_API NumberType : public Type {
+struct TORCH_API NumberType : public Type {
   static NumberTypePtr create() {
     return NumberTypePtr(new NumberType()); // NOLINT(modernize-make-shared)
   }
@@ -1311,7 +1311,7 @@ struct CAFFE2_API NumberType : public Type {
 struct FloatType;
 using FloatTypePtr = std::shared_ptr<FloatType>;
 // This type represents a Python float number
-struct CAFFE2_API FloatType : public NumberType {
+struct TORCH_API FloatType : public NumberType {
   static FloatTypePtr create() {
     return FloatTypePtr(new FloatType()); // NOLINT(modernize-make-shared)
   }
@@ -1338,7 +1338,7 @@ struct CAFFE2_API FloatType : public NumberType {
 struct IntType;
 using IntTypePtr = std::shared_ptr<IntType>;
 // This type represents a Python int number
-struct CAFFE2_API IntType : public NumberType {
+struct TORCH_API IntType : public NumberType {
   static IntTypePtr create() {
     return IntTypePtr(new IntType()); // NOLINT(modernize-make-shared)
   }
@@ -1365,7 +1365,7 @@ struct CAFFE2_API IntType : public NumberType {
 struct BoolType;
 using BoolTypePtr = std::shared_ptr<BoolType>;
 // This node represents a Python bool value
-struct CAFFE2_API BoolType : public Type {
+struct TORCH_API BoolType : public Type {
   static BoolTypePtr create() {
     return BoolTypePtr(new BoolType());
   }
@@ -1386,7 +1386,7 @@ struct CAFFE2_API BoolType : public Type {
 struct StringType;
 using StringTypePtr = std::shared_ptr<StringType>;
 // This type represents a Python string
-struct CAFFE2_API StringType : public Type {
+struct TORCH_API StringType : public Type {
   static StringTypePtr create() {
     return StringTypePtr(new StringType()); // NOLINT(modernize-make-shared)
   }
@@ -1410,7 +1410,7 @@ struct CAFFE2_API StringType : public Type {
 
 struct StorageType;
 using StorageTypePtr = std::shared_ptr<StorageType>;
-struct CAFFE2_API StorageType : public Type {
+struct TORCH_API StorageType : public Type {
   static StorageTypePtr create() {
     return StorageTypePtr(new StorageType()); // NOLINT(modernize-make-shared)
   }
@@ -1433,7 +1433,7 @@ struct CAFFE2_API StorageType : public Type {
 
 struct FunctionType;
 using FunctionTypePtr = std::shared_ptr<FunctionType>;
-struct CAFFE2_API FunctionType : public NamedType {
+struct TORCH_API FunctionType : public NamedType {
   static FunctionTypePtr create(torch::jit::Function* function) {
     return FunctionTypePtr(
         new FunctionType(function)); // NOLINT(modernize-make-shared)
@@ -1465,7 +1465,7 @@ struct CAFFE2_API FunctionType : public NamedType {
 struct NoneType;
 using NoneTypePtr = std::shared_ptr<NoneType>;
 // This type represents a Python None
-struct CAFFE2_API NoneType : public Type {
+struct TORCH_API NoneType : public Type {
   static NoneTypePtr create() {
     return NoneTypePtr(new NoneType()); // NOLINT(modernize-make-shared)
   }
@@ -1492,7 +1492,7 @@ struct CAFFE2_API NoneType : public Type {
 struct GeneratorType;
 using GeneratorTypePtr = std::shared_ptr<GeneratorType>;
 // This type represents a Generator
-struct CAFFE2_API GeneratorType : public Type {
+struct TORCH_API GeneratorType : public Type {
   static GeneratorTypePtr create() {
     return GeneratorTypePtr(
         new GeneratorType()); // NOLINT(modernize-make-shared)
@@ -1514,7 +1514,7 @@ struct CAFFE2_API GeneratorType : public Type {
 struct QuantizerType;
 using QuantizerTypePtr = std::shared_ptr<QuantizerType>;
 // This type represents a Quantizer
-struct CAFFE2_API QuantizerType : public Type {
+struct TORCH_API QuantizerType : public Type {
   static QuantizerTypePtr create() {
     return QuantizerTypePtr(
         new QuantizerType()); // NOLINT(modernize-make-shared)
@@ -1536,7 +1536,7 @@ struct CAFFE2_API QuantizerType : public Type {
 struct QSchemeType;
 using QSchemeTypePtr = std::shared_ptr<QSchemeType>;
 // This type represents a QScheme
-struct CAFFE2_API QSchemeType : public Type {
+struct TORCH_API QSchemeType : public Type {
   static QSchemeTypePtr create() {
     return QSchemeTypePtr(
         new QSchemeType()); // NOLINT(modernize-make-shared)
@@ -1558,7 +1558,7 @@ struct CAFFE2_API QSchemeType : public Type {
 struct DeviceObjType;
 using DeviceObjTypePtr = std::shared_ptr<DeviceObjType>;
 // This type represents a Device
-struct CAFFE2_API DeviceObjType : public Type {
+struct TORCH_API DeviceObjType : public Type {
   static DeviceObjTypePtr create() {
     return DeviceObjTypePtr(
         new DeviceObjType()); // NOLINT(modernize-make-shared)
@@ -1580,7 +1580,7 @@ struct CAFFE2_API DeviceObjType : public Type {
 struct StreamObjType;
 using StreamObjTypePtr = std::shared_ptr<StreamObjType>;
 // This type represents a Generator
-struct CAFFE2_API StreamObjType : public Type {
+struct TORCH_API StreamObjType : public Type {
   static StreamObjTypePtr create() {
     return StreamObjTypePtr(
       new StreamObjType()); // NOLINT(modernize-make-shared)
@@ -1630,7 +1630,7 @@ struct CapsuleType;
 using CapsuleTypePtr = std::shared_ptr<CapsuleType>;
 // This type represents a Python Capsule.
 // It does not appear in the IR and is only used during runtime
-struct CAFFE2_API CapsuleType : public Type {
+struct TORCH_API CapsuleType : public Type {
   static CapsuleTypePtr create() {
     return CapsuleTypePtr(new CapsuleType()); // NOLINT(modernize-make-shared)
   }
@@ -1651,7 +1651,7 @@ private:
 struct PyObjectType;
 using PyObjectTypePtr = std::shared_ptr<PyObjectType>;
 // This type represents a PyObject Type
-struct CAFFE2_API PyObjectType : public Type {
+struct TORCH_API PyObjectType : public Type {
   static PyObjectTypePtr create() {
     return PyObjectTypePtr(new PyObjectType()); // NOLINT(modernize-make-shared)
   }
@@ -1677,16 +1677,16 @@ enum class TypeVerbosity {
   Default = Full,
 };
 
-CAFFE2_API TypeVerbosity type_verbosity();
+TORCH_API TypeVerbosity type_verbosity();
 
-CAFFE2_API std::ostream& operator<<(std::ostream& out, const Type& t);
+TORCH_API std::ostream& operator<<(std::ostream& out, const Type& t);
 template <typename T>
-CAFFE2_API std::ostream& operator<<(
+TORCH_API std::ostream& operator<<(
     std::ostream& out,
     const VaryingShape<T>& t);
-CAFFE2_API std::ostream& operator<<(std::ostream& os, const SymbolicShape& s);
-CAFFE2_API std::ostream& operator<<(std::ostream& os, const ShapeSymbol& s);
-CAFFE2_API std::ostream& operator<<(std::ostream& os, const Stride& s);
+TORCH_API std::ostream& operator<<(std::ostream& os, const SymbolicShape& s);
+TORCH_API std::ostream& operator<<(std::ostream& os, const ShapeSymbol& s);
+TORCH_API std::ostream& operator<<(std::ostream& os, const Stride& s);
 // what is the type, ignoring extra size/shape information?
 // e.g. Tensor(2x3) -> Dynamic, and Tuple(Tensor(2x3),...) -> Tuple(Dynamic,...)
 
@@ -1738,12 +1738,12 @@ inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
 // Two different tensortypes will return dynamic.
 // Currently we chose not to support returning a NumberType for a float & int
 // input because of a lack of operator support for NumberType
-CAFFE2_API c10::optional<TypePtr> unifyTypes(
+TORCH_API c10::optional<TypePtr> unifyTypes(
     const TypePtr& t1,
     const TypePtr& t2,
     bool default_to_any = false);
 
-CAFFE2_API c10::optional<TypePtr> unifyTypeList(
+TORCH_API c10::optional<TypePtr> unifyTypeList(
     at::ArrayRef<TypePtr> elements,
     std::ostream& why_not);
 
@@ -1963,15 +1963,15 @@ struct MatchTypeReturn {
 // note: It is possible to successfully match a formal, but for type variables
 // in the formal to still not be defined. In particular, None matches Optional[T]
 // but does not define the value of T.
-CAFFE2_API MatchTypeReturn
+TORCH_API MatchTypeReturn
 matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env);
 
 // replace type variables appearing in `type` with the values in
 // `type_env`. Returns nullptr if a variable used in `type`
 // does not appear in `type_env`
-CAFFE2_API TypePtr tryEvalTypeVariables(TypePtr type, TypeEnv& type_env);
+TORCH_API TypePtr tryEvalTypeVariables(TypePtr type, TypeEnv& type_env);
 
-CAFFE2_API bool elementTypeCanBeInferredFromMembers(const TypePtr& elem_type);
+TORCH_API bool elementTypeCanBeInferredFromMembers(const TypePtr& elem_type);
 
 // This enumerator represents the 'kind' of an attribute - a buffer, a paramter, or neither.
 // This state is mutually exclusive. Buffers and Parameters can only appear on modules.
@@ -1983,7 +1983,7 @@ enum class AttributeKind {
 
 // This structure represents all notional booking entities in a class attribute: name, kind (see: AttributeKind), and type (see: TypePtr).
 // Note: This structure does not represent the value of the attribute.
-struct CAFFE2_API ClassAttribute {
+struct TORCH_API ClassAttribute {
   public:
   ClassAttribute(AttributeKind kind,
   TypePtr attributeType,
@@ -2019,7 +2019,7 @@ using ClassTypePtr = std::shared_ptr<ClassType>;
 using ::torch::jit::CompilationUnit;
 
 // This represents a class in TorchScript.
-struct CAFFE2_API ClassType : public NamedType {
+struct TORCH_API ClassType : public NamedType {
   // This represents an attribute of a class; a name associated with an attribute, and a
   // getter and (optional) setter for that attribute.
   struct Property {
@@ -2377,7 +2377,7 @@ using ::torch::jit::CompilationUnit;
 // lhs (ClassType or InterfaceType) is a subtype of rhs if:
 // 1. lhs methods are a superset of rhs methods
 // 2. if rhs is module interface, the lhs must be module interface or module itself
-struct CAFFE2_API InterfaceType : public NamedType {
+struct TORCH_API InterfaceType : public NamedType {
   static InterfaceTypePtr create(
       QualifiedName qualifiedName, bool is_module=false);
 
@@ -2441,7 +2441,7 @@ EnumerationType() : Type(Kind) {}
 struct LayoutType;
 using LayoutTypePtr = std::shared_ptr<LayoutType>;
 // This type represents a Generator
-struct CAFFE2_API LayoutType : public EnumerationType<TypeKind::LayoutType> {
+struct TORCH_API LayoutType : public EnumerationType<TypeKind::LayoutType> {
 static LayoutTypePtr create() {
 return LayoutTypePtr(
     new LayoutType()); // NOLINT(modernize-make-shared)
@@ -2460,7 +2460,7 @@ LayoutType() : EnumerationType() {}
 struct ScalarTypeType;
 using ScalarTypeTypePtr = std::shared_ptr<ScalarTypeType>;
 // This type represents a Generator
-struct CAFFE2_API ScalarTypeType : public EnumerationType<TypeKind::ScalarTypeType> {
+struct TORCH_API ScalarTypeType : public EnumerationType<TypeKind::ScalarTypeType> {
 static ScalarTypeTypePtr create() {
 return ScalarTypeTypePtr(
     new ScalarTypeType()); // NOLINT(modernize-make-shared)
@@ -2480,7 +2480,7 @@ ScalarTypeType() : EnumerationType() {}
 // List[T] <: AnyList for all T
 struct AnyListType;
 using AnyListTypePtr = std::shared_ptr<AnyListType>;
-struct CAFFE2_API AnyListType : public Type {
+struct TORCH_API AnyListType : public Type {
   static AnyListTypePtr create() {
     return AnyListTypePtr(
         new AnyListType()); // NOLINT(modernize-make-shared)
@@ -2503,7 +2503,7 @@ private:
 // Tuple[T...] <: AnyTuple for all T
 struct AnyTupleType;
 using AnyTupleTypePtr = std::shared_ptr<AnyTupleType>;
-struct CAFFE2_API AnyTupleType : public Type {
+struct TORCH_API AnyTupleType : public Type {
   static AnyTupleTypePtr create() {
     return AnyTupleTypePtr(
         new AnyTupleType()); // NOLINT(modernize-make-shared)
@@ -2528,7 +2528,7 @@ private:
 // ClassType <: AnyClassType for all classes
 struct AnyClassType;
 using AnyClassTypePtr = std::shared_ptr<AnyClassType>;
-struct CAFFE2_API AnyClassType : public Type {
+struct TORCH_API AnyClassType : public Type {
   static AnyClassTypePtr create() {
     return AnyClassTypePtr(
         new AnyClassType()); // NOLINT(modernize-make-shared)
@@ -2581,4 +2581,27 @@ inline std::shared_ptr<const NamedType> Type::cast<NamedType>() const {
   }
   return nullptr;
 }
+
+// Used as a return type when inferring the IValue type of a Python object.
+struct InferredType {
+  /* implicit */ InferredType(TypePtr type) : type_(std::move(type)) {}
+  /* implicit */ InferredType(std::string reason)
+      : type_(nullptr), reason_(std::move(reason)) {}
+  TypePtr type() const {
+    TORCH_INTERNAL_ASSERT(type_);
+    return type_;
+  }
+  bool success() const {
+    return type_ != nullptr;
+  }
+  const std::string& reason() const {
+    TORCH_INTERNAL_ASSERT(!type_);
+    return reason_;
+  }
+
+private:
+  TypePtr type_;
+  std::string reason_;
+};
+
 } // namespace c10
