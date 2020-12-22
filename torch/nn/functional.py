@@ -2799,7 +2799,7 @@ pixel_shuffle = _add_docstr(torch.pixel_shuffle, r"""
 pixel_shuffle(input, upscale_factor) -> Tensor
 
 Rearranges elements in a tensor of shape :math:`(*, C \times r^2, H, W)` to a
-tensor of shape :math:`(*, C, H \times r, W \times r)`, where r is an upscale factor.
+tensor of shape :math:`(*, C, H \times r, W \times r)`, where r is the :attr:`upscale_factor`.
 
 See :class:`~torch.nn.PixelShuffle` for details.
 
@@ -2820,7 +2820,7 @@ pixel_unshuffle(input, downscale_factor) -> Tensor
 
 Reverses the :class:`~torch.nn.PixelShuffle` operation by rearranging elements in a
 tensor of shape :math:`(*, C, H \times r, W \times r)` to a tensor of shape
-:math:`(*, C \times r^2, H, W)`, where r is a downscale factor.
+:math:`(*, C \times r^2, H, W)`, where r is the :attr:`downscale_factor`.
 
 See :class:`~torch.nn.PixelUnshuffle` for details.
 

@@ -72,7 +72,7 @@ Tensor pixel_unshuffle(const Tensor& self, int64_t downscale_factor) {
   int64_t c = self.size(-3);
   int64_t h = self.size(-2);
   int64_t w = self.size(-1);
-  const auto NUM_NON_BATCH_DIMS = 3;
+  constexpr auto NUM_NON_BATCH_DIMS = 3;
   const auto self_sizes_batch_end = self.sizes().end() - NUM_NON_BATCH_DIMS;
 
   TORCH_CHECK(h % downscale_factor == 0,
