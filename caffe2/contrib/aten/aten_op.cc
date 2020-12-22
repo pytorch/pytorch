@@ -15,8 +15,7 @@ at::Tensor index_with_uint8_handling(
       TORCH_WARN(
           "Indexing with uint8 mask tensor in ATenOp is now deprecated,"
           " please use a bool mask instead.");
-      return at::index(self, torch::List<c10::optional<at::Tensor>>({
-        first->to(at::kBool)}));
+      return at::index(self, {first->to(at::kBool)});
     }
   }
   return at::index(self, indices);
