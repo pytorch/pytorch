@@ -307,14 +307,14 @@ def sample_inputs_linalg_inv(op_info, device, dtype, requires_grad=False):
     'batches' cases include:
         () - single input,
         (0,) - zero batched dimension,
-        (4,) - batch of two matrices,
+        (2,) - batch of two matrices,
         (2, 3) - 2x3 batch of matrices
     'ns' gives 0x0 and 5x5 matrices.
     Zeros in dimensions are edge cases in the implementation and important to test for in order to avoid unexpected crashes.
     """
     from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
-    batches = [(), (0, ), (4, ), (2, 3)]
+    batches = [(), (0, ), (2, ), (2, 3)]
     ns = [0, 5]
     out = []
     for batch, n in product(batches, ns):
