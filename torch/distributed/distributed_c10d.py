@@ -2,6 +2,8 @@ import pickle
 import torch
 import warnings
 import contextlib
+import sys
+import time
 from torch._six import string_classes
 from datetime import timedelta
 from typing import Dict, Optional, Tuple, Union
@@ -16,15 +18,22 @@ from torch._C._distributed_c10d import (
     AllreduceCoalescedOptions,
     AllToAllOptions,
     BroadcastOptions,
+    FileStore,
     GatherOptions,
-    ReduceOptions,
-    ReduceScatterOptions,
-    ScatterOptions,
-    ReduceOp,
-    Store,
     PrefixStore,
     ProcessGroup,
+    ReduceOptions,
+    ReduceOp,
+    ReduceScatterOptions,
+    ScatterOptions,
+    Store,
+    TCPStore,
 )
+
+if sys.platform != 'win32':
+    from torch._C._distributed_c10d import (
+        HashStore,
+    )
 
 
 _MPI_AVAILABLE = True
@@ -172,6 +181,26 @@ _default_pg_init_method = None
 # Process group count for default naming
 _group_count = 0
 
+STORE_BASED_BARRIER_PREFIX = "store_based_barrier_key"
+
+def _store_based_barrier(rank, store, timeout):
+    """
+    Barrier based on store which is used for synchronizing processes after
+    ``init_process_group`` or ``new_group``. Intended to be used only with
+    those two methods and is not a generic alternative to ``barrier()``.
+    """
+    store_key = "{}:{}".format(STORE_BASED_BARRIER_PREFIX, _group_count)
+    store.add(store_key, 1)
+
+    # Now wait for all workers to check in with the store.
+    world_size = get_world_size()
+    worker_count = int(store.get(store_key))
+    start = time.time()
+    while worker_count != world_size:
+        time.sleep(0.01)
+        worker_count = int(store.get(store_key))
+        if timedelta(seconds=(time.time() - start)) > timeout:
+            raise RuntimeError("Timed out initializing process group")
 
 def _rank_not_in_group(group: ProcessGroup):
     """
@@ -475,7 +504,17 @@ def init_process_group(backend,
     # barrier at the end to ensure that once we return from this method, all
     # process groups including global variables are updated correctly on all
     # ranks.
-    barrier()
+    if backend == Backend.MPI or not (
+        isinstance(store, TCPStore) or
+        isinstance(store, FileStore) or
+        (sys.platform != 'win32' and isinstance(store, HashStore))
+    ):
+        # MPI doesn't have store.
+        barrier()
+    else:
+        # Use store based barrier here since barrier() used a bunch of
+        # default devices and messes up NCCL internal state.
+        _store_based_barrier(rank, store, timeout)
 
 def _new_process_group_helper(world_size,
                               rank,
@@ -2452,6 +2491,16 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
     # barrier at the end to ensure that once we return from this method, all
     # process groups including global variables are updated correctly on all
     # ranks.
-    barrier()
+    if backend == Backend.MPI or not (
+        isinstance(default_store, TCPStore) or
+        isinstance(default_store, FileStore) or
+        (sys.platform != 'win32' and isinstance(default_store, HashStore))
+    ):
+        # MPI doesn't have store.
+        barrier()
+    else:
+        # Use store based barrier here since barrier() used a bunch of
+        # default devices and messes up NCCL internal state.
+        _store_based_barrier(group_rank, default_store, timeout)
 
     return pg
