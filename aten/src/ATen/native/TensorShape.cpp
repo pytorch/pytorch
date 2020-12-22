@@ -114,8 +114,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   // to cat empty tensors unless all the other tensors were 1-dimensional, so we allowed these tensors
   // to be "skipped".  We maintain this behavior for backwards compatibility, but only for this specific
   // size (i.e. other empty sizes are not skipped).
-  // FIXME: warn if this is the case
-  bool allSkipped = true;
+
   bool allContiguous = true;
 
   // Inputs cannot alias the output tensor
@@ -140,6 +139,8 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   }(tensors);
 
   if (!pnotSkippedTensor) {
+    // FIXME: warn if this is the case -- see comment about skipped
+    // tensors at top of function.
     return result;
   }
   const Tensor& notSkippedTensor = *pnotSkippedTensor;
