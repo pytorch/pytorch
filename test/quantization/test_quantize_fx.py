@@ -2396,16 +2396,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_conv_transpose_impl(
             torch.nn.ConvTranspose2d, nnq.ConvTranspose2d, torch.randn(4, 1, 4, 4))
 
-    # TODO: remove
-    def test_conv_transpose_eager(self):
-        m = torch.nn.Sequential(torch.nn.ConvTranspose2d(1, 1, 1))
-        m.qconfig = torch.quantization.get_default_qconfig('fbgemm')
-        print(m.qconfig)
-        mp = torch.quantization.prepare(m)
-        mp(torch.randn(4, 1, 4, 4))
-        mq = torch.quantization.convert(mp)
-        print(mq)
-
 
 class TestQuantizeFxModels(QuantizationTestCase):
     def _test_model_impl(
