@@ -15,7 +15,7 @@ from functools import reduce
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
-     TEST_WITH_ASAN, make_tensor, TEST_WITH_ROCM, IS_FBCODE,
+     TEST_WITH_ASAN, make_tensor, TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU,
      wrapDeterministicFlagAPITest, iter_indices)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes,

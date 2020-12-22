@@ -637,11 +637,11 @@ Tensor _sparse_addmm_sparse_backward(const Tensor& grad, const Tensor& sparse_, 
 // However, to get `values` we have to use specific helper function for CPU/CUDA and use the `mask` data to filter `values`
 // That's why we created this `_sparse_matrix_mask_helper` function.
 Tensor _sparse_matrix_mask(const Tensor& input, const Tensor& mask){
-  Tensor output = at::native::empty_like(mask);
+  Tensor output = at::empty_like(mask);
   Tensor mask_indices = mask._indices().clone();
   Tensor r_values;
   if (mask._nnz() == 0) {
-    r_values = at::native::zeros_like(mask._values());
+    r_values = at::zeros_like(mask._values());
   } else {
     r_values = _sparse_matrix_mask_helper(input, mask_indices.contiguous());
   }
