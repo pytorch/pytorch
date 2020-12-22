@@ -87,9 +87,10 @@ linalg.inv(input, *, out=None) -> Tensor
 
 This function computes the "multiplicative inverse" matrix of a square matrix, or batch of such matrices, :attr:`input`.
 The result satisfies the relation
+
 ``matmul(inv(input), input) = matmul(input, inv(input)) = eye(input.shape[0]).expand_as(input)``.
 
-Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` data types.
+Supports input of float, double, cfloat and cdouble data types.
 
 .. note:: If :attr:`input` is a non-invertible matrix or non-square matrix, or batch with at least one such matrix,
           then a RuntimeError will be thrown.
@@ -101,12 +102,12 @@ Args:
                     of such matrices of size :math:`(*, n, n)` where `*` is one or more batch dimensions.
 
 Keyword args:
-    out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
+    out (Tensor, optional): The output tensor. Ignored if None. Default: None
 
 Examples::
 
     >>> x = torch.rand(4, 4)
-    >>> y = torch.inverse(x)
+    >>> y = torch.linalg.inv(x)
     >>> z = torch.mm(x, y)
     >>> z
     tensor([[ 1.0000, -0.0000, -0.0000,  0.0000],
@@ -118,13 +119,13 @@ Examples::
 
     >>> # Batched inverse example
     >>> x = torch.randn(2, 3, 4, 4)
-    >>> y = torch.inverse(x)
+    >>> y = torch.linalg.inv(x)
     >>> z = torch.matmul(x, y)
     >>> torch.max(torch.abs(z - torch.eye(4).expand_as(x))) # Max non-zero
     tensor(1.9073e-06)
 
     >>> x = torch.rand(4, 4, dtype=torch.cdouble)
-    >>> y = torch.inverse(x)
+    >>> y = torch.linalg.inv(x)
     >>> z = torch.mm(x, y)
     >>> z
     tensor([[ 1.0000e+00+0.0000e+00j, -1.3878e-16+3.4694e-16j,
