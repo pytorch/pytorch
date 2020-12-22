@@ -624,10 +624,8 @@ Tensor& _linalg_inv_out_helper_cpu(Tensor &result, Tensor& infos_lu, Tensor& inf
 // LAPACK/MAGMA/cuSOLVER error codes are saved in 'infos' tensors, they are not checked here
 static Tensor& linalg_inv_out_info(Tensor& result, Tensor& infos_lu, Tensor& infos_getri, const Tensor& input) {
   squareCheckInputs(input);
-  TORCH_CHECK(infos_lu.scalar_type() == kInt,
-    "infos_lu dtype ", infos_lu.scalar_type(), " does not match the expected dtype ", kInt);
-  TORCH_CHECK(infos_getri.scalar_type() == kInt,
-    "infos_getri dtype ", infos_getri.scalar_type(), " does not match the expected dtype ", kInt);
+  TORCH_INTERNAL_ASSERT(infos_lu.scalar_type() == kInt);
+  TORCH_INTERNAL_ASSERT(infos_getri.scalar_type() == kInt);
   TORCH_CHECK(result.scalar_type() == input.scalar_type(),
     "result dtype ", result.scalar_type(), " does not match input dtype ", input.scalar_type());
   TORCH_CHECK(result.device() == input.device(),
