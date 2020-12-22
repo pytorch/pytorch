@@ -218,7 +218,8 @@ def insert_observer_for_output_of_the_node(
                 load_arg, observed_node_names_set)
 
 def insert_observer_for_input_arg_of_observed_node(
-        node: Node, observed_node_names_set: Set[str], quants: Dict[str, Any],
+        node: Node, observed_node_names_set: Set[str],
+        quants: Dict[str, Tuple[DefaultQuantizeHandler, Callable]],
         model: torch.nn.Module,
         activation_post_process_map: Dict[str, torch.quantization.ObserverBase],
         env: Dict[str, str], observed_graph: Graph,
@@ -376,7 +377,8 @@ class Quantizer:
         # find _inputs_ to matched nodes that are not quantized, these
         # have to be quantized, which requires measuring stats,
         # initialize an DefaultQuantizeHandler object for each
-        quants = self._find_quants(model.graph, matches)
+        quants: Dict[str, Tuple[DefaultQuantizeHandler, Callable]] = \
+            self._find_quants(model.graph, matches)
 
         self.activation_post_process_map = dict()
         env: Dict[Any, Any] = {}
@@ -547,7 +549,8 @@ class Quantizer:
             model.graph, self.modules, self.patterns,
             custom_module_classes=custom_module_classes)
 
-        quants = self._find_quants(model.graph, matches)
+        quants: Dict[str, Tuple[DefaultQuantizeHandler, Callable]] = \
+            self._find_quants(model.graph, matches)
 
         self.quantized_graph = Graph()
         env: Dict[Any, Any] = {}
@@ -569,14 +572,9 @@ class Quantizer:
             return env[n.name]
 
         def load_quantized(n):
-            if n.name not in quant_env:
-                assert n.name in env, \
-                    'trying to load quantized node but did not find node:' + \
-                    n.name + ' in float environment:' + str(env)
-                assert n.name in quants, \
-                    'did not find quant object for node:' + n.name
-                quant = quants[n.name][0]
-                quant_env[n.name] = quant.convert(self, env[n.name])
+            assert n.name in quant_env, \
+                'trying to load quantized node but did not find node:' + \
+                n.name + ' in quant environment:' + str(quant_env)
             return quant_env[n.name]
 
         def load_x(n):
@@ -941,7 +939,7 @@ class Quantizer:
         return match_map
 
     def _find_quants(self, graph: Graph, matches: Dict[str, MatchResult],
-                     ) -> Dict[str, Any]:
+                     ) -> Dict[str, Tuple[DefaultQuantizeHandler, Callable]]:
         """
         Takes the nodes in the input graph and pending matches, and finds and
         returns the input and output nodes which need to be quantized.
@@ -954,7 +952,7 @@ class Quantizer:
          node_name -> (QuantizeHandler instance (always DefaultQuantizeHandler),
          activation_post_process (observer/fake_quantize module) constructor)
         """
-        quants: Dict[str, Any] = {}
+        quants: Dict[str, Tuple[DefaultQuantizeHandler, Callable]] = {}
 
         def visit(node, matched_pattern, qconfig):
             def visit_arg(arg):
@@ -969,15 +967,11 @@ class Quantizer:
                    (activation_is_statically_quantized(qconfig) or is_weight):
                     act_post_process_ctr = qconfig.weight if is_weight else \
                         qconfig.activation
-                    quants[arg.name] = (
-                        DefaultQuantizeHandler(self, arg), qconfig, is_weight)
                     # overwrite the constructor from qconfig
                     act_post_process_ctr = \
                         get_default_output_activation_post_process_map().get(
                             matched_pattern,
                             act_post_process_ctr)
-                    # overwrite previous activation post process constructor if
-                    # necessary
                     quants[arg.name] = (
                         DefaultQuantizeHandler(self, arg), act_post_process_ctr)
             return visit_arg
