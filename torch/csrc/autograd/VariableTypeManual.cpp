@@ -196,7 +196,6 @@ void retain_grad(Tensor & self) {
 
 // We don't have an outplace copy, so this can't be generated automatically
 Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool non_blocking) {
-  jit::Value* output = nullptr;
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
   auto& self_ = unpack(self, "self", 0);
@@ -213,7 +212,6 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    //self_.copy_(src_, non_blocking);
     static auto op = c10::Dispatcher::singleton()
       .findSchemaOrThrow("aten::copy_", "")
       .typed<Tensor & (Tensor &, const Tensor &, bool)>();
@@ -236,12 +234,11 @@ Tensor& resize_(
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    //self_.resize_(size, std::move(optional_memory_format));
     static auto op = c10::Dispatcher::singleton()
       .findSchemaOrThrow("aten::resize_", "")
       .typed<Tensor & (Tensor &, IntArrayRef, c10::optional<MemoryFormat>)>();
     c10::Dispatcher::singleton()
-      .redispatch<Tensor &, Tensor &, IntArrayRef, c10::optional<MemoryFormat>>(op, ks & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther), self_, size, std::move(optional_memory_format));
+      .redispatch<Tensor &, Tensor &, IntArrayRef, c10::optional<MemoryFormat>>(op, ks & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther), self_, size, optional_memory_format);
   }
   return self;
 }
@@ -258,12 +255,11 @@ Tensor& resize_as_(
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    //at::resize_as_(self_, the_template_, std::move(optional_memory_format));
     static auto op = c10::Dispatcher::singleton()
       .findSchemaOrThrow("aten::resize_as_", "")
       .typed<Tensor & (Tensor &, const Tensor &, c10::optional<MemoryFormat>)>();
     c10::Dispatcher::singleton()
-      .redispatch<Tensor &, Tensor &, const Tensor &, c10::optional<MemoryFormat>>(op, ks & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther), self_, the_template_, std::move(optional_memory_format));
+      .redispatch<Tensor &, Tensor &, const Tensor &, c10::optional<MemoryFormat>>(op, ks & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther), self_, the_template_, optional_memory_format);
   }
   return self;
 }

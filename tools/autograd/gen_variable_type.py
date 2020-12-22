@@ -591,7 +591,7 @@ def emit_body(declaration):
 
     def save_variables(
         saved_variables: Sequence[SavedAttribute],
-          is_output: bool,
+        is_output: bool,
         guard_for: Callable[[SavedAttribute], Optional[str]] = lambda name: None,
     ) -> Sequence[str]:
         # assign the saved variables to the generated grad_fn
@@ -626,24 +626,6 @@ def emit_body(declaration):
                 stmts.append('}')
         return stmts
 
-    def emit_dispatch_call(api_name, input_base, unpacked_args):
-        """ Dispatch call via function in a namespace or method on Tensor."""
-        if 'namespace' in declaration['method_of']:
-            if declaration['use_c10_dispatcher'] in ['hacky_wrapper_for_legacy_signatures', 'full']:
-                dispatcher_api_name = make_out_api_name_faithful(api_name)
-            else:
-                assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
-                dispatcher_api_name = api_name
-            call = CALL_DISPATCH_VIA_NAMESPACE.substitute(
-                api_name=dispatcher_api_name,
-                unpacked_args=unpacked_args)
-        else:
-            call = CALL_DISPATCH_VIA_METHOD.substitute(
-                api_name=api_name,
-                var=input_base,
-                unpacked_method_args=unpacked_args[1:])
-        return call
-
     def emit_view_lambda():
         """ Generate an additional lambda function to recover views in backward when as_strided is not supported.
         See Note [View + Inplace update for base tensor] and [View + Inplace update for view tensor] for more details."""
@@ -677,14 +659,14 @@ def emit_body(declaration):
             else:
                 updated_unpacked_args.append(arg)
 
-        # replay_view_call = emit_dispatch_call(combined['api_name'], input_base, updated_unpacked_args)
-
         # TODO: hack to deal with c10-ness. This will disappear when I write this in the new codegen
-        args = combined['schema_order_arguments'] if combined['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures'] else combined['arguments']
+        args = combined['schema_order_arguments'] if  \
+            combined['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures'] else combined['arguments']
         arg_types = [a['type'] for a in args]
         ret_and_arg_types = ', '.join([combined['return_type']] + arg_types)
         # TODO: something less hacky than AutogradOther?
-        dispatch_key_set = 'ks & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther)'
+        # note that we do NOT modify ks here. This is a full redispatch that should call back into the autograd kernel.
+        dispatch_key_set = 'ks'
         redispatch_args = ['op', dispatch_key_set] + updated_unpacked_args
         replay_view_call = CALL_DISPATCH_VIA_NAMESPACE.substitute(
             ret_and_arg_types=ret_and_arg_types,
@@ -783,7 +765,8 @@ def emit_body(declaration):
         # See NOTE [ Treating Variables as non-Variables in type dispatch ] for details.
         # base_type_call = emit_dispatch_call(combined['api_name'], 'self_', combined['unpacked_args'])
         # if any([a['simple_type'] == 'TensorOptions' for a in combined['arguments']]) \
-        args = combined['schema_order_arguments'] if combined['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures'] else combined['arguments']
+        args = combined['schema_order_arguments'] if \
+            combined['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures'] else combined['arguments']
         arg_types = [a['type'] for a in args]
         ret_and_arg_types = ', '.join([combined['return_type']] + arg_types)
 

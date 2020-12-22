@@ -40,9 +40,9 @@ void named_not_supported_kernel(OperatorKernel*, const OperatorHandle& op, Dispa
 // single line summary of state
 std::string KernelFunction::dumpState() const {
   std::ostringstream oss;
-  //if (boxed_kernel_func_ == fallthrough_kernel) {
-    //oss << "fallthrough ";
-  //}
+  if (boxed_kernel_func_ == fallthrough_kernel) {
+    oss << "fallthrough ";
+  }
   if (boxed_kernel_func_) {
     oss << "boxed ";
   }

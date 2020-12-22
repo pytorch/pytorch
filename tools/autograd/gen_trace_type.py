@@ -380,7 +380,7 @@ def method_definition(f: NativeFunction) -> Optional[str]:
         formals = ', '.join(
             ['c10::DispatchKeySet ks'] +
             [f'{cpp.argument_type(a, binds="__placeholder__").cpp_type()} {a.name}'
-            for a in f.func.schema_order_arguments()]
+                for a in f.func.schema_order_arguments()]
         )
     else:
         sig_group = CppSignatureGroup.from_schema(f.func, method=False)
