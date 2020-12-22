@@ -305,6 +305,11 @@ Tensor& resize_as_(
   if (self.fw_grad(/* level */ 0).defined()) {
     AT_ERROR("cannot resize variables that has a forward grad");
   }
+
+  // Handle fw grad
+  if (self.fw_grad(/* level */ 0).defined()) {
+    AT_ERROR("cannot resize variables that has a forward grad");
+  }
   return self;
 }
 
