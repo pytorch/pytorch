@@ -3133,7 +3133,8 @@ between ``0`` and ``self.size(dim) - 1`` inclusive.
 
     When indices are not unique, the behavior is non-deterministic (one of the
     values from ``src`` will be picked arbitrarily) and the gradient will be
-    incorrect!
+    incorrect (it will be propagated to all locations in the source that
+    correspond to the same index)!
 
 .. note::
 
