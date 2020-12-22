@@ -535,6 +535,9 @@ class TestQuantizeFx(QuantizationTestCase):
         m(dict_input)
 
     def test_standalone_module(self):
+        """ Test standalone module with different quantized input/quantized output
+        configurations
+        """
         class StandaloneModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -574,45 +577,91 @@ class TestQuantizeFx(QuantizationTestCase):
         original_ref_m.conv2.weight = torch.nn.Parameter(original_m.standalone.conv.weight.detach())
         original_ref_m.conv2.bias = torch.nn.Parameter(original_m.standalone.conv.bias.detach())
 
-        qconfig_dict = {"": default_qconfig}
-        config_name = {"standalone_module_name": [("standalone", None, None)]}
-        config_class = {"standalone_module_class": [(StandaloneModule, None, None)]}
-        for prepare_config in [config_name, config_class]:
+        float_interface_config = {
+            "input_quantized_idxs": [], # float input
+            "output_quantized_idxs": [], # float output
+        }
+
+        quantized_interface_config = {
+            "input_quantized_idxs": [0], # quantized input
+            "output_quantized_idxs": [0], # quantized output
+        }
+        # is_name, is_float
+        options = itertools.product([True, False], [True, False])
+        for is_name, is_float in options:
+            if is_float:
+                interface_config = float_interface_config
+                # input and output of first conv, observer for standalone module
+                # will be inserted in the standalone module itself
+                prepare_count_check = {
+                    ns.call_module(torch.quantization.MinMaxObserver): 2
+                }
+                # for input and output of conv in the standalone module
+                standalone_prepare_count_check = {
+                    ns.call_module(torch.quantization.MinMaxObserver): 2
+                }
+                convert_count_check = {
+                    ns.call_function(torch.quantize_per_tensor) : 1,
+                    ns.call_module(nnq.Conv2d) : 1,
+                    ns.call_method("dequantize") : 1,
+                }
+                standalone_convert_count_check = {
+                    # standalone module will take float as input and output
+                    # so we'll see quantize and dequantize in the modoule
+                    ns.call_function(torch.quantize_per_tensor) : 1,
+                    ns.call_module(nnq.Conv2d): 1,
+                    ns.call_method("dequantize") : 1,
+                }
+            else:
+                interface_config = quantized_interface_config
+                # input and output of first conv, observer for standalone module
+                # will be inserted in the standalone module itself
+                prepare_count_check = {
+                    ns.call_module(torch.quantization.MinMaxObserver): 2
+                }
+                # for input and output of conv in the standalone module
+                standalone_prepare_count_check = {
+                    ns.call_module(torch.quantization.MinMaxObserver): 1
+                }
+                convert_count_check = {
+                    ns.call_function(torch.quantize_per_tensor) : 1,
+                    ns.call_module(nnq.Conv2d) : 1,
+                    ns.call_method("dequantize") : 1,
+                }
+                standalone_convert_count_check = {
+                    # quantization of input happens in parent module
+                    # quantization of output happens in the quantized conv module
+                    ns.call_function(torch.quantize_per_tensor) : 0,
+                    ns.call_module(nnq.Conv2d): 1,
+                    # dequantization for output happens in parent module
+                    ns.call_method("dequantize") : 0,
+                }
+
+            if is_name:
+                prepare_config = {
+                    "standalone_module_name": [("standalone", None, interface_config)]
+                }
+            else:
+                prepare_config = {
+                    "standalone_module_class": [(StandaloneModule, None, interface_config)]
+                }
+
             original_m_copy = copy.deepcopy(original_m)
             original_ref_m_copy = copy.deepcopy(original_ref_m)
+
+            qconfig_dict = {"": default_qconfig}
             # check prepared model
             m = prepare_fx(
                 original_m_copy, qconfig_dict, prepare_custom_config_dict=prepare_config)
             # calibration
             m(data)
-            # input and output of first conv, observer for standalone module
-            # will be inserted in the standalone module itself
-            count_check = {
-                ns.call_module(torch.quantization.MinMaxObserver): 2
-            }
-            self.checkGraphModuleNodes(m, expected_node_occurrence=count_check)
-            # for input and output of conv in the standalone module
-            count_check = {
-                ns.call_module(torch.quantization.MinMaxObserver): 2
-            }
-            self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=count_check)
+            self.checkGraphModuleNodes(m, expected_node_occurrence=prepare_count_check)
+            self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=standalone_prepare_count_check)
 
             # check converted/quantized model
             m = convert_fx(m)
-            count_check = {
-                ns.call_function(torch.quantize_per_tensor) : 1,
-                ns.call_module(nnq.Conv2d) : 1,
-                ns.call_method('dequantize') : 1,
-            }
-            self.checkGraphModuleNodes(m, expected_node_occurrence=count_check)
-            count_check = {
-                # standalone module will take float as input and output
-                # so we'll see quantize and dequantize in the modoule
-                ns.call_function(torch.quantize_per_tensor) : 1,
-                ns.call_module(nnq.Conv2d): 1,
-                ns.call_method('dequantize') : 1,
-            }
-            self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=count_check)
+            self.checkGraphModuleNodes(m, expected_node_occurrence=convert_count_check)
+            self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=standalone_convert_count_check)
             res = m(data)
 
             # quantize the reference model
