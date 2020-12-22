@@ -289,13 +289,13 @@ if __name__ == '__main__':
             view_length = 'InputSize()' if has_tensorlist and i < tensorlist_idx else static_tensor_inputs
             if arg['type'] == 'TensorList':
                 # NOTE: do not advance real_inputs here. After this we will
-                # switch to indexing the "stack" from the end as if we only had
+                # switch to indexing the "stack" from the end
                 env['statements'].append(
                     'auto {} = peekSlice({}, InputSize() - {}, InputSize());'
                     .format(arg['name'], real_inputs, static_tensor_inputs))
             elif arg['type'] == 'const c10::List<c10::optional<Tensor>> &':
                 # NOTE: do not advance real_inputs here. After this we will
-                # switch to indexing the "stack" from the end as if we only had
+                # switch to indexing the "stack" from the end
                 env['statements'].append(
                     'auto {} = peekSliceOptionals({}, InputSize() - {}, InputSize());'
                     .format(arg['name'], real_inputs, static_tensor_inputs))
