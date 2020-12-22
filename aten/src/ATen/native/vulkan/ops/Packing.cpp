@@ -11,14 +11,17 @@ vTensor pack_image2d_h2w2(vTensor v_src, api::Context* context, api::Command::Bu
   TORCH_CHECK(v_src.has_image() , "Not implemented!");
   TORCH_CHECK(v_src.sizes().size() <= 2 , "pack_image2d_h2w2 not supported for tensors with dims > 2");
 
+  uint32_t orig_w;
   uint32_t packed_h, packed_w;
   if (v_src.sizes().size() == 2) {
     packed_h = div_up(v_src.sizes()[Layout::Parameter::height], INT64_C(2));
     packed_w = div_up(v_src.sizes()[Layout::Parameter::width], INT64_C(2));
+    orig_w = v_src.sizes()[Layout::Parameter::width];
   }
   else {
     packed_h = 1;
     packed_w = div_up(v_src.sizes()[Layout::Parameter::height], INT64_C(2));
+    orig_w = v_src.sizes()[Layout::Parameter::height];
   }
   vTensor v_src_packed {
     context,
@@ -29,7 +32,7 @@ vTensor pack_image2d_h2w2(vTensor v_src, api::Context* context, api::Command::Bu
     },
     v_src.options()
   };
-  uint32_t plane = v_src.sizes()[Layout::Parameter::width];
+  uint32_t plane = orig_w;
   const struct {
     uvec3 extents;
     uint32_t block;

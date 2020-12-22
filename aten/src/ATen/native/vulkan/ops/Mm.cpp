@@ -53,7 +53,7 @@ vTensor pack_biases(
   vTensor v_bias{
       api::context(),
       &pool,
-      {weight_arg.sizes()[Layout::Parameter::width], 1},
+      {weight_arg.sizes()[Layout::Parameter::width]},
       weight_arg.options(),
   };
 
