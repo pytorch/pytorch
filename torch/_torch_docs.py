@@ -1130,6 +1130,26 @@ Example:
     tensor([ True, False, False])
 """.format(**common_args))
 
+add_docstr(torch.broadcast_to,
+           r"""
+broadcast_to(input, shape) -> Tensor
+
+Broadcasts :attr:`input` to the shape :attr:`\shape`.
+Equivalent to calling ``input.expand(shape)``. See :meth:`~Tensor.expand` for details.
+
+Args:
+    {input}
+    shape (list, tuple, or :class:`torch.Size`): the new shape.
+
+Example::
+
+    >>> x = torch.tensor([1, 2, 3])
+    >>> torch.broadcast_to(x, (3, 3))
+    tensor([[1, 2, 3],
+            [1, 2, 3],
+            [1, 2, 3]])
+""".format(**common_args))
+
 add_docstr(torch.stack,
            r"""
 stack(tensors, dim=0, *, out=None) -> Tensor
@@ -7475,7 +7495,7 @@ Computes the normalized sinc of :attr:`input.`
 .. math::
     \text{out}_{i} =
     \begin{cases}
-      1, & \text{if}\ \text{out}_{i}=0 \\
+      1, & \text{if}\ \text{input}_{i}=0 \\
       \sin(\pi \text{input}_{i}) / (\pi \text{input}_{i}), & \text{otherwise}
     \end{cases}
 """ + r"""
