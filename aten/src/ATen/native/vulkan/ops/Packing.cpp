@@ -51,7 +51,7 @@ vTensor pack_image2d_h2w2(vTensor v_src, api::Context* context, api::Command::Bu
   context->dispatch(
     command_buffer,
     {
-      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
       VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
       VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
     },
