@@ -118,8 +118,9 @@ static bool needsGradientInProfilingMode(Block* b) {
   return false;
 }
 
-void guardDifferentiableGraph(Node* dnode) {
+bool guardDifferentiableGraph(Node* dnode) {
   auto gi = dnode->g(attr::Subgraph)->inputs();
+  bool all_inputs_seen = true;
   for (size_t i = 0; i < gi.size(); i++) {
     auto ty = gi[i]->type()->cast<TensorType>();
     if (ty) {
@@ -144,17 +145,30 @@ void guardDifferentiableGraph(Node* dnode) {
           dni->setType(o->node()->ty(attr::profiled_type));
         }
       }
+
+      // we check if the optional is defined
+      all_inputs_seen &= (dni->type()->cast<TensorType>() != TensorType::get());
     }
   }
-  // we may have seen both true and false for requires_grad. In this case
-  // we guard with true here and the other case is in the fallback. This
-  // will give us trouble when we get "alternating patterns" of gradients
-  // of two inputs, but so it is. An alternative could be to look into
-  // the individual requires_grad seen in the profiling record.
-  insertTypeGuard(dnode, [](const TensorTypePtr& t) {
-    return TensorType::get()->withRequiresGrad(
-        t->requiresGrad().value_or(true));
-  });
+  if (all_inputs_seen) {
+    // we may have seen both true and false for requires_grad. In this case
+    // we guard with true here and the other case is in the fallback. This
+    // will give us trouble when we get "alternating patterns" of gradients
+    // of two inputs, but so it is. An alternative could be to look into
+    // the individual requires_grad seen in the profiling record.
+    insertTypeGuard(dnode, [](const TensorTypePtr& t) {
+      return TensorType::get()->withRequiresGrad(
+          t->requiresGrad().value_or(true));
+    });
+    return true;
+  } else {
+    // we inline the differentiable graph as a fallback
+    // ideally we would set this up for re-profiling
+    UpdateDifferentiableGraphRequiresGrad(
+        dnode->g(attr::Subgraph), c10::nullopt);
+    SubgraphUtils::unmergeSubgraph(dnode);
+    return false;
+  }
 }
 
 void runNooptPassPipeline(std::shared_ptr<Graph>& graph) {
@@ -424,7 +438,11 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     size_t idx = 0;
     for (Node* dnode : diff_nodes) {
       GRAPH_DEBUG("Optimizing diff node ", idx, " in ", *copy);
-      guardDifferentiableGraph(dnode);
+      if (!guardDifferentiableGraph(dnode)) {
+        GRAPH_DEBUG("Could not guardDifferentiableGraph ", idx, " in ", *copy);
+        idx++;
+        continue;
+      }
       GRAPH_DEBUG("After guardDifferentiableGraph:\n", *copy);
       auto diff_graph = std::move(dnode->g(attr::Subgraph));
       Gradient gradient = differentiate(diff_graph);
