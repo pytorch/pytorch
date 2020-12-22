@@ -3865,7 +3865,7 @@ add_docstr(torch.is_floating_point, r"""
 is_floating_point(input) -> (bool)
 
 Returns True if the data type of :attr:`input` is a floating point data type i.e.,
-one of ``torch.float64``, ``torch.float32`` and ``torch.float16``.
+one of ``torch.float64``, ``torch.float32``, ``torch.float16``, and ``torch.bfloat16``.
 
 Args:
     {input}
