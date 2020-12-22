@@ -985,7 +985,7 @@ op_db: List[OpInfo] = [
                # cuda gradchecks are very slow
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
                SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'))),
-    OpInfo('linalg_svd',
+    OpInfo('linalg.svd',
            op=torch.linalg.svd,
            dtypes=floating_and_complex_types(),
            test_inplace_grad=False,
