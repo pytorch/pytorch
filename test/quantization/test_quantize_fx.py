@@ -1370,17 +1370,21 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 quantized_nodes[dim])
 
     @skipIfNoFBGEMM
-    def test_conv_functional_bias_not_observed(self):
+    def test_conv2d_functional(self):
         for bias in [True, False]:
-            conv = torch.nn.Conv2d(3, 1, 1, bias=bias)
+            conv = torch.nn.Conv2d(1, 1, 1, bias=bias)
             # There should be 3 observers: after input, weight and activation.
-            expected_node_occurrence = {
+            # No observer after bias.
+            prepare_expected_node_occurrence = {
                 ns.call_module(torch.quantization.HistogramObserver): 2,
                 ns.call_module(torch.quantization.PerChannelMinMaxObserver): 1,
             }
+            expected_node_occurrence = \
+                {ns.call_function(torch.ops.quantized.conv2d): 1}
             self.checkGraphModeFxOp(
-                conv, self.img_data_dict[2], QuantType.STATIC,
-                prepare_expected_node_occurrence=expected_node_occurrence,
+                conv, (torch.randn(4, 1, 4, 4),), QuantType.STATIC,
+                prepare_expected_node_occurrence=prepare_expected_node_occurrence,
+                expected_node_occurrence=expected_node_occurrence,
             )
 
     def test_linear_functional_bias_not_observed(self):
