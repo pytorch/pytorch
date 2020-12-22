@@ -350,37 +350,47 @@ def np_unary_ufunc_integer_promotion_wrapper(fn):
     return wrapped_fn
 
 def np_binary_ufunc_type_promotion_wrapper(fn):
-    # Wrapper that passes PyTorch's default scalar
+    # Wrapper that passes PyTorch's promoted
     #   type as an argument to the wrapped NumPy
-    #   binary ufunc when given an integer input .
-    #   This mimicks PyTorch's integer->floating point
-    #   type promotion.
+    #   binary ufunc when the type promotion
+    #   for the given inputs is inconsistent
+    #   with PyTorch.
+    #   This mimicks PyTorch's type promotion.
     #
-    # This is necessary when NumPy promotes
-    #   integer types to double, since PyTorch promotes
-    #   integer types to the default scalar type.
+    # The following describes all scenarios that
+    #   the type promotion is different between
+    #   NumPy and PyTorch
+    # 1) For inputs with integer tensor and float scalar,
+    #   NumPy promotes integer types to double,
+    #   but PyTorch promotes integer types to the
+    #   default scalar type.
     #
-    # Besides, the table below shows the difference between
-    #   PyTorch and NumPy on the type promotion for binary
-    #   functions
-    #      inputs         NumPy     PyTorch
-    #    bool  bool       vary        bool
-    #   int16 float16    float32    float16
-    #   int32 float16    float64    float16
-    #   int64 float16    float64    float16
-    #   int32 float32    float64    float32
-    #   int64 float32    float64    float32
+    # 2) For inputs with two tensors, the table below
+    #   shows the difference
+    #       inputs         NumPy     PyTorch
+    #    int16 float16    float32    float16
+    #    int32 float16    float64    float16
+    #    int64 float16    float64    float16
+    #    int32 float32    float64    float32
+    #    int64 float32    float64    float32
+    #   Special case:
+    #   For two boolean inputs, the result dtype varies
+    #   for different operations in NumPy, but it is
+    #   torch.bool in PyTorch.
     #
-    # Another special case only on Windows platform due to
-    # torch tensor wrapper for integer scalar is int64, but
-    # numpy wrapper for integer scalar is int32.
-    # For boolean tensor and integer scalar, NumPy result
-    # needs to be promoted from int32 to int64
+    # 3) On Windows platform, PyTorch tensor wrapper
+    #   for integer scalar is int64, but NumPy wrapper
+    #   for integer scalar is int32. For boolean tensor
+    #   and integer scalar, NumPy result needs to be
+    #   promoted from int3 to int64
 
-    # Helper to get the unified type between PyTorch
-    #    and NumPy
-    #    x is Tensor; y can be Tensor or Scalar
-    def unified_type(x, y):
+    # Helper function to get the NumPy's corresponding
+    #   dtype from PyTorch when type promotion is
+    #   different from each other.
+    #   Fact for binary function:
+    #     x must be a Tensor
+    #     y can be a Tensor or a Scalar
+    def numpy_dtype_from_torch(x, y):
         if not hasattr(y, 'dtype'):
             if x.dtype in [np.bool, np.uint8, np.int8, np.int16, np.int32, np.int64] and \
                     type(y) == float:
@@ -400,14 +410,14 @@ def np_binary_ufunc_type_promotion_wrapper(fn):
 
     @wraps(fn)
     def wrapped_fn(x, y):
-        utype = unified_type(x, y)
-        if utype is not None:
+        res_dtype = numpy_dtype_from_torch(x, y)
+        if res_dtype is not None:
             # Can not do fn(x, y, dtype=utype), since some NumPy operations
             #   don't support all dtypes as signature
             #   e.g. np.fmod(x, y, dtype=np.bool) is not valid
             def new_fn(x, y):
                 v = fn(x, y)
-                return v.astype(utype)
+                return v.astype(res_dtype)
             return new_fn(x, y)
         return fn(x, y)
 
