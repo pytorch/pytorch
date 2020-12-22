@@ -1100,7 +1100,7 @@ if TEST_SCIPY:
                            # negative integers) especially due to reduced precision
                            # in float16 and NaN's can't be tested for equality.
                            SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                                    device='cuda', dtypes=[torch.float16]),),
+                                    device_type='cuda', dtypes=[torch.float16]),),
                        promotes_integers_to_float=True)
     ]
     op_db = op_db + op_db_scipy_reference
