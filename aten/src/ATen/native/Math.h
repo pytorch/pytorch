@@ -285,7 +285,7 @@ static inline double calc_digamma(double x) {
     return std::copysign(INFINITY, -x);
   }
 
-  int x_is_integer = x == trunc(x);
+  bool x_is_integer = x == trunc(x);
   if (x < 0) {
     if (x_is_integer) {
       // As per C++ standard for gamma related functions and SciPy,
@@ -337,7 +337,7 @@ static inline float calc_digamma(float x) {
     return std::copysign(INFINITY, -x);
   }
 
-  int x_is_integer = x == truncf(x);
+  bool x_is_integer = x == truncf(x);
   if (x < 0) {
     if (x_is_integer) {
     // As per C++ standard for gamma related functions and SciPy,
