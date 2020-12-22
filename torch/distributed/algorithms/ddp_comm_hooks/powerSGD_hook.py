@@ -361,7 +361,7 @@ def batched_powerSGD_hook(
     """
     process_group = state.process_group
     group_to_use = process_group if process_group is not None else dist.group.WORLD
-    world_size = process_group.size()
+    world_size = group_to_use.size()
 
     # The input tensor is a flattened 1D tensor.
     input_tensor = bucket.get_tensors()[0]

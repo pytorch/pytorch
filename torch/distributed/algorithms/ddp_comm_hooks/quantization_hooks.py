@@ -142,7 +142,7 @@ def quantization_perchannel_hook(
     """
     group_to_use = process_group if process_group is not None else dist.group.WORLD
     rank = process_group.rank() if process_group is not None else dist.get_rank()
-    world_size = process_group.size()
+    world_size = group_to_use.size()
 
     tensor = bucket.get_tensors()[0]
 
