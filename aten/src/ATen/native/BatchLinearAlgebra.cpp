@@ -614,7 +614,6 @@ Tensor& _linalg_inv_out_helper_cpu(Tensor &result, Tensor& infos_lu, Tensor& inf
   // This function calculates the inverse matrix in-place
   // result should be in column major order and contain matrices to invert
   // the content of result is overriden by 'apply_inverse'
-  // std::vector<int64_t> infos(batchCount(result), 0);
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "linalg_inv_out_cpu", [&]{
     apply_inverse<scalar_t>(result, infos_lu, infos_getri);
   });
