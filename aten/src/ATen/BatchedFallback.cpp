@@ -361,7 +361,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
         flat_output.sizes().end());
     torch::jit::push(
         stack,
-        input_physical_views.front().newLogicalFromPhysical(flat_output.view(output_sizes)));
+        input_physical_views.front().getPhysicalToLogicalMap().apply(flat_output.view(output_sizes)));
   }
 }
 

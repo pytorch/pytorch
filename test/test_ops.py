@@ -4,7 +4,7 @@ import torch
 
 from torch.testing import floating_and_complex_types_and
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, IS_SANDCASTLE)
+    (TestCase, run_tests, IS_SANDCASTLE, clone_input_helper)
 from torch.testing._internal.common_methods_invocations import \
     (op_db)
 from torch.testing._internal.common_device_type import \
@@ -88,7 +88,7 @@ class TestGradients(TestCase):
                 self.assertTrue(gradcheck(partial_fn, (*sample.input,) + sample.args,
                                           check_grad_dtypes=True))
             elif check == 'gradgradcheck':
-                self.assertTrue(gradgradcheck(partial_fn, (*sample.input,) + sample.args, 
+                self.assertTrue(gradgradcheck(partial_fn, (*sample.input,) + sample.args,
                                               gen_non_contig_grad_outputs=False,
                                               check_grad_dtypes=True))
                 self.assertTrue(gradgradcheck(partial_fn, (*sample.input,) + sample.args,
@@ -114,11 +114,13 @@ class TestGradients(TestCase):
         self._skip_helper(op, dtype)
         self._grad_test_helper(device, dtype, op, op.get_op())
 
-    @dtypes(torch.double, torch.cdouble)
-    @ops(op_db)
-    def test_method_grad(self, device, dtype, op):
-        self._skip_helper(op, dtype)
-        self._grad_test_helper(device, dtype, op, op.get_method())
+    # Method grad (and gradgrad, see below) tests are disabled since they're
+    #   costly and redundant with function grad (and gradgad) tests
+    # @dtypes(torch.double, torch.cdouble)
+    # @ops(op_db)
+    # def test_method_grad(self, device, dtype, op):
+    #     self._skip_helper(op, dtype)
+    #     self._grad_test_helper(device, dtype, op, op.get_method())
 
     @dtypes(torch.double, torch.cdouble)
     @ops(op_db)
@@ -135,11 +137,13 @@ class TestGradients(TestCase):
         self._skip_helper(op, dtype)
         self._gradgrad_test_helper(device, dtype, op, op.get_op())
 
-    @dtypes(torch.double, torch.cdouble)
-    @ops(op_db)
-    def test_method_gradgrad(self, device, dtype, op):
-        self._skip_helper(op, dtype)
-        self._gradgrad_test_helper(device, dtype, op, op.get_method())
+    # Method gradgrad (and grad, see above) tests are disabled since they're
+    #   costly and redundant with function gradgrad (and grad) tests
+    # @dtypes(torch.double, torch.cdouble)
+    # @ops(op_db)
+    # def test_method_gradgrad(self, device, dtype, op):
+    #     self._skip_helper(op, dtype)
+    #     self._gradgrad_test_helper(device, dtype, op, op.get_method())
 
     @dtypes(torch.double, torch.cdouble)
     @ops(op_db)
@@ -152,9 +156,9 @@ class TestGradients(TestCase):
 
 # Tests operators for consistency between JIT and eager, also checks
 #   correctness of JIT specific alias schemas and intended
-#   autodifferentiation behavior. 
+#   autodifferentiation behavior.
 # Inherits from JitCommonTestCase instead of TestCase directly to share
-#   functionality with original test_jit.py method operator tests 
+#   functionality with original test_jit.py method operator tests
 class TestCommon(JitCommonTestCase):
     exact_dtype = True
 
@@ -179,7 +183,7 @@ class TestCommon(JitCommonTestCase):
 
     # Tests that the forward and backward passes of operations produce the
     #   same values for the cross-product of op variants (method, inplace)
-    #   against eager's gold standard op function variant 
+    #   against eager's gold standard op function variant
     @ops(op_db)
     def test_variant_consistency_eager(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
@@ -214,12 +218,18 @@ class TestCommon(JitCommonTestCase):
                 if (variant is inplace and op.promotes_integers_to_float and
                         dtype in (torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)):
                     try:
-                        variant_forward = variant(*(input.clone() for input in sample.input), *sample.args, **sample.kwargs)
+                        variant_forward = variant(*(clone_input_helper(input) for input in sample.input),
+                                                  *sample.args,
+                                                  **sample.kwargs)
                     except Exception as e:
                         continue
                     self.fail("Inplace operation on integer tensor that should be promoted to float didn't fail!")
                 # Compares variant's forward
-                variant_forward = variant(*(input.clone() for input in sample.input), *sample.args, **sample.kwargs)
+                # Note: copy the tensor-type inputs when testing inplace operation
+                variant_forward = variant(*(clone_input_helper(input) if variant is inplace else input
+                                            for input in sample.input),
+                                          *sample.args,
+                                          **sample.kwargs)
                 self.assertEqual(variant_forward, expected_forward)
 
                 # Compares variant's backward
