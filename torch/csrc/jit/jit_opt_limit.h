@@ -1,13 +1,12 @@
 #pragma once
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <memory>
 #include <string>
 #include <unordered_map>
 
 // `TorchScript` offers a simple optimization limit checker
-// that can be configured through environment variable `PYTORCH_OPT_LIMIT`.
+// that can be configured through environment variable `PYTORCH_JIT_OPT_LIMIT`.
 // The purpose is to limit how many optimization you can make per pass.
-// This is useful for debugging performance passes.
+// This is useful for debugging any passes.
 
 // Opt limit checker is enabled on a per file basis (hence per pass). For
 // example, in `constant_propagation.cpp`, `PYTORCH_JIT_OPT_LIMIT` should be set
@@ -23,7 +22,7 @@
 // You can call opt limiter by calling JIT_OPT_LIMIT(). It will return true if
 // we haven't reached the optimization limit yet. Otherwise, it will return
 // false. Typical usage:
-//
+
 // auto allowed = JIT_OPT_LIMIT();
 // if (!allowed) {
 //     GRAPH_DUMP(...); //supplied from jit_log
@@ -32,9 +31,6 @@
 
 namespace torch {
 namespace jit {
-
-struct Node;
-struct Graph;
 
 static std::unordered_map<std::string, int64_t> passes_to_current_counter;
 

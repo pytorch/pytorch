@@ -15,7 +15,6 @@ namespace torch {
 namespace jit {
 
 static int parseOptLimit(const std::string& opt_limit) {
-  // TODO bad code
   try {
     int64_t n = std::stoi(opt_limit);
     return n;

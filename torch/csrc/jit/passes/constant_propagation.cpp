@@ -12,7 +12,6 @@
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <torch/csrc/utils/memory.h>
-#include <string>
 
 namespace torch {
 namespace jit {
