@@ -1,7 +1,6 @@
 # Nodes represent a definition of a value in our graph of operators.
 from typing import TYPE_CHECKING, Union, Callable, Any, Tuple, List, Optional, Dict
 from .immutable_collections import immutable_dict, immutable_list
-from ._internal import _update_args_kwargs as _update_args_kwargs_DO_NOT_CALL
 import torch
 
 if TYPE_CHECKING:
@@ -249,7 +248,6 @@ def _update_args_kwargs_DO_NOT_CALL(self, new_args : Tuple['Argument', ...], new
 
     for new_use in self._input_nodes.keys():
         new_use.users.setdefault(self)
-
 
 def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
     """ Apply fn to each Node appearing arg. arg may be a list, tuple, slice, or dict with string keys. """
