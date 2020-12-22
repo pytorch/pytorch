@@ -3131,7 +3131,7 @@ between ``0`` and ``self.size(dim) - 1`` inclusive.
 
 .. warning::
 
-    When indices are not unique, the behaviour is non-deterministic (one of the
+    When indices are not unique, the behavior is non-deterministic (one of the
     values from ``src`` will be picked arbitrarily) and the gradient will be
     incorrect!
 
@@ -3156,8 +3156,8 @@ Reducing with the addition operation is the same as using
 Args:
     dim (int): the axis along which to index
     index (LongTensor): the indices of elements to scatter, can be either empty
-        or the same size of ``src``. When empty, the operation returns
-        ``self`` unchanged.
+        or of the same dimensionality as ``src``. When empty, the operation
+        returns ``self`` unchanged.
     src (Tensor or float): the source element(s) to scatter.
     reduce (str, optional): reduction operation to apply, can be either
         ``'add'`` or ``'multiply'``.
@@ -3215,15 +3215,11 @@ dimensions ``d``, and that ``index.size(d) <= self.size(d)`` for all dimensions
 Note:
     {forward_reproducibility_note}
 
-.. warning::
-
-    When indices are not unique, the gradient will be incorrect!
-
 Args:
     dim (int): the axis along which to index
-    index (LongTensor): the indices of elements to scatter and add,
-      can be either empty or the same size of src.
-      When empty, the operation returns identity.
+    index (LongTensor): the indices of elements to scatter and add, can be
+        either empty or of the same dimensionality as ``src``. When empty, the
+        operation returns ``self`` unchanged.
     src (Tensor): the source elements to scatter and add
 
 Example::
