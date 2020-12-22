@@ -6,7 +6,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, skipCPUIfNoLapack, skipCUDAIfNoMagma, onlyCPU)
-import collections
+from collections.abc import Sequence
 
 # Information for generating an alias test
 # NOTE: ending the alias_name with an underscore will interpret the test
@@ -173,7 +173,7 @@ class TestOpNormalization(JitTestCase):
 
 # Clone input tensor and sequence of Tensors
 def clone_inp(inp):
-    if isinstance(inp, collections.Sequence):
+    if isinstance(inp, Sequence):
         return list(map(torch.clone, inp))
     else:
         return inp.clone()
@@ -201,7 +201,7 @@ def create_alias_tests(cls):
                 arg_string = ', '.join((str(arg) for arg in info.get_args(device)))
                 script = fn_template.format(alias_name=info.alias_name, args=arg_string)
             else:
-                is_input_tensor_list = isinstance(info.get_input(device), collections.Sequence)
+                is_input_tensor_list = isinstance(info.get_input(device), Sequence)
                 # For sequence of Tensors, annotate the type to be List[Tensor]
                 if is_input_tensor_list:
                     fn_template = '''
