@@ -2140,27 +2140,6 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "does not match input device"):
                 torch.linalg.inv(a, out=out)
 
-
-    # TODO: implement tests using OpInfo
-    # This test is here insead of method_tests of common_methods_invocations.py because
-    # adding 'linalg.' functions there breaks some Facebook internal tests
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @skipCPUIfNoLapack
-    @dtypes(torch.float64, torch.complex128)
-    def test_inv_autograd(self, device, dtype):
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
-
-        for batches, n in itertools.product([[], [0], [4], [2, 3]], [0, 5]):
-            # using .to(device) instead of device=device because @xwang233 claims it's faster
-            a = random_fullrank_matrix_distinct_singular_value(n, *batches, dtype=dtype).to(device)
-            a.requires_grad_()
-
-            def func(a):
-                return torch.linalg.inv(a)
-
-            gradcheck(func, a)
-            gradgradcheck(func, a)
-
     def solve_test_helper(self, A_dims, b_dims, device, dtype):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
