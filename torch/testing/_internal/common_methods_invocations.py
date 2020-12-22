@@ -395,7 +395,7 @@ class SpectralFuncInfo(OpInfo):
             ]
 
 
-def sample_inputs_svd(op_info, device, dtype, requires_grad=False):
+def _sample_inputs_svd(op_info, device, dtype, requires_grad=False, is_linalg_svd=False):
     """
     This function generates input for torch.svd with distinct singular values so that autograd is always stable.
     Matrices of different size:
@@ -407,6 +407,14 @@ def sample_inputs_svd(op_info, device, dtype, requires_grad=False):
     It is needed for autograd checks, because backward of svd doesn't work for an arbitrary loss function.
     """
     from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+
+    # svd and linalg.svd returns V and V.T, respectively. So we need to slice
+    # along different dimensions when needed (this is used by
+    # test_cases2:wide_all and wide_all_batched below)
+    if is_linalg_svd:
+        def slice_V(v): return v[..., :(S - 2), :]
+    else:
+        def slice_V(v): return v[..., :, :(S - 2)]
 
     test_cases1 = (  # some=True (default)
         # loss functions for complex-valued svd have to be "gauge invariant",
@@ -437,11 +445,11 @@ def sample_inputs_svd(op_info, device, dtype, requires_grad=False):
     )
     test_cases2 = (  # some=False
         (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:(S - 2)],
-            lambda usv: (abs(usv[0]), usv[1], abs(usv[2][:, :(S - 2)]))),  # 'wide_all'
+            lambda usv: (abs(usv[0]), usv[1], abs(slice_V(usv[2])))),  # 'wide_all'
         (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:, :(S - 2)],
             lambda usv: (abs(usv[0][:, :(S - 2)]), usv[1], abs(usv[2]))),  # 'tall_all'
         (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype).to(device)[..., :(S - 2), :],
-            lambda usv: (abs(usv[0]), usv[1], abs(usv[2][..., :, :(S - 2)]))),  # 'wide_all_batched'
+            lambda usv: (abs(usv[0]), usv[1], abs(slice_V(usv[2])))),  # 'wide_all_batched'
         (random_fullrank_matrix_distinct_singular_value(S, 2, dtype=dtype).to(device)[..., :, :(S - 2)],
             lambda usv: (abs(usv[0][..., :, :(S - 2)]), usv[1], abs(usv[2]))),  # 'tall_all_batched'
     )
@@ -449,15 +457,27 @@ def sample_inputs_svd(op_info, device, dtype, requires_grad=False):
     out = []
     for a, out_fn in test_cases1:
         a.requires_grad = requires_grad
-        out.append(SampleInput(a, output_process_fn_grad=out_fn))
+        if is_linalg_svd:
+            kwargs = {'full_matrices': False}
+        else:
+            kwargs = {'some': True}
+        out.append(SampleInput(a, kwargs=kwargs, output_process_fn_grad=out_fn))
 
     for a, out_fn in test_cases2:
         a.requires_grad = requires_grad
-        kwargs = {'some': False}
+        if is_linalg_svd:
+            kwargs = {'full_matrices': True}
+        else:
+            kwargs = {'some': False}
         out.append(SampleInput(a, kwargs=kwargs, output_process_fn_grad=out_fn))
 
     return out
 
+def sample_inputs_svd(op_info, device, dtype, requires_grad=False):
+    return _sample_inputs_svd(op_info, device, dtype, requires_grad, is_linalg_svd=False)
+
+def sample_inputs_linalg_svd(op_info, device, dtype, requires_grad=False):
+    return _sample_inputs_svd(op_info, device, dtype, requires_grad, is_linalg_svd=True)
 
 def sample_inputs_pinverse(op_info, device, dtype, requires_grad=False):
     """
@@ -958,6 +978,19 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            supports_tensor_out=False,
            sample_inputs_func=sample_inputs_svd,
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           skips=(
+               # gradgrad checks are slow
+               SkipInfo('TestGradients', 'test_fn_gradgrad', active_if=(not TEST_WITH_SLOW)),
+               # cuda gradchecks are very slow
+               # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'))),
+    OpInfo('linalg_svd',
+           op=torch.linalg.svd,
+           dtypes=floating_and_complex_types(),
+           test_inplace_grad=False,
+           supports_tensor_out=False,
+           sample_inputs_func=sample_inputs_linalg_svd,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(
                # gradgrad checks are slow
