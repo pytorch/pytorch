@@ -405,10 +405,12 @@ TEST(IValueTest, EnumEquality) {
 
 TEST(IValueTest, isPtrType) {
   IValue tensor(at::rand({3, 4}));
+  IValue undefinedTensor((at::Tensor()));
   IValue integer(42);
   IValue str("hello");
 
   EXPECT_TRUE(tensor.isPtrType());
+  EXPECT_FALSE(undefinedTensor.isPtrType());
   EXPECT_FALSE(integer.isPtrType());
   EXPECT_TRUE(str.isPtrType());
 }
@@ -511,7 +513,7 @@ TEST(IValueTest, getSubValues) {
   objType->addAttribute("t1", tv1.type());
   objType->addAttribute("t2", tv2.type());
 
-  auto o = ivalue::Object::create(StrongTypePtr(0, objType), 2);
+  auto o = ivalue::Object::create(StrongTypePtr(nullptr, objType), 2);
   o->setSlot(0, tv1);
   o->setSlot(1, tv2);
 
