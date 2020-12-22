@@ -439,6 +439,8 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     for (Node* dnode : diff_nodes) {
       GRAPH_DEBUG("Optimizing diff node ", idx, " in ", *copy);
       if (!guardDifferentiableGraph(dnode)) {
+        // if we cannot guard (because of inputs without profiling information),
+        // we re-inline the subgraph and remove the differentiable node
         GRAPH_DEBUG("Could not guardDifferentiableGraph ", idx, " in ", *copy);
         idx++;
         continue;
@@ -448,6 +450,8 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
       Gradient gradient = differentiate(diff_graph);
       GRAPH_DEBUG("Forward graph:\n", *(gradient.f));
       GRAPH_DEBUG("Backward graph:\n", *(gradient.df));
+      // just like inside autograd.Functions, the forward of a differentiable
+      // graph is essentially in a torch.no_grad context.
       UpdateDifferentiableGraphRequiresGrad(gradient.f, false);
       GRAPH_DEBUG("After UpdateDifferentiableGraphRequiresGrad ", *gradient.f);
       runDiffGraphPasses(gradient.f);
