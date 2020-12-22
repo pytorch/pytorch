@@ -9,9 +9,6 @@ TH_API int THTensor_(equal)(THTensor *ta, THTensor *tb);
 
 #if !defined(TH_REAL_IS_HALF)
 
-TH_API void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src);
-TH_API void THTensor_(maskedCopyBool)(THTensor *tensor, THBoolTensor *mask, THTensor* src);
-
 TH_API ptrdiff_t THTensor_(numel)(THTensor *t);
 
 #if !defined(TH_REAL_IS_BOOL)
