@@ -2,20 +2,25 @@ import torch
 import uuid
 import sqlite3
 conn = sqlite3.connect('operators_stats.sqlite')
+
+# TODO: Add numel field
+
 # Using sqlite3 table:
 # CREATE TABLE usage (
-#   operator_name TEXT NOT NULL,
-#   operation_id TEXT NOT NULL,
-#   type TEXT NOT NULL,
-#   ord INT NOT NULL,
-#   dim INT NOT NULL,
-#   shape TEXT NOT NULL,
-#   strides TEXT NOT NULL,
-#   contiguous BOOL NOT NULL,
-#   channels_last BOOL NOT NULL,
-#   non_overlapping_and_dense BOOL NOT NULL,
-#   dtype TEXT NOT NULL,
-#   device TEXT NOT NULL);
+#       operator_name TEXT NOT NULL,
+#       operation_id TEXT NOT NULL,
+#       type TEXT NOT NULL,
+#       ord INT NOT NULL,
+#       dim INT NOT NULL,
+#       shape TEXT NOT NULL,
+#       strides TEXT NOT NULL,
+#       contiguous BOOL NOT NULL,
+#       channels_last BOOL NOT NULL,
+#       non_overlapping_and_dense BOOL NOT NULL,
+#       sparse BOOL NOT NULL,
+#       mkl_dnn BOOL NOT NULL,
+#       dtype TEXT NOT NULL,
+#       device TEXT NOT NULL);
 
 
 
@@ -81,15 +86,25 @@ def is_non_overlapping_and_dense(t):
         require_stride *= t.shape[idx]
     return True
 
+records = []
+
 def check_wrapper(fn):
     name = fn.__name__
+    global records
     def check_cl(*args, **kwargs):
         order = [0]
-        records = []
+        # records = []
         operation_id = str(uuid.uuid1())
         def callback(tensor, t):
-            channels_last = tensor.is_contiguous(memory_format=torch.channels_last)
-            non_overlapping_and_dense = is_non_overlapping_and_dense(tensor)
+            sparse = tensor.is_sparse
+            mkldnn = tensor.is_mkldnn
+            channels_last = not sparse and not mkldnn and tensor.is_contiguous(memory_format=torch.channels_last)
+            non_overlapping_and_dense = not sparse and not mkldnn and is_non_overlapping_and_dense(tensor)
+            contiguous = not sparse and not mkldnn and tensor.is_contiguous()
+            if sparse or mkldnn:
+                strides = '[]'
+            else:
+                strides = str(list(tensor.stride()))
             records.append(
                 (name,
                 operation_id,
@@ -97,39 +112,47 @@ def check_wrapper(fn):
                 order[0],
                 tensor.dim(),
                 str(list(tensor.shape)),
-                str(list(tensor.stride())),
-                tensor.is_contiguous(),
+                strides,
+                contiguous,
                 channels_last,
                 non_overlapping_and_dense,
+                sparse,
+                mkldnn,
                 str(tensor.dtype),
                 str(tensor.device),
                 )
             )
+            order[0] += 1
 
         result = fn(*args, **kwargs)
         traverse_all_tensors(args, callback, 'args')
         if 'out' in kwargs:
             traverse_all_tensors(kwargs['out'], callback, 'out')
         traverse_all_tensors(result, callback, 'res')
-
-        cursor = conn.cursor()
-        cursor.executemany('INSERT INTO usage VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', records)
-        #   operator_name TEXT NOT NULL,
-        #   operation_id TEXT NOT NULL,
-        #   type TEXT NOT NULL,
-        #   ord INT NOT NULL,
-        #   dim INT NOT NULL,
-        #   shape TEXT NOT NULL,
-        #   strides TEXT NOT NULL,
-        #   contiguous BOOL NOT NULL,
-        #   channels_last BOOL NOT NULL,
-        #   non_overlapping_and_dense BOOL NOT NULL,
-        #   dtype TEXT NOT NULL,
-        #   device TEXT NOT NULL);
-        conn.commit()
+        if len(records) > 1000:
+            flush()
         return result
     return check_cl
 
+def flush():
+    cursor = conn.cursor()
+    cursor.executemany('INSERT INTO usage VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)', records)
+    #   operator_name TEXT NOT NULL,
+    #   operation_id TEXT NOT NULL,
+    #   type TEXT NOT NULL,
+    #   ord INT NOT NULL,
+    #   dim INT NOT NULL,
+    #   shape TEXT NOT NULL,
+    #   strides TEXT NOT NULL,
+    #   contiguous BOOL NOT NULL,
+    #   channels_last BOOL NOT NULL,
+    #   non_overlapping_and_dense BOOL NOT NULL,
+    #   sparse BOOL NOT NULL,
+    #   mkl_dnn BOOL NOT NULL,
+    #   dtype TEXT NOT NULL,
+    #   device TEXT NOT NULL);
+    conn.commit()
+    records.clear()
 
 def attribute(m):
     for i in dir(m):
