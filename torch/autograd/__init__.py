@@ -101,7 +101,7 @@ def backward(
         in a user-specified CUDA stream context, see
         :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
 
-    Arguments:
+    Args:
         tensors (sequence of Tensor): Tensors of which the derivative will be
             computed.
         grad_tensors (sequence of (Tensor or None)): The "vector" in the Jacobian-vector
@@ -173,7 +173,7 @@ def grad(
         in a user-specified CUDA stream context, see
         :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
 
-    Arguments:
+    Args:
         outputs (sequence of Tensor): outputs of the differentiated function.
         inputs (sequence of Tensor): Inputs w.r.t. which the gradient will be
             returned (and not accumulated into ``.grad``).

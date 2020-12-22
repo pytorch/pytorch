@@ -111,7 +111,7 @@ def powerSGD_hook(
     one left multiplication and one right multiplication.
     For warm start, can take one such step at a time, and alternate between them.
 
-    Arguments:
+    Args:
         state (PowerSGDState): State information to configure the compression rate and support error feedback, warm start, etc.
         bucket (dist._GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
             Note that since DDP comm hook only supports single process single device mode at this time,
@@ -348,7 +348,7 @@ def batched_powerSGD_hook(
     one left multiplication and one right multiplication.
     For warm start, can take one such step at a time, and alternate between them.
 
-    Arguments:
+    Args:
         state (PowerSGDState): State information to configure the compression rate and support error feedback, warm start, etc.
         bucket (dist._GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
             Note that since DDP comm hook only supports single process single device mode at this time,
