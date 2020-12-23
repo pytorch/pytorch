@@ -16,6 +16,10 @@ from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_versi
 from numbers import Number
 from torch.autograd.gradcheck import gradcheck
 from typing import Dict, Any
+from torch.testing._internal.common_device_type import \
+    (instantiate_device_type_tests, ops)
+from torch.testing._internal.common_methods_invocations import \
+    (sparse_unary_ufuncs)
 
 if TEST_SCIPY:
     import scipy.sparse
@@ -3233,6 +3237,33 @@ class TestSparseOneOff(TestCase):
         with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a CUDA tensor, but got a CPU tensor"):
             x + sparse_y
 
+class TestSparseUnaryUfuncs(TestCase):
+    exact_dtype = True
+
+    @ops(sparse_unary_ufuncs)
+    def test_sparse_consistency(self, device, dtype, op):
+        unsupportedTypes = [torch.bfloat16, torch.cfloat, torch.cdouble]
+        if dtype in unsupportedTypes:
+            self.skipTest('Skipped! Unsupported dtypes for Sparse')
+
+        samples = op.sample_inputs(device, dtype)
+
+        if len(samples) == 0:
+            self.skipTest("Skipped! No sample inputs!")
+
+        sample = samples[0]
+
+        if len(sample.input) > 1:
+            self.skipTest("Skipped! Testing unary ops, one input is expected")
+        sample = sample.input[0]
+
+        expected = op(sample)
+        assert torch.is_tensor(expected)
+        output = op(sample.to_sparse())
+        assert torch.is_tensor(output)
+        self.assertEqual(output.to_dense(), expected)
+
+instantiate_device_type_tests(TestSparseUnaryUfuncs, globals())
 
 if __name__ == '__main__':
     run_tests()
