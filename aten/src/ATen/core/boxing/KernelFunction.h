@@ -47,9 +47,25 @@ TORCH_API void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHan
 class TORCH_API KernelFunction final {
 public:
   // This is how boxed kernels are actually stored
+  //
+  // Note [Plumbing Keys Through The Dispatcher]
+  // Benchmarks have shown that it is expensive for the dispatcher to read from thread-local storage (TLS)
+  // upon every dispatch call into order to compute which kernel to dispatch to.
+  //
+  // To mitigate this, we allow kernels to optionally take in the DispatchKeySet that the dispatcher computed,
+  // manually calculate the next kernel that should be dispatched to, and pass that information back to the dispatcher,
+  // thus bypassing the dispatcher overhead of reading from TLS to recompute keys.
+  // Kernels that opt into this convention must register themselves with Library::impl_withKeys() rather than Library::impl().
+  // See the kernels in VariableTypeEverything.cpp and TraceTypeEverything.cpp for examples.
+  //
+  // This changes the calling convention for the dispatcher. The dispatcher now expects all kernels that it stores
+  // to have a first argument of type DispatchKeySet. The mechanism for optionally passing that DispatchKeySet
+  // into the kernel lives in make_boxed_from_unboxed_functor.h.
+  // See Note [Plumbing Keys Through The Dispatcher 2] for details.
   using InternalBoxedKernelFunction = void(OperatorKernel*, const OperatorHandle&, DispatchKeySet, Stack*);
   // This is the public API for how boxed kernels are defined
   using BoxedKernelFunction = void(const OperatorHandle&, Stack*);
+  using BoxedKernelFunction_withKeys = void(const OperatorHandle&, DispatchKeySet, Stack*);
 
   KernelFunction();
 
@@ -110,6 +126,13 @@ public:
   static KernelFunction makeFromBoxedFunction();
 
   /**
+   * TODO: This will only be useful if we write a backend fallback that plumbs dispatch keys (currently there are none)
+   * See Note [Plumbing Keys Through The Dispatcher] for details.
+   */
+  template<BoxedKernelFunction_withKeys* func>
+  static KernelFunction makeFromBoxedFunction_withKeys();
+
+  /**
    * Create a KernelFunction from an unboxed functor.
    *
    * Example:
@@ -146,7 +169,6 @@ public:
   template<class KernelFunctor>
   static KernelFunction makeFromUnboxedOnlyFunctor(std::unique_ptr<OperatorKernel> kernelFunctor);
 
-  // TODO: temp
   template<class KernelFunctor>
   static KernelFunction makeFromUnboxedOnlyFunctor_withKeys(std::unique_ptr<OperatorKernel> kernelFunctor);
 
@@ -185,7 +207,6 @@ public:
   template<class FuncPtr>
   static KernelFunction makeFromUnboxedOnlyFunction(FuncPtr);
 
-  // TODO: temp
   template<class FuncPtr>
   static KernelFunction makeFromUnboxedOnlyFunction_withKeys(FuncPtr);
 
@@ -209,7 +230,6 @@ public:
   template<class FuncType>
   static KernelFunction makeFromUnboxedOnlyRuntimeFunction(FuncType* func);
 
-  // TODO: temp
   template<class FuncType>
   static KernelFunction makeFromUnboxedOnlyRuntimeFunction_withKeys(FuncType* func);
 
@@ -251,6 +271,9 @@ private:
 
   template<BoxedKernelFunction* func>
   static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack* stack);
+
+  template<BoxedKernelFunction_withKeys* func>
+  static void make_boxed_function_withKeys(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack* stack);
 
   void checkBoxedKernel(const OperatorHandle& opHandle) const;
 

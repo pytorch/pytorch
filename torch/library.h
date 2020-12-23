@@ -85,6 +85,7 @@ class TORCH_API CppFunction final {
   // TODO: This is morally the same thing as KernelRegistrationConfig, but it's
   // opaque to the user.
 
+  // See Note [Plumbing Keys Through The Dispatcher]
   enum class WithKeys { WITH_KEYS };
 
 public:
@@ -98,7 +99,6 @@ public:
     , debug_()
     {}
 
-  // TODO: temp
   template <typename Func>
   explicit CppFunction(WithKeys, Func* f, std::enable_if_t<c10::guts::is_function_type<Func>::value, std::nullptr_t> = nullptr)
     : func_(c10::KernelFunction::makeFromUnboxedRuntimeFunction_withKeys(f))
@@ -119,7 +119,6 @@ public:
     {}
 
   /// This overload accepts compile time function pointers, e.g., `CppFunction(TORCH_FN(add_impl))`
-  // TODO: temp
   template <typename FuncPtr>
   explicit CppFunction(WithKeys, FuncPtr f, std::enable_if_t<c10::is_compile_time_function_pointer<FuncPtr>::value, std::nullptr_t> = nullptr)
     : func_(c10::KernelFunction::makeFromUnboxedFunction_withKeys(f))
@@ -140,7 +139,6 @@ public:
     {}
 
   /// This overload accepts lambdas, e.g., `CppFunction([](const Tensor& self) { ... })`
-  // TODO: temp
   template <typename Lambda>
   explicit CppFunction(WithKeys, Lambda&& f, std::enable_if_t<c10::guts::is_functor<std::decay_t<Lambda>>::value, std::nullptr_t> = nullptr)
     : func_(c10::KernelFunction::makeFromUnboxedLambda_withKeys(std::forward<Lambda>(f)))
@@ -173,7 +171,6 @@ public:
     );
   }
 
-  // TODO: temp
   template <typename Func>
   static CppFunction makeUnboxedOnly_withKeys(Func* f) {
     // TODO: Eliminate the necessity for this function entirely.
@@ -241,7 +238,6 @@ private:
   template <typename Func>
   friend CppFunction dispatch(c10::DispatchKey, Func&&);
 
-  // TODO: temp
   template <typename Func>
   friend CppFunction dispatch_withKeys(c10::DispatchKey, Func&&);
 
@@ -277,7 +273,7 @@ inline CppFunction dispatch(c10::DispatchKey k, Func&& raw_f) {
   return f;
 }
 
-// TODO: temp
+// See Note [Plumbing Keys Through The Dispatcher]
 template <typename Func>
 inline CppFunction dispatch_withKeys(c10::DispatchKey k, Func&& raw_f) {
     // TODO: don't actually need this... use default move constructor
@@ -558,6 +554,7 @@ public:
     return _impl(name, std::move(f));
   }
 
+  // See Note [Plumbing Keys Through The Dispatcher]
   template <typename Name, typename Func>
   Library& impl_withKeys(Name name, Func&& raw_f) & {
     CppFunction f(CppFunction::WithKeys::WITH_KEYS, std::forward<Func>(raw_f));
@@ -595,7 +592,7 @@ public:
     return impl(name, CppFunction::makeUnboxedOnly(raw_f));
   }
 
-  // TODO: temp
+  // See Note [Plumbing Keys Through The Dispatcher]
   template <typename Name, typename Func>
   Library& impl_UNBOXED_withKeys(Name name, Func* raw_f) & {
     // TODO: Remove this overload once the makeUnboxedOnly incidence rate

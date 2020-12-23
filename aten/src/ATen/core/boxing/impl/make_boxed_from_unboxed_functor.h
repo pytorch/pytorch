@@ -328,7 +328,6 @@ namespace impl {
     ))...);
   }
 
-  // TODO: temp
   template<class Functor, bool AllowDeprecatedTypes, size_t... ivalue_arg_indices>
   std::decay_t<typename guts::infer_function_traits_t<Functor>::return_type>
   call_functor_with_args_from_stack_withKeys_(Functor* functor, DispatchKeySet dispatchKeySet, Stack* stack, std::index_sequence<ivalue_arg_indices...>) {
@@ -342,9 +341,10 @@ namespace impl {
      * TODO We should remove reference_cast once kernels don't take "Tensor&" arguments anymore
      */
     using ArgTypes = typename guts::infer_function_traits_t<Functor>::parameter_types;
-    // The DispatchKeySet lives as an argument in unboxed functions' schemas, but does NOT go on the stack
-    // explicitly passing in a dummy DispatchKeySet that will be ignored, and moving the stack arguments
+    // The DispatchKeySet lives as an argument in unboxed functions' schemas, but does NOT go on the stack.
+    // explicitly passing the DispatchKeySet argument to the unboxed function pointer, and moving the stack arguments
     // to positions 1 through n of the unboxed function schema
+    // See Note [Plumbing Keys Through The Dispatcher]
     return (*functor)(dispatchKeySet, reference_cast<guts::typelist::element_t<ivalue_arg_indices + 1, ArgTypes>>(
       ivalue_to_arg<std::decay_t<guts::typelist::element_t<ivalue_arg_indices + 1, ArgTypes>>, AllowDeprecatedTypes>::call(
         std::move(torch::jit::peek(*stack, ivalue_arg_indices, sizeof...(ivalue_arg_indices)))
@@ -358,7 +358,6 @@ namespace impl {
     return call_functor_with_args_from_stack_<Functor, AllowDeprecatedTypes>(functor, stack, std::make_index_sequence<num_ivalue_args>());
   }
 
-  // TODO: temp
   template<class Functor, bool AllowDeprecatedTypes>
   std::decay_t<typename guts::infer_function_traits_t<Functor>::return_type>
   call_functor_with_args_from_stack_withKeys(Functor* functor, DispatchKeySet dispatchKeySet, Stack* stack) {
@@ -422,7 +421,6 @@ namespace impl {
     }
   };
 
-  // TODO: temp
   template<class KernelFunctor, bool AllowDeprecatedTypes>
   struct make_boxed_from_unboxed_functor_withKeys final {
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value,
@@ -488,9 +486,14 @@ namespace impl {
 
     static ReturnType call(OperatorKernel* functor, DispatchKeySet, FirstParam firstArg, ParameterTypes... args) {
       KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
-      // We're explicitly taking in a dispatchKeySet and not forwarding it to the registered kernel.
-      // This functor is used by all kernels that do not expect to take in a DispatchKeySet,
-      // i.e. pretty much all manually written kernels
+      // Note [Plumbing Keys Through The Dispatcher 2]
+      // See Note [Plumbing Keys Through The Dispatcher] for the background.
+      // This functor explicitly takes in a dispatchKeySet and drops it on the floor- it does not forward it to the registered kernel.
+      //
+      // This is due to the calling convention within the dispatcher, which expects all registered kernels to have a first argument of type
+      // DispatchKeySet.
+      // This is not the case for pretty much all manually written kernels, however- this functor serves to separate the calling convention
+      // of the dispatcher with the calling convention of manually written kernels.
       return (*functor_)(std::forward<FirstParam>(firstArg), std::forward<ParameterTypes>(args)...);
     }
   };
@@ -498,38 +501,41 @@ namespace impl {
   template<class KernelFunctor>
   using wrap_kernel_functor_unboxed = wrap_kernel_functor_unboxed_<KernelFunctor, typename guts::infer_function_traits_t<KernelFunctor>::func_type>;
 
-  // TODO: temp
   // this version of wrap_kernel_functor_unboxed explicitly removes the first argument from the function type
   // and passes in a DispatchKeySet.
   template<class KernelFunctor, class OpSignature>
-  struct wrap_kernel_functor_unboxed_withKeys_ final {};
+  struct wrap_kernel_functor_unboxed_withKeys_ final {
+    static_assert(!std::is_same<OpSignature, OpSignature>::value,
+        "wrap_kernel_functor_unboxed_withKeys expects the first argument of the schema to be a DispatchKeySet. "
+        "However, the passed in kernel contains no arguments. If your kernel signature's first argument is not "
+        "a DispatchKeySet, you should register it with impl() instead of impl_withKeys().");
+  };
 
-  template<class KernelFunctor, class ReturnType, class... ParameterTypes>
-  struct wrap_kernel_functor_unboxed_withKeys_<KernelFunctor, ReturnType(ParameterTypes...)> final {
+  template<class KernelFunctor, class ReturnType, class FirstParam, class... ParameterTypes>
+  struct wrap_kernel_functor_unboxed_withKeys_<KernelFunctor, ReturnType(FirstParam, ParameterTypes...)> final {
     static_assert(
         std::is_same<
-            guts::typelist::typelist<DispatchKeySet>,
-            guts::typelist::take_t<typename guts::infer_function_traits_t<KernelFunctor>::parameter_types, 1>
+            DispatchKeySet,
+            FirstParam
         >::value,
       "wrap_kernel_functor_unboxed_withKeys expects the first argument of the schema to be a DispatchKeySet. "
       "If your kernel signature's first argument is not a DispatchKeySet, you should register it with impl() "
       " instead of impl_withKeys().");
     static_assert(std::is_same<ReturnType, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value,
       "Return type mismatch");
-    static_assert(std::is_same<guts::typelist::typelist<DispatchKeySet, ParameterTypes...>, typename guts::infer_function_traits_t<KernelFunctor>::parameter_types>::value,
+    static_assert(std::is_same<guts::typelist::typelist<FirstParam, ParameterTypes...>, typename guts::infer_function_traits_t<KernelFunctor>::parameter_types>::value,
       "Parameter types mismatch");
 
-    static ReturnType call(OperatorKernel* functor, DispatchKeySet dispatchKeySet, ParameterTypes... args) {
+    static ReturnType call(OperatorKernel* functor, FirstParam dispatchKeySet, ParameterTypes... args) {
       KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
       // We're explicitly taking in a dispatchKeySet and forwarding it to the registered kernel.
-      // TODO: better note.
-      // TODO: maybe don't bother with explicitly removing the first arg from ParameterTypes with infer_function_traits?
+      // See Note [Plumbing Keys Through The Dispatcher 2] for details.
       return (*functor_)(dispatchKeySet, std::forward<ParameterTypes>(args)...);
     }
   };
 
   template<class KernelFunctor>
-  using wrap_kernel_functor_unboxed_withKeys = wrap_kernel_functor_unboxed_withKeys_<KernelFunctor, typename guts::infer_function_traits_withKeys_t<KernelFunctor>::func_type>;
+  using wrap_kernel_functor_unboxed_withKeys = wrap_kernel_functor_unboxed_withKeys_<KernelFunctor, typename guts::infer_function_traits_t<KernelFunctor>::func_type>;
 } // namespace impl
 
 } // namespace c10

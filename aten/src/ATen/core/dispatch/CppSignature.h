@@ -25,7 +25,7 @@ public:
         return CppSignature(std::type_index(typeid(decayed_function_type)));
     }
 
-    // TODO: temp
+    // See Note [Plumbing Keys Through The Dispatcher]
     template<class FuncType>
     static CppSignature make_withKeys() {
         // Normalize functors, lambdas, function pointers, etc. into the plain function type

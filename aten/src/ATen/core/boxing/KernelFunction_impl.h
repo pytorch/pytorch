@@ -19,9 +19,15 @@ inline KernelFunction::KernelFunction(std::unique_ptr<OperatorKernel> functor, I
 
 template<KernelFunction::BoxedKernelFunction* func>
 inline void KernelFunction::make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack* stack) {
-    // TODO: a version of this that actually plumbs the dispatch key set?
-    // Only needed if we actually codegen some redispatching kernels that use this
+    // Note that we're dropping the DispatchKeySet argument.
+    // See Note [Plumbing Keys Through The Dispatcher 2] for details.
     func(opHandle, stack);
+}
+
+template<KernelFunction::BoxedKernelFunction_withKeys* func>
+inline void KernelFunction::make_boxed_function_withKeys(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet ks, Stack* stack) {
+    // See Note [Plumbing Keys Through The Dispatcher 2] for details.
+    func(opHandle, ks, stack);
 }
 
 inline bool KernelFunction::isValid() const {
@@ -60,7 +66,6 @@ inline Return KernelFunction::call(const OperatorHandle& opHandle, DispatchKeySe
         "Tried to call KernelFunction::call() on an uninitialized KernelFunction."
     );
 
-    // TODO: plumb TLS keys through boxed wrappers
     return impl::BoxedKernelWrapper<Return(Args...)>::call(
         boxed_kernel_func_,
         functor_.get(),
@@ -75,6 +80,15 @@ inline KernelFunction KernelFunction::makeFromBoxedFunction() {
     return KernelFunction(
         nullptr,  // no functor_ object
         &make_boxed_function<func>,
+        nullptr  // no unboxed function pointer
+    );
+}
+
+template<KernelFunction::BoxedKernelFunction_withKeys* func>
+inline KernelFunction KernelFunction::makeFromBoxedFunction_withKeys() {
+    return KernelFunction(
+        nullptr,  // no functor_ object
+        &make_boxed_function_withKeys<func>,
         nullptr  // no unboxed function pointer
     );
 }
@@ -115,7 +129,6 @@ inline KernelFunction KernelFunction::makeFromUnboxedFunctor(std::unique_ptr<Ope
     );
 }
 
-// TODO: temp
 template<bool AllowLegacyTypes, class KernelFunctor>
 inline KernelFunction KernelFunction::makeFromUnboxedFunctor_withKeys(std::unique_ptr<OperatorKernel> kernelFunctor) {
     static_assert(guts::is_functor<KernelFunctor>::value, "Tried to call KernelFunction::makeFromUnboxedFunctor<KernelFunctor> but the argument is not a functor.");
@@ -143,7 +156,6 @@ inline KernelFunction KernelFunction::makeFromUnboxedOnlyFunctor(std::unique_ptr
     );
 }
 
-// TODO: temp
 template<class KernelFunctor>
 inline KernelFunction KernelFunction::makeFromUnboxedOnlyFunctor_withKeys(std::unique_ptr<OperatorKernel> kernelFunctor) {
     // TODO We want to get rid of kernels that have only an unboxed function pointer.
@@ -177,7 +189,6 @@ inline KernelFunction KernelFunction::makeFromUnboxedFunction(FuncPtr func_ptr) 
 #endif
 }
 
-// TODO: temp
 template<class FuncPtr, bool AllowLegacyTypes>
 inline KernelFunction KernelFunction::makeFromUnboxedFunction_withKeys(FuncPtr func_ptr) {
     static_assert(is_compile_time_function_pointer<FuncPtr>::value, "Tried to call KernelFunction::makeFromUnboxedFunction with an invalid parameter. It must be a function pointer created with TORCH_FN.");
@@ -217,7 +228,6 @@ inline KernelFunction KernelFunction::makeFromUnboxedOnlyFunction(FuncPtr func_p
 #endif
 }
 
-// TODO: temp
 template<class FuncPtr>
 inline KernelFunction KernelFunction::makeFromUnboxedOnlyFunction_withKeys(FuncPtr func_ptr) {
     // TODO We want to get rid of kernels that have only an unboxed function pointer.
@@ -272,7 +282,6 @@ inline KernelFunction KernelFunction::makeFromUnboxedOnlyRuntimeFunction(FuncTyp
     );
 }
 
-// TODO: temp
 template<class FuncType>
 inline KernelFunction KernelFunction::makeFromUnboxedOnlyRuntimeFunction_withKeys(FuncType* func) {
     static_assert(guts::is_function_type<FuncType>::value, "Tried to call KernelFunction::makeFromUnboxedRuntimeFunction with a non-function type.");
@@ -301,7 +310,6 @@ inline std::enable_if_t<guts::is_stateless_lambda<std::decay_t<Lambda>>::value, 
 #endif
 }
 
-// TODO: temp
 template<bool AllowLegacyTypes, class Lambda>
 inline std::enable_if_t<guts::is_stateless_lambda<std::decay_t<Lambda>>::value, KernelFunction> KernelFunction::makeFromUnboxedLambda_withKeys(Lambda&& lambda) {
     static_assert(guts::is_functor<std::decay_t<Lambda>>::value, "Tried to call KernelFunction::makeFromUnboxedLambda with a non-lambda type.");
@@ -328,7 +336,6 @@ inline std::enable_if_t<!guts::is_stateless_lambda<std::decay_t<Lambda>>::value,
     );
 }
 
-// TODO: temp
 template<bool AllowLegacyTypes, class Lambda>
 inline std::enable_if_t<!guts::is_stateless_lambda<std::decay_t<Lambda>>::value, KernelFunction> KernelFunction::makeFromUnboxedLambda_withKeys(Lambda&& lambda) {
     static_assert(guts::is_functor<std::decay_t<Lambda>>::value, "Tried to call KernelFunction::makeFromUnboxedLambda with a non-lambda type.");

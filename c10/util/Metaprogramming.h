@@ -63,6 +63,7 @@ struct infer_function_traits<Result (Args...)> {
 template <typename T>
 using infer_function_traits_t = typename infer_function_traits<T>::type;
 
+// See Note [Plumbing Keys Through The Dispatcher]
 template <typename T>
 using infer_function_traits_withKeys_t = typename infer_function_traits<T>::type_withKeys;
 
