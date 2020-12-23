@@ -20,7 +20,7 @@ namespace caffe2 {
 // Containing blobs are owned by the workspace.
 // On read, we swap out the underlying data for the blob passed in for blobs
 
-class CAFFE2_API BlobsQueue : public std::enable_shared_from_this<BlobsQueue> {
+class TORCH_API BlobsQueue : public std::enable_shared_from_this<BlobsQueue> {
  public:
   BlobsQueue(
       Workspace* ws,

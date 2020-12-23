@@ -32,6 +32,7 @@ allow_list = [
     # Internal, profiler-specific ops
     ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
     ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
+<<<<<<< HEAD
     ("tensorexpr::Group", datetime.date(2020, 9, 9)),
     ("aten::append*", datetime.date(2020, 4, 15)),
     ("aten::_min", datetime.date(2020, 9, 9)),
@@ -188,9 +189,20 @@ allow_list = [
     ("aten::ifft", datetime.date(2021, 1, 31)),
     ("aten::irfft", datetime.date(2021, 1, 31)),
     ("aten::rfft", datetime.date(2021, 1, 31)),
+    ("aten::_cudnn_rnn_flatten_weight", datetime.date(2020, 12, 31)),
+    ("aten::_cudnn_rnn", datetime.date(2020, 12, 31)),
+    ("aten::_cudnn_rnn_backward", datetime.date(2020, 12, 31)),
     ("aten::quantile", datetime.date(2021, 1, 31)),
     ("aten::nanquantile", datetime.date(2021, 1, 31)),
     ("aten::_fft_with_size", datetime.date(2021, 1, 31)),
+    ("aten::thnn_conv_depthwise2d_backward", datetime.date(2021, 1, 31)),
+    ("aten::slow_conv3d_backward", datetime.date(2021, 1, 31)),
+    ("aten::thnn_conv2d_backward", datetime.date(2021, 1, 31)),
+    ("aten::slow_conv_transpose3d_backward", datetime.date(2021, 1, 31)),
+    ("aten::slow_conv_transpose2d_backward", datetime.date(2021, 1, 31)),
+    ("aten::set_", datetime.date(2021, 1, 31)),
+    ("aten::native_layer_norm", datetime.date(2021, 1, 31)),
+    ("aten::native_layer_norm_backward", datetime.date(2021, 1, 31)),
 ]
 
 def allow_listed(schema, allow_list):

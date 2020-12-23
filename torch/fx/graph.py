@@ -247,6 +247,8 @@ class Graph:
         assert op in ('call_function', 'call_method', 'get_attr', 'call_module', 'placeholder', 'output')
         args = () if args is None else args
         kwargs = {} if kwargs is None else kwargs
+        assert isinstance(args, tuple), "args must be a tuple"
+        assert isinstance(kwargs, dict), "kwargs must be a dict"
         unique_name = self._create_unique_name(name if name is not None else self._target_to_str(target))
         n = Node(self, unique_name, op, target, args, kwargs, type_expr)
         self._insert(n)
@@ -415,7 +417,7 @@ class Graph:
                     type_expr: Optional[Any] = None) -> Node:
         """
         Insert a ``call_method`` ``Node`` into the ``Graph``. A ``call_method`` node
-        represents a call to a given method on the 0th element of `args.
+        represents a call to a given method on the 0th element of ``args``.
 
         Args:
 
@@ -617,6 +619,8 @@ class Graph:
             not used in the remainder of the code are freed and the memory usage
             of the code is optimal.
             """
+            if user.op == 'placeholder':
+                return
             if user.op == 'output':
                 body.append('\n')
                 return
@@ -635,7 +639,7 @@ class Graph:
                 free_vars.append(f'{node.target}{maybe_type_annotation}{maybe_default_arg}')
                 raw_name = node.target.replace('*', '')
                 if raw_name != node.name:
-                    body.append(f'{node.name} = {raw_name}')
+                    body.append(f'{node.name} = {raw_name}\n')
                 return
             elif node.op == 'call_method':
                 assert isinstance(node.target, str)
@@ -756,9 +760,9 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation}:
         """
         Runs various checks on this Graph to make sure it is well-formed. In
         particular:
-            - Checks Nodes have correct ownership (owned by this graph)
-            - Checks Nodes appear in topological order
-            - If ``root`` is provided, checks that targets exist in ``root``
+        - Checks Nodes have correct ownership (owned by this graph)
+        - Checks Nodes appear in topological order
+        - If ``root`` is provided, checks that targets exist in ``root``
 
         Args:
 
