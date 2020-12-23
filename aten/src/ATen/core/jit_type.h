@@ -3,7 +3,6 @@
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
-#include <ATen/core/ivalue.h>
 #include <ATen/core/qualified_name.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/Optional.h>
@@ -17,11 +16,13 @@ struct ClassType;
 namespace torch {
 namespace jit {
 struct CompilationUnit;
+struct Function;
 } // namespace jit
 } // namespace torch
 
 namespace c10 {
 
+struct IValue;
 struct FunctionSchema;
 struct NamedType;
 using OptNameList = c10::optional<std::vector<std::string>>;
@@ -1747,6 +1748,12 @@ TORCH_API c10::optional<TypePtr> unifyTypeList(
     at::ArrayRef<TypePtr> elements,
     std::ostream& why_not);
 
+}
+
+#include <ATen/core/ivalue.h>
+
+namespace c10 {
+
 namespace detail {
 template <typename T>
 struct getTypePtr_ final {
@@ -2546,23 +2553,6 @@ private:
   AnyClassType()
   : Type(TypeKind::AnyClassType) {}
 };
-
-inline bool IValue::isDoubleList() const {
-  // note: avoids calling type() to avoid extra referencing counting for the returned type.
-  return isList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->kind() == FloatType::Kind;
-}
-
-inline bool IValue::isTensorList() const {
-  return isList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->kind() == TensorType::Kind;
-}
-
-inline bool IValue::isIntList() const {
-  return isList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->kind() == IntType::Kind;
-}
-
-inline bool IValue::isBoolList() const {
-  return isList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->kind() == BoolType::Kind;
-}
 
 template<>
 inline std::shared_ptr<NamedType> Type::cast() {
