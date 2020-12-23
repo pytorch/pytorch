@@ -254,6 +254,7 @@ class UnaryUfuncInfo(OpInfo):
                  handles_extremals=True,  # whether the op correctly handles extremal values (like inf)
                  handles_complex_extremals=True,  # whether the op correct handles complex extremals (like inf -infj)
                  supports_complex_to_float=False,  # op supports casting from complex input to real output safely eg. angle
+                 supports_dtype_kwarg=False,  # whether the op supports dtype argument to control computation type
                  sample_inputs_func=sample_inputs_unary,
                  **kwargs):
         super(UnaryUfuncInfo, self).__init__(name,
@@ -269,6 +270,7 @@ class UnaryUfuncInfo(OpInfo):
         self.handles_extremals = handles_extremals
         self.handles_complex_extremals = handles_complex_extremals
         self.supports_complex_to_float = supports_complex_to_float
+        self.supports_dtype_kwarg = supports_dtype_kwarg
 
         # Epsilon to ensure grad and gradgrad checks don't test values
         #   outside a function's domain.
@@ -867,6 +869,7 @@ op_db: List[OpInfo] = [
                    promotes_integers_to_float=True,
                    test_inplace_grad=False,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
+                   supports_dtype_kwarg=True,
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),

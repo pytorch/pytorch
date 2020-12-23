@@ -450,6 +450,40 @@ class TestUnaryUfuncs(TestCase):
             else:
                 self._test_out_arg(op, input, out)
 
+    @ops(filter(lambda op: op.supports_dtype_kwarg, unary_ufuncs), dtypes=OpDTypes.supported)
+    def test_dtype_arg(self, device, dtype, op):
+        input = make_tensor((32, 32), dtype=dtype, device=device,
+                            low=op.domain[0], high=op.domain[1])
+
+        for computation_dtype in all_types_and_complex_and(torch.bool, torch.half):
+            # As NumPy doesn't have a bfloat16 equivalent.
+            if torch.bfloat16 in [computation_dtype, input.dtype]:
+                continue
+
+            np_computation_dtype = torch_to_numpy_dtype_dict[computation_dtype]
+            try:
+                expected = op.ref(input.numpy(), dtype=np_computation_dtype)
+            except TypeError:
+                expected = None
+
+            if expected is None:
+                with self.assertRaisesRegex(RuntimeError, "can't be cast to the desired output type"):
+                    op(input, dtype=computation_dtype)
+            else:
+                actual = op(input, dtype=computation_dtype)
+
+                # TODO: Investigate
+                rtol, atol = None, None
+                if input.dtype in [torch.float32, torch.float64] and computation_dtype == torch.float16:
+                    rtol = 1e-2
+                    atol = 1e-2
+
+                if input.dtype in [torch.complex128] and computation_dtype == torch.complex64:
+                    rtol = 1e-3
+                    atol = 1e-4
+
+                self.assertEqual(actual, expected, rtol=rtol, atol=atol)
+
     @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool] +
               torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
     def test_nan_to_num(self, device, dtype):
