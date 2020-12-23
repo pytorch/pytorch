@@ -234,9 +234,37 @@ def insert_observer_for_input_arg_of_observed_node(
 
 # A dictionary for querying the weight index for a given op
 WEIGHT_INDEX_DICT = {
+    torch.nn.functional.conv1d : [1],
     torch.nn.functional.conv2d : [1],
+    torch.nn.functional.conv3d : [1],
     torch.nn.functional.linear : [1],
 }
+
+def node_arg_is_weight(node: Node, arg: Any) -> bool:
+    if isinstance(node, Node) and node.op == 'call_function' and \
+            node.target in WEIGHT_INDEX_DICT:
+        for i, node_arg in enumerate(node.args):
+            if arg is node_arg and i in \
+                    WEIGHT_INDEX_DICT[node.target]:  # type: ignore
+                return True
+    return False
+
+# A dictionary for querying the weight index for a given op
+# TODO(future PR): handle linear
+BIAS_INDEX_DICT = {
+    torch.nn.functional.conv1d : [2],
+    torch.nn.functional.conv2d : [2],
+    torch.nn.functional.conv3d : [2],
+}
+
+def node_arg_is_bias(node: Node, arg: Any) -> bool:
+    if isinstance(node, Node) and node.op == 'call_function' and \
+            node.target in BIAS_INDEX_DICT:
+        for i, node_arg in enumerate(node.args):
+            if arg is node_arg and i in \
+                    BIAS_INDEX_DICT[node.target]:  # type: ignore
+                return True
+    return False
 
 # weight prepacking ops
 WEIGHT_PREPACK_OPS = {
@@ -956,15 +984,16 @@ class Quantizer:
 
         def visit(node, matched_pattern, qconfig):
             def visit_arg(arg):
-                is_weight = False
-                if isinstance(node, Node) and node.op == 'call_function' and \
-                        node.target in WEIGHT_INDEX_DICT:
-                    for i, node_arg in enumerate(node.args):
-                        if arg is node_arg and i in \
-                                WEIGHT_INDEX_DICT[node.target]:  # type: ignore
-                            is_weight = True
-                if qconfig is not None and \
-                   (activation_is_statically_quantized(qconfig) or is_weight):
+                is_weight = node_arg_is_weight(node, arg)
+                is_bias = node_arg_is_bias(node, arg)
+                is_activation = not (is_weight or is_bias)
+                should_add_handler = qconfig is not None and (
+                    (is_activation and
+                        activation_is_statically_quantized(qconfig)) or
+                    (is_weight and weight_is_statically_quantized(qconfig))
+                )
+
+                if should_add_handler:
                     act_post_process_ctr = qconfig.weight if is_weight else \
                         qconfig.activation
                     # overwrite the constructor from qconfig
