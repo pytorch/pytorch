@@ -82,6 +82,65 @@ Examples::
     True
 """)
 
+inv = _add_docstr(_linalg.linalg_inv, r"""
+linalg.inv(input, *, out=None) -> Tensor
+
+This function computes the "multiplicative inverse" matrix of a square matrix, or batch of such matrices, :attr:`input`.
+The result satisfies the relation
+
+``matmul(inv(input), input) = matmul(input, inv(input)) = eye(input.shape[0]).expand_as(input)``.
+
+Supports input of float, double, cfloat and cdouble data types.
+
+.. note:: If :attr:`input` is a non-invertible matrix or non-square matrix, or batch with at least one such matrix,
+          then a RuntimeError will be thrown.
+
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+Args:
+    input (Tensor): the square :math:`n \times n` matrix or the batch
+                    of such matrices of size :math:`(*, n, n)` where `*` is one or more batch dimensions.
+
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if None. Default: None
+
+Examples::
+
+    >>> x = torch.rand(4, 4)
+    >>> y = torch.linalg.inv(x)
+    >>> z = torch.mm(x, y)
+    >>> z
+    tensor([[ 1.0000, -0.0000, -0.0000,  0.0000],
+            [ 0.0000,  1.0000,  0.0000,  0.0000],
+            [ 0.0000,  0.0000,  1.0000,  0.0000],
+            [ 0.0000, -0.0000, -0.0000,  1.0000]])
+    >>> torch.max(torch.abs(z - torch.eye(4))) # Max non-zero
+    tensor(1.1921e-07)
+
+    >>> # Batched inverse example
+    >>> x = torch.randn(2, 3, 4, 4)
+    >>> y = torch.linalg.inv(x)
+    >>> z = torch.matmul(x, y)
+    >>> torch.max(torch.abs(z - torch.eye(4).expand_as(x))) # Max non-zero
+    tensor(1.9073e-06)
+
+    >>> x = torch.rand(4, 4, dtype=torch.cdouble)
+    >>> y = torch.linalg.inv(x)
+    >>> z = torch.mm(x, y)
+    >>> z
+    tensor([[ 1.0000e+00+0.0000e+00j, -1.3878e-16+3.4694e-16j,
+            5.5511e-17-1.1102e-16j,  0.0000e+00-1.6653e-16j],
+            [ 5.5511e-16-1.6653e-16j,  1.0000e+00+6.9389e-17j,
+            2.2204e-16-1.1102e-16j, -2.2204e-16+1.1102e-16j],
+            [ 3.8858e-16-1.2490e-16j,  2.7756e-17+3.4694e-17j,
+            1.0000e+00+0.0000e+00j, -4.4409e-16+5.5511e-17j],
+            [ 4.4409e-16+5.5511e-16j, -3.8858e-16+1.8041e-16j,
+            2.2204e-16+0.0000e+00j,  1.0000e+00-3.4694e-16j]],
+        dtype=torch.complex128)
+    >>> torch.max(torch.abs(z - torch.eye(4, dtype=torch.cdouble))) # Max non-zero
+    tensor(7.5107e-16, dtype=torch.float64)
+""")
+
 det = _add_docstr(_linalg.linalg_det, r"""
 linalg.det(input) -> Tensor
 
@@ -486,6 +545,54 @@ Examples::
     tensor([ 5.9175, 48.4590,  5.6443])
     >>> LA.cond(a, 1)
     >>> tensor([ 11.6734+0.j, 105.1037+0.j,  10.1978+0.j])
+""")
+
+solve = _add_docstr(_linalg.linalg_solve, r"""
+linalg.solve(input, other, *, out=None) -> Tensor
+
+Computes the solution ``x`` to the matrix equation ``matmul(input, x) = other``
+with a square matrix, or batches of such matrices, :attr:`input` and one or more right-hand side vectors :attr:`other`.
+If :attr:`input` is batched and :attr:`other` is not, then :attr:`other` is broadcast
+to have the same batch dimensions as :attr:`input`.
+The resulting tensor has the same shape as the (possibly broadcast) :attr:`other`.
+
+Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` dtypes.
+
+.. note:: If :attr:`input` is a non-square or non-invertible matrix, or a batch containing non-square matrices
+          or one or more non-invertible matrices, then a RuntimeError will be thrown.
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+Args:
+    input (Tensor): the square :math:`n \times n` matrix or the batch
+                    of such matrices of size :math:`(*, n, n)` where ``*`` is one or more batch dimensions.
+    other (Tensor): right-hand side tensor of shape :math:`(*, n)` or :math:`(*, n, k)`,
+                    where :math:`k` is the number of right-hand side vectors.
+
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
+
+Examples::
+
+    >>> A = torch.eye(3)
+    >>> b = torch.randn(3)
+    >>> x = torch.linalg.solve(A, b)
+    >>> torch.allclose(A @ x, b)
+    True
+
+Batched input::
+
+    >>> A = torch.randn(2, 3, 3)
+    >>> b = torch.randn(3, 1)
+    >>> x = torch.linalg.solve(A, b)
+    >>> torch.allclose(A @ x, b)
+    True
+    >>> b = torch.rand(3) # b is broadcast internally to (*A.shape[:-2], 3)
+    >>> x = torch.linalg.solve(A, b)
+    >>> x.shape
+    torch.Size([2, 3])
+    >>> Ax = A @ x.unsqueeze(-1)
+    >>> torch.allclose(Ax, b.unsqueeze(-1).expand_as(Ax))
+    True
 """)
 
 tensorinv = _add_docstr(_linalg.linalg_tensorinv, r"""

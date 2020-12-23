@@ -60,6 +60,14 @@ inline Tensor& matrix_rank_out(Tensor& result, const Tensor input, optional<doub
   return torch::linalg_matrix_rank_out(result, input, tol, hermitian);
 }
 
+inline Tensor solve(const Tensor& input, const Tensor& other) {
+  return torch::linalg_solve(input, other);
+}
+
+inline Tensor& solve_out(Tensor& result, const Tensor& input, const Tensor& other) {
+  return torch::linalg_solve_out(result, input, other);
+}
+
 inline Tensor tensorinv(const Tensor& self, int64_t ind) {
   return torch::linalg_tensorinv(self, ind);
 }
@@ -74,6 +82,14 @@ inline Tensor tensorsolve(const Tensor& self, const Tensor& other, optional<IntA
 
 inline Tensor& tensorsolve_out(Tensor& result, const Tensor& self, const Tensor& other, optional<IntArrayRef> dims) {
   return torch::linalg_tensorsolve_out(result, self, other, dims);
+}
+
+inline Tensor inv(const Tensor& input) {
+  return torch::linalg_inv(input);
+}
+
+inline Tensor& inv_out(Tensor& result, const Tensor& input) {
+  return torch::linalg_inv_out(result, input);
 }
 
 } // namespace detail
@@ -150,6 +166,17 @@ inline Tensor& matrix_rank_out(Tensor& result, const Tensor input, optional<doub
   return detail::matrix_rank_out(result, input, tol, hermitian);
 }
 
+/// Computes a tensor `x` such that `matmul(input, x) = other`.
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.solve
+inline Tensor solve(const Tensor& input, const Tensor& other) {
+  return detail::solve(input, other);
+}
+
+inline Tensor& solve_out(Tensor& result, const Tensor& input, const Tensor& other) {
+  return detail::solve_out(result, input, other);
+}
+
 /// Computes the inverse of a tensor
 ///
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.tensorinv
@@ -184,6 +211,17 @@ inline Tensor tensorsolve(const Tensor& input, const Tensor& other, optional<Int
 
 inline Tensor& tensorsolve_out(Tensor& result, const Tensor& input, const Tensor& other, optional<IntArrayRef> dims) {
   return detail::tensorsolve_out(result, input, other, dims);
+}
+
+/// Computes a tensor `inverse_input` such that `dot(input, inverse_input) = eye(input.size(0))`.
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.inv
+inline Tensor inv(const Tensor& input) {
+  return detail::inv(input);
+}
+
+inline Tensor& inv_out(Tensor& result, const Tensor& input) {
+  return detail::inv_out(result, input);
 }
 
 }} // torch::linalg

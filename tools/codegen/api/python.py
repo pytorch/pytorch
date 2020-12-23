@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional, Union, Sequence, Set, List, Tuple, Dict
+from typing import Optional, Union, Sequence, Set, List, Dict, Tuple
 
 from tools.codegen.api.types import *
 import tools.codegen.api.cpp as cpp
@@ -870,11 +870,11 @@ def argument_type_str_pyi(t: Type) -> str:
 
 def dispatch_lambda_args(ps: PythonSignature, f: NativeFunction) -> Tuple[DispatchLambdaArgument, ...]:
     # Start with cpp arguments - dispatch lambda signature always include 'self'
-    cpp_args: Sequence[CppArgument] = _cpp_signature(f, method=False).arguments()
+    cpp_args: Sequence[Binding] = _cpp_signature(f, method=False).arguments()
 
     # Special reorder logic for deprecated python signature
     if isinstance(ps, PythonSignatureDeprecated):
-        m: Dict[str, CppArgument] = dict((a.name, a) for a in cpp_args)
+        m: Dict[str, Binding] = dict((a.name, a) for a in cpp_args)
         # reorder according to the deprecated signature
         # ignore 'out' argument when binding to non-output function.
         ordered_args = filter(lambda n: n != 'out' or f.func.is_out_fn(),
@@ -884,7 +884,7 @@ def dispatch_lambda_args(ps: PythonSignature, f: NativeFunction) -> Tuple[Dispat
     out_args: Set[str] = set(a.name for a in f.func.arguments.out)
 
     # Convert from cpp argument to lambda argument
-    def dispatch_lambda_arg(cpp_arg: CppArgument) -> DispatchLambdaArgument:
+    def dispatch_lambda_arg(cpp_arg: Binding) -> DispatchLambdaArgument:
         type_str = cpp_arg.type
         is_out_arg = cpp_arg.name in out_args
         if ps.method and cpp_arg.name == 'self':
@@ -970,7 +970,7 @@ def cpp_dispatch_target(f: NativeFunction) -> str:
 def cpp_dispatch_exprs(f: NativeFunction, *,
                        python_signature: Optional[PythonSignature] = None,
                        ) -> Tuple[str, ...]:
-    cpp_args: Sequence[CppArgument] = _cpp_signature(f, method=False).arguments()
+    cpp_args: Sequence[Binding] = _cpp_signature(f, method=False).arguments()
 
     exprs: Tuple[str, ...] = tuple()
     if not isinstance(python_signature, PythonSignatureDeprecated):

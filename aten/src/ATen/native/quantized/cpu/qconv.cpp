@@ -746,7 +746,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
       run_status == pytorch_qnnp_status_success,
       "failed to run quantized::conv2d (qnnpack) operator");
 
-  return output;
+  return output.contiguous(act.suggest_memory_format());
 }
 
 template at::Tensor PackedConvWeightsQnnp<2>::apply(

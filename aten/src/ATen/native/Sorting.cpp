@@ -6,6 +6,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/Sorting.h>
 #include <ATen/native/SortingUtils.h>
+#include <ATen/MemoryOverlap.h>
 
 #include <utility>
 
@@ -251,6 +252,8 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
       k > 0 && k <= (self.dim() > 0 ? self.size(dim) : 1),
       "selected index k out of range");
 
+  at::assert_no_overlap(self, values);
+
   _reduction_with_indices_allocate_or_resize_output(
       values, indices, self, dim_, keepdim);
   if (self.dim() == 0 && self.numel() == 1) {
@@ -444,7 +447,7 @@ Tensor& quantile_out(
   TORCH_WARN_ONCE(
       "torch.quantile(input, q, dim=None, keepdim=False, *, out=None) is deprecated "
       "in favor of the new signature torch.quantile(input, q, dim=None, interpolation='linear', "
-      "keepdim=False, *, out=None) with interpolation parameter.");
+      "keepdim=False, *, out=None) with the interpolation parameter.");
   quantile_impl(
       out,
       self,
@@ -465,7 +468,7 @@ Tensor& quantile_out(
   TORCH_WARN_ONCE(
       "torch.quantile(input, q, dim=None, keepdim=False, *, out=None) is deprecated "
       "in favor of the new signature torch.quantile(input, q, dim=None, interpolation='linear', "
-      "keepdim=False, *, out=None) with interpolation parameter.");
+      "keepdim=False, *, out=None) with the interpolation parameter.");
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::quantile_out(
@@ -485,7 +488,7 @@ Tensor quantile(
   TORCH_WARN_ONCE(
       "torch.quantile(input, q, dim=None, keepdim=False) is deprecated "
       "in favor of the new signature torch.quantile(input, q, dim=None, interpolation='linear', "
-      "keepdim=False) with interpolation parameter.");
+      "keepdim=False) with the interpolation parameter.");
   Tensor out = at::empty({0}, self.options());
   quantile_impl(
       out,
@@ -506,7 +509,7 @@ Tensor quantile(
   TORCH_WARN_ONCE(
       "torch.quantile(input, q, dim=None, keepdim=False) is deprecated "
       "in favor of the new signature torch.quantile(input, q, dim=None, interpolation='linear', "
-      "keepdim=False) with interpolation parameter.");
+      "keepdim=False) with the interpolation parameter.");
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::quantile(
@@ -526,7 +529,7 @@ Tensor& nanquantile_out(
   TORCH_WARN_ONCE(
       "torch.nanquantile(input, q, dim=None, keepdim=False, *, out=None) is deprecated "
       "in favor of the new signature torch.nanquantile(input, q, dim=None, interpolation='linear', "
-      "keepdim=False, *, out=None) with interpolation parameter.");
+      "keepdim=False, *, out=None) with the interpolation parameter.");
   quantile_impl(
       out,
       self,
@@ -547,7 +550,7 @@ Tensor& nanquantile_out(
   TORCH_WARN_ONCE(
       "torch.nanquantile(input, q, dim=None, keepdim=False, *, out=None) is deprecated "
       "in favor of the new signature torch.nanquantile(input, q, dim=None, interpolation='linear', "
-      "keepdim=False, *, out=None) with interpolation parameter.");
+      "keepdim=False, *, out=None) with the interpolation parameter.");
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::nanquantile_out(
@@ -567,7 +570,7 @@ Tensor nanquantile(
   TORCH_WARN_ONCE(
       "torch.nanquantile(input, q, dim=None, keepdim=False) is deprecated "
       "in favor of the new signature torch.nanquantile(input, q, dim=None, interpolation='linear', "
-      "keepdim=False) with interpolation parameter.");
+      "keepdim=False) with the interpolation parameter.");
   Tensor out = at::empty({0}, self.options());
   quantile_impl(
       out,
@@ -588,7 +591,7 @@ Tensor nanquantile(
   TORCH_WARN_ONCE(
       "torch.nanquantile(input, q, dim=None, keepdim=False) is deprecated "
       "in favor of the new signature torch.nanquantile(input, q, dim=None, interpolation='linear', "
-      "keepdim=False) with interpolation parameter.");
+      "keepdim=False) with the interpolation parameter.");
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::nanquantile(

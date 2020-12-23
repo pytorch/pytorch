@@ -769,6 +769,13 @@ bitwise_xor_() -> Tensor
 In-place version of :meth:`~Tensor.bitwise_xor`
 """)
 
+add_docstr_all('broadcast_to',
+               r"""
+broadcast_to(shape) -> Tensor
+
+See :func:`torch.broadcast_to`.
+""")
+
 add_docstr_all('logical_and',
                r"""
 logical_and() -> Tensor
@@ -2751,14 +2758,14 @@ Returns the quantization scheme of a given QTensor.
 
 add_docstr_all('quantile',
                r"""
-quantile(q, dim=None, keepdim=False) -> Tensor
+quantile(q, dim=None, interpolation='linear', keepdim=False) -> Tensor
 
 See :func:`torch.quantile`
 """)
 
 add_docstr_all('nanquantile',
                r"""
-nanquantile(q, dim=None, keepdim=False) -> Tensor
+nanquantile(q, dim=None, interpolation='linear', keepdim=False) -> Tensor
 
 See :func:`torch.nanquantile`
 """)
@@ -3338,6 +3345,20 @@ add_docstr_all('sin_',
 sin_() -> Tensor
 
 In-place version of :meth:`~Tensor.sin`
+""")
+
+add_docstr_all('sinc',
+               r"""
+sinc() -> Tensor
+
+See :func:`torch.sinc`
+""")
+
+add_docstr_all('sinc_',
+               r"""
+sinc_() -> Tensor
+
+In-place version of :meth:`~Tensor.sinc`
 """)
 
 add_docstr_all('sinh',
@@ -4449,6 +4470,20 @@ add_docstr_all('masked_scatter',
 masked_scatter(mask, tensor) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.masked_scatter_`
+""")
+
+add_docstr_all('xlogy',
+               r"""
+xlogy(other) -> Tensor
+
+See :func:`torch.xlogy`
+""")
+
+add_docstr_all('xlogy_',
+               r"""
+xlogy_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.xlogy`
 """)
 
 add_docstr_all('masked_fill',

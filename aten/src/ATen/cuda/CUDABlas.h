@@ -175,7 +175,7 @@ void getrfBatched<c10::complex<float>>(CUDABLAS_GETRF_ARGTYPES(c10::complex<floa
 
 
 #define CUDABLAS_GETRI_ARGTYPES(Dtype)  \
-  int n, Dtype** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize, Dtype** dC_array
+  int n, Dtype** dA_array, int ldda, int* ipiv_array, Dtype** dC_array, int lddc, int* info_array, int batchsize
 
 template<class Dtype>
 void getriBatched(CUDABLAS_GETRI_ARGTYPES(Dtype)) {
