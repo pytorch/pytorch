@@ -297,6 +297,44 @@ class PoissonNLLLoss(_Loss):
                                   eps=self.eps, reduction=self.reduction)
 
 
+class GaussianNLLLoss(_Loss):
+    r"""Negative log likelihood loss with Gaussian distribution
+
+    For targets modelled as having Gaussian distribution:
+    .. math::
+    target \sim \mathcal{N}(input, var)
+
+    the full loss can be described as:
+    .. math::
+    \text{loss}[i] = \frac{1}{2}\sum_{j=1}^D \left(\log(\text{var}[i, j] + \epsilon) + \frac{\left(\text{input}[i,j] - \text{target}[i,j]\right)^2}{\text{var}[i,j]} \right) + \frac{D}{2}\log(2\pi)
+
+    where the input, target and variance tensors have shape (N, D). The homoscedastic case applies when the variance tensor has shape (N, 1) instead:
+    .. math::
+    \text{loss}[i] = \frac{D}{2}\log(\text{var}[i] + \epsilon) + \frac{1}{2}\sum_{j=1}^D \left(\frac{\left(\text{input}[i,j] - \text{target}[i,j]\right)^2}{\text{var}[i]} \right) + \frac{D}{2}\log(2\pi)
+
+
+    Examples::
+
+        >>> loss = nn.GaussianNLLLoss()
+        >>> input = torch.randn(5, 2, requires_grad=True)
+        >>> target = torch.randn(5, 2)
+        >>> var = torch.ones(5, 2, requires_grad=True)
+        >>> output = loss(input, target, var)
+        >>> output.backward()
+    """
+    __constants__ = ['full', 'eps', 'reduction']
+    full: bool
+    eps: float
+
+    def __init__(self, full: bool = True, eps: float = 1e-8, reduction: str = 'mean') -> None:
+        super(GaussianNLLLoss, self).__init__(reduction)
+        self.full = full
+        self.eps = eps
+
+    def forward(self, input: Tensor, target: Tensor, var: Tensor) -> Tensor:
+        return F.gaussian_nll_loss(input, target, var, full=self.full, eps=self.eps, reduction=self.reduction)
+
+
 class KLDivLoss(_Loss):
     r"""The Kullback-Leibler divergence loss measure
 

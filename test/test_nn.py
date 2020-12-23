@@ -4674,6 +4674,24 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(ValueError, 'is not valid'):
             F.poisson_nll_loss(input, target, reduction='total')
 
+    def test_gaussian_nll_loss_reduction_modes(self):
+        input = torch.tensor([[0.5, 1.5, 2.5], [2., 4., 6.]])
+        target = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
+        var = torch.tensor([[0.5, 1., 1.5], [1., 1.5, 2.]])
+        component_wise_loss = 0.5*(torch.sum(torch.log(var) + (input - target)**2/var, dim=1)) + 1.5*math.log(2*math.pi)
+        self.assertEqual(component_wise_loss,
+                         F.gaussian_nll_loss(input, target, var,
+                         reduction='none'))
+        self.assertEqual(torch.sum(component_wise_loss),
+                         F.gaussian_nll_loss(input, target, var,
+                         reduction='sum'))
+        self.assertEqual(torch.mean(component_wise_loss),
+                         F.gaussian_nll_loss(input, target, var,
+                         reduction='mean'))
+        with self.assertRaisesRegex(ValueError, 'is not valid'):
+            F.gaussian_nll_loss(input, target, var, reduction='total')
+
+
     def test_KLDivLoss_batch_mean(self):
         input_shape = (2, 5)
         log_prob1 = F.log_softmax(torch.randn(input_shape), 1)
@@ -11107,6 +11125,7 @@ class TestNNDeviceType(NNTestCase):
             v(lambda: F.mse_loss(input, input, reduction=reduction))
             v(lambda: F.hinge_embedding_loss(input, input, reduction=reduction))
             v(lambda: F.poisson_nll_loss(input, input, reduction=reduction))
+            v(lambda: F.gaussian_nll_loss(input, input, input, reduction=reduction))
             v(lambda: F.binary_cross_entropy_with_logits(input, input, reduction=reduction))
 
             zeros = torch.zeros_like(input).to(torch.int64)

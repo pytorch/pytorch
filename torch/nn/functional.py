@@ -2316,6 +2316,68 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
     return ret
 
 
+def gaussian_nll_loss(input, target, var, eps=1e-8, full=True, reduction='mean'):
+    r"""Gaussian negative log likelihood loss.
+
+    See :class:`~torch.nn.GaussianNLLLoss` for details.
+
+    Args:
+        input: tensor of size (N, *).
+        target: tensor with same size as input.
+        var: tensor of positive variance(s), size (N, 1)
+            or same size as input.
+        eps: value added to var, for stability.
+        full: True/False (bool), include the constant term in the loss
+            calculation. Default: True.
+        reduction: specifies the reduction to apply to the output:
+            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
+            'mean': the output is the average of all batch member losses,
+            'sum': the output is the sum of all batch member losses.
+            Default: 'mean'.
+
+    Output:
+        loss: scalar by default. If reduction is 'none', then (N, *), same
+            size as input.
+
+    """
+    # Inputs and targets much have same shape
+    input = input.view(input.size(0), -1)
+    target = target.view(target.size(0), -1)
+    if input.size() != target.size():
+        raise ValueError("input and target must have same size")
+
+    # Second dim must be 1 ie shape (N, 1) if var and input do not have same shape
+    var = var.view(var.size(0), -1)
+    if var.size() != input.size() and var.size(1) != 1:
+        raise ValueError("var is of incorrect size")
+
+    if reduction != 'none' and reduction != 'mean' and reduction != 'sum':
+        raise ValueError(reduction + " is not valid")
+
+    # Entries of var must be non-negative
+    if torch.any(var < 0):
+        raise ValueError("var has negative entry/entries")
+
+    # Add eps for stability
+    var = var + eps
+
+    # Calculate loss (without constant)
+    loss = 0.5 * (torch.log(var) + (input - target)**2 / var).view(input.size(0), -1).sum(dim=1)
+
+    # Add constant to loss term if required
+    if full:
+        D = input.size(1)
+        loss = loss + 0.5 * D * math.log(2 * math.pi)
+
+    # Apply reduction
+    if reduction == 'mean':
+        return loss.mean()
+    elif reduction == 'sum':
+        return loss.sum()
+    else:
+        return loss
+
+
 def kl_div(input, target, size_average=None, reduce=None, reduction='mean', log_target=False):
     # type: (Tensor, Tensor, Optional[bool], Optional[bool], str, bool) -> Tensor
     r"""The `Kullback-Leibler divergence Loss
