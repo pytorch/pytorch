@@ -15,7 +15,7 @@ project(PYTORCH_QNNPACK C CXX ASM)
 option(PYTORCH_QNNPACK_CUSTOM_THREADPOOL "Build QNNPACK for custom thread pool" OFF)
 set(PYTORCH_QNNPACK_LIBRARY_TYPE "default" CACHE STRING "Type of library (shared, static, or default) to build")
 set_property(CACHE PYTORCH_QNNPACK_LIBRARY_TYPE PROPERTY STRINGS default static shared)
-OPTION(PYTORCH_QNNPACK_ENABLE_ASSEMBLY "Build QNNPACK with assembly micro-kernels" ON)
+option(PYTORCH_QNNPACK_ENABLE_ASSEMBLY "Build QNNPACK with assembly micro-kernels" ON)
 option(PYTORCH_QNNPACK_BUILD_TESTS "Build QNNPACK unit tests" ON)
 option(PYTORCH_QNNPACK_BUILD_BENCHMARKS "Build QNNPACK benchmarks" ON)
 
