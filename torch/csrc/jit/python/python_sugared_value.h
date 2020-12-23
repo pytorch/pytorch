@@ -197,6 +197,7 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
 
     if (have_pre_hooks || have_hooks) {
       // convert forward args into tuple for forward hooks
+      // (the input of eager hooks are always tuples)
       for (const auto& sv : args) {
         arg_values.push_back(sv.value(*caller.graph()));
       }
@@ -214,19 +215,21 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
       for (const auto& hook : concreteType_->getJitType()
                                   ->expect<ClassType>()
                                   ->getForwardPreHooks()) {
-        std::vector<NamedValue> pre_hook_args;
-        // add self argument here
-        pre_hook_args.emplace_back(NamedValue(self_));
-        pre_hook_args.emplace_back(NamedValue(forward_input));
         Value* pre_hook_output =
             FunctionValue(hook)
-                .call(loc, caller, pre_hook_args, kwargs, n_binders)
+                .call(loc, caller, {NamedValue(self_), NamedValue(forward_input)}, kwargs, n_binders)
                 ->asValue(loc, caller);
         if (pre_hook_output->node()->output(0)->type() != NoneType::get()) {
+          if(pre_hook_output->node()->output(0)->type()->kind() != TypeKind::TupleType){
+            pre_hook_output = caller.graph()
+                          ->insertNode(caller.graph()->createTuple({pre_hook_output}))
+                          ->output();
+
+          }
           forward_input = pre_hook_output;
         }
       }
-      // de-tuple pre_hook output
+      // de-tuple pre_hook output for forward
       at::ArrayRef<Value*> output_nodes =
           caller.graph()
               ->insertNode(caller.graph()->createTupleUnpack(forward_input))
@@ -250,14 +253,9 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
       for (const auto& hook : concreteType_->getJitType()
                                   ->expect<ClassType>()
                                   ->getForwardHooks()) {
-        // convert input and output
-        std::vector<NamedValue> hook_args;
-        hook_args.emplace_back(NamedValue(self_));
-        hook_args.emplace_back(NamedValue(forward_input));
-        hook_args.emplace_back(NamedValue(forward_output));
         Value* forward_hook_output =
             FunctionValue(hook)
-                .call(loc, caller, hook_args, kwargs, n_binders)
+                .call(loc, caller, {NamedValue(self_), NamedValue(forward_input), NamedValue(forward_output)}, kwargs, n_binders)
                 ->asValue(loc, caller);
         if (forward_hook_output->node()->output(0)->type() != NoneType::get()) {
           forward_output = forward_hook_output;
