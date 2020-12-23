@@ -1,11 +1,12 @@
 import torch
 import functools
 import warnings
+import collections
 try:
     import numpy as np
 except ModuleNotFoundError:
     np = None
-from torch._six import container_abcs, string_classes
+from torch._six import string_classes
 
 
 class autocast(object):
@@ -149,9 +150,9 @@ def _cast(value, dtype):
         return value
     elif np is not None and isinstance(value, np.ndarray):
         return value
-    elif isinstance(value, container_abcs.Mapping):
+    elif isinstance(value, collections.abc.Mapping):
         return {_cast(k, dtype): _cast(v, dtype) for k, v in value.items()}
-    elif isinstance(value, container_abcs.Iterable):
+    elif isinstance(value, collections.abc.Iterable):
         iterable = map(lambda v: _cast(v, dtype), value)
         if isinstance(value, list) or isinstance(value, tuple):
             return type(value)(iterable)

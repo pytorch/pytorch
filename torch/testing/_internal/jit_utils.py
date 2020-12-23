@@ -23,7 +23,7 @@ from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: 
 # Standard library
 from contextlib import contextmanager
 from functools import reduce
-from torch._six import StringIO
+from io import StringIO
 from collections import defaultdict
 
 import inspect

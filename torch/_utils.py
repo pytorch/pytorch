@@ -1,5 +1,4 @@
 import torch
-import torch._six
 from typing import Optional
 import warnings
 from collections import defaultdict

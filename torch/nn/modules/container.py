@@ -1,6 +1,5 @@
 import warnings
-from collections import OrderedDict
-from torch._six import container_abcs
+from collections import OrderedDict, abc as container_abcs
 from itertools import islice
 import operator
 

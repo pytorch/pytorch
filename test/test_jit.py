@@ -40,7 +40,7 @@ from jit.test_hash import TestHash  # noqa: F401
 # Torch
 from torch import Tensor
 from torch._C import TensorType, BoolType, parse_ir, _propagate_shapes
-from torch._six import PY37, StringIO
+from torch._six import PY37
 from torch.autograd import Variable
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3, Any  # noqa: F401
 from torch.testing import FileCheck
@@ -14936,7 +14936,7 @@ dedent """
             archive = zipfile.ZipFile(fname, 'r')
             pickled_data = archive.read(os.path.join(archive_name, 'data.pkl'))
 
-            out = StringIO()
+            out = io.StringIO()
             pickletools.dis(pickled_data, out=out)
             disassembled = out.getvalue()
 

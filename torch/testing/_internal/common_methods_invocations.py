@@ -5,7 +5,7 @@ import collections
 
 import torch
 import numpy as np
-from torch._six import inf, istuple
+from torch._six import inf
 from torch.autograd import Variable
 
 from typing import List, Tuple, Dict, Any
@@ -2328,7 +2328,7 @@ def run_additional_tri_tests(self, device):
 
 
 def unpack_variables(args):
-    if istuple(args):
+    if isinstance(args, tuple):
         return tuple(unpack_variables(elem) for elem in args)
     else:
         return args

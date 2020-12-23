@@ -12,7 +12,6 @@ import sys
 import tempfile
 
 import torch
-import torch._six
 from torch.utils import cpp_extension
 from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell, set_cwd, FILE_SCHEMA
 import torch.distributed as dist
