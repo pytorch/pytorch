@@ -39,6 +39,9 @@ except ImportError:
                     sys.stderr.write("\r{0:.1f}%".format(100 * self.n / float(self.total)))
                 sys.stderr.flush()
 
+            def close(self):
+                self.disable = True
+
             def __enter__(self):
                 return self
 

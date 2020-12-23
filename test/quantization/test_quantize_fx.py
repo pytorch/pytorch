@@ -611,8 +611,8 @@ class TestQuantizeFx(QuantizationTestCase):
         original_ref_m.conv2.bias = torch.nn.Parameter(original_m.standalone.conv.bias.detach())
 
         qconfig_dict = {"": default_qconfig}
-        config_name = {"standalone_module_name": ["standalone"]}
-        config_class = {"standalone_module_class": [StandaloneModule]}
+        config_name = {"standalone_module_name": [("standalone", None, None)]}
+        config_class = {"standalone_module_class": [(StandaloneModule, None, None)]}
         for prepare_config in [config_name, config_class]:
             original_m_copy = copy.deepcopy(original_m)
             original_ref_m_copy = copy.deepcopy(original_ref_m)
@@ -1346,12 +1346,12 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 self.checkGraphModeFxOp(model, data, quant_type, quantized_node)
 
     @skipIfNoFBGEMM
-    def test_quantized_conv(self):
+    def test_conv_module(self):
         conv_module = {1 : torch.nn.Conv1d, 2 : torch.nn.Conv2d, 3 : torch.nn.Conv3d}
 
-        class Conv(torch.nn.Module):
+        class ConvWrapper(torch.nn.Module):
             def __init__(self, dim):
-                super(Conv, self).__init__()
+                super(ConvWrapper, self).__init__()
                 self.conv = conv_module[dim](3, 3, 3).float()
 
             def forward(self, x):
@@ -1366,8 +1366,40 @@ class TestQuantizeFxOps(QuantizationTestCase):
         }
         for dim, quant_type in options:
             model = self.checkGraphModeFxOp(
-                Conv(dim), self.img_data_dict[dim], quant_type,
+                ConvWrapper(dim), self.img_data_dict[dim], quant_type,
                 quantized_nodes[dim])
+
+    @skipIfNoFBGEMM
+    def test_conv2d_functional(self):
+        for bias in [True, False]:
+            conv = torch.nn.Conv2d(1, 1, 1, bias=bias)
+            # There should be 3 observers: after input, weight and activation.
+            # No observer after bias.
+            prepare_expected_node_occurrence = {
+                ns.call_module(torch.quantization.HistogramObserver): 2,
+                ns.call_module(torch.quantization.PerChannelMinMaxObserver): 1,
+            }
+            expected_node_occurrence = \
+                {ns.call_function(torch.ops.quantized.conv2d): 1}
+            self.checkGraphModeFxOp(
+                conv, (torch.randn(4, 1, 4, 4),), QuantType.STATIC,
+                prepare_expected_node_occurrence=prepare_expected_node_occurrence,
+                expected_node_occurrence=expected_node_occurrence,
+            )
+
+    def test_linear_functional_bias_not_observed(self):
+        data = (torch.rand((1, 4), dtype=torch.float),)
+        for bias in [True, False]:
+            linear = torch.nn.Linear(4, 4, bias=bias)
+            # There should be 3 observers: after input, weight and activation.
+            expected_node_occurrence = {
+                ns.call_module(torch.quantization.HistogramObserver): 2,
+                ns.call_module(torch.quantization.PerChannelMinMaxObserver): 1,
+            }
+            self.checkGraphModeFxOp(
+                linear, data, QuantType.STATIC,
+                prepare_expected_node_occurrence=expected_node_occurrence,
+            )
 
     @skipIfNoFBGEMM
     def test_quantized_conv_relu(self):

@@ -350,6 +350,7 @@ Pointwise Ops
     tanh
     true_divide
     trunc
+    xlogy
 
 Reduction Ops
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -446,6 +447,7 @@ Other Operations
     bincount
     block_diag
     broadcast_tensors
+    broadcast_to
     broadcast_shapes
     bucketize
     cartesian_prod
