@@ -2398,7 +2398,7 @@ def barrier(group=GroupMember.WORLD,
 
     opts = BarrierOptions()
     if device_ids is not None:
-        if get_backend(group) !=  Backend.NCCL:
+        if get_backend(group) != Backend.NCCL:
             raise RuntimeError("Function argument device_ids not supported "
                                "for the selected backend {}".format(get_backend(group)))
         if isinstance(device_ids, list):
