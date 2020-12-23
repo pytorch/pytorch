@@ -82,6 +82,65 @@ Examples::
     True
 """)
 
+inv = _add_docstr(_linalg.linalg_inv, r"""
+linalg.inv(input, *, out=None) -> Tensor
+
+This function computes the "multiplicative inverse" matrix of a square matrix, or batch of such matrices, :attr:`input`.
+The result satisfies the relation
+
+``matmul(inv(input), input) = matmul(input, inv(input)) = eye(input.shape[0]).expand_as(input)``.
+
+Supports input of float, double, cfloat and cdouble data types.
+
+.. note:: If :attr:`input` is a non-invertible matrix or non-square matrix, or batch with at least one such matrix,
+          then a RuntimeError will be thrown.
+
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+Args:
+    input (Tensor): the square :math:`n \times n` matrix or the batch
+                    of such matrices of size :math:`(*, n, n)` where `*` is one or more batch dimensions.
+
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if None. Default: None
+
+Examples::
+
+    >>> x = torch.rand(4, 4)
+    >>> y = torch.linalg.inv(x)
+    >>> z = torch.mm(x, y)
+    >>> z
+    tensor([[ 1.0000, -0.0000, -0.0000,  0.0000],
+            [ 0.0000,  1.0000,  0.0000,  0.0000],
+            [ 0.0000,  0.0000,  1.0000,  0.0000],
+            [ 0.0000, -0.0000, -0.0000,  1.0000]])
+    >>> torch.max(torch.abs(z - torch.eye(4))) # Max non-zero
+    tensor(1.1921e-07)
+
+    >>> # Batched inverse example
+    >>> x = torch.randn(2, 3, 4, 4)
+    >>> y = torch.linalg.inv(x)
+    >>> z = torch.matmul(x, y)
+    >>> torch.max(torch.abs(z - torch.eye(4).expand_as(x))) # Max non-zero
+    tensor(1.9073e-06)
+
+    >>> x = torch.rand(4, 4, dtype=torch.cdouble)
+    >>> y = torch.linalg.inv(x)
+    >>> z = torch.mm(x, y)
+    >>> z
+    tensor([[ 1.0000e+00+0.0000e+00j, -1.3878e-16+3.4694e-16j,
+            5.5511e-17-1.1102e-16j,  0.0000e+00-1.6653e-16j],
+            [ 5.5511e-16-1.6653e-16j,  1.0000e+00+6.9389e-17j,
+            2.2204e-16-1.1102e-16j, -2.2204e-16+1.1102e-16j],
+            [ 3.8858e-16-1.2490e-16j,  2.7756e-17+3.4694e-17j,
+            1.0000e+00+0.0000e+00j, -4.4409e-16+5.5511e-17j],
+            [ 4.4409e-16+5.5511e-16j, -3.8858e-16+1.8041e-16j,
+            2.2204e-16+0.0000e+00j,  1.0000e+00-3.4694e-16j]],
+        dtype=torch.complex128)
+    >>> torch.max(torch.abs(z - torch.eye(4, dtype=torch.cdouble))) # Max non-zero
+    tensor(7.5107e-16, dtype=torch.float64)
+""")
+
 det = _add_docstr(_linalg.linalg_det, r"""
 linalg.det(input) -> Tensor
 
