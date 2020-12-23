@@ -937,10 +937,6 @@ class AbstractTestCases:
                         # index_add calls atomicAdd on cuda.
                         zeros = torch.zeros(size, dtype=dtype, device=device)
 
-                        # index_add is not supported for complex dtypes on cuda yet
-                        if device.startswith('cuda') and dtype.is_complex:
-                            continue
-
                         added = zeros.index_add(0, torch.arange(0, size[0], dtype=idx_dtype, device=device), tensor)
                         self.assertEqual(added, tensor)
 
@@ -6655,7 +6651,6 @@ tensor_op_tests = [
         torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types_skip_rocm, _cpu_types, True,
         [_wrap_maybe_warns("This overload of addmv_? is deprecated")]),
     ('atan2', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-2, 1e-5, 1e-5, _types, _types_no_half),
-    ('angle', '', _small_3d, lambda t, d: [], 0, 0, 0, _types_no_half, [torch.bfloat16], False),
     ('fmod', 'value', _small_3d, lambda t, d: [3], 1e-3),
     ('fmod', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-3),
     ('chunk', '', _medium_2d, lambda t, d: [4], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),

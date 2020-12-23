@@ -29,6 +29,10 @@ struct IndexRangeGenerator {
     size_t i = 0;
 };
 
+bool isFwGradDefined(const c10::optional<Tensor>& t);
+Tensor toLegacyFwGrad(const c10::optional<Tensor>& t);
+Tensor toLegacyPrimal(const c10::optional<Tensor>& t);
+
 bool any_variable_defined(variable_list& variables);
 void copy_range(variable_list& out, IndexRange range, const at::Tensor & t);
 void copy_range(variable_list& out, IndexRange range, at::ArrayRef<at::Tensor> t);

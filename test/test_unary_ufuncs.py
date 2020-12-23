@@ -212,8 +212,7 @@ class TestUnaryUfuncs(TestCase):
         for alt, inplace in ((op.get_method(), False), (op.get_inplace(), True),
                              (torch.jit.script(_fn), False)):
             if alt is None:
-                with self.assertRaises(RuntimeError):
-                    alt(t.clone())
+                continue
 
             if inplace and op.promotes_integers_to_float and dtype in integral_types() + (torch.bool,):
                 # Assert that RuntimeError is raised
@@ -426,9 +425,12 @@ class TestUnaryUfuncs(TestCase):
         if out_dtype.is_floating_point and not dtype.is_complex:
             compare_out(op, input, output)
         elif out_dtype.is_floating_point and dtype.is_complex:
-            # Can't cast complex to float
-            with self.assertRaises(RuntimeError):
-                op(input, out=output)
+            if op.supports_complex_to_float:
+                compare_out(op, input, output)
+            else:
+                # Can't cast complex to float
+                with self.assertRaises(RuntimeError):
+                    op(input, out=output)
         elif out_dtype.is_complex:
             compare_out(op, input, output)
         else:
@@ -610,14 +612,6 @@ class TestUnaryUfuncs(TestCase):
         for dtype in [torch.complex64, torch.complex128]:
             size = [5, 5]
             tensor = torch.rand(size, dtype=dtype, device=device)
-
-            # index_add calls atomicAdd on cuda.
-            zeros = torch.zeros(size, dtype=dtype, device=device)
-
-            # index_add is not supported for complex dtypes on cuda yet
-            if device.startswith('cuda') and dtype.is_complex:
-                self.assertRaises(RuntimeError,
-                                  lambda: zeros.index_add(0, torch.arange(0, size[0], dtype=torch.long, device=device), tensor))
 
             with self.assertRaisesRegex(RuntimeError,
                                         (r'Unlike NumPy, torch.sign is not intended to support complex numbers\. '
