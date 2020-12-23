@@ -157,6 +157,13 @@ def warn_if_tmpdir_set(env):
         fast_nvcc_warn(url_vars)
 
 
+def contains_non_executable(commands):
+    for command in commands:
+        if command.startswith("--"):
+            return True
+    return False
+
+
 def module_id_contents(command):
     """
     Guess the contents of the .module_id file contained within command.
@@ -275,6 +282,8 @@ def is_weakly_connected(graph):
     """
     Return true iff graph is weakly connected.
     """
+    if (graph is None or len(graph) == 0):
+        return False
     neighbors = [set() for _ in graph]
     for node, predecessors in enumerate(graph):
         for pred in predecessors:
@@ -408,6 +417,10 @@ def exit_code(results):
     return 0
 
 
+def wrap_nvcc(args, config=default_config):
+    return subprocess.call([config.nvcc] + args)
+
+
 def fast_nvcc(args, *, config=default_config):
     """
     Emulate the result of calling the given nvcc binary with args.
@@ -422,6 +435,10 @@ def fast_nvcc(args, *, config=default_config):
     commands = dryrun_data['commands']
     if not config.faithful:
         commands = make_rm_force(unique_module_id_files(commands))
+
+    if contains_non_executable(commands):
+        return wrap_nvcc(args, config)
+
     command_parts = list(map(shlex.split, commands))
     if config.verbose:
         print_verbose_output(
