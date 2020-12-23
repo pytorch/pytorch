@@ -54,6 +54,10 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     case prim::CreateObject: {
       createObject(stack, n->output()->type()->expect<ClassType>());
     } break;
+    case prim::GetAttr: {
+      auto attr = pop(stack).toObject()->getAttr(n->s(attr::name));
+      push(stack, attr);
+    } break;
     case prim::isinstance: {
       isinstance(stack, n->tys(attr::types));
     } break;
