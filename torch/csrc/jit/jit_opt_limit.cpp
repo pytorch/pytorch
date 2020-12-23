@@ -16,7 +16,7 @@ namespace jit {
 
 static int parseOptLimit(const std::string& opt_limit) {
   try {
-    int64_t n = std::stoi(opt_limit);
+    int64_t n = at::stoi(opt_limit);
     return n;
   } catch (...) {
     return -1;
