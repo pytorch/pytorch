@@ -25,6 +25,8 @@ from torch.testing._internal.common_utils import \
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
      torch_to_numpy_dtype_dict, TEST_WITH_SLOW)
 
+from distutils.version import LooseVersion
+
 if TEST_SCIPY:
     import scipy.special
 
@@ -1139,6 +1141,25 @@ if TEST_SCIPY:
                                     dtypes=[torch.bfloat16]),),
                        assert_autodiffed=True,
                        promotes_integers_to_float=True),
+        UnaryUfuncInfo('erfinv',
+                       ref=scipy.special.erfinv,
+                       decorators=(precisionOverride({torch.float16: 1e-2,
+                                                      torch.bfloat16: 1e-2,
+                                                      torch.float32: 1e-4}),),
+                       dtypes=all_types_and(torch.bool),
+                       dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
+                       dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+                       promotes_integers_to_float=True,
+                       domain=(-1, 1),
+                       skips=(
+                           # Reference: https://github.com/pytorch/pytorch/pull/49155#issuecomment-742664611
+                           SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                    active_if=LooseVersion(scipy.__version__) < "1.4.0"),
+                           # RuntimeError: "pow" not implemented for 'BFloat16'
+                           SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                    dtypes=[torch.bfloat16]),
+                       )
+                       ),
         OpInfo('xlogy',
                dtypes=all_types_and(torch.bool),
                dtypesIfCPU=all_types_and(torch.bool, torch.half, torch.bfloat16),
@@ -1412,8 +1433,6 @@ def method_tests():
         ('expand_as', (S, 1, 1), (torch.rand(S, S, S),), '', (False,)),
         ('exp', (S, S, S), NO_ARGS, '', (True,)),
         ('exp', (), NO_ARGS, 'scalar', (True,)),
-        ('erfinv', torch.rand(S, S, S).clamp(-0.9, 0.9), NO_ARGS),
-        ('erfinv', normal_scalar_clamp(-0.9, 0.9, requires_grad=True), NO_ARGS, 'scalar'),
         ('logit', torch.randn(S, S, S).clamp(0.1, 0.9).requires_grad_(True), NO_ARGS, ''),
         ('logit', torch.randn(S, S, S).clamp(0.1, 0.9).requires_grad_(True), (0.2,), 'eps'),
         ('logit', uniform_scalar().clamp(0.1, 0.9).requires_grad_(True), NO_ARGS, 'scalar'),
