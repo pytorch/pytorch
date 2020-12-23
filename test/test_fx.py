@@ -1139,6 +1139,27 @@ class TestFX(JitTestCase):
         m = M()
         self.checkGraphModule(m, ())
 
+    def test_torchbind_class_attribute_in_fx(self):
+        if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS:
+            self.skipTest("torch.classes._TorchScriptTesting._StackString is registered, skipping")
+
+        class FooBar1234(torch.nn.Module):
+            def __init__(self):
+                super(FooBar1234, self).__init__()
+                self.f = torch.classes._TorchScriptTesting._StackString(["3", "4"])
+
+            def forward(self):
+                return self.f.top()
+
+        m = FooBar1234()
+        self.checkGraphModule(m, ())
+
+    def test_namedtuple_return_trace(self):
+        class NamedTupReturn(torch.nn.Module):
+            def forward(self, x):
+                return Pair(x, x)
+
+        traced = symbolic_trace(NamedTupReturn())
 
 if __name__ == '__main__':
     run_tests()

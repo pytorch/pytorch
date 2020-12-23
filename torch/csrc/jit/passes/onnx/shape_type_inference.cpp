@@ -494,7 +494,7 @@ bool HasSequenceTypeOutput(Node* node) {
 
 void ONNXUpdateTypeFromTensor(
     Value* graph_output,
-    at::Tensor output,
+    const at::Tensor& output,
     bool onnx_shape_inference) {
   if (onnx_shape_inference) {
     graph_output->setType(
