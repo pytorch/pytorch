@@ -18,15 +18,12 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import builtins
 import math
 import sys
-import queue  # noqa: F401
 
 inf = math.inf
 nan = math.nan
 string_classes = (str, bytes)
-FileNotFoundError = builtins.FileNotFoundError
 PY37 = sys.version_info[0] == 3 and sys.version_info[1] >= 7
 
 def with_metaclass(meta: type, *bases) -> type:
