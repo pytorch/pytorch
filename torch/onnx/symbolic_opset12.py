@@ -77,7 +77,7 @@ def binary_cross_entropy_with_logits(g, input, target, weight, pos_weight, reduc
     elif reduction == 2:
         return g.op("ReduceSum", output)
     else:
-        return sym_help._onnx_unsupported("binary_cross_entropy_with_logits")
+        return sym_help._onnx_unsupported("binary_cross_entropy_with_logits with reduction other than none, mean, or sum")
 
 
 def celu(g, self, alpha):
