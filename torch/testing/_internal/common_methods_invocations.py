@@ -10,11 +10,11 @@ from torch.autograd import Variable
 from typing import List, Tuple, Dict, Any
 
 from torch.testing import \
-    (make_non_contiguous, _dispatch_dtypes,
-     floating_types, floating_types_and, floating_and_complex_types,
-     floating_and_complex_types_and, all_types_and_complex_and, all_types_and)
+    (make_non_contiguous, _dispatch_dtypes, floating_types, floating_types_and,
+     floating_and_complex_types, floating_and_complex_types_and,
+     all_types_and_complex_and, all_types_and)
 from torch.testing._internal.common_device_type import \
-    (skipCUDAIfNoMagma, skipCPUIfNoLapack,
+    (skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfRocm,
      expectedAlertNondeterministic, precisionOverride)
 from torch.testing._internal.common_utils import \
     (prod_single_zero, random_square_matrix_of_rank,
@@ -22,7 +22,7 @@ from torch.testing._internal.common_utils import \
      random_symmetric_pd_matrix, make_nonzero_det,
      random_fullrank_matrix_distinct_singular_value, set_rng_seed,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
-     torch_to_numpy_dtype_dict)
+     torch_to_numpy_dtype_dict, TEST_WITH_SLOW)
 
 if TEST_SCIPY:
     import scipy.special
@@ -52,6 +52,23 @@ class SampleInput(object):
         self.input = input if isinstance(input, tuple) else (input,)
         self.args = args
         self.kwargs = kwargs if kwargs is not None else {}
+
+
+_NOTHING = object()  # Unique value to distinguish default from anything else
+
+
+# Extension of getattr to support qualified names
+# e.g. _getattr_qual(torch, 'linalg.norm') -> torch.linalg.norm
+def _getattr_qual(obj, name, default=_NOTHING):
+    try:
+        for path in name.split('.'):
+            obj = getattr(obj, path)
+        return obj
+    except AttributeError:
+        if default is not _NOTHING:
+            return default
+        else:
+            raise
 
 
 # Classes and methods for the operator database
@@ -84,13 +101,16 @@ class OpInfo(object):
                  skips=tuple(),  # information about which tests to skip
                  decorators=None,  # decorators to apply to generated tests
                  promotes_integers_to_float=False,  # whether op promotes unary output to float or not
-                 sample_inputs_func=None):  # function to generate sample inputs
+                 sample_inputs_func=None,  # function to generate sample inputs
+                 aten_name=None,  # name of the corresponding aten:: operator
+                 ):
 
         # Validates the dtypes are generated from the dispatch-related functions
         for dtype_list in (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM):
             assert isinstance(dtype_list, (_dispatch_dtypes, type(None)))
 
         self.name = name
+        self.aten_name = aten_name if aten_name is not None else name
 
         self.dtypes = set(dtypes)
         self.dtypesIfCPU = set(dtypesIfCPU) if dtypesIfCPU is not None else self.dtypes
@@ -99,12 +119,10 @@ class OpInfo(object):
         self._default_test_dtypes = set(default_test_dtypes) if default_test_dtypes is not None else None
 
         # NOTE: if the op is unspecified it is assumed to be under the torch namespace
-        if op is None:
-            assert hasattr(torch, self.name), f"Can't find torch.{self.name}"
-        self.op = op if op else getattr(torch, self.name)
-        self.method_variant = getattr(torch.Tensor, name) if hasattr(torch.Tensor, name) else None
+        self.op = op if op else _getattr_qual(torch, self.name)
+        self.method_variant = getattr(torch.Tensor, name, None)
         inplace_name = name + "_"
-        self.inplace_variant = getattr(torch.Tensor, inplace_name) if hasattr(torch.Tensor, name) else None
+        self.inplace_variant = getattr(torch.Tensor, inplace_name, None)
         self.skip_bfloat16_grad = skip_bfloat16_grad
 
         self.test_inplace_grad = test_inplace_grad
@@ -289,8 +307,71 @@ def np_unary_ufunc_integer_promotion_wrapper(fn):
 
     return wrapped_fn
 
+
+# Metadata class for Fast Fourier Transforms in torch.fft.
+class SpectralFuncInfo(OpInfo):
+    """Operator information for torch.fft transforms. """
+
+    def __init__(self,
+                 name,  # the string name of the function
+                 *,
+                 ref=None,  # Reference implementation (probably in np.fft namespace)
+                 dtypes=floating_and_complex_types(),
+                 dtypesIfCPU=None,
+                 dtypesIfCUDA=None,
+                 dtypesIfROCM=None,
+                 ndimensional: bool,  # Whether dim argument can be a tuple
+                 skips=None,
+                 decorators=None,
+                 **kwargs):
+        dtypesIfCPU = dtypesIfCPU if dtypesIfCPU is not None else dtypes
+        dtypesIfCUDA = dtypesIfCUDA if dtypesIfCUDA is not None else dtypes
+        dtypesIfROCM = dtypesIfROCM if dtypesIfROCM is not None else dtypes
+
+        # gradgrad is quite slow
+        if not TEST_WITH_SLOW:
+            skips = skips if skips is not None else []
+            skips.append(SkipInfo('TestGradients', 'test_fn_gradgrad'))
+
+        decorators = decorators if decorators is not None else []
+        decorators += [skipCPUIfNoMkl, skipCUDAIfRocm]
+
+        super().__init__(name=name,
+                         dtypes=dtypes,
+                         dtypesIfCPU=dtypesIfCPU,
+                         dtypesIfCUDA=dtypesIfCUDA,
+                         dtypesIfROCM=dtypesIfROCM,
+                         skips=skips,
+                         decorators=decorators,
+                         **kwargs)
+        self.ref = ref if ref is not None else _getattr_qual(np, name)
+        self.ndimensional = ndimensional
+
+
+    def sample_inputs(self, device, dtype, requires_grad=False):
+        tensor = make_tensor((L, M), device, dtype,
+                             low=None, high=None,
+                             requires_grad=requires_grad)
+        if self.ndimensional:
+            return [
+                SampleInput(tensor),
+                SampleInput(tensor, kwargs=dict(dim=(-2,))),
+                SampleInput(tensor, kwargs=dict(norm='ortho')),
+                SampleInput(tensor, kwargs=dict(s=(10, 15))),
+                SampleInput(tensor, kwargs=dict(s=10, dim=1, norm='ortho')),
+            ]
+        else:
+            return [
+                SampleInput(tensor),
+                SampleInput(tensor, kwargs=dict(dim=-2)),
+                SampleInput(tensor, kwargs=dict(norm='ortho')),
+                SampleInput(tensor, kwargs=dict(n=15)),
+                SampleInput(tensor, kwargs=dict(n=10, dim=1, norm='ortho')),
+            ]
+
+
 # Operator database (sorted alphabetically)
-op_db: List[Any] = [
+op_db: List[OpInfo] = [
     # NOTE: CPU complex acos produces incorrect outputs (https://github.com/pytorch/pytorch/issues/42952)
     UnaryUfuncInfo('acos',
                    ref=np.arccos,
@@ -437,10 +518,15 @@ op_db: List[Any] = [
                                 dtypes=[torch.float], active_if=TEST_WITH_ROCM),
                    )),
     UnaryUfuncInfo('cosh',
-                   ref=np.cosh,
-                   dtypesIfCPU=floating_and_complex_types(),
+                   ref=np_unary_ufunc_integer_promotion_wrapper(np.cosh),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+                   promotes_integers_to_float=True,
                    assert_autodiffed=True,
                    skips=(
+                       # Reference: https://github.com/pytorch/pytorch/issues/48641
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cpu', dtypes=[torch.int8]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics', device_type='cpu',
@@ -448,6 +534,89 @@ op_db: List[Any] = [
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 device_type='cuda', dtypes=[torch.float16]),
                    )),
+    SpectralFuncInfo('fft.fft',
+                     aten_name='fft_fft',
+                     ref=np.fft.fft,
+                     ndimensional=False,
+                     dtypes=all_types_and_complex_and(torch.bool),
+                     default_test_dtypes=floating_and_complex_types(),
+                     supports_tensor_out=False,
+                     test_inplace_grad=False,),
+    SpectralFuncInfo('fft.fftn',
+                     aten_name='fft_fftn',
+                     ref=np.fft.fftn,
+                     ndimensional=True,
+                     dtypes=all_types_and_complex_and(torch.bool),
+                     default_test_dtypes=floating_and_complex_types(),
+                     supports_tensor_out=False,
+                     test_inplace_grad=False,
+                     decorators=[precisionOverride(
+                         {torch.float: 1e-4, torch.cfloat: 1e-4})],),
+    SpectralFuncInfo('fft.hfft',
+                     aten_name='fft_hfft',
+                     ref=np.fft.hfft,
+                     ndimensional=False,
+                     dtypes=all_types_and_complex_and(torch.bool),
+                     default_test_dtypes=floating_and_complex_types(),
+                     supports_tensor_out=False,
+                     test_inplace_grad=False,),
+    SpectralFuncInfo('fft.rfft',
+                     aten_name='fft_rfft',
+                     ref=np.fft.rfft,
+                     ndimensional=False,
+                     dtypes=all_types_and(torch.bool),
+                     default_test_dtypes=floating_and_complex_types(),
+                     supports_tensor_out=False,
+                     test_inplace_grad=False,),
+    SpectralFuncInfo('fft.rfftn',
+                     aten_name='fft_rfftn',
+                     ref=np.fft.rfftn,
+                     ndimensional=True,
+                     dtypes=all_types_and(torch.bool),
+                     default_test_dtypes=floating_and_complex_types(),
+                     supports_tensor_out=False,
+                     test_inplace_grad=False,
+                     decorators=[precisionOverride({torch.float: 1e-4})],),
+    SpectralFuncInfo('fft.ifft',
+                     aten_name='fft_ifft',
+                     ref=np.fft.ifft,
+                     ndimensional=False,
+                     dtypes=all_types_and_complex_and(torch.bool),
+                     default_test_dtypes=floating_and_complex_types(),
+                     supports_tensor_out=False,
+                     test_inplace_grad=False,),
+    SpectralFuncInfo('fft.ifftn',
+                     aten_name='fft_ifftn',
+                     ref=np.fft.ifftn,
+                     ndimensional=True,
+                     dtypes=all_types_and_complex_and(torch.bool),
+                     default_test_dtypes=floating_and_complex_types(),
+                     supports_tensor_out=False,
+                     test_inplace_grad=False,),
+    SpectralFuncInfo('fft.ihfft',
+                     aten_name='fft_ihfft',
+                     ref=np.fft.ihfft,
+                     ndimensional=False,
+                     dtypes=all_types_and(torch.bool),
+                     default_test_dtypes=floating_types(),
+                     supports_tensor_out=False,
+                     test_inplace_grad=False,),
+    SpectralFuncInfo('fft.irfft',
+                     aten_name='fft_irfft',
+                     ref=np.fft.irfft,
+                     ndimensional=False,
+                     dtypes=all_types_and_complex_and(torch.bool),
+                     default_test_dtypes=floating_and_complex_types(),
+                     supports_tensor_out=False,
+                     test_inplace_grad=False,),
+    SpectralFuncInfo('fft.irfftn',
+                     aten_name='fft_irfftn',
+                     ref=np.fft.irfftn,
+                     ndimensional=True,
+                     dtypes=all_types_and_complex_and(torch.bool),
+                     default_test_dtypes=floating_and_complex_types(),
+                     supports_tensor_out=False,
+                     test_inplace_grad=False,),
     UnaryUfuncInfo('log',
                    ref=np.log,
                    domain=(0, float('inf')),
@@ -590,10 +759,26 @@ op_db: List[Any] = [
                                 active_if=(IS_MACOS or IS_WINDOWS)),
                    )),
     UnaryUfuncInfo('exp2',
-                   ref=np.exp2,
-                   dtypes=floating_types_and(torch.half),
-                   dtypesIfCPU=None,
-                   dtypesIfCUDA=None),
+                   ref=np_unary_ufunc_integer_promotion_wrapper(np.exp2),
+                   dtypes=all_types_and(torch.bool, torch.half),
+                   dtypesIfCPU=all_types_and(torch.bool, torch.half),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+                   promotes_integers_to_float=True),
+    UnaryUfuncInfo('expm1',
+                   ref=np_unary_ufunc_integer_promotion_wrapper(np.expm1),
+                   dtypes=all_types_and(torch.bool, torch.half),
+                   dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+                   promotes_integers_to_float=True,
+                   assert_autodiffed=True,
+                   skips=(
+                       # Reference: https://github.com/pytorch/pytorch/pull/48926#issuecomment-739734774
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cpu', dtypes=[torch.bfloat16]),
+                       # RuntimeError: "isfinite" not implemented for 'BFloat16'
+                       SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                device_type='cpu', dtypes=[torch.bfloat16]),
+                   )),
     UnaryUfuncInfo('nan_to_num',
                    ref=np.nan_to_num,
                    dtypes=all_types_and(torch.half, torch.bool),
@@ -616,25 +801,13 @@ op_db: List[Any] = [
                        # Reference: https://github.com/pytorch/pytorch/pull/47293#issuecomment-721774436
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.bfloat16]),
-                       # RuntimeError: sqrt does not support automatic differentiation for outputs with complex dtype.
-                       SkipInfo('TestGradients', 'test_fn_grad',
-                                dtypes=[torch.cdouble]),
-                       SkipInfo('TestGradients', 'test_fn_gradgrad',
-                                dtypes=[torch.cdouble]),
-                       SkipInfo('TestGradients', 'test_method_grad',
-                                dtypes=[torch.cdouble]),
-                       SkipInfo('TestGradients', 'test_method_gradgrad',
-                                dtypes=[torch.cdouble]),
-                       SkipInfo('TestGradients', 'test_inplace_grad',
-                                dtypes=[torch.cdouble]),
-                       SkipInfo('TestGradients', 'test_inplace_gradgrad',
-                                dtypes=[torch.cdouble]),
                        SkipInfo('TestCommon', 'test_variant_consistency_eager',
                                 dtypes=[torch.cfloat, torch.cdouble]),
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 dtypes=[torch.cfloat, torch.cdouble])),
                    promotes_integers_to_float=True,
-                   handles_complex_extremals=False),
+                   handles_complex_extremals=False,
+                   test_complex_grad=False),
 ]
 
 if TEST_SCIPY:
@@ -644,7 +817,7 @@ if TEST_SCIPY:
             return (1 / (1 + np.exp(-x)))
         return scipy.special.expit(x)
 
-    op_db_scipy_reference = [
+    op_db_scipy_reference: List[OpInfo] = [
         UnaryUfuncInfo('sigmoid',
                        ref=reference_sigmoid,
                        decorators=(precisionOverride({torch.float16: 1e-2,
@@ -695,6 +868,7 @@ if TEST_SCIPY:
 
 # Common operator groupings
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
+spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -954,8 +1128,6 @@ def method_tests():
         ('expand_as', (S, 1, 1), (torch.rand(S, S, S),), '', (False,)),
         ('exp', (S, S, S), NO_ARGS, '', (True,)),
         ('exp', (), NO_ARGS, 'scalar', (True,)),
-        ('expm1', (S, S, S), NO_ARGS, '', (True,)),
-        ('expm1', (), NO_ARGS, 'scalar', (True,)),
         ('erfinv', torch.rand(S, S, S).clamp(-0.9, 0.9), NO_ARGS),
         ('erfinv', normal_scalar_clamp(-0.9, 0.9, requires_grad=True), NO_ARGS, 'scalar'),
         ('logit', torch.randn(S, S, S).clamp(0.1, 0.9).requires_grad_(True), NO_ARGS, ''),

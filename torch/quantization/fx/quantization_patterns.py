@@ -11,6 +11,7 @@ from torch.quantization import (
 
 from ..quantization_mappings import (
     get_static_quant_module_class,
+    get_dynamic_quant_module_class,
     get_quantized_operator,
 )
 from ..utils import (
@@ -471,7 +472,6 @@ class Embedding(QuantizeHandler):
         ]
         assert node.op == 'call_module'
         emb_node = node
-        emb = quantizer.modules[emb_node.target]
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
         if dtypes not in supported_dtypes:
@@ -481,6 +481,7 @@ class Embedding(QuantizeHandler):
                 "supported dtype combinations are: {}".format(dtypes, supported_dtypes))
             return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
+        emb = quantizer.modules[emb_node.target]
         qemb = get_static_quant_module_class(type(emb))
         quantized = qemb.from_float(emb)
         parent_name, name = _parent_name(emb_node.target)
@@ -491,6 +492,48 @@ class Embedding(QuantizeHandler):
             load_arg(quantized=False)(emb_node.args),
             load_arg(quantized=False)(emb_node.kwargs))
 
+# TODO (maybe): merge with embedding quantize handler
+@register_quant_pattern(torch.nn.GRUCell)
+@register_quant_pattern(torch.nn.LSTMCell)
+@register_quant_pattern(torch.nn.RNNCell)
+@register_quant_pattern(torch.nn.LSTM)
+@mark_input_output_not_observed()
+class RNNDynamic(QuantizeHandler):
+    def __init__(self, quantizer: QuantizerCls, node: Node):
+        super().__init__(quantizer, node)
+
+    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
+                debug: bool = False,
+                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+        # Supported combinations are:
+        # quant_type  | activation | weight | activation_compute_type
+        # dynamic |  float32   | qint8 | quint8
+        # dynamic |  float16   | float16 | None
+        # tuple (activation_dtype, weight_dtype, compute_dtype)
+        supported_dtypes = [
+            (torch.float32, torch.qint8, torch.quint8),
+            (torch.float16, torch.float16, None),
+        ]
+        assert node.op == 'call_module'
+        qconfig = quantizer.qconfig_map[node.name]
+        dtypes = get_qconfig_dtypes(qconfig)
+        if dtypes not in supported_dtypes:
+            warnings.warn(
+                "dtype combination: {} is not "
+                "supported by Embedding/EmbeddingBag, "
+                "supported dtype combinations are: {}".format(dtypes, supported_dtypes))
+            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
+
+        module = quantizer.modules[node.target]
+        qmodule_cls = get_dynamic_quant_module_class(type(module))
+        qmodule = qmodule_cls.from_float(module)
+        parent_name, name = _parent_name(node.target)
+        setattr(quantizer.modules[parent_name], name, qmodule)
+        return quantizer.quantized_graph.create_node(
+            'call_module',
+            node.target,
+            load_arg(quantized=False)(node.args),
+            load_arg(quantized=False)(node.kwargs))
 
 ARGS_TO_SKIP = {
     torch._ops.ops.quantized.hardswish: ['inplace'],
