@@ -10,6 +10,7 @@ from torch.quantization import (
     PlaceholderObserver,
     NoopObserver,
     FakeQuantize,
+    FixedQParamsFakeQuantize,
     default_debug_qconfig,
     default_observer,
     default_per_channel_weight_observer,
@@ -503,6 +504,20 @@ class TestObserver(QuantizationTestCase):
 
             self.assertEqual(x.device, scale.device)
             self.assertEqual(x.device, zero_point.device)
+
+    def test_zero_numel(self):
+        obs_list = [MinMaxObserver, MovingAverageMinMaxObserver,
+                    PerChannelMinMaxObserver,
+                    MovingAveragePerChannelMinMaxObserver, HistogramObserver,
+                    FakeQuantize, FixedQParamsFakeQuantize]
+        for obs_cls in obs_list:
+            if obs_cls is FixedQParamsFakeQuantize:
+                obs = obs_cls(0.1, 0)
+            else:
+                obs = obs_cls()
+            x = torch.Tensor()
+            # verify no crash
+            x = obs(x)
 
 
 # HistogramObserver that works like it does on master
