@@ -66,7 +66,7 @@ Tensor unary_op_impl_float(const Tensor& self, Stub& stub) {
 // Note: This is done by running the operation as usual and then copying the
 // operation's result to the expected result type.
 template <typename Stub>
-static inline Tensor& unary_op_impl_with_complex_to_float_out(Tensor& result, const Tensor& self, Stub& stub) {
+static inline Tensor& unary_op_impl_with_complex_to_float_out(Tensor& result, const Tensor& self, Stub& stub, bool promotes_integer_to_float) {
     if (self.is_complex() && !result.is_complex()) {
       // Checks if the corresponding float type can be cast to the desired dtype
       const auto float_type = c10::toValueType(self.scalar_type());
@@ -83,6 +83,10 @@ static inline Tensor& unary_op_impl_with_complex_to_float_out(Tensor& result, co
       result.resize_(complex_result.sizes());
       result.copy_(at::real(complex_result));
       return result;
+    }
+
+    if (promotes_integer_to_float) {
+      return unary_op_impl_float_out(result, self, stub);
     }
 
     return unary_op_impl_out(result, self, stub);
@@ -173,7 +177,7 @@ Tensor& arctan_(Tensor& self) { return self.atan_(); }
 // complex input. This makes sense mathematically since the absolute value
 // and angle of a complex number has no imaginary part.
 Tensor& abs_out(Tensor& result, const Tensor& self) {
-  return unary_op_impl_with_complex_to_float_out(result, self, abs_stub);
+  return unary_op_impl_with_complex_to_float_out(result, self, abs_stub, /*promotes_integer_to_float=*/false);
 }
 Tensor abs(const Tensor& self) {
   return unary_op_impl_with_complex_to_float(self, at::abs_out);
@@ -195,10 +199,16 @@ Tensor& absolute_(Tensor& self) {
 }
 
 Tensor& angle_out(Tensor& result, const Tensor& self) {
-  return unary_op_impl_with_complex_to_float_out(result, self, angle_stub);
+  return unary_op_impl_with_complex_to_float_out(result, self, angle_stub, /*promotes_integer_to_float=*/true);
 }
 Tensor angle(const Tensor& self) {
-  return unary_op_impl_with_complex_to_float(self, at::angle_out);
+  if (self.is_complex()) {
+    const auto float_type = c10::toValueType(self.scalar_type());
+    Tensor result = at::empty({0}, self.options().dtype(float_type));
+    return at::angle_out(result, self);
+  }
+
+  return unary_op_impl_float(self, angle_stub);
 }
 
 Tensor real(const Tensor& self) {

@@ -105,6 +105,20 @@
   manual_kernel_registration: True
   variants: method
 
+- func: _fw_primal(Tensor(a) self, int level) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: method
+  dispatch:
+    DefaultBackend: _fw_primal
+
+- func: make_dual(Tensor(a) primal, Tensor tangent, int level) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: function
+
+- func: unpack_dual(Tensor(a) dual, int level) -> (Tensor(a) primal, Tensor tangent)
+  use_c10_dispatcher: full
+  variants: function
+
 - func: rename_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
@@ -2546,6 +2560,56 @@
   dispatch:
     DefaultBackend: logaddexp2
 
+- func: xlogy.Tensor(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    CPU, CUDA: xlogy
+
+- func: xlogy.Scalar_Self(Scalar self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU, CUDA: xlogy
+
+- func: xlogy.Scalar_Other(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    CPU, CUDA: xlogy
+
+# xlogy: inplace variant
+- func: xlogy_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    CPU, CUDA: xlogy_
+
+- func: xlogy_.Scalar_Other(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    CPU, CUDA: xlogy_
+
+# xlogy: out variant
+- func: xlogy.OutTensor(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  variants: function
+  dispatch:
+    CPU, CUDA: xlogy_out
+
+- func: xlogy.OutScalar_Self(Scalar self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  variants: function
+  dispatch:
+    CPU, CUDA: xlogy_out
+
+- func: xlogy.OutScalar_Other(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  variants: function
+  dispatch:
+    CPU, CUDA: xlogy_out
+
 - func: logdet(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -3276,6 +3340,9 @@
   variants: method
 
 - func: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
+  use_c10_dispatcher: full
+
+- func: pixel_unshuffle(Tensor self, int downscale_factor) -> Tensor
   use_c10_dispatcher: full
 
 - func: channel_shuffle(Tensor self, int groups) -> Tensor

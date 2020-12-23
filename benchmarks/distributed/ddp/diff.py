@@ -9,10 +9,6 @@ import json
 import numpy as np
 
 
-if not torch._six.PY3:
-    raise RuntimeError("DDP benchmark requires Python 3")
-
-
 def load(path):
     with open(path, 'r') as f:
         return json.load(f)
