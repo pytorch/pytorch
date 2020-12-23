@@ -5393,6 +5393,38 @@ class TestONNXRuntime(unittest.TestCase):
         [np.testing.assert_allclose(ort_out1, ort_out2, atol=1e-7, rtol=0.001) for ort_out1, ort_out2 in
          zip(ort_outs1, ort_outs2)]
 
+    def test_initializer_sequence(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self, input_size, hidden_size, num_classes):
+                super(MyModule, self).__init__()
+                self.fc1 = torch.nn.Linear(input_size, hidden_size)
+                self.relu = torch.nn.ReLU()
+                self.fc2 = torch.nn.Linear(hidden_size, num_classes)
+
+            def forward(self, x):
+                out = self.fc1(x)
+                out = self.relu(out)
+                out = self.fc2(out)
+                return out
+
+        import os
+        from torch._utils_internal import get_writable_path
+        
+        data_dir = get_writable_path(os.path.join(os.path.dirname(__file__)))
+        onnx_model_file_name = os.path.join(data_dir, 'test_initializer_sequence.onnx')
+
+        test_model = MyModule(3, 4, 10)
+        state_dict_list=[k for (k, v) in test_model.state_dict().items()]
+        named_params_list=[k for k, v in test_model.named_parameters()]
+
+        x = torch.randn(32, 3)
+        torch.onnx.export(test_model, (x,), onnx_model_file_name,)
+        loaded_model = onnx.load(onnx_model_file_name)
+
+        actual_list = [p.name for p in loaded_model.graph.initializer]
+        assert actual_list == state_dict_list, "Initializers' sequence is not as same as state_dict(). Expected: ("+', '.join(state_dict_list)+"). Actual:("+', '.join(actual_list)+")."
+        assert actual_list == named_params_list, "Initializers' sequence is not as same as named_parameters(). Expected: ("+', '.join(named_params_list)+"). Actual:("+', '.join(actual_list)+")."
+
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout,
               **extra_kwargs):
