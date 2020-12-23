@@ -217,14 +217,20 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
                                   ->getForwardPreHooks()) {
         Value* pre_hook_output =
             FunctionValue(hook)
-                .call(loc, caller, {NamedValue(self_), NamedValue(forward_input)}, kwargs, n_binders)
+                .call(
+                    loc,
+                    caller,
+                    {NamedValue(self_), NamedValue(forward_input)},
+                    kwargs,
+                    n_binders)
                 ->asValue(loc, caller);
         if (pre_hook_output->node()->output(0)->type() != NoneType::get()) {
-          if(pre_hook_output->node()->output(0)->type()->kind() != TypeKind::TupleType){
-            pre_hook_output = caller.graph()
-                          ->insertNode(caller.graph()->createTuple({pre_hook_output}))
-                          ->output();
-
+          if (pre_hook_output->node()->output(0)->type()->kind() !=
+              TypeKind::TupleType) {
+            pre_hook_output =
+                caller.graph()
+                    ->insertNode(caller.graph()->createTuple({pre_hook_output}))
+                    ->output();
           }
           forward_input = pre_hook_output;
         }
@@ -253,10 +259,16 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
       for (const auto& hook : concreteType_->getJitType()
                                   ->expect<ClassType>()
                                   ->getForwardHooks()) {
-        Value* forward_hook_output =
-            FunctionValue(hook)
-                .call(loc, caller, {NamedValue(self_), NamedValue(forward_input), NamedValue(forward_output)}, kwargs, n_binders)
-                ->asValue(loc, caller);
+        Value* forward_hook_output = FunctionValue(hook)
+                                         .call(
+                                             loc,
+                                             caller,
+                                             {NamedValue(self_),
+                                              NamedValue(forward_input),
+                                              NamedValue(forward_output)},
+                                             kwargs,
+                                             n_binders)
+                                         ->asValue(loc, caller);
         if (forward_hook_output->node()->output(0)->type() != NoneType::get()) {
           forward_output = forward_hook_output;
         }
