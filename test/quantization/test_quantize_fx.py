@@ -663,7 +663,7 @@ class TestQuantizeFx(QuantizationTestCase):
         # input and output of first conv, observer for standalone module
         # will be inserted in the standalone module itself
         prepare_count_check = {
-        ns.call_module(torch.quantization.MinMaxObserver): 2
+            ns.call_module(torch.quantization.MinMaxObserver): 2
         }
         # for input and output of conv in the standalone module
         standalone_prepare_count_check = {
