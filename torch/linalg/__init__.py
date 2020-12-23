@@ -286,7 +286,10 @@ dimensions and the value of the `ord` parameter.
 Args:
     input (Tensor): The input tensor. If dim is None, x must be 1-D or 2-D, unless :attr:`ord`
         is None. If both :attr:`dim` and :attr:`ord` are None, the 2-norm of the input flattened to 1-D
-        will be returned.
+        will be returned. Its data type must be either a floating point or complex type. For complex
+        inputs, the norm is calculated on of the absolute values of each element. If the input is
+        complex and neither :attr:`dtype` nor :attr:`out` is specified, the result's data type will
+        be the corresponding floating point type (e.g. float if :attr:`input` is complexfloat).
 
     ord (int, float, inf, -inf, 'fro', 'nuc', optional): The order of norm.
         inf refers to :attr:`float('inf')`, numpy's :attr:`inf` object, or any equivalent object.
@@ -409,7 +412,9 @@ For norms ``p = {'fro', 'nuc', inf, -inf, 1, -1}`` this is defined as the matrix
 times the matrix norm of the inverse of :attr:`input`. And for norms ``p = {None, 2, -2}`` this is defined as
 the ratio between the largest and smallest singular values.
 
-This function supports ``float``, ``double``, and only on CPU, ``cfloat`` and ``cdouble`` dtypes for :attr:`input`.
+This function supports ``float``, ``double``, ``cfloat`` and ``cdouble`` dtypes for :attr:`input`.
+If the input is complex and neither :attr:`dtype` nor :attr:`out` is specified, the result's data type will
+be the corresponding floating point type (e.g. float if :attr:`input` is complexfloat).
 
 .. note:: For ``p = {None, 2, -2}`` the condition number is computed as the ratio between the largest
           and smallest singular values computed using :func:`torch.linalg.svd`.
@@ -481,6 +486,54 @@ Examples::
     tensor([ 5.9175, 48.4590,  5.6443])
     >>> LA.cond(a, 1)
     >>> tensor([ 11.6734+0.j, 105.1037+0.j,  10.1978+0.j])
+""")
+
+solve = _add_docstr(_linalg.linalg_solve, r"""
+linalg.solve(input, other, *, out=None) -> Tensor
+
+Computes the solution ``x`` to the matrix equation ``matmul(input, x) = other``
+with a square matrix, or batches of such matrices, :attr:`input` and one or more right-hand side vectors :attr:`other`.
+If :attr:`input` is batched and :attr:`other` is not, then :attr:`other` is broadcast
+to have the same batch dimensions as :attr:`input`.
+The resulting tensor has the same shape as the (possibly broadcast) :attr:`other`.
+
+Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` dtypes.
+
+.. note:: If :attr:`input` is a non-square or non-invertible matrix, or a batch containing non-square matrices
+          or one or more non-invertible matrices, then a RuntimeError will be thrown.
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+Args:
+    input (Tensor): the square :math:`n \times n` matrix or the batch
+                    of such matrices of size :math:`(*, n, n)` where ``*`` is one or more batch dimensions.
+    other (Tensor): right-hand side tensor of shape :math:`(*, n)` or :math:`(*, n, k)`,
+                    where :math:`k` is the number of right-hand side vectors.
+
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
+
+Examples::
+
+    >>> A = torch.eye(3)
+    >>> b = torch.randn(3)
+    >>> x = torch.linalg.solve(A, b)
+    >>> torch.allclose(A @ x, b)
+    True
+
+Batched input::
+
+    >>> A = torch.randn(2, 3, 3)
+    >>> b = torch.randn(3, 1)
+    >>> x = torch.linalg.solve(A, b)
+    >>> torch.allclose(A @ x, b)
+    True
+    >>> b = torch.rand(3) # b is broadcast internally to (*A.shape[:-2], 3)
+    >>> x = torch.linalg.solve(A, b)
+    >>> x.shape
+    torch.Size([2, 3])
+    >>> Ax = A @ x.unsqueeze(-1)
+    >>> torch.allclose(Ax, b.unsqueeze(-1).expand_as(Ax))
+    True
 """)
 
 tensorinv = _add_docstr(_linalg.linalg_tensorinv, r"""

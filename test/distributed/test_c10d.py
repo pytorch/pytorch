@@ -225,6 +225,7 @@ class StoreTestBase(object):
         fs.add("key3", 4)
         fs.add("key3", 5)
         fs.add("key3", 6)
+        self.assertEqual(fs.num_keys(), self.num_keys_total)
         self.assertEqual(b"6", fs.get("key"))
         self.assertEqual(b"value0", fs.get("key0"))
         self.assertEqual(b"value1", fs.get("key1"))
@@ -233,6 +234,14 @@ class StoreTestBase(object):
 
     def test_set_get(self):
         self._test_set_get(self._create_store())
+
+    # This is the number of keys used in test_set_get. Adding this as a class
+    # property instead of hardcoding in the test since some Store
+    # implementations will have differing number of keys. In the base case,
+    # there will be 5 keys: key, key0, key1, key2, key3.
+    @property
+    def num_keys_total(self):
+        return 5
 
 
 class FileStoreTest(TestCase, StoreTestBase):
@@ -282,7 +291,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         return store
 
     def test_address_already_in_use(self):
-        if sys.platform == 'win32':
+        if sys.platform == "win32":
             err_msg_reg = "Only one usage of each socket address*"
         else:
             err_msg_reg = "^Address already in use$"
@@ -295,6 +304,12 @@ class TCPStoreTest(TestCase, StoreTestBase):
             # object is not destroyed before the second object is created.
             store1 = c10d.TCPStore(addr, port, 1, True)  # noqa: F841
             store2 = c10d.TCPStore(addr, port, 1, True)  # noqa: F841
+
+    # The TCPStore has 6 keys in test_set_get. It contains the 5 keys added by
+    # the user and one additional key used for coordinate all the workers.
+    @property
+    def num_keys_total(self):
+        return 6
 
     def _test_numkeys_delkeys(self, fs):
         # We start off with one init key in the store to coordinate workers
@@ -324,6 +339,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
     def test_numkeys_delkeys(self):
         self._test_numkeys_delkeys(self._create_store())
 
+
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
         super(PrefixTCPStoreTest, self).setUp()
@@ -333,6 +349,13 @@ class PrefixTCPStoreTest(TestCase, StoreTestBase):
 
     def _create_store(self):
         return c10d.PrefixStore(self.prefix, self.tcpstore)
+
+    # The PrefixTCPStore has 6 keys in test_set_get. It contains the 5 keys
+    # added by the user and one additional key used for coordinate all the
+    # workers.
+    @property
+    def num_keys_total(self):
+        return 6
 
 
 class MyPythonStore(c10d.Store):
@@ -3270,6 +3293,20 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
+    def test_pass_default_pg(self):
+        dist.init_process_group(
+            "nccl",
+            init_method=f"file://{self.file_name}",
+            world_size=self.world_size,
+            rank=self.rank,
+        )
+
+        default_pg = c10d.distributed_c10d._get_default_group()
+        dist.destroy_process_group(default_pg)
+        self.assertFalse(dist.is_initialized())
+
+    @requires_nccl()
+    @skip_if_not_multigpu
     def test_save_load_checkpoint(self):
         dist.init_process_group(
             "gloo",
@@ -3767,15 +3804,21 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         # Get GPU model with the hook registered.
-        state = powerSGD.PowerSGDState(
-            process_group=process_group, matrix_approximation_rank=1
-        )
-        gpu_model = self._gpu_model_with_ddp_comm_hook(
-            process_group, powerSGD.powerSGD_hook, gradient_as_bucket_view, state
-        )
+        # Test the hook with different algorithmic configs.
+        for use_error_feedback, warm_start in product([True, False], [True, False]):
+            state = powerSGD.PowerSGDState(
+                process_group=process_group,
+                matrix_approximation_rank=1,
+                use_error_feedback=use_error_feedback,
+                warm_start=warm_start,
+            )
+            for hook in [powerSGD.powerSGD_hook, powerSGD.batched_powerSGD_hook]:
+                gpu_model = self._gpu_model_with_ddp_comm_hook(
+                    process_group, hook, gradient_as_bucket_view, state
+                )
 
-        # check whether the grads are equal to what DDP without hook would return.
-        self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
+                # check whether the grads are equal to what DDP without hook would return.
+                self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
 
     def _test_builtin_ddp_comm_hooks_nccl(self, gradient_as_bucket_view=False):
         """
@@ -4514,6 +4557,89 @@ class CommTest(MultiProcessTestCase):
         for root_rank in ranks:
             self._test_broadcast_coalesced(process_group, device, root_rank)
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    def test_nccl_barrier(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="nccl",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store)
+
+        t = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
+        c10d.all_reduce(t)
+        expected_tensor = torch.tensor([3] * 10).cuda(2 * self.rank)
+        self.assertEqual(expected_tensor, t)
+
+        # Test with new_group
+        pg = c10d.new_group([0, 1])
+        t = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
+        pg.allreduce(t).wait()
+        self.assertEqual(expected_tensor, t)
+
+        pg = c10d.new_group([0])
+        if self.rank == 0:
+            t = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
+            expected_tensor = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
+            pg.allreduce(t).wait()
+            self.assertEqual(expected_tensor, t)
+
+        pg = c10d.new_group([1])
+        if self.rank == 1:
+            t = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
+            expected_tensor = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
+            pg.allreduce(t).wait()
+            self.assertEqual(expected_tensor, t)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    def test_nccl_barrier_timeout(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        if self.rank == 0:
+            with self.assertRaisesRegex(RuntimeError, "Timed out initializing process group"):
+                c10d.init_process_group(
+                    backend="nccl",
+                    rank=self.rank,
+                    world_size=self.world_size,
+                    store=store,
+                    timeout=timedelta(seconds=1))
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    def test_nccl_barrier_timeout_new_group(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="nccl",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store,
+            timeout=timedelta(seconds=1))
+
+        if self.rank == 0:
+            with self.assertRaisesRegex(RuntimeError, "Timed out initializing process group"):
+                c10d.new_group([0, 1], timeout=timedelta(seconds=1))
+
+            with self.assertRaisesRegex(RuntimeError, "Timed out initializing process group"):
+                c10d.new_group([0], timeout=timedelta(seconds=1))
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    def test_nccl_barrier_timeout_new_group_non_member(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="nccl",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store,
+            timeout=timedelta(seconds=1))
+
+        if self.rank == 1:
+            with self.assertRaisesRegex(RuntimeError, "Timed out initializing process group"):
+                c10d.new_group([0, 1], timeout=timedelta(seconds=1))
+
+            with self.assertRaisesRegex(RuntimeError, "Timed out initializing process group"):
+                c10d.new_group([0], timeout=timedelta(seconds=1))
 
 if __name__ == "__main__":
     assert (

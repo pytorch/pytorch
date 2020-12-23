@@ -1035,6 +1035,8 @@ class TracedModule(ScriptModule):
             )
 
         for name, submodule in orig._modules.items():
+            if submodule is None:
+                continue
             tmp_module._modules[name] = make_module(
                 submodule, TracedModule, _compilation_unit=None
             )
