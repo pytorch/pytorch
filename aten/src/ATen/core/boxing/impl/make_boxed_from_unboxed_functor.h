@@ -437,8 +437,6 @@ namespace impl {
         // Decay ReturnType to ReturnType_ so that if a reference gets returned, we actually store it by value
         // and don't get a dangling reference. This is only required because some kernels still return `Tensor&`.
         using ReturnType_ = std::decay_t<typename decltype(delay_check)::template type_identity<ReturnType>>;
-        // TODO: instead of adding the +1 -1 shenanigans to call_functor_with_args_from_stack_withKeys,
-        // I could modify KernelFunctor's type here to remove the first argument (the dispatchKeySet). Not sure which is less confusing...
         ReturnType_ output = call_functor_with_args_from_stack_withKeys<KernelFunctor, AllowDeprecatedTypes>(functor_, dispatchKeySet, delay_check(stack));
         torch::jit::drop(*stack, num_inputs);
         push_outputs<ReturnType_, AllowDeprecatedTypes>::call(std::move(output), stack);
@@ -472,7 +470,6 @@ namespace impl {
 
   // This specialization is for kernels with at least one argument.
   // It's only difference is an extra static assert to check that the first argument isn't a DispatchKeySet
-  // TODO: probably write up and link to a Note [...] section on dispatch key plumbing
   template<class KernelFunctor, class ReturnType, class FirstParam, class... ParameterTypes>
   struct wrap_kernel_functor_unboxed_<KernelFunctor, ReturnType(FirstParam, ParameterTypes...)> final {
     static_assert(!std::is_same<FirstParam, DispatchKeySet>::value,
@@ -493,7 +490,7 @@ namespace impl {
       // This is due to the calling convention within the dispatcher, which expects all registered kernels to have a first argument of type
       // DispatchKeySet.
       // This is not the case for pretty much all manually written kernels, however- this functor serves to separate the calling convention
-      // of the dispatcher with the calling convention of manually written kernels.
+      // of the dispatcher from the calling convention of manually written kernels.
       return (*functor_)(std::forward<FirstParam>(firstArg), std::forward<ParameterTypes>(args)...);
     }
   };
