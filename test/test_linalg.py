@@ -15,7 +15,7 @@ from functools import reduce
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
-     TEST_WITH_ASAN, make_tensor, TEST_WITH_ROCM, IS_FBCODE,
+     TEST_WITH_ASAN, make_tensor, TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU,
      wrapDeterministicFlagAPITest, iter_indices)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes,
@@ -2101,7 +2101,107 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3})
     def test_solve(self, device, dtype):
+        def run_test(n, batch, rhs):
+            A_dims = (n, *batch)
+            b_dims = (*batch, n, *rhs)
+            b, A = self.solve_test_helper(A_dims, b_dims, device, dtype)
+
+            # Correctness test
+            x = torch.linalg.solve(A, b)
+            if rhs == ():
+                Ax = torch.matmul(A, x.unsqueeze(-1))
+                Ax.squeeze_(-1)
+            else:
+                Ax = torch.matmul(A, x)
+            self.assertEqual(b.expand_as(Ax), Ax)
+
+            # Check against NumPy
+            expected = np.linalg.solve(A.cpu().numpy(), b.expand_as(x).cpu().numpy())
+            self.assertEqual(x, expected)
+
+            # Check out= variant
+            if rhs == ():
+                out = torch.empty_like(x.unsqueeze(-1))
+            else:
+                out = torch.empty_like(x)
+            ans = torch.linalg.solve(A, b, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(x, out)
+
+            # Check empty out
+            out = torch.empty(0, dtype=dtype, device=device)
+            ans = torch.linalg.solve(A, b, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(x, out)
+
+        batches = [(), (0, ), (3, ), (2, 3)]
+        ns = [0, 5, 32]
+        nrhs = [(), (1, ), (5, )]
+        for n, batch, rhs in itertools.product(ns, batches, nrhs):
+            run_test(n, batch, rhs)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3})
+    def test_solve_batched_non_contiguous(self, device, dtype):
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+        A = random_fullrank_matrix_distinct_singular_value(2, 2, dtype=dtype).to(device).permute(1, 0, 2)
+        b = torch.randn(2, 2, 2, dtype=dtype, device=device).permute(2, 1, 0)
+        self.assertFalse(A.is_contiguous())
+        self.assertFalse(b.is_contiguous())
+        actual = torch.linalg.solve(A, b)
+        expected = np.linalg.solve(A.cpu().numpy(), b.cpu().numpy())
+        self.assertEqual(actual, expected)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_solve_errors(self, device, dtype):
+        # solve expects batches of square matrices as input
+        with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
+            a = torch.randn(2, 3, 4, 3, dtype=dtype, device=device)
+            b = torch.randn(2, 3, 4, 1, dtype=dtype, device=device)
+            torch.linalg.solve(a, b)
+
+        # solve expects compatible shapes for A x = b
+        with self.assertRaisesRegex(RuntimeError, "Incompatible matrix sizes"):
+            a = torch.randn(2, 3, 3, 3, dtype=dtype, device=device)
+            b = torch.randn(2, 3, 2, 1, dtype=dtype, device=device)
+            torch.linalg.solve(a, b)
+
+        # if input is not solvable, RuntimeError is raised mentioning the first non-solvable batch
+        def run_test_singular_input(batch_dim, n):
+            a = torch.eye(3, 3, dtype=dtype, device=device).reshape((1, 3, 3)).repeat(batch_dim, 1, 1)
+            a[n, -1, -1] = 0
+            b = torch.randn(batch_dim, 3, 1, dtype=dtype, device=device)
+            with self.assertRaisesRegex(RuntimeError, rf'For batch {n}: U\(3,3\) is zero'):
+                torch.linalg.solve(a, b)
+
+        for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
+            run_test_singular_input(*params)
+
+        # if out is non-empty then it should have correct sizes
+        with self.assertRaisesRegex(RuntimeError, r'does not match broadcasted other shape'):
+            out = torch.empty(1, dtype=dtype, device=device)
+            A = torch.eye(3, dtype=dtype, device=device)
+            b = torch.randn(3, 1, dtype=dtype, device=device)
+            torch.linalg.solve(A, b, out=out)
+
+        # if out is non-empty then it should also be Fortran contiguous
+        with self.assertRaisesRegex(RuntimeError, r'tensor must be in batched column major'):
+            out = torch.zeros(2, 2, 2, dtype=dtype, device=device).permute(2, 1, 0)
+            self.assertFalse(out.is_contiguous())
+            A = torch.eye(2, dtype=dtype, device=device).reshape((1, 2, 2)).repeat(2, 1, 1)
+            b = torch.randn(2, 2, 2, dtype=dtype, device=device)
+            torch.linalg.solve(A, b, out=out)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_old_solve(self, device, dtype):
         for (k, n) in zip([2, 3, 5], [3, 5, 7]):
             b, A = self.solve_test_helper((n,), (n, k), device, dtype)
             x = torch.solve(b, A)[0]
@@ -2110,7 +2210,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_solve_batched(self, device, dtype):
+    def test_old_solve_batched(self, device, dtype):
         def solve_batch_helper(A_dims, b_dims):
             b, A = self.solve_test_helper(A_dims, b_dims, device, dtype)
             x_exp_list = []
@@ -2128,7 +2228,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_solve_batched_non_contiguous(self, device, dtype):
+    def test_old_solve_batched_non_contiguous(self, device, dtype):
         from numpy.linalg import solve
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
         A = random_fullrank_matrix_distinct_singular_value(2, 2, dtype=dtype).to(device).permute(1, 0, 2)
@@ -2141,7 +2241,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_solve_batched_many_batches(self, device, dtype):
+    def test_old_solve_batched_many_batches(self, device, dtype):
         for A_dims, b_dims in zip([(5, 256, 256), (3, )], [(5, 1), (512, 512, 3, 1)]):
             b, A = self.solve_test_helper(A_dims, b_dims, device, dtype)
             x, _ = torch.solve(b, A)
@@ -2151,7 +2251,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_solve_batched_broadcasting(self, device, dtype):
+    def test_old_solve_batched_broadcasting(self, device, dtype):
         from numpy.linalg import solve
 
         def run_test(A_dims, b_dims):

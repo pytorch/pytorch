@@ -12,8 +12,6 @@ into its building blocks to be able to observe.
 
 class LSTMCell(torch.nn.Module):
     _FLOAT_MODULE = torch.nn.LSTMCell
-    # There are multiple outputs in the forward -- we don't want to observe!
-    do_not_observe: bool = True
 
     def __init__(self, input_dim, hidden_dim, bias=True):
         super().__init__()
@@ -186,8 +184,6 @@ class _LSTMLayer(torch.nn.Module):
 
 class LSTM(torch.nn.Module):
     _FLOAT_MODULE = torch.nn.LSTM
-    # There are multiple outputs in the forward -- we don't want to observe!
-    do_not_observe: bool = True
 
     def __init__(self, input_size: int, hidden_size: int,
                  num_layers: int = 1, bias: bool = True, batch_first: bool = False,
