@@ -102,9 +102,9 @@ def insert_observer(
         'call_module', observer_name, (load_arg(node),), {})
     observed_node_names_set.add(node.name)
 
-def insert_observer_for_special_module(
+def maybe_insert_observer_for_special_module(
         quantize_handler: QuantizeHandler, modules: Dict[str, torch.nn.Module],
-        prepare_custom_config_dict: Any, qconfig: Any, node: Node):
+        prepare_custom_config_dict: Any, qconfig: Any, node: Node) -> Optional[List[int]]:
     """ Insert observer for custom module and standalone module
       Returns: standalone_module_input_idxs: the indexs for inputs that
       needs to be observed by parent module
@@ -512,9 +512,10 @@ class Quantizer:
                 # parent
                 if qconfig is not None:
                     assert obj is not None
-                    standalone_module_input_idxs = insert_observer_for_special_module(
-                        obj, self.modules, prepare_custom_config_dict, qconfig,
-                        node)
+                    standalone_module_input_idxs = \
+                        maybe_insert_observer_for_special_module(
+                            obj, self.modules, prepare_custom_config_dict, qconfig,
+                            node)
                     insert_observer_for_output_of_the_node(
                         node, obj, qconfig, self.modules, model, pattern,
                         self.activation_post_process_map, env,
@@ -667,7 +668,7 @@ class Quantizer:
             else:
                 return env[n.name]
 
-        def load_arg(quantized: Optional[Union[List[Any], bool, Tuple[Any, ...]]]
+        def load_arg(quantized: Optional[Union[List[int], bool, Tuple[int, ...]]]
                      ) -> Callable[[Node], Argument]:
             """
             Input: quantized, which can be None, list, boolean or tuple
@@ -691,7 +692,7 @@ class Quantizer:
             def load_arg_impl(arg_or_args):
                 # we'll update the format of `quantized`
                 # to better match arg_or_args
-                updated_quantized = quantized
+                updated_quantized: Optional[Union[List[int], bool, Tuple[int, ...]]] = quantized
 
                 if isinstance(quantized, (tuple, list)) and \
                    len(quantized) == 1 and isinstance(arg_or_args, Node):

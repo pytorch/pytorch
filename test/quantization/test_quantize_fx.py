@@ -570,7 +570,13 @@ class TestQuantizeFx(QuantizationTestCase):
         m = convert_fx(m)
         m(tensor_input)
 
-    def test_standalone_module(self):
+    def _test_standalone_module(
+            self,
+            interface_config,
+            prepare_count_check,
+            standalone_prepare_count_check,
+            convert_count_check,
+            standalone_convert_count_check):
         """ Test standalone module with different quantized input/quantized output
         configurations
         """
@@ -613,67 +619,7 @@ class TestQuantizeFx(QuantizationTestCase):
         original_ref_m.conv2.weight = torch.nn.Parameter(original_m.standalone.conv.weight.detach())
         original_ref_m.conv2.bias = torch.nn.Parameter(original_m.standalone.conv.bias.detach())
 
-        float_interface_config = {
-            "input_quantized_idxs": [],  # float input
-            "output_quantized_idxs": [],  # float output
-        }
-
-        quantized_interface_config = {
-            "input_quantized_idxs": [0],  # quantized input
-            "output_quantized_idxs": [0],  # quantized output
-        }
-        # is_name, is_float
-        options = itertools.product([True, False], [True, False])
-        for is_name, is_float in options:
-            if is_float:
-                interface_config = float_interface_config
-                # input and output of first conv, observer for standalone module
-                # will be inserted in the standalone module itself
-                prepare_count_check = {
-                    ns.call_module(torch.quantization.MinMaxObserver): 2
-                }
-                # for input and output of conv in the standalone module
-                standalone_prepare_count_check = {
-                    ns.call_module(torch.quantization.MinMaxObserver): 2
-                }
-                convert_count_check = {
-                    ns.call_function(torch.quantize_per_tensor) : 1,
-                    ns.call_module(nnq.Conv2d) : 1,
-                    ns.call_method("dequantize") : 1,
-                }
-                standalone_convert_count_check = {
-                    # standalone module will take float as input and output
-                    # so we'll see quantize and dequantize in the modoule
-                    ns.call_function(torch.quantize_per_tensor) : 1,
-                    ns.call_module(nnq.Conv2d): 1,
-                    ns.call_method("dequantize") : 1,
-                }
-            else:
-                interface_config = quantized_interface_config
-                # observer for input and output of first conv
-                prepare_count_check = {
-                    ns.call_module(torch.quantization.MinMaxObserver): 2
-                }
-                # for output of conv in the standalone module
-                standalone_prepare_count_check = {
-                    ns.call_module(torch.quantization.MinMaxObserver): 1
-                }
-                convert_count_check = {
-                    # quantizing input for conv
-                    ns.call_function(torch.quantize_per_tensor) : 1,
-                    ns.call_module(nnq.Conv2d) : 1,
-                    # dequantizing output of standalone module
-                    ns.call_method("dequantize") : 1,
-                }
-                standalone_convert_count_check = {
-                    # quantization of input happens in parent module
-                    # quantization of output happens in the quantized conv module
-                    ns.call_function(torch.quantize_per_tensor) : 0,
-                    ns.call_module(nnq.Conv2d): 1,
-                    # dequantization for output happens in parent module
-                    ns.call_method("dequantize") : 0,
-                }
-
+        for is_name in [True, False]:
             if is_name:
                 prepare_config = {
                     "standalone_module_name": [("standalone", None, interface_config)]
@@ -707,6 +653,76 @@ class TestQuantizeFx(QuantizationTestCase):
             ref_m = convert_fx(ref_m)
             ref_res = ref_m(data)
             self.assertEqual(res, ref_res)
+
+    def test_standalone_module_float_interface(self):
+        float_interface_config = {
+            "input_quantized_idxs": [],  # float input
+            "output_quantized_idxs": [],  # float output
+        }
+        interface_config = float_interface_config
+        # input and output of first conv, observer for standalone module
+        # will be inserted in the standalone module itself
+        prepare_count_check = {
+        ns.call_module(torch.quantization.MinMaxObserver): 2
+        }
+        # for input and output of conv in the standalone module
+        standalone_prepare_count_check = {
+            ns.call_module(torch.quantization.MinMaxObserver): 2
+        }
+        convert_count_check = {
+            ns.call_function(torch.quantize_per_tensor) : 1,
+            ns.call_module(nnq.Conv2d) : 1,
+            ns.call_method("dequantize") : 1,
+        }
+        standalone_convert_count_check = {
+            # standalone module will take float as input and output
+            # so we'll see quantize and dequantize in the modoule
+            ns.call_function(torch.quantize_per_tensor) : 1,
+            ns.call_module(nnq.Conv2d): 1,
+            ns.call_method("dequantize") : 1,
+        }
+        self._test_standalone_module(
+            interface_config,
+            prepare_count_check,
+            standalone_prepare_count_check,
+            convert_count_check,
+            standalone_convert_count_check)
+
+    def test_standalone_module_quantized_interface(self):
+        quantized_interface_config = {
+            "input_quantized_idxs": [0],  # quantized input
+            "output_quantized_idxs": [0],  # quantized output
+        }
+        interface_config = quantized_interface_config
+        # observer for input and output of first conv
+        prepare_count_check = {
+            ns.call_module(torch.quantization.MinMaxObserver): 2
+        }
+        # for output of conv in the standalone module
+        standalone_prepare_count_check = {
+            ns.call_module(torch.quantization.MinMaxObserver): 1
+        }
+        convert_count_check = {
+            # quantizing input for conv
+            ns.call_function(torch.quantize_per_tensor) : 1,
+            ns.call_module(nnq.Conv2d) : 1,
+            # dequantizing output of standalone module
+            ns.call_method("dequantize") : 1,
+        }
+        standalone_convert_count_check = {
+            # quantization of input happens in parent module
+            # quantization of output happens in the quantized conv module
+            ns.call_function(torch.quantize_per_tensor) : 0,
+            ns.call_module(nnq.Conv2d): 1,
+            # dequantization for output happens in parent module
+            ns.call_method("dequantize") : 0,
+        }
+        self._test_standalone_module(
+            interface_config,
+            prepare_count_check,
+            standalone_prepare_count_check,
+            convert_count_check,
+            standalone_convert_count_check)
 
     @skipIfNoFBGEMM
     def test_qconfig_none(self):

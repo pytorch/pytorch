@@ -2,11 +2,11 @@ import torch
 import copy
 from torch.fx import GraphModule  # type: ignore
 from torch.fx.graph import Graph
-from typing import Union, Dict, Any
+from typing import Union, Dict, Any, List
 
 class ObservedGraphModule(GraphModule):
 
-    def get_preserved_attr_names(self):
+    def get_preserved_attr_names(self) -> List[str]:
         return ['_activation_post_process_map',
                 '_patterns',
                 '_qconfig_map',
@@ -35,7 +35,7 @@ def is_observed_module(module: Any) -> bool:
     return isinstance(module, ObservedGraphModule)
 
 class ObservedStandaloneGraphModule(ObservedGraphModule):
-    def get_preserved_attr_names(self):
+    def get_preserved_attr_names(self) -> List[str] :
         return super().get_preserved_attr_names() + [
             "_standalone_module_input_quantized_idxs",
             "_standalone_module_output_quantized_idxs"
