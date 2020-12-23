@@ -578,7 +578,7 @@ def infer_methods_to_compile(nn_module):
     methods: List[str] = []
     if hasattr(nn_module, 'forward') and not _jit_internal.is_ignored_fn(nn_module.forward):
         forward_func = getattr(nn_module.forward, "__func__", None)
-        module_forward = getattr(torch.nn.Module, "forward")
+        module_forward = torch.nn.Module.forward
         if forward_func != module_forward:
             methods = ['forward']
 
