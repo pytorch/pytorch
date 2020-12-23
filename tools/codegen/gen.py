@@ -495,7 +495,7 @@ c10::impl::hacky_wrapper_for_legacy_signatures<
         name = native.name(f.func)
         returns_type = native.returns_type(f.func.returns)
         args = native.arguments(f.func)
-        args_str = ', '.join([a.defn() for a in args])
+        args_str = ', '.join(a.defn() for a in args)
 
         if self.target is Target.DEFINITION:
             impl_name = f"at::native::{f.dispatch[self.dispatch_key]}"

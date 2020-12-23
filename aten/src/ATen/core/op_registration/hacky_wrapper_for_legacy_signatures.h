@@ -212,7 +212,6 @@ template<class Arg> constexpr bool is_out_argument_() {
 }
 template<class Arg> using is_out_argument = guts::bool_constant<is_out_argument_<Arg>()>;
 
-
 template<size_t NumOutParameters, class KernelFunc>
 struct with_out_arguments_reordered_impl final {
 private:
@@ -310,6 +309,7 @@ constexpr auto with_out_arguments_reordered(KernelFunc kernel_func) {
     // Don't wrap them but just use the kernel directly.
     return kernel_func;
 }
+
 }
 
 template<class TargetSignature, size_t NumOutParameters, class FuncPtr>

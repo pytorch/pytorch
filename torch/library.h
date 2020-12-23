@@ -153,7 +153,7 @@ public:
   explicit CppFunction(WithKeys, CppFunction&& f)
     : dispatch_key_(f.dispatch_key_)
     , func_(std::move(f.func_))
-    , cpp_signature_(std::move(f.cpp_signature_))
+    , cpp_signature_(f.cpp_signature_)
     , schema_(std::move(f.schema_))
     , debug_(std::move(f.debug_))
     {}
