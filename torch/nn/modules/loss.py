@@ -306,11 +306,15 @@ class GaussianNLLLoss(_Loss):
 
     the full loss can be described as:
     .. math::
-    \text{loss}[i] = \frac{1}{2}\sum_{j=1}^D \left(\log(\text{var}[i, j] + \epsilon) + \frac{\left(\text{input}[i,j] - \text{target}[i,j]\right)^2}{\text{var}[i,j]} \right) + \frac{D}{2}\log(2\pi)
+    \text{loss}[i] = \frac{1}{2}\sum_{j=1}^D \left(\log(\text{var}[i, j] + \epsilon) 
+     + \frac{\left(\text{input}[i,j] - \text{target}[i,j]\right)^2}{\text{var}[i,j]} \right)
+     + \frac{D}{2}\log(2\pi)
 
     where the input, target and variance tensors have shape (N, D). The homoscedastic case applies when the variance tensor has shape (N, 1) instead:
     .. math::
-    \text{loss}[i] = \frac{D}{2}\log(\text{var}[i] + \epsilon) + \frac{1}{2}\sum_{j=1}^D \left(\frac{\left(\text{input}[i,j] - \text{target}[i,j]\right)^2}{\text{var}[i]} \right) + \frac{D}{2}\log(2\pi)
+    \text{loss}[i] = \frac{D}{2}\log(\text{var}[i] + \epsilon)
+     + \frac{1}{2}\sum_{j=1}^D \left(\frac{\left(\text{input}[i,j] - \text{target}[i,j]\right)^2}{\text{var}[i]}\right)
+     + \frac{D}{2}\log(2\pi)
 
 
     Examples::
