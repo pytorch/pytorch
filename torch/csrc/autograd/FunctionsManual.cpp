@@ -35,8 +35,20 @@ bool isDefined(const c10::optional<Tensor>& t) {
   return t.has_value() && t->defined();
 }
 
+bool isFwGradDefined(const c10::optional<Tensor>& t) {
+  return t.has_value() && t->defined() && t->fw_grad(/*level */ 0).defined();
+}
+
 Tensor toLegacyTensor(const c10::optional<Tensor>& t) {
   return t.has_value() ? *t : Tensor();
+}
+
+Tensor toLegacyFwGrad(const c10::optional<Tensor>& t) {
+  return (t.has_value() && t->defined()) ? t->fw_grad(/*level */ 0) : Tensor();
+}
+
+Tensor toLegacyPrimal(const c10::optional<Tensor>& t) {
+  return (t.has_value() && t->defined()) ? t->_fw_primal(/*level */ 0) : Tensor();
 }
 
 void copy_range(variable_list& out, IndexRange range, const Tensor & t) {

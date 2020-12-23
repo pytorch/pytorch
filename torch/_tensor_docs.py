@@ -4472,6 +4472,20 @@ masked_scatter(mask, tensor) -> Tensor
 Out-of-place version of :meth:`torch.Tensor.masked_scatter_`
 """)
 
+add_docstr_all('xlogy',
+               r"""
+xlogy(other) -> Tensor
+
+See :func:`torch.xlogy`
+""")
+
+add_docstr_all('xlogy_',
+               r"""
+xlogy_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.xlogy`
+""")
+
 add_docstr_all('masked_fill',
                r"""
 masked_fill(mask, value) -> Tensor
