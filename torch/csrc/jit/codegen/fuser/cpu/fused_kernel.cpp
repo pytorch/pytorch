@@ -21,7 +21,7 @@ namespace cpu {
 static const std::string getTempPath() {
   char lpTempPathBuffer[MAX_PATH];
 
-  DWORD dwRetVal = GetTempPath(
+  DWORD dwRetVal = GetTempPathW(
       MAX_PATH, // length of the buffer
       lpTempPathBuffer); // buffer for path
 

@@ -8,6 +8,7 @@
 #ifdef _WIN32
 #include <WinError.h>
 #include <c10/util/win32-headers.h>
+#include <c10/util/Unicode.h>
 #include <fcntl.h>
 #include <io.h>
 #include <process.h>
@@ -47,7 +48,8 @@ int mkstemps(char* tmpl, int suffix_len) {
       name[i] = "abcdefghijklmnopqrstuvwxyz0123456789"[rd() % 36];
     }
 
-    fd = _open(tmpl, _O_RDWR | _O_CREAT | _O_EXCL, _S_IWRITE | _S_IREAD);
+    const std::wstring wTmpl = c10::u8u16(tmpl);
+    fd = _wopen(wTmpl.c_str(), _O_RDWR | _O_CREAT | _O_EXCL, _S_IWRITE | _S_IREAD);
   } while (errno == EEXIST);
 
   if (fd >= 0) {
