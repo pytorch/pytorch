@@ -480,7 +480,7 @@ if __name__ == '__main__':
 """
 
         # Test running of cuda assert test suite should early terminate.
-        p = subprocess.run([sys.executable, '-c', problematic_test_script], capture_output=True, timeout=120)
+        p = subprocess.run([sys.executable, '-c', problematic_test_script], stderr=subprocess.PIPE, timeout=120)
         # should capture CUDA error
         self.assertIn('CUDA error: device-side assert triggered', p.stderr.decode('ascii'))
         # should run only 3 tests - 2 CPUs and 1 CUDA (remaining CUDA test should skip)
