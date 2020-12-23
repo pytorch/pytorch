@@ -10045,27 +10045,6 @@
   dispatch:
     DefaultBackend: linalg_eigvalsh_out
 
-- func: _linalg_inv_out_helper_(Tensor(a!) self, Tensor(b!) infos_lu, Tensor(c!) infos_getri) -> Tensor(a!)
-  use_c10_dispatcher: full
-  variants: function
-  dispatch:
-    CPU: _linalg_inv_out_helper_cpu
-    CUDA: _linalg_inv_out_helper_cuda
-
-- func: linalg_inv(Tensor self) -> Tensor
-  python_module: linalg
-  use_c10_dispatcher: full
-  variants: function
-  dispatch:
-    DefaultBackend: linalg_inv
-
-- func: linalg_inv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  python_module: linalg
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
-  variants: function
-  dispatch:
-    DefaultBackend: linalg_inv_out
-
 - func: inner(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: function, method

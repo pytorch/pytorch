@@ -47,9 +47,7 @@ Tensor prepare_batch_matrix_for_cublas(const Tensor& tensor, bool& transpose_ten
     ld_tensor = tensor_strides[fast_dim];
   } else {
     transpose_tensor = !transpose_result;
-    // gemm call requires leading dimension and stride parameters to be non-zero
-    bool is_stride_non_zero = tensor.stride(1) != 0 && tensor.stride(2) != 0;
-    if (tensor.is_contiguous() && is_stride_non_zero) {
+    if (tensor.is_contiguous()) {
       tensor_ = tensor;
     } else {
       tensor_ = tensor.clone(at::MemoryFormat::Contiguous);
