@@ -2386,15 +2386,15 @@ def barrier(group=GroupMember.WORLD,
 
     opts = BarrierOptions()
     if device_ids is not None:
-        try:
-            if isinstance(device_ids, list):
-                opts.device_ids = device_ids
-            else:
-                raise RuntimeError("Invalid function argument: "
-                                   "device_ids type should be List[int]")
-        except AttributeError:
+        if get_backend(group) !=  Backend.NCCL:
             raise RuntimeError("Function argument device_ids not supported "
                                "for the selected backend {}".format(get_backend(group)))
+        if isinstance(device_ids, list):
+            opts.device_ids = device_ids
+        else:
+            raise RuntimeError("Invalid function argument: "
+                               "device_ids type should be List[int]")
+
     if group is None:
         default_pg = _get_default_group()
         work = default_pg.barrier(opts=opts)

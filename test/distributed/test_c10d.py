@@ -4634,6 +4634,29 @@ class CommTest(MultiProcessTestCase):
             with self.assertRaisesRegex(RuntimeError, "Timed out initializing process group"):
                 c10d.new_group([0], timeout=timedelta(seconds=1))
 
+    @requires_nccl()
+    def test_nccl_barrier_device_ids(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="nccl",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store)
+
+        c10d.barrier(device_ids=[self.rank])
+
+    @requires_gloo()
+    def test_gloo_barrier_device_ids(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="gloo",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store)
+
+        with self.assertRaisesRegex(RuntimeError, "device_ids not supported"):
+            c10d.barrier(device_ids=[self.rank])
+
 if __name__ == "__main__":
     assert (
         not torch.cuda._initialized
