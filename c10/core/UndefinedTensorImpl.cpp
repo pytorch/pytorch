@@ -20,10 +20,6 @@ int64_t UndefinedTensorImpl::stride(int64_t d) const {
   AT_ERROR("stride(dim) called on an undefined Tensor");
 }
 
-int64_t UndefinedTensorImpl::dim() const {
-  AT_ERROR("dim() called on undefined Tensor");
-}
-
 bool UndefinedTensorImpl::has_storage() const {
   AT_ERROR("has_storage() called on undefined Tensor");
 }
