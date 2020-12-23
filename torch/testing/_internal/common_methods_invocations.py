@@ -1045,6 +1045,7 @@ op_db: List[OpInfo] = [
                SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'))),
     OpInfo('linalg.svd',
            op=torch.linalg.svd,
+           aten_name='linalg_svd',
            dtypes=floating_and_complex_types(),
            test_inplace_grad=False,
            supports_tensor_out=False,
