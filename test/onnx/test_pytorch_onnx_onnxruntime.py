@@ -2723,6 +2723,7 @@ class TestONNXRuntime(unittest.TestCase):
             self.run_test(LSTMModel(), (input,))
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    @skipIfUnsupportedOpsetVersion([13])
     @disableScriptTest()
     def test_lstm(self):
         model = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 1, bidirectional=False)
@@ -5117,6 +5118,7 @@ class TestONNXRuntime(unittest.TestCase):
 
     @skipIfONNXShapeInference(False)
     @skipIfUnsupportedMinOpsetVersion(13)
+    @skipIfUnsupportedOpsetVersion([13])
     def test_if_list(self):
         class IfModel(torch.nn.Module):
             def forward(self, x, y, cond):
