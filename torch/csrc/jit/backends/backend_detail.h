@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ATen/core/stack.h>
 #include <ATen/core/jit_type.h>
+#include <ATen/core/stack.h>
 
 namespace torch {
 namespace jit {
