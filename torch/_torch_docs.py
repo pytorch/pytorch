@@ -625,6 +625,11 @@ Args:
 Keyword args:
     {out}
 
+.. note:: Starting in PyTorch 1.8, angle returns pi for negative real numbers,
+          zero for non-negative real numbers, and propagates NaNs. Previously
+          the function would return zero for all real numbers and not propagate
+          floating-point NaNs.
+
 Example::
 
     >>> torch.angle(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))*180/3.14159
