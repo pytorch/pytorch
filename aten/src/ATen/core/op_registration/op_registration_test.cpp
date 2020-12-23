@@ -1876,11 +1876,10 @@ TEST(NewOperatorRegistrationTest, BackendSelectRedispatchesToCPU) {
      auto op = c10::Dispatcher::singleton().findSchema({"test::fn", ""}).value().typed<Tensor (const Tensor&)>();
      return c10::Dispatcher::singleton().redispatch<Tensor, const Tensor&>(op, c10::DispatchKey::BackendSelect, x);
    });
-  auto x = c10::DispatchKeySet(c10::DispatchKeySet::FULL);
 
   auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
   ASSERT_TRUE(op.has_value());
-  callOpUnboxed<Tensor, const Tensor&>(*op, dummyTensor(c10::DispatchKey::CPU));
+  callOp(*op, dummyTensor(c10::DispatchKey::CPU));
   ASSERT_TRUE(cpu_called);
   ASSERT_TRUE(backend_generic_called);
 }

@@ -443,7 +443,7 @@ struct {class_name} final : public {parent_class} {{
     generate_super=g.out.structured_inherits is not None
 )}
 
-{sig.defn(addDispatchKeySet=True)} {{
+{sig.defn()} {{
     {op_init}
     op.meta({functional_exprs});
     {impl_call}
@@ -458,15 +458,15 @@ struct {class_name} final : public {parent_class} {{
                     payload = f"TORCH_FN({sig.name()})"
                 elif local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
                     payload = f"""
-c10::impl::hacky_wrapper_for_legacy_signatures_withKeys<
-    {dispatcher_sig.type(addDispatchKeySet=True)},
+c10::impl::hacky_wrapper_for_legacy_signatures<
+    {dispatcher_sig.type()},
     {len(f.func.arguments.out)}
 >(TORCH_FN({sig.name()}))
 """
                 else:
                     assert local.use_c10_dispatcher() is UseC10Dispatcher.with_codegenerated_unboxing_wrapper
-                    payload = f"torch::CppFunction::makeUnboxedOnly_withKeys(&{sig.name()})"
-                return f'm.impl_withKeys("{f.func.name}", {payload});'
+                    payload = f"torch::CppFunction::makeUnboxedOnly(&{sig.name()})"
+                return f'm.impl("{f.func.name}", {payload});'
             else:
                 assert_never(self.target)
                 # Silence mypy's "Missing return statement" error
@@ -495,7 +495,7 @@ c10::impl::hacky_wrapper_for_legacy_signatures_withKeys<
         name = native.name(f.func)
         returns_type = native.returns_type(f.func.returns)
         args = native.arguments(f.func)
-        args_str = ', '.join(['c10::DispatchKeySet'] + [a.defn() for a in args])
+        args_str = ', '.join([a.defn() for a in args])
 
         if self.target is Target.DEFINITION:
             impl_name = f"at::native::{f.dispatch[self.dispatch_key]}"
@@ -567,16 +567,16 @@ c10::impl::hacky_wrapper_for_legacy_signatures_withKeys<
                     payload = f"TORCH_FN({name})"
                 elif local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
                     payload = f"""
-c10::impl::hacky_wrapper_for_legacy_signatures_withKeys<
-    {dispatcher_sig.type(addDispatchKeySet=True)},
+c10::impl::hacky_wrapper_for_legacy_signatures<
+    {dispatcher_sig.type()},
     {len(f.func.arguments.out)}
 >(TORCH_FN({name}))
 """
                 else:
                     assert local.use_c10_dispatcher() is UseC10Dispatcher.with_codegenerated_unboxing_wrapper
-                    payload = f"torch::CppFunction::makeUnboxedOnly_withKeys(&{name})"
+                    payload = f"torch::CppFunction::makeUnboxedOnly(&{name})"
 
-                return f'm.impl_withKeys("{f.func.name}",\n{payload});\n'
+                return f'm.impl("{f.func.name}",\n{payload});\n'
         else:
             assert_never(self.target)
 
@@ -829,7 +829,7 @@ DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::mult
                 compute_dk = f"DispatchKeySet _dk = c10::DispatchKeySet({dispatch_key});"
             return f"""\
 // aten::{f.func}
-{sig.defn(name, addDispatchKeySet=True)} {{
+{sig.defn(name)} {{
   static auto op = c10::Dispatcher::singleton()
     .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
     .typed<{dispatcher_sig.type()}>();
@@ -839,10 +839,10 @@ DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::mult
 """
         elif self.target is Target.REGISTRATION:
             if local.use_c10_dispatcher().dispatcher_uses_new_style():
-                return f"""m.impl_withKeys("aten::{f.func.name}", TORCH_FN({name}));"""
+                return f"""m.impl("aten::{f.func.name}", TORCH_FN({name}));"""
             else:
                 assert local.use_c10_dispatcher() is UseC10Dispatcher.with_codegenerated_unboxing_wrapper
-                return f"""m.impl_UNBOXED_withKeys("aten::{f.func.name}", {name});"""
+                return f"""m.impl_UNBOXED("aten::{f.func.name}", {name});"""
         elif self.target is Target.DECLARATION:
             raise AssertionError()
         else:
