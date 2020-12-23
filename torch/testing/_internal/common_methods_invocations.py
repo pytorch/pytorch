@@ -1,4 +1,5 @@
 from functools import reduce, wraps
+from itertools import product
 from operator import mul, itemgetter
 import collections
 
@@ -23,6 +24,8 @@ from torch.testing._internal.common_utils import \
      random_fullrank_matrix_distinct_singular_value, set_rng_seed,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
      torch_to_numpy_dtype_dict, TEST_WITH_SLOW)
+
+from distutils.version import LooseVersion
 
 if TEST_SCIPY:
     import scipy.special
@@ -105,6 +108,7 @@ class OpInfo(object):
                  promotes_integers_to_float=False,  # whether op promotes unary output to float or not
                  sample_inputs_func=None,  # function to generate sample inputs
                  aten_name=None,  # name of the corresponding aten:: operator
+                 supports_sparse=False  # supported for sparse
                  ):
 
         # Validates the dtypes are generated from the dispatch-related functions
@@ -143,6 +147,7 @@ class OpInfo(object):
             self.autodiff_nonfusible_nodes = ['aten::' + self.name]
         else:
             self.autodiff_nonfusible_nodes = autodiff_nonfusible_nodes
+        self.supports_sparse = supports_sparse
 
 
 
@@ -252,7 +257,9 @@ class UnaryUfuncInfo(OpInfo):
                  handles_large_floats=True,  # whether the op correctly handles large float values (like 1e20)
                  handles_extremals=True,  # whether the op correctly handles extremal values (like inf)
                  handles_complex_extremals=True,  # whether the op correct handles complex extremals (like inf -infj)
+                 supports_complex_to_float=False,  # op supports casting from complex input to real output safely eg. angle
                  sample_inputs_func=sample_inputs_unary,
+                 supports_sparse=False,
                  **kwargs):
         super(UnaryUfuncInfo, self).__init__(name,
                                              dtypes=dtypes,
@@ -260,12 +267,14 @@ class UnaryUfuncInfo(OpInfo):
                                              dtypesIfCUDA=dtypesIfCUDA,
                                              dtypesIfROCM=dtypesIfROCM,
                                              sample_inputs_func=sample_inputs_func,
+                                             supports_sparse=supports_sparse,
                                              **kwargs)
         self.ref = ref
         self.domain = domain
         self.handles_large_floats = handles_large_floats
         self.handles_extremals = handles_extremals
         self.handles_complex_extremals = handles_complex_extremals
+        self.supports_complex_to_float = supports_complex_to_float
 
         # Epsilon to ensure grad and gradgrad checks don't test values
         #   outside a function's domain.
@@ -290,12 +299,21 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad):
     return (SampleInput((make_tensor((S, S), device, dtype,
                                      low=None, high=None,
                                      requires_grad=requires_grad),
-                        make_tensor((S, S), device, dtype,
-                                    low=None, high=None,
-                                    requires_grad=requires_grad),
-                        make_tensor((S, S), device, dtype,
-                                    low=None, high=None,
-                                    requires_grad=False))),)
+                         make_tensor((S, S), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                         make_tensor((S, S), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=False))),)
+
+
+def sample_inputs_xlogy(self, device, dtype, requires_grad):
+    return (SampleInput((make_tensor((S, S), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                         make_tensor((S, S), device, dtype,
+                                     low=0, high=None,
+                                     requires_grad=requires_grad))),)
 
 def np_sinc_with_fp16_as_fp32(x):
     # Wraps numpy's sinc function so that fp16 values are promoted to fp32
@@ -305,6 +323,22 @@ def np_sinc_with_fp16_as_fp32(x):
         return np.sinc(x.astype(np.float32))
     else:
         return np.sinc(x)
+
+def sample_inputs_broadcast_to(op_info, device, dtype, requires_grad):
+    test_cases = (
+        ((S, 1, 1), (S, S, S)),
+        ((S, 1, S), (S, S, S)),
+        ((S, 1), (S, S, S)),
+        ((1,), (S, S, S)),
+        ((1, S), (1, 1, S)),
+        ((), ()),
+        ((), (1, 3, 2)),
+    )
+
+    return tuple(SampleInput((make_tensor(size, device, dtype,
+                                          low=None, high=None,
+                                          requires_grad=requires_grad), shape))
+                 for size, shape in test_cases)
 
 def np_unary_ufunc_integer_promotion_wrapper(fn):
     # Wrapper that passes PyTorch's default scalar
@@ -393,6 +427,39 @@ class SpectralFuncInfo(OpInfo):
                 SampleInput(tensor, kwargs=dict(n=15)),
                 SampleInput(tensor, kwargs=dict(n=10, dim=1, norm='ortho')),
             ]
+
+
+def sample_inputs_linalg_solve(op_info, device, dtype, requires_grad=False):
+    """
+    This function generates always solvable input for torch.linalg.solve
+    Using random_fullrank_matrix_distinct_singular_value gives a non-singular (=invertible, =solvable) matrices 'a'.
+    The first input to torch.linalg.solve is generated as the itertools.product of 'batches' and 'ns'.
+    The second input is generated as the product of 'batches', 'ns' and 'nrhs'.
+    In total this function generates 18 SampleInputs
+    'batches' cases include:
+        () - single input,
+        (0,) - zero batched dimension,
+        (2,) - batch of two matrices.
+    'ns' gives 0x0 and 5x5 matrices.
+    and 'nrhs' controls the number of vectors to solve for:
+        () - using 1 as the number of vectors implicitly
+        (1,) - same as () but explicit
+        (3,) - solve for 3 vectors.
+    Zeros in dimensions are edge cases in the implementation and important to test for in order to avoid unexpected crashes.
+    """
+    from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+
+    batches = [(), (0, ), (2, )]
+    ns = [0, 5]
+    nrhs = [(), (1, ), (3, )]
+    out = []
+    for n, batch, rhs in product(ns, batches, nrhs):
+        a = random_fullrank_matrix_distinct_singular_value(n, *batch, dtype=dtype).to(device)
+        a.requires_grad = requires_grad
+        b = torch.randn(*batch, n, *rhs, dtype=dtype, device=device)
+        b.requires_grad = requires_grad
+        out.append(SampleInput((a, b)))
+    return out
 
 
 def sample_inputs_svd(op_info, device, dtype, requires_grad=False):
@@ -550,6 +617,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('asin',
                    ref=np.arcsin,
                    domain=(-1, 1),
+                   supports_sparse=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    promotes_integers_to_float=True,
                    dtypes=all_types_and_complex_and(torch.bool),
@@ -562,7 +630,7 @@ op_db: List[OpInfo] = [
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble],
-                                active_if=IS_WINDOWS),
+                                active_if=IS_WINDOWS)
                    )),
     # NOTE: derivative for inplace asinh is not implemented
     UnaryUfuncInfo('asinh',
@@ -603,6 +671,11 @@ op_db: List[OpInfo] = [
                    promotes_integers_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    test_inplace_grad=False),
+    OpInfo('broadcast_to',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_tensor_out=False,
+           test_inplace_grad=False,
+           sample_inputs_func=sample_inputs_broadcast_to),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -944,14 +1017,28 @@ op_db: List[OpInfo] = [
                                 active_if=IS_MACOS),
                        # Reference: https://github.com/pytorch/pytorch/pull/47293#issuecomment-721774436
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                dtypes=[torch.bfloat16]),
-                       SkipInfo('TestCommon', 'test_variant_consistency_eager',
-                                dtypes=[torch.cfloat, torch.cdouble]),
-                       SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                                dtypes=[torch.cfloat, torch.cdouble])),
+                                dtypes=[torch.bfloat16])),
                    promotes_integers_to_float=True,
-                   handles_complex_extremals=False,
-                   test_complex_grad=False),
+                   handles_complex_extremals=False),
+    UnaryUfuncInfo('angle',
+                   ref=np.angle,
+                   dtypes=all_types_and_complex_and(torch.bool),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool),
+                   dtypesIfROCM=all_types_and_complex_and(torch.bool),
+                   decorators=(precisionOverride({torch.float16: 1e-2,
+                                                  torch.bfloat16: 1e-2}),),
+                   promotes_integers_to_float=True,
+                   supports_complex_to_float=True,
+                   test_inplace_grad=False),
+    OpInfo('linalg.solve',
+           aten_name='linalg_solve',
+           op=torch.linalg.solve,
+           dtypes=floating_and_complex_types(),
+           test_inplace_grad=False,
+           supports_tensor_out=True,
+           sample_inputs_func=sample_inputs_linalg_solve,
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
     OpInfo('svd',
            op=torch.svd,
            dtypes=floating_and_complex_types(),
@@ -1026,12 +1113,40 @@ if TEST_SCIPY:
                                     dtypes=[torch.bfloat16]),),
                        assert_autodiffed=True,
                        promotes_integers_to_float=True),
+        UnaryUfuncInfo('erfinv',
+                       ref=scipy.special.erfinv,
+                       decorators=(precisionOverride({torch.float16: 1e-2,
+                                                      torch.bfloat16: 1e-2,
+                                                      torch.float32: 1e-4}),),
+                       dtypes=all_types_and(torch.bool),
+                       dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
+                       dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+                       promotes_integers_to_float=True,
+                       domain=(-1, 1),
+                       skips=(
+                           # Reference: https://github.com/pytorch/pytorch/pull/49155#issuecomment-742664611
+                           SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                    active_if=LooseVersion(scipy.__version__) < "1.4.0"),
+                           # RuntimeError: "pow" not implemented for 'BFloat16'
+                           SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                    dtypes=[torch.bfloat16]),
+                       )
+                       ),
+        OpInfo('xlogy',
+               dtypes=all_types_and(torch.bool),
+               dtypesIfCPU=all_types_and(torch.bool, torch.half, torch.bfloat16),
+               dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+               test_inplace_grad=True,
+               supports_tensor_out=True,
+               promotes_integers_to_float=True,
+               sample_inputs_func=sample_inputs_xlogy),
     ]
     op_db = op_db + op_db_scipy_reference
 
 # Common operator groupings
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
 spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
+sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse is True]
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -1291,8 +1406,6 @@ def method_tests():
         ('expand_as', (S, 1, 1), (torch.rand(S, S, S),), '', (False,)),
         ('exp', (S, S, S), NO_ARGS, '', (True,)),
         ('exp', (), NO_ARGS, 'scalar', (True,)),
-        ('erfinv', torch.rand(S, S, S).clamp(-0.9, 0.9), NO_ARGS),
-        ('erfinv', normal_scalar_clamp(-0.9, 0.9, requires_grad=True), NO_ARGS, 'scalar'),
         ('logit', torch.randn(S, S, S).clamp(0.1, 0.9).requires_grad_(True), NO_ARGS, ''),
         ('logit', torch.randn(S, S, S).clamp(0.1, 0.9).requires_grad_(True), (0.2,), 'eps'),
         ('logit', uniform_scalar().clamp(0.1, 0.9).requires_grad_(True), NO_ARGS, 'scalar'),
@@ -1314,8 +1427,6 @@ def method_tests():
         ('complex', (S, S, S), ((S, S, S),), ''),
         ('abs', (S, S, S), NO_ARGS, '', (True,)),
         ('abs', (), NO_ARGS, 'scalar', (True,)),
-        ('angle', (S, S, S), NO_ARGS, '', (True,)),
-        ('angle', (), NO_ARGS, 'scalar', (True,)),
         ('clamp', (S, S, S), (0, 1), '', (True,)),
         ('clamp', (S, S, S), (None, 0.5), 'min', (True,)),
         ('clamp', (S, S, S), (0.5, None), 'max', (True,)),

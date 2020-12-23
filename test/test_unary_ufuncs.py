@@ -212,8 +212,7 @@ class TestUnaryUfuncs(TestCase):
         for alt, inplace in ((op.get_method(), False), (op.get_inplace(), True),
                              (torch.jit.script(_fn), False)):
             if alt is None:
-                with self.assertRaises(RuntimeError):
-                    alt(t.clone())
+                continue
 
             if inplace and op.promotes_integers_to_float and dtype in integral_types() + (torch.bool,):
                 # Assert that RuntimeError is raised
@@ -426,9 +425,12 @@ class TestUnaryUfuncs(TestCase):
         if out_dtype.is_floating_point and not dtype.is_complex:
             compare_out(op, input, output)
         elif out_dtype.is_floating_point and dtype.is_complex:
-            # Can't cast complex to float
-            with self.assertRaises(RuntimeError):
-                op(input, out=output)
+            if op.supports_complex_to_float:
+                compare_out(op, input, output)
+            else:
+                # Can't cast complex to float
+                with self.assertRaises(RuntimeError):
+                    op(input, out=output)
         elif out_dtype.is_complex:
             compare_out(op, input, output)
         else:
@@ -763,26 +765,6 @@ class TestUnaryUfuncs(TestCase):
         a = torch.randn(1)
         b = torch.randn(1, device=device)
         self.assertRaises(RuntimeError, lambda: torch.ceil(a, out=b))
-
-    # TODO: review with erfinv opinfo
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
-    @dtypes(torch.float, torch.double)
-    def test_erfinv(self, device, dtype):
-        # general testing. Narrow the range to avoid accuracy issues
-        input_values = torch.randn(4, 4, dtype=dtype, device=device).clamp(-0.3, 0.3)
-        self.assertEqual(input_values.erf().erfinv(), input_values)
-        # test inf
-        self.assertTrue(torch.equal(torch.tensor([-1, 1], dtype=dtype, device=device).erfinv(),
-                                    torch.tensor([-inf, inf], dtype=dtype, device=device)))
-        # test nan
-        self.assertEqual(torch.tensor([-2, 2], dtype=dtype, device=device).erfinv(),
-                         torch.tensor([nan, nan], dtype=dtype, device=device))
-
-        if dtype == torch.double:
-            # double precision
-            a = torch.tensor([0.5, 0.8], dtype=torch.double, device=device).erfinv()
-            self.assertEqual(a[0].item(), 0.47693627620447, atol=1e-13, rtol=0)
-            self.assertEqual(a[1].item(), 0.90619380243682, atol=1e-13, rtol=0)
 
     # TODO: opinfo hardshrink
     @onlyCPU
