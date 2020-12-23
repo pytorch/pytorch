@@ -14,7 +14,7 @@
 
 #include "gemm-microkernel-tester.h"
 
-#if CPUINFO_ARCH_ARM
+#if CPUINFO_ARCH_ARM && QNN_ENABLE_ASSEMBLY
 TEST(Q8CONV_4x8__AARCH32_NEON, k_eq_8) {
   TEST_REQUIRES_ARM_NEON;
   GemmMicrokernelTester()
@@ -231,7 +231,7 @@ TEST(Q8CONV_4x8__AARCH32_NEON, k_div_8_subtile) {
 }
 #endif
 
-#if CPUINFO_ARCH_ARM64
+#if CPUINFO_ARCH_ARM64 && QNN_ENABLE_ASSEMBLY
 TEST(Q8CONV_8x8__AARCH64_NEON, k_eq_8) {
   GemmMicrokernelTester()
       .mr(8)

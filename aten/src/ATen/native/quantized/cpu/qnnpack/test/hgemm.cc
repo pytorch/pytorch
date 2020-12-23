@@ -14,7 +14,7 @@
 
 #include "gemm-microkernel-tester.h"
 
-#if CPUINFO_ARCH_ARM
+#if CPUINFO_ARCH_ARM && QNN_ENABLE_ASSEMBLY
 TEST(HGEMM_8x8__AARCH32_NEONFP16ARITH, k_eq_4) {
   TEST_REQUIRES_ARM_NEON_FP16_ARITH;
   GemmMicrokernelTester().mr(8).nr(8).np(8).kr(1).m(8).n(8).k(4).test(

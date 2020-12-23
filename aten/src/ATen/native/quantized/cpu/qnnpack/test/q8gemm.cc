@@ -14,7 +14,7 @@
 
 #include "gemm-microkernel-tester.h"
 
-#if CPUINFO_ARCH_ARM
+#if CPUINFO_ARCH_ARM && QNN_ENABLE_ASSEMBLY
 TEST(Q8GEMM_4x8__AARCH32_NEON, k_eq_8) {
   TEST_REQUIRES_ARM_NEON;
   GemmMicrokernelTester().mr(4).nr(8).np(8).kr(1).m(4).n(8).k(8).test(
@@ -794,7 +794,7 @@ TEST(Q8GEMM_4x8c2_XZP__AARCH32_NEON, k_div_8_subtile) {
 }
 #endif
 
-#if CPUINFO_ARCH_ARM64
+#if CPUINFO_ARCH_ARM64 && QNN_ENABLE_ASSEMBLY
 TEST(Q8GEMM_8x8__AARCH64_NEON, k_eq_8) {
   GemmMicrokernelTester().mr(8).nr(8).np(8).kr(1).m(8).n(8).k(8).test(
       pytorch_q8gemm_ukernel_8x8__aarch64_neon);

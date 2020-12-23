@@ -318,7 +318,7 @@ static void GemmArguments(benchmark::internal::Benchmark* b) {
   }
 }
 
-#if CPUINFO_ARCH_ARM
+#if CPUINFO_ARCH_ARM && QNN_ENABLE_ASSEMBLY
 BENCHMARK_TEMPLATE_F(HGEMM_L1, 8x8__aarch32_neonfp16arith, 8, 8, 1)
 (benchmark::State& state) {
   if (!cpuinfo_initialize() || !cpuinfo_has_arm_neon_fp16_arith()) {

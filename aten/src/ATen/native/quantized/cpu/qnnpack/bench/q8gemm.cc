@@ -611,7 +611,7 @@ static void q8gemm_compute_row_sum(
 }
 #endif /* CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64 */
 
-#if CPUINFO_ARCH_ARM
+#if CPUINFO_ARCH_ARM && QNN_ENABLE_ASSEMBLY
 BENCHMARK_TEMPLATE_F(Q8GEMM_L1, 4x8__aarch32_neon, 4, 8, 8, 1)
 (benchmark::State& state) {
   for (auto _ : state) {
@@ -711,7 +711,7 @@ BENCHMARK_REGISTER_F(Q8GEMM_XZP_Op, 4x8c2__aarch32_neon)
 BENCHMARK_REGISTER_F(Q8GEMM_XZP_Op, 4x8c2__aarch32_neon)->Apply(GemmArguments);
 #endif
 
-#if CPUINFO_ARCH_ARM64
+#if CPUINFO_ARCH_ARM64 && QNN_ENABLE_ASSEMBLY
 BENCHMARK_TEMPLATE_F(Q8GEMM_L1, 8x8__aarch64_neon, 8, 8, 8, 1)
 (benchmark::State& state) {
   for (auto _ : state) {

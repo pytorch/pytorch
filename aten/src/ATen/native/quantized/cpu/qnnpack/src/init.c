@@ -33,6 +33,9 @@
 #include <qnnpack/x8lut.h>
 #include <qnnpack/x8zip.h>
 
+#ifndef QNN_ENABLE_ASSEMBLY
+  #define QNN_ENABLE_ASSEMBLY 1
+#endif
 
 #ifdef _MSC_VER
 static INIT_ONCE init_guard;
@@ -50,6 +53,7 @@ static void init(void) {
         "QNNPACK initialization failed: NEON is not supported");
     return;
   }
+#if QNN_ENABLE_ASSEMBLY
   pytorch_qnnp_params.q8conv = (struct pytorch_q8conv_parameters){
       .gemm = pytorch_q8gemm_ukernel_4x8__aarch32_neon,
       .conv = pytorch_q8conv_ukernel_4x8__aarch32_neon,
@@ -58,7 +62,17 @@ static void init(void) {
       .nr = 8,
       .kr = 1,
   };
-#if !PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
+#else
+  pytorch_qnnp_params.q8conv = (struct pytorch_q8conv_parameters){
+      .gemm = pytorch_q8gemm_ukernel_4x8__neon,
+      .conv = pytorch_q8conv_ukernel_4x8__neon,
+      .gemm_dq = pytorch_q8gemm_dq_ukernel_4x8__neon,
+      .mr = 4,
+      .nr = 8,
+      .kr = 1,
+  };
+#endif
+#if !PYTORCH_QNNPACK_RUNTIME_QUANTIZATION && QNN_ENABLE_ASSEMBLY
   pytorch_qnnp_params.q8conv_xzp = (struct pytorch_q8conv_xzp_parameters){
       .gemm = pytorch_q8gemm_xzp_ukernel_4x8c2__aarch32_neon,
       .mr = 4,
@@ -89,11 +103,19 @@ static void init(void) {
       .kthreshold = SIZE_MAX,
   };
 #endif
+#if QNN_ENABLE_ASSEMBLY
   pytorch_qnnp_params.q8dw9 = (struct pytorch_q8dwconv_up_parameters){
       .updw = pytorch_q8dwconv_ukernel_up8x9__aarch32_neon,
       .updw_per_channel = pytorch_q8dwconv_ukernel_up8x9_per_channel__aarch32_neon,
       .cr = 8,
   };
+#else
+  pytorch_qnnp_params.q8dw9 = (struct pytorch_q8dwconv_up_parameters){
+      .updw = pytorch_q8dwconv_ukernel_up8x9__neon,
+      .updw_per_channel = pytorch_q8dwconv_ukernel_up8x9_per_channel__neon,
+      .cr = 8,
+  };
+#endif
   pytorch_qnnp_params.q8dw25 = (struct pytorch_q8dwconv_mp_parameters){
       .mpdw = pytorch_q8dwconv_ukernel_mp8x25__neon,
       .mpdw_per_channel = pytorch_q8dwconv_ukernel_mp8x25_per_channel__neon,
@@ -137,6 +159,7 @@ static void init(void) {
   pytorch_qnnp_params.u8lut32norm = pytorch_u8lut32norm_ukernel__scalar;
   pytorch_qnnp_params.x8lut = pytorch_x8lut_ukernel__scalar;
 #elif CPUINFO_ARCH_ARM64
+#if QNN_ENABLE_ASSEMBLY
   pytorch_qnnp_params.q8conv = (struct pytorch_q8conv_parameters){
       .gemm = pytorch_q8gemm_ukernel_8x8__aarch64_neon,
       .conv = pytorch_q8conv_ukernel_8x8__aarch64_neon,
@@ -145,6 +168,16 @@ static void init(void) {
       .nr = 8,
       .kr = 1,
   };
+#else
+  pytorch_qnnp_params.q8conv = (struct pytorch_q8conv_parameters){
+      .gemm = pytorch_q8gemm_ukernel_4x8__neon,
+      .conv = pytorch_q8conv_ukernel_4x8__neon,
+      .gemm_dq = pytorch_q8gemm_dq_ukernel_4x8__neon,
+      .mr = 8,
+      .nr = 8,
+      .kr = 1,
+  };
+#endif
   pytorch_qnnp_params.q8conv_xzp = (struct pytorch_q8conv_xzp_parameters){
       .kthreshold = SIZE_MAX,
   };
