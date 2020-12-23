@@ -281,7 +281,7 @@ def powerSGD_hook(
         ]
 
     def compute_qs(fut):
-        state.p_memory_dict[bucket_index] = fut.wait()[0]
+        state.p_memory_dict[bucket_index] = fut.value()[0]
         for p in ps:
             _orthogonalize(p)
 
@@ -299,7 +299,7 @@ def powerSGD_hook(
         ]
 
     def decompress(fut):
-        state.q_memory_dict[bucket_index] = fut.wait()[0].div_(world_size)
+        state.q_memory_dict[bucket_index] = fut.value()[0].div_(world_size)
 
         for p, q, tensor in zip(ps, qs, high_rank_tensors):
             torch.matmul(p, q.t(), out=tensor)
