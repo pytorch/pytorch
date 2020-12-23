@@ -2143,6 +2143,36 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         caffe2_out = prepared.run(inputs=[x.cpu().numpy()])
         self.assertEqual(caffe2_out[0].shape, x.shape)
 
+    def test_conv_rnn_2d_conversion(self):
+        # Test ConvRNN2D can be converted to Caffe.
+        in_size = (64, 64)
+        kernel_size = (3, 3)
+        in_channels = 3
+        out_channels = 16
+        batch_size = 5
+        hidden = torch.zeros(
+            (batch_size, out_channels, *in_size),
+            requires_grad=False,
+            dtype=torch.float32,
+        )
+        test_model = operators.ConvRNN2D(in_channels, out_channels, kernel_size, hidden).float()
+        test_inputs = torch.randn((batch_size, in_channels, *in_size), requires_grad=True).float()
+        with tempfile.NamedTemporaryFile() as f:
+            tmp_filename = f.name
+            torch_out = torch.onnx._export(test_model, test_inputs, tmp_filename, export_params=True, keep_initializers_as_inputs=True,)
+            np.testing.assert_array_equal(torch_out.detach().numpy().shape, [batch_size, out_channels, in_size[0], in_size[1]],)
+
+            # Convert to caffe.
+            caffe_model = onnx.load(tmp_filename)
+            prepared_backend = onnx_caffe2_backend.prepare(caffe_model)
+
+        # Run with Caffe model.
+        w = {caffe_model.graph.input[0].name: test_inputs.float().data.numpy()}
+        caffe_out = prepared_backend.run(w)[0]
+
+        # Verify torch and caffe model are the same.
+        np.testing.assert_array_almost_equal(torch_out.data.cpu().numpy(), caffe_out, decimal=5)
+
     # The order of returned indices from Multinomial is undefined, so randomly generated inputs
     # in Caffe2BackendTestEmbed doesn't work with this op.
     @skipIfEmbed
