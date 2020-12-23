@@ -1533,7 +1533,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
 
   // inlining output & intermediate buffers can duplicate computation.
   // it slows down cpu code generation but is enabled on gpu because it avoids
-  //difficult synchronization logic across blocks.
+  // difficult synchronization logic across blocks.
   bool allow_duplicated_work =
       (backendType == kCudaCodeGen || backendType == kBlockCodeGen);
   l.inlineIntermediateBufs(allow_duplicated_work);
