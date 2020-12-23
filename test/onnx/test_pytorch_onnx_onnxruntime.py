@@ -5409,21 +5409,26 @@ class TestONNXRuntime(unittest.TestCase):
 
         import os
         from torch._utils_internal import get_writable_path
-        
+
         data_dir = get_writable_path(os.path.join(os.path.dirname(__file__)))
         onnx_model_file_name = os.path.join(data_dir, 'test_initializer_sequence.onnx')
 
         test_model = MyModule(3, 4, 10)
-        state_dict_list=[k for (k, v) in test_model.state_dict().items()]
-        named_params_list=[k for k, v in test_model.named_parameters()]
+        state_dict_list = [k for (k, v) in test_model.state_dict().items()]
+        named_params_list = [k for (k, v) in test_model.named_parameters()]
 
         x = torch.randn(32, 3)
         torch.onnx.export(test_model, (x,), onnx_model_file_name,)
         loaded_model = onnx.load(onnx_model_file_name)
 
         actual_list = [p.name for p in loaded_model.graph.initializer]
-        assert actual_list == state_dict_list, "Initializers' sequence is not as same as state_dict(). Expected: ("+', '.join(state_dict_list)+"). Actual:("+', '.join(actual_list)+")."
-        assert actual_list == named_params_list, "Initializers' sequence is not as same as named_parameters(). Expected: ("+', '.join(named_params_list)+"). Actual:("+', '.join(actual_list)+")."
+        assert actual_list == state_dict_list, \
+            "Initializers' sequence is not as same as state_dict(). Expected: (" \
+            + ', '.join(state_dict_list) + "). Actual:(" + ', '.join(actual_list) + ")."
+        assert actual_list == named_params_list, \
+            "Initializers' sequence is not as same as named_parameters(). Expected: (" \
+            + ', '.join(named_params_list) + "). Actual:(" + ', '.join(actual_list) + ")."
+
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout,
