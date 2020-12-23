@@ -1118,7 +1118,7 @@ if TEST_SCIPY:
                            # in float16 and NaN's can't be tested for equality.
                            SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                     device_type='cuda', dtypes=[torch.float16]),),
-                       promotes_integers_to_float=True)
+                       promotes_integers_to_float=True),
         OpInfo('xlogy',
                dtypes=all_types_and(torch.bool),
                dtypesIfCPU=all_types_and(torch.bool, torch.half, torch.bfloat16),
