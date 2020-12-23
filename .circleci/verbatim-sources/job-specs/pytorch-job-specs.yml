@@ -27,6 +27,9 @@ jobs:
           elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
             echo 'ATEN_THREADING=NATIVE' >> "${BASH_ENV}"
           fi
+          if [[ ${BUILD_ENVIRONMENT} == *"linux_xenial_cuda"* ]]; then
+            echo 'USE_FAST_NVCC=ON' >> "${BASH_ENV}"
+          fi
           echo "Parallel backend flags: "${PARALLEL_FLAGS}
           # Pull Docker image and run build
           echo "DOCKER_IMAGE: "${DOCKER_IMAGE}:${DOCKER_TAG}
