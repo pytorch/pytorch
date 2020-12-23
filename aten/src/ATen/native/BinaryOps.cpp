@@ -51,6 +51,8 @@ DEFINE_DISPATCH(logit_backward_stub);
 DEFINE_DISPATCH(tanh_backward_stub);
 DEFINE_DISPATCH(maximum_stub);
 DEFINE_DISPATCH(minimum_stub);
+DEFINE_DISPATCH(fmax_stub);
+DEFINE_DISPATCH(fmin_stub);
 DEFINE_DISPATCH(fmod_stub);
 DEFINE_DISPATCH(logaddexp_stub);
 DEFINE_DISPATCH(logaddexp2_stub);
@@ -847,21 +849,21 @@ Tensor max(const Tensor& self, const Tensor& other) {
   return at::maximum(self, other);
 }
 
-Tensor& fmax_out(Tensor& result, const Tensor& self, const Tensor& other) {
-    auto self_isnan = self.isnan();
-    auto other_isnan = other.isnan();
-    auto both_nan = self_isnan.logical_and(other_isnan);
-    return at::maximum_out(result,
-                           at::where(self_isnan == both_nan, self, other.to(self.dtype())),
-                           at::where(other_isnan == both_nan, other, self.to(other.dtype())));
+Tensor& fmax_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmax does not support complex inputs.");
+
+  auto iter = TensorIterator::binary_op(result, self, other);
+  fmax_stub(iter.device_type(), iter);
+  return result;
 }
 
 Tensor fmax(const Tensor& self, const Tensor& other) {
-    auto self_isnan = self.isnan();
-    auto other_isnan = other.isnan();
-    auto both_nan = self_isnan.logical_and(other_isnan);
-    return at::maximum(at::where(self_isnan == both_nan, self, other.to(self.dtype())),
-                       at::where(other_isnan == both_nan, other, self.to(other.dtype())));
+  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmax does not support complex inputs.");
+
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  fmax_stub(iter.device_type(), iter);
+  return iter.output();
 }
 
 Tensor& minimum_out(Tensor& result, const Tensor& self, const Tensor& other) {
@@ -879,28 +881,28 @@ Tensor minimum(const Tensor& self, const Tensor& other) {
 
 // binary min, alias for minimum
 Tensor& min_out(Tensor& result, const Tensor& self, const Tensor& other) {
-    return at::minimum_out(result, self, other);
+  return at::minimum_out(result, self, other);
 }
 
 Tensor min(const Tensor& self, const Tensor& other) {
-    return at::minimum(self, other);
+  return at::minimum(self, other);
 }
 
-Tensor& fmin_out(Tensor& result, const Tensor& self, const Tensor& other) {
-    auto self_isnan = self.isnan();
-    auto other_isnan = other.isnan();
-    auto both_nan = self_isnan.logical_and(other_isnan);
-    return at::minimum_out(result,
-                           at::where(self_isnan == both_nan, self, other.to(self.dtype())),
-                           at::where(other_isnan == both_nan, other, self.to(other.dtype())));
+Tensor& fmin_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmin does not support complex inputs.");
+
+  auto iter = TensorIterator::binary_op(result, self, other);
+  fmin_stub(iter.device_type(), iter);
+  return result;
 }
 
 Tensor fmin(const Tensor& self, const Tensor& other) {
-    auto self_isnan = self.isnan();
-    auto other_isnan = other.isnan();
-    auto both_nan = self_isnan.logical_and(other_isnan);
-    return at::minimum(at::where(self_isnan == both_nan, self, other.to(self.dtype())),
-                       at::where(other_isnan == both_nan, other, self.to(other.dtype())));
+  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmin does not support complex inputs.");
+
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  fmin_stub(iter.device_type(), iter);
+  return iter.output();
 }
 
 Tensor floor_divide(const Tensor& self, Scalar other) {

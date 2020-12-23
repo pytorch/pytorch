@@ -6255,11 +6255,12 @@
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    Math: fmin
+    CPU, CUDA: fmin
 
 - func: fmin.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: full
   dispatch:
-    Math: fmin_out
+    CPU, CUDA: fmin_out
 
 - func: max(Tensor self) -> Tensor
   variants: method, function
@@ -6271,11 +6272,12 @@
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    Math: fmax
+    CPU, CUDA: fmax
 
 - func: fmax.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: full
   dispatch:
-    Math: fmax_out
+    CPU, CUDA: fmax_out
 
 - func: maximum(Tensor self, Tensor other) -> Tensor
   variants: method, function

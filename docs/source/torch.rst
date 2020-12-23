@@ -368,8 +368,6 @@ Reduction Ops
     any
     max
     min
-    fmax
-    fmin
     dist
     logsumexp
     mean
@@ -418,6 +416,8 @@ Comparison Ops
     less
     maximum
     minimum
+    fmax
+    fmin
     ne
     not_equal
     sort
