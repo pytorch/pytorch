@@ -1,6 +1,7 @@
 #include <pybind11/pybind11.h>
 #include <torch/csrc/cuda/Stream.h>
 #include <torch/csrc/cuda/Module.h>
+#include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/THP.h>
 
@@ -65,7 +66,7 @@ static PyObject * THCPStream_get_cuda_stream(THCPStream *self, void *unused) {
 
 static PyObject * THCPStream_get_priority(THCPStream *self, void *unused) {
   HANDLE_TH_ERRORS
-  return PyLong_FromLong(self->cuda_stream.priority());
+  return THPUtils_packInt64(self->cuda_stream.priority());
   END_HANDLE_TH_ERRORS
 }
 

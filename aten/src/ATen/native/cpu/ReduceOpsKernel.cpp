@@ -158,13 +158,23 @@ static void std_var_kernel_impl(TensorIterator &iter, bool unbiased, bool take_s
 }
 
 static void prod_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "prod_cpu", [&] {
+  // Workaround for the error: '*' in boolean context, suggest '&&' instead [-Werror=int-in-bool-context]
+  if (iter.dtype() == ScalarType::Bool) {
+    using scalar_t = bool;
     binary_kernel_reduce_vec(
       iter,
-      [=](scalar_t a, scalar_t b) -> scalar_t { return a * b; },
-      [=](Vec256<scalar_t> a, Vec256<scalar_t> b) { return a * b; },
+      [=](scalar_t a, scalar_t b) -> scalar_t { return a && b; },
+      [=](Vec256<scalar_t> a, Vec256<scalar_t> b) { return a && b; },
       /*identity=*/1);
-  });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "prod_cpu", [&] {
+      binary_kernel_reduce_vec(
+        iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t { return a * b; },
+        [=](Vec256 <scalar_t> a, Vec256 <scalar_t> b) { return a * b; },
+        /*identity=*/1);
+      });
+  }
 }
 
 static void norm_kernel_tensor_iterator_impl(
@@ -174,60 +184,74 @@ static void norm_kernel_tensor_iterator_impl(
   if (p.isIntegral(false)) {
     val = p.to<int64_t>();
   } else if (p.isFloatingPoint()) {
-    val = p.to<float>();
+    val = p.to<double>();
   } else {
     AT_ERROR("norm_kernel_tensor_iterator_impl expects norm to be integer or float");
   }
 
-
+  // In the dispatch code blocks below, reduction kernels accumulate results as
+  // the type `acc_t`. When `scalar_t` is complex, `acc_t` is the downgraded
+  // real number type. Otherwise, `acc_t` and `scalar_t` are the same type.
   if (val == 0) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "norm_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
+      using acc_t = typename scalar_value_type<scalar_t>::type;
       binary_kernel_reduce(
         iter,
-        NormZeroOps<scalar_t>(),
-        scalar_t(0)
+        NormZeroOps<scalar_t, acc_t>(),
+        acc_t(0)
       );
     });
   } else if (val == 1) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "norm_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
+      using acc_t = typename scalar_value_type<scalar_t>::type;
       binary_kernel_reduce(
         iter,
-        NormOneOps<scalar_t>(),
-        scalar_t(0)
+        NormOneOps<scalar_t, acc_t>(),
+        acc_t(0)
       );
     });
   } else if (val == 2) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "norm_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
+      using acc_t = typename scalar_value_type<scalar_t>::type;
       binary_kernel_reduce(
         iter,
-        NormTwoOps<scalar_t>(),
-        scalar_t(0)
+        NormTwoOps<scalar_t, acc_t>(),
+        acc_t(0)
       );
     });
   } else if (val == INFINITY) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "norm_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
+      using acc_t = typename scalar_value_type<scalar_t>::type;
       binary_kernel_reduce(
         iter,
-        AbsMaxOps<scalar_t>(),
-        scalar_t(std::numeric_limits<scalar_t>::min())
+        AbsMaxOps<scalar_t, acc_t>(),
+        std::numeric_limits<acc_t>::min()
       );
     });
   } else if (val == -INFINITY) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "norm_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
+      using acc_t = typename scalar_value_type<scalar_t>::type;
       binary_kernel_reduce(
         iter,
-        AbsMinOps<scalar_t>(),
-        scalar_t(std::numeric_limits<scalar_t>::max())
+        AbsMinOps<scalar_t, acc_t>(),
+        std::numeric_limits<acc_t>::max()
       );
     });
   } else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "norm_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
+      using acc_t = typename scalar_value_type<scalar_t>::type;
       binary_kernel_reduce(
         iter,
-        NormOps<scalar_t> { scalar_t(val) },
-        scalar_t(0)
+        NormOps<scalar_t, acc_t> { acc_t(val) },
+        acc_t(0)
       );
     });
+  }
+
+  // For complex outputs, the above kernels do not touch the imaginary values,
+  // so we must zero them out
+  if (isComplexType(iter.output().scalar_type())) {
+    at::imag(iter.output()).zero_();
   }
 }
 

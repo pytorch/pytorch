@@ -171,7 +171,7 @@ except ImportError:
 
 def _construct_test_name(test_name, op, device_type, dtype):
     if op is not None:
-        test_name += "_" + op.name
+        test_name += "_" + op.name.replace('.', '_')
 
     test_name += "_" + device_type
 
@@ -186,6 +186,9 @@ def _construct_test_name(test_name, op, device_type, dtype):
 
 class DeviceTypeTestBase(TestCase):
     device_type: str = 'generic_device_type'
+
+    # Flag to disable test suite early due to unrecoverable error such as CUDA error.
+    _stop_test_suite = False
 
     # Precision is a thread-local setting since it may be overridden per test
     _tls = threading.local()
@@ -271,6 +274,11 @@ class DeviceTypeTestBase(TestCase):
                     self.precision = self._get_precision_override(test_fn, dtype)
                     args = (arg for arg in (device_arg, dtype, op) if arg is not None)
                     result = test_fn(self, *args)
+                except RuntimeError as rte:
+                    if 'CUDA error: device-side assert triggered' in rte.__repr__():
+                        self._stop_test_suite = True
+                    # raise the runtime error as is.
+                    raise rte
                 finally:
                     self.precision = guard_precision
 
@@ -312,6 +320,12 @@ class DeviceTypeTestBase(TestCase):
             dtypes = tuple(dtypes) if dtypes is not None else (None,)
             for dtype in dtypes:
                 instantiate_test_helper(cls, name, test=test, dtype=dtype, op=None)
+
+    def run(self, result=None):
+        super().run(result=result)
+        # Early terminate test if _stop_test_suite is set.
+        if self._stop_test_suite:
+            result.stop()
 
 
 class CPUTestBase(DeviceTypeTestBase):

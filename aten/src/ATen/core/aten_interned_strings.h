@@ -220,6 +220,7 @@ _(aten, blackman_window) \
 _(aten, block_diag) \
 _(aten, bmm) \
 _(aten, broadcast_tensors) \
+_(aten, broadcast_to) \
 _(aten, cartesian_prod) \
 _(aten, cat) \
 _(aten, cauchy) \
@@ -435,6 +436,7 @@ _(aten, logdet) \
 _(aten, logit) \
 _(aten, logspace) \
 _(aten, logsumexp) \
+_(aten, xlogy) \
 _(aten, lstm) \
 _(aten, lstm_cell) \
 _(aten, lstsq) \
@@ -622,6 +624,7 @@ _(aten, signbit) \
 _(aten, silu) \
 _(aten, sgn) \
 _(aten, sin) \
+_(aten, sinc) \
 _(aten, sinh) \
 _(aten, size) \
 _(aten, sizes) \

@@ -226,6 +226,8 @@ void ProfilerThreadLocalState::pushRange(
     evt.setSequenceNr(fn.seqNr());
     evt.setFwdThreadId(fn.forwardThreadId());
     evt.setScope((uint8_t)fn.scope());
+    evt.setExtraArgs(saveExtraArgs(fn));
+    evt.setFlops(computeFlops(std::string(fn.name().str()), evt.extraArgs()));
 #ifndef C10_MOBILE
     // backward nodes source range corresponds to the forward node
     // TODO: consider using C++ stack trace
@@ -414,10 +416,10 @@ void pushProfilingCallbacksLegacy() {
   auto state_ptr = getProfilerTLSState();
   TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
   auto handle = at::addThreadLocalCallback(at::RecordFunctionCallback(
-      [](const at::RecordFunction& fn) {
+      [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
         auto state_ptr = getProfilerTLSState();
         if (!state_ptr || state_ptr->config().state == ProfilerState::Disabled) {
-          return;
+          return nullptr;
         }
         bool record_cuda =
             state_ptr->config().state == ProfilerState::CUDA;
@@ -432,8 +434,10 @@ void pushProfilingCallbacksLegacy() {
         } else {
           state_ptr->pushRange(fn, record_cuda, msg);
         }
+
+        return nullptr;
       },
-      [](const at::RecordFunction& fn) {
+      [](const at::RecordFunction& fn, at::ObserverContext*) {
         auto state_ptr = getProfilerTLSState();
         if (!state_ptr || state_ptr->config().state == ProfilerState::Disabled) {
           return;
