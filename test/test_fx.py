@@ -1157,6 +1157,14 @@ class TestFX(JitTestCase):
         m = M()
         self.checkGraphModule(m, ())
 
+    def test_script_fx_len(self):
+        def len(x):
+            return torch.fx.len(x)
+
+        symtraced = symbolic_trace(len)
+        scripted = torch.jit.script(symtraced)
+        self.assertEqual(scripted(torch.rand(3)), 3)
+
     def test_namedtuple_return_qualname(self):
         class NamedTupReturn(torch.nn.Module):
             def forward(self, x):

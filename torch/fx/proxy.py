@@ -8,6 +8,7 @@ from typing import Union
 from .graph import magic_methods, reflectable_magic_methods, Graph
 from typing import Tuple, Dict, Optional, Iterable, Any, Iterator
 from .node import Target, Node, Argument, base_types
+import torch.jit._builtins
 
 class TracerBase:
     graph: Graph
@@ -172,6 +173,11 @@ def len(item: Any) -> Union[Proxy, int]:
         return builtins.len(item)
 
     return item.tracer.create_proxy('call_function', builtins.len, (item,), {})
+
+# TorchScript needs special handling to switch this call into
+# an `aten::len` call directly, since scripting `fx.len` doesn't
+# work and doesn't make sense in the context of torchscript
+torch.jit._builtins._register_builtin(id(len), 'aten::len')
 
 class Attribute(Proxy):
     def __init__(self, root: Proxy, attr: str):
