@@ -462,9 +462,11 @@ def _sample_inputs_svd(op_info, device, dtype, requires_grad=False, is_linalg_sv
     # along different dimensions when needed (this is used by
     # test_cases2:wide_all and wide_all_batched below)
     if is_linalg_svd:
-        def slice_V(v): return v[..., :(S - 2), :]
+        def slice_V(v):
+            return v[..., :(S - 2), :]
     else:
-        def slice_V(v): return v[..., :, :(S - 2)]
+        def slice_V(v):
+            return v[..., :, :(S - 2)]
 
     test_cases1 = (  # some=True (default)
         # loss functions for complex-valued svd have to be "gauge invariant",
