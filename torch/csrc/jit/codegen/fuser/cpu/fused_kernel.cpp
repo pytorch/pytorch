@@ -19,7 +19,7 @@ namespace cpu {
 
 #ifdef _MSC_VER
 static const std::string getTempPath() {
-  char lpTempPathBuffer[MAX_PATH];
+  wchar_t lpTempPathBuffer[MAX_PATH];
 
   DWORD dwRetVal = GetTempPathW(
       MAX_PATH, // length of the buffer
@@ -27,7 +27,7 @@ static const std::string getTempPath() {
 
   TORCH_CHECK(dwRetVal < MAX_PATH && dwRetVal != 0, "GetTempPath failed.");
 
-  return std::string(lpTempPathBuffer);
+  return std::string(c10::u16u8(lpTempPathBuffer));
 }
 static const std::string temp_dir = getTempPath();
 static const std::string so_template = temp_dir + "pytorch_fuserXXXXXX.dll";
