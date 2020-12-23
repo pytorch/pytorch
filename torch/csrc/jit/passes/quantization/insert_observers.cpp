@@ -375,6 +375,7 @@ class InsertObserversHelper {
   // Clone observer module and add it to the original module,
   // and insert a call to observer forward function
   void insertObserverFor(
+      Value* self,
       Value* v,
       Module& module,
       const Module& observer_module,
@@ -383,6 +384,8 @@ class InsertObserversHelper {
   // Uses the state created by fillBoundaryValueMap and fillValueObserverMap
   // to return an observer configured for a value, if it is needed.
   c10::optional<Module> getObserverFor(Value* v);
+
+  c10::optional<Value*> buildObserverPath(Value* v);
 
   // Uses the state created by fillPassThroughValueMap to propage observed
   // property which should pass through from inputs to outputs.
@@ -956,6 +959,7 @@ ModuleMethodVector InsertObserversHelper::getInvokedMethods(
 }
 
 void InsertObserversHelper::insertObserverFor(
+    Value* self,
     Value* v,
     Module& module,
     const Module& observer_module,
@@ -964,11 +968,22 @@ void InsertObserversHelper::insertObserverFor(
     return;
   }
   GRAPH_DEBUG("Inserting observer for:", v->debugName());
+  std::cout << "Inserting observer for:" << v->debugName() <<  " " << self->debugName() <<  std::endl;
+  // std::cout << v->owningGraph()->toString();
+  if (getModuleName(self).has_value()) {
+    std::cout << " MODULE name " << getModuleName(self).value() << std::endl;
+  }
+  /*auto path = getModuleAccessPath(v, self);
+  for (int i = 0; i < path.size(); ++i) {
+    std::cout << " " << path[i] << " ";
+  }
+  std::cout << std::endl;*/
   Module observer = observer_module.deepcopy();
   std::string observer_name = "_observer_" + c10::to_string(uid_++);
   while (module.hasattr(observer_name)) {
     observer_name = "_observer_" + c10::to_string(uid_++);
   }
+  std::cout << "name " << observer_name << std::endl;
   module.register_module(observer_name, observer);
   observer_name_and_modules.push_back(std::make_pair(observer_name, observer));
 
@@ -1066,6 +1081,7 @@ void InsertObserversHelper::fillBoundaryValueMap(
     const std::string& method_name) {
   for (auto& invoked_method : getInvokedMethods(module, method_name)) {
     auto& invoked_module = std::get<0>(invoked_method);
+    // Get access path of module here and build map from node to path
     const auto& invoked_method_name = std::get<1>(invoked_method);
     fillBoundaryValueMap(invoked_module, invoked_method_name);
   }
@@ -1260,6 +1276,30 @@ void InsertObserversHelper::fillValueObserverMap(
   }
 }
 
+c10::optional<Value*> InsertObserversHelper::buildObserverPath(Value* v) {
+  if (observer_for_value_.count(v)) {
+    std::cout << "Got observer module config for:" <<  v->debugName() << std::endl;
+    return v;
+  }
+  c10::optional<Value*> result;
+  if (boundary_value_map_.count(v)) {
+    for (Value* next : boundary_value_map_.at(v)) {
+      std::cout <<
+          "Going through boundary map:" <<
+          v->debugName() <<
+          " --> " <<
+          next->debugName() << std::endl;
+      std::cout << "From graph:" << v->owningGraph()->toString();
+      std::cout << "To graph:" << next->owningGraph()->toString();
+      auto final_val = buildObserverPath(next);
+      if (final_val) {
+        result = final_val;
+      }
+    }
+  }
+  return result;
+}
+
 c10::optional<Module> InsertObserversHelper::getObserverFor(Value* v) {
   if (observer_for_value_.count(v)) {
     auto observer = observer_for_value_.at(v);
@@ -1335,7 +1375,6 @@ InsertObserversHelper::insertObserversFor(
   std::vector<c10::optional<Module>> block_input_observers;
   // list of observer modules for output values
   std::vector<c10::optional<Module>> block_output_observers;
-
   // if the current block is the block for entry point graph(the forward graph
   // of the top level module), we can insert observers in the block directly
   if (!is_entry_point) {
@@ -1353,6 +1392,19 @@ InsertObserversHelper::insertObserversFor(
 
     for (auto* v : block->inputs()) {
       block_input_observers.emplace_back(getObserverFor(v));
+      auto final_val = buildObserverPath(v);
+      if (final_val) {
+        Value* self = v->owningGraph()->inputs()[0];
+        std::cout << "final graph " << final_val.value()->owningGraph()->toString();
+        std::cout << "curr graph " << self->owningGraph()->toString();
+        std::cout << "Printing module path for " << final_val.value()->debugName() << " self " << self->debugName();
+        auto path = getModuleAccessPath(final_val.value(), self);
+
+        for (int i = 0; i < path.size(); ++i) {
+          std::cout << " " << path[i];
+        }
+        std::cout << std::endl;
+      }
     }
 
     for (auto* v : block->outputs()) {
@@ -1361,6 +1413,18 @@ InsertObserversHelper::insertObserversFor(
       // these subblock has access to all values before the `if` node
       if (!isObserved(v, block_observed_values)) {
         block_output_observers.emplace_back(getObserverFor(v));
+        auto final_val = buildObserverPath(v);
+        if (final_val) {
+          Value* self = v->owningGraph()->inputs()[0];
+           std::cout << "final graph " << final_val.value()->owningGraph()->toString();
+        std::cout << "curr graph " << self->owningGraph()->toString();
+          std::cout << "Printing module path for " << final_val.value()->debugName() << " self " << self->debugName();
+          auto path = getModuleAccessPath(final_val.value(), self);
+          for (int i = 0; i < path.size(); ++i) {
+            std::cout << " " << path[i];
+          }
+          std::cout << std::endl;
+        }
       } else {
         block_output_observers.emplace_back(c10::nullopt);
       }
@@ -1404,6 +1468,17 @@ InsertObserversHelper::insertObserversFor(
       if (auto observer_opt = getObserverFor(v)) {
         recordObserved(
             v, *observer_opt, values_to_observe, block_observed_values);
+      }
+      auto final_val = buildObserverPath(v);
+      if (final_val) {
+         std::cout << "final graph " << final_val.value()->owningGraph()->toString();
+        std::cout << "curr graph " << self->owningGraph()->toString();
+        std::cout << "Printing module path for " << final_val.value()->debugName() << " self " << self->debugName();
+        auto path = getModuleAccessPath(final_val.value(), self);
+        for (int i = 0; i < path.size(); ++i) {
+          std::cout << " " << path[i];
+        }
+        std::cout << std::endl;
       }
     }
   }
@@ -1535,6 +1610,18 @@ InsertObserversHelper::insertObserversFor(
         propagateObservedProperty(v, block_observed_values);
         if (!inputs_outputs.count(v) && !isObserved(v, block_observed_values)) {
           auto observer_opt = getObserverFor(v);
+          auto final_val = buildObserverPath(v);
+          if (final_val) {
+            Value* self = v->owningGraph()->inputs()[0];
+            std::cout << "final graph " << final_val.value()->owningGraph()->toString();
+            std::cout << "curr graph " << self->owningGraph()->toString();
+            std::cout << "Printing module path for " << final_val.value()->debugName() << " self " << self->debugName();
+            auto path = getModuleAccessPath(final_val.value(), self);
+            for (int i = 0; i < path.size(); ++i) {
+              std::cout << " " << path[i];
+            }
+            std::cout << std::endl;
+          }
           // If the node is one of the propagate quant node, e.g.
           // aten::cat, we should observe its output only
           // if the input of the node is observed
@@ -1562,7 +1649,7 @@ InsertObserversHelper::insertObserversFor(
           !is_user_defined_function,
           "Inserting observers for user defined functions is not "
           "supported right now");
-      insertObserverFor(v, module, observer, observer_name_and_modules);
+      insertObserverFor(self, v, module, observer, observer_name_and_modules);
     }
     block_observer_map_[block] = observer_name_and_modules;
   }

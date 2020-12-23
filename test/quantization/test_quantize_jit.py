@@ -1416,6 +1416,60 @@ class TestQuantizeJitOps(QuantizationTestCase):
     """ Test graph mode post training static quantization works
     for individual ops end to end.
     """
+    def test_tmp(self):
+        class LinearModule(torch.nn.Module):
+            def __init__(self):
+                super(LinearModule, self).__init__()
+                self.w = torch.randn(5, 5)
+                self.b = torch.randn(5)
+
+            def forward(self, x):
+                return F.linear(x, self.w, self.b)
+
+        class DenseArch(torch.nn.Module):
+            def __init__(self):
+                super(DenseArch, self).__init__()
+                self.w = torch.randn(5, 5)
+                self.b = torch.randn(5)
+
+            def forward(self, x):
+                return F.linear(x, self.w, self.b)
+
+        class OverArch(torch.nn.Module):
+            def __init__(self):
+                super(OverArch, self).__init__()
+                self.over_arch = torch.nn.Sequential(
+                    LinearModule(),
+                    LinearModule(),
+                    LinearModule(),
+                    LinearModule(),
+                    LinearModule())
+
+            def forward(self, x):
+                return self.over_arch(x)
+
+        class SparseNN(torch.nn.Module):
+            def __init__(self):
+                super(SparseNN, self).__init__()
+                self.dense = DenseArch()
+                self.over = OverArch()
+
+            def forward(self, x):
+                dense = self.dense(x)
+                return self.over(dense)
+
+        model = SparseNN().eval()
+        scripted = torch.jit.script(model)
+        model = prepare_jit(scripted, {'': default_per_channel_qconfig})
+        print(model.graph)
+        for k, v in model.state_dict().items():
+            if 'obs' in k:
+                print(k, v)
+        torch._C._jit_pass_inline(model.graph)
+        #print(model.graph)
+        #model = convert_jit(model)
+        #print(model.graph)
+
     @skipIfNoFBGEMM
     def test_linear(self):
         class ModuleLinear(torch.nn.Module):
