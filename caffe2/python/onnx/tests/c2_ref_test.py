@@ -8,7 +8,6 @@
 
 import json
 import os
-import six
 import unittest
 
 from caffe2.python import core
@@ -44,9 +43,8 @@ class TestCaffe2Basic(TestCase):
         b2.convert_node(node_def.SerializeToString())
 
         bad_node_def = make_node("Add", inputs=["X", "Y"], outputs=["Z"], foo=42, bar=56)
-        with six.assertRaisesRegex(self,
-                                   RuntimeError,
-                                   "Don't know how to map unexpected argument (foo|bar)"):
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Don't know how to map unexpected argument (foo|bar)"):
             b2.convert_node(bad_node_def.SerializeToString())
 
     def test_dynamicslice_3inputs_graph(self):

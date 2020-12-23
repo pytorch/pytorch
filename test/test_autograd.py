@@ -10,7 +10,7 @@ import unittest
 import warnings
 from copy import deepcopy
 from collections import OrderedDict
-from itertools import product
+from itertools import product, permutations
 from operator import mul
 from functools import reduce
 import torch
@@ -7395,6 +7395,54 @@ class TestAutogradDeviceType(TestCase):
         self._test_atleast(device, torch.atleast_1d)
         self._test_atleast(device, torch.atleast_2d)
         self._test_atleast(device, torch.atleast_3d)
+
+    def test_xlogy(self, device):
+
+        def _tensor_tensor_helper(x, y):
+            gradcheck(lambda x, y: torch.xlogy(x, y), (x, y))
+            gradgradcheck(lambda x, y: torch.xlogy(x, y), (x, y))
+
+            with torch.no_grad():
+                x = x.clone()
+                x[torch.rand_like(x) > 0.5] = 0
+
+            gradcheck(lambda y: torch.xlogy(x, y), (y))
+            gradgradcheck(lambda y: torch.xlogy(x, y), (y))
+
+        shapes = ((4,), (1, 4), (1, 1, 4), (1, 1, 1, 4))
+
+        # For broadcastible shapes and scalar.
+        for x_shape, y_shape in permutations(shapes, 2):
+            x = torch.rand(*x_shape, dtype=torch.double, device=device, requires_grad=True)
+            y = torch.rand(*y_shape, dtype=torch.double, device=device, requires_grad=True)
+
+            _tensor_tensor_helper(x, y)
+            _tensor_tensor_helper(y, x)
+
+            gradcheck(lambda y: torch.xlogy(0, y), (y))
+            gradgradcheck(lambda y: torch.xlogy(0, y), (y))
+
+            gradcheck(lambda y: torch.xlogy(2, y), (y))
+            gradgradcheck(lambda y: torch.xlogy(2, y), (y))
+            gradcheck(lambda y: torch.xlogy(y, 2), (y))
+            gradgradcheck(lambda y: torch.xlogy(y, 2), (y))
+
+        # Different shape
+        x = torch.rand(2, 3, 4, 5, dtype=torch.double, device=device, requires_grad=True)
+        y = torch.rand(4, 5, dtype=torch.double, device=device, requires_grad=True)
+        _tensor_tensor_helper(x, y)
+        _tensor_tensor_helper(y, x)
+        _tensor_tensor_helper(x, x)
+        _tensor_tensor_helper(y, y)
+
+        # Same shape
+        x = torch.rand(4, 5, dtype=torch.double, device=device, requires_grad=True)
+        y = torch.rand(4, 5, dtype=torch.double, device=device, requires_grad=True)
+        _tensor_tensor_helper(x, y)
+        _tensor_tensor_helper(y, x)
+        _tensor_tensor_helper(x, x)
+        _tensor_tensor_helper(y, y)
+
 
 class TestMultithreadAutograd(TestCase):
     def _run_py_multithread_fn(self, fn, args=(), num_threads=10, kwargs=None):
