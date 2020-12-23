@@ -126,7 +126,7 @@ public:
   template<class Return, class... Args>
   Return callWithDispatchKey(const TypedOperatorHandle<Return (Args...)>& op, DispatchKey dispatchKey, Args... args) const;
 
-  // Like callWithDispatchKey, but provies the dispatch key as a set of keys.
+  // Like callWithDispatchKey, but provides the dispatch key as a set of keys.
   // The dispatch key with highest priority is used.
   // See Note [Plumbing Keys Through The Dispatcher]
   template<class Return, class... Args>

@@ -510,11 +510,7 @@ namespace impl {
 
   template<class KernelFunctor, class ReturnType, class FirstParam, class... ParameterTypes>
   struct wrap_kernel_functor_unboxed_withKeys_<KernelFunctor, ReturnType(FirstParam, ParameterTypes...)> final {
-    static_assert(
-        std::is_same<
-            DispatchKeySet,
-            FirstParam
-        >::value,
+    static_assert(std::is_same<DispatchKeySet, FirstParam>::value,
       "wrap_kernel_functor_unboxed_withKeys expects the first argument of the schema to be a DispatchKeySet. "
       "If your kernel signature's first argument is not a DispatchKeySet, you should register it with impl() "
       " instead of impl_withKeys().");
