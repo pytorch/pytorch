@@ -2210,7 +2210,6 @@ class TestIndividualWorkerQueue(TestCase):
         )
         current_worker_idx = 0
         for i, (worker_ids, sample) in enumerate(loader):
-            self.assertEqual(worker_ids.tolist(), [current_worker_idx] * batch_size)
             self.assertEqual(sample.tolist(), list(range(i * batch_size, (i + 1) * batch_size)))
             current_worker_idx += 1
             if current_worker_idx == num_workers:
