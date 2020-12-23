@@ -66,7 +66,7 @@ class TestNamedTupleAPI(unittest.TestCase):
             op(operators=['triangular_solve'], input=(a,), names=('solution', 'cloned_coefficient'), hasout=True),
             op(operators=['lstsq'], input=(a,), names=('solution', 'QR'), hasout=True),
             op(operators=['linalg_eigh'], input=("L",), names=('eigenvalues', 'eigenvectors'), hasout=True),
-            op(operators=['unpack_dual'], input=(a, 0), names=('primal', 'tangent'), hasout=False),
+            op(operators=['unpack_dual'], input=(0,), names=('primal', 'tangent'), hasout=False),
         ]
 
         def get_func(f):
