@@ -891,7 +891,7 @@ class TensorOptionsArguments:
         return [self.dtype, self.layout, self.device, self.pin_memory]
 
 @dataclass(frozen=True)
-class Args:
+class Arguments:
     # pre_self_positional is usually empty, but is notably non-empty
     # for where.self, where the condition argument comes before the
     # self argument
