@@ -737,31 +737,6 @@ class TestUtilityFuns(TestCase):
 
         assert len(list(graph.nodes())) == 1
 
-    def test_scripting_param(self):
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super(MyModule, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 16, kernel_size=1, stride=2, padding=3, bias=True)
-                self.bn = torch.nn.BatchNorm2d(16, affine=True)
-
-            def forward(self, x):
-                x = self.conv(x)
-                bn = self.bn(x)
-                return bn
-
-        model = torch.jit.script(MyModule())
-        x = torch.randn(10, 3, 128, 128)
-        example_outputs = model(x)
-        f = io.BytesIO()
-        _set_opset_version(self.opset_version)
-        _set_operator_export_type(OperatorExportTypes.ONNX)
-        graph, _, __ = utils._model_to_graph(model, (x,), do_constant_folding=True, example_outputs=example_outputs,
-                                             operator_export_type=OperatorExportTypes.ONNX)
-
-        graph_input_params = [param.debugName() for param in graph.inputs()]
-        assert all(item in graph_input_params for item in dict(model.named_parameters())), \
-            "Graph parameter names does not match model parameters."
-
     def test_fuse_resnet18(self):
         model = torchvision.models.resnet18(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
