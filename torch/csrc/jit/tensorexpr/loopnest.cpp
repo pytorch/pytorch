@@ -9,6 +9,7 @@
 #include <c10/util/Logging.h>
 #include <c10/util/string_utils.h>
 
+#include <aten/src/ATen/core/functional.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/bounds_inference.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
@@ -23,7 +24,7 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-class FunctionCallUses : public IRVisitor {
+class FunctionCallUseCount : public IRVisitor {
  public:
   std::unordered_map<const Buf*, size_t> findUses(Stmt* s) {
     s->accept(this);
@@ -33,11 +34,7 @@ class FunctionCallUses : public IRVisitor {
  private:
   void visit(const FunctionCall* v) override {
     if (function_calls_[v->tensor()->buf()].insert(v).second) {
-      if (!uses_.count(v->tensor()->buf())) {
-        uses_[v->tensor()->buf()] = 1;
-      } else {
-        uses_[v->tensor()->buf()] = uses_[v->tensor()->buf()] + 1;
-      }
+      uses_[v->tensor()->buf()] = uses_[v->tensor()->buf()] + 1;
     }
     IRVisitor::visit(v);
   }
@@ -777,9 +774,10 @@ bool LoopNest::computeInline(const Buf* b) {
   return true;
 }
 
-// inlining buffers with multiple uses creates duplicated work, which can slow
-// down cpu code generation but is enabled on gpu because it avoids difficult
-// synchronization logic across blocks.
+// inlining buffers with multiple uses can create duplicated work, which can
+// slow down cpu code generation but is enabled on gpu because it avoids
+// difficult synchronization logic across blocks. Inlining trivial reads does
+// not duplicate work
 void LoopNest::inlineIntermediateBufs(bool allow_duplicated_work) {
   // We need to collect all intermediate buffers as the buffers to be inlined
   // before calling 'computeInline' since the buffers that are inlined are
@@ -789,17 +787,33 @@ void LoopNest::inlineIntermediateBufs(bool allow_duplicated_work) {
   if (allow_duplicated_work) {
     bufs_to_inline.insert(intermediate_bufs_.begin(), intermediate_bufs_.end());
   } else {
-    FunctionCallUses fcu;
+    FunctionCallUseCount fcu;
     auto function_call_uses = fcu.findUses(root_stmt_);
     auto buf_load_store_uses = findLoadOrStoreUses(root_stmt_);
+    auto input_bufs = getInputBufs();
+
     for (auto buf : intermediate_bufs_) {
       TORCH_INTERNAL_ASSERT(buf_load_store_uses.count(buf));
       std::vector<BufLoadOrStoreUse>& uses = buf_load_store_uses[buf];
+      auto stores = c10::filter(
+          uses, [](const BufLoadOrStoreUse& use) { return use.isStore; });
+
+      // if the intermediate is the buffer formed from reading in the input
+      // tensors, always inline, bc we are not duplicating any work
+      // and avoiding an intermediary buffer
+      if (stores.size() == 1) {
+        auto store = dynamic_cast<Store*>(stores[0].s);
+        auto input_as_load = dynamic_cast<const Load*>(store->value());
+        if (input_as_load && input_bufs.count(input_as_load->buf())) {
+          bufs_to_inline.insert(buf);
+          continue;
+        }
+      }
+
       // all bufs will have at least one store (if they have > 1 they cant be
       // inlined anyway)
       size_t reads = uses.size() - 1;
-      size_t function_call_reads =
-          function_call_uses.count(buf) ? function_call_uses[buf] : 0;
+      size_t function_call_reads = function_call_uses[buf];
       // if only one read, we can inline it without duplicating work
       if ((reads + function_call_reads) <= 1) {
         bufs_to_inline.insert(buf);
