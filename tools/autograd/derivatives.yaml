@@ -650,6 +650,16 @@
   self: grad / (1 + pow(2, other - self))
   other: grad / (1 + pow(2, self - other))
 
+- name: xlogy.Tensor(Tensor self, Tensor other) -> Tensor
+  self: grad * at::xlogy((self != 0), other)
+  other: grad * self / other
+
+- name: xlogy.Scalar_Self(Scalar self, Tensor other) -> Tensor
+  other: grad * self / other
+
+- name: xlogy.Scalar_Other(Tensor self, Scalar other) -> Tensor
+  self: grad * at::xlogy((self != 0), other)
+
 - name: logdet(Tensor self) -> Tensor
   self: logdet_backward(grad, self, result)
 

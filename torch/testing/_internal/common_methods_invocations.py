@@ -253,6 +253,7 @@ class UnaryUfuncInfo(OpInfo):
                  handles_large_floats=True,  # whether the op correctly handles large float values (like 1e20)
                  handles_extremals=True,  # whether the op correctly handles extremal values (like inf)
                  handles_complex_extremals=True,  # whether the op correct handles complex extremals (like inf -infj)
+                 supports_complex_to_float=False,  # op supports casting from complex input to real output safely eg. angle
                  sample_inputs_func=sample_inputs_unary,
                  **kwargs):
         super(UnaryUfuncInfo, self).__init__(name,
@@ -267,6 +268,7 @@ class UnaryUfuncInfo(OpInfo):
         self.handles_large_floats = handles_large_floats
         self.handles_extremals = handles_extremals
         self.handles_complex_extremals = handles_complex_extremals
+        self.supports_complex_to_float = supports_complex_to_float
 
         # Epsilon to ensure grad and gradgrad checks don't test values
         #   outside a function's domain.
@@ -291,12 +293,21 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad):
     return (SampleInput((make_tensor((S, S), device, dtype,
                                      low=None, high=None,
                                      requires_grad=requires_grad),
-                        make_tensor((S, S), device, dtype,
-                                    low=None, high=None,
-                                    requires_grad=requires_grad),
-                        make_tensor((S, S), device, dtype,
-                                    low=None, high=None,
-                                    requires_grad=False))),)
+                         make_tensor((S, S), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                         make_tensor((S, S), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=False))),)
+
+
+def sample_inputs_xlogy(self, device, dtype, requires_grad):
+    return (SampleInput((make_tensor((S, S), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                         make_tensor((S, S), device, dtype,
+                                     low=0, high=None,
+                                     requires_grad=requires_grad))),)
 
 def sample_inputs_linalg_inv(op_info, device, dtype, requires_grad=False):
     """
@@ -1035,6 +1046,17 @@ op_db: List[OpInfo] = [
            supports_tensor_out=True,
            sample_inputs_func=sample_inputs_linalg_inv,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
+    UnaryUfuncInfo('angle',
+                   ref=np.angle,
+                   dtypes=all_types_and_complex_and(torch.bool),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool),
+                   dtypesIfROCM=all_types_and_complex_and(torch.bool),
+                   decorators=(precisionOverride({torch.float16: 1e-2,
+                                                  torch.bfloat16: 1e-2}),),
+                   promotes_integers_to_float=True,
+                   supports_complex_to_float=True,
+                   test_inplace_grad=False),
     OpInfo('linalg.solve',
            aten_name='linalg_solve',
            op=torch.linalg.solve,
@@ -1117,6 +1139,14 @@ if TEST_SCIPY:
                                     dtypes=[torch.bfloat16]),),
                        assert_autodiffed=True,
                        promotes_integers_to_float=True),
+        OpInfo('xlogy',
+               dtypes=all_types_and(torch.bool),
+               dtypesIfCPU=all_types_and(torch.bool, torch.half, torch.bfloat16),
+               dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+               test_inplace_grad=True,
+               supports_tensor_out=True,
+               promotes_integers_to_float=True,
+               sample_inputs_func=sample_inputs_xlogy),
     ]
     op_db = op_db + op_db_scipy_reference
 
@@ -1405,8 +1435,6 @@ def method_tests():
         ('complex', (S, S, S), ((S, S, S),), ''),
         ('abs', (S, S, S), NO_ARGS, '', (True,)),
         ('abs', (), NO_ARGS, 'scalar', (True,)),
-        ('angle', (S, S, S), NO_ARGS, '', (True,)),
-        ('angle', (), NO_ARGS, 'scalar', (True,)),
         ('clamp', (S, S, S), (0, 1), '', (True,)),
         ('clamp', (S, S, S), (None, 0.5), 'min', (True,)),
         ('clamp', (S, S, S), (0.5, None), 'max', (True,)),
