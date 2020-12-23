@@ -18,6 +18,21 @@ from caffe2.proto import caffe2_pb2
 
 dyndep.InitOpsLibrary('@/caffe2/caffe2/fb/optimizers:sgd_simd_ops')
 
+if workspace.has_gpu_support:
+    # NOTE: During GPU stress tests, the number of workers exceeds the number
+    #       of GPUs which results in flakiness from GPU contention. As a
+    #       result, deadlines are not enforced on CUDA runs.
+    _hypothesis_settings = settings
+
+    def settings(**kwargs):
+        if 'deadline' in kwargs:
+            kwargs['deadline'] = None
+            kwargs.setdefault('max_examples', 50)
+
+        def wrapped(f):
+            return _hypothesis_settings(**kwargs)(f)
+        return wrapped
+
 
 def sigmoid(x):
     return 1.0 / (1.0 + np.exp(-x))
