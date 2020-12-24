@@ -350,7 +350,9 @@ Tensor & _index_put_impl_(Tensor & self, TensorList indices, const Tensor & valu
   }
 
   auto info = make_info(self, indices);
-  auto iter = make_index_put_iterator(info, value);
+  auto iter = make_index_put_iterator(
+      info,
+      value.view(at::indexing::slicePrefix1sSize(value.sizes())));
   index_put_stub(iter.device_type(), iter, info.indexed_sizes, info.indexed_strides, accumulate);
   return self;
 }

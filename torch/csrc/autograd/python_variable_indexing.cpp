@@ -409,17 +409,19 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     return 0;
   }
 
-  IntArrayRef valueSizes = value.sizes();
-  IntArrayRef slicedValueSizes = at::indexing::slicePrefix1sSize(valueSizes);
-  torch::autograd::Variable valuesSliced;
-  if (!valueSizes.equals(slicedValueSizes)) {
-    valuesSliced = value.view(slicedValueSizes);
-  } else {
-    valuesSliced = value;
-  }
+  /*
+   *IntArrayRef valueSizes = value.sizes();
+   *IntArrayRef slicedValueSizes = at::indexing::slicePrefix1sSize(valueSizes);
+   *torch::autograd::Variable valuesSliced;
+   *if (!valueSizes.equals(slicedValueSizes)) {
+   *  valuesSliced = value.view(slicedValueSizes);
+   *} else {
+   *  valuesSliced = value;
+   *}
+   */
   {
     pybind11::gil_scoped_release no_gil;
-    at::indexing::dispatch_index_put_(sliced, std::move(variableIndices), valuesSliced);
+    at::indexing::dispatch_index_put_(sliced, std::move(variableIndices), value);
   }
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)

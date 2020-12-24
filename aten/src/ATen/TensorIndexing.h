@@ -576,15 +576,7 @@ static inline void set_item(Tensor& self, const ArrayRef<TensorIndex>& indices, 
     return;
   }
 
-  IntArrayRef valueSizes = value.sizes();
-  IntArrayRef slicedValueSizes = slicePrefix1sSize(valueSizes);
-  Tensor valuesSliced;
-  if (!valueSizes.equals(slicedValueSizes)) {
-    valuesSliced = value.view(slicedValueSizes);
-  } else {
-    valuesSliced = value;
-  }
-  dispatch_index_put_(sliced, std::move(tensorIndices), valuesSliced);
+  dispatch_index_put_(sliced, std::move(tensorIndices), value);
   return;
 }
 
