@@ -17,6 +17,7 @@ algorithms = {
     'adagrad': optim.adagrad,
     'adam': optim.adam,
     'adamw': optim.adamw,
+    'adabelief': optim.adabelief,
     'adamax': optim.adamax,
     'asgd': optim.asgd,
     'cg': optim.cg,

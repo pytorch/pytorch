@@ -7,6 +7,7 @@ future.
 
 from .adam import Adam
 from .adamw import AdamW
+from .adabelief import AdaBelief
 from .sgd import SGD
 from .rmsprop import RMSprop
 from .rprop import Rprop
@@ -16,6 +17,7 @@ from .adadelta import Adadelta
 
 del adam
 del adamw
+del adabelief
 del sgd
 del rmsprop
 del rprop
