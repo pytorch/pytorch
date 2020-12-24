@@ -90,7 +90,14 @@ extern "C" void cgeev_(char *jobvl, char *jobvr, int *n,
              std::complex<float> *work, int *lwork,
              float *rwork,
              int *info);
-
+extern "C" void zgeev_(char *jobvl, char *jobvr, int *n,
+             std::complex<double> *a, int *lda,
+             std::complex<double> *w,
+             std::complex<double> *vl, int *ldvl,
+             std::complex<double> *vr, int *ldvr,
+             std::complex<double> *work, int *lwork,
+             double *rwork,
+             int *info);
 
 // gesdd
 extern "C" void zgesdd_(char *jobz, int *m, int *n, std::complex<double> *a, int *lda,
@@ -338,7 +345,13 @@ template<> void lapackEig<float>(char jobvl, char jobvr, int n, float *a, int ld
 }
 
 template<> void lapackEig<c10::complex<double>, double>(char jobvl, char jobvr, int n, c10::complex<double> *a, int lda, c10::complex<double> *w, c10::complex<double> *vl, int ldvl, c10::complex<double> *vr, int ldvr, c10::complex<double> *work, int lwork, double *rwork, int *info) {
-  AT_ERROR("lapackEig<complex<double>>");
+  zgeev_(&jobvl, &jobvr, &n,
+         reinterpret_cast<std::complex<double>*>(a), &lda,
+         reinterpret_cast<std::complex<double>*>(w),
+         reinterpret_cast<std::complex<double>*>(vl), &ldvl,
+         reinterpret_cast<std::complex<double>*>(vr), &ldvr,
+         reinterpret_cast<std::complex<double>*>(work), &lwork,
+         rwork, info);
 }
 
 template<> void lapackEig<c10::complex<float>, float>(char jobvl, char jobvr, int n, c10::complex<float> *a, int lda, c10::complex<float> *w, c10::complex<float> *vl, int ldvl, c10::complex<float> *vr, int ldvr, c10::complex<float> *work, int lwork, float *rwork, int *info) {
