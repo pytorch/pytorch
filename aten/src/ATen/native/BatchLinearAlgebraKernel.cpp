@@ -66,7 +66,17 @@ std::tuple<Tensor, Tensor> eig_kernel_impl(const Tensor& self, bool& eigenvector
   self_.copy_(self);
 
   auto options = self.options().memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  Tensor vals_ = at::empty_strided({n, 2}, {1, n}, options);
+
+  // the API is slightly different for the complex vs real case: if the input
+  // is complex, eigenvals will be a vector of complex. If the input is real,
+  // eigenvals will be a (n, 2) matrix containing the real and imaginary parts
+  // in each column
+  Tensor vals_;
+  if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
+      vals_ = at::empty({n}, options);
+  } else {
+      vals_ = at::empty_strided({n, 2}, {1, n}, options);
+  }
   Tensor vecs_ = eigenvectors
                  ? at::empty_strided({n, n}, {1, n}, options)
                  : Tensor();

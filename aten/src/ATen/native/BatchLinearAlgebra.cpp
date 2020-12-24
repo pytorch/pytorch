@@ -1214,7 +1214,11 @@ std::tuple<Tensor&, Tensor&> eig_out(Tensor& e, Tensor& v, const Tensor& self, b
       TORCH_CHECK(v.dtype() == self.dtype(), "Expected 'v' to have dtype ", self.dtype(), " but got ", v.dtype());
   int64_t n = self.size(-1);
 
-  at::native::resize_output(e, {n, 2});
+  if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
+      at::native::resize_output(e, {n});
+  } else {
+      at::native::resize_output(e, {n, 2});
+  }
   if (eigenvectors) {
       at::native::resize_output(v, self.sizes());
   }
