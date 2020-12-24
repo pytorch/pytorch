@@ -18,6 +18,10 @@
 
 #pragma once
 
+#include <cstdint>
+#include <type_traits>
+#include <utility>
+
 namespace c10 {
 
 /// An efficient, type-erasing, non-owning reference to a callable. This is

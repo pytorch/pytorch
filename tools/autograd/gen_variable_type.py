@@ -23,36 +23,19 @@
 #     differentiable subcomponents.
 #
 
-from .utils import CodeTemplate, nested_dict, write
+from .utils import CodeTemplate, nested_dict, write, make_out_api_name_faithful
 from .gen_autograd import VIEW_FUNCTIONS, VIEW_FUNCTIONS_WITH_METADATA_CHANGE, \
     MULTI_OUTPUT_SAFE_FUNCTIONS, RETURNS_VIEWS_OF_INPUT
 from .gen_autograd_functions import uses_single_grad
+from .gen_trace_type import MANUAL_BACKEND, MANUAL_AUTOGRAD_AND_TRACER, MANUAL_AUTOGRAD
 
-# Note [Manual Backend kernels]
-# For these ops, we want to manually register to dispatch key Backend and
-# skip codegen-ed registeration to all keys before Backend.
-# For codegen this means:
-#   - op set below must match ops with manual_kernel_registration=True in native_functions.yaml
-#     where we skip codegen backend kernels
-#   - all ops below are part of MANUAL_AUTOGRAD to skip codegen Autograd kernel registration
-#   - all ops below are part of MANUAL_TRACER to skip codegen Tracer kernel registration
-# Note: we still register to dispatch key Profiler for these ops, keeping it untouched for now.
-# You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
-MANUAL_BACKEND = set([
-    'options', 'data', 'set_data', 'is_leaf', 'output_nr', '_version', 'retain_grad',
-    '_backward', 'requires_grad_',
-])
-
-# For these ops we want to skip the codegen-ed registration to both Autograd and Tracer keys.
-# You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
-MANUAL_AUTOGRAD_AND_TRACER = set([
-    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_',
-])
-
-# Currently MANUAL_AUTOGRAD and MANUAL_TRACER share the same set of ops:
-#   union(MANUAL_BACKEND, MANUAL_AUTOGRAD_AND_TRACER)
-# You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
-MANUAL_AUTOGRAD = MANUAL_TRACER = MANUAL_BACKEND | MANUAL_AUTOGRAD_AND_TRACER
+from tools.codegen.api.types import *
+from tools.codegen.api.autograd import *
+import tools.codegen.api.cpp as cpp
+import tools.codegen.api.python as python
+from tools.codegen.gen import with_native_function
+from tools.codegen.model import *
+from typing import Dict, Optional, List, Sequence, Any, Callable
 
 # We don't set or modify grad_fn on these methods. Generally, they return
 # tensors that have requires_grad=False. In-place functions listed here will
@@ -87,14 +70,16 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'repeat', 'expand', 'flip', 'fliplr', 'flipud', 'rot90', 'transpose',
     'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
     'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_', 'eq_',
-    'ne_', 'add', '__radd__', 'sum', '_conj', 'sin', 'cos', 'mul', 'sinh',
+    'ne_', 'add', '__radd__', 'sum', '_conj', 'sin', 'cos', 'mul', 'sinc', 'sinh',
     'cosh', '__rmul__', 'sgn', 'asin', 'acos', 'sub', 'div', 'cat', 'view_as_complex',
     'neg', 'complex', 'select', '_s_where', 'as_strided', 'slice', 'constant_pad_nd',
     'unbind', 'split', 'split_with_sizes', 'unsafe_split', 'split_with_sizes_backward',
     'dot', 'vdot', 'cholesky', 'triangular_solve', 'mm', '_unsafe_view', 'mv', 'ger',
     'bmm', 'diagonal', 'alias', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
     'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'take', 'fill_',
-    'exp', 'nonzero', 'mean', 'inverse', 'solve'
+    'exp', 'nonzero', 'mean', 'inverse', 'solve', 'linalg_cholesky', 'addcmul', 'addcdiv',
+    'matrix_exp', 'linalg_eigh', 'cholesky_solve', 'qr', 'svd',
+    '_fft_c2c', '_fft_r2c', 'linalg_solve', 'sqrt'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
@@ -201,9 +186,20 @@ DECLARE_GRAD_FN = CodeTemplate("""\
 std::shared_ptr<${op}> grad_fn;
 """)
 
+SETUP_ANY_REQUIRES_GRAD = CodeTemplate("""\
+auto _any_requires_grad = compute_requires_grad( ${args_with_derivatives} );
+(void)_any_requires_grad;
+""")
+
 SETUP_DERIVATIVE = CodeTemplate("""\
-if (compute_requires_grad( ${args_with_derivatives} )) {
+if (_any_requires_grad) {
   ${setup}
+}
+""")
+
+SETUP_NONE_REQUIRES_GRAD = CodeTemplate("""\
+if (compute_requires_grad( ${args_to_check} )) {
+  throw_error_out_requires_grad("${base_name}");
 }
 """)
 
@@ -278,36 +274,6 @@ ${statements}
 #endif
 """)
 
-FACTORY_FUNCTION_NAMES = None
-
-# TODO The maybe_unwrap_optional_tensors is only needed because our at::native::xxx functions
-# still take "Tensor" instead of "optional<Tensor>", so we need CPUType, TypeDefault, ...
-# to do the same. Once at::native::xxx are converted, we can remove use_optional_tensor
-# and use the use_optional_tensor=True behavior always.
-def maybe_unwrap_optional_tensors(option, formals, args):
-    assert len(formals) == len(args), \
-        "Assert we didn't screw up with method_args removing self but forgetting to remove it from formals"
-    if option['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']:
-        def maybe_unwrap_optional_tensor(formal, arg):
-            if formal['dynamic_type'] == 'Tensor' and formal['is_nullable']:
-                return "{}.has_value() ? *{} : at::Tensor()".format(arg, arg)
-            else:
-                return arg
-        return [maybe_unwrap_optional_tensor(formal, arg) for (formal, arg) in zip(formals, args)]
-    else:
-        assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
-        return args
-
-
-def find_factory_functions(declarations):
-    global FACTORY_FUNCTION_NAMES
-    FACTORY_FUNCTION_NAMES = set()
-
-    for declaration in declarations:
-        if declaration['is_factory_method']:
-            FACTORY_FUNCTION_NAMES.add(declaration['api_name'])
-
-
 # Methods shared by TraceType and VariableType to handle return variable declaration, tie and tuple.
 def format_return_variables(declaration):
     name = declaration['name']
@@ -350,7 +316,7 @@ def format_return_variables(declaration):
     return (declare_returned_variables(), tie_return_values(), get_return_value())
 
 
-def gen_variable_type(out, aten_declarations, template_path):
+def gen_variable_type(out, aten_declarations, differentiability_infos, template_path):
 
     """VariableType.h and VariableType.cpp body
 
@@ -359,10 +325,8 @@ def gen_variable_type(out, aten_declarations, template_path):
     compute the output. The grad_fn is attached to differentiable functions.
     """
 
-    # WARNING: this function call modifies global mutable state
-    find_factory_functions(aten_declarations)
-
     aten_declarations = list(sorted(aten_declarations, key=lambda decl: decl['name']))
+    match_declarations_with_differentiability_info(aten_declarations, differentiability_infos)
 
     gen_variable_type_shard(out, aten_declarations, template_path, None, True)
 
@@ -463,11 +427,11 @@ def emit_body(declaration):
         """Find arguments that have derivative definitions"""
         if func is None:
             return differentiable_inputs
-        names = set(name for d in func['derivatives'] for name in d['var_names'])
+        names = set(name for d in func.derivatives for name in d.var_names)
         differentiable = [arg for arg in differentiable_inputs if arg['name'] in names]
         if len(differentiable) != len(names):
             missing = names - set(arg['name'] for arg in differentiable)
-            raise RuntimeError('Missing arguments for derivatives: {} in {}'.format(missing, func['name']))
+            raise RuntimeError(f'Missing arguments for derivatives: {missing} in {func.name}')
         return differentiable
 
     inputs = [arg for arg in arguments if not arg.get('output', False)]
@@ -502,11 +466,11 @@ def emit_body(declaration):
         if func is None:
             return setup
 
-        has_tensorlist_arg = any(arg['type'] == 'TensorList' for arg in func['args_with_derivatives'])
+        has_tensorlist_arg = any(arg.type == 'TensorList' for arg in func.args_with_derivatives)
 
         # We don't want to save tensors if we know that they will never be used
         # when computing the derivative, so we add guards to those statements
-        def guard_for(arg):
+        def guard_for(arg: SavedAttribute) -> Optional[str]:
             # It's hard to determine the edge offset if we have TensorLists
             if has_tensorlist_arg:
                 return None
@@ -517,62 +481,61 @@ def emit_body(declaration):
             # require_grad if the backward function even gets executed. I don't
             # have any good ideas for detecting those cases, so I simply disabled the
             # checks.
-            if 'backward' in func['name']:
+            if 'backward' in func.name:
                 return None
 
             # If there's a single derivative we could compute, we already have
             # a requires_grad check that is sufficient
-            if len(func['args_with_derivatives']) <= 1:
+            if len(func.args_with_derivatives) <= 1:
                 return None
 
             # We really only care about trimming down the amount of tensors we save
-            if arg['type'] != 'Tensor':
+            if arg.type != 'Tensor':
                 return None
 
             # We want to emit simple guards, so we only allow that if checking one
             # input is enough to determine whether we need that value
-            used_in = [d for d in func['derivatives'] if arg in d['saved_inputs']]
+            used_in = [d for d in func.derivatives if arg in d.saved_inputs]
             assert len(used_in) > 0
             if len(used_in) != 1:
                 return None
             derivative = used_in[0]
-            if len(derivative['var_names']) != 1:
+            if len(derivative.var_names) != 1:
                 return None
-            derivative_var_name = derivative['var_names'][0]
+            derivative_var_name = derivative.var_names[0]
 
             # Figure out the offset of the edge that uses this variable
-            for edge_off, arg in enumerate(func['args_with_derivatives']):
-                if arg['name'] == derivative_var_name:
+            for edge_off, arg in enumerate(func.args_with_derivatives):
+                if arg.name == derivative_var_name:
                     break
             else:
                 raise AssertionError()
 
-            return 'grad_fn->should_compute_output({})'.format(edge_off)
+            return f'grad_fn->should_compute_output({edge_off})'
 
-        setup.extend(save_variables(func['saved_inputs'], False, guard_for))
-        for arg in func['args_with_derivatives']:
-            if arg['type'] == 'TensorList':
-                setup.append("grad_fn->{}_size_ = {}.size();".format(arg['name'], arg['name']))
+        setup.extend(save_variables(func.all_saved_inputs, False, guard_for))
+        for arg in func.args_with_derivatives:
+            if arg.type == 'TensorList':
+                setup.append(f'grad_fn->{arg.name}_size_ = {arg.name}.size();')
 
         return setup
 
     def setup_derivative(differentiable_inputs):
-
         env = {}
         env['args_with_derivatives'] = [arg['name'] for arg in args_with_derivatives]
-        env['op'] = func['op'] if func is not None else 'NotImplemented'
+        env['op'] = func.op if func is not None else 'NotImplemented'
         env['op_ctor'] = '' if func is not None else '"{}"'.format(declaration['api_name'])
 
         if is_out_fn:
-            setup = ['throw_error_out_requires_grad("{}");'.format(base_name)]
+            # For out functions, ensure that no input or output requires grad
             body = []
             body.append(DECLARE_GRAD_FN.substitute(op='Node'))
-            body.append(SETUP_DERIVATIVE.substitute(
-                setup=setup,
-                args_with_derivatives=[arg['name'] for arg in differentiable_inputs]))
-            body.append(SETUP_DERIVATIVE.substitute(
-                setup=setup,
-                args_with_derivatives=[arg['name'] for arg in differentiable_outputs]))
+            body.append(SETUP_NONE_REQUIRES_GRAD.substitute(
+                base_name=base_name,
+                args_to_check=[arg['name'] for arg in differentiable_inputs]))
+            body.append(SETUP_NONE_REQUIRES_GRAD.substitute(
+                base_name=base_name,
+                args_to_check=[arg['name'] for arg in differentiable_outputs]))
             return body
 
         setup = []
@@ -582,7 +545,7 @@ def emit_body(declaration):
         body = []
         body.extend(emit_check_no_requires_grad(differentiable_inputs, args_with_derivatives))
         body.append(DECLARE_GRAD_FN.substitute(env))
-        body.append(SETUP_DERIVATIVE.substitute(env, setup=setup))
+        body.append(SETUP_DERIVATIVE.substitute(setup=setup))
         return body
 
     def emit_check_if_in_complex_autograd_allowlist():
@@ -613,44 +576,53 @@ def emit_body(declaration):
             body.append('check_no_requires_grad({}, "{}");'.format(name, name))
         return body
 
-    def save_variables(saved_variables, is_output, guard_for=lambda name: None):
+    def save_variables(
+        saved_variables: Sequence[SavedAttribute],
+        is_output: bool,
+        guard_for: Callable[[SavedAttribute], Optional[str]] = lambda name: None,
+    ) -> Sequence[str]:
         # assign the saved variables to the generated grad_fn
-        stmts = []
+        stmts: List[str] = []
         for arg in saved_variables:
-            name = arg['name']
-            expr = arg.get('expr', arg['name'])
-            if arg['type'] == 'Tensor' or arg['type'] == 'c10::optional<Tensor>' or \
-                    arg['type'] == 'c10::optional<Tensor>&' or (is_output and arg['type'] == 'Scalar'):
+            name = arg.name
+            expr = arg.expr
+            if arg.type == 'Tensor' or arg.type == 'c10::optional<Tensor>' or \
+                    arg.type == 'c10::optional<Tensor>&' or (is_output and arg.type == 'Scalar'):
                 name += '_'
-                var = arg['name']
+                var = arg.name
                 if var == 'self' and inplace:
                     var = 'self.clone()'
                     assert not is_output
                 if inplace and is_output:
                     var = 'self'
-                    is_inplace_view = "{}.is_view()".format(var)
-                    expr = 'SavedVariable({}, {}, {})'.format(var, str(is_output).lower(), is_inplace_view)
+                    is_inplace_view = f'{var}.is_view()'
+                    expr = f'SavedVariable({var}, {str(is_output).lower()}, {is_inplace_view})'
                 else:
-                    expr = 'SavedVariable({}, {})'.format(var, str(is_output).lower())
-            elif arg['type'] == 'TensorList':
+                    expr = f'SavedVariable({var}, {str(is_output).lower()})'
+            elif arg.type == 'TensorList':
                 name += '_'
-                expr = 'make_saved_variable_list({})'.format(arg['name'])
-            elif arg['type'] == 'IntArrayRef':
+                expr = f'make_saved_variable_list({arg.name})'
+            elif arg.type == 'IntArrayRef':
                 expr = expr + ".vec()"
             guard = guard_for(arg)
             if guard is None:
-                stmts.append('grad_fn->{} = {};'.format(name, expr))
+                stmts.append(f'grad_fn->{name} = {expr};')
             else:
-                stmts.append('if ({}) {{'.format(guard))
-                stmts.append('  grad_fn->{} = {};'.format(name, expr))
+                stmts.append(f'if ({guard}) {{')
+                stmts.append(f'  grad_fn->{name} = {expr};')
                 stmts.append('}')
         return stmts
 
     def emit_dispatch_call(api_name, input_base, unpacked_args):
         """ Dispatch call via function in a namespace or method on Tensor."""
         if 'namespace' in declaration['method_of']:
+            if declaration['use_c10_dispatcher'] in ['hacky_wrapper_for_legacy_signatures', 'full']:
+                dispatcher_api_name = make_out_api_name_faithful(api_name)
+            else:
+                assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
+                dispatcher_api_name = api_name
             call = CALL_DISPATCH_VIA_NAMESPACE.substitute(
-                api_name=api_name,
+                api_name=dispatcher_api_name,
                 unpacked_args=unpacked_args)
         else:
             call = CALL_DISPATCH_VIA_METHOD.substitute(
@@ -717,7 +689,7 @@ def emit_body(declaration):
 
             if len(differentiable_output_vars) == 0:
                 # no output is differentiable (.indices() for SparseTensors for example)
-                rhs_value = 'as_view({}, {}, /* is_differentiable */ false)'.format(view_info, var)
+                rhs_value = f'as_view({view_info}, {var}, /* is_bw_differentiable */ false, /* is_fw_differentiable */ false)'
             elif len(differentiable_output_vars) == 1:
                 # Single differentiable output (Tensor or Tensor[])
                 return_info = differentiable_outputs[0]
@@ -732,12 +704,15 @@ def emit_body(declaration):
                         creation_meta = "CreationMeta::MULTI_OUTPUT_SAFE"
                     else:
                         creation_meta = "CreationMeta::MULTI_OUTPUT_NODE"
-                    rhs_value = ("as_view(/* base */ {}, /* output */ {}, /* is_differentiable */ true, "
-                                 "/* creation_meta */ {})").format(view_info, var, creation_meta)
+                    call += ("as_view(/* base */ {}, /* output */ {}, /* is_bw_differentiable */ true, "
+                             "/* is_fw_differentiable */ true, "
+                             "/* creation_meta */ {});").format(view_info, var, creation_meta)
+                    rhs_value = 'std::move({})'.format(var)
                 else:
                     call += emit_view_lambda()
                     creation_meta = "GradMode::is_enabled() ? CreationMeta::DEFAULT: CreationMeta::NO_GRAD_MODE"
-                    rhs_value = ("as_view(/* base */ {}, /* output */ {}, /* is_differentiable */ true, "
+                    rhs_value = ("as_view(/* base */ {}, /* output */ {}, /* is_bw_differentiable */ true, "
+                                 "/* is_fw_differentiable */ true, "
                                  "/* view_func */ func, /* creation_meta */ {})").format(view_info, var, creation_meta)
             else:
                 # This could be supported but we don't need it at the moment, so keeping things simple.
@@ -805,16 +780,20 @@ def emit_body(declaration):
             return ''
         func = declaration['derivative']
         if func is not None:
-            stmts = save_variables(func['saved_outputs'], True)
+            stmts = save_variables(func.all_saved_outputs, True)
             if len(stmts) == 0:
                 return ''
             return CONDITIONAL.substitute(cond='grad_fn', statements=stmts)
         return ''
 
+    def emit_any_requires_grad():
+        return [SETUP_ANY_REQUIRES_GRAD.substitute(
+            args_with_derivatives=[arg['name'] for arg in args_with_derivatives]), ]
+
     def emit_check_inplace():
         if not inplace:
             return []
-        return ['check_inplace({});'.format(arg['name']) for arg in differentiable_outputs]
+        return ['check_inplace({}, _any_requires_grad);'.format(arg['name']) for arg in differentiable_outputs]
 
     def emit_increment_version():
         if not modifies_arguments:
@@ -830,6 +809,7 @@ def emit_body(declaration):
 
     body.extend(unpack_args(env, declaration))
     if requires_derivative:
+        body.extend(emit_any_requires_grad())
         body.extend(emit_check_inplace())
         body.extend(setup_derivative(differentiable_inputs))
     body.append(declare_returned_variables)
@@ -840,7 +820,6 @@ def emit_body(declaration):
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called
         body.append(emit_history())
-    if requires_derivative:
         body.append(emit_save_outputs())
         body.extend(emit_check_if_in_complex_autograd_allowlist())
     if base_name in RESET_GRAD_ACCUMULATOR:
@@ -944,3 +923,63 @@ def dispatch_strategy(declaration):
         # actually implemented out of differentiable functions. (This
         # assumption might not hold, but then you'll see gradcheck fail.)
         return 'use_type'
+
+def get_decl_signature(declaration: Dict[Any, Any], use_base_variant: bool = False) -> str:
+    name = declaration['name']
+    arguments = declaration['arguments']
+    if use_base_variant:
+        if declaration['inplace']:
+            assert name.endswith('_')
+            name = name[:-1]
+        elif name.endswith('_out'):
+            name = name[:-4]
+            arguments = [arg for arg in arguments if not arg.get('output', False)]
+    simple_types = ', '.join(arg['simple_type'] for arg in arguments)
+    return f'{name}({simple_types})'
+
+@with_native_function
+def get_func_signature(f: NativeFunction) -> str:
+    args = CppSignatureGroup.from_schema(f.func, method=False).signature.arguments()
+    types = ', '.join(python.argument_type_str(a.argument.type, simple_type=True)
+                      if isinstance(a.argument, Argument) else 'TensorOptions'
+                      for a in args)
+    return f'{cpp.name(f.func)}({types})'
+
+def match_declarations_with_differentiability_info(
+    declarations: Dict[Any, Any],
+    differentiability_infos: Sequence[DifferentiabilityInfo],
+) -> None:
+    """Sets the "derivative" key on declarations to matching autograd function
+
+    In-place functions will use the out-of-place derivative definition if there
+    is no in-place specific derivative.
+    """
+
+    info_by_signature = {get_func_signature(info.func): info for info in differentiability_infos}
+
+    def find_info(declaration: Dict[Any, Any]) -> Optional[DifferentiabilityInfo]:
+        signature = get_decl_signature(declaration)
+        if signature in info_by_signature:
+            return info_by_signature[signature]
+
+        # if there is no exact match look for the out-of-place signature.
+        # i.e mul() for mul_() or mul_out()
+        signature = get_decl_signature(declaration, use_base_variant=True)
+        return info_by_signature.get(signature)
+
+    for declaration in declarations:
+        info = find_info(declaration)
+        declaration['derivative'] = info if info and info.args_with_derivatives else None
+
+        # Currently, the '.strides()' to 'strides_or_error' replacement does not support
+        # 'self' derivatives of an inplace function, so we must check for this case.
+        if declaration['inplace'] and (info is not None):
+            for derivative in info.derivatives:
+                if 'self' in derivative.var_names:
+                    for saved_input in derivative.saved_inputs:
+                        assert 'strides_or_error' not in saved_input.expr, (
+                            "Calling '.strides()' in the 'self' derivative formula of an "
+                            f"in-place function is not supported: {declaration['name']}")
+
+        declaration['non_differentiable_arg_names'] = info.non_differentiable_arg_names if info else []
+        declaration['output_differentiability'] = info.output_differentiability if info else None

@@ -550,10 +550,7 @@ class Tensor(torch._C._TensorBase):
         from torch.overrides import has_torch_function, handle_torch_function
         if type(self) is not Tensor and type(other) is not Tensor and has_torch_function(relevant_args):
             return handle_torch_function(Tensor.__rdiv__, relevant_args, self, other)
-        if self.dtype.is_floating_point or self.dtype.is_complex:
-            return self.reciprocal() * other
-        else:
-            return self.to(torch.get_default_dtype()).reciprocal() * other
+        return self.reciprocal() * other
 
     __rtruediv__ = __rdiv__
     __itruediv__ = _C._TensorBase.__idiv__
@@ -590,13 +587,6 @@ class Tensor(torch._C._TensorBase):
         return torch.floor_divide(other, self)
 
     __neg__ = _C._TensorBase.neg
-
-    __eq__ = _wrap_type_error_to_not_implemented(_C._TensorBase.eq)
-    __ne__ = _wrap_type_error_to_not_implemented(_C._TensorBase.ne)
-    __lt__ = _wrap_type_error_to_not_implemented(_C._TensorBase.lt)
-    __le__ = _wrap_type_error_to_not_implemented(_C._TensorBase.le)
-    __gt__ = _wrap_type_error_to_not_implemented(_C._TensorBase.gt)
-    __ge__ = _wrap_type_error_to_not_implemented(_C._TensorBase.ge)
     __abs__ = _C._TensorBase.abs
 
     def __len__(self):

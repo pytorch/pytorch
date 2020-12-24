@@ -989,7 +989,7 @@ class PlaceholderObserver(ObserverBase):
         custom_op_name: (temporary) specify this observer for an operator that doesn't require any observation
                         (Can be used in Graph Mode Passes for special case ops).
     """
-    def __init__(self, dtype=torch.float16, custom_op_name="", compute_dtype=None):
+    def __init__(self, dtype=torch.float32, custom_op_name="", compute_dtype=None):
         super(PlaceholderObserver, self).__init__(dtype=dtype)
         # dtype of input of the target operator, e.g. for dynamic quantization
         # ops, the dtype will be float32
@@ -1126,6 +1126,7 @@ def load_observer_state_dict(mod, obs_dict):
 
 # Restrict activations to be in the range (0,127)
 default_observer = MinMaxObserver.with_args(reduce_range=True)
+default_placeholder_observer = PlaceholderObserver
 default_debug_observer = RecordingObserver
 default_weight_observer = MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric)
 default_histogram_observer = HistogramObserver.with_args(reduce_range=True)

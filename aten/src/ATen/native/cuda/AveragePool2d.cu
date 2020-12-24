@@ -325,7 +325,7 @@ void avg_pool2d_out_cuda_template(
                 output_data,
                 divisor_override_value,
                 count_include_pad, use_divisor);
-          TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
           break;
         }
         case MemoryFormat::Contiguous: {
@@ -343,7 +343,7 @@ void avg_pool2d_out_cuda_template(
               output_data,
               divisor_override_value,
               count_include_pad, use_divisor);
-          TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
           break;
         }
         default: TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
@@ -457,7 +457,7 @@ Tensor& avg_pool2d_backward_out_cuda_template(
               gradInput_data,
               divisor_override_value,
               count_include_pad, use_divisor);
-          TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
           break;
         }
         case MemoryFormat::Contiguous: {
@@ -475,7 +475,7 @@ Tensor& avg_pool2d_backward_out_cuda_template(
               gradInput_data,
               divisor_override_value,
               count_include_pad, use_divisor);
-          TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
           break;
         }
         default: TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");

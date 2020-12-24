@@ -29,6 +29,10 @@ struct IndexRangeGenerator {
     size_t i = 0;
 };
 
+bool isFwGradDefined(const c10::optional<Tensor>& t);
+Tensor toLegacyFwGrad(const c10::optional<Tensor>& t);
+Tensor toLegacyPrimal(const c10::optional<Tensor>& t);
+
 bool any_variable_defined(variable_list& variables);
 void copy_range(variable_list& out, IndexRange range, const at::Tensor & t);
 void copy_range(variable_list& out, IndexRange range, at::ArrayRef<at::Tensor> t);
@@ -75,6 +79,7 @@ at::IntArrayRef strides_or_error(const Tensor & input, c10::string_view const & 
 at::Tensor mm_mat1_backward(const Tensor & grad, const Tensor & mat2, at::IntArrayRef mat1_sizes, at::IntArrayRef mat1_strides, const Scalar & alpha);
 at::Tensor mm_mat2_backward(const at::Tensor & grad, const at::Tensor & mat1, at::IntArrayRef sizes, at::IntArrayRef strides, const at::Scalar & alpha);
 at::Tensor _sparse_addmm_sparse_backward(const at::Tensor& grad, const at::Tensor& sparse_, const at::Tensor& dense, const at::Scalar& alpha);
+at::Tensor sparse_sparse_matmul_backward(const at::Tensor& grad, const at::Tensor& mat1, const at::Tensor& mat2,int64_t grad_order);
 at::Tensor renorm_backward(const at::Tensor & grad, const at::Tensor & self, at::Scalar p, int64_t dim, at::Scalar maxnorm);
 at::Tensor repeat_backward(at::Tensor grad, at::IntArrayRef repeats, at::IntArrayRef input_shape);
 at::Tensor _fused_dropout_backward(at::Tensor grad, at::Tensor mask, double p1m);
@@ -160,6 +165,9 @@ Tensor fft_backward(const Tensor& self, const Tensor& grad, int64_t signal_ndim,
                     bool inverse, IntArrayRef checked_signal_sizes,
                     int64_t normalization, bool onesided,
                     IntArrayRef output_sizes);
+Tensor fft_r2c_backward(const Tensor& grad, IntArrayRef dim, int64_t normalization,
+                        bool onesided, int64_t last_dim_size);
+Tensor fft_c2r_backward(const Tensor& grad, IntArrayRef dim, int64_t normalization);
 Tensor constant_pad_nd_backward(const Tensor& grad, IntArrayRef pad);
 std::tuple<Tensor, Tensor> cholesky_solve_backward(
     const Tensor& grad_x, const Tensor& self,
@@ -196,8 +204,7 @@ infinitely_differentiable_native_layer_norm_backward(
     const Tensor& mean,
     const Tensor& rstd,
     const c10::optional<Tensor>& gamma,
-    int64_t M,
-    int64_t N,
+    IntArrayRef normalized_shape,
     double eps,
     std::array<bool, 3> grad_input_mask);
 

@@ -36,18 +36,10 @@ std::tuple<Tensor,Tensor> _th_topk(const Tensor & self, int64_t k, int64_t dim, 
 Tensor & _th_renorm_out(Tensor & result, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm);
 Tensor _th_renorm(const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm);
 Tensor & _th_renorm_(Tensor & self, Scalar p, int64_t dim, Scalar maxnorm);
-Tensor & _th_fmod_out(Tensor & result, const Tensor & self, Scalar other);
-Tensor _th_fmod(const Tensor & self, Scalar other);
-Tensor & _th_fmod_out(Tensor & result, const Tensor & self, const Tensor & other);
-Tensor _th_fmod(const Tensor & self, const Tensor & other);
-Tensor & _th_fmod_(Tensor & self, Scalar other);
-Tensor & _th_fmod_(Tensor & self, const Tensor & other);
 Tensor & _th_cross_kernel_out(Tensor & result, const Tensor & self, const Tensor & other, int64_t dim);
 Tensor _th_cross_kernel(const Tensor & self, const Tensor & other, int64_t dim);
 std::tuple<Tensor &,Tensor &> _th_gels_out(Tensor & res1, Tensor & res2, const Tensor & self, const Tensor & A);
 std::tuple<Tensor,Tensor> _th_gels(const Tensor & self, const Tensor & A);
-std::tuple<Tensor &,Tensor &> _th_eig_out(Tensor & res1, Tensor & res2, const Tensor & self, bool eigenvectors);
-std::tuple<Tensor,Tensor> _th_eig(const Tensor & self, bool eigenvectors);
 Tensor & _th_potri_out(Tensor & output, const Tensor & self, bool upper);
 Tensor _th_potri(const Tensor & self, bool upper);
 std::tuple<Tensor &,Tensor &> _th_geqrf_out(Tensor & res1, Tensor & res2, const Tensor & self);
@@ -83,7 +75,6 @@ Tensor & _thnn_log_sigmoid_backward_out(Tensor & grad_input, const Tensor & grad
 Tensor _thnn_log_sigmoid_backward(const Tensor & grad_output, const Tensor & self, const Tensor & buffer);
 Tensor & _thnn_rrelu_with_noise_forward_out(Tensor & output, const Tensor & self, const Tensor & noise, Scalar lower, Scalar upper, bool training, c10::optional<at::Generator> generator);
 Tensor _thnn_rrelu_with_noise_forward(const Tensor & self, const Tensor & noise, Scalar lower, Scalar upper, bool training, c10::optional<at::Generator> generator);
-Tensor & _thnn_rrelu_with_noise_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, const Tensor & noise, Scalar lower, Scalar upper, bool training);
 Tensor _thnn_rrelu_with_noise_backward(const Tensor & grad_output, const Tensor & self, const Tensor & noise, Scalar lower, Scalar upper, bool training);
 Tensor & _thnn_rrelu_with_noise_forward_(Tensor & self, const Tensor & noise, Scalar lower, Scalar upper, bool training, c10::optional<at::Generator> generator);
 std::tuple<Tensor &,Tensor &,Tensor &> _thnn_conv2d_forward_out(Tensor & output, Tensor & columns, Tensor & ones, const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const Tensor & bias, IntArrayRef stride, IntArrayRef padding);

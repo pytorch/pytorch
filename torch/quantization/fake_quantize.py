@@ -40,10 +40,27 @@ class FakeQuantizeBase(ABC, Module):
     def calculate_qparams(self, **kwargs):
         pass
 
+    @torch.jit.export
+    def enable_fake_quant(self, enabled=True):
+        # type: (bool) -> None
+        self.fake_quant_enabled[0] = 1 if enabled else 0
+
+    @torch.jit.export
+    def disable_fake_quant(self):
+        self.enable_fake_quant(False)
+
+    @torch.jit.export
+    def enable_observer(self, enabled=True):
+        # type: (bool) -> None
+        self.observer_enabled[0] = 1 if enabled else 0
+
+    @torch.jit.export
+    def disable_observer(self):
+        self.enable_observer(False)
+
     with_args = classmethod(_with_args)
 
-# TODO: inherit from FakeQuantizeBase
-class FakeQuantize(Module):
+class FakeQuantize(FakeQuantizeBase):
     r""" Simulate the quantize and dequantize operations in training time.
     The output of this module is given by
 
@@ -82,22 +99,15 @@ class FakeQuantize(Module):
 
     """
 
-    fake_quant_enabled: torch.Tensor
-    observer_enabled: torch.Tensor
     scale: torch.Tensor
     zero_point: torch.Tensor
 
     def __init__(self, observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=255, **observer_kwargs):
-        super(FakeQuantize, self).__init__()
+        super().__init__()
         assert quant_min <= quant_max, \
             'quant_min must be less than or equal to quant_max'
         self.quant_min = quant_min
         self.quant_max = quant_max
-        # fake_quant_enabled and observer_enabled are buffers to support their
-        # replication in DDP. Data type is uint8 because NCCL does not support
-        # bool tensors.
-        self.register_buffer('fake_quant_enabled', torch.tensor([1], dtype=torch.uint8))
-        self.register_buffer('observer_enabled', torch.tensor([1], dtype=torch.uint8))
         self.activation_post_process = observer(**observer_kwargs)
         assert torch.iinfo(self.activation_post_process.dtype).min <= quant_min, 'quant_min out of bound'
         assert quant_max <= torch.iinfo(self.activation_post_process.dtype).max, 'quant_max out of bound'
@@ -112,24 +122,6 @@ class FakeQuantize(Module):
             'Only per channel and per tensor quantization are supported in fake quantize' + \
             ' got qscheme: ' + str(self.qscheme)
         self.is_per_channel = _is_per_channel(self.qscheme)
-
-    @torch.jit.export
-    def enable_fake_quant(self, enabled=True):
-        # type: (bool) -> None
-        self.fake_quant_enabled[0] = 1 if enabled else 0
-
-    @torch.jit.export
-    def disable_fake_quant(self):
-        self.enable_fake_quant(False)
-
-    @torch.jit.export
-    def enable_observer(self, enabled=True):
-        # type: (bool) -> None
-        self.observer_enabled[0] = 1 if enabled else 0
-
-    @torch.jit.export
-    def disable_observer(self):
-        self.enable_observer(False)
 
     @torch.jit.export
     def calculate_qparams(self):
@@ -154,8 +146,6 @@ class FakeQuantize(Module):
                                                           int(self.zero_point), self.quant_min,
                                                           self.quant_max)
         return X
-
-    with_args = classmethod(_with_args)
 
     @torch.jit.export
     def extra_repr(self):
@@ -276,17 +266,17 @@ def _is_fake_quant_script_module(mod):
     return False
 
 def disable_fake_quant(mod):
-    if type(mod) == FakeQuantize or _is_fake_quant_script_module(mod):
+    if isinstance(mod, FakeQuantizeBase) or _is_fake_quant_script_module(mod):
         mod.disable_fake_quant()
 
 def enable_fake_quant(mod):
-    if type(mod) == FakeQuantize or _is_fake_quant_script_module(mod):
+    if isinstance(mod, FakeQuantizeBase) or _is_fake_quant_script_module(mod):
         mod.enable_fake_quant()
 
 def disable_observer(mod):
-    if type(mod) == FakeQuantize or _is_fake_quant_script_module(mod):
+    if isinstance(mod, FakeQuantizeBase) or _is_fake_quant_script_module(mod):
         mod.disable_observer()
 
 def enable_observer(mod):
-    if type(mod) == FakeQuantize or _is_fake_quant_script_module(mod):
+    if isinstance(mod, FakeQuantizeBase) or _is_fake_quant_script_module(mod):
         mod.enable_observer()

@@ -90,6 +90,18 @@ Tensor cumsum(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) 
   return result;
 }
 
+Tensor& cumsum_(Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
+  TORCH_CHECK(
+          !dtype.has_value() || (self.scalar_type() == dtype.value()),
+          "provided dtype must match the dtype of self tensor in cumsum. Got ",
+          toString(self.scalar_type()),
+          " and ",
+          toString(dtype.value()),
+          ".");
+
+  return at::_cumsum_out(self, self, dim);
+}
+
 Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
   // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
   TORCH_CHECK(
@@ -125,6 +137,18 @@ Tensor cumprod(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype)
   }();
   namedinference::propagate_names(result, self);
   return result;
+}
+
+Tensor& cumprod_(Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
+    TORCH_CHECK(
+            !dtype.has_value() || (self.scalar_type() == dtype.value()),
+            "provided dtype must match the dtype of self tensor in cumprod. Got ",
+            toString(self.scalar_type()),
+            " and ",
+            toString(dtype.value()),
+            ".");
+
+    return at::_cumprod_out(self, self, dim);
 }
 
 Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
@@ -636,22 +660,23 @@ Tensor& logsumexp_out(Tensor& result, const Tensor& self, DimnameList dims, bool
 
 static Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> opt_p,
                                IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  auto p = opt_p.value_or(2.0);
-  TORCH_CHECK(!(p.toDouble() == 2 && self.is_complex()), "norm with p=2 not supported for complex tensors");
+  auto p = opt_p.value_or(2.0).to<double>();
   TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
               "norm only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "norm only supports strided layout, got: ", self.layout());
 
-  ScalarType scalarType = opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
+  ScalarType in_dtype = opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
   TORCH_CHECK(
-      at::isFloatingType(scalarType) || at::isComplexType(scalarType),
-      "Can only calculate the mean of floating types. Got ",
-      toString(scalarType),
+      at::isFloatingType(in_dtype) || at::isComplexType(in_dtype),
+      "Can only calculate the norm of floating point and complex dtypes. Got ",
+      toString(in_dtype),
       " instead.");
 
-  ScalarType dtype = get_dtype(result, self, opt_dtype, true);
-  auto iter = make_reduction("norm", result, self, dim, keepdim, dtype);
+  ScalarType out_dtype = result.defined() ? result.scalar_type() : (opt_dtype.has_value() ? opt_dtype.value() : toValueType(self.scalar_type()));
+
+  auto iter = make_reduction("norm", result, self, dim, keepdim, in_dtype, out_dtype);
+
   if (iter.numel() == 0) {
     result.zero_();
   } else {
@@ -1150,11 +1175,17 @@ Tensor& logcumsumexp_out(Tensor& result, const Tensor& self, Dimname dim) {
 Tensor cumsum(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
   return at::cumsum(self, dimname_to_position(self, dim), dtype);
 }
+Tensor& cumsum_(Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
+    return native::cumsum_(self, dimname_to_position(self, dim), dtype);
+}
 Tensor& cumsum_out(Tensor& result, const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
   return at::cumsum_out(result, self, dimname_to_position(self, dim), dtype);
 }
 Tensor cumprod(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
   return at::cumprod(self, dimname_to_position(self, dim), dtype);
+}
+Tensor& cumprod_(Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
+    return native::cumprod_(self, dimname_to_position(self, dim), dtype);
 }
 Tensor& cumprod_out(Tensor& result, const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
   return at::cumprod_out(result, self, dimname_to_position(self, dim), dtype);
