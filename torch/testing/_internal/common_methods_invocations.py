@@ -1009,6 +1009,7 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and_complex_and(torch.half),
                    decorators=(precisionOverride({torch.half: 5e-2}),),
                    promotes_integers_to_float=True,
+                   assert_autodiffed=True,
                    handles_complex_extremals=False),
     UnaryUfuncInfo('sqrt',
                    ref=np.sqrt,
