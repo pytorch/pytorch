@@ -766,26 +766,6 @@ class TestUnaryUfuncs(TestCase):
         b = torch.randn(1, device=device)
         self.assertRaises(RuntimeError, lambda: torch.ceil(a, out=b))
 
-    # TODO: review with erfinv opinfo
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
-    @dtypes(torch.float, torch.double)
-    def test_erfinv(self, device, dtype):
-        # general testing. Narrow the range to avoid accuracy issues
-        input_values = torch.randn(4, 4, dtype=dtype, device=device).clamp(-0.3, 0.3)
-        self.assertEqual(input_values.erf().erfinv(), input_values)
-        # test inf
-        self.assertTrue(torch.equal(torch.tensor([-1, 1], dtype=dtype, device=device).erfinv(),
-                                    torch.tensor([-inf, inf], dtype=dtype, device=device)))
-        # test nan
-        self.assertEqual(torch.tensor([-2, 2], dtype=dtype, device=device).erfinv(),
-                         torch.tensor([nan, nan], dtype=dtype, device=device))
-
-        if dtype == torch.double:
-            # double precision
-            a = torch.tensor([0.5, 0.8], dtype=torch.double, device=device).erfinv()
-            self.assertEqual(a[0].item(), 0.47693627620447, atol=1e-13, rtol=0)
-            self.assertEqual(a[1].item(), 0.90619380243682, atol=1e-13, rtol=0)
-
     # TODO: opinfo hardshrink
     @onlyCPU
     @dtypes(torch.float, torch.double)
