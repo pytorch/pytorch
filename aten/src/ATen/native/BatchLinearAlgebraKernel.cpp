@@ -31,9 +31,8 @@ void apply_eig(const Tensor& self, bool eigenvectors, Tensor& vals_, Tensor& vec
   Tensor rwork;
   value_t* rwork_data = nullptr;
   if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
-    ScalarType dtype = toValueType(typeMetaToScalarType(self.dtype()));
-    // XXX: I would like a double/float dtype, not a complex dtype
-    rwork = at::empty({n*2}, self.options().dtype(dtype));
+    ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
+    rwork = at::empty({n*2}, self.options().dtype(real_dtype));
     rwork_data = rwork.data_ptr<value_t>();
   }
 
