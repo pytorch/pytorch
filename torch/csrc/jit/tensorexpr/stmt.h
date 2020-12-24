@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <list>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include <torch/csrc/jit/tensorexpr/expr.h>
@@ -10,7 +11,7 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-class Buffer;
+class Placeholder;
 
 // The common base between all statement node.
 class TORCH_API Stmt : public KernelScopedObject {
@@ -163,6 +164,13 @@ class TORCH_API Block : public StmtNode<Block> {
     return stmts_;
   }
 
+  void clear() {
+    for (auto* s : stmts_) {
+      set_parent(s, nullptr);
+    }
+    stmts_.clear();
+  }
+
   explicit Block(const std::vector<Stmt*>& stmts) {
     for (Stmt* s : stmts) {
       if (s->get_parent()) {
@@ -244,6 +252,14 @@ class TORCH_API Block : public StmtNode<Block> {
     return nullptr;
   }
 
+  // returns the immediate child containing statement s.
+  const Stmt* getEnclosedRoot(const Stmt* s) const {
+    while (s && s->get_parent() != this) {
+      s = s->get_parent();
+    }
+    return s;
+  }
+
  private:
   std::list<Stmt*> stmts_;
 };
@@ -271,12 +287,6 @@ class TORCH_API Store : public StmtNode<Store> {
   }
 
   static Store* make(
-      const Buffer& buffer,
-      const std::vector<ExprHandle>& indices,
-      const ExprHandle& value,
-      const ExprHandle& mask);
-
-  static Store* make(
       const BufHandle& buf,
       const std::vector<ExprHandle>& indices,
       const ExprHandle& value,
@@ -286,13 +296,6 @@ class TORCH_API Store : public StmtNode<Store> {
       const BufHandle& buf,
       const std::vector<ExprHandle>& indices,
       const ExprHandle& value);
-
-  // TODO: merge this with Load.
-  Store(
-      const Buffer& buffer,
-      const std::vector<const Expr*>& indices,
-      const Expr* value,
-      const Expr* mask);
 
   Store(
       const Buf* buf,
@@ -676,7 +679,7 @@ class TORCH_API For : public StmtNode<For> {
 // This node could only shows up as an internal with GPU backends.
 // TODO: move to this an internal IR.
 // TODO: make IR nodes extensible.
-class AtomicAdd : public StmtNode<AtomicAdd> {
+class TORCH_API AtomicAdd : public StmtNode<AtomicAdd> {
  public:
   AtomicAdd(
       const Buf* buf,
@@ -711,7 +714,7 @@ class AtomicAdd : public StmtNode<AtomicAdd> {
   const Expr* value_;
 };
 
-class SyncThreads : public StmtNode<SyncThreads> {
+class TORCH_API SyncThreads : public StmtNode<SyncThreads> {
  public:
   SyncThreads() {}
 };

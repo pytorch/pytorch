@@ -1,6 +1,6 @@
 # @package adaptive_weight
 # Module caffe2.fb.python.layers.adaptive_weight
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import numpy as np
 from caffe2.python import core, schema

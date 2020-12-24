@@ -28,8 +28,10 @@ _backend_type_doc = """
 """
 
 # Create an enum type, `BackendType`, with empty members.
-BackendType = enum.Enum(value="BackendType", names={})
-BackendType.__repr__ = _backend_type_repr
+# Can't handle Function Enum API (mypy bug #9079)
+BackendType = enum.Enum(value="BackendType", names=dict())  # type: ignore[misc]
+# Unable to assign a function a method (mypy bug #2427)
+BackendType.__repr__ = _backend_type_repr  # type: ignore[assignment]
 BackendType.__doc__ = _backend_type_doc
 
 def backend_registered(backend_name):
@@ -73,8 +75,10 @@ def register_backend(
         },
         **existing_enum_dict
     )
-    BackendType = enum.Enum(value="BackendType", names=extended_enum_dict)
-    BackendType.__repr__ = _backend_type_repr
+    # Can't handle Function Enum API (mypy bug #9079)
+    BackendType = enum.Enum(value="BackendType", names=extended_enum_dict)  # type: ignore[misc]
+    # Unable to assign a function a method (mypy bug #2427)
+    BackendType.__repr__ = _backend_type_repr  # type: ignore[assignment]
     BackendType.__doc__ = _backend_type_doc
     return BackendType[backend_name]
 
@@ -134,7 +138,20 @@ def _init_process_group(store, rank, world_size):
 def _process_group_init_backend_handler(
     store, name, rank, world_size, rpc_backend_options
 ):
+    from . import ProcessGroupRpcBackendOptions
     from . import ProcessGroupAgent
+
+    if not isinstance(store, dist.Store):
+        raise TypeError("`store` must be a c10d::Store. {}".format(store))
+
+    if not isinstance(
+        rpc_backend_options, ProcessGroupRpcBackendOptions
+    ):
+        raise TypeError(
+            "`rpc_backend_options` must be a `ProcessGroupRpcBackendOptions`. {}".format(
+                rpc_backend_options
+            )
+        )
 
     group = _init_process_group(store, rank, world_size)
 
@@ -254,6 +271,7 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
 
     try:
         _tensorpipe_check_device_maps(agent, rpc_backend_options.device_maps)
+        agent.join()
     except Exception:
         api.shutdown()
         raise

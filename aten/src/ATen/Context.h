@@ -21,7 +21,7 @@ namespace at {
 
 class Tensor;
 
-class CAFFE2_API Context {
+class TORCH_API Context {
  public:
   Context();
 
@@ -225,13 +225,13 @@ class CAFFE2_API Context {
   std::unique_ptr<THHState, void(*)(THHState*)> thh_state;
 };
 
-CAFFE2_API Context& globalContext();
+TORCH_API Context& globalContext();
 
 static inline void init() {
   globalContext();
 }
 
-CAFFE2_API Allocator* getCPUAllocator();
+TORCH_API Allocator* getCPUAllocator();
 
 static inline DeprecatedTypeProperties& getDeprecatedTypeProperties(Backend p, ScalarType s) {
   return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
@@ -314,10 +314,12 @@ static inline void manual_seed(uint64_t seed) {
   }
   // NB: Sometimes we build with CUDA, but we don't have any GPUs
   // available. In that case, we must not seed CUDA; it will fail!
-  int num_gpus = detail::getCUDAHooks().getNumGPUs();
+  const auto num_gpus = detail::getCUDAHooks().getNumGPUs();
   if (hasCUDA() && num_gpus > 0) {
     for (int i = 0; i < num_gpus; i++) {
-      auto cuda_gen = globalContext().defaultGenerator(Device(at::kCUDA, i));
+      auto cuda_gen = globalContext().defaultGenerator(
+        Device(at::kCUDA, static_cast<c10::DeviceIndex>(i))
+      );
       {
         // See Note [Acquire lock when using random generators]
         std::lock_guard<std::mutex> lock(cuda_gen.mutex());
@@ -326,5 +328,21 @@ static inline void manual_seed(uint64_t seed) {
     }
   }
 }
+
+// When the global flag `allow_tf32` is set to true, cuBLAS handles are
+// automatically configured to use math mode CUBLAS_TF32_TENSOR_OP_MATH.
+// For some operators, such as addmv, TF32 offers no performance improvement
+// but causes precision loss. To help this case, this class implements
+// a RAII guard that can be used to quickly disable TF32 within its scope.
+//
+// Usage:
+//     NoTF32Guard disable_tf32;
+struct TORCH_API NoTF32Guard {
+  NoTF32Guard();
+  ~NoTF32Guard();
+  static bool should_disable_tf32();
+private:
+  bool changed = false;
+};
 
 } // namespace at

@@ -8,7 +8,7 @@ torch.Tensor
 A :class:`torch.Tensor` is a multi-dimensional matrix containing elements of
 a single data type.
 
-Torch defines 10 tensor types with CPU and GPU variants:
+Torch defines 10 tensor types with CPU and GPU variants which are as follows:
 
 ========================== ===========================================   ============================= ================================
 Data type                  dtype                                         CPU tensor                    GPU tensor
@@ -32,7 +32,7 @@ Boolean                    ``torch.bool``                                :class:
   Sometimes referred to as binary16: uses 1 sign, 5 exponent, and 10
   significand bits. Useful when precision is important at the expense of range.
 .. [2]
-  Sometimes referred to as Brain Floating Point: use 1 sign, 8 exponent and 7
+  Sometimes referred to as Brain Floating Point: uses 1 sign, 8 exponent, and 7
   significand bits. Useful when range is important, since it has the same
   number of exponent bits as ``float32``
 
@@ -189,6 +189,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: addcmul_
    .. automethod:: addmm
    .. automethod:: addmm_
+   .. automethod:: sspaddmm
+      :noindex:
    .. automethod:: addmv
    .. automethod:: addmv_
    .. automethod:: addr
@@ -231,6 +233,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: bmm
    .. automethod:: bool
    .. automethod:: byte
+   .. automethod:: broadcast_to
    .. automethod:: cauchy_
    .. automethod:: ceil
    .. automethod:: ceil_
@@ -247,6 +250,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: contiguous
    .. automethod:: copy_
    .. automethod:: conj
+   .. automethod:: copysign
+   .. automethod:: copysign_
    .. automethod:: cos
    .. automethod:: cos_
    .. automethod:: cosh
@@ -263,12 +268,15 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cummax
    .. automethod:: cummin
    .. automethod:: cumprod
+   .. automethod:: cumprod_
    .. automethod:: cumsum
+   .. automethod:: cumsum_
    .. automethod:: data_ptr
    .. automethod:: deg2rad
    .. automethod:: dequantize
    .. automethod:: det
    .. automethod:: dense_dim
+      :noindex:
    .. automethod:: detach
       :noindex:
    .. automethod:: detach_
@@ -308,13 +316,14 @@ view of a storage and defines numeric operations on it.
    .. automethod:: exponential_
    .. automethod:: fix
    .. automethod:: fix_
-   .. automethod:: fft
    .. automethod:: fill_
    .. automethod:: flatten
    .. automethod:: flip
    .. automethod:: fliplr
    .. automethod:: flipud
    .. automethod:: float
+   .. automethod:: float_power
+   .. automethod:: float_power_
    .. automethod:: floor
    .. automethod:: floor_
    .. automethod:: floor_divide
@@ -346,7 +355,10 @@ view of a storage and defines numeric operations on it.
    .. automethod:: hypot_
    .. automethod:: i0
    .. automethod:: i0_
-   .. automethod:: ifft
+   .. automethod:: igamma
+   .. automethod:: igamma_
+   .. automethod:: igammac
+   .. automethod:: igammac_
    .. automethod:: index_add_
    .. automethod:: index_add
    .. automethod:: index_copy_
@@ -357,10 +369,11 @@ view of a storage and defines numeric operations on it.
    .. automethod:: index_put
    .. automethod:: index_select
    .. automethod:: indices
+      :noindex:
+   .. automethod:: inner
    .. automethod:: int
    .. automethod:: int_repr
    .. automethod:: inverse
-   .. automethod:: irfft
    .. automethod:: isclose
    .. automethod:: isfinite
    .. automethod:: isinf
@@ -377,12 +390,15 @@ view of a storage and defines numeric operations on it.
    .. automethod:: is_shared
    .. automethod:: is_signed
    .. autoattribute:: is_sparse
+      :noindex:
    .. automethod:: istft
    .. automethod:: isreal
    .. automethod:: item
    .. automethod:: kthvalue
    .. automethod:: lcm
    .. automethod:: lcm_
+   .. automethod:: ldexp
+   .. automethod:: ldexp_
    .. automethod:: le
    .. automethod:: le_
    .. automethod:: less_equal
@@ -436,11 +452,16 @@ view of a storage and defines numeric operations on it.
    .. automethod:: maximum
    .. automethod:: mean
    .. automethod:: median
+   .. automethod:: nanmedian
    .. automethod:: min
    .. automethod:: minimum
    .. automethod:: mm
+   .. automethod:: smm
+      :noindex:
    .. automethod:: mode
    .. automethod:: movedim
+   .. automethod:: moveaxis
+   .. automethod:: msort
    .. automethod:: mul
    .. automethod:: mul_
    .. automethod:: multiply
@@ -453,6 +474,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: narrow
    .. automethod:: narrow_copy
    .. automethod:: ndimension
+   .. automethod:: nan_to_num
+   .. automethod:: nan_to_num_
    .. automethod:: ne
    .. automethod:: ne_
    .. automethod:: not_equal
@@ -492,6 +515,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: q_per_channel_axis
    .. automethod:: rad2deg
    .. automethod:: random_
+   .. automethod:: ravel
    .. automethod:: reciprocal
    .. automethod:: reciprocal_
    .. automethod:: record_stream
@@ -512,7 +536,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: resize_as_
    .. automethod:: retain_grad
       :noindex:
-   .. automethod:: rfft
    .. automethod:: roll
    .. automethod:: rot90
    .. automethod:: round
@@ -532,8 +555,12 @@ view of a storage and defines numeric operations on it.
    .. automethod:: sign
    .. automethod:: sign_
    .. automethod:: signbit
+   .. automethod:: sgn
+   .. automethod:: sgn_
    .. automethod:: sin
    .. automethod:: sin_
+   .. automethod:: sinc
+   .. automethod:: sinc_
    .. automethod:: sinh
    .. automethod:: sinh_
    .. automethod:: asinh
@@ -546,7 +573,9 @@ view of a storage and defines numeric operations on it.
    .. automethod:: sort
    .. automethod:: split
    .. automethod:: sparse_mask
+      :noindex:
    .. automethod:: sparse_dim
+      :noindex:
    .. automethod:: sqrt
    .. automethod:: sqrt_
    .. automethod:: square
@@ -566,9 +595,13 @@ view of a storage and defines numeric operations on it.
    .. automethod:: sum
    .. automethod:: sum_to_size
    .. automethod:: svd
+   .. automethod:: swapaxes
+   .. automethod:: swapdims
    .. automethod:: symeig
    .. automethod:: t
    .. automethod:: t_
+   .. automethod:: tensor_split
+   .. automethod:: tile
    .. automethod:: to
    .. automethod:: to_mkldnn
    .. automethod:: take
@@ -583,6 +616,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: tolist
    .. automethod:: topk
    .. automethod:: to_sparse
+      :noindex:
    .. automethod:: trace
    .. automethod:: transpose
    .. automethod:: transpose_
@@ -605,11 +639,14 @@ view of a storage and defines numeric operations on it.
    .. automethod:: unsqueeze
    .. automethod:: unsqueeze_
    .. automethod:: values
+      :noindex:
    .. automethod:: var
    .. automethod:: vdot
    .. automethod:: view
    .. automethod:: view_as
    .. automethod:: where
+   .. automethod:: xlogy
+   .. automethod:: xlogy_
    .. automethod:: zero_
 
 .. class:: BoolTensor()

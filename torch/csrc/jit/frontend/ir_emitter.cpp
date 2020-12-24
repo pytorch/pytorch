@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
+
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/api/function_impl.h>
@@ -8,6 +9,7 @@
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/passes/annotate_warns.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -19,6 +21,7 @@
 #include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/runtime/slice_indices_adjust.h>
 #include <torch/csrc/jit/testing/hooks_for_testing.h>
 
 #include <torch/csrc/jit/ir/constants.h>
@@ -41,7 +44,7 @@ using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
 struct Refinement {
   Refinement(std::string identifier, TypePtr type)
-      : identifier_(std::move(identifier)), type_(type) {}
+      : identifier_(std::move(identifier)), type_(std::move(type)) {}
   const std::string& identifier() const {
     return identifier_;
   }
@@ -69,7 +72,7 @@ struct RefinementSet {
       : RefinementSet(
             Refinements({std::move(single_true)}),
             Refinements({std::move(single_false)})) {}
-  RefinementSet() {} // empty
+  RefinementSet() = default; // empty
   RefinementSet And(const RefinementSet& rhs) const {
     // if the result of an AND is true, both a & b had to be true,
     // so we take the union of a.true_refinements and b.true_refinements.
@@ -243,7 +246,7 @@ struct Environment {
     while (runner->next) {
       runner = runner->next.get();
     }
-    runner->error_messages[name] = msg;
+    runner->error_messages[name] = std::move(msg);
   }
 
   // see if type error has been set for a variable
@@ -279,7 +282,7 @@ struct Environment {
       TypePtr type) {
     auto g = b->owningGraph();
     g->insertNode(g->createStore(name, v))->setSourceRange(loc);
-    type_table[name] = type;
+    type_table[name] = std::move(type);
   }
 
   SugaredValuePtr findInThisFrame(const std::string& name) {
@@ -402,7 +405,7 @@ struct Environment {
             << " but is being assigned to a value of type "
             << as_simple_value->type()->repr_str();
       }
-      insertStore(name, loc, std::move(as_simple_value), annotated_type);
+      insertStore(name, loc, as_simple_value, annotated_type);
     } else {
       value_table[name] = std::move(value);
     }
@@ -483,7 +486,7 @@ struct Environment {
           {"all", std::make_shared<BuiltinFunction>(aten::all, at::nullopt)},
           {"divmod",
            std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
-          {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
+          {"list", SpecialFormValue::create(prim::list)},
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
           {"chr", std::make_shared<BuiltinFunction>(aten::chr, at::nullopt)},
           {"bin", std::make_shared<BuiltinFunction>(aten::bin, at::nullopt)},
@@ -858,9 +861,12 @@ struct to_ir {
     return emitStatements(statements.begin(), statements.end());
   }
 
-  // XXX - right now closures are used _only_ for defining gradients internally
+  // XXX: Right now closures are not generically implemented and are only used
+  // as an intermediate form for special tasks, like defining gradients or
+  // forked functions.
+  //
   // There are several unfinished aspects that make them unusable generally
-  // 1. We do not have a type, ivalue, operator to represent prim::Function, so
+  // 1. We do not have a type, ivalue, operator to represent prim::Closure, so
   // closure_node has type None
   // 2. There is no export logic for it yet, so it cannot be
   // exported/python_printed
@@ -869,9 +875,19 @@ struct to_ir {
   //    the changes to those variables will just get forgotten.
   // 4. There is no parsing support in frontend.py, this is intentional since it
   //    prevents people from accidentally using this feature.
+  //
+  // This function leaves in the graph something like:
+  //
+  //   %2 : None = prim::Closure()
+  //     block0():
+  //       %1 : Tensor = prim::DoSomething(%0)
+  //       -> (%1)
+  //
+  // A separate pass is required to erase this closure and replace it with
+  // something actually executable (see liftClosure and inlineForkedClosure).
   std::shared_ptr<ClosureValue> emitClosure(
       const std::function<void(Block*)>& emit_body) {
-    Node* closure_node = graph->insertNode(graph->create(prim::Function, 1));
+    Node* closure_node = graph->insertNode(graph->create(prim::Closure, 1));
     // it is not a real thing yet, so just say the type is None
     closure_node->output()->setType(NoneType::get());
     Block* block = closure_node->addBlock();
@@ -930,49 +946,51 @@ struct to_ir {
   }
 
   void emitDelete(const Delete& stmt) {
-    if (stmt.expr().kind() == TK_SUBSCRIPT) {
-      Subscript subscript(stmt.expr());
-      const List<Expr>& subscript_exprs = subscript.subscript_exprs();
-      if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
-        throw ErrorReport(stmt.range())
-            << "del statements only support deletion at a single index, "
-               "slicing is not supported"
-               " (see https://github.com/pytorch/pytorch/issues/31430)";
-      }
-      const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
-      const SourceRange& val_range = subscript.value().range();
-      Value* idx = emitExpr(subscript_exprs[0]);
-      Value* val = sv->asValue(val_range, method);
-
-      // If val is a class instance, this is a method call to a type-specific
-      // implementation of del defined in a __delitem__ method.
-      if (auto cls = val->type()->cast<ClassType>()) {
-        if (!cls->findMethod("__delitem__")) {
-          throw ErrorReport(stmt.range())
-              << "Class does not define __delitem__";
+    for (const auto& target : stmt.targets()) {
+      if (target.kind() == TK_SUBSCRIPT) {
+        Subscript subscript(target);
+        const List<Expr>& subscript_exprs = subscript.subscript_exprs();
+        if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
+          throw ErrorReport(target.range())
+              << "del statements only support deletion at a single index, "
+                 "slicing is not supported"
+                 " (see https://github.com/pytorch/pytorch/issues/31430)";
         }
+        const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
+        const SourceRange& val_range = subscript.value().range();
+        Value* idx = emitExpr(subscript_exprs[0]);
+        Value* val = sv->asValue(val_range, method);
 
-        // Use MethodValue to call the method to handle recursion.
-        MethodValue(val, "__delitem__")
-            .call(stmt.range(), method, {idx}, {}, 0);
+        // If val is a class instance, this is a method call to a type-specific
+        // implementation of del defined in a __delitem__ method.
+        if (auto cls = val->type()->cast<ClassType>()) {
+          if (!cls->findMethod("__delitem__")) {
+            throw ErrorReport(target.range())
+                << "Class does not define __delitem__";
+          }
+
+          // Use MethodValue to call the method to handle recursion.
+          MethodValue(val, "__delitem__")
+              .call(stmt.range(), method, {idx}, {}, 0);
+        } else {
+          auto node = graph->create(aten::Delete, {val, idx}, 0)
+                          ->setSourceRange(target.range());
+          graph->insertNode(node);
+        }
+      } else if (target.kind() == TK_VAR) {
+        Var var(target);
+        environment_stack->removeVar(var.name(), /*check_if_removed=*/true);
       } else {
-        auto node = graph->create(aten::Delete, {val, idx}, 0)
-                        ->setSourceRange(stmt.range());
-        graph->insertNode(node);
+        throw ErrorReport(target.range())
+            << "del statements are only supported for deleting"
+               " list and dict items and variables";
       }
-    } else if (stmt.expr().kind() == TK_VAR) {
-      Var var(stmt.expr());
-      environment_stack->removeVar(var.name(), /*check_if_removed=*/true);
-    } else {
-      throw ErrorReport(stmt.range())
-          << "del statements are only supported for deleting"
-             " list and dict items and variables";
     }
   }
 
   void emitReturn(const Return& stmt) {
-    Value* result = emitExpr(stmt.expr());
     TypePtr result_type = def_stack_.back().declared_return_type_;
+    Value* result = emitExpr(stmt.expr(), result_type);
     // result type is annotated, every return must convert to that type
     if (result_type) {
       // this guard skips implicit conversion from None -> Tensor for the return
@@ -1090,9 +1108,9 @@ struct to_ir {
   }
 
   RefinementSet findIsNoneRefinements(
-      Expr lhs,
+      const Expr& lhs,
       Value* lhs_value,
-      Expr rhs,
+      const Expr& rhs,
       Value* rhs_value,
       int tok) {
     if (rhs.kind() != TK_NONE && lhs.kind() == TK_NONE) {
@@ -1195,11 +1213,23 @@ struct to_ir {
               return emitHasAttr(apply.inputs()[0], apply.inputs()[1]);
             }
           }
+          auto sv = emitSugaredExpr(apply.callee(), 1);
+          auto loc = apply.callee().range();
+          if (auto special_form = dynamic_cast<SpecialFormValue*>(sv.get())) {
+            if (special_form->form() == prim::isinstance) {
+              checkApplyNumInputs(apply, 2);
+              return emitIsInstance(apply.inputs()[0], apply.inputs()[1]);
+            }
+          }
         }
         auto expr_out = emitToBool(expr.range(), emitExpr(expr));
         c10::optional<bool> static_if = c10::nullopt;
         if (expr_out->node()->kind() == aten::is_scripting) {
           static_if = true;
+        }
+        // MetaCompile on boolean literals and constants
+        if (auto maybe_ivalue = toIValue(expr_out)) {
+          static_if = maybe_ivalue->toBool();
         }
         return CondValue(expr_out, RefinementSet({}), static_if);
       } break;
@@ -1221,10 +1251,12 @@ struct to_ir {
     return graph->create(kind, n_outputs)->setSourceRange(loc);
   }
 
-  Value* emitTernaryIf(const TernaryIf& expr) {
+  Value* emitTernaryIf(
+      const TernaryIf& expr,
+      const TypePtr& type_hint = nullptr) {
     CondValue cond_value = emitCondExpr(expr.cond());
-    auto true_expr = [&] { return emitExpr(expr.true_expr()); };
-    auto false_expr = [&] { return emitExpr(expr.false_expr()); };
+    auto true_expr = [&] { return emitExpr(expr.true_expr(), type_hint); };
+    auto false_expr = [&] { return emitExpr(expr.false_expr(), type_hint); };
     return emitIfExpr(expr.range(), cond_value, true_expr, false_expr);
   }
 
@@ -1253,7 +1285,7 @@ struct to_ir {
     // comprehension introduces it's own scope. no variable assigned
     // leaks into the rest of the graph
     Node* n =
-        graph->insertNode(create(prim::LocalVariableScope, lc.range(), 0));
+        graph->insertNode(create(prim::ComprehensionScope, lc.range(), 0));
     auto* comprehension_block = n->addBlock();
     pushFrame(comprehension_block);
     WithInsertPoint guard(comprehension_block);
@@ -1270,6 +1302,52 @@ struct to_ir {
     emitFor(targets_list, itrs, loc, emit_body);
     popFrame();
     return list_value;
+  }
+
+  Value* emitDictComprehension(const DictComp& dc, const TypePtr& type_hint) {
+    const auto loc = dc.range();
+    const auto targets_list = List<Expr>::create(dc.range(), {dc.target()});
+    const auto itrs = List<Expr>::create(dc.range(), {dc.iter()});
+
+    Value* dict_value =
+        graph->insertNode(graph->create(prim::DictConstruct, 1))->output();
+    // Set the default type to be Dict[Str, Tensor]
+    dict_value->setType(DictType::create(StringType::get(), TensorType::get()));
+    bool type_set = false;
+    if (type_hint) {
+      if (!type_hint->cast<DictType>()) {
+        throw ErrorReport(loc)
+            << "Expected Dict type annotation for dict comprehension"
+               ", found "
+            << type_hint->repr_str();
+      }
+      dict_value->setType(type_hint);
+      type_set = true;
+    }
+
+    // A dict comprehension introduces its own scope. No variable assigned
+    // may leak into the rest of the graph
+    Node* n =
+        graph->insertNode(create(prim::ComprehensionScope, dc.range(), 0));
+    auto* comprehension_block = n->addBlock();
+    pushFrame(comprehension_block);
+    WithInsertPoint guard(comprehension_block);
+    auto emit_body = [&]() {
+      auto k = emitExpr(dc.key());
+      auto v = emitExpr(dc.value());
+      if (!type_set) {
+        dict_value->setType(DictType::create(k->type(), v->type()));
+        type_set = true;
+      }
+      NamedValue self = NamedValue(loc, "self", dict_value);
+      NamedValue input_k = NamedValue(loc, "", k);
+      NamedValue input_v = NamedValue(loc, "", v);
+      emitBuiltinCall(
+          loc, *graph, aten::_set_item, {self, input_k, input_v}, {});
+    };
+    emitFor(targets_list, itrs, loc, emit_body);
+    popFrame();
+    return dict_value;
   }
 
   // Insert subtyping refinements
@@ -1334,8 +1412,8 @@ struct to_ir {
   Value* emitIfExpr(
       const SourceRange& range,
       const CondValue& cond_value,
-      std::function<Value*()> true_expr,
-      std::function<Value*()> false_expr) {
+      const std::function<Value*()>& true_expr,
+      const std::function<Value*()>& false_expr) {
     Node* n = graph->insertNode(create(prim::If, range, 0));
     n->addInput(cond_value.value());
     auto* true_block = n->addBlock();
@@ -1344,7 +1422,7 @@ struct to_ir {
     auto emit_if_expr = [this, &range](
                             Block* b,
                             const RefinementSet& refinements,
-                            std::function<Value*()> expr_value) {
+                            const std::function<Value*()>& expr_value) {
       pushFrame(b);
       WithInsertPoint guard(b);
       insertRefinements(range, refinements);
@@ -1353,9 +1431,8 @@ struct to_ir {
       popFrame();
     };
 
-    emit_if_expr(true_block, cond_value.refinements(), std::move(true_expr));
-    emit_if_expr(
-        false_block, cond_value.refinements().Not(), std::move(false_expr));
+    emit_if_expr(true_block, cond_value.refinements(), true_expr);
+    emit_if_expr(false_block, cond_value.refinements().Not(), false_expr);
 
     auto true_type = true_block->outputs().at(0)->type();
     auto false_type = false_block->outputs().at(0)->type();
@@ -1575,7 +1652,7 @@ struct to_ir {
     // category checks: tuple_check = true, types = {float, int}
     struct GatheredTypes {
       GatheredTypes(ScriptTypeParser parser) : typeParser_(std::move(parser)) {}
-      void gather(Expr classinfo) {
+      void gather(const Expr& classinfo) {
         if (classinfo.kind() == TK_TUPLE_LITERAL) {
           for (Expr e : TupleLiteral(classinfo).inputs()) {
             gather(e);
@@ -1668,7 +1745,7 @@ struct to_ir {
   // semantics specified at
   // https://github.com/onnx/onnx/blob/master/docs/Operators.md#Loop
   void emitLoopCommon(
-      SourceRange range,
+      const SourceRange& range,
       const std::function<void()>& emit_body,
       const SugaredValuePtr& iter_val,
       c10::optional<List<Expr>> targets,
@@ -1733,7 +1810,7 @@ struct to_ir {
   void emitUnrolledLoop(
       const SourceRange& loc,
       const std::function<void()>& emit_body,
-      SugaredValuePtr iterable,
+      const SugaredValuePtr& iterable,
       const List<Expr>& targets) {
     auto static_len = iterable->staticLen();
     TORCH_INTERNAL_ASSERT(
@@ -1974,6 +2051,18 @@ struct to_ir {
         return use_inplace_op ? aten::mul_ : aten::mul;
       case '%':
         return use_inplace_op ? aten::fmod_ : aten::fmod;
+      case '|':
+        return use_inplace_op ? aten::bitwise_or : aten::__or__;
+      case '&':
+        return use_inplace_op ? aten::bitwise_and : aten::__and__;
+      case '^':
+        return use_inplace_op ? aten::bitwise_xor : aten::__xor__;
+      case TK_LSHIFT:
+        return use_inplace_op ? aten::__lshift__ : aten::__lshift__;
+      case TK_RSHIFT:
+        return use_inplace_op ? aten::__irshift__ : aten::__rshift__;
+      case TK_POW:
+        return aten::pow;
       default:
         throw ErrorReport(stmt)
             << "Unknown augmented assignment: " << kindToString(stmt.aug_op());
@@ -2085,8 +2174,8 @@ struct to_ir {
           stmt.range(),
           *method.graph(),
           getAugOp(stmt, lhs->type()),
-          /*inputs=*/{lhs, rhs},
-          /*attributes=*/{},
+          /*args=*/{lhs, rhs},
+          /*kwargs=*/{},
           /*self=*/c10::nullopt);
     }
   }
@@ -2189,13 +2278,13 @@ struct to_ir {
   NamedValue emitValueToTensor(
       const NamedValue& value,
       const NamedValue& matchTypeOf) {
-    // Add implicit conversion of int/float/bool types to tensors
+    // Add implicit conversion of int/float/bool/number types to tensors
     // Used in emitSubscriptAssign to convert:
     //   `tensor(...)[x] = 99` to `tensor(...)[x] = tensor(99)`
     // Mirrors the `valueToTensor` behavior in python_variable_indexing.cpp
     const auto kind = value.type()->kind();
-    if (kind == c10::TypeKind::IntType || kind == c10::TypeKind::BoolType ||
-        kind == c10::TypeKind::FloatType) {
+    if (kind == c10::TypeKind::NumberType || kind == c10::TypeKind::IntType ||
+        kind == c10::TypeKind::BoolType || kind == c10::TypeKind::FloatType) {
       auto dtype = graph->insert(prim::dtype, {matchTypeOf}, {});
       auto device = graph->insert(prim::device, {matchTypeOf}, {});
       auto converted = graph->insert(
@@ -2267,6 +2356,10 @@ struct to_ir {
             << "Sliced expression not yet supported for"
             << " subscripted assignment. "
             << "File a bug if you want this";
+      }
+      if (sliceable->type()->isSubtypeOf(AnyTupleType::get())) {
+        throw ErrorReport(lhs) << sliceable->type()->repr_str()
+                               << " does not support subscripted assignment";
       }
 
       std::vector<NamedValue> args;
@@ -2652,9 +2745,9 @@ struct to_ir {
     if (auto special_form = dynamic_cast<SpecialFormValue*>(sv.get())) {
       return emitApplySpecialForm(special_form->form(), apply, type_hint);
     }
-    auto inputs = getNamedValues(apply.inputs(), true);
-    auto attributes = emitAttributes(apply.attributes());
-    return sv->call(loc, method, inputs, attributes, n_binders);
+    auto args = getNamedValues(apply.inputs(), true);
+    auto kwargs = emitAttributes(apply.attributes());
+    return sv->call(loc, method, args, kwargs, n_binders);
   }
 
   // this function handles expressions that look like apply statements
@@ -2675,9 +2768,9 @@ struct to_ir {
         }
         auto forked = emitSugaredExpr(Expr(trees[0]), 1);
         TreeList sliced_trees(trees.begin() + 1, trees.end());
-        auto inputs = getNamedValues(sliced_trees, true);
-        auto attributes = emitAttributes(apply.attributes());
-        return emitForkExpr(apply.range(), forked, inputs, attributes);
+        auto args = getNamedValues(sliced_trees, true);
+        auto kwargs = emitAttributes(apply.attributes());
+        return emitForkExpr(apply.range(), forked, args, kwargs);
       }
       case prim::annotate: {
         checkApplyNumInputs(apply, 2);
@@ -2697,7 +2790,7 @@ struct to_ir {
               << why_not.str();
         }
 
-        // None is a subtype of Optional[T], but we want to remember what T is,
+        // None is a subtype of Optional[T], but we want to remember what T is
         // after annotation so that variables assigned to this None will still
         // get the right type. To do this, we make a None constant that
         // has the type Optional[T]
@@ -2869,6 +2962,49 @@ struct to_ir {
         }
         return iterable_tree;
       }
+      case prim::list: {
+        if (apply.inputs().size() == 0) {
+          TypePtr type = type_hint ? type_hint : ListType::ofTensors();
+          if (!type->cast<ListType>()) {
+            throw ErrorReport(apply.range())
+                << "Expected list type annotation for list(), found "
+                << type_hint->repr_str();
+          }
+          return std::make_shared<SimpleValue>(
+              graph
+                  ->insertNode(graph->createList(
+                      type->expect<ListType>()->getElementType(), {}))
+                  ->output());
+        }
+        // list(iter) desugars to [_elem for _elem in iter]
+        checkApplyNumInputs(apply, 1);
+        auto iter_input = emitSugaredExpr(apply.inputs()[0], 1);
+
+        // aten::list builtin op is registered for List and Str input
+        // dispatch to the builtin op to avoid perf slowdown on existing uses
+        if (auto simple = asSimple(iter_input)) {
+          if (simple->type()->cast<ListType>() ||
+              simple->type()->cast<StringType>()) {
+            return std::make_shared<SimpleValue>(emitBuiltinCall(
+                apply.range(), *method.graph(), aten::list, {simple}, {}));
+          }
+        }
+        const std::string& iter_name = createTempName("$_iter");
+        environment_stack->setSugaredVar(
+            apply.range(),
+            iter_name,
+            iter_input,
+            /*annotated_type=*/nullptr);
+
+        const std::string& elem_name = createTempName("$_elem");
+        auto ident =
+            Var::create(apply.range(), Ident::create(apply.range(), elem_name));
+        auto iter =
+            Var::create(apply.range(), Ident::create(apply.range(), iter_name));
+        auto lc = ListComp::create(apply.range(), ident, ident, iter);
+        return std::make_shared<SimpleValue>(
+            emitListComprehension(lc, type_hint));
+      }
       default:
         TORCH_INTERNAL_ASSERT(false, "unknown special form: ", form);
     }
@@ -2878,7 +3014,15 @@ struct to_ir {
     // Push the source range of a call in case compiling this function
     // triggers an error
     ErrorReport::CallStack::update_pending_range(tree.range());
-    return emitSugaredExpr(tree, 1, type_hint)->asValue(tree.range(), method);
+    Value* out_val =
+        emitSugaredExpr(tree, 1, type_hint)->asValue(tree.range(), method);
+    // AnyType is the only user-exposed type which we don't unify to from
+    // its subtypes, so we add a cast for use cases like
+    // x : Any = 1 if cond else "str"
+    if (type_hint == AnyType::get() && out_val->type() != AnyType::get()) {
+      out_val = graph->insertUncheckedCast(out_val, type_hint);
+    }
+    return out_val;
   }
 
   NodeKind reverseComparision(NodeKind kind) {
@@ -2919,7 +3063,7 @@ struct to_ir {
         return emitApplyExpr(apply, n_binders, type_hint);
       } break;
       case TK_SUBSCRIPT: {
-        return emitSubscript(Subscript(tree));
+        return emitSubscript(Subscript(tree), type_hint);
       } break;
       default:
         return std::make_shared<SimpleValue>(emitSimpleExpr(tree, type_hint));
@@ -2952,11 +3096,15 @@ struct to_ir {
     return graph->insertConstant(maybe_out_stack->at(0), tree->range());
   }
 
+  /**
+   * Emit a fork expression, of the form:
+   *   torch.jit.fork(forked, *args, **kwargs)
+   */
   std::shared_ptr<SugaredValue> emitForkExpr(
       SourceRange loc,
       const std::shared_ptr<SugaredValue>& forked,
-      at::ArrayRef<NamedValue> inputs,
-      at::ArrayRef<NamedValue> attributes) {
+      at::ArrayRef<NamedValue> args,
+      at::ArrayRef<NamedValue> kwargs) {
     auto g = method.graph();
     Node* fork_node;
     TypePtr out_type;
@@ -2976,8 +3124,7 @@ struct to_ir {
         fork_node->addInput(closure_output);
       } else {
         auto emit_closure_body = [&](Block* closure_block) {
-          auto fn_sugared_output =
-              forked->call(loc, method, inputs, attributes, 1);
+          auto fn_sugared_output = forked->call(loc, method, args, kwargs, 1);
           auto fn_simple_output = fn_sugared_output->asValue(loc, method);
           closure_block->registerOutput(fn_simple_output);
           out_type = fn_simple_output->type();
@@ -2996,8 +3143,8 @@ struct to_ir {
     // through RPC in TorchScript,
     // Ideally, function value in JIT IR is first-class citizen and
     // The RPC C++ entry API can take c10::Function directly.
-    auto rpcMinInputs = 2;
-    auto rpcMaxInputs = 5; // NOLINT
+    size_t rpcMinInputs = 2;
+    size_t rpcMaxInputs = 5; // NOLINT
     std::string op_name = rpc_op.toUnqualString();
     if (apply.inputs().size() < rpcMinInputs ||
         apply.inputs().size() > rpcMaxInputs) {
@@ -3119,6 +3266,22 @@ struct to_ir {
     return std::make_shared<SimpleValue>(rpc_node_output);
   }
 
+  Value* emitBinaryOp(const TreeRef& tree) {
+    const auto& inputs = tree->trees();
+    auto kind = getNodeKind(tree->kind(), inputs.size());
+    auto overload = getOperatorOverload(tree->kind(), inputs.size());
+    auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
+    if (tree->kind() == TK_IN) {
+      // For `in` the arguments are in reverse order (the object being
+      // checked is second)
+      std::iter_swap(named_values.begin() + 0, named_values.begin() + 1);
+    }
+    return asSimple(
+        makeMagic(
+            overload, std::make_shared<BuiltinFunction>(kind, at::nullopt))
+            ->call(tree->range(), method, named_values, {}, 0));
+  }
+
   Value* emitSimpleExpr(
       const TreeRef& tree,
       const TypePtr& type_hint = nullptr) {
@@ -3130,6 +3293,21 @@ struct to_ir {
         auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
         return emitBuiltinCall(
             tree->range(), *method.graph(), kind, named_values, {});
+      }
+      case '%': {
+        auto lhs = emitSugaredExpr(Expr(tree->tree(0)), 0)
+                       ->asValue(tree->tree(0)->range(), method);
+        auto const& lhs_type = lhs->type();
+        if (lhs_type == StringType::get()) {
+          auto values = getValues(tree->trees(), /*maybe_unpack=*/false);
+          auto node = graph->create(aten::percentFormat, values, 1)
+                          ->setSourceRange(tree->range());
+          Value* output = graph->insertNode(node)->output();
+          output->setType(StringType::get());
+          return output;
+        } else {
+          return emitBinaryOp(tree);
+        }
       }
       case TK_IN:
       case TK_POW:
@@ -3143,28 +3321,12 @@ struct to_ir {
       case '/':
       case '+':
       case '-':
-      case '%':
       case '&':
       case '|':
       case '^':
       case TK_LSHIFT:
-      case TK_RSHIFT: {
-        const auto& inputs = tree->trees();
-        auto kind = getNodeKind(tree->kind(), inputs.size());
-        auto overload = getOperatorOverload(tree->kind(), inputs.size());
-        auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
-
-        if (tree->kind() == TK_IN) {
-          // For `in` the arguments are in reverse order (the object being
-          // checked is second)
-          std::iter_swap(named_values.begin() + 0, named_values.begin() + 1);
-        }
-
-        return asSimple(
-            makeMagic(
-                overload, std::make_shared<BuiltinFunction>(kind, at::nullopt))
-                ->call(tree->range(), method, named_values, {}, 0));
-      }
+      case TK_RSHIFT:
+        return emitBinaryOp(tree);
       case TK_IS:
       case TK_ISNOT:
       case TK_AND:
@@ -3195,7 +3357,7 @@ struct to_ir {
         return graph->insertConstant(IValue(), tree->range());
       } break;
       case TK_IF_EXPR: {
-        return emitTernaryIf(TernaryIf(tree));
+        return emitTernaryIf(TernaryIf(tree), type_hint);
       } break;
       case TK_STRINGLITERAL: {
         return emitStringLiteral(StringLiteral(tree));
@@ -3303,6 +3465,10 @@ struct to_ir {
         auto lc = ListComp(tree);
         return emitListComprehension(lc, type_hint);
       } break;
+      case TK_DICT_COMP: {
+        auto dc = DictComp(tree);
+        return emitDictComprehension(dc, type_hint);
+      } break;
       default:
         throw ErrorReport(tree) << "Cannot emit expr for: " << tree;
     }
@@ -3350,7 +3516,25 @@ struct to_ir {
     } else {
       AT_ASSERT(!sliceable->type()->isSubtypeOf(TensorType::get()));
     }
+    // TODO for now let's deal with TupleType first. Ideally all list, tensor,
+    // string, and tuple slicing should be same (tugsbayasgalan)
+    if (sliceable->type()->cast<TupleType>()) {
+      std::vector<at::optional<NamedValue>> tuple_args;
+      // since we are only dealing with tuple slicing for now, we try to keep
+      // tuple args seperate for now
+      tuple_args.reserve(3);
 
+      start ? tuple_args.emplace_back(start)
+            : tuple_args.emplace_back(c10::nullopt);
+      end ? tuple_args.emplace_back(end)
+          : tuple_args.emplace_back(c10::nullopt);
+      step ? tuple_args.emplace_back(step)
+           : tuple_args.emplace_back(c10::nullopt);
+
+      return emitTupleSlice(loc, args[0], tuple_args);
+    }
+
+    // TODO this needs to be cleaned for list slicing
     // Default value for start is 0.
     if (!start) {
       start = graph->insertConstant(0, loc);
@@ -3359,19 +3543,6 @@ struct to_ir {
 
     if (end) {
       args.emplace_back(loc, "end", end);
-    }
-    if (sliceable->type()->cast<TupleType>()) {
-      if (step) {
-        // TODO: add support for slicing tuples with a step
-        throw ErrorReport(loc)
-            << "Unsupported operation: slicing tuples with a step isn't supported";
-      }
-
-      if (end) {
-        return emitTupleSlice(loc, args[0], args[1], /*end*/ args[2]);
-      } else {
-        return emitTupleSlice(loc, args[0], args[1], c10::nullopt);
-      }
     }
 
     if (!step) {
@@ -3735,32 +3906,43 @@ struct to_ir {
   Value* emitTupleSlice(
       const SourceRange& loc,
       const NamedValue& tuple_val,
-      const NamedValue& beg_val,
-      const at::optional<NamedValue>& end_val) {
+      const std::vector<at::optional<NamedValue>>& tuple_args) {
     auto tuple_type = tuple_val.value(*graph)->type()->expect<TupleType>();
-    int64_t beg = getAdjTupleIndex(
-        loc,
-        tuple_type,
-        getSliceInd(beg_val.value(*graph), loc),
-        /*allow_out_of_bounds*/ true);
-    int64_t end;
     int64_t tuple_len = tuple_type->elements().size();
+    auto beg_val = tuple_args[0];
+    auto end_val = tuple_args[1];
+    auto step = tuple_args[2];
+
+    int64_t step_size = 1;
+    if (step) {
+      auto val = toIValue(step->value(*graph));
+      TORCH_CHECK(val->isInt(), "Step size should always be an integer");
+      step_size = val->to<int64_t>();
+    }
+
+    int64_t beg = std::numeric_limits<int64_t>::max();
+    if (beg_val) {
+      beg = getAdjTupleIndex(
+          loc, tuple_type, getSliceInd(beg_val->value(*graph), loc), true);
+    }
+
+    int64_t end = std::numeric_limits<int64_t>::max();
     if (end_val) {
       end = getAdjTupleIndex(
           loc, tuple_type, getSliceInd(end_val->value(*graph), loc), true);
-    } else {
-      end = tuple_len;
     }
-    // slicing does not throw out of bounds errors
-    end = std::min(std::max((int64_t)0, end), tuple_len);
-    beg = std::min(std::max((int64_t)0, beg), tuple_len);
+
+    int64_t num_values = slice_indices_adjust(tuple_len, &beg, &end, step_size);
 
     return graph
-        ->insertNode(graph->createTupleSlice(tuple_val.value(*graph), beg, end))
+        ->insertNode(graph->createTupleSlice(
+            tuple_val.value(*graph), beg, step_size, num_values))
         ->output();
   }
 
-  std::shared_ptr<SugaredValue> emitSubscript(const Subscript& subscript) {
+  std::shared_ptr<SugaredValue> emitSubscript(
+      const Subscript& subscript,
+      TypePtr type_hint = nullptr) {
     const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
     const List<Expr>& subscript_exprs = subscript.subscript_exprs();
     const SourceRange& range = subscript.range();
@@ -3778,19 +3960,25 @@ struct to_ir {
         auto s_tuple_val =
             sv->asTupleValue(val_range, method)->asValue(val_range, method);
         const SliceExpr& slice = SliceExpr(subscript_exprs[0]);
+        std::vector<at::optional<NamedValue>> tuple_args;
+        tuple_args.reserve(3);
         auto begin =
             NamedValue(val_range, "begin", emitExpr(Expr(slice.startOr(0))));
+        tuple_args.emplace_back(begin);
         if (slice.end().present()) {
           auto end =
               NamedValue(val_range, "end", emitExpr(Expr(slice.end().get())));
-          auto tupleSliceValue =
-              emitTupleSlice(val_range, s_tuple_val, begin, end);
-          return std::make_shared<SimpleValue>(tupleSliceValue);
+          tuple_args.emplace_back(end);
+
         } else {
-          auto tupleSliceValue =
-              emitTupleSlice(val_range, s_tuple_val, begin, c10::nullopt);
-          return std::make_shared<SimpleValue>(tupleSliceValue);
+          tuple_args.emplace_back(c10::nullopt);
         }
+        // pushing step_size to match the tuple_args
+        tuple_args.emplace_back(c10::nullopt);
+
+        auto tupleSliceValue =
+            emitTupleSlice(val_range, s_tuple_val, tuple_args);
+        return std::make_shared<SimpleValue>(tupleSliceValue);
       } else {
         return std::make_shared<SimpleValue>(emitBasicSlice(
             range, sv->asValue(val_range, method), subscript_exprs));
@@ -3830,7 +4018,7 @@ struct to_ir {
         return std::make_shared<SimpleValue>(
             emitMultidimSlicing(range, sliceable, subscript_exprs));
       } else {
-        return sv->getitem(range, method, idx);
+        return sv->getitem(range, method, idx, std::move(type_hint));
       }
     }
   }
@@ -4086,6 +4274,10 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
 
   // For jitter
   CanonicalizeOutputs(to_clean);
+
+  // Annotate aten::warns so that each has its unique ID. This enables us to
+  // mimic Python behavior of only emitting each warning only once.
+  AnnotateWarns(to_clean);
 }
 
 // we consider _N where N is a number, to be a non-meaningful name

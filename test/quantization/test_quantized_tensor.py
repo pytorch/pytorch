@@ -67,6 +67,75 @@ def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
 def get_supported_device_types():
     return ['cpu', 'cuda'] if torch.cuda.is_available() and not TEST_WITH_ROCM else ['cpu']
 
+# Note we explicitly cast variables to np.float32 in a couple of places to avoid
+# the default casting in Python often resuling in double precision and to make
+# sure we're doing the same numerics as C++ code.
+def param_search_greedy(x, bit_rate, n_bins=200, ratio=0.16):
+    xmin, xmax = np.min(x), np.max(x)
+    stepsize = (xmax - xmin) / np.float32(n_bins)
+    min_bins = np.float32(n_bins) * (np.float32(1) - np.float32(ratio))
+    xq, loss = _compress_uniform_simplified(x, bit_rate, xmin, xmax)
+
+    solutions = []  # [(left, right, loss)] # local optima solution
+
+    cur_min, cur_max, cur_loss = xmin, xmax, loss
+    thr = min_bins * stepsize
+    while cur_min + thr < cur_max:
+        # move left
+        xq, loss1 = _compress_uniform_simplified(
+            x, bit_rate, cur_min + stepsize, cur_max
+        )
+        # move right
+        xq, loss2 = _compress_uniform_simplified(
+            x, bit_rate, cur_min, cur_max - stepsize
+        )
+
+        if cur_loss < loss1 and cur_loss < loss2:
+            # found a local optima
+            solutions.append((cur_min, cur_max, cur_loss))
+        if loss1 < loss2:
+            cur_min, cur_max, cur_loss = cur_min + stepsize, cur_max, loss1
+        else:
+            cur_min, cur_max, cur_loss = cur_min, cur_max - stepsize, loss2
+    if len(solutions):
+        best = solutions[0]
+        for solution in solutions:
+            if solution[-1] < best[-1]:
+                best = solution
+        return best[1], best[0]  # xmax, xmin
+    return xmax, xmin
+
+
+def _compress_uniform_simplified(X, bit_rate, xmin, xmax, fp16_scale_bias=True):
+    # affine transform to put Xq in [0,2**bit_rate - 1]
+    # Xq = (2 ** bit_rate - 1) * (Xq - xmin) / data_range
+    if fp16_scale_bias:
+        xmin = xmin.astype(np.float16).astype(np.float32)
+    data_range = xmax - xmin
+    scale = np.where(
+        data_range == 0, np.float32(1), data_range / np.float32(2 ** bit_rate - 1)
+    )
+    if fp16_scale_bias:
+        scale = scale.astype(np.float16).astype(np.float32)
+    inverse_scale = np.float32(1) / scale
+    Xq = np.clip(np.round((X - xmin) * inverse_scale), 0, np.float32(2 ** bit_rate - 1))
+    Xq = Xq * scale + xmin
+
+    # Manually compute loss instead of using np.linalg.norm to use the same
+    # accumulation order used by C++ code
+    vlen = 8
+    loss_v = np.zeros(vlen).astype(np.float32)
+    for i in range(len(Xq) // vlen * vlen):
+        loss_v[i % vlen] += (X[i] - Xq[i]) * (X[i] - Xq[i])
+    loss = np.float32(0)
+    for i in range(vlen):
+        loss += loss_v[i]
+    for i in range(len(Xq) // vlen * vlen, len(Xq)):
+        loss += (X[i] - Xq[i]) * (X[i] - Xq[i])
+    loss = np.sqrt(loss)
+
+    return Xq, loss
+
 class TestQuantizedTensor(TestCase):
     def test_qtensor(self):
         num_elements = 10
@@ -102,6 +171,36 @@ class TestQuantizedTensor(TestCase):
                                  "tensor([], " + device_msg + "size=(0, 1), dtype=" + dtype_msg +
                                  "quantization_scheme=torch.per_tensor_affine, " +
                                  "scale=1.0, zero_point=2)")
+
+    def test_qtensor_sub_byte(self):
+        num_elements = 10
+        scale = 1.0
+        zero_point = 2
+        for dtype in [torch.quint4x2]:
+            r = torch.ones((5, 2), dtype=torch.float)
+            qr = torch.quantize_per_tensor(r, scale, zero_point, dtype)
+            self.assertEqual(qr.q_scale(), scale)
+            self.assertEqual(qr.q_zero_point(), zero_point)
+            self.assertTrue(qr.is_quantized)
+            self.assertFalse(r.is_quantized)
+            self.assertEqual(qr.storage().size(), 5)
+
+            int_repr = qr.int_repr()
+            for num in int_repr[0:5]:
+                self.assertEqual(num, 51)  # Packed entries, each of value 3, i.e. 00110011
+
+            # Test tensor creation
+            q = torch._empty_affine_quantized([num_elements], scale=scale, zero_point=zero_point,
+                                              dtype=torch.quint4x2)
+            self.assertEqual(q.storage().size(), 5)
+
+            # Test save/load
+            with tempfile.NamedTemporaryFile() as f:
+                torch.save(qr, f)
+                f.seek(0)
+                loaded_q = torch.load(f)
+                loaded_int_repr = loaded_q.int_repr()[0:5]
+                self.assertEqual(int_repr[0:5], loaded_int_repr)
 
     def test_qtensor_float_assignment(self):
         # Scalar Tensor
@@ -216,15 +315,10 @@ class TestQuantizedTensor(TestCase):
         r = torch.rand(3, 2, dtype=torch.float) * 4 - 2
         scale = 0.2
         zero_point = 2
-        qr = torch.quantize_per_tensor(r, scale, zero_point, torch.qint8)
-        rqr = qr.dequantize()
-        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
-        qr = torch.quantize_per_tensor(r, scale, zero_point, torch.quint8)
-        rqr = qr.dequantize()
-        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
-        qr = torch.quantize_per_tensor(r, scale, zero_point, torch.qint32)
-        rqr = qr.dequantize()
-        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
+        for dtype in [torch.qint8, torch.quint8, torch.qint32, torch.quint4x2]:
+            qr = torch.quantize_per_tensor(r, scale, zero_point, dtype)
+            rqr = qr.dequantize()
+            self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
 
     def _test_quantize_per_channel(self, r, scales, zero_points, axis, float_params):
 
@@ -335,6 +429,52 @@ class TestQuantizedTensor(TestCase):
         zero_points = torch.tensor([0.1, 0.2, 1.], dtype=torch.float)
         self._test_quantize_per_channel(r, scales, zero_points, 0, True)
 
+    def test_quantize_per_channel_sub_byte(self):
+        """ Tests the per channel quantization scheme for 4-bit qtensors.
+        The scale and zero point for this have to be in floating point. """
+        r = torch.rand(3, 2, dtype=torch.float) * 4
+        scales = torch.tensor([0.2, 0.3, 0.1], dtype=torch.float)
+        zero_points = torch.tensor([0.1, 0.2, 0.3], dtype=torch.float)
+        qr = torch.quantize_per_channel(r, scales, zero_points, 0, torch.quint4x2)
+        dequant_tensor = qr.dequantize()
+
+        def _get_qranges(bit_width):
+            if bit_width == 4:
+                return 0, 15
+
+        def _quantize_per_channel_sub_byte_ref(data, scales, zero_points, axis, bit_width):
+            dims = data.size()
+            data = data.view(-1, dims[axis], np.prod(dims[axis + 1:]))
+            qtensor_size = math.ceil(data.numel() / 2)
+            res = torch.empty(qtensor_size, dtype=torch.uint8)
+            elem_per_byte = 8 / bit_width
+            quant_min, quant_max = _get_qranges(bit_width)
+            for i in range(data.size()[0]):
+                for j in range(data.size()[1]):
+                    for k in range(data.size()[2]):
+                        inv_scale = 1.0 / scales[j]
+                        index = i * data.size()[1] * data.size()[2] + j * data.size()[2] + k
+                        qvalue = np.clip(
+                            np.round(data[i][j][k] * inv_scale + zero_points[j]), quant_min, quant_max).to(dtype=torch.int)
+                        res_idx = int(index / elem_per_byte)
+                        if (index % elem_per_byte == 0):
+                            res[res_idx] = qvalue
+                        else:
+                            res[res_idx] |= (qvalue << ((index % elem_per_byte) * bit_width))
+            return res
+
+        ref_res = _quantize_per_channel_sub_byte_ref(r, scales, zero_points, 0, 4)
+        self.assertTrue(np.allclose(qr.int_repr(), ref_res))
+        self.assertTrue(np.allclose(r.numpy(), dequant_tensor.numpy(), atol=1 / np.min(scales.numpy())))
+
+        # Check 4D tensor with non-zero axis.
+        r = torch.rand(3, 2, 4, 5, dtype=torch.float) * 4
+        scales = torch.tensor([0.2, 0.03], dtype=torch.float)
+        zero_points = torch.tensor([0.1, 0.2], dtype=torch.float)
+        qr = torch.quantize_per_channel(r, scales, zero_points, axis=1, dtype=torch.quint4x2)
+        ref_res = _quantize_per_channel_sub_byte_ref(r, scales, zero_points, 1, 4)
+        self.assertTrue(np.allclose(qr.int_repr(), ref_res))
+
     def test_qtensor_permute(self):
         scale = 0.02
         zero_point = 1
@@ -422,7 +562,9 @@ class TestQuantizedTensor(TestCase):
         scales = torch.rand(10, dtype=torch.double) * 0.02 + 0.01
         zero_points = torch.round(torch.rand(10) * 20 + 1).to(torch.long)
         # quint32, cuda is not supported yet
-        for dtype in [torch.quint8, torch.qint8]:
+        for dtype in [torch.quint8, torch.qint8, torch.quint4x2]:
+            if dtype == torch.quint4x2:
+                zero_points = torch.ones(10, dtype=torch.float)
             qr = torch.quantize_per_channel(r, scales, zero_points, 1, dtype)
             with tempfile.NamedTemporaryFile() as f:
                 # Serializing and Deserializing Tensor
@@ -435,8 +577,8 @@ class TestQuantizedTensor(TestCase):
         scale = 0.5
         zero_point = 10
         numel = 10
-        for device in get_supported_device_types():
-            for dtype in [torch.qint8, torch.quint8, torch.qint32]:
+        for dtype in [torch.qint8, torch.quint8, torch.qint32]:
+            for device in get_supported_device_types():
                 # copy from same scale and zero_point
                 q = torch._empty_affine_quantized([numel], scale=scale,
                                                   zero_point=zero_point, device=device, dtype=dtype)
@@ -447,21 +589,29 @@ class TestQuantizedTensor(TestCase):
                 self.assertEqual(q.q_scale(), q2.q_scale())
                 self.assertEqual(q.q_zero_point(), q2.q_zero_point())
                 # copying from different scale and zero_point
-                scale = 3.2
-                zero_point = 5
-                q = torch._empty_affine_quantized([numel], scale=scale,
-                                                  zero_point=zero_point, device=device, dtype=dtype)
+                new_scale = 3.2
+                new_zero_point = 5
+                q = torch._empty_affine_quantized([numel], scale=new_scale,
+                                                  zero_point=new_zero_point, device=device, dtype=dtype)
                 # check original scale and zero_points are set correctly
-                self.assertEqual(q.q_scale(), scale)
-                self.assertEqual(q.q_zero_point(), zero_point)
+                self.assertEqual(q.q_scale(), new_scale)
+                self.assertEqual(q.q_zero_point(), new_zero_point)
                 q.copy_(q2)
                 # check scale and zero_points has been copied
                 self.assertEqual(q, q2)
                 # can't copy from quantized tensor to non-quantized tensor
                 r = torch.empty([numel], dtype=torch.float)
-                q = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=torch.quint8)
+                q = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=dtype)
                 with self.assertRaisesRegex(RuntimeError, "please use dequantize"):
                     r.copy_(q)
+            # copy from float doesn't support cuda
+            device = 'cpu'
+            # check copy from non-quantized to quantized
+            r = torch.randn([numel], dtype=torch.float).to(device)
+            q = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=dtype, device=device)
+            q.copy_(r)
+            qr = torch.quantize_per_tensor(r, scale=scale, zero_point=zero_point, dtype=dtype)
+            self.assertEqual(q, qr)
 
     def test_torch_qtensor_deepcopy(self):
         # cuda is not supported yet
@@ -737,3 +887,11 @@ class TestQuantizedTensor(TestCase):
         ref[0] = torch.ones(5) * -65504
         y = torch._saturate_weight_to_fp16(x)
         self.assertEqual(y, ref)
+
+    def test_choose_qparams_optimized(self):
+        for bit_width in [4, 2]:
+            x = torch.randn(64, dtype=torch.float)
+            y = torch.choose_qparams_optimized(x, numel=64, n_bins=200, ratio=0.16, bit_width=bit_width)
+            ref = param_search_greedy(x.numpy(), bit_rate=bit_width)
+            self.assertEqual(y[0].numpy(), ref[0])
+            self.assertEqual(y[1].numpy(), ref[1])

@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core
 from hypothesis import given, settings
@@ -118,6 +118,33 @@ class TestStringOps(serial.SerializedTestCase):
             op,
             [strings],
             string_ends_with_ref)
+
+    @given(strings=st.text(alphabet=['a', 'b']))
+    @settings(deadline=1000)
+    def test_string_equals(self, strings):
+        text = ""
+        if strings:
+            text = strings[0]
+
+        strings = np.array(
+            [str(a) for a in strings], dtype=np.object
+        )
+
+        def string_equals_ref(strings):
+            return (
+                np.array([a == text for a in strings], dtype=bool),
+            )
+
+        op = core.CreateOperator(
+            'StringEquals',
+            ['strings'],
+            ['bools'],
+            text=text)
+        self.assertReferenceChecks(
+            hu.cpu_do,
+            op,
+            [strings],
+            string_equals_ref)
 
 if __name__ == "__main__":
     import unittest

@@ -82,6 +82,8 @@ namespace jit {
 using ::c10::TensorTypePtr;
 using Dimension = int64_t;
 
+TORCH_API void RegisterProfilingNode(const std::function<bool(const Node*)>&);
+
 struct ProfilingRecord;
 
 // `SetPartitioningHelper` is used to maintain the following invariant:

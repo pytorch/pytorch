@@ -88,9 +88,11 @@ endif()
 
 if(@USE_CUDA@)
   if(MSVC)
-    set(NVTOOLEXT_HOME "C:/Program Files/NVIDIA Corporation/NvToolsExt")
-    if($ENV{NVTOOLEXT_HOME})
-      set(NVTOOLEXT_HOME $ENV{NVTOOLEXT_HOME})
+    if(NOT NVTOOLEXT_HOME)
+      set(NVTOOLEXT_HOME "C:/Program Files/NVIDIA Corporation/NvToolsExt")
+    endif()
+    if(DEFINED ENV{NVTOOLSEXT_PATH})
+      set(NVTOOLEXT_HOME $ENV{NVTOOLSEXT_PATH})
     endif()
     set(TORCH_CUDA_LIBRARIES
       ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib

@@ -33,23 +33,24 @@ bool SliceImpl(
   for (int i = 0; i < data.dim(); ++i) {
     if (i >= starts.numel()) {
       starts_idx[i] = 0;
-      ends_idx[i] = data.sizes()[i];
+      ends_idx[i] = data.size(i);
+      dst_sizes[i] = data.size(i);
       continue;
     }
-    if (data.sizes()[i] > 0) {
+    if (data.size(i) > 0) {
       auto start = starts_data[i];
       auto end = ends_data[i];
       if (start < 0) {
-        start = data.sizes()[i] + 1 + start;
+        start = data.size(i) + 1 + start;
       }
       if (end < 0) {
-        end = data.sizes()[i] + 1 + end;
+        end = data.size(i) + 1 + end;
       }
-      if (start > data.sizes()[i]) {
-        start = data.sizes()[i];
+      if (start > data.size(i)) {
+        start = data.size(i);
       }
-      if (end > data.sizes()[i]) {
-        end = data.sizes()[i];
+      if (end > data.size(i)) {
+        end = data.size(i);
       }
       CAFFE_ENFORCE_GE(start, 0);
       CAFFE_ENFORCE_GE(end, 0);
@@ -78,7 +79,7 @@ bool SliceImpl(
   // for now only supports slicing in 1 dimension
   int dim = -1;
   for (int i = 0; i < data.dim(); ++i) {
-    if (starts_idx[i] > 0 || ends_idx[i] < data.sizes()[i]) {
+    if (starts_idx[i] > 0 || ends_idx[i] < data.size(i)) {
       CAFFE_ENFORCE_EQ(
           dim, -1, "Currently only possible to slice in 1 dimension.");
       dim = i;
@@ -117,7 +118,7 @@ bool SliceImpl(
     size_t src_nbytes = data.nbytes();
     size_t dst_nbytes = output->nbytes();
 
-    size_t src_block_size = unit * data.sizes()[dim];
+    size_t src_block_size = unit * data.size(dim);
     size_t dst_block_size = unit * (ends_idx[dim] - starts_idx[dim]);
     size_t src_offset = unit * starts_idx[dim];
 
@@ -155,7 +156,7 @@ bool SliceImpl(
     size_t dst_nbytes = gdata->nbytes();
 
     size_t src_block_size = unit * (ends_idx[dim] - starts_idx[dim]);
-    size_t dst_block_size = unit * data.sizes()[dim];
+    size_t dst_block_size = unit * data.size(dim);
     size_t dst_offset = unit * starts_idx[dim];
 
     if (num_blocks == 0 || dst_block_size == 0) {

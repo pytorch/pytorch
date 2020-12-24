@@ -6,16 +6,18 @@ from torch.nn import functional as F
 from torch.utils.mobile_optimizer import optimize_for_mobile
 from torch.testing import FileCheck
 import torch.testing._internal.hypothesis_utils as hu
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, slowTest
 from hypothesis import given, assume
 from hypothesis import strategies as st
 import io
 import itertools
 
+from torch.testing._internal.common_utils import TEST_WITH_TSAN
 
 @unittest.skipUnless(torch.backends.xnnpack.enabled,
                      " XNNPACK must be enabled for these tests."
                      " Please build with USE_XNNPACK=1.")
+@unittest.skipIf(TEST_WITH_TSAN, "TSAN fails with XNNPACK. Does not seem to have a good reason for failures.")
 class TestXNNPACKOps(TestCase):
     @given(batch_size=st.integers(0, 3),
            data_shape=hu.array_shapes(1, 3, 2, 64),
@@ -161,6 +163,7 @@ class TestXNNPACKOps(TestCase):
 @unittest.skipUnless(torch.backends.xnnpack.enabled,
                      " XNNPACK must be enabled for these tests."
                      " Please build with USE_XNNPACK=1.")
+@unittest.skipIf(TEST_WITH_TSAN, "TSAN fails with XNNPACK. Does not seem to have a good reason for failures.")
 class TestXNNPACKSerDes(TestCase):
     @given(batch_size=st.integers(0, 3),
            data_shape=hu.array_shapes(1, 3, 2, 64),
@@ -551,6 +554,7 @@ class TestXNNPACKSerDes(TestCase):
 @unittest.skipUnless(torch.backends.xnnpack.enabled,
                      " XNNPACK must be enabled for these tests."
                      " Please build with USE_XNNPACK=1.")
+@unittest.skipIf(TEST_WITH_TSAN, "TSAN fails with XNNPACK. Does not seem to have a good reason for failures.")
 class TestXNNPACKRewritePass(TestCase):
     @staticmethod
     def validate_transformed_module(
@@ -911,6 +915,7 @@ class TestXNNPACKRewritePass(TestCase):
 @unittest.skipUnless(torch.backends.xnnpack.enabled,
                      " XNNPACK must be enabled for these tests."
                      " Please build with USE_XNNPACK=1.")
+@unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
 class TestXNNPACKConv1dTransformPass(TestCase):
     @staticmethod
     def validate_transform_conv1d_to_conv2d(
@@ -1017,6 +1022,8 @@ class TestXNNPACKConv1dTransformPass(TestCase):
                                                                                pattern_count_optimized_map,
                                                                                data_shape)
 
+    # See https://github.com/pytorch/pytorch/issues/46066
+    @slowTest
     def test_conv1d_with_relu_fc(self):
         batch_size_list = range(1, 3)
         input_channels_per_group_list = range(10, 12)

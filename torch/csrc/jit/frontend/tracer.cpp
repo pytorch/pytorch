@@ -284,11 +284,23 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
         key_type->isSubtypeOf(TensorType::get());
     bool value_type_valid = value_type->isSubtypeOf(TensorType::get());
 
+    // Support tuple values that contain only tensors
+    if (value_type->isSubtypeOf(AnyTupleType::get())) {
+      value_type_valid = true;
+      for (const auto& type : value_type->containedTypes()) {
+        if (!type->isSubtypeOf(TensorType::get())) {
+          value_type_valid = false;
+          break;
+        }
+      }
+    }
+
     if (!key_type_valid || !value_type_valid) {
       std::ostringstream os;
       os << "output " << i << " (" << dict << ") of traced region "
-         << "cannot be understood by the tracer, only dict[str, Tensor] "
-         << "or dict[Tensor, Tensor] can be a dictionary output of a traced function";
+         << "cannot be understood by the tracer, only outputs matching"
+         << "dict[Union[str, Tensor], Union[Tensor, Tuple[Tensor, ...]]] "
+         << "can be a dictionary output of a traced function";
       throw std::runtime_error(os.str());
     }
     std::vector<Value*> keys;
@@ -614,6 +626,9 @@ void addInputs(
 void addInputs(Node* n, const char* name, at::Device value) {
   detail::genericAddInput(n, value);
 }
+void addInputs(Node* n, const char* name, c10::Stream stream) {
+  detail::genericAddInput(n, static_cast<int64_t>(stream.pack()));
+}
 void addInputs(Node* n, const char* name, at::Layout value) {
   detail::genericAddInput(n, static_cast<int64_t>(value));
 }
@@ -694,15 +709,6 @@ void addInputs(
     Value* none = g->insertNode(g->createNone())->output();
     n->addInput(none);
   }
-}
-
-void addInputs(Node* n, const char* name, const at::TensorOptions& options) {
-  // [TensorOptions in script] - update this when you change how we schematize
-  // TensorOptions
-  addInputs(n, name, options.dtype_opt());
-  addInputs(n, name, options.layout());
-  addInputs(n, name, options.device());
-  addInputs(n, name, options.pinned_memory());
 }
 
 void addInputs(Node* n, const char* name, at::IntArrayRef value) {
@@ -919,6 +925,18 @@ void recordSourceLocation(Node* n) {
 }
 void setRecordSourceLocation(void (*v)(Node*)) {
   record_source_location.store(v);
+}
+
+std::vector<StackEntry> defaultPythonCallstack() {
+  return std::vector<StackEntry>();
+}
+std::atomic<decltype(&defaultPythonCallstack)> python_callstack_fn(
+    defaultPythonCallstack);
+std::vector<StackEntry> pythonCallstack() {
+  return python_callstack_fn.load()();
+}
+void setPythonCallstack(std::vector<StackEntry> (*v)()) {
+  python_callstack_fn.store(v);
 }
 
 void defaultWarn(const std::string& str) {

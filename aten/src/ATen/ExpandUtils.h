@@ -9,12 +9,16 @@
 
 namespace at {
 
-CAFFE2_API std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b);
-CAFFE2_API std::tuple<std::vector<int64_t>, std::vector<int64_t>>
+TORCH_API std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b);
+TORCH_API std::tuple<std::vector<int64_t>, std::vector<int64_t>>
 inferExpandGeometry(
     IntArrayRef tensor_sizes,
     IntArrayRef tensor_strides,
     IntArrayRef sizes);
+
+TORCH_API std::vector<int64_t> infer_dense_strides(
+    IntArrayRef tensor_sizes,
+    IntArrayRef tensor_strides);
 
 // True if input shapes are expandable
 // NOTE: infer_size did a similar check, please keep them sync if change is needed

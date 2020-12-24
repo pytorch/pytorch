@@ -1,9 +1,9 @@
 ## @package workspace
 # Module caffe2.python.workspace
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 import collections
 import contextlib
 from google.protobuf.message import Message
@@ -335,7 +335,7 @@ def StringifyNetName(name):
 def GetNetName(net):
     if isinstance(net, basestring):
         return net
-    if type(net).__name__ == "Net":
+    if type(net).__name__ == "Net" or type(net).__name__ == "NetWithShapeInference":
         return net.Name()
     if isinstance(net, caffe2_pb2.NetDef):
         return net.name

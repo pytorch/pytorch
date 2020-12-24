@@ -3,6 +3,7 @@
 #include <ATen/Context.h>
 
 #include <c10/core/TensorOptions.h>
+#include <c10/core/CPUAllocator.h>
 
 #include <mutex>
 #include <sstream>
@@ -64,6 +65,11 @@ bool Context::deterministic() const {
 }
 
 void Context::setDeterministic(bool b) {
+  if (b) {
+    TORCH_WARN_ONCE("torch.set_deterministic is in beta, and its design and "
+      " functionality may change in the future.");
+  }
+
   _deterministic = b;
 }
 
@@ -227,7 +233,30 @@ bool Context::setFlushDenormal(bool on) {
 }
 
 Allocator* getCPUAllocator() {
-  return getTHDefaultAllocator();
+  return c10::GetCPUAllocator();
+}
+
+// override_allow_tf32_flag = true
+//    means the allow_tf32 flags are overrided and tf32 is force disabled
+// override_allow_tf32_flag = false
+//    means the original allow_tf32 flags are followed
+thread_local bool override_allow_tf32_flag = false;
+
+NoTF32Guard::NoTF32Guard() {
+  if (!override_allow_tf32_flag) {
+    changed = true;
+    override_allow_tf32_flag = true;
+  }
+}
+
+NoTF32Guard::~NoTF32Guard() {
+  if (changed) {
+    override_allow_tf32_flag = false;
+  }
+}
+
+bool NoTF32Guard::should_disable_tf32() {
+  return override_allow_tf32_flag;
 }
 
 } // namespace at

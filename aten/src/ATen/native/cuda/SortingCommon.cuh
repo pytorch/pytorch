@@ -143,6 +143,7 @@ static uint64_t nextHighestPowerOf2(uint64_t n) {
 }
 
 
+// WARNING: This function assumes input tensors are contiguous
 template <typename scalar_t, typename index_t, typename Launcher>
 void run_launcher(
     Tensor& values,

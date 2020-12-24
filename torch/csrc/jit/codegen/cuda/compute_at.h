@@ -10,6 +10,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 class TensorDomain;
 class TensorView;
@@ -56,9 +57,7 @@ class ComputeAtData {
   // If we set computeAt, save the domain so we can reset it after traversal.
   // Traversal state can deviate from the domain we will want to save after the
   // entire computeAt pass.
-  void setComputeAtDomain(TensorDomain* td) {
-    new_compute_at_domain_ = td;
-  }
+  void setComputeAtDomain(TensorDomain* td);
 
   // Return domain set in setComputeAtDomain
   TensorDomain* getComputeAtDomain() const {
@@ -160,6 +159,7 @@ class ComputeAt {
   ComputeAt& operator=(const ComputeAt& other) = delete;
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

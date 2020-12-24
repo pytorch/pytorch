@@ -27,19 +27,26 @@ namespace rpc {
 namespace {
 
 constexpr std::chrono::milliseconds kDeleteAllUsersTimeout(100000);
-constexpr float kSecToMsConversion = 1000;
 
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
-PyObject* rpc_init(PyObject* /* unused */) {
+PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
   auto rpc_module =
       THPObjectPtr(PyImport_ImportModule("torch.distributed.rpc"));
   if (!rpc_module) {
     throw python_error();
   }
 
-  auto module = py::handle(rpc_module).cast<py::module>();
+  auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
+  if (!torch_C_module) {
+    throw python_error();
+  }
+
+  auto torch_C_m = py::handle(torch_C_module).cast<py::module>();
+  auto m = torch_C_m.def_submodule("_distributed_rpc", "distributed rpc bindings");
+
+  auto module = py::handle(m).cast<py::module>();
 
   auto rpcBackendOptions =
       shared_ptr_class_<RpcBackendOptions>(
@@ -50,6 +57,11 @@ PyObject* rpc_init(PyObject* /* unused */) {
             :meth:`~torch.distributed.rpc.init_rpc` in order to initialize RPC
             with specific configurations, such as the RPC timeout and
             ``init_method`` to be used. )")
+          .def(py::init<>())
+          .def(
+              py::init<float, std::string>(),
+              py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
+              py::arg("init_method") = kDefaultInitMethod)
           .def_readwrite(
               "rpc_timeout",
               &RpcBackendOptions::rpcTimeoutSeconds,
@@ -77,7 +89,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
             be constructed directly, rather, an instance can be retrieved
             through :meth:`~torch.distributed.rpc.get_worker_info` and the
             result can be passed in to functions such as
-            :meth:`~torch.distributed.rpc.rpc_sync`, :class:`~torch.distributed.rpc.rpc_async`,
+            :meth:`~torch.distributed.rpc.rpc_sync`, :meth:`~torch.distributed.rpc.rpc_async`,
             :meth:`~torch.distributed.rpc.remote` to avoid copying a string on
             every invocation.)")
           .def(
@@ -110,6 +122,20 @@ PyObject* rpc_init(PyObject* /* unused */) {
               "join", &RpcAgent::join, py::call_guard<py::gil_scoped_release>())
           .def(
               "sync", &RpcAgent::sync, py::call_guard<py::gil_scoped_release>())
+          .def(
+              "shutdown",
+              &RpcAgent::shutdown,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "get_worker_info",
+              (const WorkerInfo& (RpcAgent::*)(void)const) &
+              RpcAgent::getWorkerInfo,
+              py::call_guard<py::gil_scoped_release>())
+        .def(
+              "get_worker_info",
+              (const WorkerInfo& (RpcAgent::*)(const std::string&)const) &
+              RpcAgent::getWorkerInfo,
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "get_worker_infos",
               &RpcAgent::getWorkerInfos,
@@ -389,6 +415,44 @@ PyObject* rpc_init(PyObject* /* unused */) {
                   Set future that is completed when the profiling event corresponding
                   to the creation of this RRef on the remote node has been recorded.
               )")
+          .def(
+              "backward",
+              [](PyRRef& self,
+                 int64_t dist_autograd_ctx_id,
+                 bool retain_graph) {
+                self.backward(dist_autograd_ctx_id, retain_graph);
+              },
+              py::arg("dist_autograd_ctx_id") = -1,
+              py::arg("retain_graph") = false,
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+                  Runs the backward pass using the RRef as the root of the
+                  backward pass. If ``dist_autograd_ctx_id`` is provided,
+                  we perform a distributed backward pass using the provided
+                  ctx_id starting from the owner of the RRef. In this case,
+                  :meth:`~torch.distributed.autograd.get_gradients` should be
+                  used to retrieve the gradients. If ``dist_autograd_ctx_id``
+                  is ``None``, it is assumed that this is a local autograd graph
+                  and we only perform a local backward pass. In the local case,
+                  the node calling this API has to be the owner of the RRef.
+                  The value of the RRef is expected to be a scalar Tensor.
+
+                Arguments:
+                    dist_autograd_ctx_id (int, optional): The distributed
+                        autograd context id for which we should retrieve the
+                        gradients (default: -1).
+                    retain_graph(bool, optional): If ``False``, the graph used to
+                        compute the grad will be freed. Note that in nearly all
+                        cases setting this option to ``True`` is not needed and
+                        often can be worked around in a much more efficient way.
+                        Usually, you need to set this to ``True`` to run backward
+                        multiple times (default: False).
+
+                Example::
+                    >>> import torch.distributed.autograd as dist_autograd
+                    >>> with dist_autograd.context() as context_id:
+                    >>>     rref.backward(context_id)
+                )")
           // not releasing GIL to avoid context switch
           .def("__repr__", &PyRRef::str);
 
@@ -430,7 +494,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   shared_ptr_class_<ProcessGroupAgent>(module, "ProcessGroupAgent", rpcAgent)
       .def(py::init([](std::string workerName,
-                       const std::shared_ptr<::c10d::ProcessGroup>& pg,
+                       const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
                        int numSendRecvThreads,
                        std::chrono::milliseconds rpcTimeout) {
         return std::make_unique<ProcessGroupAgent>(
@@ -448,6 +512,11 @@ PyObject* rpc_init(PyObject* /* unused */) {
       .def(
           "get_worker_info",
           (const WorkerInfo& (ProcessGroupAgent::*)(const std::string&)const) &
+              ProcessGroupAgent::getWorkerInfo,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_worker_info",
+          (const WorkerInfo& (ProcessGroupAgent::*)(worker_id_t id) const) &
               ProcessGroupAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
@@ -507,11 +576,11 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   shared_ptr_class_<TensorPipeAgent>(module, "TensorPipeAgent", rpcAgent)
       .def(
-          py::init([](const std::shared_ptr<::c10d::Store>& store,
+          py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
                       std::string selfName,
                       worker_id_t selfId,
                       int worldSize,
-                      std::shared_ptr<::c10d::ProcessGroup> processGroup,
+                      c10::intrusive_ptr<::c10d::ProcessGroup> processGroup,
                       TensorPipeRpcBackendOptions opts) {
             return std::make_shared<TensorPipeAgent>(
                 store,
@@ -544,6 +613,11 @@ PyObject* rpc_init(PyObject* /* unused */) {
       .def(
           "get_worker_info",
           (const WorkerInfo& (TensorPipeAgent::*)(const std::string&)const) &
+              TensorPipeAgent::getWorkerInfo,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_worker_info",
+          (const WorkerInfo& (TensorPipeAgent::*)(worker_id_t id) const) &
               TensorPipeAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
@@ -773,7 +847,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
 } // namespace
 
 static PyMethodDef methods[] = { // NOLINT
-    {"_rpc_init", (PyCFunction)rpc_init, METH_NOARGS, nullptr},
+    {"_rpc_init", rpc_init, METH_NOARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 PyMethodDef* python_functions() {

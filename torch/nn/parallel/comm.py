@@ -2,8 +2,8 @@ import warnings
 import torch
 from torch.cuda import nccl
 from torch._utils import _take_tensors, _flatten_dense_tensors, \
-    _unflatten_dense_tensors, _reorder_tensors_as, _get_device_index
-
+    _unflatten_dense_tensors, _reorder_tensors_as, _get_device_index, _handle_complex
+from typing import List
 
 def broadcast(tensor, devices=None, *, out=None):
     r"""Broadcasts a tensor to specified GPU devices.
@@ -26,6 +26,7 @@ def broadcast(tensor, devices=None, *, out=None):
             a tuple containing :attr:`out` tensors, each containing a copy of
             :attr:`tensor`.
     """
+    tensor = _handle_complex(tensor)
     if not ((devices is None) ^ (out is None)):
         raise RuntimeError(
             "Exactly one of 'devices' and 'out' must be specified, but got "
@@ -53,6 +54,7 @@ def broadcast_coalesced(tensors, devices, buffer_size=10485760):
         A tuple containing copies of :attr:`tensor`, placed on :attr:`devices`.
     """
     devices = [_get_device_index(d) for d in devices]
+    tensors = [_handle_complex(t) for t in tensors]
     return torch._C._broadcast_coalesced(tensors, devices, buffer_size)
 
 
@@ -121,7 +123,7 @@ def reduce_add_coalesced(inputs, destination=None, buffer_size=10485760):
     """
     # TODO: When `len(inputs) == 1` and all inputs are on `destination`, just
     #       return `inputs`.
-    dense_tensors = [[] for _ in inputs]  # shape (num_gpus, num_tensors)
+    dense_tensors: List[List] = [[] for _ in inputs]  # shape (num_gpus, num_tensors)
     output = []
     ref_order = []
     # process sparse ones first since they may have different sizes on different gpus
@@ -181,6 +183,7 @@ def scatter(tensor, devices=None, chunk_sizes=None, dim=0, streams=None, *, out=
             a tuple containing :attr:`out` tensors, each containing a chunk of
             :attr:`tensor`.
     """
+    tensor = _handle_complex(tensor)
     if out is None:
         devices = [_get_device_index(d) for d in devices]
         return tuple(torch._C._scatter(tensor, devices, chunk_sizes, dim, streams))
@@ -194,6 +197,7 @@ def scatter(tensor, devices=None, chunk_sizes=None, dim=0, streams=None, *, out=
                 "'chunk_sizes' must not be specified when 'out' is specified, "
                 "but got chunk_sizes={}".format(chunk_sizes))
         return tuple(torch._C._scatter_out(tensor, out, dim, streams))
+
 
 def gather(tensors, dim=0, destination=None, *, out=None):
     r"""Gathers tensors from multiple GPU devices.
@@ -221,6 +225,7 @@ def gather(tensors, dim=0, destination=None, *, out=None):
             the :attr:`out` tensor, now containing results of concatenating
             :attr:`tensors` along :attr:`dim`.
     """
+    tensors = [_handle_complex(t) for t in tensors]
     if out is None:
         if destination == -1:
             warnings.warn(

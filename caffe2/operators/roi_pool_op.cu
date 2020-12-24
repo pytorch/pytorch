@@ -167,7 +167,7 @@ bool RoIPoolOp<float, CUDAContext>::RunOnDevice() {
 }
 
 template <>
-bool RoIPoolGradientOp<float, CUDAContext>::RunOnDevice() {
+C10_EXPORT bool RoIPoolGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0); // Input data to pool
   auto& R = Input(1); // RoIs
   auto& A = Input(2); // argmaxes

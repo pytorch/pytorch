@@ -359,6 +359,7 @@ class TestWith(JitTestCase):
         Check that exceptions thrown in the bodies of with-statements are
         handled correctly.
         """
+        global Context
 
         @torch.jit.script
         class Context(object):
@@ -379,10 +380,12 @@ class TestWith(JitTestCase):
             def __exit__(self, type: Any, value: Any, tb: Any):
                 self.count.sub_(0.3)
 
+        @torch.jit.script
         def method_that_raises():
             # type: () -> Tensor
-            raise Exception()
+            raise Exception("raised exception")
 
+        @torch.jit.script
         def test_exception(x, c):
             # type: (Tensor, Context) -> Tensor
             """
@@ -393,6 +396,7 @@ class TestWith(JitTestCase):
 
             return x
 
+        @torch.jit.script
         def test_exception_nested(x, c):
             # type: (Tensor, Context) -> Tensor
             """
@@ -404,6 +408,7 @@ class TestWith(JitTestCase):
 
             return x
 
+        @torch.jit.script
         def with_that_raises(c):
             # type: (Context) -> Tensor
             a = torch.tensor([1])
@@ -413,6 +418,7 @@ class TestWith(JitTestCase):
 
             return a
 
+        @torch.jit.script
         def test_exception_fn_call(x, c):
             # type: (Tensor, Context) -> Tensor
             """
@@ -426,15 +432,18 @@ class TestWith(JitTestCase):
 
         c = Context(1)
 
-        with self.assertRaises(Exception):
+        # checkScript and checkScriptRaisesRegex cannot be used because the string frontend will
+        # not compile class types (of which Context, the context manager being used for this test
+        # is one).
+        with self.assertRaisesRegex(Exception, r"raised exception"):
             test_exception(torch.randn(2), c)
         self.assertEqual(c.count, 1)
 
-        with self.assertRaises(Exception):
+        with self.assertRaisesRegex(Exception, r"raised exception"):
             test_exception_nested(torch.randn(2), c)
         self.assertEqual(c.count, 1)
 
-        with self.assertRaises(Exception):
+        with self.assertRaisesRegex(Exception, r"raised exception"):
             test_exception_fn_call(torch.randn(2), c)
         self.assertEqual(c.count, 1)
 

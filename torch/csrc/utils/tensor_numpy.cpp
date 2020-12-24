@@ -7,7 +7,7 @@ namespace torch { namespace utils {
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
-at::Tensor tensor_from_numpy(PyObject* obj) {
+at::Tensor tensor_from_numpy(PyObject* obj, bool warn_if_not_writeable/*=true*/) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
 bool is_numpy_int(PyObject* obj) {
@@ -125,13 +125,15 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   return array.release();
 }
 
-at::Tensor tensor_from_numpy(PyObject* obj) {
+at::Tensor tensor_from_numpy(PyObject* obj, bool warn_if_not_writeable/*=true*/) {
   if (!PyArray_Check(obj)) {
     throw TypeError("expected np.ndarray (got %s)", Py_TYPE(obj)->tp_name);
   }
   auto array = (PyArrayObject*)obj;
 
-  if (!PyArray_ISWRITEABLE(array)) {
+  // warn_if_not_writable is true when a copy of numpy variable is created.
+  // the warning is suppressed when a copy is being created.
+  if (!PyArray_ISWRITEABLE(array) && warn_if_not_writeable) {
     TORCH_WARN_ONCE(
       "The given NumPy array is not writeable, and PyTorch does "
       "not support non-writeable tensors. This means you can write to the "

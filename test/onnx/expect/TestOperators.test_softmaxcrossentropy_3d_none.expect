@@ -9,6 +9,11 @@ graph {
     name: "SoftmaxCrossEntropyLoss_0"
     op_type: "SoftmaxCrossEntropyLoss"
     attribute {
+      name: "ignore_index"
+      i: -100
+      type: INT
+    }
+    attribute {
       name: "reduction"
       s: "none"
       type: STRING

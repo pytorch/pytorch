@@ -23,8 +23,8 @@ class TestE2ETensorPipe : public TestE2EBase {
     float rpcTimeout = 30;
 
     // Initialize server rpc agent.
-    auto pg =
-        std::make_shared<c10d::ProcessGroupGloo>(store, 0, numWorkers, options);
+    auto pg = c10::make_intrusive<c10d::ProcessGroupGloo>(
+        store, 0, numWorkers, options);
 
     TensorPipeRpcBackendOptions opts(
         /*numWorkerThreads=*/std::max(16U, std::thread::hardware_concurrency()),

@@ -58,9 +58,6 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   at::globalContext().alertNotDeterministic("SpatialClassNLLCriterion_updateOutput");
-  #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
-  TORCH_CHECK(false, "SpatialClassNLLCriterion_updateOutput not suppported with BFloat16");
-  #else
   THNN_(SpatialClassNLLCriterion_shapeCheck)(state, input, target, weights);
   THCTensor_(resize0d)(state, output);
   THCTensor_(resize0d)(state, total_weight);
@@ -147,7 +144,6 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
     THCTensor_(free)(state, weights);
   THCIndexTensor_(free)(state, target);
   THCTensor_(free)(state, input);
-  #endif // THC_REAL_IS_BFLOAT16 && !__HIP_PLATFORM_HCC__
 }
 
 void THNN_(SpatialClassNLLCriterion_updateGradInput)(
@@ -161,9 +157,6 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
            THCTensor *total_weight,
            int64_t ignore_index)
 {
-  #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
-  TORCH_CHECK(false, "SpatialClassNLLCriterion_updateGradInput not suppported with BFloat16");
-  #else
   THNN_(SpatialClassNLLCriterion_shapeCheck)(state, input, target, weights);
   THCTensor_(resizeAs)(state, gradInput, input);
   THCTensor_(zero)(state, gradInput);
@@ -247,7 +240,6 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
     THCTensor_(free)(state, weights);
   THCIndexTensor_(free)(state, target);
   THCTensor_(free)(state, input);
-  #endif // THC_REAL_IS_BFLOAT16 && !__HIP_PLATFORM_HCC__
 }
 
 #endif

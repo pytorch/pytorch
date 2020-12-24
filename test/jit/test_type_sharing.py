@@ -560,3 +560,54 @@ class TestTypeSharing(JitTestCase):
         self.assertDifferentType(top1_s, top2_s.sub)
         self.assertDifferentType(top2_s, top2_s.sub)
         self.assertDifferentType(top2_s, top1_s.sub)
+
+    def test_type_shared_ignored_attributes(self):
+        """
+        Test that types are shared if the exclusion of their
+        ignored attributes makes them equal.
+        """
+        class A(torch.nn.Module):
+            __jit_ignored_attributes__ = ["a"]
+
+            def __init__(self, a, b):
+                super().__init__()
+                self.a = a
+                self.b = b
+
+            def forward(self, x):
+                return x
+
+        a_with_linear = A(torch.nn.Linear(5, 5), 5)
+        a_with_string = A("string", 10)
+
+        # Both should have the same type because the attribute
+        # that differs in type is ignored and the common attribute
+        # has the same type.
+        self.assertSameType(a_with_linear, a_with_string)
+
+    def test_type_not_shared_ignored_attributes(self):
+        """
+        Test that types are not shared if the exclusion of their
+        ignored attributes makes them not equal.
+        """
+        class A(torch.nn.Module):
+            __jit_ignored_attributes__ = ["a"]
+
+            def __init__(self, a, b, c):
+                super().__init__()
+                self.a = a
+                self.b = b
+                self.c = c
+
+            def forward(self, x):
+                return x
+
+        mod = A(torch.nn.Linear(5, 5), 5, "string")
+        s1 = torch.jit.script(mod)
+        A.__jit_ignored_attributes__ = ["a", "b"]
+        s2 = torch.jit.script(mod)
+
+        # The types of s1 and s2 should differ. Although they are instances
+        # of A, __jit_ignored_attributes__ was modified before scripting s2,
+        # so the set of ignored attributes is different between s1 and s2.
+        self.assertDifferentType(s1, s2)

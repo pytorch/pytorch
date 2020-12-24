@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -ex
+
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
@@ -7,36 +9,7 @@
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
-# Temp: use new sccache
-if [[ -n "$IN_CIRCLECI" && "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  # Download customized sccache
-  sudo curl --retry 3 http://repo.radeon.com/misc/.sccache_amd/sccache -o /opt/cache/bin/sccache
-  sudo chmod 755 /opt/cache/bin/sccache
-fi
-
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
-
-# For distributed, four environmental configs:
-# (1) build with only NCCL
-# (2) build with NCCL and MPI
-# (3) build with only MPI
-# (4) build with neither
-if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]]; then
-  # TODO: move this to Docker
-  sudo apt-get -qq update
-  sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.5.6-1+cuda10.1 libnccl2=2.5.6-1+cuda10.1
-fi
-
-if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc7* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc5* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]] || [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
-  # TODO: move this to Docker
-  sudo apt-get -qq update
-  if [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
-    sudo apt-get -qq install openmpi-bin libopenmpi-dev
-  else
-    sudo apt-get -qq install --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
-  fi
-  sudo mkdir -p /var/run/sshd
-fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-asan* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
@@ -64,6 +37,11 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   nvcc --version
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
+  # enable build option in CMake
+  export USE_CPP_CODE_COVERAGE=ON
+fi
+
 # TODO: Don't run this...
 pip_install -r requirements.txt || true
 
@@ -89,8 +67,14 @@ if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
   POSSIBLE_JAVA_HOMES+=(/usr/local)
   POSSIBLE_JAVA_HOMES+=(/usr/lib/jvm/java-8-openjdk-amd64)
   POSSIBLE_JAVA_HOMES+=(/Library/Java/JavaVirtualMachines/*.jdk/Contents/Home)
+  # Add the Windows-specific JNI
+  POSSIBLE_JAVA_HOMES+=("$PWD/.circleci/windows-jni/")
   for JH in "${POSSIBLE_JAVA_HOMES[@]}" ; do
     if [[ -e "$JH/include/jni.h" ]] ; then
+      # Skip if we're not on Windows but haven't found a JAVA_HOME
+      if [[ "$JH" == "$PWD/.circleci/windows-jni/" && "$OSTYPE" != "msys" ]] ; then
+        break
+      fi
       echo "Found jni.h under $JH"
       export JAVA_HOME="$JH"
       export BUILD_JNI=ON
@@ -135,40 +119,27 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     export MAX_JOBS=$(($(nproc) - 1))
   fi
 
-  # ROCm CI is using Caffe2 docker images, which needs these wrapper
-  # scripts to correctly use sccache.
-  if [[ -n "${SCCACHE_BUCKET}" && -z "$IN_CIRCLECI" ]]; then
-    mkdir -p ./sccache
-
-    SCCACHE="$(which sccache)"
-    if [ -z "${SCCACHE}" ]; then
-      echo "Unable to find sccache..."
-      exit 1
-    fi
-
-    # Setup wrapper scripts
-    for compiler in cc c++ gcc g++ clang clang++; do
-      (
-        echo "#!/bin/sh"
-        echo "exec $SCCACHE $(which $compiler) \"\$@\""
-      ) > "./sccache/$compiler"
-      chmod +x "./sccache/$compiler"
-    done
-
-    export CACHE_WRAPPER_DIR="$PWD/sccache"
-
-    # CMake must find these wrapper scripts
-    export PATH="$CACHE_WRAPPER_DIR:$PATH"
-  fi
-
-  if [[ -n "$IN_CIRCLECI" ]]; then
-      # Set ROCM_ARCH to gtx900 and gtx906 in CircleCI
-      echo "Limiting PYTORCH_ROCM_ARCH to gfx90[06] for CircleCI builds"
+  if [[ -n "$IN_CI" ]]; then
+      # Set ROCM_ARCH to gfx900 and gfx906 for CI builds
+      echo "Limiting PYTORCH_ROCM_ARCH to gfx90[06] for CI builds"
       export PYTORCH_ROCM_ARCH="gfx900;gfx906"
   fi
 
   python tools/amd_build/build_amd.py
   python setup.py install --user
+
+  # remove sccache wrappers post-build; runtime compilation of MIOpen kernels does not yet fully support them
+  sudo rm -f /opt/cache/bin/cc
+  sudo rm -f /opt/cache/bin/c++
+  sudo rm -f /opt/cache/bin/gcc
+  sudo rm -f /opt/cache/bin/g++
+  pushd /opt/rocm/llvm/bin
+  if [[ -d original ]]; then
+    sudo mv original/clang .
+    sudo mv original/clang++ .
+  fi
+  sudo rm -rf original
+  popd
 
   exit 0
 fi
@@ -176,7 +147,7 @@ fi
 # sccache will fail for CUDA builds if all cores are used for compiling
 # gcc 7 with sccache seems to have intermittent OOM issue if all cores are used
 if [ -z "$MAX_JOBS" ]; then
-  if ([[ "$BUILD_ENVIRONMENT" == *cuda* ]] || [[ "$BUILD_ENVIRONMENT" == *gcc7* ]]) && which sccache > /dev/null; then
+  if { [[ "$BUILD_ENVIRONMENT" == *cuda* ]] || [[ "$BUILD_ENVIRONMENT" == *gcc7* ]]; } && which sccache > /dev/null; then
     export MAX_JOBS=$(($(nproc) - 1))
   fi
 fi

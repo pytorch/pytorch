@@ -1,14 +1,20 @@
-
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/codegen.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
 #include <torch/csrc/jit/codegen/cuda/ir_printer.h>
+#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
+
+// TODO(kir): only needed until we can fix Fusion::origin()
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 static thread_local Fusion* ACTIVE_FUSION = nullptr;
 
@@ -25,36 +31,9 @@ Fusion* FusionGuard::getCurFusion() {
   return ACTIVE_FUSION;
 }
 
-void ExprSort::handle(Expr* expr) {
-  exprs.push_back(expr);
-}
-
-std::vector<Expr*> ExprSort::getExprs(Fusion* fusion, bool from_outputs_only) {
-  ExprSort es;
-  es.traverse(fusion, from_outputs_only);
-  return es.exprs;
-}
-
-std::vector<Expr*> ExprSort::getExprs(
-    Fusion* fusion,
-    const std::vector<Val*>& from) {
-  ExprSort es;
-  es.traverseFrom(fusion, from, false);
-  return es.exprs;
-}
-
-void InputsOf::handle(Val* v) {
-  if (FusionGuard::getCurFusion()->origin(v) == nullptr)
-    inputs.emplace(v);
-}
-
-std::unordered_set<Val*> InputsOf::output(Fusion* fusion, Val* output_) {
-  InputsOf io;
-  io.traverseFrom(FusionGuard::getCurFusion(), {output_}, false);
-  return io.inputs;
-}
-
 void swap(Fusion& a, Fusion& b) noexcept {
+  FUSER_PERF_SCOPE("Fusion swap");
+
   using std::swap;
 
   // Swap the content
@@ -90,6 +69,7 @@ void swap(Fusion& a, Fusion& b) noexcept {
   // Lowered IR nodes
   swap(a.lowered_val_set_, b.lowered_val_set_);
   swap(a.lowered_expr_set_, b.lowered_expr_set_);
+  swap(a.lowered_origin_, b.lowered_origin_);
 
   for (auto val : a.lowered_val_set_) {
     val->fusion_ = &a;
@@ -106,6 +86,8 @@ void swap(Fusion& a, Fusion& b) noexcept {
 }
 
 Fusion::Fusion(const Fusion& other) {
+  FUSER_PERF_SCOPE("Fusion copy");
+
   IrCloner ir_cloner(this);
 
   for (auto val : other.val_set_) {
@@ -140,22 +122,15 @@ Fusion::Fusion(const Fusion& other) {
 
   inputs_ = ir_cloner.clone(other.inputs_);
   outputs_ = ir_cloner.clone(other.outputs_);
-
-  // Lowered nodes
-  for (auto val : other.lowered_val_set_) {
-    lowered_val_set_.insert(ir_cloner.clone(val));
-  }
-
-  for (auto expr : other.lowered_expr_set_) {
-    lowered_expr_set_.insert(ir_cloner.clone(expr));
-  }
 }
 
 Fusion::Fusion(Fusion&& other) noexcept {
+  FUSER_PERF_SCOPE("Fusion move");
   swap(*this, other);
 }
 
 Fusion& Fusion::operator=(const Fusion& other) {
+  FUSER_PERF_SCOPE("Fusion copy assign");
   Fusion copy(other);
   clear();
   swap(*this, copy);
@@ -163,6 +138,7 @@ Fusion& Fusion::operator=(const Fusion& other) {
 }
 
 Fusion& Fusion::operator=(Fusion&& other) noexcept {
+  FUSER_PERF_SCOPE("Fusion move assign");
   clear();
   swap(*this, other);
   return *this;
@@ -173,6 +149,8 @@ Fusion::~Fusion() {
 }
 
 void Fusion::clear() noexcept {
+  FUSER_PERF_SCOPE("Fusion clear");
+
   // Free the owned values
   for (auto ptr : val_set_) {
     delete ptr;
@@ -208,6 +186,7 @@ void Fusion::clear() noexcept {
   }
   lowered_val_set_.clear();
   lowered_expr_set_.clear();
+  lowered_origin_.clear();
 }
 
 void Fusion::removeExpr(Expr* expr) {
@@ -263,39 +242,34 @@ void Fusion::removeVal(Val* val) {
   delete val;
 }
 
-void Fusion::addInput(Val* const input) {
+void Fusion::addInput(Val* input) {
   assertInFusion(input, "Cannot register input ");
 
   if (input->getValType().value() == ValType::TensorView) {
     auto tv = input->as<TensorView>();
-    if (tv->hasReduction())
+    if (tv->hasReduction()) {
       TORCH_WARN_ONCE(
           "Registered input ",
           input,
           " has a reduction axis, but this does nothing in the fusion.");
+    }
+    tv->setMemoryType(MemoryType::Global);
   }
 
-  TORCH_CHECK(
+  TORCH_INTERNAL_ASSERT(
       input->getOrigin() == nullptr,
       input,
       " cannot be registered as an input as it is used as an output of an expression (",
       input->getOrigin(),
       ").");
-
   inputs_.push_back(input);
 }
 
-void Fusion::addOutput(Val* const output) {
+void Fusion::addOutput(Val* output) {
   assertInFusion(output, "Cannot register output ");
   if (output->getValType().value() == ValType::TensorView) {
     auto tv = output->as<TensorView>();
-    if (TensorDomain::hasBroadcast(tv->getRootDomain()))
-      // Go to the root as we can merge bcast and
-      // non-bcast dims, making a non-bcast dim.
-      TORCH_CHECK( // Should we warn instead?
-          false,
-          output,
-          " cannot be registered as an output as it has a broadcast axis.");
+    tv->setMemoryType(MemoryType::Global);
   }
   outputs_.push_back(output);
 }
@@ -367,29 +341,35 @@ void Fusion::validateInputs() {
 }
 
 void Fusion::print() {
+  FUSER_PERF_SCOPE("Fusion::print");
+
   FusionGuard fg(this);
   std::cout << "%kernel {\n";
-  IRMathPrinter op_exprs(std::cout);
+  IrMathPrinter op_exprs(std::cout);
   op_exprs.handle(this);
-  IRTransformPrinter t_exprs(std::cout);
+  IrTransformPrinter t_exprs(std::cout);
   t_exprs.handle(this);
   std::cout << "}\n";
 }
 
 void Fusion::printKernel() {
-  GpuLower lower(this);
-  lower.printKernel(std::cout);
+  FUSER_PERF_SCOPE("Fusion::printKernel");
+  std::cout << codegen::generateCudaKernel(GpuLower(this).kernel());
 }
 
 void Fusion::printMath() {
+  FUSER_PERF_SCOPE("Fusion::printMath");
+
   FusionGuard fg(this);
   for (auto expr : exprs(true))
     std::cout << expr;
 }
 
 void Fusion::printTransforms() {
+  FUSER_PERF_SCOPE("Fusion::printTransforms");
+
   FusionGuard fg(this);
-  IRTransformPrinter t_exprs(std::cout);
+  IrTransformPrinter t_exprs(std::cout);
   t_exprs.handle(this);
 }
 
@@ -478,13 +458,11 @@ StmtNameType Fusion::registerLoweredExpr(Expr* expr) {
 
   for (Val* input : expr->inputs()) {
     TORCH_CHECK(inKernelIr(input));
-    assertInFusion(input);
   }
 
   for (Val* output : expr->outputs()) {
     TORCH_CHECK(inKernelIr(output));
-    assertInFusion(output);
-    TORCH_CHECK(origin_.insert({output, expr}).second);
+    TORCH_CHECK(lowered_origin_.insert({output, expr}).second);
   }
 
   lowered_expr_set_.insert(expr);
@@ -518,20 +496,17 @@ std::unordered_set<Expr*> Fusion::unordered_uses(Val* val) const {
   return std::unordered_set<Expr*>();
 }
 
-Expr* Fusion::origin(Val* val) const {
-  assertInFusion(val, "Cannot detect the origin of val, ");
-  auto it = origin_.find(val);
-  if (it == origin_.end())
-    return nullptr;
-  return it->second;
-}
-
-const Expr* Fusion::origin(const Val* val) const {
-  assertInFusion(val, "Cannot dettect the origin of val, ");
-  auto it = origin_.find(const_cast<Val*>(val)); // NOLINT
-  if (it == origin_.end())
-    return nullptr;
-  return it->second;
+Expr* Fusion::origin(const Val* val) const {
+  // TODO(kir): remove the lowered branch
+  if (kir::isLoweredVal(val)) {
+    TORCH_INTERNAL_ASSERT(inKernelIr(val));
+    auto it = lowered_origin_.find(val);
+    return it != lowered_origin_.end() ? it->second : nullptr;
+  } else {
+    assertInFusion(val, "Cannot detect the origin of val, ");
+    auto it = origin_.find(val);
+    return it != origin_.end() ? it->second : nullptr;
+  }
 }
 
 bool Fusion::hasInput(const Val* val) const {
@@ -559,7 +534,7 @@ StmtNameType Fusion::getExprName() {
 }
 
 // Indicate to kernel to set itself up to generate random numbers
-bool Fusion::hasRNG() {
+bool Fusion::isStochastic() {
   for (auto expr : exprs(true))
     if (expr->getExprType() == ExprType::UnaryOp)
       if (expr->as<UnaryOp>()->getUnaryOpType() == UnaryOpType::RandLike)
@@ -567,8 +542,9 @@ bool Fusion::hasRNG() {
   return false;
 }
 
-// Indicate to kernel to set itself up to generate random numbers
 bool Fusion::hasReduction() {
+  FUSER_PERF_SCOPE("Fusion::hasReduction");
+
   for (auto expr : exprs(true))
     for (auto out : expr->outputs())
       if (out->getValType() == ValType::TensorView)
@@ -579,6 +555,8 @@ bool Fusion::hasReduction() {
 }
 
 bool Fusion::hasBlockReduction() {
+  FUSER_PERF_SCOPE("Fusion::hasBlockReduction");
+
   for (auto expr : exprs(true))
     for (auto out : expr->outputs())
       if (out->getValType() == ValType::TensorView)
@@ -589,6 +567,8 @@ bool Fusion::hasBlockReduction() {
 }
 
 bool Fusion::hasGridReduction() {
+  FUSER_PERF_SCOPE("Fusion::hasGridReduction");
+
   for (auto expr : exprs(true))
     for (auto out : expr->outputs())
       if (out->getValType() == ValType::TensorView)
@@ -598,7 +578,32 @@ bool Fusion::hasGridReduction() {
   return false;
 }
 
+bool Fusion::hasBlockBroadcast() {
+  for (auto expr : exprs(true)) {
+    for (auto out : expr->outputs()) {
+      if (out->getValType() == ValType::TensorView) {
+        if (out->as<TensorView>()->hasBlockBroadcast()) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+bool Fusion::hasBroadcast() {
+  for (auto expr : exprs(true))
+    for (auto out : expr->outputs())
+      if (out->getValType() == ValType::TensorView)
+        if (out->as<TensorView>()->hasBroadcast())
+          return true;
+
+  return false;
+}
+
 std::vector<Val*> Fusion::getTerminatingOutputs() {
+  FUSER_PERF_SCOPE("getTerminatingOutputs");
+
   FusionGuard fg(this);
 
   std::unordered_set<Val*> used_vals;
@@ -620,6 +625,7 @@ std::vector<Val*> Fusion::getTerminatingOutputs() {
   return terminating_outputs;
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

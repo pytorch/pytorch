@@ -215,9 +215,9 @@ static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module, PyObject *_ig
 #endif
 
 PyMethodDef DataLoaderMethods[] = {
-  {"_set_worker_signal_handlers",  (PyCFunction)THPModule_setWorkerSignalHandlers,  METH_NOARGS,   nullptr},
-  {"_set_worker_pids",             (PyCFunction)THPModule_setWorkerPIDs,            METH_VARARGS,  nullptr},
-  {"_remove_worker_pids",          (PyCFunction)THPModule_removeWorkerPIDs,         METH_O,        nullptr},
-  {"_error_if_any_worker_fails",   (PyCFunction)THPModule_errorIfAnyWorkerFails,    METH_NOARGS,   nullptr},
+  {"_set_worker_signal_handlers",  THPModule_setWorkerSignalHandlers,  METH_NOARGS,   nullptr},
+  {"_set_worker_pids",             THPModule_setWorkerPIDs,            METH_VARARGS,  nullptr},
+  {"_remove_worker_pids",          THPModule_removeWorkerPIDs,         METH_O,        nullptr},
+  {"_error_if_any_worker_fails",   THPModule_errorIfAnyWorkerFails,    METH_NOARGS,   nullptr},
   {nullptr, nullptr, 0, nullptr}
 };

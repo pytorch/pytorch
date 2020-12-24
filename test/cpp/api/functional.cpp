@@ -246,6 +246,18 @@ TEST_F(FunctionalTest, SmoothL1LossDefaultOptions) {
   ASSERT_TRUE(input.sizes() == input.grad().sizes());
 }
 
+TEST_F(FunctionalTest, SmoothL1LossBeta) {
+  auto input = torch::tensor({0.1, 1.5, 10.0}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
+  auto output =
+      F::smooth_l1_loss(input, target, /*reduction=*/torch::kMean, /*beta=*/0.5);
+  auto expected = torch::tensor(1.67, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_TRUE(input.sizes() == input.grad().sizes());
+}
+
 TEST_F(FunctionalTest, SmoothL1LossNoReduction) {
   auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
@@ -668,6 +680,56 @@ TEST_F(FunctionalTest, TripletMarginLoss) {
   auto expected = torch::tensor({0.}, torch::kFloat);
 
   ASSERT_TRUE(output.allclose(expected, 1e-04));
+}
+
+TEST_F(FunctionalTest, TripletMarginWithDistanceLossDefaultParity) {
+  // Check that if we use torch::pairwise_distance with the default
+  // TripletMarginLoss options as our distance function, the outputs
+  // are equal (i.e., equal under defaults).
+
+  std::vector<TripletMarginWithDistanceLossOptions::reduction_t>
+      reductions = {torch::kSum, torch::kMean, torch::kNone};
+  std::vector<float> margins = {0.5, 1.0, 1.5};
+  std::vector<bool> swaps = {true, false};
+
+  for (auto& reduction : reductions) {
+    for (auto& margin : margins) {
+      for (const auto& swap : swaps) {
+        auto anchor = 
+            torch::randn({100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
+        auto positive =
+            torch::randn({100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
+        auto negative =
+            torch::randn({100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
+
+        auto basicOptions = F::TripletMarginLossFuncOptions()
+                                .reduction(reduction)
+                                .margin(margin)
+                                .swap(swap);
+        auto distanceOptions =
+            F::TripletMarginWithDistanceLossFuncOptions()
+                .reduction(reduction)
+                .margin(margin)
+                .swap(swap);
+        TripletMarginLoss basicLoss(basicOptions);
+        TripletMarginWithDistanceLoss distanceLoss(distanceOptions);
+
+        auto basicOutput =
+            F::triplet_margin_loss(anchor, positive, negative, basicOptions);
+        auto distanceOutput = F::triplet_margin_with_distance_loss(
+            anchor, positive, negative, distanceOptions);
+
+        ASSERT_TRUE(distanceOutput.allclose(basicOutput, 1e-6, 1e-6));
+
+        // handle for torch::kNone reduction
+        auto sum = distanceOutput.sum();
+        sum.backward();
+        ASSERT_EQ(anchor.sizes(), anchor.grad().sizes());
+        ASSERT_EQ(positive.sizes(), positive.grad().sizes());
+        ASSERT_EQ(negative.sizes(), negative.grad().sizes());
+      }
+    }
+  }
 }
 
 TEST_F(FunctionalTest, NLLLoss) {
@@ -1422,6 +1484,23 @@ TEST_F(FunctionalTest, PixelShuffle) {
 
   ASSERT_EQ(y.ndimension(), 4);
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 4, 4}));
+  ASSERT_TRUE(y.allclose(y_exp));
+}
+
+TEST_F(FunctionalTest, PixelUnshuffle) {
+  auto x = torch::tensor(
+      {{{{-17, 7, 19, 14}, {0, -15, -2, 0}, {-1, -3, 2, 1}, {-12, -3, 14, 9}}}},
+      torch::kFloat);
+  auto y_exp = torch::tensor(
+      {{{{-17, 19}, {-1, 2}},
+        {{7, 14}, {-3, 1}},
+        {{0, -2}, {-12, 14}},
+        {{-15, 0}, {-3, 9}}}},
+      torch::kFloat);
+  auto y = F::pixel_unshuffle(x, 2);
+
+  ASSERT_EQ(y.ndimension(), 4);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 4, 2, 2}));
   ASSERT_TRUE(y.allclose(y_exp));
 }
 

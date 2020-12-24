@@ -138,8 +138,6 @@ class GPUMetaVarRewriter : public IRMutator {
   std::vector<const Expr*> current_block_reach_;
   std::vector<const Expr*> current_thread_reach_;
 
-  bool need_sync_ = false;
-  const Expr* last_thread_dim_ = nullptr;
   const CudaAnalysis* cuda_analysis_;
 };
 
@@ -199,8 +197,9 @@ class TORCH_CUDA_API CudaCodeGen : public CodeGen {
   CudaCodeGen(
       Stmt* stmt,
       const std::vector<BufferArg>& buffer_args,
-      at::Device device = at::Device(at::kCUDA, at::cuda::current_device()))
-      : CodeGen(stmt, buffer_args, device) {
+      at::Device device = at::Device(at::kCUDA, at::cuda::current_device()),
+      const std::string& kernel_func_name = "func")
+      : CodeGen(stmt, buffer_args, device, kernel_func_name) {
     Initialize();
   }
 
@@ -241,6 +240,7 @@ class TORCH_CUDA_API CudaCodeGen : public CodeGen {
   std::unique_ptr<CudaPrinter> printer_;
   std::unique_ptr<CudaAnalysis> cuda_analysis_;
   std::unique_ptr<GPUMetaVarRewriter> metavar_rewriter_;
+  std::unordered_set<std::string> taken_func_names;
   CUfunction function_;
   bool has_random_ = false;
 

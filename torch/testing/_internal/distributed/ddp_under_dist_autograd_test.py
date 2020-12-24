@@ -18,8 +18,9 @@ from torch.testing._internal.common_distributed import (
     requires_gloo,
     requires_nccl,
     skip_if_lt_x_gpu,
+    skip_if_rocm,
 )
-from torch.testing._internal.dist_utils import dist_init
+from torch.testing._internal.dist_utils import INIT_METHOD_TEMPLATE, dist_init
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
@@ -324,14 +325,19 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
         # The name has to be consistent with that in 'dist_init' decorator.
         return f"worker{rank}"
 
-    def _remote_worker_process(self):
+    def _remote_worker_process(self, ddp_mode):
         gLogger.info("The remote worker is running.")
         dist.init_process_group(
             backend="gloo",
-            init_method="file://{}".format(self.file_name),
+            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
             world_size=self.world_size,
             rank=self.rank,
         )
+
+        if ddp_mode in (DdpMode.INSIDE, DdpMode.OUTSIDE):
+            # new_group needs to be called on ranks.
+            dist.new_group(TRAINER_RANKS)
+
         global shutdown_signal
         with shutdown_signal:
             shutdown_signal.wait()
@@ -345,7 +351,7 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
         )
         dist.init_process_group(
             backend="gloo",
-            init_method="file://{}".format(self.file_name),
+            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
             world_size=self.world_size,
             rank=self.rank,
         )
@@ -362,10 +368,11 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
         gLogger.info("Running the master process...")
         dist.init_process_group(
             backend="gloo",
-            init_method="file://{}".format(self.file_name),
+            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
             world_size=self.world_size,
             rank=self.rank,
         )
+
         remote_em_rref = rpc.remote(
             self.remote_worker_name(), RemoteEM, args=(NUM_EM_ROW, D_SPARSE)
         )
@@ -399,6 +406,10 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
                     args=(remote_em_rref, remote_net_rref, ddp_mode, rank),
                 )
             )
+
+        if ddp_mode in (DdpMode.INSIDE, DdpMode.OUTSIDE):
+            # new_group needs to be called on ranks.
+            dist.new_group(TRAINER_RANKS)
 
         training_examples = get_training_examples()
         for _ in range(3):
@@ -454,7 +465,7 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
         if self.rank == MASTER_RANK:
             self._master_process(ddp_mode, simulate_uneven_inputs)
         elif self.rank == REMOTE_WORKER_RANK:
-            self._remote_worker_process()
+            self._remote_worker_process(ddp_mode)
         elif self.rank in TRAINER_RANKS:
             self._trainer_process(self.rank)
         else:
@@ -499,7 +510,7 @@ class DdpComparisonTest(RpcAgentTestFixture):
         torch.manual_seed(self.rank)
         dist.init_process_group(
             backend="gloo",
-            init_method="file://{}".format(self.file_name),
+            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
             world_size=self.world_size,
             rank=self.rank,
         )
@@ -566,7 +577,7 @@ class DdpComparisonTest(RpcAgentTestFixture):
         torch.manual_seed(self.rank)
         dist.init_process_group(
             backend="gloo",
-            init_method="file://{}".format(self.file_name),
+            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
             world_size=self.world_size,
             rank=self.rank,
         )
@@ -603,44 +614,48 @@ class DdpComparisonTest(RpcAgentTestFixture):
         torch.manual_seed(self.rank)
         dist.init_process_group(
             backend="gloo",
-            init_method="file://{}".format(self.file_name),
+            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
             world_size=self.world_size,
             rank=self.rank,
         )
 
-        remote_layer1 = RemoteModule(
-            "worker0", device="cpu", module_cls=nn.Linear, args=(10, 5, False)
-        )
-        layer1 = nn.Linear(10, 5, False)
-        # Start with the same parameters for remote and local
-        layer1.weight = remote_layer1.module_rref.to_here().weight
-
-        # Run local case.
-        layer2 = nn.Linear(5, 1)
-        inputs = torch.rand((10, 10))
-        ddp_model = DistributedDataParallel(layer2)
-        loss = ddp_model(layer1(inputs)).sum()
-        loss.backward()
-
-        # Run remote case.
-        with dist_autograd.context() as context_id:
-            loss = ddp_model(remote_layer1(inputs)).sum()
-            dist_autograd.backward(context_id, [loss])
-            grads_dict = dist_autograd.get_gradients(context_id)
-            dist.barrier()
-            self.assertEqual(layer2.weight.grad, grads_dict[layer2.weight])
-            self.assertEqual(
-                layer1.weight.grad,
-                rpc.rpc_sync(
-                    "worker0",
-                    DdpComparisonTest.get_remote_grads,
-                    args=(remote_layer1.module_rref, context_id),
-                ),
+        # Use two different remote device input string, w/ and w/o the default
+        # device string "cpu", respectively.
+        for remote_device in ["worker0/cpu", "worker0"]:
+            remote_layer1 = RemoteModule(
+                remote_device=remote_device, module_cls=nn.Linear, args=(10, 5, False)
             )
+            layer1 = nn.Linear(10, 5, False)
+            # Start with the same parameters for remote and local
+            layer1.weight = remote_layer1.module_rref.to_here().weight
+
+            # Run local case.
+            layer2 = nn.Linear(5, 1)
+            inputs = torch.rand((10, 10))
+            ddp_model = DistributedDataParallel(layer2)
+            loss = ddp_model(layer1(inputs)).sum()
+            loss.backward()
+
+            # Run remote case.
+            with dist_autograd.context() as context_id:
+                loss = ddp_model(remote_layer1(inputs)).sum()
+                dist_autograd.backward(context_id, [loss])
+                grads_dict = dist_autograd.get_gradients(context_id)
+                dist.barrier()
+                self.assertEqual(layer2.weight.grad, grads_dict[layer2.weight])
+                self.assertEqual(
+                    layer1.weight.grad,
+                    rpc.rpc_sync(
+                        "worker0",
+                        DdpComparisonTest.get_remote_grads,
+                        args=(remote_layer1.module_rref, context_id),
+                    ),
+                )
 
     @skip_if_lt_x_gpu(NUM_TRAINERS)
     @requires_nccl()
     @dist_init
+    @skip_if_rocm
     def test_ddp_dist_autograd_local_vs_remote_gpu(self):
         # Each trainer uses a different random seed. Otherwise, they are going
         # to have exactly the same initial model parameters, input, and
@@ -649,13 +664,13 @@ class DdpComparisonTest(RpcAgentTestFixture):
         torch.manual_seed(self.rank)
         dist.init_process_group(
             backend="gloo",
-            init_method="file://{}".format(self.file_name),
+            init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
             world_size=self.world_size,
             rank=self.rank,
         )
 
         remote_layer1 = RemoteModule(
-            "worker0", device="cpu", module_cls=nn.Linear, args=(10, 7, False)
+            remote_device="worker0/cpu", module_cls=nn.Linear, args=(10, 7, False)
         )
         layer1 = nn.Linear(10, 7, False)
         # Start with the same parameters for remote and local
@@ -665,7 +680,7 @@ class DdpComparisonTest(RpcAgentTestFixture):
         ddp_layer2 = DistributedDataParallel(layer2, device_ids=[self.rank])
 
         remote_layer3 = RemoteModule(
-            "worker0", device="cpu", module_cls=nn.Linear, args=(5, 3, False)
+            remote_device="worker0/cpu", module_cls=nn.Linear, args=(5, 3, False)
         )
         layer3 = nn.Linear(5, 3, False)
         # Start with the same parameters for remote and local

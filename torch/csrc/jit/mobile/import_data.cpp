@@ -171,8 +171,9 @@ mobile::Module _load_data(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device) {
   auto observer = torch::observerConfig().getModuleObserver();
+  auto instance_key = std::rand();
   if (observer) {
-    observer->onEnterLoadModel();
+    observer->onEnterLoadModel(instance_key);
   }
   try {
     auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
@@ -186,12 +187,12 @@ mobile::Module _load_data(
       copied_metadata["model_name"] = result.name();
     }
     if (observer) {
-      observer->onExitLoadModel(copied_metadata);
+      observer->onExitLoadModel(instance_key, copied_metadata);
     }
     return result;
   } catch (c10::Error& error) {
     if (observer) {
-      observer->onFailLoadModel(error.what());
+      observer->onFailLoadModel(instance_key, error.what());
     }
     TORCH_RETHROW(error);
   } catch (...) {
@@ -208,7 +209,7 @@ mobile::Module _load_data(
       }
     } catch (c10::Error& error) {
       if (observer) {
-        observer->onFailLoadModel(error.what());
+        observer->onFailLoadModel(instance_key, error.what());
       }
       TORCH_RETHROW(error);
     }

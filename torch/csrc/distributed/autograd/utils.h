@@ -54,7 +54,8 @@ sendMessageWithAutograd(
     const rpc::WorkerInfo& dst,
     rpc::Message&& wrappedRpcMsg,
     bool forceGradRecording = false,
-    const float rpcTimeoutSeconds = torch::distributed::rpc::kUnsetRpcTimeout);
+    const float rpcTimeoutSeconds = torch::distributed::rpc::kUnsetRpcTimeout,
+    bool forceDisableProfiling = false);
 
 } // namespace autograd
 } // namespace distributed

@@ -8,6 +8,27 @@
 
 #include <nccl.h>
 
+namespace {
+  // Provides additional detail into NCCL error codes based on when these are
+  // thrown in the NCCL codebase.
+const char* errorMessage(ncclResult_t error) {
+  switch (error) {
+    case ncclUnhandledCudaError:
+      return "ncclUnhandledCudaError: Call to CUDA function failed.";
+    case ncclSystemError:
+      return "ncclSystemError: System call (socket, malloc, munmap, etc) failed.";
+    case ncclInternalError:
+      return "ncclInternalError: Internal check failed. This is either a bug in NCCL or due to memory corruption";
+    case ncclInvalidArgument:
+      return "ncclInvalidArgument: Invalid value for an argument (such as invalid pointer, device count, ip:host pair, etc).";
+    case ncclInvalidUsage:
+      return "ncclInvalidUsage: This usually reflects invalid usage of NCCL library (such as too many async ops, too many collectives at once, mixing streams in a group, etc).";
+    default:
+      break;
+  }
+  return "Unknown NCCL error";
+}
+} // namespace
 // Error checking is enabled only for NCCL versions 2.4+ since ncclCommAbort()
 // and ncclCommGetAsyncError() are not supported in earlier versions.
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
@@ -17,8 +38,6 @@
 #define ENABLE_NCCL_ERROR_CHECKING
 #endif
 
-// Fix build issues with NCCL P2P - until then disable NCCL send/recv.
-#if defined(ENABLE_NCCL_A2A) && (ENABLE_NCCL_A2A == 1)
 // P2P is enabled only for NCCL versions 2.7+ since ncclSend()
 // and ncclRecv() are not supported in earlier versions.
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
@@ -27,17 +46,17 @@
 #elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
 #define ENABLE_NCCL_P2P_SUPPORT
 #endif
-#endif
 
 // Macro to throw on a non-successful NCCL return value.
-#define C10D_NCCL_CHECK(cmd)                                                 \
-  do {                                                                       \
-    ncclResult_t result = cmd;                                               \
-    if (result != ncclSuccess) {                                             \
-      std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +    \
-          std::to_string(__LINE__) + ", " + ncclGetErrorWithVersion(result); \
-      throw std::runtime_error(err);                                         \
-    }                                                                        \
+#define C10D_NCCL_CHECK(cmd)                                                  \
+  do {                                                                        \
+    ncclResult_t result = cmd; \
+    if (result != ncclSuccess) {                                              \
+      std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +     \
+          std::to_string(__LINE__) + ", " + ncclGetErrorWithVersion(result) + \
+          "\n" + errorMessage(result);                                        \
+      throw std::runtime_error(err);                                          \
+    }                                                                         \
   } while (0)
 
 // Macro to print and abort on a non-successful NCCL return value.

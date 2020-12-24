@@ -11,13 +11,15 @@ import unittest
 import itertools
 import warnings
 import tempfile
+import random
 from torch import multiprocessing as mp
-from torch.utils.data import _utils, Dataset, IterableDataset, TensorDataset, DataLoader, ConcatDataset, ChainDataset
+from torch.utils.data import (_utils, Dataset, IterableDataset, TensorDataset, DataLoader, ConcatDataset,
+                              ChainDataset, BufferedShuffleDataset)
 from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
-                                                  IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm,
+                                                  IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_ROCM, TEST_WITH_TSAN, IS_SANDCASTLE)
 
 try:
@@ -482,6 +484,17 @@ class SynchronizedDataset(Dataset):
         return self.size
 
 
+class EmptyTensorDataset(torch.utils.data.Dataset):
+    def __init__(self, len):
+        self.len = len
+
+    def __len__(self):
+        return self.len
+
+    def __getitem__(self, any):
+        return torch.empty(0)
+
+
 class SynchronizedSeedDataset(SynchronizedDataset):
     def __getitem__(self, idx):
         self.sync_once()
@@ -500,6 +513,24 @@ def _test_timeout_pin_memory(persistent_workers):
     dataloader = DataLoader(dataset, batch_size=2, num_workers=2, timeout=1, pin_memory=True,
                             persistent_workers=persistent_workers)
     _ = next(iter(dataloader))
+
+
+def _test_large_sampler_indices(persistent_workers):
+    # See
+    #   test_large_sampler_indices
+    #   https://github.com/pytorch/pytorch/issues/48666
+
+    dataloader = torch.utils.data.DataLoader(
+        EmptyTensorDataset(10000000),
+        batch_size=40960,
+        persistent_workers=persistent_workers,
+        num_workers=1)
+
+    it = iter(dataloader)
+
+    for x in it:
+        assert x.numel() == 0
+        raise RuntimeError('My Error')
 
 
 def disable_stderr(worker_id):
@@ -708,6 +739,10 @@ def _test_get_worker_info():
 # test custom init function
 def init_fn(worker_id):
     torch.manual_seed(12345)
+
+
+def shuffle_ds_init_fn(worker_id):
+    random.seed(123)
 
 
 # used with test_error_in_init
@@ -972,6 +1007,24 @@ except RuntimeError as e:
             finally:
                 p.terminate()
 
+    def test_large_sampler_indices(self):
+        # Test that the data loader cleanly exit when the process errors
+        #   1. having an reference to the iterator
+        #   2. using a sampler that yields big elements s.t. _index_queues putters block
+        #
+        # More context: https://github.com/pytorch/pytorch/issues/48666
+
+        p = ErrorTrackingProcess(target=_test_large_sampler_indices, args=(self.persistent_workers,))
+        p.start()
+        p.join(JOIN_TIMEOUT)
+        try:
+            self.assertFalse(p.is_alive())
+            self.assertNotEqual(p.exitcode, 0)
+            self.assertIsInstance(p.exception, RuntimeError)
+            self.assertRegex(str(p.exception), r'My Error')
+        finally:
+            p.terminate()
+
     def test_invalid_ctor_args_combinations(self):
         # general
         with self.assertRaisesRegex(ValueError, "num_workers option should be non-negative"):
@@ -1213,6 +1266,37 @@ except RuntimeError as e:
         with self.assertRaisesRegex(AssertionError, "ChainDataset only supports IterableDataset"):
             list(iter(ChainDataset([dataset1, self.dataset])))
 
+    def test_buffer_shuffle_dataset(self):
+        dataset = CountingIterableDataset(20)
+        expected = list(range(20))
+        buffer_sizes = [5, 20, 25]
+        for num_workers in [0, 1]:
+            # Buffer Size <= 1: Not shuffled dataset
+            fetched_nos = list(self._get_data_loader(BufferedShuffleDataset(dataset, 1), num_workers=num_workers))
+            self.assertEqual(len(fetched_nos), len(expected))
+            for e, d in zip(expected, fetched_nos):
+                self.assertIsInstance(d, torch.Tensor)
+                self.assertEqual(e, d)
+            # Buffer Size > 1: Shuffled dataset
+            for buffer_size in buffer_sizes:
+                fetched = sorted(list(self._get_data_loader(BufferedShuffleDataset(dataset, buffer_size), num_workers=num_workers)))
+                self.assertEqual(len(fetched), len(expected))
+                for e, d in zip(expected, fetched):
+                    self.assertIsInstance(d, torch.Tensor)
+                    self.assertEqual(e, d)
+                # Random Seed for single process
+                random.seed(123)
+                fetched_seed1 = list(self._get_data_loader(BufferedShuffleDataset(dataset, buffer_size), num_workers=num_workers,
+                                     worker_init_fn=shuffle_ds_init_fn))
+                random.seed(123)
+                fetched_seed2 = list(self._get_data_loader(BufferedShuffleDataset(dataset, buffer_size), num_workers=num_workers,
+                                     worker_init_fn=shuffle_ds_init_fn))
+                self.assertEqual(len(fetched_seed1), len(fetched_seed2))
+                for d1, d2 in zip(fetched_seed1, fetched_seed2):
+                    self.assertIsInstance(d1, torch.Tensor)
+                    self.assertIsInstance(d2, torch.Tensor)
+                    self.assertEqual(d1, d2)
+
     def test_multiprocessing_contexts(self):
         reference = [
             torch.arange(3),
@@ -1370,6 +1454,15 @@ except RuntimeError as e:
         self.assertEqual(int(math.ceil(float(num_samples) / batch_size)),
                          count_num_samples_in_data_loader)
 
+    def test_distributed_sampler_invalid_rank(self):
+        from torch.utils.data.distributed import DistributedSampler
+        dataset = torch.IntTensor(range(10))
+        with self.assertRaisesRegex(ValueError, "Invalid rank"):
+            sampler = DistributedSampler(dataset, 3, 3)
+
+        with self.assertRaisesRegex(ValueError, "Invalid rank"):
+            sampler = DistributedSampler(dataset, 3, -1)
+
     def test_duplicating_data_with_drop_last(self):
 
         from torch.utils.data.distributed import DistributedSampler
@@ -1493,8 +1586,10 @@ except RuntimeError as e:
                 pin_memory_thread.join(JOIN_TIMEOUT)
                 self.assertFalse(pin_memory_thread.is_alive())
 
+    # Takes 2.5min to finish, see https://github.com/pytorch/pytorch/issues/46065
     @skipIfRocm
     @unittest.skipIf(not HAS_PSUTIL, "psutil not found")
+    @slowTest
     def test_proper_exit(self):
         (r'''There might be ConnectionResetError or leaked semaphore warning '''
          r'''(due to dirty process exit), but they are all safe to ignore''')
@@ -1525,7 +1620,7 @@ except RuntimeError as e:
             # In all cases, all processes should end properly.
             if use_workers:
                 exit_methods = [None, 'loader_error', 'loader_kill', 'worker_error', 'worker_kill']
-                persistent_workers = self.persistent_workers 
+                persistent_workers = self.persistent_workers
             else:
                 exit_methods = [None, 'loader_error', 'loader_kill']
                 persistent_workers = False
@@ -1800,6 +1895,12 @@ except RuntimeError as e:
             self.assertEqual(_utils.collate.default_collate([n_in]).is_shared(), True)
         finally:
             _utils.worker._worker_info = old
+
+    def test_excessive_thread_creation_warning(self):
+        with self.assertWarnsRegex(
+            UserWarning,
+                r"excessive worker creation might get DataLoader running slow or even freeze"):
+            dataloader = DataLoader(self.dataset, batch_size=2, num_workers=1000)
 
 
 class StringDataset(Dataset):
