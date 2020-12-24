@@ -100,8 +100,6 @@ def get_ignored_functions() -> Set[Any]:
         torch.has_cuda,
         torch.has_cudnn,
         torch.has_lapack,
-        # torch.cpp is a module
-        torch.cpp,  # type: ignore[attr-defined]
         torch.device,
         torch.dtype,
         torch.finfo,
