@@ -688,7 +688,7 @@ class ConvTranspose1d(_ConvTransposeNd):
         # One cannot replace List by Sequence in "_output_padding" because pytorch does
         # not support Sequence[T]. Therefore, a "type:ignore[...]" is required.
         output_padding = self._output_padding(
-            input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore[arg-type]
+            input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore
         return F.conv_transpose1d(
             input, self.weight, self.bias, self.stride, self.padding,
             output_padding, self.groups, self.dilation)
@@ -832,7 +832,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         # One cannot replace List by Sequence in "_output_padding" because pytorch does
         # not support Sequence[T]. Therefore, a "type:ignore[...]" is required.
         output_padding = self._output_padding(
-            input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore[arg-type]
+            input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore
 
         return F.conv_transpose2d(
             input, self.weight, self.bias, self.stride, self.padding,
@@ -973,7 +973,7 @@ class ConvTranspose3d(_ConvTransposeNd):
         # One cannot replace List by Sequence in "_output_padding" because pytorch does
         # not support Sequence[T]. Therefore, a "type:ignore[...]" is required.
         output_padding = self._output_padding(
-            input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore[arg-type]
+            input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore
 
         return F.conv_transpose3d(
             input, self.weight, self.bias, self.stride, self.padding,
