@@ -200,14 +200,6 @@ void THPUtils_invalidArguments(PyObject *given_args, PyObject *given_kwargs,
       given_args, given_kwargs, function_name, option_strings).c_str());
 }
 
-template<>
-void THPPointer<THPGenerator>::free() {
-  if (ptr)
-    Py_DECREF(ptr);
-}
-
-template class THPPointer<THPGenerator>;
-
 static bool backCompatBroadcastWarn = false;
 
 void setBackCompatBroadcastWarn(bool warn) {

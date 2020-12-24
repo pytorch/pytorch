@@ -133,7 +133,7 @@ class AbstractTestCases:
             with open(doc_file, "r") as f:
                 doc_strs = f.read()
 
-            for doc_str in re.findall(r'add_docstr\((.*?),.*?("""|\'\'\')(.*?)("""|\'\'\')\)', doc_strs, re.MULTILINE | re.DOTALL):
+            for doc_str in re.findall(r'^add_docstr\((.*?),.*?("""|\'\'\')(.*?)("""|\'\'\')\)', doc_strs, re.MULTILINE | re.DOTALL):
                 for common_args in [multi_dim_common, single_dim_common, factory_common_args, factory_like_common_args]:
                     for k, v in common_args.items():
                         self.assertNotIn(v, doc_str[2], 'The argument description "{}" in {} can be '
@@ -782,7 +782,7 @@ class AbstractTestCases:
                     expected_initial_seed, seed, actual_initial_seed)
                 self.assertEqual(expected_initial_seed, actual_initial_seed, msg=msg)
             for invalid_seed in [min_int64 - 1, max_uint64 + 1]:
-                with self.assertRaisesRegex(RuntimeError, r'Overflow when unpacking long'):
+                with self.assertRaisesRegex(TypeError, r'incompatible function arguments'):
                     torch.manual_seed(invalid_seed)
 
             torch.set_rng_state(rng_state)

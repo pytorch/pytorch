@@ -3,7 +3,26 @@
 import re
 
 import torch._C
-from torch._C import _add_docstr as add_docstr
+from torch._C import _add_docstr
+
+
+def add_docstr(obj, doc):
+    cls = obj.__class__
+    # Pybind11 class
+    if cls.__name__ == "pybind11_type":
+        if obj.__doc__ is not None:
+            raise RuntimeError("pybind11 type '{}' already has a docstring".format(obj.__name__))
+        obj.__doc__ = doc
+        return obj
+    # Pybind11 property
+    elif cls is property:
+        # Pybind11 leaves an empty docstring for property
+        if obj.__doc__:
+            raise RuntimeError("pybind11 property already has a docstring")
+        obj.__doc__ = doc
+        return obj
+    else:
+        return _add_docstr(obj, doc)
 
 
 def parse_kwargs(desc):

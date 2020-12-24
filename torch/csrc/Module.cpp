@@ -74,8 +74,6 @@ namespace py = pybind11;
 
 PyObject* module;
 
-THPGenerator *THPDefaultCPUGenerator = nullptr;
-
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -268,6 +266,34 @@ PyObject *THPModule_addDocStr(PyObject *_unused, PyObject *args)
           "Type '%s' already has a docstring", t->tp_name);
     }
     t->tp_doc = doc_str;
+  // Pybind11 method
+  } else if (Py_TYPE(obj) == &PyInstanceMethod_Type) {
+    PyObject* func_obj = PyInstanceMethod_GET_FUNCTION(obj);
+    if (Py_TYPE(func_obj) != &PyCFunction_Type) {
+      return PyErr_Format(PyExc_TypeError,
+          "don't know how to add docstring for instancemethod with non-C implementation");
+    }
+    PyCFunctionObject* func = (PyCFunctionObject*)func_obj;
+    // Remove pybind11's default docstring
+    if (func->m_ml->ml_doc) {
+      // We expect pybind11's automatic docstring generation to be disabled
+      // In this case, pybind11 currently produces an empty docstring for the function
+      if (strlen(func->m_ml->ml_doc) != 0) {
+        return PyErr_Format(PyExc_RuntimeError,
+            "pybind11 method '%s' already has a docstring "
+            "(to fix this error, disable pybind11's automatic docstring generation)",
+            func->m_ml->ml_name);
+      }
+      // This is extremely hacky; it uses the implementation detail of pybind11 that
+      // docstrings are allocated with `malloc()`
+      //NOLINTNEXTLINE(cppcoreguidelines-no-malloc, cppcoreguidelines-pro-type-const-cast)
+      free(const_cast<char *>(func->m_ml->ml_doc));
+    }
+    // This is extremely hacky; it uses the implementation detail of pybind11 that
+    // docstrings are allocated with `malloc()`
+    func->m_ml->ml_doc = strdup(doc_str);
+    // The new docstring is assumed to be managed by pybind11, so we no longer need to keep it
+    all_docs.pop_back();
   } else {
     return PyErr_Format(PyExc_TypeError,
         "don't know how to add docstring to type '%s'", Py_TYPE(obj)->tp_name);
@@ -749,7 +775,7 @@ PyObject* initModule() {
      methods.data()
   };
   ASSERT_TRUE(module = PyModule_Create(&torchmodule));
-  ASSERT_TRUE(THPGenerator_init(module));
+  torch::initGeneratorBindings(module);
   ASSERT_TRUE(THPException_init(module));
   THPSize_init(module);
   THPDtype_init(module);
@@ -924,10 +950,9 @@ Call this whenever a new thread is created in order to propagate values from
 #endif
 #undef SET_STR_DEFINE
 
-  const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();
-  THPDefaultCPUGenerator = (THPGenerator*)THPGenerator_initDefaultGenerator(defaultGenerator);
+  py::object default_cpu_generator = py::cast(at::detail::getDefaultCPUGenerator());
   // This reference is meant to be given away, so no need to incref here.
-  ASSERT_TRUE(set_module_attr("default_generator", (PyObject*)THPDefaultCPUGenerator, /* incref= */ false));
+  ASSERT_TRUE(set_module_attr("default_generator", default_cpu_generator.release().ptr(), /* incref= */ false));
   ASSERT_TRUE(set_module_attr("DisableTorchFunction", (PyObject*)THPModule_DisableTorchFunctionType(), /* incref= */ false));
   torch::set_disabled_torch_function_impl(PyObject_GetAttrString(module, "_disabled_torch_function_impl"));
   ASSERT_TRUE(torch::disabled_torch_function_impl() != nullptr);

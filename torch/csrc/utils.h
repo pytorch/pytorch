@@ -141,8 +141,6 @@ int THPUtils_getCallable(PyObject *arg, PyObject **result);
 #define THPTensorPtr  TH_CONCAT_3(THP,Real,TensorPtr)
 #define THSPTensorPtr  TH_CONCAT_3(THSP,Real,TensorPtr)
 
-typedef THPPointer<THPGenerator> THPGeneratorPtr;
-
 template <typename T>
 struct THPUtils_typeTraits {};
 

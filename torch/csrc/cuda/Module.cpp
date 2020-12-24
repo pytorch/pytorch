@@ -20,7 +20,6 @@
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/cuda/python_comm.h>
-#include <torch/csrc/Generator.h>
 #include <torch/csrc/python_headers.h>
 
 #ifndef WIN32
@@ -511,10 +510,9 @@ static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
   auto num_gpus = c10::cuda::device_count();
   auto default_cuda_generators = PyTuple_New(static_cast<Py_ssize_t>(num_gpus));
   for(int i = 0; i < num_gpus; i++) {
-    auto gen = at::cuda::detail::getDefaultCUDAGenerator(i);
-    auto cast_gen = (THPGenerator*)THPGenerator_initDefaultGenerator(gen);
+    py::object cuda_generator = py::cast(at::cuda::detail::getDefaultCUDAGenerator(i));
     // This reference is meant to be given away, so no need to incref here.
-    PyTuple_SetItem(default_cuda_generators, i, (PyObject*)cast_gen);
+    PyTuple_SetItem(default_cuda_generators, i, cuda_generator.release().ptr());
   }
   set_module_attr("default_generators", default_cuda_generators);
   bindGetDeviceProperties(m);

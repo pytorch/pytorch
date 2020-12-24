@@ -47,7 +47,6 @@
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
-#include <torch/csrc/Generator.h>
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/Layout.h>
@@ -652,7 +651,7 @@ inline bool PythonArgs::isNone(int i) {
 
 inline c10::optional<at::Generator> PythonArgs::generator(int i) {
   if (!args[i]) return c10::nullopt;
-  return reinterpret_cast<THPGenerator*>(args[i])->cdata;
+  return py::handle(args[i]).cast<at::Generator>();
 }
 
 inline at::Storage PythonArgs::storage(int i) {

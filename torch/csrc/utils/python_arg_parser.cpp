@@ -478,7 +478,7 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
       return size > 0 && THPUtils_checkLong(obj);
     }
     case ParameterType::FLOAT_LIST: return is_float_or_complex_list(obj);
-    case ParameterType::GENERATOR: return THPGenerator_Check(obj);
+    case ParameterType::GENERATOR: return py::isinstance<at::Generator>(obj);
     case ParameterType::BOOL: return PyBool_Check(obj);
     case ParameterType::STORAGE: return isStorage(obj);
     case ParameterType::PYOBJECT: return true;
