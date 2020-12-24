@@ -114,14 +114,6 @@ struct TORCH_API Generator {
 
   Device device() const { return impl_->device(); }
 
-  inline void set_pyobj(PyObject* pyobj) const noexcept {
-    impl_->set_pyobj(pyobj);
-  }
-
-  inline PyObject* pyobj() const noexcept {
-    return impl_->pyobj();
-  }
-
   template<typename T>
   T* get() const { return static_cast<T*>(impl_.get()); }
 

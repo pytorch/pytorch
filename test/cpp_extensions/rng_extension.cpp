@@ -47,7 +47,7 @@ Generator createTestCPUGenerator(uint64_t value) {
   return at::make_generator<TestCPUGenerator>(value);
 }
 
-Generator identity(Generator g) {
+Generator& identity(Generator& g) {
   return g;
 }
 
