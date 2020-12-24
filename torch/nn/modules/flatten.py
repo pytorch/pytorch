@@ -1,6 +1,6 @@
 from .module import Module
 
-from typing import Tuple, Union
+from typing import Tuple, Union, List
 from torch import Tensor
 from torch import Size
 
@@ -53,8 +53,8 @@ class Unflatten(Module):
       be either `int` or `str` when `Tensor` or `NamedTensor` is used, respectively.
 
     * :attr:`unflattened_size` is the new shape of the unflattened dimension of the tensor and it can be
-      a `tuple` of ints or `torch.Size` for `Tensor` input or a `NamedShape` (tuple of `(name, size)` tuples)
-      for `NamedTensor` input.
+      a `tuple` of ints or `torch.Size` for `Tensor` input or the size as a list or a `NamedShape` 
+      (tuple of `(name, size)` tuples) for `NamedTensor` input.
 
     Shape:
         - Input: :math:`(N, *dims)`
@@ -62,7 +62,7 @@ class Unflatten(Module):
 
     Args:
         dim (Union[int, str]): Dimension to be unflattened
-        unflattened_size (Union[torch.Size, NamedShape]): New shape of the unflattened dimension
+        unflattened_size (Union[torch.Size, List, NamedShape]): New shape of the unflattened dimension
 
     Examples:
         >>> input = torch.randn(2, 50)
@@ -95,10 +95,13 @@ class Unflatten(Module):
 
     __constants__ = ['dim', 'unflattened_size']
     dim: Union[int, str]
-    unflattened_size: Union[Size, NamedShape]
+    unflattened_size: Union[Size, List, NamedShape]
 
-    def __init__(self, dim: Union[int, str], unflattened_size: Union[Size, NamedShape]) -> None:
+    def __init__(self, dim: Union[int, str], unflattened_size: Union[Size, List, NamedShape]) -> None:
         super(Unflatten, self).__init__()
+
+        if (isinstance(unflattened_size, list)):
+            unflattened_size = tuple(unflattened_size)
 
         if isinstance(dim, int):
             self._require_tuple_int(unflattened_size)
