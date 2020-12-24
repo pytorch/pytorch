@@ -627,7 +627,7 @@ if _enabled:
         # it is not overriden, we call into the nn.Module __dir__ method
         def __dir__(self):
             self_method = self.__dir__
-            if self_method.__func__ == RecursiveScriptModule.__dir__:
+            if self_method.__func__ == getattr(RecursiveScriptModule, "__dir__", None):
                 return super(RecursiveScriptModule, self).__dir__()
             return self_method()
 
@@ -636,7 +636,7 @@ if _enabled:
         # class throws if it isn't overriden, we define __bool__ to preserve default behavior
         def __bool__(self):
             self_method = self.__bool__
-            if self_method.__func__ == RecursiveScriptModule.__bool__:
+            if self_method.__func__ == getattr(RecursiveScriptModule, "__bool__", None):
                 return True
             return self_method()
 
