@@ -1989,18 +1989,21 @@ TORCH_CHECK(false, "Calling torch.eig on a CUDA tensor requires compiling PyTorc
   }
 
   value_t *rwork_data = nullptr;
+  if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
+    ALLOCATE_ARRAY(rwork_data, value_t, n*2);
+  }
 
   if (n > 0) {
     // call magmaEig once to get the optimal size of work_data
     scalar_t wkopt;
     magma_int_t info;
-    magmaEig<scalar_t>(MagmaNoVec, jobvr, n, self_data, n, wr, NULL, 1, vr_data, ldvr, &wkopt, -1, rwork_data, &info);
-    magma_int_t lwork = (magma_int_t) wkopt;
+    magmaEig<scalar_t, value_t>(MagmaNoVec, jobvr, n, self_data, n, wr, NULL, 1, vr_data, ldvr, &wkopt, -1, rwork_data, &info);
+    magma_int_t lwork = static_cast<magma_int_t>(real_impl<scalar_t, value_t>(wkopt));
 
     // call it a 2nd time to to the actual work
     scalar_t *work_data = nullptr;
     ALLOCATE_ARRAY(work_data, scalar_t, lwork);
-    magmaEig<scalar_t>(MagmaNoVec, jobvr, n, self_data, n, wr, NULL, 1, vr_data, ldvr, work_data, lwork, rwork_data, &info);
+    magmaEig<scalar_t, value_t>(MagmaNoVec, jobvr, n, self_data, n, wr, NULL, 1, vr_data, ldvr, work_data, lwork, rwork_data, &info);
     *info_ptr = info;
   }
 #endif
@@ -2023,13 +2026,18 @@ std::tuple<Tensor, Tensor> eig_kernel_impl(const Tensor& self, bool& eigenvector
 
   // tensors holding the results. We use empty_strided to make them column-ordered
   auto options = self.options().device(at::kCPU).memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto out_eigvals = at::empty_strided({n, 2}, {1, n}, options);
+  Tensor out_eigvals;
+  if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
+      out_eigvals = at::empty({n}, options);
+  } else {
+      out_eigvals = at::empty_strided({n, 2}, {1, n}, options);
+  }
   auto out_eigvecs = eigenvectors
                      ? at::empty_strided({n, n}, {1, n}, options)
                      : Tensor();
 
   int64_t info;
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "eig_cuda", [&]{
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "eig_cuda", [&]{
     apply_eig<scalar_t>(self_working_copy, eigenvectors, out_eigvals, out_eigvecs, &info);
   });
   singleCheckErrors(info, "eig_cuda");
