@@ -125,11 +125,13 @@ void magmaSymeig(
     value_t* w, scalar_t* wA, magma_int_t ldwa, scalar_t* work, magma_int_t lwork, value_t* rwork,
     magma_int_t lrwork, magma_int_t* iwork, magma_int_t liwork, magma_int_t* info);
 
-template<class scalar_t>
+template<class scalar_t, class value_t=scalar_t>
 void magmaEig(
     magma_vec_t jobvl, magma_vec_t jobvr, magma_int_t n, scalar_t *A, magma_int_t lda,
-    scalar_t *wr, scalar_t *wi, scalar_t *VL, magma_int_t ldvl,
-    scalar_t *VR, magma_int_t ldvr, scalar_t *work, magma_int_t lwork, magma_int_t *info);
+    scalar_t *w, scalar_t *VL, magma_int_t ldvl,
+    scalar_t *VR, magma_int_t ldvr, scalar_t *work, magma_int_t lwork,
+    value_t *rwork,
+    magma_int_t *info);
 
 template<class scalar_t, class value_t=scalar_t>
 void magmaSvd(
@@ -975,23 +977,41 @@ void magmaSymeig<c10::complex<float>, float>(
       ldwa, reinterpret_cast<magmaFloatComplex*>(work), lwork, rwork, lrwork, iwork, liwork, info);
   AT_CUDA_CHECK(cudaGetLastError());
 }
-    
+
 template<>
 void magmaEig<double>(
-    magma_vec_t jobvl, magma_vec_t jobvr, magma_int_t n, double *A, magma_int_t lda,
-    double *wr, double *wi, double *VL, magma_int_t ldvl,
-    double *VR, magma_int_t ldvr, double *work, magma_int_t lwork, magma_int_t *info) {
+    magma_vec_t jobvl, magma_vec_t jobvr, magma_int_t n,
+    double *A, magma_int_t lda,
+    double *w,
+    double *VL, magma_int_t ldvl,
+    double *VR, magma_int_t ldvr,
+    double *work, magma_int_t lwork,
+    double *rwork,
+    magma_int_t *info) {
   MagmaStreamSyncGuard guard;
+  // magma [sd]geev wants to separate output arrays: wr and wi for the real
+  // and imaginary parts
+  double *wr = w;
+  double *wi = w + n;
+  (void)rwork; // unused
   magma_dgeev(jobvl, jobvr, n, A, lda, wr, wi, VL, ldvl, VR, ldvr, work, lwork, info);
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
 void magmaEig<float>(
-    magma_vec_t jobvl, magma_vec_t jobvr, magma_int_t n, float *A, magma_int_t lda,
-    float *wr, float *wi, float *VL, magma_int_t ldvl,
-    float *VR, magma_int_t ldvr, float *work, magma_int_t lwork, magma_int_t *info) {
+    magma_vec_t jobvl, magma_vec_t jobvr, magma_int_t n,
+    float *A, magma_int_t lda,
+    float *w,
+    float *VL, magma_int_t ldvl,
+    float *VR, magma_int_t ldvr,
+    float *work, magma_int_t lwork,
+    float *rwork,
+    magma_int_t *info) {
   MagmaStreamSyncGuard guard;
+  float *wr = w;
+  float *wi = w + n;
+  (void)rwork; // unused
   magma_sgeev(jobvl, jobvr, n, A, lda, wr, wi, VL, ldvl, VR, ldvr, work, lwork, info);
   AT_CUDA_CHECK(cudaGetLastError());
 }
@@ -1910,13 +1930,13 @@ TORCH_CHECK(false, "Calling torch.eig on a CUDA tensor requires compiling PyTorc
                    "Either transfer the tensor to the CPU before calling torch.eig or recompile with MAGMA.");
 #else
   TORCH_INTERNAL_ASSERT(self.device() == at::kCPU, "Internal error: apply_eig needs a CPU tensor");
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
   magma_vec_t jobvr = eigenvectors ? MagmaVec : MagmaNoVec;
   magma_int_t n = magma_int_cast(self.size(-1), "n");
   auto self_data = self.data_ptr<scalar_t>();
 
   auto out_eigvals_data = out_eigvals.data_ptr<scalar_t>();
   scalar_t *wr = out_eigvals_data;
-  scalar_t *wi = out_eigvals_data+n;
 
   scalar_t *vr_data = NULL;
   magma_int_t ldvr = 1;
@@ -1926,17 +1946,19 @@ TORCH_CHECK(false, "Calling torch.eig on a CUDA tensor requires compiling PyTorc
       ldvr = n;
   }
 
+  value_t *rwork_data = nullptr;
+
   if (n > 0) {
     // call magmaEig once to get the optimal size of work_data
     scalar_t wkopt;
     magma_int_t info;
-    magmaEig<scalar_t>(MagmaNoVec, jobvr, n, self_data, n, wr, wi, NULL, 1, vr_data, ldvr, &wkopt, -1, &info);
+    magmaEig<scalar_t>(MagmaNoVec, jobvr, n, self_data, n, wr, NULL, 1, vr_data, ldvr, &wkopt, -1, rwork_data, &info);
     magma_int_t lwork = (magma_int_t) wkopt;
 
     // call it a 2nd time to to the actual work
     scalar_t *work_data = nullptr;
     ALLOCATE_ARRAY(work_data, scalar_t, lwork);
-    magmaEig<scalar_t>(MagmaNoVec, jobvr, n, self_data, n, wr, wi, NULL, 1, vr_data, ldvr, work_data, lwork, &info);
+    magmaEig<scalar_t>(MagmaNoVec, jobvr, n, self_data, n, wr, NULL, 1, vr_data, ldvr, work_data, lwork, rwork_data, &info);
     *info_ptr = info;
   }
 #endif
