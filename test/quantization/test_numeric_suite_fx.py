@@ -74,8 +74,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
             test_only_eval_fn(prepared_model, self.img_data_2d)
             q_model = convert_fx(prepared_model)
 
-            expected_ob_dict_keys = {"conv.weight"}
-            compare_and_validate_results(fused, q_model, expected_ob_dict_keys)
+            compare_and_validate_results(fused, q_model)
 
     @override_qengines
     def test_compare_weights_linear_static_fx(self):
@@ -105,10 +104,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
         test_only_eval_fn(prepared_model, self.calib_data)
         q_model = convert_fx(prepared_model)
 
-        expected_ob_dict_keys = {"fc1.weight"}
-        compare_and_validate_results_weights_fx(
-            backup_prepared_model, q_model, expected_ob_dict_keys
-        )
+        compare_and_validate_results(backup_prepared_model, q_model)
 
     @override_qengines
     def test_compare_weights_linear_dynamic_fx(self):
@@ -137,10 +133,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
 
         q_model = convert_fx(prepared_model)
 
-        expected_ob_dict_keys = {"fc1.weight"}
-        compare_and_validate_results(
-            backup_prepared_model, q_model, expected_ob_dict_keys
-        )
+        compare_and_validate_results(backup_prepared_model, q_model)
 
     @override_qengines
     def test_compare_model_stub_conv_static_fx(self):
