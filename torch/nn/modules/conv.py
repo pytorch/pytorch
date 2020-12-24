@@ -532,9 +532,9 @@ class _ConvTransposeNd(_ConvNd):
 
     # dilation being an optional parameter is for backwards
     # compatibility
-    def _output_padding(self, input: Tensor, output_size: Optional[Sequence[int]],
-                        stride: Sequence[int], padding: Sequence[int], kernel_size: Sequence[int],
-                        dilation: Optional[Sequence[int]] = None) -> List[int]:
+    def _output_padding(self, input: Tensor, output_size: Optional[List[int]],
+                        stride: List[int], padding: List[int], kernel_size: List[int],
+                        dilation: Optional[List[int]] = None) -> List[int]:
         if output_size is None:
             ret = _single(self.output_padding)  # converting to list if was not already
         else:
@@ -685,8 +685,10 @@ class ConvTranspose1d(_ConvTransposeNd):
         if self.padding_mode != 'zeros':
             raise ValueError('Only `zeros` padding mode is supported for ConvTranspose1d')
 
+        # One cannot replace List by Sequence in "_output_padding" because pytorch does
+        # not support Sequence[T]. Therefore, a "type:ignore[...]" is required.
         output_padding = self._output_padding(
-            input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)
+            input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore[arg-type]
         return F.conv_transpose1d(
             input, self.weight, self.bias, self.stride, self.padding,
             output_padding, self.groups, self.dilation)
@@ -827,8 +829,10 @@ class ConvTranspose2d(_ConvTransposeNd):
         if self.padding_mode != 'zeros':
             raise ValueError('Only `zeros` padding mode is supported for ConvTranspose2d')
 
+        # One cannot replace List by Sequence in "_output_padding" because pytorch does
+        # not support Sequence[T]. Therefore, a "type:ignore[...]" is required.
         output_padding = self._output_padding(
-            input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)
+            input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore[arg-type]
 
         return F.conv_transpose2d(
             input, self.weight, self.bias, self.stride, self.padding,
@@ -966,8 +970,10 @@ class ConvTranspose3d(_ConvTransposeNd):
         if self.padding_mode != 'zeros':
             raise ValueError('Only `zeros` padding mode is supported for ConvTranspose3d')
 
+        # One cannot replace List by Sequence in "_output_padding" because pytorch does
+        # not support Sequence[T]. Therefore, a "type:ignore[...]" is required.
         output_padding = self._output_padding(
-            input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)
+            input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore[arg-type]
 
         return F.conv_transpose3d(
             input, self.weight, self.bias, self.stride, self.padding,
