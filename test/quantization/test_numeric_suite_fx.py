@@ -22,6 +22,7 @@ from torch.testing._internal.common_quantization import (
 )
 from torch.testing._internal.common_quantized import override_qengines
 
+
 class TestGraphModeNumericSuite(QuantizationTestCase):
     @override_qengines
     def test_remove_qconfig_observer_fx(self):
@@ -240,30 +241,24 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
                 for i, val in enumerate(v["quantized"]):
                     self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
-            qengine = torch.backends.quantized.engine
-            qconfig = get_default_qconfig(qengine)
-            qconfig_dict = {"": qconfig}
+        qengine = torch.backends.quantized.engine
+        qconfig = get_default_qconfig(qengine)
+        qconfig_dict = {"": qconfig}
 
-            model_list = [ConvModel(), ConvBNReLU()]
+        model_list = [ConvModel(), ConvBNReLU()]
 
-            for float_model in model_list:
-                float_model.eval()
+        for float_model in model_list:
+            float_model.eval()
+            prepared_model = prepare_fx(float_model, qconfig_dict)
+            backup_prepared_model = copy.deepcopy(prepared_model)
 
-                prepared_model = prepare_fx(float_model, qconfig_dict)
+            # Run calibration
+            test_only_eval_fn(prepared_model, self.img_data_2d)
+            q_model = convert_fx(prepared_model)
 
-                backup_prepared_model = copy.deepcopy(prepared_model)
-
-                # Run calibration
-                test_only_eval_fn(prepared_model, self.img_data_2d)
-                q_model = convert_fx(prepared_model)
-
-                qengine = torch.backends.quantized.engine
-                qconfig = get_default_qconfig(qengine)
-                qconfig_dict = {"": qconfig}
-
-                compare_and_validate_results(
-                    backup_prepared_model, q_model, self.img_data_2d[0][0]
-                )
+            compare_and_validate_results(
+                backup_prepared_model, q_model, self.img_data_2d[0][0]
+            )
 
     @override_qengines
     def test_compare_model_outputs_linear_static_fx(self):
@@ -283,20 +278,20 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
                 for i, val in enumerate(v["quantized"]):
                     self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
-            float_model = SingleLayerLinearModel()
-            float_model.eval()
+        float_model = SingleLayerLinearModel()
+        float_model.eval()
 
-            qengine = torch.backends.quantized.engine
-            qconfig = get_default_qconfig(qengine)
-            qconfig_dict = {"": qconfig}
+        qengine = torch.backends.quantized.engine
+        qconfig = get_default_qconfig(qengine)
+        qconfig_dict = {"": qconfig}
 
-            prepared_model = prepare_fx(float_model, qconfig_dict)
+        prepared_model = prepare_fx(float_model, qconfig_dict)
 
-            backup_prepared_model = copy.deepcopy(prepared_model)
+        backup_prepared_model = copy.deepcopy(prepared_model)
 
-            # Run calibration
-            test_only_eval_fn(prepared_model, self.calib_data)
-            q_model = convert_fx(prepared_model)
+        # Run calibration
+        test_only_eval_fn(prepared_model, self.calib_data)
+        q_model = convert_fx(prepared_model)
 
-            linear_data = self.calib_data[0][0]
-            compare_and_validate_results(backup_prepared_model, q_model, linear_data)
+        linear_data = self.calib_data[0][0]
+        compare_and_validate_results(backup_prepared_model, q_model, linear_data)
