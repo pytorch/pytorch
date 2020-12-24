@@ -11104,6 +11104,7 @@ class TestNNDeviceType(NNTestCase):
     def test_invalid_reduction_strings(self, device):
         input = torch.randn(3, 5, requires_grad=True, device=device)
         target = torch.tensor([1, 0, 4], device=device)
+        var = torch.ones(size=input.size(), requires_grad=True, device=device)
 
         for reduction in ['none', 'invalid']:
             def v(fn):
@@ -11122,7 +11123,7 @@ class TestNNDeviceType(NNTestCase):
             v(lambda: F.mse_loss(input, input, reduction=reduction))
             v(lambda: F.hinge_embedding_loss(input, input, reduction=reduction))
             v(lambda: F.poisson_nll_loss(input, input, reduction=reduction))
-            v(lambda: F.gaussian_nll_loss(input, input, input, reduction=reduction))
+            v(lambda: F.gaussian_nll_loss(input, input, var, reduction=reduction))
             v(lambda: F.binary_cross_entropy_with_logits(input, input, reduction=reduction))
 
             zeros = torch.zeros_like(input).to(torch.int64)

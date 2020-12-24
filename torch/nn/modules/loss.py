@@ -317,6 +317,8 @@ class GaussianNLLLoss(_Loss):
      + \frac{1}{2}\sum_{j=1}^D \left(\frac{\left(\text{input}[i,j] - \text{target}[i,j]\right)^2}{\text{var}[i]}\right)
      + \frac{D}{2}\log(2\pi)
 
+    By default, the constant final term is omitted, unless :attr:`full` is ``True``.
+
 
     Examples::
 
@@ -326,12 +328,20 @@ class GaussianNLLLoss(_Loss):
         >>> var = torch.ones(5, 2, requires_grad=True)
         >>> output = loss(input, target, var)
         >>> output.backward()
+
+    Shape:
+        - Input: :math:`(N, *)` where :math:`*` means, any number of additional
+          dimensions
+        - Target: :math:`(N, *)`, same shape as the input
+        - Var: :math:`(N, 1)` or `(N, *)`, same shape as the input
+        - Output: scalar by default. If :attr:`reduction` is ``'none'``, then :math:`(N, *)`,
+          the same shape as the input
     """
     __constants__ = ['full', 'eps', 'reduction']
     full: bool
     eps: float
 
-    def __init__(self, full: bool = True, eps: float = 1e-8, reduction: str = 'mean') -> None:
+    def __init__(self, full: bool = False, eps: float = 1e-8, reduction: str = 'mean') -> None:
         super(GaussianNLLLoss, self).__init__(reduction)
         self.full = full
         self.eps = eps
