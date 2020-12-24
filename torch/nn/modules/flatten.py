@@ -71,7 +71,7 @@ class Unflatten(Module):
         >>>     nn.Linear(50, 50),
         >>>     nn.Unflatten(1, (2, 5, 5))
         >>> )
-        >>> output = m(output)
+        >>> output = m(input)
         >>> output.size()
         torch.Size([2, 2, 5, 5])
         >>> # With torch.Size
@@ -79,7 +79,7 @@ class Unflatten(Module):
         >>>     nn.Linear(50, 50),
         >>>     nn.Unflatten(1, torch.Size([2, 5, 5]))
         >>> )
-        >>> output = m(output)
+        >>> output = m(input)
         >>> output.size()
         torch.Size([2, 2, 5, 5])
         >>> # With namedshape (tuple of tuples)
@@ -87,7 +87,7 @@ class Unflatten(Module):
         >>>     nn.Linear(50, 50),
         >>>     nn.Unflatten('features', (('C', 2), ('H', 50), ('W',50)))
         >>> )
-        >>> output = m(output)
+        >>> output = m(input)
         >>> output.size()
         torch.Size([2, 2, 5, 5])
     """
