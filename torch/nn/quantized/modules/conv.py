@@ -1,7 +1,7 @@
 # coding=utf-8
 r"""Quantized convolution modules."""
 
-from typing import Optional, List
+from typing import Optional, List, TypeVar
 
 import torch
 import torch.nn as nn
@@ -176,8 +176,8 @@ class _ConvNd(nn.Module):
     @staticmethod
     def from_float(cls, mod):
         if hasattr(mod, "weight_fake_quant"):
-            # assert type(mod) == cls.__QAT_MODULE, " nnq." + cls.__name__ + \
-            # ".from_float only works for " + cls.__QAT_MODULE.__name__
+            # assert type(mod) == cls.__QAT_MODULE, " nnq." + cls.__name__
+            # ".from_float only works for " + c
             if type(mod) == cls._NNIQAT_CONV_BN_MODULE:
                 mod.weight, mod.bias = fuse_conv_bn_weights(
                     mod.weight, mod.bias, mod.bn.running_mean, mod.bn.running_var,
@@ -463,8 +463,12 @@ class Conv3d(_ConvNd):
         return cls.get_qconv(mod, activation_post_process)
 
 # === Transposed Convolutions ===
+MOD = TypeVar('MOD', bound=nn.modules.conv._ConvNd)
 
 class _ConvTransposeNd(_ConvNd):
+
+    _FLOAT_MODULE = MOD
+
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation, transposed, output_padding,
                  groups, bias, padding_mode):
@@ -493,8 +497,8 @@ class _ConvTransposeNd(_ConvNd):
         """
         # derived classes override cls._FLOAT_MODULE attribute
         msg = ' nnq.' + cls.__name__ + '.from_float only works for ' + \
-              cls._FLOAT_MODULE.__name__  # type: ignore[attr-defined]
-        assert type(mod) == cls._FLOAT_MODULE, msg  # type: ignore[attr-defined]
+              cls._FLOAT_MODULE.__name__
+        assert type(mod) == cls._FLOAT_MODULE, msg
         assert hasattr(mod, 'qconfig'), \
             'Input float module must have qconfig defined.'
         weight_post_process = mod.qconfig.weight()
