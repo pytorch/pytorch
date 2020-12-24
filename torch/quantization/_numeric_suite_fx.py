@@ -15,7 +15,7 @@ from torch.quantization._numeric_suite import (
 from torch.quantization.fx.quantization_patterns import NumericSuiteQuantizeHandler
 from torch.quantization.fx.quantize import _remove_qconfig, is_activation_post_process
 from torch.quantization.quantize_fx import prepare_fx
-
+from torch.quantization import get_default_compare_output_module_list
 
 def remove_qconfig_observer_fx(model):
     # remove activation post process
@@ -209,7 +209,8 @@ def compare_model_outputs_fx(
     )
     if allow_list is None:
         allow_list = get_default_compare_output_module_list()
-    prepare_model_outputs_fx(float_model, q_model, Logger, allow_list)
+
+    float_model, q_model = prepare_model_outputs_fx(float_model, q_model, Logger, allow_list)
     float_model(*data)
     q_model(*data)
     act_compare_dict = get_matching_activations(float_model, q_model)

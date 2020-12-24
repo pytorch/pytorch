@@ -157,6 +157,7 @@ class Logger(nn.Module):
     def __init__(self):
         super(Logger, self).__init__()
         self.stats = {}
+        self.dtype = torch.quint8
 
     def forward(self, x):
         pass

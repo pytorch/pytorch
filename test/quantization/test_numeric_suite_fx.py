@@ -192,7 +192,6 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
                 float_model, q_model, module_swap_list, data
             )
             expected_ob_dict_keys = {"fc1.stats"}
-
             self.assertTrue(ob_dict.keys() == expected_ob_dict_keys)
             self.assertEqual(len(ob_dict), 1)
             for k, v in ob_dict.items():
@@ -232,11 +231,10 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
             act_compare_dict = compare_model_outputs_fx(float_model, q_model, data)
 
             expected_ob_dict_keys = {"stats"}
-
             self.assertTrue(act_compare_dict.keys() == expected_ob_dict_keys)
-
+            self.assertEqual(len(act_compare_dict), 1)
             for k, v in act_compare_dict.items():
-                self.assertTrue(len(v["float"] == 1))
+                self.assertTrue(len(v["float"]) == 1)
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
                 for i, val in enumerate(v["quantized"]):
                     self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
@@ -268,12 +266,11 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
 
         def compare_and_validate_results(float_model, q_model, data):
             act_compare_dict = compare_model_outputs_fx(float_model, q_model, data)
-
             expected_ob_dict_keys = {"stats"}
             self.assertTrue(act_compare_dict.keys() == expected_ob_dict_keys)
-
+            self.assertEqual(len(act_compare_dict), 1)
             for k, v in act_compare_dict.items():
-                self.assertTrue(len(v["float"] == 1))
+                self.assertTrue(len(v["float"]) == 1)
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
                 for i, val in enumerate(v["quantized"]):
                     self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
