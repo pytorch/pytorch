@@ -110,7 +110,7 @@ def maybe_insert_observer_for_special_module(
       needs to be observed by parent module
     """
     assert modules is not None
-    standalone_module_input_idxs = None
+    standalone_module_input_idxs: Optional[List[int]] = None
     if isinstance(quantize_handler, CustomModuleQuantizeHandler):
         custom_module = modules[node.target]  # type: ignore
         custom_module_class_mapping = prepare_custom_config_dict.get(
@@ -138,7 +138,7 @@ def maybe_insert_observer_for_special_module(
         observed_standalone_module = \
             prepare(standalone_module, sm_qconfig_dict, sm_prepare_config_dict)
         standalone_module_input_idxs = observed_standalone_module.\
-            _standalone_module_input_quantized_idxs
+            _standalone_module_input_quantized_idxs  # type: ignore
         observed_standalone_module = mark_observed_standalone_module(
             observed_standalone_module)
         parent_name, name = _parent_name(node.target)
@@ -553,8 +553,8 @@ class Quantizer:
                 result_node.args[0].name in observed_node_names_set
             # these inputs are observed in parent
             model._standalone_module_input_quantized_idxs = \
-                input_quantized_idxs
-            model._standalone_module_output_quantized_idxs = output_quantized_idxs
+                input_quantized_idxs  # type: ignore
+            model._standalone_module_output_quantized_idxs = output_quantized_idxs  # type: ignore
         return model
 
     def save_state(self, observed: GraphModule) -> None:
@@ -835,7 +835,8 @@ class Quantizer:
                     # for non-standalone module, since _standalone_module_output_quantized_idxs
                     # is only available in observed standalone module
                     if is_observed_standalone_module_node:
-                        out_quant_idxs = self.modules[node.target]._standalone_module_output_quantized_idxs
+                        out_quant_idxs: List[int]
+                        out_quant_idxs = self.modules[node.target]._standalone_module_output_quantized_idxs  # type: ignore
                         assert len(out_quant_idxs) <= 1, "Currently standalone only support one output"
                         quantized = 0 in out_quant_idxs
 
