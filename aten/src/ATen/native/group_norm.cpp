@@ -25,7 +25,10 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
     int64_t HxW,
     int64_t group,
     double eps) {
-  Tensor Y = at::native::empty_like(X, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto memory_format = X.suggest_memory_format();
+  Tensor Y = X.device().type() == c10::DeviceType::CPU ?
+      at::native::empty_like(X, memory_format) :
+      at::native::empty_like(X, at::MemoryFormat::Contiguous);
   Tensor mean = at::empty({N, group}, X.options());
   Tensor rstd = at::empty({N, group}, X.options());
   GroupNormKernel(
@@ -110,7 +113,9 @@ Tensor group_norm(
       prod_intlist(input_shape.cbegin() + 2, input_shape.cend());
 
   const Tensor kEmpty;
-  const auto& X = input.is_contiguous() ? input : input.contiguous();
+  auto memory_format = input.suggest_memory_format();
+  const auto& X = input.device().type() == c10::DeviceType::CPU ?
+      input.contiguous(memory_format) : input.contiguous();
   const auto& gamma = weight.defined() ? weight.contiguous() : kEmpty;
   const auto& beta = bias.defined() ? bias.contiguous() : kEmpty;
   TORCH_CHECK(!gamma.defined() || gamma.numel() == C);
