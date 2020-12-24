@@ -80,7 +80,16 @@ The corresponding implementation is chosen automatically based on the PyTorch bu
 Quantization API Summary
 ---------------------------------------
 
-There are three types of quantization supported in PyTorch:
+PyTorch provides two different modes of quantization: Eager Mode Quantization and FX Graph Mode Quantization.
+
+Eager Mode Quantization is a beta feature. User needs to do fusion and specify where quantization and dequantization happens manually, also it only supports modules and not functionals.
+
+FX Graph Mode Quantization is a new automated quantization framework in PyTorch, and currently it's a prototype feature. It improves upon Eager Mode Quantization by adding support for functionals and automating the quantization process. Although people might need to refactor the model a bit to make the model compatible with FX Graph Mode Quantization (symbolically traceable with torch.fx).
+
+Eager Mode Quantization
+^^^^^^^^^^^^^^^^^^^^^^^
+
+There are three types of quantization supported in Eager Mode Quantization:
 
 1. dynamic quantization (weights quantized with activations read/stored in
    floating point and quantized for compute.)
@@ -95,7 +104,7 @@ for a more comprehensive overview of the tradeoffs between these quantization
 types.
 
 Dynamic Quantization
-^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~
 
 This is the simplest to apply form of quantization where the weights are
 quantized ahead of time but the activations are dynamically quantized
@@ -148,7 +157,7 @@ To learn more about dynamic quantization please see our `dynamic quantization tu
 <https://pytorch.org/tutorials/recipes/recipes/dynamic_quantization.html>`_.
 
 Static Quantization
-^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~
 
 Static quantization quantizes the weights and activations of the model.  It
 fuses activations into preceding layers where possible.  It requires
@@ -238,7 +247,7 @@ To learn more about static quantization, please see the `static quantization tut
 <https://pytorch.org/tutorials/advanced/static_quantization_tutorial.html>`_.
 
 Quantization Aware Training
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Quantization Aware Training models the effects of quantization during training
 allowing for higher accuracy compared to other quantization methods.  During
@@ -331,6 +340,92 @@ API Example::
 To learn more about quantization aware training, please see the `QAT
 tutorial
 <https://pytorch.org/tutorials/advanced/static_quantization_tutorial.html>`_.
+
+(Prototype) FX Graph Mode Quantization
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Quantization types supported by FX Graph Mode can be classified in two ways:
+
+1.
+- Post Training Quantization (apply quantization after training, quantization parameters are calculated based on sample calibration data)
+- Quantization Aware Training (simulate quantization during training so that the quantization parameters can be learned together with the model using training data)
+
+2.
+- Weight Only Quantization (only weight is statically quantized)
+- Dynamic Quantization (weight is statically quantized, activation is dynamically quantized)
+- Static Quantization (both weight and activations are statically quantized)
+
+These two ways of classification are independent, so theoretically we can have 6 different types of quantization.
+
+The supported quantization types in FX Graph Mode Quantization are:
+- Post Training Quantization
+
+  - Weight Only Quantization
+  - Dynamic Quantization
+  - Static Quantization
+
+- Quantization Aware Training
+
+  - Static Quantization
+
+
+There are multiple quantization types in post training quantization (weight only, dynamic and static) and the configuration is done through `qconfig_dict` (an argument of the `prepare_fx` function).
+
+API Example::
+
+  import torch.quantization.quantize_fx as quantize_fx
+  import copy
+
+  model_fp = UserModel(...)
+
+  #
+  # post training dynamic/weight_only quantization
+  #
+
+  # we need to deepcopy if we still want to keep model_fp unchanged after quantization since quantization apis change the input model
+  model_to_quantize = copy.deepcopy(model_fp)
+  model_to_quantize.eval()
+  qconfig_dict = {"": torch.quantization.default_dynamic_qconfig}
+  # prepare
+  model_prepared = quantize_fx.prepare_fx(model_to_quantize, qconfig_dict)
+  # no calibration needed when we only have dynamici/weight_only quantization
+  # quantize
+  model_quantized = quantize_fx.convert_fx(model_prepared)
+
+  #
+  # post training static quantization
+  #
+
+  model_to_quantize = copy.deepcopy(model_fp)
+  qconfig_dict = {"": torch.quantization.get_default_qconfig('qnnpack')}
+  model_to_quantize.eval()
+  # prepare
+  model_prepared = quantize_fx.prepare_fx(model_to_quantize, qconfig_dict)
+  # calibrate (not shown)
+  # quantize
+  model_quantized = quantize_fx.convert_fx(model_prepared)
+
+  #
+  # quantization aware training for static quantization
+  #
+
+  model_to_quantize = copy.deepcopy(model_fp)
+  qconfig_dict = {"": torch.quantization.get_default_qat_qconfig('qnnpack')}
+  model_to_quantize.train()
+  # prepare
+  model_prepared = quantize_fx.prepare_qat_fx(model_to_qunatize, qconfig_dict)
+  # training loop (not shown)
+  # quantize
+  model_quantized = quantize_fx.convert_fx(model_prepared)
+
+  #
+  # fusion
+  #
+  model_to_quantize = copy.deepcopy(model_fp)
+  model_fused = quantize_fx.fuse_fx(model_to_quantize)
+
+Please see the following tutorials for more information about FX Graph Mode Quantization:
+- FX Graph Mode Post Training Static Quantization (TODO: link)
+- FX Graph Mode Post Training Dynamic Quantization (TODO: link)
 
 Quantized Tensors
 ---------------------------------------
