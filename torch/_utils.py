@@ -144,7 +144,7 @@ def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad, bac
     return tensor
 
 
-_sparse_tensors_to_validate: List[torch.Tensor] = []
+_sparse_tensors_to_validate: List["torch.Tensor"] = []
 
 # In _legacy_load() in serialization.py we unpickle storages after the sparse
 # tensors have been already unpickled. Those storages contain data necessary for
