@@ -5429,6 +5429,61 @@ class TestONNXRuntime(unittest.TestCase):
             "Initializers' sequence is not as same as named_parameters(). Expected: (" \
             + ', '.join(named_params_list) + "). Actual:(" + ', '.join(actual_list) + ")."
 
+    def test_initializer_sequence_script_model(self):
+        def list_is_expected(short_list, long_list) -> bool:
+            if (len(short_list) > len(long_list)):
+                return False
+
+            for i in range(len(short_list)):
+                if (short_list[i] not in long_list[i]):
+                    return False
+
+            return True
+
+        def loop(x, y):
+            for i in range(int(y)):
+                x = x + i
+            return x
+
+        class MyModule(torch.nn.Module):
+            def __init__(self, input_size, hidden_size, num_classes):
+                super(MyModule, self).__init__()
+                self.fc1 = torch.nn.Linear(input_size, hidden_size)
+                self.relu = torch.nn.ReLU()
+                self.fc2 = torch.nn.Linear(hidden_size, num_classes)
+
+            def forward(self, x, y):
+                x = loop(x, y)
+                out = self.fc1(x)
+                out = self.relu(out)
+                out = self.fc2(out)
+                return out
+
+        import os
+        from torch._utils_internal import get_writable_path
+
+        data_dir = get_writable_path(os.path.join(os.path.dirname(__file__)))
+        onnx_model_file_name = os.path.join(data_dir, 'test_initializer_sequence_script.onnx')
+
+        test_model = torch.jit.script(MyModule(3, 4, 10))
+        state_dict_list = [k for (k, v) in test_model.state_dict().items()]
+        named_params_list = [k for (k, v) in test_model.named_parameters()]
+
+        x = torch.ones(2, 3, dtype=torch.float)
+        y = torch.tensor(5, dtype=torch.long)
+
+        example_output = (test_model(x, y),)
+        torch.onnx.export(test_model, (x, y), onnx_model_file_name, example_outputs=example_output)
+        loaded_model = onnx.load(onnx_model_file_name)
+
+        actual_list = [p.name for p in loaded_model.graph.initializer]
+        assert list_is_expected(state_dict_list, actual_list), \
+            "ScriptModel - Initializers' sequence is not as same as state_dict(). Expected: (" \
+            + ', '.join(state_dict_list) + "). Actual:(" + ', '.join(actual_list) + ")."
+        assert list_is_expected(named_params_list, actual_list), \
+            "ScriptModel - Initializers' sequence is not as same as named_parameters(). Expected: (" \
+            + ', '.join(named_params_list) + "). Actual:(" + ', '.join(actual_list) + ")."
+
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout,
