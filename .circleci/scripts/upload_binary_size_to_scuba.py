@@ -41,11 +41,13 @@ def build_message(size):
             "build_num": os.environ.get("CIRCLE_BUILD_NUM"),
             "sha1": os.environ.get("CIRCLE_SHA1"),
             "branch": os.environ.get("CIRCLE_BRANCH"),
+            "workflow_id": os.environ.get("CIRCLE_WORKFLOW_ID"),
         },
         "int": {
             "time": int(time.time()),
             "size": size,
             "commit_time": int(os.environ.get("COMMIT_TIME", "0")),
+            "run_duration": int(time.time() - os.path.getmtime(os.path.realpath(__file__))),
         },
     }
 
@@ -114,10 +116,12 @@ def report_android_sizes(file_dir):
                     "build_num": os.environ.get("CIRCLE_BUILD_NUM"),
                     "sha1": os.environ.get("CIRCLE_SHA1"),
                     "branch": os.environ.get("CIRCLE_BRANCH"),
+                    "workflow_id": os.environ.get("CIRCLE_WORKFLOW_ID"),
                 },
                 "int": {
                     "time": int(time.time()),
                     "commit_time": int(os.environ.get("COMMIT_TIME", "0")),
+                    "run_duration": int(time.time() - os.path.getmtime(os.path.realpath(__file__))),
                     "size": comp_size,
                     "raw_size": uncomp_size,
                 },

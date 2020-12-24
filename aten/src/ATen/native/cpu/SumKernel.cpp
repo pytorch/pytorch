@@ -111,14 +111,18 @@ std::array<scalar_t, nrows> multi_row_sum(
   for (; i + level_step <= size;) {
     for (int64_t j = 0; j < level_step; ++j, ++i) {
       const char * sum_base = in_data + i * row_stride;
-      #pragma unroll
+      #if !defined(COMPILING_FOR_MIN_SIZE)
+      # pragma unroll
+      #endif
       for (int64_t k = 0; k < nrows; ++k) {
         acc[0][k] += load<scalar_t>(sum_base, col_stride, k);
       }
     }
 
     for (int64_t j = 1; j < num_levels; ++j) {
-      #pragma unroll
+      #if !defined(COMPILING_FOR_MIN_SIZE)
+      # pragma unroll
+      #endif
       for (int64_t k = 0; k < nrows; ++k) {
         acc[j][k] += acc[j-1][k];
         acc[j-1][k] = scalar_t(0);
@@ -133,14 +137,18 @@ std::array<scalar_t, nrows> multi_row_sum(
 
   for (; i < size; ++i) {
     const char * sum_base = in_data + i * row_stride;
-    #pragma unroll
+    #if !defined(COMPILING_FOR_MIN_SIZE)
+    # pragma unroll
+    #endif
     for (int64_t k = 0; k < nrows; ++k) {
       acc[0][k] += load<scalar_t>(sum_base, col_stride, k);
     }
   }
 
   for (int64_t j = 1; j < num_levels; ++j) {
-    #pragma unroll
+    #if !defined(COMPILING_FOR_MIN_SIZE)
+    # pragma unroll
+    #endif
     for (int64_t k = 0; k < nrows; ++k) {
       acc[0][k] += acc[j][k];
     }

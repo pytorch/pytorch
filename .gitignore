@@ -33,6 +33,8 @@ docs/cpp/src
 docs/src/**/*
 docs/cpp/build
 docs/cpp/source/api
+docs/cpp/source/html/
+docs/cpp/source/latex/
 docs/source/generated/
 log
 test/.coverage
@@ -53,10 +55,12 @@ torch.egg-info/
 torch/_C/__init__.pyi
 torch/_C/_nn.pyi
 torch/_C/_VariableFunctions.pyi
+torch/_VF.pyi
 torch/nn/functional.pyi
 torch/csrc/autograd/generated/*
 # Listed manually because some files in this directory are not generated
 torch/testing/_internal/generated/annotated_fn_args.py
+torch/testing/_internal/data/*.pt
 torch/csrc/cudnn/cuDNN.cpp
 torch/csrc/generated
 torch/csrc/generic/TensorMethods.cpp
@@ -72,6 +76,7 @@ torch/lib/*.exe*
 torch/lib/*.dylib*
 torch/lib/*.h
 torch/lib/*.lib
+torch/lib/*.pdb
 torch/lib/*.so*
 torch/lib/protobuf*.pc
 torch/lib/build
@@ -89,6 +94,8 @@ torch/lib64
 torch/include/
 torch/share/
 torch/test/
+torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h
+torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h
 torch/version.py
 # Root level file used in CI to specify certain env configs.
 # E.g., see .circleci/config.yaml
@@ -186,6 +193,7 @@ build_ios
 /build_*
 .build_debug/*
 .build_release/*
+.build_profile/*
 distribute/*
 *.testbin
 *.bin
@@ -259,6 +267,7 @@ TAGS
 
 # clangd background index
 .clangd/
+.cache/
 
 # bazel symlinks
 bazel-*

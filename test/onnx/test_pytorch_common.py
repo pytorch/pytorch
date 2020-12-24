@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import functools
 import os
 import unittest
@@ -70,6 +65,16 @@ def enableScriptTest():
     def script_dec(func):
         def wrapper(self):
             self.is_script_test_enabled = True
+            return func(self)
+        return wrapper
+    return script_dec
+
+
+# Disable tests for scripting.
+def disableScriptTest():
+    def script_dec(func):
+        def wrapper(self):
+            self.is_script_test_enabled = False
             return func(self)
         return wrapper
     return script_dec

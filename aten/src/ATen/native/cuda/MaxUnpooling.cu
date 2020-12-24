@@ -169,8 +169,8 @@ Tensor& max_unpooling2d_forward_out_cuda(
             oheight,
             owidth,
             output.data_ptr<scalar_t>());
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }));
-  AT_CUDA_CHECK(cudaGetLastError()); 
   if (self.ndimension() == 3) {
     output.resize_({numChannels, oheight, owidth});
   }
@@ -343,7 +343,7 @@ Tensor& max_unpooling3d_forward_out_cuda(
               oH,
               oW,
               offsetZ);
-          AT_CUDA_CHECK(cudaGetLastError()); 
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
           totalZ -= 65535;
           offsetZ += 65535;
         }
@@ -428,7 +428,7 @@ at::Tensor& max_unpooling2d_backward_out_cuda(
   grad_input.resize_as_(self);
   grad_input.zero_();
 
-  int count = self.numel();
+  int64_t count = self.numel();
 
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half,
       self.scalar_type(), "max_unpooling2d_backward_kernel", ([&] {
@@ -446,8 +446,8 @@ at::Tensor& max_unpooling2d_backward_out_cuda(
             oheight,
             owidth,
             grad_input.data_ptr<scalar_t>());
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }));
-  AT_CUDA_CHECK(cudaGetLastError()); 
   return grad_input;
 }
 at::Tensor max_unpooling2d_backward_cuda(
@@ -550,7 +550,7 @@ at::Tensor& max_unpooling3d_backward_out_cuda(
               indices.packed_accessor64<int64_t, 4>(),
               grad_input_reshaped.packed_accessor64<scalar_t, 4>(),
               offsetZ);
-          AT_CUDA_CHECK(cudaGetLastError());
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
           totalZ -= 65535;
           offsetZ += 65535;
         }

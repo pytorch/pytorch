@@ -4,7 +4,9 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/symbolic.h>
 #include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 #include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/utils/pybind.h>
 #include <sstream>
@@ -186,11 +188,16 @@ void BlockToONNX(
     return it->second;
   };
 
+  GRAPH_DEBUG(
+      "BlockToONNX: graph of old block: ",
+      old_block->owningGraph()->toString());
+
   // Initialize context and environment
   for (auto input : old_block->inputs()) {
     auto n = ctx.block->addInput()->copyMetadata(input);
     env[input] = n;
   }
+
   // Put the new outputs in our environment map, and copy the type from the
   // input graph if they were not set by the symbolic. This is called only
   // with results of symbolic call (not for nodes that are just cloned).
@@ -213,12 +220,10 @@ void BlockToONNX(
         // Allow symbolic() to skip specifying the type of the return node.
         // Unfortunately, they are on the hook for all internal nodes
         // (though in practice, the types are not computed.)
-        auto old_tensor_type = old->type()->cast<TensorType>();
-        if (old_tensor_type == nullptr ||
-            old_tensor_type->scalarType().has_value()) {
-          // Check if Tensor has scalartype when overwriting output type
-          outputs[i]->setType(old->type());
-        }
+        //
+        // If onnx shape inference is turned on, the new outputs will have
+        // types inferred, and they will be merged with the old types.
+        outputs[i]->setType(MergeInferredType(old->type(), outputs[i]->type()));
 
         // Copy over source location and scope information to all nodes
         // created by the symbolic
@@ -297,6 +302,7 @@ void BlockToONNX(
     // TODO: Assert it's an ATen identifier???
     // (Sometimes it's not...)
     processSymbolicOutput(n->kind().toUnqualString(), n, raw_output);
+    GRAPH_DUMP("after process output:", ctx.block->owningGraph());
   };
 
   auto callPySymbolicMethod = [&](ConcretePythonOp* op) {
@@ -363,7 +369,6 @@ void BlockToONNX(
   }
   for (auto output : old_block->outputs()) {
     ctx.block->registerOutput(env.at(output));
-    env.at(output)->setType(output->type());
   }
   EliminateDeadCode(
       ctx.block,

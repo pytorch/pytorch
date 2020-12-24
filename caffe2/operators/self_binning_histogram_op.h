@@ -19,7 +19,8 @@ class SelfBinningHistogramOp final : public Operator<Context> {
         bin_spacing_(this->template GetSingleArgument<std::string>(
             "bin_spacing",
             "linear")),
-        logspace_start_(this->template GetSingleArgument<float>("logspace_start", 1e-24))
+        logspace_start_(this->template GetSingleArgument<float>("logspace_start", 1e-24)),
+        abs_(this->template GetSingleArgument<bool>("abs", false))
          {
     CAFFE_ENFORCE_GE(
         num_bins_, 1, "Number of bins must be greater than or equal to 1.");
@@ -64,13 +65,14 @@ class SelfBinningHistogramOp final : public Operator<Context> {
       total_count += N;
       const auto* x_data = x.template data<T>();
       for (int64_t data_idx = 0; data_idx < N; data_idx++) {
+        const T val = this->abs_ ? abs(x_data[data_idx]) :  x_data[data_idx];
         if (!first_seen) {
-          max = x_data[data_idx];
-          min = x_data[data_idx];
+          max = val;
+          min = val;
           first_seen = true;
         } else {
-          max = std::max(x_data[data_idx], max);
-          min = std::min(x_data[data_idx], min);
+          max = std::max(val, max);
+          min = std::min(val, min);
         }
       }
     }
@@ -130,10 +132,11 @@ class SelfBinningHistogramOp final : public Operator<Context> {
         const int64_t N = x.numel();
         const auto* x_data = x.template data<T>();
         for (int64_t data_idx = 0; data_idx < N; data_idx++) {
+          const T val = this->abs_ ? abs(x_data[data_idx]) :  x_data[data_idx];
           const auto bisection_it = std::upper_bound(
               histogram_values_data,
               histogram_values_data + num_edges_,
-              x_data[data_idx]);
+              val);
           const int bisection_idx = bisection_it - histogram_values_data;
           if (bisection_idx > 0 && bisection_idx < num_edges_) {
             histogram_counts_data[bisection_idx - 1]++;
@@ -156,6 +159,7 @@ class SelfBinningHistogramOp final : public Operator<Context> {
   int num_edges_;
   std::string bin_spacing_;
   float logspace_start_;
+  bool abs_; // automatically apply abs() on the input values
 
   void CheckInputs() {
     const auto& input_zero = Input(0);

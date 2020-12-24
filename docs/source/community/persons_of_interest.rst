@@ -25,7 +25,6 @@ torch.*
 torch.nn
 ~~~~~~~~
 
--  Thomas Viehmann (`t-vi <https://github.com/t-vi>`__)
 -  Adam Paszke (`apaszke <https://github.com/apaszke>`__)
 -  Greg Chanan (`gchanan <https://github.com/gchanan>`__)
 -  Soumith Chintala (`soumith <https://github.com/soumith>`__)
@@ -160,6 +159,7 @@ XLA
 TorchServe
 ~~~~~~~~~~
 
+- Geeta Chauhan (`chauhang <https://github.com/chauhang>`__)
 - Manoj Rao (`mycpuorg <https://github.com/mycpuorg>`__)
 - Vamshi Dantu (`vdantu <https://github.com/vdantu>`__)
 - Dhanasekar Karuppasamy (`dhanainme <https://github.com/dhanainme>`__)

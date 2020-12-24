@@ -87,7 +87,7 @@ class C10_API Scalar {
   }
 
   Scalar operator-() const;
-
+  Scalar conj() const;
   ScalarType type() const {
     if (isComplex()) {
       return ScalarType::ComplexDouble;
@@ -111,14 +111,14 @@ class C10_API Scalar {
     }
 
     template<typename T,
-             typename std::enable_if<!std::is_integral<T>::value && !c10::is_complex_t<T>::value, bool>::type* =
+             typename std::enable_if<!std::is_integral<T>::value && !c10::is_complex<T>::value, bool>::type* =
                  nullptr>
     Scalar(T vv, bool) : tag(Tag::HAS_d) {
       v.d = convert<decltype(v.d), T>(vv);
     }
 
     template<typename T,
-             typename std::enable_if<c10::is_complex_t<T>::value, bool>::type* =
+             typename std::enable_if<c10::is_complex<T>::value, bool>::type* =
                  nullptr>
     Scalar(T vv, bool) : tag(Tag::HAS_z) {
       v.z = convert<decltype(v.z), T>(vv);

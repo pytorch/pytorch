@@ -26,6 +26,7 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_DECLARE)
 #undef IMM_DECLARE
 
 class Cast;
+class BitCast;
 class Var;
 class Buf;
 class Ramp;
@@ -45,6 +46,8 @@ class Cond;
 class Term;
 class Polynomial;
 class RoundOff;
+class MaxTerm;
+class MinTerm;
 class ReduceOp;
 class AtomicAdd;
 class SyncThreads;
@@ -72,6 +75,7 @@ class TORCH_API IRVisitor {
 #undef IMM_PRINT_VISIT
 
   virtual void visit(const Cast* v);
+  virtual void visit(const BitCast* v);
   virtual void visit(const Var* v);
   virtual void visit(const Buf* v);
   virtual void visit(const Ramp* v);
@@ -98,6 +102,8 @@ class TORCH_API IRVisitor {
   virtual void visit(const Term* v);
   virtual void visit(const Polynomial* v);
   virtual void visit(const RoundOff* v);
+  virtual void visit(const MaxTerm* v);
+  virtual void visit(const MinTerm* v);
   virtual void visit(const ReduceOp* v);
   virtual void visit(const AtomicAdd* v);
   virtual void visit(const SyncThreads* v);

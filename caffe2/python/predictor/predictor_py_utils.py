@@ -1,9 +1,9 @@
 ## @package predictor_py_utils
 # Module caffe2.python.predictor.predictor_py_utils
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core, scope
 
@@ -161,6 +161,9 @@ def GetBlobsOrder(meta_net_def):
 
 def SetTensorBoundShapes(meta_net_def, tensor_bound_shapes):
     meta_net_def.tensorBoundShapes.CopyFrom(tensor_bound_shapes)
+
+def SetAOTConfig(meta_net_def, aot_config):
+    meta_net_def.aotConfig.CopyFrom(aot_config)
 
 def GetArgumentByName(net_def, arg_name):
     for arg in net_def.arg:

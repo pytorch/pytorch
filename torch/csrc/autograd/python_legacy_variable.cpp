@@ -30,9 +30,10 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
     grad_fn = nullptr;
 
   if (is_volatile) {
-    PyErr_WarnEx(PyExc_UserWarning,
+    auto r = PyErr_WarnEx(PyExc_UserWarning,
         "volatile was removed and now has no effect. Use `with torch.no_grad():` "
         "instead.", 1);
+    if (r != 0) throw python_error();
   }
 
   if (is_volatile && requires_grad) {

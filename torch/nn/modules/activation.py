@@ -442,7 +442,10 @@ class ELU(Module):
     r"""Applies the element-wise function:
 
     .. math::
-        \text{ELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x) - 1))
+        \text{ELU}(x) = \begin{cases}
+        x, & \text{ if } x > 0\\
+        \alpha * (\exp(x) - 1), & \text{ if } x \leq 0
+        \end{cases}
 
     Args:
         alpha: the :math:`\alpha` value for the ELU formulation. Default: 1.0
@@ -828,7 +831,7 @@ class Softshrink(Module):
 class MultiheadAttention(Module):
     r"""Allows the model to jointly attend to information
     from different representation subspaces.
-    See reference: Attention Is All You Need
+    See `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_
 
     .. math::
         \text{MultiHead}(Q, K, V) = \text{Concat}(head_1,\dots,head_h)W^O
@@ -846,17 +849,15 @@ class MultiheadAttention(Module):
         vdim: total number of features in value. Default: None.
 
         Note: if kdim and vdim are None, they will be set to embed_dim such that
-        query, key, and value have the same number of features.
+              query, key, and value have the same number of features.
 
     Examples::
 
         >>> multihead_attn = nn.MultiheadAttention(embed_dim, num_heads)
         >>> attn_output, attn_output_weights = multihead_attn(query, key, value)
     """
-    __annotations__ = {
-        'bias_k': torch._jit_internal.Optional[torch.Tensor],
-        'bias_v': torch._jit_internal.Optional[torch.Tensor],
-    }
+    bias_k: Optional[torch.Tensor]
+    bias_v: Optional[torch.Tensor]
 
     def __init__(self, embed_dim, num_heads, dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False, kdim=None, vdim=None):
         super(MultiheadAttention, self).__init__()
@@ -949,7 +950,7 @@ class MultiheadAttention(Module):
           with the zero positions will be unchanged. If a BoolTensor is provided, the positions with the
           value of ``True`` will be ignored while the position with the value of ``False`` will be unchanged.
         - attn_mask: 2D mask :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
-          3D mask :math:`(N*num_heads, L, S)` where N is the batch size, L is the target sequence length,
+          3D mask :math:`(N*\text{num_heads}, L, S)` where N is the batch size, L is the target sequence length,
           S is the source sequence length. attn_mask ensure that position i is allowed to attend the unmasked
           positions. If a ByteTensor is provided, the non-zero positions are not allowed to attend
           while the zero positions will be unchanged. If a BoolTensor is provided, positions with ``True``

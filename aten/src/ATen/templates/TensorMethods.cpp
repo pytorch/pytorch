@@ -1,6 +1,7 @@
 #include <c10/core/Scalar.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/QScheme.h>
+#include <c10/core/Stream.h>
 #include <c10/macros/Macros.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/intrusive_ptr.h>
@@ -13,6 +14,8 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace at {
+
+using Stream = c10::Stream;
 
 Tensor Tensor::cpu() const {
   return to(options().device(DeviceType::CPU), /*non_blocking*/ false, /*copy*/ false);
@@ -29,6 +32,10 @@ Tensor Tensor::hip() const {
 
 Tensor Tensor::vulkan() const {
   return to(options().device(DeviceType::Vulkan), /*non_blocking*/ false, /*copy*/ false);
+}
+
+Tensor Tensor::metal() const {
+  return to(options().device(DeviceType::Metal), /*non_blocking*/ false, /*copy*/ false);
 }
 
 Tensor Tensor::toType(ScalarType t) const {
@@ -127,8 +134,18 @@ bool Tensor::is_vulkan() const {
   return impl_->is_vulkan();
 }
 
+bool Tensor::is_metal() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_metal();
+}
+
+
 bool is_vulkan(Tensor self) {
   return self.is_vulkan();
+}
+
+bool is_metal(Tensor self) {
+  return self.is_metal();
 }
 
 bool Tensor::is_quantized() const {

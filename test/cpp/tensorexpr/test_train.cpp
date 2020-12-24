@@ -1,13 +1,12 @@
-#include "test/cpp/tensorexpr/test_train.h"
+#include <gtest/gtest.h>
+
 #include "test/cpp/tensorexpr/padded_buffer.h"
 #include "test/cpp/tensorexpr/test_base.h"
+#include "test/cpp/tensorexpr/test_train.h"
 #include "test/cpp/tensorexpr/test_utils.h"
-#include "torch/csrc/jit/tensorexpr/buffer.h"
 #include "torch/csrc/jit/tensorexpr/eval.h"
-#include "torch/csrc/jit/tensorexpr/function.h"
 #include "torch/csrc/jit/tensorexpr/ir.h"
 #include "torch/csrc/jit/tensorexpr/ir_printer.h"
-#include "torch/csrc/jit/tensorexpr/llvm_codegen.h"
 #include "torch/csrc/jit/tensorexpr/loopnest.h"
 #include "torch/csrc/jit/tensorexpr/tensor.h"
 
@@ -49,7 +48,7 @@ struct T {
   }
 };
 
-void testTrainBasic() {
+TEST(Train, TrainBasic) {
   {
     VGraph graph;
     auto A = graph.create_tensor({"K"});
@@ -57,7 +56,7 @@ void testTrainBasic() {
     auto C = call("mul", {A, B})[0];
 
     Stmt* s;
-    std::map<const VTensor*, Buffer> inputs;
+    std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
     std::map<std::string, VarHandle> vbindings;
 
@@ -86,7 +85,7 @@ void testTrainBasic() {
     auto dA = grad(D, A, ones);
 
     Stmt* s;
-    std::map<const VTensor*, Buffer> inputs;
+    std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
     std::map<std::string, VarHandle> vbindings;
 
@@ -118,7 +117,7 @@ void testTrainBasic() {
     auto C = A + B;
 
     Stmt* s;
-    std::map<const VTensor*, Buffer> inputs;
+    std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
     std::map<std::string, VarHandle> vbindings;
 
@@ -147,7 +146,7 @@ void testTrainBasic() {
     auto dA = D.grad(A, ones);
 
     Stmt* s;
-    std::map<const VTensor*, Buffer> inputs;
+    std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
     std::map<std::string, VarHandle> vbindings;
 
@@ -182,7 +181,7 @@ void testTrainBasic() {
     auto dC = (C * C).grad(B, ones);
 
     Stmt* s;
-    std::map<const VTensor*, Buffer> inputs;
+    std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
     std::map<std::string, VarHandle> vbindings;
 
@@ -210,7 +209,7 @@ void testTrainBasic() {
     auto X = T(g, {"K"});
     auto Y = X.sum();
     Stmt* s;
-    std::map<const VTensor*, Buffer> inputs;
+    std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
     std::map<std::string, VarHandle> vbindings;
 
@@ -230,7 +229,7 @@ void testTrainBasic() {
     auto Y = X.sum();
     auto Z = Y.broadcast_like(X);
     Stmt* s;
-    std::map<const VTensor*, Buffer> inputs;
+    std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
     std::map<std::string, VarHandle> vbindings;
 
@@ -267,7 +266,7 @@ void testTrainBasic() {
     auto new_W = W - W_grad;
 
     Stmt* s;
-    std::map<const VTensor*, Buffer> inputs;
+    std::map<const VTensor*, Placeholder> inputs;
     std::map<const VTensor*, Tensor*> bindings;
     std::map<std::string, VarHandle> vbindings;
 

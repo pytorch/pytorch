@@ -127,7 +127,8 @@ inline TensorQuantizationParams ChooseQuantizationParams(
   // to be a middle value between qmin and qmax.
   // If either min or max is 0, then we just use 0 as zero_point.
   if (min < 0 && max > 0 && preserve_sparsity) {
-    initial_zero_point = (qmin + qmax) / 2 + 1;
+    const auto midpoint = qmin + (qmax - qmin) / 2;  // Overflow-safe midpoint
+    initial_zero_point = midpoint + 1;
   }
 
   // Now we need to nudge the zero point to be an integer

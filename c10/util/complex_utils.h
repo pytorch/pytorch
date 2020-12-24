@@ -8,13 +8,13 @@
 namespace c10 {
 
 template <typename T>
-struct is_complex_t : public std::false_type {};
+struct is_complex : public std::false_type {};
 
 template <typename T>
-struct is_complex_t<std::complex<T>> : public std::true_type {};
+struct is_complex<std::complex<T>> : public std::true_type {};
 
 template <typename T>
-struct is_complex_t<c10::complex<T>> : public std::true_type {};
+struct is_complex<c10::complex<T>> : public std::true_type {};
 
 
 // Extract double from std::complex<double>; is identity otherwise

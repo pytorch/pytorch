@@ -33,11 +33,14 @@ class SumBenchmark(op_bench.TorchBenchmarkBase):
         else:
             self.input_tensor = tensor
 
-        self.dim = dim
+        self.inputs = {
+            "input_tensor": self.input_tensor,
+            "dim": dim
+        }
         self.set_module_name("sum")
 
-    def forward(self):
-        return self.input_tensor.sum(dim=self.dim)
+    def forward(self, input_tensor, dim: int):
+        return input_tensor.sum(dim=dim)
 
 op_bench.generate_pt_test(sum_configs, SumBenchmark)
 

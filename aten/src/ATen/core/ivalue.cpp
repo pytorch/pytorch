@@ -3,7 +3,9 @@
 #include <ATen/core/Formatting.h>
 #include <ATen/core/function.h>
 #include <ATen/core/jit_type.h>
+#include <ATen/core/stack.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/hash.h>
 #include <cmath>
 
 namespace c10 {
@@ -20,7 +22,7 @@ namespace ivalue {
 
 // This is in ivalue.cpp because we need to access Type::annotation_str, which
 // is declared in jit_type.h
-void checkCustomClassType(TypePtr expected_type, TypePtr actual_type) {
+void checkCustomClassType(const Type* expected_type, const Type* actual_type) {
   // NB: doing pointer comparison here
   // If in the future there ever arises a need to call operator== on custom class
   // Type's, this needs to be changed!
@@ -31,7 +33,7 @@ void checkCustomClassType(TypePtr expected_type, TypePtr actual_type) {
               expected_type->repr_str());
 }
 
-CAFFE2_API c10::intrusive_ptr<ConstantString> ConstantString::create(
+TORCH_API c10::intrusive_ptr<ConstantString> ConstantString::create(
     std::string str_) {
   return c10::make_intrusive<ConstantString>(std::move(str_));
 }
@@ -74,6 +76,8 @@ TypePtr IValue::type() const {
       return NoneType::get();
     case Tag::Tensor:
       return TensorType::create(toTensor());
+    case Tag::Storage:
+      return StorageType::get();
     case Tag::Double:
       return FloatType::get();
     case Tag::Int:
@@ -96,6 +100,8 @@ TypePtr IValue::type() const {
       return RRefType::create(toRRef()->type());
     case Tag::Device:
       return DeviceObjType::get();
+    case Tag::Stream:
+      return StreamObjType::get();
     case Tag::Object:
       return toObjectRef().type();
     case Tag::PyObject:
@@ -152,6 +158,15 @@ void IValue::visit(const std::function<bool (const IValue &)>& visitor) const {
       }
       break;
     }
+    case Tag::PyObject: {
+      c10::intrusive_ptr<at::ivalue::PyObjectHolder> py_obj = toPyObjectHolder();
+      auto match = py_obj->tryToInferType();
+      if (match.success()) {
+        auto contained_value = py_obj->toIValue(match.type());
+        contained_value.visit(visitor);
+      }
+      break;
+    }
     default:
       break;
  }
@@ -195,9 +210,18 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
       }
       break;
     }
+    case Tag::PyObject: {
+      subValues.insert(*this);
+      c10::intrusive_ptr<at::ivalue::PyObjectHolder> py_obj = toPyObjectHolder();
+      auto match = py_obj->tryToInferType();
+      TORCH_INTERNAL_ASSERT(match.success(),
+            "Cannot infer type of ", py_obj->toStr(), "\n:", match.reason());
+      auto contained_value = py_obj->toIValue(match.type());
+      contained_value.getSubValues(subValues);
+      break;
+    }
     case Tag::Future:
     case Tag::Device:
-    case Tag::PyObject:
     case Tag::Uninitialized:
     case Tag::Capsule:
       TORCH_INTERNAL_ASSERT(
@@ -256,6 +280,8 @@ IValue IValue::equals(const IValue& rhs) const {
         return false;
       }
       return lhs.toTensor().eq(rhs.toTensor());
+    case Tag::Storage:
+      return rhs.isStorage() && lhs.toStorage().unsafeGetStorageImpl() == rhs.toStorage().unsafeGetStorageImpl();
     case Tag::Double:
       return rhs.isDouble() && lhs.toDouble() == rhs.toDouble();
     case Tag::Int:
@@ -268,6 +294,8 @@ IValue IValue::equals(const IValue& rhs) const {
       return rhs.isGenericDict() && lhs.toGenericDict() == rhs.toGenericDict();
     case Tag::Tuple:
       return rhs.isTuple() && *lhs.toTuple() == *rhs.toTuple();
+    case Tag::Stream:
+      return rhs.isStream() && lhs.toStream() == rhs.toStream();
     case Tag::Device:
       return rhs.isDevice() && lhs.toDevice() == rhs.toDevice();
     case Tag::GenericList:
@@ -287,6 +315,48 @@ IValue IValue::equals(const IValue& rhs) const {
       // Unitialized ivalues show up in no-ops when the compiler can prove a
       // value will never be used. Just return false on any equality comparison.
       return false;
+  }
+  // the above switch should be exhaustive
+  TORCH_INTERNAL_ASSERT(false, "we should never reach here")
+}
+
+size_t IValue::hash(const IValue& v) {
+  switch (v.tag) {
+    case Tag::None:
+      return 0;
+    case Tag::Bool:
+      return c10::get_hash(v.payload.as_bool);
+    case Tag::Double:
+      return c10::get_hash(v.payload.as_double);
+    case Tag::Tensor:
+      // Tensor __hash__ is equivalent to `id()`, so take the pointer value of
+      // the tensor to emulate it
+      return c10::get_hash(v.payload.as_int);
+    case Tag::Storage:
+      return c10::get_hash(v.payload.as_int);
+    case Tag::Int:
+      return c10::get_hash(v.payload.as_int);
+    case Tag::String:
+      return c10::get_hash(v.toStringRef());
+    case Tag::Tuple:
+      return c10::get_hash(*v.toTuple());
+    case Tag::Device:
+      return c10::get_hash(v.toDevice());
+    case Tag::GenericDict:
+    case Tag::GenericList:
+    case Tag::Blob:
+    case Tag::Future:
+    case Tag::RRef:
+    case Tag::Object:
+    case Tag::PyObject:
+    case Tag::Capsule:
+    case Tag::Generator:
+    case Tag::Quantizer:
+    case Tag::Enum:
+    case Tag::Stream:
+    case Tag::Uninitialized:
+      throw std::runtime_error(
+          "unhashable type: '" + v.type()->repr_str() + "'");
   }
   // the above switch should be exhaustive
   TORCH_INTERNAL_ASSERT(false, "we should never reach here")
@@ -422,12 +492,16 @@ std::ostream& IValue::repr(
       if ((c == FP_NORMAL || c == FP_ZERO ) && std::abs(d) < 1e10) {
         int64_t i = int64_t(d);
         if (double(i) == d) {
+          // -0.0 (signed zero) needs to be parsed as -0.
+          if (i == 0 && std::signbit(d)) {
+            return out << "-" << i << ".";
+          }
           return out << i << ".";
         }
       }
       auto orig_prec = out.precision();
       return out << std::setprecision(std::numeric_limits<double>::max_digits10)
-                 << v.toDouble() << std::setprecision(orig_prec);
+                 << d << std::setprecision(orig_prec);
     }
     case IValue::Tag::Int:
       return out << v.toInt();
@@ -458,9 +532,129 @@ std::ostream& IValue::repr(
       return out << enum_holder->qualifiedClassName() << "." <<
           enum_holder->name();
     }
+    case IValue::Tag::Object: {
+      TORCH_INTERNAL_ASSERT(false, "repr() not defined on: ", v.tagKind(), ". Perhaps you've frozen a module with custom classes?");
+    }
     default:
       TORCH_INTERNAL_ASSERT(false, "repr() not defined on: ", v.tagKind());
   }
+}
+
+bool simpleClassTypeArg(const Argument& arg, const ClassTypePtr& type) {
+  return arg.type() == type && !arg.kwarg_only() && !arg.default_value();
+}
+
+torch::jit::Function* checkObjectSortSchema(const c10::ClassTypePtr& t, std::stringstream& why_not) {
+  if (auto method = t->findMethod("__lt__")) {
+      const auto& lt_schema = method->getSchema();
+      const auto& schema_args = lt_schema.arguments();
+      bool error =
+          (schema_args.size() != 2 ||
+           !simpleClassTypeArg(schema_args[0], t) ||
+           !simpleClassTypeArg(schema_args[1], t) ||
+           lt_schema.returns().size() != 1 ||
+           lt_schema.returns()[0].type() != BoolType::get());
+      if (!error) {
+        return method;
+      }
+    }
+
+    why_not << "To sort a list of " << t->repr_str()
+            << " it must define a "
+            << "__lt__ method with two inputs of type "
+            << t->repr_str() << " that "
+            << "returns a bool";
+    return nullptr;
+}
+
+IValueComparator getLessThanComparator(const IValue& v) {
+  if (v.isTensor()) {
+      return [](const IValue& a, const IValue& b) {
+        return a.toTensor().lt(b.toTensor()).is_nonzero();
+      };
+  }
+
+  if (v.isDouble()) {
+      return [](const IValue& a, const IValue& b) {
+        return a.toDouble() < b.toDouble();
+      };
+  }
+
+  if (v.isInt()) {
+      return [](const IValue& a, const IValue& b) {
+        return a.toInt() < b.toInt();
+      };
+  }
+
+  if (v.isBool()) {
+      return [](const IValue& a, const IValue& b) {
+        return a.toBool() == false && b.toBool() == true;
+      };
+  }
+
+  if (v.isString()) {
+      return [](const IValue& a, const IValue& b) {
+       return a.toString()->string() < b.toString()->string();
+      };
+  }
+
+  if (v.isTuple()) {
+      const auto& elements = v.toTuple()->elements();
+      size_t n = elements.size();
+
+      std::vector<IValueComparator> elements_lts;
+      elements_lts.reserve(n);
+      for (size_t i = 0; i < n; ++i) {
+        elements_lts.push_back(getLessThanComparator(elements[i]));
+      }
+
+      return [elements_lts=std::move(elements_lts), n](const IValue& a, const IValue& b) {
+        const auto& a_elements = a.toTuple()->elements();
+        const auto& b_elements = b.toTuple()->elements();
+
+        for (size_t i = 0; i < n; ++i) {
+          if (elements_lts[i](a_elements[i], b_elements[i])) {
+            return true;
+          }
+          if (a_elements[i] == b_elements[i]) {
+            continue;
+          }
+          return false;
+        }
+        // Reaching here means two tuples are equal.
+        return false;
+      };
+  }
+
+  if (v.isObject()) {
+    std::stringstream why_not;
+    torch::jit::Function* lt_func =
+        checkObjectSortSchema(v.type()->expect<ClassType>(), why_not);
+    if (!lt_func) {
+      AT_ERROR(why_not.str());
+    }
+
+    return [lt_func](const IValue& a, const IValue& b) {
+      // Quick pass to satisfy "strict weak ordering" requirement
+      if (a.is(b)) {
+        return false;
+      }
+      torch::jit::Stack sort_stack;
+      sort_stack.push_back(a);
+      sort_stack.push_back(b);
+      lt_func->run(sort_stack);
+      return torch::jit::pop(sort_stack).toBool();
+    };
+  }
+
+  AT_ERROR("IValues of type: ", v.tagKind(), " are not comparable");
+}
+
+IValueComparator getGreaterThanComparator(const IValue& v) {
+  auto lt = getLessThanComparator(v);
+  return [lt = std::move(lt)](const IValue& a, const IValue& b) {
+    return lt(b, a);  // gt(a, b) === lt(b, a)
+  };
 }
 
 std::ostream& operator<<(std::ostream& out, const ivalue::EnumHolder& v) {
@@ -477,6 +671,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << v.toNone();
     case IValue::Tag::Tensor:
       return out << v.toTensor();
+    case IValue::Tag::Storage:
+      return out << v.toStorage().unsafeGetStorageImpl();
     case IValue::Tag::Double: {
       double d = v.toDouble();
       int c = std::fpclassify(d);
@@ -516,6 +712,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << "Uninitialized";
     case IValue::Tag::Device:
       return out << v.toDevice();
+    case IValue::Tag::Stream:
+      return out << v.toStream();
     case IValue::Tag::GenericDict:
       return printDict(out, v.toGenericDict(), formatter);
     case IValue::Tag::PyObject: {
@@ -707,7 +905,7 @@ getClassConverter() {
   return classConverter;
 }
 
-CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
+TORCH_API intrusive_ptr<ivalue::Future> collectAll(
     List<intrusive_ptr<ivalue::Future>> srcs) {
   struct Ctx {
     explicit Ctx(List<intrusive_ptr<ivalue::Future>> srcs)
@@ -739,7 +937,7 @@ CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
   return ctx->dstFuture;
 }
 
-CAFFE2_API intrusive_ptr<ivalue::Future> collectAny(
+TORCH_API intrusive_ptr<ivalue::Future> collectAny(
     List<intrusive_ptr<ivalue::Future>> srcs) {
   if (srcs.empty()) {
     auto res = make_intrusive<ivalue::Future>(NoneType::get());

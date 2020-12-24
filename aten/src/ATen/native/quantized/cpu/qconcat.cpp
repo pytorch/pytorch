@@ -102,10 +102,10 @@ Tensor qcat_out(const c10::List<Tensor>& qxs, int64_t dim, Tensor out) {
 } // namespace
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("cat", TORCH_FN(qcat<false>));
-  m.impl("cat_relu", TORCH_FN(qcat<true>));
-  m.impl("cat_out", TORCH_FN(qcat_out<false>));
-  m.impl("cat_relu_out", TORCH_FN(qcat_out<true>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::cat"), TORCH_FN(qcat<false>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::cat_relu"), TORCH_FN(qcat<true>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::cat_out"), TORCH_FN(qcat_out<false>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::cat_relu_out"), TORCH_FN(qcat_out<true>));
 }
 
 Tensor cat_quantized_cpu(TensorList qxs, int64_t dim) {

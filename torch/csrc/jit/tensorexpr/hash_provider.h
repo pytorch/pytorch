@@ -99,11 +99,14 @@ class TORCH_API HashProvider : public IRVisitor {
   void visit(const Broadcast* v) override;
   void visit(const IfThenElse* v) override;
   void visit(const BaseCallNode* v) override;
+  void visit(const Intrinsics* v) override;
   void visit(const Allocate* v) override;
   void visit(const Free* v) override;
   void visit(const Cond* v) override;
   void visit(const Term* v) override;
   void visit(const Polynomial* v) override;
+  void visit(const MaxTerm* v) override;
+  void visit(const MinTerm* v) override;
 
   template <typename... Types>
   SimplifierHashType hash_combine(const Types&... args) {

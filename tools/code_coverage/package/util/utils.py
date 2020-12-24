@@ -2,9 +2,16 @@ import os
 import shutil
 import sys
 import time
-from typing import Any
+from typing import Any, Optional
 
-from .setting import LOG_DIR, PROFILE_DIR, TestList, TestPlatform, TestType
+from .setting import (
+    LOG_DIR,
+    PROFILE_DIR,
+    CompilerType,
+    TestList,
+    TestPlatform,
+    TestType,
+)
 
 
 def convert_time(seconds: float) -> str:
@@ -80,9 +87,20 @@ def get_raw_profiles_folder() -> str:
     return os.environ.get("RAW_PROFILES_FOLDER", os.path.join(PROFILE_DIR, "raw"))
 
 
-# TODO auto detect
-def get_cov_type() -> str:
-    return os.environ.get("COMPILER_TYPE", "CLANG")
+def detect_compiler_type(platform: TestPlatform) -> CompilerType:
+    if platform == TestPlatform.OSS:
+        from package.oss.utils import detect_compiler_type
+
+        cov_type = detect_compiler_type()
+    else:
+        from caffe2.fb.code_coverage.tool.package.fbcode.utils import (
+            detect_compiler_type,
+        )
+
+        cov_type = detect_compiler_type()
+
+    check_compiler_type(cov_type)
+    return cov_type
 
 
 def get_test_name_from_whole_path(path: str) -> str:
@@ -93,8 +111,8 @@ def get_test_name_from_whole_path(path: str) -> str:
     return path[start + 1 : end]
 
 
-def check_compiler_type(cov_type: str) -> None:
-    if cov_type in ["CLANG", "GCC"]:
+def check_compiler_type(cov_type: Optional[CompilerType]) -> None:
+    if cov_type is not None and cov_type in [CompilerType.GCC, CompilerType.CLANG]:
         return
     raise Exception(
         f"Can't parse compiler type: {cov_type}.",

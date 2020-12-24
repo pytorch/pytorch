@@ -15,6 +15,7 @@ class Function {
  public:
   Function(c10::QualifiedName name);
   bool run(Stack& stack) const;
+  c10::IValue operator()(Stack& stack);
   const std::string& name() const;
   const c10::QualifiedName& qualname() const;
   void append_instruction(OpCode op, int X, int N);
@@ -30,6 +31,7 @@ class Function {
   void set_register_size(size_t size);
 
   std::string get_module_debug_info(size_t pc) const;
+  const std::shared_ptr<Code> get_code() const;
 
  private:
   c10::QualifiedName name_;

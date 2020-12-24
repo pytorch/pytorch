@@ -120,10 +120,10 @@ class Upsample(Module):
     """
     __constants__ = ['size', 'scale_factor', 'mode', 'align_corners', 'name']
     name: str
-    size: _size_any_t
-    scale_factor: _ratio_any_t
+    size: Optional[_size_any_t]
+    scale_factor: Optional[_ratio_any_t]
     mode: str
-    align_corners: bool
+    align_corners: Optional[bool]
 
     def __init__(self, size: Optional[_size_any_t] = None, scale_factor: Optional[_ratio_any_t] = None,
                  mode: str = 'nearest', align_corners: Optional[bool] = None) -> None:

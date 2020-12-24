@@ -1,11 +1,12 @@
 import torch
 import torch._C as _C
+from torch._C import _functions
 import torch.utils.hooks as hooks
 from torch._six import with_metaclass
 import functools
 import warnings
 from collections import OrderedDict
-from typing import Any
+from typing import Any, List, Optional
 
 
 class _ContextMethodMixin(object):
@@ -84,7 +85,8 @@ class BackwardCFunction(_C._FunctionBase, _ContextMethodMixin, _HookMixin):
     _is_legacy = False
 
     def apply(self, *args):
-        return self._forward_cls.backward(self, *args)
+        # _forward_cls is defined by derived class
+        return self._forward_cls.backward(self, *args)  # type: ignore
 
 
 class FunctionMeta(type):
@@ -115,8 +117,8 @@ class FunctionMeta(type):
 
         return super(FunctionMeta, cls).__init__(name, bases, attrs)
 
-
-class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixin, _HookMixin)):
+# mypy doesn't understand `with_metaclass` from torch._six
+class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixin, _HookMixin)):  # type: ignore
     r"""Records operation history and defines formulas for differentiating ops.
 
     See the Note on extending the autograd engine for more details on how to use
@@ -227,7 +229,7 @@ def once_differentiable(fn):
         if not isinstance(outputs, tuple):
             outputs = (outputs,)
 
-        err_fn = torch._C._functions.DelayedError(
+        err_fn = _functions.DelayedError(
             b"trying to differentiate twice a function that was marked"
             b"with @once_differentiable", len(outputs))
 
@@ -330,7 +332,7 @@ def _unflatten(input, proto):
     # unflatten a list or tuple input into a nested list/tuple structure
     # specified by proto
     def unflatten_helper(input, proto):
-        res = []
+        res: List[Optional[torch.Tensor]] = []
         if hasattr(proto, "_jit_wrap"):
             return proto._jit_wrap(input)
         if not isinstance(proto, (list, tuple)):
@@ -379,16 +381,16 @@ class NestedIOFunction(Function):
             del self._to_save_nested
         return result
 
-    def backward(self, *gradients: Any) -> Any:
+    def backward(self, *gradients: Any) -> Any:  # type: ignore
         nested_gradients = _unflatten(gradients, self._nested_output)
-        result = self.backward_extended(*nested_gradients)
+        result = self.backward_extended(*nested_gradients)  # type: ignore
         return tuple(_iter_None_tensors(result))
 
     __call__ = _do_forward
 
-    def forward(self, *args: Any) -> Any:
+    def forward(self, *args: Any) -> Any:  # type: ignore
         nested_tensors = _map_tensor_data(self._nested_input)
-        result = self.forward_extended(*nested_tensors)
+        result = self.forward_extended(*nested_tensors)  # type: ignore
         del self._nested_input
         self._nested_output = result
         return tuple(_iter_tensors(result))

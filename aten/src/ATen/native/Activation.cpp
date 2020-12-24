@@ -224,6 +224,13 @@ Tensor silu_backward(
   return grad_input;
 }
 
+Tensor math_silu_backward(
+    const Tensor& grad_output,
+    const Tensor& input) {
+  auto input_sigmoid = at::sigmoid(input);
+  return grad_output * (input_sigmoid * (1 + input * (1 - input_sigmoid)));
+}
+
 template <typename scalar_t>
 inline void _rrelu_with_noise_train(
     Tensor& output,
@@ -719,6 +726,15 @@ Tensor gelu_backward_cpu(const Tensor& grad, const Tensor& self) {
   return dX;
 }
 
+Tensor infinitely_differentiable_gelu_backward(
+    const Tensor& grad,
+    const Tensor& self) {
+  constexpr double kAlpha = M_2_SQRTPI * M_SQRT1_2 * 0.5;
+  Tensor cdf = (1.0 + (self * M_SQRT1_2).erf_()).mul_(0.5);
+  Tensor pdf = (-0.5 * self * self).exp_();
+  return cdf.addcmul_(self, pdf, kAlpha).mul_(grad);
+}
+
 Tensor& leaky_relu_out(
     Tensor& result,
     const Tensor& self,
@@ -799,7 +815,6 @@ Tensor log_sigmoid(const Tensor & self) {
 Tensor log_sigmoid_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& buffer) {
   Tensor grad_input;
   auto iter = at::TensorIteratorConfig()
-    .set_check_mem_overlap(true)
     .add_output(grad_input)
     .add_input(input)
     .add_input(buffer)
@@ -815,7 +830,6 @@ Tensor& log_sigmoid_backward_out_cpu(
     const Tensor& input,
     const Tensor& buffer) {
   auto iter = TensorIteratorConfig()
-    .set_check_mem_overlap(true)
     .add_output(grad_input)
     .add_input(input)
     .add_input(buffer)

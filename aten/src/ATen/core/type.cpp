@@ -27,7 +27,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       out << "Tensor";
     }
     if (auto ndim = value->sizes().size()) {
-      bool has_valid_strides_info =
+      bool has_valid_strides_info = *ndim > 0 &&
           value->strides().isComplete() && value->strides().size() == ndim;
 
       out << "(";
@@ -41,10 +41,17 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
         } else {
           out << "*";
         }
-        if (has_valid_strides_info &&
-            type_verbosity() >= TypeVerbosity::TypeAndStride) {
-          out << ":" << *value->strides()[i];
+      }
+      if (has_valid_strides_info &&
+          type_verbosity() >= TypeVerbosity::TypeAndStride) {
+        out << ", strides=[";
+        for (size_t i = 0; i < *ndim; ++i) {
+          if (i > 0) {
+            out << ", ";
+          }
+          out << *value->strides()[i];
         }
+        out << "]";
       }
       if (type_verbosity() >= TypeVerbosity::Full) {
         if (value->requiresGrad()) {
@@ -127,6 +134,10 @@ BoolTypePtr BoolType::get() {
   static auto value = BoolType::create();
   return value;
 }
+StorageTypePtr StorageType::get() {
+  static auto value = StorageType::create();
+  return value;
+}
 NoneTypePtr NoneType::get() {
   static auto value = NoneType::create();
   return value;
@@ -149,6 +160,10 @@ StringTypePtr StringType::get() {
 }
 DeviceObjTypePtr DeviceObjType::get() {
   static auto value = DeviceObjType::create();
+  return value;
+}
+StreamObjTypePtr StreamObjType::get() {
+  static auto value = StreamObjType::create();
   return value;
 }
 ScalarTypeTypePtr ScalarTypeType::get() {
@@ -222,7 +237,7 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2) {
 
   // Handle non-container types which do not subtype each other and unify
   if (t1->kind() == TensorType::Kind && t2->kind() == TensorType::Kind) {
-    return t1->expect<TensorType>()->merge(t2->expect<TensorType>());
+    return t1->expect<TensorType>()->merge(*t2->expect<TensorType>());
   }
 
   if (t1->isSubtypeOf(NoneType::get()) && !t2->isSubtypeOf(NoneType::get())) {
@@ -454,7 +469,7 @@ MatchTypeReturn matchTypeVariables(
 }
 
 // change return types like List[List[t]] into List[List[int]]
-CAFFE2_API TypePtr tryEvalTypeVariables(TypePtr type, std::unordered_map<std::string, TypePtr>& type_env) {
+TORCH_API TypePtr tryEvalTypeVariables(TypePtr type, std::unordered_map<std::string, TypePtr>& type_env) {
   if (!type->hasFreeVariables()) {
     return type;
   }
@@ -479,7 +494,7 @@ CAFFE2_API TypePtr tryEvalTypeVariables(TypePtr type, std::unordered_map<std::st
   }
 }
 
-CAFFE2_API bool elementTypeCanBeInferredFromMembers(const TypePtr& elem_type) {
+TORCH_API bool elementTypeCanBeInferredFromMembers(const TypePtr& elem_type) {
   if (elem_type->kind() == OptionalType::Kind ||
       elem_type->kind() == NumberType::Kind) {
     // Builtin Union types
@@ -506,7 +521,7 @@ const char * typeKindToString(TypeKind kind) {
   return "";
 }
 
-bool Type::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
+bool Type::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
   if (rhs->kind() == TypeKind::AnyType || *this == *rhs) {
     return true;
   }
@@ -549,16 +564,16 @@ VaryingShape<int64_t> TensorType::sizes() const {
       }));
 }
 
-TensorTypePtr TensorType::merge(TensorTypePtr other, bool merge_sizes) const {
-  auto scalar_type = merge_primitive(scalarType(), other->scalarType());
-  auto dev = merge_primitive(device(), other->device());
-  auto sprops = stride_properties().merge(other->stride_properties());
-  auto gr = merge_primitive(requiresGrad(), other->requiresGrad());
-  auto undef = merge_primitive(undefined(), other->undefined());
+TensorTypePtr TensorType::merge(const TensorType& other, bool merge_sizes) const {
+  auto scalar_type = merge_primitive(scalarType(), other.scalarType());
+  auto dev = merge_primitive(device(), other.device());
+  auto sprops = stride_properties().merge(other.stride_properties());
+  auto gr = merge_primitive(requiresGrad(), other.requiresGrad());
+  auto undef = merge_primitive(undefined(), other.undefined());
   return TensorType::create(
       scalar_type,
       dev,
-      merge_sizes ? symbolic_sizes().merge(other->symbolic_sizes())
+      merge_sizes ? symbolic_sizes().merge(other.symbolic_sizes())
                   : symbolic_sizes(),
       sprops,
       gr,
@@ -716,6 +731,9 @@ TupleType::TupleType(
       schema_(std::move(schema)) {
   has_free_variables_ =
       std::any_of(elements_.begin(), elements_.end(), [](TypePtr v) {
+        if (!v) {
+          throw std::runtime_error("Can not create tuple with None type");
+        }
         return v->hasFreeVariables();
       });
   if (schema_) {
@@ -725,7 +743,7 @@ TupleType::TupleType(
   }
 }
 
-bool TupleType::isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const {
+bool TupleType::isSubtypeOfExt(const TypePtr& rhs_, std::ostream* why_not) const {
   if (Type::isSubtypeOfExt(rhs_, why_not)) {
     return true;
   }
@@ -760,7 +778,7 @@ bool TupleType::isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const 
   });
 }
 
-bool ListType::isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const {
+bool ListType::isSubtypeOfExt(const TypePtr& rhs_, std::ostream* why_not) const {
   if (Type::isSubtypeOfExt(rhs_, why_not)) {
     return true;
   }
@@ -940,17 +958,22 @@ TensorTypePtr TensorType::create(
     const VaryingShape<int64_t>& strides,
     c10::optional<bool> requires_grad,
     c10::optional<bool> undefined, bool tensor_contiguity) {
-  TORCH_INTERNAL_ASSERT(sizes.concrete_sizes().has_value());
-  TORCH_INTERNAL_ASSERT(
-      !strides.concrete_sizes().has_value() ||
-      sizes.concrete_sizes()->size() == strides.concrete_sizes()->size());
-  auto sprops = strides.concrete_sizes().has_value()
+  if(strides.concrete_sizes() && strides.concrete_sizes().has_value()){
+    // handles case where strides are set
+    TORCH_INTERNAL_ASSERT(sizes.concrete_sizes()->size() == strides.concrete_sizes()->size());
+    auto sprops = strides.concrete_sizes().has_value()
       ? computeStrideProps(*sizes.concrete_sizes(), *strides.concrete_sizes(), tensor_contiguity)
       : VaryingShape<Stride>();
-
-  auto symbol_sizes = SymbolicShape(*sizes.concrete_sizes());
-  return TensorType::create(
+    auto symbol_sizes = SymbolicShape(*sizes.concrete_sizes());
+    return TensorType::create(
       scalar_type, device, symbol_sizes, sprops, requires_grad, undefined);
+  } else {
+    // strides are all null, but still have number of strides equal to number of ranks
+    TORCH_INTERNAL_ASSERT(sizes.sizes() && sizes.size());
+    auto symbol_sizes = SymbolicShape(*sizes.sizes());
+    return TensorType::create(
+      scalar_type, device, symbol_sizes, VaryingShape<Stride>(*sizes.size()), requires_grad, undefined);
+  }
 }
 
 TensorTypePtr TensorType::create(
@@ -959,11 +982,9 @@ TensorTypePtr TensorType::create(
     const SymbolicShape& sizes,
     const VaryingShape<Stride>& strides,
     c10::optional<bool> requires_grad,
-    c10::optional<bool> undefined,
-    bool is_inferred) {
-    auto pt = TensorTypePtr(new TensorType(
+    c10::optional<bool> undefined) {
+  auto pt = TensorTypePtr(new TensorType(
       scalar_type, device, sizes, strides, requires_grad, undefined));
-    pt->is_inferred_ = is_inferred;
   return pt;
 }
 
@@ -998,13 +1019,13 @@ const SymbolicShape& TensorType::symbolic_sizes() const {
   return sizes_;
 }
 
-bool TensorType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
+bool TensorType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
   if (auto rhs_p = rhs->cast<TensorType>()) {
     // if we have the same pointer, avoid computing the merge
     if (this == rhs_p.get()) {
       return true;
     }
-    return *merge(rhs_p) == *rhs_p;
+    return *merge(*rhs_p) == *rhs_p;
   }
   return Type::isSubtypeOfExt(rhs, why_not);
 }
@@ -1079,7 +1100,7 @@ ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
   return ptr;
 }
 
-bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
+bool ClassType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
   if (rhs->cast<AnyClassType>()) {
     return true;
   }
@@ -1163,7 +1184,7 @@ bool InterfaceType::isSubTypeImpl(
     return true;
 }
 
-bool InterfaceType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
+bool InterfaceType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
   // to improve performance this check can be cached
   if (auto iface = rhs->cast<InterfaceType>()) {
     return isSubTypeImpl(*this, *iface, why_not);
@@ -1192,19 +1213,21 @@ InterfaceType::~InterfaceType() = default;
 ClassTypePtr ClassType::create(
     c10::optional<QualifiedName> qualifiedName,
     std::weak_ptr<CompilationUnit> cu,
-    bool is_module) {
+    bool is_module,
+    std::string doc_string) {
   return ClassTypePtr(
-      new ClassType(std::move(qualifiedName), std::move(cu), is_module));
+      new ClassType(std::move(qualifiedName), std::move(cu), is_module, std::move(doc_string)));
 }
 
 ClassType::ClassType(
     c10::optional<QualifiedName> name,
     std::weak_ptr<CompilationUnit> cu,
-    bool is_module = false)
+    bool is_module = false,
+    std::string doc_string = "")
     : NamedType(TypeKind::ClassType, std::move(name)),
       compilation_unit_(std::move(cu)),
-      isModule_(is_module) {
-}
+      isModule_(is_module),
+      doc_string_(std::move(doc_string)) {}
 
 const std::vector<torch::jit::Function*>& ClassType::methods() const {
   return methods_;
@@ -1292,6 +1315,14 @@ void ClassType::unsafeRemoveAttribute(const std::string& name) {
   attributes_.erase(attributes_.begin() + slot);
   attributeTypes_.erase(attributeTypes_.begin() + slot);
   AT_ASSERT(attributes_.size() == attributeTypes_.size());
+}
+
+void ClassType::unsafeChangeAttributeType(const std::string& name, TypePtr new_ty) {
+  auto slot = getAttributeSlot(name);
+  auto old_attr_info = attributes_[slot];
+  AT_ASSERT(old_attr_info.getKind() == AttributeKind::REGULAR_ATTRIBUTE);
+  attributes_[slot] = ClassAttribute(old_attr_info.getKind(), new_ty, old_attr_info.getName());
+  attributeTypes_[slot] = new_ty;
 }
 
 size_t ClassType::addConstant(const std::string& name, const IValue& value) {
@@ -1411,7 +1442,7 @@ SymbolicShape SymbolicShape::merge(const SymbolicShape& other) const {
   return SymbolicShape(std::move(dims));
 }
 
-bool EnumType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
+bool EnumType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
   return rhs->kind() == TypeKind::AnyType ||
       rhs->kind() == TypeKind::AnyEnumType || *this == *rhs;
 }

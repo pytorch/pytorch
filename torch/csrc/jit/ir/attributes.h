@@ -108,7 +108,7 @@ struct TORCH_API GraphAttr : public AttributeValue {
   using ConstructorType = std::shared_ptr<Graph>;
   using ValueType = std::shared_ptr<Graph>;
   GraphAttr(Symbol name, ConstructorType value_)
-      : AttributeValue(name), value_(value_) {}
+      : AttributeValue(name), value_(std::move(value_)) {}
   ValueType& value() {
     return value_;
   }
@@ -138,8 +138,8 @@ struct TORCH_API GraphsAttr : public AttributeValue {
   ValueType value_;
 };
 
-struct AttributeError : public std::exception {
-  AttributeError(Symbol name, bool defined) {
+struct IRAttributeError : public std::exception {
+  IRAttributeError(Symbol name, bool defined) {
     std::stringstream ss;
     if (!defined) {
       ss << "required keyword attribute '" << name.toUnqualString()

@@ -107,18 +107,6 @@ Tensor avg_pool1d(
   return output.squeeze(2);
 }
 
-Tensor max_pool1d(
-    const Tensor& self,
-    IntArrayRef kernel_size,
-    IntArrayRef stride,
-    IntArrayRef padding,
-    IntArrayRef dilation,
-    bool ceil_mode) {
-  auto output_and_indices = at::max_pool1d_with_indices(
-      self, kernel_size, stride, padding, dilation, ceil_mode);
-  return std::get<0>(output_and_indices);
-}
-
 Tensor max_pool2d(
     const Tensor& self,
     IntArrayRef kernel_size,

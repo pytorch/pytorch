@@ -191,7 +191,7 @@ void ROIAlignBackwardFeature(
 } // namespace
 
 template <>
-bool RoIAlignGradientOp<float, CPUContext>::RunOnDevice() {
+C10_EXPORT bool RoIAlignGradientOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0); // Input data to pool
   auto& R = Input(1); // RoIs
   auto& dY = Input(2); // Gradient of net w.r.t. output of "forward" op

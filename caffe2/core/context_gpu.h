@@ -279,7 +279,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
 
   template <class SrcContext, class DstContext>
   inline void
-  CopyItems(const TypeMeta& meta, size_t n, const void* src, void* dst) {
+  CopyItems(const TypeMeta meta, size_t n, const void* src, void* dst) {
     CAFFE_ENFORCE(!meta.copy(), "CUDAContext requires fundamental types.");
     CopyBytes<SrcContext, DstContext>(n * meta.itemsize(), src, dst);
   }

@@ -19,6 +19,25 @@ std::ostream& operator<<(std::ostream & out, TensorGeometryArg t) {
   return out;
 }
 
+void checkDim(
+    CheckedFrom c,
+    const Tensor& tensor,
+    const char* name,
+    int pos, // 1-indexed
+    int64_t dim) {
+  TORCH_CHECK(
+      tensor.dim() == dim,
+      "Expected ",
+      dim,
+      "-dimensional tensor, but got ",
+      tensor.dim(),
+      "-dimensional tensor for ",
+      TensorGeometryArg(TensorArg({tensor, name, pos})),
+      " (while checking arguments for ",
+      c,
+      ")");
+}
+
 void checkDim(CheckedFrom c, const TensorGeometryArg& t, int64_t dim) {
   TORCH_CHECK(t->dim() == dim,
     "Expected ", dim, "-dimensional tensor, but got ", t->dim(),
@@ -335,8 +354,7 @@ c10::optional<std::vector<int64_t>> computeStride(
   // we use the stride as if it were computed via resize.
   // This could perhaps be combined with the below code, but the complexity
   // didn't seem worth it.
-  int64_t numel = std::accumulate(oldshape.begin(), oldshape.end(), 1,
-                                  std::multiplies<int64_t>());
+  const int64_t numel = prod_intlist(oldshape);
   if (numel == 0 && oldshape.equals(newshape)) {
     return oldstride.vec();
   }
