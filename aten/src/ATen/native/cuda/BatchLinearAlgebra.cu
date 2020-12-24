@@ -1017,6 +1017,48 @@ void magmaEig<float>(
 }
 
 template<>
+void magmaEig<c10::complex<double>, double>(
+    magma_vec_t jobvl, magma_vec_t jobvr, magma_int_t n,
+    c10::complex<double> *A, magma_int_t lda,
+    c10::complex<double> *w,
+    c10::complex<double> *VL, magma_int_t ldvl,
+    c10::complex<double> *VR, magma_int_t ldvr,
+    c10::complex<double> *work, magma_int_t lwork,
+    double *rwork,
+    magma_int_t *info) {
+  MagmaStreamSyncGuard guard;
+  magma_zgeev(jobvl, jobvr, n,
+         reinterpret_cast<magmaDoubleComplex*>(A), lda,
+         reinterpret_cast<magmaDoubleComplex*>(w),
+         reinterpret_cast<magmaDoubleComplex*>(VL), ldvl,
+         reinterpret_cast<magmaDoubleComplex*>(VR), ldvr,
+         reinterpret_cast<magmaDoubleComplex*>(work), lwork,
+         rwork, info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaEig<c10::complex<float>, float>(
+    magma_vec_t jobvl, magma_vec_t jobvr, magma_int_t n,
+    c10::complex<float> *A, magma_int_t lda,
+    c10::complex<float> *w,
+    c10::complex<float> *VL, magma_int_t ldvl,
+    c10::complex<float> *VR, magma_int_t ldvr,
+    c10::complex<float> *work, magma_int_t lwork,
+    float *rwork,
+    magma_int_t *info) {
+  MagmaStreamSyncGuard guard;
+  magma_cgeev(jobvl, jobvr, n,
+         reinterpret_cast<magmaFloatComplex*>(A), lda,
+         reinterpret_cast<magmaFloatComplex*>(w),
+         reinterpret_cast<magmaFloatComplex*>(VL), ldvl,
+         reinterpret_cast<magmaFloatComplex*>(VR), ldvr,
+         reinterpret_cast<magmaFloatComplex*>(work), lwork,
+         rwork, info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
 void magmaSvd<double>(
     magma_vec_t jobz, magma_int_t m, magma_int_t n, double* A,
     magma_int_t lda, double* s, double* U, magma_int_t ldu,
