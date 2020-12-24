@@ -115,6 +115,8 @@ Algorithms
     :members:
 .. autoclass:: AdamW
     :members:
+.. autoclass:: AdaBelief
+    :members:
 .. autoclass:: SparseAdam
     :members:
 .. autoclass:: Adamax

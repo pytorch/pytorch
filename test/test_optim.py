@@ -319,6 +319,10 @@ class TestOptim(TestCase):
             ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=1., amsgrad=False)),
             ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=0., amsgrad=True)),
             ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=0., amsgrad=False)),
+            ((optim.AdaBelief, optim._multi_tensor.AdaBelief), dict(weight_decay=1., amsgrad=True)),
+            ((optim.AdaBelief, optim._multi_tensor.AdaBelief), dict(weight_decay=1., amsgrad=False)),
+            ((optim.AdaBelief, optim._multi_tensor.AdaBelief), dict(weight_decay=0., amsgrad=True)),
+            ((optim.AdaBelief, optim._multi_tensor.AdaBelief), dict(weight_decay=0., amsgrad=False)),
             ((optim.SGD, optim._multi_tensor.SGD), dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True)),
             ((optim.SGD, optim._multi_tensor.SGD), dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False)),
             ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=1, centered=True)),
@@ -427,6 +431,25 @@ class TestOptim(TestCase):
 
     def test_adamw(self):
         for optimizer in [optim.AdamW, optim_mt.AdamW]:
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=1)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=1, amsgrad=True)
+            )
+            with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
+                optimizer(None, lr=1e-2, weight_decay=-1)
+    
+    def test_adabelief(self):
+        for optimizer in [optim.AdaBelief, optim_mt.AdaBelief]:
             self._test_basic_cases(
                 lambda weight, bias: optimizer([weight, bias], lr=1e-3)
             )
