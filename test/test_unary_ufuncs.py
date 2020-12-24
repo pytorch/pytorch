@@ -212,8 +212,7 @@ class TestUnaryUfuncs(TestCase):
         for alt, inplace in ((op.get_method(), False), (op.get_inplace(), True),
                              (torch.jit.script(_fn), False)):
             if alt is None:
-                with self.assertRaises(RuntimeError):
-                    alt(t.clone())
+                continue
 
             if inplace and op.promotes_integers_to_float and dtype in integral_types() + (torch.bool,):
                 # Assert that RuntimeError is raised
@@ -426,9 +425,12 @@ class TestUnaryUfuncs(TestCase):
         if out_dtype.is_floating_point and not dtype.is_complex:
             compare_out(op, input, output)
         elif out_dtype.is_floating_point and dtype.is_complex:
-            # Can't cast complex to float
-            with self.assertRaises(RuntimeError):
-                op(input, out=output)
+            if op.supports_complex_to_float:
+                compare_out(op, input, output)
+            else:
+                # Can't cast complex to float
+                with self.assertRaises(RuntimeError):
+                    op(input, out=output)
         elif out_dtype.is_complex:
             compare_out(op, input, output)
         else:
@@ -764,26 +766,6 @@ class TestUnaryUfuncs(TestCase):
         b = torch.randn(1, device=device)
         self.assertRaises(RuntimeError, lambda: torch.ceil(a, out=b))
 
-    # TODO: review with erfinv opinfo
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
-    @dtypes(torch.float, torch.double)
-    def test_erfinv(self, device, dtype):
-        # general testing. Narrow the range to avoid accuracy issues
-        input_values = torch.randn(4, 4, dtype=dtype, device=device).clamp(-0.3, 0.3)
-        self.assertEqual(input_values.erf().erfinv(), input_values)
-        # test inf
-        self.assertTrue(torch.equal(torch.tensor([-1, 1], dtype=dtype, device=device).erfinv(),
-                                    torch.tensor([-inf, inf], dtype=dtype, device=device)))
-        # test nan
-        self.assertEqual(torch.tensor([-2, 2], dtype=dtype, device=device).erfinv(),
-                         torch.tensor([nan, nan], dtype=dtype, device=device))
-
-        if dtype == torch.double:
-            # double precision
-            a = torch.tensor([0.5, 0.8], dtype=torch.double, device=device).erfinv()
-            self.assertEqual(a[0].item(), 0.47693627620447, atol=1e-13, rtol=0)
-            self.assertEqual(a[1].item(), 0.90619380243682, atol=1e-13, rtol=0)
-
     # TODO: opinfo hardshrink
     @onlyCPU
     @dtypes(torch.float, torch.double)
@@ -903,52 +885,6 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(torch.nn.functional.silu(
             input_noncontig, inplace=True), expected_output_noncontig,
             atol=atol, rtol=rtol)
-
-    # Opinfo reciprocal
-    @onlyCPU
-    @dtypes(torch.float, torch.double)
-    def test_reciprocal(self, device, dtype):
-        a = torch.randn(100, 89, device=device, dtype=dtype)
-        res_div = 1 / a
-        res_reciprocal = a.clone()
-        res_reciprocal.reciprocal_()
-        self.assertEqual(res_reciprocal, res_div)
-
-    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
-    def test_reciprocal_complex(self, device, dtype):
-        t = torch.randn(10, 10, dtype=dtype, device=device)
-        expected = torch.from_numpy(np.reciprocal(t.cpu().numpy()))
-        actual = torch.reciprocal(t).cpu()
-        self.assertEqual(expected, actual)
-
-    @onlyCUDA
-    @dtypes(torch.complex64, torch.complex128)
-    def test_reciprocal_complex_extremal(self, device, dtype):
-        vals = (
-            # Inf and Zeros
-            complex(float('inf'), float('inf')),
-            complex(float('inf'), 0.),
-            complex(0., float('inf')),
-            complex(0., 0.),
-
-            # Nans and Zeros
-            complex(float('nan'), 0.),
-            complex(0., float('nan')),
-            complex(float('nan'), float('nan')),
-
-            # Inf and Nans
-            complex(float('nan'), float('inf')),
-            complex(float('inf'), float('nan')),
-
-            # Extremal and Normal Number
-            complex(float('nan'), 2.0),
-            complex(float('inf'), 2.0),
-            complex(2.0, float('nan')),
-            complex(2.0, float('inf')),
-            complex(2.0, 0.0),
-            complex(0.0, 2.0))
-
-        self.compare_with_numpy(torch.reciprocal, np.reciprocal, vals, device, dtype)
 
     # do ops like threshold need a test_unary(_nonufunc) test suite?
     @onlyCPU
@@ -1217,7 +1153,7 @@ class TestUnaryUfuncs(TestCase):
         for num in abs_zeros:
             self.assertGreater(math.copysign(1.0, num), 0.0)
 
-    @dtypes(torch.float)
+    @dtypes(*torch.testing.get_all_fp_dtypes())
     def test_isfinite_isinf_isnan(self, device, dtype):
         vals = (-float('inf'), float('inf'), float('nan'), -1, 0, 1)
 
@@ -1225,7 +1161,7 @@ class TestUnaryUfuncs(TestCase):
         self.compare_with_numpy(torch.isinf, np.isinf, vals, device, dtype)
         self.compare_with_numpy(torch.isnan, np.isnan, vals, device, dtype)
 
-    @dtypes(torch.long)
+    @dtypes(torch.int8, torch.int16, torch.int32, torch.int64)
     def test_isfinite_isinf_isnan_int(self, device, dtype):
         vals = (-1, 0, 1)
 
@@ -1297,7 +1233,7 @@ class TestUnaryUfuncs(TestCase):
             with self.assertRaisesRegex(RuntimeError, 'does not support non-boolean outputs'):
                 torch_op(t, out=out)
 
-    @dtypes(torch.complex64)
+    @dtypes(torch.complex64, torch.complex128)
     def test_isfinite_isinf_isnan_complex(self, device, dtype):
         vals = (
             complex(-float('inf'), float('inf')),
@@ -1770,7 +1706,6 @@ _types_no_half = [
 # TODO: all these should be replaced with OpInfos
 torch_op_tests = [
     _TorchMathTestMeta('exp'),
-    _TorchMathTestMeta('expm1'),
     _TorchMathTestMeta('floor'),
     _TorchMathTestMeta('ceil'),
     _TorchMathTestMeta('rad2deg'),

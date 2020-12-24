@@ -3,7 +3,6 @@
 
 #include <THC/THCGeneral.h>
 #include <THC/THCAllocator.h>
-#include <THC/THCBlas.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <THC/THCCachingHostAllocator.h>
 #include <THC/THCSleep.h>

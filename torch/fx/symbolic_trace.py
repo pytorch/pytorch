@@ -66,6 +66,7 @@ class Tracer(TracerBase):
             * For a Parameter, emit a ``get_attr`` node referring to that Parameter
             * For a non-Parameter Tensor, store the Tensor away in a special
               attribute referring to that attribute.
+
         This method can be overridden to support more types.
 
         Args:
@@ -90,6 +91,13 @@ class Tracer(TracerBase):
             for n, p in self.root.named_buffers():
                 if a is p:
                     return self.create_node('get_attr', n, (), {})
+
+        # For NamedTuple instances that appear literally as args, we emit
+        # a node to construct the NamedTuple and use that Node as the argument.
+        if isinstance(a, tuple) and hasattr(a, '_fields'):
+            args = tuple(self.create_arg(elem) for elem in a)
+            return self.create_node('call_function', a.__class__, args, {})
+
         # Tensors do not have a reliable string repr() from which they can be
         # constructed (and we probably don't want to rely on that, either), so
         # for any constant Tensor values we encounter, first search for if they
@@ -126,6 +134,7 @@ class Tracer(TracerBase):
         via this parameter.
 
         Args:
+
             m (Module): The module being queried about
             module_qualified_name (str): The path to root of this module. For example,
                 if you have a module hierarchy where submodule ``foo`` contains
@@ -163,7 +172,7 @@ class Tracer(TracerBase):
         This method can be overridden to--for example--create nested traced
         GraphModules, or any other behavior you would want while tracing across
         ``Module`` boundaries.
-         ``Module`` boundaries.
+        ``Module`` boundaries.
 
         Args:
 
@@ -186,8 +195,8 @@ class Tracer(TracerBase):
     def create_args_for_root(self, root_fn, is_module):
         """
         Create ``placeholder`` nodes corresponding to the signature of the ``root``
-        Module. This method introspects ``root``'s signature and emits those
-        nodes accordingly, also supporting *args and **kwargs.
+        Module. This method introspects root's signature and emits those
+        nodes accordingly, also supporting ``*args`` and ``**kwargs``.
         """
         # In some cases, a function or method has been decorated with a wrapper
         # defined via ``functools.wraps``. In this case, the outer code object
