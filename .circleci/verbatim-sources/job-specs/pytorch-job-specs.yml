@@ -201,7 +201,7 @@ jobs:
           export CIRCLE_JOB="$CIRCLE_JOB"
           export CIRCLE_WORKFLOW_ID="$CIRCLE_WORKFLOW_ID"
           cd workspace
-          python test/print_test_stats.py test
+          python test/print_test_stats.py --upload-to-s3 test
           EOL
           echo "(cat docker_commands.sh | docker exec -u jenkins -i "$id" bash) 2>&1" > command.sh
           unbuffer bash command.sh | ts

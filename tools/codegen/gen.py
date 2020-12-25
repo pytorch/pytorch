@@ -599,9 +599,9 @@ class ComputeFunction:
         sig_group = CppSignatureGroup.from_schema(f.func, method=False, fallback_binding=f.manual_cpp_binding)
 
         if self.target is Target.DECLARATION:
-            result = f"CAFFE2_API {sig_group.signature.decl()};\n"
+            result = f"TORCH_API {sig_group.signature.decl()};\n"
             if sig_group.faithful_signature is not None:
-                result += f"CAFFE2_API {sig_group.faithful_signature.decl()};\n"
+                result += f"TORCH_API {sig_group.faithful_signature.decl()};\n"
             return result
 
         assert self.target is Target.DEFINITION
@@ -714,7 +714,7 @@ def compute_native_function_declaration(g: Union[StructuredNativeFunctions, Nati
                 continue
             seen.add(n)
             rs.append(f"""\
-struct CAFFE2_API structured_{n} : public at::meta::{meta_name} {{
+struct TORCH_API structured_{n} : public at::meta::{meta_name} {{
     void impl({', '.join(a.decl() for a in out_args)});
 }};
 """)
@@ -740,7 +740,7 @@ struct CAFFE2_API structured_{n} : public at::meta::{meta_name} {{
                     args_str = ', '.join(a.defn() for a in args)
                 else:
                     args_str = ', '.join(a.decl() for a in args)
-                rs.append(f"CAFFE2_API {returns_type} {n}({args_str});")
+                rs.append(f"TORCH_API {returns_type} {n}({args_str});")
 
         return rs
 
@@ -760,7 +760,7 @@ struct CAFFE2_API structured_{n} : public at::meta::{meta_name} {{
             seen.add(n)
             returns_type = native.returns_type(f.func.returns)
             args = native.arguments(f.func)
-            rs.append(f"CAFFE2_API {returns_type} {n}({', '.join(a.decl() for a in args)});")
+            rs.append(f"TORCH_API {returns_type} {n}({', '.join(a.decl() for a in args)});")
 
         return rs
 
@@ -774,7 +774,7 @@ def compute_meta_function_declaration(g: StructuredNativeFunctions) -> str:
         if parent_class is None:
             parent_class = "at::impl::MetaBase"
         return f"""\
-struct CAFFE2_API {name} : public {parent_class} {{
+struct TORCH_API {name} : public {parent_class} {{
     void meta({args_str});
 }};
 """
