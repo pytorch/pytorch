@@ -76,12 +76,6 @@ class AdaBelief(Optimizer):
         self.degenerated_to_sgd = degenerated_to_sgd
         self.weight_decouple = weight_decouple
         self.rectify = rectify
-        if self.weight_decouple:
-            print('Weight decoupling enabled in AdaBelief')
-        if self.rectify:
-            print('Rectification enabled in AdaBelief')
-        if amsgrad:
-            print('AMSGrad enabled in AdaBelief')
 
     def __setstate__(self, state):
         super(AdaBelief, self).__setstate__(state)
