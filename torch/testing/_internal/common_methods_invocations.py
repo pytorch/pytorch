@@ -1476,6 +1476,14 @@ def method_tests():
         ('ceil', (), NO_ARGS, 'scalar', (True,)),
         ('rad2deg', (S, S, S), NO_ARGS),
         ('deg2rad', (S, S, S), NO_ARGS),
+        # Removing the 'rsqrt' entries leads to failure in
+        # test_index_fill_variable_dim_*
+        # TODO: Remove when fixed.
+        # Reference: https://github.com/pytorch/pytorch/issues/48230
+        ('rsqrt', torch.rand(S, S, S) + 1e-2, NO_ARGS, '', (True,)),
+        ('rsqrt', uniform_scalar(1e-2, requires_grad=True), NO_ARGS, 'scalar', (True,)),
+        ('rsqrt', torch.rand(S, S, S, dtype=torch.cfloat) + 1e-2, NO_ARGS, 'complex', (True,)),
+        ('rsqrt', uniform_scalar(1e-2 * (1 + 1j), requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
         ('frac', (S, S, S), NO_ARGS, '', (True,)),
         ('frac', (), NO_ARGS, 'scalar', (True,)),
         ('fmod', (S, S, S), (1.5,), '', (True,)),
