@@ -136,8 +136,9 @@ void initGeneratorBindings(PyObject* module) {
             END_HANDLE_TH_ERRORS_PYBIND
           },
           /* __setstate__ */
-          [](std::tuple<uint64_t, py::object, Tensor&> state_tuple) {
+          [](py::tuple t) {
             HANDLE_TH_ERRORS
+            auto state_tuple = t.cast<std::tuple<uint64_t, py::object, Tensor&>>();
             auto state_version = std::get<0>(state_tuple);
             auto py_device = std::get<1>(state_tuple).ptr();
             // Currently only state version 0 is supported
