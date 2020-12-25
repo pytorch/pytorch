@@ -1097,6 +1097,19 @@ if TEST_SCIPY:
                        promotes_integers_to_float=True,
                        assert_autodiffed=True,
                        test_complex_grad=False),  # Reference: https://github.com/pytorch/pytorch/issues/48552
+        UnaryUfuncInfo('digamma',
+                       ref=scipy.special.digamma,
+                       decorators=(precisionOverride({torch.float16: 5e-1}),),
+                       dtypes=all_types_and(torch.bool),
+                       dtypesIfCPU=all_types_and(torch.bool),
+                       dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+                       skips=(
+                           # In some cases, output is NaN (for input close to
+                           # negative integers) especially due to reduced precision
+                           # in float16 and NaN's can't be tested for equality.
+                           SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                    device_type='cuda', dtypes=[torch.float16]),),
+                       promotes_integers_to_float=True),
         UnaryUfuncInfo('erf',
                        ref=scipy.special.erf,
                        decorators=(precisionOverride({torch.float16: 1e-2,

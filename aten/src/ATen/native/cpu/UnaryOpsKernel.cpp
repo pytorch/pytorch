@@ -360,7 +360,7 @@ static void atanh_kernel(TensorIterator& iter) {
 }
 
 static void digamma_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "digamma", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "digamma", [&]() {
     cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return calc_digamma(a); });
