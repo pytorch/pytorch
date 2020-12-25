@@ -190,12 +190,12 @@ class AdaBelief(Optimizer):
                 conf_params_with_grad, conf_exp_avg, conf_denom, conf_step_size = [], [], [], []
                 inconf_params_with_grad, inconf_exp_avg, inconf_denom, inconf_step_size = [], [], [], []
                 for (_N_sma,_param_with_grad, _exp_avg, _denom, _N_sma, _rec_step_size) in zip(N_smas, params_with_grad, exp_avg, denom, N_smas, rectify_step_sizes):
-                    if _N_sma >= 5.0:
+                    if _N_sma >= 5:
                         conf_params_with_grad.append(_param_with_grad)
                         conf_exp_avg.append(_exp_avg)
                         conf_denom.append(_denom)
                         conf_step_size.append( -group['lr'] * _rec_step_size )
-                    elif _rec_step_size > 0.0:
+                    elif _rec_step_size > 0:
                         inconf_params_with_grad.append(_param_with_grad)
                         inconf_exp_avg.append(_exp_avg)
                         inconf_denom.append(_denom)
