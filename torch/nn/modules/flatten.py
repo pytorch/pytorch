@@ -102,8 +102,6 @@ class Unflatten(Module):
         super(Unflatten, self).__init__()
 
         if isinstance(dim, int):
-            if (isinstance(unflattened_size, list)):
-                unflattened_size = tuple(unflattened_size)
             self._require_tuple_int(unflattened_size)
         elif isinstance(dim, str):
             self._require_tuple_tuple(unflattened_size)
@@ -124,7 +122,7 @@ class Unflatten(Module):
                         "but found type {}".format(type(input).__name__))
 
     def _require_tuple_int(self, input):
-        if (isinstance(input, tuple)):
+        if (isinstance(input, (tuple, list))):
             for idx, elem in enumerate(input):
                 if not isinstance(elem, int):
                     raise TypeError("unflattened_size must be tuple of ints, " + 
