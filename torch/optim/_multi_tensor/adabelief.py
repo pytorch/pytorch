@@ -206,7 +206,7 @@ class AdaBelief(Optimizer):
                     #for i in range(len(conf_params_with_grad)):
                     #    conf_params_with_grad[i].addcdiv_(conf_exp_avg[i], conf_denom[i], value=conf_step_size[i])
                 if len(inconf_params_with_grad) > 0:# SGD-type update
-                    torch._foreach_add_( inconf_params_with_grad, inconf_exp_avg, inconf_step_size) 
+                    torch._foreach_add_( inconf_params_with_grad, inconf_exp_avg, alpha = inconf_step_size[0]) 
                     #for i in range(len(inconf_params_with_grad)):
                     #    inconf_params_with_grad[i].add_(inconf_exp_avg[i], alpha=inconf_step_size[i])
                     
