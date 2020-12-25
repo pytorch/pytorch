@@ -1090,6 +1090,7 @@ Tensor& put__cpu(Tensor& self, const Tensor& index, const Tensor& source, bool a
     TORCH_CHECK(self.scalar_type() == source.scalar_type(), "output and source scalar type must match.",
                 "But got different types: ", self.scalar_type(), " and ", source.scalar_type());
     TORCH_CHECK(index.scalar_type() == kLong, "index must be an int64 tensor");
+    TORCH_CHECK(index.numel() == source.numel(), "src should have the same number of elements as index")
 
     int64_t idx_numel = index.numel();
     bool is_contiguous = self.is_contiguous();
