@@ -63,7 +63,6 @@ class AdaBelief(Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
 
-        self.degenerated_to_sgd = degenerated_to_sgd
         if isinstance(params, (list, tuple)) and len(params) > 0 and isinstance(params[0], dict):
             for param in params:
                 if 'betas' in param and (param['betas'][0] != betas[0] or param['betas'][1] != betas[1]):
@@ -73,9 +72,9 @@ class AdaBelief(Optimizer):
                         weight_decay=weight_decay, amsgrad=amsgrad, buffer=[[None, None, None] for _ in range(10)])
         super(AdaBelief, self).__init__(params, defaults)
 
-        self.degenerated_to_sgd = degenerated_to_sgd
-        self.weight_decouple = weight_decouple
-        self.rectify = rectify
+        self._degenerated_to_sgd = degenerated_to_sgd
+        self._weight_decouple = weight_decouple
+        self._rectify = rectify
 
     def __setstate__(self, state):
         super(AdaBelief, self).__setstate__(state)
@@ -119,7 +118,7 @@ class AdaBelief(Optimizer):
                         state['max_exp_avg_var'] = torch.zeros_like(p.data,memory_format=torch.preserve_format)
 
                 # perform weight decay, check if decoupled weight decay
-                if self.weight_decouple:
+                if self._weight_decouple:
                     p.data.mul_(1.0 - group['lr'] * group['weight_decay'])
                 else:
                     if group['weight_decay'] != 0:
@@ -148,7 +147,7 @@ class AdaBelief(Optimizer):
                     denom = (exp_avg_var.add_(group['eps']).sqrt() / math.sqrt(bias_correction2)).add_(group['eps'])
 
                 # update
-                if not self.rectify:
+                if not self._rectify:
                     # Default update
                     step_size = group['lr'] / bias_correction1
                     p.data.addcdiv_( exp_avg, denom, value=-step_size)
@@ -169,7 +168,7 @@ class AdaBelief(Optimizer):
                             step_size = math.sqrt(
                                 (1 - beta2_t) * (N_sma - 4) / (N_sma_max - 4) * (N_sma - 2) / N_sma * N_sma_max / (
                                         N_sma_max - 2)) / (1 - beta1 ** state['step'])
-                        elif self.degenerated_to_sgd:
+                        elif self._degenerated_to_sgd:
                             step_size = 1.0 / (1 - beta1 ** state['step'])
                         else:
                             step_size = -1
