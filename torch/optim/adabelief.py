@@ -4,14 +4,14 @@ from .optimizer import Optimizer
 
 class AdaBelief(Optimizer):
     r"""Implements AdaBelief algorithm proposed in 'AdaBelief optimizer, adapting stepsizes by the belief in observed gradients'_.
-    
+
     Recommendation on hyper-parameters\:
-    >> Epsilon in AdaBelief is different from Adam (typically eps_adabelief = eps_adam*eps_adam) <br>    
-    >> If SGD is better than Adam  ->  Set a large eps (1e-8) <br>
-    >> If SGD is worse than Adam   ->  Set a small eps (1e-16) (rectify=True often helps) <br>
-    >> If AdamW is better than Adam  ->  Turn on “weight_decouple” <br>
-    >> Note that default "weight_decay" is very different for Adam and AdamW, need to consider this when using AdaBelief with and without "weight_decouple". <br>
-    >> For a full list of recommended hyper-parameters, see https://github.com/juntang-zhuang/Adabelief-Optimizer
+    (1) Epsilon in AdaBelief is different from Adam (typically eps_adabelief = eps_adam*eps_adam) 
+    (2) If SGD is better than Adam  ->  Set a large eps (1e-8)
+    (3) If SGD is worse than Adam   ->  Set a small eps (1e-16) (rectify=True often helps)
+    (4) If AdamW is better than Adam  ->  Turn on “weight_decouple”
+    (5) Note that default "weight_decay" is very different for Adam and AdamW, need to consider this when using AdaBelief with and without "weight_decouple".
+    (6) For a full list of recommended hyper-parameters, see https://github.com/juntang-zhuang/Adabelief-Optimizer
 
     Arguments:
         params (iterable): iterable of parameters to optimize or dicts defining
