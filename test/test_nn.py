@@ -9309,7 +9309,7 @@ class TestNN(NNTestCase):
         for us in ([['C', 2], ['W', 5], ['H', 5]], [('C', 2), ('W', 5), ('H', 5)]):
             with self.assertRaisesRegex(
                     TypeError,
-                    r"unflattened_size must be tuple of tuples, but found type list"):
+                    r"unflattened_size must be a tuple of tuples, but found type list"):
                 nn.Unflatten(dim='features', unflattened_size=us)
 
         # Wrong type for unflattened_size (tuple of lists)
