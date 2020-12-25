@@ -217,7 +217,7 @@ static inline int64_t THTensor_(wrapLinearIndex)(int64_t linearIndex, int64_t nu
   return linearIndex < 0 ? linearIndex + numel : linearIndex;
 }
 
-void THTensor_(put)(THTensor *tensor, THLongTensor *index, THTensor *src, int accumulate)
+/*void THTensor_(put)(THTensor *tensor, THLongTensor *index, THTensor *src, int accumulate)
 {
   THArgCheck(THLongTensor_nElement(index) == THTensor_(nElement)(src), 3,
     "src should have the same number of elements as index");
@@ -241,7 +241,7 @@ void THTensor_(put)(THTensor *tensor, THLongTensor *index, THTensor *src, int ac
 
   c10::raw::intrusive_ptr::decref(src);
   THLongTensor_free(index);
-}
+}*/
 
 void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, scalar_t val)
 {

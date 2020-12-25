@@ -1083,6 +1083,34 @@ Tensor take_backward(const Tensor& grad, const Tensor& input, const Tensor& inde
   return at::zeros_like(input).put_(index, grad, true);
 }
 
+Tensor& put__cpu(Tensor& self, const Tensor& index, const Tensor& source, bool accumulate){
+    TORCH_CHECK(self.device().type() == at::kCPU, "device type of output (", self.device().type(), ") is not CPU");
+    TORCH_CHECK(index.device().type() == at::kCPU, "device type of index (", index.device().type(), ") is not CPU");
+    TORCH_CHECK(source.device().type() == at::kCPU, "device type of source (", source.device().type(), ") is not CPU");
+    TORCH_CHECK(self.scalar_type() == source.scalar_type(), "output and source scalar type must match.",
+                "But got different types: ", self.scalar_type(), " and ", source.scalar_type());
+    TORCH_CHECK(index.scalar_type() == kLong, "index must be an int64 tensor");
+
+    int64_t idx_numel = index.numel();
+    bool is_contiguous = self.is_contiguous();
+    AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half, self.scalar_type(), "put__cpu", [&] {
+        auto self_data = self.data_ptr<scalar_t>();
+        auto index_data = index.data_ptr<int64_t>();
+        auto source_data = source.data_ptr<scalar_t>();
+        for (auto i = 0; i < idx_numel; i++) {
+            checkLinearIndex(i, idx_numel);
+            auto linearIndex = wrapLinearIndex(index_data[i], self.numel());
+            auto dataOffset_ = is_contiguous ? linearIndex : dataOffset(index, linearIndex);
+            if (accumulate){
+                self_data[dataOffset_] += source_data[i];
+            } else {
+                self_data[dataOffset_] = source_data[i];
+            }
+        }
+    });
+    return self;
+}
+
 Tensor _gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& grad){
 // special case scalar input and/or index
     if (self.ndimension() == 0) return at::_sparse_coo_tensor_unsafe(at::empty({0,grad.numel()}, index.options()), grad, self.sizes());

@@ -5509,7 +5509,7 @@
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_put_
+    CPU: put__cpu
     CUDA: legacy::cuda::_th_put_
 
 - func: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
