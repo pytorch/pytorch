@@ -9283,32 +9283,16 @@ class TestNN(NNTestCase):
     def test_unflatten(self):
         tensor_input = torch.randn(2, 50)
 
-        # Unflatten Tensor
+        # Unflatten Tensor (unflattened_size as a tuple of ints and list of ints)
 
-        unflatten = nn.Unflatten(dim=1, unflattened_size=(2, 5, 5))
-        tensor_output = unflatten(tensor_input)
-        self.assertEqual(tensor_output.size(), torch.Size([2, 2, 5, 5]))
-
-        # Unflatten Tensor (unflattened_size of list)
-        unflatten = nn.Unflatten(dim=1, unflattened_size=[2, 5, 5])
-        tensor_output = unflatten(tensor_input)
-        self.assertEqual(tensor_output.size(), torch.Size([2, 2, 5, 5]))
+        for us in ((2, 5, 5), [2, 5, 5]):
+            unflatten = nn.Unflatten(dim=1, unflattened_size=us)
+            tensor_output = unflatten(tensor_input)
+            self.assertEqual(tensor_output.size(), torch.Size([2, 2, 5, 5]))
 
         # Unflatten NamedTensor
 
         unflatten = nn.Unflatten(dim='features', unflattened_size=(('C', 2), ('H', 5), ('W', 5)))
-        named_tensor_input = tensor_input.refine_names('N', 'features')
-        named_tensor_output = unflatten(named_tensor_input)
-        self.assertEqual(named_tensor_output.size(), torch.Size([2, 2, 5, 5]))
-
-        # Unflatten NamedTensor (unflattened size of list of lists)
-        unflatten = nn.Unflatten(dim='features', unflattened_size=[['C', 2], ['H', 5], ['W', 5]])
-        named_tensor_input = tensor_input.refine_names('N', 'features')
-        named_tensor_output = unflatten(named_tensor_input)
-        self.assertEqual(named_tensor_output.size(), torch.Size([2, 2, 5, 5]))
-
-        # Unflatten NamedTensor (unflattened size of list of tuples)
-        unflatten = nn.Unflatten(dim='features', unflattened_size=[('C', 2), ('H', 5), ('W', 5)])
         named_tensor_input = tensor_input.refine_names('N', 'features')
         named_tensor_output = unflatten(named_tensor_input)
         self.assertEqual(named_tensor_output.size(), torch.Size([2, 2, 5, 5]))
@@ -9320,6 +9304,13 @@ class TestNN(NNTestCase):
                 TypeError,
                 r"unflattened_size must be tuple of ints, but found element of type float at pos 2"):
             nn.Unflatten(dim=1, unflattened_size=(2, 5, 5.0))
+
+        # Wrong type for unflattened_size (list of lists and list of tuples)
+        for us in ([['C', 2], ['W', 5], ['H', 5]], [('C', 2), ('W', 5), ('H', 5)]):
+            with self.assertRaisesRegex(
+                    TypeError,
+                    r"unflattened_size must be tuple of tuples, but found type list"):
+                nn.Unflatten(dim='features', unflattened_size=us)
 
         # Wrong type for unflattened_size (tuple of lists)
 

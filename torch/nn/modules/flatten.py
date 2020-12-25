@@ -53,7 +53,7 @@ class Unflatten(Module):
       be either `int` or `str` when `Tensor` or `NamedTensor` is used, respectively.
 
     * :attr:`unflattened_size` is the new shape of the unflattened dimension of the tensor and it can be
-      a `tuple` of ints or `torch.Size` for `Tensor` input or the size as a list or a `NamedShape` 
+      a `tuple` of ints or `torch.Size` for `Tensor` input or a `list` of ints or a `NamedShape` 
       (tuple of `(name, size)` tuples) for `NamedTensor` input.
 
     Shape:
@@ -62,7 +62,7 @@ class Unflatten(Module):
 
     Args:
         dim (Union[int, str]): Dimension to be unflattened
-        unflattened_size (Union[torch.Size, List, NamedShape]): New shape of the unflattened dimension
+        unflattened_size (Union[torch.Size, Tuple, List, NamedShape]): New shape of the unflattened dimension
 
     Examples:
         >>> input = torch.randn(2, 50)
@@ -95,9 +95,9 @@ class Unflatten(Module):
 
     __constants__ = ['dim', 'unflattened_size']
     dim: Union[int, str]
-    unflattened_size: Union[Size, List, NamedShape]
+    unflattened_size: Union[Size, NamedShape]
 
-    def __init__(self, dim: Union[int, str], unflattened_size: Union[Size, List, NamedShape]) -> None:
+    def __init__(self, dim: Union[int, str], unflattened_size: Union[_size, NamedShape]) -> None:
         super(Unflatten, self).__init__()
 
         if isinstance(dim, int):
@@ -105,12 +105,6 @@ class Unflatten(Module):
                 unflattened_size = tuple(unflattened_size)
             self._require_tuple_int(unflattened_size)
         elif isinstance(dim, str):
-            if (isinstance(unflattened_size, list)):
-                for idx, elem in enumerate(unflattened_size):
-                    if not isinstance(elem, list) and not isinstance(elem, tuple):
-                        raise TypeError("unflattened_size must be a list of lists or a list of tuples " +
-                                        "but found element of type {} at pos {}".format(type(elem).__name__, idx))
-                unflattened_size = tuple(map(tuple, unflattened_size))
             self._require_tuple_tuple(unflattened_size)
         else:
             raise TypeError("invalid argument type for dim parameter")
