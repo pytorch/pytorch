@@ -4,9 +4,10 @@ from ..optimizer import Optimizer
 from collections import defaultdict
 
 class AdaBelief(Optimizer):
-    r"""Implements AdaBelief algorithm proposed in 'AdaBelief optimizer, adapting stepsizes by the belief in observed gradients'_.
+    r"""Implements AdaBelief algorithm.
 
-    Recommendation on hyper-parameters\:
+    It's proposed in 'AdaBelief optimizer, adapting stepsizes by the belief in observed gradients'_.
+    Recommendation on hyper-parameters:
     (1) Epsilon in AdaBelief is different from Adam (typically eps_adabelief = eps_adam*eps_adam) 
     (2) If SGD is better than Adam  ->  Set a large eps (1e-8)
     (3) If SGD is worse than Adam   ->  Set a small eps (1e-16) (rectify=True often helps)
