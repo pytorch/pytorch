@@ -217,32 +217,6 @@ static inline int64_t THTensor_(wrapLinearIndex)(int64_t linearIndex, int64_t nu
   return linearIndex < 0 ? linearIndex + numel : linearIndex;
 }
 
-/*void THTensor_(put)(THTensor *tensor, THLongTensor *index, THTensor *src, int accumulate)
-{
-  THArgCheck(THLongTensor_nElement(index) == THTensor_(nElement)(src), 3,
-    "src should have the same number of elements as index");
-
-  index = THLongTensor_newContiguous(index);
-  src = THTensor_(newContiguous)(src);
-  scalar_t* data = tensor->data<scalar_t>();
-  ptrdiff_t numel = THTensor_(nElement)(tensor);
-  int is_contiguous = THTensor_(isContiguous)(tensor);
-
-  TH_TENSOR_APPLY2(int64_t, index, scalar_t, src,
-    THTensor_(checkLinearIndex)(*index_data, numel);
-    int64_t linearIndex = THTensor_(wrapLinearIndex)(*index_data, numel);
-    int64_t dataOffset = is_contiguous ? linearIndex : THTensor_(dataOffset)(tensor, linearIndex);
-    if (accumulate) {
-      data[dataOffset] += *src_data;
-    } else {
-      data[dataOffset] = *src_data;
-    }
-  );
-
-  c10::raw::intrusive_ptr::decref(src);
-  THLongTensor_free(index);
-}*/
-
 void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, scalar_t val)
 {
   at::NoNamesGuard guard;
