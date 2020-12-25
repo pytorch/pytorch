@@ -164,14 +164,12 @@ class AdaBelief(Optimizer):
             if amsgrad:
                 # Maintains the maximum of all 2nd moment running avg. till now
                 max_exp_avg_sq = torch._foreach_maximum(max_exp_avg_sq, exp_avg_sq)
-                #[torch.max(a, b, out=a) for a, b in zip(max_exp_avg_sq, exp_avg_sq)]
 
                 # Use the max. for normalizing running avg. of gradient
                 max_exp_avg_sq_sqrt = torch._foreach_sqrt(max_exp_avg_sq)
                 bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]
 
                 torch._foreach_div_(max_exp_avg_sq_sqrt, bias_correction_sqrt)
-                #torch._foreach_div_scalar_list_(max_exp_avg_sq_sqrt, bias_correction_sqrt)
 
                 denom = torch._foreach_add(max_exp_avg_sq_sqrt, group['eps'])
             else:
@@ -179,7 +177,6 @@ class AdaBelief(Optimizer):
                 bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]
 
                 torch._foreach_div_(exp_avg_sq_sqrt, bias_correction_sqrt)
-                #torch._foreach_div_scalar_list_(exp_avg_sq_sqrt, bias_correction_sqrt)
 
                 denom = torch._foreach_add(exp_avg_sq_sqrt, group['eps'])
 
@@ -187,8 +184,6 @@ class AdaBelief(Optimizer):
             if not self.rectify:
                 step_size = [-1 * (group['lr'] / bc) for bc in bias_correction1]
                 torch._foreach_addcdiv_(params_with_grad, exp_avg, denom, step_size)
-                #for i in range(len(step_size)):
-                #    params_with_grad[i].addcdiv_(exp_avg[i], denom[i], value=step_size[i])
             else: # rectified update
                 N_smas, rectify_step_sizes = self.get_rectification_factor(group)
                 # split list by rectification
@@ -209,12 +204,8 @@ class AdaBelief(Optimizer):
                 # update parameters by confidence
                 if len(conf_params_with_grad) > 0:# Adam-type update
                     torch._foreach_addcdiv_(conf_params_with_grad, conf_exp_avg, conf_denom, conf_step_size) 
-                    #for i in range(len(conf_params_with_grad)):
-                    #    conf_params_with_grad[i].addcdiv_(conf_exp_avg[i], conf_denom[i], value=conf_step_size[i])
                 if len(inconf_params_with_grad) > 0:# SGD-type update
                     torch._foreach_add_( inconf_params_with_grad, inconf_exp_avg, alpha = inconf_step_size[0]) 
-                    #for i in range(len(inconf_params_with_grad)):
-                    #    inconf_params_with_grad[i].add_(inconf_exp_avg[i], alpha=inconf_step_size[i])
                     
         return loss
     
