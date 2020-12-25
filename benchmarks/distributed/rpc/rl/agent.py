@@ -14,20 +14,16 @@ from torch.distributions import Categorical
 from torch import autograd
 
 OBSERVER_NAME = "observer{}"
-gamma = 0.99
 
-torch.autograd.set_detect_anomaly(True)
 
 
 class Policy(nn.Module):
-    def __init__(self, state_size, nlayers, out_features, batch=True):
-        torch.autograd.set_detect_anomaly(True)
+    def __init__(self, in_features, nlayers, out_features):
         super(Policy, self).__init__()
-        self.in_features = reduce((lambda x, y: x*y), state_size)
 
         self.model = nn.Sequential(
             nn.Flatten(1, -1),
-            nn.Linear(self.in_features, out_features),
+            nn.Linear(in_features, out_features),
             * [nn.Linear(out_features, out_features) for _ in range(nlayers)]
         )
         self.dim = 0
@@ -63,7 +59,7 @@ class AgentBase:
         from observer import ObserverBase
 
         self.batch = batch
-        self.policy = Policy(state_size, nlayers, out_features, self.batch)
+        self.policy = Policy(reduce((lambda x, y: x*y), state_size), nlayers, out_features)
         self.optimizer = optim.Adam(self.policy.parameters(), lr=1e-2)
 
         self.batch_size = batch_size

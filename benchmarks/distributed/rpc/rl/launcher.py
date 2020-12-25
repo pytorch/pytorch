@@ -68,56 +68,75 @@ def run_worker(rank, world_size, master_addr, master_port, batch, state_size, nl
     rpc.shutdown()
 
 def find_graph_variable(args):
-    args['testing'] = True
     var_types = {'world_size': int, 
     'state_size': str, 'nlayers': int, 'out_features': int, 'batch': bool} #"False" converts to True, i need to fix batch
     for arg in var_types.keys():
         if ',' in args[arg]:
             if args.get('x_axis_name'):
                 raise("Only 1 x axis graph variable allowed")
-            pdb.set_trace()
             args[arg] = list(map(var_types[arg], args[arg].split(','))) #convert , separted str to lst
             args['x_axis_name'] = arg
         else:
             args[arg] = var_types[arg](args[arg]) #convert string to proper type
 
-def main():
-    find_graph_variable(args)
 
-    x_axis_variables = args[args['x_axis_name']] if args.get('x_axis_name') else [None] #run once if no x axis variables
-    ctx = mp.get_context('spawn')
-    queue = ctx.SimpleQueue()
-    benchmark_runs = []
-    for i, x_axis_variable in enumerate(x_axis_variables): #run benchmark for every x axis variable
-        if len(x_axis_variables) > 1:
-            args[args['x_axis_name']] = x_axis_variable #save x axis variable for this particular benchmark run
-        processes = []
-        start_time = time.time()
-        for rank in range(args['world_size']):
-            prc = ctx.Process(
-                target=run_worker, 
-                args=(
-                    rank, args['world_size'], args['master_addr'], args['master_port'],
-                    args['batch'], args['state_size'], args['nlayers'], 
-                    args['out_features'], queue
-                    )
-            )
-            prc.start()
-            processes.append(prc)
-        benchmark_run_results = queue.get()   
-        for process in processes:
-            process.join()
-        print(f"Time taken -, {time.time() - start_time}")
-        if args.get('x_axis_name'):
-            benchmark_run_results[args['x_axis_name']] = x_axis_variable #save what the x axis value was for this benchmark run       
-        benchmark_runs.append(benchmark_run_results)
+def print_benchmark_results(report):
+    print("---------------------------------------\nPyTorch distributed rpc benchmark suite\n---------------------------------------")
+    for key, val in report.items():
+        if key != "benchmark_results":
+            print(f'{key} : {val}')
+    x_axis_name = report.get('x_axis_name')
+    for benchmark_run in report['benchmark_results']:
+        print('---------\nBenchmark')
+        if x_axis_name: #edit
+            print(f'{x_axis_name} : {benchmark_run.get(x_axis_name)}')
+        for metric_name, percentile_results in benchmark_run.items():
+            if metric_name != x_axis_name:
+                print(f'{metric_name} -- {percentile_results}\n')
+
+
+
+def main():
+    # find_graph_variable(args)
+
+    # x_axis_variables = args[args['x_axis_name']] if args.get('x_axis_name') else [None] #run once if no x axis variables
+    # ctx = mp.get_context('spawn')
+    # queue = ctx.SimpleQueue()
+    # benchmark_runs = []
+    # for i, x_axis_variable in enumerate(x_axis_variables): #run benchmark for every x axis variable
+    #     if len(x_axis_variables) > 1:
+    #         args[args['x_axis_name']] = x_axis_variable #save x axis variable for this particular benchmark run
+    #     processes = []
+    #     start_time = time.time()
+    #     for rank in range(args['world_size']):
+    #         prc = ctx.Process(
+    #             target=run_worker, 
+    #             args=(
+    #                 rank, args['world_size'], args['master_addr'], args['master_port'],
+    #                 args['batch'], args['state_size'], args['nlayers'], 
+    #                 args['out_features'], queue
+    #                 )
+    #         )
+    #         prc.start()
+    #         processes.append(prc)
+    #     benchmark_run_results = queue.get()   
+    #     for process in processes:
+    #         process.join()
+    #     print(f"Time taken -, {time.time() - start_time}")
+    #     if args.get('x_axis_name'):
+    #         benchmark_run_results[args['x_axis_name']] = x_axis_variable #save what the x axis value was for this benchmark run       
+    #     benchmark_runs.append(benchmark_run_results)
     
-    report = args
-    report['benchmark_results'] = benchmark_runs
-    if args.get('x_axis_name'):
-        del report[args['x_axis_name']] #x_axis_name was variable so dont save a constant in the report for that variable
-    with open(args['output_file_path'], 'w') as f:
-        json.dump(report, f)
+    # report = args
+    # report['benchmark_results'] = benchmark_runs
+    # if args.get('x_axis_name'):
+    #     del report[args['x_axis_name']] #x_axis_name was variable so dont save a constant in the report for that variable
+    # with open(args['output_file_path'], 'w') as f:
+    #     json.dump(report, f)
+    # # pdb.set_trace()
+    with open(args['output_file_path']) as report:
+        report = json.load(report)
+    print_benchmark_results(report)
 
 if __name__ == '__main__':
     main()
