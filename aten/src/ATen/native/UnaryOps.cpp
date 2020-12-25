@@ -327,13 +327,9 @@ Tensor reciprocal(const Tensor& self) { return unary_op_impl_float(self, recipro
 Tensor& reciprocal_(Tensor& self) { return unary_op_impl_(self, at::reciprocal_out); }
 
 Tensor& rsqrt_out(Tensor& result, const Tensor& self) {
-  TORCH_CHECK(
-      self.scalar_type() != kBool, "rsqrt: bool dtype is not supported");
   return unary_op_impl_float_out(result, self, rsqrt_stub);
 }
 Tensor rsqrt(const Tensor& self) {
-  TORCH_CHECK(
-      self.scalar_type() != kBool, "rsqrt: bool dtype is not supported");
   return unary_op_impl_float(self, rsqrt_stub);
 }
 Tensor& rsqrt_(Tensor& self) { return unary_op_impl_(self, at::rsqrt_out); }
