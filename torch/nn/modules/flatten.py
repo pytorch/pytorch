@@ -3,6 +3,7 @@ from .module import Module
 from typing import Tuple, Union, List
 from torch import Tensor
 from torch import Size
+from torch.types import _size
 
 
 class Flatten(Module):
