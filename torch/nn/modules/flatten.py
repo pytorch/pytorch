@@ -83,11 +83,9 @@ class Unflatten(Module):
         >>> output.size()
         torch.Size([2, 2, 5, 5])
         >>> # With namedshape (tuple of tuples)
-        >>> m = nn.Sequential(
-        >>>     nn.Linear(50, 50),
-        >>>     nn.Unflatten('features', (('C', 2), ('H', 50), ('W',50)))
-        >>> )
-        >>> output = m(output)
+        >>> input = torch.randn(2, 50, names=('N', 'features'))
+        >>> unflatten = nn.Unflatten('features', (('C', 2), ('H', 5), ('W',5)))
+        >>> output = unflatten(input)
         >>> output.size()
         torch.Size([2, 2, 5, 5])
     """
