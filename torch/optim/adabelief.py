@@ -3,8 +3,8 @@ import torch
 from .optimizer import Optimizer
 
 class AdaBelief(Optimizer):
-    r"""Implements AdaBelief algorithm proposed in 'AdaBelief optimizer, adapting stepsizes by the 
-    belief in observed gradients'_.
+    r"""Implements AdaBelief algorithm proposed in 'AdaBelief optimizer, adapting stepsizes by the belief in observed gradients'_.
+    
     Recommendation on hyper-parameters\:
     >> Epsilon in AdaBelief is different from Adam (typically eps_adabelief = eps_adam*eps_adam) <br>    
     >> If SGD is better than Adam  ->  Set a large eps (1e-8) <br>
