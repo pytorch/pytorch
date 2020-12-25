@@ -187,4 +187,3 @@ class AdaBelief(Optimizer):
                         p.data.add_( exp_avg, alpha=-step_size * group['lr'])
 
         return loss
-        
