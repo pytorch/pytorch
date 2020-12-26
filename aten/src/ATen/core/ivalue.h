@@ -231,7 +231,7 @@ struct TORCH_API IValue final {
    * - Hashing is not defined on all built-in IValue types (e.g. list and
    *   dict), following Python. Calling `hash()` on these types will throw.
    */
-  IValue hash() const {
+   int64_t hash() const {
     return (int64_t)IValue::hash(*this);
   }
   // This is defined because `c10::hash` dispatches to a function of this
