@@ -94,7 +94,7 @@ class Unflatten(Module):
 
     __constants__ = ['dim', 'unflattened_size']
     dim: Union[int, str]
-    unflattened_size: Union[Size, NamedShape]
+    unflattened_size: Union[_size, NamedShape]
 
     def __init__(self, dim: Union[int, str], unflattened_size: Union[_size, NamedShape]) -> None:
         super(Unflatten, self).__init__()
