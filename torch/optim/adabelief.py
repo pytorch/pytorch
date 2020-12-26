@@ -176,9 +176,9 @@ class AdaBelief(Optimizer):
 
                     if N_sma >= 5:
                         if amsgrad:
-                            denom = exp_avg_var.sqrt().add_(group['eps'])
-                        else:
                             denom = max_exp_avg_var.sqrt().add_(group['eps'])
+                        else:
+                            denom = exp_avg_var.sqrt().add_(group['eps'])
                         p.data.addcdiv_(exp_avg, denom, value=-step_size * group['lr'])
                     elif step_size > 0:
                         p.data.add_( exp_avg, alpha=-step_size * group['lr'])
