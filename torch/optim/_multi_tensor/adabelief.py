@@ -101,8 +101,8 @@ class AdaBelief(Optimizer):
             grads = []
             states = []
             exp_avg = []
-            exp_avg_sq = []
-            max_exp_avg_sq = []
+            exp_avg_var = []
+            max_exp_avg_var = []
             params_with_grad = []
 
             for p in group['params']:
@@ -129,16 +129,16 @@ class AdaBelief(Optimizer):
                     # Exponential moving average of gradient values
                     state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     # Exponential moving average of squared gradient values
-                    state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    state['exp_avg_var'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     if amsgrad:
                         # Maintains max of all exp. moving avg. of sq. grad. values
-                        state['max_exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                        state['max_exp_avg_var'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
                 exp_avg.append(state['exp_avg'])
-                exp_avg_sq.append(state['exp_avg_sq'])
+                exp_avg_var.append(state['exp_avg_var'])
 
                 if amsgrad:
-                    max_exp_avg_sq.append(state['max_exp_avg_sq'])
+                    max_exp_avg_var.append(state['max_exp_avg_var'])
 
                 state['step'] += 1
                 states.append(state)
@@ -156,24 +156,24 @@ class AdaBelief(Optimizer):
 
             difs = torch._foreach_add( grads, exp_avg, alpha=-1.0 )
 
-            torch._foreach_mul_(exp_avg_sq, beta2)
-            torch._foreach_addcmul_(exp_avg_sq, difs, difs, 1 - beta2)
+            torch._foreach_mul_(exp_avg_var, beta2)
+            torch._foreach_addcmul_(exp_avg_var, difs, difs, 1 - beta2)
             
-            torch._foreach_add_(exp_avg_sq, group['eps'])
+            torch._foreach_add_(exp_avg_var, group['eps'])
 
             if amsgrad:
                 # Maintains the maximum of all 2nd moment running avg. till now
-                max_exp_avg_sq = torch._foreach_maximum(max_exp_avg_sq, exp_avg_sq)
+                max_exp_avg_var = torch._foreach_maximum(max_exp_avg_var, exp_avg_var)
 
                 # Use the max. for normalizing running avg. of gradient
-                max_exp_avg_sq_sqrt = torch._foreach_sqrt(max_exp_avg_sq)
+                max_exp_avg_sq_sqrt = torch._foreach_sqrt(max_exp_avg_var)
                 bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]
 
                 torch._foreach_div_(max_exp_avg_sq_sqrt, bias_correction_sqrt)
 
                 denom = torch._foreach_add(max_exp_avg_sq_sqrt, group['eps'])
             else:
-                exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_sq)
+                exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_var)
                 bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]
 
                 torch._foreach_div_(exp_avg_sq_sqrt, bias_correction_sqrt)
@@ -185,36 +185,31 @@ class AdaBelief(Optimizer):
                 step_size = [-1 * (group['lr'] / bc) for bc in bias_correction1]
                 torch._foreach_addcdiv_(params_with_grad, exp_avg, denom, step_size)
             else: # rectified update
-                N_smas, rectify_step_sizes = self.get_rectification_factor(group)
-                # split list by rectification
-                conf_params_with_grad, conf_exp_avg, conf_denom, conf_step_size = [], [], [], []
-                inconf_params_with_grad, inconf_exp_avg, inconf_denom, inconf_step_size = [], [], [], []
-                for (_N_sma,_param_with_grad, _exp_avg, _denom, _N_sma, _rec_step_size) in zip(N_smas, params_with_grad, exp_avg, denom, N_smas, rectify_step_sizes):
-                    if _N_sma >= 5:
-                        conf_params_with_grad.append(_param_with_grad)
-                        conf_exp_avg.append(_exp_avg)
-                        conf_denom.append(_denom)
-                        conf_step_size.append( -group['lr'] * _rec_step_size )
-                    elif _rec_step_size > 0:
-                        inconf_params_with_grad.append(_param_with_grad)
-                        inconf_exp_avg.append(_exp_avg)
-                        inconf_denom.append(_denom)
-                        inconf_step_size.append( -group['lr'] * _rec_step_size )
-                
-                # update parameters by confidence
-                if len(conf_params_with_grad) > 0:# Adam-type update
-                    torch._foreach_addcdiv_(conf_params_with_grad, conf_exp_avg, conf_denom, conf_step_size) 
-                if len(inconf_params_with_grad) > 0:# SGD-type update
-                    torch._foreach_add_( inconf_params_with_grad, inconf_exp_avg, alpha = inconf_step_size[0]) 
-                    
+                if amsgrad:
+                    denom = torch._foreach_sqrt(max_exp_avg_var)
+                else:
+                    denom = torch._foreach_sqrt(exp_avg_var)
+                torch._foreach_add_(denom, group['eps'])
+
+                conf_params_with_grad, conf_denom, conf_exp_avg, conf_stepsize, \
+                inconf_params_with_grad, inconf_denom, inconf_exp_avg, inconf_stepsize = \
+                    self.get_rectification_factor(group, params_with_grad, denom, exp_avg)
+
+                if len(conf_params_with_grad)>0: # Adam-type update
+                    torch._foreach_addcdiv_(conf_params_with_grad, conf_exp_avg, conf_denom, conf_stepsize)
+                if len(inconf_params_with_grad)>0: # SGD type update
+                    torch._foreach_add_(inconf_params_with_grad, inconf_exp_avg, alpha=inconf_stepsize[0])
+
         return loss
     
-    def get_rectification_factor(self, group):
-        rectify_step_sizes = []
-        N_smas = []
+    def get_rectification_factor(self, group, params_with_grad, denom, exp_avg):
+        conf_params_with_grad, conf_denom, conf_exp_avg, conf_stepsize = [], [], [], []
+        inconf_params_with_grad, inconf_denom, inconf_exp_avg, inconf_stepsize = [], [], [], []
+
         beta1, beta2 = group['betas']
 
-        for p in group['params']:
+        for p, _denom, _exp_avg in zip(params_with_grad, denom, exp_avg) :
+
             if p.grad is None:
                 continue
             
@@ -226,6 +221,7 @@ class AdaBelief(Optimizer):
             buffered = group['buffer'][int(state['step'] % 10)]
             if state['step'] == buffered[0]:
                 N_sma, step_size = buffered[1], buffered[2]
+
             else:
                 buffered[0] = state['step']
                 beta2_t = beta2 ** state['step']
@@ -244,9 +240,19 @@ class AdaBelief(Optimizer):
                     step_size = -1
                 buffered[2] = step_size
 
-            N_smas.append(N_sma)
-            rectify_step_sizes.append(step_size)
-        return N_smas, rectify_step_sizes
+            if N_sma > 5:
+                conf_params_with_grad.append(p)
+                conf_denom.append(_denom)
+                conf_exp_avg.append(_exp_avg)
+                conf_stepsize.append(-group['lr'] * step_size)
+            elif step_size > 0:
+                inconf_params_with_grad.append(p)
+                inconf_denom.append(_denom)
+                inconf_exp_avg.append(_exp_avg)
+                inconf_stepsize.append(-group['lr'] * step_size)
+
+        return ( conf_params_with_grad, conf_denom, conf_exp_avg, conf_stepsize,
+                 inconf_params_with_grad, inconf_denom, inconf_exp_avg, inconf_stepsize)
     
     # TODO: refactor to a base class once foreach ops are in a good shape.
     def zero_grad(self, set_to_none: bool = False):
@@ -270,3 +276,4 @@ class AdaBelief(Optimizer):
             for _, per_dtype_grads in per_device_and_dtype_grads.items():
                 for grads in per_dtype_grads.values():
                     torch._foreach_zero_(grads)
+
