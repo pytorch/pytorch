@@ -83,22 +83,22 @@ class MultiheadAttention(torch.nn.MultiheadAttention):
             observed.linear_Q.weight = _w
             observed.linear_Q.bias = _b
 
-            _b = in_proj_bias
-            _start = embed_dim
-            _end = embed_dim * 2
-            _w = in_proj_weight[_start:_end, :]
+            _b = other.in_proj_bias
+            _start = other.embed_dim
+            _end = other.embed_dim * 2
+            _w = other.in_proj_weight[_start:_end, :]
             if _b is not None:
                 _b = _b[_start:_end]
             observed.linear_K.weight = _w
             observed.linear_K.bias = _b
 
-            _b = in_proj_bias
-            _start = embed_dim * 2
+            _b = other.in_proj_bias
+            _start = other.embed_dim * 2
             _end = None
-            _w = in_proj_weight[_start:, :]
+            _w = other.in_proj_weight[_start:, :]
             if _b is not None:
                 _b = _b[_start:]
-            vobserved.linear_V.weight = _w
+            observed.linear_V.weight = _w
             observed.linear_V.bias = _b
         else:
             observed.linear_Q = other.q_proj_weight
