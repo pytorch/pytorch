@@ -472,7 +472,7 @@ class TestThatContainsCUDAAssertFailure(TestCase):
 instantiate_device_type_tests(
     TestThatContainsCUDAAssertFailure,
     globals(),
-    except_for=None
+    only_for='cuda'
 )
 
 if __name__ == '__main__':
@@ -484,7 +484,7 @@ if __name__ == '__main__':
         # should capture CUDA error
         self.assertIn('CUDA error: device-side assert triggered', p.stderr.decode('ascii'))
         # should run only 3 tests - 2 CPUs and 1 CUDA (remaining CUDA test should skip)
-        self.assertIn('Ran 3 tests', p.stderr.decode('ascii'))
+        self.assertIn('Ran 1 test', p.stderr.decode('ascii'))
 
 instantiate_device_type_tests(TestTesting, globals())
 
