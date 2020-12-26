@@ -39,7 +39,7 @@ class MultiheadAttention(torch.nn.MultiheadAttention):
         self.linear_Q = nn.Linear(self.embed_dim, self.embed_dim, bias=bias)
         self.linear_K = nn.Linear(self.kdim, self.embed_dim, bias=bias)
         self.linear_V = nn.Linear(self.vdim, self.embed_dim, bias=bias)
-        self.out_proj =nn.Linear(self.embed_dim, self.embed_dim, bias=bias)
+        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=bias)
 
         # Functionals
         self.q_scaling_product = nnq.FloatFunctional()
