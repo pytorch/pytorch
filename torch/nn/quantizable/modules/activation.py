@@ -174,7 +174,7 @@ class MultiheadAttention(torch.nn.MultiheadAttention):
         assert key.size(0) == value.size(0) and key.size(1) == value.size(1)
 
         head_dim = self.embed_dim // self.num_heads
-        assert head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
+        assert head_dim * self.num_heads == self.embed_dim, "embed_dim must be divisible by num_heads"
         scaling = float(head_dim) ** -0.5
 
         q = self.linear_Q(query)
@@ -196,7 +196,7 @@ class MultiheadAttention(torch.nn.MultiheadAttention):
                 if list(attn_mask.size()) != [1, query.size(0), key.size(0)]:
                     raise RuntimeError('The size of the 2D attn_mask is not correct.')
             elif attn_mask.dim() == 3:
-                if list(attn_mask.size()) != [bsz * num_heads, query.size(0), key.size(0)]:
+                if list(attn_mask.size()) != [bsz * self.num_heads, query.size(0), key.size(0)]:
                     raise RuntimeError('The size of the 3D attn_mask is not correct.')
             else:
                 raise RuntimeError("attn_mask's dimension {} is not supported".format(attn_mask.dim()))
@@ -226,19 +226,19 @@ class MultiheadAttention(torch.nn.MultiheadAttention):
             assert bias_k is None
             assert bias_v is None
 
-        q = q.contiguous().view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
+        q = q.contiguous().view(tgt_len, bsz * self.num_heads, head_dim).transpose(0, 1)
         if k is not None:
-            k = k.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+            k = k.contiguous().view(-1, bsz * self.num_heads, head_dim).transpose(0, 1)
         if v is not None:
-            v = v.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+            v = v.contiguous().view(-1, bsz * self.num_heads, head_dim).transpose(0, 1)
 
         if static_k is not None:
-            assert static_k.size(0) == bsz * num_heads
+            assert static_k.size(0) == bsz * self.num_heads
             assert static_k.size(2) == head_dim
             k = static_k
 
         if static_v is not None:
-            assert static_v.size(0) == bsz * num_heads
+            assert static_v.size(0) == bsz * self.num_heads
             assert static_v.size(2) == head_dim
             v = static_v
 
@@ -266,7 +266,7 @@ class MultiheadAttention(torch.nn.MultiheadAttention):
         k = self.dequant_k(k)
         v = self.dequant_v(v)
         attn_output_weights = torch.bmm(q, k.transpose(1, 2))
-        assert list(attn_output_weights.size()) == [bsz * num_heads, tgt_len, src_len]
+        assert list(attn_output_weights.size()) == [bsz * self.num_heads, tgt_len, src_len]
 
         if attn_mask is not None:
             if attn_mask.dtype == torch.bool:
@@ -275,29 +275,29 @@ class MultiheadAttention(torch.nn.MultiheadAttention):
                 attn_output_weights += attn_mask
 
         if key_padding_mask is not None:
-            attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
+            attn_output_weights = attn_output_weights.view(bsz, self.num_heads, tgt_len, src_len)
             attn_output_weights = attn_output_weights.masked_fill(
                 key_padding_mask.unsqueeze(1).unsqueeze(2),
                 float('-inf'),
             )
-            attn_output_weights = attn_output_weights.view(bsz * num_heads, tgt_len, src_len)
+            attn_output_weights = attn_output_weights.view(bsz * self.num_heads, tgt_len, src_len)
 
         attn_output_weights = softmax(
             attn_output_weights, dim=-1)
         attn_output_weights = dropout(attn_output_weights, p=self.dropout, training=self.training)
 
         attn_output = torch.bmm(attn_output_weights, v)
-        assert list(attn_output.size()) == [bsz * num_heads, tgt_len, head_dim]
-        attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
+        assert list(attn_output.size()) == [bsz * self.num_heads, tgt_len, head_dim]
+        attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, self.embed_dim)
 
         # Reentering the quantized zone
         attn_output = self.quant_attn_output(attn_output)
-        attn_output = self.out_proj(attn_output, out_proj_weight, out_proj_bias)
+        attn_output = self.out_proj(attn_output)
         attn_output_weights = self.quant_qttn_output_weights(attn_output_weights)
 
         if need_weights:
             # average attention weights over heads
-            attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
+            attn_output_weights = attn_output_weights.view(bsz, self.num_heads, tgt_len, src_len)
             return attn_output, attn_output_weights.mean(dim=1)
         else:
             return attn_output, None
