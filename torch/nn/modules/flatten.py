@@ -1,6 +1,6 @@
 from .module import Module
 
-from typing import Tuple, Union, List
+from typing import Tuple, Union
 from torch import Tensor
 from torch import Size
 from torch.types import _size
@@ -72,7 +72,7 @@ class Unflatten(Module):
         >>>     nn.Linear(50, 50),
         >>>     nn.Unflatten(1, (2, 5, 5))
         >>> )
-        >>> output = m(output)
+        >>> output = m(input)
         >>> output.size()
         torch.Size([2, 2, 5, 5])
         >>> # With torch.Size
@@ -80,15 +80,13 @@ class Unflatten(Module):
         >>>     nn.Linear(50, 50),
         >>>     nn.Unflatten(1, torch.Size([2, 5, 5]))
         >>> )
-        >>> output = m(output)
+        >>> output = m(input)
         >>> output.size()
         torch.Size([2, 2, 5, 5])
         >>> # With namedshape (tuple of tuples)
-        >>> m = nn.Sequential(
-        >>>     nn.Linear(50, 50),
-        >>>     nn.Unflatten('features', (('C', 2), ('H', 50), ('W',50)))
-        >>> )
-        >>> output = m(output)
+        >>> input = torch.randn(2, 50, names=('N', 'features'))
+        >>> unflatten = nn.Unflatten('features', (('C', 2), ('H', 5), ('W', 5)))
+        >>> output = unflatten(input)
         >>> output.size()
         torch.Size([2, 2, 5, 5])
     """
