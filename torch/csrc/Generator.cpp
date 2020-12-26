@@ -129,27 +129,26 @@ void initGeneratorBindings(PyObject* module) {
             std::lock_guard<std::mutex> lock(gen.mutex());
             py::handle py_device = (PyObject*)THPDevice_New(gen.device());
             auto state_tensor = gen.state();
-            // `__getstate__` currently returns a 3-tuple: (state_version, device, state_tensor)
+            // `__getstate__` currently returns (state_version, (device, state))
             // `state_version` is added for backward compatibility when changes are made to
             // the state tuple. Currently it is always set to 0.
-            return py::make_tuple((uint64_t)0, py_device, state_tensor);
+            return std::make_pair((uint64_t)0, py::make_tuple(py_device, state_tensor));
             END_HANDLE_TH_ERRORS_PYBIND
           },
           /* __setstate__ */
-          [](py::tuple t) {
+          [](std::pair<uint64_t, py::tuple> t) {
             HANDLE_TH_ERRORS
-            auto state_tuple = t.cast<std::tuple<uint64_t, py::object, Tensor&>>();
-            auto state_version = std::get<0>(state_tuple);
-            auto py_device = std::get<1>(state_tuple).ptr();
+            auto state_pair = t.second.cast<std::pair<py::object, Tensor&>>();
+            auto py_device = state_pair.first.ptr();
             // Currently only state version 0 is supported
-            TORCH_CHECK(state_version == 0, "unsupported RNG state version ", state_version);
+            TORCH_CHECK(t.first == 0, "unsupported RNG state version ", t.first);
             TORCH_CHECK_TYPE(
               THPDevice_Check(py_device),
-              "expect torch.device for state tuple element 0, got ", Py_TYPE(py_device)->tp_name
+              "expect torch.device for restoring Generator, got ", Py_TYPE(py_device)->tp_name
             );
 
             auto& device = ((THPDevice*)py_device)->device;
-            auto new_state_tensor = std::get<2>(state_tuple);
+            auto new_state_tensor = state_pair.second;
             // FIXME support state restore beyond CPU and CUDA generators
             auto gen = pyCreateGenerator(device);
             // No need to lock because we are the sole owner of the generator
