@@ -503,7 +503,6 @@ libtorch_python_core_sources = [
     "torch/csrc/MemoryFormat.cpp",
     "torch/csrc/QScheme.cpp",
     "torch/csrc/Module.cpp",
-    "torch/csrc/PtrWrapper.cpp",
     "torch/csrc/python_dimname.cpp",
     "torch/csrc/Size.cpp",
     "torch/csrc/Storage.cpp",
