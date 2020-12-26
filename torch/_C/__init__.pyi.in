@@ -23,17 +23,16 @@ T = TypeVar('T')
 
 # Defined in torch/csrc/Device.cpp
 class device:
-    type: str  # THPDevice_type
-    index: _int  # THPDevice_index
+    type: str
+    index: _int
 
-    # THPDevice_pynew
     @overload
     def __init__(self, device: Union[_device, _int, str]) -> None: ...
 
     @overload
     def __init__(self, type: str, index: _int) -> None: ...
 
-    def __reduce__(self) -> Tuple[Any, ...]: ...  # THPDevice_reduce
+    def __reduce__(self) -> Tuple[Any, ...]: ...
 
 # Defined in torch/csrc/Stream.cpp
 class Stream:
