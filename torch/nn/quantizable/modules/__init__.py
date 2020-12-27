@@ -1,3 +1,4 @@
+from .activation import MultiheadAttention
 from .rnn import LSTM
 from .rnn import LSTMCell
 
