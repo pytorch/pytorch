@@ -1,5 +1,6 @@
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Device.h>
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/pybind.h>
 
 #include <ATen/ATen.h>
@@ -10,9 +11,12 @@
 #endif
 
 namespace torch {
+
 using namespace at;
 
-static Generator pyCreateGenerator(const Device& device) {
+namespace {
+
+inline Generator createGenerator(const Device& device) {
   HANDLE_TH_ERRORS
   if (device.type() == kCPU) {
     return make_generator<CPUGeneratorImpl>();
@@ -27,7 +31,7 @@ static Generator pyCreateGenerator(const Device& device) {
   END_HANDLE_TH_ERRORS_PYBIND
 }
 
-static Generator& pyManualSeed(Generator& gen, uint64_t seed) {
+inline Generator& manualSeed(Generator& gen, uint64_t seed) {
   HANDLE_TH_ERRORS
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen.mutex());
@@ -36,25 +40,30 @@ static Generator& pyManualSeed(Generator& gen, uint64_t seed) {
   END_HANDLE_TH_ERRORS_PYBIND
 }
 
+} // namespace
+
 void initGeneratorBindings(PyObject* module) {
   py::options options;
   options.disable_user_defined_docstrings();
   options.disable_function_signatures();
 
-  py::class_<Generator>(module, "Generator")
-      // FIXME Refactor this after binding Device with pybind11
-      .def(py::init([]() { return pyCreateGenerator(Device(kCPU)); }))
+  py::class_<Generator>(module, "Generator", py::is_final())
+      // FIXME These constructors are temporary and will be replaced by a subsequent
+      // PR that binds at::Device with pybind11
+      .def(py::init([]() { return createGenerator(Device(kCPU)); }))
       .def(py::init(
           [](std::string& dev_str) {
             HANDLE_TH_ERRORS
-            return pyCreateGenerator(Device(dev_str));
+            return createGenerator(Device(dev_str));
             END_HANDLE_TH_ERRORS_PYBIND
           }),
           py::arg("device"))
       .def(py::init(
           [](DeviceIndex index) {
             HANDLE_TH_ERRORS
-            return pyCreateGenerator(Device(kCUDA, index));
+            // -1 is allowed in ATen/C++, to mean the default device, but not in Python
+            TORCH_CHECK(index >= 0, "Device index must not be negative");
+            return createGenerator(Device(kCUDA, index));
             END_HANDLE_TH_ERRORS_PYBIND
           }),
           py::arg("device"))
@@ -68,7 +77,7 @@ void initGeneratorBindings(PyObject* module) {
               Py_TYPE(obj_ptr)->tp_name
             );
             auto& device = ((THPDevice*)obj_ptr)->device;
-            return pyCreateGenerator(device);
+            return createGenerator(device);
             END_HANDLE_TH_ERRORS_PYBIND
           }),
           py::arg("device"))
@@ -91,10 +100,10 @@ void initGeneratorBindings(PyObject* module) {
             END_HANDLE_TH_ERRORS_PYBIND
           },
           py::arg("new_state"))
-      .def("manual_seed", &pyManualSeed, py::arg("seed"))
+      .def("manual_seed", &manualSeed, py::arg("seed"))
       .def("manual_seed",
           [](Generator& gen, int64_t seed) -> Generator& {
-            return pyManualSeed(gen, (uint64_t)seed);
+            return manualSeed(gen, (uint64_t)seed);
           },
           py::arg("seed"))
       .def("seed",
