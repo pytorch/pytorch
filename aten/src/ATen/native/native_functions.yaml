@@ -6930,14 +6930,12 @@
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    CPU: _erfinv__cpu
-    CUDA: _erfinv__cuda
+    CPU, CUDA: erfinv_
 
 - func: erfinv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
-    CPU: _erfinv_out_cpu
-    CUDA: _erfinv_out_cuda
+    CPU, CUDA: erfinv_out
 
 - func: i0(Tensor self) -> Tensor
   use_c10_dispatcher: full
