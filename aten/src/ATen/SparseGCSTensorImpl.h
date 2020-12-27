@@ -8,8 +8,39 @@
 #include <c10/util/Exception.h>
 
 namespace at {
+// This struct defines the core implementation of the GCS 
+// (Generalized Compresses Storage) sparse format. This
+// format has been inspired from the paper 
+// "Efficient storage scheme for n-dimensional sparse array: GCRS/GCCS"
+// by Md Abu Hanif Shaikh and K.M. Azharul Hasan, published
+// in 2015 (https://ieeexplore.ieee.org/document/7237032/). 
+// In that paper the authors propose a compressed format
+// for storing N-way sparse tensors which ends up exactly like
+// the CSR format for 2-D tensors. We slightly tweak their
+// approach to allow an arbitrary number of dimensions to
+// from an N-D tensor be collapsed into two dimensions which
+// can be represented using similar data structures as that 
+// used in the CSR format. We call this new sparse format the
+// "GCS" format.
 
-struct CAFFE2_API SparseGCSTensorImpl : public TensorImpl {
+// Since the GCS format allows the user to collapse contiguous
+// dimensions of their choice into 2-D tensors, use of optimized
+// routines meant for CSR formats from MKL or MAGMA can be
+// used for performing operations on the collapsed dimensions.
+// For further information on usage and best practices see
+// the documentation of the torch.sparse_gcs_tensor() method
+// and the benchmarks in the benchmarks/sparse folder for
+// comparisons against COO.
+
+// We use four Tensors for representing the GCS format:
+// row_indices_, col_indices_, values_ and reduction_.
+// The row_indices_, col_indices_ and values_ tensors
+// are very similar to the tensors of the CSR format used
+// for storing compressed row indices, col indices and
+// non-zero values respectively. The reduction_ tensor
+// is a new introduction into GCS that stores the dimensions
+// of the tensor that must be collapsed 
+struct TORCH_API SparseGCSTensorImpl : public TensorImpl {
   Tensor pointers_;
   Tensor indices_;
   Tensor values_;
@@ -57,4 +88,4 @@ struct CAFFE2_API SparseGCSTensorImpl : public TensorImpl {
 
   void make_strides(int shape_begin, std::vector<int>& strides, std::vector<int>& dims);
 };
-}
+} // namespace at
