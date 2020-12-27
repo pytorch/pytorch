@@ -537,9 +537,231 @@ class ScriptModuleSerializer {
     }
   }
 
-  void writeByteCode(const Module& module, bool save_mobile_debug_info, std::unordered_set<IValue, MyHash, MyEqual> constants_from_bytecode) {
+  std::vector<IValue> add_constants(std::vector<IValue>& elements) {
+    std::vector<IValue> deduplicated_elements;
+
+    bool is_constant_element = false;
+    c10::ivalue::ConstantString constants_str("constants");
+    auto constants_ir = IValue(constants_str);
+
+    for(const auto& element: elements) {
+      if (element.isTuple()) {
+        const auto& bytecode_elements = element.toTuple()->elements();
+        std::vector<IValue> deduplicate_bytecode_elements;
+        for(const auto& bytecode_element: bytecode_elements) {
+
+          if (bytecode_element.isTuple()) {
+            const auto& key_values_pairs = bytecode_element.toTuple()->elements();
+            std::vector<IValue> deduplicate_key_values_pair;
+            for (const auto& key_values_pair: key_values_pairs) {
+              is_constant_element = false;
+              std::cout << "key_values_pair: " << std::endl;
+              key_values_pair.dump();
+              if (key_values_pair.isTuple()) {
+                const auto& key_values_vector = key_values_pair.toTuple()->elements();
+                if (key_values_vector.size() == 2) {
+                  const auto& key = key_values_vector[0];
+                  const auto& values = key_values_vector[1];
+                  // find constant fields
+                  if (key.isString() && key == constants_ir ) {
+                    if (values.isTuple()) {
+                      const auto& constant_values = values.toTuple()->elements();
+                      std::vector<IValue> deduplicated_constant_values;
+                      for (const auto& constant_value: constant_values) {
+                        deduplicated_constant_values.push_back(constant_value);
+                      }
+                      deduplicated_constant_values.push_back(torch::tensor({1, 1, 1, 1, 1, 1, 1, 200}));
+//                      deduplicated_constant_values.push_back(IValue(123));
+                      std::vector<IValue> deduplicated_constant_key_values = {constants_ir, Tup(std::move(deduplicated_constant_values))};
+                      deduplicate_key_values_pair.push_back(Tup(std::move(deduplicated_constant_key_values)));
+                    } else {
+                      deduplicate_key_values_pair.push_back(key_values_pair);
+                    }
+                    is_constant_element = true;
+                  }
+                }
+              }
+              if (!is_constant_element) {
+                deduplicate_key_values_pair.push_back(key_values_pair);
+              }
+            }
+            std::cout << "deduplicate_key_values_pair: " << std::endl;
+            for (const auto& it: deduplicate_key_values_pair) {
+              it.dump();
+            }
+            deduplicate_bytecode_elements.push_back(Tup(std::move(deduplicate_key_values_pair)));
+          } else {
+            deduplicate_bytecode_elements.push_back(bytecode_element);
+          }
+        }
+        deduplicated_elements.push_back(Tup(std::move(deduplicate_bytecode_elements)));
+      } else {
+        deduplicated_elements.push_back(element);
+      }
+    }
+    std::cout << "add_constants dump raw elements " << std::endl;
+    for(const auto& element: elements) {
+      std::cout << "---------" << std::endl;
+      element.dump();
+      std::cout << "---------" << std::endl;
+    }
+    std::cout << "add_constants dump new elements " << std::endl;
+    for(const auto& element: deduplicated_elements) {
+      std::cout << "---------" << std::endl;
+      element.dump();
+      std::cout << "---------" << std::endl;
+    }
+    return deduplicated_elements;
+  }
+
+  std::vector<IValue> deduplicate_constants(std::vector<IValue>& elements, std::unordered_set<IValue, MyHash, MyEqual> constants_from_jit) {
+    std::vector<IValue> deduplicated_elements;
+
+    bool is_constant_element = false;
+    c10::ivalue::ConstantString constants_str("constants");
+    auto constants_ir = IValue(constants_str);
+
+    for(const auto& element: elements) {
+      if (element.isTuple()) {
+        const auto& bytecode_elements = element.toTuple()->elements();
+        std::vector<IValue> deduplicate_bytecode_elements;
+        for(const auto& bytecode_element: bytecode_elements) {
+
+          if (bytecode_element.isTuple()) {
+            const auto& key_values_pairs = bytecode_element.toTuple()->elements();
+            std::vector<IValue> deduplicate_key_values_pair;
+            for (const auto& key_values_pair: key_values_pairs) {
+              is_constant_element = false;
+              std::cout << "key_values_pair: " << std::endl;
+              key_values_pair.dump();
+              if (key_values_pair.isTuple()) {
+                const auto& key_values_vector = key_values_pair.toTuple()->elements();
+                if (key_values_vector.size() == 2) {
+                  const auto& key = key_values_vector[0];
+                  const auto& values = key_values_vector[1];
+                  // find constant fields
+                  if (key.isString() && key == constants_ir ) {
+                    if (values.isTuple()) {
+                      const auto& constant_values = values.toTuple()->elements();
+                      std::vector<IValue> deduplicated_constant_values;
+                      for (const auto& constant_value: constant_values) {
+                        constant_value.dump();
+                        if (constants_from_jit.find(constant_value) != constants_from_jit.end()) {
+                          std::cout << "find one" << std::endl;
+                        } else {
+                          deduplicated_constant_values.push_back(constant_value);
+                        }
+                      }
+                      std::vector<IValue> deduplicated_constant_key_values = {constants_ir, Tup(std::move(deduplicated_constant_values))};
+                      deduplicate_key_values_pair.push_back(Tup(std::move(deduplicated_constant_key_values)));
+                    } else {
+                      deduplicate_key_values_pair.push_back(key_values_pair);
+                    }
+                    is_constant_element = true;
+                  }
+                }
+              }
+              if (!is_constant_element) {
+                deduplicate_key_values_pair.push_back(key_values_pair);
+              }
+            }
+            std::cout << "deduplicate_constants: deduplicate_key_values_pair: " << std::endl;
+            for (const auto& it: deduplicate_key_values_pair) {
+              it.dump();
+            }
+            deduplicate_bytecode_elements.push_back(Tup(std::move(deduplicate_key_values_pair)));
+          } else {
+            deduplicate_bytecode_elements.push_back(bytecode_element);
+          }
+        }
+        deduplicated_elements.push_back(Tup(std::move(deduplicate_bytecode_elements)));
+      } else {
+        deduplicated_elements.push_back(element);
+      }
+    }
+    std::cout << "deduplicate_constants dump raw elements " << std::endl;
+    for(const auto& element: elements) {
+      std::cout << "---------" << std::endl;
+      element.dump();
+      std::cout << "---------" << std::endl;
+    }
+    std::cout << "deduplicate_constants dump new elements " << std::endl;
+    for(const auto& element: deduplicated_elements) {
+      std::cout << "---------" << std::endl;
+      element.dump();
+      std::cout << "---------" << std::endl;
+    }
+    return deduplicated_elements;
+  }
+
+//  std::vector<IValue> deduplicate_constants(std::vector<IValue>& elements, std::unordered_set<IValue, MyHash, MyEqual> constants_from_jit) {
+//    std::vector<IValue> deduplicated_elements;
+//
+//    bool is_constant_element = false;
+//    c10::ivalue::ConstantString constants_str("constants");
+//    auto constants_ir = IValue(constants_str);
+//
+//    for(const auto& element: elements) {
+//      if (element.isTuple()) {
+//        const auto& bytecode_elements = element.toTuple()->elements();
+//        for(const auto& bytecode_element: bytecode_elements) {
+//          is_constant_element = false;
+//          bytecode_element.dump();
+//          if (bytecode_element.isTuple()) {
+//            const auto& key_values_pairs = bytecode_element.toTuple()->elements();
+//            for (const auto& key_values_pair: key_values_pairs) {
+//              key_values_pair.dump();
+//
+//              if (key_values_pair.isTuple()) {
+//                const auto& key_values_vector = key_values_pair.toTuple()->elements();
+//                if (key_values_vector.size() == 2) {
+//                  const auto& key = key_values_vector[0];
+//                  const auto& values = key_values_vector[1];
+//                  // find constant fields
+//                  if (key.isString() && key == constants_ir ) {
+//                    if (values.isTuple()) {
+//                      const auto& constant_values = values.toTuple()->elements();
+//                      std::vector<IValue> deduplicated_constant_values;
+//                      for (const auto& constant_value: constant_values) {
+//                        constant_value.dump();
+//                        if (constants_from_jit.find(constant_value) != constants_from_jit.end()) {
+//                          std::cout << "find one" << std::endl;
+//                          constant_value.dump();
+//                        } else {
+//                          deduplicated_constant_values.push_back(constant_value);
+//                        }
+//                      }
+//                      std::vector<IValue> deduplicated_constant_key_values = {constants_ir, Tup(std::move(deduplicated_constant_values))};
+//                      deduplicated_elements.push_back(Tup(std::move(deduplicated_constant_key_values)));
+//                    } else {
+//                      deduplicated_elements.push_back(key_values_pair);
+//                    }
+//                    is_constant_element = true;
+//                  }
+//                }
+//              }
+//            }
+//          }
+//          if (!is_constant_element) {
+//            deduplicated_elements.push_back(bytecode_element);
+//          }
+//        }
+//      }
+//    }
+//
+//    std::cout << "deduplicate_constants dump raw elements " << std::endl;
+//    for(const auto& element: elements) {
+//      element.dump();
+//    }
+//    std::cout << "deduplicate_constants dump dedup elements " << std::endl;
+//    for(const auto& element: deduplicated_elements) {
+//      element.dump();
+//    }
+//    return deduplicated_elements;
+//  }
+
+  void writeByteCode(const Module& module, bool save_mobile_debug_info, std::unordered_set<IValue, MyHash, MyEqual> constants_from_jit) {
     std::vector<c10::IValue> elements;
-    std::vector<c10::IValue> deduplicated_elements = elements;
     elements.emplace_back(
         static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
     c10::optional<std::vector<c10::IValue>> debug_info_elements;
@@ -548,109 +770,27 @@ class ScriptModuleSerializer {
       debug_info_elements->emplace_back(
           static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
     }
-    std::cout << "items in set: " << std::endl;
-    for (const auto& it: constants_from_bytecode) {
+    std::cout << "set list: " << std::endl;
+    for (const auto& it: constants_from_jit) {
       it.dump();
     }
-    std::cout << "that's all. " << std::endl;
-
+    std::cout << " ################### " << std::endl;
     moduleMethodsTuple(
         module, elements, debug_info_elements, save_mobile_debug_info);
+
+    auto new_elements = add_constants(elements);
+    auto deduplicated_elements = deduplicate_constants(new_elements, constants_from_jit);
+//    auto deduplicated_elements = deduplicate_constants(elements, constants_from_jit);
+    auto telements = Tup(std::move(deduplicated_elements));
+
 //    auto telements = Tup(std::move(elements));
-    at::Tensor telements = torch::tensor({1, 1, 1, 1, 1, 1, 1, 200});
-    IValue b(false);
-    elements.push_back(b);
-    elements.push_back(telements);
-//    const std::function<bool(const IValue&)> visitor_fun = [](const IValue& iv) {
-//      if(iv.isTuple()) {
-//        const auto tuple = iv.toTuple()->elements();
-//        if (tuple.size() > 1 && tuple[0].isString() && tuple[0] == IValue("constants")) {
-//          const auto constants_list = tuple[1];
-//          constants_list.dump();
-//        }
-//      }
-//      iv.dump();
-//      std::cout << "end" << std::endl;
-//      return false;
-//    };
-    elements.push_back(telements);
-    for (size_t i = 0; i  <elements.size(); i++) {
-//    for(const auto& element: elements) {
-      const auto& element = elements[i];
-      if (constants_from_bytecode.find(element) != constants_from_bytecode.end()) {
-        std::cout << "find one" << std::endl;
-      } else {
-        auto tag = element.tagKind();
-        std::cout << "no, tag is " << tag <<  std::endl;
-//        element.visit(visitor_fun);
-        if (element.isTuple()) {
-          const auto bycode_list = element.toTuple()->elements();
-          for (auto bycode_key: bycode_list) {
-            if (bycode_key.isTuple()) {
-              for (auto bycode_value: bycode_key.toTuple()->elements()) {
-                auto key_value = bycode_value.isTuple() ? bycode_value.toTuple()->elements() : std::vector<IValue>();
-                auto key = key_value[0];
-                auto value = key_value[1];
-                auto key_tag = key.tagKind();
-                auto value_tag = value.tagKind();
-                std::cout << " key tag is " << key_tag << " value tag is " << value_tag << std::endl;
-                c10::ivalue::ConstantString constants_str("constants");
-                auto constants_ir = IValue(constants_str);
-                auto key_string = key.toString();
-                if(value.isTuple()) {
-                  auto constants_items = value.toTuple()->elements();
-                  constants_items.push_back(telements);
-                  auto constants_items_filtered = std::vector<IValue>();
-                  if (key.isString() && key == constants_ir && value.isTuple() && constants_items.size() > 0) {
-                    std::cout << "find constant field" << std::endl;
-
-                    for (auto constant_item: constants_items) {
-                      if (constants_from_bytecode.find(constant_item) != constants_from_bytecode.end()) {
-                        std::cout << "find the item in set " << std::endl;
-                      } else {
-                        constants_items_filtered.push_back(constant_item);
-                        std::cout << " no, this constant is " << std::endl;
-                      }
-                      constant_item.dump();
-                    }
-
-                    std::vector<IValue> constants_key_value_pairs_filtered = {key, Tup(std::move(constants_items_filtered))};
-                    deduplicated_elements.push_back(Tup(std::move(constants_key_value_pairs_filtered)));
-                  } else {
-                    deduplicated_elements.push_back(bycode_value);
-                  }
-                } else {
-                  deduplicated_elements.push_back(bycode_value);
-                }
-
-                bycode_value.dump();
-              }
-            } else {
-              bycode_key.dump();
-            }
-          }
-        } else {
-          element.dump();
-        }
-      }
-    }
-
-    std::cout << "items in deduplicated_elements: " << std::endl;
-    for (const auto& it: deduplicated_elements) {
-      it.dump();
-    }
-    std::cout << "that's all. " << std::endl;
-
-//    constants_from_bytecode.insert(elements.begin(), elements.end());
-    auto s = constants_from_bytecode.size();
-    std::cout << s << std::endl;
-
     writeArchive("bytecode", telements);
     if (save_mobile_debug_info) {
       auto debug_info_telements = Tup(std::move(debug_info_elements.value()));
       writeArchive("mobile_debug", debug_info_telements);
     }
   }
+
 
   void convertNamedType(const c10::NamedTypePtr& class_type) {
     if (converted_types_.count(class_type)) {
