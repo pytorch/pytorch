@@ -9,13 +9,12 @@ args = parser.parse_args()
 
 
 def main():
-    import pdb
     with open(args.benchmark_file_path) as report:
         report = json.load(report)
     if not report.get('x_axis_name'):
         raise ValueError("no x axis name, are you sure you provided multiple x variables for one of the arguments?")
     x_axis_name = report['x_axis_name']
-    bar_width = 0.35  # the bar_width of the bars
+    bar_width = 0.35  # bar_width of the graph bars
 
     benchmark_results = report['benchmark_results']
     x_axis_labels = [benchmark_run[x_axis_name] for benchmark_run in benchmark_results]
@@ -29,8 +28,8 @@ def main():
             p50s.append(benchmark_results[i][benchmark_metric]['50'])
             p95s.append(benchmark_results[i][benchmark_metric]['95'])
 
-        y1 = ax.bar(label_location - bar_width/2, p50s, bar_width, label='p50')
-        y2 = ax.bar(label_location + bar_width/2, p95s, bar_width, label='p95')
+        y1 = ax.bar(label_location - bar_width / 2, p50s, bar_width, label='p50')
+        y2 = ax.bar(label_location + bar_width / 2, p95s, bar_width, label='p95')
         ax.set_ylabel(benchmark_metric)
         ax.set_xlabel(x_axis_name)
         ax.set_title('RPC Benchmarks')

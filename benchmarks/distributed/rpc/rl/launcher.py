@@ -1,14 +1,11 @@
 import argparse
 import os
-import pdb
+import time
 
-import torch
+import json
 import torch.distributed.rpc as rpc
 import torch.multiprocessing as mp
-import json
-import numpy as np
 
-import time
 
 from coordinator import CoordinatorBase
 
@@ -51,14 +48,12 @@ def run_worker(rank, world_size, master_addr, master_port, batch, state_size, nl
 
     os.environ['MASTER_ADDR'] = master_addr
     os.environ['MASTER_PORT'] = master_port
-    print("running run worker")
     if rank == 0:
         rpc.init_rpc(COORDINATOR_NAME, rank=rank, world_size=world_size)
 
         coordinator = CoordinatorBase(
             batch_size, batch, state_size, nlayers, out_features)
         coordinator.run_coordinator(TOTAL_EPISODES, TOTAL_EPISODE_STEPS, queue)
-
 
     elif rank == 1:
         rpc.init_rpc(AGENT_NAME, rank=rank, world_size=world_size)
@@ -68,16 +63,19 @@ def run_worker(rank, world_size, master_addr, master_port, batch, state_size, nl
     rpc.shutdown()
 
 def find_graph_variable(args):
-    var_types = {'world_size': int, 
-    'state_size': str, 'nlayers': int, 'out_features': int, 'batch': str2bool} #"False" converts to True, i need to fix batch
+    var_types = {'world_size': int,
+                 'state_size': str,
+                 'nlayers': int,
+                 'out_features': int,
+                 'batch': str2bool}
     for arg in var_types.keys():
         if ',' in args[arg]:
             if args.get('x_axis_name'):
                 raise("Only 1 x axis graph variable allowed")
-            args[arg] = list(map(var_types[arg], args[arg].split(','))) #convert , separted str to lst
+            args[arg] = list(map(var_types[arg], args[arg].split(',')))  # convert , separated str to list
             args['x_axis_name'] = arg
         else:
-            args[arg] = var_types[arg](args[arg]) #convert string to proper type
+            args[arg] = var_types[arg](args[arg])  # convert string to proper type
 
 
 def print_benchmark_results(report):
@@ -88,7 +86,7 @@ def print_benchmark_results(report):
     x_axis_name = report.get('x_axis_name')
     for benchmark_run in report['benchmark_results']:
         print('---------\nBenchmark')
-        if x_axis_name: #edit
+        if x_axis_name:
             print(f'{x_axis_name} : {benchmark_run.get(x_axis_name)}')
         for metric_name, percentile_results in benchmark_run.items():
             if metric_name != x_axis_name:
@@ -100,38 +98,38 @@ def main():
     find_graph_variable(args)
     arg_name = "state_size"
 
-    x_axis_variables = args[args['x_axis_name']] if args.get('x_axis_name') else [None] #run once if no x axis variables
+    x_axis_variables = args[args['x_axis_name']] if args.get('x_axis_name') else [None]  # run once if no x axis variables
     ctx = mp.get_context('spawn')
     queue = ctx.SimpleQueue()
     benchmark_runs = []
-    for i, x_axis_variable in enumerate(x_axis_variables): #run benchmark for every x axis variable
+    for i, x_axis_variable in enumerate(x_axis_variables):  # run benchmark for every x axis variable
         if len(x_axis_variables) > 1:
-            args[args['x_axis_name']] = x_axis_variable #save x axis variable for this particular benchmark run
+            args[args['x_axis_name']] = x_axis_variable  # save x axis variable for this particular benchmark run
         processes = []
         start_time = time.time()
         for rank in range(args['world_size']):
             prc = ctx.Process(
-                target=run_worker, 
+                target=run_worker,
                 args=(
                     rank, args['world_size'], args['master_addr'], args['master_port'],
-                    args['batch'], args['state_size'], args['nlayers'], 
+                    args['batch'], args['state_size'], args['nlayers'],
                     args['out_features'], queue
-                    )
+                     )
             )
             prc.start()
             processes.append(prc)
-        benchmark_run_results = queue.get()   
+        benchmark_run_results = queue.get()
         for process in processes:
             process.join()
-        print(f"Time taken -, {time.time() - start_time}")
+        print(f"Time taken benchmark run {i} -, {time.time() - start_time}")
         if args.get('x_axis_name'):
-            benchmark_run_results[args['x_axis_name']] = x_axis_variable #save what the x axis value was for this benchmark run       
+            benchmark_run_results[args['x_axis_name']] = x_axis_variable  # save what the x axis value was for this benchmark run
         benchmark_runs.append(benchmark_run_results)
-    
+
     report = args
     report['benchmark_results'] = benchmark_runs
     if args.get('x_axis_name'):
-        del report[args['x_axis_name']] #x_axis_name was variable so dont save a constant in the report for that variable
+        del report[args['x_axis_name']]  # x_axis_name was variable so dont save a constant in the report for that variable
     with open(args['output_file_path'], 'w') as f:
         json.dump(report, f)
     print_benchmark_results(report)

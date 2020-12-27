@@ -3,15 +3,12 @@ import time
 import threading
 
 import torch
+from torch.distributions import Categorical
+import torch.distributed.rpc as rpc
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
-import torch.distributed.rpc as rpc
-from torch.distributed.rpc import RRef, remote
-from torch.distributions import Categorical
-
-from torch import autograd
 
 OBSERVER_NAME = "observer{}"
 
@@ -56,10 +53,8 @@ class AgentBase:
         self.agent_throughput = []
 
     def set_world(self, batch_size, state_size, nlayers, out_features, batch=True):
-        from observer import ObserverBase
-
         self.batch = batch
-        self.policy = Policy(reduce((lambda x, y: x*y), state_size), nlayers, out_features)
+        self.policy = Policy(reduce((lambda x, y: x * y), state_size), nlayers, out_features)
         self.optimizer = optim.Adam(self.policy.parameters(), lr=1e-2)
 
         self.batch_size = batch_size
@@ -83,8 +78,6 @@ class AgentBase:
         self = agent_rref.local_value()
         observer_id -= 2
 
-
-
         self.states[observer_id].copy_(state)
         future_action = self.future_actions.then(
             lambda future_actions: future_actions.wait()[observer_id].item()
@@ -105,10 +98,8 @@ class AgentBase:
                 future_actions.set_result(actions)
 
                 self.agent_latency_end = time.time()
-                # agent_latency_end = time.time()
 
                 batch_latency = self.agent_latency_end - self.agent_latency_start
-                # batch_latency = agent_latency_end - agent_latency_start
                 self.agent_latency.append(batch_latency)
                 self.agent_throughput.append(self.batch_size / batch_latency)
 
@@ -130,7 +121,6 @@ class AgentBase:
 
         agent_latency_end = time.time()
 
-        # non_batch_latency = self.agent_latency_end - self.agent_latency_start
         non_batch_latency = agent_latency_end - agent_latency_start
 
         self.agent_latency.append(non_batch_latency)
@@ -140,7 +130,3 @@ class AgentBase:
 
     def finish_episode(self, rets):
         return self.agent_latency, self.agent_throughput
-
-        # calculate running rewards
-        # self.running_reward = 0.5 * ep_rewards + 0.5 * self.running_reward
-        # return ep_rewards, self.running_reward

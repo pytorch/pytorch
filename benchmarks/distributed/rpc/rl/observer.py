@@ -1,10 +1,9 @@
-import torch
-import torch.distributed.rpc as rpc
-from torch.distributed.rpc import rpc_async, rpc_sync, remote
-
-import numpy as np
 import random
 import time
+
+import torch
+import torch.distributed.rpc as rpc
+from torch.distributed.rpc import rpc_sync
 
 from agent import AgentBase
 
@@ -35,7 +34,6 @@ class ObserverBase:
 
         for st in range(n_steps):
             ob_latency_start = time.time()
-            # action = agent_rref.rpc_sync().select_action(self.id, state)
             action = rpc_sync(agent_rref.owner(), self.select_action, args=(
                 agent_rref, self.id, state))
 

@@ -1,13 +1,11 @@
+import numpy as np
+import time
+
 import torch
 import torch.distributed.rpc as rpc
-import matplotlib.pyplot as plt
-from torch.distributed.rpc import rpc_async, rpc_sync, remote
 
 from agent import AgentBase
 from observer import ObserverBase
-
-import time
-import numpy as np
 
 COORDINATOR_NAME = "coordinator"
 AGENT_NAME = "agent"
@@ -25,11 +23,11 @@ class CoordinatorBase:
         self.ob_rrefs = []   # Observer RRef
 
         agent_info = rpc.get_worker_info(AGENT_NAME)
-        self.agent_rref = remote(agent_info, AgentBase)
+        self.agent_rref = rpc.remote(agent_info, AgentBase)
 
         for rank in range(batch_size):
             ob_info = rpc.get_worker_info(OBSERVER_NAME.format(rank + 2))
-            ob_ref = remote(ob_info, ObserverBase)
+            ob_ref = rpc.remote(ob_info, ObserverBase)
             self.ob_rrefs.append(ob_ref)
 
             ob_ref.rpc_sync().set_state(state_size, batch)
@@ -49,7 +47,6 @@ class CoordinatorBase:
             ep_start_time = time.time()
 
             print(f"Episode {ep} - ", end='')
-            # n_steps = int(episode_steps / self.batch_size)
 
             n_steps = episode_steps
             agent_start_time = time.time()
