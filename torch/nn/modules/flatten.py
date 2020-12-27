@@ -53,7 +53,7 @@ class Unflatten(Module):
       be either `int` or `str` when `Tensor` or `NamedTensor` is used, respectively.
 
     * :attr:`unflattened_size` is the new shape of the unflattened dimension of the tensor and it can be
-      a `tuple` of ints or `torch.Size` for `Tensor` input or a `list` of ints or a `NamedShape` 
+      a `tuple` of ints or a `list` of ints or `torch.Size` for `Tensor` input;  a `NamedShape` 
       (tuple of `(name, size)` tuples) for `NamedTensor` input.
 
     Shape:
