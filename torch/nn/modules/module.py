@@ -26,7 +26,7 @@ class _IncompatibleKeys(namedtuple('IncompatibleKeys', ['missing_keys', 'unexpec
     __str__ = __repr__
 
 
-class ModuleAttributeError(AttributeError):
+class ModuleAttributeNotFoundError(Exception):
     """ When `__getattr__` raises AttributeError inside a property,
     AttributeError is raised with the property name instead of the
     attribute that initially raised AttributeError, making the error
@@ -935,7 +935,7 @@ class Module:
             modules = self.__dict__['_modules']
             if name in modules:
                 return modules[name]
-        raise ModuleAttributeError("'{}' object has no attribute '{}'".format(
+        raise ModuleAttributeNotFoundError("'{}' object has no attribute '{}'".format(
             type(self).__name__, name))
 
     def __setattr__(self, name: str, value: Union[Tensor, 'Module']) -> None:
