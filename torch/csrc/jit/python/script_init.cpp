@@ -1405,9 +1405,8 @@ void initJitScriptBindings(PyObject* module) {
          const py::dict& extra_files) {
         c10::optional<at::Device> optional_device;
         if (!map_location.is(py::none())) {
-          AT_ASSERT(THPDevice_Check(map_location.ptr()));
-          optional_device =
-              reinterpret_cast<THPDevice*>(map_location.ptr())->device;
+          AT_ASSERT(py::isinstance<Device>(map_location));
+          optional_device = map_location.cast<Device>();
         }
         ExtraFilesMap extra_files_map = extra_files_from_python(extra_files);
         auto ret = import_ir_module(
@@ -1424,9 +1423,8 @@ void initJitScriptBindings(PyObject* module) {
         std::istringstream in(buffer);
         c10::optional<at::Device> optional_device;
         if (!map_location.is(py::none())) {
-          AT_ASSERT(THPDevice_Check(map_location.ptr()));
-          optional_device =
-              reinterpret_cast<THPDevice*>(map_location.ptr())->device;
+          AT_ASSERT(py::isinstance<Device>(map_location));
+          optional_device = map_location.cast<Device>();
         }
         ExtraFilesMap extra_files_map = extra_files_from_python(extra_files);
         auto ret = import_ir_module(
@@ -1439,9 +1437,8 @@ void initJitScriptBindings(PyObject* module) {
       [](const std::string& filename, py::object map_location) {
         c10::optional<at::Device> optional_device;
         if (!map_location.is(py::none())) {
-          AT_ASSERT(THPDevice_Check(map_location.ptr()));
-          optional_device =
-              reinterpret_cast<THPDevice*>(map_location.ptr())->device;
+          AT_ASSERT(py::isinstance<Device>(map_location));
+          optional_device = map_location.cast<Device>();
         }
         return _load_for_mobile(filename, optional_device);
       });
@@ -1451,9 +1448,8 @@ void initJitScriptBindings(PyObject* module) {
         std::istringstream in(buffer);
         c10::optional<at::Device> optional_device;
         if (!map_location.is(py::none())) {
-          AT_ASSERT(THPDevice_Check(map_location.ptr()));
-          optional_device =
-              reinterpret_cast<THPDevice*>(map_location.ptr())->device;
+          AT_ASSERT(py::isinstance<Device>(map_location));
+          optional_device = map_location.cast<Device>();
         }
         return _load_for_mobile(in, optional_device);
       });

@@ -925,9 +925,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       return toSimple(g.insertConstant(py::cast<std::string>(obj), loc));
     } else if (obj.is(py::none())) {
       return toSimple(g.insertConstant(IValue(), loc));
-    } else if (THPDevice_Check(obj.ptr())) {
-      auto device = reinterpret_cast<THPDevice*>(obj.ptr());
-      return toSimple(g.insertConstant(device->device));
+    } else if (py::isinstance<Device>(obj)) {
+      return toSimple(g.insertConstant(py::cast<Device>(obj)));
     } else if (THPLayout_Check(obj.ptr())) {
       auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
       const auto v = static_cast<int64_t>(layout->layout);

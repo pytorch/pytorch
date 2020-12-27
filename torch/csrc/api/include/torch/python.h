@@ -21,9 +21,8 @@ namespace torch {
 namespace python {
 namespace detail {
 inline Device py_object_to_device(py::object object) {
-  PyObject* obj = object.ptr();
-  if (THPDevice_Check(obj)) {
-    return reinterpret_cast<THPDevice*>(obj)->device;
+  if (py::isinstance<Device>(object)) {
+    return object.cast<Device>();
   }
   throw TypeError("Expected device");
 }
@@ -146,10 +145,8 @@ py::class_<ModuleType, Extra...> add_module_bindings(
       .def("named_children",
           [](ModuleType& module) { return module.named_children(); })
       .def("to", [](ModuleType& module, py::object object, bool non_blocking) {
-            if (THPDevice_Check(object.ptr())) {
-              module.to(
-                  reinterpret_cast<THPDevice*>(object.ptr())->device,
-                  non_blocking);
+            if (py::isinstance<Device>(object)) {
+              module.to(object.cast<Device>(), non_blocking);
             } else {
               module.to(detail::py_object_to_dtype(object), non_blocking);
             }
