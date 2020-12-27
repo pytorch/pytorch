@@ -129,19 +129,19 @@ void initGeneratorBindings(PyObject* module) {
             std::lock_guard<std::mutex> lock(gen.mutex());
             py::handle py_device = (PyObject*)THPDevice_New(gen.device());
             auto state_tensor = gen.state();
-            // `__getstate__` currently returns (state_version, (device, state))
-            // `state_version` is added for backward compatibility when changes are made to
-            // the state tuple. Currently it is always set to 0.
+            // `__getstate__` returns (state_version, (device, state))
+            // `state_version` enables incompatible changes of the state tuple in the future,
+            // at which we'll still be able to load earlier formats. Currently it is always 0.
             return std::make_pair((uint64_t)0, py::make_tuple(py_device, state_tensor));
             END_HANDLE_TH_ERRORS_PYBIND
           },
           /* __setstate__ */
           [](std::pair<uint64_t, py::tuple> t) {
             HANDLE_TH_ERRORS
-            auto state_pair = t.second.cast<std::pair<py::object, Tensor&>>();
-            auto py_device = state_pair.first.ptr();
             // Currently only state version 0 is supported
             TORCH_CHECK(t.first == 0, "unsupported RNG state version ", t.first);
+            auto state_pair = t.second.cast<std::pair<py::object, Tensor&>>();
+            auto py_device = state_pair.first.ptr();
             TORCH_CHECK_TYPE(
               THPDevice_Check(py_device),
               "expect torch.device for restoring Generator, got ", Py_TYPE(py_device)->tp_name
@@ -150,7 +150,7 @@ void initGeneratorBindings(PyObject* module) {
             auto& device = ((THPDevice*)py_device)->device;
             auto new_state_tensor = state_pair.second;
             // FIXME support state restore beyond CPU and CUDA generators
-            auto gen = pyCreateGenerator(device);
+            auto gen = createGenerator(device);
             // No need to lock because we are the sole owner of the generator
             gen.set_state(new_state_tensor);
             return gen;
