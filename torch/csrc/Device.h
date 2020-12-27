@@ -1,22 +1,26 @@
 #pragma once
 
+#include <ATen/ATen.h>
 #include <torch/csrc/python_headers.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/utils/pybind.h>
 
-#include <ATen/Device.h>
+namespace torch {
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-struct TORCH_API THPDevice {
-  PyObject_HEAD
-  at::Device device;
-};
+/**
+ * Utility for parsing the device argument.
+ */
+at::Device parseDevice(py::object device);
 
-TORCH_API extern PyTypeObject THPDeviceType;
+void initDeviceBindings(PyObject* module);
 
+} // namespace torch
+
+// Legacy functions are still kept to ease transition to pybind11 bindings
+// FIXME Remove use of these functions and get rid of them
 inline bool THPDevice_Check(PyObject *obj) {
-  return Py_TYPE(obj) == &THPDeviceType;
+  return py::isinstance<at::Device>(obj);
 }
 
-PyObject * THPDevice_New(const at::Device& device);
-
-void THPDevice_init(PyObject *module);
+inline PyObject* THPDevice_New(const at::Device& device) {
+  return py::cast(device).release().ptr();
+}
