@@ -386,11 +386,11 @@ class TestShapeOps(TestCase):
         self.assertEqual(flip1_result, data.flip(1))
 
         # test empty tensor, should just return an empty tensor of the same shape
-        data = torch.tensor([])
+        data = torch.tensor([]).to(device)
         self.assertEqual(data, data.flip(0))
 
         # test bool tensor
-        a = torch.tensor([False, True])
+        a = torch.tensor([False, True]).to(device)
         self.assertEqual(a.flip(0), torch.tensor([True, False]))
 
     def _rand_shape(self, dim, min_size, max_size):
