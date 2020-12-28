@@ -2532,8 +2532,7 @@ Examples::
              [ 1.0500,  0.7336, -0.3836, -1.1015]]])
 """.format(**common_args))
 
-add_docstr(torch.digamma,
-           r"""
+add_docstr(torch.digamma, r"""
 digamma(input, *, out=None) -> Tensor
 
 Computes the logarithmic derivative of the gamma function on `input`.
@@ -2546,6 +2545,11 @@ Args:
 
 Keyword args:
     {out}
+
+.. note::  This function is similar to SciPy's `scipy.special.digamma`.
+
+.. note::  From PyTorch 1.8 onwards, the digamma function returns `-Inf` for `0`. 
+           Previously it returned `NaN` for `0`.
 
 Example::
 
@@ -3734,7 +3738,7 @@ Tests if each element of :attr:`input` is infinite
     Complex values are infinite when their real or imaginary part is
     infinite.
 
-    Arguments:
+    Args:
         {input}
 
     Returns:
@@ -3819,7 +3823,7 @@ Returns a new tensor with boolean elements representing if each element is `fini
 Real values are finite when they are not NaN, negative infinity, or infinity.
 Complex values are finite when both their real and imaginary parts are finite.
 
-    Arguments:
+    Args:
         {input}
 
     Returns:

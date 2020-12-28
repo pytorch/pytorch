@@ -318,8 +318,8 @@ Tensor& round_out(Tensor& result, const Tensor& self) { return unary_op_impl_out
 Tensor round(const Tensor& self) { return unary_op_impl(self, at::round_out); }
 Tensor& round_(Tensor& self) { return unary_op_impl_(self, at::round_out); }
 
-Tensor& digamma_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, digamma_stub); }
-Tensor digamma(const Tensor& self) { return unary_op_impl(self, digamma_out); }
+Tensor& digamma_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, digamma_stub); }
+Tensor digamma(const Tensor& self) { return unary_op_impl_float(self, digamma_stub); }
 Tensor& digamma_(Tensor& self) { return unary_op_impl_(self, digamma_out); }
 
 Tensor& reciprocal_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, reciprocal_stub); }
