@@ -108,12 +108,13 @@ void onnxifi(
     const std::vector<std::string>& output_names,
     const std::vector<std::string>& weight_names,
     const std::unordered_set<int>& blacklist,
-    const ShapeInfoMap& shape_hints,
+    const ShapeInfoMap& shape_hints_max_bs,
     bool use_onnx,
     size_t max_batch_size,
     size_t max_seq_size,
     bool load_model_by_blob,
-    bool predictor_net_ssa_rewritten) {
+    bool predictor_net_ssa_rewritten,
+    const std::unordered_map<int, ShapeInfoMap> &shape_hints_per_bs) {
   // Split SparseLengthsSumSparse so that we can lower the SparseLengthsSum part
   splitSparseLengthsSumSparse(net, *ws);
 
@@ -143,8 +144,9 @@ void onnxifi(
   opts.merge_fp32_inputs_into_fp16 = FLAGS_merge_fp32_inputs_into_fp16;
   opts.predictor_net_ssa_rewritten = predictor_net_ssa_rewritten;
   opts.timeout = FLAGS_onnxifi_timeout_ms;
+  opts.shape_hints_per_bs = shape_hints_per_bs;
 
-  ShapeInfoMap more_shape_hints = shape_hints;
+  ShapeInfoMap more_shape_hints = shape_hints_max_bs;
   if (!FLAGS_onnxifi_shape_hints.empty()) {
     parseShapeInfoMapFromString(FLAGS_onnxifi_shape_hints, more_shape_hints);
   }

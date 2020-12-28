@@ -2,6 +2,7 @@ from typing import Dict, Any
 
 from torch.fx import (  # type: ignore
     GraphModule,
+    Node,
     map_arg
 )
 
@@ -18,8 +19,14 @@ from .pattern_utils import (
 
 from .fusion_patterns import *  # noqa: F401
 
+from .quantization_types import Pattern
+
+from typing import Callable, Tuple, Optional
+
+
 class Fuser:
-    def fuse(self, model, fuse_custom_config_dict=None):
+    def fuse(self, model: GraphModule,
+             fuse_custom_config_dict: Dict[str, Any] = None) -> GraphModule:
         if fuse_custom_config_dict is None:
             fuse_custom_config_dict = {}
 
@@ -27,10 +34,13 @@ class Fuser:
         input_graph = model.graph
         self.modules = dict(input_root.named_modules())
 
-        additional_fusion_patterns = fuse_custom_config_dict.get("additional_quant_pattern", {})
-        fusion_patterns = get_combined_dict(get_default_fusion_patterns(), additional_fusion_patterns)
+        additional_fusion_patterns = \
+            fuse_custom_config_dict.get("additional_fusion_pattern", {})
+        fusion_patterns = get_combined_dict(
+            get_default_fusion_patterns(), additional_fusion_patterns)
         # find fusion
-        fusion_pairs = self._find_matches(input_root, input_graph, fusion_patterns)
+        fusion_pairs = self._find_matches(
+            input_root, input_graph, fusion_patterns)
         self.fused_graph = Graph()
         env: Dict[Any, Any] = {}
 
@@ -40,6 +50,7 @@ class Fuser:
         for node in input_graph.nodes:
             root_node, obj = fusion_pairs.get(node.name, (None, None))
             if root_node is node:
+                assert obj is not None
                 env[node.name] = obj.fuse(self, load_arg)
             elif root_node is None:
                 env[node.name] = self.fused_graph.node_copy(node, load_arg)
@@ -48,7 +59,9 @@ class Fuser:
         model = GraphModule(input_root, self.fused_graph)
         return model
 
-    def _find_matches(self, root, graph, patterns):
+    def _find_matches(self, root: GraphModule, graph: Graph,
+                      patterns: Dict[Pattern, Callable]
+                      ) -> Dict[str, Tuple[Node, Optional[Any]]]:
         modules = dict(root.named_modules())
         match_map = {}  # node name -> (root_node, match_value?)
 

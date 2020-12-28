@@ -358,7 +358,7 @@ struct AutogradZeroSpecializer {
 // AutogradAdds when possible. Outputs of other nodes are conservatively
 // marked Unknown and not optimized.
 void specializeAutogradZero(std::shared_ptr<Graph> g) {
-  AutogradZeroSpecializer azs(g);
+  AutogradZeroSpecializer azs(std::move(g));
   azs.run();
 }
 

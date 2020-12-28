@@ -77,12 +77,13 @@ Tensor& resize_as_(
 Tensor& resize_(
     Tensor& self,
     IntArrayRef size,
-    c10::optional<MemoryFormat> optional_memory_format) {
+    c10::optional<MemoryFormat> optional_memory_format,
+    bool resize_storage) {
   if (self.has_names()) {
     return resize_named_tensor_(self, size, optional_memory_format);
   }
   auto* self_ = self.unsafeGetTensorImpl();
-  resize_impl_cpu_(self_, size, /*strides=*/c10::nullopt);
+  resize_impl_cpu_(self_, size, /*strides=*/c10::nullopt, resize_storage);
   if (optional_memory_format.has_value()) {
     auto memory_format =
         optional_memory_format.value();
@@ -93,6 +94,21 @@ Tensor& resize_(
     self_->empty_tensor_restride(memory_format);
   }
   return self;
+}
+
+Tensor& resize_(
+    Tensor& self,
+    IntArrayRef size,
+    c10::optional<MemoryFormat> optional_memory_format) {
+  return resize_(self, size, optional_memory_format, /*resize_storage=*/true);
+}
+
+Tensor& resize_meta_(
+    Tensor& self,
+    IntArrayRef size,
+    c10::optional<MemoryFormat> optional_memory_format) {
+  // meta tensors don't have storage, so don't resize them
+  return resize_(self, size, optional_memory_format, /*resize_storage=*/false);
 }
 
 } // namespace native
