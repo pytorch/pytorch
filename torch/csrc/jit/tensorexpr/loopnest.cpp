@@ -9,7 +9,7 @@
 #include <c10/util/Logging.h>
 #include <c10/util/string_utils.h>
 
-#include <aten/src/ATen/core/functional.h>
+#include <ATen/core/functional.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/bounds_inference.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
