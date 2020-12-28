@@ -238,7 +238,7 @@ def get_annotation_str(annotation):
     elif isinstance(annotation, ast.Attribute):
         return '.'.join([get_annotation_str(annotation.value), annotation.attr])
     elif isinstance(annotation, ast.Subscript):
-        return f"{annotation.value}[{get_annotation_str(annotation.slice.value)}]"  # type: ignore
+        return f"{get_annotation_str(annotation.value)}[{get_annotation_str(annotation.slice.value)}]"  # type: ignore
     elif isinstance(annotation, ast.Tuple):
         return ','.join([get_annotation_str(elt) for elt in annotation.elts])
     elif isinstance(annotation, ast.Constant) or isinstance(annotation, ast.NameConstant):
@@ -254,7 +254,7 @@ def get_type_hint_captures(fn):
     for the literal annotations on 'fn'. These are not considered to be closed-over by fn
     and must be obtained separately (e.g. using this function).
 
-    Arguments:
+    Args:
         fn: A callable.
     Returns:
         A Dict[str, Any] containing a mapping from the literal annotations used on

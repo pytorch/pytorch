@@ -831,7 +831,7 @@ class Softshrink(Module):
 class MultiheadAttention(Module):
     r"""Allows the model to jointly attend to information
     from different representation subspaces.
-    See reference: Attention Is All You Need
+    See `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_
 
     .. math::
         \text{MultiHead}(Q, K, V) = \text{Concat}(head_1,\dots,head_h)W^O
@@ -849,7 +849,7 @@ class MultiheadAttention(Module):
         vdim: total number of features in value. Default: None.
 
         Note: if kdim and vdim are None, they will be set to embed_dim such that
-        query, key, and value have the same number of features.
+              query, key, and value have the same number of features.
 
     Examples::
 
@@ -1112,7 +1112,7 @@ class Softmin(Module):
           dimensions
         - Output: :math:`(*)`, same shape as the input
 
-    Arguments:
+    Args:
         dim (int): A dimension along which Softmin will be computed (so every slice
             along dim will sum to 1).
 
@@ -1166,7 +1166,7 @@ class Softmax(Module):
         a Tensor of the same dimension and shape as the input with
         values in the range [0, 1]
 
-    Arguments:
+    Args:
         dim (int): A dimension along which Softmax will be computed (so every slice
             along dim will sum to 1).
 
@@ -1240,7 +1240,7 @@ class LogSoftmax(Module):
           dimensions
         - Output: :math:`(*)`, same shape as the input
 
-    Arguments:
+    Args:
         dim (int): A dimension along which LogSoftmax will be computed.
 
     Returns:

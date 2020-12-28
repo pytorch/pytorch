@@ -2,7 +2,7 @@ import torch
 import numpy as np
 
 import unittest
-from itertools import product, permutations
+from itertools import product, permutations, combinations
 from functools import partial
 import random
 
@@ -535,11 +535,12 @@ class TestViewOps(TestCase):
                 out[idx_1, idx_2] = random.random()
                 self.assertEqual(t[idx_2, idx_1], out[idx_1, idx_2])
 
-        op = partial(torch.movedim, source=(0, 1), destination=(1, 0))
-        run_test(device, op)
+        for fn in [torch.movedim, torch.moveaxis]:
+            op = partial(fn, source=(0, 1), destination=(1, 0))
+            run_test(device, op)
 
-        op = partial(torch.movedim, source=0, destination=1)
-        run_test(device, op)
+            op = partial(fn, source=0, destination=1)
+            run_test(device, op)
 
 class TestOldViewOps(TestCase):
     def test_ravel(self, device):
@@ -1021,6 +1022,51 @@ class TestOldViewOps(TestCase):
         self.assertTrue(y1.size() == expected_size)
         self.assertTrue(y2.size() == expected_size)
 
+
+    @onlyCPU
+    def test_broadcast_shapes(self, device):
+        examples = [(), (1,), (2,), (1, 1), (3, 1), (3, 2), (4, 1, 1), (4, 3, 2)]
+        for s0 in examples:
+            x0 = torch.randn(s0)
+            expected = torch.broadcast_tensors(x0)[0].shape
+            actual = torch.broadcast_shapes(s0)
+            self.assertEqual(expected, actual)
+
+            for s1 in examples:
+                x1 = torch.randn(s1)
+                expected = torch.broadcast_tensors(x0, x1)[0].shape
+                actual = torch.broadcast_shapes(s0, s1)
+                self.assertEqual(expected, actual)
+
+    # Skip BFloat16 since numpy does not support it
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False))
+    def test_broadcast_to(self, device, dtype):
+        def can_broadcast(s0, s1):
+            # s0.dim() <= s1.dim(), reverse s0 and s1 to compare trailing dimension
+            s0 = tuple(reversed(s0))
+            s1 = tuple(reversed(s1))
+            for i in range(len(s0)):
+                if s0[i] != 1 and s0[i] != s1[i]:
+                    return False
+            return True
+
+        sizes = (
+            (), (1,), (2,), (1, 1), (3, 1), (3, 2), (4, 1, 1), (4, 3, 2)
+        )
+        for s0, s1 in combinations(sizes, r=2):
+            t = make_tensor(s0, device, dtype, low=-9, high=9)
+            t_np = t.cpu().numpy()
+
+            if can_broadcast(s0, s1):
+                res = torch.broadcast_to(t, s1)
+                np_res = np.broadcast_to(t_np, s1)
+                self.assertEqual(res, np_res)
+            else:
+                with self.assertRaisesRegex(RuntimeError,
+                                            r"The expanded size of the tensor \(\d\) "
+                                            r"must match the existing size \(\d\)"):
+                    torch.broadcast_to(t, s1)
+
     def test_view(self, device):
         tensor = torch.rand(15, device=device)
         template = torch.rand(3, 5, device=device)
@@ -1125,12 +1171,16 @@ class TestOldViewOps(TestCase):
                 for dim in range(-a.dim(), a.dim()):
                     for sections in range(1, 2 * a.size(dim)):
                         msg = f'input_size {input_size}, sections {sections}, dim {dim}'
-                        result = torch.tensor_split(a, sections, dim)
-                        for result_item in result:
-                            self.assertEqual(result_item.device, torch.device(device), msg=msg)
-                            self.assertEqual(result_item.dtype, dtype, msg=msg)
+                        result1 = torch.tensor_split(a, sections, dim)
+                        result2 = torch.tensor_split(a, torch.tensor(sections, dtype=torch.int64), dim)
+                        for r1, r2 in zip(result1, result2):
+                            self.assertEqual(r1.device, torch.device(device), msg=msg)
+                            self.assertEqual(r1.dtype, dtype, msg=msg)
+                            self.assertEqual(r2.device, torch.device(device), msg=msg)
+                            self.assertEqual(r2.dtype, dtype, msg=msg)
                         result_n = np.array_split(a_n, sections, dim)
-                        self.assertEqual(result_n, result, msg=msg)
+                        self.assertEqual(result_n, result1, msg=msg)
+                        self.assertEqual(result_n, result2, msg=msg)
 
     @onlyOnCPUAndCUDA
     # Skip BFloat16 since numpy does not support it
@@ -1163,13 +1213,19 @@ class TestOldViewOps(TestCase):
                 a_n = a.cpu().numpy()
                 for dim in range(-a.dim(), a.dim()):
                     for indices in indices_args:
-                        result = torch.tensor_split(a, indices, dim)
+                        result_1 = torch.tensor_split(a, indices, dim)
+                        result_2 = torch.tensor_split(a, torch.tensor(indices, dtype=torch.int64), dim)
+
                         msg = f'input_size {input_size}, indices {indices}, dim {dim}'
-                        for result_item in result:
-                            self.assertEqual(result_item.device, torch.device(device), msg=msg)
-                            self.assertEqual(result_item.dtype, dtype, msg=msg)
+                        for r1, r2 in zip(result_1, result_2):
+                            self.assertEqual(r1.device, torch.device(device), msg=msg)
+                            self.assertEqual(r1.dtype, dtype, msg=msg)
+                            self.assertEqual(r2.device, torch.device(device), msg=msg)
+                            self.assertEqual(r2.dtype, dtype, msg=msg)
+
                         result_n = np.array_split(a_n, indices, dim)
-                        self.assertEqual(result_n, result, msg=msg)
+                        self.assertEqual(result_n, result_1, msg=msg)
+                        self.assertEqual(result_n, result_2, msg=msg)
 
     @onlyOnCPUAndCUDA
     def test_tensor_split_errors(self, device):
@@ -1177,9 +1233,11 @@ class TestOldViewOps(TestCase):
         test_cases = [
             # input size, sections or indices, dim, error type, error message, numpy error type
             [(S,), 10, 1, IndexError, r'Dimension out of range', IndexError],
-            [(), 10, 0, RuntimeError, r'expected at least a 1-dimensional tensor', IndexError],
+            [(), 10, 0, RuntimeError, r'tensor_split expected at least a 1-dimensional tensor, '
+                + 'but got a tensor with 0 dims', IndexError],
             [(S,), (10,), 1, IndexError, r'Dimension out of range', IndexError],
-            [(), (10,), 0, RuntimeError, r'expected at least a 1-dimensional tensor', IndexError],
+            [(), (10,), 0, RuntimeError, r'tensor_split expected at least a 1-dimensional tensor, '
+                + 'but got a tensor with 0 dims', IndexError],
             [(S,), 0, 0, RuntimeError, r'number of sections must be larger than 0, got 0', ValueError],
             [(S,), -1, 0, RuntimeError, r'number of sections must be larger than 0, got -1', ValueError],
         ]
@@ -1188,8 +1246,20 @@ class TestOldViewOps(TestCase):
             msg = f'input_size {input_size}, sections_or_indices {sections_or_indices}, dim {dim}'
             with self.assertRaisesRegex(err, err_msg, msg=msg):
                 torch.tensor_split(a, sections_or_indices, dim)
+            with self.assertRaisesRegex(err, err_msg, msg=msg):
+                torch.tensor_split(a, torch.tensor(sections_or_indices), dim)
             with self.assertRaises(numpy_err, msg=msg):
                 np.array_split(a.cpu().numpy(), sections_or_indices, dim)
+
+        # addtional tests for tensor_split with tensor_indices_or_sections
+        with self.assertRaisesRegex(RuntimeError,
+                                    r'tensor_split expected tensor_indices_or_sections to have dtype of long, but got Float'):
+            torch.tensor_split(a, torch.tensor(1.1), dim)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    r'tensor_split expected tensor_indices_or_sections to be a'
+                                    + ' zero-dimensional or one-dimensional tensor, but got a tensor with 2 dims'):
+            torch.tensor_split(torch.rand(S, device=device), torch.tensor(((1,),)), 0)
 
     def test_resize_all_dtypes_and_devices(self, device):
         shape = (2, 2)

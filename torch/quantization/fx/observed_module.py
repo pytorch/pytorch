@@ -1,15 +1,18 @@
 import torch
 import copy
 from torch.fx import GraphModule  # type: ignore
+from torch.fx.graph import Graph
+from typing import Union, Dict, Any
 
 class ObservedGraphModule(GraphModule):
 
     def get_preserved_attr_names(self):
         return ['_activation_post_process_map',
                 '_patterns',
-                '_qconfig_map']
+                '_qconfig_map',
+                '_prepare_custom_config_dict']
 
-    def __init__(self, root, graph):
+    def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph):
         preserved_attrs = dict()
         for attr in self.get_preserved_attr_names():
             preserved_attrs[attr] = getattr(root, attr)
@@ -25,28 +28,20 @@ class ObservedGraphModule(GraphModule):
         fake_mod.__dict__ = copy.deepcopy(self.__dict__)
         return ObservedGraphModule(fake_mod, self.graph)
 
-def mark_observed_module(module):
+def mark_observed_module(module: GraphModule) -> GraphModule:
     return ObservedGraphModule(module, module.graph)
 
-def is_observed_module(module):
+def is_observed_module(module: Any) -> bool:
     return isinstance(module, ObservedGraphModule)
 
 class ObservedStandaloneGraphModule(ObservedGraphModule):
-
-    def get_preserved_attr_names(self):
-        return ['_activation_post_process_map',
-                '_patterns',
-                '_qconfig_map',
-                '_standalone_module_observed_input_idxs',
-                '_output_is_observed']
-
     def __deepcopy__(self, memo):
         fake_mod = torch.nn.Module()
         fake_mod.__dict__ = copy.deepcopy(self.__dict__)
         return ObservedStandaloneGraphModule(fake_mod, self.graph)
 
-def mark_observed_standalone_module(module):
+def mark_observed_standalone_module(module: GraphModule) -> GraphModule:
     return ObservedStandaloneGraphModule(module, module.graph)
 
-def is_observed_standalone_module(module):
+def is_observed_standalone_module(module: Any) -> bool:
     return isinstance(module, ObservedStandaloneGraphModule)

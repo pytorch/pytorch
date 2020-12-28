@@ -4,8 +4,11 @@
 #include <torch/csrc/jit/ir/attributes.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/type_hashing.h>
+#include <torch/csrc/jit/mobile/function.h>
+#include <torch/csrc/jit/mobile/interpreter.h>
+#include <torch/csrc/jit/mobile/method.h>
+#include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/passes/reconstruct_scopes.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
@@ -54,21 +57,53 @@ static IValue Table(
   return Tup(std::move(ivalue_entries));
 }
 
-std::string getModulePath(Node* node) {
-  std::string modulePath = node->scopeName();
-  size_t end = modulePath.size();
-  // Here we remove the source range information to make the
-  // module debugging information shorter and cleaner.
-  if (modulePath[end - 1] == '>') {
-    end = modulePath.rfind('<');
-    if (end > 0 && modulePath[end - 1] == '<') {
-      --end;
+std::string getModulePath(Node* node, const std::string& root_scope_string) {
+  constexpr size_t kFunction = 0;
+  constexpr size_t kModuleInstanceInfo = 2;
+
+  if (!node->callstack()) {
+    return root_scope_string + ".forward";
+  } else {
+    std::string module_info = root_scope_string;
+    auto callstack_ptr = *(node->callstack());
+    const auto& vec = callstack_ptr->vec();
+
+    for (const auto& element : vec) {
+      const auto& opt_module_instance_info =
+          std::get<kModuleInstanceInfo>(element);
+      if (opt_module_instance_info.has_value()) {
+        const auto& module_instance_info = opt_module_instance_info.value();
+        if (module_instance_info.class_type()) {
+          const auto& class_type = module_instance_info.class_type();
+          const auto& instance_name = module_instance_info.instance_name();
+          auto type_name = class_type->name()->qualifiedName();
+          type_name = type_name.substr(type_name.find_last_of('.') + 1);
+          module_info.append(".")
+              .append(instance_name)
+              .append("(")
+              .append(type_name)
+              .append(")")
+              .append(".")
+              .append(std::get<kFunction>(element)->name());
+        } else {
+          module_info += ".(UNKNOWN_INSTANCE(UNKNOWN_TYPE)";
+        }
+      } else {
+        module_info += ".(UNKNOWN_INSTANCE(UNKNOWN_TYPE)";
+      }
     }
+
+    return module_info;
   }
-  // We only keep the last function in a callstack.
-  size_t start = modulePath.rfind('/', end);
-  start = (start != std::string::npos) ? start + 1 : 0;
-  return modulePath.substr(start, end - start);
+}
+
+std::string getModuleTypeName(const Module& module, const std::string& prefix) {
+  std::string moduleType = module.type()->str();
+  size_t lastDotIndex = moduleType.rfind('.');
+  if (lastDotIndex != std::string::npos) {
+    moduleType = moduleType.substr(lastDotIndex + 1);
+  }
+  return prefix + "(" + moduleType + ")";
 }
 
 std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
@@ -78,9 +113,6 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
   auto graph = func.graph()->copy();
 
   Inline(*graph);
-  if (save_mobile_debug_info) {
-    ReconstructScopes(module, *graph, "top");
-  }
 
   torch::jit::Code code(graph, func.name());
   auto instructions_copy = code.instructions();
@@ -95,7 +127,8 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
       auto node = code.instructions_source()[i];
       opnames.emplace_back(node->schema().operator_name());
       if (save_mobile_debug_info) {
-        op_module_paths.emplace_back(getModulePath(node));
+        std::string root_scope_string = getModuleTypeName(module, "top");
+        op_module_paths.emplace_back(getModulePath(node, root_scope_string));
       }
     }
     // CALL nodes at this point represent built-in (i.e. non-Graph)
@@ -567,5 +600,26 @@ std::vector<std::string> export_opnames(const script::Module& m) {
   return std::vector<std::string>(names.begin(), names.end());
 }
 
+namespace mobile {
+
+std::set<std::string> _export_operator_list(
+    torch::jit::mobile::Module& module) {
+  std::set<std::string> operator_list;
+  for (Method func : module.get_methods()) {
+    const Function& function = func.function();
+    const std::shared_ptr<Code> cptr = function.get_code();
+    // op_names below isn't a list of unique operator names. In fact
+    // it can contain the same operator name many many times, so we need
+    // to de-dup the list by adding all the operator names into
+    // an std::set<std::string>.
+    std::vector<c10::OperatorName> const& op_names = cptr->op_names_;
+    for (auto& op_name : op_names) {
+      operator_list.insert(toString(op_name));
+    }
+  }
+  return operator_list;
+}
+
+} // namespace mobile
 } // namespace jit
 } // namespace torch

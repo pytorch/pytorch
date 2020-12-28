@@ -175,7 +175,7 @@ jobs:
             echo ".jenkins/pytorch/multigpu-test.sh" >> docker_commands.sh
           elif [[ ${BUILD_ENVIRONMENT} == *onnx* ]]; then
             echo "pip install click mock tabulate networkx==2.0" >> docker_commands.sh
-            echo "pip -q install --user -b /tmp/pip_install_onnx \"file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx\"" >> docker_commands.sh
+            echo "pip -q install --user \"file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx\"" >> docker_commands.sh
             echo ".jenkins/caffe2/test.sh" >> docker_commands.sh
           else
             echo ".jenkins/pytorch/test.sh" >> docker_commands.sh
@@ -201,7 +201,7 @@ jobs:
           export CIRCLE_JOB="$CIRCLE_JOB"
           export CIRCLE_WORKFLOW_ID="$CIRCLE_WORKFLOW_ID"
           cd workspace
-          python test/print_test_stats.py test
+          python test/print_test_stats.py --upload-to-s3 test
           EOL
           echo "(cat docker_commands.sh | docker exec -u jenkins -i "$id" bash) 2>&1" > command.sh
           unbuffer bash command.sh | ts
@@ -237,7 +237,7 @@ jobs:
         default: ""
       cuda_version:
         type: string
-        default: "10"
+        default: "10.1"
       python_version:
         type: string
         default: "3.6"
@@ -299,7 +299,7 @@ jobs:
         default: ""
       cuda_version:
         type: string
-        default: "10"
+        default: "10.1"
       python_version:
         type: string
         default: "3.6"
