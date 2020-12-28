@@ -726,6 +726,20 @@ class TestPostTrainingStatic(QuantizationTestCase):
         ref_res = ref_m(data)
         self.assertEqual(res, ref_res)
 
+    @skipIfNoFBGEMM
+    def test_convtranspose_per_channel_fails_early(self):
+        r"""
+        Verifies that attempting to quantize a ConvTranspose module with per-Channel
+        weight observers fails in the prepare step, as opposed to the convert step.
+        """
+        m = torch.nn.Sequential(torch.nn.ConvTranspose2d(1, 1, 1))
+        m.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+        with self.assertRaises(AssertionError) as context:
+            mp = torch.quantization.prepare(m)
+        self.assertTrue(
+            str(context.exception) ==
+            'Per channel weight observer is not supported yet for ConvTranspose{n}d.')
+
 
 @skipIfNoFBGEMM
 class TestPostTrainingDynamic(QuantizationTestCase):
