@@ -685,7 +685,7 @@ class ConvTranspose1d(_ConvTransposeNd):
         if self.padding_mode != 'zeros':
             raise ValueError('Only `zeros` padding mode is supported for ConvTranspose1d')
 
-        # One cannot replace List by Sequence in "_output_padding" because pytorch does
+        # One cannot replace List by Sequence in "_output_padding" because TorchScript does
         # not support Sequence[T]. Therefore, a "type:ignore[...]" is required.
         output_padding = self._output_padding(
             input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore

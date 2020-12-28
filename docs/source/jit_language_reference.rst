@@ -131,6 +131,7 @@ These types and features from the :mod:`typing` module are unavailble in TorchSc
    ":any:`typing.Any`", ":any:`typing.Any` is currently in development but not yet released"
    ":any:`typing.NoReturn`", "Not implemented"
    ":any:`typing.Union`", "Unlikely to be implemented (however :any:`typing.Optional` is supported)"
+   ":any:`typing.Sequence`", "Not implemented"
    ":any:`typing.Callable`", "Not implemented"
    ":any:`typing.Literal`", "Not implemented"
    ":any:`typing.ClassVar`", "Not implemented"
