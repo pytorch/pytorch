@@ -92,7 +92,7 @@ class C10_API Scalar {
 
   template<typename T>
   bool equal(T num) const {
-      if (isComplex()) {
+    if (isComplex()) {
       return v.z == num;
     } else if (isFloatingPoint()) {
       return v.d == num;
