@@ -37,13 +37,12 @@ class SubgraphMatcher:
         if pn in self.nodes_map:
             return self.nodes_map[pn] == gn
 
-        # We use "placeholder" nodes as wildcard matches but we don't
-        # map them to any nodes in `original_graph`
-        if pn.op == "placeholder":
-            return True
-
         def attributes_are_equal(pn : Node, gn : Node) -> bool:
-            if pn.op == "output":
+            # Use placeholder and output nodes as wildcards. The
+            # only exception is that an output node can't match
+            # a placeholder
+            if (pn.op == "placeholder"
+                    or (pn.op == "output" and gn.op != "placeholder")):
                 return True
             return pn.op == gn.op and pn.target == gn.target
 
@@ -56,8 +55,8 @@ class SubgraphMatcher:
 
         # Traverse the use-def relationships to ensure that `pn` is a true
         # match for `gn`
-        if ((not len(pn.all_input_nodes) and len(gn.all_input_nodes))
-                or (len(pn.all_input_nodes) and not len(gn.all_input_nodes))):
+        if (pn.op != "output"
+                and len(pn.all_input_nodes) != len(gn.all_input_nodes)):
             return False
         match_found = all(self._match_nodes(pn_, gn_) for pn_, gn_
                           in zip(pn.all_input_nodes, gn.all_input_nodes))
@@ -89,23 +88,17 @@ def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-            def forward(self, x, w1, w2, b1, b2):
-                m1 = torch.cat([w1, w2])
-                m2 = torch.cat([x, b2])
-                t1 = torch.sum(w1, 1)
-                t2 = torch.addmm(b1, m1, m2.t())
-                return torch.eq(torch.sum(t1), torch.sum(t2))
 
-        def pattern(x, w1, w2, b1, b2):
-            p1 = torch.cat([w1, w2])
-            p2 = torch.cat([x, b2])
-            return torch.addmm(b1, p1, p2.t())
+            def forward(self, x, w1, w2):
+                m1 = torch.cat([w1, w2]).sum()
+                m2 = torch.cat([w1, w2]).sum()
+                return x + torch.max(m1) + torch.max(m2)
 
-        def replacement(x, w1, w2, b1, b2):
-            m2 = torch.cat([x, b2])
-            m1 = torch.cat([w1, w2])
-            more_lines = torch.mm(w1, w2.t())
-            return torch.addmm(b1, m1, m2.t())
+        def pattern(w1, w2):
+            return torch.cat([w1, w2])
+
+        def replacement(w1, w2):
+            return torch.stack([w1, w2])
 
         traced_module = symbolic_trace(M())
 
@@ -113,23 +106,46 @@ def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable
 
     The above code will first match ``pattern`` in the ``forward``
     method of ``traced_module``. Pattern-matching is done based on
-    use-def relationships, not node names. For example,
-    ``p1 = torch.cat([w1, w2])`` in ``pattern`` would match
-    ``m1 = torch.cat([w1, w2])``. The ``return`` statement in
-    ``pattern`` is matched based on its value only; it may or may not
-    match to the ``return`` statement in the larger graph. In other
-    words, the pattern doesn't have to extend to the end of the larger
-    graph.
+    use-def relationships, not node names. For example, if you had
+    ``p = torch.cat([a, b])`` in ``pattern``, you could match
+    ``m = torch.cat([a, b])`` in the original ``forward`` function,
+    despite the variable names being different (``p`` vs ``m``).
 
-    Once the pattern is matched, it will be removed from the larger
-    graph and replaced by ``replacement``. During this process, name
-    mangling of ``replacement`` nodes may occur.
+    The ``return`` statement in ``pattern`` is matched based on its
+    value only; it may or may not match to the ``return`` statement in
+    the larger graph. In other words, the pattern doesn't have to extend
+    to the end of the larger graph.
 
-    Parameters can be added just like any other nodes. If you match
-    ``forward(self, x, w1, w2)`` on ``pattern(self, x, w1, w2)`` with a
-    replacement Callable ``replacement(x, w1, w2, b1, b2)``, then you'll
-    end up with two additional parameters in your ``forward`` function:
-    ``forward(self, x, w1, w2, b1, b2)``.
+    When the pattern is matched, it will be removed from the larger
+    function and replaced by ``replacement``. If there are multiple
+    matches for ``pattern`` in the larger function, each non-overlapping
+    match will be replaced. In the case of a match overlap, the first
+    found match in the set of overlapping matches will be replaced.
+
+    One important thing to note is that the parameters of the
+    ``pattern`` and ``replacement`` Callables should be: 1) a subset
+    of the parameters of the original ``forward`` function, 2) used
+    in the Callable itself. Rule #2 is why, in the above code block, the
+    ``forward`` function has parameters ``x, w1, w2``, but the
+    ``pattern`` function only has parameters ``w1, w2``. ``pattern``
+    doesn't use ``x``, so it shouldn't specify ``x`` as a parameter.
+
+    After calling ``subgraph_rewriter.replace_pattern``, the generated
+    Python code looks like this:
+
+    .. code-block:: python
+
+        def forward(self, x, w1, w2):
+            stack_1 = torch.stack([w1, w2])
+            sum_1 = stack_1.sum()
+            stack_2 = torch.stack([w1, w2])
+            sum_2 = stack_2.sum()
+            max_1 = torch.max(sum_1)
+            add_1 = x + max_1
+            max_2 = torch.max(sum_2)
+            add_2 = add_1 + max_2
+            return add_2
+
     """
     # Get the graphs for `gm`, `pattern`, `replacement`
     original_graph = gm.graph
@@ -165,24 +181,20 @@ def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable
             # It's not a match if the pattern leaks out into the rest
             # of the graph
             if pattern_is_contained(matcher.nodes_map):
-                # Shallow copy nodes_map
-                matches.append(Match(anchor=anchor,
-                                     nodes_map=copy.copy(matcher.nodes_map)))
+                for k, v in matcher.nodes_map.items():
+                    # Shallow copy nodes_map
+                    matches.append(Match(anchor=anchor,
+                                   nodes_map=copy.copy(matcher.nodes_map)))
 
     # The set of all nodes in `original_graph` that we've seen thus far
     # as part of a pattern match
     nodes_to_delete: Set[Node] = set()
 
-    # Get the Nodes we'll use to hook the replacement subgraph in to the
-    # original graph
-    replacement_inputs: List[Node] = [n for n in replacement_graph.nodes
-                                      if n.op == "placeholder"]
-
     # Return TRUE if one of the nodes in the current match has already
     # been used as part of another match
     def overlaps_with_prev_match(match : Match) -> bool:
         for n in match.nodes_map.values():
-            if n in nodes_to_delete:
+            if n in nodes_to_delete and n.op != "placeholder":
                 return True
         return False
 
@@ -192,12 +204,20 @@ def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable
         if overlaps_with_prev_match(match):
             continue
 
-        # Get the original graph nodes corresponding to the "start" and
-        # "end" of the pattern subgraph. These connections are where
-        # we'll hook the replacement subgraph in to the original graph
-        original_graph_inputs: Dict[str, Node] = {n.target : n for n
-                                                  in original_graph.nodes
-                                                  if n.op == "placeholder"}
+        # Map replacement graph nodes to their copy in `original_graph`
+        val_map: Dict[Node, Node] = {}
+
+        pattern_placeholders = [n for n in pattern_graph.nodes
+                                if n.op == "placeholder"]
+        assert len(pattern_placeholders)
+        replacement_placeholders = [n for n in replacement_graph.nodes
+                                    if n.op == "placeholder"]
+        assert len(pattern_placeholders) == len(replacement_placeholders)
+        placeholder_map = {r : p for r, p
+                           in zip(replacement_placeholders, pattern_placeholders)}
+
+        # node from `original_graph` that matched with the output node
+        # in `pattern`
         subgraph_output: Node = match.anchor
 
         def mark_nodes_for_deletion(n : Node) -> None:
@@ -209,99 +229,34 @@ def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable
 
         mark_nodes_for_deletion(subgraph_output)
 
-        # Map replacement graph nodes to their copy in `original_graph`
-        copied_nodes: Dict[Node, Node] = {}
+        # Intialize `val_map` with mappings from placeholder nodes in
+        # `replacement` to their corresponding node in `original_graph`
+        for replacement_node in replacement_placeholders:
+            # Get the `original_graph` placeholder node
+            # corresponding to the current `replacement_node`
+            pattern_node = placeholder_map[replacement_node]
+            original_graph_node = match.nodes_map[pattern_node]
+            # Populate `val_map`
+            val_map[replacement_node] = original_graph_node
 
-        # Insert the new graph
+        # Copy the replacement graph over
         with original_graph.inserting_before(subgraph_output):
-            last_placeholder = next(iter(reversed(list(original_graph_inputs.values()))))
-            for n in replacement_graph.nodes:
-                if n.op == "output":
-                    # To ensure that we have one and only one "output"
-                    # node in our final graph, we need to change our
-                    # logic slightly if the pattern extends to the end
-                    # of the graph (i.e. if we matched the pattern
-                    # "output" node to the original graph's "output"
-                    # node)
-                    if subgraph_output.op == "output":
-                        # If we have an output-output match, we can just
-                        # replace the "output" node in `original_graph`
-                        # like we would any other node
-                        copied_nodes[n] = original_graph.node_copy(n,
-                                                                   lambda n :
-                                                                   copied_nodes[n])
-                        subgraph_output.replace_all_uses_with(copied_nodes[n])
-                    else:
-                        # If we don't have an output-output match, we
-                        # need to keep `original_graph`'s existing
-                        # "output" node. We update the existing output
-                        # node's args and remove it from
-                        # `nodes_to_delete`
-                        assert len(n.all_input_nodes) == 1
-                        n_input = next(iter(n.all_input_nodes))
-                        new_args = [arg for arg in subgraph_output.args
-                                    if arg not in nodes_to_delete]
-                        delete_args = [arg for arg in subgraph_output.args
-                                       if arg in nodes_to_delete]
-                        new_args.append(copied_nodes[n_input])
-                        new_kwargs = subgraph_output.kwargs
-                        subgraph_output._update_args_kwargs(tuple(new_args), new_kwargs)
-                        nodes_to_delete.remove(subgraph_output)
-                        for arg in delete_args:
-                            original_graph.erase_node(arg)
-                            nodes_to_delete.remove(arg)
-                elif n.op == "placeholder":
-                    # If `n` corresponds to a placeholder node that
-                    # already exists in `original_graph`, we don't want
-                    # to swap it out
-                    if n.target in original_graph_inputs.keys():
-                        original_graph_node = original_graph_inputs[n.target]
-                        if original_graph_node in nodes_to_delete:
-                            nodes_to_delete.remove(original_graph_node)
-                        copied_nodes[n] = original_graph_node
-                    else:
-                        # Temporarily change the insertion point to the
-                        # beginning of the graph to ensure that placeholder
-                        # nodes are inserted before anything else
-                        with original_graph.inserting_after(last_placeholder):
-                            copied_nodes[n] = original_graph.node_copy(n,
-                                                                       lambda n :
-                                                                       copied_nodes[n])
-                            if n.name in original_graph_inputs.keys():
-                                original_node = original_graph_inputs[n.name]
-                                nodes_to_delete.add(original_node)
-                                original_node.replace_all_uses_with(copied_nodes[n])
-                            last_placeholder = copied_nodes[n]
-                else:
-                    copied_nodes[n] = original_graph.node_copy(n,
-                                                               lambda n :
-                                                               copied_nodes[n])
+            copied_output = original_graph.graph_copy(replacement_graph,
+                                                      val_map)
+        assert isinstance(copied_output, Node)
 
-        def erase_nodes(n : Node) -> None:
-            users = n.all_input_nodes
-            if n in nodes_to_delete:
-                original_graph.erase_node(n)
-            for user in users:
-                erase_nodes(user)
+        # We only want to copy in the output node from `pattern` if we
+        # have an output-output match. Otherwise, we leave out the
+        # `pattern` output node so we don't have two outputs in the
+        # resultant graph
+        if subgraph_output.op != "output":
+            subgraph_output = subgraph_output.args[0]
+        subgraph_output.replace_all_uses_with(copied_output)
 
-        original_graph_output = next(iter(reversed(original_graph.nodes)))
-        erase_nodes(original_graph_output)
-
-        # During graph replacement, we don't add `replacement`
-        # placeholder nodes if a node by the same name already exists
-        # in `original_graph`. This means that the we need to manually
-        # update the placeholder nodes' "users" list to reflect the
-        # current state of the graph. By updating placeholders from the
-        # nodes that use them, we ensure that we have the correct
-        # use-def relationships.
-        for n in original_graph.nodes:
-            for i in n.all_input_nodes:
-                if i.op == "placeholder":
-                    i.users[n] = None
-                    users_to_remove = [user for user in i.users
-                                       if user in list(nodes_to_delete)]
-                    for user in users_to_remove:
-                        i.users.pop(user)
+        # Erase the `pattern` nodes
+        for node in reversed(original_graph.nodes):
+            if len(node.users) == 0 and node.op != "output":
+                original_graph.erase_node(node)
 
     # Update the passed-in GraphModule to reflect the new state of
     # `original_graph`

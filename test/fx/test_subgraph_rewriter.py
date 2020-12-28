@@ -1,5 +1,4 @@
 import os
-import re
 import sys
 
 import torch
@@ -19,36 +18,21 @@ class TestSubgraphRewriter(JitTestCase):
 
     def test_subgraph_rewriter_preserves_logic(self):
         class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
+            def forward(self, x):
+                val = torch.neg(x) + torch.relu(x)
+                return torch.add(val, val)
 
-            def forward(self, x, w1, w2, b1, b2):
-                m1 = torch.cat([w1, w2])
-                m2 = torch.cat([x, b2])
-                t1 = torch.sum(w1, 1)
-                t2 = torch.addmm(b1, m1, m2.t())
-                return torch.eq(torch.sum(t1), torch.sum(t2))
+        def pattern(x):
+            return torch.neg(x) + torch.relu(x)
 
-        def comparison(x, w1, w2, b1, b2):
-            m1 = torch.cat([w1, w2])
-            m2 = torch.cat([x, b2])
-            t1 = torch.sum(w1, 1)
-            t2 = torch.addmm(b1, m1, m2.t())
-            return torch.eq(torch.sum(t1), torch.sum(t2))
-
-        def pattern(x, w1, w2, b1, b2):
-            m1 = torch.cat([w1, w2])
-            m2 = torch.cat([x, b2])
-            return torch.addmm(b1, m1, m2.t())
+        def comparison(x):
+            val = torch.neg(x) + torch.relu(x)
+            return torch.add(val, val)
 
         traced_module = symbolic_trace(M())
         comparison_fn = symbolic_trace(comparison)
 
         x = torch.rand(1, 3)
-        w1 = torch.rand(1, 3)
-        w2 = torch.rand(1, 3)
-        b1 = torch.rand(2, 2)
-        b2 = torch.rand(1, 3)
 
         # Replace `pattern` with the same pattern (shouldn't change
         # the underlying logic)
@@ -56,27 +40,21 @@ class TestSubgraphRewriter(JitTestCase):
 
         traced_module.graph.lint(traced_module)
 
-        ref_outs = comparison_fn(x, w1, w2, b1, b2)
-        test_outs = traced_module.forward(x, w1, w2, b1, b2)
-        self.assertEqual(ref_outs, test_outs)
+        ref_output = comparison_fn(x)
+        test_output = traced_module.forward(x)
+        self.assertEqual(ref_output, test_output)
 
     def test_subgraph_rewriter_with_oneliner_pattern(self):
         class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
+            def forward(self, x):
+                val = torch.neg(x)
+                return torch.add(val, val)
 
-            def forward(self, x, w1, w2, b1, b2):
-                m1 = torch.cat([w1, w2])
-                m2 = torch.cat([x, b2])
-                t1 = torch.sum(w1, 1)
-                t2 = torch.addmm(b1, m1, m2.t())
-                return torch.eq(torch.sum(t1), torch.sum(t2))
+        def pattern(x):
+            return torch.neg(x)
 
-        def pattern(x, w1, w2, b1, b2):
-            return torch.cat([x, b2])
-
-        def replacement(x, w1, w2, b1, b2):
-            return torch.cat([b2, w2])
+        def replacement(x):
+            return torch.relu(x)
 
         traced_module = symbolic_trace(M())
         subgraph_rewriter.replace_pattern(traced_module, pattern, replacement)
@@ -85,153 +63,51 @@ class TestSubgraphRewriter(JitTestCase):
 
     def test_subgraph_rewriter_single_pattern_match(self):
         class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
+            def forward(self, x):
+                val = torch.neg(x) + torch.relu(x)
+                return torch.add(val, val)
 
-            def forward(self, x, w1, w2, b1, b2):
-                m1 = torch.cat([w1, w2])
-                m2 = torch.cat([x, b2])
-                t1 = torch.sum(w1, 1)
-                t2 = torch.addmm(b1, m1, m2.t())
-                return torch.eq(torch.sum(t1), torch.sum(t2))
+        def pattern(x):
+            return torch.neg(x) + torch.relu(x)
 
-        def comparison(x, w1, w2, b1, b2):
-            m1 = torch.cat([w1, w2])
-            m2 = torch.cat([x, b2])
-            t1 = torch.sum(w1, 1)
-            t2 = torch.addmm(b1, m1, m2.t())
-            return torch.eq(torch.sum(t1), torch.sum(t2))
+        def replacement(x):
+            return torch.relu(x)
 
-        def pattern(x, w1, w2, b1, b2):
-            m1 = torch.cat([w1, w2])
-            m2 = torch.cat([x, b2])
-            return torch.addmm(b1, m1, m2.t())
-
-        def replacement(x, w1, w2, b1, b2):
-            m2 = torch.cat([x, b2])
-            m1 = torch.cat([w1, w2])
-            more_lines = torch.mm(w1, w2.t())
-            return torch.addmm(b1, m1, m2.t())
+        def comparison(x):
+            val = torch.relu(x)
+            return torch.add(val, val)
 
         traced_module = symbolic_trace(M())
         comparison_fn = symbolic_trace(comparison)
 
         x = torch.rand(1, 3)
-        w1 = torch.rand(1, 3)
-        w2 = torch.rand(1, 3)
-        b1 = torch.rand(2, 2)
-        b2 = torch.rand(1, 3)
 
         subgraph_rewriter.replace_pattern(traced_module, pattern, replacement)
 
-        # Check that the pattern in `fn` was replaced. The outputs should
-        # be the same since the only difference is in code order
-        ref_outs = comparison_fn(x, w1, w2, b1, b2)
-        test_outs = traced_module.forward(x, w1, w2, b1, b2)
-        self.assertEqual(ref_outs, test_outs)
+        ref_output = comparison_fn(x)
+        test_output = traced_module.forward(x)
+        self.assertEqual(ref_output, test_output)
 
     def test_subgraph_rewriter_multiple_pattern_match(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
 
-            def forward(self, x, w1, w2, b1, b2):
-                m1 = torch.cat([w1, w2])
-                m2 = torch.cat([x, b2])
-                m3 = torch.cat([w1, w2])
-                t1 = torch.addmm(b1, m3, m2.t())
-                t2 = torch.addmm(b1, m1, m2.t())
-                return torch.eq(torch.sum(t1), torch.sum(t2))
-
-        def comparison(x, w1, w2, b1, b2):
-            m1 = torch.cat([w1, w2])
-            m2 = torch.cat([x, b2])
-            m3 = torch.cat([w1, w2])
-            t1 = torch.addmm(b1, m3, m2.t())
-            t2 = torch.addmm(b1, m1, m2.t())
-            return torch.eq(torch.sum(t1), torch.sum(t2))
-
-        def pattern(x, w1, w2, b1, b2):
-            return torch.cat([w1, w2])
-
-        def replacement(x, w1, w2, b1, b2):
-            return torch.cat([w2, w1])
-
-        traced_module = symbolic_trace(M())
-        comparison_fn = symbolic_trace(comparison)
-
-        x = torch.rand(1, 3)
-        w1 = torch.rand(1, 3)
-        w2 = torch.rand(1, 3)
-        b1 = torch.rand(2, 2)
-        b2 = torch.rand(1, 3)
-
-        subgraph_rewriter.replace_pattern(traced_module, pattern, replacement)
-
-        traced_module.graph.lint(traced_module)
-
-        # Check that the pattern in `fn` was replaced. The outputs should
-        # be the same since the only difference is in argument order.
-        ref_outs = comparison_fn(x, w1, w2, b1, b2)
-        test_outs = traced_module.forward(x, w1, w2, b1, b2)
-        self.assertEqual(ref_outs, test_outs)
-
-    def test_subgraph_rewriter_add_params(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x, w1, w2):
-                m1 = torch.cat([w1, w2])
-                return torch.mm(m1, x.t())
+                m1 = torch.cat([w1, w2]).sum()
+                m2 = torch.cat([w1, w2]).sum()
+                return x + torch.max(m1) + torch.max(m2)
 
-        def pattern(x, w1, w2):
+        def comparison(x, w1, w2):
+            m1 = torch.stack([w1, w2]).sum()
+            m2 = torch.stack([w1, w2]).sum()
+            return x + torch.max(m1) + torch.max(m2)
+
+        def pattern(w1, w2):
             return torch.cat([w1, w2])
 
-        def replacement(x, w1, w2, b1, b2):
-            m1 = torch.cat([w1, w2])
-            m2 = torch.cat([b1, b2])
-            return torch.cat([m1, m2])
-
-        traced_module = symbolic_trace(M())
-
-        subgraph_rewriter.replace_pattern(traced_module, pattern, replacement)
-
-        traced_module.graph.lint(traced_module)
-
-        # `compile()` represents the function as an anonymous module,
-        # which means that `co_argcount` would always be 0. This means
-        # we have to check the produced string for equality instead
-        code_str = traced_module.graph.python_code("<string>")
-        def_line = re.search("def.*", code_str).group()
-        self.assertEqual(def_line,
-                         "def forward(self, x, w1, w2, b1, b2):")
-
-    def test_subgraph_rewriter_pattern_extends_to_end_of_original_graph(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x, w1, w2, b1, b2):
-                m1 = torch.cat([w1, w2])
-                m2 = torch.cat([x, b2])
-                t1 = torch.addmm(b1, m1, m2.t())
-                t2 = torch.sum(w1, 1)
-                t3 = torch.sum(b1, 1)
-                return torch.eq(torch.sum(t2), torch.sum(t3))
-
-        def comparison(x, w1, w2, b1, b2):
-            m1 = torch.cat([w1, w2])
-            m2 = torch.cat([x, b2])
-            t1 = torch.addmm(b1, m1, m2.t())
-            t2 = torch.sum(w1, 1)
-            t3 = torch.sum(b1, 1)
-            return torch.eq(torch.sum(t2), torch.sum(t3))
-
-        def pattern(x, w1, w2, b1, b2):
-            t2 = torch.sum(w1, 1)
-            t3 = torch.sum(b1, 1)
-            return torch.eq(torch.sum(t2), torch.sum(t3))
+        def replacement(w1, w2):
+            return torch.stack([w1, w2])
 
         traced_module = symbolic_trace(M())
         comparison_fn = symbolic_trace(comparison)
@@ -239,15 +115,11 @@ class TestSubgraphRewriter(JitTestCase):
         x = torch.rand(1, 3)
         w1 = torch.rand(1, 3)
         w2 = torch.rand(1, 3)
-        b1 = torch.rand(2, 2)
-        b2 = torch.rand(1, 3)
 
-        # Replace `pattern` with the same pattern (shouldn't change
-        # the underlying logic)
-        subgraph_rewriter.replace_pattern(traced_module, pattern, pattern)
+        subgraph_rewriter.replace_pattern(traced_module, pattern, replacement)
 
         traced_module.graph.lint(traced_module)
 
-        ref_outs = comparison_fn(x, w1, w2, b1, b2)
-        test_outs = traced_module.forward(x, w1, w2, b1, b2)
+        ref_outs = comparison_fn(x, w1, w2)
+        test_outs = traced_module.forward(x, w1, w2)
         self.assertEqual(ref_outs, test_outs)

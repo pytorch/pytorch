@@ -79,14 +79,12 @@ DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.GRUCell: nnqd.GRUCell,
     nn.Linear: nnqd.Linear,
     nn.LSTM: nnqd.LSTM,
+    nn.GRU: nnqd.GRU,
     nn.LSTMCell: nnqd.LSTMCell,
     nn.RNNCell: nnqd.RNNCell,
 }
 
 # Whitelist for propagating the qconfig
-_EXCLUDE_QCONFIG_PROPAGATE_LIST : Set[Callable] = {
-    DeQuantStub,
-}
 _INCLUDE_QCONFIG_PROPAGATE_LIST : Set[Callable] = {
     nn.Sequential,
 }
@@ -161,8 +159,7 @@ def get_default_qconfig_propagation_list() -> Set[Callable]:
         (set(DEFAULT_STATIC_QUANT_MODULE_MAPPINGS.keys()) |
          set(DEFAULT_QAT_MODULE_MAPPINGS.keys()) |
          set(DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS.keys()) |
-         _INCLUDE_QCONFIG_PROPAGATE_LIST) -
-        _EXCLUDE_QCONFIG_PROPAGATE_LIST
+         _INCLUDE_QCONFIG_PROPAGATE_LIST)
     )
     return QCONFIG_PROPAGATE_MODULE_CLASS_LIST
 
@@ -178,7 +175,7 @@ def get_default_compare_output_module_list() -> Set[Callable]:
         | set(DEFAULT_QAT_MODULE_MAPPINGS.keys())
         | set(DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS.keys())
         | _INCLUDE_QCONFIG_PROPAGATE_LIST
-    ) - _EXCLUDE_QCONFIG_PROPAGATE_LIST
+    )
     return NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_MODULE_LIST
 
 # TODO: merge with get_static_quant_module_class
