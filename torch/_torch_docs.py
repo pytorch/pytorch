@@ -3029,6 +3029,18 @@ numbers. The remainder has the same sign as the dividend :attr:`input`.
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
 
+Note:
+    For the divisor as zero, returns ``NaN`` for floating-point common dtype;
+    raises ``RuntimeError`` for integral common dtype on CPU;
+    For integral common dtype On CUDA, due to it's an undefined behavior,
+    returns a pattern of all 1s for all integral dividend except int64.
+    For int64, returns all 1s for negative dividend, half 1s for positive
+    dividend. E.g.:
+        uint8: 0xff -> 255
+        int32: 0xffffffff -> -1
+        int64: 0xffffffffffffffff -> -1
+               0x00000000ffffffff -> 4294967295
+
 Args:
     input (Tensor): the dividend
     other (Tensor or float/integer): the divisor, which may be either a number or a tensor
