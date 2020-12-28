@@ -253,6 +253,7 @@ class UnaryUfuncInfo(OpInfo):
                  handles_large_floats=True,  # whether the op correctly handles large float values (like 1e20)
                  handles_extremals=True,  # whether the op correctly handles extremal values (like inf)
                  handles_complex_extremals=True,  # whether the op correct handles complex extremals (like inf -infj)
+                 supports_complex_to_float=False,  # op supports casting from complex input to real output safely eg. angle
                  sample_inputs_func=sample_inputs_unary,
                  **kwargs):
         super(UnaryUfuncInfo, self).__init__(name,
@@ -267,6 +268,7 @@ class UnaryUfuncInfo(OpInfo):
         self.handles_large_floats = handles_large_floats
         self.handles_extremals = handles_extremals
         self.handles_complex_extremals = handles_complex_extremals
+        self.supports_complex_to_float = supports_complex_to_float
 
         # Epsilon to ensure grad and gradgrad checks don't test values
         #   outside a function's domain.
@@ -291,12 +293,21 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad):
     return (SampleInput((make_tensor((S, S), device, dtype,
                                      low=None, high=None,
                                      requires_grad=requires_grad),
-                        make_tensor((S, S), device, dtype,
-                                    low=None, high=None,
-                                    requires_grad=requires_grad),
-                        make_tensor((S, S), device, dtype,
-                                    low=None, high=None,
-                                    requires_grad=False))),)
+                         make_tensor((S, S), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                         make_tensor((S, S), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=False))),)
+
+
+def sample_inputs_xlogy(self, device, dtype, requires_grad):
+    return (SampleInput((make_tensor((S, S), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                         make_tensor((S, S), device, dtype,
+                                     low=0, high=None,
+                                     requires_grad=requires_grad))),)
 
 def np_sinc_with_fp16_as_fp32(x):
     # Wraps numpy's sinc function so that fp16 values are promoted to fp32
@@ -346,80 +357,6 @@ def np_unary_ufunc_integer_promotion_wrapper(fn):
         if is_integral(x.dtype):
             return fn(x, dtype=np_dtype)
         return fn(x)
-
-    return wrapped_fn
-
-def np_binary_ufunc_type_promotion_wrapper(fn):
-    # Wrapper that passes PyTorch's promoted
-    #   type as an argument to the wrapped NumPy
-    #   binary ufunc when the type promotion
-    #   for the given inputs is inconsistent
-    #   with PyTorch.
-    #   This mimicks PyTorch's type promotion.
-    #
-    # The following describes all scenarios that
-    #   the type promotion is different between
-    #   NumPy and PyTorch
-    # 1) For inputs with integer tensor and float scalar,
-    #   NumPy promotes integer types to double,
-    #   but PyTorch promotes integer types to the
-    #   default scalar type.
-    #
-    # 2) For inputs with two tensors, the table below
-    #   shows the difference
-    #       inputs         NumPy     PyTorch
-    #    int16 float16    float32    float16
-    #    int32 float16    float64    float16
-    #    int64 float16    float64    float16
-    #    int32 float32    float64    float32
-    #    int64 float32    float64    float32
-    #   Special case:
-    #   For two boolean inputs, the result dtype varies
-    #   for different operations in NumPy, but it is
-    #   torch.bool in PyTorch.
-    #
-    # 3) On Windows platform, PyTorch tensor wrapper
-    #   for integer scalar is int64, but NumPy wrapper
-    #   for integer scalar is int32. For boolean tensor
-    #   and integer scalar, NumPy result needs to be
-    #   promoted from int3 to int64
-
-    # Helper function to get the NumPy's corresponding
-    #   dtype from PyTorch when type promotion is
-    #   different from each other.
-    #   Fact for binary function:
-    #     x must be a Tensor
-    #     y can be a Tensor or a Scalar
-    def numpy_dtype_from_torch(x, y):
-        if not hasattr(y, 'dtype'):
-            if x.dtype in [np.bool, np.uint8, np.int8, np.int16, np.int32, np.int64] and \
-                    type(y) == float:
-                return torch_to_numpy_dtype_dict[torch.get_default_dtype()]
-            if IS_WINDOWS and x.dtype == np.bool and type(y) == int:
-                return np.int64
-            return None
-        if x.dtype == np.bool and y.dtype == np.bool:
-            return np.bool
-        if (x.dtype == np.float16 and y.dtype in [np.int16, np.int32, np.int64]) or \
-           (x.dtype in [np.int16, np.int32, np.int64] and y.dtype == np.float16):
-            return np.float16
-        if (x.dtype == np.float32 and y.dtype in [np.int32, np.int64]) or \
-           (x.dtype in [np.int32, np.int64] and y.dtype == np.float32):
-            return np.float32
-        return None
-
-    @wraps(fn)
-    def wrapped_fn(x, y):
-        res_dtype = numpy_dtype_from_torch(x, y)
-        if res_dtype is not None:
-            # Can not do fn(x, y, dtype=utype), since some NumPy operations
-            #   don't support all dtypes as signature
-            #   e.g. np.fmod(x, y, dtype=np.bool) is not valid
-            def new_fn(x, y):
-                v = fn(x, y)
-                return v.astype(res_dtype)
-            return new_fn(x, y)
-        return fn(x, y)
 
     return wrapped_fn
 
@@ -1073,14 +1010,20 @@ op_db: List[OpInfo] = [
                                 active_if=IS_MACOS),
                        # Reference: https://github.com/pytorch/pytorch/pull/47293#issuecomment-721774436
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                dtypes=[torch.bfloat16]),
-                       SkipInfo('TestCommon', 'test_variant_consistency_eager',
-                                dtypes=[torch.cfloat, torch.cdouble]),
-                       SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                                dtypes=[torch.cfloat, torch.cdouble])),
+                                dtypes=[torch.bfloat16])),
                    promotes_integers_to_float=True,
-                   handles_complex_extremals=False,
-                   test_complex_grad=False),
+                   handles_complex_extremals=False),
+    UnaryUfuncInfo('angle',
+                   ref=np.angle,
+                   dtypes=all_types_and_complex_and(torch.bool),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool),
+                   dtypesIfROCM=all_types_and_complex_and(torch.bool),
+                   decorators=(precisionOverride({torch.float16: 1e-2,
+                                                  torch.bfloat16: 1e-2}),),
+                   promotes_integers_to_float=True,
+                   supports_complex_to_float=True,
+                   test_inplace_grad=False),
     OpInfo('linalg.solve',
            aten_name='linalg_solve',
            op=torch.linalg.solve,
@@ -1163,6 +1106,14 @@ if TEST_SCIPY:
                                     dtypes=[torch.bfloat16]),),
                        assert_autodiffed=True,
                        promotes_integers_to_float=True),
+        OpInfo('xlogy',
+               dtypes=all_types_and(torch.bool),
+               dtypesIfCPU=all_types_and(torch.bool, torch.half, torch.bfloat16),
+               dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+               test_inplace_grad=True,
+               supports_tensor_out=True,
+               promotes_integers_to_float=True,
+               sample_inputs_func=sample_inputs_xlogy),
     ]
     op_db = op_db + op_db_scipy_reference
 
@@ -1451,8 +1402,6 @@ def method_tests():
         ('complex', (S, S, S), ((S, S, S),), ''),
         ('abs', (S, S, S), NO_ARGS, '', (True,)),
         ('abs', (), NO_ARGS, 'scalar', (True,)),
-        ('angle', (S, S, S), NO_ARGS, '', (True,)),
-        ('angle', (), NO_ARGS, 'scalar', (True,)),
         ('clamp', (S, S, S), (0, 1), '', (True,)),
         ('clamp', (S, S, S), (None, 0.5), 'min', (True,)),
         ('clamp', (S, S, S), (0.5, None), 'max', (True,)),
