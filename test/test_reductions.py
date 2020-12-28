@@ -1154,7 +1154,7 @@ class TestReductions(TestCase):
             self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=exact_dtype)
 
         def _test_out_variant(x, dim):
-            out = torch.empty_like(x)
+            out = torch.empty(0, dtype=x.dtype, device=x.device)
             if dtype == torch.bool or dtype == torch.uint8:
                 expected = torch.all(x, dim)
                 torch.all(x, dim, out=out)
@@ -1243,6 +1243,28 @@ class TestReductions(TestCase):
                 _test_out_variant(x, dim)
                 _test_all_any_with_dim_keepdim(x, dim, keepdim=True)
                 _test_all_any_with_dim_keepdim(x, dim, keepdim=False)
+
+    @dtypes(*(torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
+                                           include_bool=True, include_complex=True)))
+    def test_all_any_invalid_out_dtype(self, device, dtype):
+        def _test_out_throws(x, out, dim=0):
+            dtype_str = "bool"
+            if x.dtype == torch.uint8:
+                dtype_str = "uint8"
+
+            with self.assertRaisesRegex(RuntimeError, "all only supports {dtype} tensor for result, got".format(dtype=dtype_str)):
+                torch.all(x, dim, out=out)
+
+            with self.assertRaisesRegex(RuntimeError, "any only supports {dtype} tensor for result, got".format(dtype=dtype_str)):
+                torch.any(x, dim, out=out)
+
+        out = torch.ones(0, device=device, dtype=dtype)
+
+        for valid_in_dtype in [torch.bool, torch.uint8]:
+            x = torch.ones(3, 3, device=device, dtype=valid_in_dtype)
+
+        if x.dtype != out.dtype:
+            _test_out_throws(x, out)
 
     # TODO: part of this test covers torch.norm, with should be covered by test_linalg
     @onlyOnCPUAndCUDA

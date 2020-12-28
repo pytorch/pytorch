@@ -805,8 +805,12 @@ Tensor &all_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
   TORCH_CHECK(self.layout() == Layout::Strided,
               "all only supports strided layout, got: ", self.layout());
   // Refer [all, any : uint8 compatibility]
-  TORCH_CHECK(result.scalar_type() == ScalarType::Bool || result.scalar_type() == ScalarType::Byte,
+  TORCH_CHECK(result.scalar_type() == ScalarType::Bool || self.scalar_type() == ScalarType::Byte,
               "all only supports bool tensor for result, got: ", result.scalar_type());
+  if (self.scalar_type() == ScalarType::Byte) {
+    TORCH_CHECK(result.scalar_type() == ScalarType::Byte,
+              "all only supports uint8 tensor for result, got: ", result.scalar_type());
+  }
 
   auto out_dtype = result.scalar_type();
   dim = maybe_wrap_dim(dim, self.dim());
@@ -887,8 +891,12 @@ Tensor &any_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
   TORCH_CHECK(self.layout() == Layout::Strided,
               "any only supports strided layout, got: ", self.layout());
   // Refer [all, any : uint8 compatibility]
-  TORCH_CHECK(result.scalar_type() == ScalarType::Bool || result.scalar_type() == ScalarType::Byte,
+  TORCH_CHECK(result.scalar_type() == ScalarType::Bool || self.scalar_type() == ScalarType::Byte,
               "any only supports bool tensor for result, got: ", result.scalar_type());
+  if (self.scalar_type() == ScalarType::Byte) {
+    TORCH_CHECK(result.scalar_type() == ScalarType::Byte,
+              "any only supports uint8 tensor for result, got: ", result.scalar_type());
+  }
 
   auto out_dtype = result.scalar_type();
   dim = maybe_wrap_dim(dim, self.dim());
