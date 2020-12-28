@@ -5,4 +5,5 @@ from .rnn import LSTMCell
 __all__ = [
     'LSTM',
     'LSTMCell',
+    'MultiheadAttention',
 ]

@@ -1,10 +1,13 @@
 import torch
+from torch import nn
+import torch.nn.functional as nnF
+import torch.nn.quantized as nnq
 
 from torch import Tensor
 from typing import Optional, Tuple
 
-class MultiheadAttention(torch.nn.MultiheadAttention):
-    _FLOAT_MODULE = torch.nn.MultiheadAttention
+class MultiheadAttention(nn.MultiheadAttention):
+    _FLOAT_MODULE = nn.MultiheadAttention
 
     r"""Allows the model to jointly attend to information
     from different representation subspaces.
@@ -30,8 +33,12 @@ class MultiheadAttention(torch.nn.MultiheadAttention):
 
     Examples::
 
-        >>> multihead_attn = nn.MultiheadAttention(embed_dim, num_heads)
+        >>> import torch.nn.quantizable as nnqa
+        >>> multihead_attn = nnqa.MultiheadAttention(embed_dim, num_heads)
         >>> attn_output, attn_output_weights = multihead_attn(query, key, value)
+
+    Note::
+        Please, follow the quantization flow to convert the quantizable MHA.
     """
     def __init__(self, embed_dim, num_heads,
                  dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False,
@@ -48,10 +55,11 @@ class MultiheadAttention(torch.nn.MultiheadAttention):
         self.q_scaling_product = nnq.FloatFunctional()
 
         # Quant/Dequant
-        self.quant_attn_output = nnq.QuantStub()
-        self.dequant_q = nnq.DeQuantStub()
-        self.dequant_k = nnq.DeQuantStub()
-        self.dequant_v = nnq.DeQuantStub()
+        self.quant_attn_output = torch.quantization.QuantStub()
+        self.quant_attn_output_weights = torch.quantization.QuantStub()
+        self.dequant_q = torch.quantization.DeQuantStub()
+        self.dequant_k = torch.quantization.DeQuantStub()
+        self.dequant_v = torch.quantization.DeQuantStub()
 
     def __setstate__(self, state):
         super(MultiheadAttention, self).__setstate__(state)
@@ -62,7 +70,7 @@ class MultiheadAttention(torch.nn.MultiheadAttention):
         # TODO: Better to save the weights explicitly, rather than trust Linear
 
     @classmethod
-    def from_float(self, other):
+    def from_float(cls, other):
         assert type(other) == cls._FLOAT_MODULE
         assert hasattr(other, 'qconfig'), "The float module must have 'qconfig'"
         # Setting the dropout to 0.0!
@@ -74,7 +82,7 @@ class MultiheadAttention(torch.nn.MultiheadAttention):
 
         # Set the linear weights
         observed.out_proj.weight = other.out_proj.weight
-        observed.out_proj.bias = other.bias
+        observed.out_proj.bias = other.out_proj.bias
         if other._qkv_same_embed_dim:
             # Use separate params
             _b = other.in_proj_bias
@@ -83,8 +91,8 @@ class MultiheadAttention(torch.nn.MultiheadAttention):
             _w = other.in_proj_weight[_start:_end, :]
             if _b is not None:
                 _b = _b[_start:_end]
-            observed.linear_Q.weight = _w
-            observed.linear_Q.bias = _b
+            observed.linear_Q.weight = torch.nn.Parameter(_w)
+            observed.linear_Q.bias = torch.nn.Parameter(_b)
 
             _b = other.in_proj_bias
             _start = other.embed_dim
@@ -92,8 +100,8 @@ class MultiheadAttention(torch.nn.MultiheadAttention):
             _w = other.in_proj_weight[_start:_end, :]
             if _b is not None:
                 _b = _b[_start:_end]
-            observed.linear_K.weight = _w
-            observed.linear_K.bias = _b
+            observed.linear_K.weight = torch.nn.Parameter(_w)
+            observed.linear_K.bias = torch.nn.Parameter(_b)
 
             _b = other.in_proj_bias
             _start = other.embed_dim * 2
@@ -101,8 +109,8 @@ class MultiheadAttention(torch.nn.MultiheadAttention):
             _w = other.in_proj_weight[_start:, :]
             if _b is not None:
                 _b = _b[_start:]
-            observed.linear_V.weight = _w
-            observed.linear_V.bias = _b
+            observed.linear_V.weight = torch.nn.Parameter(_w)
+            observed.linear_V.bias = torch.nn.Parameter(_b)
         else:
             observed.linear_Q = other.q_proj_weight
             observed.linear_K = other.k_proj_weight
@@ -117,11 +125,11 @@ class MultiheadAttention(torch.nn.MultiheadAttention):
                 observed.linear_V.bias = other.in_proj_bias[(other.embed_dim * 2):]
         observed.eval()
         # Explicit prepare
-        observed = tq.prepare(observed, inplace=True)
+        observed = torch.quantization.prepare(observed, inplace=True)
         return observed
 
     def from_observed(self, other):
-        return tq.convert(self, inplace=False, remove_qconfig=True)
+        return torch.quantization.convert(self, inplace=False, remove_qconfig=True)
 
     def forward(self, query, key, value, key_padding_mask=None,
                 need_weights=True, attn_mask=None):
@@ -171,8 +179,13 @@ class MultiheadAttention(torch.nn.MultiheadAttention):
     def _forward_impl(
             self, query, key, value, key_padding_mask=None, need_weights=True,
             attn_mask=None) -> Tuple[Tensor, Optional[Tensor]]:
-        tgt_len, bsz, embed_dim = query.size()
-        assert embed_dim == embed_dim_to_check
+        # This version will not deal with the static key/value pairs.
+        # Keeping it here for future changes.
+        static_k = None
+        static_v = None
+
+        tgt_len, bsz, embed_dim_to_check = query.size()
+        assert self.embed_dim == embed_dim_to_check
         # allow MHA to have different sizes for the feature dimension
         assert key.size(0) == value.size(0) and key.size(1) == value.size(1)
 
@@ -184,7 +197,7 @@ class MultiheadAttention(torch.nn.MultiheadAttention):
         k = self.linear_K(key)
         v = self.linear_V(value)
 
-        q = self.q_scaling_product.mul(q, scaling)
+        q = self.q_scaling_product.mul_scalar(q, scaling)
 
         if attn_mask is not None:
             assert attn_mask.dtype == torch.float32 or attn_mask.dtype == torch.float64 or \
@@ -210,11 +223,11 @@ class MultiheadAttention(torch.nn.MultiheadAttention):
             warnings.warn("Byte tensor for key_padding_mask in nn.MultiheadAttention is deprecated. Use bool tensor instead.")
             key_padding_mask = key_padding_mask.to(torch.bool)
 
-        if bias_k is not None and bias_v is not None:
+        if self.bias_k is not None and self.bias_v is not None:
             if static_k is None and static_v is None:
                 if k.is_quantized:
-                    bias_k = torch.quantize_per_tensor(bias_k, k.q_scale(), k.q_zero_point(), k.dtype)
-                k = torch.cat([k, bias_k.repeat(1, bsz, 1)])
+                    self.bias_k = torch.quantize_per_tensor(self.bias_k, k.q_scale(), k.q_zero_point(), k.dtype)
+                k = torch.cat([k, self.bias_k.repeat(1, bsz, 1)])
                 if v.is_quantized:
                     bias_v = torch.quantize_per_tensor(bias_v, v.q_scale(), v.q_zero_point(), v.dtype)
                 v = torch.cat([v, bias_v.repeat(1, bsz, 1)])
@@ -226,8 +239,8 @@ class MultiheadAttention(torch.nn.MultiheadAttention):
                 assert static_k is None, "bias cannot be added to static key."
                 assert static_v is None, "bias cannot be added to static value."
         else:
-            assert bias_k is None
-            assert bias_v is None
+            assert self.bias_k is None
+            assert self.bias_v is None
 
         q = q.contiguous().view(tgt_len, bsz * self.num_heads, head_dim).transpose(0, 1)
         if k is not None:
@@ -251,7 +264,7 @@ class MultiheadAttention(torch.nn.MultiheadAttention):
             assert key_padding_mask.size(0) == bsz
             assert key_padding_mask.size(1) == src_len
 
-        if add_zero_attn:
+        if self.add_zero_attn:
             src_len += 1
             k_zeros = torch.zeros((k.size(0), 1) + k.size()[2:])
             k_zeros = torch.quantize_per_tensor(k_zeros, k.q_scale(), k.q_zero_point(), k.dtype)
@@ -285,9 +298,9 @@ class MultiheadAttention(torch.nn.MultiheadAttention):
             )
             attn_output_weights = attn_output_weights.view(bsz * self.num_heads, tgt_len, src_len)
 
-        attn_output_weights = softmax(
+        attn_output_weights = nnF.softmax(
             attn_output_weights, dim=-1)
-        attn_output_weights = dropout(attn_output_weights, p=self.dropout, training=self.training)
+        attn_output_weights = nnF.dropout(attn_output_weights, p=self.dropout, training=self.training)
 
         attn_output = torch.bmm(attn_output_weights, v)
         assert list(attn_output.size()) == [bsz * self.num_heads, tgt_len, head_dim]
@@ -296,7 +309,7 @@ class MultiheadAttention(torch.nn.MultiheadAttention):
         # Reentering the quantized zone
         attn_output = self.quant_attn_output(attn_output)
         attn_output = self.out_proj(attn_output)
-        attn_output_weights = self.quant_qttn_output_weights(attn_output_weights)
+        attn_output_weights = self.quant_attn_output_weights(attn_output_weights)
 
         if need_weights:
             # average attention weights over heads
