@@ -182,7 +182,6 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
     self_scaled = self;
     scale_v = grad / norm;
   } else if (std::isinf(p)) {
-<<<<<<< HEAD
     Tensor is_eq_max = (self.abs() == norm).logical_or_(self.isnan().logical_and_(norm.isnan())).type_as(self);
     self_scaled = self.sign() * is_eq_max;
     Tensor nb_max = is_eq_max.count_nonzero(dim);
@@ -190,10 +189,6 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
       nb_max = unsqueeze_multiple(nb_max, dim, ndim);
     }
     scale_v = grad / nb_max;
-=======
-    self_scaled = self.sgn() * (self.abs() == norm).type_as(self);
-    scale_v = grad.clone(at::MemoryFormat::Preserve);
->>>>>>> fc559bd6dc21d8bcdb77d63ecf11ec514266f27e
   } else if (p < 2.0) {
     self_scaled = self.sgn() * self.abs().pow(p - 1);
     scale_v = grad / norm.pow(p - 1);
