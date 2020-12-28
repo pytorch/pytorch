@@ -85,7 +85,7 @@ Tensor mean(
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
           VK_KERNEL(mean2d),
-          v_output_packed.extents(),
+          v_input.extents(),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
           v_output_packed.image(
