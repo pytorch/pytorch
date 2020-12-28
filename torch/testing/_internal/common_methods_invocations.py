@@ -2,6 +2,7 @@ from functools import reduce, wraps
 from itertools import product
 from operator import mul, itemgetter
 import collections
+import random
 
 import torch
 import numpy as np
@@ -546,6 +547,33 @@ def sample_inputs_pinverse(op_info, device, dtype, requires_grad=False):
     return out
 
 
+def sample_inputs_flip(op_info, device, dtype, requires_grad):
+    test_cases = (
+        make_tensor((S, M, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        make_tensor((S, 0, M), device, dtype, low=None, high=None, requires_grad=requires_grad)
+    )
+
+    dims = [[0, 1, 2], [0], [0, 2], [-1]]
+    out = []
+    for dim in dims:
+        for case in test_cases:
+            random.shuffle(dim)
+            out.append(SampleInput(case, kwargs={'dims': tuple(dim)}))
+
+    return out
+
+def sample_inputs_fliplr_flipud(op_info, device, dtype, requires_grad):
+    test_cases = (
+        make_tensor((S, M, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        make_tensor((S, 0, M), device, dtype, low=None, high=None, requires_grad=requires_grad)
+    )
+
+    out = []
+    for case in test_cases:
+        out.append(SampleInput(case))
+
+    return out
+
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
     # NOTE: CPU complex acos produces incorrect outputs (https://github.com/pytorch/pytorch/issues/42952)
@@ -711,6 +739,24 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 device_type='cuda', dtypes=[torch.float16]),
                    )),
+    OpInfo('flip',
+           op=torch.flip,
+           dtypes=all_types_and_complex_and(torch.bool, torch.half),
+           sample_inputs_func=sample_inputs_flip,
+           test_inplace_grad=False,
+           supports_tensor_out=False),
+    OpInfo('fliplr',
+           op=torch.fliplr,
+           dtypes=all_types_and_complex_and(torch.bool, torch.half),
+           sample_inputs_func=sample_inputs_fliplr_flipud,
+           test_inplace_grad=False,
+           supports_tensor_out=False),
+    OpInfo('flipud',
+           op=torch.flipud,
+           dtypes=all_types_and_complex_and(torch.bool, torch.half),
+           sample_inputs_func=sample_inputs_fliplr_flipud,
+           test_inplace_grad=False,
+           supports_tensor_out=False),
     SpectralFuncInfo('fft.fft',
                      aten_name='fft_fft',
                      ref=np.fft.fft,
@@ -1392,8 +1438,6 @@ def method_tests():
         ('flip', (S, S, S), ([0, 2],), 'd02'),
         ('flip', (S, S, S), ([2, 0],), 'd20'),
         ('flip', (S, S, S), ([-1],), 'neg_d'),
-        ('fliplr', (S, S, S), ()),
-        ('flipud', (S, S, S), ()),
         ('roll', (S, S, S), (0, 0), 'd0'),
         ('roll', (S, S, S), (1, 2), 'd12'),
         ('roll', (S, S, S), (0, 2,), 'd02'),
