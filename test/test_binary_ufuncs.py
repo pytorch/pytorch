@@ -8,17 +8,19 @@ import random
 import unittest
 import warnings
 import operator
+from functools import partial
 
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
     TestCase, iter_indices, TEST_WITH_ASAN, run_tests,
-    torch_to_numpy_dtype_dict, make_tensor)
+    torch_to_numpy_dtype_dict, make_tensor, TEST_SCIPY)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, onlyCPU, dtypes, dtypesIfCUDA,
     dtypesIfCPU, deviceCountAtLeast, precisionOverride, onlyOnCPUAndCUDA,
-    skipCUDAIfRocm)
-from torch.testing._internal.common_methods_invocations import (
-    np_binary_ufunc_type_promotion_wrapper)
+    skipCUDAIfRocm, skipIf)
+
+if TEST_SCIPY:
+    import scipy.special
 
 # TODO: remove this
 def _generate_input(shape, dtype, device, with_extremal):
@@ -1386,31 +1388,30 @@ class TestBinaryUfuncs(TestCase):
                 value = 255 if dtype == torch.uint8 else -1
                 self.assertTrue(torch.all(x.fmod(zero) == value))
 
-    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=True, include_complex=False))
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=False))
     def test_fmod(self, device, dtype):
         # Use numpy as reference
         def _helper(x, mod):
             np_x = x.cpu().numpy()
             np_mod = mod.cpu().numpy() if torch.is_tensor(mod) else mod
-            ref_fn = np_binary_ufunc_type_promotion_wrapper(np.fmod)
-            exp = ref_fn(np_x, np_mod)
+            exp = np.fmod(np_x, np_mod)
             exp = torch.from_numpy(exp)
             res = torch.fmod(x, mod)
 
-            self.assertEqual(res, exp)
+            self.assertEqual(res, exp, exact_dtype=False)
             # out
             out = torch.empty(0, device=device, dtype=res.dtype)
             torch.fmod(x, mod, out=out)
-            self.assertEqual(out, exp)
+            self.assertEqual(out, exp, exact_dtype=False)
             self.assertEqual(out.size(), torch.Size([10, 10]))
             # in-place (Type cast runtime error)
             try:
                 x.fmod_(mod)
                 self.assertEqual(x, exp, exact_dtype=False)
             except RuntimeError as e:
-                self.assertRegex(str(e), "result type (Half|Float|Double|Long) "
+                self.assertRegex(str(e), "result type (Half|Float|Double) "
                                          "can't be cast to the desired output "
-                                         "type (Bool|Byte|Char|Short|Int|Long)")
+                                         "type (Byte|Char|Short|Int|Long)")
 
         x = make_tensor((10, 10), device=device, dtype=dtype, low=-9, high=9)
         # mod with same dtype as x
@@ -2435,6 +2436,103 @@ class TestBinaryUfuncs(TestCase):
                     with self.assertRaisesRegex(RuntimeError, "is not the desired type"):
                         torch.Tensor.float_power_(base.clone(), exp)
 
+    @skipIf(not TEST_SCIPY, "Scipy required for the test.")
+    @dtypes(*product(torch.testing.get_all_dtypes(include_complex=False, include_bfloat16=False),
+                     torch.testing.get_all_dtypes(include_complex=False, include_bfloat16=False)))
+    def test_xlogy(self, device, dtypes):
+        def out_variant_helper(torch_fn, x, y):
+            expected = torch_fn(x, y)
+            out = torch.empty_like(expected)
+            torch_fn(x, y, out=out)
+            self.assertEqual(expected, out)
+
+        def inplace_variant_helper(x, y):
+            if x.dtype in torch.testing.get_all_int_dtypes() + [torch.bool]:
+                with self.assertRaisesRegex(RuntimeError,
+                                            "can't be cast to the desired output type"):
+                    x.clone().xlogy_(y)
+            else:
+                expected = torch.empty_like(x)
+                torch.xlogy(x, y, out=expected)
+                inplace_out = x.clone().xlogy_(y)
+                self.assertEqual(expected, inplace_out)
+
+        x_dtype, y_dtype = dtypes
+
+        # Tensor-Tensor Test (tensor of same and different shape)
+        x = make_tensor((3, 2, 4, 5), device, x_dtype, low=0.5, high=1000)
+        y = make_tensor((3, 2, 4, 5), device, y_dtype, low=0.5, high=1000)
+        z = make_tensor((4, 5), device, y_dtype, low=0.5, high=1000)
+
+        torch_fn = partial(torch.xlogy, x)
+        reference_fn = partial(scipy.special.xlogy, x.cpu().numpy())
+
+        self.compare_with_numpy(torch_fn, reference_fn, x, exact_dtype=False)
+        self.compare_with_numpy(torch_fn, reference_fn, y, exact_dtype=False)
+        self.compare_with_numpy(torch_fn, reference_fn, z, exact_dtype=False)
+        out_variant_helper(torch.xlogy, x, x)
+        out_variant_helper(torch.xlogy, x, y)
+        out_variant_helper(torch.xlogy, x, z)
+        inplace_variant_helper(x, x)
+        inplace_variant_helper(x, y)
+        inplace_variant_helper(x, z)
+
+        # Scalar-Tensor Test
+        torch_fn = partial(torch.xlogy, 3.14)
+        reference_fn = partial(scipy.special.xlogy, 3.14)
+
+        self.compare_with_numpy(torch_fn, reference_fn, x, exact_dtype=False)
+        self.compare_with_numpy(torch_fn, reference_fn, y, exact_dtype=False)
+        self.compare_with_numpy(torch_fn, reference_fn, z, exact_dtype=False)
+        out_variant_helper(torch.xlogy, 3.14, x)
+        out_variant_helper(torch.xlogy, 3.14, y)
+        out_variant_helper(torch.xlogy, 3.14, z)
+
+        # Special Values Tensor-Tensor
+        t = torch.tensor([0., 1., 2., float('inf'), -float('inf'), float('nan')], device=device)
+        zeros = torch.zeros(6, dtype=y_dtype, device=device)
+
+        torch_fn = partial(torch.xlogy, zeros)
+        reference_fn = partial(scipy.special.xlogy, zeros.cpu().numpy())
+        self.compare_with_numpy(torch_fn, reference_fn, t, exact_dtype=False)
+        out_variant_helper(torch.xlogy, zeros, t)
+        inplace_variant_helper(zeros, t)
+
+        # Special Values Scalar-Tensor
+        torch_fn = partial(torch.xlogy, 0)
+        reference_fn = partial(scipy.special.xlogy, 0)
+        self.compare_with_numpy(torch_fn, reference_fn, t, exact_dtype=False)
+        out_variant_helper(torch.xlogy, 0, t)
+
+    @skipIf(not TEST_SCIPY, "Scipy required for the test.")
+    def test_xlogy_bfloat16(self, device):
+        def _compare_helper(x, y):
+            x_np = x if isinstance(x, float) else x.cpu().to(torch.float).numpy()
+            y_np = y if isinstance(y, float) else y.cpu().to(torch.float).numpy()
+            expected = torch.from_numpy(scipy.special.xlogy(x_np, y_np))
+            actual = torch.xlogy(x, y)
+            self.assertEqual(expected, actual, exact_dtype=False)
+
+        x_dtype, y_dtype = torch.bfloat16, torch.bfloat16
+
+        # Tensor-Tensor Test (tensor of same and different shape)
+        x = make_tensor((3, 2, 4, 5), device, x_dtype, low=0.5, high=1000)
+        y = make_tensor((3, 2, 4, 5), device, y_dtype, low=0.5, high=1000)
+        z = make_tensor((4, 5), device, y_dtype, low=0.5, high=1000)
+
+        _compare_helper(x, x)
+        _compare_helper(x, y)
+        _compare_helper(x, z)
+
+        _compare_helper(x, 3.14)
+        _compare_helper(y, 3.14)
+        _compare_helper(z, 3.14)
+
+        # Special Values Tensor-Tensor
+        t = torch.tensor([0., 1., 2., float('inf'), -float('inf'), float('nan')], device=device)
+        zeros = torch.tensor(5, dtype=y_dtype, device=device)
+        _compare_helper(t, zeros)
+        _compare_helper(t, 0.)
 
 tensor_binary_ops = [
     '__lt__', '__le__',

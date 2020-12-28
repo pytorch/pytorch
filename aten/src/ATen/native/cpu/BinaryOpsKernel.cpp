@@ -639,8 +639,8 @@ void mse_kernel(TensorIterator& iter) {
 }
 
 void fmod_kernel(TensorIterator& iter) {
-  if (isIntegralType(iter.common_dtype(), /*includeBool=*/ true)) {
-    AT_DISPATCH_INTEGRAL_TYPES_AND(kBool, iter.common_dtype(), "fmod_cpu", [&]() {
+  if (isIntegralType(iter.common_dtype(), /*includeBool=*/ false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "fmod_cpu", [&]() {
       cpu_kernel(iter, [=](scalar_t x, scalar_t d) -> scalar_t {
         TORCH_CHECK(d != 0, "ZeroDivisionError");
         return x % d;
@@ -815,6 +815,20 @@ void copysign_kernel(TensorIterator& iter) {
   });
 }
 
+void xlogy_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "xlogy_cpu", [&]() {
+    cpu_kernel(iter, [](scalar_t x, scalar_t y) -> scalar_t {
+      if (at::_isnan(y)){
+        return NAN;
+      }
+      if (x == 0){
+        return 0;
+      }
+      return x * std::log(y);
+    });
+  });
+}
+
 } // namespace
 
 REGISTER_DISPATCH(add_stub, &add_kernel);
@@ -856,6 +870,7 @@ REGISTER_DISPATCH(igammac_stub, &igammac_kernel);
 REGISTER_DISPATCH(nextafter_stub, &nextafter_kernel);
 REGISTER_DISPATCH(heaviside_stub, &heaviside_kernel);
 REGISTER_DISPATCH(copysign_stub, &copysign_kernel);
+REGISTER_DISPATCH(xlogy_stub, &xlogy_kernel);
 
 } // namespace native
 } // namespace at

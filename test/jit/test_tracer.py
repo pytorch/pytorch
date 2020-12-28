@@ -1846,6 +1846,20 @@ class TestTracer(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, r"Type 'Tuple\[int\]' cannot be traced"):
             torch.jit.trace(f, (1,))
 
+    def test_trace_skip_none_submodule(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.submod = torch.nn.Linear(3, 4)
+                self.submod = None
+
+            def forward(self, inputs):
+                return inputs
+
+        m = TestModule()
+        tm = torch.jit.trace(m, torch.tensor(1.))
+        self.assertFalse(hasattr(tm, "submod"))
+
 
 class TestMixTracingScripting(JitTestCase):
     def test_trace_script(self):
