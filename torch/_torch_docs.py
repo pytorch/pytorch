@@ -3098,13 +3098,13 @@ Flattening a tensor reshapes it into a one-dimensional tensor while preserving i
 If :attr:`start_dim` or :attr:`end_dim` are specified, :attr:`end_dim` cannot come before :attr:`start_dim`,
 and only dimensions starting with :attr:`start_dim` and ending with :attr:`end_dim` are flattened.
 
-If `start_dim < end_dim`, flattening an :attr:`input` with shape :math:`(l^*, f^+, r^*)` produces an output
-shape of :math:`(l^*, \prod f^+, r^*)` where :math:`l^*` is the sizes of the zero or more "left" dimensions
-before :attr:`start_dim`, :math:`f^+` is the sizes of the one or more dimensions between :attr:`start_dim` and
-:attr:`end_dim` that will be "flattened", and :math:`r^*` is the sizes of the zero or more "right" dimensions
-after :attr:`end_dim`. It is equivalent to calling `torch.reshape(input, shape)` where shape is
-:math:`(l^*, \prod f^+, r^*)` and like :func:`torch.reshape` returns a view when possible. See
-:meth:`torch.Tensor.view` for details on when a view will be returned.
+If `start_dim < end_dim` (taking into account dimension wrapping), flattening an :attr:`input` with shape
+:math:`(l^*, f^+, r^*)` produces an output shape of :math:`(l^*, \prod f^+, r^*)` where :math:`l^*` is the
+sizes of the zero or more "left" dimensions before :attr:`start_dim`, :math:`f^+` is the sizes of the one
+or more dimensions between :attr:`start_dim` and :attr:`end_dim` that will be "flattened", and :math:`r^*`
+is the sizes of the zero or more "right" dimensions after :attr:`end_dim`. It is equivalent to calling
+`torch.reshape(input, shape)` where shape is :math:`(l^*, \prod f^+, r^*)` and like :func:`torch.reshape`
+returns a view when possible. See :meth:`torch.Tensor.view` for details on when a view will be returned.
 
 If `start_dim == end_dim` then this returns the original object :attr:`input` if :attr:`input` has one or more
 dimensions, and a one-dimensional view if :attr:`input` is a zero-dimensional tensor.
