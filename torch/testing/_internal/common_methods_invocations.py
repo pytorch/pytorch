@@ -567,12 +567,7 @@ def sample_inputs_fliplr_flipud(op_info, device, dtype, requires_grad):
         make_tensor((S, M, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
         make_tensor((S, 0, M), device, dtype, low=None, high=None, requires_grad=requires_grad)
     )
-
-    out = []
-    for case in test_cases:
-        out.append(SampleInput(case))
-
-    return out
+    return [SampleInput(case) for case in test_cases]
 
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
