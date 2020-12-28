@@ -73,7 +73,7 @@ Tensor flip_cpu(const Tensor& self, IntArrayRef dims) {
       );
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Bool,
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Bool, at::ScalarType::Half,
                                           in_tensor.scalar_type(),
                                           "flip_cpu", [&] {
       flip_cpu_kernel<scalar_t>(
