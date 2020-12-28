@@ -19,6 +19,7 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include "jit/jit_log.h"
 
 namespace torch {
 namespace jit {
@@ -61,6 +62,32 @@ RegisterOperators reg(
            return [key](Stack* stack) {
              RECORD_FUNCTION("FusionGroup", std::vector<c10::IValue>());
              runFusion(key, *stack);
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
+         prim::RequiresGradCheck /* (...)  -> (..., bool) */,
+         [](const Node* node) -> Operation {
+           std::vector<c10::optional<bool>> rg_props =
+               fmap(node->tys(attr::types), [](const TypePtr& t) {
+                 return t->cast<TensorType>()->requiresGrad();
+               });
+           return [rg_props](Stack* stack) {
+             auto num_inputs = rg_props.size();
+             TORCH_INTERNAL_ASSERT(
+                 stack->size() >= num_inputs && num_inputs > 0);
+             // Check every input's shape against profiled (expected) shape.
+             for (size_t i = 0; i < num_inputs; i++) {
+               auto& input = peek(stack, i, num_inputs);
+               auto t = input.toTensor();
+               if (rg_props[i].has_value() &&
+                   *rg_props[i] != t.requires_grad()) {
+                 push(stack, false);
+                 return;
+               }
+             }
+
+             push(stack, true);
            };
          },
          aliasAnalysisSpecialCase()),
