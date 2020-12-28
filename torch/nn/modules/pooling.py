@@ -742,7 +742,7 @@ class FractionalMaxPool2d(Module):
     kernel_size: Tuple[int, int]
     return_indices: bool
     output_size: Optional[Tuple[int, int]]
-    output_ratio: Optional[Tuple[int, int]]
+    output_ratio: Optional[Tuple[float, float]]
 
     def __init__(self, kernel_size: _size_2_t, output_size: Optional[_size_2_t] = None,
                  output_ratio: Optional[_ratio_2_t] = None,
@@ -805,7 +805,7 @@ class FractionalMaxPool3d(Module):
     kernel_size: Tuple[int, int, int] 
     return_indices: bool
     output_size: Optional[Tuple[int, int, int]]
-    output_ratio: Optional[Tuple[int, int, int]]
+    output_ratio: Optional[Tuple[float, float, float]]
 
     def __init__(self, kernel_size: _size_3_t, output_size: Optional[_size_3_t] = None,
                  output_ratio: Optional[_ratio_3_t] = None,
