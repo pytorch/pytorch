@@ -85,10 +85,11 @@ void _fake_quantize_grad_learnable_tensor_kernel_cuda(
       float dXOutput, dZeroPointOutput, dScaleOutput;
       int64_t xq = std::nearbyint(zero_point + XInput * inv_scale);
       dXOutput = dYInput * (xq >= quant_min && xq <= quant_max);
-      float xfq = static_cast<float>((std::max(std::min(xq, quant_max), quant_min) - zero_point) * scale);
-      if (xq < quant_min || xq > quant_max) {
+      xq = std::max(std::min(xq, quant_max), quant_min);
+      float xfq = static_cast<float>((xq - zero_point) * scale);
+      if (xq == quant_min || xq == quant_max) {
         dZeroPointOutput = (dYInput) * (-1) * scale * grad_factor;
-        dScaleOutput = ((xq < quant_min) ? (dYInput * dscale_small) : (dYInput * dscale_big)) * grad_factor;
+        dScaleOutput = ((xq == quant_min) ? (dYInput * dscale_small) : (dYInput * dscale_big)) * grad_factor;
       } else {
         dZeroPointOutput = 0;
         dScaleOutput = (dYInput) * (xfq - (XInput)) * inv_scale * grad_factor;
@@ -138,10 +139,11 @@ void _fake_quantize_grad_learnable_channel_kernel_cuda(TensorIterator &iter, int
       int64_t xqi = std::nearbyint(zero_point_input + x_input * inv_scale);
       dx_output = dy_input * (xqi >= quant_min && xqi <= quant_max);
       // Calculate gradients for scale and zero point.
-      float xfqi = static_cast<float>((std::max(std::min(xqi, quant_max), quant_min) - zero_point_input) * scale_input);
-      if (xqi < quant_min || xqi > quant_max) {
+      xqi = std::max(std::min(xqi, quant_max), quant_min);
+      float xfqi = static_cast<float>((xqi - zero_point_input) * scale_input);
+      if (xqi == quant_min || xqi == quant_max) {
         dzero_point_output = dy_input * (-1) * scale_input * grad_factor;
-        dscale_output = ((xqi < quant_min) ? (dy_input * dscale_small) : (dy_input * dscale_big)) * grad_factor;
+        dscale_output = ((xqi == quant_min) ? (dy_input * dscale_small) : (dy_input * dscale_big)) * grad_factor;
       } else {
         dzero_point_output = 0;
         dscale_output = dy_input * (xfqi - x_input) * inv_scale * grad_factor;
