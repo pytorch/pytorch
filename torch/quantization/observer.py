@@ -886,9 +886,9 @@ class HistogramObserver(_ObserverBase):
         return orig_hist
 
     def forward(self, x_orig):
+        # type: (torch.Tensor) -> torch.Tensor
         if x_orig.numel() == 0:
             return x_orig
-        # type: (torch.Tensor) -> torch.Tensor
         x = x_orig.detach()
         min_val = self.min_val
         max_val = self.max_val

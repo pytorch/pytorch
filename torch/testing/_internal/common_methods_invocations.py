@@ -25,6 +25,8 @@ from torch.testing._internal.common_utils import \
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
      torch_to_numpy_dtype_dict, TEST_WITH_SLOW)
 
+from distutils.version import LooseVersion
+
 if TEST_SCIPY:
     import scipy.special
 
@@ -106,6 +108,7 @@ class OpInfo(object):
                  promotes_integers_to_float=False,  # whether op promotes unary output to float or not
                  sample_inputs_func=None,  # function to generate sample inputs
                  aten_name=None,  # name of the corresponding aten:: operator
+                 supports_sparse=False  # supported for sparse
                  ):
 
         # Validates the dtypes are generated from the dispatch-related functions
@@ -144,6 +147,7 @@ class OpInfo(object):
             self.autodiff_nonfusible_nodes = ['aten::' + self.name]
         else:
             self.autodiff_nonfusible_nodes = autodiff_nonfusible_nodes
+        self.supports_sparse = supports_sparse
 
 
 
@@ -255,6 +259,7 @@ class UnaryUfuncInfo(OpInfo):
                  handles_complex_extremals=True,  # whether the op correct handles complex extremals (like inf -infj)
                  supports_complex_to_float=False,  # op supports casting from complex input to real output safely eg. angle
                  sample_inputs_func=sample_inputs_unary,
+                 supports_sparse=False,
                  **kwargs):
         super(UnaryUfuncInfo, self).__init__(name,
                                              dtypes=dtypes,
@@ -262,6 +267,7 @@ class UnaryUfuncInfo(OpInfo):
                                              dtypesIfCUDA=dtypesIfCUDA,
                                              dtypesIfROCM=dtypesIfROCM,
                                              sample_inputs_func=sample_inputs_func,
+                                             supports_sparse=supports_sparse,
                                              **kwargs)
         self.ref = ref
         self.domain = domain
@@ -611,6 +617,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('asin',
                    ref=np.arcsin,
                    domain=(-1, 1),
+                   supports_sparse=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    promotes_integers_to_float=True,
                    dtypes=all_types_and_complex_and(torch.bool),
@@ -623,7 +630,7 @@ op_db: List[OpInfo] = [
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble],
-                                active_if=IS_WINDOWS),
+                                active_if=IS_WINDOWS)
                    )),
     # NOTE: derivative for inplace asinh is not implemented
     UnaryUfuncInfo('asinh',
@@ -1080,6 +1087,19 @@ if TEST_SCIPY:
                        promotes_integers_to_float=True,
                        assert_autodiffed=True,
                        test_complex_grad=False),  # Reference: https://github.com/pytorch/pytorch/issues/48552
+        UnaryUfuncInfo('digamma',
+                       ref=scipy.special.digamma,
+                       decorators=(precisionOverride({torch.float16: 5e-1}),),
+                       dtypes=all_types_and(torch.bool),
+                       dtypesIfCPU=all_types_and(torch.bool),
+                       dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+                       skips=(
+                           # In some cases, output is NaN (for input close to
+                           # negative integers) especially due to reduced precision
+                           # in float16 and NaN's can't be tested for equality.
+                           SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                    device_type='cuda', dtypes=[torch.float16]),),
+                       promotes_integers_to_float=True),
         UnaryUfuncInfo('erf',
                        ref=scipy.special.erf,
                        decorators=(precisionOverride({torch.float16: 1e-2,
@@ -1106,6 +1126,25 @@ if TEST_SCIPY:
                                     dtypes=[torch.bfloat16]),),
                        assert_autodiffed=True,
                        promotes_integers_to_float=True),
+        UnaryUfuncInfo('erfinv',
+                       ref=scipy.special.erfinv,
+                       decorators=(precisionOverride({torch.float16: 1e-2,
+                                                      torch.bfloat16: 1e-2,
+                                                      torch.float32: 1e-4}),),
+                       dtypes=all_types_and(torch.bool),
+                       dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
+                       dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+                       promotes_integers_to_float=True,
+                       domain=(-1, 1),
+                       skips=(
+                           # Reference: https://github.com/pytorch/pytorch/pull/49155#issuecomment-742664611
+                           SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                    active_if=LooseVersion(scipy.__version__) < "1.4.0"),
+                           # RuntimeError: "pow" not implemented for 'BFloat16'
+                           SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                    dtypes=[torch.bfloat16]),
+                       )
+                       ),
         OpInfo('xlogy',
                dtypes=all_types_and(torch.bool),
                dtypesIfCPU=all_types_and(torch.bool, torch.half, torch.bfloat16),
@@ -1120,6 +1159,7 @@ if TEST_SCIPY:
 # Common operator groupings
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
 spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
+sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse is True]
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -1379,8 +1419,6 @@ def method_tests():
         ('expand_as', (S, 1, 1), (torch.rand(S, S, S),), '', (False,)),
         ('exp', (S, S, S), NO_ARGS, '', (True,)),
         ('exp', (), NO_ARGS, 'scalar', (True,)),
-        ('erfinv', torch.rand(S, S, S).clamp(-0.9, 0.9), NO_ARGS),
-        ('erfinv', normal_scalar_clamp(-0.9, 0.9, requires_grad=True), NO_ARGS, 'scalar'),
         ('logit', torch.randn(S, S, S).clamp(0.1, 0.9).requires_grad_(True), NO_ARGS, ''),
         ('logit', torch.randn(S, S, S).clamp(0.1, 0.9).requires_grad_(True), (0.2,), 'eps'),
         ('logit', uniform_scalar().clamp(0.1, 0.9).requires_grad_(True), NO_ARGS, 'scalar'),
