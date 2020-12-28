@@ -994,7 +994,7 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
   // the contained types of immutable type containers (optional, tuple, future)
   // are unified, so these types can be mutable or immutable
   // and point to a type which is mutable or immutable.
-  // Any is mutable but can point to a immutable type through refinement
+  // Any is mutable but can point to an immutable type through refinement
   if (isMutableTypeInternal(from) != isMutableTypeInternal(to)) {
     bool expected_kind = false;
     for (auto kind : {from->type()->kind(), to->type()->kind()}) {
