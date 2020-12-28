@@ -771,7 +771,6 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
                         responseMessage.payload().begin(),
                         responseMessage.payload().end()));
               } else {
-                //IValue(c10::make_intrusive<Message>(std::move(responseMessage)));
                 markFutureAsComplete(
                     std::move(futureResponseMessage),
                     std::move(responseMessage));
