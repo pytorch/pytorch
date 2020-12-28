@@ -806,6 +806,7 @@ class AbstractTestCases:
             self.assertIsInstance(t[1][1], torch.Tensor)
 
             before_2 = torch.rand(10, generator=gen)
+            gen = torch.Generator.__new__(torch.Generator)
             gen.__setstate__(t)
             after_2 = torch.rand(10, generator=gen)
             self.assertEqual(before_2, after_2, atol=0, rtol=0)
