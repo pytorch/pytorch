@@ -787,6 +787,42 @@ class AbstractTestCases:
 
             torch.set_rng_state(rng_state)
 
+        def test_RNG_pickle(self):
+            import pickle
+            gen = torch.Generator()
+            serialized = pickle.dumps(gen)
+            before_1 = torch.rand(10, generator=gen)
+            gen = pickle.loads(serialized)
+            after_1 = torch.rand(10, generator=gen)
+            self.assertEqual(before_1, after_1, atol=0, rtol=0)
+
+            t = gen.__getstate__()
+            self.assertIsInstance(t, tuple)
+            self.assertEqual(len(t), 2)
+            self.assertEqual(t[0], 0)
+            self.assertIsInstance(t[1], tuple)
+            self.assertEqual(len(t[1]), 2)
+            self.assertEqual(t[1][0], torch.device("cpu"))
+            self.assertIsInstance(t[1][1], torch.Tensor)
+
+            before_2 = torch.rand(10, generator=gen)
+            gen.__setstate__(t)
+            after_2 = torch.rand(10, generator=gen)
+            self.assertEqual(before_2, after_2, atol=0, rtol=0)
+
+            invalid_format = ("lorem ipsum", 1, None, True)
+            with self.assertRaises(TypeError):
+                gen.__setstate__(invalid_format)
+            unsupported_version = (1, t[1])
+            with self.assertRaisesRegex(RuntimeError, r'unsupported RNG state version'):
+                gen.__setstate__(unsupported_version)
+            invalid_dev = (0, (None, t[1][1]))
+            with self.assertRaisesRegex(TypeError, r'expect torch\.device'):
+                gen.__setstate__(invalid_dev)
+            invalid_state = (0, (t[1][0], torch.ones(10, dtype=torch.uint8)))
+            with self.assertRaisesRegex(RuntimeError, r'but found the input RNG state size'):
+                gen.__setstate__(invalid_state)
+
         def test_numel(self):
             b = torch.ByteTensor(3, 100, 100)
             self.assertEqual(b.nelement(), 3 * 100 * 100)
