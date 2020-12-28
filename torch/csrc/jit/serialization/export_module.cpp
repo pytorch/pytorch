@@ -38,11 +38,16 @@ namespace {
 struct MyHash
 {
   std::size_t operator()(const IValue& value) const {
+//    value.dump();
     if (value.isTensor()) {
       std::stringstream tensor_stream;
       tensor_stream << value;
       std::string tensor_str = tensor_stream.str();
       std::size_t h1 = std::hash<std::string>{}(tensor_str);
+      std::cout << "hash: " << h1 << std::endl;
+      std::cout << "----------" << std::endl;
+      std::cout << "tensor_str: " << tensor_str << std::endl;
+      std::cout << "==========" << std::endl;
       return  h1;
     } else {
       return value.hash(value);
@@ -58,15 +63,15 @@ struct MyEqual
 {
   bool operator()(const IValue& a, const IValue& b) {
     if (a.isTensor() && b.isTensor()) {
-      return a.toTensor().equal(b.toTensor());
-//      std::stringstream a_stream;
-//      a_stream << a;
-//      std::string a_str = a_stream.str();
-//
-//      std::stringstream b_stream;
-//      b_stream << b;
-//      std::string b_str = b_stream.str();
-//      return a_str == b_str;
+//      return a.toTensor().equal(b.toTensor());
+      std::stringstream a_stream;
+      a_stream << a;
+      std::string a_str = a_stream.str();
+
+      std::stringstream b_stream;
+      b_stream << b;
+      std::string b_str = b_stream.str();
+      return a_str == b_str;
     } else {
       return a == b;
     }
@@ -387,34 +392,45 @@ class ScriptModuleSerializer {
       bool bytecode_format,
       bool save_mobile_debug_info) {
     C10_LOG_API_USAGE_ONCE("torch.script.save");
+    std::cout << "writeExtraFiles(module, extra_files)" << std::endl;
     writeExtraFiles(module, extra_files);
     // Serialize the model object
+    std::cout << "writeArchive(data, module._ivalue())" << std::endl;
     writeArchive("data", module._ivalue());
     // Then we serialize all code info.
+    std::cout << "writeCode(module.type())" << std::endl;
     writeCode(module.type());
     // The tensor constants from the code are written to a separate archive
     // so loading the code does not depend on loading the data
+    std::cout << "ivalue_constants construction " << std::endl;
     std::vector<IValue> ivalue_constants(
         constant_table_.begin(), constant_table_.end());
 
-    at::Tensor t = torch::tensor({1, 1, 1, 1, 1, 1, 1, 200});
-    IValue b(false);
-//    IValue c()
-    ivalue_constants.push_back(b);
-    ivalue_constants.push_back(t);
+//    at::Tensor t = torch::tensor({1, 1, 1, 1, 1, 1, 1, 200});
+//    IValue b(false);
+//    ivalue_constants.push_back(b);
+//    ivalue_constants.push_back(t);
 
 
-    std::unordered_set<IValue, MyHash, MyEqual> constants_from_bytecode;
-    constants_from_bytecode.insert(ivalue_constants.begin(), ivalue_constants.end());
+    std::unordered_set<IValue, MyHash, MyEqual> constants_from_jit;
+    std::cout << "constants_from_jit construction " << std::endl;
+    for(const auto it: ivalue_constants) {
+      std::cout << it.tagKind() << std::endl;
+    }
+    constants_from_jit.insert(ivalue_constants.begin(), ivalue_constants.end());
 
+    std::cout << "writeArchive(constants, create())" << std::endl;
     writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
     if (bytecode_format) {
-      writeByteCode(module, save_mobile_debug_info, constants_from_bytecode);
+      std::cout << "writeByteCode" << std::endl;
+      writeByteCode(module, save_mobile_debug_info, constants_from_jit);
+      std::cout << "writeMobileMetadata" << std::endl;
       writeMobileMetadata(module, extra_files);
     }
 
     // Acquires and sets minimum (dynamic) version
     for (auto& item : file_streams_) {
+      std::cout << "writeMobileMetadata " << item.key() << std::endl;
       writer_.setMinVersion(item.value().minVersion());
     }
   }
@@ -838,6 +854,7 @@ void ExportModule(
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
     bool save_mobile_debug_info) {
+  std::cout << "Export Module filename out" << std::endl;
   ScriptModuleSerializer serializer(
       [&](const void* buf, size_t nbytes) -> size_t {
         out.write(static_cast<const char*>(buf), nbytes);
@@ -854,6 +871,7 @@ void ExportModule(
     bool bytecode_format,
     bool save_mobile_debug_info) {
   ScriptModuleSerializer serializer(filename);
+  std::cout << "Export Module filename" << std::endl;
   serializer.serialize(
       module, extra_files, bytecode_format, save_mobile_debug_info);
 }
@@ -864,6 +882,7 @@ void ExportModule(
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
     bool save_mobile_debug_info) {
+  std::cout << "Export Module writer_func" << std::endl;
   ScriptModuleSerializer serializer(writer_func);
   serializer.serialize(
       module, extra_files, bytecode_format, save_mobile_debug_info);
