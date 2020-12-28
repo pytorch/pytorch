@@ -140,7 +140,7 @@ void initGeneratorBindings(PyObject* module) {
             HANDLE_TH_ERRORS
             // Currently only state version 0 is supported
             TORCH_CHECK(t.first == 0, "unsupported RNG state version ", t.first);
-            auto state_pair = t.second.cast<std::pair<py::object, Tensor&>>();
+            auto state_pair = t.second.cast<std::pair<py::object, Tensor>>();
             auto py_device = state_pair.first.ptr();
             TORCH_CHECK_TYPE(
               THPDevice_Check(py_device),
@@ -148,10 +148,10 @@ void initGeneratorBindings(PyObject* module) {
             );
 
             auto& device = ((THPDevice*)py_device)->device;
-            auto new_state_tensor = state_pair.second;
             // FIXME support state restore beyond CPU and CUDA generators
             auto gen = createGenerator(device);
             // No need to lock because we are the sole owner of the generator
+            auto& new_state_tensor = state_pair.second;
             gen.set_state(new_state_tensor);
             return gen;
             END_HANDLE_TH_ERRORS_PYBIND
