@@ -131,7 +131,7 @@ class TORCH_API Pickler {
       : writer_(std::move(writer)),
         tensor_table_(tensor_table),
         type_renamer_(std::move(type_renamer)),
-        memoized_class_types_(memorized_class_types) {}
+        memoized_class_types_(memoized_class_types) {}
   ~Pickler();
 
   // Push protocol onto the stack
