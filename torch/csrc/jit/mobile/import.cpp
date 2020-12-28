@@ -77,10 +77,9 @@ std::string operator_str(
 
 namespace {
 
-struct MyHash
-{
+struct MyHash {
   std::size_t operator()(const IValue& value) const {
-//    value.dump();
+    //    value.dump();
     if (value.isTensor()) {
       std::stringstream tensor_stream;
       tensor_stream << value;
@@ -90,22 +89,21 @@ struct MyHash
       std::cout << "----------" << std::endl;
       std::cout << "tensor_str: " << tensor_str << std::endl;
       std::cout << "==========" << std::endl;
-      return  h1;
+      return h1;
     } else {
       return value.hash(value);
     }
-//    auto h = value.hash(value);
-//    return h;
-//      return value.hash();
-//    return value.hash(value); // Insert your hash here
+    //    auto h = value.hash(value);
+    //    return h;
+    //      return value.hash();
+    //    return value.hash(value); // Insert your hash here
   }
 };
 
-struct MyEqual
-{
+struct MyEqual {
   bool operator()(const IValue& a, const IValue& b) {
     if (a.isTensor() && b.isTensor()) {
-//      return a.toTensor().equal(b.toTensor());
+      //      return a.toTensor().equal(b.toTensor());
       std::stringstream a_stream;
       a_stream << a;
       std::string a_str = a_stream.str();
@@ -134,7 +132,9 @@ void print_unsupported_ops_and_throw(
       error_message);
 }
 
-std::unordered_set<IValue, MyHash, MyEqual> merge_const_list(const std::vector<IValue>& constant_list_a, const std::vector<IValue>& constant_list_b) {
+std::unordered_set<IValue, MyHash, MyEqual> merge_const_list(
+    const std::vector<IValue>& constant_list_a,
+    const std::vector<IValue>& constant_list_b) {
   std::unordered_set<IValue, MyHash, MyEqual> merge_list;
   merge_list.insert(constant_list_a.begin(), constant_list_a.end());
   merge_list.insert(constant_list_b.begin(), constant_list_b.end());
@@ -202,7 +202,8 @@ void parseMethods(
         expect_field(table, "register_size", BYTECODE_INDEX_REGISTER_SIZE)
             .toInt();
 
-    auto merged_const_list = merge_const_list(consts_list, constant_vals_from_jit);
+    auto merged_const_list =
+        merge_const_list(consts_list, constant_vals_from_jit);
 
     std::vector<IValue> module_debug_info_list;
     if (has_debug_info) {
@@ -346,7 +347,8 @@ mobile::Module BytecodeDeserializer::deserialize(
   }
   std::vector<IValue> constant_values_from_jit;
   if (reader_->hasRecord("constants.pkl")) {
-    constant_values_from_jit = readArchive("constants", mcu).toTuple()->elements();
+    constant_values_from_jit =
+        readArchive("constants", mcu).toTuple()->elements();
   }
   parseMethods(bvals, constant_values_from_jit, debug_info_bvals, *mcu);
   auto meta_dict = readMobileMetadata(mcu);
