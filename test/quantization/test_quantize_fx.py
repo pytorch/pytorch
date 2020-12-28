@@ -611,8 +611,8 @@ class TestQuantizeFx(QuantizationTestCase):
         original_ref_m.conv2.bias = torch.nn.Parameter(original_m.standalone.conv.bias.detach())
 
         qconfig_dict = {"": default_qconfig}
-        config_name = {"standalone_module_name": ["standalone"]}
-        config_class = {"standalone_module_class": [StandaloneModule]}
+        config_name = {"standalone_module_name": [("standalone", None, None)]}
+        config_class = {"standalone_module_class": [(StandaloneModule, None, None)]}
         for prepare_config in [config_name, config_class]:
             original_m_copy = copy.deepcopy(original_m)
             original_ref_m_copy = copy.deepcopy(original_ref_m)
