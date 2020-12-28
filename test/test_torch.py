@@ -796,6 +796,12 @@ class AbstractTestCases:
             after_1 = torch.rand(10, generator=gen)
             self.assertEqual(before_1, after_1, atol=0, rtol=0)
 
+            def restore_gen(t):
+                # pybind11's __setstate__ only works on uninitialized instances
+                gen = torch.Generator.__new__(torch.Generator)
+                gen.__setstate__(t)
+                return gen
+
             t = gen.__getstate__()
             self.assertIsInstance(t, tuple)
             self.assertEqual(len(t), 2)
@@ -806,23 +812,22 @@ class AbstractTestCases:
             self.assertIsInstance(t[1][1], torch.Tensor)
 
             before_2 = torch.rand(10, generator=gen)
-            gen = torch.Generator.__new__(torch.Generator)
-            gen.__setstate__(t)
+            gen = restore_gen(t)
             after_2 = torch.rand(10, generator=gen)
             self.assertEqual(before_2, after_2, atol=0, rtol=0)
 
             invalid_format = ("lorem ipsum", 1, None, True)
             with self.assertRaises(TypeError):
-                gen.__setstate__(invalid_format)
+                gen = restore_gen(invalid_format)
             unsupported_version = (1, t[1])
             with self.assertRaisesRegex(RuntimeError, r'unsupported RNG state version'):
-                gen.__setstate__(unsupported_version)
+                gen = restore_gen(unsupported_version)
             invalid_dev = (0, (None, t[1][1]))
             with self.assertRaisesRegex(TypeError, r'expect torch\.device'):
-                gen.__setstate__(invalid_dev)
+                gen = restore_gen(invalid_dev)
             invalid_state = (0, (t[1][0], torch.ones(10, dtype=torch.uint8)))
             with self.assertRaisesRegex(RuntimeError, r'but found the input RNG state size'):
-                gen.__setstate__(invalid_state)
+                gen = restore_gen(invalid_state)
 
         def test_numel(self):
             b = torch.ByteTensor(3, 100, 100)
