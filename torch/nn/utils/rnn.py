@@ -213,7 +213,7 @@ def pack_padded_sequence(input, lengths, batch_first=False, enforce_sorted=True)
         them to compute the loss directly. A Tensor can be retrieved from
         a :class:`PackedSequence` object by accessing its ``.data`` attribute.
 
-    Arguments:
+    Args:
         input (Tensor): padded batch of variable length sequences.
         lengths (Tensor or list(int)): list of sequence lengths of each batch
             element (must be on the CPU if provided as a tensor).
@@ -279,7 +279,7 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_le
         See :ref:`this FAQ section <pack-rnn-unpack-with-data-parallelism>` for
         details.
 
-    Arguments:
+    Args:
         sequence (PackedSequence): batch to pad
         batch_first (bool, optional): if ``True``, the output will be in ``B x T x *``
             format.
@@ -343,7 +343,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0.0):
         where `T` is the length of the longest sequence. This function assumes
         trailing dimensions and type of all the Tensors in sequences are same.
 
-    Arguments:
+    Args:
         sequences (list[Tensor]): list of variable length sequences.
         batch_first (bool, optional): output will be in ``B x T x *`` if True, or in
             ``T x B x *`` otherwise
@@ -398,7 +398,7 @@ def pack_sequence(sequences, enforce_sorted=True):
         PackedSequence(data=tensor([ 1,  4,  6,  2,  5,  3]), batch_sizes=tensor([ 3,  2,  1]))
 
 
-    Arguments:
+    Args:
         sequences (list[Tensor]): A list of sequences of decreasing length.
         enforce_sorted (bool, optional): if ``True``, checks that the input
             contains sequences sorted by length in a decreasing order. If
