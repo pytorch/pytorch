@@ -37,8 +37,8 @@ TORCH_API Module PatternBasedRewrite(const Module& module);
 /** A class implementing API for pattern-based subgraph rewrites.
  *
  * To perform pattern-based subgraph rewrites on a module using this API, one
- * needs to create an object of such class, register rewrite patterns and run the
- * transformation pass (`runOnModule`).
+ * needs to create an object of such class, register rewrite patterns and run
+ * the transformation pass (`runOnModule`).
  *
  * To use standard patterns, one could use `RegisterDefaultPatterns`.
  *
@@ -53,9 +53,9 @@ class TORCH_API SubgraphRewriter {
   // Run pattern-based subgraph rewrite pass on the graph (used in testing).
   // `filter` is a function that does extra filtering on the match. If it
   // returns false for a given Match, we'll skip the Match. The filter
-  // function's arguments consist of a Match and a value map from parsing the pattern
-  // graph. Both the Match and the value map are necessary because we need to
-  // 1) do extra filtering on the matched result as well as 2) refer to
+  // function's arguments consist of a Match and a value map from parsing the
+  // pattern graph. Both the Match and the value map are necessary because we
+  // need to 1) do extra filtering on the matched result as well as 2) refer to
   // the values in the matched result through the values in the pattern graph.
   void runOnGraph(
       std::shared_ptr<Graph>& graph,

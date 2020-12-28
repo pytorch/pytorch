@@ -12,9 +12,9 @@ namespace jit {
  * \brief A structure describing a match of a pattern in a graph.
  *
  * The structure contains an anchor node, from which the match was found, and
- * match-maps for nodes and values. A match-map specifies the correspondance between
- * nodes in the pattern graph (match-map keys) with nodes in the actual graph
- * (match-map values). We keep such maps for both nodes and values.
+ * match-maps for nodes and values. A match-map specifies the correspondance
+ * between nodes in the pattern graph (match-map keys) with nodes in the actual
+ * graph (match-map values). We keep such maps for both nodes and values.
  */
 struct Match {
   Node* anchor;
@@ -39,9 +39,9 @@ struct Match {
  * graph are ignored during matching (IOW, we're essentially performing DCE on
  * the pattern).
  *  - Pattern graph nodes cannot alias. TODO: the check not implemented yet.
- *  - Aliasing nodes in the graph cannot consitute a match (i.e. through all found
- * matches, no nodes in the subgraph alias with each other). TODO: check not
- * implemented yet.
+ *  - Aliasing nodes in the graph cannot consitute a match (i.e. through all
+ * found matches, no nodes in the subgraph alias with each other). TODO: check
+ * not implemented yet.
  *  - The matcher will not mutate either the pattern graph or the matched graph.
  * The matched graph is taken as non-const so that Match may contain non-const
  * pointers.  This enables clients of this API to use Match to drive mutations.
@@ -50,11 +50,11 @@ struct Match {
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  * Subgraph matcher provides limited support for multi-output patterns. With a
  * single output pattern, a single scan through the graph is sufficient to
- * find all the matches: given a starting node (an "anchor"), we can deterministically
- * check whether a pattern matches a subgraph corresponding to this anchor
- * node. For a general case of multi-output patterns, we would have N anchors,
- * which would result in M^N comparisons (M is the size of the graph). Clearly
- * this is computationally prohibitive.
+ * find all the matches: given a starting node (an "anchor"), we can
+ * deterministically check whether a pattern matches a subgraph corresponding to
+ * this anchor node. For a general case of multi-output patterns, we would have
+ * N anchors, which would result in M^N comparisons (M is the size of the
+ * graph). Clearly this is computationally prohibitive.
  *
  * To overcome this, we impose some constraints on the multi-output patterns
  * that we accept. We require that checking whether the pattern matches a
