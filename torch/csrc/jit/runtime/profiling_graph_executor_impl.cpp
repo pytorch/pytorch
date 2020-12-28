@@ -31,6 +31,7 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/update_differentiable_graph_requires_grad.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
+#include "ATen/core/interned_strings.h"
 
 C10_DEFINE_bool(
     torch_jit_enable_new_executor,
@@ -156,10 +157,13 @@ bool guardDifferentiableGraph(Node* dnode) {
     // will give us trouble when we get "alternating patterns" of gradients
     // of two inputs, but so it is. An alternative could be to look into
     // the individual requires_grad seen in the profiling record.
-    insertTypeGuard(dnode, [](const TensorTypePtr& t) {
-      return TensorType::get()->withRequiresGrad(
-          t->requiresGrad().value_or(true));
-    });
+    insertTypeGuard(
+        dnode,
+        [](const TensorTypePtr& t) {
+          return TensorType::get()->withRequiresGrad(
+              t->requiresGrad().value_or(true));
+        },
+        prim::RequiresGradCheck);
     return true;
   } else {
     // we inline the differentiable graph as a fallback

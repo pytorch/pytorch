@@ -146,14 +146,15 @@ class JitTestCase(JitCommonTestCase):
                 elif node.kind() == 'prim::DifferentiableGraph':
                     get_nodes_and_parents_recursively(node.g('Subgraph'), kind, acc)
                 elif node.kind() == 'prim::If' and (node.inputs().__next__().node().kind() == 'aten::all' or
-                                                    node.inputs().__next__().node().kind() == 'prim::TypeCheck'):
+                                                    node.inputs().__next__().node().kind() == 'prim::TypeCheck' or 
+                                                    node.inputs().__next__().node().kind() == 'prim::RequiresGradCheck'):
                     get_nodes_and_parents_recursively(node.blocks().__next__(), kind, acc)
                 else:
                     for inner_block in node.blocks():
                         get_nodes_and_parents_recursively(inner_block, kind, acc)
 
         allowed_nodes = {'prim::Constant', FUSION_GROUP, 'prim::BailoutTemplate',
-                         'prim::TupleConstruct', 'prim::If', 'prim::TypeCheck'} | set(except_for)
+                         'prim::TupleConstruct', 'prim::If', 'prim::TypeCheck', 'prim::RequiresGradCheck'} | set(except_for)
 
         fusion_groups : Dict[torch._C.Block, List[torch._C.Node]] = defaultdict(list)
         get_nodes_and_parents_recursively(graph, FUSION_GROUP, fusion_groups)
