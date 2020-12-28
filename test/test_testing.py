@@ -485,7 +485,7 @@ if __name__ == '__main__':
         p = subprocess.run([sys.executable, '-c', problematic_test_script], stderr=subprocess.PIPE, timeout=120)
         # should capture CUDA error
         self.assertIn('CUDA error: device-side assert triggered', p.stderr.decode('ascii'))
-        # should run only 3 tests - 2 CPUs and 1 CUDA (remaining CUDA test should skip)
+        # should run only 1 test because it throws unrecoverable error.
         self.assertIn('Ran 1 test', p.stderr.decode('ascii'))
 
 instantiate_device_type_tests(TestTesting, globals())
