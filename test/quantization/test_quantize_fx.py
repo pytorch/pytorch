@@ -64,7 +64,9 @@ from torch.testing._internal.common_quantization import (
 )
 
 from torch.testing._internal.common_quantized import (
+    supported_qengines,
     override_qengines,
+    override_quantized_engine,
 )
 
 from torch.testing._internal.common_distributed import skip_if_not_multigpu
@@ -612,8 +614,8 @@ class TestQuantizeFx(QuantizationTestCase):
         original_ref_m.conv2.bias = torch.nn.Parameter(original_m.standalone.conv.bias.detach())
 
         qconfig_dict = {"": default_qconfig}
-        config_name = {"standalone_module_name": ["standalone"]}
-        config_class = {"standalone_module_class": [StandaloneModule]}
+        config_name = {"standalone_module_name": [("standalone", None, None)]}
+        config_class = {"standalone_module_class": [(StandaloneModule, None, None)]}
         for prepare_config in [config_name, config_class]:
             original_m_copy = copy.deepcopy(original_m)
             original_ref_m_copy = copy.deepcopy(original_ref_m)
@@ -2378,34 +2380,36 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
     def _test_conv_transpose_impl(
             self, float_cls: Callable, q_cls: Callable, data: torch.Tensor):
-        if 'qnnpack' not in torch.backends.quantized.supported_engines:
-            return
-        torch.backends.quantized.engine = 'qnnpack'
-        # Create fp32 versions of FX and Eager models
-        m1 = torch.nn.Sequential(float_cls(1, 1, 1))
-        m2 = torch.nn.Sequential(float_cls(1, 1, 1))
-        m2.load_state_dict(m1.state_dict())
-        m2 = torch.quantization.QuantWrapper(m2)
-        # FX graph
-        q_result1 = self.checkGraphModeFxOp(
-            m1, (data,), QuantType.STATIC,
-            expected_node_occurrence={
-                ns.call_module(q_cls): 1,
-            })
-        # Eager
-        m2.qconfig = get_default_qconfig(torch.backends.quantized.engine)
-        m2.eval()
-        m2p = torch.quantization.prepare(m2)
-        m2p(data)
-        m2q = torch.quantization.convert(m2p)
-        q_result2 = m2q(data)
-        # verify results match
-        self.assertTrue(torch.allclose(q_result1, q_result2))
+        with override_quantized_engine('qnnpack'):
+            # Create fp32 versions of FX and Eager models
+            m1 = torch.nn.Sequential(float_cls(1, 1, 1))
+            m2 = torch.nn.Sequential(float_cls(1, 1, 1))
+            m2.load_state_dict(m1.state_dict())
+            m2 = torch.quantization.QuantWrapper(m2)
+            # FX graph
+            q_result1 = self.checkGraphModeFxOp(
+                m1, (data,), QuantType.STATIC,
+                expected_node_occurrence={
+                    ns.call_module(q_cls): 1,
+                })
+            # Eager
+            m2.qconfig = get_default_qconfig(torch.backends.quantized.engine)
+            m2.eval()
+            m2p = torch.quantization.prepare(m2)
+            m2p(data)
+            m2q = torch.quantization.convert(m2p)
+            q_result2 = m2q(data)
+            # verify results match
+            self.assertTrue(torch.allclose(q_result1, q_result2))
 
+    @unittest.skipUnless('qnnpack' in supported_qengines,
+                         "This Pytorch Build has not been built with or does not support QNNPACK")
     def test_conv_transpose_1d(self):
         self._test_conv_transpose_impl(
             torch.nn.ConvTranspose1d, nnq.ConvTranspose1d, torch.randn(4, 1, 4))
 
+    @unittest.skipUnless('qnnpack' in supported_qengines,
+                         "This Pytorch Build has not been built with or does not support QNNPACK")
     def test_conv_transpose_2d(self):
         self._test_conv_transpose_impl(
             torch.nn.ConvTranspose2d, nnq.ConvTranspose2d, torch.randn(4, 1, 4, 4))
