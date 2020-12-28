@@ -157,13 +157,15 @@ bool guardDifferentiableGraph(Node* dnode) {
     // will give us trouble when we get "alternating patterns" of gradients
     // of two inputs, but so it is. An alternative could be to look into
     // the individual requires_grad seen in the profiling record.
+
+    const auto static USE_TYPECHECK = std::getenv("USE_TYPECHECK");
     insertTypeGuard(
         dnode,
         [](const TensorTypePtr& t) {
           return TensorType::get()->withRequiresGrad(
               t->requiresGrad().value_or(true));
         },
-        prim::RequiresGradCheck);
+        USE_TYPECHECK ? prim::TypeCheck : prim::RequiresGradCheck);
     return true;
   } else {
     // we inline the differentiable graph as a fallback
