@@ -124,11 +124,18 @@ def insert_observer_for_special_module(
     elif isinstance(quantize_handler, StandaloneModuleQuantizeHandler):
         # observe standalone module
         standalone_module = modules[node.target]  # type: ignore
+        standalone_module_name_configs = prepare_custom_config_dict.get("standalone_module_name", [])
+        standalone_module_class_configs = prepare_custom_config_dict.get("standalone_module_class", [])
+        class_config_map = {x[0]: (x[1], x[2]) for x in standalone_module_class_configs}
+        name_config_map = {x[0]: (x[1], x[2]) for x in standalone_module_name_configs}
+        config = class_config_map.get(type(standalone_module), (None, None))
+        config = name_config_map.get(node.target, (None, None))
+        standalone_module_qconfig_dict = {"": qconfig} if config[0] is None else config[0]
+        standalone_prepare_config_dict = {} if config[1] is None else config[1]
         prepare = \
             torch.quantization.quantize_fx._prepare_standalone_module_fx  # type: ignore
         observed_standalone_module = \
-            prepare(standalone_module, {"": qconfig})
-        observed_standalone_module.qconfig = qconfig
+            prepare(standalone_module, standalone_module_qconfig_dict, standalone_prepare_config_dict)
         observed_standalone_module = mark_observed_standalone_module(
             observed_standalone_module)
         parent_name, name = _parent_name(node.target)
@@ -395,10 +402,13 @@ class Quantizer:
         self._generate_qconfig_map(model, model.graph, qconfig_dict)
 
         # match the patterns that will get quantized
-        standalone_module_names = prepare_custom_config_dict.get(
-            "standalone_module_name", None)
-        standalone_module_classes = prepare_custom_config_dict.get(
-            "standalone_module_class", None)
+        standalone_module_name_configs = prepare_custom_config_dict.get(
+            "standalone_module_name", [])
+        standalone_module_class_configs = prepare_custom_config_dict.get(
+            "standalone_module_class", [])
+
+        standalone_module_names = [config[0] for config in standalone_module_name_configs]
+        standalone_module_classes = [config[0] for config in standalone_module_class_configs]
         custom_module_classes = get_custom_module_class_keys(
             prepare_custom_config_dict, "float_to_observed_custom_module_class")
         assert self.patterns is not None
@@ -754,21 +764,21 @@ class Quantizer:
             root_node, matched, matched_pattern, obj, qconfig = \
                 matches.get(node.name, (None, None, None, None, None))
             if root_node is node:
-                if qconfig is None:
+                is_observed_standalone_module_node = (
+                    node.op == 'call_module' and
+                    is_observed_standalone_module(
+                        self.modules[node.target])  # type: ignore
+                )
+                if qconfig is None and not is_observed_standalone_module_node:
                     result = self.quantized_graph.node_copy(
                         node, load_non_quantized)
                     quantized = False
                 else:
                     assert obj is not None
-                    is_standalone_module_node = (
-                        node.op == 'call_module' and
-                        is_observed_standalone_module(
-                            self.modules[node.target])  # type: ignore
-                    )
                     result = obj.convert(
                         self, node, load_arg, debug=debug,
                         convert_custom_config_dict=convert_custom_config_dict)
-                    if is_standalone_module_node:
+                    if is_observed_standalone_module_node:
                         quantized = False
                     else:
                         quantized = is_output_quantized(node, obj)
