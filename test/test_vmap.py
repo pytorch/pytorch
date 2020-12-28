@@ -2322,6 +2322,11 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self._batched_grad_test(op, (x,), {})
         self._batched_grad_grad_test(op, (x,), {})
 
+    def test_threshold(self, device):
+        x = torch.randn(2, 3, device=device, requires_grad=True)
+        self._batched_grad_test(lambda x: F.threshold(x, 0.5, 0.0), (x,))
+
+
     @allowVmapFallbackUsage
     def test_inplace_view(self, device):
         leaf = torch.randn(4, 5, requires_grad=True)

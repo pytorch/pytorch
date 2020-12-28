@@ -1089,6 +1089,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
 #undef TO_BATCHING_RULE
   m.impl("clone", clone_batching_rule);
 
+  using TensorTensorScalarType = Tensor (*)(const Tensor&, const Tensor&, Scalar);
   using TensorTensorType = Tensor (*)(const Tensor&, const Tensor&);
   using TensorScalarType = Tensor (*)(const Tensor&, Scalar);
 
@@ -1115,6 +1116,12 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("pow.Scalar", pow_scalar_Tensor_batching_rule);
 
   m.impl("sigmoid_backward", binary_pointwise_batching_rule<TensorTensorType, at::sigmoid_backward>);
+  m.impl(
+      "threshold_backward",
+      binary_pointwise_batching_rule<
+          TensorTensorScalarType,
+          at::threshold_backward,
+          Scalar>);
 
   // for at::result_type, call the native::result_type implementation.
   // We don't have to do anything special because native::result_type operates
