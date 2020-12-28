@@ -488,6 +488,54 @@ Examples::
     >>> tensor([ 11.6734+0.j, 105.1037+0.j,  10.1978+0.j])
 """)
 
+solve = _add_docstr(_linalg.linalg_solve, r"""
+linalg.solve(input, other, *, out=None) -> Tensor
+
+Computes the solution ``x`` to the matrix equation ``matmul(input, x) = other``
+with a square matrix, or batches of such matrices, :attr:`input` and one or more right-hand side vectors :attr:`other`.
+If :attr:`input` is batched and :attr:`other` is not, then :attr:`other` is broadcast
+to have the same batch dimensions as :attr:`input`.
+The resulting tensor has the same shape as the (possibly broadcast) :attr:`other`.
+
+Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` dtypes.
+
+.. note:: If :attr:`input` is a non-square or non-invertible matrix, or a batch containing non-square matrices
+          or one or more non-invertible matrices, then a RuntimeError will be thrown.
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+Args:
+    input (Tensor): the square :math:`n \times n` matrix or the batch
+                    of such matrices of size :math:`(*, n, n)` where ``*`` is one or more batch dimensions.
+    other (Tensor): right-hand side tensor of shape :math:`(*, n)` or :math:`(*, n, k)`,
+                    where :math:`k` is the number of right-hand side vectors.
+
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
+
+Examples::
+
+    >>> A = torch.eye(3)
+    >>> b = torch.randn(3)
+    >>> x = torch.linalg.solve(A, b)
+    >>> torch.allclose(A @ x, b)
+    True
+
+Batched input::
+
+    >>> A = torch.randn(2, 3, 3)
+    >>> b = torch.randn(3, 1)
+    >>> x = torch.linalg.solve(A, b)
+    >>> torch.allclose(A @ x, b)
+    True
+    >>> b = torch.rand(3) # b is broadcast internally to (*A.shape[:-2], 3)
+    >>> x = torch.linalg.solve(A, b)
+    >>> x.shape
+    torch.Size([2, 3])
+    >>> Ax = A @ x.unsqueeze(-1)
+    >>> torch.allclose(Ax, b.unsqueeze(-1).expand_as(Ax))
+    True
+""")
+
 tensorinv = _add_docstr(_linalg.linalg_tensorinv, r"""
 linalg.tensorinv(input, ind=2, *, out=None) -> Tensor
 

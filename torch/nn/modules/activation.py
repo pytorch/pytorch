@@ -1112,7 +1112,7 @@ class Softmin(Module):
           dimensions
         - Output: :math:`(*)`, same shape as the input
 
-    Arguments:
+    Args:
         dim (int): A dimension along which Softmin will be computed (so every slice
             along dim will sum to 1).
 
@@ -1166,7 +1166,7 @@ class Softmax(Module):
         a Tensor of the same dimension and shape as the input with
         values in the range [0, 1]
 
-    Arguments:
+    Args:
         dim (int): A dimension along which Softmax will be computed (so every slice
             along dim will sum to 1).
 
@@ -1240,7 +1240,7 @@ class LogSoftmax(Module):
           dimensions
         - Output: :math:`(*)`, same shape as the input
 
-    Arguments:
+    Args:
         dim (int): A dimension along which LogSoftmax will be computed.
 
     Returns:

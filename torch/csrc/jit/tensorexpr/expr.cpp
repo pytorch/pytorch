@@ -124,8 +124,48 @@ ExprHandle expm1(const ExprHandle& v) {
   return Intrinsics::make(kExpm1, v);
 }
 
-ExprHandle fabs(const ExprHandle& v) {
-  return Intrinsics::make(kFabs, v);
+ExprHandle abs(const ExprHandle& v) {
+  return Intrinsics::make(kAbs, v);
+}
+
+ExprHandle fast_log(const ExprHandle& v) {
+  // this implementation is taken from sleef:
+  // https://github.com/shibatch/sleef/blob/master/src/libm/sleefsp.c#L1131
+  // to generate coefficients, this tool is provided
+  // https://github.com/shibatch/sleef/blob/master/src/gencoef/gencoef.txt
+  auto ilogb2kf = [](ExprHandle x) {
+    auto y = (bitcast<int32_t>(x) >> IntImm::make(23)) & IntImm::make(0xff);
+    return y - IntImm::make(0x7f);
+  };
+
+  auto ldexp3kf = [](ExprHandle x, ExprHandle e) {
+    return bitcast<float>(bitcast<int32_t>(x) + (e << IntImm::make(23)));
+  };
+  auto e = ilogb2kf(v * FloatImm::make(1.0 / 0.75));
+  auto m = ldexp3kf(v, IntImm::make(-1) * e);
+  auto one = FloatImm::make(1.0f);
+  auto x = (m - one) / (m + one);
+  auto x2 = x * x;
+
+  auto mlaf = [](ExprHandle x, ExprHandle y, float z) {
+    return x * y + FloatImm::make(z);
+  };
+
+  auto t = FloatImm::make(0.2392828464508056640625);
+  t = mlaf(t, x2, 0.28518211841583251953125);
+  t = mlaf(t, x2, 0.400005877017974853515625);
+  t = mlaf(t, x2, 0.666666686534881591796875);
+  t = mlaf(t, x2, 2.0);
+  x = x * t + FloatImm::make(0.693147180559945286226764) * e;
+  x = IfThenElse::make(
+      v < FloatImm::make(0),
+      FloatImm::make(std::numeric_limits<float>::quiet_NaN()),
+      x);
+  x = IfThenElse::make(
+      v == FloatImm::make(0),
+      FloatImm::make(-std::numeric_limits<float>::infinity()),
+      x);
+  return x;
 }
 
 ExprHandle log(const ExprHandle& v) {
@@ -198,6 +238,10 @@ ExprHandle fmod(const ExprHandle& v1, const ExprHandle& v2) {
 
 ExprHandle remainder(const ExprHandle& v1, const ExprHandle& v2) {
   return Intrinsics::make(kRemainder, v1, v2);
+}
+
+ExprHandle isnan(const ExprHandle& v1) {
+  return Intrinsics::make(kIsNan, v1);
 }
 
 ExprHandle ifThenElse(
