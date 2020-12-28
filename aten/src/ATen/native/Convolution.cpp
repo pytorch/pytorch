@@ -588,7 +588,7 @@ at::Tensor convolution(
     bool transposed, IntArrayRef output_padding, int64_t groups) {
   auto& ctx = at::globalContext();
   // See Note [Enabling Deterministic Operations]
-  bool deterministic = ctx.deterministicCuDNN() || ctx.deterministic();
+  bool deterministic = ctx.deterministicCuDNN() || ctx.deterministicAlgorithms();
   return at::_convolution(input, weight, bias, stride, padding, dilation,
                           transposed, output_padding, groups,
                           ctx.benchmarkCuDNN(), deterministic, ctx.userEnabledCuDNN(), ctx.allowTF32CuDNN());
