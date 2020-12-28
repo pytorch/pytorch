@@ -157,7 +157,7 @@ class TORCH_API RpcAgent {
   // If ``message.isRequest()`` is true, the ``FutureMessage`` will be
   // completed when the response arrives. For other message types, the Future
   // should be ignored by the caller.
-  virtual std::shared_ptr<FutureMessage> send(
+  virtual std::shared_ptr<JitFuture> send(
       const WorkerInfo& to,
       Message&& message,
       const float rpcTimeoutSeconds = kUnsetRpcTimeout) = 0;
@@ -258,6 +258,38 @@ class TORCH_API RpcAgent {
 
   // Get the type resolver
   std::shared_ptr<TypeResolver> getTypeResolver();
+
+  static std::shared_ptr<JitFuture> toJitFuture(std::shared_ptr<FutureMessage> fm) {
+    auto jitFuture = std::make_shared<JitFuture>(at::AnyClassType::get());
+
+    fm->addCallback(
+        [jitFuture, fm]() mutable {
+          if (fm->hasError()) {
+            jitFuture->setError(std::make_exception_ptr(*(fm->error())));
+          } else {
+            jitFuture->markCompleted(IValue(
+                c10::make_intrusive<Message>(std::move(*fm).moveValue())));
+          }
+        }
+    );
+    return jitFuture;
+  }
+
+  static std::shared_ptr<FutureMessage> toFutureMessage(std::shared_ptr<JitFuture> jitFuture) {
+    auto fm = std::make_shared<FutureMessage>();
+
+    jitFuture->addCallback(
+        [fm, jitFuture]() mutable {
+          if (jitFuture->hasError()) {
+            fm->setError(jitFuture->tryRetrieveErrorMessage());
+          } else {
+            fm->markCompleted(
+                std::move(*jitFuture->value().toCustomClass<Message>()));
+          }
+        }
+    );
+    return fm;
+  }
 
  protected:
   const WorkerInfo workerInfo_;

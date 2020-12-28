@@ -93,7 +93,7 @@ enum MessageType {
 // Layers above ``RpcAgent`` only converts ScriptCall, ScriptResp, PythonCall,
 // and PythonResp into a Message, and it is up to the RpcAgent
 // implementation to determine how to serialize a message.
-class TORCH_API Message final {
+class TORCH_API Message final : public torch::CustomClassHolder {
  public:
   Message();
 

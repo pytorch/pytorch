@@ -47,8 +47,8 @@ variable_list RecvRpcBackward::apply(variable_list&& grads) {
 
   // Send the gradients over to the appropriate node.
   auto rpcAgent = rpc::RpcAgent::getCurrentRpcAgent();
-  auto futureMessage = rpcAgent->send(
-      rpcAgent->getWorkerInfo(fromWorkerId_), std::move(gradCall).toMessage());
+  auto futureMessage = rpc::RpcAgent::toFutureMessage(rpcAgent->send(
+      rpcAgent->getWorkerInfo(fromWorkerId_), std::move(gradCall).toMessage()));
 
   // Record the future in the context.
   sharedContext->addOutstandingRpc(futureMessage);

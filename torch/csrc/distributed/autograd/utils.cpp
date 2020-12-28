@@ -160,9 +160,11 @@ std::shared_ptr<FutureMessage> sendMessageWithAutograd(
         std::move(msg),
         rpc::MessageType::RUN_WITH_PROFILING_REQ,
         std::move(profilerConfig));
-    fut = agent.send(dst, std::move(msgWithProfiling), rpcTimeoutSeconds);
+    fut = rpc::RpcAgent::toFutureMessage(
+        agent.send(dst, std::move(msgWithProfiling), rpcTimeoutSeconds));
   } else {
-    fut = agent.send(dst, std::move(msg), rpcTimeoutSeconds);
+    fut = rpc::RpcAgent::toFutureMessage(
+        agent.send(dst, std::move(msg), rpcTimeoutSeconds));
   }
 
   return fut;
