@@ -32,7 +32,7 @@ USE_NINJA = (not check_negative_env_flag('USE_NINJA') and
 def convert_cmake_value_to_python_value(cmake_value, cmake_type):
     r"""Convert a CMake value in a string form to a Python value.
 
-    Arguments:
+    Args:
       cmake_value (string): The CMake value in a string form (e.g., "ON", "OFF", "1").
       cmake_type (string): The CMake type of :attr:`cmake_value`.
 
@@ -56,7 +56,7 @@ def convert_cmake_value_to_python_value(cmake_value, cmake_type):
 def get_cmake_cache_variables_from_file(cmake_cache_file):
     r"""Gets values in CMakeCache.txt into a dictionary.
 
-    Arguments:
+    Args:
       cmake_cache_file: A CMakeCache.txt file object.
     Returns:
       dict: A ``dict`` containing the value of cached CMake variables.
