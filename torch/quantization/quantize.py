@@ -220,6 +220,8 @@ def prepare(model, inplace=False, allow_list=None,
 
     """
     torch._C._log_api_usage_once("quantization_api.quantize.prepare")
+    assert not model.training, 'prepare only works for models in ' + \
+        'eval mode'
     if prepare_custom_config_dict is None:
         prepare_custom_config_dict = {}
     custom_module_class_mapping = prepare_custom_config_dict.get("float_to_observed_custom_module_class", {})
@@ -394,6 +396,8 @@ def prepare_qat(model, mapping=None, inplace=False):
                  is mutated
     """
     torch._C._log_api_usage_once("quantization_api.quantize.prepare_qat")
+    assert model.training, 'prepare_qat only works for models in  ' + \
+        'train mode'
     if mapping is None:
         mapping = get_default_qat_module_mappings()
 
