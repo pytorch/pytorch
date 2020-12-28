@@ -1,5 +1,8 @@
 import torch
 
+from torch import Tensor
+from typing import Optional, Tuple
+
 class MultiheadAttention(torch.nn.MultiheadAttention):
     _FLOAT_MODULE = torch.nn.MultiheadAttention
 
