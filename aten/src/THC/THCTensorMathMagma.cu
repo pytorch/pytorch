@@ -9,8 +9,6 @@
 
 #ifdef USE_MAGMA
 #include <magma.h>
-#else
-#include <THC/THCBlas.h>
 #endif
 
 #ifndef DIVUP
