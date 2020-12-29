@@ -12,7 +12,7 @@ class AdaBelief(Optimizer):
     (2) If SGD is better than Adam  ->  Set a large eps (1e-8)
     (3) If SGD is worse than Adam   ->  Set a small eps (1e-16) (rectify=True often helps)
     (4) If AdamW is better than Adam  ->  Turn on “weight_decouple”
-    (5) Note that default "weight_decay" is very different for Adam and AdamW, need to consider this when using AdaBelief with and without "weight_decouple".
+    (5) In AdaBelief, "weight_decay" could be very different when "weight_decouple" is set as True vs. False (similar to AdamW vs. Adam).
     (6) For a full list of recommended hyper-parameters, see https://github.com/juntang-zhuang/Adabelief-Optimizer
 
     Arguments:
@@ -154,11 +154,10 @@ class AdaBelief(Optimizer):
             torch._foreach_mul_(exp_avg, beta1)
             torch._foreach_add_(exp_avg, grads, alpha=1 - beta1)
 
-            difs = torch._foreach_add( grads, exp_avg, alpha=-1.0 )
+            difs = torch._foreach_add(grads, exp_avg, alpha=-1.0)
 
             torch._foreach_mul_(exp_avg_var, beta2)
             torch._foreach_addcmul_(exp_avg_var, difs, difs, 1 - beta2)
-            
             torch._foreach_add_(exp_avg_var, group['eps'])
 
             if amsgrad:
@@ -168,40 +167,37 @@ class AdaBelief(Optimizer):
                 # Use the max. for normalizing running avg. of gradient
                 max_exp_avg_sq_sqrt = torch._foreach_sqrt(max_exp_avg_var)
                 bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]
-
                 torch._foreach_div_(max_exp_avg_sq_sqrt, bias_correction_sqrt)
-
                 denom = torch._foreach_add(max_exp_avg_sq_sqrt, group['eps'])
             else:
                 exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_var)
                 bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]
-
                 torch._foreach_div_(exp_avg_sq_sqrt, bias_correction_sqrt)
-
                 denom = torch._foreach_add(exp_avg_sq_sqrt, group['eps'])
 
             # update:
             if not self._rectify:
                 step_size = [-1 * (group['lr'] / bc) for bc in bias_correction1]
                 torch._foreach_addcdiv_(params_with_grad, exp_avg, denom, step_size)
-            else: # rectified update
+            # rectified update
+            else: 
                 if amsgrad:
                     denom = torch._foreach_sqrt(max_exp_avg_var)
                 else:
                     denom = torch._foreach_sqrt(exp_avg_var)
                 torch._foreach_add_(denom, group['eps'])
 
-                conf_params_with_grad, conf_denom, conf_exp_avg, conf_stepsize, \
-                inconf_params_with_grad, inconf_denom, inconf_exp_avg, inconf_stepsize = \
-                    self.get_rectification_factor(group, params_with_grad, denom, exp_avg)
+                (conf_params_with_grad, conf_denom, conf_exp_avg, conf_stepsize, \
+                inconf_params_with_grad, inconf_denom, inconf_exp_avg, inconf_stepsize) = \
+                self.get_rectification_factor(group, params_with_grad, denom, exp_avg)
 
-                if len(conf_params_with_grad)>0: # Adam-type update
+                if len(conf_params_with_grad) > 0:  # Adam-type update
                     torch._foreach_addcdiv_(conf_params_with_grad, conf_exp_avg, conf_denom, conf_stepsize)
-                if len(inconf_params_with_grad)>0: # SGD type update
+                if len(inconf_params_with_grad) > 0:  # SGD type update
                     torch._foreach_add_(inconf_params_with_grad, inconf_exp_avg, alpha=inconf_stepsize[0])
 
         return loss
-    
+
     def get_rectification_factor(self, group, params_with_grad, denom, exp_avg):
         conf_params_with_grad, conf_denom, conf_exp_avg, conf_stepsize = [], [], [], []
         inconf_params_with_grad, inconf_denom, inconf_exp_avg, inconf_stepsize = [], [], [], []
@@ -212,12 +208,11 @@ class AdaBelief(Optimizer):
 
             if p.grad is None:
                 continue
-            
             if p.grad.is_sparse:
                 raise RuntimeError('AdaBelief does not support sparse gradients.')
-            
+
             state = self.state[p]
-        
+
             buffered = group['buffer'][int(state['step'] % 10)]
             if state['step'] == buffered[0]:
                 N_sma, step_size = buffered[1], buffered[2]
@@ -232,8 +227,8 @@ class AdaBelief(Optimizer):
                 # more conservative since it's an approximated value
                 if N_sma >= 5:
                     step_size = math.sqrt(
-                                (1 - beta2_t) * (N_sma - 4) / (N_sma_max - 4) * (N_sma - 2) / N_sma * N_sma_max / (
-                                        N_sma_max - 2)) / (1 - beta1 ** state['step'])
+                    (1 - beta2_t) * (N_sma - 4) / (N_sma_max - 4) * (N_sma - 2) / N_sma * N_sma_max / (
+                    N_sma_max - 2)) / (1 - beta1 ** state['step'])
                 elif self._degenerated_to_sgd:
                     step_size = 1.0 / (1 - beta1 ** state['step'])
                 else:
@@ -251,9 +246,9 @@ class AdaBelief(Optimizer):
                 inconf_exp_avg.append(_exp_avg)
                 inconf_stepsize.append(-group['lr'] * step_size)
 
-        return ( conf_params_with_grad, conf_denom, conf_exp_avg, conf_stepsize,
+        return (conf_params_with_grad, conf_denom, conf_exp_avg, conf_stepsize,
                  inconf_params_with_grad, inconf_denom, inconf_exp_avg, inconf_stepsize)
-    
+
     # TODO: refactor to a base class once foreach ops are in a good shape.
     def zero_grad(self, set_to_none: bool = False):
         per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
@@ -276,4 +271,3 @@ class AdaBelief(Optimizer):
             for _, per_dtype_grads in per_device_and_dtype_grads.items():
                 for grads in per_dtype_grads.values():
                     torch._foreach_zero_(grads)
-
