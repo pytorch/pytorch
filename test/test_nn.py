@@ -7593,12 +7593,22 @@ class TestNN(NNTestCase):
             'smooth_l1_loss': lambda x, y, r: F.smooth_l1_loss(x, y, reduction=r),
         }
 
+        supports_complex = ['l1_loss']
+
         input = torch.randn(2, 1, requires_grad=True)
-        for _name, fn in losses.items():
+        cinput = torch.randn(2, 1, requires_grad=True, dtype=torch.cfloat)
+        for name, fn in losses.items():
             for requires_grad in [True, False]:
                 # When target.requires_grad=True, its impl is in Python, while the other is in TH.
                 target = torch.randn(2, 10, requires_grad=requires_grad)
+                ctarget = torch.randn(2, 10, requires_grad=requires_grad, dtype=torch.cfloat)
                 for reduction in ['none', 'mean', 'sum']:
+                    if name in supports_complex:
+                        l = fn(cinput, ctarget, reduction)
+                        if reduction == 'none':
+                            self.assertEqual(l.size(), target.size())
+                        self.assertTrue(gradcheck(fn, (input, target, reduction)))
+
                     l = fn(input, target, reduction)
                     if reduction == 'none':
                         self.assertEqual(l.size(), target.size())
@@ -11089,6 +11099,7 @@ class TestNNDeviceType(NNTestCase):
     @onlyOnCPUAndCUDA
     def test_invalid_reduction_strings(self, device):
         input = torch.randn(3, 5, requires_grad=True, device=device)
+        cinput = torch.randn(3, 5, requires_grad=True, device=device, dtype=torch.cfloat)
         target = torch.tensor([1, 0, 4], device=device)
 
         for reduction in ['none', 'invalid']:
@@ -11105,6 +11116,7 @@ class TestNNDeviceType(NNTestCase):
             v(lambda: F.kl_div(input, input, reduction=reduction))
             v(lambda: F.smooth_l1_loss(input, input, reduction=reduction))
             v(lambda: F.l1_loss(input, input, reduction=reduction))
+            v(lambda: F.l1_loss(cinput, cinput, reduction=reduction))
             v(lambda: F.mse_loss(input, input, reduction=reduction))
             v(lambda: F.hinge_embedding_loss(input, input, reduction=reduction))
             v(lambda: F.poisson_nll_loss(input, input, reduction=reduction))
