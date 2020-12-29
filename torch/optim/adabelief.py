@@ -168,7 +168,7 @@ class AdaBelief(Optimizer):
                         if N_sma >= 5:
                             step_size = math.sqrt(
                                 (1 - beta2_t) * (N_sma - 4) / (N_sma_max - 4) * (N_sma - 2) / N_sma * N_sma_max / (
-                                N_sma_max - 2)) / (1 - beta1 ** state['step'])
+                                    N_sma_max - 2)) / (1 - beta1 ** state['step'])
                         elif self._degenerated_to_sgd:
                             step_size = 1.0 / (1 - beta1 ** state['step'])
                         else:
@@ -183,4 +183,4 @@ class AdaBelief(Optimizer):
                         p.data.addcdiv_(exp_avg, denom, value=-step_size * group['lr'])
                     elif step_size > 0:
                         p.data.add_(exp_avg, alpha=-step_size * group['lr'])
-        return loss 
+        return loss

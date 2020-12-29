@@ -229,7 +229,7 @@ class AdaBelief(Optimizer):
                 if N_sma >= 5:
                     step_size = math.sqrt(
                         (1 - beta2_t) * (N_sma - 4) / (N_sma_max - 4) * (N_sma - 2) / N_sma * N_sma_max / (
-                        N_sma_max - 2)) / (1 - beta1 ** state['step'])
+                            N_sma_max - 2)) / (1 - beta1 ** state['step'])
                 elif self._degenerated_to_sgd:
                     step_size = 1.0 / (1 - beta1 ** state['step'])
                 else:
@@ -248,7 +248,7 @@ class AdaBelief(Optimizer):
                 inconf_stepsize.append(-group['lr'] * step_size)
 
         return (conf_params_with_grad, conf_denom, conf_exp_avg, conf_stepsize,
-            inconf_params_with_grad, inconf_denom, inconf_exp_avg, inconf_stepsize)
+                    inconf_params_with_grad, inconf_denom, inconf_exp_avg, inconf_stepsize)
 
     # TODO: refactor to a base class once foreach ops are in a good shape.
     def zero_grad(self, set_to_none: bool = False):
@@ -271,4 +271,4 @@ class AdaBelief(Optimizer):
 
             for _, per_dtype_grads in per_device_and_dtype_grads.items():
                 for grads in per_dtype_grads.values():
-                    torch._foreach_zero_(grads) 
+                    torch._foreach_zero_(grads)
