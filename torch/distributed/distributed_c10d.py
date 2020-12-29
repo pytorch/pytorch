@@ -2386,7 +2386,7 @@ def barrier(group=GroupMember.WORLD,
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
-        device_ids ([int], optional): List of device/GPU ids
+        device_ids ([int], optional): List of device/GPU ids.
                                       Valid only for NCCL backend.
 
     Returns:
