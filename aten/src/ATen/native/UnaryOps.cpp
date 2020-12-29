@@ -66,7 +66,7 @@ Tensor unary_op_impl_float(const Tensor& self, Stub& stub) {
 // Note: This is done by running the operation as usual and then copying the
 // operation's result to the expected result type.
 template <typename Stub>
-static inline Tensor& unary_op_impl_with_complex_to_float_out(Tensor& result, const Tensor& self, Stub& stub) {
+static inline Tensor& unary_op_impl_with_complex_to_float_out(Tensor& result, const Tensor& self, Stub& stub, bool promotes_integer_to_float) {
     if (self.is_complex() && !result.is_complex()) {
       // Checks if the corresponding float type can be cast to the desired dtype
       const auto float_type = c10::toValueType(self.scalar_type());
@@ -83,6 +83,10 @@ static inline Tensor& unary_op_impl_with_complex_to_float_out(Tensor& result, co
       result.resize_(complex_result.sizes());
       result.copy_(at::real(complex_result));
       return result;
+    }
+
+    if (promotes_integer_to_float) {
+      return unary_op_impl_float_out(result, self, stub);
     }
 
     return unary_op_impl_out(result, self, stub);
@@ -173,7 +177,7 @@ Tensor& arctan_(Tensor& self) { return self.atan_(); }
 // complex input. This makes sense mathematically since the absolute value
 // and angle of a complex number has no imaginary part.
 Tensor& abs_out(Tensor& result, const Tensor& self) {
-  return unary_op_impl_with_complex_to_float_out(result, self, abs_stub);
+  return unary_op_impl_with_complex_to_float_out(result, self, abs_stub, /*promotes_integer_to_float=*/false);
 }
 Tensor abs(const Tensor& self) {
   return unary_op_impl_with_complex_to_float(self, at::abs_out);
@@ -195,10 +199,16 @@ Tensor& absolute_(Tensor& self) {
 }
 
 Tensor& angle_out(Tensor& result, const Tensor& self) {
-  return unary_op_impl_with_complex_to_float_out(result, self, angle_stub);
+  return unary_op_impl_with_complex_to_float_out(result, self, angle_stub, /*promotes_integer_to_float=*/true);
 }
 Tensor angle(const Tensor& self) {
-  return unary_op_impl_with_complex_to_float(self, at::angle_out);
+  if (self.is_complex()) {
+    const auto float_type = c10::toValueType(self.scalar_type());
+    Tensor result = at::empty({0}, self.options().dtype(float_type));
+    return at::angle_out(result, self);
+  }
+
+  return unary_op_impl_float(self, angle_stub);
 }
 
 Tensor real(const Tensor& self) {
@@ -266,6 +276,10 @@ Tensor& erfc_out(Tensor& result, const Tensor& self) { return unary_op_impl_floa
 Tensor erfc(const Tensor& self) { return unary_op_impl_float(self, erfc_stub); }
 Tensor& erfc_(Tensor& self) { return unary_op_impl_(self, at::erfc_out); }
 
+Tensor& erfinv_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, erfinv_stub); }
+Tensor erfinv(const Tensor& self) { return unary_op_impl_float(self, erfinv_stub); }
+Tensor& erfinv_(Tensor& self) { return unary_op_impl_(self, at::erfinv_out); }
+
 Tensor& frac_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, frac_stub); }
 Tensor frac(const Tensor& self) { return unary_op_impl(self, at::frac_out); }
 Tensor& frac_(Tensor& self) { return unary_op_impl_(self, at::frac_out); }
@@ -304,12 +318,12 @@ Tensor& round_out(Tensor& result, const Tensor& self) { return unary_op_impl_out
 Tensor round(const Tensor& self) { return unary_op_impl(self, at::round_out); }
 Tensor& round_(Tensor& self) { return unary_op_impl_(self, at::round_out); }
 
-Tensor& digamma_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, digamma_stub); }
-Tensor digamma(const Tensor& self) { return unary_op_impl(self, digamma_out); }
+Tensor& digamma_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, digamma_stub); }
+Tensor digamma(const Tensor& self) { return unary_op_impl_float(self, digamma_stub); }
 Tensor& digamma_(Tensor& self) { return unary_op_impl_(self, digamma_out); }
 
-Tensor& reciprocal_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, reciprocal_stub); }
-Tensor reciprocal(const Tensor& self) { return unary_op_impl(self, at::reciprocal_out); }
+Tensor& reciprocal_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, reciprocal_stub); }
+Tensor reciprocal(const Tensor& self) { return unary_op_impl_float(self, reciprocal_stub); }
 Tensor& reciprocal_(Tensor& self) { return unary_op_impl_(self, at::reciprocal_out); }
 
 Tensor& rsqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, rsqrt_stub); }
@@ -342,6 +356,10 @@ Tensor& sin_(Tensor& self) { return unary_op_impl_(self, at::sin_out); }
 Tensor& cos_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, cos_stub); }
 Tensor cos(const Tensor& self) { return unary_op_impl_float(self, cos_stub); }
 Tensor& cos_(Tensor& self) { return unary_op_impl_(self, at::cos_out); }
+
+Tensor& sinc_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, sinc_stub); }
+Tensor sinc(const Tensor& self) { return unary_op_impl_float(self, sinc_stub); }
+Tensor& sinc_(Tensor& self) { return unary_op_impl_(self, at::sinc_out); }
 
 Tensor& sinh_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, sinh_stub); }
 Tensor sinh(const Tensor& self) { return unary_op_impl_float(self, sinh_stub); }
@@ -669,7 +687,6 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CPU)                         \
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cuda, CUDA)
 
-IMPLEMENT_UNARY_OP_VEC_CUDA(erfinv)
 IMPLEMENT_UNARY_OP_VEC_CUDA(lgamma)
 
 DEFINE_DISPATCH(abs_stub);
@@ -717,6 +734,7 @@ DEFINE_DISPATCH(sign_stub);
 DEFINE_DISPATCH(signbit_stub);
 DEFINE_DISPATCH(sgn_stub);
 DEFINE_DISPATCH(sin_stub);
+DEFINE_DISPATCH(sinc_stub);
 DEFINE_DISPATCH(sinh_stub);
 DEFINE_DISPATCH(sqrt_stub);
 DEFINE_DISPATCH(tan_stub);

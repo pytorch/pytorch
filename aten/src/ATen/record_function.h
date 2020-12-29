@@ -10,7 +10,7 @@
 #include <functional>
 
 namespace c10 {
-class CAFFE2_API OperatorHandle;
+class TORCH_API OperatorHandle;
 }
 
 namespace at {
