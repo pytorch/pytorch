@@ -47,7 +47,6 @@ C10_HOST_DEVICE inline T uniform_int_full_range(V val) {
   return static_cast<T>(static_cast<int64_t>(val));
 }
 
-
 /**
  * A transformation function for `torch.Tensor.random_()`, when used without specifying `from` and `to`.
  * In order to prevent compiler warnings reported in GitHub issue 46391, T can't be float or double
