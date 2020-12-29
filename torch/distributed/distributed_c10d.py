@@ -3,7 +3,6 @@ import logging
 import pickle
 import torch
 import warnings
-import sys
 import time
 from torch._six import string_classes
 from datetime import timedelta
