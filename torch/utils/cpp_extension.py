@@ -226,7 +226,7 @@ def check_compiler_ok_for_platform(compiler: str) -> bool:
     r'''
     Verifies that the compiler is the expected one for the current platform.
 
-    Arguments:
+    Args:
         compiler (str): The compiler executable to check.
 
     Returns:
@@ -261,7 +261,7 @@ def check_compiler_abi_compatibility(compiler) -> bool:
     r'''
     Verifies that the given compiler is ABI-compatible with PyTorch.
 
-    Arguments:
+    Args:
         compiler (str): The compiler executable name to check (e.g. ``g++``).
             Must be executable in a shell process.
 
