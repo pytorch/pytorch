@@ -164,13 +164,13 @@ struct Resource final {
 
         typedef Sampler::Descriptor Descriptor;
         typedef VK_DELETER(Sampler) Deleter;
-        typedef Handle<VkSampler, Deleter> Handle;
+        typedef Handle<VkSampler, Deleter> Handler;
 
         struct Hasher {
           size_t operator()(const Descriptor& descriptor) const;
         };
 
-        Handle operator()(const Descriptor& descriptor) const;
+        Handler operator()(const Descriptor& descriptor) const;
 
        private:
         VkDevice device_;

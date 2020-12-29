@@ -141,7 +141,7 @@ Resource::Image::Sampler::Factory::Factory(const GPU& gpu)
       "Invalid Vulkan device!");
 }
 
-typename Resource::Image::Sampler::Factory::Handle
+typename Resource::Image::Sampler::Factory::Handler
 Resource::Image::Sampler::Factory::operator()(
     const Descriptor& descriptor) const {
   const VkSamplerCreateInfo sampler_create_info{
@@ -176,7 +176,7 @@ Resource::Image::Sampler::Factory::operator()(
       sampler,
       "Invalid Vulkan image sampler!");
 
-  return Handle{
+  return Handler{
     sampler,
     Deleter(device_),
   };

@@ -72,13 +72,13 @@ struct Pipeline final {
 
       typedef Layout::Descriptor Descriptor;
       typedef VK_DELETER(PipelineLayout) Deleter;
-      typedef Handle<VkPipelineLayout, Deleter> Handle;
+      typedef Handle<VkPipelineLayout, Deleter> Handler;
 
       struct Hasher {
         size_t operator()(const Descriptor& descriptor) const;
       };
 
-      Handle operator()(const Descriptor& descriptor) const;
+      Handler operator()(const Descriptor& descriptor) const;
 
      private:
       VkDevice device_;
@@ -131,13 +131,13 @@ struct Pipeline final {
 
     typedef Pipeline::Descriptor Descriptor;
     typedef VK_DELETER(Pipeline) Deleter;
-    typedef Handle<VkPipeline, Deleter> Handle;
+    typedef Handle<VkPipeline, Deleter> Handler;
 
     struct Hasher {
       size_t operator()(const Descriptor& descriptor) const;
     };
 
-    Handle operator()(const Descriptor& descriptor) const;
+    Handler operator()(const Descriptor& descriptor) const;
 
    private:
     VkDevice device_;

@@ -12,7 +12,7 @@ Pipeline::Layout::Factory::Factory(const GPU& gpu)
       "Invalid Vulkan device!");
 }
 
-typename Pipeline::Layout::Factory::Handle Pipeline::Layout::Factory::operator()(
+typename Pipeline::Layout::Factory::Handler Pipeline::Layout::Factory::operator()(
     const Descriptor& descriptor) const {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       descriptor.descriptor_set_layout,
@@ -39,7 +39,7 @@ typename Pipeline::Layout::Factory::Handle Pipeline::Layout::Factory::operator()
       pipeline_layout,
       "Invalid Vulkan pipeline layout!");
 
-  return Handle{
+  return Handler{
     pipeline_layout,
     Deleter(device_),
   };
@@ -90,7 +90,7 @@ Pipeline::Factory::Factory(const GPU& gpu)
       "Invalid Vulkan pipeline cache!");
 }
 
-typename Pipeline::Factory::Handle Pipeline::Factory::operator()(
+typename Pipeline::Factory::Handler Pipeline::Factory::operator()(
     const Descriptor& descriptor) const {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       descriptor.pipeline_layout,
@@ -159,7 +159,7 @@ typename Pipeline::Factory::Handle Pipeline::Factory::operator()(
       pipeline,
       "Invalid Vulkan pipeline!");
 
-  return Handle{
+  return Handler{
     pipeline,
     Deleter(device_),
   };

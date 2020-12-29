@@ -35,7 +35,7 @@ class Cache final {
   // Factory must have the following symbols defined.
 
   typedef typename Factory::Descriptor Descriptor;
-  typedef typename Factory::Handle Handle;
+  typedef typename Factory::Handler Handler;
   typedef typename Factory::Hasher Hasher;
 
   // Create or retrieve a resource.
@@ -58,7 +58,7 @@ class Cache final {
     static constexpr uint32_t kReserve = 64u;
   };
 
-  ska::flat_hash_map<Descriptor, Handle, Hasher> cache_;
+  ska::flat_hash_map<Descriptor, Handler, Hasher> cache_;
   Factory factory_;
 };
 

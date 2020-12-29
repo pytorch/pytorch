@@ -16,7 +16,7 @@ Shader::Layout::Factory::Factory(const GPU& gpu)
       "Invalid Vulkan device!");
 }
 
-Shader::Layout::Factory::Handle Shader::Layout::Factory::operator()(
+Shader::Layout::Factory::Handler Shader::Layout::Factory::operator()(
     const Descriptor& descriptor) const {
   c10::SmallVector<VkDescriptorSetLayoutBinding, 6u> bindings;
 
@@ -50,7 +50,7 @@ Shader::Layout::Factory::Handle Shader::Layout::Factory::operator()(
       descriptor_set_layout,
       "Invalid Vulkan descriptor set layout!");
 
-  return Handle{
+  return Handler{
     descriptor_set_layout,
     Deleter(device_),
   };
@@ -125,7 +125,7 @@ Shader::Factory::Factory(Factory&&) = default;
 Shader::Factory& Shader::Factory::Factory::operator=(Factory&&) = default;
 Shader::Factory::~Factory() = default;
 
-typename Shader::Factory::Handle Shader::Factory::operator()(
+typename Shader::Factory::Handler Shader::Factory::operator()(
     const Descriptor& descriptor) const {
   std::vector<uint32_t> binary;
 
@@ -164,7 +164,7 @@ typename Shader::Factory::Handle Shader::Factory::operator()(
       shader_module,
       "Invalid Vulkan shader module!");
 
-  return Handle{
+  return Handler{
     shader_module,
     Deleter(device_),
   };
