@@ -1196,5 +1196,18 @@ class TestFX(JitTestCase):
         input = torch.rand(3, 4)
         self.assertEqual(traced(input), Pair(input, input))
 
+    def test_return_type_exists(self):
+        class ReturnTypeModule(torch.nn.Module):
+            def other(self, x: List[str]) -> List[str]:
+                return x
+
+            def forward(self, x: List[str]) -> List[str]:
+                return self.other(x)
+
+        traced = symbolic_trace(ReturnTypeModule())
+        self.assertIn("-> typing.List[str]", traced._code)
+        scripted = torch.jit.script(traced)
+        self.assertIn("-> List[str]", scripted.code)
+
 if __name__ == '__main__':
     run_tests()
