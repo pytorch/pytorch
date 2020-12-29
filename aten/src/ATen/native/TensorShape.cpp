@@ -177,7 +177,12 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   // compute the size of the result
   auto result_size = notSkippedTensor.sizes().vec();
   result_size[dim] = cat_dim_size;
-  result.resize_(result_size, first_tensor_mem_format);
+
+  // skip resizing if size of result is same as expected
+  if ((result.sizes() != result_size) || result.suggest_memory_format() != first_tensor_mem_format){
+    result.resize_(result_size, first_tensor_mem_format);
+  }
+
   if (result.numel() == 0) {
     return result;
   }
