@@ -17,8 +17,8 @@ namespace rpc {
 // for signaling and launching callbacks. In this case, the message will be
 // discarded and then set the FutureIValue using an empty IValue or the given
 // FutureError if there is an error.
-c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
-    const std::shared_ptr<FutureMessage>& futureResponseMessage,
+c10::intrusive_ptr<JitFuture> toPyJitFuture(
+    const std::shared_ptr<JitFuture>& futureResponseMessage,
     bool hasValue = true);
 
 c10::intrusive_ptr<JitFuture> pyRpcBuiltin(

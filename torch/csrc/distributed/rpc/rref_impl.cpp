@@ -170,13 +170,14 @@ IValue UserRRef::toHere(const float timeoutSeconds) const {
   // toHere is profiled as a blocking call, and does not execute operations on
   // the remote node. Hence, don't wrap it with a profiling message since we
   // don't need the profiler to be enabled remotely.
-  auto futureResponse = autograd::sendMessageWithAutograd(
-      *agent,
-      agent->getWorkerInfo(ownerId_),
-      std::move(msgToSend),
-      true /* forceGradRecording */,
-      timeoutSeconds,
-      true /* forceDisableProfiling */);
+  auto futureResponse = RpcAgent::toFutureMessage(
+      autograd::sendMessageWithAutograd(
+          *agent,
+          agent->getWorkerInfo(ownerId_),
+          std::move(msgToSend),
+          true /* forceGradRecording */,
+          timeoutSeconds,
+          true /* forceDisableProfiling */));
 
   // TODO: we should ideally be able to interrupt this blocking wait if we check
   // getTimedOut() and it is true
