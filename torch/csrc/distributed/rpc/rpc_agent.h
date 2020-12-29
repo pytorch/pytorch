@@ -262,8 +262,10 @@ class TORCH_API RpcAgent {
   static std::shared_ptr<JitFuture> toJitFuture(std::shared_ptr<FutureMessage> fm) {
     auto jitFuture = std::make_shared<JitFuture>(at::AnyClassType::get());
 
+    std::weak_ptr<FutureMessage> wp = fm;
     fm->addCallback(
-        [jitFuture, fm]() mutable {
+        [jitFuture, wp]() mutable {
+          auto fm = wp.lock();
           if (fm->hasError()) {
             jitFuture->setError(std::make_exception_ptr(*(fm->error())));
           } else {
@@ -278,8 +280,10 @@ class TORCH_API RpcAgent {
   static std::shared_ptr<FutureMessage> toFutureMessage(std::shared_ptr<JitFuture> jitFuture) {
     auto fm = std::make_shared<FutureMessage>();
 
+    std::weak_ptr<JitFuture> wp = jitFuture;
     jitFuture->addCallback(
-        [fm, jitFuture]() mutable {
+        [fm, wp]() mutable {
+          auto jitFuture = wp.lock();
           if (jitFuture->hasError()) {
             fm->setError(jitFuture->tryRetrieveErrorMessage());
           } else {

@@ -844,7 +844,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
   // NB: need to call torch::class_ to register Message in the map returned by
   // c10::getCustomClassTypeMap(). Otherwise, Message cannot be wrapped within
   // an IValue.
-  torch::class_<Message>("rpc", "_Message");
+  static const auto message = torch::class_<Message>("rpc", "_Message");
 
   Py_RETURN_TRUE;
 }
