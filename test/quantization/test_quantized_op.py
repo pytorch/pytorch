@@ -2511,10 +2511,10 @@ class TestDynamicQuantizedLinear(TestCase):
 class TestDynamicQuantizedRNNOp(TestCase):
     """Tests the correctness of the dynamic quantized lstm/gru."""
 
-    def _get_rnn_inputs(self, seq_len, num_batches, input_size, hidden_size, num_directions):
+    def _get_rnn_inputs(self, seq_len, num_batches, input_size, hidden_size, num_directions, reduce_range):
         # For Input (seq_len, batch, input_size)
         X = torch.randn(seq_len, num_batches, input_size)
-        s, z = _calculate_dynamic_qparams(X, torch.quint8, reduce_range=True)
+        s, z = _calculate_dynamic_qparams(X, torch.quint8, reduce_range)
         Xq = torch.quantize_per_tensor(X, s, z, torch.quint8)
 
         # For H and C: (num_layers(1) * num_directions, batch, hidden_size)
@@ -2526,9 +2526,9 @@ class TestDynamicQuantizedRNNOp(TestCase):
             H = torch.zeros(num_directions, num_batches, hidden_size)
             C = torch.zeros(num_directions, num_batches, hidden_size)
 
-        s, z = _calculate_dynamic_qparams(H, torch.quint8, reduce_range=True)
+        s, z = _calculate_dynamic_qparams(H, torch.quint8, reduce_range)
         Hq = torch.quantize_per_tensor(H, s, z, torch.quint8)
-        s, z = _calculate_dynamic_qparams(C, torch.quint8, reduce_range=True)
+        s, z = _calculate_dynamic_qparams(C, torch.quint8, reduce_range)
         Cq = torch.quantize_per_tensor(C, s, z, torch.quint8)
         return Xq, Hq, Cq
 
@@ -2571,7 +2571,11 @@ class TestDynamicQuantizedRNNOp(TestCase):
                 if torch.backends.quantized.engine == 'qnnpack' and dtype == torch.float16:
                     continue
 
-                Xq, Hq, Cq = self._get_rnn_inputs(seq_len, num_batches, input_size, hidden_size, num_directions)
+                if torch.backends.quantized.engine == 'qnnpack':
+                    reduce_range = False
+                else:
+                    reduce_range = True
+                Xq, Hq, Cq = self._get_rnn_inputs(seq_len, num_batches, input_size, hidden_size, num_directions, reduce_range)
                 Wq1, Wq2, b1, b2 = self._get_rnn_weights_and_bias(input_size,
                                                                   hidden_size,
                                                                   num_directions,
@@ -2580,7 +2584,7 @@ class TestDynamicQuantizedRNNOp(TestCase):
                 if dtype == torch.qint8:
                     packed_ih = torch.ops.quantized.linear_prepack(Wq1, b1)
                     packed_hh = torch.ops.quantized.linear_prepack(Wq2, b2)
-                    cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(packed_ih, packed_hh, b1, b2, True)
+                    cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(packed_ih, packed_hh, b1, b2, reduce_range)
                     W_ref1 = Wq1.dequantize()
                     W_ref2 = Wq2.dequantize()
 
@@ -2700,7 +2704,12 @@ class TestDynamicQuantizedRNNOp(TestCase):
                 if torch.backends.quantized.engine == 'qnnpack' and dtype == torch.float16:
                     continue
 
-                Xq, Hq, Cq = self._get_rnn_inputs(seq_len, num_batches, input_size, hidden_size, 1)
+                if torch.backends.quantized.engine == 'qnnpack':
+                    reduce_range = False
+                else:
+                    reduce_range = True
+
+                Xq, Hq, Cq = self._get_rnn_inputs(seq_len, num_batches, input_size, hidden_size, 1, reduce_range)
                 Wq1, Wq2, b1, b2 = self._get_rnn_weights_and_bias(input_size, hidden_size, 1, per_channel_quant, rnn_type)
                 if dtype == torch.qint8:
                     packed_ih = torch.ops.quantized.linear_prepack(Wq1, b1)
@@ -3337,7 +3346,7 @@ class TestQuantizedConv(TestCase):
         self, batch_size, input_channels_per_group, input_feature_map_shape,
         output_channels_per_group, groups, kernels, strides, pads, dilations,
         X_scale, X_zero_point, W_scale, W_zero_point,
-        use_bias, use_channelwise, use_transpose
+        use_bias, use_channelwise, use_transpose, memory_format=torch.contiguous_format
     ):
         assert not (use_channelwise and use_transpose), \
                "Cannot generate channelwise qconv_transpose_tensors "
@@ -3385,6 +3394,7 @@ class TestQuantizedConv(TestCase):
             (batch_size, input_channels,) + input_feature_map_shape,
         )
         X = X_scale * (X_init - X_zero_point).float()
+        X = X.to(memory_format=memory_format)
 
         if use_channelwise:
             W_shape = (-1, 1) + (1,) * len(kernels)
@@ -3417,13 +3427,15 @@ class TestQuantizedConv(TestCase):
         input_channels_per_group, input_feature_map_shape,
         output_channels_per_group, groups, kernels, strides, pads, o_pads,
         dilations, X_scale, X_zero_point, W_scale, W_zero_point, Y_scale,
-        Y_zero_point, use_bias, use_relu, use_channelwise, use_transpose
+        Y_zero_point, use_bias, use_relu, use_channelwise, use_transpose,
+        memory_format=torch.contiguous_format
     ):
         (X, W), (X_q, W_q), bias_float = self._make_qconv_tensors(
             batch_size, input_channels_per_group, input_feature_map_shape,
             output_channels_per_group, groups, kernels,
             strides, pads, dilations, X_scale, X_zero_point, W_scale,
-            W_zero_point, use_bias, use_channelwise, use_transpose)
+            W_zero_point, use_bias, use_channelwise, use_transpose,
+            memory_format)
         # Assign weights
         W = W_q.dequantize()
         X = X_q.dequantize()
@@ -3470,6 +3482,14 @@ class TestQuantizedConv(TestCase):
             err_msg=f'''X: {X_q}, W: {W_q}, b: {bias_float}, strides: {strides},
             pads: {pads}, o_pads: {o_pads}, dilations: {dilations},
             groups: {groups}, y_s: {Y_scale}, y_zp: {Y_zero_point}''')
+
+        # fbgemm for now forces output to be NHWC (channels last) to opportunistically
+        # improve performance
+        if torch.backends.quantized.engine == 'qnnpack':
+            # Make sure memory format is preserved
+            self.assertEqual(
+                X_q.is_contiguous(memory_format=memory_format),
+                Y_q.is_contiguous(memory_format=memory_format))
 
         # Return the quantized data for later reuse
         return X_q, W_q, bias_float
@@ -3543,12 +3563,14 @@ class TestQuantizedConv(TestCase):
             dilations,
             groups,
         )
-        self._test_qconv_impl(
-            qconv, qconv_prepack, conv_op, batch_size,
-            input_channels_per_group, (height, width),
-            output_channels_per_group, groups, kernels, strides, pads, None,
-            dilations, X_scale, X_zero_point, W_scale, W_zero_point,
-            Y_scale, Y_zero_point, use_bias, use_relu, use_channelwise, False)
+        for memory_format in (torch.contiguous_format, torch.channels_last):
+            self._test_qconv_impl(
+                qconv, qconv_prepack, conv_op, batch_size,
+                input_channels_per_group, (height, width),
+                output_channels_per_group, groups, kernels, strides, pads, None,
+                dilations, X_scale, X_zero_point, W_scale, W_zero_point,
+                Y_scale, Y_zero_point, use_bias, use_relu, use_channelwise, False,
+                memory_format)
 
     """Tests the correctness of quantized convolution op."""
     @given(batch_size=st.integers(1, 3),
@@ -4140,6 +4162,7 @@ class TestQuantizedConv(TestCase):
             qconv_prepack, qconv_unpack, inputs,
             (stride_d, stride_h, stride_w), (pad_d, pad_h, pad_w), (o_pad, o_pad, o_pad),
             channelwise)
+
 
 class TestPadding(TestCase):
     @given(batch_size=st.integers(1, 64),

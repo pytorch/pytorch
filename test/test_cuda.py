@@ -16,6 +16,7 @@ import torch.cuda
 import torch.cuda.comm as comm
 from torch import multiprocessing as mp
 from torch.nn.parallel import scatter_gather
+from torch.utils.checkpoint import checkpoint_sequential
 from torch._six import inf, nan, container_abcs
 
 from test_torch import AbstractTestCases
@@ -23,7 +24,7 @@ from test_torch import AbstractTestCases
 from torch.testing._internal.common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
 from torch.testing._internal.common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
-    NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_SANDCASTLE, IS_WINDOWS, \
+    NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_REMOTE_GPU, IS_SANDCASTLE, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
@@ -1818,7 +1819,7 @@ class TestCuda(TestCase):
                     self.assertEqual(b.grad, grad * a)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    @unittest.skipIf(not IS_SANDCASTLE, "Does not work on Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE or IS_REMOTE_GPU, "Does not work on Sandcastle")
     def test_cuda_init_race(self):
         # See https://github.com/pytorch/pytorch/issues/16559
         import subprocess
@@ -2881,6 +2882,17 @@ t2.start()
                 for _ in range(3):
                     out = linear(data)
                 self.assertTrue(first_iter_mem == torch.cuda.memory_allocated())
+
+    def test_autocast_checkpointing(self):
+        model = torch.nn.Sequential(torch.nn.Linear(8, 8),
+                                    torch.nn.Linear(8, 8),
+                                    torch.nn.Linear(8, 8)).cuda()
+        input = torch.rand((8, 8), device="cuda", dtype=torch.float16, requires_grad=True)
+        with torch.cuda.amp.autocast():
+            output = checkpoint_sequential(model, 2, input)
+        self.assertTrue(output.requires_grad)
+        self.assertTrue(output.dtype is torch.float16)
+        output.sum().backward()
 
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")

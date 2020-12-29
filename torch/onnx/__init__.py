@@ -40,7 +40,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
     once in order to get a trace of its execution to be exported;
     at the moment, it supports a limited set of dynamic models (e.g., RNNs.)
 
-    Arguments:
+    Args:
         model (torch.nn.Module): the model to be exported.
         args (tuple of arguments or torch.Tensor, a dictionary consisting of named arguments (optional)): 
             a dictionary to specify the input to the corresponding named parameter: 
