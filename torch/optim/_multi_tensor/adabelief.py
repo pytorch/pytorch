@@ -6,15 +6,15 @@ from collections import defaultdict
 class AdaBelief(Optimizer):
     r"""Implements AdaBelief algorithm.
 
-    It's proposed in 'AdaBelief optimizer, adapting stepsizes by the belief in observed gradients'_.
-    Recommendation on hyper-parameters:
+    It's proposed in `AdaBelief Optimizer: Adapting Stepsizes by the Belief in Observed Gradients`_.
+    Recommendation on hyper-parameters: 
     (1) Epsilon in AdaBelief is different from Adam (typically eps_adabelief = eps_adam*eps_adam) 
-    (2) If SGD is better than Adam  ->  Set a large eps (1e-8)
-    (3) If SGD is worse than Adam   ->  Set a small eps (1e-16) (rectify=True often helps)
-    (4) If AdamW is better than Adam  ->  Turn on “weight_decouple”
+    (2) If SGD is better than Adam, then we recodmmend a large eps (e.g. 1e-8) 
+    (3) If SGD is worse than Adam, then we recommend a small eps (e.g. 1e-16) (rectify=True often helps) 
+    (4) If AdamW is better than Adam, then we recommend “weight_decouple=True” 
     (5) In AdaBelief, "weight_decay" could be very different when "weight_decouple" is set as True vs. False,
-    similar to AdamW vs. Adam.
-    (6) For a full list of recommended hyper-parameters, see https://github.com/juntang-zhuang/Adabelief-Optimizer
+    similar to AdamW vs. Adam. 
+    (6) For a full list of recommended hyper-parameters, see https://github.com/juntang-zhuang/Adabelief-Optimizer 
 
     Arguments:
         params (iterable): iterable of parameters to optimize or dicts defining
@@ -38,7 +38,7 @@ class AdaBelief(Optimizer):
             when variance of gradient is high
             (default:True) 
 
-    .. _AdaBelief optimizer, adapting stepsizes by the belief in observed gradients:
+    .. _AdaBelief Optimizer\: Adapting Stepsizes by the Belief in Observed Gradients:
         https://arxiv.org/abs/2010.07468       
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
