@@ -6753,6 +6753,11 @@ a")
 
         self.checkScript(complicated_arithmetic_operation, ())
 
+    def test_in_operator_with_two_strings(self):
+        def fn() -> bool:
+            return "a" in "abcd"
+        self.checkScript(fn, ())
+
     def test_bitwise_ops(self):
 
         def int_test():

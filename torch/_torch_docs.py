@@ -625,6 +625,11 @@ Args:
 Keyword args:
     {out}
 
+.. note:: Starting in PyTorch 1.8, angle returns pi for negative real numbers,
+          zero for non-negative real numbers, and propagates NaNs. Previously
+          the function would return zero for all real numbers and not propagate
+          floating-point NaNs.
+
 Example::
 
     >>> torch.angle(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))*180/3.14159
@@ -2527,8 +2532,7 @@ Examples::
              [ 1.0500,  0.7336, -0.3836, -1.1015]]])
 """.format(**common_args))
 
-add_docstr(torch.digamma,
-           r"""
+add_docstr(torch.digamma, r"""
 digamma(input, *, out=None) -> Tensor
 
 Computes the logarithmic derivative of the gamma function on `input`.
@@ -2541,6 +2545,11 @@ Args:
 
 Keyword args:
     {out}
+
+.. note::  This function is similar to SciPy's `scipy.special.digamma`.
+
+.. note::  From PyTorch 1.8 onwards, the digamma function returns `-Inf` for `0`. 
+           Previously it returned `NaN` for `0`.
 
 Example::
 
@@ -3106,7 +3115,6 @@ Example::
             [5, 6, 7, 8]])
 """.format(**common_args))
 
-# TODO: see https://github.com/pytorch/pytorch/issues/43667
 add_docstr(torch.gather,
            r"""
 gather(input, dim, index, *, sparse_grad=False, out=None) -> Tensor
@@ -3123,19 +3131,22 @@ If :attr:`input` is an n-dimensional tensor with size
 :math:`(x_0, x_1..., x_{i-1}, x_i, x_{i+1}, ..., x_{n-1})`
 and ``dim = i``, then :attr:`index` must be an :math:`n`-dimensional tensor with
 size :math:`(x_0, x_1, ..., x_{i-1}, y, x_{i+1}, ..., x_{n-1})` where :math:`y \geq 1`
-and :attr:`out` will have the same size as :attr:`index`.
-""" + r"""
+and :attr:`out` will have the same size as :attr:`index`.  Note that ``input``
+and ``index`` do not broadcast against each other.
+
 Args:
     input (Tensor): the source tensor
     dim (int): the axis along which to index
     index (LongTensor): the indices of elements to gather
-    sparse_grad(bool,optional): If ``True``, gradient w.r.t. :attr:`input` will be a sparse tensor.
+
+Keyword arguments:
+    sparse_grad (bool, optional): If ``True``, gradient w.r.t. :attr:`input` will be a sparse tensor.
     out (Tensor, optional): the destination tensor
 
 Example::
 
-    >>> t = torch.tensor([[1,2],[3,4]])
-    >>> torch.gather(t, 1, torch.tensor([[0,0],[1,0]]))
+    >>> t = torch.tensor([[1, 2], [3, 4]])
+    >>> torch.gather(t, 1, torch.tensor([[0, 0], [1, 0]]))
     tensor([[ 1,  1],
             [ 4,  3]])
 """)
@@ -3727,7 +3738,7 @@ Tests if each element of :attr:`input` is infinite
     Complex values are infinite when their real or imaginary part is
     infinite.
 
-    Arguments:
+    Args:
         {input}
 
     Returns:
@@ -3812,7 +3823,7 @@ Returns a new tensor with boolean elements representing if each element is `fini
 Real values are finite when they are not NaN, negative infinity, or infinity.
 Complex values are finite when both their real and imaginary parts are finite.
 
-    Arguments:
+    Args:
         {input}
 
     Returns:
@@ -3865,7 +3876,7 @@ add_docstr(torch.is_floating_point, r"""
 is_floating_point(input) -> (bool)
 
 Returns True if the data type of :attr:`input` is a floating point data type i.e.,
-one of ``torch.float64``, ``torch.float32`` and ``torch.float16``.
+one of ``torch.float64``, ``torch.float32``, ``torch.float16``, and ``torch.bfloat16``.
 
 Args:
     {input}
@@ -4369,6 +4380,48 @@ Args:
 
 Keyword arguments:
     {out}
+""".format(**common_args))
+
+add_docstr(torch.xlogy,
+           r"""
+xlogy(input, other, *, out=None) -> Tensor
+
+Computes ``input * log(other)`` with the following cases.
+
+.. math::
+    \text{out}_{i} = \begin{cases}
+        \text{NaN} & \text{if } \text{other}_{i} = \text{NaN} \\
+        0 & \text{if } \text{input}_{i} = 0.0 \\
+        \text{input}_{i} * \log{(\text{other}_{i})} & \text{otherwise}
+    \end{cases}
+
+Similar to SciPy's `scipy.special.xlogy`.
+
+""" + r"""
+
+Args:
+    input (Number or Tensor)
+    other (Number or Tensor)
+
+.. note:: At least one of :attr:`input` or :attr:`other` must be a tensor.
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> x = torch.zeros(5,)
+    >>> y = torch.tensor([-1, 0, 1, float('inf'), float('nan')])
+    >>> torch.xlogy(x, y)
+    tensor([0., 0., 0., 0., nan])
+    >>> x = torch.tensor([1, 2, 3])
+    >>> y = torch.tensor([3, 2, 1])
+    >>> torch.xlogy(x, y)
+    tensor([1.0986, 1.3863, 0.0000])
+    >>> torch.xlogy(x, 4)
+    tensor([1.3863, 2.7726, 4.1589])
+    >>> torch.xlogy(2, y)
+    tensor([2.1972, 1.3863, 0.0000])
 """.format(**common_args))
 
 add_docstr(torch.logical_and,
@@ -7290,6 +7343,20 @@ Example::
     >>> torch.rsqrt(a)
     tensor([    nan,  1.8351,  0.8053,     nan])
 """.format(**common_args))
+
+add_docstr(torch.scatter,
+           r"""
+scatter(input, dim, index, src) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.scatter_`
+""")
+
+add_docstr(torch.scatter_add,
+           r"""
+scatter_add(input, dim, index, src) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.scatter_add_`
+""")
 
 add_docstr(torch.set_flush_denormal,
            r"""
