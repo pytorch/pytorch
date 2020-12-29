@@ -32,6 +32,7 @@ allow_list = [
     # Internal, profiler-specific ops
     ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
     ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
+    ("aten::_qr_helper", datetime.date(2021, 1, 31)),
     ("aten::fft", datetime.date(2021, 1, 31)),
     ("aten::ifft", datetime.date(2021, 1, 31)),
     ("aten::irfft", datetime.date(2021, 1, 31)),

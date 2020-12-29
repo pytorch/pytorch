@@ -2548,7 +2548,7 @@ Keyword args:
 
 .. note::  This function is similar to SciPy's `scipy.special.digamma`.
 
-.. note::  From PyTorch 1.8 onwards, the digamma function returns `-Inf` for `0`. 
+.. note::  From PyTorch 1.8 onwards, the digamma function returns `-Inf` for `0`.
            Previously it returned `NaN` for `0`.
 
 Example::
@@ -3127,12 +3127,10 @@ For a 3-D tensor the output is specified by::
     out[i][j][k] = input[i][index[i][j][k]][k]  # if dim == 1
     out[i][j][k] = input[i][j][index[i][j][k]]  # if dim == 2
 
-If :attr:`input` is an n-dimensional tensor with size
-:math:`(x_0, x_1..., x_{i-1}, x_i, x_{i+1}, ..., x_{n-1})`
-and ``dim = i``, then :attr:`index` must be an :math:`n`-dimensional tensor with
-size :math:`(x_0, x_1, ..., x_{i-1}, y, x_{i+1}, ..., x_{n-1})` where :math:`y \geq 1`
-and :attr:`out` will have the same size as :attr:`index`.  Note that ``input``
-and ``index`` do not broadcast against each other.
+:attr:`input` and :attr:`index` must have the same number of dimensions.
+It is also required that ``index.size(d) <= input.size(d)`` for all
+dimensions ``d != dim``.  :attr:`out` will have the same shape as :attr:`index`.
+Note that ``input`` and ``index`` do not broadcast against each other.
 
 Args:
     input (Tensor): the source tensor
@@ -3738,7 +3736,7 @@ Tests if each element of :attr:`input` is infinite
     Complex values are infinite when their real or imaginary part is
     infinite.
 
-    Arguments:
+    Args:
         {input}
 
     Returns:
@@ -3823,7 +3821,7 @@ Returns a new tensor with boolean elements representing if each element is `fini
 Real values are finite when they are not NaN, negative infinity, or infinity.
 Complex values are finite when both their real and imaginary parts are finite.
 
-    Arguments:
+    Args:
         {input}
 
     Returns:
@@ -6678,18 +6676,30 @@ with :math:`Q` being an orthogonal matrix or batch of orthogonal matrices and
 If :attr:`some` is ``True``, then this function returns the thin (reduced) QR factorization.
 Otherwise, if :attr:`some` is ``False``, this function returns the complete QR factorization.
 
+.. warning:: ``torch.qr`` is deprecated. Please use ``torch.linalg.`` :meth:`~torch.linalg.qr`
+             instead, which provides a better compatibility with
+             ``numpy.linalg.qr``.
+
+             **Differences with** ``torch.linalg.`` :meth:`~torch.linalg.qr`:
+
+             * ``torch.linalg.qr`` takes a string parameter ``mode`` instead of ``some``:
+
+               - ``some=True`` is equivalent of ``mode='reduced'``: both are the
+                 default
+
+               - ``some=False`` is equivalent of ``mode='complete'``.
+
+
 .. warning::
           If you plan to backpropagate through QR, note that the current backward implementation
           is only well-defined when the first :math:`\min(input.size(-1), input.size(-2))`
           columns of :attr:`input` are linearly independent.
           This behavior will propably change once QR supports pivoting.
 
-.. note:: precision may be lost if the magnitudes of the elements of :attr:`input`
-          are large
-
-.. note:: While it should always give you a valid decomposition, it may not
-          give you the same one across platforms - it will depend on your
-          LAPACK implementation.
+.. note:: This function uses LAPACK for CPU inputs and MAGMA for CUDA inputs,
+          and may produce different (valid) decompositions on different device types
+          and different platforms, depending on the precise version of the
+          underlying library.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
