@@ -13,32 +13,6 @@ for block_listed_op in block_listed_operators:
     vars()[block_listed_op] = _block_list_in_opset(block_listed_op)
 
 
-def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
-    symbolic = torch.onnx.symbolic_opset9._reduce_op_symbolic(onnx_op, allow_multi_dim_support=allow_multi_dim_support)
-
-    @torch.onnx.symbolic_opset9.overload_by_arg_count
-    def reduce(g, *args, **kwargs):
-        @parse_args('v', 'none')
-        def reduce_nodim(g, self, dtype):
-            if dtype.node().kind() != 'prim::Constant':
-                return _unimplemented(name, "dtype")
-            return symbolic(g, self)
-
-        dim_desc = 'is' if allow_multi_dim_support else 'i'
-
-        @parse_args('v', dim_desc, 'i', 'none')
-        def reduce_dim(g, self, dim, keepdim, dtype):
-            if dtype.node().kind() != 'prim::Constant':
-                return _unimplemented(name, "dtype")
-            return symbolic(g, self, dim, keepdim)
-        return reduce_nodim, reduce_dim
-    return reduce
-
-
-sum = _reduce_with_dtype('ReduceSum', 'sum')
-mean = _reduce_with_dtype('ReduceMean', 'mean')
-
-
 @parse_args('v', 'i', 'none')
 def softmax(g, input, dim, dtype=None):
     softmax = g.op('Softmax', input, axis_i=dim)
