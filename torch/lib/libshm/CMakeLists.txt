@@ -41,7 +41,9 @@ set_target_properties(torch_shm_manager PROPERTIES INSTALL_RPATH "${_rpath_porta
 set_target_properties(shm PROPERTIES
   PREFIX "lib"
   IMPORT_PREFIX "lib")
-target_link_libraries(shm torch c10)
+if(NOT("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU"))
+  target_link_libraries(shm torch c10)
+endif()
 
 if(UNIX AND NOT APPLE)
   include(CheckLibraryExists)
