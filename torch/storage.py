@@ -158,7 +158,10 @@ class _StorageBase(object):
 
 
 def _load_from_bytes(b):
-    return torch.load(io.BytesIO(b))
+    if torch.cuda.is_available():
+        return torch.load(io.BytesIO(b))
+    else:
+        return torch.load(io.BytesIO(b), map_location=torch.device('cpu'))
 
 
 _StorageBase.type = _type  # type: ignore[assignment]
