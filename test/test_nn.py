@@ -7607,11 +7607,12 @@ class TestNN(NNTestCase):
     # https://github.com/pytorch/pytorch/issues/27692 reports
     # that l1_loss get a wrong result for big batch size
     def test_l1_loss_correct(self):
-        for N in range(1, 50, 10):
-            input = torch.rand(N, 3, 1024, 1024)
-            self.assertEqual(
-                torch.nn.L1Loss()(input, torch.zeros_like(input)),
-                input.abs().mean())
+        for dtype in [torch.float, torch.cfloat]:
+            for N in range(1, 50, 10):
+                input = torch.rand(N, 3, 1024, 1024, dtype=dtype)
+                self.assertEqual(
+                    torch.nn.L1Loss()(input, torch.zeros_like(input)),
+                    input.abs().mean())
 
     def test_smoothl1loss_negative_beta_not_supported(self):
         with self.assertRaises(RuntimeError):
