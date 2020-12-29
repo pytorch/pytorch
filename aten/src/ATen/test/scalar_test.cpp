@@ -14,7 +14,6 @@
 
 using std::cout;
 using namespace at;
-using namespace c10;
 
 constexpr auto Float = ScalarType::Float;
 
