@@ -99,7 +99,7 @@ class C10_API Scalar {
     } else if (isIntegral(/*includeBool=*/false)) {
       return v.i == num;
     } else {
-      // boolean scalar
+      // boolean scalar does not equal to a non boolean value
       return false;
     }
   }

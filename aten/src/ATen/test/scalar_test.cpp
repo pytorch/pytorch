@@ -14,6 +14,7 @@
 
 using std::cout;
 using namespace at;
+using namespace c10;
 
 constexpr auto Float = ScalarType::Float;
 
@@ -140,11 +141,21 @@ TEST(TestScalar, TestConj) {
 }
 
 TEST(TestScalar, TestEqual) {
-  ASSERT_EQ(Scalar(1.0).equal(false), false);
-  ASSERT_EQ(Scalar(1.0).equal(true), false);
-  ASSERT_EQ(Scalar(true).equal(1.0), false);
-  ASSERT_EQ(Scalar(c10::complex<double>{2.0, 0}).equal(2.0), true);
-  ASSERT_EQ(Scalar(2.0).equal(3.0), false);
-  // this fails
-  // ASSERT_EQ(Scalar(2).equal(2), true);
+  ASSERT_FALSE(Scalar(1.0).equal(false));
+  ASSERT_FALSE(Scalar(1.0).equal(true));
+  ASSERT_FALSE(Scalar(true).equal(1.0));
+  ASSERT_TRUE(Scalar(true).equal(true));
+
+  ASSERT_TRUE(Scalar(c10::complex<double>{2.0, 5.0}).equal(c10::complex<double>{2.0, 5.0}));
+  ASSERT_TRUE(Scalar(c10::complex<double>{2.0, 0}).equal(2.0));
+  ASSERT_TRUE(Scalar(c10::complex<double>{2.0, 0}).equal(2));
+
+  ASSERT_TRUE(Scalar(2.0).equal(c10::complex<double>{2.0, 0.0}));
+  ASSERT_FALSE(Scalar(2.0).equal(c10::complex<double>{2.0, 4.0}));
+  ASSERT_FALSE(Scalar(2.0).equal(3.0));
+  ASSERT_TRUE(Scalar(2.0).equal(2));
+
+  ASSERT_TRUE(Scalar(2).equal(c10::complex<double>{2.0, 0}));
+  ASSERT_TRUE(Scalar(2).equal(2));
+  ASSERT_TRUE(Scalar(2).equal(2.0));
 }

@@ -444,6 +444,16 @@ constexpr bool operator==(const T& lhs, const complex<T>& rhs) {
 }
 
 template<typename T>
+constexpr bool operator==(const complex<T>& lhs, const int& rhs) {
+  return (lhs.real() == rhs) && (lhs.imag() == T());
+}
+
+template<typename T>
+constexpr bool operator==(const int& lhs, const complex<T>& rhs) {
+  return (lhs == rhs.real()) && (T() == rhs.imag());
+}
+
+template<typename T>
 constexpr bool operator!=(const complex<T>& lhs, const complex<T>& rhs) {
   return !(lhs == rhs);
 }
