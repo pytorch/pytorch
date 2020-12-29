@@ -15,7 +15,6 @@ import torch.distributed as dist
 if dist.is_available():
     from torch.distributed.distributed_c10d import _get_default_group
     from torch.distributed.distributed_c10d import ReduceOp
-    from torch.distributed.pipeline.sync import Pipe
 from ..modules import Module
 from .replicate import replicate
 from .scatter_gather import scatter_kwargs, gather, is_namedtuple
@@ -698,7 +697,8 @@ class DistributedDataParallel(Module):
             # this forward pass, to ensure we short circuit reduction for any
             # unused parameters. Only if `find_unused_parameters` is set.
             if self.find_unused_parameters:
-                if isinstance(self.module, Pipe):
+                if (torch.distributed.rpc.is_available() and
+                        isinstance(self.module, torch.distributed.pipeline.sync.Pipe)):
                     # Unwrap RRef to get real output for Pipe.
                     # TODO: Needs to be reworked for cross host pipelining.
                     self.reducer.prepare_for_backward(list(_find_tensors(output.local_value())))
@@ -1005,7 +1005,7 @@ class DistributedDataParallel(Module):
         and gradient compression which involve different communication strategies for
         parameter syncs while running Distributed DataParallel training.
 
-        Arguments:
+        Args:
             state (object): state is passed to the hook and can be used to maintain
                             and update any state information that users would like to
                             maintain as part of the training process. Examples: error
@@ -1090,7 +1090,7 @@ class DistributedDataParallel(Module):
         The built-in hooks aim to provide efficient C++ implementations for certain hooks,
         which might not be as efficient if implemented in Python using a Python communication hook.
 
-        Arguments:
+        Args:
             comm_hook_type (dist.BuiltinCommHookType): type of communication hook, such as
             ALLREDUCE, FP16_COMPRESS, etc.
 
