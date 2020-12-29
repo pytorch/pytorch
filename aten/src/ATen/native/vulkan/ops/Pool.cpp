@@ -10,6 +10,22 @@ namespace {
 
 using namespace api::utils;
 
+struct Pool_Block {
+  uvec3 extents;
+  int32_t range;
+  ivec2 iextents;
+  ivec2 stride;
+  ivec2 padding;
+  ivec2 kernel;
+};
+
+struct Pool_Block0 {
+  uvec3 size;
+  uint32_t _;
+  vec2 stride;
+  vec2 kernel;
+};
+
 Tensor adaptive_avg_pool2d(
     const at::Tensor& self_arg,
     const IntArrayRef output_size) {
@@ -45,12 +61,7 @@ Tensor adaptive_avg_pool2d(
         static_cast<float>(v_self_size.data[1u]) / v_output_size.data[1u],
       };
 
-      const struct {
-        uvec3 size;
-        uint32_t _;
-        vec2 stride;
-        vec2 kernel;
-      } block {
+      const Pool_Block0 block {
         v_output.extents(),
         0u,
         stride,
@@ -177,14 +188,7 @@ Tensor avg_pool2d(
     using namespace utils;
 
     if (v_self.has_image()) {
-      const struct {
-        uvec3 extents;
-        int32_t range;
-        ivec2 iextents;
-        ivec2 stride;
-        ivec2 padding;
-        ivec2 kernel;
-      } block {
+      const Pool_Block block {
         v_output.extents(),
         safe_downcast<int32_t>(
             kernel[Layout::Parameter::width] *

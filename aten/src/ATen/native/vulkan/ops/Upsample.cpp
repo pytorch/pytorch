@@ -10,6 +10,13 @@ namespace {
 
 using namespace api::utils;
 
+struct Upsample_Block {
+  uvec3 extents;
+  uint32_t _;
+  ivec2 iextents;
+  vec2 scale;
+};
+
 Tensor upsample_nearest2d(
     const Tensor& input_arg,
     const IntArrayRef output_sizes,
@@ -40,12 +47,7 @@ Tensor upsample_nearest2d(
   command_buffer.begin();
   {
     if (v_input.has_image()) {
-      const struct {
-        uvec3 extents;
-        uint32_t _;
-        ivec2 iextents;
-        vec2 scale;
-      } block {
+      const Upsample_Block block {
         v_output.extents(),
         0u,
         {

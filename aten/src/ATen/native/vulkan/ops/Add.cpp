@@ -9,6 +9,11 @@ namespace {
 
 using namespace api::utils;
 
+struct Add_Block {
+  uvec3 extents;
+  float other;
+};
+
 Tensor add_scalar(
     const Tensor& self_arg,
     const Scalar other,
@@ -28,10 +33,7 @@ Tensor add_scalar(
   command_buffer.begin();
   {
     if (v_output.has_image() && v_self.has_image()) {
-      const struct {
-        uvec3 extents;
-        float other;
-      } block {
+      const Add_Block block {
         v_self.extents(),
         other.to<float>() * alpha.to<float>(),
       };
@@ -86,10 +88,7 @@ Tensor& add_scalar_(
   command_buffer.begin();
   {
     if (v_self.has_image()) {
-      const struct {
-        uvec3 extents;
-        float other;
-      } block {
+      const Add_Block block {
         v_self.extents(),
         other.to<float>() * alpha.to<float>(),
       };
@@ -144,10 +143,7 @@ Tensor add_tensor(
   command_buffer.begin();
   {
     if (v_self.has_image() && v_other.has_image()) {
-      const struct {
-        uvec3 extents;
-        float alpha;
-      } block {
+      const Add_Block block {
         v_output.extents(),
         alpha.to<float>(),
       };
@@ -211,10 +207,7 @@ Tensor& add_tensor_(
   command_buffer.begin();
   {
     if (v_self.has_image() && v_other.has_image() && !self.is_same(other)) {
-      const struct {
-        uvec3 extents;
-        float alpha;
-      } block {
+      const Add_Block block {
         v_self.extents(),
         alpha.to<float>(),
       };

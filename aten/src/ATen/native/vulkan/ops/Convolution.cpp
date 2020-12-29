@@ -12,6 +12,42 @@ namespace {
 
 using namespace api::utils;
 
+struct Conv2d_Block {
+      int32_t kernel_x, kernel_y;
+      int32_t stride_x, stride_y;
+      int32_t padding_x, padding_y;
+      int32_t dilate_x, dilate_y;
+      float clamp_x, clamp_y;
+      int32_t src_filter_w, src_filter_h;
+};
+
+struct Conv2d_Block0 {
+      int32_t kernel_ic, kernel_oc;
+      int32_t stride_x, stride_y;
+      int32_t padding_x, padding_y;
+      float clamp_x, clamp_y;
+};
+
+struct Conv2d_Block1 {
+      int32_t kernel_x, kernel_y, kernel_ic, kernel_oc;
+      int32_t stride_x, stride_y;
+      int32_t padding_x, padding_y;
+      int32_t dilate_x, dilate_y;
+      float clamp_x, clamp_y;
+      int32_t src_filter_w, src_filter_h, src_filter_w4;
+};
+
+struct Conv2d_Block2 {
+      int32_t padding_x, padding_y;
+      int32_t kernel_x, kernel_y;
+      int32_t stride_x, stride_y;
+      int32_t dilate_x, dilate_y;
+      int32_t outputSize[4];
+      int32_t inputSize[4];
+      float outputMin;
+      float outputMax;
+};
+
 inline bool is_depthwise(
     const IntArrayRef filter,
     const int64_t groups) {
@@ -447,14 +483,7 @@ void conv2d_depthwise(
     const float output_min,
     const float output_max) {
   if (v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
-    const struct {
-      int32_t kernel_x, kernel_y;
-      int32_t stride_x, stride_y;
-      int32_t padding_x, padding_y;
-      int32_t dilate_x, dilate_y;
-      float clamp_x, clamp_y;
-      int32_t src_filter_w, src_filter_h;
-    } block {
+    const Conv2d_Block block {
       safe_downcast<int32_t>(filter[Layout::Filter::width]),
       safe_downcast<int32_t>(filter[Layout::Filter::height]),
       safe_downcast<int32_t>(stride[Layout::Parameter::width]),
@@ -524,12 +553,7 @@ void conv2d_pointwise(
     const float output_max) {
   if (v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
 
-    const struct {
-      int32_t kernel_ic, kernel_oc;
-      int32_t stride_x, stride_y;
-      int32_t padding_x, padding_y;
-      float clamp_x, clamp_y;
-    } block {
+    const Conv2d_Block0 block {
       safe_downcast<int32_t>(filter[Layout::Filter::input]),
       safe_downcast<int32_t>(filter[Layout::Filter::output]),
       safe_downcast<int32_t>(stride[Layout::Parameter::width]),
@@ -596,14 +620,8 @@ void conv2d(
     const float output_min,
     const float output_max) {
   if (v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
-    const struct {
-      int32_t kernel_x, kernel_y, kernel_ic, kernel_oc;
-      int32_t stride_x, stride_y;
-      int32_t padding_x, padding_y;
-      int32_t dilate_x, dilate_y;
-      float clamp_x, clamp_y;
-      int32_t src_filter_w, src_filter_h, src_filter_w4;
-    } block {
+    const int64_t stacks_per_tower = v_weight.sizes()[0];
+    const Conv2d_Block1 block {
       safe_downcast<int32_t>(filter[Layout::Filter::width]),
       safe_downcast<int32_t>(filter[Layout::Filter::height]),
       safe_downcast<int32_t>(filter[Layout::Filter::input]),
@@ -688,7 +706,7 @@ Tensor convolution(
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl("convolution_overrideable", convolution);
+  m.impl_UNBOXED("convolution_overrideable", convolution);
 }
 
 #endif /* USE_VULKAN_API */
@@ -808,16 +826,7 @@ void conv2d_old(
     const int32_t OC_4 = v_output.extents().data[2];
     const int32_t OC = 4 * OC_4;
 
-    const struct {
-      int32_t padding_x, padding_y;
-      int32_t kernel_x, kernel_y;
-      int32_t stride_x, stride_y;
-      int32_t dilate_x, dilate_y;
-      int32_t outputSize[4];
-      int32_t inputSize[4];
-      float outputMin;
-      float outputMax;
-    } block {
+    const Conv2d_Block2 block {
       safe_downcast<int32_t>(padding[Layout::Parameter::width]),
       safe_downcast<int32_t>(padding[Layout::Parameter::height]),
       safe_downcast<int32_t>(filter[Layout::Filter::width]),

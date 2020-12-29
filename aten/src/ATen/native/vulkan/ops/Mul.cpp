@@ -9,6 +9,11 @@ namespace {
 
 using namespace api::utils;
 
+struct Mul_Block {
+  uvec3 extents;
+  float other;
+};
+
 Tensor mul_scalar(
     const Tensor& self_arg,
     const Scalar other) {
@@ -27,10 +32,7 @@ Tensor mul_scalar(
   command_buffer.begin();
   {
     if (v_output.has_image() && v_self.has_image()) {
-      const struct {
-        uvec3 extents;
-        float other;
-      } block {
+      const Mul_Block block {
         v_output.extents(),
         other.to<float>(),
       };
@@ -84,10 +86,7 @@ Tensor& mul_scalar_(
   command_buffer.begin();
   {
     if (v_self.has_image()) {
-      const struct {
-        uvec3 extents;
-        float other;
-      } block {
+      const Mul_Block block {
         v_self.extents(),
         other.to<float>(),
       };

@@ -9,6 +9,17 @@ namespace {
 
 using namespace api::utils;
 
+struct Mm_Block0 {
+  uvec3 size;
+  int32_t K;
+  vec2 multiplier;
+};
+
+struct Mm_Block {
+  uvec3 size;
+  int32_t K;
+};
+
 vTensor pack_weights(
   api::Resource::Pool& pool,
   const Tensor& weight_arg) {
@@ -166,10 +177,7 @@ Tensor mm(
   command_buffer.begin();
   {
     if (v_mat1.has_image() && v_mat2.has_image()) {
-      const struct {
-        uvec3 size;
-        int32_t K;
-      } block {
+      const Mm_Block block {
         v_output.extents(),
         safe_downcast<int32_t>(v_mat1_sizes[Layout::Parameter::width]),
       };
@@ -288,11 +296,7 @@ Tensor LinearOpContext::run(
         v_input.has_image() &&
         packed_.v_weight.has_image() &&
         packed_.v_bias.has_image()) {
-      const struct {
-        uvec3 size;
-        int32_t K;
-        vec2 multiplier;
-      } block {
+      const Mm_Block0 block {
           v_output.extents(),
           safe_downcast<int32_t>(v_input.sizes()[Layout::Parameter::width]),
           {

@@ -8,6 +8,12 @@ namespace {
 
 using namespace api::utils;
 
+struct Tensor_Block {
+  uvec3 extents;
+  uint32_t block;
+  uvec4 offset;
+};
+
 VkFormat vk_format(const caffe2::TypeMeta dtype) {
   switch (c10::typeMetaToScalarType(dtype)) {
     case kFloat:
@@ -847,11 +853,7 @@ void vTensor::View::CMD::copy_buffer_to_image(
   const uvec3 extents = view_.extents();
   const uint32_t plane = extents.data[0u] * extents.data[1u];
 
-  const struct {
-    uvec3 extents;
-    uint32_t block;
-    uvec4 offset;
-  } block {
+  const Tensor_Block block {
     extents,
     4u * plane,
     {
@@ -904,11 +906,7 @@ void vTensor::View::CMD::copy_image_to_buffer(
   const uvec3 extents = view_.extents();
   const uint32_t plane = extents.data[0u] * extents.data[1u];
 
-  const struct {
-    uvec3 extents;
-    uint32_t block;
-    uvec4 offset;
-  } block {
+  const Tensor_Block block {
     extents,
     4u * plane,
     {

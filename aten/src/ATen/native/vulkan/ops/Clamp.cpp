@@ -9,6 +9,12 @@ namespace {
 
 using namespace api::utils;
 
+struct Clamp_Block final {
+  uvec3 extents;
+  uint32_t _;
+  vec2 clamp;
+};
+
 Tensor clamp(
     const Tensor& self_arg,
     const c10::optional<Scalar> min,
@@ -32,11 +38,7 @@ Tensor clamp(
   command_buffer.begin();
   {
     if (v_output.has_image() && v_self.has_image()) {
-      const struct {
-        uvec3 extents;
-        uint32_t _;
-        vec2 clamp;
-      } block {
+      const Clamp_Block block {
         v_output.extents(),
         0u,
         {
@@ -99,11 +101,7 @@ Tensor& clamp_(
   command_buffer.begin();
   {
     if (v_self.has_image()) {
-      const struct {
-        uvec3 extents;
-        uint32_t _;
-        vec2 clamp;
-      } block {
+      const Clamp_Block block {
         v_self.extents(),
         0u,
         {

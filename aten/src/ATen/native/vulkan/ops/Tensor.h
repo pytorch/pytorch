@@ -235,6 +235,7 @@ class vTensor final {
 
  private:
   class View final {
+   friend class vTensor;
    public:
     View();
     View(
@@ -280,6 +281,8 @@ class vTensor final {
     class CMD;
 
     class State final {
+     friend class View;
+
      public:
       State();
       State(const api::Adapter*, IntArrayRef);

@@ -10,6 +10,12 @@ namespace {
 
 using namespace api::utils;
 
+struct Mean_Block {
+  uvec3 extents;
+  int32_t range;
+  ivec2 iextents;
+};
+
 Tensor mean(
     const at::Tensor& input_arg,
     const IntArrayRef dim,
@@ -56,11 +62,7 @@ Tensor mean(
   command_buffer.begin();
   {
     if (v_input.has_image()) {
-      const struct {
-        uvec3 extents;
-        int32_t range;
-        ivec2 iextents;
-      } block {
+      const Mean_Block block {
         v_output.extents(),
         safe_downcast<int32_t>(
             v_input_sizes[Layout::Activation4D::width] *
