@@ -172,7 +172,7 @@ class EventList(list):
     def table(self, sort_by=None, row_limit=100, max_src_column_width=75, header=None, top_level_events_only=False):
         """Prints an EventList as a nicely formatted table.
 
-        Arguments:
+        Args:
             sort_by (str, optional): Attribute used to sort entries. By default
                 they are printed in the same order as they were registered.
                 Valid keys include: ``cpu_time``, ``cuda_time``, ``cpu_time_total``,
@@ -203,7 +203,7 @@ class EventList(list):
 
         The checkpoint can be later loaded and inspected under ``chrome://tracing`` URL.
 
-        Arguments:
+        Args:
             path (str): Path where the trace will be written.
         """
         import os
@@ -266,10 +266,29 @@ class EventList(list):
             f.truncate()
             f.write("]")
 
+    def supported_export_stacks_metrics(self):
+        return ["self_cpu_time_total", "self_cuda_time_total"]
+
+    def export_stacks(self, path: str, metric: str):
+        if metric not in self.supported_export_stacks_metrics():
+            raise ValueError("metric should be one of: " + str(self.supported_export_stacks_metrics()))
+        translate_table = str.maketrans(" ;\t\n", "____")
+        with open(path, 'w') as f:
+            for evt in self:
+                if evt.stack and len(evt.stack) > 0:
+                    metric_value = getattr(evt, metric)
+                    if int(metric_value) > 0:
+                        stack_str = ""
+                        for entry in reversed(evt.stack):
+                            stack_str += entry.translate(translate_table)
+                            stack_str += ";"
+                        stack_str = stack_str[:-1] + " " + str(int(metric_value))
+                        f.write(stack_str + "\n")
+
     def key_averages(self, group_by_input_shapes=False, group_by_stack_n=0):
         """Averages all function events over their keys.
 
-        Arguments:
+        Args:
             group_by_input_shapes: group entries by
             (event name, input shapes) rather than just event name.
             This is useful to see which input shapes contribute to the runtime
@@ -326,7 +345,7 @@ class profile(object):
     only report runtime of PyTorch functions.
     Note: profiler is thread local and is automatically propagated into the async tasks
 
-    Arguments:
+    Args:
         enabled (bool, optional): Setting this to False makes this context manager a no-op.
             Default: ``True``.
 
@@ -464,6 +483,15 @@ class profile(object):
             torch.autograd._enable_profiler_legacy(self.config())
         return self
 
+    def _prepare_kineto_trace(self):
+        assert self.kineto_activities
+        self.entered = True
+        torch.autograd._prepare_profiler(self.config(), self.kineto_activities)
+
+    def _start_kineto_trace(self):
+        assert self.kineto_activities
+        torch.autograd._enable_profiler(self.config(), self.kineto_activities)
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
@@ -513,15 +541,21 @@ class profile(object):
             return self.function_events.export_chrome_trace(path)
     export_chrome_trace.__doc__ = EventList.export_chrome_trace.__doc__
 
+    def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
+        self._check_finish()
+        assert self.function_events is not None, "Expected profiling results"
+        assert self.with_stack, "export_stacks() requires with_stack=True"
+        return self.function_events.export_stacks(path, metric)
+
     def key_averages(self, group_by_input_shape=False, group_by_stack_n=0):
         self._check_finish()
-        assert self.function_events is not None
+        assert self.function_events is not None, "Expected profiling results"
         return self.function_events.key_averages(group_by_input_shape, group_by_stack_n)
     key_averages.__doc__ = EventList.key_averages.__doc__
 
     def total_average(self):
         self._check_finish()
-        assert self.function_events is not None
+        assert self.function_events is not None, "Expected profiling results"
         return self.function_events.total_average()
     total_average.__doc__ = EventList.total_average.__doc__
 
@@ -540,7 +574,7 @@ class record_function(ContextDecorator):
     Python code (or function) when running autograd profiler. It is
     useful when tracing the code profile.
 
-    Arguments:
+    Args:
         name (str): Label assigned to the block of code.
         node_id (int): ID of node, for distributed profiling. Unset in
         non-distributed cases.
@@ -594,7 +628,7 @@ class record_function(ContextDecorator):
         once to attach the callback onto the future, and will throw if called multiple
         times.
 
-        Arguments:
+        Args:
             fut: (torch._C.Future): future for which to schedule
             callback for.
 
@@ -632,7 +666,7 @@ class emit_nvtx(object):
         This context manager should not be called recursively, i.e. at most one
         instance should be enabled at any given time.
 
-    Arguments:
+    Args:
         enabled (bool, optional, default=True): Setting ``enabled=False`` makes this context manager a no-op.
             Default: ``True``.
         record_shapes (bool, optional, default=False): If ``record_shapes=True``, the nvtx range wrapping
@@ -727,7 +761,7 @@ class emit_nvtx(object):
 def load_nvprof(path):
     """Opens an nvprof trace file and parses autograd annotations.
 
-    Arguments:
+    Args:
         path (str): path to nvprof trace
     """
     return EventList(parse_nvprof_trace(path))

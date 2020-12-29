@@ -192,7 +192,7 @@ class Tensor(torch._C._TensorBase):
             in a user-specified CUDA stream context, see
             :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
 
-        Arguments:
+        Args:
             gradient (Tensor or None): Gradient w.r.t. the
                 tensor. If it is a tensor, it will be automatically converted
                 to a Tensor that does not require grad unless ``create_graph`` is True.
@@ -510,10 +510,7 @@ class Tensor(torch._C._TensorBase):
     def __rdiv__(self, other):
         if has_torch_function_variadic(self, other):
             return handle_torch_function(Tensor.__rdiv__, (self, other), self, other)
-        if self.dtype.is_floating_point or self.dtype.is_complex:
-            return self.reciprocal() * other
-        else:
-            return self.to(torch.get_default_dtype()).reciprocal() * other
+        return self.reciprocal() * other
 
     __rtruediv__ = __rdiv__
     __itruediv__ = _C._TensorBase.__idiv__
@@ -618,7 +615,7 @@ class Tensor(torch._C._TensorBase):
     def __contains__(self, element):
         r"""Check if `element` is present in tensor
 
-        Arguments:
+        Args:
             element (Tensor or scalar): element to be checked
                 for presence in current tensor"
         """
@@ -715,7 +712,7 @@ class Tensor(torch._C._TensorBase):
         Python 2 does not support Ellipsis but one may use a string literal
         instead (``'...'``).
 
-        Arguments:
+        Args:
             names (iterable of str): The desired names of the output tensor. May
                 contain up to one Ellipsis.
 
@@ -759,7 +756,7 @@ class Tensor(torch._C._TensorBase):
         Python 2 does not support Ellipsis but one may use a string literal
         instead (``'...'``).
 
-        Arguments:
+        Args:
             names (iterable of str): The desired dimension ordering of the
                 output tensor. May contain up to one Ellipsis that is expanded
                 to all unmentioned dim names of :attr:`self`.
@@ -794,7 +791,7 @@ class Tensor(torch._C._TensorBase):
           if :attr:`self` is a `NamedTensor`. The total number of elements in sizes must match the number
           of elements in the original dim being unflattened.
 
-        Arguments:
+        Args:
             dim (Union[int, str]): Dimension to unflatten
             sizes (Union[Tuple[int] or torch.Size, Tuple[Tuple[str, int]]]): New shape of the unflattened dimension
 

@@ -54,20 +54,24 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     case prim::CreateObject: {
       createObject(stack, n->output()->type()->expect<ClassType>());
     } break;
+    case prim::GetAttr: {
+      auto attr = pop(stack).toObject()->getAttr(n->s(attr::name));
+      push(stack, attr);
+    } break;
     case prim::isinstance: {
       isinstance(stack, n->tys(attr::types));
     } break;
     default: {
-      const auto& the_operator = n->getOperator();
-      if (the_operator.schema().is_vararg()) {
+      const auto maybe_schema = n->maybeSchema();
+      if (maybe_schema && maybe_schema->is_vararg()) {
         // vararg schemas require the number of inputs at the top of the stack
         // but this is broken in other places in constant prop, so disable it
         // for now
         return c10::nullopt;
       }
 
-      auto op = n->getOperation();
       try {
+        auto op = n->getOperation();
         op(&stack);
       } catch (...) {
         return c10::nullopt;
