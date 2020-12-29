@@ -137,7 +137,7 @@ def _get_name(func: Callable):
     # Not all callables have __name__, in fact, only static functions/methods do.
     # A callable created via functools.partial or an nn.Module, to name some
     # examples, don't have a __name__.
-    fn_name = repr(func)
+    return repr(func)
 
 # vmap(func)(inputs) wraps all Tensor inputs to be batched in BatchedTensors,
 # sends those into func, and then unwraps the output BatchedTensors. Operations
