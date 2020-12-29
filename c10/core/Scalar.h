@@ -90,14 +90,29 @@ class C10_API Scalar {
   Scalar conj() const;
   Scalar log() const;
 
-  template<typename T>
+  template<typename T, typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
   bool equal(T num) const {
     if (isComplex()) {
-      return v.z == num;
+      auto val = v.z;
+      return (val.real() == num) && (val.imag() == T());
     } else if (isFloatingPoint()) {
       return v.d == num;
     } else if (isIntegral(/*includeBool=*/false)) {
       return v.i == num;
+    } else {
+      // boolean scalar does not equal to a non boolean value
+      return false;
+    }
+  }
+
+  template<typename T, typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
+  bool equal(T num) const {
+    if (isComplex()) {
+      return v.z == num;
+    } else if (isFloatingPoint()) {
+      return (v.d == num.real()) && (num.imag() == T());
+    } else if (isIntegral(/*includeBool=*/false)) {
+      return (v.i == num.real()) && (num.imag() == T());
     } else {
       // boolean scalar does not equal to a non boolean value
       return false;
