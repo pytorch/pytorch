@@ -50,7 +50,7 @@ else:
 def set_sharing_strategy(new_strategy):
     """Sets the strategy for sharing CPU tensors.
 
-    Arguments:
+    Args:
         new_strategy (str): Name of the selected strategy. Should be one of
             the values returned by :func:`get_all_sharing_strategies()`.
     """

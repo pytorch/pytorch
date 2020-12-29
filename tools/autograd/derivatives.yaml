@@ -647,6 +647,16 @@
   self: grad / (1 + pow(2, other - self))
   other: grad / (1 + pow(2, self - other))
 
+- name: xlogy.Tensor(Tensor self, Tensor other) -> Tensor
+  self: grad * at::xlogy((self != 0), other)
+  other: grad * self / other
+
+- name: xlogy.Scalar_Self(Scalar self, Tensor other) -> Tensor
+  other: grad * self / other
+
+- name: xlogy.Scalar_Other(Tensor self, Scalar other) -> Tensor
+  self: grad * at::xlogy((self != 0), other)
+
 - name: logdet(Tensor self) -> Tensor
   self: logdet_backward(grad, self, result)
 
@@ -999,7 +1009,7 @@
   self: split_with_sizes_backward(grads, split_sizes, dim, self.sizes(), self.options())
 
 - name: sqrt(Tensor self) -> Tensor
-  self: grad / (2 * result)
+  self: grad / (2 * result.conj())
 
 - name: squeeze(Tensor(a) self) -> Tensor(a)
   self: unsqueeze_to(grad, self.sizes())
