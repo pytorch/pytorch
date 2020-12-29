@@ -964,7 +964,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
 
     case aten::masked_fill: {
       return computeThreeOperand(
-          "aten::masked_fill",
+          "aten_masked_fill",
           v,
           [](const ExprHandle& input,
              const ExprHandle& mask,
