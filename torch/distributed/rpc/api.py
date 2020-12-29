@@ -434,6 +434,8 @@ for method_name, method in inspect.getmembers(PyRRef):
     setattr(RRef, method_name, new_method)
 
 
+
+ARG_CACHE = {}
 @_require_initialized
 def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     r"""
@@ -592,9 +594,15 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
                 **kwargs,
             )
         else:
-            (pickled_python_udf, tensors) = _default_pickler.serialize(
-                PythonUDF(func, args, kwargs)
-            )
+            arg_cache_key = (func, args, str(kwargs))
+            if arg_cache_key in ARG_CACHE:
+                (pickled_python_udf, tensors) = ARG_CACHE[arg_cache_key]
+            else:
+                (pickled_python_udf, tensors) = _default_pickler.serialize(
+                    PythonUDF(func, args, kwargs)
+                )
+                ARG_CACHE[arg_cache_key] = (pickled_python_udf, tensors)
+
             rref = _invoke_remote_python_udf(
                 dst_worker_info,
                 pickled_python_udf,

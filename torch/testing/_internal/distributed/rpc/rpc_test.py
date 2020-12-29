@@ -76,6 +76,24 @@ REMOTE_OP_STR = "#remote_op: "
 
 VALUE_FUTURE = concurrent.futures.Future()
 DONE_FUTURE = concurrent.futures.Future()
+from torch.nn import Linear, ReLU, Sequential
+
+class DenseNet(torch.nn.Module):
+    def __init__(self, n):
+        super().__init__()
+        hidden_size = 100
+        dense = []
+        for _ in range(n):
+            dense.extend([Linear(hidden_size, hidden_size), ReLU(inplace=True)])
+        model = Sequential(*dense)
+        self.model = model
+
+    def forward(self, x):
+        return self.model(x)
+
+def run_densenet_forward(net, x, *args):
+    return net(x)
+
 
 
 class StubRpcAgent:
@@ -1535,6 +1553,29 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_profiler_with_autograd_context(self):
         self._run_test_profiler_with_autograd_context()
+
+    @dist_init
+    def test_remote_serialization(self):
+        if self.rank == 1:
+            # Create net
+            net = DenseNet(10)
+            inp = torch.randn(100, 100)
+            ncalls = self.world_size * 4
+            total_remote_time = 0
+            nets = tuple(DenseNet(j) for j in range(50))
+            args_tuple = (net, inp) + nets
+            for i in range(ncalls):
+                rank = ncalls % self.world_size
+                wname = worker_name(rank)
+                s = time.time()
+                fwd_rref = rpc.remote(wname, run_densenet_forward, args=args_tuple)
+                tot = time.time() - s
+                print(f"Took {tot}")
+                total_remote_time += tot
+            print(f"tot time {total_remote_time}")
+
+
+
 
     def _profiler_test_with_rpc(self, rpc_exec_mode, func, args, use_record_function=False, dst=None):
         dst = dst if dst is not None else (self.rank + 1) % self.world_size
