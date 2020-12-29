@@ -1,13 +1,11 @@
+import numpy as np
+import time
+
 import torch
 import torch.distributed.rpc as rpc
-import matplotlib.pyplot as plt
-from torch.distributed.rpc import rpc_async, rpc_sync, remote
 
 from agent import AgentBase
 from observer import ObserverBase
-
-import time
-import numpy as np
 
 COORDINATOR_NAME = "coordinator"
 AGENT_NAME = "agent"
@@ -18,6 +16,11 @@ EPISODE_STEPS = 100
 
 class CoordinatorBase:
     def __init__(self, batch_size, batch, state_size, nlayers, out_features):
+        r"""
+        Coordinator object to run on worker.  Only one coordinator exists.  Responsible
+        for facilitating communication between agent and observers and recording benchmark
+        throughput and latency data. 
+        """
         self.batch_size = batch_size
         self.batch = batch
 
@@ -25,11 +28,11 @@ class CoordinatorBase:
         self.ob_rrefs = []   # Observer RRef
 
         agent_info = rpc.get_worker_info(AGENT_NAME)
-        self.agent_rref = remote(agent_info, AgentBase)
+        self.agent_rref = rpc.remote(agent_info, AgentBase)
 
         for rank in range(batch_size):
             ob_info = rpc.get_worker_info(OBSERVER_NAME.format(rank + 2))
-            ob_ref = remote(ob_info, ObserverBase)
+            ob_ref = rpc.remote(ob_info, ObserverBase)
             self.ob_rrefs.append(ob_ref)
 
             ob_ref.rpc_sync().set_state(state_size, batch)
@@ -38,6 +41,16 @@ class CoordinatorBase:
             batch_size, state_size, nlayers, out_features, self.batch)
 
     def run_coordinator(self, episodes, episode_steps, queue):
+        r"""
+            Runs n benchmark episodes.  Each episode is started by coordinator telling each 
+            observer to contact the agent.  Each episode is concluded by coordinator telling agent 
+            to finish the episode, and then the coordinator records benchmark data
+            Args:
+                episodes (int): Number of episodes to run
+                episode_steps (int): Number steps to be run in each episdoe by each observer
+                queue (SimpleQueue): SimpleQueue from torch.multiprocessing.get_context() for 
+                                     saving benchmark run results to
+        """
 
         agent_latency_final = []
         agent_throughput_final = []
@@ -49,7 +62,6 @@ class CoordinatorBase:
             ep_start_time = time.time()
 
             print(f"Episode {ep} - ", end='')
-            # n_steps = int(episode_steps / self.batch_size)
 
             n_steps = episode_steps
             agent_start_time = time.time()
