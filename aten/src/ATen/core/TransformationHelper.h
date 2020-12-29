@@ -54,11 +54,9 @@ template <typename T, typename V>
 C10_HOST_DEVICE inline T uniform_int(V val) {
   if (std::is_same<T, bool>::value) {
     return static_cast<bool>(val & 1);
-  } else if (std::is_same<T, double>::value) {
-    return static_cast<T>(val % static_cast<uint64_t>((1ULL << std::numeric_limits<T>::digits) + 1));
   } else if (std::is_same<T, int64_t>::value) {
     return static_cast<T>(val % (static_cast<uint64_t>(std::numeric_limits<T>::max()) + 1));
-  } else if (std::is_floating_point<T>::value || std::is_same<T, at::Half>::value || std::is_same<T, at::BFloat16>::value) {
+  } else if (std::is_same<T, at::Half>::value || std::is_same<T, at::BFloat16>::value) {
     return static_cast<T>(val % static_cast<uint64_t>((1ULL << std::numeric_limits<T>::digits) + 1));
   } else if (std::is_integral<T>::value) {
     return static_cast<T>(val % (static_cast<uint64_t>(std::numeric_limits<T>::max()) + 1));
@@ -66,6 +64,46 @@ C10_HOST_DEVICE inline T uniform_int(V val) {
     assert(false);
     return 0;
   }
+}
+
+/**
+ * An overloaded transformation function for `torch.Tensor.random_()`, when used without specifying `from` and `to`,
+ * added to fix compiler warnings reported in GitHub issue 46391.
+ * Here, <T, V> is <float, uint32_t>
+ */
+template <>
+C10_HOST_DEVICE inline float uniform_int(uint32_t val) {
+  return static_cast<float>(val % static_cast<uint64_t>((1ULL << std::numeric_limits<float>::digits) + 1));
+}
+
+/**
+ * An overloaded transformation function for `torch.Tensor.random_()`, when used without specifying `from` and `to`,
+ * added to fix compiler warnings reported in GitHub issue 46391.
+ * Here, <T, V> is <float, uint64_t>
+ */
+template <>
+C10_HOST_DEVICE inline float uniform_int(uint64_t val) {
+  return static_cast<float>(val % static_cast<uint64_t>((1ULL << std::numeric_limits<float>::digits) + 1));
+}
+
+/**
+ * An overloaded transformation function for `torch.Tensor.random_()`, when used without specifying `from` and `to`,
+ * added to fix compiler warnings reported in GitHub issue 46391.
+ * Here, <T, V> is <double, uint32_t>
+ */
+template <>
+C10_HOST_DEVICE inline double uniform_int(uint32_t val) {
+  return static_cast<double>(val % static_cast<uint64_t>((1ULL << std::numeric_limits<double>::digits) + 1));
+}
+
+/**
+ * An overloaded transformation function for `torch.Tensor.random_()`, when used without specifying `from` and `to`,
+ * added to fix compiler warnings reported in GitHub issue 46391.
+ * Here, <T, V> is <double, uint64_t>
+ */
+template <>
+C10_HOST_DEVICE inline double uniform_int(uint64_t val) {
+  return static_cast<double>(val % static_cast<uint64_t>((1ULL << std::numeric_limits<double>::digits) + 1));
 }
 
 template <typename T, typename V>
