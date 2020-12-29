@@ -11,7 +11,7 @@ class AdaBelief(Optimizer):
     (2) If SGD is better than Adam  ->  Set a large eps (1e-8)
     (3) If SGD is worse than Adam   ->  Set a small eps (1e-16) (rectify=True often helps)
     (4) If AdamW is better than Adam  ->  Turn on “weight_decouple”
-    (5) Note that default "weight_decay" is very different for Adam and AdamW, need to consider this when using AdaBelief with and without "weight_decouple".
+    (5) In AdaBelief, "weight_decay" could be very different when "weight_decouple" is set as True vs. False (similar to AdamW vs. Adam).
     (6) For a full list of recommended hyper-parameters, see https://github.com/juntang-zhuang/Adabelief-Optimizer
 
     Arguments:
@@ -110,12 +110,12 @@ class AdaBelief(Optimizer):
                 if len(state) == 0:
                     state['step'] = 0
                     # Exponential moving average of gradient values
-                    state['exp_avg'] = torch.zeros_like(p.data,memory_format=torch.preserve_format)
+                    state['exp_avg'] = torch.zeros_like(p.data, memory_format=torch.preserve_format)
                     # Exponential moving average of squared gradient values
-                    state['exp_avg_var'] = torch.zeros_like(p.data,memory_format=torch.preserve_format) 
+                    state['exp_avg_var'] = torch.zeros_like(p.data, memory_format=torch.preserve_format) 
                     if amsgrad:
                         # Maintains max of all exp. moving avg. of sq. grad. values
-                        state['max_exp_avg_var'] = torch.zeros_like(p.data,memory_format=torch.preserve_format)
+                        state['max_exp_avg_var'] = torch.zeros_like(p.data, memory_format=torch.preserve_format)
 
                 # perform weight decay, check if decoupled weight decay
                 if self._weight_decouple:
@@ -134,7 +134,7 @@ class AdaBelief(Optimizer):
                 # Update first and second moment running average
                 exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
                 grad_residual = grad - exp_avg
-                exp_avg_var.mul_(beta2).addcmul_( grad_residual, grad_residual, value=1 - beta2)
+                exp_avg_var.mul_(beta2).addcmul_(grad_residual, grad_residual, value=1 - beta2)
 
                 if amsgrad:
                     max_exp_avg_var = state['max_exp_avg_var']
@@ -150,7 +150,7 @@ class AdaBelief(Optimizer):
                 if not self._rectify:
                     # Default update
                     step_size = group['lr'] / bias_correction1
-                    p.data.addcdiv_( exp_avg, denom, value=-step_size)
+                    p.data.addcdiv_(exp_avg, denom, value=-step_size)
 
                 else:  # Rectified update, forked from RAdam
                     buffered = group['buffer'][int(state['step'] % 10)]
@@ -166,8 +166,8 @@ class AdaBelief(Optimizer):
                         # more conservative since it's an approximated value
                         if N_sma >= 5:
                             step_size = math.sqrt(
-                                (1 - beta2_t) * (N_sma - 4) / (N_sma_max - 4) * (N_sma - 2) / N_sma * N_sma_max / (
-                                        N_sma_max - 2)) / (1 - beta1 ** state['step'])
+                            (1 - beta2_t) * (N_sma - 4) / (N_sma_max - 4) * (N_sma - 2) / N_sma * N_sma_max / (
+                            N_sma_max - 2)) / (1 - beta1 ** state['step'])
                         elif self._degenerated_to_sgd:
                             step_size = 1.0 / (1 - beta1 ** state['step'])
                         else:
@@ -181,6 +181,6 @@ class AdaBelief(Optimizer):
                             denom = exp_avg_var.sqrt().add_(group['eps'])
                         p.data.addcdiv_(exp_avg, denom, value=-step_size * group['lr'])
                     elif step_size > 0:
-                        p.data.add_( exp_avg, alpha=-step_size * group['lr'])
+                        p.data.add_(exp_avg, alpha=-step_size * group['lr'])
 
         return loss 
