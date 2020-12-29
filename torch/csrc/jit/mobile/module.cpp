@@ -25,6 +25,7 @@ Function* CompilationUnit::find_function(const c10::QualifiedName& qn) {
 }
 
 Method Module::get_method(const std::string& name) const {
+  std::cout << "get method: " << name << std::endl;
   if (auto method = find_method(name)) {
     return *method;
   }
@@ -32,7 +33,10 @@ Method Module::get_method(const std::string& name) const {
 }
 
 c10::optional<Method> Module::find_method(const std::string& basename) const {
+  std::cout << "Module::find_method: basename: " << basename << std::endl;
   for (auto& fn : cu_->methods()) {
+    std::cout << "##############" << std::endl;
+    std::cout << "fn -> name: " << fn->name() << std::endl;
     if (fn->name() == basename) {
       return c10::make_optional<Method>(Method(this, fn.get()));
     }
@@ -128,6 +132,13 @@ Method::Method(const Module* owner, Function* function)
     : owner_(owner), function_(function) {}
 
 void Method::run(Stack& stack) {
+  std::cout << "Method::run start" << std::endl;
+  std::cout << "stack is : " << std::endl;
+  for (const auto& it: stack) {
+    std::cout << "***********" << std::endl;
+    it.dump();
+  }
+  std::cout << "******finish*****" << std::endl;
   auto observer = torch::observerConfig().getModuleObserver();
   auto instance_key = std::rand();
   /* if the metadata dict doesn't contain "model_name", copy the metadata and
@@ -142,6 +153,7 @@ void Method::run(Stack& stack) {
         copied_metadata, instance_key, function_->name());
   }
 
+  std::cout << "debug_info setup" << std::endl;
   auto debug_info = std::make_shared<MobileDebugInfo>();
   std::string name = copied_metadata["model_name"];
   debug_info->setModelName(name);
@@ -149,7 +161,9 @@ void Method::run(Stack& stack) {
   at::DebugInfoGuard guard(at::DebugInfoKind::MOBILE_RUNTIME_INFO, debug_info);
 
   try {
+    std::cout << "try stack.insert()" << std::endl;
     stack.insert(stack.begin(), owner_->_ivalue());
+    std::cout << "function_->run" << std::endl;
     function_->run(stack);
     if (observer) {
       observer->onExitRunMethod(instance_key);

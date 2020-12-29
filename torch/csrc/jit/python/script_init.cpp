@@ -1076,9 +1076,12 @@ void initJitScriptBindings(PyObject* module) {
           "forward",
           [](mobile::Module& m, const py::tuple& input_tuple) {
             Stack stack;
+            std::cout << "forward method_name: " << std::endl;
             for (auto& input : input_tuple) {
+              std::cout << "---------------" << std::endl;
               stack.push_back(toTypeInferredIValue(input));
             }
+            std::cout << "---------finish------" << std::endl;
             return m.get_method("forward")(stack);
           },
           py::arg("input_tuple"));

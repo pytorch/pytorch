@@ -271,6 +271,7 @@ InferredType tryToInferContainerType(py::handle input);
 //   input is an list with element types that cannot be unified
 //   input is an dict with key or value types that cannot be unified
 inline InferredType tryToInferType(py::handle input) {
+  std::cout << "tryToInferType start" << std::endl;
   // Try tensor types
   if (THPVariable_Check(input.ptr())) {
     return InferredType(TensorType::get());
@@ -286,6 +287,7 @@ inline InferredType tryToInferType(py::handle input) {
   }
 
   // Try basic types first
+  std::cout << "try basic types" << std::endl;
   if (py::isinstance<py::bool_>(input)) {
     return InferredType(BoolType::get());
   } else if (py::isinstance<py::int_>(input)) {
@@ -307,7 +309,7 @@ inline InferredType tryToInferType(py::handle input) {
   } else if (THPLayout_Check(input.ptr())) {
     return InferredType(IntType::get());
   }
-
+  std::cout << "try enum types" << std::endl;
   auto enum_type = py::module::import("enum").attr("Enum");
   py::bool_ isEnumValue = py::isinstance(input, enum_type);
   if (py::cast<bool>(isEnumValue)) {
@@ -318,6 +320,7 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(enum_type);
   }
 
+  std::cout << "try class" << std::endl;
   py::bool_ isClass =
       py::module::import("inspect").attr("isclass")(input.get_type());
   if (py::cast<bool>(isClass)) {
@@ -344,6 +347,7 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(rref_ivalue.type());
 #endif
   }
+  std::cout << "try tryToInferContainerType" << std::endl;
 
   // Try container types
   return tryToInferContainerType(input);
@@ -479,6 +483,7 @@ inline bool isTraceableType(const TypePtr& type) {
 
 inline IValue toTypeInferredIValue(py::handle input) {
   auto match = tryToInferType(input);
+  std::cout << "input py::str: " << py::str(input) << std::endl;
   if (!match.success()) {
     AT_ERROR(
         "Tracer cannot infer type of ", py::str(input), "\n:", match.reason());

@@ -441,7 +441,7 @@ TEST(LiteInterpreterTest, OneSubmoduleModuleInfo) {
   }
 
   std::unordered_set<std::string> expected_result(
-      {"top(B).forward", "top(B).A0(A).forward"});
+      {"top(B).forward{}", "top(B).A0(A).forward{self.A0.forward:}"});
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
@@ -483,7 +483,9 @@ TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
   }
 
   std::unordered_set<std::string> expected_result(
-      {"top(C).forward", "top(C).A0(A).forward", "top(C).B0(B).forward"});
+      {"top(C).forward{}",
+       "top(C).A0(A).forward{self.A0.forward:}",
+       "top(C).B0(B).forward{self.B0.forward:}"});
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
@@ -507,9 +509,21 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
   )JIT");
 
   std::stringstream ss;
-  c._save_for_mobile(ss, {}, true);
-  mobile::Module bc = _load_for_mobile(ss);
-
+  //  c._save_for_mobile(ss, {}, true);
+  //  c._save_for_mobile("/Users/chenlai/Documents/pytorch/data/data/test.ptl");
+  //  mobile::Module bc = _load_for_mobile(ss);
+  //  mobile::Module bc =
+  //  _load_for_mobile("/Users/chenlai/Documents/pytorch/data/data/opt_model.ptl");
+  //  mobile::Module bc =
+  //  _load_for_mobile("/Users/chenlai/Documents/pytorch/data/data/traced_model.ptl");
+  //  mobile::Module bc =
+  //  _load_for_mobile("/Users/chenlai/Documents/pytorch/data/data/test.ptl");
+//  mobile::Module bc = _load_for_mobile(
+//      "/Users/chenlai/Documents/pytorch/data/data/example_debug.ptl");
+  mobile::Module bc = _load_for_mobile("/Users/chenlai/Documents/pytorch/notebook/example_debug_lite.ptl");
+  //  mobile::Module bc =
+  //  _load_for_mobile("/Users/chenlai/Documents/pytorch/data/data/example.ptl");
+  bc.run_method("forward");
   std::unordered_set<std::string> module_debug_info_set;
   size_t pc = 0;
   while (true) {
@@ -548,7 +562,7 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
   //     return self.A0.forward(self.B0.forward(x))
 
   std::unordered_set<std::string> expected_result(
-      {"top(C).A0(A).forward", "top(C).B0(B).forward"});
+      {"top(C).A0(A).forward{}", "top(C).B0(B).forward{self.B0.forward:}"});
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
@@ -594,9 +608,9 @@ TEST(LiteInterpreterTest, HierarchyModuleInfo) {
   // "top(C).B0(B).forward": for the add operator in B0.
   // "top(C).B0(B).forward.A0(A).forward": for the add operator in A0.
   std::unordered_set<std::string> expected_result(
-      {"top(C).forward",
-       "top(C).B0(B).forward",
-       "top(C).B0(B).forward.A0(A).forward"});
+      {"top(C).forward{}",
+       "top(C).B0(B).forward{self.B0.forward:}",
+       "top(C).B0(B).forward.A0(A).forward{self.B0.forward:self.A0.forward:}"});
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
@@ -809,7 +823,7 @@ TEST(LiteInterpreterTest, OpNameExportFetchRootOperators) {
       "aten::zeros",
   };
   EXPECT_EQ(operator_names, expected_operator_names)
-      << "Expected the root operator lists to be the same";
+            << "Expected the root operator lists to be the same";
 }
 
 namespace {
@@ -821,7 +835,7 @@ static auto reg =
         .def_pickle(
             // __getattr__
             [](const c10::intrusive_ptr<TorchBindLiteInterpreterTestStruct>&
-                   self) -> int64_t { return 0; },
+            self) -> int64_t { return 0; },
             // __setattr__
             [](int64_t state) {
               return c10::make_intrusive<TorchBindLiteInterpreterTestStruct>();

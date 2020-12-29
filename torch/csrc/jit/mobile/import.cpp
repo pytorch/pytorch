@@ -76,6 +76,44 @@ std::string operator_str(
 }
 
 namespace {
+
+struct MyHash {
+  std::size_t operator()(const IValue& value) const {
+    //    value.dump();
+    if (value.isTensor()) {
+      std::stringstream tensor_stream;
+      tensor_stream << value;
+      std::string tensor_str = tensor_stream.str();
+      std::size_t h1 = std::hash<std::string>{}(tensor_str);
+      return h1;
+    } else {
+      return value.hash(value);
+    }
+    //    auto h = value.hash(value);
+    //    return h;
+    //      return value.hash();
+    //    return value.hash(value); // Insert your hash here
+  }
+};
+
+struct MyEqual {
+  bool operator()(const IValue& a, const IValue& b) const {
+    if (a.isTensor() && b.isTensor()) {
+      //      return a.toTensor().equal(b.toTensor());
+      std::stringstream a_stream;
+      a_stream << a;
+      std::string a_str = a_stream.str();
+
+      std::stringstream b_stream;
+      b_stream << b;
+      std::string b_str = b_stream.str();
+      return a_str == b_str;
+    } else {
+      return a == b;
+    }
+  }
+};
+
 void print_unsupported_ops_and_throw(
     const std::unordered_set<std::string>& unsupported_ops) {
   std::string error_message("{");
@@ -90,8 +128,18 @@ void print_unsupported_ops_and_throw(
       error_message);
 }
 
+std::unordered_set<IValue, MyHash, MyEqual> merge_const_list(
+    const std::vector<IValue>& constant_list_a,
+    const std::vector<IValue>& constant_list_b) {
+  std::unordered_set<IValue, MyHash, MyEqual> merge_list;
+  merge_list.insert(constant_list_a.begin(), constant_list_a.end());
+  merge_list.insert(constant_list_b.begin(), constant_list_b.end());
+  return merge_list;
+}
+
 void parseMethods(
     const std::vector<IValue>& vals,
+    const std::vector<IValue>& constant_vals_from_jit,
     const c10::optional<std::vector<IValue>>& debug_info_vals,
     mobile::CompilationUnit& mcu) {
   TORCH_CHECK(vals.size() > 0, "Bytecode has no elements. ");
@@ -106,7 +154,7 @@ void parseMethods(
   }
   TORCH_CHECK(
       caffe2::serialize::kMinSupportedBytecodeVersion <= model_version &&
-          model_version <= caffe2::serialize::kProducedBytecodeVersion,
+      model_version <= caffe2::serialize::kProducedBytecodeVersion,
       "Lite Interpreter verson number does not match. ",
       "The model version must be between ",
       caffe2::serialize::kMinSupportedBytecodeVersion,
@@ -150,6 +198,9 @@ void parseMethods(
         expect_field(table, "register_size", BYTECODE_INDEX_REGISTER_SIZE)
             .toInt();
 
+    auto merged_const_list =
+        merge_const_list(consts_list, constant_vals_from_jit);
+
     std::vector<IValue> module_debug_info_list;
     if (has_debug_info) {
       const auto& debug_info_element = (*debug_info_vals)[i];
@@ -161,11 +212,11 @@ void parseMethods(
           "The function names in the bytecode table and the debug info table do not match.");
       IValue debug_info_table = debug_info_m_tuple[1];
       module_debug_info_list = expect_field(
-                                   debug_info_table,
-                                   "module_debug_info",
-                                   BYTECODE_INDEX_MODULE_DEBUG_INFO)
-                                   .toTuple()
-                                   ->elements();
+          debug_info_table,
+          "module_debug_info",
+          BYTECODE_INDEX_MODULE_DEBUG_INFO)
+          .toTuple()
+          ->elements();
       TORCH_CHECK(
           module_debug_info_list.size() == ops_list.size(),
           "The numbers of operators and module info strings do not match.");
@@ -184,8 +235,8 @@ void parseMethods(
       function->append_instruction(op_code, X, N);
       if (op_code == OP) {
         std::string module_debug_info = (has_debug_info)
-            ? module_debug_info_list[X].toString()->string()
-            : "";
+                                        ? module_debug_info_list[X].toString()->string()
+                                        : "";
         function->set_module_info(module_debug_info, i);
       }
     }
@@ -211,7 +262,7 @@ void parseMethods(
       print_unsupported_ops_and_throw(unsupported_op_names);
     };
 
-    for (const auto& constant : consts_list) {
+    for (const auto& constant : merged_const_list) {
       function->append_constant(constant);
     }
 
@@ -253,7 +304,7 @@ BytecodeDeserializer::BytecodeDeserializer(
       reader_(std::move(reader)) {}
 
 std::unordered_map<std::string, std::string> BytecodeDeserializer::
-    deserializeMetadata(c10::optional<at::Device> device) {
+deserializeMetadata(c10::optional<at::Device> device) {
   device_ = device;
   auto mcu = std::make_shared<mobile::CompilationUnit>();
   return readMobileMetadata(mcu);
@@ -290,13 +341,18 @@ mobile::Module BytecodeDeserializer::deserialize(
   if (reader_->hasRecord("mobile_debug.pkl")) {
     debug_info_bvals = readArchive("mobile_debug", mcu).toTuple()->elements();
   }
-  parseMethods(bvals, debug_info_bvals, *mcu);
+  std::vector<IValue> constant_values_from_jit;
+  if (reader_->hasRecord("constants.pkl")) {
+    constant_values_from_jit =
+        readArchive("constants", mcu).toTuple()->elements();
+  }
+  parseMethods(bvals, constant_values_from_jit, debug_info_bvals, *mcu);
   auto meta_dict = readMobileMetadata(mcu);
   return mobile::Module(readArchive("data", mcu).toObject(), meta_dict, mcu);
 }
 
 std::unordered_map<std::string, std::string> BytecodeDeserializer::
-    readMobileMetadata(std::shared_ptr<mobile::CompilationUnit> mcu) {
+readMobileMetadata(std::shared_ptr<mobile::CompilationUnit> mcu) {
   std::unordered_map<std::string, std::string> res;
   if (!reader_->hasRecord("metadata.pkl")) {
     return res;
@@ -423,6 +479,7 @@ mobile::Module _load_for_mobile(
     ExtraFilesMap& extra_files) {
   std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
   auto module = _load_for_mobile(std::move(rai), device, extra_files);
+  std::cout << "finish loading " << std::endl;
   return module;
 }
 
@@ -430,17 +487,23 @@ mobile::Module _load_for_mobile(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files) {
+  std::cout << " get observer " << std::endl;
   auto observer = torch::observerConfig().getModuleObserver();
+  std::cout << " get instance_key " << std::endl;
   auto instance_key = std::rand();
   if (observer) {
     observer->onEnterLoadModel(instance_key);
   }
+  std::cout << " get reader " << std::endl;
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
+  std::cout << " get BytecodeDeserializer " << std::endl;
   BytecodeDeserializer deserializer(std::move(reader));
   try {
+    std::cout << " try deserializer.deserialize " << std::endl;
     mobile::Module result = deserializer.deserialize(device, extra_files);
     std::unordered_map<std::string, std::string> copied_metadata =
         result.metadata();
+    std::cout << " find model_name " << std::endl;
     if (result.metadata().find("model_name") == result.metadata().end()) {
       copied_metadata["model_name"] = result.name();
     }

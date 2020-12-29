@@ -17,6 +17,8 @@
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
 
+#include <torch/script.h>
+
 #include <caffe2/serialize/inline_container.h>
 
 #include <ATen/ATen.h>
@@ -32,6 +34,47 @@ namespace jit {
 char const* toString(OpCode op);
 
 namespace {
+
+struct MyHash {
+  std::size_t operator()(const IValue& value) const {
+    //    value.dump();
+    if (value.isTensor()) {
+      std::stringstream tensor_stream;
+      tensor_stream << value;
+      std::string tensor_str = tensor_stream.str();
+      std::size_t h1 = std::hash<std::string>{}(tensor_str);
+      std::cout << "hash: " << h1 << std::endl;
+      std::cout << "----------" << std::endl;
+      std::cout << "tensor_str: " << tensor_str << std::endl;
+      std::cout << "==========" << std::endl;
+      return h1;
+    } else {
+      return value.hash(value);
+    }
+    //    auto h = value.hash(value);
+    //    return h;
+    //      return value.hash();
+    //    return value.hash(value); // Insert your hash here
+  }
+};
+
+struct MyEqual {
+  bool operator()(const IValue& a, const IValue& b) const {
+    if (a.isTensor() && b.isTensor()) {
+      //      return a.toTensor().equal(b.toTensor());
+      std::stringstream a_stream;
+      a_stream << a;
+      std::string a_str = a_stream.str();
+
+      std::stringstream b_stream;
+      b_stream << b;
+      std::string b_str = b_stream.str();
+      return a_str == b_str;
+    } else {
+      return a == b;
+    }
+  }
+};
 
 ExportModuleExtraFilesHook& GetExtraFilesHook() {
   static ExportModuleExtraFilesHook func = nullptr;
@@ -157,7 +200,7 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
         const auto& input_type = input->type();
         if (input_type->kind() == TypeKind::TupleType) {
           if (const auto& name_typed_input =
-                  input_type->cast<at::NamedType>()) {
+              input_type->cast<at::NamedType>()) {
             TORCH_CHECK(
                 !name_typed_input->name(),
                 "A named tuple type is not supported in mobile module. ",
@@ -329,23 +372,44 @@ class ScriptModuleSerializer {
       bool bytecode_format,
       bool save_mobile_debug_info) {
     C10_LOG_API_USAGE_ONCE("torch.script.save");
+    std::cout << "writeExtraFiles(module, extra_files)" << std::endl;
     writeExtraFiles(module, extra_files);
     // Serialize the model object
+    std::cout << "writeArchive(data, module._ivalue())" << std::endl;
     writeArchive("data", module._ivalue());
     // Then we serialize all code info.
+    std::cout << "writeCode(module.type())" << std::endl;
     writeCode(module.type());
     // The tensor constants from the code are written to a separate archive
     // so loading the code does not depend on loading the data
+    std::cout << "ivalue_constants construction " << std::endl;
     std::vector<IValue> ivalue_constants(
         constant_table_.begin(), constant_table_.end());
+
+    //    at::Tensor t = torch::tensor({1, 1, 1, 1, 1, 1, 1, 200});
+    //    IValue b(false);
+    //    ivalue_constants.push_back(b);
+    //    ivalue_constants.push_back(t);
+
+    std::unordered_set<IValue, MyHash, MyEqual> constants_from_jit;
+    std::cout << "constants_from_jit construction " << std::endl;
+    for (const auto it : ivalue_constants) {
+      std::cout << it.tagKind() << std::endl;
+    }
+    constants_from_jit.insert(ivalue_constants.begin(), ivalue_constants.end());
+
+    std::cout << "writeArchive(constants, create())" << std::endl;
     writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
     if (bytecode_format) {
-      writeByteCode(module, save_mobile_debug_info);
+      std::cout << "writeByteCode" << std::endl;
+      writeByteCode(module, save_mobile_debug_info, constants_from_jit);
+      std::cout << "writeMobileMetadata" << std::endl;
       writeMobileMetadata(module, extra_files);
     }
 
     // Acquires and sets minimum (dynamic) version
     for (auto& item : file_streams_) {
+      std::cout << "writeMobileMetadata " << item.key() << std::endl;
       writer_.setMinVersion(item.value().minVersion());
     }
   }
@@ -468,7 +532,187 @@ class ScriptModuleSerializer {
     }
   }
 
-  void writeByteCode(const Module& module, bool save_mobile_debug_info) {
+  std::vector<IValue> add_constants(std::vector<IValue>& elements) {
+    std::vector<IValue> deduplicated_elements;
+
+    bool is_constant_element = false;
+    c10::ivalue::ConstantString constants_str("constants");
+    auto constants_ir = IValue(constants_str);
+
+    for (const auto& element : elements) {
+      if (element.isTuple()) {
+        const auto& bytecode_elements = element.toTuple()->elements();
+        std::vector<IValue> deduplicate_bytecode_elements;
+        for (const auto& bytecode_element : bytecode_elements) {
+          if (bytecode_element.isTuple()) {
+            const auto& key_values_pairs =
+                bytecode_element.toTuple()->elements();
+            std::vector<IValue> deduplicate_key_values_pair;
+            for (const auto& key_values_pair : key_values_pairs) {
+              is_constant_element = false;
+              std::cout << "key_values_pair: " << std::endl;
+              key_values_pair.dump();
+              if (key_values_pair.isTuple()) {
+                const auto& key_values_vector =
+                    key_values_pair.toTuple()->elements();
+                if (key_values_vector.size() == 2) {
+                  const auto& key = key_values_vector[0];
+                  const auto& values = key_values_vector[1];
+                  // find constant fields
+                  if (key.isString() && key == constants_ir) {
+                    if (values.isTuple()) {
+                      const auto& constant_values =
+                          values.toTuple()->elements();
+                      std::vector<IValue> deduplicated_constant_values;
+                      for (const auto& constant_value : constant_values) {
+                        deduplicated_constant_values.push_back(constant_value);
+                      }
+                      deduplicated_constant_values.push_back(
+                          torch::tensor({1, 1, 1, 1, 1, 1, 1, 200}));
+                      //                      deduplicated_constant_values.push_back(IValue(123));
+                      std::vector<IValue> deduplicated_constant_key_values = {
+                          constants_ir,
+                          Tup(std::move(deduplicated_constant_values))};
+                      deduplicate_key_values_pair.push_back(
+                          Tup(std::move(deduplicated_constant_key_values)));
+                    } else {
+                      deduplicate_key_values_pair.push_back(key_values_pair);
+                    }
+                    is_constant_element = true;
+                  }
+                }
+              }
+              if (!is_constant_element) {
+                deduplicate_key_values_pair.push_back(key_values_pair);
+              }
+            }
+            std::cout << "deduplicate_key_values_pair: " << std::endl;
+            for (const auto& it : deduplicate_key_values_pair) {
+              it.dump();
+            }
+            deduplicate_bytecode_elements.push_back(
+                Tup(std::move(deduplicate_key_values_pair)));
+          } else {
+            deduplicate_bytecode_elements.push_back(bytecode_element);
+          }
+        }
+        deduplicated_elements.push_back(
+            Tup(std::move(deduplicate_bytecode_elements)));
+      } else {
+        deduplicated_elements.push_back(element);
+      }
+    }
+    std::cout << "add_constants dump raw elements " << std::endl;
+    for (const auto& element : elements) {
+      std::cout << "---------" << std::endl;
+      element.dump();
+      std::cout << "---------" << std::endl;
+    }
+    std::cout << "add_constants dump new elements " << std::endl;
+    for (const auto& element : deduplicated_elements) {
+      std::cout << "---------" << std::endl;
+      element.dump();
+      std::cout << "---------" << std::endl;
+    }
+    return deduplicated_elements;
+  }
+
+  std::vector<IValue> deduplicate_constants(
+      std::vector<IValue>& elements,
+      std::unordered_set<IValue, MyHash, MyEqual> constants_from_jit) {
+    std::vector<IValue> deduplicated_elements;
+
+    bool is_constant_element = false;
+    c10::ivalue::ConstantString constants_str("constants");
+    auto constants_ir = IValue(constants_str);
+
+    for (const auto& element : elements) {
+      if (element.isTuple()) {
+        const auto& bytecode_elements = element.toTuple()->elements();
+        std::vector<IValue> deduplicate_bytecode_elements;
+        for (const auto& bytecode_element : bytecode_elements) {
+          if (bytecode_element.isTuple()) {
+            const auto& key_values_pairs =
+                bytecode_element.toTuple()->elements();
+            std::vector<IValue> deduplicate_key_values_pair;
+            for (const auto& key_values_pair : key_values_pairs) {
+              is_constant_element = false;
+              std::cout << "key_values_pair: " << std::endl;
+              key_values_pair.dump();
+              if (key_values_pair.isTuple()) {
+                const auto& key_values_vector =
+                    key_values_pair.toTuple()->elements();
+                if (key_values_vector.size() == 2) {
+                  const auto& key = key_values_vector[0];
+                  const auto& values = key_values_vector[1];
+                  // find constant fields
+                  if (key.isString() && key == constants_ir) {
+                    if (values.isTuple()) {
+                      const auto& constant_values =
+                          values.toTuple()->elements();
+                      std::vector<IValue> deduplicated_constant_values;
+                      for (const auto& constant_value : constant_values) {
+                        constant_value.dump();
+                        if (constants_from_jit.find(constant_value) !=
+                            constants_from_jit.end()) {
+                          std::cout << "find one" << std::endl;
+                        } else {
+                          deduplicated_constant_values.push_back(
+                              constant_value);
+                        }
+                      }
+                      std::vector<IValue> deduplicated_constant_key_values = {
+                          constants_ir,
+                          Tup(std::move(deduplicated_constant_values))};
+                      deduplicate_key_values_pair.push_back(
+                          Tup(std::move(deduplicated_constant_key_values)));
+                    } else {
+                      deduplicate_key_values_pair.push_back(key_values_pair);
+                    }
+                    is_constant_element = true;
+                  }
+                }
+              }
+              if (!is_constant_element) {
+                deduplicate_key_values_pair.push_back(key_values_pair);
+              }
+            }
+            std::cout << "deduplicate_constants: deduplicate_key_values_pair: "
+                      << std::endl;
+            for (const auto& it : deduplicate_key_values_pair) {
+              it.dump();
+            }
+            deduplicate_bytecode_elements.push_back(
+                Tup(std::move(deduplicate_key_values_pair)));
+          } else {
+            deduplicate_bytecode_elements.push_back(bytecode_element);
+          }
+        }
+        deduplicated_elements.push_back(
+            Tup(std::move(deduplicate_bytecode_elements)));
+      } else {
+        deduplicated_elements.push_back(element);
+      }
+    }
+    std::cout << "deduplicate_constants dump raw elements " << std::endl;
+    for (const auto& element : elements) {
+      std::cout << "---------" << std::endl;
+      element.dump();
+      std::cout << "---------" << std::endl;
+    }
+    std::cout << "deduplicate_constants dump new elements " << std::endl;
+    for (const auto& element : deduplicated_elements) {
+      std::cout << "---------" << std::endl;
+      element.dump();
+      std::cout << "---------" << std::endl;
+    }
+    return deduplicated_elements;
+  }
+
+  void writeByteCode(
+      const Module& module,
+      bool save_mobile_debug_info,
+      std::unordered_set<IValue, MyHash, MyEqual> constants_from_jit) {
     std::vector<c10::IValue> elements;
     elements.emplace_back(
         static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
@@ -478,10 +722,22 @@ class ScriptModuleSerializer {
       debug_info_elements->emplace_back(
           static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
     }
-
+    std::cout << "set list: " << std::endl;
+    for (const auto& it : constants_from_jit) {
+      it.dump();
+    }
+    std::cout << " ################### " << std::endl;
     moduleMethodsTuple(
         module, elements, debug_info_elements, save_mobile_debug_info);
-    auto telements = Tup(std::move(elements));
+
+    auto new_elements = add_constants(elements);
+    auto deduplicated_elements =
+        deduplicate_constants(new_elements, constants_from_jit);
+    //    auto deduplicated_elements = deduplicate_constants(elements,
+    //    constants_from_jit);
+    auto telements = Tup(std::move(deduplicated_elements));
+
+    //    auto telements = Tup(std::move(elements));
     writeArchive("bytecode", telements);
     if (save_mobile_debug_info) {
       auto debug_info_telements = Tup(std::move(debug_info_elements.value()));
@@ -500,12 +756,12 @@ class ScriptModuleSerializer {
 
     auto type_printer =
         [&](const c10::ConstTypePtr& t) -> c10::optional<std::string> {
-      auto namedType = t->cast<c10::NamedType>();
-      if (namedType && namedType->name()) {
-        return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
-      }
-      return c10::nullopt;
-    };
+          auto namedType = t->cast<c10::NamedType>();
+          if (namedType && namedType->name()) {
+            return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
+          }
+          return c10::nullopt;
+        };
     if (!pp) {
       pp = &file_streams_.insert(
           std::move(qualifier),
@@ -535,6 +791,7 @@ void ExportModule(
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
     bool save_mobile_debug_info) {
+  std::cout << "Export Module filename out" << std::endl;
   ScriptModuleSerializer serializer(
       [&](const void* buf, size_t nbytes) -> size_t {
         out.write(static_cast<const char*>(buf), nbytes);
@@ -551,6 +808,7 @@ void ExportModule(
     bool bytecode_format,
     bool save_mobile_debug_info) {
   ScriptModuleSerializer serializer(filename);
+  std::cout << "Export Module filename" << std::endl;
   serializer.serialize(
       module, extra_files, bytecode_format, save_mobile_debug_info);
 }
@@ -561,6 +819,7 @@ void ExportModule(
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
     bool save_mobile_debug_info) {
+  std::cout << "Export Module writer_func" << std::endl;
   ScriptModuleSerializer serializer(writer_func);
   serializer.serialize(
       module, extra_files, bytecode_format, save_mobile_debug_info);
