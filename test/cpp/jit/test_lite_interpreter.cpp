@@ -509,8 +509,8 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
   )JIT");
 
   std::stringstream ss;
-  //  c._save_for_mobile(ss, {}, true);
-  //  c._save_for_mobile("/Users/chenlai/Documents/pytorch/data/data/test.ptl");
+//    c._save_for_mobile(ss, {}, true);
+//    c._save_for_mobile("/Users/chenlai/Documents/pytorch/data/data/test.ptl");
   //  mobile::Module bc = _load_for_mobile(ss);
   //  mobile::Module bc =
   //  _load_for_mobile("/Users/chenlai/Documents/pytorch/data/data/opt_model.ptl");
@@ -520,7 +520,8 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
   //  _load_for_mobile("/Users/chenlai/Documents/pytorch/data/data/test.ptl");
 //  mobile::Module bc = _load_for_mobile(
 //      "/Users/chenlai/Documents/pytorch/data/data/example_debug.ptl");
-  mobile::Module bc = _load_for_mobile("/Users/chenlai/Documents/pytorch/notebook/example_debug_lite.ptl");
+  mobile::Module bc = _load_for_mobile("/Users/chenlai/Documents/pytorch/experiment/example_debug_map.ptl");
+//  mobile::Module bc = _load_for_mobile("/Users/chenlai/Documents/pytorch/data/data/example.ptl");
   //  mobile::Module bc =
   //  _load_for_mobile("/Users/chenlai/Documents/pytorch/data/data/example.ptl");
   bc.run_method("forward");

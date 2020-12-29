@@ -198,8 +198,19 @@ void parseMethods(
         expect_field(table, "register_size", BYTECODE_INDEX_REGISTER_SIZE)
             .toInt();
 
+//    auto merged_const_list =
+//        merge_const_list(consts_list, constant_vals_from_jit);
     auto merged_const_list =
         merge_const_list(consts_list, constant_vals_from_jit);
+    std::vector<IValue> updated_constant_vals;
+    for (const auto& const_item: consts_list) {
+      if (const_item.isTuple()) {
+        const auto& index = const_item.toTuple()->elements()[0];
+        updated_constant_vals.push_back(constant_vals_from_jit[index.toInt()]);
+      } else {
+        updated_constant_vals.push_back(const_item);
+      }
+    }
 
     std::vector<IValue> module_debug_info_list;
     if (has_debug_info) {
@@ -262,7 +273,13 @@ void parseMethods(
       print_unsupported_ops_and_throw(unsupported_op_names);
     };
 
-    for (const auto& constant : merged_const_list) {
+//    for (const auto& constant : merged_const_list) {
+//      function->append_constant(constant);
+//    }
+//    for (const auto& constant : consts_list) {
+//      function->append_constant(constant);
+//    }
+    for (const auto& constant : updated_constant_vals) {
       function->append_constant(constant);
     }
 
