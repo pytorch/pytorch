@@ -9,6 +9,16 @@ args = parser.parse_args()
 
 
 def main():
+    r"""
+    Plots benchmark data graphically based on benchmark output file.  Benchmark must be run
+    with multiple entries for one and only one argument so that those multiple entries
+    can be plotted on the x axis.  4 graphs will be plotted with 4 different y axis: agent 
+    throughput, observer throughput, agent latency, observer latency
+    Args:
+        agent_rref (Rref): Rref of this agent
+        observer_id (int): observer id of observer calling this function
+        state (Tensor): Tensor representing current state held by observer
+    """
     with open(args.benchmark_file_path) as report:
         report = json.load(report)
     if not report.get('x_axis_name'):

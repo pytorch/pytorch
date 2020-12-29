@@ -16,6 +16,11 @@ EPISODE_STEPS = 100
 
 class CoordinatorBase:
     def __init__(self, batch_size, batch, state_size, nlayers, out_features):
+        r"""
+        Coordinator object to run on worker.  Only one coordinator exists.  Responsible
+        for facilitating communication between agent and observers and recording benchmark
+        throughput and latency data. 
+        """
         self.batch_size = batch_size
         self.batch = batch
 
@@ -36,6 +41,16 @@ class CoordinatorBase:
             batch_size, state_size, nlayers, out_features, self.batch)
 
     def run_coordinator(self, episodes, episode_steps, queue):
+        r"""
+            Runs n benchmark episodes.  Each episode is started by coordinator telling each 
+            observer to contact the agent.  Each episode is concluded by coordinator telling agent 
+            to finish the episode, and then the coordinator records benchmark data
+            Args:
+                episodes (int): Number of episodes to run
+                episode_steps (int): Number steps to be run in each episdoe by each observer
+                queue (SimpleQueue): SimpleQueue from torch.multiprocessing.get_context() for 
+                                     saving benchmark run results to
+        """
 
         agent_latency_final = []
         agent_throughput_final = []
