@@ -85,7 +85,7 @@ if is_available():
         and distributed autograd, which immediately makes the current
         process ready to send and receive RPCs.
 
-        Arguments:
+        Args:
             backend (BackendType, optional): The type of RPC backend
                 implementation. Supported values include
                 ``BackendType.TENSORPIPE`` (the default) and

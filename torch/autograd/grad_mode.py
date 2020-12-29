@@ -172,7 +172,7 @@ class set_grad_enabled(object):
     This context manager is thread local; it will not affect computation
     in other threads.
 
-    Arguments:
+    Args:
         mode (bool): Flag whether to enable grad (``True``), or disable
                      (``False``). This can be used to conditionally enable
                      gradients.
