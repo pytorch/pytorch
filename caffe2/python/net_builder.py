@@ -13,7 +13,7 @@ from caffe2.python.control_ops_util import add_if_op, add_while_op
 class NetBuilder(context.Managed):
     """
     Scope-driven mechanism for building nets, loops and conditional blocks.
-    Arguments:
+    Args:
       name: NetBuilder's name
       initial_scope: list of blobs that are available for reading/writing
     Example:
