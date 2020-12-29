@@ -12,7 +12,8 @@ class AdaBelief(Optimizer):
     (2) If SGD is better than Adam  ->  Set a large eps (1e-8)
     (3) If SGD is worse than Adam   ->  Set a small eps (1e-16) (rectify=True often helps)
     (4) If AdamW is better than Adam  ->  Turn on “weight_decouple”
-    (5) In AdaBelief, "weight_decay" could be very different when "weight_decouple" is set as True vs. False (similar to AdamW vs. Adam).
+    (5) In AdaBelief, "weight_decay" could be very different when "weight_decouple" is set as True vs. False,
+    similar to AdamW vs. Adam.
     (6) For a full list of recommended hyper-parameters, see https://github.com/juntang-zhuang/Adabelief-Optimizer
 
     Arguments:
@@ -187,9 +188,9 @@ class AdaBelief(Optimizer):
                     denom = torch._foreach_sqrt(exp_avg_var)
                 torch._foreach_add_(denom, group['eps'])
 
-                (conf_params_with_grad, conf_denom, conf_exp_avg, conf_stepsize, \
-                inconf_params_with_grad, inconf_denom, inconf_exp_avg, inconf_stepsize) = \
-                self.get_rectification_factor(group, params_with_grad, denom, exp_avg)
+                (conf_params_with_grad, conf_denom, conf_exp_avg, conf_stepsize, 
+                    inconf_params_with_grad, inconf_denom, inconf_exp_avg, inconf_stepsize) = \
+                    self.get_rectification_factor(group, params_with_grad, denom, exp_avg)
 
                 if len(conf_params_with_grad) > 0:  # Adam-type update
                     torch._foreach_addcdiv_(conf_params_with_grad, conf_exp_avg, conf_denom, conf_stepsize)
@@ -227,8 +228,8 @@ class AdaBelief(Optimizer):
                 # more conservative since it's an approximated value
                 if N_sma >= 5:
                     step_size = math.sqrt(
-                    (1 - beta2_t) * (N_sma - 4) / (N_sma_max - 4) * (N_sma - 2) / N_sma * N_sma_max / (
-                    N_sma_max - 2)) / (1 - beta1 ** state['step'])
+                        (1 - beta2_t) * (N_sma - 4) / (N_sma_max - 4) * (N_sma - 2) / N_sma * N_sma_max / (
+                        N_sma_max - 2)) / (1 - beta1 ** state['step'])
                 elif self._degenerated_to_sgd:
                     step_size = 1.0 / (1 - beta1 ** state['step'])
                 else:
@@ -247,7 +248,7 @@ class AdaBelief(Optimizer):
                 inconf_stepsize.append(-group['lr'] * step_size)
 
         return (conf_params_with_grad, conf_denom, conf_exp_avg, conf_stepsize,
-                 inconf_params_with_grad, inconf_denom, inconf_exp_avg, inconf_stepsize)
+            inconf_params_with_grad, inconf_denom, inconf_exp_avg, inconf_stepsize)
 
     # TODO: refactor to a base class once foreach ops are in a good shape.
     def zero_grad(self, set_to_none: bool = False):
@@ -270,4 +271,4 @@ class AdaBelief(Optimizer):
 
             for _, per_dtype_grads in per_device_and_dtype_grads.items():
                 for grads in per_dtype_grads.values():
-                    torch._foreach_zero_(grads)
+                    torch._foreach_zero_(grads) 
