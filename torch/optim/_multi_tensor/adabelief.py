@@ -248,7 +248,7 @@ class AdaBelief(Optimizer):
                 inconf_stepsize.append(-group['lr'] * step_size)
 
         return (conf_params_with_grad, conf_denom, conf_exp_avg, conf_stepsize,
-                    inconf_params_with_grad, inconf_denom, inconf_exp_avg, inconf_stepsize)
+                inconf_params_with_grad, inconf_denom, inconf_exp_avg, inconf_stepsize)
 
     # TODO: refactor to a base class once foreach ops are in a good shape.
     def zero_grad(self, set_to_none: bool = False):
