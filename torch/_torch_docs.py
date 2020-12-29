@@ -3738,7 +3738,7 @@ Tests if each element of :attr:`input` is infinite
     Complex values are infinite when their real or imaginary part is
     infinite.
 
-    Arguments:
+    Args:
         {input}
 
     Returns:
@@ -3823,7 +3823,7 @@ Returns a new tensor with boolean elements representing if each element is `fini
 Real values are finite when they are not NaN, negative infinity, or infinity.
 Complex values are finite when both their real and imaginary parts are finite.
 
-    Arguments:
+    Args:
         {input}
 
     Returns:
@@ -6678,18 +6678,30 @@ with :math:`Q` being an orthogonal matrix or batch of orthogonal matrices and
 If :attr:`some` is ``True``, then this function returns the thin (reduced) QR factorization.
 Otherwise, if :attr:`some` is ``False``, this function returns the complete QR factorization.
 
+.. warning:: ``torch.qr`` is deprecated. Please use ``torch.linalg.`` :meth:`~torch.linalg.qr`
+             instead, which provides a better compatibility with
+             ``numpy.linalg.qr``.
+
+             **Differences with** ``torch.linalg.`` :meth:`~torch.linalg.qr`:
+
+             * ``torch.linalg.qr`` takes a string parameter ``mode`` instead of ``some``:
+
+               - ``some=True`` is equivalent of ``mode='reduced'``: both are the
+                 default
+
+               - ``some=False`` is equivalent of ``mode='complete'``.
+
+
 .. warning::
           If you plan to backpropagate through QR, note that the current backward implementation
           is only well-defined when the first :math:`\min(input.size(-1), input.size(-2))`
           columns of :attr:`input` are linearly independent.
           This behavior will propably change once QR supports pivoting.
 
-.. note:: precision may be lost if the magnitudes of the elements of :attr:`input`
-          are large
-
-.. note:: While it should always give you a valid decomposition, it may not
-          give you the same one across platforms - it will depend on your
-          LAPACK implementation.
+.. note:: This function uses LAPACK for CPU inputs and MAGMA for CUDA inputs,
+          and may produce different (valid) decompositions on different device types
+          and different platforms, depending on the precise version of the
+          underlying library.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more

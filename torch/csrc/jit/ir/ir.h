@@ -1171,7 +1171,7 @@ struct Graph {
       const std::string& cconv,
       pyobj_list&& scalar_args);
   // clone n, making a new node in _this_ graph.
-  // use node_map to translate inputs of n to inputs of the cloned node
+  // use value_map to translate inputs of n to inputs of the cloned node
   // if copy_blocks is false, it will not recursively clone the nested blocks
   // this node contains.
   TORCH_API Node* createClone(
@@ -1267,7 +1267,7 @@ struct Graph {
 /** \brief An utility class for setting temporary insertion points.
  *
  * When an object of this class is created, it stores the current insertion
- * point, sets the new one, and restores the original insertion point  when the
+ * point, sets the new one, and restores the original insertion point when the
  * object is destroyed.
  */
 struct WithInsertPoint {
