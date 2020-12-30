@@ -517,11 +517,13 @@ class ScriptModuleSerializer {
                       std::vector<IValue> deduplicated_constant_values;
                       for (const auto& constant_value : constant_values) {
                         //                        constant_value.dump();
-                        if (constant_value.isTensor() && constants_from_jit.find(constant_value.toTensor()) !=
-                            constants_from_jit.end()) {
+                        if (constant_value.isTensor() &&
+                            constants_from_jit.find(
+                                constant_value.toTensor()) !=
+                                constants_from_jit.end()) {
                           std::cout << "find one" << std::endl;
-                          std::vector<IValue> index = {
-                              IValue(constants_from_jit[constant_value.toTensor()])};
+                          std::vector<IValue> index = {IValue(
+                              constants_from_jit[constant_value.toTensor()])};
                           auto index_with_key = Tup(std::vector<IValue>{
                               IValue(kTensorJitIndex), Tup(index)});
                           deduplicated_constant_values.push_back(
