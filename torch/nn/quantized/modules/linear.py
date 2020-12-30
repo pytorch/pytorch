@@ -124,7 +124,7 @@ class Linear(torch.nn.Module):
         torch.Size([128, 30])
     """
     _version = 3
-    _FLOAT_MODULE = nn.Linear
+    _FLOAT_MODULE = (nn.Linear, nn.modules.linear._LinearWithBias)
 
     def __init__(self, in_features, out_features, bias_=True,
                  dtype=torch.qint8):
@@ -252,8 +252,9 @@ class Linear(torch.nn.Module):
             weight_post_process = mod.weight_fake_quant
             activation_post_process = mod.activation_post_process
         else:
-            assert type(mod) == cls._FLOAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
-                cls._FLOAT_MODULE.__name__
+            assert type(mod) in cls._FLOAT_MODULE, \
+                ' nnq.' + cls.__name__ + '.from_float only works for ' + \
+                [float_mod.__name__ for float_mod in cls._FLOAT_MODULE]
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
             activation_post_process = mod.activation_post_process
             if type(mod) == nni.LinearReLU:

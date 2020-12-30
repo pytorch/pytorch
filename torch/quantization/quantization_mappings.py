@@ -39,6 +39,7 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.InstanceNorm3d: nnq.InstanceNorm3d,
     nn.LayerNorm: nnq.LayerNorm,
     nn.LeakyReLU: nnq.LeakyReLU,
+    nn.modules.linear._LinearWithBias: nnq.Linear,
     nn.Linear: nnq.Linear,
     nn.ReLU6: nnq.ReLU6,
     # Wrapper Modules:
@@ -65,6 +66,7 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
 DEFAULT_QAT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.Conv2d: nnqat.Conv2d,
     nn.Linear: nnqat.Linear,
+    nn.modules.linear._LinearWithBias: nnqat.Linear,
     # Intrinsic modules:
     nni.ConvBn1d: nniqat.ConvBn1d,
     nni.ConvBn2d: nniqat.ConvBn2d,
@@ -78,6 +80,7 @@ DEFAULT_QAT_MODULE_MAPPINGS : Dict[Callable, Any] = {
 DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.GRUCell: nnqd.GRUCell,
     nn.Linear: nnqd.Linear,
+    nn.modules.linear._LinearWithBias: nnqd.Linear,
     nn.LSTM: nnqd.LSTM,
     nn.GRU: nnqd.GRU,
     nn.LSTMCell: nnqd.LSTMCell,
