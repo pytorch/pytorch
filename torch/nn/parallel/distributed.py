@@ -12,9 +12,13 @@ import torch
 from . import comm
 import torch.distributed as dist
 
+RPC_AVAILABLE = False
 if dist.is_available():
     from torch.distributed.distributed_c10d import _get_default_group
     from torch.distributed.distributed_c10d import ReduceOp
+if torch.distributed.rpc.is_available():
+    RPC_AVAILABLE = True
+    import torch.distributed.pipeline.sync
 from ..modules import Module
 from .replicate import replicate
 from .scatter_gather import scatter_kwargs, gather, is_namedtuple
@@ -697,8 +701,7 @@ class DistributedDataParallel(Module):
             # this forward pass, to ensure we short circuit reduction for any
             # unused parameters. Only if `find_unused_parameters` is set.
             if self.find_unused_parameters:
-                if (torch.distributed.rpc.is_available() and
-                        isinstance(self.module, torch.distributed.pipeline.sync.Pipe)):
+                if RPC_AVAILABLE and isinstance(self.module, torch.distributed.pipeline.sync.Pipe):
                     # Unwrap RRef to get real output for Pipe.
                     # TODO: Needs to be reworked for cross host pipelining.
                     self.reducer.prepare_for_backward(list(_find_tensors(output.local_value())))
