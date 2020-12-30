@@ -732,13 +732,13 @@ class Module:
         It returns two lists, one with the full backward hooks and one with the non-full
         backward hooks.
         """
-        full_backward_hooks = []
+        full_backward_hooks: List[Callable] = []
         if (_global_is_full_backward_hook is True):
             full_backward_hooks += _global_backward_hooks.values()
         if (self._is_full_backward_hook is True):
             full_backward_hooks += self._backward_hooks.values()
 
-        non_full_backward_hooks = []
+        non_full_backward_hooks: List[Callable] = []
         if (_global_is_full_backward_hook is False):
             non_full_backward_hooks += _global_backward_hooks.values()
         if (self._is_full_backward_hook is False):
