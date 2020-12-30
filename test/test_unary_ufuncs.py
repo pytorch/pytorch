@@ -456,6 +456,8 @@ class TestUnaryUfuncs(TestCase):
                             low=op.domain[0], high=op.domain[1])
 
         for computation_dtype in all_types_and_complex_and(torch.bool, torch.half):
+            if computation_dtype in [torch.float16]:
+                continue
             # As NumPy doesn't have a bfloat16 equivalent.
             if torch.bfloat16 in [computation_dtype, input.dtype]:
                 continue
@@ -467,22 +469,18 @@ class TestUnaryUfuncs(TestCase):
                 expected = None
 
             if expected is None:
-                with self.assertRaisesRegex(RuntimeError, "can't be cast to the desired output type"):
+                # Verify that torch variant raises an error.
+                if dtype.is_complex and computation_dtype.is_floating_point:
+                    # Pytorch doesn't raise an error for
+                    # complex -> float casting
+                    continue
+
+                with self.assertRaisesRegex(RuntimeError, "not implemented for"):
                     op(input, dtype=computation_dtype)
             else:
+                # Verify the output.
                 actual = op(input, dtype=computation_dtype)
-
-                # TODO: Investigate
-                rtol, atol = None, None
-                if input.dtype in [torch.float32, torch.float64] and computation_dtype == torch.float16:
-                    rtol = 1e-2
-                    atol = 1e-2
-
-                if input.dtype in [torch.complex128] and computation_dtype == torch.complex64:
-                    rtol = 1e-3
-                    atol = 1e-4
-
-                self.assertEqual(actual, expected, rtol=rtol, atol=atol)
+                self.assertEqual(actual, expected)
 
     @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool] +
               torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
