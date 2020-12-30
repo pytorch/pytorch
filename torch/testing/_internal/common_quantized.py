@@ -104,7 +104,15 @@ def _calculate_dynamic_per_channel_qparams(X, dtype):
 
 def _snr(x, x_hat):
     """Calculates the signal to noise ratio and returns the signal and noise
-    power, as well as the SNR in dB"""
+    power, as well as the SNR in dB.
+    If the input is a list/tuple this function is called recursively on each
+    element. The result will have the same nested structure as the inputs.
+
+    Args:
+        x, x_hat: Either a tensor or a nested list/tuple of tensors.
+    Returns:
+        signal, noise, SNR(in dB): Either floats or a nested list of floats
+    """
     if isinstance(x, (list, tuple)):
         assert(len(x) == len(x_hat))
         res = []

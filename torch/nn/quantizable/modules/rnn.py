@@ -61,6 +61,9 @@ class LSTMCell(torch.nn.Module):
             c = torch.quantize_per_tensor(c, scale=1.0, zero_point=0, dtype=torch.quint8)
         return h, c
 
+    def _get_name(self):
+        return 'QuantizableLSTMCell'
+
     @classmethod
     def from_params(cls, wi, wh, bi=None, bh=None):
         assert (bi is None) == (bh is None)  # Either both None or both have values
@@ -267,6 +270,9 @@ class LSTM(torch.nn.Module):
             x = x.transpose(0, 1)
 
         return x, (hx_tensor, cx_tensor)
+
+    def _get_name(self):
+        return 'QuantizableLSTM'
 
     @classmethod
     def from_float(cls, other, qconfig=None):
