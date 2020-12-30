@@ -205,12 +205,12 @@ Tensor norm_backward(Tensor grad, const Tensor & self, const optional<Scalar> & 
   return norm_backward(grad, self, p_, norm);
 }
 
-Tensor pow_backward(Tensor grad, const Tensor & self, const Scalar & exponent_) {
-  auto exponent = (exponent_.isComplex()) ? exponent_.toComplexDouble() : exponent_.toDouble();
-  if (exponent == 0.0) {
+Tensor pow_backward(Tensor grad, const Tensor & self, const Scalar & exponent) {
+  if (exponent.equal(0.0)) {
     return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
-    auto out = grad * (exponent * self.pow(exponent - 1)).conj();
+    auto grad_lambda = [&](auto exp) { return grad * (exp * self.pow(exp - 1)).conj(); };
+    Tensor out = (exponent.isComplex()) ? grad_lambda(exponent.toComplexDouble()) : grad_lambda(exponent.toDouble());
     return handle_r_to_c(self, out);
   }
 }
@@ -243,9 +243,8 @@ Tensor pow_backward_exponent(Tensor grad, const Tensor& self, const Tensor& expo
 }
 
 Tensor pow_backward_exponent(Tensor grad, const Scalar & base, const Tensor& exponent, Tensor result) {
-  auto base_ = base.isComplex() ? base.toComplexDouble() : base.toDouble();
-  auto grad_lambda = [](auto a, auto b) { return (a * std::log(b)).conj(); };
-  if (base_ == 0.0) {
+  auto grad_lambda = [](Tensor a, Scalar b) { return (a * b.log()).conj(); };
+  if (base.equal(0.0)) {
     auto cond = [](auto exp) {
       if (exp.is_complex()) {
         return at::logical_and(at::imag(exp) == 0, at::real(exp) >= 0);
@@ -255,10 +254,10 @@ Tensor pow_backward_exponent(Tensor grad, const Scalar & base, const Tensor& exp
     };
     auto out = grad * at::where(cond(exponent),
                             at::zeros({}, grad.options()),
-                            grad_lambda(result, base_));
+                            grad_lambda(result, base));
     return handle_r_to_c(exponent, out);
   } else {
-    auto out = grad * grad_lambda(result, base_);
+    auto out = grad * grad_lambda(result, base);
     return handle_r_to_c(exponent, out);
   }
 }
