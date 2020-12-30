@@ -243,7 +243,7 @@ class TORCH_API RRef : public RRefInterface {
   }
 
   // Dispatches an error to the correct handler based on its RPCErrorType.
-  void handleError(RPCErrorType errorType, const FutureMessage& futMessage);
+  void handleError(RPCErrorType errorType, const JitFuture& JitFuture);
 
   // Send delete UserRRef request to Owner,
   // if the request hasn't been sent yet.

@@ -121,14 +121,12 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         rpcTimeoutSeconds /* timeout */);
 
     userRRefPtr->registerOwnerCreationFuture(jitFuture);
-    auto fm = RpcAgent::toFutureMessage(std::move(jitFuture));
-
     ctx.addPendingUser(userRRefPtr->forkId(), userRRefPtr);
-    std::weak_ptr<FutureMessage> wp = fm;
-    fm->addCallback(
+    std::weak_ptr<JitFuture> wp = jitFuture;
+    jitFuture->addCallback(
         at::wrapPropagateTLSState<void>([wp, forkId{userRRefPtr->forkId()}]() {
-          auto fm = wp.lock();
-          callback::confirmPendingUser(*fm, forkId);
+          auto jitFuture = wp.lock();
+          callback::confirmPendingUser(*jitFuture, forkId);
         }));
 
     return userRRefPtr;
@@ -152,13 +150,11 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         rpcTimeoutSeconds /* timeout */);
 
     ownerRRefPtr->registerOwnerCreationFuture(jitFuture);
-    auto fm = RpcAgent::toFutureMessage(std::move(jitFuture));
-
-    std::weak_ptr<FutureMessage> wp = fm;
-    fm->addCallback(at::wrapPropagateTLSState<void>(
+    std::weak_ptr<JitFuture> wp = jitFuture;
+    jitFuture->addCallback(at::wrapPropagateTLSState<void>(
         [wp, ownerRRefId = ownerRRefPtr->rrefId()]() {
-          auto fm = wp.lock();
-          callback::finishCreatingOwnerRRef(*fm, ownerRRefId);
+          auto jitFuture = wp.lock();
+          callback::finishCreatingOwnerRRef(*jitFuture, ownerRRefId);
         }));
     return ownerRRefPtr;
   }

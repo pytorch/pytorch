@@ -67,21 +67,21 @@ RRefForkData RRef::fork() const {
 
 void RRef::handleError(
     RPCErrorType errorType,
-    const FutureMessage& futMessage) {
+    const JitFuture& jitFuture) {
   static std::unordered_map<
       RPCErrorType,
-      std::function<void(const FutureMessage& fm)>,
+      std::function<void(const JitFuture& jitFuture)>,
       std::hash<int>>
       errorHandlers = {
           {RPCErrorType::TIMEOUT,
-           [this](const FutureMessage& /* unused */) { setTimedOut(); }},
+           [this](const JitFuture& /* unused */) { setTimedOut(); }},
           {RPCErrorType::INTENTIONAL_FAILURE,
-           [this](const FutureMessage& /* unused */) { setTimedOut(); }},
-          {RPCErrorType::UNKNOWN_ERROR, [](const FutureMessage& fm) {
+           [this](const JitFuture& /* unused */) { setTimedOut(); }},
+          {RPCErrorType::UNKNOWN_ERROR, [](const JitFuture& jitFuture) {
              // Default error handler
-             RRefContext::handleException(fm);
+             RRefContext::handleException(jitFuture);
            }}};
-  errorHandlers.find(errorType)->second(futMessage);
+  errorHandlers.find(errorType)->second(jitFuture);
 }
 
 //////////////////////////  UserRRef  /////////////////////////////////////
