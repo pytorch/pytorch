@@ -675,7 +675,9 @@ class TestScriptPy3(JitTestCase):
         mod = ModuleWithProperties(3)
         scripted_mod = torch.jit.script(mod)
 
-        with self.assertRaisesRegex(torch.nn.modules.module.ModuleAttributeError, "has no attribute"):
+        with self.assertRaisesRegex(
+                AttributeError, 
+                r"'RecursiveScriptModule' object has no attribute 'ignored_attr'"):
             scripted_mod.ignored_attr
 
     def test_ignoring_module_attributes(self):
