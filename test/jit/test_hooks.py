@@ -84,9 +84,60 @@ class OuterModuleMultipleIO(torch.nn.Module):
         return self.submodule(input1, input2)
 
 
+class InnerModuleTupleSingleIO(torch.nn.Module):
+    def __init__(self, name):
+        super(InnerModuleTupleSingleIO, self).__init__()
+        self.name = name
+
+    def forward(self, input: Tuple[int]):
+        input_access = input[0]
+        return (1,)
+
+
+class OuterModuleTupleSingleIO(torch.nn.Module):
+    def __init__(self, name: str, submodule_name: str):
+        super(OuterModuleTupleSingleIO, self).__init__()
+        self.name = name
+        self.submodule = InnerModuleTupleSingleIO(submodule_name)
+
+    def forward(self, input: Tuple[int]):
+        input_access = input[0]
+        return self.submodule((1,))
+
+
+class InnerModuleTupleDoubleIO(torch.nn.Module):
+    def __init__(self, name):
+        super(InnerModuleTupleDoubleIO, self).__init__()
+        self.name = name
+
+    def forward(self, input: Tuple[str, str]):
+        input_access1 = input[0]
+        input_access2 = input[1]
+        return input
+
+
+class OuterModuleTupleDoubleIO(torch.nn.Module):
+    def __init__(self, name: str, submodule_name: str):
+        super(OuterModuleTupleDoubleIO, self).__init__()
+        self.name = name
+        self.submodule = InnerModuleTupleDoubleIO(submodule_name)
+
+    def forward(self, input: Tuple[str, str]):
+        input_access1 = input[0]
+        input_access2 = input[1]
+        return self.submodule(("outer_mod", "outer_mod"))
+
+
 # Tests for JIT forward hooks and pre-hooks
 class TestHooks(JitTestCase):
     def test_module_hook_and_pre_hook_no_IO(self):
+
+        # TODO: this test causes the jit legacy fuser to seg fault
+        # at argument_spec.cpp:161 when the stack top is pointed
+        # to the Tuple's elements which do not exist :(
+        # run test with:
+        #   python test/test_jit_legacy.py TestHooks.test_module_hook_and_pre_hook_no_IO
+
         m = OuterModuleNoIO("outer_mod_name", "inner_mod_name")
 
         def pre_hook(self, input: Tuple[None]):
@@ -201,9 +252,6 @@ class TestHooks(JitTestCase):
             return ("pre_hook_overrid_name",)
 
         def forward_hook(self, input: Tuple[str], output: str):
-            # note: 'output' of forward hook needs to not be wrapped in tuple
-            # when there is a single element in the forward's return
-            # this is to match eager's behavior
             assert self.name == "outer_mod_name"
             assert input == ("pre_hook_overrid_name",)
             output = output + "_fh"
@@ -252,13 +300,13 @@ class TestHooks(JitTestCase):
             assert input == ("pre_hook_overrid_name2",)
             assert output == "pre_hook_overrid_name2_outermod_inner_mod"
             output = output + "_fh1"
-            return output
+            return output, output
 
-        def forward_hook2(self, input: Tuple[str], output: str):
+        def forward_hook2(self, input: Tuple[str], output: Tuple[str, str]):
             assert self.name == "outer_mod_name"
             assert input == ("pre_hook_overrid_name2",)
-            assert output == "pre_hook_overrid_name2_outermod_inner_mod_fh1"
-            output = output + "_fh2"
+            assert output[0] == "pre_hook_overrid_name2_outermod_inner_mod_fh1"
+            output = output[0] + "_fh2"
             return output
 
         m.register_forward_pre_hook(pre_hook1)
@@ -309,16 +357,16 @@ class TestHooks(JitTestCase):
             assert input[1] == "pre_hook_override2"
             assert output[1] == "pre_hook_override2_"
             output2 = output[1] + "fh1"
-            return output[0], output2
+            return output[0], output2, output2
 
         def forward_hook2(
-            self, input: Tuple[List[str], str], output: Tuple[List[str], str]
+            self, input: Tuple[List[str], str], output: Tuple[List[str], str, str]
         ):
             assert self.name == "inner_mod_name"
             assert input[1] == "pre_hook_override2"
             assert output[1] == "pre_hook_override2_fh1"
             output2 = output[1] + "_fh2"
-            return output[0], output2
+            return output[0], output2, output2
 
         m.submodule.register_forward_pre_hook(pre_hook1)
         m.submodule.register_forward_pre_hook(pre_hook2)
@@ -412,6 +460,57 @@ class TestHooks(JitTestCase):
 
         self.checkModule(m, (["a"]))
 
+    def test_nested_tuple_IO(self):
+        m = OuterModuleTupleDoubleIO("outer_mod_name", "inner_mod_name")
+
+        def pre_hook_outermod(self, input: Tuple[Tuple[str, str]]):
+            # 'return ("hello", "goodbye")' doesn't work with eager because
+            # tuple is unpacked by eager when forward isn't expecting it
+            return (("hello", "goodbye"),)
+
+        def pre_hook_innermod(self, input: Tuple[Tuple[str, str]]):
+            # 'return ("hey","howdy")' doesn't work with eager because
+            # tuple unpacked by eager when forward isn't expecting it
+            return (("hey", "howdy"),)
+
+        def forward_hook_outermod(self, input: Tuple[Tuple[str, str]], output: str):
+            return ("a", "b")
+
+        def forward_hook_innermod(
+            self, input: Tuple[Tuple[str, str]], output: Tuple[str, str]
+        ):
+            return "forward_inner_mod"
+
+        m.register_forward_pre_hook(pre_hook_outermod)
+        m.submodule.register_forward_pre_hook(pre_hook_innermod)
+        m.register_forward_hook(forward_hook_outermod)
+        m.submodule.register_forward_hook(forward_hook_innermod)
+
+        self.checkModule(m, (("a", "b"),))
+
+        m = OuterModuleTupleSingleIO("outer_mod_name", "inner_mod_name")
+
+        def pre_hook_outermod(self, input: Tuple[Tuple[int]]):
+            # 'return (11,)' doesn't work with eager, inner tuple lost
+            return ((11,),)
+
+        def pre_hook_innermod(self, input: Tuple[Tuple[int]]):
+            # 'return (22,)' doesn't work with eager, inner tuple lost
+            return ((22,),)
+
+        def forward_hook_outermod(self, input: Tuple[Tuple[int]], output: int):
+            return (11,)
+
+        def forward_hook_innermod(self, input: Tuple[Tuple[int]], output: Tuple[int]):
+            return 22
+
+        m.register_forward_pre_hook(pre_hook_outermod)
+        m.submodule.register_forward_pre_hook(pre_hook_innermod)
+        m.register_forward_hook(forward_hook_outermod)
+        m.submodule.register_forward_hook(forward_hook_innermod)
+
+        self.checkModule(m, ((3,),))
+
     def test_hook_method_name_collision(self):
         m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
 
@@ -426,7 +525,284 @@ class TestHooks(JitTestCase):
             r"Can't define hook: foo on class: .+ "
             "because a method or hook with that name already exists."
         )
-        with self.assertRaisesRegex(RuntimeError, err_msg,):
+        with self.assertRaisesRegex(
+            RuntimeError, err_msg,
+        ):
             torch.jit.script(m)
 
-    # TODO: need to test error messages for incorrect schemas/signatures!!
+    def test_submodule_forward_and_pre_hook_single_IO_no_tuple_returned(self):
+        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
+
+        def pre_hook_a(self, input: Tuple[str]):
+            assert self.name == "inner_mod_name"
+            assert input[0] == "a_outermod"
+            return "pre_hook_overrid_name"
+
+        def forward_hook_b(self, input: Tuple[str], output: str):
+            assert self.name == "inner_mod_name"
+            assert input == ("pre_hook_overrid_name",)
+            output = output + "_fh"
+            return output
+
+        m.submodule.register_forward_pre_hook(pre_hook_a)
+        m.submodule.register_forward_hook(forward_hook_b)
+
+        self.checkModule(m, ("a",))
+
+    # TODO: add actual error messages checks once error messages are finalized
+
+    def test_module_wrong_pre_hook_signatures(self):
+        # correct signature: pre_hook_c(self, input: Tuple[str])
+
+        def pre_hook_wrong_input1(self, input: Tuple[None]):
+            input = input[10]
+            return ("hello",)
+
+        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
+        m.register_forward_pre_hook(pre_hook_wrong_input1)
+
+        with self.assertRaisesRegex(
+            RuntimeError, ".*",
+        ):
+            torch.jit.script(m)
+
+        def pre_hook_wrong_input2(self, input: Tuple):
+            return ("hello",)
+
+        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
+        m.register_forward_pre_hook(pre_hook_wrong_input2)
+
+        with self.assertRaisesRegex(
+            RuntimeError, ".*",
+        ):
+            torch.jit.script(m)
+
+        def pre_hook_wrong_input3(self, input: Tuple[str], input2: str):
+            return ("hello",)
+
+        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
+        m.register_forward_pre_hook(pre_hook_wrong_input3)
+
+        with self.assertRaisesRegex(
+            RuntimeError, ".*",
+        ):
+            torch.jit.script(m)
+
+        def pre_hook_wrong_input4(self, input: int):
+            return ("hello",)
+
+        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
+        m.register_forward_pre_hook(pre_hook_wrong_input4)
+
+        with self.assertRaisesRegex(
+            RuntimeError, ".*",
+        ):
+            torch.jit.script(m)
+
+        def pre_hook_wrong_output(self, input: Tuple[str]):
+            return 1  # expecting Tuple[str], str, or None
+
+        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
+        m.register_forward_pre_hook(pre_hook_wrong_output)
+
+        with self.assertRaisesRegex(
+            RuntimeError, ".*",
+        ):
+            torch.jit.script(m)
+
+    def test_submodule_wrong_hook_signatures(self):
+        # correct signature:
+        #   def forward_hook(self, input: Tuple[str], output: str)
+        def forward_hook_wrong_input1(self, input: Tuple[str, str], output: str):
+            return output
+
+        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
+        m.submodule.register_forward_hook(forward_hook_wrong_input1)
+
+        with self.assertRaisesRegex(
+            RuntimeError, ".*",
+        ):
+            torch.jit.script(m)
+
+        def forward_hook_wrong_input2(self, input: str, output: str):
+            return output
+
+        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
+        m.submodule.register_forward_hook(forward_hook_wrong_input2)
+
+        with self.assertRaisesRegex(
+            RuntimeError, ".*",
+        ):
+            torch.jit.script(m)
+
+        def forward_hook_wrong_input3(self, input: Tuple, output: str):
+            return output
+
+        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
+        m.submodule.register_forward_hook(forward_hook_wrong_input3)
+
+        with self.assertRaisesRegex(
+            RuntimeError, ".*",
+        ):
+            torch.jit.script(m)  # error has no mention of hooks
+
+        def forward_hook_wrong_input4(self, input: Tuple[None], output: str):
+            return output
+
+        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
+        m.submodule.register_forward_hook(forward_hook_wrong_input4)
+
+        with self.assertRaisesRegex(
+            RuntimeError, ".*",
+        ):
+            torch.jit.script(m)
+
+    def test_module_wrong_hook_signatures(self):
+        # correct signature:
+        #   def forward_hook(self, input: Tuple[str], output: str)
+        def forward_hook_wrong_input1(self, input: Tuple[str, str], output: str):
+            return output
+
+        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
+        m.register_forward_hook(forward_hook_wrong_input1)
+
+        with self.assertRaisesRegex(
+            RuntimeError, ".*",
+        ):
+            torch.jit.script(m)
+
+        def forward_hook_wrong_input2(self, input: str, output: str):
+            return output
+
+        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
+        m.register_forward_hook(forward_hook_wrong_input2)
+
+        with self.assertRaisesRegex(
+            RuntimeError, ".*",
+        ):
+            torch.jit.script(m)
+
+        def forward_hook_wrong_input3(self, input: Tuple, output: str):
+            return output
+
+        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
+        m.register_forward_hook(forward_hook_wrong_input3)
+
+        with self.assertRaisesRegex(
+            RuntimeError, ".*",
+        ):
+            torch.jit.script(m)
+
+        def forward_hook_wrong_input4(self, input: Tuple[None], output: str):
+            return output
+
+        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
+        m.register_forward_hook(forward_hook_wrong_input4)
+
+        with self.assertRaisesRegex(
+            RuntimeError, ".*",
+        ):
+            torch.jit.script(m)
+
+        def forward_hook_wrong_output(self, input: Tuple[str], output: Tuple[str]):
+            return output
+
+        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
+        m.register_forward_hook(forward_hook_wrong_output)
+
+        with self.assertRaisesRegex(
+            RuntimeError, ".*",
+        ):
+            torch.jit.script(m)
+
+        def forward_hook_correct(self, input: Tuple[str], output: str):
+            return (output,)
+
+        def forward_hook_wrong_output_from_prev_hook(
+            self, input: Tuple[str], output: str
+        ):
+            return output
+
+        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
+        m.register_forward_hook(forward_hook_correct)
+        m.register_forward_hook(forward_hook_wrong_output_from_prev_hook)
+
+        with self.assertRaisesRegex(
+            RuntimeError, ".*",
+        ):
+            torch.jit.script(m)
+
+    def test_submodule_wrong_hook_signatures(self):
+        # correct signature:
+        #   def forward_hook(self, input: Tuple[str], output: str)
+        def forward_hook_wrong_input1(self, input: Tuple[str, str], output: str):
+            return output
+
+        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
+        m.submodule.register_forward_hook(forward_hook_wrong_input1)
+
+        with self.assertRaisesRegex(
+            RuntimeError, ".*",
+        ):
+            torch.jit.script(m)
+
+        def forward_hook_wrong_input2(self, input: str, output: str):
+            return output
+
+        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
+        m.submodule.register_forward_hook(forward_hook_wrong_input2)
+
+        with self.assertRaisesRegex(
+            RuntimeError, ".*",
+        ):
+            torch.jit.script(m)
+
+        def forward_hook_wrong_input3(self, input: Tuple, output: str):
+            return output
+
+        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
+        m.submodule.register_forward_hook(forward_hook_wrong_input3)
+
+        with self.assertRaisesRegex(
+            RuntimeError, ".*",
+        ):
+            torch.jit.script(m)  # error has no mention of hooks
+
+        def forward_hook_wrong_input4(self, input: Tuple[None], output: str):
+            return output
+
+        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
+        m.submodule.register_forward_hook(forward_hook_wrong_input4)
+
+        with self.assertRaisesRegex(
+            RuntimeError, ".*",
+        ):
+            torch.jit.script(m)
+
+        def forward_hook_wrong_output(self, input: Tuple[str], output: Tuple[str]):
+            return output
+
+        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
+        m.submodule.register_forward_hook(forward_hook_wrong_output)
+
+        with self.assertRaisesRegex(
+            RuntimeError, ".*",
+        ):
+            torch.jit.script(m)
+
+        def forward_hook_correct(self, input: Tuple[str], output: str):
+            return (output,)
+
+        def forward_hook_wrong_output_from_prev_hook(
+            self, input: Tuple[str], output: str
+        ):
+            return output
+
+        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
+        m.submodule.register_forward_hook(forward_hook_correct)
+        m.submodule.register_forward_hook(forward_hook_wrong_output_from_prev_hook)
+
+        with self.assertRaisesRegex(
+            RuntimeError, ".*",
+        ):
+            torch.jit.script(m)

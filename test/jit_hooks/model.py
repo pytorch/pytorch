@@ -71,6 +71,29 @@ class OuterModuleMultipleIO(torch.nn.Module):
         return self.submodule(input1, input2)
 
 
+class InnerModuleTupleDoubleIO(torch.nn.Module):
+    def __init__(self, name):
+        super(InnerModuleTupleDoubleIO, self).__init__()
+        self.name = name
+
+    def forward(self, input: Tuple[str, str]):
+        input_access1 = input[0]
+        input_access2 = input[1]
+        return input
+
+
+class OuterModuleTupleDoubleIO(torch.nn.Module):
+    def __init__(self, name: str, submodule_name: str):
+        super(OuterModuleTupleDoubleIO, self).__init__()
+        self.name = name
+        self.submodule = InnerModuleTupleDoubleIO(submodule_name)
+
+    def forward(self, input: Tuple[str, str]):
+        input_access1 = input[0]
+        input_access2 = input[1]
+        return self.submodule(("outer_mod", "outer_mod"))
+
+
 # Tests for JIT forward hooks and pre-hooks
 def test_module_hook_and_pre_hook_no_IO():
     m = OuterModuleNoIO("outer_mod_name", "inner_mod_name")
@@ -158,7 +181,7 @@ def test_module_forward_and_pre_hook_single_IO():
     def pre_hook_(self, input: Tuple[str]):
         assert self.name == "outer_mod_name"
         assert input[0] == "a"
-        return ("pre_hook_overrid_name",)
+        return "pre_hook_overrid_name"
 
     def forward_hook_(self, input: Tuple[str], output: str):
         assert self.name == "outer_mod_name"
@@ -238,14 +261,13 @@ def test_module_forward_and_pre_hook_single_IO_multiple_hooks():
         assert input == ("pre_hook_overrid_name2",)
         assert output == "pre_hook_overrid_name2_outermod_inner_mod"
         output = output + "_fh1"
-        return output
+        return output, output
 
-    def forward_hook2(self, input: Tuple[str], output: str):
+    def forward_hook2(self, input: Tuple[str], output: Tuple[str, str]):
         assert self.name == "outer_mod_name"
         assert input == ("pre_hook_overrid_name2",)
-        assert output == "pre_hook_overrid_name2_outermod_inner_mod_fh1"
-        output = output + "_fh2"
-        return output
+        assert output[0] == "pre_hook_overrid_name2_outermod_inner_mod_fh1"
+        return output[0] + "_fh2"
 
     m.register_forward_pre_hook(pre_hook1)
     m.register_forward_pre_hook(pre_hook2)
@@ -299,10 +321,10 @@ def test_submodule_hook_and_pre_hook_multiple_IO_multiple_hooks():
         assert input[1] == "pre_hook_override2"
         assert output[1] == "pre_hook_override2_"
         output2 = output[1] + "fh1"
-        return output[0], output2
+        return output[0], output2, output2
 
     def forward_hook2(
-        self, input: Tuple[List[str], str], output: Tuple[List[str], str]
+        self, input: Tuple[List[str], str], output: Tuple[List[str], str, str]
     ):
         assert self.name == "inner_mod_name"
         assert input[1] == "pre_hook_override2"
@@ -329,7 +351,7 @@ def test_submodule_forward_and_pre_hooks_single_IO():
     def pre_hook_single(self, input: Tuple[str]):
         assert self.name == "inner_mod_name"
         assert input[0] == "a_outermod"
-        return ("pre_hook_overrid_name",)
+        return "pre_hook_overrid_name"
 
     def forward_hook_single(self, input: Tuple[str], output: str):
         assert self.name == "inner_mod_name"
@@ -430,6 +452,36 @@ def test_submodule_forward_and_pre_hooks_single_IO_multiple_hooks():
     )
 
 
+def test_nested_tuple_IO():
+    m = OuterModuleTupleDoubleIO("outer_mod_name", "inner_mod_name")
+
+    def pre_hook_outermod(self, input: Tuple[Tuple[str, str]]):
+        # 'return ("hello", "goodbye")' doesn't work with eager because
+        # tuple is unpacked by eager when forward isn't expecting it
+        return (("hello", "goodbye"),)
+
+    def pre_hook_innermod(self, input: Tuple[Tuple[str, str]]):
+        # 'return ("hey","howdy")' doesn't work with eager because
+        # tuple unpacked by eager when forward isn't expecting it
+        return (("hey", "howdy"),)
+
+    def forward_hook_outermod(self, input: Tuple[Tuple[str, str]], output: str):
+        return "howdy"
+
+    def forward_hook_innermod(
+        self, input: Tuple[Tuple[str, str]], output: Tuple[str, str]
+    ):
+        return "forward_inner_mod"
+
+    m.register_forward_pre_hook(pre_hook_outermod)
+    m.submodule.register_forward_pre_hook(pre_hook_innermod)
+    m.register_forward_hook(forward_hook_outermod)
+    m.submodule.register_forward_hook(forward_hook_innermod)
+
+    m_scripted = torch.jit.script(m)
+    m_scripted.save(save_name + "test_nested_tuple_IO" + ".pt")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Serialize a script module with custom ops"
@@ -454,6 +506,7 @@ def main():
     test_module_hook_and_pre_hook_multiple_IO()
 
     test_module_hook_and_pre_hook_no_IO()
+    test_nested_tuple_IO()
 
 
 if __name__ == "__main__":

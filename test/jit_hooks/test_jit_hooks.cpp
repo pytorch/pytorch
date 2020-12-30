@@ -150,6 +150,21 @@ void test_module_hook_and_pre_hook_multiple_IO_multiple_hooks(
   AT_ASSERT("([pre_hook_overrid_name2, outer_mod_name, inner_mod_name], pre_hook_override_fh1_fh2)" == output_str);
 }
 
+void test_nested_tuple_IO(
+    const std::string& path_to_exported_script_module) {
+  torch::jit::Module module =
+      torch::jit::load(path_to_exported_script_module + "_" + "test_nested_tuple_IO" + ".pt");
+  std::vector<torch::jit::IValue> inputs;
+
+  std::tuple<std::string, std::string> input_tuple ("a","b");
+  inputs.push_back(input_tuple);
+
+  auto output = module(inputs);
+  std::cout << "----- module output: " << output << std::endl;
+  AT_ASSERT("howdy" == output);;
+}
+
+
 void test_module_hook_and_pre_hook_multiple_IO(
     const std::string& path_to_exported_script_module) {
   torch::jit::Module module =
@@ -223,6 +238,8 @@ int main(int argc, const char* argv[]) {
   
   std::cout << "testing: test_module_hook_and_pre_hook_no_IO" << std::endl;
   test_module_hook_and_pre_hook_no_IO(path_to_exported_script_module);
+  std::cout << "testing: test_nested_tuple_IO" << std::endl;
+  test_nested_tuple_IO(path_to_exported_script_module);
 
   std::cout << "JIT CPP Hooks okay!" << std::endl;
 }
