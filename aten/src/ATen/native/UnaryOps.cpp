@@ -55,10 +55,29 @@ static inline Tensor& unary_op_impl_float_out(Tensor& result, const Tensor& self
 template <typename Stub>
 Tensor unary_op_impl_float(const Tensor& self, Stub& stub, c10::optional<ScalarType> dtype = c10::nullopt) {
   Tensor result;
+  TensorIterator iter;
   if (dtype.has_value()) {
-    result = at::empty_like(self, self.options().dtype(dtype.value()));
+    iter = TensorIteratorConfig()
+               .set_check_mem_overlap(true)
+               .add_output(result)
+               .add_input(self)
+               .set_common_dtype(dtype.value())
+               .promote_inputs_to_common_dtype(true)
+               .cast_common_dtype_to_outputs(true)
+               .enforce_safe_casting_to_output(true)
+               .promote_integer_inputs_to_float(true)
+               .build();
+  } else {
+    iter = TensorIteratorConfig()
+               .set_check_mem_overlap(true)
+               .add_output(result)
+               .add_input(self)
+               .promote_inputs_to_common_dtype(true)
+               .cast_common_dtype_to_outputs(true)
+               .enforce_safe_casting_to_output(true)
+               .promote_integer_inputs_to_float(true)
+               .build();
   }
-  auto iter = TensorIterator::unary_float_op(result, self);
   stub(iter.device_type(), iter);
   iter.cast_outputs();
   return iter.output();
