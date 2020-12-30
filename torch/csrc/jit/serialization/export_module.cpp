@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/ir/type_hashing.h>
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
+#include <torch/csrc/jit/mobile/ivalue_hash.h>
 #include <torch/csrc/jit/mobile/method.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/passes/inliner.h>
@@ -32,51 +33,9 @@ namespace torch {
 namespace jit {
 
 char const* toString(OpCode op);
-
 namespace {
 
 const std::string kTensorJitIndex = "tensor_jit_index";
-
-struct MyHash {
-  std::size_t operator()(const IValue& value) const {
-    //    value.dump();
-    if (value.isTensor()) {
-      std::stringstream tensor_stream;
-      tensor_stream << value;
-      std::string tensor_str = tensor_stream.str();
-      std::size_t h1 = std::hash<std::string>{}(tensor_str);
-      std::cout << "hash: " << h1 << std::endl;
-      std::cout << "----------" << std::endl;
-      std::cout << "tensor_str: " << tensor_str << std::endl;
-      std::cout << "==========" << std::endl;
-      return h1;
-    } else {
-      return value.hash(value);
-    }
-    //    auto h = value.hash(value);
-    //    return h;
-    //      return value.hash();
-    //    return value.hash(value); // Insert your hash here
-  }
-};
-
-struct MyEqual {
-  bool operator()(const IValue& a, const IValue& b) const {
-    if (a.isTensor() && b.isTensor()) {
-      //      return a.toTensor().equal(b.toTensor());
-      std::stringstream a_stream;
-      a_stream << a;
-      std::string a_str = a_stream.str();
-
-      std::stringstream b_stream;
-      b_stream << b;
-      std::string b_str = b_stream.str();
-      return a_str == b_str;
-    } else {
-      return a == b;
-    }
-  }
-};
 
 ExportModuleExtraFilesHook& GetExtraFilesHook() {
   static ExportModuleExtraFilesHook func = nullptr;

@@ -21,26 +21,19 @@ InterpreterState::InterpreterState(std::shared_ptr<Code> code)
 using namespace at;
 
 bool InterpreterState::run(Stack& stack) {
-  std::cout << " InterpreterState::run and stack size is " << stack.size() << std::endl;
-  std::cout << " instructions number:  " << code_->instructions_.size()
-            << " op_names: " << code_->op_names_.size()
-            << " operatar: " << code_->operators_.size()
-            << " constants: " << code_->constants_.size()
-            << " types: " << code_->types_.size()
-            << std::endl;
   size_t pc = 0;
   while (true) {
     Instruction inst = code_->instructions_[pc];
     auto instX = inst.X;
 
-        std::cout << "RUNNING " << pc << " " << code_->instructions_[pc];
-        if (inst.op == OP) {
-          std::cout << ", " << code_->op_names_[inst.X].name;
-          if (!code_->op_names_[inst.X].overload_name.empty()) {
-            std::cout << "." << code_->op_names_[inst.X].overload_name;
-          }
-        }
-        std::cout << std::endl;
+//        std::cout << "RUNNING " << pc << " " << code_->instructions_[pc];
+//        if (inst.op == OP) {
+//          std::cout << ", " << code_->op_names_[inst.X].name;
+//          if (!code_->op_names_[inst.X].overload_name.empty()) {
+//            std::cout << "." << code_->op_names_[inst.X].overload_name;
+//          }
+//        }
+//        std::cout << std::endl;
     switch (inst.op) {
       case OP: {
         if (at::hasGlobalCallbacks()) {
@@ -53,22 +46,16 @@ bool InterpreterState::run(Stack& stack) {
 
         // TODO(iliacher): remove the workaround after RecordFunction is in
         // Dispatcher
-        std::cout << "isRecordFunctionEnabled" <<std::endl;
         bool prev_value = isRecordFunctionEnabled();
         if (!prev_value) {
           // enable only for the RecordFunction
-          std::cout << "!pre_value, enableRecordFunction true"<<std::endl;
           enableRecordFunction(true);
         }
-        std::cout << "RECORD_USER_SCOPE_WITH_INPUTS" <<std::endl;
         RECORD_USER_SCOPE_WITH_INPUTS(code_->op_names_[inst.X].name, stack);
         if (!prev_value) {
-          std::cout << "!pre_value, enableRecordFunction false" <<std::endl;
           enableRecordFunction(false);
         }
-        std::cout << "code_->operators_[inst.X](stack)" <<std::endl;
         code_->operators_[inst.X](stack);
-        std::cout << "++pc" <<std::endl;
         ++pc;
       } break;
       case OPN: {

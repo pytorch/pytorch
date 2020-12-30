@@ -3,6 +3,7 @@
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/observer.h>
+#include <torch/csrc/jit/mobile/ivalue_hash.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
@@ -78,43 +79,6 @@ std::string operator_str(
 namespace {
 
 const std::string kTensorJitIndex = "tensor_jit_index";
-
-struct MyHash {
-  std::size_t operator()(const IValue& value) const {
-    //    value.dump();
-    if (value.isTensor()) {
-      std::stringstream tensor_stream;
-      tensor_stream << value;
-      std::string tensor_str = tensor_stream.str();
-      std::size_t h1 = std::hash<std::string>{}(tensor_str);
-      return h1;
-    } else {
-      return value.hash(value);
-    }
-    //    auto h = value.hash(value);
-    //    return h;
-    //      return value.hash();
-    //    return value.hash(value); // Insert your hash here
-  }
-};
-
-struct MyEqual {
-  bool operator()(const IValue& a, const IValue& b) const {
-    if (a.isTensor() && b.isTensor()) {
-      //      return a.toTensor().equal(b.toTensor());
-      std::stringstream a_stream;
-      a_stream << a;
-      std::string a_str = a_stream.str();
-
-      std::stringstream b_stream;
-      b_stream << b;
-      std::string b_str = b_stream.str();
-      return a_str == b_str;
-    } else {
-      return a == b;
-    }
-  }
-};
 
 void print_unsupported_ops_and_throw(
     const std::unordered_set<std::string>& unsupported_ops) {
@@ -502,7 +466,6 @@ mobile::Module _load_for_mobile(
     ExtraFilesMap& extra_files) {
   std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
   auto module = _load_for_mobile(std::move(rai), device, extra_files);
-  std::cout << "finish loading " << std::endl;
   return module;
 }
 
@@ -510,23 +473,17 @@ mobile::Module _load_for_mobile(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files) {
-  std::cout << " get observer " << std::endl;
   auto observer = torch::observerConfig().getModuleObserver();
-  std::cout << " get instance_key " << std::endl;
   auto instance_key = std::rand();
   if (observer) {
     observer->onEnterLoadModel(instance_key);
   }
-  std::cout << " get reader " << std::endl;
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
-  std::cout << " get BytecodeDeserializer " << std::endl;
   BytecodeDeserializer deserializer(std::move(reader));
   try {
-    std::cout << " try deserializer.deserialize " << std::endl;
     mobile::Module result = deserializer.deserialize(device, extra_files);
     std::unordered_map<std::string, std::string> copied_metadata =
         result.metadata();
-    std::cout << " find model_name " << std::endl;
     if (result.metadata().find("model_name") == result.metadata().end()) {
       copied_metadata["model_name"] = result.name();
     }

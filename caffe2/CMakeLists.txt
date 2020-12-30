@@ -650,7 +650,6 @@ foreach(input_filename ${Caffe2_CPU_SRCS})
     list(APPEND Caffe2_CPU_SRCS_NON_AVX ${input_filename})
   endif()
 endforeach(input_filename)
-set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS_NON_AVX} ${Caffe2_CPU_SRCS_AVX} ${Caffe2_CPU_SRCS_AVX2})
 
 # ==========================================================
 # END formerly-libtorch sources
