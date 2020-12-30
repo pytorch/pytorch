@@ -326,6 +326,7 @@ Tensor LinearOpContext::run(
           },
           VK_KERNEL(addmm),
           v_output_packed.extents(),
+          {8, 8, 1},
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
           v_output_packed.image(

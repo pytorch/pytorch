@@ -156,6 +156,34 @@ Descriptor::Set dispatch_prologue(
   return descriptor.pool.allocate(shader_layout);
 }
 
+Descriptor::Set dispatch_prologue(
+    Command::Buffer& command_buffer,
+    const Shader::Layout::Signature& shader_layout_signature,
+    const Shader::Descriptor& shader_descriptor,
+    const Shader::WorkGroup& local_work_group_size) {
+  Context* const context = api::context();
+  const GPU gpu = context->gpu();
+  Descriptor& descriptor = context->descriptor();
+  Pipeline& pipeline = context->pipeline();
+  Shader& shader = context->shader();
+
+  const Shader::Layout::Object shader_layout =
+      shader.layout.cache.retrieve({
+        shader_layout_signature,
+      });
+
+  command_buffer.bind(
+      pipeline.cache.retrieve({
+        pipeline.layout.cache.retrieve({
+          shader_layout.handle,
+        }),
+        shader.cache.retrieve(shader_descriptor),
+        local_work_group_size,
+      }));
+
+  return descriptor.pool.allocate(shader_layout);
+}
+
 void dispatch_epilogue(
     Command::Buffer& command_buffer,
     const Descriptor::Set& descriptor_set,
