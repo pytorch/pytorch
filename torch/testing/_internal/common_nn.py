@@ -1273,6 +1273,7 @@ new_module_tests = [
     kldivloss_no_reduce_log_target_test(),
     kldivloss_no_reduce_scalar_log_target_test(),
     l1loss_no_reduce_test(),
+    l1loss_no_reduce_complex_test(),
     l1loss_no_reduce_scalar_test(),
     mseloss_no_reduce_test(),
     mseloss_no_reduce_scalar_test(),
