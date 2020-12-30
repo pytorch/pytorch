@@ -75,7 +75,7 @@ bool isSimpleMap(Node* node) {
       "aten::round(Tensor self) -> Tensor",
       "aten::rsqrt(Tensor self) -> Tensor",
       "aten::sigmoid(Tensor self) -> Tensor",
-      "aten::sin(Tensor self) -> Tensor",
+      "aten::sin(Tensor self, *, ScalarType? dtype=None) -> Tensor",
       "aten::sinh(Tensor self) -> Tensor",
       "aten::sqrt(Tensor self) -> Tensor",
       "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",

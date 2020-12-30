@@ -283,7 +283,7 @@ class IrParser {
         "aten::cos(Tensor self) -> Tensor",
         "aten::acos(Tensor self) -> Tensor",
         "aten::cosh(Tensor self) -> Tensor",
-        "aten::sin(Tensor self) -> Tensor",
+        "aten::sin(Tensor self, *, ScalarType? dtype=None) -> Tensor",
         "aten::asin(Tensor self) -> Tensor",
         "aten::sinh(Tensor self) -> Tensor",
         "aten::tan(Tensor self) -> Tensor",
