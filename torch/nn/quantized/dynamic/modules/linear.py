@@ -1,5 +1,4 @@
 import torch
-from ....modules.linear import Linear as NNLinear
 import torch.nn.quantized as nnq
 from torch.nn.quantized.modules.utils import _quantize_weight
 
@@ -82,8 +81,8 @@ class Linear(nnq.Linear):
         """
         float_modules = [torch.nn.Linear, torch.nn.modules.linear._LinearWithBias]
         assert type(mod) in float_modules, \
-            'nn.quantized.dynamic.Linear.from_float only works for one of' \
-            [float_mod.__name__ for float_mod in float_modules]
+            'nn.quantized.dynamic.Linear.from_float only works for one of' + \
+            str([float_mod.__name__ for float_mod in float_modules])
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
         if mod.qconfig is not None and mod.qconfig.weight is not None:
             weight_observer = mod.qconfig.weight()
