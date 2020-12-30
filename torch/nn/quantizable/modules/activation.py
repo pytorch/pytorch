@@ -90,8 +90,8 @@ class MultiheadAttention(nn.MultiheadAttention):
             _end = other.embed_dim
             _w = other.in_proj_weight[_start:_end, :]
             if _b is not None:
-                _b = torch.nn.Parameter(_b[_start:_end])
-            observed.linear_Q.weight = torch.nn.Parameter(_w)
+                _b = torch.nn.Parameter(_b[_start:_end], _b.requires_grad)
+            observed.linear_Q.weight = torch.nn.Parameter(_w, _w.requires_grad)
             observed.linear_Q.bias = _b
 
             _b = other.in_proj_bias
@@ -99,8 +99,8 @@ class MultiheadAttention(nn.MultiheadAttention):
             _end = other.embed_dim * 2
             _w = other.in_proj_weight[_start:_end, :]
             if _b is not None:
-                _b = torch.nn.Parameter(_b[_start:_end])
-            observed.linear_K.weight = torch.nn.Parameter(_w)
+                _b = torch.nn.Parameter(_b[_start:_end], _b.requires_grad)
+            observed.linear_K.weight = torch.nn.Parameter(_w, _w.requires_grad)
             observed.linear_K.bias = _b
 
             _b = other.in_proj_bias
@@ -108,8 +108,8 @@ class MultiheadAttention(nn.MultiheadAttention):
             _end = None
             _w = other.in_proj_weight[_start:, :]
             if _b is not None:
-                _b = torch.nn.Parameter(_b[_start:])
-            observed.linear_V.weight = torch.nn.Parameter(_w)
+                _b = torch.nn.Parameter(_b[_start:], _b.requires_grad)
+            observed.linear_V.weight = torch.nn.Parameter(_w, _w.requires_grad)
             observed.linear_V.bias = _b
         else:
             observed.linear_Q = other.q_proj_weight
@@ -222,17 +222,17 @@ class MultiheadAttention(nn.MultiheadAttention):
         if key_padding_mask is not None and key_padding_mask.dtype == torch.uint8:
             warnings.warn("Byte tensor for key_padding_mask in nn.MultiheadAttention is deprecated. Use bool tensor instead.")
             key_padding_mask = key_padding_mask.to(torch.bool)
-
+        print('=== DEBUG q', self.bias_k, self.bias_v)
         if self.bias_k is not None and self.bias_v is not None:
             if static_k is None and static_v is None:
                 # TODO: This is a potential source of accuracy drop.
                 #       quantized cat takes the scale and zp of the first
                 #       element, which might lose the precision in the bias_k
                 #       and the bias_v.
-                if k.is_quantized:
+                if k.is_quantized and not self.bias_k.is_quantized:
                     self.bias_k = torch.quantize_per_tensor(self.bias_k, k.q_scale(), k.q_zero_point(), k.dtype)
                 k = torch.cat([k, self.bias_k.repeat(1, bsz, 1)])
-                if v.is_quantized:
+                if v.is_quantized and not self.bias_v.is_quantized:
                     self.bias_v = torch.quantize_per_tensor(self.bias_v, v.q_scale(), v.q_zero_point(), v.dtype)
                 v = torch.cat([v, self.bias_v.repeat(1, bsz, 1)])
                 if attn_mask is not None:
