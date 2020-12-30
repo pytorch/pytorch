@@ -35,6 +35,8 @@ char const* toString(OpCode op);
 
 namespace {
 
+const std::string kTensorJitIndex = "tensor_jit_index";
+
 struct MyHash {
   std::size_t operator()(const IValue& value) const {
     //    value.dump();
@@ -662,7 +664,8 @@ class ScriptModuleSerializer {
                             constants_from_jit.end()) {
                           std::cout << "find one" << std::endl;
                           std::vector<IValue> index = {IValue(constants_from_jit[constant_value])};
-                          deduplicated_constant_values.push_back(Tup(index));
+                          auto index_with_key = Tup(std::vector<IValue>{IValue(kTensorJitIndex), Tup(index)});
+                          deduplicated_constant_values.push_back(index_with_key);
                         } else {
                           deduplicated_constant_values.push_back(
                               constant_value);

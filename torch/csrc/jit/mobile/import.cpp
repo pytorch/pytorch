@@ -77,6 +77,8 @@ std::string operator_str(
 
 namespace {
 
+const std::string kTensorJitIndex = "tensor_jit_index";
+
 struct MyHash {
   std::size_t operator()(const IValue& value) const {
     //    value.dump();
@@ -205,8 +207,12 @@ void parseMethods(
     std::vector<IValue> updated_constant_vals;
     for (const auto& const_item: consts_list) {
       if (const_item.isTuple()) {
-        const auto& index = const_item.toTuple()->elements()[0];
-        updated_constant_vals.push_back(constant_vals_from_jit[index.toInt()]);
+        const auto& tensor_jit = const_item.toTuple()->elements();
+        if (tensor_jit.size() > 1) {
+          const auto& tensor_jit_index_key = tensor_jit[0];
+          const auto& tensor_jit_index = tensor_jit[1].toTuple()->elements()[0];
+          updated_constant_vals.push_back(constant_vals_from_jit[tensor_jit_index.toInt()]);
+        }
       } else {
         updated_constant_vals.push_back(const_item);
       }
