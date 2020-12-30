@@ -2425,6 +2425,9 @@ class TestQuantizedOps(TestCase):
         custom_module_config = {
             'float_to_observed_custom_module_class': {
                 torch.nn.MultiheadAttention: torch.nn.quantizable.MultiheadAttention
+            },
+            'observed_to_quantized_custom_module_class': {
+                torch.nn.quantizable.MultiheadAttention: torch.nn.quantizable.MultiheadAttention
             }
         }
 
@@ -2449,10 +2452,9 @@ class TestQuantizedOps(TestCase):
             for bias, add_bias_kv, add_zero_attn in itertools.product(
                     Bias, Add_bias_kv, Add_zero_attn):
                 # Assume 12dB is sufficient for functional equivalence
-                # Without the bias, linear performs poorly
-                min_power = 10 #if bias else 5
-                max_mse = 5e-6 #if bias else 5e-1
-
+                # Without the bias, linear might perform poorly
+                min_power = 12
+                max_mse = 5
 
                 mha = MultiheadAttentionModel(embed_dim, num_heads, dropout,
                                               bias, add_bias_kv, add_zero_attn)
@@ -2467,20 +2469,17 @@ class TestQuantizedOps(TestCase):
                 y_ref = mha(*fp_data)
 
                 # Calibrate
-                print(bias, add_bias_kv, add_zero_attn)
                 y = mha_prepared(*fp_data)
-                self.assertEqual(y_ref[0], y[0], msg=("Failed with the following parameters:\n"
-                             f"- bias = {bias}\n"
-                             f"- add_bias_kv = {add_bias_kv}\n"
-                             f"- add_zero_attn = {add_zero_attn}"))  # Attention
+                self.assertEqual(y_ref[0], y[0])  # Attention
                 self.assertEqual(y_ref[1], y[1])  # Weight
 
                 # Quantize
-                mha_quantized = torch.quantization.convert(mha_prepared)
+                mha_quantized = torch.quantization.convert(
+                    mha_prepared,
+                    convert_custom_config_dict=custom_module_config)
                 qy = mha_quantized(*q_data)
 
                 snr = _snr(y, qy)
-
                 for signal, mse, power in snr:
                     self.assertTrue(
                         power > min_power or mse < max_mse,

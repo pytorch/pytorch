@@ -6,6 +6,8 @@ import torch.nn.quantized as nnq
 from torch import Tensor
 from typing import Optional, Tuple
 
+import warnings
+
 class MultiheadAttention(nn.MultiheadAttention):
     _FLOAT_MODULE = nn.MultiheadAttention
 
@@ -40,16 +42,19 @@ class MultiheadAttention(nn.MultiheadAttention):
     Note::
         Please, follow the quantization flow to convert the quantizable MHA.
     """
-    def __init__(self, embed_dim, num_heads,
-                 dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False,
-                 kdim=None, vdim=None):
+    def __init__(self, embed_dim: int, num_heads: int,
+                 dropout: float = 0., bias: bool = True,
+                 add_bias_kv: bool = False, add_zero_attn: bool = False,
+                 kdim: int = None, vdim: int = None):
         super(MultiheadAttention, self).__init__(embed_dim, num_heads, dropout,
                                                  bias, add_bias_kv,
                                                  add_zero_attn, kdim, vdim)
         self.linear_Q = nn.Linear(self.embed_dim, self.embed_dim, bias=bias)
-        self.linear_K = nn.Linear(self.kdim, self.embed_dim, bias=add_bias_kv)
-        self.linear_V = nn.Linear(self.vdim, self.embed_dim, bias=add_bias_kv)
-        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=bias)
+        self.linear_K = nn.Linear(self.kdim, self.embed_dim, bias=bias)
+        self.linear_V = nn.Linear(self.vdim, self.embed_dim, bias=bias)
+
+        # TODO: The use of the `_LinearWithBias` increases the quantization noise
+        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=True)
 
         # Functionals
         self.q_scaling_product = nnq.FloatFunctional()
@@ -61,13 +66,8 @@ class MultiheadAttention(nn.MultiheadAttention):
         self.dequant_k = torch.quantization.DeQuantStub()
         self.dequant_v = torch.quantization.DeQuantStub()
 
-    def __setstate__(self, state):
-        super(MultiheadAttention, self).__setstate__(state)
-        # TODO: Better to save the weights explicitly, rather than trust Linear
-
-    # def __getstate__(self, state):
-    #     super(MultiheadAttention, self).__setstate__(state)
-    #     # TODO: Better to save the weights explicitly, rather than trust Linear
+    def _get_name(self):
+        return 'QuantizableMultiheadAttention'
 
     @classmethod
     def from_float(cls, other):
@@ -78,6 +78,8 @@ class MultiheadAttention(nn.MultiheadAttention):
                        (other.in_proj_bias is not None),
                        (other.bias_k is not None),
                        other.add_zero_attn, other.kdim, other.vdim)
+        observed.bias_k = other.bias_k
+        observed.bias_v = other.bias_v
         observed.qconfig = getattr(other, 'qconfig')
 
         # Set the linear weights
@@ -116,9 +118,9 @@ class MultiheadAttention(nn.MultiheadAttention):
             observed.linear_K = other.k_proj_weight
             observed.linear_V = other.v_proj_weight
             if other.in_proj_bias is None:
-                observed.linear_Q.bias = None
-                observed.linear_K.bias = None
-                observed.linear_V.bias = None
+                observed.linear_Q.bias = None  # type: ignore
+                observed.linear_K.bias = None  # type: ignore
+                observed.linear_V.bias = None  # type: ignore
             else:
                 observed.linear_Q.bias = other.in_proj_bias[0:other.embed_dim]
                 observed.linear_K.bias = other.in_proj_bias[other.embed_dim:(other.embed_dim * 2)]
@@ -128,8 +130,32 @@ class MultiheadAttention(nn.MultiheadAttention):
         observed = torch.quantization.prepare(observed, inplace=True)
         return observed
 
-    def from_observed(self, other):
-        return torch.quantization.convert(self, inplace=False, remove_qconfig=True)
+    @classmethod
+    def from_observed(cls, other):
+        converted = torch.quantization.convert(other, mapping=None,
+                                               inplace=False,
+                                               remove_qconfig=True,
+                                               convert_custom_config_dict=None)
+        # Remove the parameters for the bias_k and bias_v to quantize them
+        # TODO: This is a potential source of accuracy drop.
+        #       quantized cat takes the scale and zp of the first
+        #       element, which might lose the precision in the bias_k
+        #       and the bias_v (which are cat'ed with k/v being first).
+        if converted.bias_k is not None:
+            bias_k = converted._parameters.pop('bias_k')
+            sc, zp = torch._choose_qparams_per_tensor(bias_k,
+                                                      reduce_range=False)
+            bias_k = torch.quantize_per_tensor(bias_k, sc, zp, torch.quint8)
+            setattr(converted, 'bias_k', bias_k)
+
+        if converted.bias_v is not None:
+            bias_v = converted._parameters.pop('bias_v')
+            sc, zp = torch._choose_qparams_per_tensor(bias_k,
+                                                      reduce_range=False)
+            bias_v = torch.quantize_per_tensor(bias_v, sc, zp, torch.quint8)
+            setattr(converted, 'bias_v', bias_v)
+
+        return converted
 
     def forward(self, query, key, value, key_padding_mask=None,
                 need_weights=True, attn_mask=None):
@@ -178,7 +204,8 @@ class MultiheadAttention(nn.MultiheadAttention):
 
     def _forward_impl(
             self, query, key, value, key_padding_mask=None, need_weights=True,
-            attn_mask=None) -> Tuple[Tensor, Optional[Tensor]]:
+            attn_mask=None):
+        # type: (Tensor, Tensor, Tensor, Optional[Tensor], bool, Optional[Tensor]) -> Tuple[Tensor, Optional[Tensor]]
         # This version will not deal with the static key/value pairs.
         # Keeping it here for future changes.
         static_k = None
@@ -222,23 +249,14 @@ class MultiheadAttention(nn.MultiheadAttention):
         if key_padding_mask is not None and key_padding_mask.dtype == torch.uint8:
             warnings.warn("Byte tensor for key_padding_mask in nn.MultiheadAttention is deprecated. Use bool tensor instead.")
             key_padding_mask = key_padding_mask.to(torch.bool)
-        print('=== DEBUG q', self.bias_k, self.bias_v)
         if self.bias_k is not None and self.bias_v is not None:
             if static_k is None and static_v is None:
-                # TODO: This is a potential source of accuracy drop.
-                #       quantized cat takes the scale and zp of the first
-                #       element, which might lose the precision in the bias_k
-                #       and the bias_v.
-                if k.is_quantized and not self.bias_k.is_quantized:
-                    self.bias_k = torch.quantize_per_tensor(self.bias_k, k.q_scale(), k.q_zero_point(), k.dtype)
                 k = torch.cat([k, self.bias_k.repeat(1, bsz, 1)])
-                if v.is_quantized and not self.bias_v.is_quantized:
-                    self.bias_v = torch.quantize_per_tensor(self.bias_v, v.q_scale(), v.q_zero_point(), v.dtype)
                 v = torch.cat([v, self.bias_v.repeat(1, bsz, 1)])
                 if attn_mask is not None:
-                    attn_mask = pad(attn_mask, (0, 1))
+                    attn_mask = nnF.pad(attn_mask, (0, 1))
                 if key_padding_mask is not None:
-                    key_padding_mask = pad(key_padding_mask, (0, 1))
+                    key_padding_mask = nnF.pad(key_padding_mask, (0, 1))
             else:
                 assert static_k is None, "bias cannot be added to static key."
                 assert static_v is None, "bias cannot be added to static value."
@@ -280,9 +298,9 @@ class MultiheadAttention(nn.MultiheadAttention):
             v = torch.cat([v, v_zeros], dim=1)
 
             if attn_mask is not None:
-                attn_mask = pad(attn_mask, (0, 1))
+                attn_mask = nnF.pad(attn_mask, (0, 1))
             if key_padding_mask is not None:
-                key_padding_mask = pad(key_padding_mask, (0, 1))
+                key_padding_mask = nnF.pad(key_padding_mask, (0, 1))
 
         # Leaving the quantized zone here
         q = self.dequant_q(q)
