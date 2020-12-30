@@ -2,7 +2,6 @@ from functools import reduce, wraps
 from itertools import product
 from operator import mul, itemgetter
 import collections
-import random
 
 import torch
 import numpy as np
@@ -548,26 +547,27 @@ def sample_inputs_pinverse(op_info, device, dtype, requires_grad=False):
 
 
 def sample_inputs_flip(op_info, device, dtype, requires_grad):
-    test_cases = (
+    tensors = (
         make_tensor((S, M, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
         make_tensor((S, 0, M), device, dtype, low=None, high=None, requires_grad=requires_grad)
     )
 
-    dims = [[0, 1, 2], [0], [0, 2], [-1]]
-    out = []
-    for dim in dims:
-        for case in test_cases:
-            random.shuffle(dim)
-            out.append(SampleInput(case, kwargs={'dims': tuple(dim)}))
+    dims = ((0, 1, 2), (0,), (0, 2), (-1,))
 
-    return out
+    # On CUDA, `dims=()` errors out with IndexError
+    if device == 'cpu':
+        dims = dims + ((),)
+
+    samples = [SampleInput(tensor, kwargs={'dims': dim}) for tensor, dim in product(tensors, dims)]
+
+    return samples
 
 def sample_inputs_fliplr_flipud(op_info, device, dtype, requires_grad):
-    test_cases = (
+    tensors = (
         make_tensor((S, M, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
         make_tensor((S, 0, M), device, dtype, low=None, high=None, requires_grad=requires_grad)
     )
-    return [SampleInput(case) for case in test_cases]
+    return [SampleInput(tensor) for tensor in tensors]
 
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [

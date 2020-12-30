@@ -378,19 +378,19 @@ class TestShapeOps(TestCase):
             self.assertEqual(size, list(data.flip(ds).size()))
 
         # test rectangular case
-        data = torch.tensor([1, 2, 3, 4, 5, 6]).view(2, 3).to(device)
-        flip0_result = torch.tensor([[4, 5, 6], [1, 2, 3]]).to(device)
-        flip1_result = torch.tensor([[3, 2, 1], [6, 5, 4]]).to(device)
+        data = torch.tensor([1, 2, 3, 4, 5, 6], device=device).view(2, 3)
+        flip0_result = torch.tensor([[4, 5, 6], [1, 2, 3]], device=device)
+        flip1_result = torch.tensor([[3, 2, 1], [6, 5, 4]], device=device)
 
         self.assertEqual(flip0_result, data.flip(0))
         self.assertEqual(flip1_result, data.flip(1))
 
         # test empty tensor, should just return an empty tensor of the same shape
-        data = torch.tensor([]).to(device)
+        data = torch.tensor((), device=device)
         self.assertEqual(data, data.flip(0))
 
         # test bool tensor
-        a = torch.tensor([False, True]).to(device)
+        a = torch.tensor([False, True], device=device)
         self.assertEqual(a.flip(0), torch.tensor([True, False]))
 
     def _rand_shape(self, dim, min_size, max_size):
