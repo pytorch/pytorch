@@ -58,6 +58,11 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
                 self.update_bn_stats()
         else:
             self.freeze_bn_stats()
+        # TODO(before land): remove
+        # (this is used for debugging by logging I/O with fw/bw hooks, not for land)
+        self.conv_before = nn.Identity()
+        self.conv_after = nn.Identity()
+        self.conv_rescale_after = nn.Identity()
 
     def reset_running_stats(self):
         self.bn.reset_running_stats()
@@ -86,12 +91,13 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         return self
 
     def _forward(self, input):
-        running_std = torch.sqrt(self.bn.running_var + self.bn.eps)
-        scale_factor = self.bn.weight / running_std
-        weight_shape = [1] * len(self.weight.shape)
-        weight_shape[0] = -1
-        bias_shape = [1] * len(self.weight.shape)
-        bias_shape[1] = -1
+        with torch.no_grad():
+            running_std = torch.sqrt(self.bn.running_var + self.bn.eps)
+            scale_factor = self.bn.weight / running_std
+            weight_shape = [1] * len(self.weight.shape)
+            weight_shape[0] = -1
+            bias_shape = [1] * len(self.weight.shape)
+            bias_shape[1] = -1
         scaled_weight = self.weight_fake_quant(self.weight * scale_factor.reshape(weight_shape))
         # using zero bias here since the bias for original conv
         # will be added later
@@ -99,8 +105,17 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
             zero_bias = torch.zeros_like(self.bias)
         else:
             zero_bias = torch.zeros(self.out_channels, device=scaled_weight.device)
+        # TODO(before land): remove
+        # (this is used for debugging, not for land)
+        scaled_weight = self.conv_before(scaled_weight)
         conv = self._conv_forward(input, scaled_weight, zero_bias)
+        # TODO(before land): remove
+        # (this is used for debugging, not for land)
+        conv = self.conv_after(conv)
         conv_orig = conv / scale_factor.reshape(bias_shape)
+        # TODO(before land): remove
+        # (this is used for debugging, not for land)
+        conv_orig = self.conv_rescale_after(conv_orig)
         if self.bias is not None:
             conv_orig = conv_orig + self.bias.reshape(bias_shape)
         conv = self.bn(conv_orig)
