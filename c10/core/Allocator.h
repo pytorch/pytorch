@@ -74,7 +74,7 @@ class C10_API DataPtr {
    * However, in some cases, you know /exactly/ what the deleter
    * is, and you have a new deleter that manually wraps
    * the old one.  In this case, you can safely swap the deleter
-   * after asserting that the deleters line is up.
+   * after asserting that the deleters line-up.
    *
    * What are the requirements on new_deleter?  It must still
    * properly dispose of the void* pointer passed in as its argument,
