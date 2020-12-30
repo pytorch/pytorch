@@ -926,7 +926,10 @@ class Module:
             modules = self.__dict__['_modules']
             if name in modules:
                 return modules[name]
-        object.__getattribute__(self, name)
+        # prevent raising AttributeError for function when local variables raise AttributeError
+        # and the __getattr__ is recalled. Instead, raise AttributeError for the local variable
+        # related Python issue: https://bugs.python.org/issue37379
+        super().__getattribute__(name)
 
     def __setattr__(self, name: str, value: Union[Tensor, 'Module']) -> None:
         def remove_from(*dicts_or_sets):
