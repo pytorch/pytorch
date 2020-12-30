@@ -508,7 +508,7 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
 
   std::stringstream ss;
   //    c._save_for_mobile(ss, {}, true);
-  //    c._save_for_mobile("/Users/chenlai/Documents/pytorch/data/data/test.ptl");
+      c._save_for_mobile("/Users/chenlai/Documents/pytorch/data/data/test.ptl");
   //  mobile::Module bc = _load_for_mobile(ss);
   //  mobile::Module bc =
   //  _load_for_mobile("/Users/chenlai/Documents/pytorch/data/data/opt_model.ptl");

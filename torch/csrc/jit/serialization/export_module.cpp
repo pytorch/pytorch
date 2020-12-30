@@ -341,12 +341,12 @@ class ScriptModuleSerializer {
     std::vector<IValue> ivalue_constants(
         constant_table_.begin(), constant_table_.end());
 
-    std::unordered_map<IValue, int, MyHash, MyEqual> constants_from_jit;
+    std::unordered_map<at::Tensor, int, MyHash, MyEqual> constants_from_jit;
 
     for (size_t i = 0; i < ivalue_constants.size(); i++) {
-      if (constants_from_jit.find(ivalue_constants[i]) ==
+      if (constants_from_jit.find(ivalue_constants[i].toTensor()) ==
           constants_from_jit.end()) {
-        constants_from_jit[ivalue_constants[i]] = i;
+        constants_from_jit[ivalue_constants[i].toTensor()] = i;
       }
     }
 
@@ -483,7 +483,7 @@ class ScriptModuleSerializer {
 
   std::vector<IValue> deduplicate_constants(
       std::vector<IValue>& elements,
-      std::unordered_map<IValue, int, MyHash, MyEqual> constants_from_jit) {
+      std::unordered_map<at::Tensor, int, MyHash, MyEqual> constants_from_jit) {
     std::vector<IValue> deduplicated_elements;
 
     bool is_constant_element = false;
@@ -517,11 +517,11 @@ class ScriptModuleSerializer {
                       std::vector<IValue> deduplicated_constant_values;
                       for (const auto& constant_value : constant_values) {
                         //                        constant_value.dump();
-                        if (constants_from_jit.find(constant_value) !=
+                        if (constant_value.isTensor() && constants_from_jit.find(constant_value.toTensor()) !=
                             constants_from_jit.end()) {
                           std::cout << "find one" << std::endl;
                           std::vector<IValue> index = {
-                              IValue(constants_from_jit[constant_value])};
+                              IValue(constants_from_jit[constant_value.toTensor()])};
                           auto index_with_key = Tup(std::vector<IValue>{
                               IValue(kTensorJitIndex), Tup(index)});
                           deduplicated_constant_values.push_back(
@@ -571,7 +571,7 @@ class ScriptModuleSerializer {
   void writeByteCode(
       const Module& module,
       bool save_mobile_debug_info,
-      std::unordered_map<IValue, int, MyHash, MyEqual> constants_from_jit) {
+      std::unordered_map<at::Tensor, int, MyHash, MyEqual> constants_from_jit) {
     std::vector<c10::IValue> elements;
     elements.emplace_back(
         static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
