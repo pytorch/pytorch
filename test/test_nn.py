@@ -1226,17 +1226,10 @@ class TestNN(NNTestCase):
         # this normal property shouldn't raise any errors
         self.assertEqual(model.another_property, "hello")
 
-        with self.assertRaises(AttributeError) as cm:
+        with self.assertRaisesRegex(
+                AttributeError,
+                r"'Model' object has no attribute 'something_that_doesnt_exist'"):
             model.some_property
-        
-        self.assertEqual(
-            "'Model' object has no attribute 'something_that_doesnt_exist'",
-            str(cm.exception)
-        )
-        self.assertNotEqual(
-            "'Model' object has no attribute 'some_property'",
-            str(cm.exception)
-        )
 
     def test_Sequential_getitem(self):
         l1 = nn.Linear(10, 20)
