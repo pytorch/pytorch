@@ -17,7 +17,6 @@ from caffe2.python.modeling.net_modifier import NetModifier
 from caffe2.python.optimizer import get_param_device, Optimizer
 from caffe2.python.regularizer import Regularizer, RegularizationBy
 from caffe2.python.layers import layers
-from caffe2.proto import caffe2_pb2
 from future.utils import viewitems, viewvalues
 
 import logging

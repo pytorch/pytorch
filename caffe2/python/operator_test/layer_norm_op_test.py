@@ -13,7 +13,6 @@ import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 
 import numpy as np
-import os
 import torch
 
 import unittest

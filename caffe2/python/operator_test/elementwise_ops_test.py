@@ -10,7 +10,6 @@ import hypothesis.strategies as st
 import numpy as np
 
 import unittest
-import os
 
 class TestElementwiseOps(hu.HypothesisTestCase):
 
