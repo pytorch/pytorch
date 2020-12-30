@@ -70,7 +70,7 @@ C10_HOST_DEVICE inline typename std::enable_if<!(std::is_floating_point<T>::valu
 
 /**
  * An overloaded transformation function for `torch.Tensor.random_()`, when used without specifying `from` and `to`,
- * added to fix compiler warnings reported in GitHub issue 46391. T is either float or double.
+ * added to fix compiler warnings reported in GitHub issue 46391. T is either float or double in this version.
  */
 template<typename T, typename V>
 C10_HOST_DEVICE inline typename std::enable_if<std::is_floating_point<T>::value, T>::type uniform_int(V val) {
