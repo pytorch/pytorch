@@ -1080,253 +1080,298 @@ torch::jit::Function* ClassType::findForwardHook(const std::string& name) const 
 }
 
 std::string ClassType::getPreHookErrorMessage(const std::string& pre_hook_name) const {
-    std::stringstream input_types;
-    const std::vector<Argument>& forward_args = getMethod("forward").getSchema().arguments();
-    for(int i = 1; i < forward_args.size(); ++i) {
-      input_types << forward_args[i].type()->annotation_str(); 
-      if (forward_args.size() - 1 != i) {
-        input_types << " ";
-      }
+  std::stringstream input_types;
+  const std::vector<Argument>& forward_args = getMethod("forward").getSchema().arguments();
+  for (int i = 1; i < forward_args.size(); ++i) {
+    input_types << forward_args[i].type()->annotation_str();
+    if (forward_args.size() - 1 != i) {
+      input_types << " ";
     }
-    if (forward_args.size() == 1 ){
-      input_types << "None";
-    }
-    std::string single_output = "";
-    if (forward_args.size() == 2 && forward_args[1].type()->cast<TupleType>() == nullptr) {
-      // if the output type is a tuple, it needs to be wrapped in an outer tuple to match eager's behavior 
-      single_output = ", '" + forward_args[1].type()->annotation_str() + "',";
-    }
-    std::string pre_hook_schema = pre_hook_name + "(self, input: Tuple[" + input_types.str() + "])";
-    std::string return_string = "This error occured while compiling the forward pre-hook '" +
-            pre_hook_name + "' on module '" + name()->name() +
-            "'. If you did not want to compile this pre-hook remove it from the original NN module" +
-            " before scripting. Pre-hooks for module '" + name()->name() +
-            "' are expected to have the following signature: " + pre_hook_schema +
-            " with a return type of either 'None'" + single_output + " or 'Tuple[" + input_types.str() + "]'.\n";
-    return return_string;
+  }
+  if (forward_args.size() == 1) {
+    input_types << "None";
+  }
+  std::string single_output = "";
+  if (forward_args.size() == 2 &&
+      forward_args[1].type()->cast<TupleType>() == nullptr) {
+    // if the output type is a tuple, it needs to be wrapped in an outer tuple
+    // to match eager's behavior
+    single_output = ", '" + forward_args[1].type()->annotation_str() + "',";
+  }
+  std::string pre_hook_schema =
+      pre_hook_name + "(self, input: Tuple[" + input_types.str() + "])";
+  std::string return_string =
+      "This error occured while compiling the forward pre-hook '" +
+      pre_hook_name + "' on module '" + name()->name() +
+      "'. If you did not want to compile this pre-hook remove it from the "
+      "original NN module before scripting. Pre-hooks for module '" + 
+      name()->name() + "' are expected to have the following signature: " 
+      + pre_hook_schema + " with a return type of either 'None'" + 
+      single_output + " or 'Tuple[" + input_types.str() + "]'.\n";
+  return return_string;
 }
 
 std::string ClassType::getHookErrorMessage(const std::string& hook_name) const {
-    FunctionSchema forwardSchema = getMethod("forward").getSchema();
-    std::stringstream input_types;
-    const std::vector<Argument>& forward_args = forwardSchema.arguments();
-    for(int i = 1; i < forward_args.size(); ++i) {
-      input_types << forward_args[i].type()->annotation_str(); 
-      if (forward_args.size() - 1 != i) {
-        input_types << " ";
-      }
+  FunctionSchema forwardSchema = getMethod("forward").getSchema();
+  std::stringstream input_types;
+  // create expected input type string
+  const std::vector<Argument>& forward_args = forwardSchema.arguments();
+  for (int i = 1; i < forward_args.size(); ++i) {
+    input_types << forward_args[i].type()->annotation_str();
+    if (forward_args.size() - 1 != i) {
+      input_types << " ";
     }
-    if (forward_args.size() == 1 ){
-      input_types << "None";
-    }
-    // create expected output types string
-    const Argument& pre_output = (forward_hooks_.size() == 1) ? forwardSchema.returns()[0] : forward_hooks_[forward_hooks_.size() - 2]->getSchema().returns()[0];  
-    std::string output_types = pre_output.type()->annotation_str();
-    // create error message
-    std::string hook_schema = hook_name + "(self, input: Tuple[" + input_types.str() + "], output: " + output_types +")";
-    std::string return_string = 
-            "This error occured while compiling the forward hook '" + 
-            hook_name + "' on module " + name()->name() +
-            ". If you did not want to compile this hook remove it from" +
-            " the original NN module before scripting. This hook was" +
-            " expected to have the following signature: " + hook_schema +
-            ". The type of the output arg is the returned type from either the forward" +
-            " method or the previous hook if it exists. Note that hooks can return " 
-            "anything, but if the hook is on a submodule the outer module is expecting"
-            " the same return type as the submodule's forward. \n";
-    return return_string;
+  }
+  if (forward_args.size() == 1) {
+    input_types << "None";
+  }
+
+  // create expected output types string
+  const Argument& pre_output =
+      (forward_hooks_.size() == 1)
+          ? forwardSchema.returns()[0]
+          : forward_hooks_[forward_hooks_.size() - 2]->getSchema().returns()[0];
+  std::string output_types = pre_output.type()->annotation_str();
+  // create error message
+  std::string hook_schema = hook_name + "(self, input: Tuple[" +
+                            input_types.str() + "], output: " + output_types + ")";
+  std::string return_string =
+      "This error occured while compiling the forward hook '" 
+      + hook_name + "' on module " + name()->name() +
+      ". If you did not want to compile this hook remove it from" +
+      " the original NN module before scripting. This hook was" +
+      " expected to have the following signature: " + hook_schema +
+      ". The type of the output arg is the returned type from" + 
+      " either the forward method or the previous hook if it exists. " + 
+      "Note that hooks can return anything, but if the hook is " + 
+      "on a submodule the outer module is expecting" +
+      " the same return type as the submodule's forward. \n";
+  return return_string;
 }
 
 void ClassType::checkPreHookSchema(torch::jit::Function& pre_hook) const {
   const FunctionSchema pre_hook_schema = pre_hook.getSchema();
-  std::string hook_id = "Pre-hook '" + pre_hook.name() + "' on module '" + name()->name() + "' ";
-  std::string pre_hook_err_msg = getPreHookErrorMessage(pre_hook.name()); 
-  // Pre-hooks are expecting two inputs: self, and a Tuple containing the non-self arguments passed to Forward
+  std::string hook_id =
+      "Pre-hook '" + pre_hook.name() + "' on module '" + name()->name() + "' ";
+  std::string pre_hook_err_msg = getPreHookErrorMessage(pre_hook.name());
+
+  // Pre-hooks are expecting two inputs: self, and a Tuple containing the
+  // non-self arguments passed to Forward
   TORCH_CHECK(
-          pre_hook_schema.arguments().size() == 2,
-          hook_id,
-          "was expected to only have exactly 2 inputs but it had ",
-          pre_hook_schema.arguments().size(),
-          " inputs. ",
-          pre_hook_err_msg);
+      pre_hook_schema.arguments().size() == 2,
+      hook_id,
+      "was expected to only have exactly 2 inputs but it had ",
+      pre_hook_schema.arguments().size(),
+      " inputs. ",
+      pre_hook_err_msg
+   );
 
   // check for proper tuple input types
   const std::vector<Argument>& forward_args = getMethod("forward").getSchema().arguments();
   const Argument input_arg = pre_hook_schema.arguments()[1];
   TORCH_CHECK(
-          input_arg.type()->cast<TupleType>() != nullptr,
-          hook_id,
-          "expected the second argument to be typed as a Tuple but found type: '",
-          input_arg.type()->annotation_str(),
-          "' instead.\n",
-          pre_hook_err_msg);
+      input_arg.type()->cast<TupleType>() != nullptr, 
+      hook_id,
+      "expected the second argument to be typed as a Tuple but found type: '",
+      input_arg.type()->annotation_str(), 
+      "' instead.\n", 
+      pre_hook_err_msg
+   );
 
-  const at::ArrayRef<TypePtr> input_tuple_types = input_arg.type()->cast<TupleType>()->elements(); 
+  const at::ArrayRef<TypePtr> input_tuple_types = input_arg.type()->cast<TupleType>()->elements();
   if (forward_args.size() == 1) {
-   // check for empty forward case
-   TORCH_CHECK(
-          input_tuple_types.size() == 1 &&  input_tuple_types[0]->kind() ==  NoneType::get()->kind(),
-          hook_id,
-          "was expecting Tuple[None] as the input type.",
-          " Recieved type: '",
-          input_arg.type()->annotation_str(), 
-          "'.\n",
-          pre_hook_err_msg); 
+    // check for empty forward case
+    TORCH_CHECK(
+        input_tuple_types.size() == 1 && input_tuple_types[0]->kind() == NoneType::get()->kind(),
+        hook_id,
+        "was expecting Tuple[None] as the input type. Recieved type: '",
+        input_arg.type()->annotation_str(),
+        "'.\n",
+        pre_hook_err_msg
+      );
   } else {
     // check input tuple for correct size and correct contained types
     TORCH_CHECK(
-          input_tuple_types.size() == forward_args.size() - 1,
-          hook_id,
-          "has the wrong number of contained types for the",
-          " input argument's Tuple. Recieved type: '",
-          input_arg.type()->annotation_str(), 
-          "'.\n",
-          pre_hook_err_msg);
+        input_tuple_types.size() == forward_args.size() - 1, hook_id,
+        "has the wrong number of contained types for the",
+        " input argument's Tuple. Recieved type: '",
+        input_arg.type()->annotation_str(),
+        "'.\n",
+        pre_hook_err_msg
+    );
 
-  for(int i = 1; i < forward_args.size(); ++i) {
-      if (forward_args[i].type()->annotation_str() != input_tuple_types[i-1]->annotation_str()) {
+    for (int i = 1; i < forward_args.size(); ++i) {
+      if (forward_args[i].type()->annotation_str() != input_tuple_types[i - 1]->annotation_str()) {
         TORCH_CHECK(
-          false,
-          hook_id,
-          "has the wrong inner types for the second tuple argument. Recieved type: '",
-          input_arg.type()->annotation_str(), 
-          "'.\n",
-          pre_hook_err_msg);
-      } 
+            false,
+            hook_id,
+            "has the wrong inner types for the second tuple argument. Recieved type: '",
+            input_arg.type()->annotation_str(),
+            "'.\n",
+            pre_hook_err_msg
+        );
+      }
+    }
   }
-  }
-  
-  // check return type, expected to be either None, the same type as the input, or the contained single type if the input was a tuple containing a single type.
+
+  // check return type, expected to be either None, the same type as the input,
+  // or the contained single type if the input was a tuple containing a single
+  // type.
   const Argument return_arg = pre_hook_schema.returns()[0];
-  std::string wrong_type_returned_err_msg = hook_id + "returned the wrong type of: '" + return_arg.type()->annotation_str() + "'.";
+  std::string wrong_type_returned_err_msg = hook_id + 
+      "returned the wrong type of: '" +
+      return_arg.type()->annotation_str() + "'.";
+
   if (return_arg.type()->kind() == NoneType::get()->kind()) {
     return;
   }
-  
-  if(forward_args.size() == 2 && forward_args[1].type()->annotation_str() == return_arg.type()->annotation_str()) {
-    // For edge case where forward's input is a tuple and the pre-hook returns a matching tuple that doesn't need unpacking. Don't want to return false here if the pre-hook's return doesn't match, could still be correct.
+  if (forward_args.size() == 2 && 
+        forward_args[1].type()->annotation_str() == return_arg.type()->annotation_str()) {
+    // For edge case where forward's input is a tuple and the pre-hook returns a
+    // matching tuple that doesn't need unpacking. Don't want to return false
+    // here if the pre-hook's return doesn't match, could still be correct.
     TORCH_CHECK(
-          return_arg.type()->cast<TupleType>() == nullptr,
-          wrong_type_returned_err_msg,
-          " When forward has a single tuple argument, the return needs",
-          " to be 'None' or a nested tuple containing forward's tuple",
-          " argument as in: 'Tuple[",
-          forward_args[1].type()->annotation_str(),
-          "]'.\n",
-          pre_hook_err_msg); 
+        return_arg.type()->cast<TupleType>() == nullptr,
+        wrong_type_returned_err_msg,
+        " When forward has a single tuple argument, the return needs",
+        " to be 'None' or a nested tuple containing forward's tuple",
+        " argument as in: 'Tuple[",
+        forward_args[1].type()->annotation_str(),
+        "]'.\n",
+        pre_hook_err_msg
+    );
     return;
   }
   // return can only be tuple of nested types now
   // check to make sure return is of tuple type
   TORCH_CHECK(
-          return_arg.type()->cast<TupleType>() != nullptr,
-          wrong_type_returned_err_msg,
-          pre_hook_err_msg);
-  const at::ArrayRef<TypePtr> return_tuple_types = return_arg.type()->cast<TupleType>()->elements(); 
+      return_arg.type()->cast<TupleType>() != nullptr,
+      wrong_type_returned_err_msg,
+      pre_hook_err_msg
+  );
+  const at::ArrayRef<TypePtr> return_tuple_types =
+      return_arg.type()->cast<TupleType>()->elements();
   // check for edge case of Tuple[None] for when forward has no arguments
   if (forward_args.size() == 1) {
     TORCH_CHECK(
-          return_tuple_types.size() == 1 &&  return_tuple_types[0]->kind() ==  NoneType::get()->kind(),
-          wrong_type_returned_err_msg,
-          " Was expecting either 'None' or 'Tuple[None]' since forward had no arguments.\n",
-          pre_hook_err_msg);
+        return_tuple_types.size() == 1 &&
+          return_tuple_types[0]->kind() == NoneType::get()->kind(),
+        wrong_type_returned_err_msg,
+        " Was expecting either 'None' or 'Tuple[None]' since forward had ",
+        "no arguments.\n",
+        pre_hook_err_msg
+    );
     return;
   }
 
   // check that tuple has proper number of contained types
   TORCH_CHECK(
-          return_tuple_types.size() == forward_args.size() - 1,
-          wrong_type_returned_err_msg,
-          " The returned tuple contains the wrong number of contained types.\n",
-          pre_hook_err_msg);
-  // check that contained types match forward types 
-  for(int i = 1; i < forward_args.size(); ++i) {
-      if (forward_args[i].type()->annotation_str() != return_tuple_types[i-1]->annotation_str()) {
-        TORCH_CHECK(
-          false,
+      return_tuple_types.size() == forward_args.size() - 1,
+      wrong_type_returned_err_msg,
+      " The returned tuple contains the wrong number of contained types.\n",
+      pre_hook_err_msg
+  );
+  // check that contained types match forward types
+  for (int i = 1; i < forward_args.size(); ++i) {
+    if (forward_args[i].type()->annotation_str() !=
+        return_tuple_types[i - 1]->annotation_str()) {
+      TORCH_CHECK(
+          false, 
           wrong_type_returned_err_msg,
           " The returned tuple contains the wrong inner types.\n",
           pre_hook_err_msg);
-      } 
+    }
   }
 }
+
 void ClassType::checkHookSchema(torch::jit::Function& hook) const {
   const FunctionSchema hook_schema = hook.getSchema();
-  std::string hook_id = "Hook '" + hook.name() + "' on module '" + name()->name() + "' ";
-  std::string hook_err_msg = getHookErrorMessage(hook.name()); 
-  // Hooks are expecting three inputs: self, a Tuple containing the non-self arguments passed to Forward, and the output of either Forward or the previous hook 
+  std::string hook_id =
+      "Hook '" + hook.name() + "' on module '" + name()->name() + "' ";
+  std::string hook_err_msg = getHookErrorMessage(hook.name());
+  // Hooks are expecting three inputs: self, a Tuple containing the non-self
+  // arguments passed to Forward, and the output of either Forward or the
+  // previous hook
   TORCH_CHECK(
-          hook_schema.arguments().size() == 3,
-          hook_id,
-          "was expected to only have exactly 3 inputs but it had ",
-          hook_schema.arguments().size(),
-          " inputs. ",
-          hook_err_msg);
+      hook_schema.arguments().size() == 3,
+      hook_id,
+      "was expected to only have exactly 3 inputs but it had ",
+      hook_schema.arguments().size(),
+      " inputs. ",
+      hook_err_msg
+  );
 
   // check for proper tuple input types
-  FunctionSchema forwardSchema = getMethod("forward").getSchema(); 
+  FunctionSchema forwardSchema = getMethod("forward").getSchema();
   const std::vector<Argument>& forward_args = forwardSchema.arguments();
   const Argument input_arg = hook_schema.arguments()[1];
   TORCH_CHECK(
-          input_arg.type()->cast<TupleType>() != nullptr,
-          hook_id,
-          "expected the second argument to be typed as a Tuple but found type: '",
-          input_arg.type()->annotation_str(),
-          "' instead.\n",
-          hook_err_msg);
+      input_arg.type()->cast<TupleType>() != nullptr,
+      hook_id,
+      "expected the second argument to be typed as a Tuple but found type: '",
+      input_arg.type()->annotation_str(),
+      "' instead.\n",
+      hook_err_msg
+  );
 
-  const at::ArrayRef<TypePtr> input_tuple_types = input_arg.type()->cast<TupleType>()->elements(); 
+  const at::ArrayRef<TypePtr> input_tuple_types =
+      input_arg.type()->cast<TupleType>()->elements();
   if (forward_args.size() == 1) {
-   // check for empty forward case
-   TORCH_CHECK(
-          input_tuple_types.size() == 1 &&  input_tuple_types[0]->kind() ==  NoneType::get()->kind(),
-          hook_id,
-          "was expecting Tuple[None] as the input type.",
-          " Recieved type: '",
-          input_arg.type()->annotation_str(), 
-          "'.\n",
-          hook_err_msg); 
+    // check for empty forward case
+    TORCH_CHECK(
+        input_tuple_types.size() == 1 &&
+          input_tuple_types[0]->kind() == NoneType::get()->kind(),
+        hook_id,
+        "was expecting Tuple[None] as the input type. Recieved type: '",
+        input_arg.type()->annotation_str(), 
+        "'.\n",
+        hook_err_msg
+    );
   } else {
     // check input tuple for correct size and correct contained types
     TORCH_CHECK(
-          input_tuple_types.size() == forward_args.size() - 1,
-          hook_id,
-          "has the wrong number of contained types for the",
-          " input argument's Tuple. Recieved type: '",
-          input_arg.type()->annotation_str(), 
-          "'.\n",
-          hook_err_msg);
+        input_tuple_types.size() == forward_args.size() - 1,
+        hook_id,
+        "has the wrong number of contained types for the",
+        " input argument's Tuple. Recieved type: '",
+        input_arg.type()->annotation_str(),
+        "'.\n",
+        hook_err_msg
+    );
 
-  for(int i = 1; i < forward_args.size(); ++i) {
-      if (forward_args[i].type()->annotation_str() != input_tuple_types[i-1]->annotation_str()) {
+    for (int i = 1; i < forward_args.size(); ++i) {
+      if (forward_args[i].type()->annotation_str() !=
+          input_tuple_types[i - 1]->annotation_str()) {
         TORCH_CHECK(
-          false,
-          hook_id,
-          "has the wrong inner types for the second tuple argument. Recieved type: '",
-          input_arg.type()->annotation_str(), 
-          "'.\n",
-          hook_err_msg);
-      } 
+            false, 
+            hook_id,
+            "has the wrong inner types for the second ",
+            "tuple argument. Recieved type: '",
+            input_arg.type()->annotation_str(), 
+            "'.\n", 
+            hook_err_msg
+        );
+      }
+    }
   }
-  }
-  
-  // check output tuple 
-  const Argument& prev_output = (forward_hooks_.size() == 1) ? forwardSchema.returns()[0] : forward_hooks_[forward_hooks_.size() - 2]->getSchema().returns()[0];
+
+  // check output tuple
+  const Argument& prev_output = (forward_hooks_.size() == 1)
+            ? forwardSchema.returns()[0]
+            : forward_hooks_[forward_hooks_.size() - 2]->getSchema().returns()[0];
   const Argument return_arg = hook_schema.arguments()[2];
-  std::string wrong_type_returned_err_msg = hook_id + "returned the wrong type of: " + return_arg.type()->annotation_str() + ".";
 
-  // output tuple needs to match prev_output's return exactly?? 
-
+  // output tuple needs to match prev_output's return exactly
   TORCH_CHECK(
-          prev_output.type()->annotation_str() == return_arg.type()->annotation_str(),
-          hook_id,
-          "has the wrong type for the output argument. Recieved type: '",
-          return_arg.type()->annotation_str(), 
-          "'. Expected type: '",
-          prev_output.type()->annotation_str(),
-          "'.\n",
-          hook_err_msg);
-
+      prev_output.type()->annotation_str() == return_arg.type()->annotation_str(),
+      hook_id,
+      "has the wrong type for the output argument. Recieved type: '",
+      return_arg.type()->annotation_str(),
+      "'. Expected type: '",
+      prev_output.type()->annotation_str(),
+      "'.\n",
+      hook_err_msg
+  );
 }
 
 torch::jit::Function* ClassType::findMethod(const std::string& name) const {
