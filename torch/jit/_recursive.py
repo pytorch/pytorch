@@ -447,14 +447,14 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     # Compile methods if necessary
     if concrete_type not in concrete_type_store.methods_compiled:
         create_methods_and_properties_from_stubs(concrete_type, method_stubs, property_stubs)
-        # create hooks after methods to ensure no name collisions between hooks and methods
-        # if done before hooks can overshadow methods that aren't exported
+        # Create hooks after methods to ensure no name collisions between hooks and methods.
+        # If done before hooks can overshadow methods that aren't exported
         create_hooks_from_stubs(concrete_type, hook_stubs, pre_hook_stubs)
         torch._C._run_emit_module_hook(cpp_module)
         concrete_type_store.methods_compiled.add(concrete_type)
 
-    # Copy the python now ScriptFunction forward and pre_forward hooks 
-    # to the new ScriptModule to allow the hooks to be run from eager
+    # Copy the forward hooks and pre-hooks to the new ScriptModule 
+    # to allow the hooks to be run from eager as ScriptFunctions
     for idx, fn in enumerate(script_module._c._get_forward_pre_hooks()):
         script_module._forward_pre_hooks[idx] = fn
     for idx, fn in enumerate(script_module._c._get_forward_hooks()):
