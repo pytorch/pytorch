@@ -500,6 +500,7 @@ class TestViewOps(TestCase):
         test_writes_propagate(t, v3)
         self.assertTrue(self.is_view_of_same_base(t, v3))
 
+    @onlyOnCPUAndCUDA
     def test_flatten_nonview(self, device):
         def assert_is_nonview(t, nv):
             idx_t = (0,) * t.ndim
