@@ -636,6 +636,15 @@ struct to_ir {
     }
     method.setSchema(emitDef(def, self, graph->block()));
 
+    // check schemas for hooks and prehooks 
+    if (self) {
+      if (self->getClassType()->findForwardHook(method.name())){
+        self->getClassType()->checkHookSchema(method);
+      } else if (self->getClassType()->findForwardPreHook(method.name())){
+        self->getClassType()->checkPreHookSchema(method);
+      }
+    }
+
     // NB ORDERING: SSA conversion has to occur before
     // lifting of closures and forks, this way closures are converted
     // to SSA while part of their original graph, and closures are ready to
