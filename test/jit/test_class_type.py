@@ -1212,6 +1212,32 @@ class TestClassType(JitTestCase):
 
         self.checkScript(test_function, (1, 2))
 
+    def test_classmethod(self):
+        """
+        Test classmethods on class types.
+        """
+        global ClassWithClassMethod
+
+        @torch.jit.script
+        class ClassWithClassMethod:
+            def __init__(self, a: int):
+                self.a: int = a
+
+            def __eq__(self, other: 'ClassWithClassMethod'):
+                return self.a == other.a
+
+            @classmethod
+            def create(cls, a: int) -> 'ClassWithClassMethod':
+                return cls(a)
+
+        def test_function(a: int) -> 'ClassWithClassMethod':
+            x = ClassWithClassMethod(a)
+            # Support calling classmethod with an instance
+            # Calling with the class is not supported.
+            return x.create(a)
+
+        self.checkScript(test_function, (1,))
+
     def test_properties(self):
         """
         Test that a scripted class can make use of the @property decorator.
