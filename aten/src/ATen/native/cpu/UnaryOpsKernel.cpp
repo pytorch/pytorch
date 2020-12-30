@@ -167,7 +167,7 @@ static void abs_kernel(TensorIterator& iter) {
 }
 
 static void angle_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "angle_cpu", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "angle_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return angle_impl(a); },
@@ -360,7 +360,7 @@ static void atanh_kernel(TensorIterator& iter) {
 }
 
 static void digamma_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "digamma", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "digamma", [&]() {
     cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return calc_digamma(a); });
