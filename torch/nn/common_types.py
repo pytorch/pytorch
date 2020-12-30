@@ -26,12 +26,8 @@ _size_6_t = _scalar_or_tuple_6_t[int]
 
 # For arguments which represent optional size parameters (eg, adaptive pool parameters)
 _size_any_opt_t = _scalar_or_tuple_any_t[Optional[int]]
-_size_1_opt_t = _scalar_or_tuple_1_t[Optional[int]]
 _size_2_opt_t = _scalar_or_tuple_2_t[Optional[int]]
 _size_3_opt_t = _scalar_or_tuple_3_t[Optional[int]]
-_size_4_opt_t = _scalar_or_tuple_4_t[Optional[int]]
-_size_5_opt_t = _scalar_or_tuple_5_t[Optional[int]]
-_size_6_opt_t = _scalar_or_tuple_6_t[Optional[int]]
 
 # For arguments that represent a ratio to adjust each dimension of an input with (eg, upsampling parameters)
 _ratio_2_t = _scalar_or_tuple_2_t[float]
