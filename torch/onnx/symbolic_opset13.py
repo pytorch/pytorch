@@ -5,7 +5,7 @@
 from torch.onnx.symbolic_helper import _block_list_in_opset
 import torch
 import torch.onnx.symbolic_helper as sym_help
-from torch.onnx.symbolic_helper import parse_args, _unimplemented
+from torch.onnx.symbolic_helper import parse_args
 
 block_listed_operators = ['embedding_bag']
 
