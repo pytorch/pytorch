@@ -47,8 +47,8 @@ class MultiheadAttention(nn.MultiheadAttention):
                                                  bias, add_bias_kv,
                                                  add_zero_attn, kdim, vdim)
         self.linear_Q = nn.Linear(self.embed_dim, self.embed_dim, bias=bias)
-        self.linear_K = nn.Linear(self.kdim, self.embed_dim, bias=bias)
-        self.linear_V = nn.Linear(self.vdim, self.embed_dim, bias=bias)
+        self.linear_K = nn.Linear(self.kdim, self.embed_dim, bias=add_bias_kv)
+        self.linear_V = nn.Linear(self.vdim, self.embed_dim, bias=add_bias_kv)
         self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=bias)
 
         # Functionals
@@ -65,9 +65,9 @@ class MultiheadAttention(nn.MultiheadAttention):
         super(MultiheadAttention, self).__setstate__(state)
         # TODO: Better to save the weights explicitly, rather than trust Linear
 
-    def __getstate__(self, state):
-        super(MultiheadAttention, self).__setstate__(state)
-        # TODO: Better to save the weights explicitly, rather than trust Linear
+    # def __getstate__(self, state):
+    #     super(MultiheadAttention, self).__setstate__(state)
+    #     # TODO: Better to save the weights explicitly, rather than trust Linear
 
     @classmethod
     def from_float(cls, other):
@@ -90,27 +90,27 @@ class MultiheadAttention(nn.MultiheadAttention):
             _end = other.embed_dim
             _w = other.in_proj_weight[_start:_end, :]
             if _b is not None:
-                _b = _b[_start:_end]
+                _b = torch.nn.Parameter(_b[_start:_end])
             observed.linear_Q.weight = torch.nn.Parameter(_w)
-            observed.linear_Q.bias = torch.nn.Parameter(_b)
+            observed.linear_Q.bias = _b
 
             _b = other.in_proj_bias
             _start = other.embed_dim
             _end = other.embed_dim * 2
             _w = other.in_proj_weight[_start:_end, :]
             if _b is not None:
-                _b = _b[_start:_end]
+                _b = torch.nn.Parameter(_b[_start:_end])
             observed.linear_K.weight = torch.nn.Parameter(_w)
-            observed.linear_K.bias = torch.nn.Parameter(_b)
+            observed.linear_K.bias = _b
 
             _b = other.in_proj_bias
             _start = other.embed_dim * 2
             _end = None
             _w = other.in_proj_weight[_start:, :]
             if _b is not None:
-                _b = _b[_start:]
+                _b = torch.nn.Parameter(_b[_start:])
             observed.linear_V.weight = torch.nn.Parameter(_w)
-            observed.linear_V.bias = torch.nn.Parameter(_b)
+            observed.linear_V.bias = _b
         else:
             observed.linear_Q = other.q_proj_weight
             observed.linear_K = other.k_proj_weight
@@ -225,12 +225,16 @@ class MultiheadAttention(nn.MultiheadAttention):
 
         if self.bias_k is not None and self.bias_v is not None:
             if static_k is None and static_v is None:
+                # TODO: This is a potential source of accuracy drop.
+                #       quantized cat takes the scale and zp of the first
+                #       element, which might lose the precision in the bias_k
+                #       and the bias_v.
                 if k.is_quantized:
                     self.bias_k = torch.quantize_per_tensor(self.bias_k, k.q_scale(), k.q_zero_point(), k.dtype)
                 k = torch.cat([k, self.bias_k.repeat(1, bsz, 1)])
                 if v.is_quantized:
-                    bias_v = torch.quantize_per_tensor(bias_v, v.q_scale(), v.q_zero_point(), v.dtype)
-                v = torch.cat([v, bias_v.repeat(1, bsz, 1)])
+                    self.bias_v = torch.quantize_per_tensor(self.bias_v, v.q_scale(), v.q_zero_point(), v.dtype)
+                v = torch.cat([v, self.bias_v.repeat(1, bsz, 1)])
                 if attn_mask is not None:
                     attn_mask = pad(attn_mask, (0, 1))
                 if key_padding_mask is not None:
@@ -267,11 +271,14 @@ class MultiheadAttention(nn.MultiheadAttention):
         if self.add_zero_attn:
             src_len += 1
             k_zeros = torch.zeros((k.size(0), 1) + k.size()[2:])
-            k_zeros = torch.quantize_per_tensor(k_zeros, k.q_scale(), k.q_zero_point(), k.dtype)
+            if k.is_quantized:
+                k_zeros = torch.quantize_per_tensor(k_zeros, k.q_scale(), k.q_zero_point(), k.dtype)
             k = torch.cat([k, k_zeros], dim=1)
             v_zeros = torch.zeros((v.size(0), 1) + k.size()[2:])
-            v_zeros = torch.quantize_per_tensor(v_zeros, v.q_scale(), v.q_zero_point(), v.dtype)
+            if v.is_quantized:
+                v_zeros = torch.quantize_per_tensor(v_zeros, v.q_scale(), v.q_zero_point(), v.dtype)
             v = torch.cat([v, v_zeros], dim=1)
+
             if attn_mask is not None:
                 attn_mask = pad(attn_mask, (0, 1))
             if key_padding_mask is not None:

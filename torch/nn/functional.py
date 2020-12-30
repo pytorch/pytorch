@@ -3295,7 +3295,7 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
                        or :math:`(N, D_\text{out}, H_\text{out}, W_\text{out}, 3)` (5-D case)
         mode (str): interpolation mode to calculate output values
             ``'bilinear'`` | ``'nearest'`` | ``'bicubic'``. Default: ``'bilinear'``
-            Note: ``mode='bicubic'`` supports only 4-D input. 
+            Note: ``mode='bicubic'`` supports only 4-D input.
             When ``mode='bilinear'`` and the input is 5-D, the interpolation mode
             used internally will actually be trilinear. However, when the input is 4-D,
             the interpolation mode will legitimately be bilinear.
@@ -3328,11 +3328,11 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
         in order to bring it in line with the default for :func:`interpolate`.
 
     .. note::
-        ``mode='bicubic'`` is implemented using the `cubic convolution algorithm`_ with :math:`\alpha=-0.75`. 
-        The constant :math:`\alpha` might be different from packages to packages. 
-        For example, `PIL`_ and `OpenCV`_ use -0.5 and -0.75 respectively. 
-        This algorithm may "overshoot" the range of values it's interpolating. 
-        For example, it may produce negative values or values greater than 255 when interpolating input in [0, 255]. 
+        ``mode='bicubic'`` is implemented using the `cubic convolution algorithm`_ with :math:`\alpha=-0.75`.
+        The constant :math:`\alpha` might be different from packages to packages.
+        For example, `PIL`_ and `OpenCV`_ use -0.5 and -0.75 respectively.
+        This algorithm may "overshoot" the range of values it's interpolating.
+        For example, it may produce negative values or values greater than 255 when interpolating input in [0, 255].
         Clamp the results with :func: `torch.clamp` to ensure they are within the valid range.
     .. _`cubic convolution algorithm`: https://en.wikipedia.org/wiki/Bicubic_interpolation
     .. _`PIL`: https://github.com/python-pillow/Pillow/blob/4634eafe3c695a014267eefdce830b4a825beed7/src/libImaging/Resample.c#L51
