@@ -5,7 +5,7 @@ from .module import Module
 from .utils import _single, _pair, _triple
 from .. import functional as F
 
-from ..common_types import _size_any_t, _size_1_t, _size_2_t, _size_3_t, _ratio_3_t, _ratio_2_t
+from ..common_types import _size_any_t, _size_1_t, _size_2_t, _size_3_t, _ratio_3_t, _ratio_2_t, _size_any_opt_t
 
 
 class _MaxPoolNd(Module):
@@ -14,7 +14,7 @@ class _MaxPoolNd(Module):
     return_indices: bool
     ceil_mode: bool
 
-    def __init__(self, kernel_size: _size_any_t, stride: Optional[_size_any_t] = None,
+    def __init__(self, kernel_size: _size_any_opt_t, stride: Optional[_size_any_t] = None,
                  padding: _size_any_t = 0, dilation: _size_any_t = 1,
                  return_indices: bool = False, ceil_mode: bool = False) -> None:
         super(_MaxPoolNd, self).__init__()
