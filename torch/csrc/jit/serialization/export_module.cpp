@@ -161,7 +161,7 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
         const auto& input_type = input->type();
         if (input_type->kind() == TypeKind::TupleType) {
           if (const auto& name_typed_input =
-              input_type->cast<at::NamedType>()) {
+                  input_type->cast<at::NamedType>()) {
             TORCH_CHECK(
                 !name_typed_input->name(),
                 "A named tuple type is not supported in mobile module. ",
@@ -346,7 +346,8 @@ class ScriptModuleSerializer {
     std::unordered_map<IValue, int, MyHash, MyEqual> constants_from_jit;
 
     for (size_t i = 0; i < ivalue_constants.size(); i++) {
-      if (constants_from_jit.find(ivalue_constants[i]) == constants_from_jit.end()) {
+      if (constants_from_jit.find(ivalue_constants[i]) ==
+          constants_from_jit.end()) {
         constants_from_jit[ivalue_constants[i]] = i;
       }
     }
@@ -500,8 +501,8 @@ class ScriptModuleSerializer {
             std::vector<IValue> deduplicate_key_values_pair;
             for (const auto& key_values_pair : key_values_pairs) {
               is_constant_element = false;
-//              std::cout << "key_values_pair: " << std::endl;
-//              key_values_pair.dump();
+              //              std::cout << "key_values_pair: " << std::endl;
+              //              key_values_pair.dump();
               if (key_values_pair.isTuple()) {
                 const auto& key_values_vector =
                     key_values_pair.toTuple()->elements();
@@ -536,10 +537,11 @@ class ScriptModuleSerializer {
                 deduplicate_key_values_pair.push_back(key_values_pair);
               }
             }
-//            std::cout << "deduplicate_key_values_pair: " << std::endl;
-//            for (const auto& it : deduplicate_key_values_pair) {
-//              it.dump();
-//            }
+            //            std::cout << "deduplicate_key_values_pair: " <<
+            //            std::endl; for (const auto& it :
+            //            deduplicate_key_values_pair) {
+            //              it.dump();
+            //            }
             deduplicate_bytecode_elements.push_back(
                 Tup(std::move(deduplicate_key_values_pair)));
           } else {
@@ -552,18 +554,18 @@ class ScriptModuleSerializer {
         deduplicated_elements.push_back(element);
       }
     }
-//    std::cout << "add_constants dump raw elements " << std::endl;
-//    for (const auto& element : elements) {
-//      std::cout << "---------" << std::endl;
-//      element.dump();
-//      std::cout << "---------" << std::endl;
-//    }
-//    std::cout << "add_constants dump new elements " << std::endl;
-//    for (const auto& element : deduplicated_elements) {
-//      std::cout << "---------" << std::endl;
-//      element.dump();
-//      std::cout << "---------" << std::endl;
-//    }
+    //    std::cout << "add_constants dump raw elements " << std::endl;
+    //    for (const auto& element : elements) {
+    //      std::cout << "---------" << std::endl;
+    //      element.dump();
+    //      std::cout << "---------" << std::endl;
+    //    }
+    //    std::cout << "add_constants dump new elements " << std::endl;
+    //    for (const auto& element : deduplicated_elements) {
+    //      std::cout << "---------" << std::endl;
+    //      element.dump();
+    //      std::cout << "---------" << std::endl;
+    //    }
     return deduplicated_elements;
   }
 
@@ -588,7 +590,7 @@ class ScriptModuleSerializer {
             for (const auto& key_values_pair : key_values_pairs) {
               is_constant_element = false;
               std::cout << "key_values_pair: " << std::endl;
-//              key_values_pair.dump();
+              //              key_values_pair.dump();
               if (key_values_pair.isTuple()) {
                 const auto& key_values_vector =
                     key_values_pair.toTuple()->elements();
@@ -602,13 +604,16 @@ class ScriptModuleSerializer {
                           values.toTuple()->elements();
                       std::vector<IValue> deduplicated_constant_values;
                       for (const auto& constant_value : constant_values) {
-//                        constant_value.dump();
+                        //                        constant_value.dump();
                         if (constants_from_jit.find(constant_value) !=
                             constants_from_jit.end()) {
                           std::cout << "find one" << std::endl;
-                          std::vector<IValue> index = {IValue(constants_from_jit[constant_value])};
-                          auto index_with_key = Tup(std::vector<IValue>{IValue(kTensorJitIndex), Tup(index)});
-                          deduplicated_constant_values.push_back(index_with_key);
+                          std::vector<IValue> index = {
+                              IValue(constants_from_jit[constant_value])};
+                          auto index_with_key = Tup(std::vector<IValue>{
+                              IValue(kTensorJitIndex), Tup(index)});
+                          deduplicated_constant_values.push_back(
+                              index_with_key);
                         } else {
                           deduplicated_constant_values.push_back(
                               constant_value);
@@ -630,11 +635,12 @@ class ScriptModuleSerializer {
                 deduplicate_key_values_pair.push_back(key_values_pair);
               }
             }
-//            std::cout << "deduplicate_constants: deduplicate_key_values_pair: "
-//                      << std::endl;
-//            for (const auto& it : deduplicate_key_values_pair) {
-//              it.dump();
-//            }
+            //            std::cout << "deduplicate_constants:
+            //            deduplicate_key_values_pair: "
+            //                      << std::endl;
+            //            for (const auto& it : deduplicate_key_values_pair) {
+            //              it.dump();
+            //            }
             deduplicate_bytecode_elements.push_back(
                 Tup(std::move(deduplicate_key_values_pair)));
           } else {
@@ -647,18 +653,18 @@ class ScriptModuleSerializer {
         deduplicated_elements.push_back(element);
       }
     }
-//    std::cout << "deduplicate_constants dump raw elements " << std::endl;
-//    for (const auto& element : elements) {
-//      std::cout << "---------" << std::endl;
-//      element.dump();
-//      std::cout << "---------" << std::endl;
-//    }
-//    std::cout << "deduplicate_constants dump new elements " << std::endl;
-//    for (const auto& element : deduplicated_elements) {
-//      std::cout << "---------" << std::endl;
-//      element.dump();
-//      std::cout << "---------" << std::endl;
-//    }
+    //    std::cout << "deduplicate_constants dump raw elements " << std::endl;
+    //    for (const auto& element : elements) {
+    //      std::cout << "---------" << std::endl;
+    //      element.dump();
+    //      std::cout << "---------" << std::endl;
+    //    }
+    //    std::cout << "deduplicate_constants dump new elements " << std::endl;
+    //    for (const auto& element : deduplicated_elements) {
+    //      std::cout << "---------" << std::endl;
+    //      element.dump();
+    //      std::cout << "---------" << std::endl;
+    //    }
     return deduplicated_elements;
   }
 
@@ -675,11 +681,11 @@ class ScriptModuleSerializer {
       debug_info_elements->emplace_back(
           static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
     }
-//    std::cout << "set list: " << std::endl;
-//    for (const auto& it : constants_from_jit) {
-//      std::cout << "index: " << it.second << " => " ;
-//      it.first.dump();
-//    }
+    //    std::cout << "set list: " << std::endl;
+    //    for (const auto& it : constants_from_jit) {
+    //      std::cout << "index: " << it.second << " => " ;
+    //      it.first.dump();
+    //    }
     std::cout << " ################### " << std::endl;
     moduleMethodsTuple(
         module, elements, debug_info_elements, save_mobile_debug_info);
@@ -710,12 +716,12 @@ class ScriptModuleSerializer {
 
     auto type_printer =
         [&](const c10::ConstTypePtr& t) -> c10::optional<std::string> {
-          auto namedType = t->cast<c10::NamedType>();
-          if (namedType && namedType->name()) {
-            return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
-          }
-          return c10::nullopt;
-        };
+      auto namedType = t->cast<c10::NamedType>();
+      if (namedType && namedType->name()) {
+        return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
+      }
+      return c10::nullopt;
+    };
     if (!pp) {
       pp = &file_streams_.insert(
           std::move(qualifier),

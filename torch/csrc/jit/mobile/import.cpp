@@ -2,8 +2,8 @@
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
-#include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/mobile/ivalue_hash.h>
+#include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
@@ -111,7 +111,7 @@ void parseMethods(
   }
   TORCH_CHECK(
       caffe2::serialize::kMinSupportedBytecodeVersion <= model_version &&
-      model_version <= caffe2::serialize::kProducedBytecodeVersion,
+          model_version <= caffe2::serialize::kProducedBytecodeVersion,
       "Lite Interpreter verson number does not match. ",
       "The model version must be between ",
       caffe2::serialize::kMinSupportedBytecodeVersion,
@@ -156,13 +156,14 @@ void parseMethods(
             .toInt();
 
     std::vector<IValue> updated_constant_vals;
-    for (const auto& const_item: consts_list) {
+    for (const auto& const_item : consts_list) {
       if (const_item.isTuple()) {
         const auto& tensor_jit = const_item.toTuple()->elements();
         if (tensor_jit.size() > 1) {
           const auto& tensor_jit_index_key = tensor_jit[0];
           const auto& tensor_jit_index = tensor_jit[1].toTuple()->elements()[0];
-          updated_constant_vals.push_back(constant_vals_from_jit[tensor_jit_index.toInt()]);
+          updated_constant_vals.push_back(
+              constant_vals_from_jit[tensor_jit_index.toInt()]);
         }
       } else {
         updated_constant_vals.push_back(const_item);
@@ -180,11 +181,11 @@ void parseMethods(
           "The function names in the bytecode table and the debug info table do not match.");
       IValue debug_info_table = debug_info_m_tuple[1];
       module_debug_info_list = expect_field(
-          debug_info_table,
-          "module_debug_info",
-          BYTECODE_INDEX_MODULE_DEBUG_INFO)
-          .toTuple()
-          ->elements();
+                                   debug_info_table,
+                                   "module_debug_info",
+                                   BYTECODE_INDEX_MODULE_DEBUG_INFO)
+                                   .toTuple()
+                                   ->elements();
       TORCH_CHECK(
           module_debug_info_list.size() == ops_list.size(),
           "The numbers of operators and module info strings do not match.");
@@ -203,8 +204,8 @@ void parseMethods(
       function->append_instruction(op_code, X, N);
       if (op_code == OP) {
         std::string module_debug_info = (has_debug_info)
-                                        ? module_debug_info_list[X].toString()->string()
-                                        : "";
+            ? module_debug_info_list[X].toString()->string()
+            : "";
         function->set_module_info(module_debug_info, i);
       }
     }
@@ -272,7 +273,7 @@ BytecodeDeserializer::BytecodeDeserializer(
       reader_(std::move(reader)) {}
 
 std::unordered_map<std::string, std::string> BytecodeDeserializer::
-deserializeMetadata(c10::optional<at::Device> device) {
+    deserializeMetadata(c10::optional<at::Device> device) {
   device_ = device;
   auto mcu = std::make_shared<mobile::CompilationUnit>();
   return readMobileMetadata(mcu);
@@ -320,7 +321,7 @@ mobile::Module BytecodeDeserializer::deserialize(
 }
 
 std::unordered_map<std::string, std::string> BytecodeDeserializer::
-readMobileMetadata(std::shared_ptr<mobile::CompilationUnit> mcu) {
+    readMobileMetadata(std::shared_ptr<mobile::CompilationUnit> mcu) {
   std::unordered_map<std::string, std::string> res;
   if (!reader_->hasRecord("metadata.pkl")) {
     return res;

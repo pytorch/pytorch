@@ -507,8 +507,8 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
   )JIT");
 
   std::stringstream ss;
-//    c._save_for_mobile(ss, {}, true);
-//    c._save_for_mobile("/Users/chenlai/Documents/pytorch/data/data/test.ptl");
+  //    c._save_for_mobile(ss, {}, true);
+  //    c._save_for_mobile("/Users/chenlai/Documents/pytorch/data/data/test.ptl");
   //  mobile::Module bc = _load_for_mobile(ss);
   //  mobile::Module bc =
   //  _load_for_mobile("/Users/chenlai/Documents/pytorch/data/data/opt_model.ptl");
@@ -516,10 +516,12 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
   //  _load_for_mobile("/Users/chenlai/Documents/pytorch/data/data/traced_model.ptl");
   //  mobile::Module bc =
   //  _load_for_mobile("/Users/chenlai/Documents/pytorch/data/data/test.ptl");
-//  mobile::Module bc = _load_for_mobile(
-//      "/Users/chenlai/Documents/pytorch/data/data/example_debug.ptl");
-  mobile::Module bc = _load_for_mobile("/Users/chenlai/Documents/pytorch/experiment/example_debug_map.ptl");
-//  mobile::Module bc = _load_for_mobile("/Users/chenlai/Documents/pytorch/data/data/example.ptl");
+  //  mobile::Module bc = _load_for_mobile(
+  //      "/Users/chenlai/Documents/pytorch/data/data/example_debug.ptl");
+  mobile::Module bc = _load_for_mobile(
+      "/Users/chenlai/Documents/pytorch/experiment/example_debug_map.ptl");
+  //  mobile::Module bc =
+  //  _load_for_mobile("/Users/chenlai/Documents/pytorch/data/data/example.ptl");
   //  mobile::Module bc =
   //  _load_for_mobile("/Users/chenlai/Documents/pytorch/data/data/example.ptl");
   bc.run_method("forward");
@@ -822,7 +824,7 @@ TEST(LiteInterpreterTest, OpNameExportFetchRootOperators) {
       "aten::zeros",
   };
   EXPECT_EQ(operator_names, expected_operator_names)
-            << "Expected the root operator lists to be the same";
+      << "Expected the root operator lists to be the same";
 }
 
 namespace {
@@ -834,7 +836,7 @@ static auto reg =
         .def_pickle(
             // __getattr__
             [](const c10::intrusive_ptr<TorchBindLiteInterpreterTestStruct>&
-            self) -> int64_t { return 0; },
+                   self) -> int64_t { return 0; },
             // __setattr__
             [](int64_t state) {
               return c10::make_intrusive<TorchBindLiteInterpreterTestStruct>();
