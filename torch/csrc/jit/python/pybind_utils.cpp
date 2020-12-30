@@ -11,7 +11,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       auto var = py::cast<autograd::Variable>(obj);
       if (var.is_sparse()) {
         TORCH_WARN_ONCE(
-            "Using sparsinput py::str:e tensors in TorchScript is experimental. Many optimization "
+            "Using sparse tensors in TorchScript is experimental. Many optimization "
             "pathways have not been thoroughly tested with sparse tensors. Please "
             "include the fact that the network is running sparse tensors in any bug "
             "reports submitted.");

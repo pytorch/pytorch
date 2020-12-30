@@ -24,16 +24,15 @@ bool InterpreterState::run(Stack& stack) {
   size_t pc = 0;
   while (true) {
     Instruction inst = code_->instructions_[pc];
-    auto instX = inst.X;
 
-//        std::cout << "RUNNING " << pc << " " << code_->instructions_[pc];
-//        if (inst.op == OP) {
-//          std::cout << ", " << code_->op_names_[inst.X].name;
-//          if (!code_->op_names_[inst.X].overload_name.empty()) {
-//            std::cout << "." << code_->op_names_[inst.X].overload_name;
-//          }
-//        }
-//        std::cout << std::endl;
+    //    std::cout << "RUNNING " << pc << " " << code_->instructions_[pc];
+    //    if (inst.op == OP) {
+    //      std::cout << ", " << code_->op_names_[inst.X].name;
+    //      if (!code_->op_names_[inst.X].overload_name.empty()) {
+    //        std::cout << "." << code_->op_names_[inst.X].overload_name;
+    //      }
+    //    }
+    //    std::cout << std::endl;
     switch (inst.op) {
       case OP: {
         if (at::hasGlobalCallbacks()) {
@@ -191,7 +190,6 @@ bool InterpreterState::run(Stack& stack) {
     //    }
     //  }
   }
-
   return false;
 }
 

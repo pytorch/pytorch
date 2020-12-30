@@ -307,6 +307,7 @@ inline InferredType tryToInferType(py::handle input) {
   } else if (THPLayout_Check(input.ptr())) {
     return InferredType(IntType::get());
   }
+
   auto enum_type = py::module::import("enum").attr("Enum");
   py::bool_ isEnumValue = py::isinstance(input, enum_type);
   if (py::cast<bool>(isEnumValue)) {

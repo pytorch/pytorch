@@ -333,43 +333,27 @@ class ScriptModuleSerializer {
       bool bytecode_format,
       bool save_mobile_debug_info) {
     C10_LOG_API_USAGE_ONCE("torch.script.save");
-    std::cout << "writeExtraFiles(module, extra_files)" << std::endl;
     writeExtraFiles(module, extra_files);
     // Serialize the model object
-    std::cout << "writeArchive(data, module._ivalue())" << std::endl;
     writeArchive("data", module._ivalue());
     // Then we serialize all code info.
-    std::cout << "writeCode(module.type())" << std::endl;
     writeCode(module.type());
     // The tensor constants from the code are written to a separate archive
     // so loading the code does not depend on loading the data
-    std::cout << "ivalue_constants construction " << std::endl;
     std::vector<IValue> ivalue_constants(
         constant_table_.begin(), constant_table_.end());
 
-    //    at::Tensor t = torch::tensor({1, 1, 1, 1, 1, 1, 1, 200});
-    //    IValue b(false);
-    //    ivalue_constants.push_back(b);
-    //    ivalue_constants.push_back(t);
-
     std::unordered_map<IValue, int, MyHash, MyEqual> constants_from_jit;
-    std::cout << "constants_from_jit construction " << std::endl;
-    for (const auto& it : ivalue_constants) {
-      std::cout << it.tagKind() << std::endl;
-    }
-//    constants_from_jit.insert(ivalue_constants.begin(), ivalue_constants.end());
+
     for (size_t i = 0; i < ivalue_constants.size(); i++) {
       if (constants_from_jit.find(ivalue_constants[i]) == constants_from_jit.end()) {
         constants_from_jit[ivalue_constants[i]] = i;
       }
     }
 
-    std::cout << "writeArchive(constants, create())" << std::endl;
     writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
     if (bytecode_format) {
-      std::cout << "writeByteCode" << std::endl;
       writeByteCode(module, save_mobile_debug_info, constants_from_jit);
-      std::cout << "writeMobileMetadata" << std::endl;
       writeMobileMetadata(module, extra_files);
     }
 
