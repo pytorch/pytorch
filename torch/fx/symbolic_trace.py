@@ -88,11 +88,9 @@ class Tracer(TracerBase):
                     return self.create_node('get_attr', n, (), {})
             raise NameError('parameter is not a member of this module')
         elif isinstance(a, torch.Tensor):
-            # Type ignore here is required because "n" and "p" have different types
-            # a few lines above
-            for n, p in self.root.named_buffers():  # type: ignore[assignment]
-                if a is p:
-                    return self.create_node('get_attr', n, (), {})
+            for n_, p_ in self.root.named_buffers():
+                if a is p_:
+                    return self.create_node('get_attr', n_, (), {})
 
         # For NamedTuple instances that appear literally as args, we emit
         # a node to construct the NamedTuple and use that Node as the argument.

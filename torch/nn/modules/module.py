@@ -1200,9 +1200,7 @@ class Module:
                     load(child, prefix + name + '.')
 
         load(self)
-        # instruction "load = None" => break load->load reference cycle 
-        # type ignore[...] is required because mypy isn't happy with the redef of "load"
-        load = None  # type: ignore[assignment]
+        del load
 
         if strict:
             if len(unexpected_keys) > 0:
