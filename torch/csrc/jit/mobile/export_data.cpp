@@ -36,7 +36,7 @@ class ScriptModuleSerializer {
   void writeArchive(const std::string& archive_name, const IValue& value) {
     std::vector<char> data;
     // Vector to capture the run-time class types during pickling the IValues
-    std::vector<c10::ClassTypePtr> memorizedClassTypes;
+    std::vector<c10::ClassTypePtr> memoizedClassTypes;
     Pickler data_pickle(
         [&](const char* buf, size_t size) {
           data.insert(data.end(), buf, buf + size);
@@ -45,7 +45,7 @@ class ScriptModuleSerializer {
         [&](const c10::ClassTypePtr& t) {
           return type_name_uniquer_.getUniqueName(t);
         },
-        &memorizedClassTypes);
+        &memoizedClassTypes);
     data_pickle.protocol();
     data_pickle.pushIValue(value);
     data_pickle.stop();

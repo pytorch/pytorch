@@ -2,6 +2,30 @@
 #define THC_GENERIC_FILE "THCUNN/generic/MultiMarginCriterion.cu"
 #else
 
+static inline void THNN_(MultiMarginCriterion_shapeCheck)(
+                         THCState *state,
+                         THCTensor *input, THCTensor *target) {
+  int64_t nframe, dim;
+  int64_t ndims = input->dim();
+  bool valid_inputs = (ndims == 2 && input->size(1) != 0) || (ndims == 1 && input->size(0) != 0) || ndims == 0;
+  if (ndims <= 1) {
+    nframe = 1;
+    dim = ndims == 0 ? 1 : input->size(0);
+  } else {
+    nframe = input->size(0);
+    dim = input->size(1);
+  }
+
+  TORCH_CHECK(
+    valid_inputs,
+    "Expected non-empty vector or matrix with optional 0-dim batch size, but got: ",
+    input->sizes());
+  TORCH_CHECK(
+      valid_inputs && target->dim() <= 1 && target->numel() == nframe,
+      "inconsistent target size, got: ",
+      target->sizes());
+}
+
 // TODO: improve error messages
 void THNN_(MultiMarginCriterion_updateOutput)(
            THCState *state,
@@ -13,6 +37,10 @@ void THNN_(MultiMarginCriterion_updateOutput)(
            THCTensor *weights,
            accreal margin_)
 {
+  THNN_(MultiMarginCriterion_shapeCheck)(state, input, target);
+  if (input->numel() == 0) {
+    return;
+  }
   scalar_t margin = ScalarConvert<accreal, scalar_t>::to(margin_);
   THCUNN_assertSameGPU(state, 2, input, target);
   input = THCTensor_(newContiguous)(state, input);
@@ -59,7 +87,8 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   else if (input->dim() == 2)
   {
     int nframe = input->size(0);
-    THArgCheck(!target->is_empty() && (THTensor_nDimensionLegacyNoScalars(target) == 1) && (THTensor_sizeLegacyNoScalars(target, 0) == nframe), 3,
+    // allow zero-dim target for 2D input.
+    THArgCheck((input->size(1) != 0) && (THTensor_nDimensionLegacyNoScalars(target) == 1) && (THTensor_sizeLegacyNoScalars(target, 0) == nframe), 3,
                "inconsistent target size");
     dim3 blocks(input->size(0));
     dim3 threads(MULTIMARGIN_THREADS);
@@ -130,7 +159,8 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   }
   else
   {
-    AT_ERROR("non-empty vector or matrix expected, got sizes: ", input->sizes());
+    TORCH_CHECK(false, "Expected 2D input with optional zero batch dim, or 1D input with non-zero dims, but got sizes: ",
+    input->sizes());
   }
 
   THCTensor_(free)(state, input);
@@ -149,11 +179,17 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
            THCTensor *weights,
            accreal margin_)
 {
+  THNN_(MultiMarginCriterion_shapeCheck)(state, input, target);
+  input = THCTensor_(newContiguous)(state, input);
+  THCTensor_(resizeAs)(state, gradInput, input);
+  if (input->numel() == 0) {
+    THCTensor_(free)(state, input);
+    return;
+  }
   scalar_t margin = ScalarConvert<accreal, scalar_t>::to(margin_);
   THCUNN_assertSameGPU(state, 3, input, gradInput, target);
-  input = THCTensor_(newContiguous)(state, input);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
-  THCTensor_(resizeAs)(state, gradInput, input);
+
   if(weights)
     weights = THCTensor_(newContiguous)(state, weights);
 
@@ -195,7 +231,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
   else if (input->dim() == 2)
   {
     int nframe = gradInput->size(0);
-    THArgCheck(!target->is_empty() && (THTensor_nDimensionLegacyNoScalars(target) == 1) && (THTensor_sizeLegacyNoScalars(target, 0) == nframe), 3,
+    THArgCheck((input->size(1) != 0) && (THTensor_nDimensionLegacyNoScalars(target) == 1) && (THTensor_sizeLegacyNoScalars(target, 0) == nframe), 3,
                "inconsistent target size");
     dim3 blocks(gradInput->size(0));
     dim3 threads(MULTIMARGIN_THREADS);
@@ -232,7 +268,8 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
   }
   else
   {
-    AT_ERROR("non-empty vector or matrix expected, got ", input->sizes());
+    TORCH_CHECK(false, "Expected 2D input with optional zero batch dim, or 1D input with non-zero dims, but got sizes: ", 
+    input->sizes());
   }
 
   THCTensor_(free)(state, input);
