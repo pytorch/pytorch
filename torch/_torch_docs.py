@@ -3091,12 +3091,9 @@ add_docstr(torch.flatten,
            r"""
 flatten(input, start_dim=0, end_dim=-1) -> Tensor
 
-Flattens :attr:`input`, or if :attr:`start_dim` or :attr:`end_dim` are specified, a range of :attr:`input`
-dimensions.
-
-Flattening a tensor reshapes it into a one-dimensional tensor while preserving its order.
-If :attr:`start_dim` or :attr:`end_dim` are specified, :attr:`end_dim` cannot come before :attr:`start_dim`,
-and only dimensions starting with :attr:`start_dim` and ending with :attr:`end_dim` are flattened.
+Flattens :attr:`input` by reshaping it into a one-dimensional tensor. If :attr:`start_dim` or :attr:`end_dim`
+are passed, only dimensions starting with :attr:`start_dim` and ending with :attr:`end_dim` are flattened.
+The order of elements in :attr:input is unchanged.
 
 If `start_dim < end_dim` (taking into account dimension wrapping), flattening an :attr:`input` with shape
 :math:`(l^*, f^+, r^*)` produces an output shape of :math:`(l^*, \prod f^+, r^*)` where :math:`l^*` is the

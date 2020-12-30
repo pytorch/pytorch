@@ -464,28 +464,27 @@ class TestViewOps(TestCase):
         self.assertNotEqual(t[1, 1], nv[6])
 
     def test_flatten_view(self, device):
-        def assert_is_view(t, v, t_is_view=False):
+        def test_writes_propagate(t, v):
             idx_t = (0,) * t.ndim
             idx_v = (0,) * v.ndim
-            if not t_is_view:
-                self.assertTrue(self.is_view_of(t, v))
-            else:
-                self.assertTrue(self.is_view_of_same_base(t, v))
             v[idx_v] = 0
             self.assertEqual(t[idx_t], v[idx_v])
 
         t = torch.ones(1, 2, 3, 4, device=device)
         v = t.flatten()
-        assert_is_view(t, v)
+        self.assertTrue(self.is_view_of(t, v))
+        test_writes_propagate(t, v)
 
         # zero-dimensional tensor
         t = torch.tensor(1, device=device)
         v = t.flatten()
-        assert_is_view(t, v)
+        test_writes_propagate(t, v)
+        self.assertTrue(self.is_view_of(t, v))
 
         t = torch.ones(1, 2, 3, 4, device=device).transpose(2, 3)
         v = t.flatten(0, 1)
-        assert_is_view(t, v, True)
+        test_writes_propagate(t, v)
+        self.assertTrue(self.is_view_of_same_base(t, v))
 
         # stride[i] = stride[i + 1] * size[i + 1] is satisfied for 3 groups:
         t = torch.ones(720, device=device) \
@@ -494,9 +493,12 @@ class TestViewOps(TestCase):
         v1 = t.flatten(0, 1)
         v2 = v1.flatten(1, 3)
         v3 = v2.flatten(2, 2)
-        assert_is_view(t, v1, True)
-        assert_is_view(t, v2, True)
-        assert_is_view(t, v3, True)
+        test_writes_propagate(t, v1)
+        self.assertTrue(self.is_view_of_same_base(t, v1))
+        test_writes_propagate(t, v2)
+        self.assertTrue(self.is_view_of_same_base(t, v2))
+        test_writes_propagate(t, v3)
+        self.assertTrue(self.is_view_of_same_base(t, v3))
 
     def test_flatten_nonview(self, device):
         def assert_is_nonview(t, nv):
