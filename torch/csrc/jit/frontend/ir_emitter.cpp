@@ -4291,9 +4291,8 @@ std::vector<Function*> CompilationUnit::define_hooks(
 
     function_table[fn->name()] = fn.get();
     functions.emplace_back(fn.get());
-    fn->ensure_defined();
-    // TODO check that hook schema is well formed
     this->register_function(std::move(fn));
+    functions.back()->ensure_defined();
   }
 
   // define pre_hooks
@@ -4317,9 +4316,8 @@ std::vector<Function*> CompilationUnit::define_hooks(
 
     function_table[fn->name()] = fn.get();
     functions.emplace_back(fn.get());
-    fn->ensure_defined();
-    // TODO check to ensure hook schema is well formed
     this->register_function(std::move(fn));
+    functions.back()->ensure_defined();
   }
 
   return functions;

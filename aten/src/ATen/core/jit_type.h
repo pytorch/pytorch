@@ -2293,6 +2293,8 @@ struct TORCH_API ClassType : public NamedType {
 
   void addForwardPreHook(torch::jit::Function* pre_hook_ptr);
   void addForwardHook(torch::jit::Function* hook_ptr);
+  torch::jit::Function* findForwardPreHook(const std::string& name) const;
+  torch::jit::Function* findForwardHook(const std::string& name) const;
   const std::vector<torch::jit::Function*>& getForwardHooks();
   const std::vector<torch::jit::Function*>& getForwardPreHooks();
 

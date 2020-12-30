@@ -142,8 +142,11 @@ IValue Module::operator()(std::vector<IValue> inputs) {
     auto tuple_input = c10::ivalue::Tuple::create(pre_hook_input_vals);
     IValue result = Method(_ivalue(), pre_hook)({tuple_input});
     if (!result.isNone()) {
-      inputs = result.isTuple() ? result.toTuple()->elements()
-                                : (std::vector<IValue>){result};
+      if (result.isTuple()) {
+        inputs = result.toTuple()->elements();
+      } else {
+        inputs = {result};
+      }
     }
   }
 
