@@ -127,7 +127,7 @@ vTensor pack_weights(
           dim0_ = dim0;
           dim1_ = dim1;
           dim2_ = dim2;
-          data_ = new float[dim0 * dim1 * dim2 * 4];
+          data_ = new float[dim0 * dim1 * dim2 * 4];  // memory leak
           memset(data_, 0.f, dim0 * dim1 * dim2 * 4 * sizeof(float));
         }
 
