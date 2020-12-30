@@ -22,6 +22,7 @@ from torch.jit._recursive import ScriptMethodStub, wrap_cpp_module, infer_method
 from torch.nn import Module
 from torch.jit._state import _enabled
 from torch.jit._builtins import _register_builtin
+from torch._six import get_function_from_type
 from torch._six import with_metaclass
 from torch.jit.frontend import get_jit_def, get_default_args, get_jit_class_def
 from torch._jit_internal import _qualified_name
@@ -627,7 +628,9 @@ if _enabled:
         # it is not overriden, we call into the nn.Module __dir__ method
         def __dir__(self):
             self_method = self.__dir__
-            if self_method.__func__ == getattr(RecursiveScriptModule, "__dir__", None):
+            if self_method.__func__ == get_function_from_type(  # type: ignore
+                    RecursiveScriptModule, "__dir__"
+            ):
                 return super(RecursiveScriptModule, self).__dir__()
             return self_method()
 
@@ -636,7 +639,9 @@ if _enabled:
         # class throws if it isn't overriden, we define __bool__ to preserve default behavior
         def __bool__(self):
             self_method = self.__bool__
-            if self_method.__func__ == getattr(RecursiveScriptModule, "__bool__", None):
+            if self_method.__func__ == get_function_from_type(  # type: ignore
+                    RecursiveScriptModule, "__bool__"
+            ):
                 return True
             return self_method()
 
