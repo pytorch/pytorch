@@ -298,7 +298,7 @@ def get_device_capability(device: Optional[_device_t] = None) -> Tuple[int, int]
 def get_device_properties(device: _device_t) -> _CudaDeviceProperties:
     r"""Gets the properties of a device.
 
-    Arguments:
+    Args:
         device (torch.device or int or str): device for which to return the
             properties of the device.
 
