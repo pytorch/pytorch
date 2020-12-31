@@ -358,7 +358,6 @@ class ScriptModuleSerializer {
 
     // Acquires and sets minimum (dynamic) version
     for (auto& item : file_streams_) {
-      std::cout << "writeMobileMetadata " << item.key() << std::endl;
       writer_.setMinVersion(item.value().minVersion());
     }
   }
@@ -502,8 +501,6 @@ class ScriptModuleSerializer {
             std::vector<IValue> deduplicate_key_values_pair;
             for (const auto& key_values_pair : key_values_pairs) {
               is_constant_element = false;
-              std::cout << "key_values_pair: " << std::endl;
-              //              key_values_pair.dump();
               if (key_values_pair.isTuple()) {
                 const auto& key_values_vector =
                     key_values_pair.toTuple()->elements();
@@ -517,12 +514,10 @@ class ScriptModuleSerializer {
                           values.toTuple()->elements();
                       std::vector<IValue> deduplicated_constant_values;
                       for (const auto& constant_value : constant_values) {
-                        //                        constant_value.dump();
                         if (constant_value.isTensor() &&
                             constants_from_jit.find(
                                 constant_value.toTensor()) !=
                                 constants_from_jit.end()) {
-                          std::cout << "find one" << std::endl;
                           std::vector<IValue> index = {
                               IValue(constants_from_jit.at(
                                   constant_value.toTensor()))};
@@ -551,12 +546,6 @@ class ScriptModuleSerializer {
                 deduplicate_key_values_pair.push_back(key_values_pair);
               }
             }
-            //            std::cout << "deduplicate_constants:
-            //            deduplicate_key_values_pair: "
-            //                      << std::endl;
-            //            for (const auto& it : deduplicate_key_values_pair) {
-            //              it.dump();
-            //            }
             deduplicate_bytecode_elements.push_back(
                 Tup(std::move(deduplicate_key_values_pair)));
           } else {
@@ -575,7 +564,8 @@ class ScriptModuleSerializer {
   void writeByteCode(
       const Module& module,
       bool save_mobile_debug_info,
-      std::unordered_map<at::Tensor, int, MyHash, MyEqual> constants_from_jit) {
+      const std::unordered_map<at::Tensor, int, MyHash, MyEqual>&
+          constants_from_jit) {
     std::vector<c10::IValue> elements;
     elements.emplace_back(
         static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
@@ -645,7 +635,6 @@ void ExportModule(
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
     bool save_mobile_debug_info) {
-  std::cout << "Export Module filename out" << std::endl;
   ScriptModuleSerializer serializer(
       [&](const void* buf, size_t nbytes) -> size_t {
         out.write(static_cast<const char*>(buf), nbytes);
@@ -662,7 +651,6 @@ void ExportModule(
     bool bytecode_format,
     bool save_mobile_debug_info) {
   ScriptModuleSerializer serializer(filename);
-  std::cout << "Export Module filename" << std::endl;
   serializer.serialize(
       module, extra_files, bytecode_format, save_mobile_debug_info);
 }
@@ -673,7 +661,6 @@ void ExportModule(
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
     bool save_mobile_debug_info) {
-  std::cout << "Export Module writer_func" << std::endl;
   ScriptModuleSerializer serializer(writer_func);
   serializer.serialize(
       module, extra_files, bytecode_format, save_mobile_debug_info);
