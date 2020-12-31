@@ -2,6 +2,7 @@
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
+#include <torch/csrc/jit/mobile/common_const.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
@@ -76,8 +77,6 @@ std::string operator_str(
 }
 
 namespace {
-
-const std::string kTensorJitIndex = "tensor_jit_index";
 
 void print_unsupported_ops_and_throw(
     const std::unordered_set<std::string>& unsupported_ops) {
@@ -161,8 +160,12 @@ void parseMethods(
         if (tensor_jit.size() > 1) {
           const auto& tensor_jit_index_key = tensor_jit[0];
           const auto& tensor_jit_index = tensor_jit[1].toTuple()->elements()[0];
-          updated_constant_vals.push_back(
-              constant_vals_from_jit[tensor_jit_index.toInt()]);
+          if (tensor_jit_index_key.isString() &&
+              tensor_jit_index_key.toString().get()->string() ==
+                  mobile::kTensorJitIndex) {
+            updated_constant_vals.push_back(
+                constant_vals_from_jit[tensor_jit_index.toInt()]);
+          }
         }
       } else {
         updated_constant_vals.push_back(const_item);

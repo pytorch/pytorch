@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/ir/attributes.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/type_hashing.h>
+#include <torch/csrc/jit/mobile/common_const.h>
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/ivalue_hash.h>
@@ -32,8 +33,6 @@ namespace jit {
 
 char const* toString(OpCode op);
 namespace {
-
-const std::string kTensorJitIndex = "tensor_jit_index";
 
 ExportModuleExtraFilesHook& GetExtraFilesHook() {
   static ExportModuleExtraFilesHook func = nullptr;
@@ -344,8 +343,9 @@ class ScriptModuleSerializer {
     std::unordered_map<at::Tensor, int, MyHash, MyEqual> constants_from_jit;
 
     for (size_t i = 0; i < ivalue_constants.size(); i++) {
-      if (ivalue_constants[i].isTensor() && constants_from_jit.find(ivalue_constants[i].toTensor()) ==
-          constants_from_jit.end()) {
+      if (ivalue_constants[i].isTensor() &&
+          constants_from_jit.find(ivalue_constants[i].toTensor()) ==
+              constants_from_jit.end()) {
         constants_from_jit[ivalue_constants[i].toTensor()] = i;
       }
     }
@@ -525,7 +525,7 @@ class ScriptModuleSerializer {
                           std::vector<IValue> index = {IValue(
                               constants_from_jit[constant_value.toTensor()])};
                           auto index_with_key = Tup(std::vector<IValue>{
-                              IValue(kTensorJitIndex), Tup(index)});
+                              IValue(mobile::kTensorJitIndex), Tup(index)});
                           deduplicated_constant_values.push_back(
                               index_with_key);
                         } else {
