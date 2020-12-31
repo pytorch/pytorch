@@ -21,4 +21,14 @@ Scalar Scalar::conj() const {
   }
 }
 
+Scalar Scalar::log() const {
+  if (isComplex()) {
+    return std::log(v.z);
+  } else if (isFloatingPoint()) {
+    return std::log(v.d);
+  } else {
+    return std::log(v.i);
+  }
+}
+
 }  // namespace c10

@@ -1129,8 +1129,7 @@ struct to_ir {
     // propagate further in all loaded models. The handling of
     // unwrap_optional will fail in these cases since export did
     // not expect that the input would be none and an unannotated None.
-    // cannot be passed to unwrapoptional To enable this,
-    // we need to (1) implement a real casting operator
+    // To enable this, we need to (1) implement a real casting operator
     // annotated(T, X) that stays in the graph and does the cast
     // and (2) only enable this OPTIONAL_NONE when loading newer
     // graphs because it is incompatible with older graphs.
@@ -1283,7 +1282,7 @@ struct to_ir {
       type_set = true;
     }
 
-    // comprehension introduces it's own scope. no variable assigned
+    // comprehension introduces its own scope. no variable assigned
     // leaks into the rest of the graph
     Node* n =
         graph->insertNode(create(prim::ComprehensionScope, lc.range(), 0));
@@ -3124,7 +3123,7 @@ struct to_ir {
             if (!apply.inputs().empty()) {
               auto tuple_list = ListLiteral(apply.inputs()[0]).inputs();
               for (auto tuple : tuple_list) {
-                exprs.pushe_back(tuple);
+                exprs.push_back(tuple);
               }
             }
             // Create tuples out of each kwarg and gather them as well

@@ -468,7 +468,8 @@ class profile(object):
             self.profiler_kind,
             self.record_shapes,
             self.profile_memory,
-            self.with_stack)
+            self.with_stack,
+            self.with_flops)
 
     def __enter__(self):
         if not self.enabled:
@@ -745,6 +746,7 @@ class emit_nvtx(object):
             torch.autograd.ProfilerConfig(
                 torch.autograd.ProfilerState.NVTX,
                 self.record_shapes,
+                False,
                 False,
                 False)
         )
