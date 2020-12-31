@@ -7,9 +7,9 @@
 #include <torch/csrc/jit/mobile/common_const.h>
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
-#include <torch/csrc/jit/mobile/ivalue_hash.h>
 #include <torch/csrc/jit/mobile/method.h>
 #include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/mobile/tensor_hash.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
@@ -483,7 +483,8 @@ class ScriptModuleSerializer {
 
   std::vector<IValue> deduplicate_constants(
       std::vector<IValue>& elements,
-      std::unordered_map<at::Tensor, int, MyHash, MyEqual> constants_from_jit) {
+      const std::unordered_map<at::Tensor, int, MyHash, MyEqual>&
+          constants_from_jit) {
     std::vector<IValue> deduplicated_elements;
 
     bool is_constant_element = false;
