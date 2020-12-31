@@ -37,7 +37,7 @@ constexpr int kCannotComputeNumOutputs = -1;
  *     OPERATOR_SCHEMA(name)
  *         .NumInputs(2).NumOutputs(1).AllowInplace({{0, 0}});
  */
-class CAFFE2_API OpSchema {
+class TORCH_API OpSchema {
  public:
   OpSchema() : OpSchema("unknown", "unknown", 0) {}
   OpSchema(const string& type, const string& file, const int line);
@@ -339,7 +339,7 @@ class CAFFE2_API OpSchema {
     return inplace_enforced_(x, y);
   }
 
-  CAFFE2_API friend std::ostream& operator<<(std::ostream& out, const OpSchema& schema);
+  TORCH_API friend std::ostream& operator<<(std::ostream& out, const OpSchema& schema);
 
   const std::vector<Argument>& args() const {
     return args_;
@@ -457,7 +457,7 @@ class CAFFE2_API OpSchema {
 /**
  * @brief A registry to hold all the operator schemas.
  */
-class CAFFE2_API OpSchemaRegistry {
+class TORCH_API OpSchemaRegistry {
  public:
   static OpSchema&
   NewSchema(const string& key, const string& file, const int line) {

@@ -124,7 +124,7 @@ variable_list _wrap_outputs(const variable_list &input_vars,
     if (!(is_input && is_modified) && var.is_view()) {
       // NB: is_view() ==> get_autograd_meta()
       auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(var));
-      diff_view_meta->creation_meta = CreationMeta::IN_CUSTOM_FUNCTION;
+      diff_view_meta->set_creation_meta(CreationMeta::IN_CUSTOM_FUNCTION);
     }
 
     if (is_differentiable) {
@@ -142,7 +142,7 @@ variable_list _wrap_outputs(const variable_list &input_vars,
       if (var.is_view()) {
         // NB: is_view() ==> get_autograd_meta()
         auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(var));
-        diff_view_meta->creation_meta = CreationMeta::MULTI_OUTPUT_NODE;
+        diff_view_meta->set_creation_meta(CreationMeta::MULTI_OUTPUT_NODE);
       }
     }
   }
