@@ -523,8 +523,9 @@ class ScriptModuleSerializer {
                                 constant_value.toTensor()) !=
                                 constants_from_jit.end()) {
                           std::cout << "find one" << std::endl;
-                          std::vector<IValue> index = {IValue(
-                              constants_from_jit[constant_value.toTensor()])};
+                          std::vector<IValue> index = {
+                              IValue(constants_from_jit.at(
+                                  constant_value.toTensor()))};
                           auto index_with_key = Tup(std::vector<IValue>{
                               IValue(mobile::kTensorJitIndex), Tup(index)});
                           deduplicated_constant_values.push_back(

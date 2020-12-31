@@ -4,7 +4,7 @@ namespace torch {
 namespace jit {
 namespace mobile {
 
-const std::string kTensorJitIndex = "tensor_jit_index";
+constexpr auto kTensorJitIndex = "tensor_jit_index";
 
 } // namespace mobile
 } // namespace jit
