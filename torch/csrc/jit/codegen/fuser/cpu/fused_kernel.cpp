@@ -142,24 +142,26 @@ void activate() {
 
 intptr_t run(const std::string& cmd) {
   // Getting the path of `cmd.exe`
-  char* comspec = getenv("COMSPEC");
+  wchar_t* comspec = _wgetenv(L"COMSPEC");
   if (!comspec) {
-    comspec = "C:\\Windows\\System32\\cmd.exe";
+    comspec = L"C:\\Windows\\System32\\cmd.exe";
   }
   // Constructing the command line
-  const char* a[] = {"/c", cmd.c_str(), nullptr};
+  auto wCmd = c10::u8u16(cmd);
+  const wchar_t* a[] = {L"/c", wCmd.c_str(), nullptr};
   // Constructing the env array
   // If `env_list` is not empty, then add char pointers ending with nullptr.
   // Otherwise, it will be nullptr, which implies the default env.
-  std::vector<const char*> e;
+  std::vector<const wchar_t *> e;
   if (!env_list.empty()) {
     for (auto& s : env_list) {
-      e.push_back(s.c_str());
+      auto ws = c10::u8u16(s);
+      e.push_back(ws.c_str());
     }
     e.push_back(nullptr);
   }
   // Running the command
-  intptr_t r = _spawnve(_P_WAIT, comspec, a, e.data());
+  intptr_t r = _wspawnve(_P_WAIT, comspec, a, e.data());
   return r;
 }
 #endif
