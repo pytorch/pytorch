@@ -12,6 +12,7 @@
 #include <ATen/BatchedTensorImpl.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ScalarOps.h>
+#include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/SparseTensorUtils.h>
 
 #include <ciso646>
@@ -204,12 +205,12 @@ Tensor norm_backward(Tensor grad, const Tensor & self, const optional<Scalar> & 
   return norm_backward(grad, self, p_, norm);
 }
 
-Tensor pow_backward(Tensor grad, const Tensor & self, const Scalar & exponent_) {
-  auto exponent = (exponent_.isComplex()) ? exponent_.toComplexDouble() : exponent_.toDouble();
-  if (exponent == 0.0) {
+Tensor pow_backward(Tensor grad, const Tensor & self, const Scalar & exponent) {
+  if (exponent.equal(0.0)) {
     return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
-    auto out = grad * (exponent * self.pow(exponent - 1)).conj();
+    auto grad_lambda = [&](auto exp) { return grad * (exp * self.pow(exp - 1)).conj(); };
+    Tensor out = (exponent.isComplex()) ? grad_lambda(exponent.toComplexDouble()) : grad_lambda(exponent.toDouble());
     return handle_r_to_c(self, out);
   }
 }
@@ -242,9 +243,8 @@ Tensor pow_backward_exponent(Tensor grad, const Tensor& self, const Tensor& expo
 }
 
 Tensor pow_backward_exponent(Tensor grad, const Scalar & base, const Tensor& exponent, Tensor result) {
-  auto base_ = base.isComplex() ? base.toComplexDouble() : base.toDouble();
-  auto grad_lambda = [](auto a, auto b) { return (a * std::log(b)).conj(); };
-  if (base_ == 0.0) {
+  auto grad_lambda = [](Tensor a, Scalar b) { return (a * b.log()).conj(); };
+  if (base.equal(0.0)) {
     auto cond = [](auto exp) {
       if (exp.is_complex()) {
         return at::logical_and(at::imag(exp) == 0, at::real(exp) >= 0);
@@ -254,10 +254,10 @@ Tensor pow_backward_exponent(Tensor grad, const Scalar & base, const Tensor& exp
     };
     auto out = grad * at::where(cond(exponent),
                             at::zeros({}, grad.options()),
-                            grad_lambda(result, base_));
+                            grad_lambda(result, base));
     return handle_r_to_c(exponent, out);
   } else {
-    auto out = grad * grad_lambda(result, base_);
+    auto out = grad * grad_lambda(result, base);
     return handle_r_to_c(exponent, out);
   }
 }
@@ -2076,8 +2076,13 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
   return result.add(result.conj().transpose(-2, -1)).mul_(0.5);
 }
 
-Tensor qr_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
-                   bool some, const Tensor& q, const Tensor& r){
+Tensor linalg_qr_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
+                          std::string mode, const Tensor& q, const Tensor& r){
+  bool compute_q, reduced;
+  std::tie(compute_q, reduced) = at::native::_parse_qr_mode(mode);
+  TORCH_CHECK(compute_q, "linalg_qr_backward: cannot compute backward if mode='r'. "
+                         "Please use torch.linalg.qr(..., mode='reduced')");
+
   auto square_deep_case_backward = [](const Tensor& grad_Q,
                                       const Tensor& grad_R,
                                       const Tensor& A,
@@ -2141,7 +2146,7 @@ Tensor qr_backward(const std::vector<torch::autograd::Variable> &grads, const Te
   auto n = self.size(-1);
 
   TORCH_CHECK(
-      ((m <= n && (!some)) || some),
+      ((m <= n && (!reduced)) || reduced),
       "The derivative is not implemented when nrows > ncols and complete QR. ");
 
   auto grad_Q = grads[0];
