@@ -160,10 +160,21 @@ std::tuple<Tensor, Tensor> _euclidean_dist_backward(const Tensor & grad, const T
             x2 * ratio.sum(-2, false).unsqueeze(-1) - ratio.transpose(-2, -1).matmul(x1)};
 }
 
-Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Scalar> & p_, const Tensor & norm) {
+Tensor norm_backward(const Tensor& grad, const Tensor& self, const optional<Scalar> & p_, const Tensor& norm) {
+  return norm_backward(grad, self, p_, norm, {}, true);
+}
+
+Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p_, Tensor norm, IntArrayRef dim, bool keepdim) {
+  size_t ndim = self.sizes().size();
   double p = p_.value_or(2.0).toDouble();
   Tensor self_scaled;
   Tensor scale_v;
+
+  if (!keepdim && self.dim() != 0) {
+    grad = unsqueeze_multiple(grad, dim, ndim);
+    norm = unsqueeze_multiple(norm, dim, ndim);
+  }
+
   if (p == 0.0) {
     return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else if (p == 1.0) {
@@ -172,8 +183,13 @@ Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Sc
     self_scaled = self;
     scale_v = grad / norm;
   } else if (std::isinf(p)) {
-    self_scaled = self.sgn() * (self.abs() == norm).type_as(self);
-    scale_v = grad.clone(at::MemoryFormat::Preserve);
+    Tensor is_eq_max = (self.abs() == norm).logical_or_(self.isnan().logical_and_(norm.isnan())).type_as(self);
+    self_scaled = self.sign() * is_eq_max;
+    Tensor nb_max = is_eq_max.count_nonzero(dim);
+    if (self.dim() != 0) {
+      nb_max = unsqueeze_multiple(nb_max, dim, ndim);
+    }
+    scale_v = grad / nb_max;
   } else if (p < 2.0) {
     self_scaled = self.sgn() * self.abs().pow(p - 1);
     scale_v = grad / norm.pow(p - 1);
@@ -184,25 +200,6 @@ Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Sc
   // handle case at 0 where we return a subgradient containing 0
   scale_v.masked_fill_(norm == 0, 0);
   return self_scaled * scale_v;
-}
-
-Tensor norm_backward(Tensor grad, const Tensor & self, const optional<Scalar> & p_, Tensor norm, IntArrayRef dim, bool keepdim) {
-  IntArrayRef sizes = self.sizes();
-  if (!keepdim && self.dim() != 0) {
-    if (dim.size()==1) {
-      grad = grad.unsqueeze(dim[0]);
-      norm = norm.unsqueeze(dim[0]);
-    } else {
-      auto dims_to_unsqueeze = at::dim_list_to_bitset(dim, sizes.size());
-      for (size_t i = 0; i < sizes.size(); i++){
-        if (dims_to_unsqueeze[i]) {
-          grad = grad.unsqueeze(i);
-          norm = norm.unsqueeze(i);
-        }
-      }
-    }
-  }
-  return norm_backward(grad, self, p_, norm);
 }
 
 Tensor pow_backward(Tensor grad, const Tensor & self, const Scalar & exponent) {
