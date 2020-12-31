@@ -1592,11 +1592,11 @@ static void check_str_ord_valid(const std::string& str_ord, optional<IntArrayRef
 
 // Performs vector norm for ord = +/-infinity, and the second dimension reduction
 // for matrix norms.
-static Tensor _norm_min_max(Tensor& self, double ord, int64_t dim, bool keepdim) {
+static Tensor _norm_min_max(Tensor& self, double ord, int64_t dim, bool keepdim, bool flatten) {
   Tensor result;
-  if (self.numel() == 0 && self.sizes()[dim] > 0) {
+  if (self.numel() == 0 && self.sizes()[dim] > 0 && !flatten) {
     // This special case is needed in matrix norm for tensors with 3 or more dims,
-    // or in vector norm for order inf and -inf for tesnsors with 2 or more dims.
+    // or in vector norm for order inf and -inf for tensors with 2 or more dims.
     // When the sizes of the dims to be reduced are greater than 0 but another dim
     // in the tensor is size 0 (thus numel == 0), we must either flatten or resize
     // the second reduction dim to 1, to avoid calling min/max, which would throw
@@ -1608,10 +1608,21 @@ static Tensor _norm_min_max(Tensor& self, double ord, int64_t dim, bool keepdim)
     }
     result = keepdim ? self : self.flatten(dim);
   } else {
-    if (ord > 0) {
-      result = std::get<0>(self.max(dim, keepdim));
+    if (flatten) {
+      if (ord > 0) {
+        result = self.max();
+      } else {
+        result = self.min();
+      }
+      if (keepdim) {
+        result = result.reshape(std::vector<int64_t>(self.dim(), 1));
+      }
     } else {
-      result = std::get<0>(self.min(dim, keepdim));
+      if (ord > 0) {
+        result = std::get<0>(self.max(dim, keepdim));
+      } else {
+        result = std::get<0>(self.min(dim, keepdim));
+      }
     }
   }
   return result;
@@ -1654,7 +1665,7 @@ static Tensor& _linalg_norm_matrix_out(Tensor& result, const Tensor &self, optio
     auto permutation_reverse = create_reverse_permutation(permutation);
 
     result_ = std::get<1>(self_.permute(permutation).svd()).abs();
-    result_ = _norm_min_max(result_, ord, result_.dim() - 1, keepdim);
+    result_ = _norm_min_max(result_, ord, result_.dim() - 1, keepdim, false);
 
     if (keepdim) {
       result_.unsqueeze_(-1);
@@ -1676,7 +1687,7 @@ static Tensor& _linalg_norm_matrix_out(Tensor& result, const Tensor &self, optio
     }
     if (std::abs(ord) == 1 || std::abs(ord) == INFINITY) {
       result_ = self_.abs().sum(dim_[0], keepdim);
-      result_ = _norm_min_max(result_, ord, dim_[1], keepdim);
+      result_ = _norm_min_max(result_, ord, dim_[1], keepdim, false);
     } else {
       TORCH_CHECK(false, "Order ", ord, " not supported for matrix norm");
     }
@@ -1690,7 +1701,7 @@ static Tensor& _linalg_norm_matrix_out(Tensor& result, const Tensor &self, optio
 // This function mostly serves as a wrapper for at::norm, but it overrides a few cases
 // for numpy compatibility. These cases are corrected within this wrapper, rather than
 // in at::norm itself, to avoid breaking backward compatibility.
-static Tensor& _linalg_norm_vector_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord, std::vector<int64_t> dim, bool keepdim, optional<ScalarType> opt_dtype) {
+static Tensor& _linalg_norm_vector_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord, std::vector<int64_t> dim, bool keepdim, optional<ScalarType> opt_dtype, bool flatten) {
   Tensor result_;
   bool case_was_overridden = false;
   if (opt_ord.has_value()) {
@@ -1703,15 +1714,16 @@ static Tensor& _linalg_norm_vector_out(Tensor& result, const Tensor& self, optio
       // size is degenerate (like size(0), size(0, N), etc)
       case_was_overridden = true;
       self_ = self_.abs();
-      result_ = _norm_min_max(self_, ord, dim[0], keepdim);
+      result_ = _norm_min_max(self_, ord, dim[0], keepdim, flatten);
     } else if ((self_.numel() == 0) && (ord < 0)) {
       // For negative orders with degenerate input sizes, at::norm's result does not
       // match numpy. It should always be infinity.
-      auto mask = make_dim_mask(dim[0], self_.dim());
+      // auto mask = make_dim_mask(flatten ? dim : self.dims(), self_.dim());
+      auto mask = flatten ? DimMask().flip() : make_dim_mask(dim, self_.dim());
       allocate_reduction_result(result, self_, mask, keepdim, result.scalar_type());
       return result.fill_(INFINITY);
     }
-  } else {
+  } else if (!flatten) {
     // If ord == None, need to check for unique dims because at::norm does not check it
     // for this case.
     std::vector<int64_t> dim_(dim);
@@ -1720,10 +1732,21 @@ static Tensor& _linalg_norm_vector_out(Tensor& result, const Tensor& self, optio
     TORCH_CHECK(unique_dims, "Expected dims to be different, got this instead: (", dim, ")");
   }
   if (!case_was_overridden) {
-    if (opt_dtype.has_value()) {
-      result_ = at::norm(self.to(opt_dtype.value()), opt_ord, dim, keepdim);
+    if (flatten) {
+      if (opt_dtype.has_value()) {
+        result_ = at::norm(self.to(opt_dtype.value()), opt_ord.value_or(2));
+      } else {
+        result_ = at::norm(self, opt_ord.value_or(2));
+      }
+      if (keepdim) {
+        result_ = result_.reshape(std::vector<int64_t>(self.dim(), 1));
+      }
     } else {
-      result_ = at::norm(self, opt_ord, dim, keepdim);
+      if (opt_dtype.has_value()) {
+        result_ = at::norm(self.to(opt_dtype.value()), opt_ord, dim, keepdim);
+      } else {
+        result_ = at::norm(self, opt_ord, dim, keepdim);
+      }
     }
   }
   resize_output(result, result_.sizes());
@@ -1731,10 +1754,15 @@ static Tensor& _linalg_norm_vector_out(Tensor& result, const Tensor& self, optio
   return result;
 }
 
-static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, optional<Scalar> opt_num_ord, optional<std::string> opt_str_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, optional<Scalar> opt_num_ord, optional<std::string> opt_str_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype, bool flatten) {
   // Callers must give the ord argument as either a number, a string, or neither.
   // Since the user-facing API has no direct control over how this function is called, this is an internal assert.
   TORCH_INTERNAL_ASSERT(!(opt_num_ord.has_value() && opt_str_ord.has_value()));
+
+  if (flatten) {
+    TORCH_CHECK(!opt_dim.has_value(), "\'dim\' must be None if \'flatten\' is True");
+  }
+
   if (opt_dtype.has_value()) {
     auto dtype = opt_dtype.value();
     TORCH_CHECK(dtype == result.scalar_type(), "provided dtype must match dtype of result, but got",
@@ -1743,6 +1771,7 @@ static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, optional
   int64_t ndim = self.dim();
   if (opt_str_ord.has_value()) {
     // 'ord' is string
+    TORCH_CHECK(!flatten, "'flatten' = True is not supported for matrix norms");
     auto str_ord = opt_str_ord.value();
     check_str_ord_valid(str_ord, opt_dim, ndim);
     Tensor self_ = opt_dtype.has_value() ? self.to(opt_dtype.value()) : self;
@@ -1757,41 +1786,42 @@ static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, optional
     }
   } else {
     // 'ord' is int or None
-    std::vector<int64_t> dim_ = opt_dim.has_value() ? opt_dim.value().vec() : make_dim_list(ndim);
-    if (!opt_num_ord.has_value() || dim_.size() == 1) {
-      _linalg_norm_vector_out(result, self, opt_num_ord, dim_, keepdim, opt_dtype);
+    std::vector<int64_t> dim_ = flatten ? std::vector<int64_t>(1, 0) : (opt_dim.has_value() ? opt_dim.value().vec() : make_dim_list(ndim));
+    if (!opt_num_ord.has_value() || flatten || dim_.size() == 1) {
+      _linalg_norm_vector_out(result, self, opt_num_ord, dim_, keepdim, opt_dtype, flatten);
     } else if (dim_.size() == 2) {
+      TORCH_CHECK(!flatten, "'flatten' = True is not supported for matrix norms");
       _linalg_norm_matrix_out(result, self, opt_num_ord.value(), dim_, keepdim, opt_dtype);
     } else {
-      TORCH_CHECK(false, "'dim' must specify 1 or 2 dimensions when order is numerical and input is "
-        "not 1-D or 2-D");
+      TORCH_CHECK(false, "'dim' must specify 1 or 2 dimensions when order is numerical, input is "
+        "not 1-D or 2-D, and 'flatten' = False");
     }
   }
   return result;
 }
 
 // Numerical or None norms
-Tensor linalg_norm(const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+Tensor linalg_norm(const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype, bool flatten) {
   auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : toValueType(self.scalar_type())).device(self.device());
   Tensor result = at::empty({0}, options);
-  return at::native::linalg_norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
+  return at::native::linalg_norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype, flatten);
 }
 
 // Frobenius and nuclear norms
-Tensor linalg_norm(const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+Tensor linalg_norm(const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype, bool flatten) {
   auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : toValueType(self.scalar_type())).device(self.device());
   Tensor result = at::empty({0}, options);
-  return at::native::linalg_norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
+  return at::native::linalg_norm_out(result, self, ord, opt_dim, keepdim, opt_dtype, flatten);
 }
 
 // Numerical or None norms
-Tensor& linalg_norm_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  return linalg_norm_out_impl(result, self, opt_ord, c10::nullopt, opt_dim, keepdim, opt_dtype);
+Tensor& linalg_norm_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype, bool flatten) {
+  return linalg_norm_out_impl(result, self, opt_ord, c10::nullopt, opt_dim, keepdim, opt_dtype, flatten);
 }
 
 // Frobenius and nuclear norms
-Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  return linalg_norm_out_impl(result, self, c10::nullopt, ord, opt_dim, keepdim, opt_dtype);
+Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype, bool flatten) {
+  return linalg_norm_out_impl(result, self, c10::nullopt, ord, opt_dim, keepdim, opt_dtype, flatten);
 }
 
 Tensor _linalg_cond_exception_helper(const Tensor& self) {

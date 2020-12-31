@@ -36,20 +36,20 @@ inline Tensor& eigvalsh_out(Tensor& result, const Tensor& self, std::string uplo
   return torch::linalg_eigvalsh_out(result, self, uplo);
 }
 
-inline Tensor norm(const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  return torch::linalg_norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
+inline Tensor norm(const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype, bool flatten) {
+  return torch::linalg_norm(self, opt_ord, opt_dim, keepdim, opt_dtype, flatten);
 }
 
-inline Tensor norm(const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline Tensor norm(const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype, bool flatten) {
   return torch::linalg_norm(self, ord, opt_dim, keepdim, opt_dtype);
 }
 
-inline Tensor& norm_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  return torch::linalg_norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
+inline Tensor& norm_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype, bool flatten) {
+  return torch::linalg_norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype, flatten);
 }
 
-inline Tensor& norm_out(Tensor& result, const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  return torch::linalg_norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
+inline Tensor& norm_out(Tensor& result, const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype, bool flatten) {
+  return torch::linalg_norm_out(result, self, ord, opt_dim, keepdim, opt_dtype, flatten);
 }
 
 inline Tensor matrix_rank(const Tensor input, optional<double> tol, bool hermitian) {
@@ -133,20 +133,20 @@ inline Tensor& eigvalsh_out(Tensor& result, const Tensor& self, std::string uplo
   return detail::eigvalsh_out(result, self, uplo);
 }
 
-inline Tensor linalg_norm(const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  return detail::norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
+inline Tensor linalg_norm(const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype, bool flatten) {
+  return detail::norm(self, opt_ord, opt_dim, keepdim, opt_dtype, flatten);
 }
 
-inline Tensor linalg_norm(const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  return detail::norm(self, ord, opt_dim, keepdim, opt_dtype);
+inline Tensor linalg_norm(const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype, bool flatten) {
+  return detail::norm(self, ord, opt_dim, keepdim, opt_dtype, flatten);
 }
 
-inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  return detail::norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
+inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype, bool flatten) {
+  return detail::norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype, flatten);
 }
 
-inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  return detail::norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
+inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype, bool flatten) {
+  return detail::norm_out(result, self, ord, opt_dim, keepdim, opt_dtype, flatten);
 }
 
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.matrix_rank

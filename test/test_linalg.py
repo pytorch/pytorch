@@ -1183,6 +1183,17 @@ class TestLinalg(TestCase):
             ('norm', (S, S), ('fro', [0, 1]), 'fro_dim'),
             ('norm', (S, S), ('nuc',), 'nuc', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
             ('norm', (S, S), ('nuc', [0, 1]), 'nuc_dim', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
+            ('norm', (S, S, S), (inf, ), 'flatten_3d_inf', (), NO_ARGS, [], {'flatten': True}),
+            ('norm', (S, S, S), (3.5, ), 'flatten_3d_3_5', (), NO_ARGS, [], {'flatten': True}),
+            ('norm', (S, S, S), (0.5, ), 'flatten_3d_0_5', (), NO_ARGS, [], {'flatten': True}),
+            ('norm', (S, S, S), (2, ), 'flatten_3d_2', (), NO_ARGS, [], {'flatten': True}),
+            ('norm', (S, S, S), (1, ), 'flatten_3d_1', (), NO_ARGS, [], {'flatten': True}),
+            ('norm', (S, S, S), (0, ), 'flatten_3d_0', (), NO_ARGS, [], {'flatten': True}),
+            ('norm', (S, S, S), (-inf, ), 'flatten_3d_neg_inf', (), NO_ARGS, [], {'flatten': True}),
+            ('norm', (S, S, S), (-3.5, ), 'flatten_3d_neg_3_5', (), NO_ARGS, [], {'flatten': True}),
+            ('norm', (S, S, S), (-0.5, ), 'flatten_3d_neg_0_5', (), NO_ARGS, [], {'flatten': True}),
+            ('norm', (S, S, S), (-2, ), 'flatten_3d_neg_2', (), NO_ARGS, [], {'flatten': True}),
+            ('norm', (S, S, S), (-1, ), 'flatten_3d_neg_1', (), NO_ARGS, [], {'flatten': True}),
         ]
         for test_case in test_cases:
             func_name = test_case[0]
@@ -1191,6 +1202,7 @@ class TestLinalg(TestCase):
             args = list(test_case[2])
             test_case_name = test_case[3] if len(test_case) >= 4 else None
             mapping_funcs = list(test_case[6]) if len(test_case) >= 7 else None
+            kwargs = test_case[7] if len(test_case) >= 8 else {}
 
             # Skip a test if a decorator tells us to
             if mapping_funcs is not None:
@@ -1208,9 +1220,9 @@ class TestLinalg(TestCase):
             # Test JIT
             input = torch.randn(*input_size, dtype=dtype, device=device)
             input_script = input.clone().detach()
-            script_method, tensors = gen_script_fn_and_args("linalg.norm", "functional", input_script, *args)
+            script_method, tensors = gen_script_fn_and_args("linalg.norm", "functional", input_script, *args, **kwargs)
             self.assertEqual(
-                func(input, *args),
+                func(input, *args, **kwargs),
                 script_method(input_script),
                 msg=msg)
 
@@ -1220,7 +1232,7 @@ class TestLinalg(TestCase):
                 input = torch.randn(*input_size, dtype=dtype, device=device, requires_grad=True)
 
                 def run_func(input):
-                    return func(input, *args)
+                    return func(input, *args, **kwargs)
                 self.assertTrue(gradcheck(run_func, input), msg=msg)
 
     # This test calls torch.linalg.norm and numpy.linalg.norm with illegal arguments
@@ -1477,6 +1489,56 @@ class TestLinalg(TestCase):
                 input = torch.randn(*input_size, dtype=dtype, device=device)
                 for ord in ord_matrix:
                     run_test_case(input, ord, dim, keepdim, ord in error_ords)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_norm_flatten(self, device, dtype):
+        ord_vector = [0, 0.5, 1, 2, 3, inf, -0.5, -1, -2, -3, -inf, None]
+        test_cases = [
+            # input size, ords that should cause errro
+            ((0, ), [inf, -inf]),
+            ((0, 10), [inf, -inf]),
+            ((10, 0), [inf, -inf]),
+            ((10, 0, 10), [inf, -inf]),
+            ((4, 5), []),
+            ((3, 4, 5), []),
+        ]
+
+        def run_test_case(input, ord, keepdim, should_error):
+            msg = f'input.size()={input.size()}, ord={ord}, keepdim={keepdim}, dtype={dtype}'
+            input_flat = input.flatten(0, -1)
+            if should_error:
+                with self.assertRaises(RuntimeError):
+                    torch.linalg.norm(input_flat, ord, keepdim=keepdim)
+                with self.assertRaises(RuntimeError):
+                    torch.linalg.norm(input, ord, keepdim=keepdim, flatten=True)
+            else:
+                result_preflattened = torch.linalg.norm(input_flat, ord, keepdim=keepdim)
+                if keepdim:
+                    result_preflattened = result_preflattened.reshape([1] * input.dim())
+                result = torch.linalg.norm(input, ord, keepdim=keepdim, flatten=True)
+                self.assertEqual(result, result_preflattened, msg=msg)
+
+        for keepdim in [True, False]:
+            for input_size, error_ords in test_cases:
+                input = torch.randn(*input_size, dtype=dtype, device=device)
+                for ord in ord_vector:
+                    run_test_case(input, ord, keepdim, ord in error_ords)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_norm_flatten_errors(self, device, dtype):
+        test_cases = [
+            ((10, 10), {'ord': 'fro', 'flatten': True}, RuntimeError, r"'flatten' = True is not supported"),
+            ((10, 10), {'ord': 'nuc', 'flatten': True}, RuntimeError, r"'flatten' = True is not supported"),
+            ((10, 10), {'dim': (0, 1), 'flatten': True}, RuntimeError, r"'dim' must be None if 'flatten' is True"),
+        ]
+        for input_size, kwargs, error, error_msg in test_cases:
+            input = torch.randn(*input_size, dtype=dtype, device=device)
+            with self.assertRaisesRegex(error, error_msg):
+                torch.linalg.norm(input, **kwargs)
 
     def test_norm_fastpaths(self, device):
         x = torch.randn(3, 5, device=device)

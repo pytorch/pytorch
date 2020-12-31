@@ -275,7 +275,7 @@ Examples::
 """)
 
 norm = _add_docstr(_linalg.linalg_norm, r"""
-linalg.norm(input, ord=None, dim=None, keepdim=False, *, out=None, dtype=None) -> Tensor
+linalg.norm(input, ord=None, dim=None, keepdim=False, *, out=None, dtype=None, flatten=False) -> Tensor
 
 Returns the matrix norm or vector norm of a given tensor.
 
@@ -332,6 +332,12 @@ Keyword args:
         will be :attr:`dtype`. If this argument is used in conjunction with the
         :attr:`out` argument, the output tensor's type must match this argument or a
         RuntimeError will be raised. Default: ``None``
+
+    flatten (bool, optional): If set to True, the input is flattened to one dimension
+        and its vector norm is calculated. In this case, inputs can have any number
+        of dimensions. The flatten is fused with the norm calculation, so it provides
+        significantly better performance than explicitly calling
+        :func:`torch.flatten` directly. Default: ``False``
 
 Examples::
 
