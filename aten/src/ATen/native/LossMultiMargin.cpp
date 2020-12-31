@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/native/LossMulti.h>
 
 namespace at {
 namespace native {
@@ -94,22 +93,33 @@ void multi_margin_loss_out_cpu_template(
     Scalar margin,
     const Tensor& weight,
     int64_t reduction) {
-  int64_t nframe, dim;
   const auto ndims = input.dim();
-  auto target_arg = TensorArg(target, "target", 2);
+  TORCH_CHECK(
+      input.numel() > 0 && ndims <= 2,
+      "non-empty vector or matrix expected, got size: ",
+      input.sizes());
 
   TORCH_CHECK(p == 1 || p == 2, "only p == 1 and p == 2 supported");
 
-  multi_margin_loss_shape_check(nframe, dim, ndims, target_arg, input, target);
+  int64_t nframe, dim;
+  if (ndims <= 1) {
+    nframe = 1;
+    dim = ndims == 0 ? 1 : input.size(0);
+  } else {
+    nframe = input.size(0);
+    dim = input.size(1);
+  }
+
+  TORCH_CHECK(
+      target.numel() > 0 && target.dim() <= 1 && target.numel() == nframe,
+      "inconsistent target size, got: ",
+      target.sizes());
 
   // produce a scalar output for 1d input
   if (reduction == Reduction::None && target.dim() > 0) {
     output.resize_({nframe});
   } else {
     output.resize_({});
-  }
-  if (input.numel() == 0) {
-    return;
   }
 
   auto input_contiguous = input.contiguous();
@@ -202,13 +212,28 @@ void multi_margin_loss_backward_out_cpu_template(
     Scalar margin,
     const Tensor& weight,
     int64_t reduction) {
-  int64_t nframe, dim;
-  auto target_arg = TensorArg(target, "target", 2);
   const auto ndims = input.dim();
+  TORCH_CHECK(
+      input.numel() > 0 && ndims <= 2,
+      "non-empty vector or matrix expected, got size: ",
+      input.sizes());
 
   TORCH_CHECK(p == 1 || p == 2, "only p == 1 and p == 2 supported");
 
-  multi_margin_loss_shape_check(nframe, dim, ndims, target_arg, input, target);
+  int64_t nframe, dim;
+  if (ndims <= 1) {
+    nframe = 1;
+    dim = ndims == 0 ? 1 : input.size(0);
+  } else {
+    nframe = input.size(0);
+    dim = input.size(1);
+  }
+
+  TORCH_CHECK(
+      target.numel() > 0 && target.dim() <= 1 && target.numel() == nframe,
+      "inconsistent target size, got: ",
+      target.sizes());
+
   grad_input.resize_as_(input);
   TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
 
