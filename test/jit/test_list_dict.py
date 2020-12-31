@@ -149,6 +149,61 @@ class TestList(JitTestCase):
         self.checkScript(foo3, ())
         FileCheck().check_count("aten::list", 2, exactly=True).run(torch.jit.script(foo3).graph)
 
+    def test_dict_keyword_with_kwargs_using_numerical_values(self):
+        def fn():
+            return dict(foo=1, bar=2, baz=3)
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_kwargs_using_str_values(self):
+        def fn():
+            return dict(foo="one", bar="two", baz="three")
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_kwargs_using_container_values(self):
+        def fn():
+            return dict(foo=[1, 2, 3], bar=[4, 5, 6], baz=[7, 8, 9])
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_iterable(self):
+        def fn():
+            return dict([("foo", 1), ("bar", 2), ("baz", 3)])
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_mapping(self):
+        def fn():
+            return dict({"foo" : 1, "bar" : 2, "baz" : 3})
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_mixed_mapping_and_kwargs(self):
+        def fn():
+            return dict({"foo" : 1, "baz" : 3}, bar=2)
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_is_correctly_typed(self):
+        def fn():
+            x: Dict[str, int] = dict()
+            x["foo"] = 1
+            return x
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_mismatched_annotations(self):
+        with self.assertRaisesRegex(RuntimeError, "Variable 'x' is "
+                                    "annotated with type "
+                                    r"Dict\[int, str\] but is being "
+                                    "assigned to a value of type "
+                                    r"Dict\[str, int\]"):
+            @torch.jit.script
+            def fn():
+                x: Dict[int, str] = dict([("foo", 1), ("bar", 2), ("baz", 3)])
+                return x
+
     def test_min_bool_list(self):
         def jit_min_list(a, b):
             # type: (List[bool], List[bool]) -> List[bool]

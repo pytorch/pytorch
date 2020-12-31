@@ -487,6 +487,7 @@ struct Environment {
           {"divmod",
            std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
           {"list", SpecialFormValue::create(prim::list)},
+          {"dict", SpecialFormValue::create(prim::dict)},
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
           {"chr", std::make_shared<BuiltinFunction>(aten::chr, at::nullopt)},
           {"bin", std::make_shared<BuiltinFunction>(aten::bin, at::nullopt)},
@@ -1335,6 +1336,14 @@ struct to_ir {
     auto emit_body = [&]() {
       auto k = emitExpr(dc.key());
       auto v = emitExpr(dc.value());
+      if (type_hint && type_set) {
+        auto elem_type = DictType::create(k->type(), v->type());
+        if (elem_type != type_hint) {
+          throw ErrorReport(loc)
+              << "Type annotation for dict was " << type_hint->repr_str()
+              << ", but type of first element was " << elem_type->repr_str();
+        }
+      }
       if (!type_set) {
         dict_value->setType(DictType::create(k->type(), v->type()));
         type_set = true;
@@ -3004,6 +3013,175 @@ struct to_ir {
         auto lc = ListComp::create(apply.range(), ident, ident, iter);
         return std::make_shared<SimpleValue>(
             emitListComprehension(lc, type_hint));
+      }
+      case prim::dict: {
+        // Correctly set the type
+        TypePtr type;
+        if (type_hint) {
+          type = type_hint;
+          if (!type->cast<DictType>()) {
+            throw ErrorReport(apply.range())
+                << "Expected dict type annotation for dict(), found "
+                << type_hint->repr_str();
+          }
+        } else {
+          // If we have kwargs, get the type from the first kwarg
+          if (!apply.attributes().empty()) {
+            // By definition, the type of the first kwarg's `name` will
+            // be a string, but we'll need to inspect the kwarg to find
+            // the type of its `value`
+            Expr value = apply.attributes()[0].value();
+            TypePtr value_type;
+            // Special case: we have a TK_CONST and need to
+            // differentiate between IntType and FloatType
+            if (value.kind() == TK_CONST) {
+              Const number_type = Const(value);
+              if (number_type.isFloatingPoint()) {
+                value_type = FloatType::get();
+              } else {
+                value_type = IntType::get();
+              }
+            } else {
+              value_type = emitSimpleExpr(value)->type();
+            }
+            type = DictType::create(StringType::get(), value_type);
+            if (type_hint && type != type_hint) {
+              throw ErrorReport(apply.range())
+                  << "Expected " << type->repr_str()
+                  << " type annotation for dict(), found "
+                  << type_hint->repr_str();
+            }
+          }
+          /// Otherwise, use the default of Dict[str, Tensor]. If we have an
+          // iterable in apply.inputs(), then this default type will be
+          // overridden when the iterable is emitted
+          else {
+            type = DictType::create(StringType::get(), TensorType::get());
+          }
+        }
+
+        // If we haven't been passsed an iterable/mapping, we have
+        // either an empty call to `dict()` or we have kwargs
+        if (apply.inputs().empty()) {
+          std::vector<Value*> keys;
+          std::vector<Value*> values;
+          for (auto attr : apply.attributes()) {
+            auto sl = StringLiteral::create(apply.range(), attr.name().name());
+            keys.push_back(emitStringLiteral(sl));
+            values.push_back(emitExpr(attr.value()));
+          }
+          return std::make_shared<SimpleValue>(
+              graph
+                  ->insertNode(graph->createDict(
+                      type->expect<DictType>()->getKeyType(),
+                      type->expect<DictType>()->getValueType(),
+                      keys,
+                      values))
+                  ->output());
+        }
+
+        // Otherwise, we need to emit a new dict using the
+        // iterable/mapping we've been passed (and potentially kwargs
+        // as well)
+        else {
+          // We can't feasibly register all possible key x value
+          // combinations of new prim ops for the case that we use the
+          // constructor with a dict literal. It makes much more sense
+          // to transform the dict literal into a list of tuples so that
+          // we can use the existing constructors
+          if (!apply.inputs().empty() &&
+              apply.inputs()[0].kind() == TK_DICT_LITERAL) {
+            auto dict_lit = DictLiteral(apply.inputs()[0]);
+            std::vector<Expr> zipped;
+            std::transform(
+                dict_lit.key_inputs().begin(),
+                dict_lit.key_inputs().end(),
+                dict_lit.value_inputs().begin(),
+                std::back_inserter(zipped),
+                [&](const auto& k, const auto& v) {
+                  auto tuple_inputs = List<Expr>::create(apply.range(), {k, v});
+                  return TupleLiteral::create(
+                      v.range(), std::move(tuple_inputs));
+                });
+            auto ll_values =
+                List<Expr>::create(apply.range(), std::move(zipped));
+            auto ll = ListLiteral::create(apply.range(), std::move(ll_values));
+            auto expr_list = List<Expr>::create(apply.range(), {std::move(ll)});
+            // Change `apply` to a new Apply node holding a list of
+            // tuples
+            apply = Apply::create(
+                std::move(apply.range()),
+                std::move(apply.callee()),
+                std::move(expr_list),
+                std::move(apply.attributes()));
+          }
+
+          // If we have kwargs to include, we'll take a similar approach
+          // to the above logic and standardize the Apply node
+          if (!apply.attributes().empty()) {
+            std::vector<Expr> exprs;
+            // Gather all the existing tuples in the input iterable
+            if (!apply.inputs().empty()) {
+              auto tuple_list = ListLiteral(apply.inputs()[0]).inputs();
+              for (auto tuple : tuple_list) {
+                exprs.pushe_back(tuple);
+              }
+            }
+            // Create tuples out of each kwarg and gather them as well
+            for (auto attr : apply.attributes()) {
+              auto k = StringLiteral::create(apply.range(), attr.name().name());
+              auto v = attr.value();
+              auto tuple_inputs = List<Expr>::create(apply.range(), {k, v});
+              auto tuple =
+                  TupleLiteral::create(apply.range(), std::move(tuple_inputs));
+              exprs.push_back(tuple);
+            }
+            auto expr_list =
+                List<Expr>::create(apply.range(), {std::move(exprs)});
+            auto ll = ListLiteral::create(apply.range(), std::move(expr_list));
+            auto new_inputs =
+                List<Expr>::create(apply.range(), {std::move(ll)});
+            auto new_kwargs = List<Attribute>::create(apply.range(), {});
+            apply = Apply::create(
+                std::move(apply.range()),
+                std::move(apply.callee()),
+                std::move(new_inputs),
+                std::move(new_kwargs));
+          }
+
+          checkApplyNumInputs(apply, 1);
+
+          auto iter_input = emitSugaredExpr(apply.inputs()[0], 1);
+
+          // If possible, dispatch to the `aten::dict` builtin op to
+          // avoid perf slowdown on existing uses
+          if (auto simple = asSimple(iter_input)) {
+            return std::make_shared<SimpleValue>(emitBuiltinCall(
+                apply.range(), *method.graph(), aten::dict, {simple}, {}));
+          }
+
+          const std::string& iter_name = createTempName("$_iter");
+          environment_stack->setSugaredVar(
+              apply.range(),
+              iter_name,
+              iter_input,
+              /*annotated_type=*/nullptr);
+
+          const std::string& key_name = createTempName("$_key");
+          const std::string& value_name = createTempName("$_value");
+          const std::string& target_name = createTempName("$_target");
+          auto key = Var::create(
+              apply.range(), Ident::create(apply.range(), key_name));
+          auto value = Var::create(
+              apply.range(), Ident::create(apply.range(), value_name));
+          auto target = Var::create(
+              apply.range(), Ident::create(apply.range(), target_name));
+          auto iter = Var::create(
+              apply.range(), Ident::create(apply.range(), iter_name));
+          auto dc = DictComp::create(apply.range(), key, value, target, iter);
+          return std::make_shared<SimpleValue>(
+              emitDictComprehension(dc, type_hint));
+        }
       }
       default:
         TORCH_INTERNAL_ASSERT(false, "unknown special form: ", form);
