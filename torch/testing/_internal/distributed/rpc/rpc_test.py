@@ -1780,7 +1780,13 @@ class RpcTest(RpcAgentTestFixture):
                 if time_range.start > last_end_time:
                     top_level_event_names.append(event_name)
                     last_end_time = time_range.end
-        self.assertEqual(sorted(top_level_event_names), sorted(expected_top_level_event_names))
+        top_level_event_names = sorted(top_level_event_names)
+        expected_top_level_event_names = sorted(expected_top_level_event_names)
+        self.assertEqual(
+            top_level_event_names,
+            expected_top_level_event_names,
+            f"Expected events {expected_top_level_event_names}, but got {top_level_event_names}",
+        )
 
     @dist_init
     def test_server_process_global_profiler(self):
@@ -1804,21 +1810,11 @@ class RpcTest(RpcAgentTestFixture):
 
         inner_events = rpc.rpc_sync(dst_worker_name, get_events_from_profile, (inner_profile_rref,))
         expected_inner_events = ['aten::sub']
-        expected_outer_events = expected_inner_events.extend(['aten::add'])
+        expected_outer_events = expected_inner_events + ['aten::add']
 
-        self._assert_top_level_events(
-            inner_events,
-            expected_inner_events,
-            f"Expected inner profile events {expected_inner_events}, but got {inner_events}",
-        )
-        outer_events = rpc.rpc_sync(
-            dst_worker_name, get_events_from_profile, (outer_profile_rref,)
-        )
-        self._assert_top_level_events(
-            outer_events,
-            expected_outer_events,
-            f"Expected outer profile events {expected_outer_events}, but got {outer_events}",
-        )
+        self._assert_top_level_events(inner_events, expected_inner_events)
+        outer_events = rpc.rpc_sync(dst_worker_name, get_events_from_profile, (outer_profile_rref,))
+        self._assert_top_level_events(outer_events, expected_outer_events)
 
         inner_profile_rref.rpc_sync().key_averages()
         outer_profile_rref.rpc_sync().key_averages()
