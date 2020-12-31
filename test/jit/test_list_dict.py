@@ -169,7 +169,7 @@ class TestList(JitTestCase):
 
     def test_dict_keyword_with_iterable(self):
         def fn():
-            return dict([("foo", 1), ("bar", 2), ("baz", 3)])
+            return dict([("foo", 1), ("bar", 2), ("baz", 3)])    # noqa: C406
 
         self.checkScript(fn, ())
 
@@ -201,7 +201,7 @@ class TestList(JitTestCase):
                                     r"Dict\[str, int\]"):
             @torch.jit.script
             def fn():
-                x: Dict[int, str] = dict([("foo", 1), ("bar", 2), ("baz", 3)])
+                x: Dict[int, str] = dict([("foo", 1), ("bar", 2), ("baz", 3)])    # noqa: C406
                 return x
 
     def test_min_bool_list(self):

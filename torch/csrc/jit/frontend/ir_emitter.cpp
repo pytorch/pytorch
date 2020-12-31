@@ -3099,20 +3099,15 @@ struct to_ir {
                 std::back_inserter(zipped),
                 [&](const auto& k, const auto& v) {
                   auto tuple_inputs = List<Expr>::create(apply.range(), {k, v});
-                  return TupleLiteral::create(
-                      v.range(), std::move(tuple_inputs));
+                  return TupleLiteral::create(v.range(), tuple_inputs);
                 });
-            auto ll_values =
-                List<Expr>::create(apply.range(), std::move(zipped));
-            auto ll = ListLiteral::create(apply.range(), std::move(ll_values));
-            auto expr_list = List<Expr>::create(apply.range(), {std::move(ll)});
+            auto ll_values = List<Expr>::create(apply.range(), zipped);
+            auto ll = ListLiteral::create(apply.range(), ll_values);
+            auto expr_list = List<Expr>::create(apply.range(), {ll});
             // Change `apply` to a new Apply node holding a list of
             // tuples
             apply = Apply::create(
-                std::move(apply.range()),
-                std::move(apply.callee()),
-                std::move(expr_list),
-                std::move(apply.attributes()));
+                apply.range(), apply.callee(), expr_list, apply.attributes());
           }
 
           // If we have kwargs to include, we'll take a similar approach
@@ -3131,21 +3126,15 @@ struct to_ir {
               auto k = StringLiteral::create(apply.range(), attr.name().name());
               auto v = attr.value();
               auto tuple_inputs = List<Expr>::create(apply.range(), {k, v});
-              auto tuple =
-                  TupleLiteral::create(apply.range(), std::move(tuple_inputs));
+              auto tuple = TupleLiteral::create(apply.range(), tuple_inputs);
               exprs.push_back(tuple);
             }
-            auto expr_list =
-                List<Expr>::create(apply.range(), {std::move(exprs)});
-            auto ll = ListLiteral::create(apply.range(), std::move(expr_list));
-            auto new_inputs =
-                List<Expr>::create(apply.range(), {std::move(ll)});
+            auto expr_list = List<Expr>::create(apply.range(), {exprs});
+            auto ll = ListLiteral::create(apply.range(), expr_list);
+            auto new_inputs = List<Expr>::create(apply.range(), {ll});
             auto new_kwargs = List<Attribute>::create(apply.range(), {});
             apply = Apply::create(
-                std::move(apply.range()),
-                std::move(apply.callee()),
-                std::move(new_inputs),
-                std::move(new_kwargs));
+                apply.range(), apply.callee(), new_inputs, new_kwargs);
           }
 
           checkApplyNumInputs(apply, 1);
