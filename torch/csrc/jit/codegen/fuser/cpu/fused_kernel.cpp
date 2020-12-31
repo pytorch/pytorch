@@ -1,7 +1,7 @@
-#include <torch/csrc/jit/codegen/fuser/cpu/fused_kernel.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
+#include <torch/csrc/jit/codegen/fuser/cpu/fused_kernel.h>
 #include <torch/csrc/jit/codegen/fuser/cpu/temp_file.h>
 #include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/utils/memory.h>
@@ -152,7 +152,7 @@ intptr_t run(const std::string& cmd) {
   // Constructing the env array
   // If `env_list` is not empty, then add char pointers ending with nullptr.
   // Otherwise, it will be nullptr, which implies the default env.
-  std::vector<const wchar_t *> e;
+  std::vector<const wchar_t*> e;
   if (!env_list.empty()) {
     for (auto& s : env_list) {
       e.push_back(s.c_str());
