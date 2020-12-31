@@ -344,7 +344,7 @@ class ScriptModuleSerializer {
     std::unordered_map<at::Tensor, int, MyHash, MyEqual> constants_from_jit;
 
     for (size_t i = 0; i < ivalue_constants.size(); i++) {
-      if (constants_from_jit.find(ivalue_constants[i].toTensor()) ==
+      if (ivalue_constants[i].isTensor() && constants_from_jit.find(ivalue_constants[i].toTensor()) ==
           constants_from_jit.end()) {
         constants_from_jit[ivalue_constants[i].toTensor()] = i;
       }
