@@ -4654,6 +4654,37 @@ class TestNN(NNTestCase):
                 else:
                     self.assertRaises(ValueError, lambda: mu(output_small, indices_small, (h, w)))
 
+    def test_max_unpool2d_nhwc_cpu(self):
+        input = torch.randn(2, 10, 9, 9).float().cpu()
+        input = input.contiguous(memory_format=torch.channels_last)
+        ref_input = input.clone().contiguous();
+
+        pool = nn.MaxPool2d(3, stride=2, return_indices=True).cpu()
+        ref_pool = nn.MaxPool2d(3, stride=2, return_indices=True).cpu()
+
+        out, ind = pool(input)
+        ref_out, ref_ind = ref_pool(ref_input)
+        out.requires_grad_()
+        ref_out.requires_grad_()
+
+        unpool = nn.MaxUnpool2d(3, stride=2).cpu()
+        ref_unpool = nn.MaxUnpool2d(3, stride=2).cpu()
+
+        upout = unpool(out, ind)
+        ref_upout = ref_unpool(ref_out, ref_ind)
+
+        grad = torch.randn(upout.size()).float().cpu()
+        grad = grad.contiguous(memory_format=torch.channels_last)
+        ref_grad = grad.clone().contiguous()
+
+        upout.backward(grad)
+        ref_upout.backward(ref_grad)
+
+        self.assertTrue(upout.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(ref_upout.is_contiguous())
+        self.assertTrue(torch.allclose(upout, ref_upout))
+        self.assertTrue(torch.allclose(out.grad, ref_out.grad))
+
     def test_container_copy(self):
         class Model(nn.Module):
             def __init__(self):
