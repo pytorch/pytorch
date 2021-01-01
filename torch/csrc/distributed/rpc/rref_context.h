@@ -43,7 +43,6 @@ class TORCH_API RRefContext {
       bool ignoreRRefLeak = true);
 
   static void handleException(const JitFuture& jitFuture);
-  static void handleException(const FutureMessage& fm);
 
   RRefContext(const RRefContext&) = delete;
   RRefContext(RRefContext&& other) = delete;
