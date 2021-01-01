@@ -621,6 +621,19 @@ class TestTensorCreation(TestCase):
         self.assertEqual(a, b)
         self.assertEqual(w[:6], y.view(-1)[:6])
 
+        # Case: 
+        # Reference: https://github.com/pytorch/pytorch/issues/49878
+        x = torch.zeros((3, 2), device=device)
+        y = x.narrow(1, 0, 1)
+        val = torch.ones((3, 1), device=device) * 3.
+
+        torch.cat((val,), dim=1, out=y)
+
+        expected = torch.zeros(3, 2, device=device)
+        expected[:, 0] = torch.ones(3, device=device) * 3.
+        self.assertEqual(y, val)
+        self.assertEqual(x, expected)
+
     def test_cat_out_channels_last(self, device):
         x = torch.randn((4, 3, 8, 8))
         y = torch.randn(x.shape)
