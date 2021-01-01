@@ -40,9 +40,9 @@ struct Self {
 };
 
 // A CompilationUnit is a list of named Functions
-// with helper methods to iterate the list, or invoke the function.
-// Classes have a CompilationUnit holding the class methods
-// and Modules also have a CompilationUnit holding the Functions that
+// with helper methods to iterate the list or invoke the function.
+// Classes have a CompilationUnit holding the class methods,
+// and Modules have a CompilationUnit holding the Functions that
 // are used to implement their Methods
 
 struct TORCH_API CompilationUnit {
@@ -85,7 +85,7 @@ struct TORCH_API CompilationUnit {
   }
 
   // for historic reasons, these are defined in ir_emitter.cpp
-  // Returns the list of Function's just defined.
+  // Returns the list of Functions just defined.
   std::vector<Function*> define(
       const c10::optional<c10::QualifiedName>& prefix,
       const std::vector<Property>& properties,
@@ -100,7 +100,7 @@ struct TORCH_API CompilationUnit {
       bool shouldMangle = false);
 
   // same as above but parse the definitions from source
-  // Returns the list of Function's just defined.
+  // Returns the list of Functions just defined.
   std::vector<Function*> define(
       // prefix namespace to put all the defined functions into
       const c10::optional<c10::QualifiedName>& prefix,

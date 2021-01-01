@@ -31,7 +31,6 @@
 #include <torch/csrc/jit/tensorexpr/types.h>
 
 #include <torch/csrc/jit/jit_log.h>
-#define DEBUG_PRINT 0
 
 using namespace torch::jit::tensorexpr;
 
@@ -510,34 +509,35 @@ void LLVMCodeGenImpl::emitKernel(
 
   irb_.CreateRet(value_);
 
-#if DEBUG_PRINT
-  llvm::errs() << *module_;
-#endif
   if (llvm::verifyFunction(*fn_, &llvm::outs())) {
     throw std::runtime_error("Function verification failed");
   }
 
-  // print graph debug info.
-  std::string fnstr;
-  llvm::raw_string_ostream FS(fnstr);
-  fn_->print(FS);
-  GRAPH_DEBUG("LLVM Function:\n", FS.str(), "\n");
+  // print graph debug info before optimization
+  llvm::SmallVector<char, 0> asmBuffer;
+  llvm::raw_svector_ostream asmStream(asmBuffer);
+  if (GRAPH_DEBUG_ENABLED) {
+    module_->print(asmStream, nullptr);
+  }
+  GRAPH_DEBUG(
+      "\nLLVM module before optimizations\n\n", asmStream.str().str(), "\n");
 
   optimize(*module_);
 
-#if DEBUG_PRINT
-  llvm::errs() << *module_;
-  llvm::SmallVector<char, 0> asmBuffer;
-  llvm::raw_svector_ostream asmStream(asmBuffer);
-  llvm::legacy::PassManager PM;
-  TM_->addPassesToEmitFile(
-      PM,
-      asmStream,
-      nullptr,
-      llvm::TargetMachine::CodeGenFileType::CGFT_AssemblyFile);
-  PM.run(*module_);
-  llvm::errs() << asmStream.str();
-#endif
+  // print graph debug info after optimization
+  asmBuffer.set_size(0);
+  if (GRAPH_DEBUG_ENABLED) {
+    module_->print(asmStream, nullptr);
+    llvm::legacy::PassManager PM;
+    TM_->addPassesToEmitFile(
+        PM,
+        asmStream,
+        nullptr,
+        llvm::TargetMachine::CodeGenFileType::CGFT_AssemblyFile);
+    PM.run(*module_);
+  }
+  GRAPH_DEBUG(
+      "\nLLVM module after optimizations\n\n", asmStream.str().str(), "\n");
 }
 
 // TODO: The binary ops are copypasta.
