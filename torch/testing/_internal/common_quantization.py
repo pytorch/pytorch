@@ -360,7 +360,8 @@ class QuantizationTestCase(TestCase):
         if hasattr(module, 'qconfig') and module.qconfig is not None and \
            ((is_leaf_module(module) and not isinstance(module, torch.nn.Sequential)
             and type(module) in propagate_qconfig_list) or
-           type(module) in float_to_observed_module_class_mapping.keys()):
+           type(module) in float_to_observed_module_class_mapping.keys()) and \
+           not isinstance(module, torch.quantization.DeQuantStub):
             self.assertTrue(hasattr(module, 'activation_post_process'),
                             'module: ' + str(type(module)) + ' do not have observer')
         # we don't need to check observers for child modules of the
@@ -671,6 +672,13 @@ class QuantizationTestCase(TestCase):
             if not quant_type == QuantType.DYNAMIC:
                 prepared(*inputs)
 
+            if print_debug_info:
+                print()
+                print('quant type:\n', quant_type)
+                print('original model:\n', model)
+                print()
+                print('prepared model:\n', prepared)
+
             self.checkGraphModuleNodes(
                 prepared, prepare_expected_node,
                 prepare_expected_node_occurrence, prepare_expected_node_list)
@@ -684,10 +692,7 @@ class QuantizationTestCase(TestCase):
             qgraph_to_check = qgraph_debug if debug else qgraph
             if print_debug_info:
                 print()
-                print('quant type:', quant_type)
-                print('original model:', model)
-                print()
-                print('quantized model:', qgraph_to_check)
+                print('quantized model:\n', qgraph_to_check)
                 self.printGraphModule(qgraph_to_check)
                 print()
             self.checkGraphModuleNodes(

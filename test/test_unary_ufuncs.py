@@ -212,8 +212,7 @@ class TestUnaryUfuncs(TestCase):
         for alt, inplace in ((op.get_method(), False), (op.get_inplace(), True),
                              (torch.jit.script(_fn), False)):
             if alt is None:
-                with self.assertRaises(RuntimeError):
-                    alt(t.clone())
+                continue
 
             if inplace and op.promotes_integers_to_float and dtype in integral_types() + (torch.bool,):
                 # Assert that RuntimeError is raised
@@ -426,9 +425,12 @@ class TestUnaryUfuncs(TestCase):
         if out_dtype.is_floating_point and not dtype.is_complex:
             compare_out(op, input, output)
         elif out_dtype.is_floating_point and dtype.is_complex:
-            # Can't cast complex to float
-            with self.assertRaises(RuntimeError):
-                op(input, out=output)
+            if op.supports_complex_to_float:
+                compare_out(op, input, output)
+            else:
+                # Can't cast complex to float
+                with self.assertRaises(RuntimeError):
+                    op(input, out=output)
         elif out_dtype.is_complex:
             compare_out(op, input, output)
         else:
@@ -494,6 +496,35 @@ class TestUnaryUfuncs(TestCase):
 
         x = torch.tensor(-1.0000e+20 - 4988429.2000j, dtype=dtype, device=device)
         self.compare_with_numpy(torch.sqrt, np.sqrt, x)
+
+    @unittest.skipIf(not TEST_SCIPY, "Requires SciPy")
+    @dtypes(torch.float, torch.double)
+    def test_digamma_special(self, device, dtype):
+        # Based on SciPy test for the following special values.
+        # Reference:
+        # https://github.com/scipy/scipy/blob/3a8a3a1d4657254a6611e77e9c28feafa26e6645/scipy/special/tests/test_digamma.py#L22
+        euler = 0.57721566490153286
+        dataset = [(0., -0.),
+                   (1, -euler),
+                   (0.5, -2 * math.log(2) - euler),
+                   (1 / 3, -math.pi / (2 * math.sqrt(3)) - 3 * math.log(3) / 2 - euler),
+                   (1 / 4, -math.pi / 2 - 3 * math.log(2) - euler),
+                   (1 / 6, -math.pi * math.sqrt(3) / 2 - 2 * math.log(2) - 3 * math.log(3) / 2 - euler),
+                   (1 / 8, -math.pi / 2 - 4 * math.log(2) -
+                       (math.pi + math.log(2 + math.sqrt(2)) - math.log(2 - math.sqrt(2))) / math.sqrt(2) - euler)]
+        x = torch.tensor(dataset, device=device, dtype=dtype)
+        self.compare_with_numpy(torch.digamma, scipy.special.digamma, x)
+
+    @unittest.skipIf(not TEST_SCIPY, "Requires SciPy")
+    @dtypes(torch.float, torch.double)
+    def test_digamma(self, device, dtype):
+        # Tests pole behavior
+        # TODO: Add value `-1931.99999994`, to the tensor below when
+        # https://github.com/pytorch/pytorch/issues/49015 is fixed
+        tensor = torch.tensor([-0.999999994, -1.999999994, -2.0000000111,
+                               -100.99999994, 0.000000111,
+                               -0.000000111, 0, -0, -1, -2, -931], dtype=dtype, device=device)
+        self.compare_with_numpy(torch.digamma, scipy.special.digamma, tensor)
 
     # TODO opinfo mvlgamma
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
@@ -764,26 +795,6 @@ class TestUnaryUfuncs(TestCase):
         b = torch.randn(1, device=device)
         self.assertRaises(RuntimeError, lambda: torch.ceil(a, out=b))
 
-    # TODO: review with erfinv opinfo
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
-    @dtypes(torch.float, torch.double)
-    def test_erfinv(self, device, dtype):
-        # general testing. Narrow the range to avoid accuracy issues
-        input_values = torch.randn(4, 4, dtype=dtype, device=device).clamp(-0.3, 0.3)
-        self.assertEqual(input_values.erf().erfinv(), input_values)
-        # test inf
-        self.assertTrue(torch.equal(torch.tensor([-1, 1], dtype=dtype, device=device).erfinv(),
-                                    torch.tensor([-inf, inf], dtype=dtype, device=device)))
-        # test nan
-        self.assertEqual(torch.tensor([-2, 2], dtype=dtype, device=device).erfinv(),
-                         torch.tensor([nan, nan], dtype=dtype, device=device))
-
-        if dtype == torch.double:
-            # double precision
-            a = torch.tensor([0.5, 0.8], dtype=torch.double, device=device).erfinv()
-            self.assertEqual(a[0].item(), 0.47693627620447, atol=1e-13, rtol=0)
-            self.assertEqual(a[1].item(), 0.90619380243682, atol=1e-13, rtol=0)
-
     # TODO: opinfo hardshrink
     @onlyCPU
     @dtypes(torch.float, torch.double)
@@ -903,52 +914,6 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(torch.nn.functional.silu(
             input_noncontig, inplace=True), expected_output_noncontig,
             atol=atol, rtol=rtol)
-
-    # Opinfo reciprocal
-    @onlyCPU
-    @dtypes(torch.float, torch.double)
-    def test_reciprocal(self, device, dtype):
-        a = torch.randn(100, 89, device=device, dtype=dtype)
-        res_div = 1 / a
-        res_reciprocal = a.clone()
-        res_reciprocal.reciprocal_()
-        self.assertEqual(res_reciprocal, res_div)
-
-    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
-    def test_reciprocal_complex(self, device, dtype):
-        t = torch.randn(10, 10, dtype=dtype, device=device)
-        expected = torch.from_numpy(np.reciprocal(t.cpu().numpy()))
-        actual = torch.reciprocal(t).cpu()
-        self.assertEqual(expected, actual)
-
-    @onlyCUDA
-    @dtypes(torch.complex64, torch.complex128)
-    def test_reciprocal_complex_extremal(self, device, dtype):
-        vals = (
-            # Inf and Zeros
-            complex(float('inf'), float('inf')),
-            complex(float('inf'), 0.),
-            complex(0., float('inf')),
-            complex(0., 0.),
-
-            # Nans and Zeros
-            complex(float('nan'), 0.),
-            complex(0., float('nan')),
-            complex(float('nan'), float('nan')),
-
-            # Inf and Nans
-            complex(float('nan'), float('inf')),
-            complex(float('inf'), float('nan')),
-
-            # Extremal and Normal Number
-            complex(float('nan'), 2.0),
-            complex(float('inf'), 2.0),
-            complex(2.0, float('nan')),
-            complex(2.0, float('inf')),
-            complex(2.0, 0.0),
-            complex(0.0, 2.0))
-
-        self.compare_with_numpy(torch.reciprocal, np.reciprocal, vals, device, dtype)
 
     # do ops like threshold need a test_unary(_nonufunc) test suite?
     @onlyCPU
@@ -1183,30 +1148,6 @@ class TestUnaryUfuncs(TestCase):
         for n in [0, 1, 2, 3, 4, 5]:
             torch.autograd.gradcheck(lambda x: x.polygamma(n),
                                      cpu_tensor)
-
-    # Note: fails when using float tensors
-    # TODO: update this test to just compare against NumPy
-    @onlyCUDA
-    @dtypes(torch.double)
-    def test_digamma(self, device, dtype):
-        cpu_tensor = torch.randn(10, 10, 10, dtype=dtype)
-        device_tensor = cpu_tensor.to(device)
-        zeros = torch.zeros(10, 10, 10, dtype=dtype)
-        cpu_out = cpu_tensor.digamma()
-        device_out = device_tensor.digamma()
-        norm_errors = (device_out - cpu_out.to(device)) / device_out
-        self.assertEqual(norm_errors, zeros)
-
-        # Tests pole behavior
-        cpu_tensor = torch.tensor([-0.999999994, -1.999999994, -2.0000000111,
-                                   -100.99999994, -1931.99999994, 0.000000111,
-                                   -0.000000111, 0, -1, -2, -931], dtype=dtype)
-        expected_errors = torch.tensor([0, 0, 0, 0, 0, 0, 0, nan, nan, nan, nan], dtype=dtype)
-        device_tensor = cpu_tensor.to(device)
-        cpu_out = cpu_tensor.digamma()
-        device_out = device_tensor.digamma()
-        norm_errors = (device_out - cpu_out.to(device)) / device_out
-        self.assertEqual(norm_errors, expected_errors)
 
     # TODO: update to compare against NumPy by rationalizing with OpInfo
     @onlyCUDA
@@ -1789,9 +1730,6 @@ torch_op_tests = [
     _TorchMathTestMeta('polygamma', args=[2], substr='_2', reffn='polygamma',
                        refargs=lambda x: (2, x.numpy()), input_fn=_generate_gamma_input, inputargs=[False],
                        ref_backend='scipy', rtol=0.0008, atol=1e-5),
-    _TorchMathTestMeta('digamma',
-                       input_fn=_generate_gamma_input, inputargs=[True], ref_backend='scipy',
-                       replace_inf_with_nan=True),
     _TorchMathTestMeta('abs', input_fn=_medium_2d, dtypes=_types_no_half, rtol=0., atol=0.),
     _TorchMathTestMeta('logit', ref_backend='scipy')]
 

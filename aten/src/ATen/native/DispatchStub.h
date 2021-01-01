@@ -59,10 +59,10 @@ enum class CPUCapability {
 CPUCapability get_cpu_capability();
 
 template <typename FnPtr, typename T>
-struct CAFFE2_API DispatchStub;
+struct TORCH_API DispatchStub;
 
 template <typename rT, typename T, typename... Args>
-struct CAFFE2_API DispatchStub<rT (*)(Args...), T> {
+struct TORCH_API DispatchStub<rT (*)(Args...), T> {
   using FnPtr = rT (*) (Args...);
 
   DispatchStub() = default;
@@ -167,7 +167,7 @@ struct RegisterHIPDispatch {
     name(const name&) = delete;            \
     name& operator=(const name&) = delete; \
   };                                       \
-  extern CAFFE2_API struct name name
+  extern TORCH_API struct name name
 
 #define DEFINE_DISPATCH(name) struct name name
 

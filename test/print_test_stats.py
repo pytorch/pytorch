@@ -3,11 +3,13 @@
 # Read and print test results statistics
 from xml.dom import minidom
 from glob import glob
+import bz2
 import json
 import os
 import statistics
 import time
 
+import boto3
 import datetime
 import requests
 
@@ -76,15 +78,20 @@ def parse_reports(folder):
             tests_by_class[class_name].append(test_case)
     return tests_by_class
 
+def build_info():
+    return {
+        "build_pr": os.environ.get("CIRCLE_PR_NUMBER"),
+        "build_tag": os.environ.get("CIRCLE_TAG"),
+        "build_sha1": os.environ.get("CIRCLE_SHA1"),
+        "build_branch": os.environ.get("CIRCLE_BRANCH"),
+        "build_job": os.environ.get("CIRCLE_JOB"),
+        "build_workflow_id": os.environ.get("CIRCLE_WORKFLOW_ID"),
+    }
+
 def build_message(test_case):
     return {
         "normal": {
-            "build_pr": os.environ.get("CIRCLE_PR_NUMBER"),
-            "build_tag": os.environ.get("CIRCLE_TAG"),
-            "build_sha1": os.environ.get("CIRCLE_SHA1"),
-            "build_branch": os.environ.get("CIRCLE_BRANCH"),
-            "build_job": os.environ.get("CIRCLE_JOB"),
-            "build_workflow_id": os.environ.get("CIRCLE_WORKFLOW_ID"),
+            **build_info(),
             "test_suite_name": test_case.class_name,
             "test_case_name": test_case.name,
         },
@@ -98,7 +105,7 @@ def build_message(test_case):
         },
     }
 
-def send_report(reports):
+def send_report_to_scribe(reports):
     access_token = os.environ.get("SCRIBE_GRAPHQL_ACCESS_TOKEN")
 
     if not access_token:
@@ -124,6 +131,51 @@ def send_report(reports):
         },
     )
     r.raise_for_status()
+
+def send_report_to_s3(reports, *, total_seconds):
+    job = os.environ.get('CIRCLE_JOB')
+    sha1 = os.environ.get('CIRCLE_SHA1')
+    branch = os.environ.get('CIRCLE_BRANCH', '')
+    if branch not in ['master', 'nightly'] and not branch.startswith("release/"):
+        print("S3 upload only enabled on master, nightly and release branches.")
+        print(f"skipping test report on branch: {branch}")
+        return
+    now = datetime.datetime.utcnow().isoformat()
+    key = f'test_time/{sha1}/{job}/{now}Z.json.bz2'  # Z meaning UTC
+    s3 = boto3.resource('s3')
+    try:
+        s3.get_bucket_acl(Bucket='ossci-metrics')
+    except Exception as e:
+        print(f"AWS ACL failed: {e}")
+    print("AWS credential found, uploading to S3...")
+
+    obj = s3.Object('ossci-metrics', key)
+    print("")
+    # use bz2 because the results are smaller than gzip, and the
+    # compression time penalty we pay is only about half a second for
+    # input files of a few megabytes in size like these JSON files, and
+    # because for some reason zlib doesn't seem to play nice with the
+    # gunzip command whereas Python's bz2 does work with bzip2
+    obj.put(Body=bz2.compress(json.dumps({
+        **build_info(),
+        'total_seconds': total_seconds,
+        'suites': {
+            name: {
+                'total_seconds': suite.total_time,
+                'cases': [
+                    {
+                        'name': case.name,
+                        'seconds': case.time,
+                        'errored': case.errored,
+                        'failed': case.failed,
+                        'skipped': case.skipped,
+                    }
+                    for case in suite.test_cases
+                ],
+            }
+            for name, suite in reports.items()
+        }
+    }).encode()))
 
 def positive_integer(value):
     parsed = int(value)
@@ -166,6 +218,11 @@ if __name__ == '__main__':
         help="how many longest tests to show from the entire run",
     )
     parser.add_argument(
+        "--upload-to-s3",
+        action="store_true",
+        help="upload test time to S3 bucket",
+    )
+    parser.add_argument(
         "folder",
         help="test report folder",
     )
@@ -176,7 +233,7 @@ if __name__ == '__main__':
         print(f"No test reports found in {args.folder}")
         sys.exit(0)
 
-    send_report(reports)
+    send_report_to_scribe(reports)
 
     longest_tests = []
     total_time = 0
@@ -187,6 +244,9 @@ if __name__ == '__main__':
         total_time += test_suite.total_time
         longest_tests.extend(test_suite.test_cases)
     longest_tests = sorted(longest_tests, key=lambda x: x.time)[-args.longest_of_run:]
+
+    if args.upload_to_s3:
+        send_report_to_s3(reports, total_seconds=total_time)
 
     print(f"Total runtime is {datetime.timedelta(seconds=int(total_time))}")
     print(f"{len(longest_tests)} longest tests of entire run:")

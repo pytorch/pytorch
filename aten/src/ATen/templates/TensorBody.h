@@ -83,7 +83,7 @@ inline bool variable_excluded_from_dispatch() {
 //
 // Note that Tensor can also be NULL, i.e. it is not associated with any underlying TensorImpl, and
 // special care must be taken to handle this.
-class CAFFE2_API Tensor {
+class TORCH_API Tensor {
  public:
   Tensor(){};
   // This constructor should not be used by end users and is an implementation
@@ -598,6 +598,23 @@ class CAFFE2_API Tensor {
   const Tensor& grad() const {
     return impl_->grad();
   }
+
+  // The Forward AD API functions below are low level and are not to be used by end
+  // users who should use the API provided in torch/csrc/autograd.h
+
+  /// This function returns the forward gradient for this Tensor at the given level.
+  const Tensor& fw_grad(uint64_t level) const {
+    return impl_->fw_grad(level, *this);
+  }
+
+  /// This function can be used to set the value of the forward grad.
+  /// Note that the given new_grad might not be used directly if it has different
+  /// metadata (size/stride/storage offset) compared to this Tensor. In that case,
+  /// new_grad content will be copied into a new Tensor
+  void set_fw_grad(const Tensor& new_grad, uint64_t level, bool is_inplace_op) {
+    impl_->set_fw_grad(new_grad, *this, level, is_inplace_op);
+  }
+
 
   // STOP.  Thinking of adding a method here, which only makes use
   // of other ATen methods?  Define it in native_functions.yaml.
