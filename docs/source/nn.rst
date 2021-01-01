@@ -299,6 +299,7 @@ Vision Layers
     :template: classtemplate.rst
 
     nn.PixelShuffle
+    nn.PixelUnshuffle
     nn.Upsample
     nn.UpsamplingNearest2d
     nn.UpsamplingBilinear2d
