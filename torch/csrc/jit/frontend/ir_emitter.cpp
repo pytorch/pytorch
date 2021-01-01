@@ -1335,14 +1335,6 @@ struct to_ir {
     auto emit_body = [&]() {
       auto k = emitExpr(dc.key());
       auto v = emitExpr(dc.value());
-      if (type_hint && type_set) {
-        auto elem_type = DictType::create(k->type(), v->type());
-        if (elem_type != type_hint) {
-          throw ErrorReport(loc)
-              << "Type annotation for dict was " << type_hint->repr_str()
-              << ", but type of first element was " << elem_type->repr_str();
-        }
-      }
       if (!type_set) {
         dict_value->setType(DictType::create(k->type(), v->type()));
         type_set = true;
