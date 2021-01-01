@@ -1,5 +1,5 @@
 import unittest
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, set_cwd
 import tempfile
 import torch
 import re
@@ -202,17 +202,14 @@ class TestTypeHints(TestCase):
         if numpy.__version__ == '1.20.0.dev0+7af1024':
             self.skipTest("Typeannotations in numpy-1.20.0-dev are broken")
 
-        cwd = os.getcwd()
         # TODO: Would be better not to chdir here, this affects the entire
         # process!
-        os.chdir(repo_rootdir)
-        try:
+        with set_cwd(repo_rootdir):
             (stdout, stderr, result) = mypy.api.run([
                 '--check-untyped-defs',
                 '--follow-imports', 'silent',
             ])
-        finally:
-            os.chdir(cwd)
+
         if result != 0:
             self.fail(f"mypy failed: {stdout} {stderr}")
 
@@ -227,14 +224,11 @@ class TestTypeHints(TestCase):
         if not os.path.exists(mypy_inifile):
             self.skipTest("Can't find PyTorch MyPy strict config file")
 
-        cwd = os.getcwd()
-        os.chdir(repo_rootdir)
-        try:
+        with set_cwd(repo_rootdir):
             (stdout, stderr, result) = mypy.api.run([
                 '--config', mypy_inifile,
             ])
-        finally:
-            os.chdir(cwd)
+
         if result != 0:
             self.fail(f"mypy failed: {stdout} {stderr}")
 

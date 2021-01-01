@@ -21,7 +21,7 @@ class DistributedSampler(Sampler[T_co]):
     .. note::
         Dataset is assumed to be of constant size.
 
-    Arguments:
+    Args:
         dataset: Dataset used for sampling.
         num_replicas (int, optional): Number of processes participating in
             distributed training. By default, :attr:`world_size` is retrieved from the
@@ -129,7 +129,7 @@ class DistributedSampler(Sampler[T_co]):
         use a different random ordering for each epoch. Otherwise, the next iteration of this
         sampler will yield the same ordering.
 
-        Arguments:
+        Args:
             epoch (int): Epoch number.
         """
         self.epoch = epoch
