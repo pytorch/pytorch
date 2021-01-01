@@ -877,8 +877,7 @@ class HistogramObserver(_ObserverBase):
         orig_hist = orig_hist + interpolated_histogram.to(torch.float)
         return orig_hist
 
-    def forward(self, x_orig):
-        # type: (torch.Tensor) -> torch.Tensor
+    def forward(self, x_orig: torch.Tensor) -> torch.Tensor:
         x = x_orig.detach()
         min_val = self.min_val
         max_val = self.max_val

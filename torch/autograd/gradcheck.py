@@ -423,7 +423,11 @@ def gradcheck(
                         return fail_test('grad is sparse tensor, but has incorrect dense_dim')
                 gi = gi.to_dense()
                 di = di.to_dense()
-            if not gi.eq(0).all():
+
+            if check_sparse_nnz:
+                if not torch.allclose(gi, torch.zeros_like(gi)):
+                    return fail_test('backward not multiplied by grad_output')
+            elif not gi.eq(0).all():
                 return fail_test('backward not multiplied by grad_output')
             if gi.dtype != di.dtype or gi.device != di.device or gi.is_sparse != di.is_sparse:
                 return fail_test("grad is incorrect type")
