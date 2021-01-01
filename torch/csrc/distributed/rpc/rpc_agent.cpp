@@ -74,9 +74,9 @@ std::shared_ptr<JitFuture> RpcAgent::sendWithRetries(
                    newTime,
                    firstRetryRpc,
                    wp = std::weak_ptr<JitFuture>(jitFuture)]() {
-    auto jitFuture = wp.lock();
-    TORCH_INTERNAL_ASSERT(jitFuture);
-    rpcRetryCallback(jitFuture, newTime, firstRetryRpc);
+    auto future = wp.lock();
+    TORCH_INTERNAL_ASSERT(future);
+    rpcRetryCallback(future, newTime, firstRetryRpc);
   });
 
   return originalFuture;
@@ -169,9 +169,9 @@ void RpcAgent::retryExpiredRpcs() {
                        newTime,
                        earliestRpc,
                        wp = std::weak_ptr<JitFuture>(jitFuture)]() {
-        auto jitFuture = wp.lock();
-        TORCH_INTERNAL_ASSERT(jitFuture);
-        rpcRetryCallback(jitFuture, newTime, earliestRpc);
+        auto future = wp.lock();
+        TORCH_INTERNAL_ASSERT(future);
+        rpcRetryCallback(future, newTime, earliestRpc);
       });
     }
     futures.clear();

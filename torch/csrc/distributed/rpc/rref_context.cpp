@@ -218,8 +218,7 @@ void RRefContext::delUser(
 
       std::weak_ptr<JitFuture> wp = jitFuture;
       jitFuture->addCallback([this, wp]() {
-        auto jitFuture = wp.lock();
-        handleException(*jitFuture);
+        handleException(*wp.lock());
         --numPendingFutures_;
       });
     }
@@ -492,8 +491,7 @@ void RRefContext::notifyOwnerAndParentOfFork(
         agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
     std::weak_ptr<JitFuture> wp = jitFuture;
     jitFuture->addCallback([this, wp]() {
-      auto jitFuture = wp.lock();
-      handleException(*jitFuture);
+      handleException(*wp.lock());
       --numPendingFutures_;
     });
   } else {
@@ -506,8 +504,7 @@ void RRefContext::notifyOwnerAndParentOfFork(
 
     std::weak_ptr<JitFuture> wp = jitFuture;
     jitFuture->addCallback([this, forkId, parent, wp]() {
-      auto jitFuture = wp.lock();
-      handleException(*jitFuture);
+      handleException(*wp.lock());
       this->finishForkRequest(forkId, parent);
       // Decrease after calling finishForkRequest because, as that creates a new
       // future, it might otherwise cause the count to briefly go to zero.
@@ -691,8 +688,7 @@ void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
 
   std::weak_ptr<JitFuture> wp = jitFuture;
   jitFuture->addCallback([this, wp]() {
-    auto jitFuture = wp.lock();
-    handleException(*jitFuture);
+    handleException(*wp.lock());
     --numPendingFutures_;
   });
 }

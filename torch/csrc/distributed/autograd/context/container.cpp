@@ -248,14 +248,14 @@ void DistAutogradContainer::sendReleaseContextRpc(
       std::weak_ptr<rpc::JitFuture> wp = cleanupFuture;
       cleanupFuture->addCallback(
           [worker_id, wp]() {
-            auto cleanupFuture = wp.lock();
-            TORCH_INTERNAL_ASSERT(cleanupFuture);
-            if (cleanupFuture->hasError()) {
+            auto future = wp.lock();
+            TORCH_INTERNAL_ASSERT(future);
+            if (future->hasError()) {
               std::string errorMsg = c10::str(
                   "Could not release Dist Autograd Context on node ",
                   worker_id,
                   ": ",
-                  cleanupFuture->tryRetrieveErrorMessage());
+                  future->tryRetrieveErrorMessage());
               LOG(ERROR) << errorMsg;
               return;
             }
