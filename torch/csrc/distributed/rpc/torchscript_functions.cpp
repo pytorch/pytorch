@@ -125,8 +125,7 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
     std::weak_ptr<JitFuture> wp = jitFuture;
     jitFuture->addCallback(
         at::wrapPropagateTLSState<void>([wp, forkId{userRRefPtr->forkId()}]() {
-          auto jitFuture = wp.lock();
-          callback::confirmPendingUser(*jitFuture, forkId);
+          callback::confirmPendingUser(*wp.lock(), forkId);
         }));
 
     return userRRefPtr;
@@ -153,8 +152,7 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
     std::weak_ptr<JitFuture> wp = jitFuture;
     jitFuture->addCallback(at::wrapPropagateTLSState<void>(
         [wp, ownerRRefId = ownerRRefPtr->rrefId()]() {
-          auto jitFuture = wp.lock();
-          callback::finishCreatingOwnerRRef(*jitFuture, ownerRRefId);
+          callback::finishCreatingOwnerRRef(*wp.lock(), ownerRRefId);
         }));
     return ownerRRefPtr;
   }

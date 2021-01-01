@@ -259,36 +259,38 @@ class TORCH_API RpcAgent {
   // Get the type resolver
   std::shared_ptr<TypeResolver> getTypeResolver();
 
-  static std::shared_ptr<JitFuture> toJitFuture(std::shared_ptr<FutureMessage> fm) {
+  static std::shared_ptr<JitFuture> toJitFuture(
+      std::shared_ptr<FutureMessage>& fm) {
     auto jitFuture = std::make_shared<JitFuture>(at::AnyClassType::get());
 
     std::weak_ptr<FutureMessage> wp = fm;
     fm->addCallback(
         [jitFuture, wp]() mutable {
-          auto fm = wp.lock();
-          if (fm->hasError()) {
-            jitFuture->setError(std::make_exception_ptr(*(fm->error())));
+          auto future = wp.lock();
+          if (future->hasError()) {
+            jitFuture->setError(std::make_exception_ptr(*(future->error())));
           } else {
             jitFuture->markCompleted(IValue(
-                c10::make_intrusive<Message>(std::move(*fm).moveValue())));
+                c10::make_intrusive<Message>(std::move(*future).moveValue())));
           }
         }
     );
     return jitFuture;
   }
 
-  static std::shared_ptr<FutureMessage> toFutureMessage(std::shared_ptr<JitFuture> jitFuture) {
+  static std::shared_ptr<FutureMessage> toFutureMessage(
+      std::shared_ptr<JitFuture>& jitFuture) {
     auto fm = std::make_shared<FutureMessage>();
 
     std::weak_ptr<JitFuture> wp = jitFuture;
     jitFuture->addCallback(
         [fm, wp]() mutable {
-          auto jitFuture = wp.lock();
-          if (jitFuture->hasError()) {
-            fm->setError(jitFuture->tryRetrieveErrorMessage());
+          auto future = wp.lock();
+          if (future->hasError()) {
+            fm->setError(future->tryRetrieveErrorMessage());
           } else {
             fm->markCompleted(
-                std::move(*jitFuture->value().toCustomClass<Message>()));
+                std::move(*future->value().toCustomClass<Message>()));
           }
         }
     );

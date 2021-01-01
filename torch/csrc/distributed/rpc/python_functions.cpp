@@ -143,12 +143,12 @@ c10::intrusive_ptr<JitFuture> toPyJitFuture(
     std::weak_ptr<JitFuture> wp = messageJitFuture;
     messageJitFuture->addCallback(
         at::wrapPropagateTLSState<void>([pyJitFuture, wp]() {
-          auto messageJitFuture = wp.lock();
-          if (messageJitFuture->hasError()) {
-            pyJitFuture->setError(messageJitFuture->exception_ptr());
+          auto future = wp.lock();
+          if (future->hasError()) {
+            pyJitFuture->setError(future->exception_ptr());
           } else {
             pyJitFuture->markCompleted(
-                toIValue(*messageJitFuture->value().toCustomClass<Message>()));
+                toIValue(*future->value().toCustomClass<Message>()));
           }
         }));
 
@@ -159,9 +159,9 @@ c10::intrusive_ptr<JitFuture> toPyJitFuture(
     std::weak_ptr<JitFuture> wp = messageJitFuture;
     messageJitFuture->addCallback(
         at::wrapPropagateTLSState<void>([wp, pyJitFuture]() {
-          auto messageJitFuture = wp.lock();
-          if (messageJitFuture->hasError()) {
-            pyJitFuture->setError(messageJitFuture->exception_ptr());
+          auto future = wp.lock();
+          if (future->hasError()) {
+            pyJitFuture->setError(future->exception_ptr());
           } else {
             pyJitFuture->markCompleted(IValue());
           }
@@ -285,8 +285,7 @@ PyRRef pyRemoteBuiltin(
     std::weak_ptr<JitFuture> wp = jitFuture;
     jitFuture->addCallback(
         at::wrapPropagateTLSState<void>([wp, forkId{userRRef->forkId()}]() {
-          auto jitFuture = wp.lock();
-          callback::confirmPendingUser(*jitFuture, forkId);
+          callback::confirmPendingUser(*wp.lock(), forkId);
         }));
     return PyRRef(userRRef);
   } else {
@@ -309,8 +308,7 @@ PyRRef pyRemoteBuiltin(
     std::weak_ptr<JitFuture> wp = jitFuture;
     jitFuture->addCallback(at::wrapPropagateTLSState<void>(
         [wp, ownerRRefId = ownerRRef->rrefId()]() {
-          auto jitFuture = wp.lock();
-          callback::finishCreatingOwnerRRef(*jitFuture, ownerRRefId);
+          callback::finishCreatingOwnerRRef(*wp.lock(), ownerRRefId);
         }));
     return PyRRef(ownerRRef);
   }
@@ -342,8 +340,7 @@ PyRRef pyRemotePythonUdf(
     std::weak_ptr<JitFuture> wp = jitFuture;
     jitFuture->addCallback(
         at::wrapPropagateTLSState<void>([wp, forkId{userRRef->forkId()}]() {
-          auto jitFuture = wp.lock();
-          callback::confirmPendingUser(*jitFuture, forkId);
+          callback::confirmPendingUser(*wp.lock(), forkId);
         }));
     return PyRRef(userRRef);
   } else {
@@ -363,9 +360,8 @@ PyRRef pyRemotePythonUdf(
     std::weak_ptr<JitFuture> wp = jitFuture;
     jitFuture->addCallback(at::wrapPropagateTLSState<void>(
         [wp, ownerRRefId = ownerRRef->rrefId()]() {
-          auto jitFuture = wp.lock();
           auto deletedRRef =
-              callback::finishCreatingOwnerRRef(*jitFuture, ownerRRefId);
+              callback::finishCreatingOwnerRRef(*wp.lock(), ownerRRefId);
           if (deletedRRef && deletedRRef->isPyObj()) {
             py::gil_scoped_acquire ag;
             deletedRRef.reset();
