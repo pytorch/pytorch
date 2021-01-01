@@ -518,7 +518,7 @@ def unbind(g, self, dim=0, _outputs=None):
 
 
 # Generate paddings in ONNX order based on pad in pytorch.
-# Arguments:
+# Args:
 #     dim: the dimension of the tensor.
 #     pad: the paddings in pytorch.
 #          The order is dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, ..., dim_m_begin, dim_m_end,

@@ -360,16 +360,14 @@ class TestSaveLoad(JitTestCase):
                 else:
                     fn_result = self._try_fn(fn, a, b)
 
-                if not a.is_floating_point():
-                    # NOTE: Torchscript rewrites the module forward into
-                    #   torch.reciprocal(a) * b, but torch.reciprocal is
-                    #   implemented for integer dtypes.
-                    self.assertTrue(m_result, Exception)
-                    self.assertTrue('"reciprocal_cpu" not implemented for' in str(m_result))
-                elif isinstance(m_result, Exception):
-                    self.assertTrue(fn_result, Exception)
-                else:
+                if isinstance(m_result, Exception):
+                    self.assertTrue(isinstance(fn_result, Exception))
+                elif fn is torch.div or a.is_floating_point():
                     self.assertEqual(m_result, fn_result)
+                else:
+                    # Skip when fn is not torch.div and a is integral because
+                    # historic_div_scalar_int performs floored division
+                    pass
 
             if isinstance(b, float):
                 _helper(v3_module_float, historic_div_scalar_float_reciprocal)
@@ -999,7 +997,7 @@ class TestSaveLoad(JitTestCase):
                 self.add_module("submodule_a", Submodule())
                 self.register_parameter("parameter_a", torch.nn.Parameter(torch.randn(4)))
                 self.register_buffer("buffer", torch.randn(4))
-                self.t = torch.rand(4) # not buffer
+                self.t = torch.rand(4)  # not buffer
 
                 self.parameter_b = torch.nn.Parameter(torch.randn(4))
                 self.submodule_b = Submodule()

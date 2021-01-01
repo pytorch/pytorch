@@ -455,7 +455,7 @@ class TestNN(NNTestCase):
         for b in net.buffers():
             self.assertTrue(b.storage().is_shared())
 
-    def test_hooks(self):
+    def _test_hooks(self, backward_register_fn):
         module = nn.Sigmoid()
         input = torch.ones(5, 5, requires_grad=True)
 
@@ -486,7 +486,7 @@ class TestNN(NNTestCase):
         self.assertEqual(counter['forwards'], 2)
         self.assertEqual(counter['backwards'], 0)
 
-        test_bwd = module.register_backward_hook(
+        test_bwd = getattr(module, backward_register_fn)(
             lambda *args: bw_hook(1, *args))
 
         output = module(input)
@@ -507,7 +507,7 @@ class TestNN(NNTestCase):
         self.assertEqual(counter['forwards'], 6)
         self.assertEqual(counter['backwards'], 2)
 
-        test2_bwd = module.register_backward_hook(lambda *args: bw_hook(2, *args))
+        test2_bwd = getattr(module, backward_register_fn)(lambda *args: bw_hook(2, *args))
 
         module(input).backward(torch.ones(5, 5) * 2)
         self.assertEqual(counter['forwards'], 9)
@@ -528,17 +528,19 @@ class TestNN(NNTestCase):
         test_fwd.remove()
         test_bwd.remove()
 
+    def test_hooks(self):
+        self._test_hooks("register_backward_hook")
+        self._test_hooks("register_full_backward_hook")
+
     def test_hook_cpp(self):
-        counter = [0]
         bn = nn.BatchNorm1d(5)
 
         def hook(module, grad_inputs, grad_outputs):
-            counter[0] += 1
-            self.assertEqual(len(grad_inputs), 3)
+            self.assertEqual(len(grad_inputs), 1)
             self.assertEqual(len(grad_outputs), 1)
             self.assertEqual(module, bn)
 
-        bn.register_backward_hook(hook)
+        bn.register_full_backward_hook(hook)
         output = bn(torch.randn(5, 5, requires_grad=True))
         output.sum().backward()
 
@@ -559,6 +561,165 @@ class TestNN(NNTestCase):
         with module.register_backward_hook(bw_fail2):
             with self.assertRaisesRegex(RuntimeError, 'got 2, but expected 1'):
                 module(input).sum().backward()
+
+    def test_hook_requires_grad(self):
+        test_self = self
+
+        class MyModule(nn.Module):
+            def forward(self, arg1, arg2, arg3):
+                test_self.assertTrue(arg1.requires_grad)
+                test_self.assertFalse(arg2.requires_grad)
+                test_self.assertTrue(arg3.requires_grad)
+                return arg1.sum() + arg2.sum() + arg3.sum()
+
+        inp = torch.rand(2, requires_grad=True)
+        mod = MyModule()
+
+        mod(inp, inp.detach(), inp)
+        # Ensure that requires grad is properly propagated
+        mod.register_full_backward_hook(lambda mod, gI, gO: None)
+        mod(inp, inp.detach(), inp)
+
+    def test_hook_extra_input(self):
+        class MyModule(nn.Module):
+            def forward(self, non_tensor, tensor):
+                return tensor.clone(), non_tensor
+
+        inp = torch.rand(2, requires_grad=True)
+        mod = MyModule()
+
+        def hook(mod, grad_input, grad_output):
+            self.assertIsNone(grad_input[0])
+            self.assertIsInstance(grad_input[1], torch.Tensor)
+
+            self.assertIsInstance(grad_output[0], torch.Tensor)
+            self.assertIsNone(grad_output[1])
+
+        mod.register_full_backward_hook(hook)
+        out, _ = mod(True, inp)
+        out.sum().backward()
+
+    def test_hook_inplace(self):
+        class MyModule(nn.Module):
+            def forward(self, inp, do_inplace):
+                self.inp = inp
+                if do_inplace:
+                    inp += 1
+                return inp.clone()
+
+        hook_called = [0]
+
+        def hook(mod, grad_input, grad_output):
+            hook_called[0] += 1
+
+        inp = torch.rand(10, requires_grad=True)
+        mod = MyModule()
+        mod.register_full_backward_hook(hook)
+
+        # No inplace should work
+        mod(inp, False).sum().backward()
+        self.assertEqual(hook_called[0], 1)
+
+        # Input inplace error should throw an error (warning during deprecation cycle)
+        with self.assertWarnsRegex(UserWarning, "Output 0 of BackwardHookFunctionBackward is "
+                                   "a view and is being modified inplace."):
+            mod(inp.clone(), True)
+
+        # Input inplace error should throw an error if we try to re-use the view after they have
+        # been modified (warning during deprecation cycle)
+        local_inp = inp.clone()
+        out = mod(local_inp, False)
+        local_inp[0] *= 1
+        with self.assertWarnsRegex(UserWarning, "Output 0 of BackwardHookFunctionBackward is "
+                                   "a view and its base or another view"):
+            # Any operation involving the view will fail here
+            mod.inp + 2
+
+        # Output inplace error should throw an error (warning during deprecation cycle)
+        with self.assertWarnsRegex(UserWarning, "BackwardHookFunctionBackward is a view "
+                                   "and is being modified inplace."):
+            # This error won't happen once the warning above is a proper error
+            with self.assertRaisesRegex(RuntimeError, "Module backward hook for grad_input is "
+                                        "called before the grad_output one."):
+                out = mod(inp, False)
+                out += 1
+                out.sum().backward()
+
+    def test_hook_non_full_warning(self):
+        def noop(*args):
+            pass
+
+        a = torch.rand(2, requires_grad=True)
+        b = torch.rand(2, requires_grad=True)
+
+        # Check invalid input container
+        class MyModule(nn.Module):
+            def forward(self, l):
+                return l[0].clone(), l[1].clone()
+
+        m = MyModule()
+        m.register_backward_hook(noop)
+
+        with self.assertWarnsRegex(UserWarning, "does not take as input a single Tensor or a tuple of Tensors"):
+            m([a, b])
+
+        # Check invalid output container
+        class MyModule(nn.Module):
+            def forward(self, a, b):
+                return [a.clone(), b.clone()]
+
+        m = MyModule()
+        m.register_backward_hook(noop)
+
+        with self.assertWarnsRegex(UserWarning, "does not return a single Tensor or a tuple of Tensors"):
+            m(a, b)
+
+        # Check invalid output from different Nodes
+        class MyModule(nn.Module):
+            def forward(self, a, b):
+                return a.clone(), b.clone()
+
+        m = MyModule()
+        m.register_backward_hook(noop)
+
+        with self.assertWarnsRegex(UserWarning, "outputs are generated by different autograd Nodes"):
+            m(a, b)
+
+        # Check invalid forward with multiple Nodes
+        class MyModule(nn.Module):
+            def forward(self, a):
+                return a.clone().clone()
+
+        m = MyModule()
+        m.register_backward_hook(noop)
+
+        with self.assertWarnsRegex(UserWarning, "the forward contains multiple autograd Nodes"):
+            m(a)
+
+    def test_hook_backward_size(self):
+        # Make module with multiple operations in forward
+        # And different size for input and outputs
+        class MyModule(nn.Module):
+            def forward(self, arg1, arg2):
+                tmp = arg1.sum() * arg2
+                tmp = tmp + arg2.sum() * arg1.sum()
+                tmp = tmp.sum().view(1)
+                tmp = tmp.expand(8).contiguous()
+                return tmp
+
+        module = MyModule()
+        inp1 = torch.randn(5, 5, requires_grad=True)
+        inp2 = torch.randn(10, 10, requires_grad=True)
+
+        def bw_hook(module, grad_input, grad_output):
+            self.assertEqual(len(grad_input), 2)
+            self.assertEqual(grad_input[0].size(), torch.Size([5, 5]))
+            self.assertEqual(grad_input[1].size(), torch.Size([10, 10]))
+            self.assertEqual(len(grad_output), 1)
+            self.assertEqual(grad_output[0].size(), torch.Size([8]))
+
+        with module.register_full_backward_hook(bw_hook):
+            module(inp1, inp2).sum().backward()
 
     def test_hook_backward_writeable(self):
         module = nn.Sigmoid()
@@ -6736,8 +6897,9 @@ class TestNN(NNTestCase):
         output.backward(grad.contiguous())
         self.assertEqual(result, input.grad.data, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
-    def test_pixel_shuffle(self):
-        def _test_pixel_shuffle_helper(num_input_dims, valid_channels_dim=True):
+    def test_pixel_shuffle_unshuffle(self):
+        def _test_pixel_shuffle_unshuffle_helper(num_input_dims, valid_channels_dim=True,
+                                                 upscale_factor=None):
             # Function to imperatively ensure pixels are shuffled to the correct locations.
             # Used to validate the batch operations in pixel_shuffle.
             def _verify_pixel_shuffle(input, output, upscale_factor):
@@ -6750,7 +6912,7 @@ class TestNN(NNTestCase):
                                           (c * upscale_factor ** 2)
                             self.assertEqual(output[..., c, h, w], input[..., channel_idx, height_idx, weight_idx])
 
-            upscale_factor = random.randint(2, 5)
+            upscale_factor = random.randint(2, 5) if upscale_factor is None else upscale_factor
             # If valid_channels_dim=False, add 1 to make channels dim indivisible by upscale_factor ** 2.
             channels = random.randint(1, 4) * upscale_factor ** 2 + (0 if valid_channels_dim else 1)
             height = random.randint(5, 10)
@@ -6764,47 +6926,76 @@ class TestNN(NNTestCase):
                 batch_sizes = [random.randint(1, 3) for _ in range(num_input_dims - 3)]
                 input = torch.rand(*batch_sizes, channels, height, width, requires_grad=True)
             ps = nn.PixelShuffle(upscale_factor)
+            pus = nn.PixelUnshuffle(downscale_factor=upscale_factor)
 
-            if num_input_dims >= 3 and valid_channels_dim:
+            if num_input_dims >= 3 and valid_channels_dim and upscale_factor > 0:
                 output = ps(input)
                 _verify_pixel_shuffle(input, output, upscale_factor)
                 output.backward(output.data)
                 self.assertEqual(input.data, input.grad.data)
+
+                # Ensure unshuffle properly inverts shuffle.
+                unshuffle_output = pus(output)
+                self.assertEqual(input, unshuffle_output)
             else:
                 self.assertRaises(RuntimeError, lambda: ps(input))
 
-        def test_pixel_shuffle_1D():
-            _test_pixel_shuffle_helper(num_input_dims=1)
+        def _test_pixel_unshuffle_error_case_helper(num_input_dims, valid_height_dim=True, valid_width_dim=True,
+                                                    downscale_factor=None):
+            downscale_factor = random.randint(2, 5) if downscale_factor is None else downscale_factor
+            channels = random.randint(1, 4)
+            # If valid_height_dim=False, add 1 to make height dim indivisible by downscale_factor.
+            height = random.randint(3, 5) * abs(downscale_factor) + (0 if valid_height_dim else 1)
+            # If valid_width_dim=False, add 1 to make width dim indivisible by downscale_factor.
+            width = random.randint(3, 5) * abs(downscale_factor) + (0 if valid_width_dim else 1)
 
-        def test_pixel_shuffle_2D():
-            _test_pixel_shuffle_helper(num_input_dims=2)
+            if num_input_dims == 1:
+                input = torch.rand(channels, requires_grad=True)
+            elif num_input_dims == 2:
+                input = torch.rand(height, width, requires_grad=True)
+            else:
+                batch_sizes = [random.randint(1, 3) for _ in range(num_input_dims - 3)]
+                input = torch.rand(*batch_sizes, channels, height, width, requires_grad=True)
 
-        def test_pixel_shuffle_3D_with_valid_channels_dim():
-            _test_pixel_shuffle_helper(num_input_dims=3)
+            pus = nn.PixelUnshuffle(downscale_factor)
+            self.assertRaises(RuntimeError, lambda: pus(input))
 
-        def test_pixel_shuffle_4D_with_valid_channels_dim():
-            _test_pixel_shuffle_helper(num_input_dims=4)
+        def _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims):
+            # For 1D - 2D, this is an error case.
+            # For 3D - 5D, this is a success case for pixel_shuffle + pixel_unshuffle.
+            _test_pixel_shuffle_unshuffle_helper(num_input_dims=num_input_dims)
 
-        def test_pixel_shuffle_5D_with_valid_channels_dim():
-            _test_pixel_shuffle_helper(num_input_dims=5)
+            # Error cases for pixel_shuffle.
+            _test_pixel_shuffle_unshuffle_helper(num_input_dims=num_input_dims, valid_channels_dim=False)
+            _test_pixel_shuffle_unshuffle_helper(num_input_dims=num_input_dims, upscale_factor=0)
+            _test_pixel_shuffle_unshuffle_helper(num_input_dims=num_input_dims, upscale_factor=-2)
 
-        def test_pixel_shuffle_3D_with_invalid_channels_dim():
-            _test_pixel_shuffle_helper(num_input_dims=3, valid_channels_dim=False)
+            # Error cases for pixel_unshuffle.
+            _test_pixel_unshuffle_error_case_helper(num_input_dims=num_input_dims, valid_height_dim=False)
+            _test_pixel_unshuffle_error_case_helper(num_input_dims=num_input_dims, valid_width_dim=False)
+            _test_pixel_unshuffle_error_case_helper(num_input_dims=num_input_dims, downscale_factor=0)
+            _test_pixel_unshuffle_error_case_helper(num_input_dims=num_input_dims, downscale_factor=-2)
 
-        def test_pixel_shuffle_4D_with_invalid_channels_dim():
-            _test_pixel_shuffle_helper(num_input_dims=4, valid_channels_dim=False)
+        def test_pixel_shuffle_unshuffle_1D():
+            _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims=1)
 
-        def test_pixel_shuffle_5D_with_invalid_channels_dim():
-            _test_pixel_shuffle_helper(num_input_dims=5, valid_channels_dim=False)
+        def test_pixel_shuffle_unshuffle_2D():
+            _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims=2)
 
-        test_pixel_shuffle_1D()
-        test_pixel_shuffle_2D()
-        test_pixel_shuffle_3D_with_valid_channels_dim()
-        test_pixel_shuffle_4D_with_valid_channels_dim()
-        test_pixel_shuffle_5D_with_valid_channels_dim()
-        test_pixel_shuffle_3D_with_invalid_channels_dim()
-        test_pixel_shuffle_4D_with_invalid_channels_dim()
-        test_pixel_shuffle_5D_with_invalid_channels_dim()
+        def test_pixel_shuffle_unshuffle_3D():
+            _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims=3)
+
+        def test_pixel_shuffle_unshuffle_4D():
+            _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims=4)
+
+        def test_pixel_shuffle_unshuffle_5D():
+            _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims=5)
+
+        test_pixel_shuffle_unshuffle_1D()
+        test_pixel_shuffle_unshuffle_2D()
+        test_pixel_shuffle_unshuffle_3D()
+        test_pixel_shuffle_unshuffle_4D()
+        test_pixel_shuffle_unshuffle_5D()
 
     def test_elu_inplace_view(self):
         v = torch.tensor([1.0, -1.0, 1.0, -1.0], requires_grad=True)
@@ -13593,7 +13784,7 @@ class TestModuleGlobalHooks(TestCase):
     def test_module_backward_global_hook_writeable(self):
         module = nn.Sigmoid()
         input = torch.randn(5, 5, requires_grad=True)
-        sig_x = torch.nn.functional.sigmoid(input)
+        sig_x = torch.sigmoid(input)
 
         def bw_hook(module, grad_input, grad_output):
             for grad in grad_input:
@@ -13610,7 +13801,7 @@ class TestModuleGlobalHooks(TestCase):
     def test_module_global_forward_preforward_hook_writeable(self):
         module = nn.Sigmoid()
         input = torch.randn(5, 5, requires_grad=True)
-        sig_x = torch.nn.functional.sigmoid(input)
+        sig_x = torch.sigmoid(input)
 
         def forward_pre_hook(m, input):
             return torch.nn.functional.relu(input[0])
@@ -13621,7 +13812,7 @@ class TestModuleGlobalHooks(TestCase):
         nn.modules.module.register_module_forward_pre_hook(forward_pre_hook)
         nn.modules.module.register_module_forward_hook(forward_hook)
         output = module(input)
-        expected_res = -torch.nn.functional.sigmoid(torch.nn.functional.relu(input))
+        expected_res = -torch.sigmoid(torch.nn.functional.relu(input))
         self.assertEqual(output, expected_res)
         output.backward(torch.ones(5, 5) * 2, retain_graph=True)
         mask = (input > 0).double()
