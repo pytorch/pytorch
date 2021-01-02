@@ -260,7 +260,7 @@ class TORCH_API RpcAgent {
   std::shared_ptr<TypeResolver> getTypeResolver();
 
   static std::shared_ptr<JitFuture> toJitFuture(
-      std::shared_ptr<FutureMessage>& fm) {
+      std::shared_ptr<FutureMessage>&& fm) {
     auto jitFuture = std::make_shared<JitFuture>(at::AnyClassType::get());
 
     std::weak_ptr<FutureMessage> wp = fm;
@@ -279,7 +279,7 @@ class TORCH_API RpcAgent {
   }
 
   static std::shared_ptr<FutureMessage> toFutureMessage(
-      std::shared_ptr<JitFuture>& jitFuture) {
+      std::shared_ptr<JitFuture>&& jitFuture) {
     auto fm = std::make_shared<FutureMessage>();
 
     std::weak_ptr<JitFuture> wp = jitFuture;
