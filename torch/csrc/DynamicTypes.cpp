@@ -28,9 +28,6 @@ namespace {
 std::unordered_map<at::DeprecatedTypeProperties*, PyTypeObject*> attype_to_py_storage_type;
 std::unordered_map<PyTypeObject*, at::DeprecatedTypeProperties*> py_storage_type_to_attype;
 
-THPDtype* dtype_registry
-  [static_cast<int>(at::ScalarType::NumOptions)] = {};
-
 THPLayout* layout_registry
   [static_cast<int>(at::Layout::NumOptions)] = {};
 
@@ -80,20 +77,8 @@ void registerStoragePyTypeObject(PyTypeObject *pytype, at::Backend backend, at::
   }
 }
 
-void registerDtypeObject(THPDtype *dtype, at::ScalarType scalarType) {
-  dtype_registry[static_cast<int>(scalarType)] = dtype;
-}
-
 void registerLayoutObject(THPLayout *thp_layout, at::Layout layout) {
   layout_registry[static_cast<int>(layout)] = thp_layout;
-}
-
-THPDtype* getTHPDtype(at::ScalarType scalarType) {
-  auto dtype = dtype_registry[static_cast<int>(scalarType)];
-  if (!dtype) {
-    throw std::invalid_argument("unsupported scalarType");
-  }
-  return dtype;
 }
 
 THPLayout* getTHPLayout(at::Layout layout) {

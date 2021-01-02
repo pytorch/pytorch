@@ -3,6 +3,8 @@
 // Provides conversions between Python tensor objects and at::Tensor.
 
 #include <torch/csrc/python_headers.h>
+#include <torch/csrc/Dtype.h>
+#include <torch/csrc/utils/pybind.h>
 
 #include <ATen/Device.h>
 #include <c10/core/ScalarType.h>
@@ -13,7 +15,6 @@
 #include <memory>
 #include <string>
 
-struct THPDtype;
 struct THPLayout;
 
 namespace c10 {
@@ -25,7 +26,6 @@ namespace torch {
 void registerStoragePyTypeObject(
     PyTypeObject *pytype, at::Backend backend, at::ScalarType scalarType);
 
-void registerDtypeObject(THPDtype *dtype, at::ScalarType scalarType);
 void registerLayoutObject(THPLayout *thp_layout, at::Layout layout);
 
 PyObject* createPyObject(
@@ -34,6 +34,6 @@ PyObject* createPyObject(
 at::Storage createStorage(PyObject* obj);
 bool isStorage(PyObject* obj);
 
-THPDtype* getTHPDtype(at::ScalarType scalarType);
 THPLayout* getTHPLayout(at::Layout layout);
+
 }  // namespace torch

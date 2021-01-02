@@ -1,12 +1,12 @@
 #include <torch/csrc/TypeInfo.h>
 
+#include <torch/csrc/Dtype.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
-#include <torch/csrc/utils/tensor_dtypes.h>
 
 #include <c10/util/Exception.h>
 
@@ -159,11 +159,8 @@ static PyObject* THPIInfo_min(THPIInfo* self, void*) {
 }
 
 static PyObject* THPIInfo_dtype(THPIInfo* self, void*) {
-  std::string primary_name, legacy_name;
-  std::tie(primary_name, legacy_name) = torch::utils::getDtypeNames(self->type);
-  return AT_DISPATCH_INTEGRAL_TYPES(self->type, "dtype", [primary_name] {
-    return PyUnicode_FromString((char*)primary_name.data());
-  });
+  const auto primary_name = torch::getPyDtype(self->type).primary_name;
+  return PyUnicode_FromString(const_cast<char*>(primary_name.data()));
 }
 
 static PyObject* THPFInfo_tiny(THPFInfo* self, void*) {
@@ -181,11 +178,8 @@ static PyObject* THPFInfo_resolution(THPFInfo* self, void*) {
 }
 
 static PyObject* THPFInfo_dtype(THPFInfo* self, void*) {
-  std::string primary_name, legacy_name;
-  std::tie(primary_name, legacy_name) = torch::utils::getDtypeNames(self->type);
-  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::kHalf, at::ScalarType::BFloat16, self->type, "dtype", [primary_name] {
-    return PyUnicode_FromString((char*)primary_name.data());
-  });
+  const auto primary_name = torch::getPyDtype(self->type).primary_name;
+  return PyUnicode_FromString(const_cast<char*>(primary_name.data()));
 }
 
 PyObject* THPFInfo_str(THPFInfo* self) {
@@ -201,11 +195,7 @@ PyObject* THPFInfo_str(THPFInfo* self) {
 }
 
 PyObject* THPIInfo_str(THPIInfo* self) {
-  auto type = self->type;
-  std::string primary_name, legacy_name;
-  std::tie(primary_name, legacy_name) = torch::utils::getDtypeNames(type);
   std::ostringstream oss;
-
   oss << "iinfo(min=" << PyFloat_AsDouble(THPIInfo_min(self, nullptr));
   oss << ", max=" << PyFloat_AsDouble(THPIInfo_max(self, nullptr));
   oss << ", dtype=" << PyUnicode_AsUTF8(THPIInfo_dtype(self, nullptr)) << ")";
