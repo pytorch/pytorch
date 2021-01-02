@@ -564,7 +564,6 @@ libtorch_python_core_sources = [
     "torch/csrc/utils/python_dispatch.cpp",
     "torch/csrc/utils/structseq.cpp",
     "torch/csrc/utils/tensor_apply.cpp",
-    "torch/csrc/utils/tensor_dtypes.cpp",
     "torch/csrc/utils/tensor_layouts.cpp",
     "torch/csrc/utils/tensor_memoryformats.cpp",
     "torch/csrc/utils/tensor_qschemes.cpp",
