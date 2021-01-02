@@ -25,9 +25,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     // TODO(xintchen): Handling LayoutType and ScalarTypeType correctly.
     case TypeKind::LayoutType:
     case TypeKind::ScalarTypeType:
-      if (THPDtype_Check(obj.ptr())) {
-        auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
-        return static_cast<int64_t>(dtype->scalar_type);
+      if (py::isinstance<PyDtype>(obj)) {
+        auto scalar_type = py::cast<at::ScalarType>(obj);
+        return static_cast<int64_t>(scalar_type);
       }
       if (THPQScheme_Check(obj.ptr())) {
         auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
@@ -203,9 +203,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       return res;
     }
     case TypeKind::NumberType: {
-      if (THPDtype_Check(obj.ptr())) {
-        auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
-        return static_cast<int64_t>(dtype->scalar_type);
+      if (py::isinstance<PyDtype>(obj)) {
+        auto scalar_type = py::cast<at::ScalarType>(obj);
+        return static_cast<int64_t>(scalar_type);
       }
       if (THPQScheme_Check(obj.ptr())) {
         auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());

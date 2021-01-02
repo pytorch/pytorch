@@ -29,9 +29,8 @@ inline Device py_object_to_device(py::object object) {
 }
 
 inline Dtype py_object_to_dtype(py::object object) {
-  PyObject* obj = object.ptr();
-  if (THPDtype_Check(obj)) {
-    return reinterpret_cast<THPDtype*>(obj)->scalar_type;
+  if (py::isinstance<PyDtype>(object)) {
+    return py::cast<Dtype>(object);
   }
   throw TypeError("Expected dtype");
 }

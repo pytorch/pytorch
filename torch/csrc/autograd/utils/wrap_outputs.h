@@ -4,6 +4,7 @@
 
 #include <ATen/ATen.h>
 #include <torch/csrc/python_headers.h>
+#include <torch/csrc/utils/pybind.h>
 #include <tuple>
 
 #include <torch/csrc/Dtype.h>
@@ -43,13 +44,8 @@ inline PyObject* wrap(void* value) {
   return THPUtils_packInt64(reinterpret_cast<intptr_t>(value));
 }
 
-inline PyObject* wrap(THPDtype *dtype) {
-  Py_INCREF(dtype);
-  return (PyObject*)dtype;
-}
-
 inline PyObject* wrap(at::ScalarType scalarType) {
-  return wrap(getTHPDtype(scalarType));
+  return py::cast(scalarType).release().ptr();
 }
 
 inline PyObject* wrap(THPLayout *layout) {

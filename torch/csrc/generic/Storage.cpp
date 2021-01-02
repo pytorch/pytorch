@@ -296,14 +296,13 @@ static PyObject * THPStorage_(device)(THPStorage* self, void *unused) {
 static PyObject * THPStorage_(dtype)(THPStorage *self, void *unused)
 {
   HANDLE_TH_ERRORS
-  return torch::autograd::utils::wrap(
-      torch::getTHPDtype(at::typeMetaToScalarType(
+  return py::cast(at::typeMetaToScalarType(
 #ifdef THQUANTIZED
           caffe2::TypeMeta::Make<quantized_t>()
 #else
           caffe2::TypeMeta::Make<scalar_t>()
 #endif
-              )));
+              )).release().ptr();
   END_HANDLE_TH_ERRORS
 }
 

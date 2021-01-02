@@ -960,8 +960,7 @@ void initJITBindings(PyObject* module) {
              size_t numel,
              py::object data_type_obj) {
             at::DataPtr data(std::get<0>(self.getRecord(key)));
-            auto scalar_type =
-                reinterpret_cast<THPDtype*>(data_type_obj.ptr())->scalar_type;
+            auto scalar_type = py::cast<at::ScalarType>(data_type_obj);
 
             c10::Storage storage(
                 c10::Storage::use_byte_size_t(),

@@ -619,7 +619,7 @@ static PyObject *THPVariable_dtype(THPVariable *self, void *unused)
     return handle_torch_function_getter(self, "dtype");
   }
   auto& self_ = self->cdata;
-  return torch::autograd::utils::wrap(torch::getTHPDtype(self_.scalar_type()));
+  return torch::autograd::utils::wrap(self_.scalar_type());
   END_HANDLE_TH_ERRORS
 }
 

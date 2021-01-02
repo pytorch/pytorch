@@ -39,7 +39,6 @@
 #include <torch/csrc/multiprocessing/init.h>
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/disable_torch_function.h>
-#include <torch/csrc/utils/tensor_dtypes.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_layouts.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
@@ -114,7 +113,6 @@ static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manag
   torch::utils::initializeLayouts();
   torch::utils::initializeMemoryFormats();
   torch::utils::initializeQSchemes();
-  torch::utils::initializeDtypes();
   torch::tensors::initialize_python_bindings();
   std::string path = THPUtils_unpackString(shm_manager_path);
   libshm_init(path.c_str());
@@ -518,9 +516,7 @@ PyObject *THPModule_setFlushDenormal(PyObject *_unused, PyObject *arg) {
 PyObject *THPModule_getDefaultDtype(PyObject *_unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   auto scalar_type = torch::tensors::get_default_scalar_type();
-  auto dtype = (PyObject*)torch::getTHPDtype(scalar_type);
-  Py_INCREF(dtype);
-  return dtype;
+  return py::cast(scalar_type).release().ptr();
   END_HANDLE_TH_ERRORS
 }
 
@@ -725,7 +721,7 @@ PyObject* initModule() {
   ASSERT_TRUE(THPGenerator_init(module));
   ASSERT_TRUE(THPException_init(module));
   THPSize_init(module);
-  THPDtype_init(module);
+  torch::initDtypeBindings(module);
   THPDTypeInfo_init(module);
   THPLayout_init(module);
   THPMemoryFormat_init(module);

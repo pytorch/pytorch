@@ -936,9 +936,9 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       auto memory_format = reinterpret_cast<THPMemoryFormat*>(obj.ptr());
       const auto v = static_cast<int64_t>(memory_format->memory_format);
       return toSimple(g.insertConstant(v, loc));
-    } else if (THPDtype_Check(obj.ptr())) {
-      auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
-      const auto v = static_cast<int64_t>(dtype->scalar_type);
+    } else if (py::isinstance<PyDtype>(obj)) {
+      auto scalar_type = py::cast<at::ScalarType>(obj);
+      const auto v = static_cast<int64_t>(scalar_type);
       return toSimple(g.insertConstant(v, loc));
     } else if (THPQScheme_Check(obj.ptr())) {
       auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());

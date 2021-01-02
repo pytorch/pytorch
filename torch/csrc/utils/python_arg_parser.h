@@ -443,7 +443,7 @@ inline at::ScalarType PythonArgs::scalartype(int i) {
   if (obj == (PyObject*)&PyLong_Type) {
     return at::ScalarType::Long;
   }
-  return reinterpret_cast<THPDtype*>(obj)->scalar_type;
+  return py::cast<at::ScalarType>(obj);
 }
 
 inline c10::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
