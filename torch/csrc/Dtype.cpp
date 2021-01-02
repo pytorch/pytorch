@@ -1,134 +1,115 @@
 #include <torch/csrc/Dtype.h>
 
-#include <cstring>
-#include <structmember.h>
 #include <torch/csrc/Exceptions.h>
-#include <torch/csrc/utils/object_ptr.h>
-#include <torch/csrc/utils/python_strings.h>
-#include <torch/csrc/utils/tensor_dtypes.h>
-#include <torch/csrc/utils/tensor_types.h>
+#include <torch/csrc/utils/pybind.h>
 
-#include <torch/csrc/Exceptions.h>
+#include <sstream>
 
-PyObject * THPDtype_New(at::ScalarType scalar_type, const std::string& name)
-{
-  AT_ASSERT(name.length() < DTYPE_NAME_LEN);
-  auto type = (PyTypeObject*)&THPDtypeType;
-  auto self = THPObjectPtr{type->tp_alloc(type, 0)};
-  if (!self) throw python_error();
-  auto self_ = reinterpret_cast<THPDtype*>(self.get());
-  self_->scalar_type = scalar_type;
-  std::strncpy(self_->name, name.c_str(), DTYPE_NAME_LEN);
-  return self.release();
-}
+namespace torch {
+using at::ScalarType;
 
-PyObject *THPDtype_is_floating_point(THPDtype *self, PyObject *noargs)
-{
-  if (at::isFloatingType(self->scalar_type)) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
-}
+namespace {
+#define PY_DTYPE(scalar_type, ...) { true, ScalarType::scalar_type, __VA_ARGS__ }
 
-PyObject *THPDtype_is_complex(THPDtype *self, PyObject *noargs)
-{
-  if (at::isComplexType(self->scalar_type)) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
-}
-
-PyObject *THPDtype_is_signed(THPDtype *self, PyObject *noargs)
-{
-  HANDLE_TH_ERRORS
-  if (at::isSignedType(self->scalar_type)) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject *THPDtype_reduce(PyObject *_self, PyObject *noargs)
-{
-  /*
-  * For singletons, a string is returned. The string should be interpreted
-  * as the name of a global variable.
-  */
-  auto self = (THPDtype*)_self;
-  return THPUtils_packString(self->name);
-}
-
-typedef PyObject *(*getter)(PyObject *, void *);
-
-static struct PyGetSetDef THPDtype_properties[] = {
-  {"is_floating_point", (getter)THPDtype_is_floating_point, nullptr, nullptr, nullptr},
-  {"is_complex", (getter)THPDtype_is_complex, nullptr, nullptr, nullptr},
-  {"is_signed", (getter)THPDtype_is_signed, nullptr, nullptr, nullptr},
-  {nullptr}
+constexpr size_t NUM_DTYPES = static_cast<size_t>(ScalarType::NumOptions);
+// Must be in exactly the same order as ScalarType definitions
+constexpr PyDtype dtype_registry[NUM_DTYPES] = {
+  PY_DTYPE(Byte, "uint8", ""),
+  PY_DTYPE(Char, "int8", ""),
+  PY_DTYPE(Short, "int16", "short"),
+  PY_DTYPE(Int, "int32", "int"),
+  PY_DTYPE(Long, "int64", "long"),
+  PY_DTYPE(Half, "float16", "half"),
+  PY_DTYPE(Float, "float32", "float"),
+  PY_DTYPE(Double, "float64", "double"),
+  PY_DTYPE(ComplexHalf, "complex32", ""),
+  PY_DTYPE(ComplexFloat, "complex64", "cfloat"),
+  PY_DTYPE(ComplexDouble, "complex128", "cdouble"),
+  PY_DTYPE(Bool, "bool", ""),
+  PY_DTYPE(QInt8, "qint8", ""),
+  PY_DTYPE(QUInt8,"quint8", ""),
+  PY_DTYPE(QInt32, "qint32", ""),
+  PY_DTYPE(BFloat16, "bfloat16", ""),
+  PY_DTYPE(QUInt4x2, "quint4x2", ""),
 };
 
-static PyMethodDef THPDtype_methods[] = {
-  {"__reduce__", THPDtype_reduce, METH_NOARGS, nullptr},
-  {nullptr}  /* Sentinel */
-};
-
-PyObject *THPDtype_repr(THPDtype *self)
-{
-  std::string name = self->name;
-  return THPUtils_packString("torch." + name);
+c10::string_view dtypeName(const PyDtype& dtype) {
+  return dtype.primary_name;
 }
 
-PyTypeObject THPDtypeType = {
-  PyVarObject_HEAD_INIT(nullptr, 0)
-  "torch.dtype",                         /* tp_name */
-  sizeof(THPDtype),                      /* tp_basicsize */
-  0,                                     /* tp_itemsize */
-  nullptr,                               /* tp_dealloc */
-  0,                                     /* tp_vectorcall_offset */
-  nullptr,                               /* tp_getattr */
-  nullptr,                               /* tp_setattr */
-  nullptr,                               /* tp_reserved */
-  (reprfunc)THPDtype_repr,               /* tp_repr */
-  nullptr,                               /* tp_as_number */
-  nullptr,                               /* tp_as_sequence */
-  nullptr,                               /* tp_as_mapping */
-  nullptr,                               /* tp_hash  */
-  nullptr,                               /* tp_call */
-  nullptr,                               /* tp_str */
-  nullptr,                               /* tp_getattro */
-  nullptr,                               /* tp_setattro */
-  nullptr,                               /* tp_as_buffer */
-  Py_TPFLAGS_DEFAULT,                    /* tp_flags */
-  nullptr,                               /* tp_doc */
-  nullptr,                               /* tp_traverse */
-  nullptr,                               /* tp_clear */
-  nullptr,                               /* tp_richcompare */
-  0,                                     /* tp_weaklistoffset */
-  nullptr,                               /* tp_iter */
-  nullptr,                               /* tp_iternext */
-  THPDtype_methods,                      /* tp_methods */
-  nullptr,                               /* tp_members */
-  THPDtype_properties,                   /* tp_getset */
-  nullptr,                               /* tp_base */
-  nullptr,                               /* tp_dict */
-  nullptr,                               /* tp_descr_get */
-  nullptr,                               /* tp_descr_set */
-  0,                                     /* tp_dictoffset */
-  nullptr,                               /* tp_init */
-  nullptr,                               /* tp_alloc */
-  nullptr,                               /* tp_new */
-};
+} // namespace
 
-void THPDtype_init(PyObject *module)
-{
-  if (PyType_Ready(&THPDtypeType) < 0) {
-    throw python_error();
+const PyDtype& getPyDtype(ScalarType scalar_type) {
+  const PyDtype& dtype = dtype_registry[static_cast<size_t>(scalar_type)];
+  if (!dtype.defined) {
+    throw std::invalid_argument("unsupported ScalarType");
   }
-  Py_INCREF(&THPDtypeType);
-  if (PyModule_AddObject(module, "dtype", (PyObject *)&THPDtypeType) != 0) {
-    throw python_error();
+  return dtype;
+}
+
+void initDtypeBindings(PyObject* module) {
+#define ASSERT_PY_DTYPE(_1, type) \
+  static_assert( \
+    dtype_registry[static_cast<size_t>(ScalarType::type)].defined, \
+    "PyDtype of scalar type " #type " is undefined" \
+  ); \
+  static_assert( \
+    dtype_registry[static_cast<size_t>(ScalarType::type)].scalar_type == ScalarType::type, \
+    "PyDtype order of scalar type " #type " is incorrect" \
+  );
+  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(ASSERT_PY_DTYPE)
+#undef ASSERT_PY_DTYPE
+
+  py::options options;
+  options.disable_user_defined_docstrings();
+  options.disable_function_signatures();
+
+  py::class_<PyDtype>(module, "dtype", py::is_final())
+      .def("__reduce__", &dtypeName)
+      .def("__repr__",
+          [](const PyDtype& dtype) {
+            std::ostringstream oss;
+            oss << "torch." << dtype.primary_name;
+            return oss.str();
+          })
+      .def_property_readonly(
+          "is_floating_point",
+          [](const PyDtype& dtype) {
+            HANDLE_TH_ERRORS
+            return at::isFloatingType(dtype.scalar_type);
+            END_HANDLE_TH_ERRORS_PYBIND
+          })
+      .def_property_readonly(
+          "is_complex",
+          [](const PyDtype& dtype) {
+            HANDLE_TH_ERRORS
+            return at::isComplexType(dtype.scalar_type);
+            END_HANDLE_TH_ERRORS_PYBIND
+          })
+      .def_property_readonly(
+          "is_signed",
+          [](const PyDtype& dtype) {
+            HANDLE_TH_ERRORS
+            return at::isSignedType(dtype.scalar_type);
+            END_HANDLE_TH_ERRORS_PYBIND
+          });
+
+  auto m = py::reinterpret_borrow<py::object>(module);
+  for (const PyDtype& dtype : dtype_registry) {
+    if (!dtype.defined) {
+      continue;
+    }
+
+    auto dtype_obj = py::cast(dtype, py::return_value_policy::reference);
+    m.attr(dtype.primary_name.data()) = dtype_obj;
+    if (!dtype.legacy_name.empty()) {
+      m.attr(dtype.legacy_name.data()) = dtype_obj;
+    }
   }
+}
+
+} // namespace torch
+
+bool THPDtype_Check(PyObject* obj) {
+  return py::isinstance<torch::PyDtype>(obj);
 }

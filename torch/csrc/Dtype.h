@@ -1,29 +1,30 @@
 #pragma once
 
-#include <ATen/ATen.h>
 #include <torch/csrc/python_headers.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/util/string_view.h>
+#include <ATen/ATen.h>
 
-const int DTYPE_NAME_LEN = 64;
+namespace torch {
 
-struct TORCH_API THPDtype {
-  PyObject_HEAD
+struct PyDtype {
+  bool defined;
   at::ScalarType scalar_type;
-  char name[DTYPE_NAME_LEN + 1];
+  c10::string_view primary_name;
+  c10::string_view legacy_name;
 };
 
-TORCH_API extern PyTypeObject THPDtypeType;
+const PyDtype& getPyDtype(at::ScalarType scalar_type);
 
-inline bool THPDtype_Check(PyObject *obj) {
-  return Py_TYPE(obj) == &THPDtypeType;
-}
+void initDtypeBindings(PyObject* module);
+
+} // namespace torch
+
+// Legacy functions are still kept to ease transition to pybind11 bindings
+// FIXME Remove use of these functions and get rid of them
+bool THPDtype_Check(PyObject* obj);
 
 inline bool THPPythonScalarType_Check(PyObject *obj) {
   return obj == (PyObject*)(&PyFloat_Type) ||
     obj == (PyObject*)(&PyBool_Type) ||
     obj == (PyObject*)(&PyLong_Type);
 }
-
-PyObject * THPDtype_New(at::ScalarType scalar_type, const std::string& name);
-
-void THPDtype_init(PyObject *module);
