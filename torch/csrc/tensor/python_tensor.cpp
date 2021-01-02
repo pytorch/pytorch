@@ -16,6 +16,7 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/utils/tensor_types.h>
+#include <torch/csrc/utils/pybind.h>
 
 #include <ATen/ATen.h>
 
@@ -31,12 +32,11 @@ using namespace torch::autograd;
 
 struct PyTensorType {
   PyTypeObject py_type;
-  THPDtype* dtype;
+  ScalarType scalar_type;
   THPLayout* layout;
   bool is_cuda;
   char name[64];
   int backend;
-  int scalar_type;
 
   Backend get_backend() const {
     return static_cast<Backend>(backend);
@@ -47,7 +47,7 @@ struct PyTensorType {
   }
 
   ScalarType get_scalar_type() const {
-    return static_cast<ScalarType>(scalar_type);
+    return scalar_type;
   }
 };
 
@@ -91,7 +91,7 @@ static PyObject* Tensor_instancecheck(PyObject* _self, PyObject* arg) {
     // TODO: Stop using legacyExtractDispatchKey here (probably need to build
     // in instanceof checking to Tensor class itself)
     if (legacyExtractDispatchKey(var.key_set()) == self->get_dispatch_key() &&
-        var.scalar_type() == static_cast<ScalarType>(self->scalar_type)) {
+        var.scalar_type() == self->scalar_type) {
       Py_RETURN_TRUE;
     }
   }
@@ -100,7 +100,7 @@ static PyObject* Tensor_instancecheck(PyObject* _self, PyObject* arg) {
 }
 
 PyObject *Tensor_dtype(PyTensorType* self, void *unused) {
-  return torch::autograd::utils::wrap(self->dtype);
+  return py::cast(self->scalar_type).release().ptr();
 }
 
 PyObject *Tensor_layout(PyTensorType* self, void *unused) {
@@ -211,9 +211,8 @@ static THPObjectPtr get_storage_obj(PyTensorType* type) {
 static void set_type(PyTensorType& type_obj, Backend backend, ScalarType scalarType) {
   // This field is lazily initialized from backend and scalar_type
   type_obj.backend = static_cast<int>(backend);
-  type_obj.scalar_type = static_cast<int>(scalarType);
+  type_obj.scalar_type = scalarType;
   type_obj.layout = torch::getTHPLayout(layout_from_backend(backend));
-  type_obj.dtype = torch::getTHPDtype(scalarType);
   type_obj.is_cuda = (backend == at::Backend::CUDA || backend == at::Backend::SparseCUDA);
 }
 
@@ -369,7 +368,7 @@ void py_set_default_tensor_type(PyObject* obj) {
 
 void py_set_default_dtype(PyObject* obj) {
   if (THPDtype_Check(obj)) {
-    auto scalar_type = ((THPDtype*)obj)->scalar_type;
+    auto scalar_type = py::cast<ScalarType>(obj);
     auto backend = default_tensor_type->get_backend();
     auto it = std::find_if(tensor_types.begin(), tensor_types.end(),
       [backend, scalar_type](const PyTensorType& x) {
