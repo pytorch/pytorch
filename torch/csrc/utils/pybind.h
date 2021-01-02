@@ -2,6 +2,7 @@
 
 #include <torch/csrc/python_headers.h>
 
+#include <c10/util/string_view.h>
 #include <ATen/ATen.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -11,6 +12,7 @@
 #include <torch/csrc/utils/python_tuples.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/Generator.h>
+#include <torch/csrc/Dtype.h>
 
 #include <stdexcept>
 #include <utility>
@@ -98,8 +100,30 @@ private:
   std::vector<int64_t> v_value;
 };
 
+// torch.dtype <-> at::ScalarType conversions
+template<> struct type_caster<at::ScalarType> {
+public:
+  PYBIND11_TYPE_CASTER(at::ScalarType, _("at::ScalarType"));
+
+  bool load(handle src, bool) {
+    value = src.cast<const torch::PyDtype&>().scalar_type;
+    return true;
+  }
+
+  static handle cast(at::ScalarType scalar_type, return_value_policy /* policy */, handle /* parent */) {
+    return py::cast(torch::getPyDtype(scalar_type), return_value_policy::reference).release();
+  }
+};
+
 // Pybind11 bindings for our optional type.
 // http://pybind11.readthedocs.io/en/stable/advanced/cast/stl.html#c-17-library-containers
 template <typename T>
 struct type_caster<c10::optional<T>> : optional_caster<c10::optional<T>> {};
+
+// Pybind11 bindings for our string_view type.
+// https://pybind11.readthedocs.io/en/stable/advanced/cast/strings.html
+template <typename CharT>
+struct type_caster<c10::basic_string_view<CharT>, enable_if_t<is_std_char_type<CharT>::value>>
+    : string_caster<c10::basic_string_view<CharT>, true> {};
+
 }} // namespace pybind11::detail
