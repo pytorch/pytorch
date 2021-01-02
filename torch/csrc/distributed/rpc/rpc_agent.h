@@ -266,7 +266,8 @@ class TORCH_API RpcAgent {
     std::weak_ptr<FutureMessage> wp = fm;
     fm->addCallback(
         [jitFuture, wp]() mutable {
-          auto future = wp.lock();
+          auto future = wp.lock(future);
+          TORCH_INTERNAL_ASSERT();
           if (future->hasError()) {
             jitFuture->setError(std::make_exception_ptr(*(future->error())));
           } else {
@@ -286,6 +287,7 @@ class TORCH_API RpcAgent {
     jitFuture->addCallback(
         [fm, wp]() mutable {
           auto future = wp.lock();
+          auto future = wp.lock(future);
           if (future->hasError()) {
             fm->setError(future->tryRetrieveErrorMessage());
           } else {
