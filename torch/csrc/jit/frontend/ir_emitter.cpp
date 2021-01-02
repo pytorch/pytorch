@@ -3084,15 +3084,15 @@ struct to_ir {
               apply.inputs()[0].kind() == TK_DICT_LITERAL) {
             auto dict_lit = DictLiteral(apply.inputs()[0]);
             std::vector<Expr> zipped;
-            std::transform(
-                dict_lit.key_inputs().begin(),
-                dict_lit.key_inputs().end(),
-                dict_lit.value_inputs().begin(),
-                std::back_inserter(zipped),
-                [&](const auto& k, const auto& v) {
-                  auto tuple_inputs = List<Expr>::create(apply.range(), {k, v});
-                  return TupleLiteral::create(v.range(), tuple_inputs);
-                });
+            for (auto key_it = dict_lit.key_inputs().begin(),
+                      val_it = dict_lit.value_inputs().begin();
+                 key_it != dict_lit.key_inputs().end();
+                 ++key_it, ++val_it) {
+              auto tuple_inputs =
+                  List<Expr>::create(apply.range(), {*key_it, *val_it});
+              auto tuple = TupleLiteral::create(apply.range(), tuple_inputs);
+              zipped.push_back(tuple);
+            }
             auto ll_values = List<Expr>::create(apply.range(), zipped);
             auto ll = ListLiteral::create(apply.range(), ll_values);
             auto expr_list = List<Expr>::create(apply.range(), {ll});
