@@ -4301,6 +4301,7 @@ std::vector<Function*> CompilationUnit::define_hooks(
     function_table[fn->name()] = fn.get();
     functions.emplace_back(fn.get());
     this->register_function(std::move(fn));
+    ErrorReport::HintStack hint(self->getClassType()->getHookErrorMessage(functions.back()->name()));
     functions.back()->ensure_defined();
   }
 
@@ -4326,6 +4327,7 @@ std::vector<Function*> CompilationUnit::define_hooks(
     function_table[fn->name()] = fn.get();
     functions.emplace_back(fn.get());
     this->register_function(std::move(fn));
+    ErrorReport::HintStack hint(self->getClassType()->getPreHookErrorMessage(functions.back()->name()));
     functions.back()->ensure_defined();
   }
 
