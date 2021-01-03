@@ -614,6 +614,20 @@ class TestHooks(JitTestCase):
         ):
             torch.jit.script(m)
 
+        def pre_hook_wrong_tuple_return(self, input: Tuple[Tuple[int]]):
+            return (11,) # doesn't work with eager, inner tuple lost
+
+        m = OuterModuleTupleSingleIO("outer_mod_name", "inner_mod_name")
+        m.register_forward_pre_hook(pre_hook_wrong_tuple_return)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "When forward has a single tuple argument, the return needs to be 'None' or a nested tuple "
+            "containing forward's tuple argument as in: 'Tuple\[Tuple\[int\]\]'.",
+        ):
+            torch.jit.script(m)
+
+
     def test_wrong_hook_signatures(self):
         # correct signature:
         #   def forward_hook(self, input: Tuple[str], output: str)
