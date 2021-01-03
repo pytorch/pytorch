@@ -676,8 +676,7 @@ void ProcessGroupAgent::markFutureWithError(int64_t id, std::string errorMsg) {
   }
 
   --clientActiveCalls_;
-  jitFuture->setError(std::make_exception_ptr(
-      std::runtime_error((std::move(errorMsg)))));
+  jitFuture->setError(std::make_exception_ptr(std::runtime_error(errorMsg)));
   futureCV_.notify_all();
 }
 
@@ -810,7 +809,7 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
       if (!timedOutFuture.future_->hasError()) {
         --clientActiveCalls_;
         timedOutFuture.future_->setError(
-            std::make_exception_ptr(std::runtime_error(std::move(err))));
+            std::make_exception_ptr(std::runtime_error(err)));
         // The future timed out and will not be processed by handleRecv(), even
         // if we eventually get a response. In order to keep track of all
         // send/recv pairs, we increment the count here.

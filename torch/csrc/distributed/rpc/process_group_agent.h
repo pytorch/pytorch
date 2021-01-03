@@ -135,11 +135,11 @@ class TORCH_API ProcessGroupAgent : public RpcAgent {
     int dstRank_;
     std::chrono::milliseconds timeout_;
     FutureInfo(
-        const std::shared_ptr<JitFuture>& future,
+        std::shared_ptr<JitFuture> future,
         const steady_clock_time_point& endTime,
         int dstRank,
         const std::chrono::milliseconds timeout)
-        : future_(future),
+        : future_(std::move(future)),
           endTime_(endTime),
           dstRank_(dstRank),
           timeout_(timeout) {}
