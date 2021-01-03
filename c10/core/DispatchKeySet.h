@@ -124,7 +124,7 @@ private:
 public:
   // STL iterator for DispatchKeySet. Iterates through all DispatchKeys in the
   // set. The iterator is only invalidated by the destruction of the underlying
-  // DispatchKeySet as the iterator stores a pointer to the raw represenation of
+  // DispatchKeySet as the iterator stores a pointer to the raw representation of
   // the DispatchKeySet.
   class iterator {
    public:
@@ -235,7 +235,7 @@ C10_API DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t);
 C10_API DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t);
 
 // This API exists because we have a use case for checking
-// getRuntimeDispatchKeySet(alias).has(DispatchKey::Undefind)
+// getRuntimeDispatchKeySet(alias).has(DispatchKey::Undefined)
 // in OperatorEntry.cpp but we disallow it in has() API.
 C10_API bool isIncludedInAlias(DispatchKey k, DispatchKey alias);
 
