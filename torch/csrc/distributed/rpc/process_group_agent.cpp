@@ -592,8 +592,8 @@ bool ProcessGroupAgent::handleRecv(RecvWork& work) {
     if (message.type() == MessageType::EXCEPTION) {
       //fm->setError(
       //    std::string(message.payload().begin(), message.payload().end()));
-      jitFuture->setError(std::make_exception_ptr(
-          std::string(message.payload().begin(), message.payload().end())));
+      jitFuture->setError(std::make_exception_ptr(std::runtime_error(
+          std::string(message.payload().begin(), message.payload().end()))));
     } else {
       //jitFuture->markCompleted(std::move(message));
       jitFuture->markCompleted(
@@ -676,7 +676,8 @@ void ProcessGroupAgent::markFutureWithError(int64_t id, std::string errorMsg) {
   }
 
   --clientActiveCalls_;
-  jitFuture->setError(std::make_exception_ptr(std::move(errorMsg)));
+  jitFuture->setError(std::make_exception_ptr(
+      std::runtime_error((std::move(errorMsg)))));
   futureCV_.notify_all();
 }
 
@@ -809,7 +810,7 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
       if (!timedOutFuture.future_->hasError()) {
         --clientActiveCalls_;
         timedOutFuture.future_->setError(
-            std::make_exception_ptr(std::move(err)));
+            std::make_exception_ptr(std::runtime_error(std::move(err))));
         // The future timed out and will not be processed by handleRecv(), even
         // if we eventually get a response. In order to keep track of all
         // send/recv pairs, we increment the count here.
