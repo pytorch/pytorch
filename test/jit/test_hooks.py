@@ -549,53 +549,57 @@ class TestHooks(JitTestCase):
 
         self.checkModule(m, ("a",))
 
-    # TODO: add actual error messages checks once error messages are finalized
+    def test_hook_compilation_hint(self):
+        # tests if hook error message is printed out if erroring before schema check
+        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
 
-    def test_module_wrong_pre_hook_signatures(self):
+        def pre_hook(self, input: Tuple[str]):
+            assert self.name == "outer_mod_name"
+            assert input[4] == "a"  # out of bounds tuple range
+            return ("pre_hook_overrid_name",)
+
+        m.register_forward_pre_hook(pre_hook)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "This error occured while scripting the forward pre-hook 'pre_hook'",
+        ):
+            torch.jit.script(m)
+
+    def test_wrong_pre_hook_signatures(self):
         # correct signature: pre_hook_c(self, input: Tuple[str])
-
         def pre_hook_wrong_input1(self, input: Tuple[None]):
-            input = input[10]
             return ("hello",)
 
         m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
         m.register_forward_pre_hook(pre_hook_wrong_input1)
 
         with self.assertRaisesRegex(
-            RuntimeError, ".*",
+            RuntimeError, "has the wrong inner types for the second tuple argument",
         ):
             torch.jit.script(m)
 
-        def pre_hook_wrong_input2(self, input: Tuple):
+        def pre_hook_wrong_input2(self, input: Tuple[str], input2: str):
             return ("hello",)
 
         m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
         m.register_forward_pre_hook(pre_hook_wrong_input2)
 
         with self.assertRaisesRegex(
-            RuntimeError, ".*",
+            RuntimeError,
+            "was expected to only have exactly 2 inputs but it had 3 inputs",
         ):
             torch.jit.script(m)
 
-        def pre_hook_wrong_input3(self, input: Tuple[str], input2: str):
+        def pre_hook_wrong_input3(self, input: int):
             return ("hello",)
 
         m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
         m.register_forward_pre_hook(pre_hook_wrong_input3)
 
         with self.assertRaisesRegex(
-            RuntimeError, ".*",
-        ):
-            torch.jit.script(m)
-
-        def pre_hook_wrong_input4(self, input: int):
-            return ("hello",)
-
-        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
-        m.register_forward_pre_hook(pre_hook_wrong_input4)
-
-        with self.assertRaisesRegex(
-            RuntimeError, ".*",
+            RuntimeError,
+            "expected the second argument to be typed as a Tuple but found type: 'int' instead",
         ):
             torch.jit.script(m)
 
@@ -606,58 +610,11 @@ class TestHooks(JitTestCase):
         m.register_forward_pre_hook(pre_hook_wrong_output)
 
         with self.assertRaisesRegex(
-            RuntimeError, ".*",
+            RuntimeError, "returned the wrong type of: 'int'",
         ):
             torch.jit.script(m)
 
-    def test_submodule_wrong_hook_signatures(self):
-        # correct signature:
-        #   def forward_hook(self, input: Tuple[str], output: str)
-        def forward_hook_wrong_input1(self, input: Tuple[str, str], output: str):
-            return output
-
-        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
-        m.submodule.register_forward_hook(forward_hook_wrong_input1)
-
-        with self.assertRaisesRegex(
-            RuntimeError, ".*",
-        ):
-            torch.jit.script(m)
-
-        def forward_hook_wrong_input2(self, input: str, output: str):
-            return output
-
-        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
-        m.submodule.register_forward_hook(forward_hook_wrong_input2)
-
-        with self.assertRaisesRegex(
-            RuntimeError, ".*",
-        ):
-            torch.jit.script(m)
-
-        def forward_hook_wrong_input3(self, input: Tuple, output: str):
-            return output
-
-        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
-        m.submodule.register_forward_hook(forward_hook_wrong_input3)
-
-        with self.assertRaisesRegex(
-            RuntimeError, ".*",
-        ):
-            torch.jit.script(m)  # error has no mention of hooks
-
-        def forward_hook_wrong_input4(self, input: Tuple[None], output: str):
-            return output
-
-        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
-        m.submodule.register_forward_hook(forward_hook_wrong_input4)
-
-        with self.assertRaisesRegex(
-            RuntimeError, ".*",
-        ):
-            torch.jit.script(m)
-
-    def test_module_wrong_hook_signatures(self):
+    def test_wrong_hook_signatures(self):
         # correct signature:
         #   def forward_hook(self, input: Tuple[str], output: str)
         def forward_hook_wrong_input1(self, input: Tuple[str, str], output: str):
@@ -667,7 +624,8 @@ class TestHooks(JitTestCase):
         m.register_forward_hook(forward_hook_wrong_input1)
 
         with self.assertRaisesRegex(
-            RuntimeError, ".*",
+            RuntimeError,
+            "has the wrong number of contained types for the input argument's Tuple. Recieved type: 'Tuple\[str, str\]'",
         ):
             torch.jit.script(m)
 
@@ -678,29 +636,20 @@ class TestHooks(JitTestCase):
         m.register_forward_hook(forward_hook_wrong_input2)
 
         with self.assertRaisesRegex(
-            RuntimeError, ".*",
+            RuntimeError,
+            "expected the second argument to be typed as a Tuple but found type: 'str' instead.",
         ):
             torch.jit.script(m)
 
-        def forward_hook_wrong_input3(self, input: Tuple, output: str):
+        def forward_hook_wrong_input3(self, input: Tuple[None], output: str):
             return output
 
         m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
         m.register_forward_hook(forward_hook_wrong_input3)
 
         with self.assertRaisesRegex(
-            RuntimeError, ".*",
-        ):
-            torch.jit.script(m)
-
-        def forward_hook_wrong_input4(self, input: Tuple[None], output: str):
-            return output
-
-        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
-        m.register_forward_hook(forward_hook_wrong_input4)
-
-        with self.assertRaisesRegex(
-            RuntimeError, ".*",
+            RuntimeError,
+            "has the wrong inner types for the second tuple argument. Recieved type: 'Tuple\[None\]'",
         ):
             torch.jit.script(m)
 
@@ -711,7 +660,8 @@ class TestHooks(JitTestCase):
         m.register_forward_hook(forward_hook_wrong_output)
 
         with self.assertRaisesRegex(
-            RuntimeError, ".*",
+            RuntimeError,
+            "has the wrong type for the output argument. Recieved type: 'Tuple\[str\]'. Expected type: 'str'",
         ):
             torch.jit.script(m)
 
@@ -728,81 +678,7 @@ class TestHooks(JitTestCase):
         m.register_forward_hook(forward_hook_wrong_output_from_prev_hook)
 
         with self.assertRaisesRegex(
-            RuntimeError, ".*",
-        ):
-            torch.jit.script(m)
-
-    def test_submodule_wrong_hook_signatures(self):
-        # correct signature:
-        #   def forward_hook(self, input: Tuple[str], output: str)
-        def forward_hook_wrong_input1(self, input: Tuple[str, str], output: str):
-            return output
-
-        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
-        m.submodule.register_forward_hook(forward_hook_wrong_input1)
-
-        with self.assertRaisesRegex(
-            RuntimeError, ".*",
-        ):
-            torch.jit.script(m)
-
-        def forward_hook_wrong_input2(self, input: str, output: str):
-            return output
-
-        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
-        m.submodule.register_forward_hook(forward_hook_wrong_input2)
-
-        with self.assertRaisesRegex(
-            RuntimeError, ".*",
-        ):
-            torch.jit.script(m)
-
-        def forward_hook_wrong_input3(self, input: Tuple, output: str):
-            return output
-
-        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
-        m.submodule.register_forward_hook(forward_hook_wrong_input3)
-
-        with self.assertRaisesRegex(
-            RuntimeError, ".*",
-        ):
-            torch.jit.script(m)  # error has no mention of hooks
-
-        def forward_hook_wrong_input4(self, input: Tuple[None], output: str):
-            return output
-
-        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
-        m.submodule.register_forward_hook(forward_hook_wrong_input4)
-
-        with self.assertRaisesRegex(
-            RuntimeError, ".*",
-        ):
-            torch.jit.script(m)
-
-        def forward_hook_wrong_output(self, input: Tuple[str], output: Tuple[str]):
-            return output
-
-        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
-        m.submodule.register_forward_hook(forward_hook_wrong_output)
-
-        with self.assertRaisesRegex(
-            RuntimeError, ".*",
-        ):
-            torch.jit.script(m)
-
-        def forward_hook_correct(self, input: Tuple[str], output: str):
-            return (output,)
-
-        def forward_hook_wrong_output_from_prev_hook(
-            self, input: Tuple[str], output: str
-        ):
-            return output
-
-        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
-        m.submodule.register_forward_hook(forward_hook_correct)
-        m.submodule.register_forward_hook(forward_hook_wrong_output_from_prev_hook)
-
-        with self.assertRaisesRegex(
-            RuntimeError, ".*",
+            RuntimeError,
+            "has the wrong type for the output argument. Recieved type: 'str'. Expected type: 'Tuple\[str\]'",
         ):
             torch.jit.script(m)

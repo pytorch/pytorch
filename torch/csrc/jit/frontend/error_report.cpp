@@ -9,17 +9,19 @@ namespace jit {
 // Avoid storing objects with destructor in thread_local for mobile build.
 #ifndef C10_MOBILE
 thread_local std::vector<Call> calls;
+thread_local std::vector<Hint> hints;
 #endif // C10_MOBILE
 
 ErrorReport::ErrorReport(const ErrorReport& e)
     : ss(e.ss.str()),
       context(e.context),
       the_message(e.the_message),
-      error_stack(e.error_stack.begin(), e.error_stack.end()) {}
+      error_stack(e.error_stack.begin(), e.error_stack.end()),
+      hint_stack(e.hint_stack.begin(), e.hint_stack.end()) {}
 
 #ifndef C10_MOBILE
 ErrorReport::ErrorReport(SourceRange r)
-    : context(std::move(r)), error_stack(calls.begin(), calls.end()) {}
+    : context(std::move(r)), error_stack(calls.begin(), calls.end()), hint_stack(hints.begin(), hints.end()) {}
 
 void ErrorReport::CallStack::update_pending_range(const SourceRange& range) {
   calls.back().caller_range = range;
@@ -34,6 +36,16 @@ ErrorReport::CallStack::CallStack(
 ErrorReport::CallStack::~CallStack() {
   calls.pop_back();
 }
+
+ErrorReport::HintStack::HintStack(
+    const std::string& hint) {
+  hints.push_back({hint});
+}
+
+ErrorReport::HintStack::~HintStack() {
+  hints.pop_back();
+}
+
 #else // defined C10_MOBILE
 ErrorReport::ErrorReport(SourceRange r) : context(std::move(r)) {}
 
@@ -44,6 +56,11 @@ ErrorReport::CallStack::CallStack(
     const SourceRange& range) {}
 
 ErrorReport::CallStack::~CallStack() {}
+
+ErrorReport::HintStack::HintStack(
+    const std::string& hint) {}
+
+ErrorReport::HintStack::~HintStack() {}
 #endif // C10_MOBILE
 
 std::string get_stacked_errors(const std::vector<Call>& error_stack) {
@@ -57,6 +74,14 @@ std::string get_stacked_errors(const std::vector<Call>& error_stack) {
           << "'\n";
       callee->caller_range.highlight(msg);
     }
+  }
+  return msg.str();
+}
+
+std::string get_hints(const std::vector<Hint>& hint_stack) {
+  std::stringstream msg;
+  for (const Hint& hint : hint_stack) {
+    msg << hint.hint << "\n";
   }
   return msg.str();
 }
@@ -76,6 +101,7 @@ const char* ErrorReport::what() const noexcept {
   context.highlight(msg);
 
   msg << get_stacked_errors(error_stack);
+  msg << get_hints(hint_stack);
 
   the_message = msg.str();
   return the_message.c_str();
