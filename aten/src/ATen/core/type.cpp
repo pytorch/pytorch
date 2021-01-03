@@ -1101,13 +1101,13 @@ std::string ClassType::getPreHookErrorMessage(const std::string& pre_hook_name) 
   std::string pre_hook_schema =
       pre_hook_name + "(self, input: Tuple[" + input_types.str() + "])";
   std::string return_string =
-      "This error occured while compiling the forward pre-hook '" +
+      "This error occured while scripting the forward pre-hook '" +
       pre_hook_name + "' on module '" + name()->name() +
-      "'. If you did not want to compile this pre-hook remove it from the "
+      "'. If you did not want to script this pre-hook remove it from the "
       "original NN module before scripting. Pre-hooks for module '" + 
       name()->name() + "' are expected to have the following signature: " 
       + pre_hook_schema + " with a return type of either 'None'" + 
-      single_output + " or 'Tuple[" + input_types.str() + "]'.\n";
+      single_output + " or 'Tuple[" + input_types.str() + "]'.";
   return return_string;
 }
 
@@ -1136,16 +1136,16 @@ std::string ClassType::getHookErrorMessage(const std::string& hook_name) const {
   std::string hook_schema = hook_name + "(self, input: Tuple[" +
                             input_types.str() + "], output: " + output_types + ")";
   std::string return_string =
-      "This error occured while compiling the forward hook '" 
+      "This error occured while scripting the forward hook '" 
       + hook_name + "' on module " + name()->name() +
-      ". If you did not want to compile this hook remove it from" +
+      ". If you did not want to script this hook remove it from" +
       " the original NN module before scripting. This hook was" +
       " expected to have the following signature: " + hook_schema +
       ". The type of the output arg is the returned type from" + 
       " either the forward method or the previous hook if it exists. " + 
       "Note that hooks can return anything, but if the hook is " + 
       "on a submodule the outer module is expecting" +
-      " the same return type as the submodule's forward. \n";
+      " the same return type as the submodule's forward.";
   return return_string;
 }
 
@@ -1153,7 +1153,7 @@ void ClassType::checkPreHookSchema(torch::jit::Function& pre_hook) const {
   const FunctionSchema pre_hook_schema = pre_hook.getSchema();
   std::string hook_id =
       "Pre-hook '" + pre_hook.name() + "' on module '" + name()->name() + "' ";
-  std::string pre_hook_err_msg = getPreHookErrorMessage(pre_hook.name());
+  std::string pre_hook_err_msg = getPreHookErrorMessage(pre_hook.name()) + "\n";
 
   // Pre-hooks are expecting two inputs: self, and a Tuple containing the
   // non-self arguments passed to Forward
@@ -1288,7 +1288,7 @@ void ClassType::checkHookSchema(torch::jit::Function& hook) const {
   const FunctionSchema hook_schema = hook.getSchema();
   std::string hook_id =
       "Hook '" + hook.name() + "' on module '" + name()->name() + "' ";
-  std::string hook_err_msg = getHookErrorMessage(hook.name());
+  std::string hook_err_msg = getHookErrorMessage(hook.name()) + "\n";
   // Hooks are expecting three inputs: self, a Tuple containing the non-self
   // arguments passed to Forward, and the output of either Forward or the
   // previous hook
@@ -1395,7 +1395,6 @@ torch::jit::Function& ClassType::getMethod(const std::string& name) const {
 }
 
 torch::jit::Function* ClassType::findHook(const std::string& name) const {
-  // check forward pre_hooks
   auto hook = findForwardHook(name);
   if (hook == nullptr) {
     hook = findForwardPreHook(name); 
