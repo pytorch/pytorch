@@ -19,7 +19,7 @@
 #include <c10/util/python_stub.h>
 
 // A global boolean variable to control whether we free memory when a Tensor
-// is shrinked to a smaller size. As a result, a Tensor is always going to
+// is shrunk to a smaller size. As a result, a Tensor is always going to
 // keep the memory allocated for its maximum capacity reshaped to so far.
 //
 // This parameter is respected "upper-case" methods which call Resize()
@@ -625,7 +625,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * The API is as follows:
    *   - "new_grad" is a Tensor containing the new value of the gradient that should
    *     be set
-   *   - "self" should reprensent the Tensor whose forward grad is accessed. It is
+   *   - "self" should represent the Tensor whose forward grad is accessed. It is
    *     required when dealing with view.
    *   - "level" allows to specify the level of forward AD nesting for which the
    *     gradient should be set. Note that since levels are not fully supported
@@ -1381,7 +1381,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // error in attempt to invoke TypeMeta::ctor()
     static_assert(
         std::is_default_constructible<T>::value,
-        "Tensor can't hold non-default-constructible types");
+        "Tensor can't hold non-default-constructable types");
     return static_cast<T*>(raw_mutable_data(caffe2::TypeMeta::Make<T>()));
   }
 

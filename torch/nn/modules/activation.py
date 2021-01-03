@@ -365,11 +365,11 @@ class SiLU(Module):
         \text{silu}(x) = x * \sigma(x), \text{where } \sigma(x) \text{ is the logistic sigmoid.}
 
     .. note::
-        See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_ 
-        where the SiLU (Sigmoid Linear Unit) was originally coined, and see 
-        `Sigmoid-Weighted Linear Units for Neural Network Function Approximation 
-        in Reinforcement Learning <https://arxiv.org/abs/1702.03118>`_ and `Swish: 
-        a Self-Gated Activation Function <https://arxiv.org/abs/1710.05941v1>`_ 
+        See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_
+        where the SiLU (Sigmoid Linear Unit) was originally coined, and see
+        `Sigmoid-Weighted Linear Units for Neural Network Function Approximation
+        in Reinforcement Learning <https://arxiv.org/abs/1702.03118>`_ and `Swish:
+        a Self-Gated Activation Function <https://arxiv.org/abs/1710.05941v1>`_
         where the SiLU was experimented with later.
 
     Shape:
@@ -937,8 +937,7 @@ class MultiheadAttention(Module):
         attn_mask: 2D or 3D mask that prevents attention to certain positions. A 2D mask will be broadcasted for all
             the batches while a 3D mask allows to specify a different mask for the entries of each batch.
 
-    Shape:
-        - Inputs:
+    Shapes for inputs:
         - query: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is
           the embedding dimension.
         - key: :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is
@@ -949,15 +948,17 @@ class MultiheadAttention(Module):
           If a ByteTensor is provided, the non-zero positions will be ignored while the position
           with the zero positions will be unchanged. If a BoolTensor is provided, the positions with the
           value of ``True`` will be ignored while the position with the value of ``False`` will be unchanged.
-        - attn_mask: 2D mask :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
-          3D mask :math:`(N*\text{num_heads}, L, S)` where N is the batch size, L is the target sequence length,
-          S is the source sequence length. attn_mask ensure that position i is allowed to attend the unmasked
-          positions. If a ByteTensor is provided, the non-zero positions are not allowed to attend
+        - attn_mask: if a 2D mask: :math:`(L, S)` where L is the target sequence length, S is the
+          source sequence length.
+
+          If a 3D mask: :math:`(N\cdot\text{num\_heads}, L, S)` where N is the batch size, L is the target sequence
+          length, S is the source sequence length. ``attn_mask`` ensure that position i is allowed to attend
+          the unmasked positions. If a ByteTensor is provided, the non-zero positions are not allowed to attend
           while the zero positions will be unchanged. If a BoolTensor is provided, positions with ``True``
           is not allowed to attend while ``False`` values will be unchanged. If a FloatTensor
           is provided, it will be added to the attention weight.
 
-        - Outputs:
+    Shapes for outputs:
         - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
           E is the embedding dimension.
         - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
