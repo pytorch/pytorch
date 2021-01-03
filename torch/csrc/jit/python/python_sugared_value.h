@@ -7,6 +7,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace torch {
@@ -90,6 +91,20 @@ struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
       const std::string& field) override;
 };
 
+// Used for desugaring uses of the torch.cuda module. All the CUDA APIs with
+// torch.cuda.* are resolved using CUDAPythonModuleValue.
+#ifndef __HIP_PLATFORM_HCC__
+struct VISIBILITY_HIDDEN CUDAPythonModuleValue : public PythonValue {
+  explicit CUDAPythonModuleValue(py::object mod)
+      : PythonValue(std::move(mod)) {}
+
+  std::shared_ptr<SugaredValue> attr(
+      const SourceRange& loc,
+      Function& m,
+      const std::string& field) override;
+};
+#endif
+
 // Represents all the parameters of a module as a List[Tensor]
 struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
   ConstantParameterList(Value* the_list) : the_list_(the_list) {}
@@ -110,8 +125,8 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
 };
 
 struct VISIBILITY_HIDDEN ModuleDictMethod : public SugaredValue {
-  explicit ModuleDictMethod(SugaredValuePtr iterable, const std::string& name)
-      : iterable_(iterable), name_(name){};
+  explicit ModuleDictMethod(SugaredValuePtr iterable, std::string name)
+      : iterable_(std::move(iterable)), name_(std::move(name)){};
 
   std::string kind() const override {
     return name_;
@@ -217,7 +232,7 @@ void recurseThroughNestedModules(
     Function& m,
     std::vector<SugaredValuePtr>& keys,
     std::vector<SugaredValuePtr>& values,
-    std::shared_ptr<ModuleValue> self,
+    std::shared_ptr<ModuleValue>& self,
     const std::string& prefix,
     const std::string& field);
 
@@ -249,7 +264,7 @@ struct VISIBILITY_HIDDEN SugaredDict : public SugaredValue {
       Function& m,
       const std::string& field) override;
 
-  SugaredValuePtr iter(const SourceRange& loc, Function& m) {
+  SugaredValuePtr iter(const SourceRange& loc, Function& m) override {
     return keys_;
   };
 
@@ -316,7 +331,7 @@ struct VISIBILITY_HIDDEN PythonExceptionValue : public ExceptionValue {
 
 // Python Slice class.
 struct VISIBILITY_HIDDEN PythonSliceClass : public SugaredValue {
-  explicit PythonSliceClass() {}
+  explicit PythonSliceClass() = default;
 
   std::string kind() const override {
     return "Python slice class";

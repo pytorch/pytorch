@@ -1,8 +1,7 @@
 #version 450 core
 #define PRECISION $precision
 layout(std430) buffer;
-layout(std430) uniform;
-layout(set = 0, rgba32f, binding = 0) writeonly PRECISION uniform image3D uOutput;
+layout(set = 0, rgba16f, binding = 0) writeonly PRECISION uniform image3D uOutput;
 layout(set = 0, binding = 1) readonly buffer kernel {
   vec4 data[];
 }
@@ -13,7 +12,7 @@ layout(set = 0, binding = 2) uniform constBlock {
 }
 uConstBlock;
 
-layout(local_size_x_id = 1, local_size_y_id = 2, local_size_z_id = 3) in;
+layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
 
 void main() {
   ivec3 pos = ivec3(gl_GlobalInvocationID) * ivec3(4, 1, 1);

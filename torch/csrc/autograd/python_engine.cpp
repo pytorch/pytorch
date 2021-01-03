@@ -1,7 +1,6 @@
 #include <torch/csrc/autograd/python_engine.h>
 
 #include <torch/csrc/DynamicTypes.h>
-#include <torch/csrc/PtrWrapper.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/engine.h>
@@ -103,9 +102,10 @@ variable_list PythonEngine::execute(
 
 std::shared_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
-    std::shared_ptr<Node> graph_root) {
+    std::shared_ptr<Node> graph_root,
+    InputBuffer&& input_buffer) {
   try {
-    return Engine::execute_with_graph_task(graph_task, graph_root);
+    return Engine::execute_with_graph_task(graph_task, graph_root, std::move(input_buffer));
   } catch (python_error& e) {
     pybind11::gil_scoped_acquire gil;
     if (!PyErr_Occurred()) {

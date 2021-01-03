@@ -30,7 +30,6 @@ from itertools import islice
 from six import StringIO
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 FIELD_SEPARATOR = ':'
 
@@ -330,8 +329,8 @@ class ListWithEvicted(List):
         self.lengths._pprint_impl(indent=indent + 2, str_buffer=str_buffer)
         str_buffer.write('  ' * (indent + 1) + "_items=\n")
         self._items._pprint_impl(indent=indent + 2, str_buffer=str_buffer)
-        str_buffer.write('  ' * (indent + 1) + "_evicted_Values=\n")
-        self._items._pprint_impl(indent=indent + 2, str_buffer=str_buffer)
+        str_buffer.write('  ' * (indent + 1) + "_evicted_values=\n")
+        self._evicted_values._pprint_impl(indent=indent + 2, str_buffer=str_buffer)
         str_buffer.write('  ' * indent + ")\n")
 
 

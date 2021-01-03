@@ -14,7 +14,16 @@ namespace jit {
 namespace tensorexpr {
 namespace analysis {
 
-enum class AccessType { Input, Output, Load, Store, Call, AtomicAdd };
+enum class AccessType {
+  Input,
+  Output,
+  Load,
+  Store,
+  Call,
+  AtomicAdd,
+  Alloc,
+  Free
+};
 const char* AccessToString(AccessType a);
 
 class AccessInfo;
@@ -248,7 +257,6 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
   void visit(const Store* v) override;
   void visit(const Load* v) override;
   void visit(const FunctionCall* v) override;
-  void visit(const ReduceOp* v) override;
   void visit(const For* v) override;
   void visit(const Cond* v) override;
   void visit(const IfThenElse* v) override;
@@ -256,18 +264,8 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
   void visit(const Block* v) override;
   void visit(const Let* v) override;
   void visit(const AtomicAdd* v) override;
-
-#define STMT_ON_STACK(Op)                    \
-  virtual void visit(const Op* v) override { \
-    const Stmt* last = lastStmt_;            \
-    lastStmt_ = v;                           \
-    IRVisitor::visit(v);                     \
-    lastStmt_ = last;                        \
-  }
-  STMT_ON_STACK(Allocate);
-  STMT_ON_STACK(Free);
-
-#undef STMT_ON_STACK
+  void visit(const Allocate* v) override;
+  void visit(const Free* v) override;
 
   using BoundRelationship = std::pair<IndexBounds, std::shared_ptr<AccessInfo>>;
 
@@ -378,6 +376,7 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
   // Maps for inputs and outputs, since they aren't present directly in the IR.
   std::unordered_map<const Buf*, std::shared_ptr<AccessInfo>> inputs_;
   std::unordered_map<const Buf*, std::shared_ptr<AccessInfo>> outputs_;
+  std::unordered_map<const Var*, std::shared_ptr<AccessInfo>> intermediates_;
 
   // Inserts accesses for Buf's: specifically for inputs and outputs.
   void insertBuffers(

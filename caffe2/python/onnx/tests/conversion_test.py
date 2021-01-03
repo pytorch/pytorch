@@ -6,7 +6,6 @@
 
 
 import json
-import six
 import tempfile
 import textwrap
 import traceback
@@ -82,9 +81,9 @@ class TestConversion(TestCase):
         caffe2_net.flush()
 
         args = [caffe2_net.name, '--output', output.name]
-        six.assertRaisesRegex(self, Exception,
-                              'value info',
-                              self._run_command, caffe2_to_onnx, args)
+        self.assertRaisesRegex(Exception,
+                               'value info',
+                               self._run_command, caffe2_to_onnx, args)
 
         args.extend([
             '--value-info',
@@ -110,12 +109,12 @@ class TestConversion(TestCase):
             [node_def],
             "test",
             [helper.make_tensor_value_info("X", TensorProto.FLOAT, (2, 3)),
-             helper.make_tensor_value_info("W", TensorProto.FLOAT, (3, 2))],
-            [helper.make_tensor_value_info("Y", TensorProto.FLOAT, (2, 2))],
+             helper.make_tensor_value_info("W", TensorProto.FLOAT, (1, 3))],
+            [helper.make_tensor_value_info("Y", TensorProto.FLOAT, (2, 3))],
             initializer=[helper.make_tensor("W",
                                             TensorProto.FLOAT,
-                                            [3, 2],
-                                            np.zeros((3, 2)).flatten().astype(float))])
+                                            [1, 3],
+                                            np.zeros((1, 3)).flatten().astype(float))])
         model_def = helper.make_model(graph_def, producer_name='onnx-to-caffe2-test')
         onnx_model.write(model_def.SerializeToString())
         onnx_model.flush()
@@ -156,7 +155,7 @@ class TestConversion(TestCase):
             initializer=[helper.make_tensor("W",
                                             TensorProto.FLOAT,
                                             [3, 2],
-                                            b'__EXTERNAL',
+                                            W.tobytes(),
                                             raw=True)])
         model_def = helper.make_model(graph_def, producer_name='onnx-to-caffe2-test')
         onnx_model.writestr('__MODEL_PROTO', model_def.SerializeToString())
@@ -222,11 +221,11 @@ class TestConversion(TestCase):
         # lcd is a dummy loop-carried dependency that only exists because
         # right now the schema checker is broken and assumes a variadic
         # input needs at least one value.
-        graph_inputs = [helper.make_tensor_value_info("i", TensorProto.INT32, ()),
-                        helper.make_tensor_value_info("cond", TensorProto.BOOL, ())]
+        graph_inputs = [helper.make_tensor_value_info("i", TensorProto.INT64, (1,)),
+                        helper.make_tensor_value_info("cond", TensorProto.BOOL, (1,))]
         for type, shape, name in input_types:
             graph_inputs.append(helper.make_tensor_value_info("_" + name, type, shape))
-        graph_outputs = [helper.make_tensor_value_info("cond", TensorProto.BOOL, ())]
+        graph_outputs = [helper.make_tensor_value_info("cond", TensorProto.BOOL, (1,))]
         for type, shape, name in output_types:
             graph_outputs.append(helper.make_tensor_value_info("_" + name, type, shape))
         body_graph = helper.make_graph(body_nodes, "body_graph", graph_inputs,

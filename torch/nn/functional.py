@@ -1430,7 +1430,7 @@ def softmin(input, dim=None, _stacklevel=3, dtype=None):
 
     See :class:`~torch.nn.Softmin` for more details.
 
-    Arguments:
+    Args:
         input (Tensor): input
         dim (int): A dimension along which softmin will be computed (so every slice
             along dim will sum to 1).
@@ -1464,7 +1464,7 @@ def softmax(input, dim=None, _stacklevel=3, dtype=None):
 
     See :class:`~torch.nn.Softmax` for more details.
 
-    Arguments:
+    Args:
         input (Tensor): input
         dim (int): A dimension along which softmax will be computed.
         dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
@@ -1563,7 +1563,7 @@ def log_softmax(input, dim=None, _stacklevel=3, dtype=None):
 
     See :class:`~torch.nn.LogSoftmax` for more details.
 
-    Arguments:
+    Args:
         input (Tensor): input
         dim (int): A dimension along which log_softmax will be computed.
         dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
@@ -2799,7 +2799,7 @@ pixel_shuffle = _add_docstr(torch.pixel_shuffle, r"""
 pixel_shuffle(input, upscale_factor) -> Tensor
 
 Rearranges elements in a tensor of shape :math:`(*, C \times r^2, H, W)` to a
-tensor of shape :math:`(*, C, H \times r, W \times r)`.
+tensor of shape :math:`(*, C, H \times r, W \times r)`, where r is the :attr:`upscale_factor`.
 
 See :class:`~torch.nn.PixelShuffle` for details.
 
@@ -2813,6 +2813,27 @@ Examples::
     >>> output = torch.nn.functional.pixel_shuffle(input, 3)
     >>> print(output.size())
     torch.Size([1, 1, 12, 12])
+""")
+
+pixel_unshuffle = _add_docstr(torch.pixel_unshuffle, r"""
+pixel_unshuffle(input, downscale_factor) -> Tensor
+
+Reverses the :class:`~torch.nn.PixelShuffle` operation by rearranging elements in a
+tensor of shape :math:`(*, C, H \times r, W \times r)` to a tensor of shape
+:math:`(*, C \times r^2, H, W)`, where r is the :attr:`downscale_factor`.
+
+See :class:`~torch.nn.PixelUnshuffle` for details.
+
+Args:
+    input (Tensor): the input tensor
+    downscale_factor (int): factor to increase spatial resolution by
+
+Examples::
+
+    >>> input = torch.randn(1, 1, 12, 12)
+    >>> output = torch.nn.functional.pixel_unshuffle(input, 3)
+    >>> print(output.size())
+    torch.Size([1, 9, 4, 4])
 """)
 
 channel_shuffle = _add_docstr(torch.channel_shuffle, r"""
@@ -4126,11 +4147,11 @@ def multi_head_attention_forward(query: Tensor,
     scaling = float(head_dim) ** -0.5
 
     if not use_separate_proj_weight:
-        if torch.equal(query, key) and torch.equal(key, value):
+        if (query is key or torch.equal(query, key)) and (key is value or torch.equal(key, value)):
             # self-attention
             q, k, v = linear(query, in_proj_weight, in_proj_bias).chunk(3, dim=-1)
 
-        elif torch.equal(key, value):
+        elif (key is value or torch.equal(key, value)):
             # encoder-decoder attention
             # This is inline in_proj function with in_proj_weight and in_proj_bias
             _b = in_proj_bias

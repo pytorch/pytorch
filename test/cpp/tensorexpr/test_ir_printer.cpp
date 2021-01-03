@@ -1,3 +1,5 @@
+#include <gtest/gtest.h>
+
 #include <stdexcept>
 #include "test/cpp/tensorexpr/test_base.h"
 
@@ -14,7 +16,7 @@ namespace jit {
 
 using namespace torch::jit::tensorexpr;
 
-void testIRPrinterBasicValueTest() {
+TEST(IRPrinter, BasicValueTest) {
   KernelScope kernel_scope;
   ExprHandle a = IntImm::make(2), b = IntImm::make(3);
   ExprHandle c = Add::make(a, b);
@@ -24,7 +26,7 @@ void testIRPrinterBasicValueTest() {
   ASSERT_EQ(ss.str(), "2 + 3");
 }
 
-void testIRPrinterBasicValueTest02() {
+TEST(IRPrinter, BasicValueTest02) {
   KernelScope kernel_scope;
   ExprHandle a(2.0f);
   ExprHandle b(3.0f);
@@ -37,7 +39,7 @@ void testIRPrinterBasicValueTest02() {
   ASSERT_EQ(ss.str(), "(2.f + 3.f) - (4.f + 5.f)");
 }
 
-void testIRPrinterCastTest() {
+TEST(IRPrinter, CastTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kHalf);
   VarHandle y("y", kFloat);
@@ -49,7 +51,7 @@ void testIRPrinterCastTest() {
   ASSERT_EQ(ss.str(), "2.f + (float(x) * 3.f + 4.f * y)");
 }
 
-void testIRPrinterFunctionName() {
+TEST(IRPrinter, FunctionName) {
   KernelScope kernel_scope;
   int M = 4;
   int N = 20;

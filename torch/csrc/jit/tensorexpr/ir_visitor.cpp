@@ -79,6 +79,9 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT);
 void IRVisitor::visit(const Cast* v) {
   v->src_value()->accept(this);
 }
+void IRVisitor::visit(const BitCast* v) {
+  v->src_value()->accept(this);
+}
 void IRVisitor::visit(const Var* v) {}
 
 void IRVisitor::visit(const Ramp* v) {
@@ -227,7 +230,7 @@ void IRVisitor::visit(const MinTerm* v) {
 
 void IRVisitor::visit(const ReduceOp* v) {
   v->accumulator()->accept(this);
-  v->body().node()->accept(this);
+  v->body()->accept(this);
 
   for (auto* e : v->output_args()) {
     e->accept(this);

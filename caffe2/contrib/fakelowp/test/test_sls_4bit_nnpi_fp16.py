@@ -1,8 +1,3 @@
-
-
-
-
-
 import numpy as np
 import unittest
 
@@ -16,6 +11,7 @@ from caffe2.python import core, workspace
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 from caffe2.python.fakelowp.test_utils import print_test_debug_info
 import caffe2.python.serialized_test.serialized_test_util as serial
+import datetime
 
 workspace.GlobalInit(["caffe2", "--glow_global_fp16=1",
                       "--glow_global_fused_scale_offset_fp16=1",
@@ -24,7 +20,7 @@ workspace.GlobalInit(["caffe2", "--glow_global_fp16=1",
 
 class SparseLengthsSum4BitFakeNNPIFp16Test(serial.SerializedTestCase):
     @given(seed=st.integers(0, 65535))
-    @settings(deadline=None)
+    @settings(deadline=datetime.timedelta(seconds=10))
     def test_slws_fused_4bit_rowwise_all_same(self, seed):
         np.random.seed(seed)
         workspace.ResetWorkspace()
@@ -118,7 +114,7 @@ class SparseLengthsSum4BitFakeNNPIFp16Test(serial.SerializedTestCase):
         batch_size=st.integers(1, 32),
         max_weight=st.integers(0, 1),
     )
-    @settings(deadline=None)
+    @settings(deadline=datetime.timedelta(seconds=10))
     def test_slws_fused_4bit_rowwise(self, seed, num_rows, embedding_dim, batch_size, max_weight):
         workspace.ResetWorkspace()
         np.random.seed(seed)

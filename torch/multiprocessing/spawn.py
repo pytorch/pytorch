@@ -6,7 +6,7 @@ import signal
 import sys
 import warnings
 
-from . import _prctl_pr_set_pdeathsig
+from . import _prctl_pr_set_pdeathsig  # type: ignore[attr-defined]
 
 
 class ProcessException(Exception):
@@ -104,7 +104,7 @@ class ProcessContext:
         Returns ``True`` if all processes have been joined successfully,
         ``False`` if there are more processes that need to be joined.
 
-        Arguments:
+        Args:
             timeout (float): Wait this long before giving up on waiting.
         """
         # Ensure this function can be called even when we're done.
@@ -169,7 +169,7 @@ class ProcessContext:
 class SpawnContext(ProcessContext):
     def __init__(self, processes, error_queues):
         warnings.warn('SpawnContext is renamed to ProcessContext since 1.4 release.')
-        super(SpawnContext, self).__init__(self, processes, error_queues)
+        super(SpawnContext, self).__init__(processes, error_queues)
     pass
 
 
@@ -215,7 +215,7 @@ def spawn(fn, args=(), nprocs=1, join=True, daemon=False, start_method='spawn'):
     child process, it is forwarded and its traceback is included in
     the exception raised in the parent process.
 
-    Arguments:
+    Args:
         fn (function): Function is called as the entrypoint of the
             spawned process. This function must be defined at the top
             level of a module so it can be pickled and spawned. This

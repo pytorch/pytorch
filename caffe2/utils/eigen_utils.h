@@ -73,17 +73,31 @@ using EArrXf = Eigen::ArrayXf;
 using EArrXd = Eigen::ArrayXd;
 using EArrXi = Eigen::ArrayXi;
 using EArrXb = EArrXt<bool>;
+using EArrXI32 = EArrXt<int32_t>;
+using EArrXU16 = EArrXt<uint16_t>;
+using EArrXU8 = EArrXt<uint8_t>;
+using EArr3U8 = Eigen::Array<uint8_t, 3, 1>;
 
 // 2-d array, column major
 template <typename T>
 using EArrXXt = Eigen::Array<T, Eigen::Dynamic, Eigen::Dynamic>;
 using EArrXXf = Eigen::ArrayXXf;
+using EArrXXI32 = EArrXXt<int32_t>;
+using EArrXXU16 = EArrXXt<uint16_t>;
+using EArrXXU8 = EArrXXt<uint8_t>;
+using EArrXXi = EArrXXt<int>;
 
 // 2-d array, row major
 template <typename T>
 using ERArrXXt =
     Eigen::Array<T, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
 using ERArrXXf = ERArrXXt<float>;
+using ERArrXXI32t = ERArrXXt<int32_t>;
+using ERArrXXU16t = ERArrXXt<uint16_t>;
+using ERArrXXU8t = ERArrXXt<uint8_t>;
+using ERArrXXi = ERArrXXt<int>;
+using ERArrXXi64t = ERArrXXt<int64_t>;
+using ERArrXXi32t = ERArrXXt<int32_t>;
 
 // 1-d vector
 template <typename T>
@@ -100,6 +114,8 @@ template <typename T>
 using EMatXt = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>;
 using EMatXd = Eigen::MatrixXd;
 using EMatXf = Eigen::MatrixXf;
+using EMatXU8 = EMatXt<uint8_t>;
+using EMatXU16 = EMatXt<uint16_t>;
 
 // 2-d matrix, row major
 template <typename T>
@@ -107,6 +123,7 @@ using ERMatXt =
     Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
 using ERMatXd = ERMatXt<double>;
 using ERMatXf = ERMatXt<float>;
+using ERMatXU8 = ERMatXt<uint8_t>;
 
 namespace utils {
 

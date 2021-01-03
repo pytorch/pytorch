@@ -1,3 +1,5 @@
+#include <gtest/gtest.h>
+
 #include <test/cpp/tensorexpr/test_base.h>
 #include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -17,7 +19,7 @@ namespace jit {
 using namespace torch::indexing;
 using namespace torch::jit::tensorexpr;
 
-void testKernel_1() {
+TEST(Kernel, _1) {
   KernelScope kernel_scope;
 
   const auto graph_string = R"IR(
@@ -56,7 +58,7 @@ void testKernel_1() {
   }
 }
 
-void testKernel_2() {
+TEST(Kernel, _2) {
   KernelScope kernel_scope;
 
   const auto graph_string = R"IR(
@@ -96,7 +98,7 @@ void testKernel_2() {
   }
 }
 
-void testKernel_3() {
+TEST(Kernel, _3) {
   KernelScope kernel_scope;
 
   const auto graph_string = R"IR(
@@ -136,7 +138,9 @@ void testKernel_3() {
   }
 }
 
-void testKernel_4() {
+TEST(Kernel, DISABLED_Shape_Inference) {
+  // disabled: doesn't do stride propagation, and isn't being used currently
+
   // Test TensorExpr shape inference capabilities: it should only require shapes
   // for the inputs
   {
@@ -378,13 +382,12 @@ void testKernel_4() {
       TensorExprKernel k(graph);
       k.getCodeGenStmt();
     };
-    ASSERT_THROWS_WITH(compile(ir_dim_99), "invalid 'dim' value in aten::cat");
-    ASSERT_THROWS_WITH(
-        compile(ir_dim_minus_6), "invalid 'dim' value in aten::cat");
+    ASSERT_THROWS_WITH(compile(ir_dim_99), "Invalid index");
+    ASSERT_THROWS_WITH(compile(ir_dim_minus_6), "Invalid index");
   }
 }
 
-void testKernelCatInputTypesPromotion() {
+TEST(Kernel, CatInputTypesPromotion) {
   {
     // Test that we properly promote input types for aten::cat
     KernelScope kernel_scope;
@@ -395,7 +398,7 @@ void testKernelCatInputTypesPromotion() {
             %c : Double(5, 9, 2, strides=[18, 2, 1], device=cpu)):
         %dim : int = prim::Constant[value=1]()
         %inputs : Tensor[] = prim::ListConstruct(%a, %b, %c)
-        %r : Tensor = aten::cat(%inputs, %dim)               # new size: [5,19,2]
+        %r : Double(5, 19, 2, strides=[38, 2, 1]) = aten::cat(%inputs, %dim)
         return (%r))IR";
     auto graph = std::make_shared<Graph>();
     parseIR(graph_string, &*graph);
@@ -464,7 +467,12 @@ at::Tensor iotaTensor(IntArrayRef sizes, const at::TensorOptions& options) {
 
 } // namespace
 
-void testKernelSumAllAxes() {
+TEST(Kernel, DISABLED_SumAllAxes) {
+  // [zero-dim tensors]
+  // NNC does not yet handle zero-dim tensors. aten::sum with no axis
+  // input returns a zero-dim tensors, so these tests must be disabled
+  // until we add support for zero-dim tensors.
+
   // Test lowering of sum on all axes.
   const auto graph_template = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu)):
@@ -511,14 +519,27 @@ void testKernelSumAllAxes() {
   }
 }
 
-void testKernelSumOneAxis() {
+std::string li_to_str(at::ArrayRef<int64_t> li) {
+  std::stringstream out;
+  bool first = true;
+  for (auto elem : li) {
+    if (!first) {
+      out << ", ";
+    }
+    out << elem;
+    first = false;
+  }
+  return out.str();
+}
+
+TEST(Kernel, SumOneAxis) {
   // Test lowering of sum on one axis.
   const auto graph_template = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu)):
         %1 : int[] = prim::Constant[value=[${dim}]]()
         %2 : bool = prim::Constant[value=${keepdim}]()
         %3 : ${dtype}
-        %4 : Tensor = aten::sum(%0, %1, %2, %3)
+        %4 : ${out_dtype}(${size}, strides=[${strides}], device=cpu) = aten::sum(%0, %1, %2, %3)
         return (%4))IR";
   auto a = iotaTensor({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
 
@@ -530,17 +551,23 @@ void testKernelSumOneAxis() {
         env.d("dim", dim);
         env.d("keepdim", keepdim);
         env.s("dtype", dtypeConstant(scalar_type));
-        const auto graph_string = format(graph_template, env);
-
-        auto graph = std::make_shared<Graph>();
-        parseIR(graph_string, &*graph);
-
-        auto o = at::empty({}, TensorOptions(kCPU));
         c10::optional<c10::ScalarType> dtype;
         if (scalar_type != ScalarType::None) {
           dtype = static_cast<c10::ScalarType>(scalar_type);
         }
         auto ref = a.sum({dim}, /*keepdim=*/keepdim, /*dtype=*/dtype);
+        if (scalar_type == ScalarType::None) {
+          env.s("out_dtype", "Float");
+        } else {
+          env.s("out_dtype", "Double");
+        }
+        env.s("size", li_to_str(ref.sizes()));
+        env.s("strides", li_to_str(ref.strides()));
+        const auto graph_string = format(graph_template, env);
+        auto graph = std::make_shared<Graph>();
+        parseIR(graph_string, &*graph);
+
+        auto o = at::empty({}, TensorOptions(kCPU));
         TensorExprKernel k(graph);
         std::vector<at::Tensor> inputs = {a};
         Stmt* s = k.getCodeGenStmt();
@@ -568,7 +595,7 @@ void testKernelSumOneAxis() {
   }
 }
 
-void testKernelSumMultipleAxes() {
+TEST(Kernel, SumMultipleAxes) {
   // Test lowering of sum on multiple axes.
   const auto graph_template = R"IR(
       graph(%0 : Float(2, 3, 2, 3, strides=[18, 6, 3, 1], device=cpu)):
@@ -577,7 +604,7 @@ void testKernelSumMultipleAxes() {
         %3 : int[] = prim::ListConstruct(%1, %2)
         %4 : bool = prim::Constant[value=${keepdim}]()
         %5 : ${dtype}
-        %6 : Tensor = aten::sum(%0, %3, %4, %5)
+        %6 : Float(${size}, strides=[${strides}]) = aten::sum(%0, %3, %4, %5)
         return (%6))IR";
   auto a = iotaTensor({2, 3, 2, 3}, TensorOptions(kCPU).dtype(at::kFloat));
 
@@ -592,13 +619,17 @@ void testKernelSumMultipleAxes() {
         env.d("dim2", dim2);
         env.d("keepdim", keepdim);
         env.s("dtype", dtypeConstant(ScalarType::None));
+        auto o = at::empty({}, TensorOptions(kCPU));
+        auto ref = a.sum(IntArrayRef{dim1, dim2}, /*keepdim=*/keepdim);
+
+        env.s("size", li_to_str(ref.sizes()));
+        env.s("strides", li_to_str(ref.strides()));
+
         const auto graph_string = format(graph_template, env);
 
         auto graph = std::make_shared<Graph>();
         parseIR(graph_string, &*graph);
 
-        auto o = at::empty({}, TensorOptions(kCPU));
-        auto ref = a.sum(IntArrayRef{dim1, dim2}, /*keepdim=*/keepdim);
         TensorExprKernel k(graph);
         std::vector<at::Tensor> inputs = {a};
         Stmt* s = k.getCodeGenStmt();
@@ -630,12 +661,12 @@ void testKernelSumMultipleAxes() {
 // This test and the following ones testing Softmax only tests with dim set
 // to one of the valid input dimensions. It does not test with dim=None
 // because that is supposed to be deprecated.
-void testKernelSoftmax2D() {
+TEST(Kernel, Softmax2D) {
   const auto graph_template = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu)):
         %1 : int = prim::Constant[value=${dim}]()
         %2 : int = prim::Constant[value=7]()
-        %3 : Tensor = aten::${op}(%0, %1, %2)
+        %3 : Float(${size}, strides=[${strides}]) = aten::${op}(%0, %1, %2)
         return (%3))IR";
 
   auto a = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -656,11 +687,15 @@ void testKernelSoftmax2D() {
     for (int softmax_dim = 0; softmax_dim < a.dim(); ++softmax_dim) {
       auto softmax_dim_size = a.sizes()[softmax_dim];
       auto other_dim = (softmax_dim + 1) % a.dim();
-
+      auto ref =
+          log_softmax ? a.log_softmax(softmax_dim) : a.softmax(softmax_dim);
       KernelScope kernel_scope;
       TemplateEnv env;
       env.d("dim", softmax_dim);
       env.s("op", log_softmax ? "log_softmax" : "softmax");
+      env.s("size", li_to_str(ref.sizes()));
+      env.s("strides", li_to_str(ref.strides()));
+
       const auto graph_string = format(graph_template, env);
 
       auto graph = std::make_shared<Graph>();
@@ -684,20 +719,18 @@ void testKernelSoftmax2D() {
       std::vector<IValue> stack = fmap<IValue>(inputs);
       k.run(stack);
       auto output = stack[0].toTensor();
-      auto ref =
-          log_softmax ? a.log_softmax(softmax_dim) : a.softmax(softmax_dim);
       ASSERT_EQ(output.sizes(), ref.sizes());
       ASSERT_TRUE(at::allclose(output, ref));
     }
   }
 }
 
-void testKernelSoftmax3D() {
+TEST(Kernel, Softmax3D) {
   const auto graph_template = R"IR(
       graph(%0 : Float(3, 4, 5, strides=[20, 5, 1], device=cpu)):
         %1 : int = prim::Constant[value=${dim}]()
         %2 : int = prim::Constant[value=7]()
-        %3 : Tensor = aten::${op}(%0, %1, %2)
+        %3 : Float(${size}, strides=[${strides}]) = aten::${op}(%0, %1, %2)
         return (%3))IR";
 
   auto a = at::rand({3, 4, 5}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -726,11 +759,16 @@ void testKernelSoftmax3D() {
           other_dims.push_back(i);
         }
       }
+      auto ref =
+          log_softmax ? a.log_softmax(softmax_dim) : a.softmax(softmax_dim);
 
       KernelScope kernel_scope;
       TemplateEnv env;
       env.d("dim", softmax_dim);
       env.s("op", log_softmax ? "log_softmax" : "softmax");
+      env.s("size", li_to_str(ref.sizes()));
+      env.s("strides", li_to_str(ref.strides()));
+
       const auto graph_string = format(graph_template, env);
 
       auto graph = std::make_shared<Graph>();
@@ -757,20 +795,18 @@ void testKernelSoftmax3D() {
       k.run(stack);
       auto output = stack[0].toTensor();
 
-      auto ref =
-          log_softmax ? a.log_softmax(softmax_dim) : a.softmax(softmax_dim);
       ASSERT_EQ(output.sizes(), ref.sizes());
       ASSERT_TRUE(at::allclose(output, ref));
     }
   }
 }
 
-void testKernelSoftmax4D() {
+TEST(Kernel, Softmax4D) {
   const auto graph_template = R"IR(
       graph(%0 : Float(2, 3, 2, 3, strides=[18, 6, 3, 1], device=cpu)):
         %1 : int = prim::Constant[value=${dim}]()
         %2 : int = prim::Constant[value=7]()
-        %3 : Tensor = aten::${op}(%0, %1, %2)
+        %3 : Float(${size}, strides=[${strides}]) = aten::${op}(%0, %1, %2)
         return (%3))IR";
 
   auto a = at::rand({2, 3, 2, 3}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -802,11 +838,16 @@ void testKernelSoftmax4D() {
           other_dims.push_back(i);
         }
       }
+      auto ref =
+          log_softmax ? a.log_softmax(softmax_dim) : a.softmax(softmax_dim);
 
       KernelScope kernel_scope;
       TemplateEnv env;
       env.d("dim", softmax_dim);
       env.s("op", log_softmax ? "log_softmax" : "softmax");
+      env.s("size", li_to_str(ref.sizes()));
+      env.s("strides", li_to_str(ref.strides()));
+
       const auto graph_string = format(graph_template, env);
 
       auto graph = std::make_shared<Graph>();
@@ -834,15 +875,14 @@ void testKernelSoftmax4D() {
       std::vector<IValue> stack = fmap<IValue>(inputs);
       k.run(stack);
       auto output = stack[0].toTensor();
-      auto ref =
-          log_softmax ? a.log_softmax(softmax_dim) : a.softmax(softmax_dim);
       ASSERT_EQ(output.sizes(), ref.sizes());
       ASSERT_TRUE(at::allclose(output, ref));
     }
   }
 }
 
-void testKernelInlineProducerIntoReduction() {
+TEST(Kernel, DISABLED_InlineProducerIntoReduction) {
+  // see : [zero-dim tensors]
   KernelScope kernel_scope;
 
   // Inline producer (mul) into reduction (sum).
@@ -881,7 +921,9 @@ void testKernelInlineProducerIntoReduction() {
   ASSERT_TRUE(at::allclose(o, ref));
 }
 
-void testKernelInlineReductionIntoConsumer() {
+TEST(Kernel, DISABLED_InlineReductionIntoConsumer) {
+  // see : [zero-dim tensors]
+
   KernelScope kernel_scope;
 
   // Inline producer (mul %2) into reduction (sum %4) but DO NOT

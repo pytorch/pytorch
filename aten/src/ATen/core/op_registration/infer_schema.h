@@ -22,6 +22,8 @@ namespace infer_schema {
 struct ArgumentDef final {
   using GetTypeFn = TypePtr();
   GetTypeFn* getTypeFn;
+  constexpr ArgumentDef(): getTypeFn(nullptr) {}
+  explicit constexpr ArgumentDef(GetTypeFn *getTypeFn): getTypeFn(getTypeFn) {}
 };
 
 template<bool V>
@@ -50,7 +52,7 @@ constexpr std::array<ArgumentDef, sizeof...(Ts)> createArgumentVectorFromTypes(s
     checkStaticTypes<Ts...>(),
 
     // Create the return value
-    std::array<ArgumentDef, sizeof...(Ts)>{{ArgumentDef{&getTypePtr_<std::decay_t<Ts>>::call}...}}
+    std::array<ArgumentDef, sizeof...(Ts)>{ArgumentDef(&getTypePtr_<std::decay_t<Ts>>::call)...}
   );
 }
 
@@ -151,6 +153,6 @@ FunctionSchema inferFunctionSchemaSingleReturn(std::string&& name, std::string&&
   return detail::infer_schema::createFunctionSchemaFromTraitsSingleReturn<guts::infer_function_traits_t<FuncType>>(std::move(name), std::move(overload_name));
 }
 
-CAFFE2_API c10::optional<std::string> findSchemaDifferences(const FunctionSchema& inferred, const FunctionSchema& specified);
+TORCH_API c10::optional<std::string> findSchemaDifferences(const FunctionSchema& inferred, const FunctionSchema& specified);
 
 }

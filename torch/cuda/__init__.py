@@ -16,12 +16,12 @@ import warnings
 import threading
 from typing import List, Optional, Tuple, Union
 from ._utils import _get_device_index, _dummy_type
-from .streams import Stream, Event
+from .streams import Stream, Event, _Graph
 from .. import device as _device
 import torch._C
 
 try:
-    from torch._C import _cudart
+    from torch._C import _cudart  # type: ignore
 except ImportError:
     _cudart = None
 
@@ -30,18 +30,18 @@ _tls = threading.local()
 _initialization_lock = threading.Lock()
 _queued_calls = []  # don't invoke these until initialization occurs
 _is_in_bad_fork = getattr(torch._C, "_cuda_isInBadFork", lambda: False)
-_device_t = Union[_device, str, int]
+_device_t = Union[_device, str, int, None]
 
 # Define dummy _CudaDeviceProperties type if PyTorch was compiled without CUDA
 if hasattr(torch._C, '_CudaDeviceProperties'):
     _CudaDeviceProperties = torch._C._CudaDeviceProperties
 else:
-    _CudaDeviceProperties = _dummy_type('_CudaDeviceProperties')
+    _CudaDeviceProperties = _dummy_type('_CudaDeviceProperties')  # type: ignore
 
 # Global variables dynamically populated by native code
 has_magma: bool = False
 has_half: bool = False
-default_generators: Tuple[torch._C.Generator] = ()
+default_generators: Tuple[torch._C.Generator] = ()  # type: ignore[assignment]
 
 def is_available() -> bool:
     r"""Returns a bool indicating if CUDA is currently available."""
@@ -210,7 +210,7 @@ def check_error(res: int) -> None:
 class device(object):
     r"""Context-manager that changes the selected device.
 
-    Arguments:
+    Args:
         device (torch.device or int): device index to select. It's a no-op if
             this argument is a negative integer or ``None``.
     """
@@ -239,7 +239,7 @@ class device_of(device):
     You can use both tensors and storages as arguments. If a given object is
     not allocated on a GPU, this is a no-op.
 
-    Arguments:
+    Args:
         obj (Tensor or Storage): object allocated on the selected device.
     """
 
@@ -254,7 +254,7 @@ def set_device(device: _device_t) -> None:
     Usage of this function is discouraged in favor of :any:`device`. In most
     cases it's better to use ``CUDA_VISIBLE_DEVICES`` environmental variable.
 
-    Arguments:
+    Args:
         device (torch.device or int): selected device. This function is a no-op
             if this argument is negative.
     """
@@ -266,7 +266,7 @@ def set_device(device: _device_t) -> None:
 def get_device_name(device: Optional[_device_t] = None) -> str:
     r"""Gets the name of a device.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): device for which to return the
             name. This function is a no-op if this argument is a negative
             integer. It uses the current device, given by :func:`~torch.cuda.current_device`,
@@ -278,7 +278,7 @@ def get_device_name(device: Optional[_device_t] = None) -> str:
 def get_device_capability(device: Optional[_device_t] = None) -> Tuple[int, int]:
     r"""Gets the cuda capability of a device.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): device for which to return the
             device capability. This function is a no-op if this argument is
             a negative integer. It uses the current device, given by
@@ -297,7 +297,7 @@ def get_device_properties(device: _device_t) -> _CudaDeviceProperties:
     device = _get_device_index(device, optional=True)
     if device < 0 or device >= device_count():
         raise AssertionError("Invalid device id")
-    return _get_device_properties(device)
+    return _get_device_properties(device)  # type: ignore[name-defined]
 
 
 @contextlib.contextmanager
@@ -307,7 +307,7 @@ def stream(stream):
     All CUDA kernels queued within its context will be enqueued on a selected
     stream.
 
-    Arguments:
+    Args:
         stream (Stream): selected stream. This manager is a no-op if it's
             ``None``.
 
@@ -356,8 +356,8 @@ def get_gencode_flags() -> str:
     arch_list = get_arch_list()
     if len(arch_list) == 0:
         return ""
-    arch_list = [arch.split("_") for arch in arch_list]
-    return " ".join([f"-gencode compute=compute_{arch},code={kind}_{arch}" for (kind, arch) in arch_list])
+    arch_list_ = [arch.split("_") for arch in arch_list]
+    return " ".join([f"-gencode compute=compute_{arch},code={kind}_{arch}" for (kind, arch) in arch_list_])
 
 
 
@@ -370,7 +370,7 @@ def current_device() -> int:
 def synchronize(device: _device_t = None) -> None:
     r"""Waits for all kernels in all streams on a CUDA device to complete.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): device for which to synchronize.
             It uses the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).
@@ -396,7 +396,7 @@ def ipc_collect():
 def current_stream(device: Optional[_device_t] = None) -> Stream:
     r"""Returns the currently selected :class:`Stream` for a given device.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): selected device. Returns
             the currently selected :class:`Stream` for the current device, given
             by :func:`~torch.cuda.current_device`, if :attr:`device` is ``None``
@@ -410,7 +410,7 @@ def current_stream(device: Optional[_device_t] = None) -> Stream:
 def default_stream(device: Optional[_device_t] = None) -> Stream:
     r"""Returns the default :class:`Stream` for a given device.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): selected device. Returns
             the default :class:`Stream` for the current device, given by
             :func:`~torch.cuda.current_device`, if :attr:`device` is ``None``
@@ -454,7 +454,7 @@ if not hasattr(torch._C, 'CudaDoubleStorageBase'):
     torch._C.__dict__['_CudaEventBase'] = _dummy_type('CudaEventBase')
 
 
-@staticmethod
+@staticmethod  # type: ignore[misc]
 def _lazy_new(cls, *args, **kwargs):
     _lazy_init()
     # We may need to call lazy init again if we are a forked child
@@ -467,8 +467,11 @@ class _CudaBase(object):
     is_sparse = False
 
     def type(self, *args, **kwargs):
-        with device(self.get_device()):
-            return super(_CudaBase, self).type(*args, **kwargs)
+        # We could use a Protocol here to tell mypy that self has `get_device` method
+        # but it is only available in the typing module on Python >= 3.8
+        # or on typing_extensions module on Python >= 3.6
+        with device(self.get_device()):  # type: ignore
+            return super(_CudaBase, self).type(*args, **kwargs)  # type: ignore[misc]
 
     __new__ = _lazy_new
 

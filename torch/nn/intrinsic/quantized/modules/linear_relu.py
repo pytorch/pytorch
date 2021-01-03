@@ -1,6 +1,6 @@
-import torch.nn.quantized as nnq
-import torch.nn.intrinsic
 import torch
+import torch.nn.quantized as nnq
+import torch.nn.intrinsic as nni
 
 class LinearReLU(nnq.Linear):
     r"""
@@ -19,17 +19,14 @@ class LinearReLU(nnq.Linear):
         >>> print(output.size())
         torch.Size([128, 30])
     """
-    _FLOAT_MODULE = torch.nn.intrinsic.LinearReLU
+    _FLOAT_MODULE = nni.LinearReLU
 
     def __init__(self, in_features, out_features, bias=True, dtype=torch.qint8):
-        super(LinearReLU, self).__init__(in_features, out_features, bias, dtype)
+        super().__init__(in_features, out_features, bias, dtype)
 
-    def forward(self, input):
-        Y_q = torch.ops.quantized.linear_relu(
-            input, self._packed_params._packed_params,
-            float(self.scale),
-            int(self.zero_point))
-        return Y_q
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.ops.quantized.linear_relu(
+            x, self._packed_params._packed_params, self.scale, self.zero_point)
 
     def _get_name(self):
         return 'QuantizedLinearReLU'
