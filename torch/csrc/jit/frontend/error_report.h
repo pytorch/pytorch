@@ -36,7 +36,7 @@ struct TORCH_API ErrorReport : public std::exception {
     static void update_pending_range(const SourceRange& range);
   };
 
-   struct TORCH_API HintStack {
+  struct TORCH_API HintStack {
     // These hints are used to report extra information that is relevant to the
     // end user if an error appears during compilation
     HintStack(const std::string& hint);
