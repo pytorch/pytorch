@@ -170,21 +170,21 @@ IValue UserRRef::toHere(const float timeoutSeconds) const {
   // toHere is profiled as a blocking call, and does not execute operations on
   // the remote node. Hence, don't wrap it with a profiling message since we
   // don't need the profiler to be enabled remotely.
-  auto futureResponse = RpcAgent::toFutureMessage(
-      autograd::sendMessageWithAutograd(
-          *agent,
-          agent->getWorkerInfo(ownerId_),
-          std::move(msgToSend),
-          true /* forceGradRecording */,
-          timeoutSeconds,
-          true /* forceDisableProfiling */));
+  auto jitFuture = autograd::sendMessageWithAutograd(
+      *agent,
+      agent->getWorkerInfo(ownerId_),
+      std::move(msgToSend),
+      true /* forceGradRecording */,
+      timeoutSeconds,
+      true /* forceDisableProfiling */);
 
   // TODO: we should ideally be able to interrupt this blocking wait if we check
   // getTimedOut() and it is true
   // (https://github.com/pytorch/pytorch/issues/39411).
-  const Message& message = futureResponse->wait();
-  MessageType msgType = message.type();
-  auto response = deserializeResponse(message, msgType);
+  jitFuture->wait();
+  auto messagePtr = jitFuture->constValue().toCustomClass<Message>();
+  MessageType msgType = messagePtr->type();
+  auto response = deserializeResponse(*messagePtr, msgType);
   TORCH_INTERNAL_ASSERT(
       msgType == MessageType::SCRIPT_RREF_FETCH_RET ||
           msgType == MessageType::PYTHON_RREF_FETCH_RET,
