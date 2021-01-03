@@ -182,6 +182,9 @@ IValue UserRRef::toHere(const float timeoutSeconds) const {
   // getTimedOut() and it is true
   // (https://github.com/pytorch/pytorch/issues/39411).
   jitFuture->wait();
+  TORCH_CHECK(
+      !jitFuture->hasError(),
+      jitFuture->tryRetrieveErrorMessage());
   auto messagePtr = jitFuture->constValue().toCustomClass<Message>();
   MessageType msgType = messagePtr->type();
   auto response = deserializeResponse(*messagePtr, msgType);
