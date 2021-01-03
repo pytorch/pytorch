@@ -637,7 +637,7 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
   ClientPipe& clientPipe = it->second;
   auto& pendingResponseMessage = clientPipe.pendingResponseMessage_;
 
-  auto futureResponseMessage = std::make_shared<AtomicFutureMessage>();
+  auto futureResponseMessage = std::make_shared<AtomicJitFuture>();
   uint64_t messageId = nextMessageID_++;
   requestMessage.setId(messageId);
   pendingResponseMessage[messageId] = futureResponseMessage;
@@ -649,7 +649,7 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
   auto devices =
       getDevicesForTensors(clientPipe.pipe_->getRemoteName(), requestMessage);
 
-  futureResponseMessage->futMsg.addCallback([this]() {
+  futureResponseMessage->jitFuture->addCallback([this]() {
     TORCH_INTERNAL_ASSERT(
         this->threadPool_.inThreadPool(),
         "Future marked complete from outside the thread pool");
@@ -747,7 +747,7 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
                       << " received response #" << messageId << " from "
                       << clientPipe.pipe_->getRemoteName();
 
-              std::shared_ptr<AtomicFutureMessage> futureResponseMessage;
+              std::shared_ptr<AtomicJitFuture> futureResponseMessage;
               {
                 std::lock_guard<std::mutex> lock(mutex_);
                 // A read error will lead all following callbacks to be
@@ -778,8 +778,7 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
             });
       });
 
-  return toJitFuture(std::shared_ptr<FutureMessage>(
-      futureResponseMessage, &futureResponseMessage->futMsg));
+  return futureResponseMessage->jitFuture;
 }
 
 void TensorPipeAgent::pollTimeoutRpcs() {
@@ -808,7 +807,7 @@ void TensorPipeAgent::pollTimeoutRpcs() {
     // Move all these futures to a separate vector so we can process them
     // outside the lock.
     std::vector<std::pair<
-        std::shared_ptr<AtomicFutureMessage>,
+        std::shared_ptr<AtomicJitFuture>,
         std::chrono::milliseconds>>
         timedOutFutures = std::move(timeoutMap_.begin()->second);
     // We can safely remove this key from the timeoutMap_ since all these
@@ -1026,16 +1025,17 @@ void TensorPipeAgent::decreaseCallCount(int32_t& count) {
 }
 
 void TensorPipeAgent::markFutureAsComplete(
-    std::shared_ptr<AtomicFutureMessage> futureMessage,
+    std::shared_ptr<AtomicJitFuture> atomicFuture,
     Message message) {
-  if (!futureMessage->isComplete.test_and_set()) {
+  if (!atomicFuture->isComplete.test_and_set()) {
     // Completing the future will run its callbacks, which could execute
     // arbitrary user code. To prevent blocking or stalling the TensorPipe event
     // loops, we defer this to a worker thread.
     threadPool_.run([this,
-                     futureMessage{std::move(futureMessage)},
+                     atomicFuture{std::move(atomicFuture)},
                      message{std::move(message)}]() mutable {
-      futureMessage->futMsg.markCompleted(std::move(message));
+      atomicFuture->jitFuture->markCompleted(
+          IValue(c10::make_intrusive<Message>(std::move(message))));
       // The future's callbacks may schedule further RPCs, increasing the count.
       // Thus we must decrease it after completing the future, otherwise it may
       // briefly dip to zero and trick join into thinking all work is done.
@@ -1045,16 +1045,17 @@ void TensorPipeAgent::markFutureAsComplete(
 }
 
 void TensorPipeAgent::markFutureWithError(
-    std::shared_ptr<AtomicFutureMessage> futureMessage,
+    std::shared_ptr<AtomicJitFuture> atomicFuture,
     std::string errorMsg) {
-  if (!futureMessage->isComplete.test_and_set()) {
+  if (!atomicFuture->isComplete.test_and_set()) {
     // Completing the future will run its callbacks, which could execute
     // arbitrary user code. To prevent blocking or stalling the TensorPipe event
     // loops, we defer this to a worker thread.
     threadPool_.run([this,
-                     futureMessage{std::move(futureMessage)},
+                     atomicFuture{std::move(atomicFuture)},
                      errorMsg{std::move(errorMsg)}]() mutable {
-      futureMessage->futMsg.setError(std::move(errorMsg));
+      atomicFuture->jitFuture->setError(
+          std::make_exception_ptr(std::runtime_error(std::move(errorMsg))));
       // The future's callbacks may schedule further RPCs, increasing the count.
       // Thus we must decrease it after completing the future, otherwise it may
       // briefly dip to zero and trick join into thinking all work is done.
