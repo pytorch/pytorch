@@ -10980,6 +10980,7 @@ class TestNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_module_empty_input(mod, inp, check_size=False)
 
+    @onlyOnCPUAndCUDA
     def test_AvgPool2d_empty(self, device):
         avgpool = torch.nn.AvgPool2d(3, stride=2).to(device)
         inp = torch.randn(0, 16, 20, 32, device=device)
