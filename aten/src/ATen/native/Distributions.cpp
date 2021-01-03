@@ -118,7 +118,7 @@ DEFINE_DISPATCH(bernoulli_tensor_stub);
 DEFINE_DISPATCH(bernoulli_scalar_stub);
 DEFINE_DISPATCH(cauchy_stub);
 DEFINE_DISPATCH(exponential_stub);
-DEFINE_DISPATCH(multinomial_stub);
+DEFINE_DISPATCH(multinomial_with_replacement_stub);
 DEFINE_DISPATCH(geometric_stub);
 DEFINE_DISPATCH(log_normal_stub);
 DEFINE_DISPATCH(uniform_stub);
@@ -535,13 +535,8 @@ Tensor& multinomial_out(
     return result;
   }
 
-  multinomial_stub(
-      result.device().type(),
-      result,
-      self,
-      n_sample,
-      with_replacement,
-      gen);
+  multinomial_with_replacement_stub(
+      result.device().type(), result, self, n_sample, gen);
   return result;
 }
 
