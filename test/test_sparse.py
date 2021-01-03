@@ -356,6 +356,11 @@ class TestSparse(TestCase):
         sp, _, _ = self._gen_sparse(2, 10, [3, 3, 3])
         self.assertRaises(RuntimeError, lambda: sp.to_sparse())
 
+    def test_sparse_bool(self):
+        a = self.value_tensor([True, False]).to(torch.bool)
+        b = a.to_sparse().to_dense()
+        self.assertEqual(a, b)
+
     def test_scalar(self):
         # tensor with value
         a = self.sparse_tensor(self.index_tensor([]).unsqueeze(1), 12.3, [])
