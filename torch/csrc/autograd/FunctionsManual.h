@@ -139,8 +139,8 @@ std::tuple<Tensor, Tensor> triangular_solve_backward(
 std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(const Tensor& grad_out, const Tensor& i1, const Tensor& i2, const Tensor& i3,
                                                        IntArrayRef expand1, IntArrayRef expand2, IntArrayRef expand3,
                                                        IntArrayRef sumdim, int64_t unroll_dim, std::array<bool, 3> grad_mask);
-Tensor qr_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
-                   bool some, const Tensor& Q, const Tensor& R);
+Tensor linalg_qr_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
+                          std::string mode, const Tensor& Q, const Tensor& R);
 Tensor eig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                     bool eigenvectors, const Tensor& lambda, const Tensor& v);
 Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det);
