@@ -1094,8 +1094,8 @@ std::string ClassType::getPreHookErrorMessage(const std::string& pre_hook_name) 
   std::string single_output = "";
   if (forward_args.size() == 2 &&
       forward_args[1].type()->cast<TupleType>() == nullptr) {
-    // if the output type is a tuple, it needs to be wrapped in an outer tuple
-    // to match eager's behavior
+    // if the output type is a single tuple, it needs to be wrapped in an outer tuple
+    // to match eager's behavior 
     single_output = ", '" + forward_args[1].type()->annotation_str() + "',";
   }
   std::string pre_hook_schema =
@@ -1227,14 +1227,14 @@ void ClassType::checkPreHookSchema(torch::jit::Function& pre_hook) const {
   }
   if (forward_args.size() == 2 && 
         forward_args[1].type()->annotation_str() == return_arg.type()->annotation_str()) {
-    // For edge case where forward's input is a tuple and the pre-hook returns a
-    // matching tuple that doesn't need unpacking. Don't want to return false
-    // here if the pre-hook's return doesn't match, could still be correct.
+    // TORCH_CHECK below is for the edge case where forward's input is a tuple and the 
+    // pre-hook returns a matching tuple. Eager doesn't support this- the working eager return
+    // for a tuple type is the forward's input tuple wrapped inside of another tuple. 
     TORCH_CHECK(
         return_arg.type()->cast<TupleType>() == nullptr,
         wrong_type_returned_err_msg,
-        " When forward has a single tuple argument, the return needs",
-        " to be 'None' or a nested tuple containing forward's tuple",
+        " When forward has a single tuple input argument, the return needs",
+        " to be 'None' or a nested tuple containing forward's input tuple",
         " argument as in: 'Tuple[",
         forward_args[1].type()->annotation_str(),
         "]'.\n",
