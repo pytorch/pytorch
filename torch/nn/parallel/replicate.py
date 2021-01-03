@@ -44,7 +44,7 @@ def _replicatable_module(module, memo=None):
     if memo is None:
         memo = set()
 
-    # memorize visited modules
+    # memoize visited modules
     memo.add(module)
     if _is_script_module(module):
         memo.update(descendant_modules(module))

@@ -43,6 +43,9 @@ bool fallbackAllowed() {
 
 bool fallbackEnforced() {
   static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR_FALLBACK");
+  if (tensorexpr::getTEGenerateBlockCode()) {
+    return false;
+  }
   if (!enable_c_str) {
     return fallback_allowed;
   }
@@ -465,15 +468,6 @@ ExprHandle promoteHalfToFloat(const ExprHandle& e) {
         Dtype(tensorexpr::ScalarType::Float, e.dtype().lanes()), e);
   } else {
     return e;
-  }
-}
-
-ExprHandle promoteHalfToFloatAndIntegerToDefaultType(const ExprHandle& e) {
-  auto scalarType = static_cast<c10::ScalarType>(e.dtype().scalar_type());
-  if (c10::isIntegralType(scalarType, /*includeBool*/ true)) {
-    return promoteIntegerToDefaultType(e);
-  } else {
-    return promoteHalfToFloat(e);
   }
 }
 
@@ -970,7 +964,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
 
     case aten::masked_fill: {
       return computeThreeOperand(
-          "aten::masked_fill",
+          "aten_masked_fill",
           v,
           [](const ExprHandle& input,
              const ExprHandle& mask,
@@ -1180,7 +1174,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::fmod: {
       return computeTwoOperand(
           "aten_fmod", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return fmod(lhs, rhs);
+            return fmod(promoteHalfToFloat(lhs), promoteHalfToFloat(rhs));
           });
     } break;
 
@@ -1197,7 +1191,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
         return Mod::make(lhs, rhs);
       };
       auto fmodImpl = [](const ExprHandle& lhs, const ExprHandle& rhs) {
-        return fmod((rhs + fmod(lhs, rhs)), rhs);
+        auto lhs_t = promoteHalfToFloat(lhs);
+        auto rhs_t = promoteHalfToFloat(rhs);
+        return fmod((rhs_t + fmod(lhs_t, rhs_t)), rhs_t);
       };
       {
         auto const& n = v->node();
@@ -1286,8 +1282,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::rsqrt: {
-      return computeOneOperand(
-          "aten_rsqrt", v, [](const ExprHandle& a) { return rsqrt(a); });
+      return computeOneOperand("aten_rsqrt", v, [](const ExprHandle& a) {
+        return rsqrt(promoteIntegerToDefaultType(a));
+      });
     } break;
 
     case aten::abs: {
@@ -1295,7 +1292,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
           "aten_abs",
           v,
           [](const ExprHandle& a) {
-            return fabs(promoteHalfToFloatAndIntegerToDefaultType(a));
+            return tensorexpr::abs(promoteHalfToFloat(a));
           },
           kIntegralTypes | kFloatingPointTypes | kBoolType);
     } break;
@@ -1525,10 +1522,21 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
 
   bool hasReduction = NodeFinder<ReduceOp>::find(l.root_stmt()).size() != 0;
 
+  // For Block codegen we create a map of tensor dims before
+  // inlining. Like GPU codegen we need to inline. But the order
+  // where this analysis is run matters.
+  auto block_analysis = std::make_unique<CreateBufferMap>();
+  if (backendType == kBlockCodeGen) {
+    // Run Block analysis to get multi dim buffer info
+    auto root_stmt = l.root_stmt();
+    root_stmt->accept(block_analysis.get());
+  }
+
   // inlining output buffers duplicates computation. it slows down
   // cpu code generation but is enabled on gpu because it avoids difficult
   // synchronization logic across blocks.
-  bool inline_output_buffers = backendType == kCudaCodeGen;
+  bool inline_output_buffers =
+      (backendType == kCudaCodeGen || backendType == kBlockCodeGen);
   l.inlineIntermediateBufs(inline_output_buffers);
 
   if (backendType == kCudaCodeGen) {
@@ -1577,20 +1585,14 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
   }
 
   if (backendType == kBlockCodeGen) {
-    auto block_analysis = std::make_unique<CreateBufferMap>();
     for (auto tensor : tensorOutputs_) {
       const int default_fp16_blocksize = 16;
       const int default_uint8_blocksize = 32;
       int blockSize = default_fp16_blocksize;
       // We only handle looplevels == 2 for now
-      // Run Block analysis to get multi dim buffer info
-      auto root_stmt = l.root_stmt();
-      root_stmt->accept(block_analysis.get());
-
       if (tensor->buf()->dtype().scalar_type() == ScalarType::Byte) {
         blockSize = default_uint8_blocksize;
       }
-
       std::vector<For*> loops = l.getLoopStmtsFor(tensor);
       TORCH_INTERNAL_ASSERT(!loops.empty(), "loops should not be empty");
       For* flattened = nullptr;

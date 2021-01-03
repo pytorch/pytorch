@@ -15,7 +15,7 @@ class Parameter(torch.Tensor):
     the model. If there was no such class as :class:`Parameter`, these
     temporaries would get registered too.
 
-    Arguments:
+    Args:
         data (Tensor): parameter tensor.
         requires_grad (bool, optional): if the parameter requires gradient. See
             :ref:`excluding-subgraphs` for more details. Default: `True`
