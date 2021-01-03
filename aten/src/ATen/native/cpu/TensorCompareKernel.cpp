@@ -3,6 +3,7 @@
 #include <numeric>
 #include <iterator>
 #include <algorithm>
+#include <iostream>
 
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
@@ -22,6 +23,7 @@ static inline void compare_base_kernel(Tensor& result1, Tensor& result2,
     const func_t& f) {
   auto self_sizes = ensure_nonempty_vec(self.sizes().vec());
   self_sizes[dim] = 1;
+  //auto wrap_dim = maybe_wrap_dim(dim, dim);
 
   // result1 and result2 may be a empty tensor, if not,
   // reshape them as self dims
@@ -33,6 +35,14 @@ static inline void compare_base_kernel(Tensor& result1, Tensor& result2,
       result2.unsqueeze_(dim);
     }
   }
+  std::cout << "self.sizes: " << self.sizes() << std::endl;
+
+    std::cout << "self_sizes: " << self_sizes << std::endl;
+    self_sizes.erase(self_sizes.begin() + 1);
+  std::cout << "post erase self_sizes: " << self_sizes << std::endl;
+
+  // PROBLEM: result1 getting resized to the size of the self, which is now
+  // non-zero dim due to the assignment =1 for the reduction dimension.
   result1.resize_(self_sizes);
   result2.resize_(self_sizes);
 
@@ -51,6 +61,7 @@ static inline void compare_base_kernel(Tensor& result1, Tensor& result2,
     auto* result1_data_bytes = data[0];
     auto* result2_data_bytes = data[1];
     const auto* self_data_bytes = data[2];
+    std::cout << "COMPARE KERNEL: " << n << std::endl;
     for (int64_t i = 0; i < n; ++i) {
       f(
         (scalar_t*)result1_data_bytes, (scalar_t_2*)result2_data_bytes,
@@ -116,7 +127,8 @@ static void max_kernel_impl(
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
   TORCH_CHECK(result.scalar_type() == self.scalar_type() && indice.scalar_type() == kLong,
-    "Expect dtype ", self.scalar_type(), "and torch.long, but got ", result.scalar_type(), "and", indice.scalar_type());
+    "Expect dtype ", self.scalar_type(), "and torch.long, but got ", result.scalar_type(), 
+    "and", indice.scalar_type());
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(ScalarType::Bool, self.scalar_type(), "max_cpu", [&] {
     compare_base_kernel<scalar_t>(result, indice, self, wrap_dim, keepdim, [&] (

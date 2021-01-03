@@ -36,7 +36,7 @@ from typing import Dict, List
 import torch.backends.quantized
 import torch.testing._internal.data
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32
-
+TEST_NUMPY = False
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
 
@@ -5005,34 +5005,51 @@ class TestTorchDeviceType(TestCase):
             test_x((2, 3), 1, [1.0, 2.0], device)
             test_x((2, 3), 1, [1.0, 2.0, 3.0, 4.0], device)
 
+    def test_tensor_compare_ops_empty(self, device):
+        shape = (2, 0, 4)
+        master_input = torch.randn(shape, device=device)
+        test_functions = [
+            ('max', lambda *args, **kwargs: torch.max(*args, **kwargs).values, None, {})
+        ]
+
+        for name, fn, identity, dt in test_functions:
+            self.assertEqual(torch.empty((2, 0), device=device,**dt), fn(master_input, dim=2))
+            self.assertEqual(torch.empty((2, 0, 1), device=device,**dt), 
+                fn(master_input, dim=2, keepdim=True))
+
+        # Raise error when wanting to reduce on the zero dimension.
+        for fn in [torch.max]:
+            ident_err = 'Expected tensor with non-zero'
+            print("function: ", fn)
+            self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(master_input, dim=1))
 
     def test_reduction_empty(self, device):
         fns_to_test = [
             # name, function, identity, kwargs
-            ('amax', torch.amax, None, {}),
-            ('amin', torch.amin, None, {}),
-            ('argmax', torch.argmax, None, {'dtype': torch.int64}),
-            ('argmin', torch.argmin, None, {'dtype': torch.int64}),
-
-            ('kthvalue', lambda *args, **kwargs: torch.kthvalue(*args, k=1, **kwargs).values, None, {}),
+#            ('amax', torch.amax, None, {}),
+#            ('amin', torch.amin, None, {}),
+#            ('argmax', torch.argmax, None, {'dtype': torch.int64}),
+#            ('argmin', torch.argmin, None, {'dtype': torch.int64}),
+#
+#            ('kthvalue', lambda *args, **kwargs: torch.kthvalue(*args, k=1, **kwargs).values, None, {}),
             ('max', lambda *args, **kwargs: torch.max(*args, **kwargs).values, None, {}),
-            ('min', lambda *args, **kwargs: torch.min(*args, **kwargs).values, None, {}),
-            ('median', lambda *args, **kwargs: torch.median(*args, **kwargs).values, None, {}),
-            ('mode', torch.mode, None, {}),
-
-            ('prod', torch.prod, 1., {}),
-            ('sum', torch.sum, 0., {}),
-            ('norm', torch.norm, 0., {}),
-            ('mean', torch.mean, nan, {}),
-            ('var', torch.var, nan, {}),
-            ('std', torch.std, nan, {}),
-            ('logsumexp', torch.logsumexp, -inf, {}),
+#            ('min', lambda *args, **kwargs: torch.min(*args, **kwargs).values, None, {}),
+#            ('median', lambda *args, **kwargs: torch.median(*args, **kwargs).values, None, {}),
+#            ('mode', torch.mode, None, {}),
+#
+#            ('prod', torch.prod, 1., {}),
+#            ('sum', torch.sum, 0., {}),
+#            ('norm', torch.norm, 0., {}),
+#            ('mean', torch.mean, nan, {}),
+#            ('var', torch.var, nan, {}),
+#            ('std', torch.std, nan, {}),
+#            ('logsumexp', torch.logsumexp, -inf, {}),
         ]
 
         shape = (2, 0, 4)
         x = torch.randn(shape, device=device)
 
-        for fn in [torch.max, torch.min, torch.argmax, torch.argmin]:
+        for fn in [torch.max]:#, torch.min, torch.argmax, torch.argmin]:
             ident_err = 'Expected tensor with non-zero'
             print("function: ", fn)
             self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=1))
