@@ -319,7 +319,7 @@ std::shared_ptr<JitFuture> ProcessGroupAgent::send(
       pg_->getRank());
 
   auto requestId = nextId();
-  auto future = std::make_shared<FutureMessage>();
+  auto future = std::make_shared<JitFuture>(at::AnyClassType::get());
   if (message.isRequest()) {
     // millisecond level precision of when request started.
     auto futureStartTime = std::chrono::steady_clock::now();
@@ -362,14 +362,14 @@ std::shared_ptr<JitFuture> ProcessGroupAgent::send(
     message.setId(requestId);
     ++clientActiveCalls_;
   } else {
-    future->markCompleted(Message());
+    future->markCompleted(IValue());
   }
 
   // Sending to ourselves: bypass the send logic and enqueue directly
   // to our receiving queue.
   if (to.id_ == (worker_id_t)pg_->getRank()) {
     sendToSelf(std::move(message));
-    return toJitFuture(std::move(future));
+    return future;
   }
 
   // NB: cannot directly pass ``to`` to the ``SendWork``, because it might no
@@ -383,8 +383,7 @@ std::shared_ptr<JitFuture> ProcessGroupAgent::send(
   // C++ land.
   enqueueSend(SendWork(allWorkerInfo_[to.id_], std::move(message)));
 
-  auto jitFuture = toJitFuture(std::move(future));
-  return jitFuture;
+  return future;
 }
 
 void ProcessGroupAgent::handleSend(const SendWork& work) {
@@ -560,7 +559,7 @@ bool ProcessGroupAgent::handleRecv(RecvWork& work) {
     }
   } else if (message.isResponse()) {
     auto id = message.id();
-    std::shared_ptr<FutureMessage> fm = nullptr;
+    std::shared_ptr<JitFuture> jitFuture = nullptr;
     {
       std::lock_guard<std::mutex> lock{futureMutex_};
       const auto& futureInfo = futures_.find(id);
@@ -572,7 +571,7 @@ bool ProcessGroupAgent::handleRecv(RecvWork& work) {
         return false;
       }
       // Use futureInfo before destructing it.
-      fm = futureInfo->second.future_;
+      jitFuture = futureInfo->second.future_;
       auto endTime = futureInfo->second.endTime_;
       futures_.erase(id);
       // look up the corresponding future by its time out and request
@@ -591,10 +590,14 @@ bool ProcessGroupAgent::handleRecv(RecvWork& work) {
     futureCV_.notify_all();
     --clientActiveCalls_;
     if (message.type() == MessageType::EXCEPTION) {
-      fm->setError(
-          std::string(message.payload().begin(), message.payload().end()));
+      //fm->setError(
+      //    std::string(message.payload().begin(), message.payload().end()));
+      jitFuture->setError(std::make_exception_ptr(
+          std::string(message.payload().begin(), message.payload().end())));
     } else {
-      fm->markCompleted(std::move(message));
+      //jitFuture->markCompleted(std::move(message));
+      jitFuture->markCompleted(
+          IValue(c10::make_intrusive<Message>(std::move(message))));
     }
   } else {
     // TODO: pass the error back to the caller instead of crashing here.
@@ -645,7 +648,7 @@ void ProcessGroupAgent::markFutureWithError(Message& message) {
 }
 
 void ProcessGroupAgent::markFutureWithError(int64_t id, std::string errorMsg) {
-  std::shared_ptr<FutureMessage> fm = nullptr;
+  std::shared_ptr<JitFuture> jitFuture = nullptr;
   {
     std::lock_guard<std::mutex> lock{futureMutex_};
     const auto& futureInfo = futures_.find(id);
@@ -655,7 +658,7 @@ void ProcessGroupAgent::markFutureWithError(int64_t id, std::string errorMsg) {
       // out and been processed accordingly.
       return;
     }
-    fm = futureInfo->second.future_;
+    jitFuture = futureInfo->second.future_;
     auto rpcEndTime = futureInfo->second.endTime_;
     futures_.erase(id);
     // look up the corresponding future by its time out and request ID,
@@ -673,7 +676,7 @@ void ProcessGroupAgent::markFutureWithError(int64_t id, std::string errorMsg) {
   }
 
   --clientActiveCalls_;
-  fm->setError(std::move(errorMsg));
+  jitFuture->setError(std::make_exception_ptr(std::move(errorMsg)));
   futureCV_.notify_all();
 }
 
@@ -805,7 +808,8 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
 
       if (!timedOutFuture.future_->hasError()) {
         --clientActiveCalls_;
-        timedOutFuture.future_->setError(std::move(err));
+        timedOutFuture.future_->setError(
+            std::make_exception_ptr(std::move(err)));
         // The future timed out and will not be processed by handleRecv(), even
         // if we eventually get a response. In order to keep track of all
         // send/recv pairs, we increment the count here.
