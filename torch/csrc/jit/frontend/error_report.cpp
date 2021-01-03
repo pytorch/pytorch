@@ -21,7 +21,9 @@ ErrorReport::ErrorReport(const ErrorReport& e)
 
 #ifndef C10_MOBILE
 ErrorReport::ErrorReport(SourceRange r)
-    : context(std::move(r)), error_stack(calls.begin(), calls.end()), hint_stack(hints.begin(), hints.end()) {}
+    : context(std::move(r)),
+      error_stack(calls.begin(), calls.end()),
+      hint_stack(hints.begin(), hints.end()) {}
 
 void ErrorReport::CallStack::update_pending_range(const SourceRange& range) {
   calls.back().caller_range = range;
@@ -37,8 +39,7 @@ ErrorReport::CallStack::~CallStack() {
   calls.pop_back();
 }
 
-ErrorReport::HintStack::HintStack(
-    const std::string& hint) {
+ErrorReport::HintStack::HintStack(const std::string& hint) {
   hints.push_back({hint});
 }
 
@@ -57,8 +58,7 @@ ErrorReport::CallStack::CallStack(
 
 ErrorReport::CallStack::~CallStack() {}
 
-ErrorReport::HintStack::HintStack(
-    const std::string& hint) {}
+ErrorReport::HintStack::HintStack(const std::string& hint) {}
 
 ErrorReport::HintStack::~HintStack() {}
 #endif // C10_MOBILE
