@@ -1001,6 +1001,16 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.bfloat16]),
                    )),
+    UnaryUfuncInfo('rsqrt',
+                   ref=lambda x: np.reciprocal(np.sqrt(x)),
+                   domain=(0, float('inf')),
+                   dtypes=all_types_and_complex_and(torch.bool),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+                   decorators=(precisionOverride({torch.half: 5e-2}),),
+                   promotes_integers_to_float=True,
+                   assert_autodiffed=True,
+                   handles_complex_extremals=False),
     UnaryUfuncInfo('sqrt',
                    ref=np.sqrt,
                    domain=(0, float('inf')),
@@ -1466,6 +1476,10 @@ def method_tests():
         ('ceil', (), NO_ARGS, 'scalar', (True,)),
         ('rad2deg', (S, S, S), NO_ARGS),
         ('deg2rad', (S, S, S), NO_ARGS),
+        # Removing the 'rsqrt' entries leads to failure in
+        # test_index_fill_variable_dim_*
+        # TODO: Remove when fixed.
+        # Reference: https://github.com/pytorch/pytorch/issues/48230
         ('rsqrt', torch.rand(S, S, S) + 1e-2, NO_ARGS, '', (True,)),
         ('rsqrt', uniform_scalar(1e-2, requires_grad=True), NO_ARGS, 'scalar', (True,)),
         ('rsqrt', torch.rand(S, S, S, dtype=torch.cfloat) + 1e-2, NO_ARGS, 'complex', (True,)),
