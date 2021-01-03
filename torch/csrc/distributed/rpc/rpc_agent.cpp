@@ -181,7 +181,7 @@ void RpcAgent::retryExpiredRpcs() {
     for (const auto& it : errorFutures) {
       auto errorFuture = it.first;
       auto errorMsg = it.second;
-      errorFuture->setError(std::make_exception_ptr(errorMsg));
+      errorFuture->setError(std::make_exception_ptr(std::runtime_error(errorMsg)));
     }
     errorFutures.clear();
   }
@@ -224,7 +224,7 @@ void RpcAgent::rpcRetryCallback(
           earliestRpc->options_.maxRetries,
           ").");
       earliestRpc->originalFuture_->setError(
-          std::make_exception_ptr(errorMessage));
+          std::make_exception_ptr(std::runtime_error(errorMessage)));
     }
   } else {
     // This try succeeded, so we can make the original future as complete.
