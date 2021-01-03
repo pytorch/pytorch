@@ -1055,7 +1055,7 @@ void TensorPipeAgent::markFutureWithError(
                      atomicFuture{std::move(atomicFuture)},
                      errorMsg{std::move(errorMsg)}]() mutable {
       atomicFuture->jitFuture->setError(
-          std::make_exception_ptr(std::runtime_error(std::move(errorMsg))));
+          std::make_exception_ptr(std::runtime_error(errorMsg)));
       // The future's callbacks may schedule further RPCs, increasing the count.
       // Thus we must decrease it after completing the future, otherwise it may
       // briefly dip to zero and trick join into thinking all work is done.
