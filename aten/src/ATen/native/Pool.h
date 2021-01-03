@@ -72,12 +72,12 @@ pool2d_shape_check(
   bool valid_dims = input.size(1) != 0 && input.size(2) != 0;
   if (memory_format == at::MemoryFormat::ChannelsLast){
     // Expect tensor in NHWC format and allow 0-dim only for N.
-    TORCH_CHECK((input.ndimension() == 4 && valid_dims && input.size(3) != 0),
+    TORCH_CHECK((ndim == 4 && valid_dims && input.size(3) != 0),
       "Expected 4D (batch mode) tensor expected for input with channels_last layout"
       " with optional 0 dim batch size for input, but got: ", input.sizes());
   } else {
-    TORCH_CHECK((input.ndimension() == 3 && input.size(0) != 0 && valid_dims) ||
-      (input.ndimension() == 4 && valid_dims && input.size(3) != 0),
+    TORCH_CHECK((ndim == 3 && input.size(0) != 0 && valid_dims) ||
+      (ndim == 4 && valid_dims && input.size(3) != 0),
       "Expected 3D or 4D (batch mode) tensor with optional 0 dim batch size for input, but got:",
       input.sizes());
   }
