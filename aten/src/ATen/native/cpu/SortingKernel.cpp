@@ -135,11 +135,13 @@ static void topk_kernel(
     int64_t dim,
     bool largest,
     bool sorted) {
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "topk_cpu", [&] {
-    dim_apply(
-        {self, values, indices},
-        dim,
-        [&](int64_t i, TensorList tl) {
+  AT_DISPATCH_ALL_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      self.scalar_type(),
+      "topk_cpu",
+      [&] {
+        dim_apply({self, values, indices}, dim, [&](int64_t i, TensorList tl) {
           auto tmp_values = tl[0].accessor<scalar_t, 1>();
           auto mode_values = tl[1].accessor<scalar_t, 1>();
           auto mode_indices = tl[2].accessor<int64_t, 1>();
@@ -198,7 +200,7 @@ static void topk_kernel(
             mode_indices[j] = queue[j].second;
           }
         });
-  });
+      });
 }
 
 } // anonymous namespace
