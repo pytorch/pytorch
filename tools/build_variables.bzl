@@ -408,6 +408,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/transform_rfactor.cpp",
     "torch/csrc/jit/codegen/cuda/type.cpp",
     "torch/csrc/jit/tensorexpr/cuda_codegen.cpp",
+    "torch/csrc/jit/runtime/register_cuda_ops.cpp",
 ]
 
 libtorch_cuda_sources = libtorch_cuda_core_sources + [
@@ -503,7 +504,6 @@ libtorch_python_core_sources = [
     "torch/csrc/MemoryFormat.cpp",
     "torch/csrc/QScheme.cpp",
     "torch/csrc/Module.cpp",
-    "torch/csrc/PtrWrapper.cpp",
     "torch/csrc/python_dimname.cpp",
     "torch/csrc/Size.cpp",
     "torch/csrc/Storage.cpp",

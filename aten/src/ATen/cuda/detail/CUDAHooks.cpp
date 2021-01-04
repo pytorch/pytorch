@@ -21,7 +21,7 @@
 #endif
 
 #ifdef USE_MAGMA
-#include <magma.h>
+#include <magma_v2.h>
 #endif
 
 #ifdef __HIP_PLATFORM_HCC__
