@@ -50,7 +50,7 @@ constexpr double generic_float_to_double(T x, int num_frac_bits) {
     throw std::runtime_error("conversion of Inf/NaN is not implemented");
   }
   int exponent = exponent_bits - exponent_offset;
-  double fp64 = pow2(exponent) + fraction * pow2(exponent - num_frac_bits));
+  double fp64 = pow2(exponent) + fraction * pow2(exponent - num_frac_bits);
   if (sign) {
     fp64 = -fp64;
   }
@@ -100,14 +100,14 @@ struct UnderlyingInfo {
 };
 
 #define PY_IINFO(scalar_type, type) \
-  ((IInfo) { \
+  (IInfo { \
     /* scalar_type = */ ScalarType::scalar_type, \
     /* bits = */ sizeof(type)*8, \
     /* min = */ numeric_limits<type>::lowest(), \
     /* max = */ numeric_limits<type>::max() \
   })
 #define PY_FINFO(scalar_type, type) \
-  ((FInfo) { \
+  (FInfo { \
     /* scalar_type = */ ScalarType::scalar_type, \
     /* bits = */ sizeof(type)*8, \
     /* digits10 = */ numeric_limits<type>::digits10, \
@@ -117,11 +117,11 @@ struct UnderlyingInfo {
     /* tiny = */ to_double(numeric_limits<type>::min()) \
   })
 #define PY_UNDERLYING_INFO(scalar_type, underlying_type) \
-  ((UnderlyingInfo) { \
+  (UnderlyingInfo { \
     /* scalar_type = */ ScalarType::scalar_type, \
     /* underlying_type = */ ScalarType::underlying_type \
   })
-#define PY_NOINFO(_scalar_type) ((c10::monostate) {})
+#define PY_NOINFO(_scalar_type) (c10::monostate {})
 
 typedef c10::variant<c10::monostate, IInfo, FInfo, UnderlyingInfo> DtypeInfo;
 
@@ -162,27 +162,27 @@ void initTypeInfoBindings(PyObject* module) {
           "__new__",
           [](ScalarType scalar_type) {
             HANDLE_TH_ERRORS
-            const DtypeInfo& info = &dtype_info_registry[static_cast<size_t>(scalar_type)];
-            const DtypeInfo& target_info;
+            const DtypeInfo& info = dtype_info_registry[static_cast<size_t>(scalar_type)];
+            const DtypeInfo* target_info;
             if (c10::holds_alternative<UnderlyingInfo>(info)) {
               auto underlying_type = c10::get<UnderlyingInfo>(info).underlying_type;
-              target_info = dtype_info_registry[static_cast<size_t>(underlying_type)];
+              target_info = &dtype_info_registry[static_cast<size_t>(underlying_type)];
             } else {
-              target_info = info;
+              target_info = &info;
             }
 
             auto dtype_name = dtypeName(scalar_type);
             TORCH_CHECK_TYPE(
-              !c10::holds_alternative<c10::monostate>(target_info),
+              !c10::holds_alternative<c10::monostate>(*target_info),
               "torch.", dtype_name, " is not supported by torch.iinfo"
             );
             TORCH_CHECK_TYPE(
-              !c10::holds_alternative<FInfo>(target_info),
+              !c10::holds_alternative<FInfo>(*target_info),
               "torch.iinfo() requires an integer input type. "
               "Use torch.finfo to handle torch.", dtype_name
             );
 
-            return c10::get<IInfo>(target_info);
+            return c10::get<IInfo>(*target_info);
             END_HANDLE_TH_ERRORS_PYBIND
           },
           py::return_value_policy::reference,
@@ -212,26 +212,26 @@ void initTypeInfoBindings(PyObject* module) {
             auto scalar_type = type.value_or(tensors::get_default_scalar_type());
 
             const DtypeInfo& info = dtype_info_registry[static_cast<size_t>(scalar_type)];
-            const DtypeInfo& target_info;
+            const DtypeInfo* target_info;
             if (c10::holds_alternative<UnderlyingInfo>(info)) {
               auto underlying_type = c10::get<UnderlyingInfo>(info).underlying_type;
-              target_info = dtype_info_registry[static_cast<size_t>(underlying_type)];
+              target_info = &dtype_info_registry[static_cast<size_t>(underlying_type)];
             } else {
-              target_info = info;
+              target_info = &info;
             }
 
             auto dtype_name = dtypeName(scalar_type);
             TORCH_CHECK_TYPE(
-              !c10::holds_alternative<c10::monostate>(target_info),
+              !c10::holds_alternative<c10::monostate>(*target_info),
               "torch.", dtype_name, " is not supported by torch.finfo"
             );
             TORCH_CHECK_TYPE(
-              !c10::holds_alternative<IInfo>(target_info),
+              !c10::holds_alternative<IInfo>(*target_info),
               "torch.finfo() requires a floating point input type. "
               "Use torch.iinfo to handle torch.", dtype_name
             );
 
-            return c10::get<FInfo>(target_info);
+            return c10::get<FInfo>(*target_info);
             END_HANDLE_TH_ERRORS_PYBIND
           },
           py::return_value_policy::reference,
