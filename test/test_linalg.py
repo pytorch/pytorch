@@ -2796,7 +2796,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float)
-    def test_linalg_qr_autograd_r(self, device, dtype):
+    def test_linalg_qr_autograd_errors(self, device, dtype):
         # torch.linalg.qr(mode='r') returns only 'r' and discards 'q', but
         # without 'q' you cannot compute the backward pass. Check that
         # linalg_qr_backward complains cleanly in that case.
@@ -2805,7 +2805,14 @@ class TestLinalg(TestCase):
         self.assertEqual(q.shape, (0,))  # empty tensor
         b = torch.sum(r)
         with self.assertRaisesRegex(RuntimeError,
-                                    "linalg_qr_backward: cannot compute backward"):
+                                    "The derivative of qr is not implemented when mode='r'"):
+            b.backward()
+        #
+        inp = torch.randn((7, 5), device=device, dtype=dtype, requires_grad=True)
+        q, r = torch.linalg.qr(inp, mode='complete')
+        b = torch.sum(r)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "The derivative of qr is not implemented when mode='complete' and nrows > ncols"):
             b.backward()
 
     @skipCUDAIfNoMagma
