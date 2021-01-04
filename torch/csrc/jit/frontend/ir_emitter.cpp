@@ -989,8 +989,8 @@ struct to_ir {
   }
 
   void emitReturn(const Return& stmt) {
-    Value* result = emitExpr(stmt.expr());
     TypePtr result_type = def_stack_.back().declared_return_type_;
+    Value* result = emitExpr(stmt.expr(), result_type);
     // result type is annotated, every return must convert to that type
     if (result_type) {
       // this guard skips implicit conversion from None -> Tensor for the return
@@ -1128,8 +1128,7 @@ struct to_ir {
     // propagate further in all loaded models. The handling of
     // unwrap_optional will fail in these cases since export did
     // not expect that the input would be none and an unannotated None.
-    // cannot be passed to unwrapoptional To enable this,
-    // we need to (1) implement a real casting operator
+    // To enable this, we need to (1) implement a real casting operator
     // annotated(T, X) that stays in the graph and does the cast
     // and (2) only enable this OPTIONAL_NONE when loading newer
     // graphs because it is incompatible with older graphs.
@@ -1251,10 +1250,12 @@ struct to_ir {
     return graph->create(kind, n_outputs)->setSourceRange(loc);
   }
 
-  Value* emitTernaryIf(const TernaryIf& expr) {
+  Value* emitTernaryIf(
+      const TernaryIf& expr,
+      const TypePtr& type_hint = nullptr) {
     CondValue cond_value = emitCondExpr(expr.cond());
-    auto true_expr = [&] { return emitExpr(expr.true_expr()); };
-    auto false_expr = [&] { return emitExpr(expr.false_expr()); };
+    auto true_expr = [&] { return emitExpr(expr.true_expr(), type_hint); };
+    auto false_expr = [&] { return emitExpr(expr.false_expr(), type_hint); };
     return emitIfExpr(expr.range(), cond_value, true_expr, false_expr);
   }
 
@@ -1280,10 +1281,10 @@ struct to_ir {
       type_set = true;
     }
 
-    // comprehension introduces it's own scope. no variable assigned
+    // comprehension introduces its own scope. no variable assigned
     // leaks into the rest of the graph
     Node* n =
-        graph->insertNode(create(prim::ListComprehensionScope, lc.range(), 0));
+        graph->insertNode(create(prim::ComprehensionScope, lc.range(), 0));
     auto* comprehension_block = n->addBlock();
     pushFrame(comprehension_block);
     WithInsertPoint guard(comprehension_block);
@@ -1300,6 +1301,52 @@ struct to_ir {
     emitFor(targets_list, itrs, loc, emit_body);
     popFrame();
     return list_value;
+  }
+
+  Value* emitDictComprehension(const DictComp& dc, const TypePtr& type_hint) {
+    const auto loc = dc.range();
+    const auto targets_list = List<Expr>::create(dc.range(), {dc.target()});
+    const auto itrs = List<Expr>::create(dc.range(), {dc.iter()});
+
+    Value* dict_value =
+        graph->insertNode(graph->create(prim::DictConstruct, 1))->output();
+    // Set the default type to be Dict[Str, Tensor]
+    dict_value->setType(DictType::create(StringType::get(), TensorType::get()));
+    bool type_set = false;
+    if (type_hint) {
+      if (!type_hint->cast<DictType>()) {
+        throw ErrorReport(loc)
+            << "Expected Dict type annotation for dict comprehension"
+               ", found "
+            << type_hint->repr_str();
+      }
+      dict_value->setType(type_hint);
+      type_set = true;
+    }
+
+    // A dict comprehension introduces its own scope. No variable assigned
+    // may leak into the rest of the graph
+    Node* n =
+        graph->insertNode(create(prim::ComprehensionScope, dc.range(), 0));
+    auto* comprehension_block = n->addBlock();
+    pushFrame(comprehension_block);
+    WithInsertPoint guard(comprehension_block);
+    auto emit_body = [&]() {
+      auto k = emitExpr(dc.key());
+      auto v = emitExpr(dc.value());
+      if (!type_set) {
+        dict_value->setType(DictType::create(k->type(), v->type()));
+        type_set = true;
+      }
+      NamedValue self = NamedValue(loc, "self", dict_value);
+      NamedValue input_k = NamedValue(loc, "", k);
+      NamedValue input_v = NamedValue(loc, "", v);
+      emitBuiltinCall(
+          loc, *graph, aten::_set_item, {self, input_k, input_v}, {});
+    };
+    emitFor(targets_list, itrs, loc, emit_body);
+    popFrame();
+    return dict_value;
   }
 
   // Insert subtyping refinements
@@ -2003,6 +2050,18 @@ struct to_ir {
         return use_inplace_op ? aten::mul_ : aten::mul;
       case '%':
         return use_inplace_op ? aten::fmod_ : aten::fmod;
+      case '|':
+        return use_inplace_op ? aten::bitwise_or : aten::__or__;
+      case '&':
+        return use_inplace_op ? aten::bitwise_and : aten::__and__;
+      case '^':
+        return use_inplace_op ? aten::bitwise_xor : aten::__xor__;
+      case TK_LSHIFT:
+        return use_inplace_op ? aten::__lshift__ : aten::__lshift__;
+      case TK_RSHIFT:
+        return use_inplace_op ? aten::__irshift__ : aten::__rshift__;
+      case TK_POW:
+        return aten::pow;
       default:
         throw ErrorReport(stmt)
             << "Unknown augmented assignment: " << kindToString(stmt.aug_op());
@@ -2954,7 +3013,15 @@ struct to_ir {
     // Push the source range of a call in case compiling this function
     // triggers an error
     ErrorReport::CallStack::update_pending_range(tree.range());
-    return emitSugaredExpr(tree, 1, type_hint)->asValue(tree.range(), method);
+    Value* out_val =
+        emitSugaredExpr(tree, 1, type_hint)->asValue(tree.range(), method);
+    // AnyType is the only user-exposed type which we don't unify to from
+    // its subtypes, so we add a cast for use cases like
+    // x : Any = 1 if cond else "str"
+    if (type_hint == AnyType::get() && out_val->type() != AnyType::get()) {
+      out_val = graph->insertUncheckedCast(out_val, type_hint);
+    }
+    return out_val;
   }
 
   NodeKind reverseComparision(NodeKind kind) {
@@ -3289,7 +3356,7 @@ struct to_ir {
         return graph->insertConstant(IValue(), tree->range());
       } break;
       case TK_IF_EXPR: {
-        return emitTernaryIf(TernaryIf(tree));
+        return emitTernaryIf(TernaryIf(tree), type_hint);
       } break;
       case TK_STRINGLITERAL: {
         return emitStringLiteral(StringLiteral(tree));
@@ -3396,6 +3463,10 @@ struct to_ir {
       case TK_LIST_COMP: {
         auto lc = ListComp(tree);
         return emitListComprehension(lc, type_hint);
+      } break;
+      case TK_DICT_COMP: {
+        auto dc = DictComp(tree);
+        return emitDictComprehension(dc, type_hint);
       } break;
       default:
         throw ErrorReport(tree) << "Cannot emit expr for: " << tree;

@@ -610,6 +610,10 @@ def select(g, self, dim, index):
         return g.op("Gather", self, index, axis_i=dim)
 
 
+def square(g, self):
+    return g.op("Mul", self, self)
+
+
 def squeeze(g, self, dim=None):
     if dim is None:
         return g.op("Squeeze", self)
@@ -932,7 +936,7 @@ adaptive_max_pool3d = _adaptive_pool('adaptive_max_pool3d', "MaxPool", _triple, 
 
 
 # Generate paddings in ONNX order based on pad in pytorch.
-# Arguments:
+# Args:
 #     dim: the dimension of the tensor.
 #     pad: the paddings in pytorch.
 #          The order is dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, ...
@@ -1916,6 +1920,9 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
                        'ScaledTanh', 'HardSigmoid', 'Elu', 'Softsign', 'Softplus']
     variantToOnnxActivationMap = dict(zip([act_fun.lower() for act_fun in onnxActivations], onnxActivations))
     weights_per_layer = 4 if has_biases else 2
+    # this means that projections are used inside LSTM, so need to tell user that it's not supported
+    if variant == 'LSTM' and len(all_weights) != num_layers * weights_per_layer * (1 + bidirectional):
+        return _unimplemented("LSTM", "LSTMs with projections")
     assert len(all_weights) == num_layers * weights_per_layer * (1 + bidirectional)
     layer_weights = [all_weights[i:i + weights_per_layer] for i in range(0, len(all_weights), weights_per_layer)]
     if batch_first:

@@ -7,7 +7,7 @@ namespace caffe2 {
 
 // A wrapper function to shut down protobuf library (this is needed in ASAN
 // testing and valgrind cases to avoid protobuf appearing to "leak" memory).
-CAFFE2_API void ShutdownProtobufLibrary();
+TORCH_API void ShutdownProtobufLibrary();
 
 } // namespace caffe2
 
