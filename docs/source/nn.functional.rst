@@ -496,6 +496,11 @@ Vision functions
 
 .. autofunction:: pixel_shuffle
 
+:hidden:`pixel_unshuffle`
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: pixel_unshuffle
+
 :hidden:`pad`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
