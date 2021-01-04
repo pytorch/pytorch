@@ -15,7 +15,7 @@ struct OperatorKernel;
 // no overhead to fallthrough to the next key.  See cpp file for some more
 // implementation notes; notably, this does NOT actually go through the
 // boxing/unboxing codepath.
-CAFFE2_API void fallthrough_kernel(OperatorKernel*, const OperatorHandle&, Stack*);
+TORCH_API void fallthrough_kernel(OperatorKernel*, const OperatorHandle&, Stack*);
 
 // Note [Ambiguity in AutogradOther kernel]
 // This kernel implements reporting an error message when there're kernels registered
@@ -27,7 +27,7 @@ CAFFE2_API void fallthrough_kernel(OperatorKernel*, const OperatorHandle&, Stack
 //   See c10/core/DispatchKeySet.cpp for a list of backends mapped to AutogradOther.
 // Thus if backend extender indeed want to override Math kernel behavior, they should request
 // a dedicated Autograd key for their backend to resolve the ambiguity.
-CAFFE2_API void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHandle&, Stack*);
+TORCH_API void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHandle&, Stack*);
 
 // Note [named_not_supported_kernel]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -36,7 +36,7 @@ CAFFE2_API void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHa
 // cased in the dispatcher to be triggered before we attempt boxing (so we can
 // give a good error message in cases when boxing is not supported).  When
 // boxing is universally supported this can be removed.
-[[noreturn]] CAFFE2_API void named_not_supported_kernel(OperatorKernel*, const OperatorHandle&, Stack*);
+[[noreturn]] TORCH_API void named_not_supported_kernel(OperatorKernel*, const OperatorHandle&, Stack*);
 
 /**
  * KernelFunction is similar to std::function but stores a kernel function.
@@ -44,7 +44,7 @@ CAFFE2_API void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHa
  * and call it in a boxed or unboxed way. If the way it was created doesn't
  * match the way it was called, it will do boxing or unboxing as necessary.
  */
-class CAFFE2_API KernelFunction final {
+class TORCH_API KernelFunction final {
 public:
   // This is how boxed kernels are actually stored
   using InternalBoxedKernelFunction = void(OperatorKernel*, const OperatorHandle&, Stack*);

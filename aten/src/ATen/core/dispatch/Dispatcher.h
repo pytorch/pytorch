@@ -16,7 +16,7 @@
 
 namespace c10 {
 
-class CAFFE2_API OperatorHandle;
+class TORCH_API OperatorHandle;
 template<class FuncType> class TypedOperatorHandle;
 
 /**
@@ -27,7 +27,7 @@ template<class FuncType> class TypedOperatorHandle;
  * NB: registration events only occur when a 'def' occurs; we don't trigger
  * on 'impl' or 'fallback' calls.
  */
-class CAFFE2_API OpRegistrationListener {
+class TORCH_API OpRegistrationListener {
 public:
   virtual ~OpRegistrationListener();
 
@@ -45,7 +45,7 @@ class SchemaRegistrationHandleRAII;
  * Most end users shouldn't use this directly; if you're trying to register
  * ops look in op_registration
  */
-class CAFFE2_API Dispatcher final {
+class TORCH_API Dispatcher final {
 private:
   // For direct access to backend fallback information
   friend class impl::OperatorEntry;
@@ -267,7 +267,7 @@ private:
  * This handle can be used to register kernels with the dispatcher or
  * to lookup a kernel for a certain set of arguments.
  */
-class CAFFE2_API OperatorHandle {
+class TORCH_API OperatorHandle {
 public:
   OperatorHandle(OperatorHandle&&) noexcept = default;
   OperatorHandle& operator=(OperatorHandle&&) noexcept = default;

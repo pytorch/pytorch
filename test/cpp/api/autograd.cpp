@@ -175,7 +175,7 @@ TEST(AutogradAPITests, AnomalyMode) {
     auto y = x.pow(1.5);
     auto gr =
         grad({y}, {x}, {}, /*retain_graph=*/true, /*create_backward=*/true);
-    ASSERT_THROWS_WITH(grad({gr[0]}, {x});, "returned nan");
+    ASSERT_THROWS_WITH(grad({gr[0]}, {x}, {torch::tensor({0.0})});, "returned nan");
     auto msgs = warnings.messages();
     ASSERT_EQ(msgs.size(), 2);
     ASSERT_TRUE(
@@ -681,6 +681,8 @@ TEST(CustomAutogradTest, ReentrantPriority) {
   ASSERT_EQ(order.size(), 10);
   ASSERT_EQ(std::count(order.begin(), order.end(), 1), 9);
   ASSERT_EQ(order.back(), 0);
+  // Clear static variable in case test get executed in a loop
+  order.clear();
 }
 
 TEST(CustomAutogradTest, Hooks) {

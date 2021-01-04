@@ -574,6 +574,7 @@ import torch.fft
 import torch.futures
 import torch.nn
 import torch.nn.intrinsic
+import torch.nn.quantizable
 import torch.nn.quantized
 import torch.optim
 import torch.optim._multi_tensor
@@ -596,6 +597,7 @@ import torch.quantization
 import torch.utils.data
 import torch.__config__
 import torch.__future__
+import torch.profiler
 
 _C._init_names(list(torch._storage_classes))
 

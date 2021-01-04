@@ -87,7 +87,7 @@ namespace {
   }
 
   TEST(BFloat16Math, Addition) {
-    // This test verifies that if only first 7 bits of float's mantisa are
+    // This test verifies that if only first 7 bits of float's mantissa are
     // changed after addition, we should have no loss in precision.
 
     // input bits
@@ -108,8 +108,8 @@ namespace {
     EXPECT_EQ(res, expected);
   }
 
-  TEST(BFloat16Math, Substraction) {
-    // This test verifies that if only first 7 bits of float's mantisa are
+  TEST(BFloat16Math, Subtraction) {
+    // This test verifies that if only first 7 bits of float's mantissa are
     // changed after subtraction, we should have no loss in precision.
 
     // input bits

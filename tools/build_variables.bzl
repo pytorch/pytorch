@@ -89,6 +89,9 @@ jit_core_sources = [
 core_sources_common = [
     "torch/csrc/autograd/profiler_legacy.cpp",
     "torch/csrc/autograd/profiler_kineto.cpp",
+    "torch/csrc/autograd/profiler_utils.cpp",
+    "torch/csrc/autograd/autograd_meta.cpp",
+    "torch/csrc/autograd/forward_grad.cpp",
     "torch/csrc/jit/frontend/edit_distance.cpp",
     "torch/csrc/jit/frontend/string_to_type.cpp",
     "torch/csrc/jit/mobile/type_parser.cpp",
@@ -353,9 +356,8 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
 def libtorch_sources(gencode_pattern = ":generate-code[{}]"):
     return libtorch_generated_sources(gencode_pattern) + libtorch_core_sources + libtorch_distributed_sources + libtorch_extra_sources
 
-libtorch_cuda_sources = [
+libtorch_cuda_core_sources = [
     "torch/csrc/cuda/comm.cpp",
-    "torch/csrc/cuda/nccl.cpp",
     "torch/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp",
     "torch/csrc/autograd/profiler_cuda.cpp",
     "torch/csrc/autograd/functions/comm.cpp",
@@ -406,6 +408,11 @@ libtorch_cuda_sources = [
     "torch/csrc/jit/codegen/cuda/transform_rfactor.cpp",
     "torch/csrc/jit/codegen/cuda/type.cpp",
     "torch/csrc/jit/tensorexpr/cuda_codegen.cpp",
+    "torch/csrc/jit/runtime/register_cuda_ops.cpp",
+]
+
+libtorch_cuda_sources = libtorch_cuda_core_sources + [
+    "torch/csrc/cuda/nccl.cpp",
 ]
 
 torch_cpp_srcs = [
@@ -497,7 +504,6 @@ libtorch_python_core_sources = [
     "torch/csrc/MemoryFormat.cpp",
     "torch/csrc/QScheme.cpp",
     "torch/csrc/Module.cpp",
-    "torch/csrc/PtrWrapper.cpp",
     "torch/csrc/python_dimname.cpp",
     "torch/csrc/Size.cpp",
     "torch/csrc/Storage.cpp",
@@ -534,6 +540,7 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/passes/onnx/unpack_quantized_weights.cpp",
     "torch/csrc/jit/passes/onnx/remove_inplace_ops_for_onnx.cpp",
     "torch/csrc/jit/passes/onnx/shape_type_inference.cpp",
+    "torch/csrc/jit/python/pybind_utils.cpp",
     "torch/csrc/jit/python/python_arg_flatten.cpp",
     "torch/csrc/jit/python/python_custom_class.cpp",
     "torch/csrc/jit/python/python_interpreter.cpp",

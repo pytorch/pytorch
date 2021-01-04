@@ -19,6 +19,7 @@ from .grad_mode import no_grad, enable_grad, set_grad_enabled
 from .anomaly_mode import detect_anomaly, set_detect_anomaly
 from ..overrides import has_torch_function, handle_torch_function
 from . import functional
+from . import forward_ad
 
 __all__ = ['Variable', 'Function', 'backward', 'grad_mode']
 
@@ -101,7 +102,7 @@ def backward(
         in a user-specified CUDA stream context, see
         :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
 
-    Arguments:
+    Args:
         tensors (sequence of Tensor): Tensors of which the derivative will be
             computed.
         grad_tensors (sequence of (Tensor or None)): The "vector" in the Jacobian-vector
@@ -173,7 +174,7 @@ def grad(
         in a user-specified CUDA stream context, see
         :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
 
-    Arguments:
+    Args:
         outputs (sequence of Tensor): outputs of the differentiated function.
         inputs (sequence of Tensor): Inputs w.r.t. which the gradient will be
             returned (and not accumulated into ``.grad``).
