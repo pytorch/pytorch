@@ -14,7 +14,7 @@ namespace rpc {
 // RequestCallback implementation with no Python dependencies.
 class TORCH_API RequestCallbackNoPython : public RequestCallback {
  public:
-  std::shared_ptr<FutureMessage> processMessage(
+  std::shared_ptr<JitFuture> processMessage(
       Message& request) const override;
 
  protected:

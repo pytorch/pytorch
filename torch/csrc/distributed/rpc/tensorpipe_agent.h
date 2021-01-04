@@ -249,7 +249,7 @@ class TensorPipeAgent : public RpcAgent {
 
   void sendCompletedResponseMessage(
       std::shared_ptr<tensorpipe::Pipe>& pipe,
-      std::shared_ptr<FutureMessage>& futureResponseMessage,
+      std::shared_ptr<JitFuture>& futureResponseMessage,
       uint64_t messageId);
 
   // Collects metrics from successful RPC calls

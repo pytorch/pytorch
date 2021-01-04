@@ -48,7 +48,7 @@ std::unique_ptr<RpcCommandBase> RequestCallbackNoPython::
   return rpc;
 }
 
-std::shared_ptr<FutureMessage> RequestCallbackNoPython::processMessage(
+std::shared_ptr<JitFuture> RequestCallbackNoPython::processMessage(
     Message& request) const {
   // We need two futures here because it could pause twice when processing a
   // RPC message:
@@ -105,7 +105,7 @@ std::shared_ptr<FutureMessage> RequestCallbackNoPython::processMessage(
     retFuture->markCompleted(handleError(e, request.type(), request.id()));
     rrefContext.clearRecordedPendingRRefsOnError();
   }
-  return RpcAgent::toFutureMessage(std::move(retFuture));
+  return retFuture;
 }
 
 void RequestCallbackNoPython::processRpcWithErrors(

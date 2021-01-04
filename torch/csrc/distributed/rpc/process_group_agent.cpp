@@ -514,22 +514,25 @@ bool ProcessGroupAgent::handleRecv(RecvWork& work) {
       std::move(data.first), std::move(data.second), work.type_, work.id_);
   if (message.isRequest()) {
     ++serverActiveCalls_;
-    std::shared_ptr<FutureMessage> futureResponse;
+    auto futureResponse =
+        std::make_shared<JitFuture>(at::AnyClassType::get());
     try {
       futureResponse = cb_->operator()(message);
     } catch (const std::exception& e) {
-      futureResponse = std::make_shared<FutureMessage>();
-      futureResponse->setError(e.what());
+      futureResponse = std::make_shared<JitFuture>(at::AnyClassType::get());
+      futureResponse->setError(std::current_exception());
     }
     if (futureResponse->completed()) {
       --serverActiveCalls_;
       if (!futureResponse->hasError()) {
-        send(work.from_, std::move(*futureResponse).moveValue());
+        send(
+            work.from_,
+            std::move(*futureResponse->value().toCustomClass<Message>()));
       } else {
         send(
             work.from_,
             createExceptionResponse(
-                futureResponse->error()->what(), message.id()));
+                futureResponse->tryRetrieveErrorMessage(), message.id()));
       }
     } else {
       ++serverActiveAsyncCalls_;
@@ -541,19 +544,21 @@ bool ProcessGroupAgent::handleRecv(RecvWork& work) {
       futureResponse->addCallback([this,
                                    fromId,
                                    requestId,
-                                   weak = std::weak_ptr<FutureMessage>(
+                                   weak = std::weak_ptr<JitFuture>(
                                        futureResponse)]() {
         auto futureResponse = weak.lock();
         TORCH_INTERNAL_ASSERT(futureResponse);
         --serverActiveCalls_;
         --serverActiveAsyncCalls_;
         if (!futureResponse->hasError()) {
-          send(getWorkerInfo(fromId), std::move(*futureResponse).moveValue());
+          send(
+              getWorkerInfo(fromId),
+              std::move(*futureResponse->value().toCustomClass<Message>()));
         } else {
           send(
               getWorkerInfo(fromId),
               createExceptionResponse(
-                  futureResponse->error()->what(), requestId));
+                  futureResponse->tryRetrieveErrorMessage(), requestId));
         }
       });
     }

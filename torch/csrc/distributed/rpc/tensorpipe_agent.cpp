@@ -464,7 +464,7 @@ void TensorPipeAgent::pipeWrite(
 
 void TensorPipeAgent::sendCompletedResponseMessage(
     std::shared_ptr<tensorpipe::Pipe>& pipe,
-    std::shared_ptr<FutureMessage>& futureResponseMessage,
+    std::shared_ptr<JitFuture>& futureResponseMessage,
     uint64_t messageId) {
   if (!rpcAgentRunning_.load()) {
     LOG(WARNING) << "RPC agent for " << workerInfo_.name_
@@ -477,17 +477,19 @@ void TensorPipeAgent::sendCompletedResponseMessage(
           << " is sending response to request #" << messageId << " to "
           << pipe->getRemoteName();
 
-  const c10::optional<utils::FutureError> error =
-      futureResponseMessage->error();
-  Message&& responseMessage = std::move(*futureResponseMessage).moveValue();
-  responseMessage.setId(messageId);
-  if (!error) {
+  //const c10::optional<utils::FutureError> error =
+  //    futureResponseMessage->error();
+  //Message&& responseMessage = std::move(*futureResponseMessage).moveValue();
+  //responseMessage.setId(messageId);
+  //if (!error) {
+  if (!futureResponseMessage->hasError()) {
+    Message&& responseMessage =
+        std::move(*futureResponseMessage->value().toCustomClass<Message>());
     std::vector<c10::DeviceIndex> devices;
-
     try {
       devices = getDevicesForTensors(pipe->getRemoteName(), responseMessage);
     } catch (const std::exception& e) {
-      responseMessage = createExceptionResponse(e.what(), responseMessage.id());
+      responseMessage = createExceptionResponse(e.what(), messageId);
     }
 
     pipeWrite(
@@ -511,7 +513,8 @@ void TensorPipeAgent::sendCompletedResponseMessage(
   } else {
     pipeWrite(
         pipe,
-        createExceptionResponse(error->what(), responseMessage.id()),
+        createExceptionResponse(
+            futureResponseMessage->tryRetrieveErrorMessage(), messageId),
         {},
         [this, pipe, messageId](const tensorpipe::Error& error) {
           if (error) {
@@ -572,12 +575,14 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
                   << " is running request #" << messageId << " from "
                   << pipe->getRemoteName() << " in thread pool";
 
-          std::shared_ptr<FutureMessage> futureResponseMessage;
+          auto futureResponseMessage =
+              std::make_shared<JitFuture>(at::AnyClassType::get());
           try {
             futureResponseMessage = cb_->operator()(requestMessage);
-          } catch (const std::exception& e) {
-            futureResponseMessage = std::make_shared<FutureMessage>();
-            futureResponseMessage->setError(e.what());
+          } catch (const std::exception& /* unused */) {
+            futureResponseMessage =
+                std::make_shared<JitFuture>(at::AnyClassType::get());
+            futureResponseMessage->setError(std::current_exception());
           }
 
           // Shortcut if immediately done
