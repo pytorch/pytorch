@@ -1,14 +1,14 @@
 import collections
 import gc
+import io
 import unittest
 
-import tempfile
 import torch
 import torch.nn as nn
 import torch.optim
 import torch.utils.data
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, TEST_WITH_ASAN, IS_WINDOWS)
+    TestCase, run_tests, TEST_WITH_ASAN, IS_WINDOWS, TemporaryFileName)
 import torch.autograd.profiler as profiler
 from torch.autograd.profiler import profile
 from torch.autograd import kineto_available
@@ -289,9 +289,10 @@ class TestProfiler(TestCase):
             z = torch.mm(x, y)
             z = z + y
 
-        with tempfile.NamedTemporaryFile(mode="w+") as f:
-            p.export_stacks(f.name)
-            lines = f.readlines()
+        with TemporaryFileName(mode="w+") as fname:
+            p.export_stacks(fname)
+            with io.open(fname, 'r') as f:
+                lines = f.readlines()
             assert len(lines) > 0, "Empty stacks file"
             for line in lines:
                 is_int = False

@@ -35,6 +35,7 @@ from jit.test_profiler import TestProfiler  # noqa: F401
 from jit.test_slice import TestSlice  # noqa: F401
 from jit.test_warn import TestWarn  # noqa: F401
 from jit.test_isinstance import TestIsinstance  # noqa: F401
+from jit.test_cuda import TestCUDA  # noqa: F401
 from jit.test_hash import TestHash  # noqa: F401
 
 # Torch
@@ -2393,8 +2394,7 @@ graph(%Ra, %Rb):
         warns = [str(w.message) for w in warns]
         self.assertEqual(len(warns), 0)
 
-    @unittest.skipIf(IS_WINDOWS or True, "TODO: need to fix this test case for "
-                                         "Windows, re-enable with https://github.com/pytorch/pytorch/pull/29339")
+    @unittest.skipIf(True, "TODO: re-enable with https://github.com/pytorch/pytorch/pull/29339")
     def test_torch_load_error(self):
         class J(torch.jit.ScriptModule):
             def __init__(self):
@@ -2405,20 +2405,20 @@ graph(%Ra, %Rb):
                 return input + 100
 
         j = J()
-        with tempfile.NamedTemporaryFile() as f:
-            j.save(f.name)
+        with TemporaryFileName() as fname:
+            j.save(fname)
             with self.assertRaisesRegex(RuntimeError, "is a zip"):
-                torch.load(f.name)
+                torch.load(fname)
 
-    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     def test_torch_load_zipfile_check(self):
         @torch.jit.script
         def fn(x):
             return x + 10
 
-        with tempfile.NamedTemporaryFile() as f:
-            fn.save(f.name)
-            self.assertTrue(torch.serialization._is_zipfile(f))
+        with TemporaryFileName() as fname:
+            fn.save(fname)
+            with io.open(fname, 'rb') as f:
+                self.assertTrue(torch.serialization._is_zipfile(f))
 
     def test_python_bindings(self):
         lstm_cell = torch.jit.script(LSTMCellS)
@@ -6529,6 +6529,24 @@ a")
         self.checkScript(func, inputs_true, optimize=True)
         self.checkScript(func, inputs_false, optimize=True)
 
+    def test_ternary_module_type_hint(self):
+        class M1(torch.nn.Module):
+            def forward(self) -> Any:
+                return 'out' if self.training else {}
+
+        class M2(torch.nn.Module):
+            def forward(self) -> Any:
+                out: Any = 'out' if self.training else {}
+                return out
+
+        class M3(torch.nn.Module):
+            def forward(self) -> Optional[int]:
+                return None if self.training else 1
+
+        for module in [M1, M2, M3]:
+            self.checkModule(module().train(), ())
+            self.checkModule(module().eval(), ())
+
     def test_print(self):
         def func(x, y):
             q = (x + y).sigmoid()
@@ -6734,6 +6752,11 @@ a")
             return result
 
         self.checkScript(complicated_arithmetic_operation, ())
+
+    def test_in_operator_with_two_strings(self):
+        def fn() -> bool:
+            return "a" in "abcd"
+        self.checkScript(fn, ())
 
     def test_bitwise_ops(self):
 
@@ -8874,7 +8897,7 @@ dedent """
     def test_torch_functional(self):
         def stft(input, n_fft):
             # type: (Tensor, int) -> Tensor
-            return torch.stft(input, n_fft)
+            return torch.stft(input, n_fft, return_complex=True)
 
         inps = (torch.randn(10), 7)
         self.assertEqual(stft(*inps), torch.jit.script(stft)(*inps))
@@ -8883,8 +8906,8 @@ dedent """
             # type: (Tensor, int) -> Tensor
             return torch.istft(input, n_fft)
 
-        inps2 = (torch.stft(*inps), inps[1])
-        self.assertEqual(torch.istft(*inps2), torch.jit.script(torch.istft)(*inps2))
+        inps2 = (stft(*inps), inps[1])
+        self.assertEqual(istft(*inps2), torch.jit.script(istft)(*inps2))
 
         def lu(x):
             # type: (Tensor) -> Tuple[Tensor, Tensor]

@@ -33,7 +33,7 @@ TEST(ATen, _cast_Float) {
     a_v(i) = i;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -61,7 +61,7 @@ TEST(ATen, negInt) {
     a_v(i) = i;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -89,7 +89,7 @@ TEST(ATen, negFloat) {
     a_v(i) = i;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -124,7 +124,7 @@ TEST(ATen, addInt) {
     c_v(i) = 3 * i + 2;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf, d_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf, d_buf});
   ir_eval(a_v, b_v, c_v, d_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -161,7 +161,7 @@ TEST(ATen, addFloat) {
     c_v(i) = 3 * i + 2;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf, d_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf, d_buf});
   ir_eval(a_v, b_v, c_v, d_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -198,7 +198,7 @@ TEST(ATen, subInt) {
     c_v(i) = 3 * i + 2;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf, d_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf, d_buf});
   ir_eval(a_v, b_v, c_v, d_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -235,7 +235,7 @@ TEST(ATen, subFloat) {
     c_v(i) = 3 * i + 2;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf, d_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf, d_buf});
   ir_eval(a_v, b_v, c_v, d_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -272,7 +272,7 @@ TEST(ATen, lerp) {
     c_v(i) = 3 * i + 2;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf, d_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf, d_buf});
   ir_eval(a_v, b_v, c_v, d_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -313,7 +313,7 @@ TEST(ATen, addcmulInt) {
     d_v(i) = 5 * i + 3;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf, d_buf, e_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf, d_buf, e_buf});
   ir_eval(a_v, b_v, c_v, d_v, e_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -355,7 +355,7 @@ TEST(ATen, addcmulFloat) {
     d_v(i) = 5 * i + 3;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf, d_buf, e_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf, d_buf, e_buf});
   ir_eval(a_v, b_v, c_v, d_v, e_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -389,7 +389,7 @@ TEST(ATen, mulInt) {
     b_v(i) = 2 * i + 1;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -421,7 +421,7 @@ TEST(ATen, mulFloat) {
     b_v(i) = 2 * i + 1;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -453,7 +453,7 @@ TEST(ATen, divInt) {
     b_v(i) = i + 1;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -485,7 +485,7 @@ TEST(ATen, divFloat) {
     b_v(i) = i + 1;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -517,7 +517,7 @@ TEST(ATen, maxInt) {
     b_v(i) = 2 * i + 1;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -549,7 +549,7 @@ TEST(ATen, maxFloat) {
     b_v(i) = 2 * i + 1;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -581,7 +581,7 @@ TEST(ATen, minInt) {
     b_v(i) = 2 * i + 1;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -613,7 +613,7 @@ TEST(ATen, minFloat) {
     b_v(i) = 2 * i + 1;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -641,7 +641,7 @@ void __ubsan_ignore_float_divide_by_zero__ testATenreciprocal() {
     a_v(i) = i;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -668,7 +668,7 @@ TEST(ATen, reluInt) {
     a_v(i) = i - 64;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -697,7 +697,7 @@ TEST(ATen, reluFloat) {
     a_v(i) = i - 64;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -724,7 +724,7 @@ TEST(ATen, logFloat) {
     a_v(i) = i + 10;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -751,7 +751,7 @@ TEST(ATen, fastLogFloat) {
     a_v(i) = at::randn({1}).item().to<float>();
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -783,7 +783,7 @@ TEST(ATen, log10Float) {
     a_v(i) = i + 10;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -810,7 +810,7 @@ TEST(ATen, log2Float) {
     a_v(i) = i + 10;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -837,7 +837,7 @@ TEST(ATen, expFloat) {
     a_v(i) = i / 10.0f;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -864,7 +864,7 @@ TEST(ATen, erfFloat) {
     a_v(i) = i / 10.0f;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -891,7 +891,7 @@ TEST(ATen, cosFloat) {
     a_v(i) = i / 10.0f;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -920,7 +920,7 @@ TEST(ATen, eqInt) {
           CompareSelect::make(
               a.load(i), b.load(i), CompareSelectOperation::kEQ)));
 
-  SimpleIREvaluator ir_eval(memcpy_expr, a, b, c);
+  SimpleIREvaluator ir_eval(memcpy_expr, {a, b, c});
   ir_eval(a_buffer, b_buffer, c_buffer);
 
   assertAllEqual(c_buffer, 1);
@@ -946,7 +946,7 @@ TEST(ATen, geInt) {
           CompareSelect::make(
               a.load(i), b.load(i), CompareSelectOperation::kGE)));
 
-  SimpleIREvaluator ir_eval(memcpy_expr, a, b, c);
+  SimpleIREvaluator ir_eval(memcpy_expr, {a, b, c});
   ir_eval(a_buffer, b_buffer, c_buffer);
 
   assertAllEqual(c_buffer, 1);
@@ -972,7 +972,7 @@ TEST(ATen, gtInt) {
           CompareSelect::make(
               a.load(i), b.load(i), CompareSelectOperation::kGT)));
 
-  SimpleIREvaluator ir_eval(memcpy_expr, a, b, c);
+  SimpleIREvaluator ir_eval(memcpy_expr, {a, b, c});
   ir_eval(a_buffer, b_buffer, c_buffer);
 
   assertAllEqual(c_buffer, 1);
@@ -998,7 +998,7 @@ TEST(ATen, leInt) {
           CompareSelect::make(
               a.load(i), b.load(i), CompareSelectOperation::kLE)));
 
-  SimpleIREvaluator ir_eval(memcpy_expr, a, b, c);
+  SimpleIREvaluator ir_eval(memcpy_expr, {a, b, c});
   ir_eval(a_buffer, b_buffer, c_buffer);
 
   assertAllEqual(c_buffer, 1);
@@ -1024,7 +1024,7 @@ TEST(ATen, ltInt) {
           CompareSelect::make(
               a.load(i), b.load(i), CompareSelectOperation::kLT)));
 
-  SimpleIREvaluator ir_eval(memcpy_expr, a, b, c);
+  SimpleIREvaluator ir_eval(memcpy_expr, {a, b, c});
   ir_eval(a_buffer, b_buffer, c_buffer);
 
   assertAllEqual(c_buffer, 0);
