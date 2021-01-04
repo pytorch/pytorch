@@ -565,6 +565,7 @@ bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
     } else if (item.a.isFuture()) {
       auto af = item.a.toFuture();
       auto bf = item.b.toFuture();
+      // FIXME Should the wait be non-blocking?
       af->wait();
       bf->wait();
       work.emplace_back(Work{af->value(), bf->value()});

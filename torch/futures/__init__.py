@@ -30,7 +30,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         """
         return super().done()
 
-    def wait(self) -> T:
+    def wait(self, non_blocking: bool = False) -> T:
         r"""
         Block until the value of this ``Future`` is ready.
 
@@ -39,7 +39,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
             creating the value has thrown an error, this ``wait`` method will
             also throw an error.
         """
-        return super().wait()
+        return super().wait(non_blocking)
 
     # Have to use string annotations because  PEP-0563 is not available in 3.6
     def then(self, callback):  # type: (Callable[[Future[T]], S]) -> Future[S]
@@ -180,7 +180,7 @@ def collect_all(futures: List[Future]) -> Future[List[Future]]:
     return cast(Future[List[Future]], torch._C._collect_all(cast(List[torch._C.Future], futures)))
 
 
-def wait_all(futures: List[Future]) -> List:
+def wait_all(futures: List[Future], non_blocking: bool = False) -> List:
     r"""
     Waits for all provided futures to be complete, and returns
     the list of completed values.
@@ -193,4 +193,7 @@ def wait_all(futures: List[Future]) -> List:
         method will throw an error if ``wait`` on any
         :class:`~torch.futures.Future` throws.
     """
-    return [fut.wait() for fut in torch._C._collect_all(cast(List[torch._C.Future], futures)).wait()]
+    return [
+        fut.wait(non_blocking)
+        for fut in torch._C._collect_all(cast(List[torch._C.Future], futures)).wait()
+    ]

@@ -1672,6 +1672,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
 
   void run(Stack& stack) {
     if (runImpl(stack)) {
+      // FIXME Should the wait be non-blocking?
       future_->wait();
 
       auto num_outputs = frames.front().function->n_outputs;

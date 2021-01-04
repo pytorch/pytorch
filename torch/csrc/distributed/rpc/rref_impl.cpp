@@ -236,6 +236,7 @@ const IValue& OwnerRRef::getValue() const {
       !getTimedOut(),
       "RRef creation via rpc.remote() timed out, and it "
       "is possible that the RRef on the owner node does not exist.");
+  // FIXME Should the wait be non-blocking? Or should we expose the flag too?
   future_->wait();
   if (future_->hasError()) {
     (void)future_->value(); // Throws the error.

@@ -1156,6 +1156,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "wait",
           &PythonFutureWrapper::wait,
+          py::arg("non_blocking") = false,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "then",
@@ -1243,9 +1244,12 @@ void initJITBindings(PyObject* module) {
     }
   });
 
-  m.def("wait", [](const std::shared_ptr<PythonFutureWrapper>& fut) {
-    return fut->wait();
-  });
+  m.def(
+      "wait",
+      [](const std::shared_ptr<PythonFutureWrapper>& fut,
+         bool non_blocking = false) { return fut->wait(non_blocking); },
+      py::arg("future"),
+      py::arg("non_blocking") = false);
 
   m.def(
       "_collect_all",
@@ -1262,7 +1266,7 @@ void initJITBindings(PyObject* module) {
         return std::make_shared<jit::PythonFutureWrapper>(
             c10::collectAll(asList),
             /* unwrap_func */ [futures](const py::object& /*unused*/) {
-              // Throw errors when calling wait() on the returned Future if
+              // Throw errors when calling value() on the returned Future if
               // any of the original futures would throw.
               // NB: PythonFutureWrapper takes an unwrap_func which serves as a
               // callback to evalute the value in the Future. RPC uses this
@@ -1273,7 +1277,7 @@ void initJITBindings(PyObject* module) {
               // discarded, and hence it will return the RemoteException as an
               // object instead of re-throwing it.
               for (auto& fut : futures) {
-                fut->wait();
+                fut->value();
               }
             });
       });

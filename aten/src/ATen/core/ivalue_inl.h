@@ -300,14 +300,14 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   /**
    * Wait on the future until it completes.
    */
-  void wait() {
+  void wait(bool non_blocking = false) {
     std::unique_lock<std::mutex> lock(mutex_);
     while (!completed_) {
       finished_cv_.wait(lock);
     }
 
     if (!eptr_) {
-      postWaitHook(value_);
+      postWaitHook(value_, non_blocking);
     }
   }
 
@@ -315,7 +315,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
    * Wait on the future until it completes and throw an
    * exception if an error exists.
    */
-  void waitAndThrow() {
+  void waitAndThrow(bool non_blocking = false) {
     std::unique_lock<std::mutex> lock(mutex_);
     while (!completed_) {
       finished_cv_.wait(lock);
@@ -325,7 +325,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
       std::rethrow_exception(eptr_);
     }
 
-    postWaitHook(value_);
+    postWaitHook(value_, non_blocking);
   }
 
   /**
@@ -502,7 +502,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   // to add some synchronization to the wait. For example, the CUDAFuture
   // subclass ensures the user's current CUDA streams synchronize with the I/O
   // events stored by the future.
-  virtual void postWaitHook(const at::IValue& value) {}
+  virtual void postWaitHook(const at::IValue& value, bool non_blocking) {}
 
  private:
   void setErrorInternal(

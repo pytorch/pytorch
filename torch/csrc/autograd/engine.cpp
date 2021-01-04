@@ -456,6 +456,7 @@ void GraphTask::mark_as_completed_and_run_post_processing() {
     // Future is already marked complete, or being marked as such.
     // In case the marking complete is only in progress, we add a
     // wait() to guarantee the future is marked complete on exit.
+    // FIXME Should the wait be non-blocking?
     future_result_->wait();
     return;
   }
@@ -895,6 +896,7 @@ auto Engine::execute(const edge_list& roots,
   // DistEngine (see TORCH_INTERNAL_ASSERT(futureGrads.use_count() == 1)
   // in dist_engine.cpp).
   auto& fut = graph_task->future_result_;
+  // FIXME Should the wait be non-blocking?
   fut->wait();
   return fut->value().toTensorVector();
 }

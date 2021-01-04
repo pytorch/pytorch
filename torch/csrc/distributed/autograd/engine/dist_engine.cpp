@@ -542,10 +542,12 @@ void DistEngine::execute(
 
   // This needs to be blocking and as a result we wait for the future to
   // complete.
+  // FIXME Should the wait be non-blocking?
   runEngineAndAccumulateGradients(autogradContext, graphRoot, outputEdges)
       ->waitAndThrow();
 
   // Wait for all of the outstanding rpcs to complete.
+  // FIXME Should the wait be non-blocking?
   autogradContext->clearAndWaitForOutstandingRpcsAsync()->waitAndThrow();
 }
 

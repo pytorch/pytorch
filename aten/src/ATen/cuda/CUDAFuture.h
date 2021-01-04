@@ -92,10 +92,21 @@ struct TORCH_CUDA_API CUDAFuture final : at::ivalue::Future {
     };
   }
 
-  void postWaitHook(const at::IValue& value) override {
-    for (at::cuda::CUDAEvent& cudaEvent : cudaEvents_) {
-      cudaEvent.block(
-          at::cuda::getCurrentCUDAStream(cudaEvent.device_index()));
+  void postWaitHook(const at::IValue& value, bool nonBlocking) override {
+    if (nonBlocking) {
+      // When non-blocking, we simply insert an instruction in the caller's
+      // current streams that causes additional async operations enqueued on
+      // those streams to wait for our events.
+      for (at::cuda::CUDAEvent& cudaEvent : cudaEvents_) {
+        cudaEvent.block(
+            at::cuda::getCurrentCUDAStream(cudaEvent.device_index()));
+      }
+    } else {
+      // When blocking, we hold up the CPU thread until our async events have
+      // effectively occurred on the device.
+      for (const at::cuda::CUDAEvent& cudaEvent : cudaEvents_) {
+        cudaEvent.synchronize();
+      }
     }
 
     for (const at::DataPtr& data_ptr : dataPtrs_) {

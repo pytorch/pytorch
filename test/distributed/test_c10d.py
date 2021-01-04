@@ -3056,11 +3056,11 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
             def mult(fut):
                 # Multiply the result by 2.
-                return [2 * t for t in fut.wait()]
+                return [2 * t for t in fut.value()]
 
             def div(fut):
                 # Divide the result by 2 * world_size.
-                return [t / (2 * self.world_size) for t in fut.wait()]
+                return [t / (2 * self.world_size) for t in fut.value()]
 
             return fut.then(mult).then(div)
 

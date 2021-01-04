@@ -1193,7 +1193,7 @@ void Reducer::finalize_backward() {
           bucket.future_work,
           "Expected bucket.future_work not to be null. "
           "This may indicate that communication hook was not properly installed.");
-      bucket.future_work->wait();
+      bucket.future_work->wait(/*non_blocking=*/true);
 
       auto future_result =
           comm_hook_->parseHookResult(bucket.future_work->value());

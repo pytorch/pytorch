@@ -96,8 +96,8 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
     return py_obj;
   }
 
-  py::object wait() {
-    fut->wait();
+  py::object wait(bool non_blocking = false) {
+    fut->wait(non_blocking);
     if (jit::tracer::isTracing()) {
       auto graph = jit::tracer::getTracingState()->graph;
 

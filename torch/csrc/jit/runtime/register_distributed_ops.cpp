@@ -146,6 +146,7 @@ void prepare_and_call_rpc_op(
         functionSchema,
         userCallableStack,
         rpcTimeout);
+    // FIXME Should the wait be non-blocking?
     futureIValuePtr->wait();
     if (futureIValuePtr->hasError()) {
       // throw error if future hasError
