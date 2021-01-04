@@ -62,6 +62,17 @@ class OuterModuleSingleIO(torch.nn.Module):
         return self.submodule(input)
 
 
+class OuterModuleSubmodForwardCall(torch.nn.Module):
+    def __init__(self, name: str, submodule_name: str):
+        super(OuterModuleSubmodForwardCall, self).__init__()
+        self.name = name
+        self.submodule = InnerModuleSingleIO(submodule_name)
+
+    def forward(self, input: str):
+        input = input + "_outermod"
+        return self.submodule.forward(input)
+
+
 class InnerModuleMultipleIO(torch.nn.Module):
     def __init__(self, name):
         super(InnerModuleMultipleIO, self).__init__()
@@ -549,8 +560,57 @@ class TestHooks(JitTestCase):
 
         self.checkModule(m, ("a",))
 
+    def test_module_direct_forward_invocation(self):
+        m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
+
+        def pre_hook(self, input: Tuple[str]):
+            return ("pre_hook_overrid_name",)
+
+        def forward_hook(self, input: Tuple[str], output: str):
+            assert self.name == "outer_mod_name"
+            assert input == ("pre_hook_overrid_name",)
+            output = output + "_fh"
+            return output
+
+        m.register_forward_pre_hook(pre_hook)
+        m.register_forward_hook(forward_hook)
+
+        m_scripted = torch.jit.script(m)
+
+        self.assertEqual(m.forward("a"), m_scripted.forward("a"))
+        self.assertNotEqual(m_scripted("a"), m_scripted.forward("a"))
+
+    def test_submodule_direct_forward_invocation(self):
+        m_submod_forward_call = OuterModuleSubmodForwardCall(
+            "outer_mod_name", "inner_mod_name"
+        )
+        m_submod_call = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
+
+        def pre_hook(self, input: Tuple[str]):
+            return ("pre_hook_overrid_name",)
+
+        def forward_hook(self, input: Tuple[str], output: str):
+            assert input == ("pre_hook_overrid_name",)
+            return output + "_fh"
+
+        m_submod_forward_call.submodule.register_forward_pre_hook(pre_hook)
+        m_submod_forward_call.submodule.register_forward_hook(forward_hook)
+        m_submod_call.submodule.register_forward_pre_hook(pre_hook)
+        m_submod_call.submodule.register_forward_hook(forward_hook)
+
+        m_submod_forward_call_scripted = torch.jit.script(m_submod_forward_call)
+        m_submod_call_scripted = torch.jit.script(m_submod_call)
+
+        self.assertEqual(
+            m_submod_forward_call_scripted("a"), m_submod_forward_call("a")
+        )
+        self.assertNotEqual(
+            m_submod_forward_call_scripted("a"), m_submod_call_scripted("a")
+        )
+
     def test_hook_compilation_hint(self):
-        # tests if hook error message is printed out if erroring before schema check
+        # Tests if hook error message is printed out if erroring before schema check.
+        # Useful for when user is scripting hooks while not aware of it
         m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
 
         def pre_hook(self, input: Tuple[str]):
@@ -625,7 +685,7 @@ class TestHooks(JitTestCase):
             RuntimeError,
             "When forward has a single tuple input argument, "
             "the return needs to be 'None' or a nested tuple containing "
-            "forward's input tuple argument as in: 'Tuple\[Tuple\[int\]\]'",
+            r"forward's input tuple argument as in: 'Tuple\[Tuple\[int\]\]'",
         ):
             torch.jit.script(m)
 
@@ -641,7 +701,7 @@ class TestHooks(JitTestCase):
         with self.assertRaisesRegex(
             RuntimeError,
             "has the wrong number of contained types for the "
-            "input argument's Tuple. Recieved type: 'Tuple\[str, str\]'",
+            r"input argument's Tuple. Recieved type: 'Tuple\[str, str\]'",
         ):
             torch.jit.script(m)
 
@@ -667,7 +727,7 @@ class TestHooks(JitTestCase):
         with self.assertRaisesRegex(
             RuntimeError,
             "has the wrong inner types for the second tuple"
-            " argument. Recieved type: 'Tuple\[None\]'",
+            r" argument. Recieved type: 'Tuple\[None\]'",
         ):
             torch.jit.script(m)
 
@@ -680,7 +740,7 @@ class TestHooks(JitTestCase):
         with self.assertRaisesRegex(
             RuntimeError,
             "has the wrong type for the output argument. Recieved"
-            " type: 'Tuple\[str\]'. Expected type: 'str'",
+            r" type: 'Tuple\[str\]'. Expected type: 'str'",
         ):
             torch.jit.script(m)
 
@@ -699,6 +759,6 @@ class TestHooks(JitTestCase):
         with self.assertRaisesRegex(
             RuntimeError,
             "has the wrong type for the output argument. "
-            "Recieved type: 'str'. Expected type: 'Tuple\[str\]'",
+            r"Recieved type: 'str'. Expected type: 'Tuple\[str\]'",
         ):
             torch.jit.script(m)

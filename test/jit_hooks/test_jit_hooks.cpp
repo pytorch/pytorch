@@ -182,6 +182,25 @@ void test_module_hook_and_pre_hook_multiple_IO(
   AT_ASSERT("([pre_hook_overrid_name, outer_mod_name, inner_mod_name], pre_hook_override_fh)" == output_str);
 }
 
+void test_module_forward_invocation_no_hooks_run(
+    const std::string& path_to_exported_script_module) {
+  torch::jit::Module module =
+      torch::jit::load(path_to_exported_script_module + "_" + "test_module_hook_and_pre_hook_multiple_IO" + ".pt");
+  std::vector<torch::jit::IValue> inputs;
+  torch::List<std::string> list({"a"});
+  inputs.push_back(list);
+  inputs.push_back("no_pre_hook");
+
+  auto output = module(inputs);
+  auto output_forward = module.forward(inputs);
+  std::cout << "----- module output: " << output << std::endl;
+  std::cout << "----- module forward output: " << output_forward << std::endl;
+  std::ostringstream stream;
+  stream << output_forward;
+  std::string output_forward_str =  stream.str();
+  AT_ASSERT("([a, outer_mod_name, inner_mod_name], no_pre_hook_)" == output_forward_str);
+}
+
 
 void test_submodule_hook_and_pre_hook_multiple_IO(
     const std::string& path_to_exported_script_module) {
@@ -240,6 +259,9 @@ int main(int argc, const char* argv[]) {
   test_module_hook_and_pre_hook_no_IO(path_to_exported_script_module);
   std::cout << "testing: test_nested_tuple_IO" << std::endl;
   test_nested_tuple_IO(path_to_exported_script_module);
+
+  std::cout << "testing: test_module_forward_invocation_no_hooks_run" << std::endl;
+  test_module_forward_invocation_no_hooks_run(path_to_exported_script_module);
 
   std::cout << "JIT CPP Hooks okay!" << std::endl;
 }
