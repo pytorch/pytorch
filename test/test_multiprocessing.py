@@ -3,7 +3,6 @@ import gc
 import os
 import sys
 import time
-import subprocess
 import unittest
 import copy
 from sys import platform
