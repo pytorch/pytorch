@@ -120,6 +120,9 @@ public:
 template <typename T>
 struct type_caster<c10::optional<T>> : optional_caster<c10::optional<T>> {};
 
+template <>
+struct type_caster<c10::nullopt_t> : void_caster<c10::nullopt_t> {};
+
 // Pybind11 bindings for our string_view type.
 // https://pybind11.readthedocs.io/en/stable/advanced/cast/strings.html
 template <typename CharT>

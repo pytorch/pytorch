@@ -722,7 +722,7 @@ PyObject* initModule() {
   ASSERT_TRUE(THPException_init(module));
   THPSize_init(module);
   torch::initDtypeBindings(module);
-  THPDTypeInfo_init(module);
+  torch::initTypeInfoBindings(module);
   THPLayout_init(module);
   THPMemoryFormat_init(module);
   THPQScheme_init(module);

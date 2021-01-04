@@ -4,23 +4,8 @@
 
 #include <ATen/ATen.h>
 
-struct THPDTypeInfo {
-  PyObject_HEAD at::ScalarType type;
-};
+namespace torch {
 
-struct THPFInfo : THPDTypeInfo {};
+void initTypeInfoBindings(PyObject* module);
 
-struct THPIInfo : THPDTypeInfo {};
-
-extern PyTypeObject THPFInfoType;
-extern PyTypeObject THPIInfoType;
-
-inline bool THPFInfo_Check(PyObject* obj) {
-  return Py_TYPE(obj) == &THPFInfoType;
-}
-
-inline bool THPIInfo_Check(PyObject* obj) {
-  return Py_TYPE(obj) == &THPIInfoType;
-}
-
-void THPDTypeInfo_init(PyObject* module);
+} // namespace torch
