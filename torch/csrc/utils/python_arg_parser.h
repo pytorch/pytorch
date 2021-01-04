@@ -160,6 +160,7 @@ struct PythonArgs {
   inline at::Scalar scalarWithDefault(int i, at::Scalar default_scalar);
   inline std::vector<at::Scalar> scalarlist(int i);
   inline std::vector<at::Tensor> tensorlist(int i);
+  inline torch::List<c10::optional<at::Tensor>> list_of_optional_tensors(int i);
   template<int N>
   inline std::array<at::Tensor, N> tensorlist_n(int i);
   inline std::vector<int64_t> intlist(int i);
@@ -323,6 +324,22 @@ inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
     // This is checked by the argument parser so it's safe to cast without checking
     // if this is a tensor first
     res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
+  }
+  return res;
+}
+
+inline torch::List<c10::optional<at::Tensor>> PythonArgs::list_of_optional_tensors(int i) {
+  if (!args[i]) return torch::List<c10::optional<at::Tensor>>();
+  auto tuple = six::isTuple(args[i]);
+  THPObjectPtr arg = six::maybeAsTuple(args[i]);
+  auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
+  torch::List<c10::optional<at::Tensor>> res;
+  res.reserve(size);
+  for (int idx = 0; idx < size; idx++) {
+    PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx) : PyList_GET_ITEM(arg.get(), idx);
+    // This is checked by the argument parser so it's safe to cast without checking
+    // if this is a tensor first
+    res.push_back(reinterpret_cast<THPVariable*>(obj)->cdata);
   }
   return res;
 }

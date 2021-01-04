@@ -104,9 +104,11 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
             return BaseCType("TensorList", binds)
         elif str(t.elem) == 'Dimname':
             return BaseCType("DimnameList", binds)
-        # TODO: do something reasonable about lists of optional tensors
-        elif (not local.use_c10_dispatcher().dispatcher_uses_new_style()) and str(t.elem) == 'Tensor?':
-            return BaseCType("TensorList", binds)
+        elif str(t.elem) == 'Tensor?':
+            if local.use_c10_dispatcher().dispatcher_uses_new_style():
+                return BaseCType("const c10::List<c10::optional<Tensor>> &", binds)
+            else:
+                return BaseCType("TensorList", binds)
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
         # TODO: explicitly qualify namespace here
         return BaseCType(f"ArrayRef<{elem.cpp_type()}>", binds)
