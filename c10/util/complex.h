@@ -61,7 +61,7 @@ namespace c10 {
 //     Since we only support float and double, on will use `complex& operator=(T x)`
 // - Copy assignment operator and converting assignment operator
 //   - There is no specialization of converting assignment operators, which type is
-//     convertible is soly depend on whether the scalar type is convertable
+//     convertible is solely dependent on whether the scalar type is convertible
 //
 // In addition to the standard assignment, we also provide assignment operators with std and thrust
 //
