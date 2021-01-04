@@ -6696,8 +6696,7 @@ Args:
                 complete QR decomposition.
 
 Keyword args:
-    out (tuple, optional): tuple of `Q` and `R` tensors
-                satisfying :code:`input = torch.matmul(Q, R)`.
+    out (tuple, optional): tuple of `Q` and `R` tensors.
                 The dimensions of `Q` and `R` are :math:`(*, m, k)` and :math:`(*, k, n)`
                 respectively, where :math:`k = \min(m, n)` if :attr:`some:` is ``True`` and
                 :math:`k = m` otherwise.

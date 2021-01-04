@@ -644,16 +644,15 @@ complete QR factorization. See below for a list of valid modes.
 .. note::
           Backpropagation is not supported for ``mode='r'``. Use ``mode='reduced'`` instead.
 
-          If you plan to backpropagate through QR, note that the current backward implementation
-          is only well-defined when the first :math:`\min(input.size(-1), input.size(-2))`
-          columns of :attr:`input` are linearly independent.
-          This behavior may change in the future.
+          Backpropagation is also not supported if the first
+          :math:`\min(input.size(-1), input.size(-2))` columns of any matrix
+          in :attr:`input` are not linearly independent. While no error will
+          be thrown when this occurs the values of the "gradient" produced may
+          be anything. This behavior may change in the future.
 
 .. note:: This function uses LAPACK for CPU inputs and MAGMA for CUDA inputs,
           and may produce different (valid) decompositions on different device types
-          and different platforms, depending on the precise version of the
-          underlying library.
-
+          or different platforms.
 Args:
     input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
                 batch dimensions consisting of matrices of dimension :math:`m \times n`.
@@ -666,8 +665,7 @@ Args:
           * ``'r'``: computes only `R`; returns `(Q, R)` where `Q` is empty and `R` has dimensions (k, n)
 
 Keyword args:
-    out (tuple, optional): tuple of `Q` and `R` tensors
-                satisfying :code:`input = torch.matmul(Q, R)`.
+    out (tuple, optional): tuple of `Q` and `R` tensors.
                 The dimensions of `Q` and `R` are :math:`(*, m, k)` and :math:`(*, k, n)`
                 respectively, where :math:`k = \min(m, n)` if :attr:`mode` is `'reduced'` and
                 :math:`k = m` if :attr:`mode` is `'complete'`.
