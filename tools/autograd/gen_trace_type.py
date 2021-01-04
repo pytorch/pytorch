@@ -121,7 +121,7 @@ def format_trace_inputs(f: NativeFunction) -> str:
     if f.use_c10_dispatcher.dispatcher_uses_new_style():
         args = list(f.func.schema_order_arguments())
     else:
-        sig_group = CppSignatureGroup.from_schema(f.func, method=False)
+        sig_group = CppSignatureGroup.from_native_function(f, method=False)
         args = [cpp_args.argument for cpp_args in sig_group.signature.arguments()
                 if not isinstance(cpp_args.argument, SelfArgument)]
 
@@ -380,7 +380,7 @@ def method_definition(f: NativeFunction) -> Optional[str]:
             for a in f.func.schema_order_arguments()
         )
     else:
-        sig_group = CppSignatureGroup.from_schema(f.func, method=False)
+        sig_group = CppSignatureGroup.from_native_function(f, method=False)
         formals = ', '.join(f'{a.type} {a.name}' for a in sig_group.signature.arguments())
 
     return METHOD_DEFINITION.substitute(
