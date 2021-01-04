@@ -237,7 +237,7 @@ auto ${val} = ${arg}.value_or(${default});
 """)
 
 SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED_OR_VIEW_WITH_METADATA_CHANGE = CodeTemplate("""\
-c10::optional<std::function<at::Tensor(const at::Tensor&)>> func=c10::nullopt;
+std::function<at::Tensor(const at::Tensor&)> func=nullptr;
 if (${is_view_with_metadata_change} || !self.unsafeGetTensorImpl()->support_as_strided()) {
   ${replay_view_func}
 }

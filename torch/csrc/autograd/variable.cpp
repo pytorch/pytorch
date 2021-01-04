@@ -44,17 +44,17 @@ DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl,
 
 // Chain this view info with the new view op between base and tensor
 ViewInfo ViewInfo::chain(const Variable & base, const Variable & tensor,
-  c10::optional<std::function<Variable(const Variable&)>> view_func) const {
+  std::function<Variable(const Variable&)> view_func) const {
   // Set `view_func` using the root base as input.
   // `view_func` is used to recover views in backward when either as_strided is not supported
   // or the view function changes the metadata which is not recorded by as_strided
   // See Note [View + Inplace update on base tensor] and [View + Inplace update on view tensor]
   // for more details how we use this function in backward.
-  if (view_func.has_value()) {
-    auto fn = view_func.value();
+  if (view_func) {
+    auto fn = view_func;
     // both current_view and it's parent have a view_func
-    if (view_fn_.has_value()) {
-      auto prev_fn = view_fn_.value();
+    if (view_fn_) {
+      auto prev_fn = view_fn_;
       view_func = [=](const at::Tensor& root_base) {
         auto temp = prev_fn(root_base);
         return fn(temp);
@@ -85,9 +85,9 @@ ViewInfo ViewInfo::chain(const Variable & base, const Variable & tensor,
         };
       }
     }
-  } else if(view_fn_.has_value()) {
+  } else if(view_fn_) {
     // if current_view doesn't have a view_func but it's parent has one
-    auto prev_view_fn = view_fn_.value();
+    auto prev_view_fn = view_fn_;
     auto size = tensor.sizes().vec();
     auto stride = tensor.strides().vec();
     auto storage_offset = tensor.storage_offset();
