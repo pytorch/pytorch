@@ -81,7 +81,7 @@ class class_;
 ///
 /// This class erases the type of the passed in function, but durably records
 /// the type via an inferred schema for the function.
-class CAFFE2_API CppFunction final {
+class TORCH_API CppFunction final {
   // TODO: This is morally the same thing as KernelRegistrationConfig, but it's
   // opaque to the user.
 
@@ -367,7 +367,7 @@ namespace detail {
 /// }
 /// ```
 ///
-class CAFFE2_API Library final {
+class TORCH_API Library final {
 public:
   /// \private
   ///

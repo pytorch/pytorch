@@ -8,13 +8,21 @@ import itertools
 import functools
 import operator
 import random
+from collections import defaultdict
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
-    do_test_empty_full, load_tests, TEST_NUMPY, IS_WINDOWS
+    do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
 from torch.autograd.gradcheck import gradcheck
 from typing import Dict, Any
+from torch.testing._internal.common_device_type import \
+    (instantiate_device_type_tests, ops)
+from torch.testing._internal.common_methods_invocations import \
+    (sparse_unary_ufuncs)
+
+if TEST_SCIPY:
+    import scipy.sparse
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -3008,6 +3016,157 @@ class TestSparse(TestCase):
         test_op(3, 100, [3, 4, 2, 3, 5, 2])
         test_op(4, 100, [3, 4, 2, 3, 5, 2])
 
+    @skipIfRocm
+    def test_sparse_matmul(self):
+        """
+        This function test `torch.sparse.mm` when both the mat1 and mat2 are sparse tensors. 
+        """
+
+        def _indices2csr(indices, dim):
+            nnz = len(indices)
+            r = [0] * (dim + 1)
+            last_i = 0
+            for i in indices:
+                if i != last_i:
+                    for _i in range(last_i, i + 1):
+                        r[_i + 1] = r[last_i + 1]
+                    last_i = i
+                r[last_i + 1] += 1
+            for _i in range(last_i, dim):
+                r[_i + 1] = r[last_i + 1]
+            assert r[-1] == nnz
+            return r
+
+        def sparse_mm(a, b, method='scipy'):
+            a = a.to('cpu')
+            b = b.to('cpu')
+            if method == 'scipy':
+                indices_1 = a._indices().numpy()
+                values_1 = a._values().numpy()
+                indices_2 = b._indices().numpy()
+                values_2 = b._values().numpy()
+
+                mat1 = scipy.sparse.coo_matrix((values_1, (indices_1[0], indices_1[1])), shape=a.shape)
+                mat2 = scipy.sparse.coo_matrix((values_2, (indices_2[0], indices_2[1])), shape=b.shape)
+                result = mat1.dot(mat2).tocoo()
+                return torch.sparse_coo_tensor([result.row, result.col], result.data, result.shape)
+            else:
+                assert a.shape[1] == b.shape[0]
+                n, p = a.shape
+                p, m = b.shape
+                indices_a = a._indices()
+                values_a = a._values()
+                indices_b = b._indices()
+                values_b = b._values()
+                nnz1 = len(indices_a[0])
+                nnz2 = len(indices_b[0])
+
+                if a.is_coalesced() and b.is_coalesced():
+                    r2 = _indices2csr(indices_b[0], b.shape[0])
+                    d = defaultdict(values_b.numpy().dtype.type)
+                    for n1 in range(nnz1):
+                        for n2 in range(r2[indices_a[1][n1]], r2[indices_a[1][n1] + 1]):
+                            d[indices_a[0][n1].item(), indices_b[1][n2].item()] += values_a[n1] * values_b[n2]
+
+                else:
+                    d = defaultdict(values_b.numpy().dtype.type)
+                    for n1 in range(nnz1):
+                        for n2 in range(nnz2):
+                            if indices_b[0][n2] == indices_a[1][n1]:
+                                d[indices_a[0][n1].item(), indices_b[1][n2].item()] += values_a[n1] * values_b[n2]
+                i3 = []
+                j3 = []
+                values = []
+                for i, j in sorted(d):
+                    i3.append(i)
+                    j3.append(j)
+                    values.append(d[i, j])
+                return torch.sparse_coo_tensor(torch.tensor([i3, j3]), torch.tensor(values), (n, m))
+
+        def grad_with_custom_sparsity_pattern_test_helper(sparse_dims, nnz, shape_a, shape_b):
+            def test_grad_dense(a_s, b_s, g_s):
+                a = a_s.to_dense().detach()
+                b = b_s.to_dense().detach()
+                g = g_s.to_dense().detach()
+
+                a.requires_grad_(True)
+                b.requires_grad_(True)
+                c = a @ b
+                c.backward(g)
+                return a.grad.sparse_mask(a_s.coalesce()), b.grad.sparse_mask(b_s.coalesce())
+
+            a, _, _ = self._gen_sparse(sparse_dims, nnz, shape_a)
+            b, _, _ = self._gen_sparse(sparse_dims, nnz, shape_b)
+            a.requires_grad_(True)
+            b.requires_grad_(True)
+
+            c = torch.sparse.mm(a, b)
+            c2 = c.to_dense().detach()
+            c2 = torch.rand_like(c2)
+            g = c2.sparse_mask(c.coalesce())
+
+            c.backward(g)
+
+            a_grad, b_grad = test_grad_dense(a, b, g)
+            self.assertEqual(a.grad, a_grad)
+            self.assertEqual(b.grad, b_grad)
+
+        def test_sparse_matmul(sparse_dims, nnz, shape_a, shape_b):
+            a, i_a, v_a = self._gen_sparse(sparse_dims, nnz, shape_a)
+            b, i_b, v_b = self._gen_sparse(sparse_dims, nnz, shape_b)
+
+            # python implementation
+            r1 = sparse_mm(a, b, 'scipy' if TEST_SCIPY else 'direct')
+
+            self.assertEqual(r1.to_dense(), torch.mm(a.to_dense(), b.to_dense()))
+
+            # cpp implementation
+            r2 = torch.sparse.mm(a, b)
+            self.assertEqual(r1, r2)
+
+            a.requires_grad_(True)
+            b.requires_grad_(True)
+
+            # check autograd support on sparse matmul
+            def fn(D1, D2):
+                return torch.sparse.mm(D1, D2).to_dense()
+
+            # For cuda, `nondet_tol` is set with `1e-5` 
+            # This is because cuSparse sometimes returns approximate zero values like `~e-323`
+            # TODO: Check this cuSparse issue. 
+            # This happens when you do chain multiplication `torch.sparse.mm` operations 
+            gradcheck(fn, (a, b), check_sparse_nnz=True, nondet_tol=1e-5)
+            grad_with_custom_sparsity_pattern_test_helper(sparse_dims, nnz, shape_a, shape_b)
+
+        def test_error_cases():
+            def fn(sparse_dims, nnz, shape_a, shape_b):
+                a, i_a, v_a = self._gen_sparse(sparse_dims, nnz, shape_a)
+                b, i_b, v_b = self._gen_sparse(sparse_dims, nnz, shape_b)
+                r2 = torch.sparse.mm(a, b)
+
+            # This is not a matrix
+            self.assertRaises(RuntimeError, lambda: fn(3, 4, [2, 2, 2], [2, 2, 2]))
+
+            # Shapes does not 
+            self.assertRaisesRegex(RuntimeError, 
+                                   r"mat1 and mat2 shapes cannot be multiplied \(2x3 and 4x2\)",
+                                   lambda: fn(2, 10, [2, 3], [4, 2]))
+
+            def different_dtypes():
+                a, i_a, v_a = self._gen_sparse(2, 10, [2, 2])
+                b, i_b, v_b = self._gen_sparse(2, 10, [2, 2])
+                r2 = torch.sparse.mm(a.to(torch.float64), a.to(torch.float32))
+
+            self.assertRaisesRegex(RuntimeError, 'mat1 dtype Double does not match mat2 dtype Float', different_dtypes)
+
+        for n in range(2, 5):
+            for m in range(2, 8):
+                for p in range(2, 8):
+                    test_sparse_matmul(2, 10, [n, m], [m, p])
+
+        test_sparse_matmul(2, 0, [0, 0], [0, 0])
+        test_sparse_matmul(2, 0, [0, 10], [10, 0])
+        test_error_cases()
 
 class TestUncoalescedSparse(TestSparse):
     def setUp(self):
@@ -3078,6 +3237,33 @@ class TestSparseOneOff(TestCase):
         with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a CUDA tensor, but got a CPU tensor"):
             x + sparse_y
 
+class TestSparseUnaryUfuncs(TestCase):
+    exact_dtype = True
+
+    @ops(sparse_unary_ufuncs)
+    def test_sparse_consistency(self, device, dtype, op):
+        unsupportedTypes = [torch.bfloat16, torch.cfloat, torch.cdouble]
+        if dtype in unsupportedTypes:
+            self.skipTest('Skipped! Unsupported dtypes for Sparse')
+
+        samples = op.sample_inputs(device, dtype)
+
+        if len(samples) == 0:
+            self.skipTest("Skipped! No sample inputs!")
+
+        sample = samples[0]
+
+        if len(sample.input) > 1:
+            self.skipTest("Skipped! Testing unary ops, one input is expected")
+        sample = sample.input[0]
+
+        expected = op(sample)
+        assert torch.is_tensor(expected)
+        output = op(sample.to_sparse())
+        assert torch.is_tensor(output)
+        self.assertEqual(output.to_dense(), expected)
+
+instantiate_device_type_tests(TestSparseUnaryUfuncs, globals())
 
 if __name__ == '__main__':
     run_tests()

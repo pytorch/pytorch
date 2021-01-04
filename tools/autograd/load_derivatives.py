@@ -61,7 +61,7 @@ def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Seque
         for info, op_name in zip(infos, op_names)]
 
 @with_native_function
-def cpp_arguments(f: NativeFunction) -> Sequence[CppArgument]:
+def cpp_arguments(f: NativeFunction) -> Sequence[Binding]:
     return CppSignatureGroup.from_schema(f.func, method=False).signature.arguments()
 
 def create_derivative(f: NativeFunction, formula: str, var_names: Tuple[str, ...]) -> Derivative:
@@ -146,7 +146,7 @@ def create_differentiability_info(
     @with_native_function
     def set_up_derivatives(f: NativeFunction) -> Tuple[
         Sequence[Derivative],
-        Sequence[CppArgument],
+        Sequence[Binding],
         Sequence[str],
     ]:
         # Set up the derivative information
