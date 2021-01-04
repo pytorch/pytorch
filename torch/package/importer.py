@@ -1,4 +1,4 @@
-from typing import List, Callable, Dict, Optional, Any, Union, ClassVar
+from typing import List, Callable, Dict, Optional, Any, Union
 import builtins
 import importlib
 from torch.serialization import _load
