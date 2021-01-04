@@ -21,7 +21,7 @@ NON_LEAF_MODULE_TO_ADD_OBSERVER_ALLOW_LIST = {
 def remove_qconfig_observer_fx(model):
     # remove activation post process
     act_post_process_removed_graph = Graph()
-    env = {}  # type: Dict[str, Any]
+    env: Dict[str, Any] = {}
 
     modules = dict(model.named_modules())
 
