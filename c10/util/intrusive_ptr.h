@@ -700,7 +700,7 @@ class weak_intrusive_ptr final {
   /**
    * Takes an owning (but must be weakly referenced) pointer to TTarget* and
    * creates a weak_intrusive_ptr that takes over ownership.
-   * Thas means the weakcount is not increased.
+   * This means that the weakcount is not increased.
    * This is the counter-part to weak_intrusive_ptr::release() and the pointer
    * passed in *must* have been created using weak_intrusive_ptr::release().
    */

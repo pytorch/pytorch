@@ -95,7 +95,7 @@ def _retrieve_device(module: nn.Module) -> torch.device:
     """Validates all parameters in the Module have the same device and returns
     the appropriate device.
 
-    Arguments:
+    Args:
         An ``nn.Module`` to process.
 
     Returns:
@@ -152,7 +152,7 @@ class Pipe(Module):
     into an :class:`nn.Sequential <torch.nn.Sequential>` module defining the
     desired order of execution.
 
-    Arguments:
+    Args:
         module (:class:`nn.Sequential <torch.nn.Sequential>`):
             sequential module to be parallelized using pipelining. Each module
             in the sequence has to have all of its parameters on a single
@@ -339,7 +339,7 @@ class Pipe(Module):
         size is less than ``chunks``, the number of micro-batches is equal to
         the batch size.
 
-        Arguments:
+        Args:
             input (torch.Tensor or sequence of :class:`~torch.Tensor`): input mini-batch
 
         Returns:

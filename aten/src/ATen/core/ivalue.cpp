@@ -125,7 +125,7 @@ TypePtr IValue::type() const {
 
 void IValue::visit(const std::function<bool (const IValue &)>& visitor) const {
   if (visitor(*this)) {
-    // Short cut.
+    // Shortcut
     return;
   }
   switch (this->tag) {
