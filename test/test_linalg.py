@@ -2793,6 +2793,19 @@ class TestLinalg(TestCase):
             # check r
             self.assertEqual(r, exp_r)
 
+    @dtypes(torch.float)
+    def test_linalg_qr_autograd_r(self, device, dtype):
+        # torch.linalg.qr(mode='r') returns only 'r' and discards 'q', but
+        # without 'q' you cannot compute the backward pass. Check that
+        # linalg_qr_backward complains cleanly in that case.
+        inp = torch.randn((5, 7), device=device, dtype=dtype, requires_grad=True)
+        q, r = torch.linalg.qr(inp, mode='r')
+        assert q.shape == (0,)  # empty tensor
+        b = torch.sum(r)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "linalg_qr_backward: cannot compute backward"):
+            b.backward()
+
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
