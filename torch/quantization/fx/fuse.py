@@ -21,7 +21,7 @@ from .fusion_patterns import *  # noqa: F401
 
 from .quantization_types import Pattern
 
-from typing import Callable, Tuple, Optional
+from typing import Callable, Tuple
 
 
 class Fuser:
