@@ -306,6 +306,9 @@ class NativeFunction:
                                if a.default is not None}
         invalid_args = set.difference(self.cpp_no_default_args, defaulted_arguments)
         assert len(invalid_args) == 0, f'Invalid cpp_no_default_args: {invalid_args}'
+        if self.structured or self.structured_delegate:
+            assert self.use_c10_dispatcher is UseC10Dispatcher.full, \
+                "Structured kernels MUST be use_c10_dispatcher: full; port your argument order"
 
 SchemaKind = Enum('SchemaKind', ('functional', 'inplace', 'out'))
 
