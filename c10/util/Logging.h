@@ -284,7 +284,7 @@ BINARY_COMP_HELPER(LessEquals, <=)
  * Very lightweight logging for the first time API usage. It's beneficial for
  * tracking of individual functionality usage in larger applications.
  *
- * In order to ensure light-weightness of logging, we utilize static variable
+ * In order to ensure light-weightedness of logging, we utilize static variable
  * trick - LogAPIUsage will be invoked only once and further invocations will
  * just do an atomic check.
  *

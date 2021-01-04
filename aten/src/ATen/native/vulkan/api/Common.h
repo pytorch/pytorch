@@ -19,16 +19,16 @@
 #endif /* USE_VULKAN_WRAPPER */
 
 #define VK_CHECK(function)                                  \
-  {                                                         \
+  do {                                                      \
     const VkResult result = (function);                     \
     TORCH_CHECK(VK_SUCCESS == result, "VkResult:", result); \
-  }
+  } while (false)
 
 #define VK_CHECK_RELAXED(function)                          \
-  {                                                         \
+  do {                                                      \
     const VkResult result = (function);                     \
     TORCH_CHECK(VK_SUCCESS <= result, "VkResult:", result); \
-  }
+  } while (false)
 
 #define VK_DELETER(Handle) \
     at::native::vulkan::api::destroy_##Handle

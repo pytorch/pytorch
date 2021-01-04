@@ -379,7 +379,7 @@ if _enabled:
             object is properly finalized (and in the future we may take
             control of how the RecursiveScriptModule instance is created).
 
-            Arguments:
+            Args:
                 cpp_module:  The C++ Module that will hold the actual state of
                              this RecursiveScriptModule instance.
                 init_fn:  Lambda that initializes the RecursiveScriptModule passed to it.
@@ -409,7 +409,7 @@ if _enabled:
             """
             Re-construct an instance of RecursiveScriptModule using an instance of a C++ module.
 
-            Arguments:
+            Args:
                 cpp_module: The C++ module that this RecursiveScriptModule will be rebuilt around.
             """
             self.__init__(cpp_module)  # type: ignore
@@ -493,7 +493,7 @@ if _enabled:
             Add (or update) the bytecode session to the script model. The updated model is used
             in lite interpreter for mobile applications.
 
-            Arguments:
+            Args:
                 f: a string containing a file name.
                 _extra_files: Map from filename to contents which will be stored as part of 'f'.
 
@@ -741,19 +741,6 @@ else:
         def __init__(self, arg=None):
             super().__init__()
 
-def call_prepare_scriptable_func(obj):
-    if not isinstance(obj, torch.nn.Module):
-        return obj
-    obj = obj.__prepare_scriptable__() if hasattr(obj, '__prepare_scriptable__') else obj  # type: ignore
-    for name in obj.__dict__:
-        sub_module = obj.__dict__.get(name)
-        if name == '_modules':
-            for k, v in sub_module.items():
-                sub_module[k] = call_prepare_scriptable_func(v)
-            obj.__setattr__(name, sub_module)
-        elif isinstance(sub_module, torch.nn.Module) and not isinstance(sub_module, ScriptModule):
-            obj.__setattr__(name, call_prepare_scriptable_func(sub_module)) 
-    return obj
 
 def script(obj, optimize=None, _frames_up=0, _rcb=None):
     r"""
@@ -767,7 +754,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
     ``torch.jit.script`` can be used as a function for modules and functions, and as a decorator
     ``@torch.jit.script`` for :ref:`torchscript-classes` and functions.
 
-    Arguments:
+    Args:
         obj (callable, class, or ``nn.Module``):  The ``nn.Module``, function, or class type to
                                                   compile.
 
@@ -907,7 +894,6 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         return obj
 
     if isinstance(obj, torch.nn.Module):
-        obj = call_prepare_scriptable_func(obj) 
         return torch.jit._recursive.create_script_module(
             obj, torch.jit._recursive.infer_methods_to_compile
         )

@@ -154,7 +154,7 @@ def main():
     )
     parser.add_argument(
         '--selected-op-list-path',
-        help='Path to the yaml file that contains the list of operators to include for custom build.',
+        help='Path to the YAML file that contains the list of operators to include for custom build.',
     )
     parser.add_argument(
         '--operators_yaml_path',

@@ -1,3 +1,5 @@
+#ifndef USE_VULKAN_API
+
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
@@ -925,10 +927,10 @@ TEST(VulkanTest, avg_pool2d) {
 
   auto t_in =
       at::rand({1, 3, 7, 7}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-  auto t_out_expected = at::avg_pool2d(t_in, {2, 2}, {1}, {0}, {1});
+  auto t_out_expected = at::avg_pool2d(t_in, {2, 2}, {1}, {0}, true);
   auto tv_in = t_in.vulkan();
 
-  auto tv_out = at::avg_pool2d(tv_in, {2, 2}, {1}, {0}, {1});
+  auto tv_out = at::avg_pool2d(tv_in, {2, 2}, {1}, {0}, true);
   auto t_out = tv_out.cpu();
 
   const auto check = almostEqual(t_out, t_out_expected);
@@ -938,3 +940,5 @@ TEST(VulkanTest, avg_pool2d) {
   }
   ASSERT_TRUE(check);
 }
+
+#endif /* USE_VULKAN_API */

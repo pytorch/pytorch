@@ -7,12 +7,14 @@ namespace vulkan {
 namespace ops {
 namespace {
 
+using namespace api::utils;
+
 Tensor clamp(
     const Tensor& self_arg,
-    const c10::optional<Scalar> min_value,
-    const c10::optional<Scalar> max_value) {
+    const c10::optional<Scalar> min,
+    const c10::optional<Scalar> max) {
   TORCH_CHECK(
-      min_value || max_value,
+      min || max,
       "At least one of 'min' or 'max' must not be None");
 
   api::Context* const context = api::context();
@@ -22,8 +24,8 @@ Tensor clamp(
 
   vTensor v_output{
     context,
-    self.sizes(),
-    self.options(),
+    v_self.sizes(),
+    v_self.options(),
   };
 
   api::Command::Buffer command_buffer = context->command().pool.allocate();
@@ -31,11 +33,16 @@ Tensor clamp(
   {
     if (v_output.has_image() && v_self.has_image()) {
       const struct {
-        float min_value;
-        float max_value;
+        uvec3 extents;
+        uint32_t _;
+        vec2 clamp;
       } block {
-        min_value ? min_value->to<float>() : -std::numeric_limits<float>::infinity(),
-        max_value ? max_value->to<float>() : std::numeric_limits<float>::infinity(),
+        v_output.extents(),
+        0u,
+        {
+          min ? min->to<float>() : -std::numeric_limits<float>::infinity(),
+          max ? max->to<float>() : std::numeric_limits<float>::infinity(),
+        },
       };
 
       context->dispatch(
@@ -49,10 +56,15 @@ Tensor clamp(
           v_output.extents(),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
-          v_output.image(command_buffer, vTensor::Access::Write),
+          v_output.image(
+              command_buffer,
+              vTensor::Stage::Compute,
+              vTensor::Access::Write),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          v_self.image(command_buffer),
+          v_self.image(
+              command_buffer,
+              vTensor::Stage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);
@@ -68,31 +80,36 @@ Tensor clamp(
 }
 
 Tensor& clamp_(
-    Tensor& self_arg,
-    const c10::optional<Scalar> min_value,
-    const c10::optional<Scalar> max_value) {
+    Tensor& self,
+    const c10::optional<Scalar> min,
+    const c10::optional<Scalar> max) {
   api::Context* const context = api::context();
 
   TORCH_CHECK(
-      min_value || max_value,
+      min || max,
       "At least one of 'min' or 'max' must not be None");
 
   TORCH_CHECK(
-      self_arg.is_vulkan(),
+      self.is_vulkan(),
       "Vulkan: In-place clamp is only supported on Vulkan tensors.");
 
-  vTensor& v_self = convert(self_arg);
+  vTensor& v_self = convert(self);
 
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
     if (v_self.has_image()) {
       const struct {
-        float min_value;
-        float max_value;
+        uvec3 extents;
+        uint32_t _;
+        vec2 clamp;
       } block {
-        min_value ? min_value->to<float>() : -std::numeric_limits<float>::infinity(),
-        max_value ? max_value->to<float>() : std::numeric_limits<float>::infinity(),
+        v_self.extents(),
+        0u,
+        {
+          min ? min->to<float>() : -std::numeric_limits<float>::infinity(),
+          max ? max->to<float>() : std::numeric_limits<float>::infinity(),
+        },
       };
 
       context->dispatch(
@@ -105,7 +122,10 @@ Tensor& clamp_(
           v_self.extents(),
           // Read-Write access triggers an async synchronization if necessory
           // and inserts appropriate barriers if hazards are detected.
-          v_self.image(command_buffer, vTensor::Access::Read | vTensor::Access::Write),
+          v_self.image(
+              command_buffer,
+              vTensor::Stage::Compute,
+              vTensor::Access::Read | vTensor::Access::Write),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);
@@ -117,7 +137,7 @@ Tensor& clamp_(
   command_buffer.end();
   command_buffer.submit(context->gpu().queue);
 
-  return self_arg;
+  return self;
 }
 
 Tensor hardtanh(

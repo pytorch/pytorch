@@ -48,13 +48,18 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
           //   are automatically inserted if a RAW hazard is detected.
           // - Recording any potential pending sync operations into the same
           //   command buffer prevents an expensive queue submission.
-          convert(src).buffer(command_buffer),
+          convert(src).buffer(
+              command_buffer,
+              vTensor::Stage::Transfer),
           // - Write-only access never triggers a sync as the contents will be
           //   overwritten regardless.  Having said that, appropriate barriers
           //   are inserted automatically if WAR or WAW hazards are detected.
           // - Recording pending sync operations into the same command buffer
           //   prevents an expensive queue submission.
-          v_self.buffer(command_buffer, vTensor::Access::Write));
+          v_self.buffer(
+              command_buffer,
+              vTensor::Stage::Transfer,
+              vTensor::Access::Write));
 
       command_buffer.end();
       command_buffer.submit(api::context()->gpu().queue);

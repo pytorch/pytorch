@@ -29,7 +29,7 @@ ext_modules = [
         extra_compile_args=CXX_FLAGS),
 ]
 
-if torch.cuda.is_available() and CUDA_HOME is not None:
+if torch.cuda.is_available() and (CUDA_HOME is not None or ROCM_HOME is not None):
     extension = CUDAExtension(
         'torch_test_cpp_extension.cuda', [
             'cuda_extension.cpp',
@@ -39,43 +39,12 @@ if torch.cuda.is_available() and CUDA_HOME is not None:
         extra_compile_args={'cxx': CXX_FLAGS,
                             'nvcc': ['-O2']})
     ext_modules.append(extension)
-elif torch.cuda.is_available() and ROCM_HOME is not None:
-    from torch.utils.hipify import hipify_python
-    this_dir = os.path.dirname(os.path.abspath(__file__))
-    hipify_python.hipify(
-        project_directory=this_dir,
-        output_directory=this_dir,
-        includes="./*",
-        show_detailed=True,
-        is_pytorch_extension=True,)
-    extension = CUDAExtension(
-        'torch_test_cpp_extension.cuda', [
-            'cuda_extension.cpp',
-            'hip/hip_extension_kernel.hip',
-            'hip/hip_extension_kernel2.hip',
-        ])
-    ext_modules.append(extension)
 
 if not IS_WINDOWS:  # MSVC has bug compiling this example
-    if torch.cuda.is_available() and CUDA_HOME is not None:
+    if torch.cuda.is_available() and (CUDA_HOME is not None or ROCM_HOME is not None):
         extension = CUDAExtension(
             'torch_test_cpp_extension.torch_library', [
                 'torch_library.cu'
-            ],
-            extra_compile_args={'cxx': CXX_FLAGS,
-                                'nvcc': ['-O2']})
-        ext_modules.append(extension)
-    elif torch.cuda.is_available() and ROCM_HOME is not None:
-        from torch.utils.hipify import hipify_python
-        hipify_python.hipify(
-            project_directory=this_dir,
-            output_directory=this_dir,
-            includes="./*",
-            show_detailed=True,
-            is_pytorch_extension=True,)
-        extension = CUDAExtension(
-            'torch_test_cpp_extension.torch_library', [
-                'hip/torch_library.hip'
             ],
             extra_compile_args={'cxx': CXX_FLAGS,
                                 'nvcc': ['-O2']})

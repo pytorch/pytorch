@@ -32,6 +32,7 @@ void YellowFinOp<float, CUDAContext>::GetLrMu() {
   // Finding root of cubic formula for YF's Single Step
   GetLrMuKernel<<<1, 1, 0, context_.cuda_stream()>>>(
       g_norm2_max_deb_, g_norm2_min_deb_, distance_deb_, variance_, mu_, lr_);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
   MovingAverage(1, mu_, mu_avg_, mu_avg_out_, mu_deb_);
   MovingAverage(1, lr_, lr_avg_, lr_avg_out_, lr_deb_);
 }
@@ -78,6 +79,7 @@ void YellowFinOp<float, CUDAContext>::MomentumSgdUpdate() {
       param_out_,
       moment_out_,
       nesterov_);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 REGISTER_CUDA_OPERATOR(YellowFin, YellowFinOp<float, CUDAContext>);

@@ -23,9 +23,8 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       const MessageType& messageType) const;
 
   virtual void processScriptCall(
-      ScriptCall& scriptCall,
+      RpcCommandBase& rpc,
       const std::function<void(Message)>& markComplete,
-      std::vector<at::IValue>& stack,
       const int64_t messageId,
       const std::shared_ptr<FutureMessage>& responseFuture) const;
 
@@ -49,6 +48,12 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       std::vector<at::IValue>& stack,
       const c10::intrusive_ptr<OwnerRRef>& ownerRRef) const;
 
+  void processBaseScriptRemoteCall(
+      RpcCommandBase& rpc,
+      const std::function<void(Message)>& markComplete,
+      const int64_t messageId,
+      const std::shared_ptr<FutureMessage>& responseFuture) const;
+
   bool processScriptRemoteCallOp(
       ScriptRemoteCall& scriptRemoteCall,
       const std::function<void(void)>& postProcessing,
@@ -61,7 +66,44 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       const int64_t messageId,
       const std::shared_ptr<FutureMessage>& responseFuture) const;
 
+  void processScriptRRefFetchCall(
+      RpcCommandBase& rpc,
+      const std::function<void(Message)>& markComplete,
+      const int64_t messageId,
+      const std::shared_ptr<FutureMessage>& responseFuture) const;
+
   virtual void processPythonRRefFetchCall(
+      RpcCommandBase& rpc,
+      const int64_t messageId,
+      const std::shared_ptr<FutureMessage>& responseFuture) const;
+
+  void processRRefUserDelete(
+      RpcCommandBase& rpc,
+      const std::function<void(Message)>& markComplete) const;
+
+  void processRRefChildAccept(
+      RpcCommandBase& rpc,
+      const std::function<void(Message)>& markComplete) const;
+
+  void processRRefForkRequest(
+      RpcCommandBase& rpc,
+      const std::function<void(Message)>& markComplete) const;
+
+  void processForwardAutogradReq(
+      RpcCommandBase& rpc,
+      const int64_t messageId,
+      const std::shared_ptr<FutureMessage>& responseFuture) const;
+
+  void processBackwardAutogradReq(
+      RpcCommandBase& rpc,
+      const int64_t messageId,
+      const std::shared_ptr<FutureMessage>& responseFuture) const;
+
+  void processCleanupAutogradContextReq(
+      RpcCommandBase& rpc,
+      const std::function<void(Message)>& markComplete) const;
+
+  void processRunWithProfilingReq(
       RpcCommandBase& rpc,
       const int64_t messageId,
       const std::shared_ptr<FutureMessage>& responseFuture) const;

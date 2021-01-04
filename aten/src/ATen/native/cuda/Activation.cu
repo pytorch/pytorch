@@ -112,7 +112,7 @@ Tensor prelu_cuda(const Tensor& self, const Tensor& weight_) {
         input_stride0,
         input_stride1,
         input_numel);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
   }
   return result;
@@ -230,7 +230,7 @@ std::tuple<Tensor, Tensor> prelu_backward_cuda(const Tensor& grad_out_, const Te
         input_stride0,
         input_stride1,
         input_numel);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
     // update weight_grad
     std::vector<int64_t> reduce_dims;

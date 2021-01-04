@@ -97,8 +97,8 @@ class LeakyReLU(torch.nn.LeakyReLU):
     """
     def __init__(self, scale: float, zero_point: int, negative_slope: float = 1e-2, inplace: bool = False):
         super().__init__(negative_slope, inplace)
-        self.register_buffer('scale', torch.tensor([scale]))
-        self.register_buffer('zero_point', torch.tensor([zero_point]))
+        self.register_buffer('scale', torch.tensor(scale))
+        self.register_buffer('zero_point', torch.tensor(zero_point))
 
     def forward(self, input):
         return torch.ops.quantized.leaky_relu(

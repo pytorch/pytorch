@@ -3102,22 +3102,57 @@ TEST(MemDependency, MemDependencyCheckerComputeGEMM) {
     stmt->accept(&analyzer_lowered);
 
     // Lowering will change the dimensionality of all bounds due to index
-    // flattening, but not the number of accesses.
+    // flattening and will insert Allocates and Frees.
 
     auto history_before = analyzer_unlowered.getHistory();
     auto history_after = analyzer_lowered.getHistory();
+
+    ASSERT_EQ(history_before.size() + 2, history_after.size());
+
+    // Filter out the alloc/free;
+    auto isAllocFree = [](const auto& info) {
+      return info->type() == AccessType::Alloc ||
+          info->type() == AccessType::Free;
+    };
+    history_after.erase(
+        std::remove_if(history_after.begin(), history_after.end(), isAllocFree),
+        history_after.end());
 
     ASSERT_EQ(history_before.size(), history_after.size());
 
     for (size_t i = 0; i < history_before.size(); ++i) {
       ASSERT_EQ(history_before[i]->type(), history_after[i]->type());
       ASSERT_EQ(history_before[i]->var(), history_after[i]->var());
-      ASSERT_EQ(
-          history_before[i]->dependencies().size(),
-          history_after[i]->dependencies().size());
-      ASSERT_EQ(
-          history_before[i]->dependents().size(),
-          history_after[i]->dependents().size());
+
+      if (history_before[i]->dependencies().size() !=
+          history_after[i]->dependencies().size()) {
+        // Must depend on an Alloc.
+        ASSERT_TRUE(std::any_of(
+            history_after[i]->dependencies().begin(),
+            history_after[i]->dependencies().end(),
+            [](const auto& pair) {
+              return pair.second->type() == AccessType::Alloc;
+            }));
+
+        ASSERT_EQ(
+            history_before[i]->dependencies().size() + 1,
+            history_after[i]->dependencies().size());
+      }
+
+      if (history_before[i]->dependents().size() !=
+          history_after[i]->dependents().size()) {
+        // Must depend on an Free.
+        ASSERT_TRUE(std::any_of(
+            history_after[i]->dependents().begin(),
+            history_after[i]->dependents().end(),
+            [](const auto& pair) {
+              return pair.second->type() == AccessType::Free;
+            }));
+
+        ASSERT_EQ(
+            history_before[i]->dependents().size() + 1,
+            history_after[i]->dependents().size());
+      }
 
       // Inputs and outputs are not flattened, only accesses.
       if (history_before[i]->type() == AccessType::Input ||

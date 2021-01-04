@@ -30,10 +30,6 @@ def get_processor_arch_name(gpu_version):
         "cu" + gpu_version.strip("cuda") if gpu_version.startswith("cuda") else gpu_version
     )
 
-PYTHON_NO_39 = [
-    v for v in dimensions.STANDARD_PYTHON_VERSIONS if v not in ['3.9']
-]
-
 LINUX_PACKAGE_VARIANTS = OrderedDict(
     manywheel=[
         "3.6m",
@@ -60,8 +56,8 @@ CONFIG_TREE_DATA = OrderedDict(
     windows=(
         [v for v in dimensions.GPU_VERSIONS if v not in ['cuda92'] + dimensions.ROCM_VERSION_LABELS],
         OrderedDict(
-            wheel=PYTHON_NO_39,
-            conda=PYTHON_NO_39,
+            wheel=dimensions.STANDARD_PYTHON_VERSIONS,
+            conda=dimensions.STANDARD_PYTHON_VERSIONS,
             libtorch=[
                 "3.7",
             ],

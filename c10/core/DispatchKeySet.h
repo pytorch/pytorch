@@ -61,8 +61,8 @@ public:
     }
   }
   // Test if a DispatchKey is in the set
-  bool has(DispatchKey t) const {
-    TORCH_INTERNAL_ASSERT(t != DispatchKey::Undefined);
+  bool inline has(DispatchKey t) const {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(t != DispatchKey::Undefined);
     return static_cast<bool>(repr_ & DispatchKeySet(t).repr_);
   }
   // Test if DispatchKeySet is a superset of ks.
@@ -124,7 +124,7 @@ private:
 public:
   // STL iterator for DispatchKeySet. Iterates through all DispatchKeys in the
   // set. The iterator is only invalidated by the destruction of the underlying
-  // DispatchKeySet as the iterator stores a pointer to the raw represenation of
+  // DispatchKeySet as the iterator stores a pointer to the raw representation of
   // the DispatchKeySet.
   class iterator {
    public:
@@ -188,6 +188,7 @@ C10_API std::ostream& operator<<(std::ostream&, DispatchKeySet);
 
 // autograd_dispatch_keyset should include all runtime autograd keys.
 // Alias key DispatchKey::Autograd maps to autograd_dispatch_keyset.
+// NB: keys in this set also get associated with Math
 constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
   DispatchKey::AutogradCPU,
   DispatchKey::AutogradCUDA,
@@ -200,6 +201,7 @@ constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
 });
 
 // backend dispatch keys that map to DispatchKey::AutogradOther
+// NB: keys in this set also get associated with Math
 constexpr DispatchKeySet autogradother_backends = DispatchKeySet({
   DispatchKey::HIP,
   DispatchKey::FPGA,
@@ -219,6 +221,7 @@ constexpr DispatchKeySet autogradother_backends = DispatchKeySet({
   DispatchKey::SparseCPU,
   DispatchKey::SparseCUDA,
   DispatchKey::SparseHIP,
+  DispatchKey::Meta,
 });
 
 // true if t is a backend dispatch key
@@ -232,7 +235,7 @@ C10_API DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t);
 C10_API DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t);
 
 // This API exists because we have a use case for checking
-// getRuntimeDispatchKeySet(alias).has(DispatchKey::Undefind)
+// getRuntimeDispatchKeySet(alias).has(DispatchKey::Undefined)
 // in OperatorEntry.cpp but we disallow it in has() API.
 C10_API bool isIncludedInAlias(DispatchKey k, DispatchKey alias);
 
