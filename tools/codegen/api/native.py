@@ -34,7 +34,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
         else:
             return ConstRefCType(BaseCType('Tensor', binds))
     elif str(t) == 'Tensor?[]':
-        return BaseCType('TensorList', binds)
+        return BaseCType('const c10::List<c10::optional<Tensor>> &', binds)
     return cpp.argumenttype_type(t, mutable=mutable, binds=binds)
 
 def returns_type(rs: Sequence[Return]) -> str:
