@@ -6693,13 +6693,15 @@ Args:
     input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
                 batch dimensions consisting of matrices of dimension :math:`m \times n`.
     some (bool, optional): Set to ``True`` for reduced QR decomposition and ``False`` for
-                complete QR decomposition.
+                complete QR decomposition. If `k = min(m, n)` then:
+
+                  * ``some=True`` : returns `(Q, R)` with dimensions (m, k), (k, n) (default)
+
+                  * ``'some=False'``: returns `(Q, R)` with dimensions (m, m), (m, n)
 
 Keyword args:
     out (tuple, optional): tuple of `Q` and `R` tensors.
-                The dimensions of `Q` and `R` are :math:`(*, m, k)` and :math:`(*, k, n)`
-                respectively, where :math:`k = \min(m, n)` if :attr:`some:` is ``True`` and
-                :math:`k = m` otherwise.
+                The dimensions of `Q` and `R` are detailed in the description of :attr:`some` above.
 
 Example::
 

@@ -666,9 +666,7 @@ Args:
 
 Keyword args:
     out (tuple, optional): tuple of `Q` and `R` tensors.
-                The dimensions of `Q` and `R` are :math:`(*, m, k)` and :math:`(*, k, n)`
-                respectively, where :math:`k = \min(m, n)` if :attr:`mode` is `'reduced'` and
-                :math:`k = m` if :attr:`mode` is `'complete'`.
+                The dimensions of `Q` and `R` are detailed in the description of :attr:`mode` above.
 
 Example::
 
