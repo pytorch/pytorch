@@ -14,7 +14,10 @@
 namespace torch {
 namespace jit {
 
-static std::unordered_map<std::string, int64_t> passes_to_current_counter;
+std::unordered_map<std::string, int64_t>& passes_to_current_counter() {
+  static std::unordered_map<std::string, int64_t> passes_to_current_counter;
+  return passes_to_current_counter;
+}
 
 static int parseOptLimit(const std::string& opt_limit) {
   try {
@@ -65,12 +68,12 @@ bool opt_limit(const char* pass_name) {
     return true;
   }
 
-  auto current_count_it = passes_to_current_counter.find(pass);
-  if (current_count_it == passes_to_current_counter.end()) {
-    passes_to_current_counter.insert({pass, 0});
+  auto current_count_it = passes_to_current_counter().find(pass);
+  if (current_count_it == passes_to_current_counter().end()) {
+    passes_to_current_counter().insert({pass, 0});
   }
 
-  current_count_it = passes_to_current_counter.find(pass);
+  current_count_it = passes_to_current_counter().find(pass);
   if (current_count_it->second >= opt_limit_it->second) {
     return false;
   }
