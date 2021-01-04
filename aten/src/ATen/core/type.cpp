@@ -440,7 +440,7 @@ MatchTypeReturn matchTypeVariables(
       // unknown type).
       return matchTypeVariables(opt_formal->getElementType(), actual, type_env);
     }
-    // note: if actual was non here we potentially did not fill in the type
+    // note: if actual was None here we potentially did not fill in the type
     // variables contained in the formal. It is still a valid match because None
     // matches Optional[T] later error checking on tryEvalTypeVariables will
     // report the problem if we never match variables in type T
