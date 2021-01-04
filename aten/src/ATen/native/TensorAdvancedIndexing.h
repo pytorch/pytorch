@@ -15,7 +15,7 @@ enum class SCATTER_GATHER_OP: uint8_t {REDUCE_ADD, REDUCE_MULTIPLY};
 
 using index_fn = void(*)(TensorIterator &, IntArrayRef indexed_sizes, IntArrayRef indexed_strides);
 using index_put_fn = void(*)(TensorIterator &, IntArrayRef indexed_sizes, IntArrayRef indexed_strides, bool accumulate);
-using index_put_accum_fn = void(*)(Tensor &, TensorList , const Tensor &, bool unsafe);
+using index_put_accum_fn = void(*)(Tensor &, const c10::List<c10::optional<Tensor>> &, const Tensor &, bool unsafe);
 using masked_fill_fn = void(*)(TensorIterator &, Scalar scalar);
 using masked_select_fn = void(*)(TensorIterator &, int64_t orig_stride);
 
@@ -42,6 +42,6 @@ DECLARE_DISPATCH(scatter_add_fn, scatter_add_stub);
 DECLARE_DISPATCH(scatter_reduce_fn, scatter_reduce_stub);
 DECLARE_DISPATCH(scatter_scalar_reduce_fn, scatter_scalar_reduce_stub);
 
-TORCH_API Tensor& index_out(Tensor& result, const Tensor & self, TensorList indices);
+TORCH_API Tensor& index_out(Tensor& result, const Tensor & self, const c10::List<c10::optional<at::Tensor>>& indices);
 
 }} // namespace at::native
