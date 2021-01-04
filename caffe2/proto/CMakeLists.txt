@@ -10,14 +10,14 @@ add_library(Caffe2_PROTO OBJECT ${Caffe2_PROTO_HEADERS} ${Caffe2_PROTO_SRCS})
 
 if(MSVC)
   if(BUILD_SHARED_LIBS)
-    set(Caffe2_API_DEFINE "-DCAFFE2_API=__declspec(dllexport)")
+    set(TORCH_API_DEFINE "-DTORCH_API=__declspec(dllexport)")
   else()
-    set(Caffe2_API_DEFINE "-DCAFFE2_API=")
+    set(TORCH_API_DEFINE "-DTORCH_API=")
   endif()
 else()
-  set(Caffe2_API_DEFINE "-DCAFFE2_API=")
+  set(TORCH_API_DEFINE "-DTORCH_API=")
 endif()
 target_compile_definitions(
-    Caffe2_PROTO PRIVATE ${Caffe2_API_DEFINE})
+    Caffe2_PROTO PRIVATE ${TORCH_API_DEFINE})
 
 install(FILES ${Caffe2_PROTO_HEADERS} DESTINATION include/caffe2/proto)

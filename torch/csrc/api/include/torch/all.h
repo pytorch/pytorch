@@ -7,6 +7,7 @@
 #include <torch/cuda.h>
 #include <torch/data.h>
 #include <torch/enum.h>
+#include <torch/fft.h>
 #include <torch/jit.h>
 #include <torch/linalg.h>
 #include <torch/nn.h>

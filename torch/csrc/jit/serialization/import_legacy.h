@@ -16,7 +16,7 @@ struct CompilationUnit;
 // Deserializes a model in legacy format.
 Module LEGACY_deserialize(
     std::shared_ptr<CompilationUnit> cu,
-    std::unique_ptr<caffe2::serialize::PyTorchStreamReader> reader,
+    std::shared_ptr<caffe2::serialize::PyTorchStreamReader> reader,
     const c10::optional<c10::Device>& device);
 
 } // namespace jit
