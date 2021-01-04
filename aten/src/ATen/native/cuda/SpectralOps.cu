@@ -125,6 +125,7 @@ void _fft_fill_with_conjugate_symmetry_cuda_(
               static_cast<const scalar_t*>(in_data),
               input_offset_calculator,
               output_offset_calculator);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 }
 

@@ -4401,6 +4401,22 @@ class TestFunctors(TestCase):
                                   t2.log_abs_det_jacobian(x2, y2)], dim=dim)
         self.assertEqual(actual_jac, expected_jac)
 
+    def test_cat_event_dim(self):
+        t1 = AffineTransform(0, 2 * torch.ones(2), event_dim=1)
+        t2 = AffineTransform(0, 2 * torch.ones(2), event_dim=1)
+        dim = 1
+        bs = 16
+        x1 = torch.randn(bs, 2)
+        x2 = torch.randn(bs, 2)
+        x = torch.cat([x1, x2], dim=1)
+        t = CatTransform([t1, t2], dim=dim, lengths=[2, 2])
+        y1 = t1(x1)
+        y2 = t2(x2)
+        y = t(x)
+        actual_jac = t.log_abs_det_jacobian(x, y)
+        expected_jac = sum([t1.log_abs_det_jacobian(x1, y1),
+                            t2.log_abs_det_jacobian(x2, y2)])
+
     def test_stack_transform(self):
         x1 = -1 * torch.arange(1, 101, dtype=torch.float)
         x2 = (torch.arange(1, 101, dtype=torch.float) - 1) / 100

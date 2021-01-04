@@ -987,7 +987,7 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
       v->debugName(),
       " exists.");
   QParamVector qparams;
-  c10::QScheme qscheme;
+  c10::QScheme qscheme = c10::kPerTensorAffine;
 
   auto observer_module = module.attr(observer_name.value()).toModule();
   auto scalar_type = observer_module.attr("dtype");
