@@ -8,6 +8,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/LinearAlgebra.h>
+#include <ATen/native/IndexingUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/LegacyTHFunctionsCPU.h>
@@ -73,7 +74,8 @@ Tensor logdet(const Tensor& self) {
   // U is singular when U(i, i) = 0 for some i in [1, self.size(-1)].
   Tensor logdet_vals = diag_U.abs_().log_().sum(-1);
   if (self.dim() > 2) {
-    logdet_vals.index_put_((det_sign < 0).nonzero_numpy(), at::full({}, NAN, self.options()));
+    auto indices = toListOfOptionalTensors((det_sign < 0).nonzero_numpy());
+    logdet_vals.index_put_(std::move(indices), at::full({}, NAN, self.options()));
   } else if (det_sign.item<double>() < 0) {
     logdet_vals.fill_(NAN);
   }
