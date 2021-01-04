@@ -8332,6 +8332,11 @@ flip(input, dims) -> Tensor
 
 Reverse the order of a n-D tensor along given axis in dims.
 
+.. note::
+    Unlike `np.flip`, `torch.flip` returns a new Tensor.
+    Due to this behavior, `torch.flip` has time complexity
+    of `O(N)` while `np.flip` is `O(1)`.
+
 Args:
     {input}
     dims (a list or tuple): axis to flip on
@@ -8365,6 +8370,11 @@ Columns are preserved, but appear in a different order than before.
 Note:
     Equivalent to input[:,::-1]. Requires the array to be at least 2-D.
 
+.. note::
+    Unlike `np.fliplr`, `torch.fliplr` returns a new Tensor.
+    Due to this behavior, `torch.fliplr` has time complexity
+    of `O(N)` while `np.fliplr` is `O(1)`.
+
 Args:
     input (Tensor): Must be at least 2-dimensional.
 
@@ -8390,6 +8400,11 @@ Rows are preserved, but appear in a different order than before.
 
 Note:
     Equivalent to input[::-1,...]. Requires the array to be at least 1-D.
+
+.. note::
+    Unlike `np.flipud`, `torch.flipud` returns a new Tensor.
+    Due to this behavior, `torch.flipud` has time complexity
+    of `O(N)` while `np.flipud` is `O(1)`.
 
 Args:
     input (Tensor): Must be at least 1-dimensional.
