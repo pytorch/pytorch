@@ -1,8 +1,8 @@
 #include <torch/csrc/jit/runtime/static/ops.h>
+#include <ATen/CPUFunctions.h>
 #include <ATen/NativeFunctions.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
-#include <ATen/CPUFunctions.h>
 
 namespace torch {
 namespace jit {
