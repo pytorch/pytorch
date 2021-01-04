@@ -248,7 +248,7 @@ def _flatten_dense_tensors(tensors):
     buffer. Element-wise operation on this buffer will be equivalent to
     operating individually.
 
-    Arguments:
+    Args:
         tensors (Iterable[Tensor]): dense tensors to flatten.
 
     Returns:
@@ -264,7 +264,7 @@ def _flatten_sparse_tensors(tensors):
     """Flatten sparse tensors into two contiguous 1D buffers, one of indices and
     one of values. Assume tensors are of same sparse type.
 
-    Arguments:
+    Args:
         tensors (Iterable[Tensor]): sparse tensors to flatten.
 
     Returns:
@@ -280,7 +280,7 @@ def _unflatten_dense_tensors(flat, tensors):
     """View a flat buffer using the sizes of tensors. Assume that tensors are of
     same dense type, and that flat is given by _flatten_dense_tensors.
 
-    Arguments:
+    Args:
         flat (Tensor): flattened dense tensors to unflatten.
         tensors (Iterable[Tensor]): dense tensors whose sizes will be used to
           unflatten flat.
@@ -303,7 +303,7 @@ def _unflatten_sparse_tensors(flat, tensors):
     tensors. Assume that tensors are of same sparse type, and that flat is given
     by _flatten_sparse_tensors.
 
-    Arguments:
+    Args:
         flat (tuple(Tensor, Tensor)): flattened indices and values of sparse
           tensors to unflatten.
         tensors (Iterable[Tensor]): sparse tensors whose sizes will be used to
@@ -327,7 +327,7 @@ def _reorder_tensors_as(tensors, ordered_tensors):
     types, e.g., from _take_tensors. Reorder them to be of same order as
     ordered_tensors.
 
-    Arguments:
+    Args:
         tensors (Iterable[Tensor]): tensors to be reordered. They should be of
           the same order as ordered_tensors within their own types.
         ordered_tensors (Iterable[Tensor]): tensors whose order will be the

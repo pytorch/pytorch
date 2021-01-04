@@ -10,17 +10,17 @@
 // From https://github.com/akrzemi1/Optional
 //
 // C10
-// - Move to `c10` namespace.
-// - Remove macro use in line 478 because the nvcc device compiler cannot handle
+// - Move file to `c10` namespace.
+// - Remove macro use in line 478 because the nvcc device compiler cannot handle it
 // it.
-// - revise constructor logic so that it is consistent with c++ 17 standard documented
-// here in (8): https://en.cppreference.com/w/cpp/utility/optional/optional, and
-// could be able to support initialization of optionals from convertible type U, also
-// remove two old constructors optional(const T&) and optional(T&&) as it could be
-// handled by the template<U=T> case with default template argument.
-// - `constexpr struct in_place_t {} in_place{}` is moved to `c10/util/in_place.h`,
+// - Revise constructor logic so that it is 1) consistent with c++ 17 standard documented
+// here in (8): https://en.cppreference.com/w/cpp/utility/optional/optional, and 2)
+// able to support initialization of optionals from convertible type U.
+// - Remove the constructors for `optional(const T&)` and `optional(T&&)`, as they can be
+// handled by the template<U=T> case with the default template argument.
+// - Move `constexpr struct in_place_t {} in_place{}` to `c10/util/in_place.h`
 // so that it can also be used in `c10/util/variant.h`.
-// - Remove special cases for pre-c++14 compilers to make code simpler
+// - Remove special cases for pre-c++14 compilers to make code simpler.
 
 #ifndef C10_UTIL_OPTIONAL_H_
 #define C10_UTIL_OPTIONAL_H_
@@ -412,7 +412,7 @@ using OptionalBase = typename std::conditional<
         constexpr_optional_base<typename std::remove_const<
             T>::type>, // use base with trivial destructor
         optional_base<typename std::remove_const<T>::type>>::type;
-#endif 
+#endif
 
 template <class T>
 class optional : private OptionalBase<T> {
@@ -438,7 +438,7 @@ class optional : private OptionalBase<T> {
           constexpr_optional_base<typename std::remove_const<
               U>::type>, // use base with trivial destructor
           optional_base<typename std::remove_const<U>::type>>::type;
-#endif 
+#endif
 
   static_assert(
       !std::is_same<typename std::decay<T>::type, nullopt_t>::value,

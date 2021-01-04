@@ -103,6 +103,9 @@ void TracingState::delValue(const IValue& var) {
 Value* getValueTrace(const IValue& var) {
   return getTracingState()->getValue(var);
 }
+Value* getOptTensorValueTrace(const c10::optional<at::Tensor>& var) {
+  return getValueTrace(IValue(var));
+}
 Value* TracingState::getValue(const IValue& var) {
   // allow tracing of tuples passed to List[Tensor] or Tuple[Tensor...]
   // arguments
@@ -284,11 +287,23 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
         key_type->isSubtypeOf(TensorType::get());
     bool value_type_valid = value_type->isSubtypeOf(TensorType::get());
 
+    // Support tuple values that contain only tensors
+    if (value_type->isSubtypeOf(AnyTupleType::get())) {
+      value_type_valid = true;
+      for (const auto& type : value_type->containedTypes()) {
+        if (!type->isSubtypeOf(TensorType::get())) {
+          value_type_valid = false;
+          break;
+        }
+      }
+    }
+
     if (!key_type_valid || !value_type_valid) {
       std::ostringstream os;
       os << "output " << i << " (" << dict << ") of traced region "
-         << "cannot be understood by the tracer, only dict[str, Tensor] "
-         << "or dict[Tensor, Tensor] can be a dictionary output of a traced function";
+         << "cannot be understood by the tracer, only outputs matching"
+         << "dict[Union[str, Tensor], Union[Tensor, Tuple[Tensor, ...]]] "
+         << "can be a dictionary output of a traced function";
       throw std::runtime_error(os.str());
     }
     std::vector<Value*> keys;
@@ -672,6 +687,16 @@ void addInputs(
     list_node = g->insertNode(
         g->createList(TensorType::get(), fmap(value, getValueTrace)));
   }
+  n->addInput(list_node->output());
+}
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const List<c10::optional<at::Tensor>>& value) {
+  Graph* g = n->owningGraph();
+  Node* list_node = nullptr;
+  list_node = g->insertNode(g->createList(
+      OptionalType::ofTensor(), fmap(value, getOptTensorValueTrace)));
   n->addInput(list_node->output());
 }
 
