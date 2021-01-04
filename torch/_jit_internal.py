@@ -254,7 +254,7 @@ def get_type_hint_captures(fn):
     for the literal annotations on 'fn'. These are not considered to be closed-over by fn
     and must be obtained separately (e.g. using this function).
 
-    Arguments:
+    Args:
         fn: A callable.
     Returns:
         A Dict[str, Any] containing a mapping from the literal annotations used on

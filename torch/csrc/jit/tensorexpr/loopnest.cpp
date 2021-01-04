@@ -154,6 +154,14 @@ class Vectorizer : public IRMutator {
     });
   }
 
+  const Expr* mutate(const BitCast* v) override {
+    std::vector<const Expr*> inputs = {v->src_value()};
+    return try_vectorize(v, inputs, [&]() {
+      return BitCast::make(
+          Dtype(v->dtype().scalar_type(), lanes_), ExprHandle(inputs[0]));
+    });
+  }
+
   const Expr* mutate(const Cast* v) override {
     std::vector<const Expr*> inputs = {v->src_value()};
     return try_vectorize(v, inputs, [&]() {
@@ -345,12 +353,7 @@ class Vectorizer : public IRMutator {
   const Expr* start_ = nullptr;
 };
 
-void LoopNest::vectorize(Stmt* stmt) {
-  For* f = dynamic_cast<For*>(stmt);
-  if (!f) {
-    return;
-  }
-
+void LoopNest::vectorize(For* f) {
   Block* b = dynamic_cast<Block*>(f->get_parent());
   if (!b) {
     return;
@@ -398,7 +401,11 @@ class DepTracker : public IRVisitor {
  public:
   std::vector<Tensor*> findUsedTensors(Tensor* tensor) {
     used_tensors.clear();
-    tensor->body()->accept(this);
+    if (tensor->body()) {
+      tensor->body()->accept(this);
+    } else {
+      tensor->ElementStmt()->accept(this);
+    }
     return used_tensors;
   }
 
@@ -504,6 +511,11 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
 
 Stmt* LoopNest::lowerToStmt(Tensor* t) {
   Stmt* body = t->ElementStmt();
+
+  // If this Tensor has no functional body, it already has its axes expanded.
+  if (nullptr == t->body()) {
+    return body;
+  }
 
   if (t->ndim() == 0 && t->reduce_ndim() == 0) {
     return body;
@@ -739,13 +751,19 @@ bool LoopNest::computeInline(const Buf* b) {
   return true;
 }
 
-void LoopNest::inlineIntermediateBufs() {
+void LoopNest::inlineIntermediateBufs(bool inline_output_buffers) {
   // We need to collect all intermediate buffers as the buffers to be inlined
   // before calling 'computeInline' since the buffers that are inlined are
   // erased from the set 'intermediate_bufs_' in that function.
   std::unordered_set<const Buf*> bufs_to_inline(
       intermediate_bufs_.begin(), intermediate_bufs_.end());
-  bufs_to_inline.insert(output_bufs_.begin(), output_bufs_.end());
+
+  // inlining output buffers duplicates computation. it slows down
+  // cpu code generation but is enabled on gpu because it avoids difficult
+  // synchronization logic across blocks.
+  if (inline_output_buffers) {
+    bufs_to_inline.insert(output_bufs_.begin(), output_bufs_.end());
+  }
   for (auto b : bufs_to_inline) {
     computeInline(b);
   }
@@ -858,7 +876,12 @@ Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
   // Insert allocations and frees for temporary buffers in the innermost
   // possible scope.
   for (const Buf* buf : intermediate_bufs_) {
-    Stmt* alloc = new Allocate(buf->base_handle(), buf->dtype(), buf->dims());
+    const Expr* flat_size = new IntImm(1);
+    for (auto& d : buf->dims()) {
+      flat_size = new Mul(flat_size, d);
+    }
+    flat_size = IRSimplifier::simplify(flat_size);
+    Stmt* alloc = new Allocate(buf->base_handle(), buf->dtype(), {flat_size});
     Stmt* free = new Free(buf->base_handle());
     Block* alloc_block = findLowestContainingBlock(uses.at(buf));
     alloc_block->prepend_stmt(alloc);

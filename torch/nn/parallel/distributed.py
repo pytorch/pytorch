@@ -999,7 +999,7 @@ class DistributedDataParallel(Module):
         and gradient compression which involve different communication strategies for
         parameter syncs while running Distributed DataParallel training.
 
-        Arguments:
+        Args:
             state (object): state is passed to the hook and can be used to maintain
                             and update any state information that users would like to
                             maintain as part of the training process. Examples: error
@@ -1084,7 +1084,7 @@ class DistributedDataParallel(Module):
         The built-in hooks aim to provide efficient C++ implementations for certain hooks,
         which might not be as efficient if implemented in Python using a Python communication hook.
 
-        Arguments:
+        Args:
             comm_hook_type (dist.BuiltinCommHookType): type of communication hook, such as
             ALLREDUCE, FP16_COMPRESS, etc.
 

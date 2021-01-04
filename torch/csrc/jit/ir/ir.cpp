@@ -1079,6 +1079,11 @@ bool Node::hasSideEffects() const {
     case prim::rpc_sync: // It represents RPC message sent.
     case prim::rpc_remote: // It represents RPC message sent.
     case aten::wait: // It can represent RPC message received.
+#ifndef __HIP_PLATFORM_HCC__
+    case cuda::set_stream:
+    case cuda::_set_device:
+    case cuda::_current_device:
+#endif
     case prim::Enter:
     case prim::Exit:
       return true;
@@ -1094,7 +1099,7 @@ bool Node::hasSideEffects() const {
     return false;
   }
 
-  if (kind_.is_prim() || kind_.is_aten()) {
+  if (kind_.is_prim() || kind_.is_aten() || kind_.is_cuda()) {
     // TODO There is nothing in the system that relies on aten:: and prim::
     // ops using AliasAnalysisKind::FROM_SCHEMA,
     // AliasAnalysisKind::INTERNAL_SPECIAL_CASE, or
@@ -1606,17 +1611,25 @@ Node* Graph::createTupleIndex(
   return n;
 }
 
-Node* Graph::createTupleSlice(Value* tup, int64_t beg, int64_t end) {
-  auto n = create(prim::TupleSlice, {tup});
-  auto tuple_type = tup->type()->expect<TupleType>();
-  n->i_(attr::beg, beg);
-  n->i_(attr::end, end);
-  std::vector<TypePtr> output_types;
-  for (auto i = beg; i < end; ++i) {
-    output_types.push_back(tuple_type->elements().at(i));
+Node* Graph::createTupleSlice(
+    Value* tup,
+    int64_t beg,
+    int64_t step_size,
+    int64_t num_values) {
+  std::vector<Value*> new_vals;
+  TupleTypePtr tt = tup->type()->expect<TupleType>();
+  new_vals.reserve(num_values);
+
+  int64_t i = beg;
+  for (int64_t j = 0; j < num_values; ++j) {
+    auto idx = insertConstant(IValue(static_cast<int64_t>(i)));
+    auto tupleIndex = insertNode(createTupleIndex(tup, idx, tt->elements()[i]));
+
+    new_vals.push_back(tupleIndex->output());
+    i += step_size;
   }
-  auto tt = TupleType::create(std::move(output_types));
-  n->output()->setType(tt);
+
+  auto n = createTuple(new_vals);
   return n;
 }
 
