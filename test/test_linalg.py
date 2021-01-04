@@ -2819,10 +2819,17 @@ class TestLinalg(TestCase):
             all_q = []
             all_r = []
             for matrix in a:
-                q, r = np.linalg.qr(matrix, mode=mode)
-                all_q.append(q)
-                all_r.append(r)
-            return np.array(all_q), np.array(all_r)
+                result = np.linalg.qr(matrix, mode=mode)
+                if mode == 'r':
+                    all_r.append(result)
+                else:
+                    q, r = result
+                    all_q.append(q)
+                    all_r.append(r)
+            if mode == 'r':
+                return np.array(all_r)
+            else:
+                return np.array(all_q), np.array(all_r)
 
         t = torch.randn((3, 7, 5), device=device, dtype=dtype)
         np_t = t.cpu().numpy()
@@ -2831,6 +2838,15 @@ class TestLinalg(TestCase):
             q, r = torch.linalg.qr(t, mode=mode)
             self.assertEqual(q, exp_q)
             self.assertEqual(r, exp_r)
+        # for mode='r' we need a special logic because numpy returns only r
+        exp_r = np_qr_batched(np_t, mode='r')
+        q, r = torch.linalg.qr(t, mode='r')
+        # check that q is empty
+        self.assertEqual(q.shape, (0,))
+        self.assertEqual(q.dtype, t.dtype)
+        self.assertEqual(q.device, t.device)
+        # check r
+        self.assertEqual(r, exp_r)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
