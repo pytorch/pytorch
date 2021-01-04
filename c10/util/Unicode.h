@@ -38,7 +38,7 @@ inline std::string u16u8(const std::wstring& wstr) {
             0,
             NULL,
             NULL);
-    TORCH_CHECK(size_needed > 0, "Error converting the content to Unicode");
+    TORCH_CHECK(size_needed > 0, "Error converting the content to UTF8");
     std::string str(size_needed, 0);
     WideCharToMultiByte(
             CP_UTF8,
