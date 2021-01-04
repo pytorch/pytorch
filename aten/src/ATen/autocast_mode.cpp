@@ -341,8 +341,8 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   // The macro doesn't like this one (I think it chokes on commas inside <>) so write it manually
   m.impl(TORCH_SELECTIVE_NAME("aten::native_layer_norm"),
          TORCH_FN((&WrapFunction<CastPolicy::fp32,
-                                 std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&, int64_t, int64_t, double),
-                                 std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&, int64_t, int64_t, double),
+                                 std::tuple<Tensor,Tensor,Tensor> (const Tensor&, IntArrayRef, const c10::optional<Tensor>&, const c10::optional<Tensor>&, double),
+                                 std::tuple<Tensor,Tensor,Tensor> (const Tensor&, IntArrayRef, const c10::optional<Tensor>&, const c10::optional<Tensor>&, double),
                                  &ADD_NS(native_layer_norm)>::type::call)));
   KERNEL(ADD_NS(group_norm), "group_norm", Tensor (const Tensor &, int64_t, const c10::optional<Tensor>&, const c10::optional<Tensor>&, double, bool), fp32)
   KERNEL(ADD_NS(frobenius_norm), "frobenius_norm", Tensor (const Tensor &), fp32)
@@ -406,7 +406,7 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(ADD_NS(cross), "cross", Tensor (const Tensor &, const Tensor &, c10::optional<int64_t>), promote)
   KERNEL(ADD_NS(dot), "dot", Tensor (const Tensor &, const Tensor &), promote)
   KERNEL(ADD_NS(equal), "equal", bool (const Tensor &, const Tensor &), promote)
-  KERNEL_UNBOXED_ONLY(ADD_NS(index_put), "index_put", Tensor (const Tensor &, TensorList, const Tensor &, bool), promote)
+  KERNEL(ADD_NS(index_put), "index_put", Tensor (const Tensor &, const torch::List<c10::optional<Tensor>>&, const Tensor &, bool), promote)
   KERNEL(ADD_NS(stack), "stack", Tensor (TensorList, int64_t), promote)
   KERNEL(ADD_NS(tensordot), "tensordot", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef), promote)
 

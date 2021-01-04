@@ -210,10 +210,6 @@ node [shape=box];
         and override this method to provide other behavior, such as automatically mocking out a whole class
         of modules"""
 
-        for pattern, action in self.patterns:
-            if pattern.matches(module_name):
-                action(module_name)
-                return
 
         root_name = module_name.split('.', maxsplit=1)[0]
         if self._can_implicitly_extern(root_name):
@@ -222,6 +218,11 @@ node [shape=box];
                       f'since it is part of the standard library and is a dependency.')
             self.save_extern_module(root_name)
             return
+
+        for pattern, action in self.patterns:
+            if pattern.matches(module_name):
+                action(module_name)
+                return
 
         self.save_module(module_name, dependencies)
 

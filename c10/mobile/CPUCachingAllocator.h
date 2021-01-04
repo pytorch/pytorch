@@ -26,7 +26,7 @@
  * What are the cons?
  *    There are some cons that were observed where use of caching allocator led to
  *    worse performance on some platforms. Reason being that the caching mechanism
- *    used by this allocator left us worse off compared to the corresonding platform's
+ *    used by this allocator left us worse off compared to the corresponding platform's
  *    tuned memory allocator. In that case it seemed better to not use this allocator.
  *    Note there are some ideas to fix this in the works.
  *
@@ -63,7 +63,7 @@ class C10_API CPUCachingAllocator {
     //    returned the memory to OS via free_cached.
     //  1.1. Therefore even when the said memory is "freed" via this
     //       allocator (and thus cached), it will continue to stay
-    //       in allocaiton_map_. Furthermore it will also exist in
+    //       in allocation_map_. Furthermore it will also exist in
     //       available_map_. Thus an allocated memory pointer can be in both
     //       allocation_map_ and available_map_ simultaneously.
     // 2. Memory pointer maybe removed from allocation_map_, when it

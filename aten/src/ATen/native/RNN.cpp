@@ -1831,7 +1831,8 @@ return_type name( \
   return cell_type{}( \
       input, prepare_hx_fn(hx), params); \
 }
-
+// Set reduced range to be True for all RNN Cells by default. This flag is used only for FBGEMM kernels
+// QNNPACK does not reduce range for activations
 #define DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(name, hx_type, cell_type, return_type, prepare_hx_fn) \
 return_type name( \
     const Tensor& input, \
@@ -1845,7 +1846,8 @@ return_type name( \
       _packed_w_ih, \
       _packed_w_hh, \
       b_ih, \
-      b_hh); \
+      b_hh,\
+      true); \
   return cell_type{}( \
       input, prepare_hx_fn(hx), params); \
 }

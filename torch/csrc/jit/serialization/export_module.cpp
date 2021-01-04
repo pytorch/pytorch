@@ -4,6 +4,10 @@
 #include <torch/csrc/jit/ir/attributes.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/type_hashing.h>
+#include <torch/csrc/jit/mobile/function.h>
+#include <torch/csrc/jit/mobile/interpreter.h>
+#include <torch/csrc/jit/mobile/method.h>
+#include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
@@ -350,7 +354,7 @@ class ScriptModuleSerializer {
   void writeArchive(const std::string& archive_name, const IValue& value) {
     std::vector<char> data;
     // Vector to capture the run-time class types during pickling the IValues
-    std::vector<c10::ClassTypePtr> memorizedClassTypes;
+    std::vector<c10::ClassTypePtr> memoizedClassTypes;
     Pickler data_pickle(
         [&](const char* buf, size_t size) {
           data.insert(data.end(), buf, buf + size);
@@ -359,7 +363,7 @@ class ScriptModuleSerializer {
         [&](const c10::ClassTypePtr& t) {
           return type_name_uniquer_.getUniqueName(t);
         },
-        &memorizedClassTypes);
+        &memoizedClassTypes);
     data_pickle.protocol();
     data_pickle.pushIValue(value);
     data_pickle.stop();
@@ -374,7 +378,7 @@ class ScriptModuleSerializer {
     writer_.writeRecord(fname, data.data(), data.size());
 
     // serialize all the captured run-time class types
-    for (const c10::ClassTypePtr& wroteType : memorizedClassTypes) {
+    for (const c10::ClassTypePtr& wroteType : memoizedClassTypes) {
       convertNamedType(wroteType);
     }
   }
@@ -596,5 +600,26 @@ std::vector<std::string> export_opnames(const script::Module& m) {
   return std::vector<std::string>(names.begin(), names.end());
 }
 
+namespace mobile {
+
+std::set<std::string> _export_operator_list(
+    torch::jit::mobile::Module& module) {
+  std::set<std::string> operator_list;
+  for (Method func : module.get_methods()) {
+    const Function& function = func.function();
+    const std::shared_ptr<Code> cptr = function.get_code();
+    // op_names below isn't a list of unique operator names. In fact
+    // it can contain the same operator name many many times, so we need
+    // to de-dup the list by adding all the operator names into
+    // an std::set<std::string>.
+    std::vector<c10::OperatorName> const& op_names = cptr->op_names_;
+    for (auto& op_name : op_names) {
+      operator_list.insert(toString(op_name));
+    }
+  }
+  return operator_list;
+}
+
+} // namespace mobile
 } // namespace jit
 } // namespace torch

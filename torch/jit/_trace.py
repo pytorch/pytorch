@@ -194,7 +194,7 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
     parameters), so don't expect the model to come out exactly the same as what
     you passed in.
 
-    Arguments:
+    Args:
         model (compiled torch.nn.Module or function): the module/function to be
             verified.  The module/function definition MUST have been decorated with
             `@torch.jit.compile`.
@@ -626,7 +626,7 @@ def trace(
         invocations of the model. The tracer will try to emit warnings when
         doing something that may cause an incorrect trace to be produced.
 
-    Arguments:
+    Args:
         func (callable or torch.nn.Module):  A Python function or `torch.nn.Module`
             that will be run with `example_inputs`. `func` arguments and return
             values  must be tensors or (possibly nested) tuples that contain
@@ -830,7 +830,7 @@ def trace_module(
 
     See :func:`torch.jit.trace <torch.jit.trace>` for more information on tracing.
 
-    Arguments:
+    Args:
         mod (torch.nn.Module):  A ``torch.nn.Module`` containing methods whose names are
                                 specified in ``inputs``. The given methods will be compiled
                                 as a part of a single `ScriptModule`.
@@ -1035,6 +1035,8 @@ class TracedModule(ScriptModule):
             )
 
         for name, submodule in orig._modules.items():
+            if submodule is None:
+                continue
             tmp_module._modules[name] = make_module(
                 submodule, TracedModule, _compilation_unit=None
             )
@@ -1075,7 +1077,7 @@ class TopLevelTracedModule(TracedModule):
         """
         Re-construct an instance of TopLevelTracedModule using an instance of a C++ module.
 
-        Arguments:
+        Args:
             cpp_module: The C++ module that this TopLevelTracedModule will be rebuilt around.
         """
         self.__dict__["_actual_script_module"]._reconstruct(cpp_module)
@@ -1115,7 +1117,7 @@ def _get_trace_graph(f, args=(), kwargs=None, strict=True, _force_outplace=False
     Tracing is guaranteed not to change the semantics of the function/module
     that is traced.
 
-    Arguments:
+    Args:
         f (torch.nn.Module or function): the function or module
             to be traced.
         args (tuple or Tensor): the positional arguments to pass to the
