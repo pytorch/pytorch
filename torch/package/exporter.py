@@ -5,6 +5,7 @@ import pickletools
 from .find_file_dependencies import find_files_source_depends_on
 from ._custom_import_pickler import create_custom_import_pickler, import_module_from_importers
 from ._importlib import _normalize_path
+from ._mangling import PackageDemangler, check_not_mangled
 import types
 import importlib
 from typing import List, Any, Callable, Dict, Tuple, Union, Iterable
@@ -73,6 +74,8 @@ class PackageExporter:
         self.importers = [importlib.import_module]
         self.patterns : List[Tuple[Any, Callable[[str], None]]] = []  # 'any' is 're.Pattern' but breaks old mypy
         self.debug_deps : List[Tuple[str, str]] = []
+        self.written_files : Set[str] = set()
+        self._demangler = PackageDemangler()
 
     def save_source_file(self, module_name: str, file_or_directory: str, dependencies=True):
         """Adds the local file system `file_or_directory` to the source package to provide the code
@@ -130,7 +133,9 @@ class PackageExporter:
         """
         self.provided[module_name] = True
         extension = '/__init__.py' if is_package else '.py'
-        filename = module_name.replace('.', '/') + extension
+        # Demangle the module name before writing to a file. This ensures that
+        # no mangled names ever affect our packaged format.
+        filename = self._demangler.demangle(module_name).replace('.', '/') + extension
         self._write(filename, src)
         if dependencies:
             package = module_name if is_package else module_name.rsplit('.', maxsplit=1)[0]
@@ -257,7 +262,7 @@ node [shape=box];
         filename = self._filename(package, resource)
         # Write the pickle data for `obj`
         data_buf = io.BytesIO()
-        pickler = create_custom_import_pickler(data_buf, self.importers)
+        pickler = create_custom_import_pickler(data_buf, self.importers, self._demangler)
         pickler.persistent_id = self._persistent_id
         pickler.dump(obj)
         data_value = data_buf.getvalue()
@@ -394,6 +399,8 @@ node [shape=box];
         self.close()
 
     def _write(self, filename, str_or_bytes):
+        check_not_mangled(filename)
+        self.written_files.add(filename)
         if isinstance(str_or_bytes, str):
             str_or_bytes = str_or_bytes.encode('utf-8')
         self.zip_file.write_record(filename, str_or_bytes, len(str_or_bytes))

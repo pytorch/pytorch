@@ -1,4 +1,4 @@
-from typing import List, Callable, Dict, Optional, Any, Union
+from typing import List, Callable, Dict, Optional, Any, Union, ClassVar
 import builtins
 import importlib
 from torch.serialization import _load
@@ -11,6 +11,7 @@ import os.path
 from ._importlib import _normalize_line_endings, _resolve_name, _sanity_check, _calc___package__, \
     _normalize_path
 from ._mock_zipreader import MockZipReader
+from ._mangling import PackageMangler
 
 class PackageImporter:
     """Importers allow you to load code written to packages by PackageExporter.
@@ -26,10 +27,10 @@ class PackageImporter:
     a locally-installed package, but then fails when the package is copied to another machine.
     """
 
-    modules : Dict[str, Optional[types.ModuleType]]
     """The dictionary of already loaded modules from this package, equivalent to `sys.modules` but
     local to this importer.
     """
+    modules : Dict[str, Optional[types.ModuleType]]
 
     def __init__(self, filename: Union[str, torch._C.PyTorchFileReader],
                  module_allowed: Callable[[str], bool] = lambda module_name: True):
@@ -74,6 +75,8 @@ class PackageImporter:
         self.patched_builtins['__import__'] = self.__import__
         # allow pickles from archive using `import resources`
         self.modules['resources'] = self  # type: ignore
+
+        self._mangler = PackageMangler()
 
         # used for torch.serialization._load
         self.Unpickler = lambda *args, **kwargs: _UnpicklerWrapper(self, *args, **kwargs)
@@ -136,14 +139,25 @@ class PackageImporter:
         pickle_file = self._zipfile_path(package, resource)
         return _load(self.zip_reader, map_location, self, pickle_file=pickle_file)
 
-
     def _read_extern(self):
         return self.zip_reader.get_record('extern_modules').decode('utf-8').splitlines(keepends=False)
+
+    def _get_empty_mangle_parent(self):
+        mangle_parent = self._mangler.parent_name()
+        module = self.modules.get(mangle_parent)
+        if module is not None:
+            return module
+
+        spec = importlib.machinery.ModuleSpec(mangle_parent, self, is_package=True)  # type: ignore
+        module = importlib.util.module_from_spec(spec)
+        self.modules[mangle_parent] = module
+        return module
 
     def _make_module(self, name: str, filename: Optional[str], is_package: bool, parent: str):
         spec = importlib.machinery.ModuleSpec(name, self, is_package=is_package)  # type: ignore
         module = importlib.util.module_from_spec(spec)
         self.modules[name] = module
+        module.__name__ = self._mangler.mangle(name)
         ns = module.__dict__
         ns['__spec__'] = spec
         ns['__loader__'] = self
@@ -239,6 +253,12 @@ class PackageImporter:
         the loader did not.
 
         """
+        if name == self._mangler.parent_name():
+            # If an external part tries to load the top-level parent module
+            # directly, just return to them an empty module.
+            return self._get_empty_mangle_parent()
+
+        name = self._mangler.demangle(name)
         _sanity_check(name, package, level)
         if level > 0:
             name = _resolve_name(name, package, level)
@@ -330,7 +350,8 @@ class PackageImporter:
         package = self._get_package(package)
         resource = _normalize_path(resource)
         assert package.__loader__ is self
-        return f"{package.__name__.replace('.', '/')}/{resource}"
+        name = self._mangler.demangle(package.__name__)
+        return f"{name.replace('.', '/')}/{resource}"
 
     def _get_or_create_package(self, atoms: List[str]) -> 'Union[_PackageNode, _ExternNode]':
         cur = self.root

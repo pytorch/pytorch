@@ -2,11 +2,13 @@ from unittest import main, skipIf
 from torch.testing._internal.common_utils import TestCase, IS_WINDOWS
 from tempfile import NamedTemporaryFile
 from torch.package import PackageExporter, PackageImporter
+from torch.package._mangling import PackageMangler, PackageDemangler, _was_mangled
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import torch
 from sys import version_info
 from io import StringIO
+import pickle
 
 try:
     from torchvision.models import resnet18
@@ -155,6 +157,100 @@ import module_a
         self.assertIs(module_a, module_a_im)
         self.assertIsNot(package_a, package_a_im)
         self.assertIs(package_a.subpackage, package_a_im.subpackage)
+
+    def test_exporting_mismatched_code(self):
+        """
+        If an object with the same qualified name is loaded from different
+        packages, the user should get an error if they try to re-save the
+        object with the wrong package's source code.
+        """
+        import package_a.subpackage
+        obj = package_a.subpackage.PackageASubpackageObject()
+        obj2 = package_a.PackageAObject(obj)
+        f1 = self.temp()
+        with PackageExporter(f1, verbose=False) as pe:
+            pe.save_pickle("obj", "obj.pkl", obj2)
+
+        importer1 = PackageImporter(f1)
+        loaded1 = importer1.load_pickle("obj", "obj.pkl")
+        importer2 = PackageImporter(f1)
+        loaded2 = importer2.load_pickle("obj", "obj.pkl")
+
+        f2 = self.temp()
+
+        def make_exporter():
+            pe = PackageExporter(f2, verbose=False)
+            # Ensure that the importer finds the 'PackageAObject' defined in 'importer1' first.
+            pe.importers.insert(0, importer1.import_module)
+            return pe
+
+        # This should fail. The 'PackageAObject' type defined from 'importer1'
+        # is not necessarily the same 'obj2's version of 'PackageAObject'.
+        pe = make_exporter()
+        with self.assertRaises(pickle.PicklingError):
+            pe.save_pickle("obj", "obj.pkl", obj2)
+
+        # This should also fail. The 'PackageAObject' type defined from 'importer1'
+        # is not necessarily the same as the one defined from 'importer2'
+        pe = make_exporter()
+        with self.assertRaises(pickle.PicklingError):
+            pe.save_pickle("obj", "obj.pkl", loaded2)
+
+        # This should succeed. The 'PackageAObject' type defined from
+        # 'importer1' is a match for the one used by loaded1.
+        pe = make_exporter()
+        pe.save_pickle("obj", "obj.pkl", loaded1)
+
+    def test_exporting_name_collision(self):
+        """
+        Implicitly overwriting an module already written in the exporter should fail.
+        """
+        import package_a.subpackage
+        obj = package_a.subpackage.PackageASubpackageObject()
+        obj2 = package_a.PackageAObject(obj)
+        f1 = self.temp()
+        with PackageExporter(f1) as pe:
+            pe.save_pickle("obj", "obj.pkl", obj2)
+
+        importer1 = PackageImporter(f1)
+        loaded1 = importer1.load_pickle("obj", "obj.pkl")
+        importer2 = PackageImporter(f1)
+        loaded2 = importer2.load_pickle("obj", "obj.pkl")
+
+        # Modules from loaded packages should not shadow the names of modules.
+        # See "Mangling Imports" for more info.
+        mod1 = type(obj2).__module__
+        mod2 = type(loaded1).__module__
+
+
+        f2 = self.temp()
+        pe = PackageExporter(f2, verbose=False)
+        pe.importers.insert(0, importer1.import_module)
+        pe.save_module(mod1)
+
+        # `mod1` and `mod2` will have a name collision on export, since they
+        # represent the same module. So saving `mod2` after saving `mod1`
+        # should raise an error.
+        with self.assertRaises(RuntimeError):
+            pe.save_module(mod2)
+
+    def test_unique_module_names(self):
+        import package_a.subpackage
+        obj = package_a.subpackage.PackageASubpackageObject()
+        obj2 = package_a.PackageAObject(obj)
+        f1 = self.temp()
+        with PackageExporter(f1, verbose=False) as pe:
+            pe.save_pickle("obj", "obj.pkl", obj2)
+
+        importer1 = PackageImporter(f1)
+        loaded1 = importer1.load_pickle("obj", "obj.pkl")
+        importer2 = PackageImporter(f1)
+        loaded2 = importer2.load_pickle("obj", "obj.pkl")
+
+        # Modules from loaded packages should not shadow the names of modules.
+        # See "Mangling Imports" for more info.
+        self.assertNotEqual(type(obj2).__module__, type(loaded1).__module__)
+        self.assertNotEqual(type(loaded1).__module__, type(loaded2).__module__)
 
     @skipIf(version_info < (3, 7), 'mock uses __getattr__ a 3.7 feature')
     def test_mock(self):
@@ -374,6 +470,82 @@ def load():
         check('torch*', [], ['torch', 'torchvision'], ['torch.f'])
         check('torch.**', ['torch.**.foo'], ['torch', 'torch.bar', 'torch.barfoo'], ['torch.foo', 'torch.some.foo'])
         check('**.torch', [], ['torch', 'bar.torch'], ['visiontorch'])
+
+
+class ManglingTest(TestCase):
+    def test_unique_manglers(self):
+        """
+        Each mangler instance should generate a unique mangled name for a given input.
+        """
+        a = PackageMangler()
+        b = PackageMangler()
+        self.assertNotEqual(a.mangle("foo.bar"), b.mangle("foo.bar"))
+
+    def test_mangler_is_consistent(self):
+        """
+        Mangling the same name twice should produce the same result.
+        """
+        a = PackageMangler()
+        self.assertEqual(a.mangle("abc.def"), a.mangle("abc.def"))
+
+    def test_roundtrip_mangling(self):
+        a = PackageMangler()
+        self.assertEqual("foo", a.demangle(a.mangle("foo")))
+
+    def test_unique_demangling(self):
+        """
+        A given PackageMangler should only be able to demangle names that it
+        created. It should pass through names created by a different
+        PackageMangler instance.
+        """
+        a = PackageMangler()
+        b = PackageMangler()
+        a_mangled = a.mangle("foo.bar.baz")
+        self.assertEqual(a_mangled, b.demangle(a_mangled))
+
+    def test_was_mangled(self):
+        a = PackageMangler()
+        b = PackageMangler()
+        self.assertTrue(_was_mangled(a.mangle("foo.bar")))
+        self.assertTrue(_was_mangled(b.mangle("foo.bar")))
+
+        self.assertFalse(_was_mangled("foo.bar"))
+        self.assertFalse(_was_mangled(a.demangle(a.mangle("foo.bar"))))
+
+    def test_demangler_multiple_manglers(self):
+        """
+        PackageDemangler should be able to demangle name generated by any PackageMangler.
+        """
+        a = PackageMangler()
+        b = PackageMangler()
+        d = PackageDemangler()
+
+        self.assertEqual("foo.bar", d.demangle(a.mangle("foo.bar")))
+        self.assertEqual("bar.foo", d.demangle(b.mangle("bar.foo")))
+
+    def test_demangler_collision(self):
+        """
+        PackageDemangler when demangling would produce a name collision with something previously demangled.
+        """
+        a = PackageMangler()
+        b = PackageMangler()
+        d = PackageDemangler()
+
+        a_mangled = a.mangle("foo.bar")
+        b_mangled = b.mangle("foo.bar")
+        d.demangle(a_mangled)
+        with self.assertRaises(RuntimeError):
+            d.demangle(b_mangled)
+
+        # A more subtle case of the above, where "foo.bar" collides with a mangled "foo.bar"
+        a = PackageMangler()
+        d = PackageDemangler()
+        a_mangled = a.mangle("foo.bar")
+
+        d.demangle("foo.bar")
+        with self.assertRaises(RuntimeError):
+            d.demangle(a_mangled)
+
 
 if __name__ == '__main__':
     main()
