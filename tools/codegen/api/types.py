@@ -1,6 +1,6 @@
 from tools.codegen.model import *
 from dataclasses import dataclass
-from typing import Optional, Union, Sequence, TypeVar, List
+from typing import Optional, Union, Sequence, TypeVar, List, Set
 from enum import Enum
 
 _T = TypeVar('_T')
@@ -128,13 +128,22 @@ class CppSignature:
     # (i.e. with a potential TensorOptions argument and out arguments in the front)
     faithful: bool
 
+    # The set of C++ arguments which should not have defaults applied to them
+    cpp_no_default_args: Set[str]
+
+    # Is this a fallback C++ binding?  Fallback bindings are enabled by
+    # manual_cpp_binding: True and are alternate, non-public API that
+    # lets manual C++ binding implementors access the binding that would
+    # have been automatically generated
     fallback_binding: bool = False
 
     # Return the unpacked argument structure of this signature,
     # discarding information about which arguments are semantically
     # related to each other.
     def arguments(self) -> Sequence[Binding]:
-        return cpp.arguments(self.func.arguments, faithful=self.faithful, method=self.method)
+        return cpp.arguments(
+            self.func.arguments, faithful=self.faithful,
+            method=self.method, cpp_no_default_args=self.cpp_no_default_args)
 
     def name(self) -> str:
         n = cpp.name(self.func, faithful_name_for_out_overloads=self.faithful)
@@ -172,10 +181,22 @@ class CppSignatureGroup:
         func = f.func
         faithful_signature: Optional[CppSignature]
         if func.arguments.tensor_options is not None or len(func.arguments.out) > 0:
-            faithful_signature = CppSignature(func=func, faithful=True, method=method, fallback_binding=fallback_binding)
+            faithful_signature = CppSignature(
+                func=func,
+                faithful=True,
+                method=method,
+                fallback_binding=fallback_binding,
+                cpp_no_default_args=f.cpp_no_default_args
+            )
         else:
             faithful_signature = None
-        signature = CppSignature(func=func, faithful=False, method=method, fallback_binding=fallback_binding)
+        signature = CppSignature(
+            func=func,
+            faithful=False,
+            method=method,
+            fallback_binding=fallback_binding,
+            cpp_no_default_args=f.cpp_no_default_args
+        )
         return CppSignatureGroup(
             func=func,
             signature=signature,
