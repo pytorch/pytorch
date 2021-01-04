@@ -168,7 +168,8 @@ class CppSignatureGroup:
     faithful_signature: Optional[CppSignature]
 
     @staticmethod
-    def from_schema(func: FunctionSchema, *, method: bool, fallback_binding: bool = False) -> 'CppSignatureGroup':
+    def from_native_function(f: NativeFunction, *, method: bool, fallback_binding: bool = False) -> 'CppSignatureGroup':
+        func = f.func
         faithful_signature: Optional[CppSignature]
         if func.arguments.tensor_options is not None or len(func.arguments.out) > 0:
             faithful_signature = CppSignature(func=func, faithful=True, method=method, fallback_binding=fallback_binding)
