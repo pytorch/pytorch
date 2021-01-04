@@ -12,7 +12,7 @@ def clip_grad_norm_(parameters: _tensor_or_tensors, max_norm: float, norm_type: 
     The norm is computed over all gradients together, as if they were
     concatenated into a single vector. Gradients are modified in-place.
 
-    Arguments:
+    Args:
         parameters (Iterable[Tensor] or Tensor): an iterable of Tensors or a
             single Tensor that will have gradients normalized
         max_norm (float or int): max norm of the gradients
@@ -58,7 +58,7 @@ def clip_grad_value_(parameters: _tensor_or_tensors, clip_value: float) -> None:
 
     Gradients are modified in-place.
 
-    Arguments:
+    Args:
         parameters (Iterable[Tensor] or Tensor): an iterable of Tensors or a
             single Tensor that will have gradients normalized
         clip_value (float or int): maximum allowed value of the gradients.

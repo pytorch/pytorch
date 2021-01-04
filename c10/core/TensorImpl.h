@@ -19,7 +19,7 @@
 #include <c10/util/python_stub.h>
 
 // A global boolean variable to control whether we free memory when a Tensor
-// is shrinked to a smaller size. As a result, a Tensor is always going to
+// is shrunk to a smaller size. As a result, a Tensor is always going to
 // keep the memory allocated for its maximum capacity reshaped to so far.
 //
 // This parameter is respected "upper-case" methods which call Resize()
@@ -136,6 +136,8 @@ struct C10_API AutogradMetaInterface {
   virtual bool requires_grad() const = 0;
   virtual at::Tensor& mutable_grad() = 0;
   virtual const at::Tensor& grad() const = 0;
+  virtual const at::Tensor& fw_grad(uint64_t level, const at::Tensor& self) const = 0;
+  virtual void set_fw_grad(const at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op) = 0;
   virtual ~AutogradMetaInterface();
 };
 
@@ -597,6 +599,42 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * See Note [Tensor versus Variable in C++].
    */
   const at::Tensor& grad() const;
+
+  /**
+   * Return the accumulated gradient of a tensor. This gradient is computed
+   * using forward mode AD.
+   *
+   * This is an internal API that should never be used by end users.
+   *
+   * The API is as follows:
+   *   - "level" allows to specify the level of forward AD nesting for which the
+   *     gradient should be returned. Note that since levels are not fully
+   *     supported yet, this argument should be 0. See documentation for
+   *     torch::autograd::enter_dual_level for more details about forward AD nesting.
+   *   - "self" should represent the Tensor whose forward grad is accessed. It is
+   *     required when dealing with view.
+   */
+  const at::Tensor& fw_grad(uint64_t level, const at::Tensor& self) const;
+
+  /**
+   * Sets the forward gradient for this Tensor.
+   * The given Tensor might not be used directly and its content will be copied.
+   *
+   * This is an internal API that should never be used by end users.
+   *
+   * The API is as follows:
+   *   - "new_grad" is a Tensor containing the new value of the gradient that should
+   *     be set
+   *   - "self" should represent the Tensor whose forward grad is accessed. It is
+   *     required when dealing with view.
+   *   - "level" allows to specify the level of forward AD nesting for which the
+   *     gradient should be set. Note that since levels are not fully supported
+   *     yet, this argument should be 0. See documentation for torch::autograd::enter_dual_level
+   *     for more details about forward AD nesting.
+   *   - "is_inplace_op" is a boolean flag that tells if this gradient was generated
+   *     by an inplace operation or an out of place one. This allows better error checking.
+   */
+  void set_fw_grad(const at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op);
 
   /**
    * Return a typed data pointer to the actual data which this tensor refers to.
@@ -1343,7 +1381,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // error in attempt to invoke TypeMeta::ctor()
     static_assert(
         std::is_default_constructible<T>::value,
-        "Tensor can't hold non-default-constructible types");
+        "Tensor can't hold non-default-constructable types");
     return static_cast<T*>(raw_mutable_data(caffe2::TypeMeta::Make<T>()));
   }
 

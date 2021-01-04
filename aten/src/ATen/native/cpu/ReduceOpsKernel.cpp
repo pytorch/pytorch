@@ -158,13 +158,23 @@ static void std_var_kernel_impl(TensorIterator &iter, bool unbiased, bool take_s
 }
 
 static void prod_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "prod_cpu", [&] {
+  // Workaround for the error: '*' in boolean context, suggest '&&' instead [-Werror=int-in-bool-context]
+  if (iter.dtype() == ScalarType::Bool) {
+    using scalar_t = bool;
     binary_kernel_reduce_vec(
       iter,
-      [=](scalar_t a, scalar_t b) -> scalar_t { return a * b; },
-      [=](Vec256<scalar_t> a, Vec256<scalar_t> b) { return a * b; },
+      [=](scalar_t a, scalar_t b) -> scalar_t { return a && b; },
+      [=](Vec256<scalar_t> a, Vec256<scalar_t> b) { return a && b; },
       /*identity=*/1);
-  });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "prod_cpu", [&] {
+      binary_kernel_reduce_vec(
+        iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t { return a * b; },
+        [=](Vec256 <scalar_t> a, Vec256 <scalar_t> b) { return a * b; },
+        /*identity=*/1);
+      });
+  }
 }
 
 static void norm_kernel_tensor_iterator_impl(
@@ -215,7 +225,7 @@ static void norm_kernel_tensor_iterator_impl(
       binary_kernel_reduce(
         iter,
         AbsMaxOps<scalar_t, acc_t>(),
-        std::numeric_limits<acc_t>::min()
+        acc_t(0)
       );
     });
   } else if (val == -INFINITY) {

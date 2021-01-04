@@ -1331,3 +1331,33 @@ class TestFreezing(JitTestCase):
         m.eval()
         with self.assertRaisesRegex(RuntimeError, "Freezing modules containing prim::ModuleDictIndex is not supported"):
             mf = torch._C._freeze_module(m._c)
+
+
+    def test_freeze_non_module_class_getattr(self):
+        class BoxCoder(object):
+            def __init__(self, bbox_xform_clip):
+                # type: (float) -> None
+                self.bbox_xform_clip = bbox_xform_clip
+
+            def decode(self, input):
+                return input * self.bbox_xform_clip
+
+        class MyModule(torch.nn.Module):
+            __annotations__ = {
+                'box_coder': BoxCoder,
+            }
+
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.box_coder = BoxCoder(50.)
+
+            def forward(self, input):
+                return self.box_coder.decode(input)
+
+        model = MyModule()
+        model.eval()
+        script_model = torch.jit.freeze(torch.jit.script(model))
+        inp = torch.randn([4, 4])
+        output_eager = model(inp)
+        self.assertEqual(model(inp), script_model(inp))
+        FileCheck().check_not("GetAttr").run(script_model.graph)

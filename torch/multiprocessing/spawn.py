@@ -104,7 +104,7 @@ class ProcessContext:
         Returns ``True`` if all processes have been joined successfully,
         ``False`` if there are more processes that need to be joined.
 
-        Arguments:
+        Args:
             timeout (float): Wait this long before giving up on waiting.
         """
         # Ensure this function can be called even when we're done.
@@ -215,7 +215,7 @@ def spawn(fn, args=(), nprocs=1, join=True, daemon=False, start_method='spawn'):
     child process, it is forwarded and its traceback is included in
     the exception raised in the parent process.
 
-    Arguments:
+    Args:
         fn (function): Function is called as the entrypoint of the
             spawned process. This function must be defined at the top
             level of a module so it can be pickled and spawned. This
