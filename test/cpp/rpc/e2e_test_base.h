@@ -90,14 +90,15 @@ class TestE2EBase : public ::testing::Test {
     ScriptCall scriptCall(op, {t1, t2, /* alpha */ 1});
 
     // Send the RPC and return result.
-    auto response = RpcAgent::toFutureMessage(
-        autograd::sendMessageWithAutograd(
-            *rpcAgent,
-            rpcAgent->getWorkerInfo("worker"),
-            std::move(scriptCall).toMessage()))
-        ->wait();
+    auto response = autograd::sendMessageWithAutograd(
+        *rpcAgent,
+        rpcAgent->getWorkerInfo("worker"),
+        std::move(scriptCall).toMessage());
+    response->waitAndThrow();
+
     MessageType messageType = MessageType::FORWARD_AUTOGRAD_RESP;
-    auto wrappedResponse = deserializeResponse(response, messageType);
+    auto wrappedResponse = deserializeResponse(
+        std::move(*response->value().toCustomClass<Message>()), messageType);
     return static_cast<ScriptResp&>(*wrappedResponse).value().toTensor();
   }
 
