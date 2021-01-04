@@ -297,6 +297,8 @@ void initJITBindings(PyObject* module) {
           py::arg("freezeInterfaces") = true,
           py::arg("preserveParameters") = false)
       .def("_jit_pass_frozen_conv_bn_folding", &FoldConvBatchnorm)
+      .def("_jit_pass_frozen_conv_add_or_sub_folding", &FoldConvAddOrSub)
+      .def("_jit_pass_frozen_conv_mul_or_div_folding", &FoldConvMulOrDiv)
       .def("_jit_pass_fuse_linear", &FuseLinear)
       .def(
           "_jit_pass_fuse_add_relu",
