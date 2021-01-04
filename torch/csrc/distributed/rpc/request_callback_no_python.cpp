@@ -124,7 +124,7 @@ void RequestCallbackNoPython::processScriptCall(
     RpcCommandBase& rpc,
     const std::function<void(Message)>& markComplete,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& responseFuture) const {
+    const std::shared_ptr<JitFuture>& /* unused */) const {
   auto& scriptCall = static_cast<ScriptCall&>(rpc);
   auto& stack = scriptCall.stackRef();
   TORCH_CHECK(
@@ -162,7 +162,7 @@ void RequestCallbackNoPython::processPythonCall(
     RpcCommandBase& rpc,
     const std::function<void(Message)>& markComplete,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& responseFuture) const {
+    const std::shared_ptr<JitFuture>& /* unused */) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
@@ -170,7 +170,7 @@ void RequestCallbackNoPython::processPythonRemoteCall(
     RpcCommandBase& rpc,
     const std::function<void(Message)>& markComplete,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& responseFuture) const {
+    const std::shared_ptr<JitFuture>& /* unused */) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
@@ -303,7 +303,7 @@ void RequestCallbackNoPython::processScriptRRefFetchCall(
 void RequestCallbackNoPython::processPythonRRefFetchCall(
     RpcCommandBase& rpc,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& responseFuture) const {
+    const std::shared_ptr<JitFuture>& /* unused */) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
@@ -555,7 +555,7 @@ void RequestCallbackNoPython::processRunWithProfilingReq(
 void RequestCallbackNoPython::processRRefBackward(
     RpcCommandBase& rpc,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& responseFuture) const {
+    const std::shared_ptr<JitFuture>& /* unused */) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
