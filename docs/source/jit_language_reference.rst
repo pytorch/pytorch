@@ -63,7 +63,7 @@ net models. In particular, TorchScript supports:
    :header: "Type", "Description"
 
    "``Tensor``", "A PyTorch tensor of any dtype, dimension, or backend"
-   "``Tuple[T0, T1, ...]``", "A tuple containing subtypes ``T0``, ``T1``, etc. (e.g. ``Tuple[Tensor, Tensor]``)"
+   "``Tuple[T0, T1, ..., TN]``", "A tuple containing subtypes ``T0``, ``T1``, etc. (e.g. ``Tuple[Tensor, Tensor]``)"
    "``bool``", "A boolean value"
    "``int``", "A scalar integer"
    "``float``", "A scalar floating point number"

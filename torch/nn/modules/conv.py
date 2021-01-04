@@ -685,8 +685,8 @@ class ConvTranspose1d(_ConvTransposeNd):
         if self.padding_mode != 'zeros':
             raise ValueError('Only `zeros` padding mode is supported for ConvTranspose1d')
 
-        # One cannot replace List by Sequence in "_output_padding" because TorchScript does
-        # not support Sequence[T]. Therefore, a "type:ignore[...]" is required.
+        # One cannot replace List by Tuple or Sequence in "_output_padding" because 
+        # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         output_padding = self._output_padding(
             input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore
         return F.conv_transpose1d(
@@ -829,8 +829,8 @@ class ConvTranspose2d(_ConvTransposeNd):
         if self.padding_mode != 'zeros':
             raise ValueError('Only `zeros` padding mode is supported for ConvTranspose2d')
 
-        # One cannot replace List by Sequence in "_output_padding" because pytorch does
-        # not support Sequence[T]. Therefore, a "type:ignore[...]" is required.
+        # One cannot replace List by Tuple or Sequence in "_output_padding" because 
+        # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         output_padding = self._output_padding(
             input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore
 
@@ -970,8 +970,8 @@ class ConvTranspose3d(_ConvTransposeNd):
         if self.padding_mode != 'zeros':
             raise ValueError('Only `zeros` padding mode is supported for ConvTranspose3d')
 
-        # One cannot replace List by Sequence in "_output_padding" because pytorch does
-        # not support Sequence[T]. Therefore, a "type:ignore[...]" is required.
+        # One cannot replace List by Tuple or Sequence in "_output_padding" because 
+        # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         output_padding = self._output_padding(
             input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore
 
