@@ -6,9 +6,9 @@ class VariableMeta(type):
         return isinstance(other, torch.Tensor)
 
 
-class Variable(torch._C._LegacyVariableBase, metaclass=VariableMeta):
+class Variable(torch._C._LegacyVariableBase, metaclass=VariableMeta):  # type: ignore
     pass
 
 
 from torch._C import _ImperativeEngine as ImperativeEngine
-Variable._execution_engine = ImperativeEngine()
+Variable._execution_engine = ImperativeEngine()  # type: ignore

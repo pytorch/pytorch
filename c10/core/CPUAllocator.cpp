@@ -1,5 +1,7 @@
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/DeviceType.h>
+#include <c10/mobile/CPUCachingAllocator.h>
+#include <c10/mobile/CPUProfilingAllocator.h>
 
 // TODO: rename flags to C10
 C10_DEFINE_bool(
@@ -43,8 +45,9 @@ void* alloc_cpu(size_t nbytes) {
   // We might have clowny upstream code that tries to alloc a negative number
   // of bytes. Let's catch it early.
   CAFFE_ENFORCE(
-    ((ptrdiff_t)nbytes) >= 0,
-    "alloc_cpu() seems to have been called with negative number: ", nbytes);
+      ((ptrdiff_t)nbytes) >= 0,
+      "alloc_cpu() seems to have been called with negative number: ",
+      nbytes);
 
   void* data;
 #ifdef __ANDROID__
@@ -76,7 +79,7 @@ void* alloc_cpu(size_t nbytes) {
   CHECK(
       !FLAGS_caffe2_cpu_allocator_do_zero_fill ||
       !FLAGS_caffe2_cpu_allocator_do_junk_fill)
-    << "Cannot request both zero-fill and junk-fill at the same time";
+      << "Cannot request both zero-fill and junk-fill at the same time";
   if (FLAGS_caffe2_cpu_allocator_do_zero_fill) {
     memset(data, 0, nbytes);
   } else if (FLAGS_caffe2_cpu_allocator_do_junk_fill) {
@@ -154,7 +157,22 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
     }
     // TODO: enable with better TLS support on mobile
     // profiledCPUMemoryReporter().Delete(pointer);
-    c10::free_cpu(pointer);
+    auto allocator_ptr = GetThreadLocalCachingAllocator();
+    auto profiling_allocator_ptr = GetThreadLocalProfilingAllocator();
+    if (allocator_ptr != nullptr) {
+      allocator_ptr->free(pointer);
+    } else if (profiling_allocator_ptr != nullptr) {
+      profiling_allocator_ptr->free(pointer);
+    } else {
+      c10::free_cpu(pointer);
+      // This adds extra cost to freeing memory to the default case when
+      // caching allocator is not enabled.
+      CPUCachingAllocator::record_free(pointer);
+      auto allocation_planner = GetThreadLocalAllocationPlanner();
+      if (allocation_planner != nullptr) {
+        allocation_planner->record_free(pointer);
+      }
+    }
   }
 
   virtual DataPtr allocate(const size_t nbytes) const override {
@@ -168,7 +186,20 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
     }
 
     auto alloc_size = PreGuardBytes + nbytes + PostGuardBytes;
-    void* const data = c10::alloc_cpu(alloc_size);
+    void* data;
+    auto allocator_ptr = GetThreadLocalCachingAllocator();
+    auto profiling_allocator_ptr = GetThreadLocalProfilingAllocator();
+    if (allocator_ptr != nullptr) {
+      data = allocator_ptr->allocate(alloc_size);
+    } else if (profiling_allocator_ptr != nullptr) {
+      data = profiling_allocator_ptr->allocate(alloc_size);
+    } else {
+      data = c10::alloc_cpu(alloc_size);
+      auto allocation_planner = GetThreadLocalAllocationPlanner();
+      if (allocation_planner != nullptr) {
+        allocation_planner->record_allocation(alloc_size, data);
+      }
+    }
     //  profiledCPUMemoryReporter().New(data, alloc_size);
     return {
         reinterpret_cast<uint8_t*>(data) + PreGuardBytes,
@@ -267,12 +298,32 @@ void ProfiledCPUMemoryReporter::Delete(void* ptr) {
     return;
   }
   if (FLAGS_caffe2_report_cpu_memory_usage) {
-    LOG(INFO) << "C10 deleted " << nbytes << " bytes, total alloc "
-              << allocated << " bytes.";
+    LOG(INFO) << "C10 deleted " << nbytes << " bytes, total alloc " << allocated
+              << " bytes.";
   }
   if (profile_memory) {
-    reportMemoryUsageToProfiler(ptr, -nbytes, c10::Device(c10::DeviceType::CPU));
+    reportMemoryUsageToProfiler(
+        ptr, -nbytes, c10::Device(c10::DeviceType::CPU));
   }
+}
+
+C10_API at::Allocator* cpu_caching_alloc = nullptr;
+C10_API uint8_t cpu_caching_alloc_priority = 0;
+
+void SetCPUCachingAllocator(Allocator* alloc, uint8_t priority) {
+  if (priority >= cpu_caching_alloc_priority) {
+    cpu_caching_alloc = alloc;
+    cpu_caching_alloc_priority = priority;
+  }
+}
+
+Allocator* GetCPUCachingAllocator() {
+  if (cpu_caching_alloc == nullptr) {
+    VLOG(1)
+        << "There is not caching allocator registered for CPU, use the default allocator instead.";
+    return GetAllocator(DeviceType::CPU);
+  }
+  return cpu_caching_alloc;
 }
 
 } // namespace c10

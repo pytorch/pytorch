@@ -21,7 +21,7 @@ TorchNNModuleTestParams = namedtuple(
         # Unique identifier for this module config (e.g. "BCELoss_weights_cuda")
         'module_variant_name',
 
-        # An instance of an NN test class (e.g. `NewCriterionTest`) which stores
+        # An instance of an NN test class (e.g. `CriterionTest`) which stores
         # necessary information (e.g. input / target / extra_args) for running the Python test
         'test_instance',
 
@@ -184,8 +184,7 @@ def move_cpp_tensors_to_device(cpp_tensor_stmts, device):
     return ['{}.to("{}")'.format(tensor_stmt, device) for tensor_stmt in cpp_tensor_stmts]
 
 def is_criterion_test(test_instance):
-    return isinstance(test_instance, common_nn.CriterionTest) or \
-        isinstance(test_instance, common_nn.NewCriterionTest)
+    return isinstance(test_instance, common_nn.CriterionTest)
 
 # This function computes the following:
 # - What variable declaration statements should show up in the C++ parity test function

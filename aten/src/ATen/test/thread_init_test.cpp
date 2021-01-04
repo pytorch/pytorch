@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
-#include <test/cpp/jit/test_base.h>
+#include <test/cpp/tensorexpr/test_base.h>
 #include <thread>
 
 

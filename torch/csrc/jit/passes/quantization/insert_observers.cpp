@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
+#include <torch/csrc/jit/passes/inline_fork_wait.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 
@@ -124,11 +125,24 @@ class ModuleCloneHelper {
     size_t N = type->numAttributes();
     for (size_t i = 0; i < N; ++i) {
       IValue s = module._ivalue()->getSlot(i);
-      if (type->getAttribute(i)->is_module()) {
+      std::string attr_name = type->getAttributeName(i);
+      TypePtr attr_type = type->getAttribute(i);
+      if (attr_type->is_module()) {
         const Module& orig = Module(s.toObject());
         Module cloned =
             clone_impl(orig, module_qconfig_map, type_remap, inplace, memo);
-        r.register_module(type->getAttributeName(i), cloned);
+
+        // NOTE: why do we need to manually setattr on object instead of using
+        // register_module here? because the attr can be a module interface
+        // type and hold a Module object still. register_module will not let us
+        // correctly set up the type for this attr, so we had to do this
+        // manually. In the case it's an interface type, the type will be shared
+        // by the new cloned instance in the same compilation unit bc it only
+        // contains a list of functionSchema
+        r.type()->addOrCheckAttribute(
+            attr_name,
+            attr_type->cast<ClassType>() ? cloned.type() : attr_type);
+        r._ivalue()->setAttr(attr_name, cloned._ivalue());
       } else {
         // we'll deepcopy the IValue in non inplace option
         r.register_attribute(
@@ -149,6 +163,14 @@ class ModuleCloneHelper {
       // Clone methods remapping the types to the cloned ones.
       for (auto& fn : type->methods()) {
         clone_method(module, r, *fn, module_qconfig_map, type_remap);
+      }
+      // Execute __setstate__(__getstate__()) to initialize custom class
+      // members.
+      if (auto setstate_method = r.find_method("__setstate__")) {
+        auto getstate_method = r.find_method("__getstate__");
+        TORCH_INTERNAL_ASSERT(getstate_method, "expect __getstate__");
+        auto state = (*getstate_method)(Stack{});
+        (*setstate_method)(Stack{state});
       }
     }
     return r;
@@ -174,7 +196,7 @@ class ModuleCloneHelper {
     }
     for (Node* node : block->nodes()) {
       // remapping type for module instance
-      if (node->kind() == prim::CallMethod) {
+      if (node->kind() == prim::CallMethod || node->kind() == prim::GetAttr) {
         Value* instance = node->inputs()[0];
         auto child_opt = getInvokedModuleOpt(source, node, self);
         if (child_opt.has_value()) {
@@ -337,7 +359,7 @@ class InsertObserversHelper {
       Module& module,
       const std::string& method_name);
 
-  bool valueNeedsToBeQuantized(Value* v);
+  bool valueNeedsToBeQuantized(Value* v, const QConfig& qconfig);
 
   bool isObserved(
       Value* v,
@@ -372,7 +394,17 @@ class InsertObserversHelper {
   // are observed
   bool shouldObserve(
       Node* n,
-      const std::unordered_set<Value*>& block_observed_values) {
+      const std::unordered_set<Value*>& block_observed_values,
+      QuantType quant_type) {
+    // Check whether node output uses can be quantized, eg cat followed by
+    // linear op
+    for (Value* v : n->outputs()) {
+      for (const auto& use : v->uses()) {
+        if (useQuantizable(use, quant_type)) {
+          return true;
+        }
+      }
+    }
     if (isPropagateQuantSingleInputOp(n)) {
       return isObserved(n->input(0), block_observed_values);
     } else if (isPropagateQuantBinaryOp(n)) {
@@ -1120,6 +1152,8 @@ void InsertObserversHelper::preprocess(
 
   Method method = module.get_method(method_name);
   auto graph = method.graph();
+  // Inline fork-wait calls
+  InlineForkWait(graph);
   // fuse decomposed linear into aten::linear
   FuseLinear(graph);
   replaceConvolutionWithAtenConv(graph);
@@ -1144,18 +1178,32 @@ void InsertObserversHelper::analyze(
   fillPassThroughValueMap(graph);
 }
 
-bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
+bool InsertObserversHelper::valueNeedsToBeQuantized(
+    Value* v,
+    const QConfig& qconfig) {
   if (isBiasOfConvOrLinear(v) ||
       !(v->type()->isSubtypeOf(TensorType::get()) ||
-        v->type()->isSubtypeOf(ListType::ofTensors()))) {
+        v->type()->isSubtypeOf(ListType::ofTensors())) ||
+      isEmbeddingBagNonInput(v)) {
     return false;
   }
   // For dynamic quantization we only insert observers at the input
   // of the quantizable function.
   if (quant_type_ == QuantType::STATIC) {
     // Check whether producer is quantizable
-    if (nodeQuantizable(v->node()) || isPropagateQuantOp(v->node())) {
+    if (!isWeightOnlyStaticQuantOp(v->node()) &&
+        (nodeQuantizable(v->node()) || isPropagateQuantOp(v->node()))) {
       return true;
+    }
+  }
+  if (quant_type_ == QuantType::DYNAMIC) {
+    // Check the dtype of the observer module.
+    Module observer_module = getObserverModuleFor(v, qconfig);
+    auto scalar_type = observer_module.attr("dtype");
+    // For inputs with Fp16 type that are not-weights we don't observer them for
+    // dynamic quantization.
+    if (scalar_type == at::ScalarType::Half && !isWeight(v)) {
+      return false;
     }
   }
   // Check whether node input value is quantizable
@@ -1185,7 +1233,7 @@ void InsertObserversHelper::fillValueObserverMap(
   }
   auto qconfig = *qconfig_opt;
   for (auto* v : graph->inputs()) {
-    if (valueNeedsToBeQuantized(v)) {
+    if (valueNeedsToBeQuantized(v, qconfig)) {
       GRAPH_DEBUG("Recording observer for ", v->debugName());
       GRAPH_DUMP("In graph:", v->owningGraph());
       observer_for_value_[v] = getObserverModuleFor(v, qconfig);
@@ -1198,7 +1246,7 @@ void InsertObserversHelper::fillValueObserverMap(
     blocks_to_visit.pop();
     for (Node* n : b->nodes()) {
       for (Value* v : n->outputs()) {
-        if (valueNeedsToBeQuantized(v)) {
+        if (valueNeedsToBeQuantized(v, qconfig)) {
           GRAPH_DEBUG("Recording observer for ", v->debugName());
           GRAPH_DUMP("In graph:", v->owningGraph());
           observer_for_value_[v] = getObserverModuleFor(v, qconfig);
@@ -1490,7 +1538,8 @@ InsertObserversHelper::insertObserversFor(
           // If the node is one of the propagate quant node, e.g.
           // aten::cat, we should observe its output only
           // if the input of the node is observed
-          if (observer_opt && shouldObserve(n, block_observed_values)) {
+          if (observer_opt &&
+              shouldObserve(n, block_observed_values, quant_type_)) {
             recordObserved(
                 v, *observer_opt, values_to_observe, block_observed_values);
           }

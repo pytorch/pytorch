@@ -60,6 +60,7 @@
 
 #include <c10/core/DispatchKey.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/core/op_registration/op_whitelist.h>
 #include <ATen/core/op_registration/infer_schema.h>
 #if defined(EXPOSE_C2_OPS) || !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
@@ -80,7 +81,7 @@ class class_;
 ///
 /// This class erases the type of the passed in function, but durably records
 /// the type via an inferred schema for the function.
-class CAFFE2_API CppFunction final {
+class TORCH_API CppFunction final {
   // TODO: This is morally the same thing as KernelRegistrationConfig, but it's
   // opaque to the user.
 
@@ -98,7 +99,7 @@ public:
   /// This overload accepts compile time function pointers, e.g., `CppFunction(TORCH_FN(add_impl))`
   template <typename FuncPtr>
   explicit CppFunction(FuncPtr f, std::enable_if_t<c10::is_compile_time_function_pointer<FuncPtr>::value, std::nullptr_t> = nullptr)
-    : func_(c10::KernelFunction::makeFromUnboxedRuntimeFunction(f.func_ptr()))
+    : func_(c10::KernelFunction::makeFromUnboxedFunction(f))
     , cpp_signature_(c10::impl::CppSignature::make<typename FuncPtr::FuncType>())
     // TODO: Don't go through WrapRuntimeKernelFunctor
     , schema_(c10::detail::inferFunctionSchemaFromFunctor<c10::impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<typename FuncPtr::FuncType>>>())
@@ -298,6 +299,48 @@ namespace detail {
 
   class TorchLibraryInit;
 
+} // namespace detail
+
+// Note [Selective build]
+// ~~~~~~~~~~~~~~~~~~~~~~
+// In some settings, especially mobile, it is important to avoid compiling any
+// references to functions that you aren't actually going to use, so that they
+// can be eliminated by the linker.  We call this capability "selective build".
+//
+// A very easy way to implement selective build which results in a lot of
+// boilerplate is to just add ifdef's around every registration call, but this
+// means you have to write a lot of extra lines of code at every registration
+// site, and it also means you have to define some munging scheme to map
+// operators to macros.
+//
+// Instead of doing this, we have a different mechanism centered around the
+// concept of a SelectiveStr.  A selective name is like a const char* string,
+// except it also carries at compile time a boolean saying whether or not a
+// registration should actually happen or not.  We then have extra overloads which
+// bypass registration entirely if a selective name is disabled.  We do a
+// constexpr test to see if a operator should be enabled or not; this is
+// currently implemented in ATen/core/op_registration/op_whitelist.h
+
+namespace detail {
+
+  // A SelectiveStr is like a const char*, except that it also comes
+  // with a type brand that says whether or not the name is enabled or
+  // not.  If the string is disabled, then (at compile time) we DON'T generate
+  // a registration call for it.  This class is not intended to be called
+  // directly; use TORCH_SELECTIVE_NAME or TORCH_SELECTIVE_SCHEMA macros below
+  // to create it.
+  template <bool enabled>
+  class SelectiveStr {
+  public:
+    constexpr SelectiveStr(const char* name) : name_(name) {}
+    constexpr operator const char*() { return name_; }
+  private:
+    const char* name_;
+  };
+
+#define TORCH_SELECTIVE_NAME(n) torch::detail::SelectiveStr<c10::impl::op_whitelist_check(n)>(n)
+#define TORCH_SELECTIVE_SCHEMA(n) torch::detail::SelectiveStr<c10::impl::schema_whitelist_check(n)>(n)
+
 }
 
 /// This object provides the API for defining operators and providing
@@ -324,7 +367,7 @@ namespace detail {
 /// }
 /// ```
 ///
-class CAFFE2_API Library final {
+class TORCH_API Library final {
 public:
   /// \private
   ///
@@ -435,8 +478,8 @@ public:
   ///   m.impl("add", add_cuda);
   /// }
   /// ```
-  template <typename Func>
-  Library& impl(const char* name, Func&& raw_f) & {
+  template <typename Name, typename Func>
+  Library& impl(Name name, Func&& raw_f) & {
     // TODO: need to raise an error when you impl a function that has a
     // catch all def
     CppFunction f(std::forward<Func>(raw_f));
@@ -448,8 +491,8 @@ public:
   /// Convenience overload for directly specifying the dispatch key when
   /// impl().  You probably don't need this; instead, prefer specifying
   /// the dispatch key for the entire block in TORCH_LIBRARY_IMPL()
-  template <typename Dispatch, typename Func>
-  Library& impl(const char* name, Dispatch&& key, Func&& raw_f) & {
+  template <typename Name, typename Dispatch, typename Func>
+  Library& impl(Name name, Dispatch&& key, Func&& raw_f) & {
     return impl(name, dispatch(std::forward<Dispatch>(key), std::forward<Func>(raw_f)));
   }
 
@@ -462,11 +505,45 @@ public:
   ///
   /// This is equivalent to calling CppFunction::makeUnboxedOnly() on
   /// the function, but this name for the function makes it easy to grep for.
-  template <typename Func>
-  Library& impl_UNBOXED(const char* name, Func* raw_f) & {
+  template <typename Name, typename Func>
+  Library& impl_UNBOXED(Name name, Func* raw_f) & {
     // TODO: Remove this overload once the makeUnboxedOnly incidence rate
     // goes way down
     return impl(name, CppFunction::makeUnboxedOnly(raw_f));
+  }
+
+  // These overloads cover cases when a SelectiveStr (see Note [Selective build])
+  // has been disabled at compile time.  In that case, don't generate any code
+  // referencing the passed in functions at all.
+  Library& def(detail::SelectiveStr<false>) & { return *this; }
+  Library& def(detail::SelectiveStr<true> raw_schema) & {
+    return def(raw_schema.operator const char *());
+  }
+  template <typename Func>
+  Library& def(detail::SelectiveStr<false>, Func&& raw_f) & { return *this; }
+  template <typename Func>
+  Library& def(detail::SelectiveStr<true> raw_name_or_schema, Func&& raw_f) & {
+    return def(raw_name_or_schema.operator const char *(), std::forward<Func>(raw_f));
+  }
+
+  template <typename Func>
+  Library& impl(detail::SelectiveStr<false>, Func&& raw_f) & { return *this; }
+  template <typename Dispatch, typename Func>
+  Library& impl(detail::SelectiveStr<false>, Dispatch&& key, Func&& raw_f) & { return *this; }
+  template <typename Func>
+  Library& impl_UNBOXED(detail::SelectiveStr<false> name, Func* raw_f) & { return *this; }
+
+  template <typename Func>
+  Library& impl(detail::SelectiveStr<true> name, Func&& raw_f) & {
+    return impl(name.operator const char*(), std::forward<Func>(raw_f));
+  }
+  template <typename Dispatch, typename Func>
+  Library& impl(detail::SelectiveStr<true> name, Dispatch&& key, Func&& raw_f) & {
+    return impl(name.operator const char*(), std::forward<Dispatch>(key), std::forward<Func>(raw_f));
+  }
+  template <typename Func>
+  Library& impl_UNBOXED(detail::SelectiveStr<true> name, Func* raw_f) & {
+    return impl(name.operator const char*(), CppFunction::makeUnboxedOnly(raw_f));
   }
 
   /// Register a fallback implementation for all operators which will be used
@@ -484,9 +561,9 @@ public:
   /// ```
   /// // Example:
   ///
-  /// TORCH_LIBRARY_IMPL(_, XLAPreAutograd, m) {
+  /// TORCH_LIBRARY_IMPL(_, AutogradXLA, m) {
   ///   // If there is not a kernel explicitly registered
-  ///   // for XLAPreAutograd, fallthrough to the next
+  ///   // for AutogradXLA, fallthrough to the next
   ///   // available kernel
   ///   m.fallback(torch::CppFunction::makeFallthrough());
   /// }
@@ -566,7 +643,7 @@ public:
 /// for any given namespace.
 #define TORCH_LIBRARY(ns, m) \
   static void TORCH_LIBRARY_init_ ## ns (torch::Library&); \
-  static torch::detail::TorchLibraryInit TORCH_LIBRARY_static_init_ ## ns ( \
+  static const torch::detail::TorchLibraryInit TORCH_LIBRARY_static_init_ ## ns ( \
     torch::Library::DEF, \
     &TORCH_LIBRARY_init_ ## ns, \
     #ns, c10::nullopt, __FILE__, __LINE__ \
@@ -576,16 +653,28 @@ public:
 /// \private
 ///
 /// This macro is a version of TORCH_LIBRARY() that doesn't enforce that there
-/// is only one library (it is a "fragment").  This should ONLY be used
-/// inside the PerOpRegistration.cpp file (as its name suggests).
-#define TORCH_LIBRARY_FRAGMENT_THIS_API_IS_FOR_PER_OP_REGISTRATION_ONLY(ns, m) \
-  static void TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## k (torch::Library&); \
-  static torch::detail::TorchLibraryInit TORCH_LIBRARY_FRAGMENT_static_init_ ## ns ## _ ## k ( \
+/// is only one library (it is a "fragment").  This is used inside the
+/// PerOpRegistration.cpp file, as well as in places where all op registrations
+/// within the same namespace cannot be easily put into one macro block
+/// (this is mostly the case for custom ops in fbcode that were ported from
+/// the old API)
+#define TORCH_LIBRARY_FRAGMENT(ns,  m) _TORCH_LIBRARY_FRAGMENT(ns, m, C10_UID)
+
+/// \private
+///
+/// The above macro requires an extra unique identifier (uid) to prevent variable name collisions
+/// This can happen if TORCH_LIBRARY_FRAGMENT is called multiple times with the same namespace
+/// in the same translation unit.
+/// Note that the TORCH_LIBRARY variant doesn't run into this problem, because it enforces
+/// that it can only be called once for a given namespace.
+#define _TORCH_LIBRARY_FRAGMENT(ns, m, uid) \
+  static void C10_CONCATENATE(TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _, uid) (torch::Library&); \
+  static const torch::detail::TorchLibraryInit C10_CONCATENATE(TORCH_LIBRARY_FRAGMENT_static_init_ ## ns ## _, uid) ( \
     torch::Library::FRAGMENT, \
-    &TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## k, \
+    &C10_CONCATENATE(TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _, uid), \
     #ns, c10::nullopt, __FILE__, __LINE__ \
   ); \
-  void TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## k (torch::Library& m)
+  void C10_CONCATENATE(TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _, uid) (torch::Library& m)
 
 /// Macro for defining a function that will be run at static
 /// initialization time to define operator overrides for dispatch key
@@ -624,14 +713,28 @@ public:
 /// If ``add_cpu_impl`` is an overloaded function, use a
 /// ``static_cast`` to specify which overload you want
 /// (by providing the full type).
-#define TORCH_LIBRARY_IMPL(ns, k, m) \
-  static void TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k (torch::Library&); \
-  static torch::detail::TorchLibraryInit TORCH_LIBRARY_IMPL_static_init_ ## ns ## _ ## k ( \
+///
+// NB: if the dispatch key is not whitelisted, we simply omit the Library
+// call entirely
+#define TORCH_LIBRARY_IMPL(ns, k, m) _TORCH_LIBRARY_IMPL(ns, k, m, C10_UID)
+
+/// \private
+///
+/// The above macro requires an extra unique identifier (uid) to prevent variable name collisions.
+/// This can happen if TORCH_LIBRARY_IMPL is called multiple times with the same namespace
+/// and dispatch key in the same translation unit.
+#define _TORCH_LIBRARY_IMPL(ns, k, m, uid) \
+  static void C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k ## _, uid) (torch::Library&); \
+  static const torch::detail::TorchLibraryInit C10_CONCATENATE(TORCH_LIBRARY_IMPL_static_init_ ## ns ## _ ## k ## _, uid) ( \
     torch::Library::IMPL, \
-    & TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k, \
-    #ns, c10::make_optional(c10::DispatchKey::k), __FILE__, __LINE__ \
+    c10::guts::if_constexpr<c10::impl::dispatch_key_whitelist_check(c10::DispatchKey::k)>( \
+      []() { return & C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k ## _, uid); }, \
+      []() { return [](torch::Library&) -> void {}; } \
+    ), \
+    #ns, c10::make_optional(c10::DispatchKey::k), \
+    __FILE__, __LINE__ \
   ); \
-  void TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k (torch::Library& m)
+  void C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k ## _, uid) (torch::Library& m)
 
 
 // These are variants of the macros above which are to be used for testing (they

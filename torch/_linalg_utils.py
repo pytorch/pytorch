@@ -12,8 +12,11 @@ def is_sparse(A):
     """Check if tensor A is a sparse tensor"""
     if isinstance(A, torch.Tensor):
         return A.layout == torch.sparse_coo
-    raise TypeError("expected Tensor but got %s" % (type(A).__name__))
 
+    error_str = "expected Tensor"
+    if not torch.jit.is_scripting():
+        error_str += " but got {}".format(type(A))
+    raise TypeError(error_str)
 
 def get_floating_dtype(A):
     """Return the floating point dtype of tensor A.

@@ -6,17 +6,13 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-namespace {
-constexpr auto kSecToMsConversion = 1000;
-}
-
 std::string fromVec(const std::vector<char>& vec) {
   return std::string(vec.begin(), vec.end());
 }
 
 FaultyProcessGroupAgent::FaultyProcessGroupAgent(
     std::string workerName,
-    std::shared_ptr<c10d::ProcessGroup> pg,
+    c10::intrusive_ptr<::c10d::ProcessGroup> pg,
     int numSendRecvThreads,
     std::chrono::milliseconds rpcTimeout,
     const std::vector<std::string>& messagesToFail,

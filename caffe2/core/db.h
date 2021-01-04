@@ -19,17 +19,19 @@ enum Mode { READ, WRITE, NEW };
 /**
  * An abstract class for the cursor of the database while reading.
  */
-class CAFFE2_API Cursor {
+class TORCH_API Cursor {
  public:
-  Cursor() { }
-  virtual ~Cursor() { }
+  Cursor() {}
+  virtual ~Cursor() {}
   /**
    * Seek to a specific key (or if the key does not exist, seek to the
    * immediate next). This is optional for dbs, and in default, SupportsSeek()
    * returns false meaning that the db cursor does not support it.
    */
   virtual void Seek(const string& key) = 0;
-  virtual bool SupportsSeek() { return false; }
+  virtual bool SupportsSeek() {
+    return false;
+  }
   /**
    * Seek to the first key in the database.
    */
@@ -58,10 +60,10 @@ class CAFFE2_API Cursor {
 /**
  * An abstract class for the current database transaction while writing.
  */
-class CAFFE2_API Transaction {
+class TORCH_API Transaction {
  public:
-  Transaction() { }
-  virtual ~Transaction() { }
+  Transaction() {}
+  virtual ~Transaction() {}
   /**
    * Puts the key value pair to the database.
    */
@@ -77,10 +79,10 @@ class CAFFE2_API Transaction {
 /**
  * An abstract class for accessing a database of key-value pairs.
  */
-class CAFFE2_API DB {
+class TORCH_API DB {
  public:
   DB(const string& /*source*/, Mode mode) : mode_(mode) {}
-  virtual ~DB() { }
+  virtual ~DB() {}
   /**
    * Closes the database.
    */
@@ -114,8 +116,8 @@ C10_DECLARE_REGISTRY(Caffe2DBRegistry, DB, const string&, Mode);
  * supported, a nullptr is returned. The caller is responsible for examining the
  * validity of the pointer.
  */
-inline unique_ptr<DB> CreateDB(
-    const string& db_type, const string& source, Mode mode) {
+inline unique_ptr<DB>
+CreateDB(const string& db_type, const string& source, Mode mode) {
   auto result = Caffe2DBRegistry()->Create(db_type, source, mode);
   VLOG(1) << ((!result) ? "not found db " : "found db ") << db_type;
   return result;
@@ -141,9 +143,8 @@ inline bool DBExists(const string& db_type, const string& full_db_name) {
 /**
  * A reader wrapper for DB that also allows us to serialize it.
  */
-class CAFFE2_API DBReader {
+class TORCH_API DBReader {
  public:
-
   friend class DBReaderSerializer;
   DBReader() {}
 
@@ -158,7 +159,8 @@ class CAFFE2_API DBReader {
   explicit DBReader(const DBReaderProto& proto) {
     Open(proto.db_type(), proto.source());
     if (proto.has_key()) {
-      CAFFE_ENFORCE(cursor_->SupportsSeek(),
+      CAFFE_ENFORCE(
+          cursor_->SupportsSeek(),
           "Encountering a proto that needs seeking but the db type "
           "does not support it.");
       cursor_->Seek(proto.key());
@@ -294,7 +296,7 @@ class CAFFE2_API DBReader {
   C10_DISABLE_COPY_AND_ASSIGN(DBReader);
 };
 
-class CAFFE2_API DBReaderSerializer : public BlobSerializerBase {
+class TORCH_API DBReaderSerializer : public BlobSerializerBase {
  public:
   /**
    * Serializes a DBReader. Note that this blob has to contain DBReader,
@@ -307,12 +309,12 @@ class CAFFE2_API DBReaderSerializer : public BlobSerializerBase {
       BlobSerializerBase::SerializationAcceptor acceptor) override;
 };
 
-class CAFFE2_API DBReaderDeserializer : public BlobDeserializerBase {
+class TORCH_API DBReaderDeserializer : public BlobDeserializerBase {
  public:
   void Deserialize(const BlobProto& proto, Blob* blob) override;
 };
 
-}  // namespace db
-}  // namespace caffe2
+} // namespace db
+} // namespace caffe2
 
-#endif  // CAFFE2_CORE_DB_H_
+#endif // CAFFE2_CORE_DB_H_

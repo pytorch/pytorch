@@ -24,6 +24,56 @@
 #include "test_utils.h"
 using namespace qnnpack::testing;
 
+pytorch_qnnp_operator_t create_deconvolution_op(const qnnpack::conv_param_t& conv_p,
+    const uint8_t input_zero_point) {
+  pytorch_qnnp_operator_t deconvolution = nullptr;
+  deconvolution =
+      static_cast<pytorch_qnnp_operator_t>(calloc(1, sizeof(struct pytorch_qnnp_operator)));
+  if (deconvolution == nullptr) {
+    pytorch_qnnp_log_error(
+        "failed to allocate %zu bytes for pytorch_qnnp_operator structure",
+        sizeof(struct pytorch_qnnp_operator));
+  }
+
+  deconvolution->ukernel_type = conv_p.ukernel_type;
+  deconvolution->groups = conv_p.groups;
+  deconvolution->group_input_channels = conv_p.group_input_channels;
+  deconvolution->kernel_height = conv_p.kernel_dims[1];
+  deconvolution->kernel_width = conv_p.kernel_dims[0];
+  deconvolution->stride_height = conv_p.stride_dims[1];
+  deconvolution->stride_width = conv_p.stride_dims[0];
+  deconvolution->dilation_height = conv_p.dilation[1];
+  deconvolution->dilation_width = conv_p.dilation[0];
+  deconvolution->input_padding_top = conv_p.padding[0];
+  deconvolution->input_padding_left = conv_p.padding[1];
+  deconvolution->input_padding_bottom = conv_p.padding[2];
+  deconvolution->input_padding_right = conv_p.padding[3];
+
+  deconvolution->adjustment_width = conv_p.adjustment_dims[0];
+  deconvolution->adjustment_height = conv_p.adjustment_dims[1];
+
+  const uint32_t kr = pytorch_qnnp_params.q8conv.kr;
+  const size_t k_stride = (conv_p.group_input_channels + (kr - 1)) & -kr;
+  size_t zero_size = sizeof(uint8_t) * k_stride;
+  size_t zero_offset = 0;
+  if (conv_p.group_input_channels < 8) {
+    zero_size += 8;
+    zero_offset = 8;
+  }
+  void* zero_buffer = malloc(zero_size);
+  if (zero_buffer == NULL) {
+    pytorch_qnnp_delete_operator(deconvolution);
+    pytorch_qnnp_log_error(
+        "failed to allocate %zu bytes for zero padding", zero_size);
+  }
+  memset(zero_buffer, input_zero_point, zero_size);
+
+  deconvolution->zero_buffer = zero_buffer;
+  deconvolution->zero_pointer = (void*) ((uintptr_t) zero_buffer + zero_offset);
+
+  return deconvolution;
+}
+
 class DeconvolutionOperatorTester {
  public:
   inline DeconvolutionOperatorTester& padding(uint32_t padding) {
@@ -597,6 +647,7 @@ class DeconvolutionOperatorTester {
             groupOutputChannels() * groups(),
             /*transpose=*/true,
             per_channel());
+          auto deconv_op = create_deconvolution_op(deconv_p, inputZeroPoint);
           auto packW = std::unique_ptr<qnnpack::PrePackConvWeights>(
               new qnnpack::PrePackConvWeights(
                   deconv_p,
@@ -605,6 +656,7 @@ class DeconvolutionOperatorTester {
                   bias.data()));
           const pytorch_qnnp_status runStatus = qnnpack::qnnpackDeConv(
               deconv_p,
+              deconv_op,
               packW->getPackedWeights(),
               batchSize(),
               inputHeight(),

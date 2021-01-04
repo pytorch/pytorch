@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import numpy as np
 import unittest
 
@@ -16,6 +11,7 @@ from caffe2.python import core, workspace
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 from caffe2.python.fakelowp.test_utils import print_test_debug_info
 import caffe2.python.serialized_test.serialized_test_util as serial
+import datetime
 
 workspace.GlobalInit(["caffe2", "--glow_global_fp16=1",
                       "--glow_global_fused_scale_offset_fp16=1",
@@ -24,6 +20,7 @@ workspace.GlobalInit(["caffe2", "--glow_global_fp16=1",
 
 class SparseLengthsSum4BitFakeNNPIFp16Test(serial.SerializedTestCase):
     @given(seed=st.integers(0, 65535))
+    @settings(deadline=datetime.timedelta(seconds=10))
     def test_slws_fused_4bit_rowwise_all_same(self, seed):
         np.random.seed(seed)
         workspace.ResetWorkspace()
@@ -38,8 +35,8 @@ class SparseLengthsSum4BitFakeNNPIFp16Test(serial.SerializedTestCase):
                                     size=num_lengths).astype(np.int32)
         num_indices = np.sum(lengths)
         indices = np.zeros(num_indices, dtype=np.int64)
-        weights = np.random.uniform(low=-0.5, high=0.5,
-            size=[len(indices)]).astype(np.float32)
+        weights = np.random.uniform(low=-0.5, high=0.5, size=[len(indices)])\
+            .astype(np.float32)
         weights = np.ones(len(indices)).astype(np.float32)
         pred_net = caffe2_pb2.NetDef()
         pred_net.name = "pred"
@@ -78,7 +75,7 @@ class SparseLengthsSum4BitFakeNNPIFp16Test(serial.SerializedTestCase):
             pred_net,
             {},
             max_batch_size=max_segments,
-            max_seq_size=max_segments * max_segment_length,
+            max_seq_size=max_segment_length,
             debug=True,
             adjust_batch=True,
             use_onnx=False
@@ -117,7 +114,7 @@ class SparseLengthsSum4BitFakeNNPIFp16Test(serial.SerializedTestCase):
         batch_size=st.integers(1, 32),
         max_weight=st.integers(0, 1),
     )
-    @settings(max_examples=100)
+    @settings(deadline=datetime.timedelta(seconds=10))
     def test_slws_fused_4bit_rowwise(self, seed, num_rows, embedding_dim, batch_size, max_weight):
         workspace.ResetWorkspace()
         np.random.seed(seed)

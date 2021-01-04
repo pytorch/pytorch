@@ -366,7 +366,6 @@ std::tuple<Tensor, Tensor> adaptive_max_pool2d_cpu(
 {
   Tensor output = at::empty({0}, input.options());
   Tensor indices = at::empty({0}, input.options().dtype(kLong));
-  AT_ASSERT(output_size.size() == 2);
   adaptive_max_pool2d_out_cpu_template(
     output,
     indices,

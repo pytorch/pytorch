@@ -53,22 +53,17 @@ inline Return KernelFunction::call(const OperatorHandle& opHandle, Args... args)
         return callUnboxedKernelFunction<Return, Args...>(unboxed_kernel_func_, functor_.get(), std::forward<Args>(args)...);
     }
 
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(boxed_kernel_func_ != nullptr, "Tried to call KernelFunction::call() on an uninitialized KernelFunction.");
-    return impl::boxAndCallBoxedFunc<Return, Args...>(boxed_kernel_func_, functor_.get(), opHandle, std::forward<Args>(args)...);
-}
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        boxed_kernel_func_ != nullptr,
+        "Tried to call KernelFunction::call() on an uninitialized KernelFunction."
+    );
 
-template<class Return, class... Args>
-inline Return KernelFunction::callBoxedOrUnboxed(const OperatorHandle& opHandle, std::vector<c10::IValue>& stack, Args... args) const {
-    // note: Args above is intentionally not Args&&. We don't want perfect
-    // forwarding, which would require Args to be deduced, but instead we
-    // want callers to explicitly specify the Args.
-
-    if (C10_LIKELY(unboxed_kernel_func_ != nullptr)) {
-        return callUnboxedKernelFunction<Return, Args...>(unboxed_kernel_func_, functor_.get(), std::forward<Args>(args)...);
-    }
-
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(boxed_kernel_func_ != nullptr, "Tried to call KernelFunction::callBoxedOrUnboxed() on an uninitialized KernelFunction.");
-    return impl::callBoxedFunc<Return>(boxed_kernel_func_, functor_.get(), opHandle, stack);
+    return impl::BoxedKernelWrapper<Return(Args...)>::call(
+        boxed_kernel_func_,
+        functor_.get(),
+        opHandle,
+        std::forward<Args>(args)...
+    );
 }
 
 template<KernelFunction::BoxedKernelFunction* func>
@@ -84,6 +79,14 @@ inline KernelFunction KernelFunction::makeFallthrough() {
     return KernelFunction(
         nullptr,  // no functor_ object
         &fallthrough_kernel,
+        nullptr  // no unboxed function pointer
+    );
+}
+
+inline KernelFunction KernelFunction::makeAmbiguousAutogradOther() {
+    return KernelFunction(
+        nullptr,  // no functor_ object
+        &ambiguous_autogradother_kernel,
         nullptr  // no unboxed function pointer
     );
 }
@@ -124,27 +127,41 @@ inline KernelFunction KernelFunction::makeFromUnboxedOnlyFunctor(std::unique_ptr
 }
 
 template<class FuncPtr, bool AllowLegacyTypes>
-inline KernelFunction KernelFunction::makeFromUnboxedFunction(FuncPtr) {
+inline KernelFunction KernelFunction::makeFromUnboxedFunction(FuncPtr func_ptr) {
     static_assert(is_compile_time_function_pointer<FuncPtr>::value, "Tried to call KernelFunction::makeFromUnboxedFunction with an invalid parameter. It must be a function pointer created with TORCH_FN.");
     static_assert(!std::is_same<typename FuncPtr::FuncType, BoxedKernelFunction>::value, "Tried to call KernelFunction::makeFromUnboxedFunction with a boxed function pointer. Please use KernelFunction::makeFromBoxedFunction instead.");
     static_assert(FuncPtr::func_ptr() != nullptr, "Kernel function cannot be nullptr");
 
+#if !defined(C10_MOBILE)
     return makeFromUnboxedFunctor<AllowLegacyTypes, typename impl::WrapFunctionIntoFunctor<FuncPtr>::type>(
         guts::make_unique_base<OperatorKernel, typename impl::WrapFunctionIntoFunctor<FuncPtr>::type>()
     );
+#else
+    // On mobile, we rather want to optimize for binary size than for performance,
+    // so let's not inline the kernel into the wrapper but use makeFromUnboxedRuntimeFunction
+    // instead.
+    return makeFromUnboxedRuntimeFunction(func_ptr.func_ptr());
+#endif
 }
 
 template<class FuncPtr>
-inline KernelFunction KernelFunction::makeFromUnboxedOnlyFunction(FuncPtr) {
+inline KernelFunction KernelFunction::makeFromUnboxedOnlyFunction(FuncPtr func_ptr) {
     // TODO We want to get rid of kernels that have only an unboxed function pointer.
     //      All kernels should have a boxed pointer.
     static_assert(is_compile_time_function_pointer<FuncPtr>::value, "Tried to call KernelFunction::makeFromUnboxedOnlyFunction with an invalid parameter. It must be a function pointer created with TORCH_FN.");
     static_assert(!std::is_same<typename FuncPtr::FuncType, BoxedKernelFunction>::value, "Tried to call KernelFunction::makeFromUnboxedOnlyFunction with a boxed function pointer. Please use KernelFunction::makeFromBoxedFunction instead.");
     static_assert(FuncPtr::func_ptr() != nullptr, "Kernel function cannot be nullptr");
 
+#if !defined(C10_MOBILE)
     return makeFromUnboxedOnlyFunctor<typename impl::WrapFunctionIntoFunctor<FuncPtr>::type> (
         guts::make_unique_base<OperatorKernel, typename impl::WrapFunctionIntoFunctor<FuncPtr>::type>()
     );
+#else
+    // On mobile, we rather want to optimize for binary size than for performance,
+    // so let's not inline the kernel into the wrapper but use makeFromUnboxedOnlyRuntimeFunction
+    // instead.
+    return makeFromUnboxedOnlyRuntimeFunction(func_ptr.func_ptr());
+#endif
 }
 
 template<bool AllowLegacyTypes, class FuncType>
@@ -170,7 +187,24 @@ inline KernelFunction KernelFunction::makeFromUnboxedOnlyRuntimeFunction(FuncTyp
 }
 
 template<bool AllowLegacyTypes, class Lambda>
-inline KernelFunction KernelFunction::makeFromUnboxedLambda(Lambda&& lambda) {
+inline std::enable_if_t<guts::is_stateless_lambda<std::decay_t<Lambda>>::value, KernelFunction> KernelFunction::makeFromUnboxedLambda(Lambda&& lambda) {
+    static_assert(guts::is_functor<std::decay_t<Lambda>>::value, "Tried to call KernelFunction::makeFromUnboxedLambda with a non-lambda type.");
+
+#if !defined(C10_MOBILE)
+    return makeFromUnboxedFunctor<AllowLegacyTypes, impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>(
+        guts::make_unique_base<OperatorKernel, impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>(std::forward<Lambda>(lambda))
+    );
+#else
+    // On mobile, we rather want to optimize for binary size than for performance,
+    // so let's not inline the kernel into the wrapper but use makeFromUnboxedRuntimeFunction
+    // instead.
+    using FuncType = typename guts::infer_function_traits_t<std::decay_t<Lambda>>::func_type;
+    return makeFromUnboxedRuntimeFunction<AllowLegacyTypes, FuncType>(lambda);
+#endif
+}
+
+template<bool AllowLegacyTypes, class Lambda>
+inline std::enable_if_t<!guts::is_stateless_lambda<std::decay_t<Lambda>>::value, KernelFunction> KernelFunction::makeFromUnboxedLambda(Lambda&& lambda) {
     static_assert(guts::is_functor<std::decay_t<Lambda>>::value, "Tried to call KernelFunction::makeFromUnboxedLambda with a non-lambda type.");
 
     return makeFromUnboxedFunctor<AllowLegacyTypes, impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>(

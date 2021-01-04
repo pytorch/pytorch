@@ -8,9 +8,6 @@ import sys
 pytorch_root = dirname(dirname(abspath(__file__)))
 sys.path.append(pytorch_root)
 
-# If you want to modify flags or environmental variables that is set when
-# building torch, you should do it in tools/setup_helpers/configure.py.
-# Please don't add it here unless it's only used in LibTorch.
 from tools.build_pytorch_libs import build_caffe2
 from tools.setup_helpers.cmake import CMake
 

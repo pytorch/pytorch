@@ -1,11 +1,87 @@
-#include <test/cpp/jit/test_base.h>
+#include <gtest/gtest.h>
+
 #include <test/cpp/jit/test_utils.h>
+
+#include <ATen/core/qualified_name.h>
+#include <torch/csrc/jit/frontend/resolver.h>
+#include <torch/csrc/jit/serialization/import.h>
+#include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/torch.h>
 
 namespace torch {
 namespace jit {
 
-void testModuleClone() {
+static const auto moduleInterfaceSrc = R"JIT(
+class OneInterface(ModuleInterface):
+    def one(self, x: Tensor, y: Tensor) -> Tensor:
+        pass
+)JIT";
+
+static const std::vector<std::string> subModuleMethodsSrc = {R"JIT(
+def one(self, x: Tensor, y: Tensor) -> Tensor:
+    return self.attr * x + y + 1
+
+def forward(self, x: Tensor) -> Tensor:
+    return self.attr + x
+)JIT"};
+
+static const auto parentForward = R"JIT(
+def forward(self, x: Tensor) -> Tensor:
+    return self.subMod1.one(x, x) + self.subMod2.one(x, x)
+)JIT";
+
+static void import_libs(
+    std::shared_ptr<CompilationUnit> cu,
+    const std::string& class_name,
+    const std::shared_ptr<Source>& src,
+    const std::vector<at::IValue>& tensor_table) {
+  SourceImporter si(
+      cu,
+      &tensor_table,
+      [&](const std::string& name) -> std::shared_ptr<Source> { return src; },
+      /*version=*/2);
+  si.loadType(QualifiedName(class_name));
+}
+
+TEST(ModuleAPITest, MethodRunAsync) {
+  // Module m("m");
+  // m.define(R"(
+  //   def forward(self):
+  //     r1 = torch.jit.fork(torch.mm, torch.rand(100,100),torch.rand(100,100))
+  //     r2 = torch.jit.fork(torch.mm, torch.rand(100,100),torch.rand(100,100))
+  //     return r1.wait() + r2.wait()
+  // )");
+  std::string filePath(__FILE__);
+  auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  // borrow model file from TEST(GraphExecutorTest, runAsync_executor)
+  testModelFile.append("test_interpreter_async.pt");
+  auto m = load(testModelFile);
+
+  auto counter = 0;
+  std::mutex mtx;
+
+  auto launcher = [&](std::function<void()> f) {
+    mtx.lock();
+    ++counter;
+    mtx.unlock();
+    at::launch(move(f));
+  };
+
+  auto method = m.get_method("forward");
+
+  std::vector<IValue> stack;
+  auto kwargs = std::unordered_map<std::string, at::IValue>();
+  auto future = method.run_async(stack, kwargs, launcher);
+
+  future->wait();
+
+  // expect 2 forks and 2 wait callbacks being excuted on provided taskLauncher
+  // but ivalue::Future would be marked completed and release wait before
+  // finishing all callbacks
+  ASSERT_GE(counter, 2);
+}
+
+TEST(ModuleAPITest, Clone) {
   auto cu = std::make_shared<CompilationUnit>();
   // creating child module
   auto child = ClassType::create("child", cu, true);
@@ -34,7 +110,51 @@ void testModuleClone() {
   ASSERT_EQ(Module(p2.attr("c2").toObject()).attr(attr_name).toInt(), 3);
 }
 
-void testModuleCopy() {
+TEST(ModuleAPITest, CloneWithModuleInterface) {
+  auto cu = std::make_shared<CompilationUnit>();
+
+  // define a initial module with two submods share same interface
+  Module parentMod("parentMod", cu);
+  Module subMod1("subMod1", cu);
+  Module subMod2("subMod2", cu);
+
+  std::vector<at::IValue> constantTable;
+  import_libs(
+      cu,
+      "__torch__.OneInterface",
+      std::make_shared<Source>(moduleInterfaceSrc),
+      constantTable);
+
+  auto v1 = IValue(2);
+  subMod1.register_attribute("attr", IntType::get(), v1, false);
+
+  auto v2 = IValue(4);
+  subMod2.register_attribute("attr", IntType::get(), v2, false);
+
+  for (const std::string& method : subModuleMethodsSrc) {
+    subMod1.define(method, nativeResolver());
+    subMod2.define(method, nativeResolver());
+  }
+
+  parentMod.register_attribute(
+      "subMod1",
+      cu->get_interface("__torch__.OneInterface"),
+      subMod1._ivalue());
+  parentMod.register_attribute(
+      "subMod2",
+      cu->get_interface("__torch__.OneInterface"),
+      subMod2._ivalue());
+
+  parentMod.define(parentForward, nativeResolver());
+
+  Module clonedMod = parentMod.clone();
+
+  // clone will copy both type and data, therefore we'll have a
+  // different type
+  ASSERT_NE(clonedMod.type(), parentMod.type());
+}
+
+TEST(ModuleAPITest, Copy) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
   auto attr_name = "attr";
@@ -63,7 +183,7 @@ void testModuleCopy() {
   ASSERT_EQ(m3.attr(attr_name).toInt(), 3);
 }
 
-void testModuleDeepcopy() {
+TEST(ModuleAPITest, DeepCopy) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
   auto str_attr = "str_attr";
@@ -122,7 +242,7 @@ void testModuleDeepcopy() {
   ASSERT_TRUE(t1.equal(t3));
 }
 
-void testModuleDeepcopyString() {
+TEST(ModuleAPITest, DeepCopyString) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
   auto attr1 = "attr1";
@@ -138,7 +258,7 @@ void testModuleDeepcopyString() {
   ASSERT_EQ(copied.attr(attr1).toString()->string(), original_str);
 }
 
-void testModuleDeepcopyAliasing() {
+TEST(ModuleAPITest, DeepCopyPreservesAliasing) {
   // check deepcopy preserves aliasing
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
@@ -175,7 +295,7 @@ void testModuleDeepcopyAliasing() {
   ASSERT_TRUE(copied_attr3.isAliasOf(copied_attr4));
 }
 
-void testModuleConstant() {
+TEST(ModuleAPITest, Constants) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
   auto attr_name = "attr";
@@ -191,7 +311,7 @@ void testModuleConstant() {
   ASSERT_EQ(m.attr(const_name).toInt(), 3);
 }
 
-void testModuleParameter() {
+TEST(ModuleAPITest, Parameters) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
   Module m(cu, cls);
@@ -208,6 +328,40 @@ void testModuleParameter() {
   ASSERT_TRUE(m.hasattr("tensor_param"));
   ASSERT_TRUE(m.hasattr("none_param"));
   ASSERT_TRUE(m.hasattr("none_param2"));
+}
+
+TEST(ModuleAPITest, Define) {
+  Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def add_it(self, x, b : int = 4):
+      return self.foo + x + b
+  )");
+  auto result = m.run_method("add_it", torch::ones({}));
+  AT_ASSERT(result.toTensor().item<float>() == 6);
+}
+
+TEST(ModuleAPITest, To_CUDA) {
+  Module m("test");
+  {
+    // test cuda to cpu for params and buffers
+    m.register_parameter("foo", torch::ones({}, at::kCUDA), false);
+    m.register_buffer("bar", torch::ones({}, at::kCUDA));
+
+    m.to(at::kCUDA);
+    m.to(at::kCPU);
+    AT_ASSERT(m.attr("foo").toTensor().device().is_cpu());
+    AT_ASSERT(m.attr("bar").toTensor().device().is_cpu());
+  }
+  {
+    // test cpu to cuda for params and buffers
+    m.register_parameter("foo", torch::ones({}), false);
+    m.register_buffer("bar", torch::ones({}));
+
+    m.to(at::kCUDA);
+    AT_ASSERT(m.attr("foo").toTensor().device().is_cuda());
+    AT_ASSERT(m.attr("bar").toTensor().device().is_cuda());
+  }
 }
 
 } // namespace jit

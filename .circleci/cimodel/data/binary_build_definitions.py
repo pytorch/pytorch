@@ -6,10 +6,10 @@ import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
 
 class Conf(object):
-    def __init__(self, os, cuda_version, pydistro, parms, smoke, libtorch_variant, gcc_config_variant, libtorch_config_variant):
+    def __init__(self, os, gpu_version, pydistro, parms, smoke, libtorch_variant, gcc_config_variant, libtorch_config_variant):
 
         self.os = os
-        self.cuda_version = cuda_version
+        self.gpu_version = gpu_version
         self.pydistro = pydistro
         self.parms = parms
         self.smoke = smoke
@@ -18,7 +18,7 @@ class Conf(object):
         self.libtorch_config_variant = libtorch_config_variant
 
     def gen_build_env_parms(self):
-        elems = [self.pydistro] + self.parms + [binary_build_data.get_processor_arch_name(self.cuda_version)]
+        elems = [self.pydistro] + self.parms + [binary_build_data.get_processor_arch_name(self.gpu_version)]
         if self.gcc_config_variant is not None:
             elems.append(str(self.gcc_config_variant))
         if self.libtorch_config_variant is not None:
@@ -37,9 +37,12 @@ class Conf(object):
         docker_distro_prefix = miniutils.override(self.pydistro, docker_word_substitution)
 
         # The cpu nightlies are built on the pytorch/manylinux-cuda102 docker image
-        alt_docker_suffix = self.cuda_version or "102"
-        docker_distro_suffix = "" if self.pydistro == "conda" else alt_docker_suffix
-        return miniutils.quote("pytorch/" + docker_distro_prefix + "-cuda" + docker_distro_suffix)
+        # TODO cuda images should consolidate into tag-base images similar to rocm
+        alt_docker_suffix = "cuda102" if not self.gpu_version else (
+            "rocm:" + self.gpu_version.strip("rocm") if self.gpu_version.startswith("rocm") else self.gpu_version)
+        docker_distro_suffix = alt_docker_suffix if self.pydistro != "conda" else (
+            "cuda" if alt_docker_suffix.startswith("cuda") else "rocm")
+        return miniutils.quote("pytorch/" + docker_distro_prefix + "-" + docker_distro_suffix)
 
     def get_name_prefix(self):
         return "smoke" if self.smoke else "binary"
@@ -72,10 +75,7 @@ class Conf(object):
                 branches_list=["postnightly"],
             )
         else:
-            if phase in ["upload"]:
-                filter_branch = "nightly"
-            else:
-                filter_branch = r"/.*/"
+            filter_branch = r"/.*/"
             job_def["filters"] = branch_filters.gen_filter_dict(
                 branches_list=[filter_branch],
                 tags_list=[branch_filters.RC_PATTERN],
@@ -88,27 +88,60 @@ class Conf(object):
             if not (self.smoke and self.os == "macos") and self.os != "windows":
                 job_def["docker_image"] = self.gen_docker_image()
 
-            if self.os != "windows" and self.cuda_version:
+            # fix this. only works on cuda not rocm
+            if self.os != "windows" and self.gpu_version:
                 job_def["use_cuda_docker_runtime"] = miniutils.quote("1")
         else:
             if self.os == "linux" and phase != "upload":
                 job_def["docker_image"] = self.gen_docker_image()
 
         if phase == "test":
-            if self.cuda_version:
+            if self.gpu_version:
                 if self.os == "windows":
                     job_def["executor"] = "windows-with-nvidia-gpu"
                 else:
                     job_def["resource_class"] = "gpu.medium"
-        if phase == "upload":
-            job_def["context"] = "org-member"
-            job_def["requires"] = [
-                self.gen_build_name(upload_phase_dependency, nightly)
-            ]
 
         os_name = miniutils.override(self.os, {"macos": "mac"})
         job_name = "_".join([self.get_name_prefix(), os_name, phase])
         return {job_name : job_def}
+
+    def gen_upload_job(self, phase, requires_dependency):
+        """Generate binary_upload job for configuration
+
+        Output looks similar to:
+
+      - binary_upload:
+          name: binary_linux_manywheel_3_7m_cu92_devtoolset7_nightly_upload
+          context: org-member
+          requires: binary_linux_manywheel_3_7m_cu92_devtoolset7_nightly_test
+          filters:
+            branches:
+              only:
+                - nightly
+            tags:
+              only: /v[0-9]+(\\.[0-9]+)*-rc[0-9]+/
+          package_type: manywheel
+          upload_subfolder: cu92
+        """
+        return {
+            "binary_upload": OrderedDict({
+                "name": self.gen_build_name(phase, nightly=True),
+                "context": "org-member",
+                "requires": [self.gen_build_name(
+                    requires_dependency,
+                    nightly=True
+                )],
+                "filters": branch_filters.gen_filter_dict(
+                    branches_list=["nightly"],
+                    tags_list=[branch_filters.RC_PATTERN],
+                ),
+                "package_type": self.pydistro,
+                "upload_subfolder": binary_build_data.get_processor_arch_name(
+                    self.gpu_version,
+                ),
+            })
+        }
 
 def get_root(smoke, name):
 
@@ -128,7 +161,7 @@ def gen_build_env_list(smoke):
     for c in config_list:
         conf = Conf(
             c.find_prop("os_name"),
-            c.find_prop("cu"),
+            c.find_prop("gpu"),
             c.find_prop("package_format"),
             [c.find_prop("pyver")],
             c.find_prop("smoke"),
@@ -148,7 +181,7 @@ def get_nightly_uploads():
     mylist = []
     for conf in configs:
         phase_dependency = "test" if predicate_exclude_macos(conf) else "build"
-        mylist.append(conf.gen_workflow_job("upload", phase_dependency, nightly=True))
+        mylist.append(conf.gen_upload_job("upload", phase_dependency))
 
     return mylist
 

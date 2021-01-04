@@ -407,7 +407,7 @@ class UnPackRecordsOp : public Operator<CPUContext> {
 
     // Precomputer the output sizes to avoid resizing
     std::vector<std::vector<int64_t>> outputDims(numTensors);
-    std::vector<const TypeMeta*> metas(numTensors);
+    std::vector<TypeMeta> metas(numTensors);
 
     CAFFE_ENFORCE(
         numRows > 0 || InputSize() > 1,
@@ -428,7 +428,7 @@ class UnPackRecordsOp : public Operator<CPUContext> {
 
         // Checks to ensure that dimensions/sizes match
         CAFFE_ENFORCE_EQ(outputDims[j].size(), input.dim());
-        CAFFE_ENFORCE(*metas[j] == input.dtype());
+        CAFFE_ENFORCE(metas[j] == input.dtype());
         // We look from first dimension, because we concat on the first.
         for (int k = 1; k < input.dim(); ++k) {
           CAFFE_ENFORCE_EQ(input.sizes()[k], outputDims[j][k]);
@@ -442,7 +442,7 @@ class UnPackRecordsOp : public Operator<CPUContext> {
     std::vector<void*> destinations(numTensors);
     for (int i = 0; i < numTensors; ++i) {
       Output(i)->Resize(outputDims[i]);
-      destinations[i] = Output(i)->raw_mutable_data(*metas[i]);
+      destinations[i] = Output(i)->raw_mutable_data(metas[i]);
     }
 
     for (int i = 0; i < numRows; ++i) {
@@ -450,7 +450,7 @@ class UnPackRecordsOp : public Operator<CPUContext> {
         const auto& input = tensors[i][j];
 
         context_.CopyItemsSameDevice(
-            *metas[j],
+            metas[j],
             input.numel(),
             input.raw_data() /* src */,
             destinations[j] /* dst */
@@ -468,7 +468,7 @@ class UnPackRecordsOp : public Operator<CPUContext> {
   void getShapeAndMetaFromInput(
       const Shared2DTensorVectorPtr& inputs,
       std::vector<std::vector<int64_t>>& outputDims,
-      std::vector<const TypeMeta*>& metas) {
+      std::vector<TypeMeta>& metas) {
     const auto& inputZero = inputs->at(0);
 
     const auto numTensors = inputZero.size();
@@ -479,13 +479,13 @@ class UnPackRecordsOp : public Operator<CPUContext> {
     for (int i = 0; i < numTensors; ++i) {
       outputDims[i] = inputZero[i].sizes().vec();
       outputDims[i][0] = 0;
-      metas[i] = &inputZero[i].dtype();
+      metas[i] = inputZero[i].dtype();
     }
   }
 
   void getShapeAndMetaFromPrototypeBlobs(
       std::vector<std::vector<int64_t>>& outputDims,
-      std::vector<const TypeMeta*>& metas) {
+      std::vector<TypeMeta>& metas) {
     const auto numTensors = fields_.size();
     CAFFE_ENFORCE_EQ(numTensors, InputSize() - 1);
     CAFFE_ENFORCE_EQ(numTensors, OutputSize());
@@ -493,7 +493,7 @@ class UnPackRecordsOp : public Operator<CPUContext> {
       const auto& input = Input(i + 1);
       outputDims[i] = input.sizes().vec();
       outputDims[i][0] = 0;
-      metas[i] = &input.dtype();
+      metas[i] = input.dtype();
     }
   }
 
@@ -987,10 +987,9 @@ class CollectTensorOp final : public Operator<Context> {
       // append
       pos = numVisited_;
     } else {
-      auto& gen = context_.RandGenerator();
       // uniform between [0, numVisited_]
-      std::uniform_int_distribution<int> uniformDist(0, numVisited_);
-      pos = uniformDist(gen);
+      at::uniform_int_from_to_distribution<int> uniformDist(numVisited_+1, 0);
+      pos = uniformDist(context_.RandGenerator());
       if (pos >= numToCollect_) {
         // discard
         pos = -1;

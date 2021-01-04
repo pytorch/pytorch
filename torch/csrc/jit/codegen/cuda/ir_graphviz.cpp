@@ -1,4 +1,3 @@
-
 #include <torch/csrc/jit/codegen/cuda/ir_graphviz.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
@@ -9,6 +8,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 namespace {
 
@@ -80,25 +80,8 @@ class IrNodeLabel : private OptInConstDispatch {
   }
 
   void handle(const IterDomain* id) override {
-    if (id->isReduction()) {
-      label_ << "r";
-    } else {
-      label_ << "i";
-    }
-
-    switch (id->parallel_method()) {
-      case (ParallelType::Vectorize):
-        label_ << "V";
-        break;
-      case (ParallelType::Unroll):
-        label_ << "U";
-        break;
-      case (ParallelType::Serial):
-        label_ << "S";
-        break;
-      default:
-        label_ << id->parallel_method();
-    }
+    label_ << id->getIterType();
+    label_ << id->getParallelType();
 
     label_ << "(";
     if (!id->start()->isZeroInt()) {
@@ -296,7 +279,7 @@ void IrGraphGenerator::generateScheduleGraph() {
       if (tv->domain()->hasRFactor())
         addArc(
             tv,
-            new TensorDomain(tv->domain()->rfactorDomain()),
+            new TensorDomain(tv->domain()->getRFactorDomain()),
             "[style=dashed, color=green, arrowhead=none]");
     }
   }
@@ -347,17 +330,6 @@ void IrGraphGenerator::handle(const IterDomain* id) {
   if (detail_level_ >= DetailLevel::Explicit &&
       id->rawExtent() != id->extent()) {
     addArc(id->extent(), id, "[color=gray, style=dashed]");
-  }
-}
-
-void IrGraphGenerator::handle(const TensorIndex* ti) {
-  graph_def_ << "    " << getid(ti) << " [label=\"TensorIndex\", "
-             << "shape=rarrow, color=gray, fontsize=10];\n";
-
-  addArc(ti, ti->view());
-
-  for (const auto index : ti->indices()) {
-    addArc(index, ti);
   }
 }
 
@@ -470,29 +442,6 @@ void IrGraphGenerator::handle(const ReductionOp* op) {
   addArc(op, op->out());
 }
 
-void IrGraphGenerator::handle(const ForLoop* for_loop) {
-  printExpr(for_loop, "ForLoop");
-  addArc(for_loop->index(), for_loop);
-  addArc(for_loop->iter_domain(), for_loop);
-  if (for_loop->parentScope()) {
-    addArc(for_loop, for_loop->parentScope());
-  }
-}
-
-void IrGraphGenerator::handle(const IfThenElse* if_then_else) {
-  printExpr(if_then_else, "IfThenElse");
-  addArc(if_then_else->cond(), if_then_else);
-  if (if_then_else->parentScope()) {
-    addArc(if_then_else, if_then_else->parentScope());
-  }
-}
-
-void IrGraphGenerator::handle(const Allocate* allocate) {
-  printExpr(allocate, "Allocate");
-  addArc(allocate->extent(), allocate);
-  addArc(allocate->buffer(), allocate);
-}
-
 void IrGraphGenerator::handle(const Split* split) {
   printExpr(split, IrNodeLabel::gen(split));
   addArc(split->in(), split);
@@ -507,6 +456,7 @@ void IrGraphGenerator::handle(const Merge* merge) {
   addArc(merge, merge->out());
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

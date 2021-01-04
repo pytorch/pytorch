@@ -37,13 +37,6 @@ PY3 = sys.version_info[0] == 3
 PY37 = sys.version_info[0] == 3 and sys.version_info[1] >= 7
 
 
-def raise_from(value, from_value):
-    try:
-        raise value from from_value
-    finally:
-        value = None
-
-
 # Gets a function from the name of a method on a type
 def get_function_from_type(cls, name):
     return getattr(cls, name, None)
@@ -55,7 +48,7 @@ def get_function_from_type(cls, name):
 # Copyright(c) PyTorch contributors
 #
 
-def istuple(obj):
+def istuple(obj) -> bool:
     # Usually instances of PyStructSequence is also an instance of tuple
     # but in some py2 environment it is not, so we have to manually check
     # the name of the type to determine if it is a namedtupled returned

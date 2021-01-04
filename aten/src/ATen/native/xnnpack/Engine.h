@@ -17,7 +17,8 @@ bool use_convolution2d(
     const IntArrayRef padding,
     const IntArrayRef stride,
     const IntArrayRef dilation,
-    const int64_t groups);
+    const int64_t groups,
+    const bool transposed);
 
 Tensor convolution2d(
     const Tensor& input,
@@ -65,6 +66,18 @@ Tensor max_pool2d(
     bool ceil_mode,
     float output_min = -std::numeric_limits<float>::infinity(),
     float output_max = +std::numeric_limits<float>::infinity());
+
+//
+// Channel Shuffle
+//
+
+bool use_channel_shuffle(
+    const Tensor& input,
+    const int64_t groups);
+
+Tensor channel_shuffle(
+    const Tensor& input,
+    const int64_t groups);
 
 } // namespace xnnpack
 } // namespace native

@@ -357,3 +357,8 @@ NO_GRADIENT(OneHot);
 NO_GRADIENT(SegmentOneHot);
 NO_GRADIENT(BucketBatchOneHot);
 } // namespace caffe2
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    BatchBucketOneHot,
+    "_caffe2::BatchBucketOneHot(Tensor data, Tensor lengths, Tensor boundaries) -> Tensor output",
+    caffe2::BatchBucketOneHotOp<caffe2::CPUContext>);

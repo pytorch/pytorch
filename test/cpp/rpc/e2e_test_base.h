@@ -19,14 +19,16 @@ namespace rpc {
 using torch::distributed::autograd::DistAutogradContainer;
 using torch::distributed::autograd::DistAutogradContext;
 
+DistAutogradContainer* getDistAutogradContainer();
+
 class TestE2EBase : public ::testing::Test {
  protected:
   void SetUp() override {
     // Setup distributed autograd.
-    autogradContainer = &DistAutogradContainer::init(0);
+    autogradContainer = getDistAutogradContainer();
 
     // Setup server store.
-    store = std::make_shared<c10d::TCPStore>(
+    store = c10::make_intrusive<c10d::TCPStore>(
         serverAddress, 0, numWorkers, true, std::chrono::seconds(10));
 
     buildRpcAgent();
@@ -43,6 +45,12 @@ class TestE2EBase : public ::testing::Test {
         });
     rpcAgent->setTypeResolver(typeResolver);
     rpcAgent->start();
+  }
+
+  void TearDown() override {
+    rpcAgent->join();
+    rpcAgent->shutdown();
+    RpcAgent::setCurrentRpcAgent(nullptr);
   }
 
   c10::intrusive_ptr<OwnerRRef> createRemoteRRef(
@@ -139,13 +147,9 @@ class TestE2EBase : public ::testing::Test {
   std::shared_ptr<RpcAgent> rpcAgent;
   static const size_t numIters;
   static const size_t numWorkers;
-  std::shared_ptr<c10d::Store> store;
+  c10::intrusive_ptr<c10d::Store> store;
   static const char* serverAddress;
 };
-
-const char* TestE2EBase::serverAddress = "127.0.0.1";
-const size_t TestE2EBase::numIters = 100;
-const size_t TestE2EBase::numWorkers = 1;
 
 } // namespace rpc
 } // namespace distributed

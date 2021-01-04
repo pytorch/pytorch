@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -10,6 +9,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 class Fusion;
 
@@ -51,7 +51,6 @@ class TORCH_CUDA_API IrCloner : private OptInConstDispatch {
   void handle(const TensorDomain*) override;
   void handle(const TensorView*) override;
   void handle(const IterDomain*) override;
-  void handle(const TensorIndex*) override;
 
   void handle(const Bool*) override;
   void handle(const Float*) override;
@@ -64,10 +63,6 @@ class TORCH_CUDA_API IrCloner : private OptInConstDispatch {
   void handle(const TernaryOp*) override;
   void handle(const BroadcastOp*) override;
   void handle(const ReductionOp*) override;
-
-  void handle(const ForLoop*) override;
-  void handle(const IfThenElse*) override;
-  void handle(const Allocate*) override;
 
   void handle(const Split*) override;
   void handle(const Merge*) override;
@@ -86,6 +81,7 @@ class TORCH_CUDA_API IrCloner : private OptInConstDispatch {
   std::unordered_map<const Statement*, Statement*> clones_map_;
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

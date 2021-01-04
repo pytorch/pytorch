@@ -1,11 +1,8 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import json
 import logging
 import numpy as np
 import os
+from typing import Optional
 
 # pylint: disable=unused-import
 from six.moves import range
@@ -128,7 +125,7 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
             ssi.hparams[k].number_value = v
 
             if k in hparam_domain_discrete:
-                domain_discrete = struct_pb2.ListValue(
+                domain_discrete: Optional[struct_pb2.ListValue] = struct_pb2.ListValue(
                     values=[
                         struct_pb2.Value(number_value=d)
                         for d in hparam_domain_discrete[k]
@@ -492,27 +489,22 @@ def audio(tag, tensor, sample_rate=44100):
         print('warning: audio amplitude out of range, auto clipped.')
         tensor = tensor.clip(-1, 1)
     assert(tensor.ndim == 1), 'input tensor should be 1 dimensional.'
+    tensor = (tensor * np.iinfo(np.int16).max).astype('<i2')
 
-    tensor_list = [int(32767.0 * x) for x in tensor]
     import io
     import wave
-    import struct
     fio = io.BytesIO()
     wave_write = wave.open(fio, 'wb')
     wave_write.setnchannels(1)
     wave_write.setsampwidth(2)
     wave_write.setframerate(sample_rate)
-    tensor_enc = b''
-    for v in tensor_list:
-        tensor_enc += struct.pack('<h', v)
-
-    wave_write.writeframes(tensor_enc)
+    wave_write.writeframes(tensor.data)
     wave_write.close()
     audio_string = fio.getvalue()
     fio.close()
     audio = Summary.Audio(sample_rate=sample_rate,
                           num_channels=1,
-                          length_frames=len(tensor_list),
+                          length_frames=tensor.shape[-1],
                           encoded_audio_string=audio_string,
                           content_type='audio/wav')
     return Summary(value=[Summary.Value(tag=tag, audio=audio)])

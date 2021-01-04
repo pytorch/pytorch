@@ -1,8 +1,20 @@
-from typing import List
+import os
+import sys
+
+from typing import Any, List, Tuple
 from collections import OrderedDict
 import torch
 import torch.nn as nn
 from torch.testing._internal.jit_utils import JitTestCase
+
+# Make the helper files in test/ importable
+pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+sys.path.append(pytorch_test_dir)
+
+if __name__ == '__main__':
+    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
+                       "\tpython test/test_jit.py TESTNAME\n\n"
+                       "instead.")
 
 class TestModuleContainers(JitTestCase):
     def test_sequential_intermediary_types(self):
@@ -239,6 +251,17 @@ class TestModuleContainers(JitTestCase):
         with self.assertRaisesRegex(Exception, "Index -11 out of range"):
             torch.jit.script(M2())
 
+        class M3(M):
+            def __init__(self):
+                super(M3, self).__init__()
+
+            def forward(self, v):
+                i = 3
+                return self.mods[i].forward(v)
+
+        with self.assertRaisesRegex(Exception, "Enumeration is supported"):
+            torch.jit.script(M3())
+
     def test_module_interface_special_methods(self):
         class CustomModuleInterface(torch.nn.Module):
             def __init__(self):
@@ -405,3 +428,64 @@ class TestModuleContainers(JitTestCase):
 
         m = MyModule()
         self.checkModule(m, [torch.randn(2, 2)])
+
+    def test_typed_module_dict(self):
+        """
+        Test that a type annotation can be provided for a ModuleDict that allows
+        non-static indexing.
+        """
+        @torch.jit.interface
+        class ModuleInterface(torch.nn.Module):
+            def forward(self, inp: Any) -> Any:
+                pass
+
+        class ImplementsInterface(torch.nn.Module):
+            def forward(self, inp: Any) -> Any:
+                if isinstance(inp, torch.Tensor):
+                    return torch.max(inp, dim=0)
+
+                return inp
+
+        class DoesNotImplementInterface(torch.nn.Module):
+            def forward(self, inp: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+                return torch.max(inp, dim=0)
+
+        # Test annotation of submodule.
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.d = torch.nn.ModuleDict({"module": ImplementsInterface()})
+
+            def forward(self, x: torch.Tensor, key: str) -> Any:
+                value: ModuleInterface = self.d[key]
+                return value.forward(x)
+
+        m = Mod()
+        self.checkModule(m, (torch.randn(2, 2), "module"))
+
+        # Test annotation of self.
+        class ModDict(torch.nn.ModuleDict):
+            def __init__(self):
+                super().__init__({"module": ImplementsInterface()})
+
+            def forward(self, x: torch.Tensor, key: str) -> Any:
+                submodule: ModuleInterface = self[key]
+                return submodule.forward(x)
+
+        m = ModDict()
+        self.checkModule(m, (torch.randn(2, 2), "module"))
+
+        # Test error message thrown when annotated attribute does not comply with the
+        # annotation.
+        class ModWithWrongAnnotation(torch.nn.ModuleDict):
+            def __init__(self):
+                super().__init__()
+                self.d = torch.nn.ModuleDict({"module": DoesNotImplementInterface()})
+
+            def forward(self, x: torch.Tensor, key: str) -> Any:
+                submodule: ModuleInterface = self.d[key]
+                return submodule.forward(x)
+
+        with self.assertRaisesRegex(RuntimeError, r"Attribute module is not of annotated type"):
+            torch.jit.script(ModWithWrongAnnotation())

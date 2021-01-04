@@ -12,30 +12,13 @@ if [[ "${BUILD_ENVIRONMENT}" == *-rocm* ]]; then
   export HSAKMT_DEBUG_LEVEL=4
 fi
 # These additional packages are needed for circleci ROCm builds.
-if [[ $BUILD_ENVIRONMENT == pytorch-linux-xenial-rocm* ]]; then
+if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
     # Need networkx 2.0 because bellmand_ford was moved in 2.1 . Scikit-image by
     # defaults installs the most recent networkx version, so we install this lower
     # version explicitly before scikit-image pulls it in as a dependency
     pip install networkx==2.0
     # click - onnx
     pip install --progress-bar off click protobuf tabulate virtualenv mock typing-extensions
-
-  # TODO: Remove this once ROCm CI images are >= ROCm 3.5
-  # ROCm 3.5 required a backwards-incompatible change; the kernel and thunk must match.
-  # Detect kernel version and upgrade thunk if this is a ROCm 3.3 container running on a 3.5 kernel.
-  ROCM_ASD_FW_VERSION=$(/opt/rocm/bin/rocm-smi --showfwinfo -d 1 | grep ASD |  awk '{print $6}')
-  if [[ $ROCM_ASD_FW_VERSION = 553648174 && "$BUILD_ENVIRONMENT" == *rocm3.3* ]]; then
-    # upgrade thunk to 3.5
-    mkdir rocm3.5-thunk
-    pushd rocm3.5-thunk
-    wget http://repo.radeon.com/rocm/apt/3.5/pool/main/h/hsakmt-roct3.5.0/hsakmt-roct3.5.0_1.0.9-347-gd4b224f_amd64.deb
-    wget http://repo.radeon.com/rocm/apt/3.5/pool/main/h/hsakmt-roct-dev3.5.0/hsakmt-roct-dev3.5.0_1.0.9-347-gd4b224f_amd64.deb
-    dpkg-deb -vx hsakmt-roct3.5.0_1.0.9-347-gd4b224f_amd64.deb .
-    dpkg-deb -vx hsakmt-roct-dev3.5.0_1.0.9-347-gd4b224f_amd64.deb .
-    sudo cp -r opt/rocm-3.5.0/* /opt/rocm-3.3.0/
-    popd
-    rm -rf rocm3.5-thunk
-  fi
 fi
 
 # Find where cpp tests and Caffe2 itself are installed
@@ -105,19 +88,16 @@ if [[ "$PIP_USER" = root ]]; then
   MAYBE_SUDO=sudo
 fi
 
-# if [[ "$BUILD_ENVIRONMENT" == *ubuntu14.04* ]]; then
-  # Hotfix, use hypothesis 3.44.6 on Ubuntu 14.04
-  # See comments on
-  # https://github.com/HypothesisWorks/hypothesis-python/commit/eadd62e467d6cee6216e71b391951ec25b4f5830
-  $MAYBE_SUDO pip -q uninstall -y hypothesis
-  # "pip install hypothesis==3.44.6" from official server is unreliable on
-  # CircleCI, so we host a copy on S3 instead
-  $MAYBE_SUDO pip -q install attrs==18.1.0 -f https://s3.amazonaws.com/ossci-linux/wheels/attrs-18.1.0-py2.py3-none-any.whl
-  $MAYBE_SUDO pip -q install coverage==4.5.1 -f https://s3.amazonaws.com/ossci-linux/wheels/coverage-4.5.1-cp36-cp36m-macosx_10_12_x86_64.whl
-  $MAYBE_SUDO pip -q install hypothesis==3.44.6 -f https://s3.amazonaws.com/ossci-linux/wheels/hypothesis-3.44.6-py3-none-any.whl
-# else
-#   pip install --user --no-cache-dir hypothesis==3.59.0
-# fi
+# Uninstall pre-installed hypothesis and coverage to use an older version as newer
+# versions remove the timeout parameter from settings which ideep/conv_transpose_test.py uses
+$MAYBE_SUDO pip -q uninstall -y hypothesis
+$MAYBE_SUDO pip -q uninstall -y coverage
+
+# "pip install hypothesis==3.44.6" from official server is unreliable on
+# CircleCI, so we host a copy on S3 instead
+$MAYBE_SUDO pip -q install attrs==18.1.0 -f https://s3.amazonaws.com/ossci-linux/wheels/attrs-18.1.0-py2.py3-none-any.whl
+$MAYBE_SUDO pip -q install coverage==4.5.1 -f https://s3.amazonaws.com/ossci-linux/wheels/coverage-4.5.1-cp36-cp36m-macosx_10_12_x86_64.whl
+$MAYBE_SUDO pip -q install hypothesis==3.44.6 -f https://s3.amazonaws.com/ossci-linux/wheels/hypothesis-3.44.6-py3-none-any.whl
 
 # Collect additional tests to run (outside caffe2/python)
 EXTRA_TESTS=()
@@ -180,15 +160,12 @@ pip install --user pytest-sugar
 if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   # Check out torch/vision at Jun 11 2020 commit
   # This hash must match one in .jenkins/pytorch/test.sh
-  pip install -q --user git+https://github.com/pytorch/vision.git@c2e8a00885e68ae1200eb6440f540e181d9125de
+  pip install -q --user git+https://github.com/pytorch/vision.git@e70c91a9ff9b8a20e05c133aec6ec3ed538c32fb
   pip install -q --user ninja
   # JIT C++ extensions require ninja, so put it into PATH.
   export PATH="/var/lib/jenkins/.local/bin:$PATH"
   if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
-    # default pip version is too old(9.0.2), unable to support tag `manylinux2010`.
-    # Fix the pip error: Couldn't find a version that satisfies the requirement
-    sudo pip install --upgrade pip
-    pip install -q --user -i https://test.pypi.org/simple/ ort-nightly==1.3.1.dev202007102
+    pip install -q --user onnxruntime==1.5.2
   fi
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi

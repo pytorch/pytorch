@@ -1,9 +1,9 @@
 ## @package predictor_exporter
 # Module caffe2.python.predictor.predictor_exporter
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.proto import caffe2_pb2
 from caffe2.proto import metanet_pb2

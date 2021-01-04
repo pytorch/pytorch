@@ -48,6 +48,12 @@ template<class T, class Iterator>
 void swap(ListElementReference<T, Iterator>&& lhs, ListElementReference<T, Iterator>&& rhs);
 
 template<class T, class Iterator>
+bool operator==(const ListElementReference<T, Iterator>& lhs, const T& rhs);
+
+template<class T, class Iterator>
+bool operator==(const T& lhs, const ListElementReference<T, Iterator>& rhs);
+
+template<class T, class Iterator>
 class ListElementReference final {
 public:
   operator T() const;
@@ -63,6 +69,11 @@ public:
   template<class _T = T>
   std::enable_if_t<std::is_same<std::string, T>::value && std::is_same<_T, T>::value, const std::string&> toStringRef() {
     return iterator_->toStringRef();
+  }
+
+  template<class _T = T>
+  std::enable_if_t<std::is_same<c10::optional<std::string>, T>::value && std::is_same<_T, T>::value, c10::optional<std::reference_wrapper<const std::string>>> toOptionalStringRef() {
+    return iterator_->toOptionalStringRef();
   }
 
   friend void swap<T, Iterator>(ListElementReference&& lhs, ListElementReference&& rhs);
@@ -232,7 +243,7 @@ public:
    * Example:
    *   List<int> a({2, 3, 4});
    */
-  explicit List(std::initializer_list<T> initial_values);
+  List(std::initializer_list<T> initial_values);
   explicit List(ArrayRef<T> initial_values);
 
   /**

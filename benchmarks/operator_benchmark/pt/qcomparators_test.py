@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import torch
 
 import operator_benchmark as op_bench
@@ -39,23 +34,32 @@ class QComparatorBenchmark(op_bench.TorchBenchmarkBase):
         q_input_a = torch.quantize_per_tensor(f_input, scale=scale,
                                               zero_point=zero_point,
                                               dtype=dtype)
-        if other_scalar:
-            q_input_b = 42
-        else:
-            q_input_b = q_input_a.clone()
+        q_input_b = q_input_a.clone()
 
         if not contig:
             permute_dims = list(range(f_input.ndim))[::-1]
             q_input_a = q_input_a.permute(permute_dims)
 
         self.qop = op_func
-        self.args = (q_input_a, q_input_b)
-        self.kwargs = {}
-        if out_variant:
-            self.kwargs['out'] = torch.tensor([], dtype=torch.bool)
+        self.inputs = {
+            "q_input_a": q_input_a,
+            "q_input_b": q_input_b,
+            "out_variant": out_variant,
+            "other_scalar": other_scalar,
+        }
 
-    def forward(self):
-        return self.qop(*self.args, **self.kwargs)
+    def forward(self, q_input_a, q_input_b, out_variant: bool, other_scalar: bool):
+        if out_variant:
+            if other_scalar:
+                return self.qop(q_input_a, 42, out=torch.tensor(True, dtype=torch.bool))
+            else:
+                return self.qop(q_input_a, q_input_b, out=torch.tensor(True, dtype=torch.bool))
+        else:
+            if other_scalar:
+                return self.qop(q_input_a, 42)
+            else:
+                return self.qop(q_input_a, q_input_b)
+
 
 
 op_bench.generate_pt_tests_from_op_list(qcomparators_ops,

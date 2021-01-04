@@ -83,19 +83,10 @@ TEST_F(AutogradTest, CanPassCustomGradientInputs) {
   ASSERT_TRUE(x.grad().allclose(y * 2));
 }
 
-TEST(DeterministicTest, CanSetDeterministic) {
-  auto context = &at::globalContext();
-  for (bool deterministic : {true, false}) {
-    context->setDeterministic(deterministic);
-    ASSERT_TRUE(context->deterministic() == deterministic);
-  }
-}
-
-TEST(DeterministicTest, CanAlertNotDeterministic) {
-  auto context = &at::globalContext();
-  context->setDeterministic(true);
-  ASSERT_ANY_THROW(context->alertNotDeterministic("test"));
-  context->setDeterministic(false);
-  // Should not throw error if deterministic setting is turned off
-  context->alertNotDeterministic("test");
+TEST(UtilsTest, AmbiguousOperatorDefaults) {
+  auto tmp = at::empty({}, at::kCPU);
+  at::_test_ambiguous_defaults(tmp);
+  at::_test_ambiguous_defaults(tmp, 1);
+  at::_test_ambiguous_defaults(tmp, 1, 1);
+  at::_test_ambiguous_defaults(tmp, 2, "2");
 }

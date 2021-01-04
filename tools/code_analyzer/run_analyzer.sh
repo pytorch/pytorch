@@ -19,8 +19,8 @@ echo "Analyze: ${INPUT}"
   -op_invoke_pattern="c10::Dispatcher::findSchema" \
   -root_symbol_pattern="torch::jit::[^(]" \
   -torch_library_init_pattern="^.*TORCH_LIBRARY_init_([^(]+)(\(.*)?$" \
-  -torch_library_init_pattern="^.*TORCH_LIBRARY_FRAGMENT_init_([^(]+)(\(.*)?$" \
-  -torch_library_init_pattern="^.*TORCH_LIBRARY_IMPL_init_([^(]+)_([^_]+)(\(.*)?$" \
+  -torch_library_init_pattern="^.*TORCH_LIBRARY_FRAGMENT_init_([_]*[^_]+)_[0-9]+(\(.*)?$" \
+  -torch_library_init_pattern="^.*TORCH_LIBRARY_IMPL_init_([_]*[^_]+)_([^_]+)_[0-9]+(\(.*)?$" \
   ${EXTRA_ANALYZER_FLAGS} \
   "${INPUT}" \
   > "${OUTPUT}"

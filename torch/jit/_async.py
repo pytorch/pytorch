@@ -31,7 +31,7 @@ def fork(func, *args, **kwargs):
         `fork` tasks will execute non-deterministicly. We recommend only spawning
         parallel fork tasks for pure functions that do not modify their inputs,
         module attributes, or global state.
-    Arguments:
+    Args:
         func (callable or torch.nn.Module):  A Python function or `torch.nn.Module`
             that will be invoked. If executed in TorchScript, it will execute asynchronously,
             otherwise it will not. Traced invocations of fork will be captured in the IR.
@@ -84,7 +84,7 @@ def wait(future):
     """
     Forces completion of a `torch.jit.Future[T]` asynchronous task, returning the
     result of the task. See :func:`~fork` for docs and examples.
-    Arguments:
+    Args:
         func (torch.jit.Future[T]): an asynchronous task reference, created through `torch.jit.fork`
     Returns:
         `T`: the return value of the the completed task

@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
@@ -120,16 +121,6 @@ bool isSimpleMap(Node* node) {
   return true;
 }
 
-Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db) {
-  AT_ASSERT(!sizes.empty());
-  Graph* graph = sizes[0]->owningGraph();
-  Node* broadcast_n =
-      graph->insertNode(graph->create(prim::BroadcastSizes, sizes));
-  broadcast_n->output()->setType(ListType::ofInts());
-  db->createValue(broadcast_n->output());
-  return broadcast_n->output();
-}
-
 struct GraphFuser {
   using FusionCallback = std::function<bool(GraphFuser*, Node*)>;
 
@@ -140,7 +131,7 @@ struct GraphFuser {
     return gf->isFusableDefault(n, gf->strict_fuser_check_);
   };
   Symbol kind_ = prim::FusionGroup;
-  bool strict_fuser_check_;
+  bool strict_fuser_check_ = false;
 
   // nvrtc has a limit on the number of arguments allowed in a CUDA kernel.
   // The specific limit is a function of constant memory size, amount available
@@ -160,11 +151,13 @@ struct GraphFuser {
       AliasDb* aliasDb,
       Block* block,
       FusionCallback callback,
-      Symbol kind)
+      Symbol kind,
+      bool strict_fuser_check = false)
       : block_(block),
         aliasDb_(aliasDb),
         callback_(std::move(callback)),
-        kind_(kind) {}
+        kind_(kind),
+        strict_fuser_check_(strict_fuser_check) {}
 
   void setInputArgLimit(size_t limit) {
     subgraph_arg_limit_ = limit;
@@ -925,13 +918,6 @@ struct GraphFuser {
     }
   }
 
-  bool usedOnlyInSize(Value* v) {
-    const auto& uses = v->uses();
-    return std::all_of(uses.begin(), uses.end(), [](const Use& u) {
-      return u.user->matches("aten::size(Tensor self) -> int[]");
-    });
-  }
-
   // Builds up expressions that compute shapes of all intermediates (and
   // outputs) of the fusion group, based on the sizes of inputs. You should run
   // DCE to remove those that you end up not using.
@@ -1138,6 +1124,13 @@ struct GraphFuser {
   }
 
   void run() {
+// TODO: old fuser is not maintained internally, somewhere it is being turned on
+// inadvertently for certain workflows. make this a no-op until we identify
+// location
+#if defined(FBCODE_CAFFE2)
+    return;
+#endif
+
     // Run the pass until no changes are made.
     // This is necessary, because the algorithm can miss out on certain fusion
     // opportunities if ran only once. Consider this graph:
@@ -1184,7 +1177,8 @@ struct GraphFuser {
 
     for (Node* node : block_->nodes()) {
       for (Block* sub_block : node->blocks()) {
-        GraphFuser(aliasDb_, sub_block, callback_, kind_).run();
+        GraphFuser(aliasDb_, sub_block, callback_, kind_, strict_fuser_check_)
+            .run();
       }
     }
   }
@@ -1259,7 +1253,7 @@ void FuseGraph(std::shared_ptr<Graph>& graph, bool strict_fuser_check) {
 
 void CustomFuseGraph(
     std::shared_ptr<Graph>& graph,
-    std::function<bool(Node*)> fn,
+    const std::function<bool(Node*)>& fn,
     Symbol kind,
     size_t arg_limit) {
   AliasDb db(graph);

@@ -45,8 +45,8 @@ void getLaunchConfig(dim3* block, dim3* grid, int64_t numel) {
   int curDevice = -1;
   cudaGetDevice(&curDevice);
   *block = cuda::getApplyBlock();
-  AT_ASSERTM(cuda::getApplyGrid(numel, *grid, curDevice),
-             "Could not get grid size for pointwise apply.");
+  TORCH_INTERNAL_ASSERT(cuda::getApplyGrid(numel, *grid, curDevice),
+                        "Could not get grid size for pointwise apply.");
 }
 
 template<typename T, typename T2>

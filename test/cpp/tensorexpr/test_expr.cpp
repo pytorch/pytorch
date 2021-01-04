@@ -1,14 +1,14 @@
-#include "test/cpp/tensorexpr/test_base.h"
+#include <gtest/gtest.h>
 
-#include "test/cpp/tensorexpr/padded_buffer.h"
-#include "test/cpp/tensorexpr/test_utils.h"
-#include "torch/csrc/jit/tensorexpr/buffer.h"
-#include "torch/csrc/jit/tensorexpr/eval.h"
-#include "torch/csrc/jit/tensorexpr/function.h"
-#include "torch/csrc/jit/tensorexpr/ir.h"
-#include "torch/csrc/jit/tensorexpr/ir_printer.h"
-#include "torch/csrc/jit/tensorexpr/loopnest.h"
-#include "torch/csrc/jit/tensorexpr/tensor.h"
+#include <test/cpp/tensorexpr/test_base.h>
+
+#include <test/cpp/tensorexpr/padded_buffer.h>
+#include <test/cpp/tensorexpr/test_utils.h>
+#include <torch/csrc/jit/tensorexpr/eval.h>
+#include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_printer.h>
+#include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <torch/csrc/jit/tensorexpr/tensor.h>
 
 #include <cmath>
 #include <sstream>
@@ -22,7 +22,7 @@ using namespace torch::jit::tensorexpr;
 
 using SimpleIRExprEval = ExprEval<SimpleIREvaluator>;
 
-void testExprBasicValueTest() {
+TEST(Expr, BasicValueTest) {
   KernelScope kernel_scope;
   ExprHandle a = IntImm::make(2), b = IntImm::make(3);
   ExprHandle c = Add::make(a, b);
@@ -30,7 +30,7 @@ void testExprBasicValueTest() {
   ASSERT_EQ(eval.value<int>(), 5);
 }
 
-void testExprBasicValueTest02() {
+TEST(Expr, BasicValueTest02) {
   KernelScope kernel_scope;
   ExprHandle a(2.0f);
   ExprHandle b(3.0f);
@@ -41,7 +41,7 @@ void testExprBasicValueTest02() {
   ASSERT_EQ(eval.value<float>(), -4.0f);
 }
 
-void testExprLetTest01() {
+TEST(Expr, LetTest01) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   ExprHandle body = ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f));
@@ -50,7 +50,7 @@ void testExprLetTest01() {
   ASSERT_EQ(eval.value<float>(), 2 + (3 * 3 + 4));
 }
 
-void testExprLetTest02() {
+TEST(Expr, LetTest02) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   VarHandle y("y", kFloat);
@@ -62,17 +62,18 @@ void testExprLetTest02() {
   ASSERT_EQ(eval.value<float>(), 2 + (3 * 3 + 4 * 6));
 }
 
-void testExprLetStmtTest01() {
+TEST(Expr, LetStmtTest01) {
   KernelScope kernel_scope;
-  Buffer a_buf("a", kFloat, {1});
-  Buffer b_buf("b", kFloat, {1});
+  Placeholder a_buf("a", kFloat, {1});
+  Placeholder b_buf("b", kFloat, {1});
 
-  ExprHandle load_a = Load::make(a_buf, {0}, 1);
+  ExprHandle load_a = a_buf.load(0);
   VarHandle var = VarHandle("v", kFloat);
-  Stmt* store_b = Store::make(b_buf, {0}, var, 1);
-  Stmt* let_store = Block::make({{var.node(), load_a.node()}}, {store_b});
+  Stmt* let_store = Let::make(var, load_a);
+  Stmt* store_b = b_buf.store({0}, var);
+  Block* block = Block::make({let_store, store_b});
 
-  SimpleIREvaluator eval(let_store, a_buf, b_buf);
+  SimpleIREvaluator eval(block, {a_buf, b_buf});
 
   PaddedBuffer<float> a_v(1);
   PaddedBuffer<float> b_v(1);
@@ -85,7 +86,7 @@ void testExprLetStmtTest01() {
   ExpectAllNear(b_v, b_ref, 1e-5);
 }
 
-void testExprIntTest() {
+TEST(Expr, IntTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   ExprHandle body = ExprHandle(2) + (x * ExprHandle(3) + ExprHandle(4));
@@ -94,7 +95,7 @@ void testExprIntTest() {
   ASSERT_EQ(eval.value<int>(), 2 + (3 * 3 + 4));
 }
 
-void testExprFloatTest() {
+TEST(Expr, FloatTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   ExprHandle body = ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f));
@@ -103,7 +104,7 @@ void testExprFloatTest() {
   ASSERT_EQ(eval.value<float>(), 2 + (3 * 3 + 4));
 }
 
-void testExprByteTest() {
+TEST(Expr, ByteTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kByte);
   ExprHandle body = ExprHandle((uint8_t)2) +
@@ -113,7 +114,7 @@ void testExprByteTest() {
   ASSERT_EQ(eval.value<uint8_t>(), 2 + (3 * 3 + 4));
 }
 
-void testExprCharTest() {
+TEST(Expr, CharTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kChar);
   ExprHandle body = ExprHandle((int8_t)2) +
@@ -123,7 +124,7 @@ void testExprCharTest() {
   ASSERT_EQ(eval.value<int8_t>(), 2 + (3 * 3 + 4));
 }
 
-void testExprShortTest() {
+TEST(Expr, ShortTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kShort);
   ExprHandle body = ExprHandle((int16_t)2) +
@@ -133,7 +134,7 @@ void testExprShortTest() {
   ASSERT_EQ(eval.value<int16_t>(), 2 + (3 * 3 + 4));
 }
 
-void testExprLongTest() {
+TEST(Expr, LongTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kLong);
   ExprHandle body = ExprHandle((int64_t)2) +
@@ -143,7 +144,7 @@ void testExprLongTest() {
   ASSERT_EQ(eval.value<int64_t>(), 2 + (3 * 3 + 4));
 }
 
-void testExprHalfTest() {
+TEST(Expr, HalfTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kHalf);
   ExprHandle body = ExprHandle((at::Half)2) +
@@ -153,7 +154,7 @@ void testExprHalfTest() {
   ASSERT_EQ(eval.value<at::Half>(), 2 + (3 * 3 + 4));
 }
 
-void testExprDoubleTest() {
+TEST(Expr, DoubleTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kDouble);
   ExprHandle body = ExprHandle((double)2) +
@@ -163,15 +164,15 @@ void testExprDoubleTest() {
   ASSERT_EQ(eval.value<double>(), 2 + (3 * 3 + 4));
 }
 
-void testExprVectorAdd01() {
+TEST(Expr, VectorAdd01) {
   KernelScope kernel_scope;
   const int kVectorSize = 8;
   const int kVectorCount = 128;
   const int kTotalSize = kVectorSize * kVectorCount;
 
-  Buffer a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Buffer b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
-  Buffer c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
+  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
+  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
 
   /*
   Build the following:
@@ -182,17 +183,14 @@ void testExprVectorAdd01() {
     }
   */
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(
-      a_buf,
+  ExprHandle load_a = a_buf.loadWithMask(
       {Ramp::make(index * kVectorSize, 1, kVectorSize)},
       Broadcast::make(1, kVectorSize));
-  ExprHandle load_b = Load::make(
-      b_buf,
+  ExprHandle load_b = b_buf.loadWithMask(
       {Ramp::make(index * kVectorSize, 1, kVectorSize)},
       Broadcast::make(1, kVectorSize));
   ExprHandle value = load_a + load_b;
-  Stmt* store_c = Store::make(
-      c_buf,
+  Stmt* store_c = c_buf.storeWithMask(
       {Ramp::make(index * kVectorSize, 1, kVectorSize)},
       value,
       Broadcast::make(1, kVectorSize));
@@ -211,38 +209,33 @@ void testExprVectorAdd01() {
     b_v(i) = i * i * 4;
     c_ref(i) = a_v(i) + b_v(i);
   }
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
   ExpectAllNear(c_v, c_ref, 1e-5);
 }
 
-void testExprCompareSelectEQ() {
+TEST(Expr, CompareSelectEQ) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}, kInt));
-  Buffer b(BufHandle("B", {N}, kInt));
-  Buffer c(BufHandle("C", {N}, kInt));
+  Placeholder a(BufHandle("A", {N}, kInt));
+  Placeholder b(BufHandle("B", {N}, kInt));
+  Placeholder c(BufHandle("C", {N}, kInt));
   std::vector<int> a_buffer(N, 1);
   std::vector<int> b_buffer(N, 1);
   std::vector<int> c_buffer(N, 0);
   std::vector<int> c_ref(N, 0);
 
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   auto memcpy_expr = For::make(
       i,
       0,
       N,
-      Store::make(
-          c,
+      c.store(
           {i},
           CompareSelect::make(
-              Load::make(a, {i}, mask),
-              Load::make(b, {i}, mask),
-              CompareSelectOperation::kEQ),
-          mask));
+              a.load(i), b.load(i), CompareSelectOperation::kEQ)));
 
-  SimpleIREvaluator ir_eval(memcpy_expr, a, b, c);
+  SimpleIREvaluator ir_eval(memcpy_expr, {a, b, c});
   ir_eval(a_buffer, b_buffer, c_buffer);
 
   ASSERT_EQ(a_buffer.size(), N);
@@ -254,7 +247,74 @@ void testExprCompareSelectEQ() {
   assertAllEqual(c_buffer, 1);
 }
 
-void testExprSubstitute01() {
+TEST(Expr, CompareSelectDtypes) {
+  // LHS and RHS expressions should have the same dtype, but this dtype could
+  // differ from the dtype of the return values (but dtypes of true and false
+  // return values should be the same).
+  // This test constructs a CompareSelect expression where the input dtype is
+  // different from the output dtype and verifies that it works correctly:
+  //   result = ((int)lhs == (int)rhs) ? (float)retval1 : (float)retval2
+  KernelScope kernel_scope;
+  constexpr int N = 1024;
+  Placeholder a(BufHandle("A", {N}, kInt));
+  Placeholder b(BufHandle("B", {N}, kInt));
+  Placeholder c(BufHandle("C", {N}, kFloat));
+  std::vector<int> a_buffer(N, 1);
+  std::vector<int> b_buffer(N, 1);
+  std::vector<float> c_buffer(N, 0.0f);
+  std::vector<float> c_ref(N, 3.14f);
+
+  VarHandle i("i", kInt);
+  // C[i] = (A[i] == B[i]) ? 3.14f : 2.78f
+  // A and B are int, C is float.
+  auto select_expr = For::make(
+      i,
+      0,
+      N,
+      c.store(
+          {i},
+          CompareSelect::make(
+              a.load(i),
+              b.load(i),
+              FloatImm::make(3.14f),
+              FloatImm::make(2.78f),
+              CompareSelectOperation::kEQ)));
+
+  SimpleIREvaluator ir_eval(select_expr, {a, b, c});
+  ir_eval(a_buffer, b_buffer, c_buffer);
+
+  ASSERT_EQ(a_buffer.size(), N);
+  ASSERT_EQ(b_buffer.size(), N);
+  ASSERT_EQ(c_buffer.size(), N);
+
+  assertAllEqual(a_buffer, 1);
+  assertAllEqual(b_buffer, 1);
+  ExpectAllNear(c_buffer, c_ref, 1e-7);
+}
+
+TEST(Expr, IntrinsicsDtypes) {
+  KernelScope kernel_scope;
+  constexpr int N = 256;
+  Placeholder a(BufHandle("A", {N}, kDouble));
+  Placeholder b(BufHandle("B", {N}, kDouble));
+  std::vector<double> a_buffer(N, -10.0);
+  std::vector<double> b_buffer(N, 0.0);
+  std::vector<double> b_ref(N, 10.0);
+
+  VarHandle i("i", kInt);
+  auto abs_expr = For::make(i, 0, N, b.store({i}, tensorexpr::abs(a.load(i))));
+
+  SimpleIREvaluator ir_eval(abs_expr, {a, b});
+  ir_eval(a_buffer, b_buffer);
+
+  ASSERT_EQ(a_buffer.size(), N);
+  ASSERT_EQ(b_buffer.size(), N);
+
+  assertAllEqual(a_buffer, -10.0);
+  ExpectAllNear(b_buffer, b_ref, 1e-7);
+}
+
+TEST(Expr, Substitute01) {
   KernelScope kernel_scope;
   const Var* x = new Var("x", kFloat);
   const Var* y = new Var("y", kFloat);
@@ -275,7 +335,7 @@ void testExprSubstitute01() {
   ASSERT_EQ(e2_str, e2_ref_str);
 }
 
-void testExprMath01() {
+TEST(Expr, Math01) {
   KernelScope kernel_scope;
   ExprHandle v = sin(ExprHandle(1.0f));
 
@@ -289,7 +349,7 @@ void testExprMath01() {
   ASSERT_NEAR(res, v_ref, 1e-6);
 }
 
-void testExprUnaryMath01() {
+TEST(Expr, UnaryMath01) {
   KernelScope kernel_scope;
   struct TestConfig {
     std::function<ExprHandle(const ExprHandle&)> func;
@@ -317,7 +377,7 @@ void testExprUnaryMath01() {
        [](float v) { return std::tanh(v); }},
       {[](const ExprHandle& v) { return exp(v); },
        [](float v) { return std::exp(v); }},
-      {[](const ExprHandle& v) { return fabs(v); },
+      {[](const ExprHandle& v) { return tensorexpr::abs(v); },
        [](float v) { return std::fabs(v); }},
       {[](const ExprHandle& v) { return log(v); },
        [](float v) { return std::log(v); }},
@@ -346,11 +406,17 @@ void testExprUnaryMath01() {
     ExprHandle v = test_config.func(ExprHandle(input_v));
     float v_ref = test_config.ref_func(input_v);
     SimpleIRExprEval eval(v);
-    ASSERT_NEAR(eval.value<float>(), v_ref, 1e-6, "fail: ", v);
+    ASSERT_NEAR(eval.value<float>(), v_ref, 1e-6);
+  }
+
+  for (float input_v : {std::nan("1"), 0., .5}) {
+    ExprHandle v = FloatImm::make(input_v);
+    SimpleIRExprEval eval(Intrinsics::make(kIsNan, v));
+    ASSERT_NEAR(eval.value<int>(), std::isnan(input_v), 0);
   }
 }
 
-void testExprBinaryMath01() {
+TEST(Expr, BinaryMath01) {
   KernelScope kernel_scope;
   struct TestConfig {
     std::function<ExprHandle(const ExprHandle&, const ExprHandle&)> func;
@@ -370,11 +436,11 @@ void testExprBinaryMath01() {
     ExprHandle v_expr = test_config.func(ExprHandle(v1), ExprHandle(v2));
     float v_ref = test_config.ref_func(v1, v2);
     SimpleIRExprEval eval(v_expr);
-    ASSERT_NEAR(eval.value<float>(), v_ref, 1e-6, "fail: ", v_expr);
+    ASSERT_NEAR(eval.value<float>(), v_ref, 1e-6);
   }
 }
 
-void testExprBitwiseOps() {
+TEST(Expr, BitwiseOps) {
   KernelScope kernel_scope;
   ExprHandle a(59);
   ExprHandle b(11);
@@ -386,19 +452,19 @@ void testExprBitwiseOps() {
   ASSERT_EQ(eval.value<int>(), 11);
 }
 
-void testExprDynamicShapeAdd() {
+TEST(Expr, DynamicShapeAdd) {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t size) {
     VarHandle n("n", kInt);
-    Buffer a(BufHandle("a", {n}, kFloat));
-    Buffer b(BufHandle("b", {n}, kFloat));
-    Buffer c(BufHandle("c", {n}, kFloat));
+    Placeholder a(BufHandle("a", {n}, kFloat));
+    Placeholder b(BufHandle("b", {n}, kFloat));
+    Placeholder c(BufHandle("c", {n}, kFloat));
     VarHandle i("i", kInt);
-    Stmt* s = For::make(i, 0, n, Store::make(c, {i}, a(i) + b(i), 1));
+    Stmt* s = For::make(i, 0, n, c.store({i}, a.load(i) + b.load(i)));
     std::vector<float> aData(size, 1.0f);
     std::vector<float> bData(size, 2.0f);
     std::vector<float> cData(size, 0.0f);
-    SimpleIREvaluator(s, a, b, c, n)(aData, bData, cData, size);
+    SimpleIREvaluator(s, {a, b, c, n})(aData, bData, cData, size);
     ExpectAllNear(cData, std::vector<float>(size, 3.0f), 1e-7);
   };
   testWithSize(1);
@@ -410,16 +476,14 @@ void testCond01() {
   KernelScope kernel_scope;
   const int N = 16;
   PaddedBuffer<float> a_v(N);
-  Buffer a_buf("a", kFloat, {N});
+  Placeholder a_buf("a", kFloat, {N});
   VarHandle index = VarHandle("index", kInt);
-  Stmt* assign_x2 =
-      Store::make(BufHandle(a_buf.data()), {index}, cast<float>(index) * 2, 1);
-  Stmt* assign_x3 =
-      Store::make(BufHandle(a_buf.data()), {index}, cast<float>(index) * 3, 1);
+  Stmt* assign_x2 = a_buf.store({index}, cast<float>(index) * 2);
+  Stmt* assign_x3 = a_buf.store({index}, cast<float>(index) * 3);
   ExprHandle even_cond = CompareSelect::make(Mod::make(index, 2), 0, kEQ);
   Stmt* assign = Cond::make(even_cond, assign_x2, assign_x3);
   Stmt* for_stmt = For::make(index, 0, N, assign);
-  SimpleIREvaluator(for_stmt, a_buf)(a_v);
+  SimpleIREvaluator(for_stmt, {a_buf})(a_v);
 
   PaddedBuffer<float> a_ref(N);
   for (int i = 0; i < N; i++) {
@@ -456,35 +520,48 @@ void testIfThenElse02() {
   ASSERT_EQ(eval.value<float>(), 2.0f);
 }
 
+void testIfThenElse03() {
+  KernelScope kernel_scope;
+  ExprHandle v =
+      ifThenElse(BoolImm::make(false), ExprHandle(1.0f), ExprHandle(2.0f));
+
+  std::ostringstream oss;
+  oss << v;
+  ASSERT_EQ(oss.str(), "IfThenElse(0, 1.f, 2.f)");
+
+  SimpleIRExprEval eval(v);
+  ASSERT_EQ(eval.value<float>(), 2.0f);
+}
+
 void testStmtClone() {
   KernelScope kernel_scope;
   const int N = 16;
 
-  Buffer a_buf("a", kInt, {N});
+  Placeholder a_buf("a", kInt, {N});
   VarHandle index = VarHandle("index", kInt);
-  Stmt* body = Store::make(BufHandle(a_buf.data()), {index}, 5, 1);
+  Stmt* body = a_buf.store({index}, 5);
   Stmt* loop = For::make(index, 0, N, body);
 
   Stmt* cloned_loop = Stmt::clone(loop);
   std::vector<int> orig_loop_results(N);
   std::vector<int> cloned_loop_results(N);
-  SimpleIREvaluator(loop, a_buf)(orig_loop_results);
-  SimpleIREvaluator(cloned_loop, a_buf)(cloned_loop_results);
+  SimpleIREvaluator(loop, {a_buf})(orig_loop_results);
+  SimpleIREvaluator(cloned_loop, {a_buf})(cloned_loop_results);
 
   assertAllEqual(orig_loop_results, 5);
   assertAllEqual(cloned_loop_results, 5);
 
   // Let's add another assign to the body in the cloned loop and verify that the
   // original statement hasn't changed while the cloned one has.
-  Stmt* body_addition = Store::make(BufHandle(a_buf.data()), {index}, 33, 1);
+  Stmt* body_addition = a_buf.store({index}, 33);
   Block* cloned_body =
       static_cast<Block*>(static_cast<const For*>(cloned_loop)->body());
   cloned_body->append_stmt(body_addition);
 
   std::vector<int> orig_loop_results_after_mutation(N);
   std::vector<int> cloned_loop_results_after_mutation(N);
-  SimpleIREvaluator(loop, a_buf)(orig_loop_results_after_mutation);
-  SimpleIREvaluator(cloned_loop, a_buf)(cloned_loop_results_after_mutation);
+  SimpleIREvaluator(loop, {a_buf})(orig_loop_results_after_mutation);
+  SimpleIREvaluator(cloned_loop, {a_buf})(cloned_loop_results_after_mutation);
 
   assertAllEqual(orig_loop_results_after_mutation, 5);
   assertAllEqual(cloned_loop_results_after_mutation, 33);

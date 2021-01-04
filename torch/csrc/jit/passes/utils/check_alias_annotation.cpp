@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
 namespace torch {
@@ -61,19 +62,11 @@ Stack deepCopy(const Stack& stack) {
 }
 
 bool deepEquals(const IValue& lhs, const IValue& rhs) {
-  if (lhs.isInt() && rhs.isInt()) {
-    return lhs.toInt() == rhs.toInt();
-  } else if (lhs.isDouble() && rhs.isDouble()) {
-    return lhs.toDouble() == rhs.toDouble();
-  } else if (lhs.isNone() && rhs.isNone()) {
-    return true;
-  } else if (lhs.isIntList() && rhs.isIntList()) {
-    return lhs.toIntVector() == rhs.toIntVector();
-  } else if (lhs.isTensor() && rhs.isTensor()) {
+  if (lhs.isTensor() && rhs.isTensor()) {
     return lhs.toTensor().equal(rhs.toTensor());
   }
 
-  throw std::runtime_error("Deep equals not implemented for type");
+  return lhs == rhs;
 }
 
 struct AliasAndIValue {
@@ -146,6 +139,16 @@ const Node* findNodeForOp(
       return node;
     }
   }
+
+  // Check for alias-ed operator names
+  const auto aliasOp = torch::jit::getOperatorAliasMap().find(opName);
+  AT_ASSERT(aliasOp != torch::jit::getOperatorAliasMap().end());
+  for (const auto node : g.nodes()) {
+    if (node->kind() == aliasOp->second) {
+      return node;
+    }
+  }
+
   AT_ASSERT(false);
 }
 

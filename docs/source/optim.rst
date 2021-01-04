@@ -187,7 +187,7 @@ normalization statistics at the end of training.
 
 SWA has been proposed in `Averaging Weights Leads to Wider Optima and Better Generalization`_.
 
-.. _`Averaging Weights Leads to Wider Optima and Better Generalization` https://arxiv.org/abs/1803.05407
+.. _`Averaging Weights Leads to Wider Optima and Better Generalization`: https://arxiv.org/abs/1803.05407
 
 Constructing averaged models
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -269,7 +269,7 @@ and start to collect SWA averages of the parameters at epoch 160:
 >>>           optimizer.zero_grad()
 >>>           loss_fn(model(input), target).backward()
 >>>           optimizer.step()
->>>       if i > swa_start:
+>>>       if epoch > swa_start:
 >>>           swa_model.update_parameters(model)
 >>>           swa_scheduler.step()
 >>>       else:

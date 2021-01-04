@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-A script that runs clang-format on all C/C++ files in CLANG_FORMAT_WHITELIST. There is
+A script that runs clang-format on all C/C++ files in CLANG_FORMAT_ALLOWLIST. There is
 also a diff mode which simply checks if clang-format would make any changes, which is useful for
 CI purposes.
 
@@ -14,22 +14,22 @@ import os
 import sys
 from clang_format_utils import get_and_check_clang_format, CLANG_FORMAT_PATH
 
-# Whitelist of directories to check. All files that in that directory
+# Allowlist of directories to check. All files that in that directory
 # (recursively) will be checked.
-# If you edit this, please edit the whitelist in clang_format_ci.sh as well.
-CLANG_FORMAT_WHITELIST = ["torch/csrc/jit/", "test/cpp/jit/", "test/cpp/tensorexpr/"]
+# If you edit this, please edit the allowlist in clang_format_ci.sh as well.
+CLANG_FORMAT_ALLOWLIST = ["torch/csrc/jit/", "test/cpp/jit/", "test/cpp/tensorexpr/"]
 
 # Only files with names matching this regex will be formatted.
 CPP_FILE_REGEX = re.compile(".*\\.(h|cpp|cc|c|hpp)$")
 
 
-def get_whitelisted_files():
+def get_allowlisted_files():
     """
-    Parse CLANG_FORMAT_WHITELIST and resolve all directories.
-    Returns the set of whitelist cpp source files.
+    Parse CLANG_FORMAT_ALLOWLIST and resolve all directories.
+    Returns the set of allowlist cpp source files.
     """
     matches = []
-    for dir in CLANG_FORMAT_WHITELIST:
+    for dir in CLANG_FORMAT_ALLOWLIST:
         for root, dirnames, filenames in os.walk(dir):
             for filename in filenames:
                 if CPP_FILE_REGEX.match(filename):
@@ -77,7 +77,7 @@ async def file_clang_formatted_correctly(filename, semaphore, verbose=False):
 
 async def run_clang_format(max_processes, diff=False, verbose=False):
     """
-    Run clang-format to all files in CLANG_FORMAT_WHITELIST that match CPP_FILE_REGEX.
+    Run clang-format to all files in CLANG_FORMAT_ALLOWLIST that match CPP_FILE_REGEX.
     """
     # Check to make sure the clang-format binary exists.
     if not os.path.exists(CLANG_FORMAT_PATH):
@@ -97,7 +97,7 @@ async def run_clang_format(max_processes, diff=False, verbose=False):
 
     # Format files in parallel.
     if diff:
-        for f in asyncio.as_completed([file_clang_formatted_correctly(f, semaphore, verbose) for f in get_whitelisted_files()]):
+        for f in asyncio.as_completed([file_clang_formatted_correctly(f, semaphore, verbose) for f in get_allowlisted_files()]):
             ok &= await f
 
         if ok:
@@ -105,7 +105,7 @@ async def run_clang_format(max_processes, diff=False, verbose=False):
         else:
             print("Some files not formatted correctly")
     else:
-        await asyncio.gather(*[run_clang_format_on_file(f, semaphore, verbose) for f in get_whitelisted_files()])
+        await asyncio.gather(*[run_clang_format_on_file(f, semaphore, verbose) for f in get_allowlisted_files()])
 
     return ok
 
@@ -134,7 +134,7 @@ def main(args):
     options = parse_args(args)
     # Get clang-format and make sure it is the right binary and it is in the right place.
     ok = get_and_check_clang_format(options.verbose)
-    # Invoke clang-format on all files in the directories in the whitelist.
+    # Invoke clang-format on all files in the directories in the allowlist.
     if ok:
         loop = asyncio.get_event_loop()
         ok = loop.run_until_complete(run_clang_format(options.max_processes, options.diff, options.verbose))

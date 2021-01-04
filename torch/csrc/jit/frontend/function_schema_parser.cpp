@@ -18,6 +18,7 @@ using c10::ListType;
 using c10::make_left;
 using c10::make_right;
 using c10::OperatorName;
+using c10::OptionalType;
 
 namespace torch {
 namespace jit {
@@ -109,7 +110,6 @@ struct SchemaParser {
   }
 
   Argument parseArgument(size_t idx, bool is_return, bool kwarg_only) {
-    Argument result;
     auto p = type_parser.parseType();
     auto type = std::move(p.first);
     auto alias_info = std::move(p.second);
@@ -127,6 +127,9 @@ struct SchemaParser {
         container->addContainedType(std::move(*alias_info));
       }
       alias_info = std::move(container);
+      if (L.nextIf('?')) {
+        type = OptionalType::create(type);
+      }
     }
     if (is_return) {
       // optionally field names in return values
@@ -199,14 +202,14 @@ struct SchemaParser {
   IValue convertToList(
       TypeKind kind,
       const SourceRange& range,
-      std::vector<IValue> vs) {
+      const std::vector<IValue>& vs) {
     switch (kind) {
       case TypeKind::FloatType:
-        return fmap(vs, [](IValue v) { return v.toDouble(); });
+        return fmap(vs, [](const IValue& v) { return v.toDouble(); });
       case TypeKind::IntType:
-        return fmap(vs, [](IValue v) { return v.toInt(); });
+        return fmap(vs, [](const IValue& v) { return v.toInt(); });
       case TypeKind::BoolType:
-        return fmap(vs, [](IValue v) { return v.toBool(); });
+        return fmap(vs, [](const IValue& v) { return v.toBool(); });
       default:
         throw ErrorReport(range)
             << "lists are only supported for float or int types";
@@ -221,7 +224,7 @@ struct SchemaParser {
       } while (L.nextIf(','));
     }
     L.expect(']');
-    return convertToList(kind, tok.range, std::move(vs));
+    return convertToList(kind, tok.range, vs);
   }
 
   IValue parseTensorDefault(const SourceRange& range) {
@@ -234,7 +237,8 @@ struct SchemaParser {
     auto range = L.cur().range;
     switch (arg_type->kind()) {
       case TypeKind::TensorType:
-      case TypeKind::GeneratorType: {
+      case TypeKind::GeneratorType:
+      case TypeKind::QuantizerType: {
         return parseTensorDefault(range);
       } break;
       case TypeKind::StringType:

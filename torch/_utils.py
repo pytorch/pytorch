@@ -7,6 +7,7 @@ import sys
 import traceback
 
 
+
 def _type(self, dtype=None, non_blocking=False, **kwargs):
     """Returns the type if `dtype` is not provided, else casts this object to
     the specified type.
@@ -184,11 +185,15 @@ def _rebuild_qtensor(storage, storage_offset, size, stride, quantizer_params, re
     if qscheme == torch.per_tensor_affine:
         _, scale, zero_point = quantizer_params
         tensor = torch._empty_affine_quantized(size, scale=scale, zero_point=zero_point, dtype=storage.dtype)
-    elif qscheme == torch.per_channel_affine:
+    elif qscheme in (torch.per_channel_affine, torch.per_channel_affine_float_qparams):
         _, scales, zero_points, axis = quantizer_params
         if type(scales) is list and type(zero_points) is list:
-            scales = torch.tensor(scales, dtype=torch.double)
-            zero_points = torch.tensor(zero_points, dtype=torch.long)
+            if qscheme == torch.per_channel_affine:
+                scales = torch.tensor(scales, dtype=torch.double)
+                zero_points = torch.tensor(zero_points, dtype=torch.long)
+            else:
+                scales = torch.tensor(scales, dtype=torch.float)
+                zero_points = torch.tensor(zero_points, dtype=torch.float)
         tensor = torch._empty_per_channel_affine_quantized(
             size, scales=scales, zero_points=zero_points, axis=axis, dtype=storage.dtype)
     else:
@@ -243,7 +248,7 @@ def _flatten_dense_tensors(tensors):
     buffer. Element-wise operation on this buffer will be equivalent to
     operating individually.
 
-    Arguments:
+    Args:
         tensors (Iterable[Tensor]): dense tensors to flatten.
 
     Returns:
@@ -259,7 +264,7 @@ def _flatten_sparse_tensors(tensors):
     """Flatten sparse tensors into two contiguous 1D buffers, one of indices and
     one of values. Assume tensors are of same sparse type.
 
-    Arguments:
+    Args:
         tensors (Iterable[Tensor]): sparse tensors to flatten.
 
     Returns:
@@ -275,7 +280,7 @@ def _unflatten_dense_tensors(flat, tensors):
     """View a flat buffer using the sizes of tensors. Assume that tensors are of
     same dense type, and that flat is given by _flatten_dense_tensors.
 
-    Arguments:
+    Args:
         flat (Tensor): flattened dense tensors to unflatten.
         tensors (Iterable[Tensor]): dense tensors whose sizes will be used to
           unflatten flat.
@@ -298,7 +303,7 @@ def _unflatten_sparse_tensors(flat, tensors):
     tensors. Assume that tensors are of same sparse type, and that flat is given
     by _flatten_sparse_tensors.
 
-    Arguments:
+    Args:
         flat (tuple(Tensor, Tensor)): flattened indices and values of sparse
           tensors to unflatten.
         tensors (Iterable[Tensor]): sparse tensors whose sizes will be used to
@@ -322,7 +327,7 @@ def _reorder_tensors_as(tensors, ordered_tensors):
     types, e.g., from _take_tensors. Reorder them to be of same order as
     ordered_tensors.
 
-    Arguments:
+    Args:
         tensors (Iterable[Tensor]): tensors to be reordered. They should be of
           the same order as ordered_tensors within their own types.
         ordered_tensors (Iterable[Tensor]): tensors whose order will be the
@@ -417,6 +422,10 @@ class ExceptionWrapper(object):
             # makes stack traces unreadable. It will not be changed in Python
             # (https://bugs.python.org/issue2651), so we work around it.
             msg = KeyErrorMessage(msg)
+        elif getattr(self.exc_type, "message", None):
+            # Some exceptions have first argument as non-str but explicitly
+            # have message field
+            raise self.exc_type(message=msg)
         raise self.exc_type(msg)
 
 
@@ -429,7 +438,7 @@ def _get_available_device_type():
 
 def _get_device_attr(get_member):
     device_type = _get_available_device_type()
-    if device_type.lower() == "cuda":
+    if device_type and device_type.lower() == "cuda":
         return get_member(torch.cuda)
     # add more available device types here
     return None
@@ -483,3 +492,12 @@ def _get_device_index(device, optional=False, allow_cpu=False) -> int:
             raise ValueError('Expected a torch.device with a specified index '
                              'or an integer, but got:{}'.format(device))
     return device_idx
+
+
+def _handle_complex(tensor):
+    """
+    Returns a real view of a tensor if complex dtype else just the tensor
+    need to check if a UninitializedParameter because otherwise checking is_complex is an error for a LazyModule
+    """
+    return torch.view_as_real(tensor) if not isinstance(tensor,
+                                                        torch.nn.UninitializedParameter) and tensor.is_complex() else tensor

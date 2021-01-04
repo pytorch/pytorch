@@ -132,6 +132,8 @@ CAFFE2_CUDA_API int GetGPUIDForPointer(const void* ptr);
 
 /**
  * Gets the device property for the given device. This function is thread safe.
+ * The initial run on this function is ~1ms/device; however, the results are
+ * cached so subsequent runs should be much faster.
  */
 CAFFE2_CUDA_API const cudaDeviceProp& GetDeviceProperty(const int device);
 

@@ -26,7 +26,7 @@ def init(output_file, flags=None, output_mode='key_value'):
     else:
         raise RuntimeError("supported CUDA profiler output modes are: key_value and csv")
     with tempfile.NamedTemporaryFile(delete=True) as f:
-        f.write(b'\n'.join(map(lambda f: f.encode('ascii'), flags)))
+        f.write(b'\n'.join(f.encode('ascii') for f in flags))
         f.flush()
         check_error(rt.cudaProfilerInitialize(f.name, output_file, output_mode_enum))
 

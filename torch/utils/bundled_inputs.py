@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-from typing import Any, TypeVar, Optional, Tuple, List, NamedTuple
+from typing import Any, TypeVar, Optional, Tuple, List, NamedTuple, Union
 import textwrap
 import torch
+from torch._C import TupleType, OptionalType, ListType
 
 
 T = TypeVar("T")
@@ -53,8 +54,8 @@ def augment_model_with_bundled_inputs(
         raise Exception("Only ScriptModule is supported.")
 
     forward_arg_types = [arg.type for arg in model.forward.schema.arguments[1:]]
-    deflated_inputs_type = torch._C.ListType(torch._C.TupleType(forward_arg_types))
-    inflated_inputs_type = torch._C.OptionalType(deflated_inputs_type)
+    deflated_inputs_type: ListType = ListType(TupleType(forward_arg_types))
+    inflated_inputs_type: OptionalType[ListType] = OptionalType(deflated_inputs_type)
     model._c._register_attribute("_bundled_inputs_deflated", deflated_inputs_type, [])
     model._c._register_attribute("_bundled_inputs_inflated", inflated_inputs_type, None)
 
@@ -117,7 +118,7 @@ def augment_model_with_bundled_inputs(
         """))
 
 
-def _inflate_expr(arg: T, ref: str) -> Tuple[T, str]:
+def _inflate_expr(arg: T, ref: str) -> Tuple[Union[T, torch.Tensor], str]:
     # Allow custom inflation expressions any object.
     # For example, calling custom image-decoding ops.
     # Or just use "{}" as the format string to ignore size limits.

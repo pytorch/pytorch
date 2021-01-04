@@ -15,14 +15,13 @@ import traceback
 import warnings
 import threading
 from typing import List, Optional, Tuple, Union
-from torch._six import raise_from
 from ._utils import _get_device_index, _dummy_type
-from .streams import Stream, Event
+from .streams import Stream, Event, _Graph
 from .. import device as _device
 import torch._C
 
 try:
-    from torch._C import _cudart
+    from torch._C import _cudart  # type: ignore
 except ImportError:
     _cudart = None
 
@@ -31,50 +30,30 @@ _tls = threading.local()
 _initialization_lock = threading.Lock()
 _queued_calls = []  # don't invoke these until initialization occurs
 _is_in_bad_fork = getattr(torch._C, "_cuda_isInBadFork", lambda: False)
-_device_t = Union[_device, str, int]
+_device_t = Union[_device, str, int, None]
 
 # Define dummy _CudaDeviceProperties type if PyTorch was compiled without CUDA
 if hasattr(torch._C, '_CudaDeviceProperties'):
     _CudaDeviceProperties = torch._C._CudaDeviceProperties
 else:
-    _CudaDeviceProperties = _dummy_type('_CudaDeviceProperties')
+    _CudaDeviceProperties = _dummy_type('_CudaDeviceProperties')  # type: ignore
 
 # Global variables dynamically populated by native code
 has_magma: bool = False
 has_half: bool = False
-default_generators: Tuple[torch._C.Generator] = ()
+default_generators: Tuple[torch._C.Generator] = ()  # type: ignore[assignment]
 
 def is_available() -> bool:
     r"""Returns a bool indicating if CUDA is currently available."""
-    if (not hasattr(torch._C, '_cuda_isDriverSufficient') or
-            not torch._C._cuda_isDriverSufficient()):
+    if not hasattr(torch._C, '_cuda_getDeviceCount'):
         return False
+    # This function never throws and returns 0 if driver is missing or can't
+    # be initialized
     return torch._C._cuda_getDeviceCount() > 0
 
 
 def _sleep(cycles):
     torch._C._cuda_sleep(cycles)
-
-
-def _check_driver():
-    if not hasattr(torch._C, '_cuda_isDriverSufficient'):
-        raise AssertionError("Torch not compiled with CUDA enabled")
-    if not torch._C._cuda_isDriverSufficient():
-        if torch._C._cuda_getDriverVersion() == 0:
-            # found no NVIDIA driver on the system
-            raise AssertionError("""
-Found no NVIDIA driver on your system. Please check that you
-have an NVIDIA GPU and installed a driver from
-http://www.nvidia.com/Download/index.aspx""")
-        else:
-            # TODO: directly link to the alternative bin that needs install
-            raise AssertionError("""
-The NVIDIA driver on your system is too old (found version {}).
-Please update your GPU driver by downloading and installing a new
-version from the URL: http://www.nvidia.com/Download/index.aspx
-Alternatively, go to: https://pytorch.org to install
-a PyTorch version that has been compiled with your version
-of the CUDA driver.""".format(str(torch._C._cuda_getDriverVersion())))
 
 
 def _check_capability():
@@ -117,11 +96,11 @@ If you want to use the {} GPU with PyTorch, please check the instructions at htt
     supported_sm = [int(arch.split('_')[1]) for arch in arch_list if 'sm_' in arch]
     for idx in range(device_count()):
         cap_major, cap_minor = get_device_capability(idx)
-        capability = cap_major * 10 + cap_minor
-        # NVIDIA GPU compute architectures are backward compatible within 5 minor revisions versions
-        supported = any([capability >= sm and capability - (sm // 5) * 5 < 5 for sm in supported_sm])
+        # NVIDIA GPU compute architectures are backward compatible within major version
+        supported = any([sm // 10 == cap_major for sm in supported_sm])
         if not supported:
             device_name = get_device_name(idx)
+            capability = cap_major * 10 + cap_minor
             warnings.warn(incompatible_device_warn.format(device_name, capability, " ".join(arch_list), device_name))
 
 
@@ -149,7 +128,7 @@ def init():
     r"""Initialize PyTorch's CUDA state.  You may need to call
     this explicitly if you are interacting with PyTorch via
     its C API, as Python bindings for CUDA functionality will not
-    be until this initialization takes place.  Ordinary users
+    be available until this initialization takes place.  Ordinary users
     should not need this, as all of PyTorch's CUDA methods
     automatically initialize CUDA state on-demand.
 
@@ -183,10 +162,13 @@ def _lazy_init():
                        "'spawn' start method")
             raise RuntimeError(
                 "Cannot re-initialize CUDA in forked subprocess. " + msg)
-        _check_driver()
+        if not hasattr(torch._C, '_cuda_getDeviceCount'):
+            raise AssertionError("Torch not compiled with CUDA enabled")
         if _cudart is None:
             raise AssertionError(
                 "libcudart functions unavailable. It looks like you have a broken build?")
+        # This function throws if there's a driver initialization error, no GPUs
+        # are found or any other error occurs
         torch._C._cuda_init()
         # Some of the queued calls may reentrantly call _lazy_init();
         # we need to just return without initializing in that case.
@@ -197,9 +179,9 @@ def _lazy_init():
                 try:
                     queued_call()
                 except Exception as e:
-                    msg = ("CUDA call failed lazily at initialization with error: {}\n\n"
-                           "CUDA call was originally invoked at:\n\n{}").format(str(e), orig_traceback)
-                    raise_from(DeferredCudaCallError(msg), e)
+                    msg = (f"CUDA call failed lazily at initialization with error: {str(e)}\n\n"
+                           f"CUDA call was originally invoked at:\n\n{orig_traceback}")
+                    raise DeferredCudaCallError(msg) from e
         finally:
             delattr(_tls, 'is_initializing')
         _initialized = True
@@ -228,7 +210,7 @@ def check_error(res: int) -> None:
 class device(object):
     r"""Context-manager that changes the selected device.
 
-    Arguments:
+    Args:
         device (torch.device or int): device index to select. It's a no-op if
             this argument is a negative integer or ``None``.
     """
@@ -257,7 +239,7 @@ class device_of(device):
     You can use both tensors and storages as arguments. If a given object is
     not allocated on a GPU, this is a no-op.
 
-    Arguments:
+    Args:
         obj (Tensor or Storage): object allocated on the selected device.
     """
 
@@ -272,7 +254,7 @@ def set_device(device: _device_t) -> None:
     Usage of this function is discouraged in favor of :any:`device`. In most
     cases it's better to use ``CUDA_VISIBLE_DEVICES`` environmental variable.
 
-    Arguments:
+    Args:
         device (torch.device or int): selected device. This function is a no-op
             if this argument is negative.
     """
@@ -284,7 +266,7 @@ def set_device(device: _device_t) -> None:
 def get_device_name(device: Optional[_device_t] = None) -> str:
     r"""Gets the name of a device.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): device for which to return the
             name. This function is a no-op if this argument is a negative
             integer. It uses the current device, given by :func:`~torch.cuda.current_device`,
@@ -296,7 +278,7 @@ def get_device_name(device: Optional[_device_t] = None) -> str:
 def get_device_capability(device: Optional[_device_t] = None) -> Tuple[int, int]:
     r"""Gets the cuda capability of a device.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): device for which to return the
             device capability. This function is a no-op if this argument is
             a negative integer. It uses the current device, given by
@@ -315,7 +297,7 @@ def get_device_properties(device: _device_t) -> _CudaDeviceProperties:
     device = _get_device_index(device, optional=True)
     if device < 0 or device >= device_count():
         raise AssertionError("Invalid device id")
-    return _get_device_properties(device)
+    return _get_device_properties(device)  # type: ignore[name-defined]
 
 
 @contextlib.contextmanager
@@ -325,7 +307,7 @@ def stream(stream):
     All CUDA kernels queued within its context will be enqueued on a selected
     stream.
 
-    Arguments:
+    Args:
         stream (Stream): selected stream. This manager is a no-op if it's
             ``None``.
 
@@ -374,8 +356,8 @@ def get_gencode_flags() -> str:
     arch_list = get_arch_list()
     if len(arch_list) == 0:
         return ""
-    arch_list = [arch.split("_") for arch in arch_list]
-    return " ".join([f"-gencode compute=compute_{arch},code={kind}_{arch}" for (kind, arch) in arch_list])
+    arch_list_ = [arch.split("_") for arch in arch_list]
+    return " ".join([f"-gencode compute=compute_{arch},code={kind}_{arch}" for (kind, arch) in arch_list_])
 
 
 
@@ -388,7 +370,7 @@ def current_device() -> int:
 def synchronize(device: _device_t = None) -> None:
     r"""Waits for all kernels in all streams on a CUDA device to complete.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): device for which to synchronize.
             It uses the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).
@@ -414,7 +396,7 @@ def ipc_collect():
 def current_stream(device: Optional[_device_t] = None) -> Stream:
     r"""Returns the currently selected :class:`Stream` for a given device.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): selected device. Returns
             the currently selected :class:`Stream` for the current device, given
             by :func:`~torch.cuda.current_device`, if :attr:`device` is ``None``
@@ -428,7 +410,7 @@ def current_stream(device: Optional[_device_t] = None) -> Stream:
 def default_stream(device: Optional[_device_t] = None) -> Stream:
     r"""Returns the default :class:`Stream` for a given device.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): selected device. Returns
             the default :class:`Stream` for the current device, given by
             :func:`~torch.cuda.current_device`, if :attr:`device` is ``None``
@@ -472,7 +454,7 @@ if not hasattr(torch._C, 'CudaDoubleStorageBase'):
     torch._C.__dict__['_CudaEventBase'] = _dummy_type('CudaEventBase')
 
 
-@staticmethod
+@staticmethod  # type: ignore[misc]
 def _lazy_new(cls, *args, **kwargs):
     _lazy_init()
     # We may need to call lazy init again if we are a forked child
@@ -485,8 +467,11 @@ class _CudaBase(object):
     is_sparse = False
 
     def type(self, *args, **kwargs):
-        with device(self.get_device()):
-            return super(_CudaBase, self).type(*args, **kwargs)
+        # We could use a Protocol here to tell mypy that self has `get_device` method
+        # but it is only available in the typing module on Python >= 3.8
+        # or on typing_extensions module on Python >= 3.6
+        with device(self.get_device()):  # type: ignore
+            return super(_CudaBase, self).type(*args, **kwargs)  # type: ignore[misc]
 
     __new__ = _lazy_new
 

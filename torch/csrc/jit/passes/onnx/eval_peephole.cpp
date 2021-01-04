@@ -135,15 +135,6 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
   }
 }
 
-void buildParamsMapFromValueToParamsMap(
-    const ValueToParamPairMap& valsToParamsMap,
-    ParamMap& paramsDict) {
-  paramsDict.clear();
-  for (const auto& nameTensorParamPair : valsToParamsMap) {
-    paramsDict.insert(nameTensorParamPair.second);
-  }
-}
-
 void EvalPeepholeONNX(Block* b, ParamMap& paramsDict) {
   auto valsToParamsMap = buildValueToParamsMap(b, paramsDict);
   fuseConvBatchNorm(b, valsToParamsMap);

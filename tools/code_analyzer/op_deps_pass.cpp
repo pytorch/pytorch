@@ -781,6 +781,7 @@ private:
       // NB: some operator names might contain namespace. If this occurs, we
       // MUST NOT use the contextual namespace. Fortunately, it's easy to tell
       // if a namespace is included: a double colon will be present.
+      // In particular, this will occur with TORCH_SELECTIVE_NAME.
       const std::string& schemaStr =
           (contextualNamespace.empty() || str.find("::") != std::string::npos)
           ? str : contextualNamespace + str;

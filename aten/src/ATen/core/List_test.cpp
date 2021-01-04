@@ -1088,3 +1088,11 @@ TEST(ListTest, canAccessStringByReference) {
   const std::string& str = list[1].toStringRef();
   EXPECT_EQ("two", str);
 }
+
+TEST(ListTest, canAccessOptionalStringByReference) {
+  List<c10::optional<std::string>> list({"one", "two", c10::nullopt});
+  c10::optional<std::reference_wrapper<const std::string>> str1 = list[1].toOptionalStringRef();
+  c10::optional<std::reference_wrapper<const std::string>> str2 = list[2].toOptionalStringRef();
+  EXPECT_EQ("two", str1.value().get());
+  EXPECT_FALSE(str2.has_value());
+}

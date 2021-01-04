@@ -44,7 +44,7 @@ namespace {
 #if !defined(__CUDA_ARCH__) && !defined(__HIPCC__)
 // we cannot use std::isnan directly due to some incompatibility of
 // gcc constexpr'ing and nvcc
-#define isnan std::isnan
+using std::isnan;
 #endif
 
 // Here sampler_t should be function type scalar_t(void). For gpu
@@ -259,11 +259,8 @@ C10_DEVICE scalar_t sample_binomial(scalar_t count, scalar_t prob, BaseSampler<a
 }
 
 /*
- * The following function comes with the following copyright notice.
- * It has been released under the BSD license.
- *
- * Cephes Math Library Release 2.8:  June, 2000
- * Copyright 1984, 1987, 1992, 2000 by Stephen L. Moshier
+ * This function is derived from the implementation of the digamma function in the Cephes Math Library.
+ * See note [3-Clause BSD License for the Cephes Math Library] in ATen/native/Math.h.
  */
 template<typename scalar_t, typename accscalar_t>
 C10_DEVICE static inline scalar_t digamma_one(scalar_t x) {

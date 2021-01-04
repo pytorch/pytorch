@@ -16,10 +16,9 @@ install_ubuntu() {
     apt-get install -y libc++1
     apt-get install -y libc++abi1
 
-    DEB_ROCM_REPO=http://repo.radeon.com/rocm/apt/${ROCM_VERSION}
     # Add rocm repository
-    wget -qO - $DEB_ROCM_REPO/rocm.gpg.key | apt-key add -
-    echo "deb [arch=amd64] $DEB_ROCM_REPO xenial main" > /etc/apt/sources.list.d/rocm.list
+    wget -qO - http://repo.radeon.com/rocm/rocm.gpg.key | apt-key add -
+    echo "deb [arch=amd64] http://repo.radeon.com/rocm/apt/${ROCM_VERSION} xenial main" > /etc/apt/sources.list.d/rocm.list
     apt-get update --allow-insecure-repositories
 
     DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated \
@@ -62,7 +61,7 @@ install_centos() {
 
   echo "[ROCm]" > /etc/yum.repos.d/rocm.repo
   echo "name=ROCm" >> /etc/yum.repos.d/rocm.repo
-  echo "baseurl=http://repo.radeon.com/rocm/yum/rpm/" >> /etc/yum.repos.d/rocm.repo
+  echo "baseurl=http://repo.radeon.com/rocm/yum/${ROCM_VERSION}" >> /etc/yum.repos.d/rocm.repo
   echo "enabled=1" >> /etc/yum.repos.d/rocm.repo
   echo "gpgcheck=0" >> /etc/yum.repos.d/rocm.repo
 
@@ -90,11 +89,16 @@ install_centos() {
 }
 
 # Install Python packages depending on the base OS
-if [ -f /etc/lsb-release ]; then
-  install_ubuntu
-elif [ -f /etc/os-release ]; then
-  install_centos
-else
-  echo "Unable to determine OS..."
-  exit 1
-fi
+ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
+case "$ID" in
+  ubuntu)
+    install_ubuntu
+    ;;
+  centos)
+    install_centos
+    ;;
+  *)
+    echo "Unable to determine OS..."
+    exit 1
+    ;;
+esac

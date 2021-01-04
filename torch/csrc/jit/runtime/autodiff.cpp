@@ -9,9 +9,9 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/passes/update_differentiable_graph_requires_grad.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/symbolic_script.h>
-
 #include <algorithm>
 #include <memory>
 
@@ -58,7 +58,8 @@ bool isDifferentiable(Node* n) {
   // Tensor", "aten::min(Tensor self) -> Tensor"
 
   if (n->kind() == prim::Constant || n->kind() == prim::AutogradZero ||
-      n->kind() == prim::AutogradAdd || n->kind() == prim::ConstantChunk)
+      n->kind() == prim::AutogradAdd || n->kind() == prim::ConstantChunk ||
+      n->kind() == prim::profile)
     return true;
 
   if (n->isMemberOf(differentiable_ops))
@@ -208,6 +209,8 @@ class GradientHelper {
     if (node->kind() == prim::AutogradAdd) {
       // NB: AutogradAdds don't broadcast
       return {grad_values.at(0), grad_values.at(0)};
+    } else if (node->kind() == prim::profile) {
+      return {grad_values.at(0)};
     } else if (node->kind() == prim::ConstantChunk) {
       auto* g = node->owningGraph();
 
@@ -838,6 +841,12 @@ Gradient differentiate(std::shared_ptr<Graph>& graph) {
   // modifies df_input_vjps (new vjps are added for temporaries)
   lambdaLiftReverse(grad_desc, rev_info);
   packReturnValuesIntoTuple(grad_desc.df);
+
+  // we have created a differentiable forward graph
+  // which will be run with tensors that have their gradients detached,
+  // so profiled types will have outdated requires_grad=True, update the
+  // requires_grad property
+  UpdateDifferentiableGraphRequiresGrad(grad_desc.f, false);
   return grad_desc;
 }
 } // namespace jit

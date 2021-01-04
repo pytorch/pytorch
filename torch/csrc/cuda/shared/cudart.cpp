@@ -29,7 +29,12 @@ void initCudartBindings(PyObject* module) {
   cudart.def("cuda" "GetErrorString", cudaGetErrorString);
   cudart.def("cuda" "ProfilerStart", cudaProfilerStart);
   cudart.def("cuda" "ProfilerStop", cudaProfilerStop);
-  cudart.def("cuda" "HostRegister", cudaHostRegister);
+  cudart.def("cuda" "HostRegister", [](uintptr_t ptr, size_t size, unsigned int flags) -> cudaError_t {
+    return cudaHostRegister((void*)ptr, size, flags);
+  });
+  cudart.def("cuda" "HostUnregister", [](uintptr_t ptr) -> cudaError_t {
+    return cudaHostUnregister((void*)ptr);
+  });
 #ifndef __HIP_PLATFORM_HCC__
   cudart.def("cuda" "ProfilerInitialize", cudaProfilerInitialize);
 #endif

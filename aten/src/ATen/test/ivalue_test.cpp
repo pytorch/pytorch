@@ -139,10 +139,10 @@ TEST(IValueTest, FutureExceptions) {
     }
   });
   ivalue::Future::FutureError err("My Error");
-  f3->setError(std::move(err));
+  f3->setError(std::make_exception_ptr(err));
   ASSERT_EQ(calledTimes, 1);
   ASSERT_TRUE(f3->hasError());
-  ASSERT_EQ(std::string(f3->error()->what()), std::string("My Error"));
+  ASSERT_EQ(f3->tryRetrieveErrorMessage(), std::string("My Error"));
 }
 
 TEST(IValueTest, ValueEquality) {
@@ -259,40 +259,64 @@ TEST(IValueTest, ListNestedEquality) {
   EXPECT_NE(c2, c3);
 }
 
+TEST(IValueTest, StreamEquality) {
+  at::Device device1 =  at::Device(kCUDA, 0);
+  at::Device device2 = at::Device(kCUDA, 1);
+  c10::Stream stream1 = c10::Stream(c10::Stream::Default::DEFAULT, device1);
+  c10::Stream stream2 = c10::Stream(c10::Stream::Default::DEFAULT, device2);
+  IValue lhs(stream1);
+  IValue rhs_different(stream2);
+  IValue rhs_same(stream1);
+  EXPECT_FALSE(lhs.equals(rhs_different).toBool());
+  EXPECT_TRUE(lhs.equals(rhs_same).toBool());
+}
+
 TEST(IValueTest, EnumEquality) {
+  auto cu = std::make_shared<CompilationUnit>();
+  IValue int_ivalue_1(1);
+  IValue int_ivalue_2(2);
+  IValue str_ivalue_1("1");
+  auto int_enum_type1 = EnumType::create(
+      "enum_class_1",
+      IntType::get(),
+      {{"enum_name_1", int_ivalue_1}, {"enum_name_2", int_ivalue_2}},
+      cu);
+  auto int_enum_type2 = EnumType::create(
+      "enum_class_2",
+      IntType::get(),
+      {{"enum_name_1", int_ivalue_1}, {"enum_name_2", int_ivalue_2}},
+      cu);
+  auto string_enum_type = EnumType::create(
+      "enum_class_3", StringType::get(), {{"enum_name_1", str_ivalue_1}}, cu);
+
   EXPECT_EQ(
       IValue(c10::make_intrusive<ivalue::EnumHolder>(
-          "enum_class_1", "enum_name_1", IValue(1))),
+          int_enum_type1, "enum_name_1", int_ivalue_1)),
       IValue(c10::make_intrusive<ivalue::EnumHolder>(
-          "enum_class_1", "enum_name_1", IValue(1)))
+          int_enum_type1, "enum_name_1", int_ivalue_1))
   );
 
   EXPECT_NE(
       IValue(c10::make_intrusive<ivalue::EnumHolder>(
-          "enum_class_1", "enum_name_1", IValue(1))),
+          int_enum_type1, "enum_name_1", int_ivalue_1)),
       IValue(c10::make_intrusive<ivalue::EnumHolder>(
-          "enum_class_2", "enum_name_1", IValue(1)))
+          int_enum_type2, "enum_name_1", int_ivalue_1))
   );
 
   EXPECT_NE(
       IValue(c10::make_intrusive<ivalue::EnumHolder>(
-          "enum_class_1", "enum_name_1", IValue(1))),
+          int_enum_type1, "enum_name_1", int_ivalue_1)),
       IValue(c10::make_intrusive<ivalue::EnumHolder>(
-          "enum_class_1", "enum_name_2", IValue(1)))
+          int_enum_type1, "enum_name_2", int_ivalue_2))
   );
 
   EXPECT_NE(
       IValue(c10::make_intrusive<ivalue::EnumHolder>(
-          "enum_class_1", "enum_name_1", IValue(1))),
+          int_enum_type1, "enum_name_1", int_ivalue_1)),
       IValue(c10::make_intrusive<ivalue::EnumHolder>(
-          "enum_class_1", "enum_name_1", IValue(2)))
-  );
-
-  EXPECT_NE(
-      IValue(c10::make_intrusive<ivalue::EnumHolder>(
-          "enum_class_1", "enum_name_1", IValue(1))),
-      IValue(c10::make_intrusive<ivalue::EnumHolder>(
-          "enum_class_1", "enum_name_1", IValue("1")))
+          string_enum_type, "enum_name_1", str_ivalue_1))
   );
 }
+
+// TODO(gmagogsfm): Add type conversion test?
 } // namespace c10

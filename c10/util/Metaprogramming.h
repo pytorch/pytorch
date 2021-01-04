@@ -129,4 +129,209 @@ decltype(auto) filter_map(const Mapper& mapper, Args&&... args) {
   return detail::filter_map_<ResultType, num_results>::template call<Condition, Mapper, Args...>(mapper, std::make_index_sequence<num_results>(), std::forward<Args>(args)...);
 }
 
+
+/**
+ * make_offset_index_sequence<Start, N>
+ * Like make_index_sequence<N>, but starting from Start instead of 0.
+ *
+ * Example:
+ *  make_offset_index_sequence<10, 3> == std::index_sequence<10, 11, 12>
+ */
+template<size_t Start, size_t N, size_t... Is>
+struct make_offset_index_sequence_impl
+  : make_offset_index_sequence_impl<Start, N - 1, Start + N - 1, Is...>
+{
+  static_assert(static_cast<int>(Start) >= 0, "make_offset_index_sequence: Start < 0");
+  static_assert(static_cast<int>(N) >= 0, "make_offset_index_sequence: N < 0");
+};
+
+template<size_t Start, size_t... Is>
+struct make_offset_index_sequence_impl <Start, 0, Is...> {
+  typedef std::index_sequence<Is...> type;
+};
+
+template<size_t Start, size_t N>
+using make_offset_index_sequence = typename make_offset_index_sequence_impl<Start, N>::type;
+
+
+/**
+ * Use tuple_elements to extract a position-indexed subset of elements
+ * from the argument tuple into a result tuple.
+ *
+ * Example:
+ *  std::tuple<int, const char*, double> t = std::make_tuple(0, "HEY", 2.0);
+ *  std::tuple<int, double> result = tuple_elements(t, std::index_sequence<0, 2>());
+ */
+template <class Tuple, size_t... Is>
+constexpr auto tuple_elements(Tuple t, std::index_sequence<Is...>) {
+  return std::tuple<std::tuple_element_t<Is, Tuple>...>(std::get<Is>(t)...);
+}
+
+/**
+ * Use tuple_take to extract the first or last n elements from the argument
+ * tuple into a result tuple.
+ *
+ * Example:
+ *  std::tuple<int, const char*, double> t = std::make_tuple(0, "HEY", 2.0);
+ *  std::tuple<int, const char*> first_two = tuple_take<decltype(t), 2>(t);
+ *  std::tuple<const char*, double> last_two = tuple_take<decltype(t), -2>(t);
+ */
+template <class Tuple, int N, class Enable = void>
+struct TupleTake {};
+
+template <class Tuple, int N>
+struct TupleTake<Tuple, N, std::enable_if_t<N >= 0, void>> {
+  static auto call(Tuple t) {
+    constexpr size_t size = std::tuple_size<Tuple>();
+    static_assert(N <= size, "tuple_take: N > size");
+    return tuple_elements(t, std::make_index_sequence<N>{});
+  }
+};
+
+template <class Tuple, int N>
+struct TupleTake<Tuple, N, std::enable_if_t<N < 0, void>> {
+  static auto call(Tuple t) {
+    constexpr size_t size = std::tuple_size<Tuple>();
+    static_assert(-N <= size, "tuple_take: -N > size");
+    return tuple_elements(t, make_offset_index_sequence<size + N, -N>{});
+  }
+};
+
+template <class Tuple, int N>
+auto tuple_take(Tuple t) {
+  return TupleTake<Tuple, N>::call(t);
+}
+
+/**
+ * Use tuple_slice to extract a contiguous subtuple from the argument.
+ *
+ * Example:
+ *  std::tuple<int, const char*, double, bool> t = std::make_tuple(0, "HEY", 2.0, false);
+ *  std::tuple<int, const char*> middle_two = tuple_slice<decltype(t), 1, 2>(t);
+ */
+template <class Tuple, size_t Start, size_t N>
+constexpr auto tuple_slice(Tuple t) {
+  constexpr size_t size = std::tuple_size<Tuple>();
+  static_assert(Start + N <= size, "tuple_slice: Start + N > size");
+  return tuple_elements(t, make_offset_index_sequence<Start, N>{});
+}
+
+
+/**
+ * Use tuple_map to run a mapping function over a tuple to get a new tuple.
+ *
+ * Example 1:
+ *   auto result = tuple_map(std::tuple<int32_t, int32_t, int32_t>(3, 4, 5), [] (int32_t a) -> int16_t {return a+1;});
+ *   // result == std::tuple<int16_t, int16_t, int16_t>(4, 5, 6)
+ *
+ * Example 2:
+ *   struct Mapper {
+ *     std::string operator()(int32_t a) const {
+ *       return std::to_string(a);
+ *     }
+ *     int64_t operator()(const std::string& a) const {
+ *        return atoi(a.c_str());
+ *     }
+ *   };
+ *   auto result = tuple_map(std::tuple<int32_t, std::string>(3, "4"), Mapper());
+ *   // result == std::tuple<std::string, int64_t>("3", 4)
+ *
+ * Example 3:
+ *   struct A final {
+ *    int32_t func() {
+ *      return 5;
+ *    }
+ *  };
+ *  struct B final {
+ *    std::string func() {
+ *      return "5";
+ *    }
+ *  };
+ *  auto result = tuple_map(std::make_tuple(A(), B()), [] (auto a) { return a.func(); });
+ *  // result == std::tuple<int32_t, std::string>(5, "5");
+ */
+namespace detail {
+  template<class Mapper, class... Args, size_t... Indices>
+  auto tuple_map(std::tuple<Args...>&& tuple, const Mapper& mapper, std::index_sequence<Indices...>) {
+    return std::tuple<decltype(mapper(std::forward<Args>(std::get<Indices>(tuple))))...>(
+      mapper(std::forward<Args>(std::get<Indices>(tuple)))...
+    );
+  }
+}
+
+template<class Mapper, class... Args>
+auto tuple_map(std::tuple<Args...>&& tuple, const Mapper& mapper) {
+  return detail::tuple_map(std::move(tuple), mapper, std::index_sequence_for<Args...>());
+}
+
+
+/**
+ * tuple_concat concatenates several tuples into one.
+ */
+
+namespace detail {
+  // extract_tuple_element_by_index is a helper that takes a list of tuples and extracts the i-th element
+  // in a flattened view of the tuples.
+  // Example: extract_tuple_element_by_index<3>(tuple(2,3), tuple(4,5), tuple(6,7)) == 5.
+
+  template<size_t index, class HeadTuple, class... TailTuples, std::enable_if_t<index < std::tuple_size<HeadTuple>::value, int> = 0>
+  decltype(auto) extract_tuple_element_by_index(HeadTuple&& head_tuple, TailTuples&&... tail_tuples) {
+    // TODO if constexpr instead of enable_if
+    return std::get<index>(std::forward<HeadTuple>(head_tuple));
+  }
+
+  template<size_t index, class HeadTuple, class... TailTuples, std::enable_if_t<index >= std::tuple_size<HeadTuple>::value, int> = 0>
+  decltype(auto) extract_tuple_element_by_index(HeadTuple&& head_tuple, TailTuples&&... tail_tuples) {
+    // TODO if constexpr instead of enable_if
+    return extract_tuple_element_by_index<index - std::tuple_size<HeadTuple>::value, TailTuples...>(std::forward<TailTuples>(tail_tuples)...);
+  }
+
+  static_assert(
+    std::is_same<
+      int&&,
+      decltype(extract_tuple_element_by_index<2>(std::tuple<int32_t>(2), std::tuple<int32_t&&, int32_t>(std::declval<int32_t>(), 3)))
+    >::value,
+    "extract_tuple_element_by_index should return rvalue references if the tuple contains them. It should not move them into a value"
+  );
+
+  template<class ConcatenatedTuple, class... Tuples, size_t... ElementIndices>
+  auto tuple_concat(Tuples&&... tuples, std::index_sequence<ElementIndices...>) {
+    return ConcatenatedTuple(extract_tuple_element_by_index<ElementIndices>(std::forward<Tuples>(tuples)...)...);
+  }
+}
+
+template<class... Tuples>
+  auto tuple_concat(Tuples&&... tuples) {
+    using flattened_types = guts::typelist::concat_t<guts::typelist::from_tuple_t<Tuples>...>;
+    using concatenated_tuple = guts::typelist::to_tuple_t<flattened_types>;
+    constexpr size_t num_elements = guts::typelist::size<flattened_types>::value;
+    return detail::tuple_concat<concatenated_tuple, Tuples...>(std::forward<Tuples>(tuples)..., std::make_index_sequence<num_elements>());
+  }
+
+
+/**
+ * Concatenate multiple integer sequences
+ * Example:
+ *   concat_iseq_t<std::index_sequence<2, 5, 3>, std::index_sequence<4, 2>, std::index_sequence<5>>
+ *     == std::index_sequence<2, 5, 3, 4, 2, 5>
+ */
+template<class... ISeqs> struct concat_iseq {
+  static_assert(false_t<ISeqs...>::value, "In concat_iseq<T1, ...>, the T arguments each must be std::integer_sequence<...> with the same IntType.");
+};
+template<>
+struct concat_iseq<> {
+  using type = std::index_sequence<>;
+};
+template<class IntType, IntType... Indices>
+struct concat_iseq<std::integer_sequence<IntType, Indices...>> {
+  using type = std::integer_sequence<IntType, Indices...>;
+};
+template<class IntType, IntType... Head1Indices, IntType... Head2Indices, class... TailISeqs>
+struct concat_iseq<std::integer_sequence<IntType, Head1Indices...>, std::integer_sequence<IntType, Head2Indices...>, TailISeqs...> {
+    using type = typename concat_iseq<std::integer_sequence<IntType, Head1Indices..., Head2Indices...>, TailISeqs...>::type;
+};
+template<class... ISeqs>
+using concat_iseq_t = typename concat_iseq<ISeqs...>::type;
+
+
 }}

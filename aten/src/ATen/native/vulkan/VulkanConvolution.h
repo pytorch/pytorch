@@ -44,6 +44,8 @@ struct Conv2DParams final {
       int64_t DY,
       int64_t DX,
       int64_t G)
+    // TODO: What if inputSizes is not of the expected dimensionality?
+    // Should check prior to indexing.
       : N(inputSizes[0]),
         C(inputSizes[1]),
         H(inputSizes[2]),
@@ -73,6 +75,8 @@ struct Conv2DParams final {
       c10::IntArrayRef stride,
       c10::IntArrayRef dilation,
       int64_t groups)
+    // TODO: What if these parameters are not of the correct dimensionality?
+    // Should check prior to indexing.
       : Conv2DParams(
             inputSizes,
             weightSizes[0],
@@ -86,7 +90,7 @@ struct Conv2DParams final {
             dilation[1],
             groups) {}
 
-  std::vector<int64_t> output_sizes() {
+  std::vector<int64_t> output_sizes() const {
     return {N, OC, OH, OW};
   }
 };
@@ -96,11 +100,11 @@ namespace convolution2d {
 
 c10::intrusive_ptr<at::native::vulkan::Conv2dOpContext>
 createConv2dClampPrePackOpContext(
-    Tensor weight,
-    c10::optional<Tensor> bias,
-    std::vector<int64_t> stride,
-    std::vector<int64_t> padding,
-    std::vector<int64_t> dilation,
+    Tensor&& weight,
+    c10::optional<Tensor>&& bias,
+    std::vector<int64_t>&& stride,
+    std::vector<int64_t>&& padding,
+    std::vector<int64_t>&& dilation,
     int64_t groups,
     c10::optional<Scalar> output_min,
     c10::optional<Scalar> output_max);

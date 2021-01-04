@@ -45,6 +45,7 @@ Creating TorchScript Code
 
     script
     trace
+    script_if_tracing
     trace_module
     fork
     wait
@@ -55,6 +56,7 @@ Creating TorchScript Code
     load
     ignore
     unused
+    isinstance
 
 Mixing Tracing and Scripting
 ----------------------------
@@ -205,8 +207,8 @@ Disable JIT for Debugging
 
 Setting the environment variable ``PYTORCH_JIT=0`` will disable all script
 and tracing annotations. If there is hard-to-debug error in one of your
-TorchScript model, you can use this flag to force everything to run using native
-Python. Since TorchScript (scripting and tracing) are disabled with this flag,
+TorchScript models, you can use this flag to force everything to run using native
+Python. Since TorchScript (scripting and tracing) is disabled with this flag,
 you can use tools like ``pdb`` to debug the model code.  For example::
 
     @torch.jit.script
@@ -545,10 +547,10 @@ best practices?
 
       cpu_model = gpu_model.cpu()
       sample_input_cpu = sample_input_gpu.cpu()
-      traced_cpu = torch.jit.trace(traced_cpu, sample_input_cpu)
+      traced_cpu = torch.jit.trace(cpu_model, sample_input_cpu)
       torch.jit.save(traced_cpu, "cpu.pth")
 
-      traced_gpu = torch.jit.trace(traced_gpu, sample_input_gpu)
+      traced_gpu = torch.jit.trace(gpu_model, sample_input_gpu)
       torch.jit.save(traced_gpu, "gpu.pth")
 
       # ... later, when using the model:

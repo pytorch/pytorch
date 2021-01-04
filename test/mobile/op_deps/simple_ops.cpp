@@ -2,7 +2,6 @@
 
 #include <iostream>
 
-#include <ATen/core/op_registration/hacky_wrapper_for_legacy_signatures.h>
 #include <c10/core/TensorOptions.h>
 #include <torch/library.h>
 
@@ -90,7 +89,7 @@ TORCH_LIBRARY(_test, m) {
   m.def("DD", TORCH_FN(DD_op));
 }
 
-TORCH_LIBRARY_FRAGMENT_THIS_API_IS_FOR_PER_OP_REGISTRATION_ONLY(_test, m) {
+TORCH_LIBRARY_FRAGMENT(_test, m) {
   m.def("EE(Tensor self) -> Tensor");
   m.def("FF(Tensor self) -> Tensor");
   m.def("GG(Tensor self) -> Tensor");
@@ -105,7 +104,7 @@ TORCH_LIBRARY_IMPL(_test, CPU, m) {
   );
   m.impl("GG",
          torch::dispatch(DispatchKey::CPU,
-                         c10::impl::hacky_wrapper_for_legacy_signatures(TORCH_FN((GG_op))))
+                         TORCH_FN((GG_op)))
   );
   m.impl("HH",
     [] (Tensor a) -> Tensor {

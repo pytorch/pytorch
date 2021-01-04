@@ -52,6 +52,8 @@ class _InstanceNorm(_NormBase):
     def forward(self, input: Tensor) -> Tensor:
         self._check_input_dim(input)
 
+        assert self.running_mean is None or isinstance(self.running_mean, Tensor)
+        assert self.running_var is None or isinstance(self.running_var, Tensor)
         return F.instance_norm(
             input, self.running_mean, self.running_var, self.weight, self.bias,
             self.training or not self.track_running_stats, self.momentum, self.eps)
@@ -85,7 +87,7 @@ class InstanceNorm1d(_InstanceNorm):
         This :attr:`momentum` argument is different from one used in optimizer
         classes and the conventional notion of momentum. Mathematically, the
         update rule for running statistics here is
-        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momemtum} \times x_t`,
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momentum} \times x_t`,
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
 
@@ -166,7 +168,7 @@ class InstanceNorm2d(_InstanceNorm):
         This :attr:`momentum` argument is different from one used in optimizer
         classes and the conventional notion of momentum. Mathematically, the
         update rule for running statistics here is
-        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momemtum} \times x_t`,
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momentum} \times x_t`,
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
 
@@ -240,7 +242,7 @@ class InstanceNorm3d(_InstanceNorm):
         This :attr:`momentum` argument is different from one used in optimizer
         classes and the conventional notion of momentum. Mathematically, the
         update rule for running statistics here is
-        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momemtum} \times x_t`,
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momentum} \times x_t`,
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
 

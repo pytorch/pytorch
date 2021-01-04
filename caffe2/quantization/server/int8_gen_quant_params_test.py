@@ -13,7 +13,7 @@
 # limitations under the License.
 ##############################################################################
 
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
@@ -24,7 +24,7 @@ from hypothesis import given, settings
 
 
 class TestInt8GenQuantParamsOperator(hu.HypothesisTestCase):
-    @settings(max_examples=50)
+    @settings(max_examples=20, deadline=None)
     @given(
         n=st.integers(10, 100),
         m=st.integers(1, 128),

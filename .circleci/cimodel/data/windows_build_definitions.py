@@ -43,8 +43,11 @@ class WindowsJob:
         if base_phase == "test":
             prerequisite_jobs.append("_".join(base_name_parts + ["build"]))
 
+        if self.cuda_version:
+            self.cudnn_version = 8 if self.cuda_version.major == 11 else 7
+
         arch_env_elements = (
-            ["cuda" + str(self.cuda_version.major), "cudnn7"]
+            ["cuda" + str(self.cuda_version.major), "cudnn" + str(self.cudnn_version)]
             if self.cuda_version
             else ["cpu"]
         )
@@ -83,21 +86,25 @@ class WindowsJob:
                 props_dict["executor"] = "windows-with-nvidia-gpu"
 
         props_dict["cuda_version"] = (
-            miniutils.quote(str(self.cuda_version.major))
+            miniutils.quote(str(self.cuda_version))
             if self.cuda_version
             else "cpu"
         )
+
         props_dict["name"] = "_".join(name_parts)
 
         return [{key_name: props_dict}]
 
 
 class VcSpec:
-    def __init__(self, year, version_elements=None):
+    def __init__(self, year, version_elements=None, hide_version=False):
         self.year = year
         self.version_elements = version_elements or []
+        self.hide_version = hide_version
 
     def get_elements(self):
+        if self.hide_version:
+            return [self.prefixed_year()]
         return [self.prefixed_year()] + self.version_elements
 
     def get_product(self):
@@ -110,7 +117,7 @@ class VcSpec:
         return "vs" + str(self.year)
 
     def render(self):
-        return "_".join(filter(None, [self.prefixed_year(), self.dotted_version()]))
+        return "_".join(self.get_elements())
 
 def FalsePred(_):
     return False
@@ -118,22 +125,22 @@ def FalsePred(_):
 def TruePred(_):
     return True
 
+_VC2019 = VcSpec(2019)
+
 WORKFLOW_DATA = [
-    # VS2017 CUDA-10.1
-    WindowsJob(None, VcSpec(2017, ["14", "13"]), CudaVersion(10, 1), master_only_pred=FalsePred),
-    WindowsJob(1, VcSpec(2017, ["14", "13"]), CudaVersion(10, 1)),
-    # VS2017 no-CUDA (builds only)
-    WindowsJob(None, VcSpec(2017, ["14", "16"]), None),
     # VS2019 CUDA-10.1
-    WindowsJob(None, VcSpec(2019), CudaVersion(10, 1)),
-    WindowsJob(1, VcSpec(2019), CudaVersion(10, 1)),
-    WindowsJob(2, VcSpec(2019), CudaVersion(10, 1)),
+    WindowsJob(None, _VC2019, CudaVersion(10, 1)),
+    WindowsJob(1, _VC2019, CudaVersion(10, 1)),
+    WindowsJob(2, _VC2019, CudaVersion(10, 1)),
+    # VS2019 CUDA-11.1
+    WindowsJob(None, _VC2019, CudaVersion(11, 1)),
+    WindowsJob(1, _VC2019, CudaVersion(11, 1), master_only_pred=TruePred),
+    WindowsJob(2, _VC2019, CudaVersion(11, 1), master_only_pred=TruePred),
     # VS2019 CPU-only
-    WindowsJob(None, VcSpec(2019), None),
-    WindowsJob(1, VcSpec(2019), None, master_only_pred=TruePred),
-    WindowsJob(2, VcSpec(2019), None, master_only_pred=TruePred),
-    WindowsJob("-jit-profiling-tests", VcSpec(2019), CudaVersion(10, 1), master_only_pred=FalsePred),
-    WindowsJob(1, VcSpec(2019), CudaVersion(10, 1), force_on_cpu=True, master_only_pred=TruePred),
+    WindowsJob(None, _VC2019, None),
+    WindowsJob(1, _VC2019, None, master_only_pred=TruePred),
+    WindowsJob(2, _VC2019, None, master_only_pred=TruePred),
+    WindowsJob(1, _VC2019, CudaVersion(10, 1), force_on_cpu=True, master_only_pred=TruePred),
 ]
 
 
