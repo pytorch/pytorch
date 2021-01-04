@@ -251,7 +251,7 @@ public:
   Vec256<T> angle() const {
     // other_t_angle is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<other_t_angle, T>::value, "other_t_angle must be T");
-    return Vec256(0);
+    return map(at::native::angle_impl<T>);  // compiler is unable to resolve the overload without <T>
   }
   template <typename complex_t_angle = T,
             typename std::enable_if<c10::is_complex<complex_t_angle>::value, int>::type = 0>

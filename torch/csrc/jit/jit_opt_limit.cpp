@@ -14,6 +14,8 @@
 namespace torch {
 namespace jit {
 
+static std::unordered_map<std::string, int64_t> passes_to_current_counter;
+
 static int parseOptLimit(const std::string& opt_limit) {
   try {
     int64_t n = c10::stoi(opt_limit);
@@ -39,8 +41,7 @@ static std::unordered_map<std::string, int64_t> parseJITOptLimitOption(
     auto pass_name = line.substr(0, index_at);
     pass_name = c10::detail::ExcludeFileExtension(pass_name);
     auto opt_limit = parseOptLimit(line.substr(index_at + 1));
-    // we do opt_limit-1 to handle the off by one issue
-    passes_to_opt_limits.insert({pass_name, opt_limit - 1});
+    passes_to_opt_limits.insert({pass_name, opt_limit});
   }
 
   return passes_to_opt_limits;
