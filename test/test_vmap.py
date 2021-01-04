@@ -1907,6 +1907,16 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(vmap(lambda t: op(t, [4] * 8 + [8] * 4, 1), in_dims=2)),
              (torch.rand(B1, 2, B0, 64, B2),), in_dims=2)
 
+    def test_trace(self):
+        op = torch.trace
+        test = self._vmap_test
+        B0, B1, B2 = 7, 11, 13
+
+        test(op, (torch.rand(B0, 2, 5),))
+        test(op, (torch.rand(2, B0, 5),), in_dims=1)
+        test(vmap(op), (torch.rand(B1, 2, B0, 5),), in_dims=2)
+        test(vmap(vmap(op, in_dims=2)), (torch.rand(B1, 2, B0, 5, B2),), in_dims=2)
+
     def test_transpose(self):
         op = torch.transpose
         test = self._vmap_view_test
@@ -2312,6 +2322,10 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self._batched_grad_test(lambda x: x[0:1], (x,))
         self._batched_grad_test(lambda x: x[:, 1:3], (x,))
         self._batched_grad_test(lambda x: x[..., 1:3], (x,))
+
+    def test_trace(self, device):
+        x = torch.randn(2, 3, device=device, requires_grad=True)
+        self._batched_grad_test(Tensor.trace, (x,))
 
     @allowVmapFallbackUsage
     def test_symeig(self, device):
