@@ -530,7 +530,7 @@ Tensor linalg_solve(const Tensor& input, const Tensor& other) {
 
 /*
 Computes the inverse of n-by-n matrix 'self'
-This is an in-place routine, content of 'self' is overriden.
+This is an in-place routine, it overwrites the content of 'self'.
 'infos_lu' and 'infos_getri' are int Tensors containing error codes for each matrix in the batched input.
 'infos_lu' is for holding lapackLU errors, and 'infos_getri' is for holding lapackGetri errors.
 For more information see LAPACK's documentation for GETRI and GETRF routines.
