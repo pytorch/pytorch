@@ -29,7 +29,7 @@ static void restoreAccurateTypeTagsIfPossible(const IValue& root) {
 // objects it contains as attributes.
 // `IfPossible` - we can only do this recovery when we have an object as
 // the top-level unpickled thing (which is guaranteed for Modules, but
-// not for torch.load/torch,save). Otherwise we do not know the types
+// not for torch.load/torch.save). Otherwise we do not know the types
 // of the contained objects and cannot restore the tags.
 void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
   struct Work {
