@@ -932,7 +932,7 @@ adaptive_max_pool3d = _adaptive_pool('adaptive_max_pool3d', "MaxPool", _triple, 
 
 
 # Generate paddings in ONNX order based on pad in pytorch.
-# Arguments:
+# Args:
 #     dim: the dimension of the tensor.
 #     pad: the paddings in pytorch.
 #          The order is dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, ...
