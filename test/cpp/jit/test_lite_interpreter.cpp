@@ -510,7 +510,9 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
 
   std::stringstream ss;
   c._save_for_mobile(ss, {}, true);
+  c._save_for_mobile("/Users/chenlai/Documents/pytorch/data/data/test.ptl", {}, true);
   mobile::Module bc = _load_for_mobile(ss);
+//  mobile::Module bc = _load_for_mobile("/Users/chenlai/Documents/pytorch/data/data/test.ptl");
 
   std::unordered_set<std::string> module_debug_info_set;
   size_t pc = 0;

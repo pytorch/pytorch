@@ -64,6 +64,7 @@ std::string getSourceRangeTrace(
   if (node->callstack()) {
     auto callstack_ptr = *(node->callstack());
     source_range_trace = callstack_ptr->source_range_trace();
+    std::cout << source_range_trace << std::endl;
   }
   return source_range_trace;
 }
@@ -491,9 +492,13 @@ class ScriptModuleSerializer {
     elements.emplace_back(
         static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
     c10::optional<std::vector<c10::IValue>> debug_info_elements;
+    c10::optional<std::vector<c10::IValue>> source_range_elements;
     if (save_mobile_debug_info) {
       debug_info_elements = std::vector<c10::IValue>();
       debug_info_elements->emplace_back(
+          static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
+      source_range_elements = std::vector<c10::IValue>();
+      source_range_elements->emplace_back(
           static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
     }
 
@@ -504,6 +509,7 @@ class ScriptModuleSerializer {
     if (save_mobile_debug_info) {
       auto debug_info_telements = Tup(std::move(debug_info_elements.value()));
       writeArchive("mobile_debug", debug_info_telements);
+      writeArchive("mobile_source_range", debug_info_telements);
     }
   }
 

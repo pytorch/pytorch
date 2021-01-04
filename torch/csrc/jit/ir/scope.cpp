@@ -140,7 +140,7 @@ std::string InlinedCallStack::source_range_trace() {
   std::string source_range_trace;
   c10::optional<InlinedCallStackPtr> current = intrusive_from_this();
   while (current) {
-    source_range_trace.append((*current)->source_range_.text()).append(":");
+    source_range_trace.append((*current)->source_range_.str());
     current = (*current)->callee_;
   }
   return source_range_trace;
