@@ -432,7 +432,7 @@ struct {class_name} final : public {parent_class} {{
                 if self.dispatch_key == 'Meta':
                     impl_call = ""
                 else:
-                    impl_call = f"op.impl({out_expr}, {functional_exprs});"
+                    impl_call = f"op.impl({functional_exprs}, {out_expr});"
 
                 # For an overview of what this template code looks like, see
                 # https://github.com/pytorch/rfcs/pull/9
@@ -455,19 +455,8 @@ struct {class_name} final : public {parent_class} {{
             elif self.target is Target.REGISTRATION:
                 dispatcher_sig = DispatcherSignature.from_schema(f.func)
 
-                if local.use_c10_dispatcher() is UseC10Dispatcher.full:
-                    payload = f"TORCH_FN({sig.name()})"
-                elif local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
-                    payload = f"""
-c10::impl::hacky_wrapper_for_legacy_signatures<
-    {dispatcher_sig.type()},
-    {len(f.func.arguments.out)}
->(TORCH_FN({sig.name()}))
-"""
-                else:
-                    assert local.use_c10_dispatcher() is UseC10Dispatcher.with_codegenerated_unboxing_wrapper
-                    payload = f"torch::CppFunction::makeUnboxedOnly(&{sig.name()})"
-                return f'm.impl("{f.func.name}", {payload});'
+                assert local.use_c10_dispatcher() is UseC10Dispatcher.full
+                return f'm.impl("{f.func.name}", TORCH_FN({sig.name()}));'
             else:
                 assert_never(self.target)
                 # Silence mypy's "Missing return statement" error
@@ -760,7 +749,7 @@ def compute_meta_function_declaration(g: StructuredNativeFunctions) -> str:
         sig = g.signature()
         name = meta.name(g)
         args = native.arguments(sig)
-        args_str = ', '.join(a.defn() for a in args)
+        args_str = ', '.join(a.decl() for a in args)
         parent_class = g.out.structured_inherits
         if parent_class is None:
             parent_class = "at::impl::MetaBase"
