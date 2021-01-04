@@ -730,17 +730,7 @@ struct TORCH_API structured_{n} : public at::meta::{meta_name} {{
                 if is_structured_dispatch_key(k):
                     continue
                 seen.add(n)
-                if f.func.is_out_fn() and local.use_c10_dispatcher() is UseC10Dispatcher.full:
-                    # out overloads don't get default arguments because
-                    # defaulted arguments would be before the out argument
-                    # in the argument list and that doesn't work.
-                    # TODO We should consider if we just want to remove
-                    # default arguments from all at::native functions
-                    # but that would be a larger change because we need
-                    # to change a lot of call sites
-                    args_str = ', '.join(a.defn() for a in args)
-                else:
-                    args_str = ', '.join(a.decl() for a in args)
+                args_str = ', '.join(a.decl() for a in args)
                 rs.append(f"TORCH_API {returns_type} {n}({args_str});")
 
         return rs
@@ -1094,7 +1084,7 @@ def compute_registration_declarations(f: NativeFunction) -> str:
     name = dispatcher.name(f.func)
     returns_type = dispatcher.returns_type(f.func.returns)
     args = dispatcher.arguments(f.func)
-    args_str = ', '.join(a.defn() for a in args)
+    args_str = ', '.join(a.no_default().decl() for a in args)
     comment_data : Dict[str, str] = {
         'schema': f'aten::{f.func}',
         # TODO: What exactly is the semantics of the 'dispatch' field?

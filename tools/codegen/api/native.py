@@ -4,7 +4,7 @@ from tools.codegen.api.types import *
 import tools.codegen.api.cpp as cpp
 from tools.codegen import local
 
-from typing import Union, Sequence, List
+from typing import Union, Sequence, List, Optional
 
 # This file describes the translation of JIT schema to the native functions API.
 # This looks a lot like the C++ API (which makes historical sense, because the
@@ -43,26 +43,36 @@ def returns_type(rs: Sequence[Return]) -> str:
 def argument_type(a: Argument, *, binds: ArgName) -> CType:
     return argumenttype_type(a.type, mutable=a.is_write, binds=binds)
 
-def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments]) -> List[Binding]:
+def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments], *, is_out: bool) -> List[Binding]:
+    # Ideally, we NEVER default native functions.  However, there are a number
+    # of functions that call native:: directly and rely on the defaulting
+    # existing.  So for BC, we generate defaults for non-out variants (but not
+    # for out variants, where it is impossible to generate an appropriate
+    # default)
+    should_default = not is_out or local.use_c10_dispatcher() is not UseC10Dispatcher.full
     if isinstance(a, Argument):
+        default: Optional[str] = None
+        if should_default and a.default is not None:
+            default = cpp.default_expr(a.default, a.type)
         return [Binding(
             ctype=argument_type(a, binds=a.name),
             name=a.name,
-            default=cpp.default_expr(a.default, a.type) if a.default is not None else None,
+            default=default,
             argument=a,
         )]
     elif isinstance(a, SelfArgument):
         # Erase SelfArgument from the distinction
-        return argument(a.argument)
+        return argument(a.argument, is_out=is_out)
     elif isinstance(a, TensorOptionsArguments):
         if local.use_c10_dispatcher() in [UseC10Dispatcher.hacky_wrapper_for_legacy_signatures,
                                           UseC10Dispatcher.with_codegenerated_unboxing_wrapper]:
             # TODO: expunge this logic entirely
             default = None
-            if all(x.default == "None" for x in a.all()):
-                default = '{}'
-            elif a.dtype.default == "long":
-                default = 'at::kLong'  # TODO: this is wrong
+            if should_default:
+                if all(x.default == "None" for x in a.all()):
+                    default = '{}'
+                elif a.dtype.default == "long":
+                    default = 'at::kLong'  # TODO: this is wrong
             return [Binding(
                 ctype=ConstRefCType(BaseCType('TensorOptions', 'options')),
                 name='options',
@@ -71,29 +81,35 @@ def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments]) -> List[B
             )]
         else:
             assert local.use_c10_dispatcher() == UseC10Dispatcher.full
+            default = None
+            if should_default:
+                default = '{}'
+            # TODO: Not sure why the arguments assigned here are for
+            # TensorOptionsArguments and not the constituent pieces.  It seems
+            # to matter
             return [
                 Binding(
                     ctype=OptionalCType(BaseCType('ScalarType', 'dtype')),
                     name='dtype',
-                    default='{}',
+                    default=default,
                     argument=a,
                 ),
                 Binding(
                     ctype=OptionalCType(BaseCType('Layout', 'layout')),
                     name='layout',
-                    default='{}',
+                    default=default,
                     argument=a,
                 ),
                 Binding(
                     ctype=OptionalCType(BaseCType('Device', 'device')),
                     name='device',
-                    default='{}',
+                    default=default,
                     argument=a,
                 ),
                 Binding(
                     ctype=OptionalCType(BaseCType('bool', 'pin_memory')),
                     name='pin_memory',
-                    default='{}',
+                    default=default,
                     argument=a,
                 )]
     else:
@@ -107,4 +123,4 @@ def arguments(func: FunctionSchema) -> List[Binding]:
     else:
         args.extend(func.arguments.out)
         args.extend(func.arguments.non_out)
-    return [r for arg in args for r in argument(arg)]
+    return [r for arg in args for r in argument(arg, is_out=func.is_out_fn())]
