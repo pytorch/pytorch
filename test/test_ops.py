@@ -4,7 +4,7 @@ import torch
 
 from torch.testing import floating_and_complex_types_and
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, IS_SANDCASTLE)
+    (TestCase, run_tests, IS_SANDCASTLE, clone_input_helper)
 from torch.testing._internal.common_methods_invocations import \
     (op_db)
 from torch.testing._internal.common_device_type import \
@@ -29,13 +29,15 @@ class TestOpInfo(TestCase):
     @onlyOnCPUAndCUDA
     @ops(op_db, dtypes=OpDTypes.unsupported)
     def test_unsupported_dtypes(self, device, dtype, op):
-        samples = op.sample_inputs(device, dtype)
-        if len(samples) == 0:
-            self.skipTest("Skipped! No sample inputs!")
-
-        # NOTE: only tests on first sample
-        sample = samples[0]
+        # sample_inputs can have a function for generating the input that doesn't work for specified dtype
+        # https://github.com/pytorch/pytorch/issues/49024
         with self.assertRaises(RuntimeError):
+            samples = op.sample_inputs(device, dtype)
+            if len(samples) == 0:
+                self.skipTest("Skipped! No sample inputs!")
+
+            # NOTE: only tests on first sample
+            sample = samples[0]
             op(*sample.input, *sample.args, **sample.kwargs)
 
     # Verifies that ops have their supported dtypes
@@ -74,7 +76,14 @@ class TestGradients(TestCase):
 
         samples = op.sample_inputs(device, dtype, requires_grad=True)
         for sample in samples:
-            partial_fn = partial(variant, **sample.kwargs)
+            if sample.output_process_fn_grad is not None:
+                out_fn = sample.output_process_fn_grad
+
+                def variant_out_fn(*args, **kwargs):
+                    return out_fn(variant(*args, **kwargs))
+            else:
+                variant_out_fn = variant
+            partial_fn = partial(variant_out_fn, **sample.kwargs)
             if check == 'gradcheck':
                 self.assertTrue(gradcheck(partial_fn, (*sample.input,) + sample.args,
                                           check_grad_dtypes=True))
@@ -209,12 +218,18 @@ class TestCommon(JitCommonTestCase):
                 if (variant is inplace and op.promotes_integers_to_float and
                         dtype in (torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)):
                     try:
-                        variant_forward = variant(*(input.clone() for input in sample.input), *sample.args, **sample.kwargs)
+                        variant_forward = variant(*(clone_input_helper(input) for input in sample.input),
+                                                  *sample.args,
+                                                  **sample.kwargs)
                     except Exception as e:
                         continue
                     self.fail("Inplace operation on integer tensor that should be promoted to float didn't fail!")
                 # Compares variant's forward
-                variant_forward = variant(*(input.clone() for input in sample.input), *sample.args, **sample.kwargs)
+                # Note: copy the tensor-type inputs when testing inplace operation
+                variant_forward = variant(*(clone_input_helper(input) if variant is inplace else input
+                                            for input in sample.input),
+                                          *sample.args,
+                                          **sample.kwargs)
                 self.assertEqual(variant_forward, expected_forward)
 
                 # Compares variant's backward

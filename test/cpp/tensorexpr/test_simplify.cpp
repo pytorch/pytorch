@@ -635,17 +635,17 @@ TEST(Simplify, SimplifySub) {
   ASSERT_EQ(rhs->name_hint(), "x");
 }
 
-/// 2 * (1 - x) - 4 => -2 * (x + 3)
+/// 2 * (1 - x) - 4 => 2 * (-3 - x)
 TEST(Simplify, SimplifyMultiLayer) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   ExprHandle body = ExprHandle(2) * ((ExprHandle(1) - x) - ExprHandle(4));
   ExprHandle simplified = IRSimplifier::simplify(body);
   IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
-  IS_IMM_WITH_VAL(Int, mul->lhs(), -2);
-  IS_NODE_WITH_NAME(Add, mul->rhs(), add);
-  IS_VAR_WITH_NAME(add->lhs(), "x");
-  IS_IMM_WITH_VAL(Int, add->rhs(), 3);
+  IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
+  IS_NODE_WITH_NAME(Sub, mul->rhs(), sub);
+  IS_IMM_WITH_VAL(Int, sub->lhs(), -3);
+  IS_VAR_WITH_NAME(sub->rhs(), "x");
 }
 
 /// 2 * (3 * x) - (x * 4) => 2 * x
@@ -777,16 +777,16 @@ TEST(Simplify, SimplifyAdds) {
   }
 
   {
-    // (x - y) + (x - y) => -2 * (y - x)
+    // (x - y) + (x - y) => 2 * (x - y)
     ExprHandle body = (x - y) + (x - y);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
-    IS_IMM_WITH_VAL(Int, mul->lhs(), -2);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
 
     IS_NODE_WITH_NAME(Sub, mul->rhs(), rhs);
-    IS_VAR_WITH_NAME(rhs->lhs(), "y");
-    IS_VAR_WITH_NAME(rhs->rhs(), "x");
+    IS_VAR_WITH_NAME(rhs->lhs(), "x");
+    IS_VAR_WITH_NAME(rhs->rhs(), "y");
   }
 
   {
@@ -965,15 +965,15 @@ TEST(Simplify, SimplifySubs) {
   }
 
   {
-    // (x + y) - 2 * (x + y) => -1 * (x + y)
+    // (x + y) - 2 * (x + y) => -1 * x - y
     ExprHandle body = (x + y) - ExprHandle(2) * (x + y);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
-    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_NODE_WITH_NAME(Sub, simplified.node(), sub);
+    IS_NODE_WITH_NAME(Mul, sub->lhs(), mul);
     IS_IMM_WITH_VAL(Int, mul->lhs(), -1);
-    IS_NODE_WITH_NAME(Add, mul->rhs(), add);
-    IS_VAR_WITH_NAME(add->lhs(), "y");
-    IS_VAR_WITH_NAME(add->rhs(), "x");
+    IS_VAR_WITH_NAME(mul->rhs(), "x");
+    IS_VAR_WITH_NAME(sub->rhs(), "y");
   }
 
   {
@@ -1434,18 +1434,62 @@ TEST(Simplify, SimplifyFactorization) {
 
   {
     // Factorization with common divider but different signs.
-    // (-2 * x) + (4 * y) => -2 * (x - 2 * y)
-    ExprHandle body = (ExprHandle(-2) * x + ExprHandle(4) * y);
+    // (2 * x) + (-4 * y) => 2 * (x - 2 * y)
+    ExprHandle body = (ExprHandle(2) * x + ExprHandle(-4) * y);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
-    IS_IMM_WITH_VAL(Int, mul->lhs(), -2);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
 
     IS_NODE_WITH_NAME(Sub, mul->rhs(), sub);
     IS_VAR_WITH_NAME(sub->lhs(), "x");
     IS_NODE_WITH_NAME(Mul, sub->rhs(), mul2);
     IS_IMM_WITH_VAL(Int, mul2->lhs(), 2);
     IS_VAR_WITH_NAME(mul2->rhs(), "y");
+  }
+
+  {
+    // Factorization with all negative numbers.
+    // (-2 * x) + (-4 * y) => 2 * (-1 * x - 2 * y)
+    ExprHandle body = ExprHandle(-2) * x + ExprHandle(-4) * y;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
+
+    IS_NODE_WITH_NAME(Sub, mul->rhs(), sub);
+    IS_NODE_WITH_NAME(Mul, sub->lhs(), mul2);
+    IS_IMM_WITH_VAL(Int, mul2->lhs(), -1);
+    IS_VAR_WITH_NAME(mul2->rhs(), "x");
+    IS_NODE_WITH_NAME(Mul, sub->rhs(), mul3);
+    IS_IMM_WITH_VAL(Int, mul3->lhs(), 2);
+    IS_VAR_WITH_NAME(mul3->rhs(), "y");
+  }
+
+  {
+    // The following test ensures that there in no infinite recursion during
+    // factorization when negative numbers are involved.
+    VarHandle a("a", kInt);
+    VarHandle b("b", kInt);
+    VarHandle c("c", kInt);
+    VarHandle d("d", kInt);
+    VarHandle e("e", kInt);
+    VarHandle f("f", kInt);
+    VarHandle g("g", kInt);
+    VarHandle h("h", kInt);
+
+    ExprHandle body = ExprHandle(0) + (ExprHandle(1024) * a) +
+        (ExprHandle(-1) * b) + (ExprHandle(-1) * c) + (ExprHandle(1) * d) +
+        (ExprHandle(1) * e) + (ExprHandle(32) * f) + (ExprHandle(-1024) * g) +
+        (ExprHandle(-32) * h);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    // We only check for the top level nodes here, since the main purpose
+    // here is ensure that this simplification completes.
+    IS_NODE_WITH_NAME(Sub, simplified.node(), sub);
+    IS_NODE_WITH_NAME(Mul, sub->rhs(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 1024);
+    IS_VAR_WITH_NAME(mul->rhs(), "g");
   }
 }
 
@@ -2224,7 +2268,7 @@ TEST(Simplify, SimplifyWontReorderFloat) {
   KernelScope kernel_scope;
 
   {
-    // 3 * (3 * x) - 3 * (3 * y) => -9 * (y - x)
+    // 3 * (3 * x) - 3 * (3 * y) => 9 * (x - y)
     // This is an expression we can simplify.
     VarHandle x("x", kInt);
     VarHandle y("y", kInt);
@@ -2234,10 +2278,10 @@ TEST(Simplify, SimplifyWontReorderFloat) {
     ExprHandle simplified = IRSimplifier::simplify(body);
 
     IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
-    IS_IMM_WITH_VAL(Int, mul->lhs(), -9);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 9);
     IS_NODE_WITH_NAME(Sub, mul->rhs(), sub);
-    IS_VAR_WITH_NAME(sub->lhs(), "y");
-    IS_VAR_WITH_NAME(sub->rhs(), "x");
+    IS_VAR_WITH_NAME(sub->lhs(), "x");
+    IS_VAR_WITH_NAME(sub->rhs(), "y");
   }
 
   {
@@ -4325,7 +4369,7 @@ TEST(Simplify, SimplifyBroadcastTermExpander) {
       {Ramp::make(0, 1, num_lanes)},
       simplified,
       Broadcast::make(ExprHandle(1), num_lanes));
-  SimpleIREvaluator eval(store, buf);
+  SimpleIREvaluator eval(store, {buf});
   std::vector<int> output(num_lanes);
   eval(output);
   for (int i = 0; i < num_lanes; ++i) {

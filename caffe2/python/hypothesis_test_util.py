@@ -50,7 +50,6 @@ import hypothesis.strategies as st
 import logging
 import numpy as np
 import os
-import six
 import struct
 
 
@@ -748,5 +747,5 @@ class HypothesisTestCase(test_util.TestCase):
             if regexp is None:
                 self.assertRaises(exception, workspace.RunOperatorOnce, op)
             else:
-                six.assertRaisesRegex(
-                    self, exception, regexp, workspace.RunOperatorOnce, op)
+                self.assertRaisesRegex(
+                    exception, regexp, workspace.RunOperatorOnce, op)

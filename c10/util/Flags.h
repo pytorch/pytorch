@@ -4,7 +4,7 @@
 /* Commandline flags support for C10.
  *
  * This is a portable commandline flags tool for c10, so we can optionally
- * choose to use gflags or a lightweighted custom implementation if gflags is
+ * choose to use gflags or a lightweight custom implementation if gflags is
  * not possible on a certain platform. If you have gflags installed, set the
  * macro C10_USE_GFLAGS will seamlessly route everything to gflags.
  *
