@@ -10229,3 +10229,14 @@
 - func: _test_string_default(Tensor dummy, str a="\"'\\", str b='"\'\\') -> Tensor
   use_c10_dispatcher: full
   python_module: nn
+
+# Note: this function is only for testing.
+- func: _test_ambiguous_defaults.a(Tensor dummy, int a=1, int b=1) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+
+# Note: this function is only for testing.
+- func: _test_ambiguous_defaults.b(Tensor dummy, int a=2, str b="2") -> Tensor
+  cpp_no_default_args: ['a', 'b']
+  use_c10_dispatcher: full
+  python_module: nn
