@@ -214,4 +214,12 @@ std::vector<Tensor> foreach_tensor_##NAME##_slow(TensorList tensors1, TensorList
 FOREACH_MAXIMUM_MINIMUM_OP(maximum)
 FOREACH_MAXIMUM_MINIMUM_OP(minimum)
 
+void foreach_tensor_zero_slow_(TensorList tensors) { 
+  check_foreach_api_restrictions(tensors);
+
+  for (auto& t : tensors) {
+    t.zero_();
+  }
+}
+
 }} // namespace at::native

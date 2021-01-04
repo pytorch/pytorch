@@ -891,6 +891,10 @@ struct CodeImpl {
   }
 
   void emitWarn(Node* node) {
+    if (FLAGS_torch_jit_disable_warning_prints) {
+      return;
+    }
+
     emitLoadInputs(node->inputs());
     int32_t idx = -1;
     if (node->hasAttribute(attr::warn_id)) {

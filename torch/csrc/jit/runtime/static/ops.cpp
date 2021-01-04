@@ -32,7 +32,6 @@ bool canRunNatively(Node* n) {
   const static std::unordered_set<std::string> native_nodes{
       "aten::flatten",
       "aten::narrow",
-      "aten::permute",
       "aten::reshape",
       "aten::slice",
       "aten::transpose",

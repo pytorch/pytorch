@@ -42,7 +42,7 @@
  * Please use the public mutex_ when using any methods from these classes, except for the
  * read-only methods. You can learn about the usage by looking into the unittests
  * (aten/src/ATen/cpu_generator_test.cpp) and other places where we have used lock_guard.
- * 
+ *
  * TODO: Look into changing the threading semantics of Generators in ATen (e.g., making
  * them non-thread safe and instead making the generator state splittable, to accommodate
  * forks into other threads).
@@ -96,7 +96,7 @@ struct C10_API GeneratorImpl : public c10::intrusive_ptr_target {
 
 namespace detail {
 
-CAFFE2_API uint64_t getNonDeterministicRandom(bool is_cuda = false);
+TORCH_API uint64_t getNonDeterministicRandom(bool is_cuda = false);
 
 } // namespace detail
 

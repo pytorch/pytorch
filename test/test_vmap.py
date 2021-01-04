@@ -1287,6 +1287,25 @@ class TestVmapOperators(Namespace.TestVmapBase):
         with self.assertRaisesRegex(RuntimeError, msg):
             vmap(functools.partial(op, memory_format=torch.channels_last_3d))(tensor)
 
+    def test_stride(self):
+        B0 = 3
+
+        x = torch.randn(B0, 2, 5, 7)
+
+        def foo(x):
+            assert x.stride() == (7 * 5, 7, 1)
+            return x
+
+        vmap(foo)(x)
+
+        x = torch.randn(2, B0, 5, 7).movedim(1, 0)
+
+        def bar(x):
+            assert x.stride() == (7 * 5 * B0, 7, 1)
+            return x
+
+        vmap(bar)(x)
+
     def test_chunk(self):
         test = self._vmap_view_test
         op = torch.chunk
@@ -2340,6 +2359,35 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
 
         x = torch.randn(3, 4, 5, device=device, requires_grad=True)
         self._batched_grad_test(lambda x: x.diagonal(0, -1, -2), (x,))
+
+    @allowVmapFallbackUsage
+    def test_unrelated_output(self, device):
+        B0 = 3
+        x = torch.randn([], requires_grad=True)
+        y = torch.randn([], requires_grad=True)
+        gy = torch.randn(B0, requires_grad=True)
+
+        def vjp(v):
+            res, = torch.autograd.grad(y, x, v, allow_unused=True)
+            return torch.zeros_like(x) if res is None else res
+
+        result = vmap(vjp)(gy)
+        self.assertEqual(result, torch.zeros(B0, *x.shape, device=device))
+
+    @allowVmapFallbackUsage
+    def test_unrelated_output_multiple_grad(self, device):
+        B0 = 3
+        x = torch.randn([], requires_grad=True)
+        y = torch.randn([], requires_grad=True)
+        gy = torch.randn(B0, requires_grad=True)
+
+        def vjp(v):
+            res, = torch.autograd.grad(y, x, v, allow_unused=True)
+            return torch.zeros_like(x) if res is None else res
+
+        _ = vjp(gy[0])
+        result = vmap(vjp)(gy)
+        self.assertEqual(result, torch.zeros(B0, *x.shape, device=device))
 
 instantiate_device_type_tests(
     TestVmapBatchedGradient,
