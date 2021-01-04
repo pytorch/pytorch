@@ -504,6 +504,17 @@ void initPythonIRBindings(PyObject* module_) {
             return py::make_iterator(n.inputs().begin(), n.inputs().end());
           })
       .def(
+          "schema",
+          [](Node& n) {
+            std::stringstream ss;
+            if (auto sch = n.maybeSchema()) {
+              ss << n.schema();
+            } else {
+              ss << "(no schema)";
+            }
+            return ss.str();
+          })
+      .def(
           "outputs",
           [](Node& n) {
             return py::make_iterator(n.outputs().begin(), n.outputs().end());
