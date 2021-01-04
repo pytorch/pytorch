@@ -67,12 +67,11 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
       }
 
       auto op = n->getOperation();
-      op(&stack);
-      // try {
-
-      // } catch (...) {
-      //   return c10::nullopt;
-      // }
+      try {
+        op(&stack);
+      } catch (...) {
+        return c10::nullopt;
+      }
     } break;
   }
 

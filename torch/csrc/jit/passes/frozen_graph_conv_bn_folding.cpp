@@ -40,10 +40,10 @@ bool supportedConvNode(Node* n) {
   }
 }
 
-void FoldConvBatchnorm(Block* b) {
+void FoldFrozenConvBatchnorm(Block* b) {
   for (Node* n : b->nodes()) {
     for (Block* block : n->blocks()) {
-      FoldConvBatchnorm(block);
+      FoldFrozenConvBatchnorm(block);
     }
 
     if (n->kind() == aten::batch_norm &&
@@ -215,10 +215,10 @@ at::Tensor resizeConstantScalarOrTensorToShape(
   return ret_tensor;
 }
 
-void FoldConvAddOrSub(Block* b) {
+void FoldFrozenConvAddOrSub(Block* b) {
   for (Node* n : b->nodes()) {
     for (Block* block : n->blocks()) {
-      FoldConvAddOrSub(block);
+      FoldFrozenConvAddOrSub(block);
     }
 
     if (supportedAddOrSub(n) && supportedConvNode(n->inputs().at(0)->node())) {
@@ -278,10 +278,10 @@ bool supportedMulOrDiv(Node* n) {
   return n->isMemberOf(add_set);
 }
 
-void FoldConvMulOrDiv(Block* b) {
+void FoldFrozenConvMulOrDiv(Block* b) {
   for (Node* n : b->nodes()) {
     for (Block* block : n->blocks()) {
-      FoldConvMulOrDiv(block);
+      FoldFrozenConvMulOrDiv(block);
     }
 
     if (supportedMulOrDiv(n) && supportedConvNode(n->inputs().at(0)->node())) {
@@ -357,18 +357,18 @@ void FoldConvMulOrDiv(Block* b) {
   }
 }
 
-void FoldConvBatchnorm(std::shared_ptr<Graph>& graph) {
-  FoldConvBatchnorm(graph->block());
+void FoldFrozenConvBatchnorm(std::shared_ptr<Graph>& graph) {
+  FoldFrozenConvBatchnorm(graph->block());
   EliminateDeadCode(graph);
 }
 
-void FoldConvAddOrSub(std::shared_ptr<Graph>& graph) {
-  FoldConvAddOrSub(graph->block());
+void FoldFrozenConvAddOrSub(std::shared_ptr<Graph>& graph) {
+  FoldFrozenConvAddOrSub(graph->block());
   EliminateDeadCode(graph);
 }
 
-void FoldConvMulOrDiv(std::shared_ptr<Graph>& graph) {
-  FoldConvMulOrDiv(graph->block());
+void FoldFrozenConvMulOrDiv(std::shared_ptr<Graph>& graph) {
+  FoldFrozenConvMulOrDiv(graph->block());
   EliminateDeadCode(graph);
 }
 
