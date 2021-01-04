@@ -5693,7 +5693,8 @@ class TestTorchDeviceType(TestCase):
             x = torch.tensor([], device=device)
             self.assertEqual(x.dtype, x.storage().dtype)
 
-    @dtypes(torch.float, torch.double, torch.half)
+    @dtypesIfCUDA(torch.float, torch.double, torch.half)
+    @dtypes(torch.float, torch.double)
     def test_multinomial(self, device, dtype):
         def make_prob_dist(shape, is_contiguous):
             if is_contiguous:
