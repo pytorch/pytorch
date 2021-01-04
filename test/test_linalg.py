@@ -2793,6 +2793,8 @@ class TestLinalg(TestCase):
             # check r
             self.assertEqual(r, exp_r)
 
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
     @dtypes(torch.float)
     def test_linalg_qr_autograd_r(self, device, dtype):
         # torch.linalg.qr(mode='r') returns only 'r' and discards 'q', but
@@ -2873,6 +2875,17 @@ class TestLinalg(TestCase):
                 self.assertIs(r2, out[1])
                 self.assertEqual(q2, q)
                 self.assertEqual(r2, r)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float)
+    def test_qr_error_cases(self, device, dtype):
+        t1 = torch.randn(5, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, 'qr input should have at least 2 dimensions, but has 1 dimensions instead'):
+            torch.linalg.qr(t1)
+        t2 = torch.randn((5, 7), device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "qr received unrecognized mode 'hello'"):
+            torch.linalg.qr(t2, mode='hello')
 
     @dtypes(torch.double, torch.cdouble)
     def test_einsum(self, device, dtype):
