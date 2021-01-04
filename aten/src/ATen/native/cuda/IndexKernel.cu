@@ -13,7 +13,6 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <THC/THCTensorInfo.cuh>
 #include <THC/THCThrustAllocator.cuh>
-#include <THC/THCApply.cuh>
 
 #include <thrust/execution_policy.h>
 #include <thrust/device_ptr.h>
@@ -339,7 +338,7 @@ Tensor & masked_scatter__cuda(Tensor& self, const Tensor& mask, const Tensor& so
       source.scalar_type());
 
   TensorArg self_arg{self, "self", 1};
-  TensorArg mask_arg{b_mask, "mask", 2};
+  TensorArg mask_arg{mask, "mask", 2};
   TensorArg source_arg{source, "source", 3};
   checkAllSameGPU("masked_scatter_", {self_arg, mask_arg, source_arg});
 
