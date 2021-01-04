@@ -593,9 +593,7 @@ void ONNXShapeTypeInference(
     std::shared_ptr<Graph>& graph,
     const ParamMap& params_dict,
     int opset_version) {
-  for (auto n : graph->nodes()) {
-    ONNXShapeTypeInference(n, params_dict, opset_version);
-  }
+  ONNXShapeTypeInference(graph->block(), params_dict, opset_version);
 }
 
 } // namespace jit
