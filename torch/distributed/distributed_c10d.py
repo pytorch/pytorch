@@ -194,14 +194,24 @@ def _store_based_barrier(rank, store, timeout):
     # legacy stores, we can use 'get' here instead.
     worker_count = store.add(store_key, 0)
     start = time.time()
+    log_time = time.time()
     while worker_count != world_size:
         time.sleep(0.01)
         worker_count = store.add(store_key, 0)
+
+        # Print status periodically to keep track.
+        if timedelta(seconds=(time.time() - log_time)) > timedelta(seconds=10):
+            logging.info(
+                "Waiting in store based barrier to initialize process group for "
+                "rank: {}, key: {} (world_size={}, worker_count={}, timeout={})".format(
+                    rank, store_key, world_size, worker_count, timeout))
+            log_time = time.time()
+
         if timedelta(seconds=(time.time() - start)) > timeout:
             raise RuntimeError(
                 "Timed out initializing process group in store based barrier on "
-                "rank: {}, for key: {} (world_size={}, worker_count={})".format(
-                    rank, store_key, world_size, worker_count))
+                "rank: {}, for key: {} (world_size={}, worker_count={}, timeout={})".format(
+                    rank, store_key, world_size, worker_count, timeout))
 
 def _rank_not_in_group(group: ProcessGroup):
     """
