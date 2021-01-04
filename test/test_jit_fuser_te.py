@@ -1210,6 +1210,141 @@ class TestTEFuser(JitTestCase):
         else:
             return v.to(dtype)
 
+    def test_torch_to(self):
+        # test no op
+        @torch.jit.script
+        def foo(x):
+            return x.to(torch.float)
+
+        foo(torch.tensor([3.], dtype=torch.float))
+        foo(torch.tensor([3.], dtype=torch.float))
+        FileCheck().check_not("TensorExpr").run(torch.jit.last_executed_optimized_graph())
+
+        # test not fusing non-const inputs
+        @torch.jit.script
+        def foo(x, dtype: int):
+            return x.to(dtype)
+
+        foo(torch.tensor([3.], dtype=torch.float), torch.int)
+        foo(torch.tensor([3.], dtype=torch.float), torch.int)
+        FileCheck().check_not("TensorExpr").run(torch.jit.last_executed_optimized_graph())
+
+        # test not fusing to_pinned inputs
+        @torch.jit.script
+        def foo(x, dtype: int):
+            return x.to(pin_memory=True)
+
+        foo(torch.tensor([3.], dtype=torch.float), torch.int)
+        foo(torch.tensor([3.], dtype=torch.float), torch.int)
+        FileCheck().check_not("TensorExpr").run(torch.jit.last_executed_optimized_graph())
+
+
+        # test across-device not supported
+        if torch.cuda.is_available():
+            @torch.jit.script
+            def foo(x):
+                return x.to(device="cuda")
+
+            foo(torch.tensor([3.], dtype=torch.float))
+            foo(torch.tensor([3.], dtype=torch.float))
+            FileCheck().check_not("TensorExpr").run(torch.jit.last_executed_optimized_graph())
+
+        sizes = [(1, 4), (4, 4)]
+        # reuses cast impl, smaller dtype set for faster test
+        dtypes = [
+            torch.bool,
+            torch.int,
+            torch.float16,
+            torch.float32,
+            torch.float64,
+        ]
+
+        class MyMod(torch.nn.Module):
+            def __init__(self, dtype):
+                super(MyMod, self).__init__()
+                self.dtype = dtype
+
+            def forward(self, x):
+                return x.to(self.dtype)
+
+        bad_dtypes = []
+        for dtype, output_dtype, device, size in product(dtypes, dtypes, self.devices, sizes):
+            if dtype == output_dtype:
+                continue
+
+            x = self.data_for(dtype, device, size=size)
+            mod = MyMod(output_dtype)
+            ref = mod.forward(x)
+            # use freezing to make non-Tensor args to `to` constant
+            mod = torch.jit.freeze(torch.jit.script(mod.eval()))
+            warmup_forward(mod.forward, x)
+            self.assertEqual(ref, mod.forward(x))
+            self.assertLastGraphAllFused()
+
+    def test_masked_fill(self):
+        dtypes = [
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.float16,
+            torch.float32,
+            torch.float64,
+            torch.bool,
+        ]
+        sizes = [(2,), (4, 4)]
+        for self_dtype, device, scalar_val, size in product(dtypes, self.devices, [0.4, 3], sizes):
+            input_v = self.data_for(self_dtype, device, size=size)
+            mask = self.data_for(torch.bool, device, size=size)
+
+            def fn(input_v, mask):
+                return torch.masked_fill(input_v, mask, scalar_val)
+            ref = fn(input_v, mask)
+            try:
+                t = torch.jit.trace(fn, (input_v, mask))
+                torch.testing.assert_allclose(ref, t(input_v, mask))
+                print(torch.jit.last_executed_optimized_graph())
+                self.assertLastGraphAllFused()
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(self_dtype), op.__name__, device, str(size)])
+                )
+
+    def test_isnan(self):
+        x = torch.rand([4])
+        x[0] = float('nan')
+        inputs = [
+            x,
+            torch.tensor([float('nan'), .5])
+        ]
+        dtypes = [
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.float16,
+            torch.float32,
+            torch.float64,
+            torch.bool,
+        ]
+
+        for inp, device, dtype in product(inputs, self.devices, dtypes):
+            # TODO
+            if dtype == torch.float16 and not LLVM_ENABLED:
+                continue
+
+            inp = inp.to(device=device, dtype=dtype)
+            try:
+                f = torch.jit.trace(lambda x: x.isnan(), (inp,))
+                warmup_forward(f, inp)
+                self.assertEqual(f(inp), inp.isnan())
+                self.assertLastGraphAllFused()
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), 'isnan', device])
+                )
+
+    # @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")
     def test_unary_ops(self):
         def apply(fn):
             return lambda x: fn(x)
@@ -1239,7 +1374,6 @@ class TestTEFuser(JitTestCase):
             torch.tanh,
             torch.sqrt,
             torch.rsqrt,
-            # FIXME: Fails in IR Eval: torch.int8 abs cpu (1,)
             torch.abs,
             torch.ceil,
             torch.floor,
@@ -1269,12 +1403,10 @@ class TestTEFuser(JitTestCase):
                     " ".join(["Failed:", str(dtype), op.__name__, device, str(size)])
                 )
 
-    @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")
     def test_binary_ops(self):
         def apply(fn):
             return lambda x, y: fn(x, y)
 
-        # FIXME: Fails in IR Eval: torch.int8 and_ cpu
         binary_ops = [
             operator.__and__,
             operator.__or__,

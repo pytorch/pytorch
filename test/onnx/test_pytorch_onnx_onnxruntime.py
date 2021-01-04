@@ -2357,7 +2357,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, x)
 
         x = torch.randn(10, 10, 128)
-        self.run_test(model, x)  
+        self.run_test(model, x)
 
     def test_batchnorm2d(self):
         x = torch.randn(10, 3, 128, 128)
@@ -2641,6 +2641,21 @@ class TestONNXRuntime(unittest.TestCase):
 
         input = torch.randn((10, 16, 16))
         self.run_test(LSTMModel(), (input,))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    @disableScriptTest()  # scripting prim_dtype
+    def test_lstm_proj_no_hidden(self):
+        class LSTMModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rnn = torch.nn.LSTM(input_size=16, hidden_size=16, proj_size=8)
+
+            def forward(self, x):
+                return self.rnn(x)
+
+        input = torch.randn((10, 16, 16))
+        with self.assertRaises(RuntimeError):
+            self.run_test(LSTMModel(), (input,))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     @disableScriptTest()
