@@ -290,7 +290,7 @@ Tensor squeeze_dim_batching_rule(const Tensor& self, int64_t dim) {
 Tensor trace_batching_rule(const Tensor& self) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   // Batched Diagonal View
-  auto self_diag = at::diagonal(self_physical.tensor(), 0, -2, -1);
+  auto self_diag = at::diagonal(self_physical.tensor(), /*offset*/0, /*dim1*/-2, /*dim2*/-1);
   auto result =  at::sum(self_diag, -1);
   return self_physical.getPhysicalToLogicalMap().apply(result);
 }
@@ -299,14 +299,9 @@ Tensor trace_backward_batching_rule(const Tensor& grad, IntArrayRef input_sizes)
   auto grad_physical = MultiBatchVmapTransform::logicalToPhysical(grad);
   auto grad_input = at::zeros(grad_physical.getPhysicalShape(input_sizes), grad.options());
   // Batched Diagonal View
-  auto grad_input_diag = at::diagonal(grad_input, 0, -2, -1);
-  // Reshape grad output
-  auto grad_physical_size = grad_physical.tensor().sizes();
-  VmapDimVector view_shape(grad_physical.numBatchDims() + 1, 1);
-  std::copy(grad_physical_size.begin(),
-      grad_physical_size.begin() + grad_physical.numBatchDims(),
-      view_shape.begin());
-  auto grad_physical_tensor = grad_physical.tensor().view(view_shape);
+  auto grad_input_diag = at::diagonal(grad_input, /*offset*/0, /*dim1*/-2, /*dim2*/-1);
+  // Append a dimension of size one to the grad output 
+  auto grad_physical_tensor = grad_physical.tensor().unsqueeze(-1);
   grad_input_diag.copy_(grad_physical_tensor);
   return grad_physical.getPhysicalToLogicalMap().apply(grad_input);
 }

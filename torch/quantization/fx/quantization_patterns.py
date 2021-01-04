@@ -537,6 +537,8 @@ ARGS_TO_SKIP = {
     torch._ops.ops.quantized.instance_norm:
     ['running_mean', 'running_var', 'use_input_stats', 'momentum'],
 }
+@register_quant_pattern(torch.nn.ConvTranspose1d)
+@register_quant_pattern(torch.nn.ConvTranspose2d)
 @register_quant_pattern(torch.nn.ELU)
 @register_quant_pattern(torch.nn.LeakyReLU)
 @register_quant_pattern(torch.nn.Hardswish)
