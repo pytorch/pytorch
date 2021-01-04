@@ -3,7 +3,7 @@
 
 import inspect
 import threading
-import six
+import functools
 
 
 class _ContextInfo(object):
@@ -91,7 +91,7 @@ class Managed(object):
             _context_registry().get(cls).exit(self)
 
     def __call__(self, func):
-        @six.wraps(func)
+        @functools.wraps(func)
         def wrapper(*args, **kwargs):
             with self:
                 return func(*args, **kwargs)

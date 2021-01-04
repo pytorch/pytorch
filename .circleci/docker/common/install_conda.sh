@@ -109,6 +109,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     numba \
     llvmlite \
     unittest-xml-reporting \
+    boto3==1.16.34 \
     coverage \
     hypothesis==4.53.2 \
     mypy==0.770 \

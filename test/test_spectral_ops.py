@@ -843,7 +843,9 @@ class TestFFT(TestCase):
             else:
                 window = None
             if expected_error is None:
-                result = x.stft(n_fft, hop_length, win_length, window, center=center)
+                with self.maybeWarnsRegex(UserWarning, "stft with return_complex=False"):
+                    result = x.stft(n_fft, hop_length, win_length, window,
+                                    center=center, return_complex=False)
                 # NB: librosa defaults to np.complex64 output, no matter what
                 # the input dtype
                 ref_result = librosa_stft(x, n_fft, hop_length, win_length, window, center)
@@ -1055,14 +1057,19 @@ class TestFFT(TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'complex'):
                     x.stft(10, window=window, pad_mode='constant', onesided=True)
             else:
-                y = x.stft(10, window=window, pad_mode='constant', onesided=True)
-                self.assertEqual(y.dtype, torch.double)
-                self.assertEqual(y.size(), (6, 51, 2))
+                y = x.stft(10, window=window, pad_mode='constant', onesided=True,
+                           return_complex=True)
+                self.assertEqual(y.dtype, torch.cdouble)
+                self.assertEqual(y.size(), (6, 51))
 
-        y = torch.rand(100, device=device, dtype=torch.double)
-        window = torch.randn(10, device=device, dtype=torch.cdouble)
+        x = torch.rand(100, device=device, dtype=torch.cdouble)
         with self.assertRaisesRegex(RuntimeError, 'complex'):
             x.stft(10, pad_mode='constant', onesided=True)
+
+    def test_stft_requires_complex(self, device):
+        x = torch.rand(100)
+        with self.assertRaisesRegex(RuntimeError, 'stft requires the return_complex parameter'):
+            y = x.stft(10, pad_mode='constant')
 
     @skipCUDAIfRocm
     @skipCPUIfNoMkl
@@ -1091,7 +1098,7 @@ class TestFFT(TestCase):
     def test_istft_round_trip_simple_cases(self, device, dtype):
         """stft -> istft should recover the original signale"""
         def _test(input, n_fft, length):
-            stft = torch.stft(input, n_fft=n_fft)
+            stft = torch.stft(input, n_fft=n_fft, return_complex=True)
             inverse = torch.istft(stft, n_fft=n_fft, length=length)
             self.assertEqual(input, inverse, exact_dtype=True)
 
@@ -1113,7 +1120,7 @@ class TestFFT(TestCase):
             for sizes in data_sizes:
                 for i in range(num_trials):
                     original = torch.randn(*sizes, dtype=dtype, device=device)
-                    stft = torch.stft(original, **stft_kwargs)
+                    stft = torch.stft(original, return_complex=True, **stft_kwargs)
                     inversed = torch.istft(stft, length=original.size(1), **istft_kwargs)
 
                     # trim the original for case when constructed signal is shorter than original

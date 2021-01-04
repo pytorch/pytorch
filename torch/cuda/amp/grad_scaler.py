@@ -94,7 +94,7 @@ class GradScaler(object):
     value calibrates.  ``scaler.step`` will skip the underlying ``optimizer.step()`` for these
     iterations.  After that, step skipping should occur rarely (once every few hundred or thousand iterations).
 
-    Arguments:
+    Args:
         init_scale (float, optional, default=2.**16):  Initial scale factor.
         growth_factor (float, optional, default=2.0):  Factor by which the scale is multiplied during
             :meth:`update` if no inf/NaN gradients occur for ``growth_interval`` consecutive iterations.
@@ -150,7 +150,7 @@ class GradScaler(object):
         Returns scaled outputs.  If this instance of :class:`GradScaler` is not enabled, outputs are returned
         unmodified.
 
-        Arguments:
+        Args:
             outputs (Tensor or iterable of Tensors):  Outputs to scale.
         """
         if not self._enabled:
@@ -245,7 +245,7 @@ class GradScaler(object):
             scaler.step(optimizer)
             scaler.update()
 
-        Arguments:
+        Args:
             optimizer (torch.optim.Optimizer):  Optimizer that owns the gradients to be unscaled.
 
         .. note::
@@ -292,7 +292,7 @@ class GradScaler(object):
 
         Returns the return value of ``optimizer.step(*args, **kwargs)``.
 
-        Arguments:
+        Args:
             optimizer (torch.optim.Optimizer):  Optimizer that applies the gradients.
             args:  Any arguments.
             kwargs:  Any keyword arguments.
@@ -346,7 +346,7 @@ class GradScaler(object):
 
         Passing ``new_scale`` sets the scale directly.
 
-        Arguments:
+        Args:
             new_scale (float or :class:`torch.cuda.FloatTensor`, optional, default=None):  New scale factor.
 
         .. warning::
@@ -415,7 +415,7 @@ class GradScaler(object):
 
     def set_growth_factor(self, new_factor):
         r"""
-        Arguments:
+        Args:
             new_scale (float):  Value to use as the new scale growth factor.
         """
         self._growth_factor = new_factor
@@ -428,7 +428,7 @@ class GradScaler(object):
 
     def set_backoff_factor(self, new_factor):
         r"""
-        Arguments:
+        Args:
             new_scale (float):  Value to use as the new scale backoff factor.
         """
         self._backoff_factor = new_factor
@@ -441,7 +441,7 @@ class GradScaler(object):
 
     def set_growth_interval(self, new_interval):
         r"""
-        Arguments:
+        Args:
             new_interval (int):  Value to use as the new growth interval.
         """
         self._growth_interval = new_interval
@@ -484,7 +484,7 @@ class GradScaler(object):
         r"""
         Loads the scaler state.  If this instance is disabled, :meth:`load_state_dict` is a no-op.
 
-        Arguments:
+        Args:
            state_dict(dict): scaler state.  Should be an object returned from a call to :meth:`state_dict`.
         """
         if not self._enabled:

@@ -49,11 +49,11 @@ class TORCH_API LoopNest {
   Stmt* getLoopBodyFor(Tensor*) const;
   bool hasLoopBodyFor(Tensor*) const;
 
-  void vectorize(Stmt*);
+  static void vectorize(For*);
 
   bool computeInline(Stmt* s);
   bool computeInline(const Buf* b);
-  void inlineIntermediateBufs();
+  void inlineIntermediateBufs(bool inline_output_buffers);
 
   static void splitWithTail(For* f, int factor);
   static void splitWithTail(
