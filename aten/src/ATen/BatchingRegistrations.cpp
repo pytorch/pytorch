@@ -287,6 +287,25 @@ Tensor squeeze_dim_batching_rule(const Tensor& self, int64_t dim) {
   return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
+Tensor trace_batching_rule(const Tensor& self) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  // Batched Diagonal View
+  auto self_diag = at::diagonal(self_physical.tensor(), /*offset*/0, /*dim1*/-2, /*dim2*/-1);
+  auto result =  at::sum(self_diag, -1);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
+}
+
+Tensor trace_backward_batching_rule(const Tensor& grad, IntArrayRef input_sizes) {
+  auto grad_physical = MultiBatchVmapTransform::logicalToPhysical(grad);
+  auto grad_input = at::zeros(grad_physical.getPhysicalShape(input_sizes), grad.options());
+  // Batched Diagonal View
+  auto grad_input_diag = at::diagonal(grad_input, /*offset*/0, /*dim1*/-2, /*dim2*/-1);
+  // Append a dimension of size one to the grad output 
+  auto grad_physical_tensor = grad_physical.tensor().unsqueeze(-1);
+  grad_input_diag.copy_(grad_physical_tensor);
+  return grad_physical.getPhysicalToLogicalMap().apply(grad_input);
+}
+
 Tensor transpose_int_batching_rule(const Tensor& self, int64_t dim0, int64_t dim1) {
   // PyTorch has a special case where scalar_tensor.transpose(dim0, dim1) works
   // for dim0, dim1 in {0, -1} and returns the scalar tensor. If the following happens:
@@ -1029,6 +1048,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("squeeze", squeeze_batching_rule);
   m.impl("squeeze.dim", squeeze_dim_batching_rule);
   m.impl("t", native::t); // composite wrt autograd
+  m.impl("trace", trace_batching_rule);
   m.impl("transpose.int", transpose_int_batching_rule);
   m.impl("unbind.int", unbind_batching_rule);
   m.impl("unfold", unfold_batching_rule);
@@ -1150,6 +1170,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   // backward operators
   m.impl("select_backward", select_backward_batching_rule);
   m.impl("slice_backward", slice_backward_batching_rule);
+  m.impl("trace_backward", trace_backward_batching_rule);
   m.impl("diagonal_backward", diagonal_backward_batching_rule);
 
   // Tensor.new_* operators
