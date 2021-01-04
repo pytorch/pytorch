@@ -151,10 +151,10 @@ class TORCH_API RpcAgent {
   virtual ~RpcAgent();
 
   // Send a message to the ``RpcAgent`` of id ``to`` and returns a
-  // ``FutureMessage`` ptr. The implementation must be asynchronous, i.e., it
+  // ``JitFuture`` ptr. The implementation must be asynchronous, i.e., it
   // cannot block until it receives the response.
   //
-  // If ``message.isRequest()`` is true, the ``FutureMessage`` will be
+  // If ``message.isRequest()`` is true, the ``JitFuture`` will be
   // completed when the response arrives. For other message types, the Future
   // should be ignored by the caller.
   virtual std::shared_ptr<JitFuture> send(
@@ -167,7 +167,7 @@ class TORCH_API RpcAgent {
   // time using an exponential backoff algorithm.
   //
   // Sends ``message`` to the ``RpcAgent`` of id ``to`` and returns a
-  // ``FutureMessage`` ptr, just like send(). Caller can specify the maximum
+  // ``JitFuture`` ptr, just like send(). Caller can specify the maximum
   // number of retries for this RPC (default is 5), initial duration between
   // sends (default is 1000ms), and backoff constant (default is 1.5) by
   // passing in the RpcRetryOptions struct. This API might end up
@@ -258,46 +258,6 @@ class TORCH_API RpcAgent {
 
   // Get the type resolver
   std::shared_ptr<TypeResolver> getTypeResolver();
-
-  static std::shared_ptr<JitFuture> toJitFuture(
-      std::shared_ptr<FutureMessage>&& fm) {
-    auto jitFuture = std::make_shared<JitFuture>(at::AnyClassType::get());
-
-    std::weak_ptr<FutureMessage> wp = fm;
-    fm->addCallback(
-        [jitFuture, wp]() mutable {
-          auto future = wp.lock();
-          TORCH_INTERNAL_ASSERT(future);
-          if (future->hasError()) {
-            jitFuture->setError(std::make_exception_ptr(*(future->error())));
-          } else {
-            jitFuture->markCompleted(IValue(
-                c10::make_intrusive<Message>(std::move(*future).moveValue())));
-          }
-        }
-    );
-    return jitFuture;
-  }
-
-  static std::shared_ptr<FutureMessage> toFutureMessage(
-      std::shared_ptr<JitFuture>&& jitFuture) {
-    auto fm = std::make_shared<FutureMessage>();
-
-    std::weak_ptr<JitFuture> wp = jitFuture;
-    jitFuture->addCallback(
-        [fm, wp]() mutable {
-          auto future = wp.lock();
-          TORCH_INTERNAL_ASSERT(future);
-          if (future->hasError()) {
-            fm->setError(future->tryRetrieveErrorMessage());
-          } else {
-            fm->markCompleted(
-                std::move(*future->value().toCustomClass<Message>()));
-          }
-        }
-    );
-    return fm;
-  }
 
  protected:
   const WorkerInfo workerInfo_;
