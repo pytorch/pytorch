@@ -351,6 +351,10 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   }
 
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  if (self_.is_sparse())
+  {
+    throw TypeError("Cannot assign to a sparse tensor");
+  }
   OptionalDeviceGuard device_guard(device_of(self_));
   at::Device self_device = self_.device();
   Variable value;

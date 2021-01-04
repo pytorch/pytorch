@@ -3168,6 +3168,14 @@ class TestSparse(TestCase):
         test_sparse_matmul(2, 0, [0, 10], [10, 0])
         test_error_cases()
 
+    def test_assign(self):
+        def assign_to(a):
+            a, i_a, v_a = self._gen_sparse(2, 5, [2, 3])
+            a[0] = 100
+
+        self.assertRaises(TypeError, assign_to)
+
+
 class TestUncoalescedSparse(TestSparse):
     def setUp(self):
         super(TestUncoalescedSparse, self).setUp()
