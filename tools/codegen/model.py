@@ -222,6 +222,9 @@ class NativeFunction:
         assert raw_dispatch is None or isinstance(raw_dispatch, dict), e
         dispatch: Dict[str, str] = {}
         if raw_dispatch is not None:
+            assert not manual_kernel_registration, \
+                "cannot specify both manual_kernel_registration and dispatch; with " \
+                "manual registration, dispatch has no effect!"
             for ks, v in raw_dispatch.items():
                 if ks == '__line__':
                     continue  # not worth tracking line numbers for dispatch entries
