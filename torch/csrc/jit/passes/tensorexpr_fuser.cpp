@@ -206,8 +206,7 @@ bool isSupported(Node* node) {
       }
     }
 
-    if (FLAGS_torch_jit_disable_cat &&
-        node->matches("aten::cat(Tensor[] tensors, int dim=0) -> Tensor")) {
+    if (FLAGS_torch_jit_disable_cat && node->kind() == aten::cat) {
       return false;
     }
 
