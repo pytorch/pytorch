@@ -353,12 +353,7 @@ class Vectorizer : public IRMutator {
   const Expr* start_ = nullptr;
 };
 
-void LoopNest::vectorize(Stmt* stmt) {
-  For* f = dynamic_cast<For*>(stmt);
-  if (!f) {
-    return;
-  }
-
+void LoopNest::vectorize(For* f) {
   Block* b = dynamic_cast<Block*>(f->get_parent());
   if (!b) {
     return;
@@ -881,7 +876,12 @@ Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
   // Insert allocations and frees for temporary buffers in the innermost
   // possible scope.
   for (const Buf* buf : intermediate_bufs_) {
-    Stmt* alloc = new Allocate(buf->base_handle(), buf->dtype(), buf->dims());
+    const Expr* flat_size = new IntImm(1);
+    for (auto& d : buf->dims()) {
+      flat_size = new Mul(flat_size, d);
+    }
+    flat_size = IRSimplifier::simplify(flat_size);
+    Stmt* alloc = new Allocate(buf->base_handle(), buf->dtype(), {flat_size});
     Stmt* free = new Free(buf->base_handle());
     Block* alloc_block = findLowestContainingBlock(uses.at(buf));
     alloc_block->prepend_stmt(alloc);

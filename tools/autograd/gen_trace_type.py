@@ -25,7 +25,7 @@ MANUAL_BACKEND = set([
 # For these ops we want to skip the codegen-ed registration to both Autograd and Tracer keys.
 # You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
 MANUAL_AUTOGRAD_AND_TRACER = set([
-    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_',
+    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', '_fw_primal',
 ])
 
 # Currently MANUAL_AUTOGRAD and MANUAL_TRACER share the same set of ops:

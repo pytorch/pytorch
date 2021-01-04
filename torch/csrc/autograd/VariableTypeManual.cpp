@@ -1,6 +1,7 @@
 #include <c10/util/Optional.h>
 #include <c10/core/ScalarType.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
+#include <torch/csrc/autograd/FunctionsManual.h>
 #include <torch/csrc/utils/memory.h>
 #include <torch/csrc/autograd/utils/error_messages.h>
 #include <torch/csrc/autograd/autograd.h>
@@ -194,6 +195,39 @@ void retain_grad(Tensor & self) {
   impl::get_autograd_meta(self)->retains_grad_ = true;
 }
 
+// Taken from codegened version
+Tensor _fw_primal(const Tensor & self, int64_t level) {
+  auto& self_ = unpack(self, "self", 0);
+  std::shared_ptr<Identity> grad_fn;
+  if (compute_requires_grad( self )) {
+    grad_fn = std::make_shared<Identity>();
+    grad_fn->set_next_edges(collect_next_edges( self ));
+  }
+  auto tmp = ([&]() {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    return self_.alias();
+  })();
+  c10::optional<std::function<at::Tensor(const at::Tensor&)>> func=c10::nullopt;
+  if (!self.unsafeGetTensorImpl()->support_as_strided()) {
+    auto size_vec = self.sizes().vec();
+    func = [=](const at::Tensor& input_base) {
+      return input_base.view(size_vec);
+    };
+  }
+  auto result = as_view(/* base */ self, /* output */ tmp, /* is_bw_differentiable */ true,
+                        /* is_fw_differentiable */ false, /* view_func */ func, /* creation_meta */ CreationMeta::DEFAULT);
+  if (grad_fn) {
+      set_history(flatten_tensor_args( result ), grad_fn);
+  }
+  if (generated::details::isFwGradDefined(self)) {
+    // Modified from original codegen
+    // We explicitly want to ignore the forward grad at the given level
+    TORCH_CHECK(level == 0, "Invalid level given to _fw_primal");
+    // End modified from original codegen
+  }
+  return result;
+}
+
 // We don't have an outplace copy, so this can't be generated automatically
 Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   jit::Value* output = nullptr;
@@ -217,6 +251,24 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   }
   increment_version(self);
   rebase_history(self , std::move(grad_fn));
+
+  if (isDifferentiableType(self.scalar_type()) &&
+      (generated::details::isFwGradDefined(self) || generated::details::isFwGradDefined(src))) {
+    auto self_fw_grad = generated::details::toLegacyFwGrad(self);
+    auto src_fw_grad = generated::details::toLegacyFwGrad(src);
+    Tensor new_fw_grad;
+    if (self_fw_grad.defined()) {
+      if (src_fw_grad.defined()) {
+        new_fw_grad = self_fw_grad.copy_(src_fw_grad);
+      } else {
+        new_fw_grad = self_fw_grad.fill_(0);
+      }
+    } else {
+      new_fw_grad = src_fw_grad;
+    }
+    self.set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ true);
+  }
+
   return self;
 }
 
@@ -232,6 +284,11 @@ Tensor& resize_(
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     self_.resize_(size, std::move(optional_memory_format));
   }
+
+  if (self.fw_grad(/* level */ 0).defined()) {
+    AT_ERROR("cannot resize variables that has a forward grad");
+  }
+
   return self;
 }
 
@@ -248,13 +305,28 @@ Tensor& resize_as_(
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     at::resize_as_(self_, the_template_, std::move(optional_memory_format));
   }
+
+  // Handle fw grad
+  if (self.fw_grad(/* level */ 0).defined()) {
+    AT_ERROR("cannot resize variables that has a forward grad");
+  }
   return self;
 }
 
 Tensor detach(const Tensor & self) {
   RECORD_FUNCTION("detach", std::vector<c10::IValue>({self}));
-  auto result = make_variable_non_differentiable_view(self, self, /*allow_tensor_metadata_change=*/false);
+  c10::optional<std::function<at::Tensor(const at::Tensor&)>> func=c10::nullopt;
+  auto result = as_view(/* base */ self, /* output */ self, /* is_bw_differentiable */ false,
+                        /* is_fw_differentiable */ true, /* view_func */ func, /* creation_meta */ CreationMeta::DEFAULT,
+                        /*allow_tensor_metadata_change=*/false);
   namedinference::propagate_names(result, self);
+
+  // detach only backward gradients for both primal and tangent
+  if (self.fw_grad(/* level */ 0).defined()) {
+    auto new_fw_grad = self.fw_grad(/* level */ 0).detach();
+    result.set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ false);
+  }
+
   return result;
 }
 
@@ -264,7 +336,7 @@ Tensor & detach_(Tensor & self) {
     // NB: is_view() ==> get_autograd_meta()
     auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(self));
     // See NOTE [ View + Inplace detection ]
-    if (diff_view_meta->creation_meta == CreationMeta::MULTI_OUTPUT_SAFE) {
+    if (diff_view_meta->get_creation_meta() == CreationMeta::MULTI_OUTPUT_SAFE) {
         TORCH_WARN("This view is an output of a function that "
                    "returns multiple views. Detaching such views inplace "
                    "is being deprecated and will be forbidden "
@@ -272,7 +344,8 @@ Tensor & detach_(Tensor & self) {
                    "of detach_(). Alternatively, create this view with an "
                    "`unsafe_` version of the function that produced it.");
     } else {
-      AT_ERROR("If you are using DistributedDataParallel (DDP) for training, "
+      AT_ERROR("Can't detach views in-place. Use detach() instead. "
+               "If you are using DistributedDataParallel (DDP) for training, "
                "and gradient_as_bucket_view is set as True, gradients are "
                "views of DDP buckets, and hence detach_() cannot be called "
                "on these gradients. To fix this error, please refer to the "
@@ -290,6 +363,12 @@ Tensor & detach_(Tensor & self) {
   autograd_meta->set_requires_grad(false, self.unsafeGetTensorImpl());
   autograd_meta->grad_fn_.reset();
   autograd_meta->output_nr_ = 0;
+
+  // detach only backward gradients for both primal and tangent
+  if (self.fw_grad(/* level */ 0).defined()) {
+    self.fw_grad(/* level */ 0).detach_();
+  }
+
   return self;
 }
 
@@ -321,6 +400,7 @@ TORCH_LIBRARY_IMPL(aten, Autograd, m) {
   //      and requires_grad_(), then remove the backend Autograd kernel here, only leaving the Math kernel.
   m.impl("_backward", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::_backward)));
   m.impl("requires_grad_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::requires_grad_)));
+  m.impl("_fw_primal", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::_fw_primal)));
 }
 
 TORCH_LIBRARY_IMPL(aten, DefaultBackend, m) {

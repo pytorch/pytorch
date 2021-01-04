@@ -134,88 +134,111 @@ template<typename... Args> inline variable_list flatten_tensor_args(Args&&... ar
 }
 
 // See NOTE [ Autograd View Variables ] for details.
-inline Tensor as_view(const Tensor & base, const Tensor& tensor, bool is_differentiable,
-        c10::optional<std::function<Tensor(const Tensor&)>> view_func=c10::nullopt,
-        CreationMeta creation_meta=CreationMeta::DEFAULT) {
-  auto base_var = Variable(base);
-  if (base_var.is_view()) {
-    // Set `view_func` using the root base as input.
-    // `view_func` is used to recover views in backward when either as_strided is not supported
-    // or the view function changes the metadata which is not recorded by as_strided
-    // See Note [View + Inplace update on base tensor] and [View + Inplace update on view tensor]
-    // for more details how we use this function in backward.
-    auto diff_view_meta = static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base_var));
-    if (view_func.has_value()) {
-      auto fn = view_func.value();
-      // both current_view and it's parent have a view_func
-      if (diff_view_meta->has_view_fn()) {
-        auto prev_fn = diff_view_meta->view_fn();
-        view_func = [=](const at::Tensor& root_base) {
-          auto temp = prev_fn(root_base);
-          return fn(temp);
-        };
+inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_differentiable,
+        bool is_fw_differentiable, c10::optional<std::function<Tensor(const Tensor&)>> view_func=c10::nullopt,
+        CreationMeta creation_meta=CreationMeta::DEFAULT, bool allow_tensor_metadata_change=true) {
+  if (!isForwardADEnabled()) {
+    // Fast codepath for backward only code
+    // It is useful as it avoids the creation of the temporary c10<optional> which makes
+    // a significant difference when measuring instruction count for a single "t.view(-1)" call from c++.
+    if (is_bw_differentiable) {
+      if (base.is_view()) {
+        auto diff_view_meta = static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base));
+        const auto& base_bw_info = diff_view_meta->get_backward_view();
+        return make_variable_differentiable_view(tensor, base_bw_info.chain(base, tensor, view_func),
+                                                 c10::nullopt, creation_meta, allow_tensor_metadata_change);
       } else {
-        // current_view has a view_func and but it's parent doesn't have one
-        if(base_var.unsafeGetTensorImpl()->support_as_strided()) {
-          auto size = base.sizes().vec();
-          auto stride = base.strides().vec();
-          auto storage_offset = base.storage_offset();
-          view_func = [=](const at::Tensor& root_base) {
-            auto temp = root_base.as_strided(size, stride, storage_offset);
-            return fn(temp);
-          };
-        } else {
-          // When base_var is a view but doesn't carry a view_fn in DifferentiableViewMeta, it's
-          // a view that doesn't support inplace update, e.g. unbind.
-          // In this case we should throw an error when inplace update happens in **forward**.
-          // One would naturally think the following function will be first called in backward pass.
-          // But the first call site is indeed in **forward** pass when we refresh `grad_fn`
-          // triggered by inplace update.
-          // Search Note [View + Inplace update for view tensor] to for the call site.
-          view_func = [=](const at::Tensor& root_base) {
-            TORCH_CHECK(false, "This view is the output of a function that returns multiple views."
-                    "Such functions do not allow the output views to be modified inplace."
-                    "You should replace the inplace operation by an out-of-place one");
-            return root_base;
-          };
-        }
+        return make_variable_differentiable_view(tensor, ViewInfo(base, view_func),
+                                                 c10::nullopt, creation_meta, allow_tensor_metadata_change);
       }
-    } else if(diff_view_meta->has_view_fn()) {
-      // if current_view doesn't have a view_func but it's parent has one
-      auto prev_view_fn = diff_view_meta->view_fn();
-      auto size = tensor.sizes().vec();
-      auto stride = tensor.strides().vec();
-      auto storage_offset = tensor.storage_offset();
-      view_func = [=](const at::Tensor& root_base) {
-        auto temp = prev_view_fn(root_base);
-        return temp.as_strided(size, stride, storage_offset);
-      };
+    } else {
+      TORCH_CHECK(creation_meta == CreationMeta::DEFAULT,
+                  "Non-backward differentiable views must have creation_meta=CreationMeta::DEFAULT");
+      return make_variable_non_differentiable_view(base, std::move(tensor), allow_tensor_metadata_change);
     }
-    base_var = base_var._base();
   }
-  if (is_differentiable) {
-    return make_variable_differentiable_view(std::move(base_var), tensor, creation_meta, std::move(view_func));
+  // Create both the forward and backward info that are needed
+  c10::optional<ViewInfo> new_bw_info;
+  c10::optional<ViewInfo> new_fw_info;
+
+  if (is_bw_differentiable) {
+    if (base.is_view()) {
+      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base));
+      const auto& base_bw_info = diff_view_meta->get_backward_view();
+      new_bw_info = base_bw_info.chain(base, tensor, view_func);
+    } else {
+      new_bw_info = ViewInfo(base, view_func);
+    }
   } else {
     TORCH_CHECK(creation_meta == CreationMeta::DEFAULT,
-                "Non-differentiable views must have creation_meta=CreationMeta::DEFAULT");
-    return make_variable_non_differentiable_view(std::move(base_var), tensor);
+                "Non-backward differentiable views must have creation_meta=CreationMeta::DEFAULT");
+  }
+
+  if (is_fw_differentiable) {
+    // Check if base is a forward differentiable view
+    auto base_meta = torch::autograd::impl::get_autograd_meta(base);
+    auto is_view = base_meta && base_meta->is_view_;
+    if (is_view && static_cast<DifferentiableViewMeta*>(base_meta)->has_fw_view()) {
+      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(base_meta);
+      const auto& base_fw_info = diff_view_meta->get_forward_view();
+      new_fw_info = base_fw_info.chain(base, tensor, view_func);
+    } else {
+      new_fw_info = ViewInfo(base, view_func);
+    }
+  }
+
+  if (is_fw_differentiable || is_bw_differentiable) {
+    return make_variable_differentiable_view(tensor, std::move(new_bw_info), std::move(new_fw_info),
+                                             creation_meta, allow_tensor_metadata_change);
+  } else {
+    return make_variable_non_differentiable_view(base, tensor, allow_tensor_metadata_change);
   }
 }
 
 // See NOTE [ Autograd View Variables ] for details.
-inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& tensors, bool is_differentiable,
-                                   CreationMeta creation_meta=CreationMeta::DEFAULT) {
-  auto base_var = Variable(base);
-  if (base_var.is_view()) {
-    base_var = base_var._base();
-  }
-  for(Tensor &tensor : tensors) {
-    if (is_differentiable) {
-      tensor = make_variable_differentiable_view(base_var, tensor, creation_meta);
+inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& tensors, bool is_bw_differentiable,
+                                   bool is_fw_differentiable, CreationMeta creation_meta=CreationMeta::DEFAULT) {
+  c10::optional<ViewInfo> new_bw_info = c10::nullopt;
+  c10::optional<ViewInfo> new_fw_info = c10::nullopt;
+
+  if (is_bw_differentiable) {
+    if (base.is_view()) {
+      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base));
+      const auto& base_bw_info = diff_view_meta->get_backward_view();
+      TORCH_INTERNAL_ASSERT(creation_meta == CreationMeta::MULTI_OUTPUT_NODE || creation_meta == CreationMeta::MULTI_OUTPUT_SAFE,
+                            "Functions that result multiple view must have a creation meta reflecting this behavior.");
+      // It is ok to create a ViewInfo where only the base is correct in this case as inplace operations on such views are
+      // not allowed
+      new_bw_info = ViewInfo(base_bw_info.base_, /* view_func */ c10::nullopt);
     } else {
-      TORCH_CHECK(creation_meta == CreationMeta::DEFAULT,
-                  "Non-differentiable views must have creation_meta=CreationMeta::DEFAULT");
-      tensor = make_variable_non_differentiable_view(base_var, tensor);
+      new_bw_info = ViewInfo(base, /* view_func */ c10::nullopt);
+    }
+  } else {
+    TORCH_CHECK(creation_meta == CreationMeta::DEFAULT,
+                "Non-backward differentiable views must have creation_meta=CreationMeta::DEFAULT");
+  }
+  if (isForwardADEnabled() && is_fw_differentiable) {
+    // Check if base is a forward differentiabble view
+    auto base_meta = torch::autograd::impl::get_autograd_meta(base);
+    auto is_view = base_meta && base_meta->is_view_;
+    if (is_view && static_cast<DifferentiableViewMeta*>(base_meta)->has_fw_view()) {
+      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(base_meta);
+      const auto& base_fw_info = diff_view_meta->get_forward_view();
+      TORCH_INTERNAL_ASSERT(creation_meta == CreationMeta::MULTI_OUTPUT_NODE || creation_meta == CreationMeta::MULTI_OUTPUT_SAFE,
+                            "Functions that result multiple view must have a creation meta reflecting this behavior.");
+      // It is ok to create a ViewInfo where only the base is correct in this case as inplace operations on such views are
+      // not allowed
+      new_fw_info = ViewInfo(base_fw_info.base_, /* view_func */ c10::nullopt);
+    } else {
+      new_fw_info = ViewInfo(base, /* view_func */ c10::nullopt);
+    }
+  }
+
+  for(Tensor &tensor : tensors) {
+    if (is_fw_differentiable || is_bw_differentiable) {
+      tensor = make_variable_differentiable_view(tensor, new_bw_info, new_fw_info, creation_meta);
+    } else {
+      tensor = make_variable_non_differentiable_view(base, tensor);
     }
   }
   return tensors;

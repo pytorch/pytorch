@@ -110,7 +110,7 @@ TEST(LoopNest, ExprSimple02) {
     PaddedBuffer<float> f_ref(26, 5, "f_res");
 
     stmt = FlattenIndexes(stmt);
-    SimpleIREvaluator ir_eval(stmt, tensor);
+    SimpleIREvaluator ir_eval(stmt, {tensor});
     ir_eval(f_v);
 
     for (int x = 0; x < 26; x++) {
@@ -560,7 +560,7 @@ TEST(LoopNest, ExprSplitWithTailNone) {
     PaddedBuffer<float> f_v(24, 5, "f_v");
     PaddedBuffer<float> f_ref(24, 5, "f_res");
 
-    SimpleIREvaluator ir_eval(stmt, tensor);
+    SimpleIREvaluator ir_eval(stmt, {tensor});
     ir_eval(f_v);
 
     for (int x = 0; x < 24; x++) {
@@ -604,7 +604,7 @@ TEST(LoopNest, ExprSplitWithMask01) {
     }
   }
 
-  SimpleIREvaluator(stmt, a_buf, b_buf, tensor)(a_v, b_v, c_v);
+  SimpleIREvaluator(stmt, {a_buf, b_buf, tensor})(a_v, b_v, c_v);
 
   ExpectAllNear(c_v, c_ref, 1e-5);
 }
@@ -729,7 +729,7 @@ TEST(LoopNest, ScheduleBroadcastAddBuffer) {
   b_v.Backup();
 
   PaddedBuffer<float> c_v(M, N, K, "c_buf");
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c});
   ir_eval(a_v, b_v, c_v);
 
   a_v.CheckBackup();
@@ -796,7 +796,7 @@ TEST(LoopNest, ScheduleFunctionCall01) {
     }
   }
 
-  SimpleIREvaluator eval(stmt, a_buf, b_buf, d);
+  SimpleIREvaluator eval(stmt, {a_buf, b_buf, d});
   eval(a_v, b_v, d_v);
 
   ExpectAllNear(d_v, d_ref, 1e-5);
@@ -835,8 +835,8 @@ TEST(LoopNest, ScheduleInlineSimple) {
   Stmt* stmt1 = IRSimplifier::simplify(l1.root_stmt());
   Stmt* stmt2 = IRSimplifier::simplify(l2.root_stmt());
 
-  SimpleIREvaluator eval1(stmt1, a_buf, b_buf, c_buf, d_buf, y);
-  SimpleIREvaluator eval2(stmt2, a_buf, b_buf, c_buf, d_buf, y);
+  SimpleIREvaluator eval1(stmt1, {a_buf, b_buf, c_buf, d_buf, y});
+  SimpleIREvaluator eval2(stmt2, {a_buf, b_buf, c_buf, d_buf, y});
 
   PaddedBuffer<float> a_v(M, N);
   PaddedBuffer<float> b_v(N, K);
@@ -966,7 +966,7 @@ void InlineFunc01Helper(const std::vector<std::string>& inline_order) {
       }
     }
 
-    SimpleIREvaluator eval(stmt, a_buf, b_buf, c_buf, d_buf, z);
+    SimpleIREvaluator eval(stmt, {a_buf, b_buf, c_buf, d_buf, z});
     eval(a_v, b_v, c_v, d_v, z_v);
     ExpectAllNear(z_v, z_ref, 1e-5);
   }
@@ -1165,8 +1165,8 @@ TEST(LoopNest, ScheduleInlineIntrinsics) {
   Stmt* stmt1 = IRSimplifier::simplify(l1.root_stmt());
   Stmt* stmt2 = IRSimplifier::simplify(l2.root_stmt());
 
-  SimpleIREvaluator eval1(stmt1, a_buf, b_buf, y);
-  SimpleIREvaluator eval2(stmt2, a_buf, b_buf, y);
+  SimpleIREvaluator eval1(stmt1, {a_buf, b_buf, y});
+  SimpleIREvaluator eval2(stmt2, {a_buf, b_buf, y});
 
   PaddedBuffer<float> y_1(M, N, K);
   PaddedBuffer<float> y_2(M, N, K);
@@ -1259,7 +1259,7 @@ TEST(LoopNest, ScheduleSplitBThenInline) {
   Stmt* s = IRSimplifier::simplify(l.root_stmt());
 
   std::vector<int> output(6, 0);
-  SimpleIREvaluator eval(s, b);
+  SimpleIREvaluator eval(s, {b});
   eval(output);
 
   for (int i = 0; i < 6; ++i) {
@@ -1308,7 +1308,7 @@ TEST(LoopNest, ScheduleInlineThenSplit) {
   l.prepareForCodegen();
   Stmt* s = IRSimplifier::simplify(l.root_stmt());
   std::vector<int> output(6, 0);
-  SimpleIREvaluator eval(s, b);
+  SimpleIREvaluator eval(s, {b});
   eval(output);
 
   for (int i = 0; i < 6; ++i) {
@@ -1339,7 +1339,7 @@ TEST(LoopNest, ScheduleSplitInlineThenSplit) {
   l.prepareForCodegen();
   Stmt* s = IRSimplifier::simplify(l.root_stmt());
   std::vector<int> output(16, 0);
-  SimpleIREvaluator eval(s, b);
+  SimpleIREvaluator eval(s, {b});
   eval(output);
 
   for (int i = 0; i < 16; ++i) {
@@ -1387,7 +1387,7 @@ TEST(LoopNest, ScheduleInlineThreeMixedOnce) {
 
   Stmt* s = IRSimplifier::simplify(l.root_stmt());
   std::vector<int> output(4 * 3, 0);
-  SimpleIREvaluator eval(s, c);
+  SimpleIREvaluator eval(s, {c});
   eval(output);
 
   for (int k = 0; k < 4; ++k) {
@@ -1418,7 +1418,7 @@ TEST(LoopNest, ScheduleInlineThreeMixedTwice) {
 
   Stmt* s = IRSimplifier::simplify(l.root_stmt());
   std::vector<int> output(4 * 3, 0);
-  SimpleIREvaluator eval(s, c);
+  SimpleIREvaluator eval(s, {c});
   eval(output);
 
   for (int k = 0; k < 4; ++k) {
@@ -1448,7 +1448,7 @@ TEST(LoopNest, ScheduleInlineThreeMixedInner) {
 
   Stmt* s = IRSimplifier::simplify(l.root_stmt());
   std::vector<int> output(4 * 3, 0);
-  SimpleIREvaluator eval(s, c);
+  SimpleIREvaluator eval(s, {c});
   eval(output);
 
   for (int k = 0; k < 4; ++k) {
@@ -1552,7 +1552,7 @@ TEST(LoopNest, ScheduleFuserStyle) {
   std::vector<float> a_data(kTotalSize, 7.0f);
   std::vector<float> b_data(kTotalSize, 0.0f);
   std::vector<float> c_data(kTotalSize, 0.0f);
-  SimpleIREvaluator(s, a_buf, b, c)(a_data, b_data, c_data);
+  SimpleIREvaluator(s, {a_buf, b, c})(a_data, b_data, c_data);
 
   for (int i = 0; i < kTotalSize; i++) {
     ASSERT_EQ(b_data[i], 18.0f);
@@ -1592,7 +1592,7 @@ TEST(LoopNest, ScheduleFuserThreeArg) {
   std::vector<float> c_data(kTotalSize, 3.0f);
   std::vector<float> d_data(kTotalSize, 4.0f);
   std::vector<float> g_data(kTotalSize, 0.0f);
-  SimpleIREvaluator(s, a, b, c, d, g)(a_data, b_data, c_data, d_data, g_data);
+  SimpleIREvaluator(s, {a, b, c, d, g})(a_data, b_data, c_data, d_data, g_data);
 
   for (int i = 0; i < kTotalSize; i++) {
     ASSERT_EQ(g_data[i], 10.0f);
@@ -1730,7 +1730,7 @@ TEST(LoopNest, LoopNestComputeAt_2) {
     const std::string& verification_pattern =
         R"IR(
 # CHECK: for (int cy = 0; cy < H; cy++)
-# CHECK:   Allocate(temp, int, {2, W + 1})
+# CHECK:   Allocate(temp, int, {2 * (W + 1)})
 # CHECK:   for
 # CHECK:     for
 # CHECK:   for (int cx = 0; cx < W; cx++)
@@ -1762,7 +1762,7 @@ TEST(LoopNest, LoopNestComputeAt_2) {
         R"IR(
 # CHECK: for (int cy = 0; cy < H; cy++)
 # CHECK:   for (int cx = 0; cx < W; cx++)
-# CHECK:     Allocate(temp, int, {2, 2})
+# CHECK:     Allocate(temp, int, {4})
 # CHECK:     for
 # CHECK:       for
 # CHECK-NOT: prod[
@@ -1847,7 +1847,7 @@ TEST(LoopNest, LoopNestComputeAt_3) {
 # CHECK:   for (int cx = 0; cx < W; cx++)
 # CHECK:     C[
 # CHECK: for (int dy = 0; dy < H; dy++)
-# CHECK:   Allocate(temp, int, {1, W})
+# CHECK:   Allocate(temp, int, {W})
 # CHECK:   for (int dx = 0; dx < W; dx++)
 # CHECK-NOT: A[)IR";
     torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
@@ -1884,7 +1884,7 @@ TEST(LoopNest, LoopNestComputeAt_3) {
 # CHECK:     C[
 # CHECK: for (int dy = 0; dy < H; dy++)
 # CHECK:   for (int dx = 0; dx < W; dx++)
-# CHECK:     Allocate(temp, int, {1, 1})
+# CHECK:     Allocate(temp, int, {1})
 # CHECK-NOT: A[)IR";
     torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -2477,7 +2477,7 @@ TEST(LoopNest, LoopNestReorderInternalLoopNest) {
       }
     }
 
-    SimpleIREvaluator eval(stmt, a_buf, b_buf, c_buf, d_buf, z);
+    SimpleIREvaluator eval(stmt, {a_buf, b_buf, c_buf, d_buf, z});
     eval(a_v, b_v, c_v, d_v, z_v);
     ExpectAllNear(z_v, z_ref, 1e-5);
   }
@@ -2680,7 +2680,7 @@ TEST(LoopNest, UnrollWithLet) {
 
   std::vector<int> a_v(kTotalSize, 0);
   std::vector<int> b_v(kTotalSize, 0);
-  SimpleIREvaluator eval(unrolled, a_buf, b_buf);
+  SimpleIREvaluator eval(unrolled, {a_buf, b_buf});
   eval(a_v, b_v);
   for (int i = 0; i < kTotalSize; ++i) {
     ASSERT_EQ(a_v[i], 7);
@@ -2982,10 +2982,10 @@ TEST(LoopNest, FlattenSimpleLoopNest2D) {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 
   {
-    SimpleIREvaluator eval1(loops[0], a_buf);
+    SimpleIREvaluator eval1(loops[0], {a_buf});
     PaddedBuffer<int> inp1(10, 5);
     eval1(inp1);
-    SimpleIREvaluator eval2(flattened, a_buf);
+    SimpleIREvaluator eval2(flattened, {a_buf});
     PaddedBuffer<int> inp2(10, 5);
     eval2(inp2);
     ExpectAllNear(inp1, inp2, 1e-5);
@@ -3029,10 +3029,10 @@ TEST(LoopNest, FlattenSimpleLoopNest3D) {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 
   {
-    SimpleIREvaluator eval1(loops[0], a_buf);
+    SimpleIREvaluator eval1(loops[0], {a_buf});
     PaddedBuffer<int> inp1(10, 5, 7);
     eval1(inp1);
-    SimpleIREvaluator eval2(flattened, a_buf);
+    SimpleIREvaluator eval2(flattened, {a_buf});
     PaddedBuffer<int> inp2(10, 5, 7);
     eval2(inp2);
     ExpectAllNear(inp1, inp2, 1e-5);
@@ -3072,10 +3072,10 @@ TEST(LoopNest, FlattenLoopNestAfterNormalize) {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 
   {
-    SimpleIREvaluator eval1(loops[0], a_buf);
+    SimpleIREvaluator eval1(loops[0], {a_buf});
     PaddedBuffer<int> inp1(8, 12);
     eval1(inp1);
-    SimpleIREvaluator eval2(flattened, a_buf);
+    SimpleIREvaluator eval2(flattened, {a_buf});
     PaddedBuffer<int> inp2(8, 12);
     eval2(inp2);
     ExpectAllNear(inp1, inp2, 1e-5);
@@ -3286,14 +3286,14 @@ TEST(LoopNest, CacheReadsSimple) {
   // just this once: verify the whole thing.
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(A, int, {64, 64});
+#CHECK: Allocate(A, int, {4096});
 #CHECK: for (int i
 #CHECK:  for (int j
 #CHECK:   A[
 #CHECK:  }
 #CHECK: }
 #CHECK: for (int i_1
-#CHECK:  Allocate(A_local, int, {1, 10});
+#CHECK:  Allocate(A_local, int, {10});
 #CHECK:  for (int j_1
 #CHECK:   A_local[j_1] = A[
 #CHECK:  }
@@ -3357,7 +3357,7 @@ TEST(LoopNest, CacheReadsOuter) {
   oss << *result;
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(A_local, int, {21, 11});
+#CHECK: Allocate(A_local, int, {231});
 #CHECK: A_local[j_1 + 11 * i_1] =
 #CHECK: B[10 * i_2 + j_2] = (A_local[(j_2 + 11 * i_2) + 12]) + (A_local[j_2 + 11 * i_2]);
       )IR";
@@ -3408,7 +3408,7 @@ TEST(LoopNest, CacheReadsInternal) {
   oss << *result;
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(A_local, int, {2, 11});
+#CHECK: Allocate(A_local, int, {22});
 #CHECK: A_local[j_1 + 11 * i_2] =
 #CHECK: B[10 * i_1 + j_2] = (A_local[j_2]) + (A_local[j_2 + 12]);
       )IR";
@@ -3460,7 +3460,7 @@ TEST(LoopNest, CacheReadsInner) {
   oss << *result;
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(A_local, int, {5, 2});
+#CHECK: Allocate(A_local, int, {10});
 #CHECK: A_local[2 * i_2 + j_2] =
 #CHECK: B[10 * i_1 + j_1] = (A_local[8]) + (A_local[1]);
       )IR";
@@ -3512,7 +3512,7 @@ TEST(LoopNest, CacheWritesSimple) {
   oss << *result;
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(A_local, int, {1, 64});
+#CHECK: Allocate(A_local, int, {64});
 #CHECK: for (int j = 0; j < 64
 #CHECK:   A_local[j] = i * j;
 #CHECK: for (int j_1 = 0; j_1 < 64
@@ -3758,7 +3758,6 @@ TEST(LoopNest, CompoundTensorUsed) {
   std::vector<int> b_data(50, 0);
 
   Stmt* s = IRSimplifier::simplify(l.root_stmt());
-  std::cout << *s << "\n ";
   SimpleIREvaluator cg(s, {B});
 
   std::vector<int> b_ref(50, 0);

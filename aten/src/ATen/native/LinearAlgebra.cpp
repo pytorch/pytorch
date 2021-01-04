@@ -328,7 +328,7 @@ Tensor& inner_out(Tensor& out, const Tensor& self, const Tensor& other) {
       self.sizes(),
       " and ",
       other.sizes());
-  
+
   at::tensordot_out(out, self, other, -1, -1);
   return out;
 }
@@ -633,26 +633,38 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
   // is_bmm_out: true for bmm_out, false for baddbmm_
   // self_or_result is "self" for baddbmm_ and "result" for bmm_out
   CheckedFrom c = (is_bmm_out ? "bmm" : "baddbmm");
-  TensorArg self_arg(self_or_result, is_bmm_out ? "self" : "result", 0);
-  TensorArg b1_arg(batch1, "batch1", 1);
-  TensorArg b2_arg(batch2, "batch2", 2);
-  checkBackend(c, {self_or_result, batch1, batch2}, Backend::CPU);
-  checkDim(c, b1_arg, 3);
-  checkDim(c, b2_arg, 3);
 
-  int64_t bs = batch1.size(0);
-  checkSize(c, b2_arg, 0, bs);
-  int64_t contraction_size = batch1.size(2);
-  int64_t res_rows = batch1.size(1);
-  int64_t res_cols = batch2.size(2);
-  checkSize(c, b2_arg, 1, contraction_size);
+  auto checkOnCPU = [](const Tensor& t, CheckedFrom c) {
+    TORCH_CHECK(
+        !t.is_cuda(),
+        "Expect tensor to have CPU backend, but got tensor with ",
+        toString(t.options().backend()),
+        " Backend (while checking arguments for ",
+        c);
+  };
+
+  checkOnCPU(self_or_result, c);
+  checkOnCPU(batch1, c);
+  checkOnCPU(batch2, c);
+
+  checkDim(c, batch1, "batch1", /* pos */ 1, /* dim */ 3);
+  checkDim(c, batch2, "batch2", /* pos */ 2, /* dim */ 3);
+
+  const auto batch1_sizes = batch1.sizes();
+  const auto batch2_sizes = batch2.sizes();
+
+  int64_t bs = batch1_sizes[0];
+  int64_t contraction_size = batch1_sizes[2];
+  int64_t res_rows = batch1_sizes[1];
+  int64_t res_cols = batch2_sizes[2];
+
+  TORCH_CHECK(batch2_sizes[0] == bs && batch2_sizes[1] == contraction_size);
 
   if (is_bmm_out) {
     self_or_result.resize_({bs, res_rows, res_cols});
   } else {
-    checkSize(c, self_arg, 0, bs);
-    checkSize(c, self_arg, 1, res_rows);
-    checkSize(c, self_arg, 2, res_cols);
+    const auto self_sizes = self_or_result.sizes();
+    TORCH_CHECK(self_sizes[0] == bs && self_sizes[1] == res_rows && self_sizes[2] == res_cols);
   }
 
   // handle pathological cases that blas may not like
@@ -667,8 +679,10 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
   }
 
   auto batch_items_contiguous_or_transposed = [&](const Tensor& t) {
-    return (t.stride(2) == 1 && t.stride(1) >= t.size(2))
-            || (t.stride(1) == 1 && t.stride(2) >= t.size(1));
+    const auto sizes = t.sizes();
+    const auto strides = t.strides();
+    return (strides[2] == 1 && strides[1] >= sizes[2])
+            || (strides[1] == 1 && strides[2] >= sizes[1]);
   };
 
   if (contraction_size * res_rows * res_cols < 400) {

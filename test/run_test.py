@@ -14,7 +14,7 @@ import tempfile
 import torch
 import torch._six
 from torch.utils import cpp_extension
-from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell, FILE_SCHEMA
+from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell, set_cwd, FILE_SCHEMA
 import torch.distributed as dist
 from typing import Dict, Optional
 
@@ -35,6 +35,7 @@ TESTS = [
     'test_jit_cuda_fuser',
     'test_cuda_primary_ctx',
     'test_dataloader',
+    'test_dataset',
     'distributed/test_data_parallel',
     'distributed/test_distributed_fork',
     'distributed/test_distributed_spawn',
@@ -616,7 +617,7 @@ def find_test_index(test, selected_tests, find_last_index=False):
     If :attr:`test`='torch' and :attr:`find_last_index`=False, result should be **2**.
     If :attr:`test`='torch' and :attr:`find_last_index`=True, result should be **4**.
 
-    Arguments:
+    Args:
         test (str): Name of test to lookup
         selected_tests (list): List of tests
         find_last_index (bool, optional): should we lookup the index of first or last
@@ -890,10 +891,8 @@ def main():
     finally:
         if options.coverage:
             from coverage import Coverage
-            cwd = os.getcwd()
             test_dir = os.path.dirname(os.path.abspath(__file__))
-            try:
-                os.chdir(test_dir)
+            with set_cwd(test_dir):
                 cov = Coverage()
                 if PYTORCH_COLLECT_COVERAGE:
                     cov.load()
@@ -901,8 +900,6 @@ def main():
                 cov.save()
                 if not PYTORCH_COLLECT_COVERAGE:
                     cov.html_report()
-            finally:
-                os.chdir(cwd)
 
     if options.continue_through_error and has_failed:
         for err in failure_messages:
