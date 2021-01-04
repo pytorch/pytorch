@@ -210,7 +210,7 @@ def check_error(res: int) -> None:
 class device(object):
     r"""Context-manager that changes the selected device.
 
-    Arguments:
+    Args:
         device (torch.device or int): device index to select. It's a no-op if
             this argument is a negative integer or ``None``.
     """
@@ -239,7 +239,7 @@ class device_of(device):
     You can use both tensors and storages as arguments. If a given object is
     not allocated on a GPU, this is a no-op.
 
-    Arguments:
+    Args:
         obj (Tensor or Storage): object allocated on the selected device.
     """
 
@@ -254,7 +254,7 @@ def set_device(device: _device_t) -> None:
     Usage of this function is discouraged in favor of :any:`device`. In most
     cases it's better to use ``CUDA_VISIBLE_DEVICES`` environmental variable.
 
-    Arguments:
+    Args:
         device (torch.device or int): selected device. This function is a no-op
             if this argument is negative.
     """
@@ -266,7 +266,7 @@ def set_device(device: _device_t) -> None:
 def get_device_name(device: Optional[_device_t] = None) -> str:
     r"""Gets the name of a device.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): device for which to return the
             name. This function is a no-op if this argument is a negative
             integer. It uses the current device, given by :func:`~torch.cuda.current_device`,
@@ -278,7 +278,7 @@ def get_device_name(device: Optional[_device_t] = None) -> str:
 def get_device_capability(device: Optional[_device_t] = None) -> Tuple[int, int]:
     r"""Gets the cuda capability of a device.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): device for which to return the
             device capability. This function is a no-op if this argument is
             a negative integer. It uses the current device, given by
@@ -307,7 +307,7 @@ def stream(stream):
     All CUDA kernels queued within its context will be enqueued on a selected
     stream.
 
-    Arguments:
+    Args:
         stream (Stream): selected stream. This manager is a no-op if it's
             ``None``.
 
@@ -370,7 +370,7 @@ def current_device() -> int:
 def synchronize(device: _device_t = None) -> None:
     r"""Waits for all kernels in all streams on a CUDA device to complete.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): device for which to synchronize.
             It uses the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).
@@ -396,7 +396,7 @@ def ipc_collect():
 def current_stream(device: Optional[_device_t] = None) -> Stream:
     r"""Returns the currently selected :class:`Stream` for a given device.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): selected device. Returns
             the currently selected :class:`Stream` for the current device, given
             by :func:`~torch.cuda.current_device`, if :attr:`device` is ``None``
@@ -410,7 +410,7 @@ def current_stream(device: Optional[_device_t] = None) -> Stream:
 def default_stream(device: Optional[_device_t] = None) -> Stream:
     r"""Returns the default :class:`Stream` for a given device.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): selected device. Returns
             the default :class:`Stream` for the current device, given by
             :func:`~torch.cuda.current_device`, if :attr:`device` is ``None``
