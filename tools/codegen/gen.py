@@ -411,7 +411,7 @@ struct {class_name} final : public {parent_class} {{
 
             if self.target is Target.DECLARATION:
                 # namespace is handled by template
-                return f"CAFFE2_API {cpp_sig.decl()};\n"
+                return f"TORCH_API {cpp_sig.decl()};\n"
 
             elif self.target is Target.DEFINITION:
                 if self.dispatch_key == 'Meta':
