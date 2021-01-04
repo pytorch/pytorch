@@ -684,8 +684,8 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
 int main() {
   float a[] = {1.0, 1.0};
   float32x4x2_t v;
-  v.val[0] = vcombine_f32 (vcreate_f32 (__AARCH64_UINT64_C (0)), vcreate_f32 (__AARCH64_UINT64_C (0)));
-  v.val[1] = vcombine_f32 (vcreate_f32 (__AARCH64_UINT64_C (0)), vcreate_f32 (__AARCH64_UINT64_C (0)));
+  v.val[0] = vcombine_f32 (vcreate_f32 (0UL), vcreate_f32 (0UL));
+  v.val[1] = vcombine_f32 (vcreate_f32 (0UL), vcreate_f32 (0UL));
   vst1q_f32_x2(a, v);
   return 0;
 }" HAS_VST1)

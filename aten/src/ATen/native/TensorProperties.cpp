@@ -1,6 +1,5 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/WrapDimUtils.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/NamedTensorUtils.h>
 #include <torch/library.h>
@@ -14,15 +13,11 @@ bool is_same_size(const Tensor& self, const Tensor& other) {
 }
 
 int64_t size(const Tensor& self, int64_t dim) {
-  // false is passed to maybe_wrap_dim so behavior is identical to array access (but with wrapping)
-  dim = maybe_wrap_dim(dim, self.dim(), false);
-  return self.sizes()[dim];
+  return self.size(dim);
 }
 
 int64_t stride(const Tensor& self, int64_t dim) {
-  // false is passed to maybe_wrap_dim so behavior is identical to array access (but with wrapping)
-  dim = maybe_wrap_dim(dim, self.dim(), false);
-  return self.strides()[dim];
+  return self.stride(dim);
 }
 
 int64_t size(const Tensor& self, Dimname dim) {

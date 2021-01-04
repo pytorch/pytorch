@@ -26,17 +26,6 @@ C10_DEFINE_bool(
     false,
     "Serialize BOOL, UINT8, INT8, UINT16, INT16, INT64, FLOAT16 tensors using byte_data field instead of int32");
 
-#ifdef _MSC_VER
-// It's MSVC, so we just have to guess ... and allow an override
-#ifdef FOLLY_ENDIAN_BE
-constexpr auto kIsLittleEndian = false;
-#else
-constexpr auto kIsLittleEndian = true;
-#endif
-#else
-constexpr auto kIsLittleEndian = __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__;
-#endif
-
 namespace caffe2 {
 /**
  * @brief StringSerializer is the serializer for String.
@@ -420,7 +409,7 @@ void DeserializeBlob(const BlobProto& blob_proto, Blob* result) {
 
 // === Local helper functions ===
 // Get dimensions from Tensor proto
-static std::vector<int64_t> DimsFromTensorProto(const TensorProto& proto) {
+std::vector<int64_t> DimsFromTensorProto(const TensorProto& proto) {
   std::vector<int64_t> dims;
   dims.reserve(proto.dims().size());
   for (const int64_t d : proto.dims()) {
@@ -430,7 +419,7 @@ static std::vector<int64_t> DimsFromTensorProto(const TensorProto& proto) {
 }
 
 // Get number of elements from Tensor proto
-static int64_t NumelFromTensorProto(const TensorProto& tensor_proto) {
+int64_t NumelFromTensorProto(const TensorProto& tensor_proto) {
   int64_t numel = 1;
   for (const int64_t d : tensor_proto.dims()) {
     numel *= d;
@@ -439,7 +428,7 @@ static int64_t NumelFromTensorProto(const TensorProto& tensor_proto) {
 }
 
 // Get data type from Tensor proto
-static TypeMeta GetDataType(const TensorProto& tensor_proto) {
+TypeMeta GetDataType(const TensorProto& tensor_proto) {
   TypeMeta dtype;
   if (tensor_proto.data_type() != TensorProto_DataType_UNDEFINED) {
     dtype = DataTypeToTypeMeta(tensor_proto.data_type());
@@ -459,7 +448,7 @@ static at::TensorOptions TensorOptionsFromProto(
       .device(OptionToDevice(tensor_proto.device_detail()));
 }
 
-static std::unique_ptr<BaseContext> ContextFromProto(
+std::unique_ptr<BaseContext> ContextFromProto(
     const TensorProto& tensor_proto) {
   auto device = OptionToDevice(tensor_proto.device_detail());
   return CreateContext(device);

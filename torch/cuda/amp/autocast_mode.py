@@ -109,7 +109,7 @@ class autocast(object):
     :class:`torch.nn.parallel.DistributedDataParallel` when used with more than one GPU per process
     (see :ref:`Working with Multiple GPUs<amp-multigpu>`).
 
-    Arguments:
+    Args:
         enabled(bool, optional, default=True):  Whether autocasting should be enabled in the region.
     """
     def __init__(self, enabled=True):
@@ -176,7 +176,7 @@ def custom_fwd(fwd=None, **kwargs):
     Helper decorator for ``forward`` methods of custom autograd functions (subclasses of
     :class:`torch.autograd.Function`).  See the :ref:`example page<amp-custom-examples>` for more detail.
 
-    Arguments:
+    Args:
         cast_inputs (:class:`torch.dtype` or None, optional, default=None):  If not ``None``,
             when ``forward`` runs in an autocast-enabled region, casts incoming
             floating-point CUDA Tensors to the target dtype (non-floating-point Tensors are not affected),
