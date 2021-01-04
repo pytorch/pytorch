@@ -63,10 +63,13 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
         );
       } else if (exp == -0.5) {
         cpu_kernel_vec(iter,
-          [](scalar_t base) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+          [](scalar_t base) -> scalar_t {
             return 1.0 / std::sqrt(base);
           },
-          [](Vec base) -> Vec { return base.rsqrt(); }
+          [](Vec base) -> Vec {
+            std::cerr << "Vectorization";
+            return base.rsqrt();
+          }
         );
       } else if (exp == -1) {
         cpu_kernel_vec(iter,

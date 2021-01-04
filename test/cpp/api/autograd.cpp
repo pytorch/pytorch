@@ -171,11 +171,11 @@ TEST(AutogradAPITests, AnomalyMode) {
   {
     WarningCapture warnings;
     // Double backward
-    auto x = torch::tensor({0.0}, torch::requires_grad());
+    auto x = torch::zeros({8}, torch::dtype(torch::kDouble).requires_grad(true));
     auto y = x.pow(1.5);
     auto gr =
-        grad({y}, {x}, {}, /*retain_graph=*/true, /*create_backward=*/true);
-    ASSERT_THROWS_WITH(grad({gr[0]}, {x}, {torch::tensor({0.0})});, "returned nan");
+        grad({y}, {x}, {torch::tensor({1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0})}, /*retain_graph=*/true, /*create_backward=*/true);
+    ASSERT_THROWS_WITH(grad({gr[0]}, {x}, {torch::tensor({0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0})});, "returned nan");
     auto msgs = warnings.messages();
     ASSERT_EQ(msgs.size(), 2);
     ASSERT_TRUE(
