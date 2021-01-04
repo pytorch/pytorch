@@ -645,6 +645,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: view
    .. automethod:: view_as
    .. automethod:: where
+   .. automethod:: xlogy
+   .. automethod:: xlogy_
    .. automethod:: zero_
 
 .. class:: BoolTensor()
