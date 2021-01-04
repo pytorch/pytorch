@@ -597,15 +597,16 @@ def l1loss_no_reduce_test():
 
 
 def l1loss_no_reduce_complex_test():
-    t = torch.randn(2, 3, 4, dtype=torch.cfloat)
+    t = torch.randn(2, 3, 4, dtype=torch.cdouble)
     return dict(
         fullname='L1Loss_no_reduce_complex',
         constructor=wrap_functional(
             lambda i: F.l1_loss(i, t.type_as(i), reduction='none')),
         cpp_function_call='F::l1_loss(i, t.to(i.options()), F::L1LossFuncOptions().reduction(torch::kNone))',
-        input_fn=lambda: torch.randn(2, 3, 4, dtype=torch.cfloat),
+        input_fn=lambda: torch.randn(2, 3, 4, dtype=torch.cdouble),
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_: (i - t.type_as(i)).abs(),
+        check_gradgrad=False,
         pickle=False)
 
 
@@ -4905,7 +4906,10 @@ class ModuleTest(TestBase):
             if tensor.size(d) > 1:
                 dim = d + 1
                 break
-        noncontig = torch.stack([torch.empty_like(tensor), tensor], dim).select(dim, 1).detach()
+
+        # Note: hstack is more concise here but doesn't support complex
+        noncontig = torch.cat([torch.empty_like(tensor).unsqueeze(dim), tensor.unsqueeze(dim)], dim) \
+            .select(dim, 1).detach()
         assert noncontig.numel() == 1 or noncontig.numel() == 0 or not noncontig.is_contiguous()
         noncontig.requires_grad = tensor.requires_grad
         return noncontig
@@ -4948,7 +4952,7 @@ class ModuleTest(TestBase):
             raise unittest.SkipTest('Excluded from CUDA tests')
 
         cpu_input = self._get_input()
-        type_map = {'torch.DoubleTensor': torch.cuda.FloatTensor}  # type: ignore[attr-defined]
+        type_map = {'torch.DoubleTensor': torch.FloatTensor}  # type: ignore[attr-defined]
         cpu_input_tuple = cpu_input if isinstance(cpu_input, tuple) else (cpu_input,)
         gpu_input_tuple = to_gpu(cpu_input_tuple, type_map=type_map)
 
@@ -5029,7 +5033,7 @@ class InputVariableMixin(object):
 
         def map_variables(i):
             if isinstance(i, torch.Tensor):
-                if i.is_floating_point():
+                if i.is_floating_point() or i.is_complex():
                     i.requires_grad = True
                 return i
             else:
