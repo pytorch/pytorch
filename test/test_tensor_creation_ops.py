@@ -623,16 +623,26 @@ class TestTensorCreation(TestCase):
 
         # Case: 
         # Reference: https://github.com/pytorch/pytorch/issues/49878
-        x = torch.zeros((3, 2), device=device)
-        y = x.narrow(1, 0, 1)
-        val = torch.ones((3, 1), device=device) * 3.
+        for dim in [0, 1]:
+            x = torch.zeros((3, 2), device=device)
+            y = x.narrow(dim, 0, 1)
 
-        torch.cat((val,), dim=1, out=y)
+            if dim == 0:
+                self.assertTrue(y.is_contiguous())
+            else:
+                self.assertFalse(y.is_contiguous())
 
-        expected = torch.zeros(3, 2, device=device)
-        expected[:, 0] = torch.ones(3, device=device) * 3.
-        self.assertEqual(y, val)
-        self.assertEqual(x, expected)
+            val = torch.ones_like(y, device=device) * 3.
+            torch.cat((val,), dim=1, out=y)
+
+            expected = torch.zeros(3, 2, device=device)
+            if dim == 0:
+                expected[0, :] = torch.ones(y.shape[0], device=device) * 3.
+            elif dim == 1:
+                expected[:, 0] = torch.ones(y.shape[0], device=device) * 3.
+
+            self.assertEqual(y, val)
+            self.assertEqual(x, expected)
 
     def test_cat_out_channels_last(self, device):
         x = torch.randn((4, 3, 8, 8))
