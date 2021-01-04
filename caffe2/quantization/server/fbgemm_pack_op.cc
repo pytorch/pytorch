@@ -193,7 +193,8 @@ void QuantizeConvBias(
   const auto& bias = blob.IsType<int8::Int8TensorCPU>()
       ? blob.Get<int8::Int8TensorCPU>().t
       : blob.Get<TensorCPU>();
-  if (blob.IsType<int8::Int8TensorCPU>()) {
+    CAFFE_ENFORCE_EQ(bias.numel(), M);
+    if (blob.IsType<int8::Int8TensorCPU>()) {
     TensorQuantizationParams bias_qparams;
     bias_qparams.scale = blob.Get<int8::Int8TensorCPU>().scale;
     bias_qparams.zero_point = blob.Get<int8::Int8TensorCPU>().zero_point;
