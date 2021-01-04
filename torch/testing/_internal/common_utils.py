@@ -1386,7 +1386,7 @@ class TestCase(expecttest.TestCase):
         s = re.sub(r'__torch__[^ ]+', '', s)
         self.assertExpected(s, subname)
 
-    # run code in subprocess and captured exceptions.
+    # run code in subprocess and capture exceptions.
     @staticmethod
     def run_process_no_exception(code, env=None):
         import subprocess
@@ -1396,16 +1396,16 @@ class TestCase(expecttest.TestCase):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=env)
-        pipes = popen.communicate()
-        return pipes
+        (stdout, stderr) = popen.communicate()
+        return (stdout, stderr)
 
     # returns captured stderr
     @staticmethod
     def runWithPytorchAPIUsageStderr(code):
         env = os.environ.copy()
         env["PYTORCH_API_USAGE_STDERR"] = "1"
-        pipes = TestCase.run_process_no_exception(code, env=env)
-        return pipes[1].decode('ascii')
+        (stdout, stderr) = TestCase.run_process_no_exception(code, env=env)
+        return stderr.decode('ascii')
 
 
 def download_file(url, binary=True):
