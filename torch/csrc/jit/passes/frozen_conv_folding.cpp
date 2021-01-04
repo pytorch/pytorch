@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/passes/frozen_graph_conv_bn_folding.h>
+#include <torch/csrc/jit/passes/frozen_conv_folding.h>
 #include <ATen/Utils.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/ir/constants.h>
