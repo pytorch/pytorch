@@ -338,9 +338,10 @@ Tensor & masked_scatter__cuda(Tensor& self, const Tensor& mask, const Tensor& so
       " and ",
       source.scalar_type());
 
-  TORCH_CHECK(self.device().type() == at::kCUDA, "device type of self (", self.device().type(), ") is not CUDA");
-  TORCH_CHECK(mask.device().type() == at::kCUDA, "device type of mask (", mask.device().type(), ") is not CUDA");
-  TORCH_CHECK(source.device().type() == at::kCUDA, "device type of source (", source.device().type(), ") is not CUDA");
+  TensorArg self_arg{self, "self", 1};
+  TensorArg mask_arg{b_mask, "mask", 2};
+  TensorArg source_arg{source, "source", 3};
+  checkAllSameGPU("masked_scatter_", {self_arg, mask_arg, source_arg});
 
   Tensor b_mask;
   std::tie(b_mask) = expand_inplace(self, mask, "masked_scatter_");
@@ -352,11 +353,6 @@ Tensor & masked_scatter__cuda(Tensor& self, const Tensor& mask, const Tensor& so
 
   // `mask` and `tensor` must have the same number of elements
   TORCH_CHECK(self.numel() == b_mask.numel(), "Number of elements of self != Number of elements in mask");
-
-  TensorArg self_arg{self, "self", 1};
-  TensorArg mask_arg{b_mask, "mask", 2};
-  TensorArg source_arg{source, "source", 3};
-  checkAllSameGPU("masked_scatter_", {self_arg, mask_arg, source_arg});
 
   auto mask_dtype = b_mask.scalar_type();
   if (mask_dtype == ScalarType::Bool) {
