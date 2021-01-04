@@ -10,6 +10,9 @@
 #include <c10/util/complex.h>
 #include <c10/util/string_view.h>
 
+#ifdef XPLAT_MOBILE_BUILD
+#include <ATen/selected_mobile_ops.h>
+#else
 namespace at {
 /**
  * The method should_include_kernel_dtype() returns true/false
@@ -25,6 +28,7 @@ inline constexpr bool should_include_kernel_dtype(
   return true;
 }
 }
+#endif
 
 /**
  * In the Facebook internal build (using BUCK), this macro is enabled by
