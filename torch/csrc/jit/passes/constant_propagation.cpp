@@ -45,7 +45,7 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     } break;
     case prim::ListConstruct: {
       listConstruct(
-          stack, n->output()->type()->expect<ListType>(), n->inputs().size());
+          stack, n->output()->type()->expectRef<ListType>(), n->inputs().size());
     } break;
     case prim::DictConstruct: {
       dictConstruct(

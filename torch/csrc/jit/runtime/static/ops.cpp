@@ -361,7 +361,7 @@ getNativeOperation(Node* n) {
       // run op
       listConstruct(
           stack,
-          p_node->get_node()->output()->type()->expect<ListType>(),
+          p_node->get_node()->output()->type()->expectRef<ListType>(),
           p_node->input_regs().size());
       // put output back
       p_node->Output(0, reg) = std::move(stack[0]);
