@@ -18,6 +18,13 @@ from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_S
 from typing import List
 import model_defs.word_language_model as word_language_model
 import torchvision
+from torchvision import ops
+from torchvision.models.detection.image_list import ImageList
+from torchvision.models.detection.transform import GeneralizedRCNNTransform
+from torchvision.models.detection.rpn import AnchorGenerator, RPNHead, RegionProposalNetwork
+from torchvision.models.detection.roi_heads import RoIHeads
+from torchvision.models.detection.faster_rcnn import FastRCNNPredictor, TwoMLPHead
+from collections import OrderedDict
 import onnx
 
 def to_numpy(tensor):
@@ -76,7 +83,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                    example_outputs=None, do_constant_folding=True,
                    dynamic_axes=None, test_with_inputs=None,
                    input_names=None, output_names=None,
-                   fixed_batch_size=False):
+                   fixed_batch_size=False, dict_check=True):
     model.eval()
 
     if input is None:
@@ -90,12 +97,15 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
             input = (input,)
         input_args = copy.deepcopy(input)
         input_kwargs = {}
-        if isinstance(input_args[-1], dict):
+        if dict_check and isinstance(input_args[-1], dict):
             input_kwargs = input_args[-1]
             input_args = input_args[:-1]
         output = model(*input_args, **input_kwargs)
         if isinstance(output, torch.Tensor):
             output = (output,)
+
+        if not dict_check and isinstance(input[-1], dict):
+            input = input + ({},)
 
         ort_sess = convert_to_onnx(model, input=input, opset_version=self.opset_version,
                                    example_outputs=output, do_constant_folding=do_constant_folding,
@@ -122,6 +132,71 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                 ort_outs = run_ort(ort_sess, test_input)
                 ort_compare_with_pytorch(ort_outs, output, rtol, atol)
 
+def _init_test_generalized_rcnn_transform():
+    min_size = 100
+    max_size = 200
+    image_mean = [0.485, 0.456, 0.406]
+    image_std = [0.229, 0.224, 0.225]
+    transform = GeneralizedRCNNTransform(min_size, max_size, image_mean, image_std)
+    return transform
+
+def _init_test_rpn():
+    anchor_sizes = ((32,), (64,), (128,), (256,), (512,))
+    aspect_ratios = ((0.5, 1.0, 2.0),) * len(anchor_sizes)
+    rpn_anchor_generator = AnchorGenerator(anchor_sizes, aspect_ratios)
+    out_channels = 256
+    rpn_head = RPNHead(out_channels, rpn_anchor_generator.num_anchors_per_location()[0])
+    rpn_fg_iou_thresh = 0.7
+    rpn_bg_iou_thresh = 0.3
+    rpn_batch_size_per_image = 256
+    rpn_positive_fraction = 0.5
+    rpn_pre_nms_top_n = dict(training=2000, testing=1000)
+    rpn_post_nms_top_n = dict(training=2000, testing=1000)
+    rpn_nms_thresh = 0.7
+
+    rpn = RegionProposalNetwork(
+        rpn_anchor_generator, rpn_head,
+        rpn_fg_iou_thresh, rpn_bg_iou_thresh,
+        rpn_batch_size_per_image, rpn_positive_fraction,
+        rpn_pre_nms_top_n, rpn_post_nms_top_n, rpn_nms_thresh)
+    return rpn
+
+def _init_test_roi_heads_faster_rcnn():
+    out_channels = 256
+    num_classes = 91
+
+    box_fg_iou_thresh = 0.5
+    box_bg_iou_thresh = 0.5
+    box_batch_size_per_image = 512
+    box_positive_fraction = 0.25
+    bbox_reg_weights = None
+    box_score_thresh = 0.05
+    box_nms_thresh = 0.5
+    box_detections_per_img = 100
+
+    box_roi_pool = ops.MultiScaleRoIAlign(
+        featmap_names=['0', '1', '2', '3'],
+        output_size=7,
+        sampling_ratio=2)
+
+    resolution = box_roi_pool.output_size[0]
+    representation_size = 1024
+    box_head = TwoMLPHead(
+        out_channels * resolution ** 2,
+        representation_size)
+
+    representation_size = 1024
+    box_predictor = FastRCNNPredictor(
+        representation_size,
+        num_classes)
+
+    roi_heads = RoIHeads(
+        box_roi_pool, box_head, box_predictor,
+        box_fg_iou_thresh, box_bg_iou_thresh,
+        box_batch_size_per_image, box_positive_fraction,
+        bbox_reg_weights,
+        box_score_thresh, box_nms_thresh, box_detections_per_img)
+    return roi_heads
 
 class TestONNXRuntime(unittest.TestCase):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
@@ -140,14 +215,14 @@ class TestONNXRuntime(unittest.TestCase):
 
     def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=True,
                  batch_size=2, use_gpu=True, dynamic_axes=None, test_with_inputs=None,
-                 input_names=None, output_names=None, fixed_batch_size=False):
+                 input_names=None, output_names=None, fixed_batch_size=False, dict_check=True):
         def _run_test(m):
             return run_model_test(self, m, batch_size=batch_size,
                                   input=input, use_gpu=use_gpu, rtol=rtol, atol=atol,
                                   do_constant_folding=do_constant_folding,
                                   dynamic_axes=dynamic_axes, test_with_inputs=test_with_inputs,
                                   input_names=input_names, output_names=output_names,
-                                  fixed_batch_size=fixed_batch_size)
+                                  fixed_batch_size=fixed_batch_size, dict_check=dict_check)
         if self.is_script_test_enabled and self.use_new_jit_passes:
             script_model = torch.jit.script(model)
             _run_test(script_model)
@@ -329,6 +404,8 @@ class TestONNXRuntime(unittest.TestCase):
         model.eval()
         x = torch.randn(2, 3, 200, 300, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+        self.run_test(model, (x,), input_names=["images_tensors"], output_names=["outputs"],
+                      dynamic_axes={"images_tensors": [0, 1, 2, 3], "outputs": [0, 1, 2, 3]}, rtol=1e-3, atol=1e-5)
 
     def get_image_from_url(self, url):
         import os
@@ -355,6 +432,37 @@ class TestONNXRuntime(unittest.TestCase):
         images = [image]
         return images
 
+    def test_paste_mask_in_image(self):
+        # disable profiling
+        torch._C._jit_set_profiling_executor(False)
+        torch._C._jit_set_profiling_mode(False)
+
+        masks = torch.rand(10, 1, 26, 26)
+        boxes = torch.rand(10, 4)
+        boxes[:, 2:] += torch.rand(10, 2)
+        boxes *= 50
+        o_im_s = (100, 100)
+        from torchvision.models.detection.roi_heads import paste_masks_in_image
+        out = paste_masks_in_image(masks, boxes, o_im_s)
+        jit_trace = torch.jit.trace(paste_masks_in_image,
+                                    (masks, boxes,
+                                     [torch.tensor(o_im_s[0]),
+                                      torch.tensor(o_im_s[1])]))
+        out_trace = jit_trace(masks, boxes, [torch.tensor(o_im_s[0]), torch.tensor(o_im_s[1])])
+
+        assert torch.all(out.eq(out_trace))
+
+        masks2 = torch.rand(20, 1, 26, 26)
+        boxes2 = torch.rand(20, 4)
+        boxes2[:, 2:] += torch.rand(20, 2)
+        boxes2 *= 100
+        o_im_s2 = (200, 200)
+        from torchvision.models.detection.roi_heads import paste_masks_in_image
+        out2 = paste_masks_in_image(masks2, boxes2, o_im_s2)
+        out_trace2 = jit_trace(masks2, boxes2, [torch.tensor(o_im_s2[0]), torch.tensor(o_im_s2[1])])
+
+        assert torch.all(out2.eq(out_trace2))
+
     @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()
     def test_mask_rcnn(self):
@@ -362,6 +470,33 @@ class TestONNXRuntime(unittest.TestCase):
                                                                              max_size=300)
         images = self.get_test_images()
         self.run_test(model, (images,), rtol=1e-3, atol=1e-5)
+        self.run_test(model, (images,), input_names=["images_tensors"], output_names=["boxes", "labels", "scores", "masks"],
+                      dynamic_axes={"images_tensors": [0, 1, 2], "boxes": [0, 1], "labels": [0],
+                                    "scores": [0], "masks": [0, 1, 2]}, rtol=1e-3, atol=1e-5)
+
+    def test_heatmaps_to_keypoints(self):
+        # disable profiling
+        torch._C._jit_set_profiling_executor(False)
+        torch._C._jit_set_profiling_mode(False)
+
+        maps = torch.rand(10, 1, 26, 26)
+        rois = torch.rand(10, 4)
+        from torchvision.models.detection.roi_heads import heatmaps_to_keypoints
+        out = heatmaps_to_keypoints(maps, rois)
+        jit_trace = torch.jit.trace(heatmaps_to_keypoints, (maps, rois))
+        out_trace = jit_trace(maps, rois)
+
+        assert torch.all(out[0].eq(out_trace[0]))
+        assert torch.all(out[1].eq(out_trace[1]))
+
+        maps2 = torch.rand(20, 2, 21, 21)
+        rois2 = torch.rand(20, 4)
+        from torchvision.models.detection.roi_heads import heatmaps_to_keypoints
+        out2 = heatmaps_to_keypoints(maps2, rois2)
+        out_trace2 = jit_trace(maps2, rois2)
+
+        assert torch.all(out2[0].eq(out_trace2[0]))
+        assert torch.all(out2[1].eq(out_trace2[1]))
 
     @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()
@@ -370,6 +505,10 @@ class TestONNXRuntime(unittest.TestCase):
                                                                                      max_size=300)
         images = self.get_test_images()
         self.run_test(model, (images,), rtol=1e-3, atol=1e-5)
+        self.run_test(model, (images,), input_names=["images_tensors"],
+                      output_names=["outputs1", "outputs2", "outputs3", "outputs4"],
+                      dynamic_axes={"images_tensors": [0, 1, 2]},
+                      rtol=1e-3, atol=1e-5)
 
     @disableScriptTest()
     def test_word_language_model_RNN_TANH(self):
@@ -5392,6 +5531,205 @@ class TestONNXRuntime(unittest.TestCase):
         ort_outs2 = run_ort(ort_sess2, input=(x,))
         [np.testing.assert_allclose(ort_out1, ort_out2, atol=1e-7, rtol=0.001) for ort_out1, ort_out2 in
          zip(ort_outs1, ort_outs2)]
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_nms(self):
+        boxes = torch.rand(5, 4)
+        boxes[:, 2:] += torch.rand(5, 2)
+        scores = torch.randn(5)
+
+        class Module(torch.nn.Module):
+            def forward(self, boxes, scores):
+                return ops.nms(boxes, scores, 0.5)
+
+        self.run_test(Module(), (boxes, scores))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_clip_boxes_to_image(self):
+        boxes = torch.randn(5, 4) * 500
+        boxes[:, 2:] += boxes[:, :2]
+        size = torch.randn(200, 300)
+
+        size_2 = torch.randn(300, 400)
+
+        class Module(torch.nn.Module):
+            def forward(self, boxes, size):
+                return ops.boxes.clip_boxes_to_image(boxes, size.shape)
+
+        self.run_test(Module(), (boxes, size),
+                      input_names=["boxes", "size"],
+                      dynamic_axes={"size": [0, 1]},
+                      test_with_inputs=[(boxes, size_2)])
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_roi_align(self):
+        x = torch.rand(1, 1, 10, 10, dtype=torch.float32)
+        single_roi = torch.tensor([[0, 0, 0, 4, 4]], dtype=torch.float32)
+        model = ops.RoIAlign((5, 5), 1, 2)
+        self.run_test(model, (x, single_roi))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_roi_align_aligned(self):
+        x = torch.rand(1, 1, 10, 10, dtype=torch.float32)
+        single_roi = torch.tensor([[0, 1.5, 1.5, 3, 3]], dtype=torch.float32)
+        model = ops.RoIAlign((5, 5), 1, 2, aligned=True)
+        self.run_test(model, (x, single_roi))
+
+        x = torch.rand(1, 1, 10, 10, dtype=torch.float32)
+        single_roi = torch.tensor([[0, 0.2, 0.3, 4.5, 3.5]], dtype=torch.float32)
+        model = ops.RoIAlign((5, 5), 0.5, 3, aligned=True)
+        self.run_test(model, (x, single_roi))
+
+        x = torch.rand(1, 1, 10, 10, dtype=torch.float32)
+        single_roi = torch.tensor([[0, 0.2, 0.3, 4.5, 3.5]], dtype=torch.float32)
+        model = ops.RoIAlign((5, 5), 1.8, 2, aligned=True)
+        self.run_test(model, (x, single_roi))
+
+        x = torch.rand(1, 1, 10, 10, dtype=torch.float32)
+        single_roi = torch.tensor([[0, 0.2, 0.3, 4.5, 3.5]], dtype=torch.float32)
+        model = ops.RoIAlign((2, 2), 2.5, 0, aligned=True)
+        self.run_test(model, (x, single_roi))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_roi_pool(self):
+        x = torch.rand(1, 1, 10, 10, dtype=torch.float32)
+        rois = torch.tensor([[0, 0, 0, 4, 4]], dtype=torch.float32)
+        pool_h = 5
+        pool_w = 5
+        model = ops.RoIPool((pool_h, pool_w), 2)
+        self.run_test(model, (x, rois))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_resize_images(self):
+        class TransformModule(torch.nn.Module):
+            def __init__(self):
+                super(TransformModule, self).__init__()
+                self.transform = _init_test_generalized_rcnn_transform()
+
+            def forward(self, images):
+                return self.transform.resize(images, None)[0]
+
+        input = torch.rand(3, 10, 20)
+        input_test = torch.rand(3, 100, 150)
+        self.run_test(TransformModule(), (input,),
+                      input_names=["input1"], dynamic_axes={"input1": [0, 1, 2]},
+                      test_with_inputs=[(input_test,)])
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_transform_images(self):
+
+        class TransformModule(torch.nn.Module):
+            def __init__(self):
+                super(TransformModule, self).__init__()
+                self.transform = _init_test_generalized_rcnn_transform()
+
+            def forward(self, images):
+                return self.transform(images)[0].tensors
+
+        input = torch.rand(3, 100, 200), torch.rand(3, 200, 200)
+        input_test = torch.rand(3, 100, 200), torch.rand(3, 200, 200)
+        self.run_test(TransformModule(), (input,), test_with_inputs=[(input_test,)])
+
+    def get_features(self, images):
+        s0, s1 = images.shape[-2:]
+        features = [
+            ('0', torch.rand(2, 256, s0 // 4, s1 // 4)),
+            ('1', torch.rand(2, 256, s0 // 8, s1 // 8)),
+            ('2', torch.rand(2, 256, s0 // 16, s1 // 16)),
+            ('3', torch.rand(2, 256, s0 // 32, s1 // 32)),
+            ('4', torch.rand(2, 256, s0 // 64, s1 // 64)),
+        ]
+        features = OrderedDict(features)
+        return features
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_rpn(self):
+        class RPNModule(torch.nn.Module):
+            def __init__(self):
+                super(RPNModule, self).__init__()
+                self.rpn = _init_test_rpn()
+
+            def forward(self, images, features):
+                images = ImageList(images, [i.shape[-2:] for i in images])
+                return self.rpn(images, features)
+
+        images = torch.rand(2, 3, 150, 150)
+        features = self.get_features(images)
+        images2 = torch.rand(2, 3, 80, 80)
+        test_features = self.get_features(images2)
+
+        model = RPNModule()
+        model.eval()
+        model(images, features)
+        self.run_test(model, (images, features),
+                      input_names=["input1", "input2", "input3", "input4", "input5", "input6"],
+                      dynamic_axes={"input1": [0, 1, 2, 3], "input2": [0, 1, 2, 3],
+                                    "input3": [0, 1, 2, 3], "input4": [0, 1, 2, 3],
+                                    "input5": [0, 1, 2, 3], "input6": [0, 1, 2, 3]},
+                      test_with_inputs=[(images2, test_features)],
+                      dict_check=False)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_multi_scale_roi_align(self):
+
+        class TransformModule(torch.nn.Module):
+            def __init__(self):
+                super(TransformModule, self).__init__()
+                self.model = ops.MultiScaleRoIAlign(['feat1', 'feat2'], 3, 2)
+                self.image_sizes = [(512, 512)]
+
+            def forward(self, input, boxes):
+                return self.model(input, boxes, self.image_sizes)
+
+        i = OrderedDict()
+        i['feat1'] = torch.rand(1, 5, 64, 64)
+        i['feat2'] = torch.rand(1, 5, 16, 16)
+        boxes = torch.rand(6, 4) * 256
+        boxes[:, 2:] += boxes[:, :2]
+
+        i1 = OrderedDict()
+        i1['feat1'] = torch.rand(1, 5, 64, 64)
+        i1['feat2'] = torch.rand(1, 5, 16, 16)
+        boxes1 = torch.rand(6, 4) * 256
+        boxes1[:, 2:] += boxes1[:, :2]
+
+        self.run_test(TransformModule(), (i, [boxes],), test_with_inputs=[(i1, [boxes1],)])
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_roi_heads(self):
+        class RoiHeadsModule(torch.nn.Module):
+            def __init__(self):
+                super(RoiHeadsModule, self).__init__()
+                self.transform = _init_test_generalized_rcnn_transform()
+                self.rpn = _init_test_rpn()
+                self.roi_heads = _init_test_roi_heads_faster_rcnn()
+
+            def forward(self, images, features):
+                original_image_sizes = [img.shape[-2:] for img in images]
+                images = ImageList(images, [i.shape[-2:] for i in images])
+                proposals, _ = self.rpn(images, features)
+                detections, _ = self.roi_heads(features, proposals, images.image_sizes)
+                detections = self.transform.postprocess(detections,
+                                                        images.image_sizes,
+                                                        original_image_sizes)
+                return detections
+
+        images = torch.rand(2, 3, 100, 100)
+        features = self.get_features(images)
+        images2 = torch.rand(2, 3, 150, 150)
+        test_features = self.get_features(images2)
+
+        model = RoiHeadsModule()
+        model.eval()
+        model(images, features)
+
+        self.run_test(model, (images, features),
+                      input_names=["input1", "input2", "input3", "input4", "input5", "input6"],
+                      dynamic_axes={"input1": [0, 1, 2, 3], "input2": [0, 1, 2, 3], "input3": [0, 1, 2, 3],
+                                    "input4": [0, 1, 2, 3], "input5": [0, 1, 2, 3], "input6": [0, 1, 2, 3]},
+                      test_with_inputs=[(images2, test_features)],
+                      dict_check=False)
+
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout,
