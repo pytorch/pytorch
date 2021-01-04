@@ -23,7 +23,7 @@ from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
-    override_quantized_engine, supported_qengines, override_qengines
+    override_quantized_engine, supported_qengines, override_qengines, _snr
 from torch.testing._internal.common_quantized import qengine_is_qnnpack
 from torch.quantization import PerChannelMinMaxObserver
 
@@ -2314,6 +2314,87 @@ class TestQuantizedOps(TestCase):
                 torch.quantize_per_tensor(x_fp32_s4, scale, zp, dtype)
             self.assertEqual(x_q_s4, x_fp32_s4_ref)
 
+    @override_qengines
+    def test_custom_module_lstm(self):
+        qengine = torch.backends.quantized.engine
+
+        batch_size = 4
+        seq_len = 8
+        input_size = 12
+
+        hidden_size = 8
+        num_layers = 2
+
+        dropout = 0  # This is not supported
+
+        Bias = [False, True]
+        Batch_first = [False, True]
+        Bidirectional = [False, True]
+
+        dtype = np.uint8
+        qtype = torch.quint8
+
+        custom_module_config = {
+            'float_to_observed_custom_module_class': {
+                torch.nn.LSTM: torch.nn.quantizable.LSTM
+            }
+        }
+
+        x = np.random.randn(seq_len, batch_size, input_size)
+        scale, zero_point = _calculate_dynamic_qparams(x, dtype=dtype)
+        x = torch.from_numpy(x).to(torch.float)
+        qx = torch.quantize_per_tensor(x, scale=scale, zero_point=zero_point,
+                                       dtype=qtype)
+        x = qx.dequantize()
+
+        with torch.no_grad():
+            for bias, batch_first, bidirectional in itertools.product(
+                    Bias, Batch_first, Bidirectional):
+                # Assume 12dB is sufficient for functional equivalence
+                # Without the bias, linear performs poorly
+                min_power = 10 if bias else 5
+                max_mse = 5e-6 if bias else 5e-1
+
+                if batch_first:
+                    x = x.reshape(batch_size, seq_len, input_size)
+                    qx = qx.reshape(batch_size, seq_len, input_size)
+                else:
+                    x = x.reshape(seq_len, batch_size, input_size)
+                    qx = qx.reshape(seq_len, batch_size, input_size)
+
+                lstm = torch.nn.Sequential(
+                    torch.nn.LSTM(input_size, hidden_size,
+                                  num_layers=num_layers,
+                                  bias=bias, batch_first=batch_first,
+                                  dropout=dropout,
+                                  bidirectional=bidirectional))
+                lstm.eval()
+                y_ref = lstm(x)
+
+                # Prepare
+                lstm.qconfig = torch.quantization.get_default_qconfig(qengine)
+                lstm_prepared = torch.quantization.prepare(
+                    lstm, prepare_custom_config_dict=custom_module_config)
+                self.assertTrue(hasattr(lstm_prepared[0], 'layers'))
+                self.assertEqual(num_layers, len(lstm_prepared[0].layers))
+
+                # Calibrate
+                y = lstm_prepared(x)
+                self.assertEqual(y_ref, y)
+
+                # Quantize
+                lstm_quantized = torch.quantization.convert(lstm_prepared)
+                qy = lstm_quantized(qx)
+
+                snr = _snr(y, qy)
+                snr = [snr[0]] + snr[1]
+
+                for signal, mse, power in snr:
+                    self.assertTrue(
+                        power > min_power or mse < max_mse,
+                        msg=(f"Error is too high: SNR(dB): {power}, "
+                             f"Signal: {signal}, MSE: {mse}"))
+
 
 class TestDynamicQuantizedLinear(TestCase):
     """Tests the correctness of the dynamic quantized linear and linear_relu op."""
@@ -3346,7 +3427,7 @@ class TestQuantizedConv(TestCase):
         self, batch_size, input_channels_per_group, input_feature_map_shape,
         output_channels_per_group, groups, kernels, strides, pads, dilations,
         X_scale, X_zero_point, W_scale, W_zero_point,
-        use_bias, use_channelwise, use_transpose
+        use_bias, use_channelwise, use_transpose, memory_format=torch.contiguous_format
     ):
         assert not (use_channelwise and use_transpose), \
                "Cannot generate channelwise qconv_transpose_tensors "
@@ -3394,6 +3475,7 @@ class TestQuantizedConv(TestCase):
             (batch_size, input_channels,) + input_feature_map_shape,
         )
         X = X_scale * (X_init - X_zero_point).float()
+        X = X.to(memory_format=memory_format)
 
         if use_channelwise:
             W_shape = (-1, 1) + (1,) * len(kernels)
@@ -3426,13 +3508,15 @@ class TestQuantizedConv(TestCase):
         input_channels_per_group, input_feature_map_shape,
         output_channels_per_group, groups, kernels, strides, pads, o_pads,
         dilations, X_scale, X_zero_point, W_scale, W_zero_point, Y_scale,
-        Y_zero_point, use_bias, use_relu, use_channelwise, use_transpose
+        Y_zero_point, use_bias, use_relu, use_channelwise, use_transpose,
+        memory_format=torch.contiguous_format
     ):
         (X, W), (X_q, W_q), bias_float = self._make_qconv_tensors(
             batch_size, input_channels_per_group, input_feature_map_shape,
             output_channels_per_group, groups, kernels,
             strides, pads, dilations, X_scale, X_zero_point, W_scale,
-            W_zero_point, use_bias, use_channelwise, use_transpose)
+            W_zero_point, use_bias, use_channelwise, use_transpose,
+            memory_format)
         # Assign weights
         W = W_q.dequantize()
         X = X_q.dequantize()
@@ -3479,6 +3563,14 @@ class TestQuantizedConv(TestCase):
             err_msg=f'''X: {X_q}, W: {W_q}, b: {bias_float}, strides: {strides},
             pads: {pads}, o_pads: {o_pads}, dilations: {dilations},
             groups: {groups}, y_s: {Y_scale}, y_zp: {Y_zero_point}''')
+
+        # fbgemm for now forces output to be NHWC (channels last) to opportunistically
+        # improve performance
+        if torch.backends.quantized.engine == 'qnnpack':
+            # Make sure memory format is preserved
+            self.assertEqual(
+                X_q.is_contiguous(memory_format=memory_format),
+                Y_q.is_contiguous(memory_format=memory_format))
 
         # Return the quantized data for later reuse
         return X_q, W_q, bias_float
@@ -3552,12 +3644,14 @@ class TestQuantizedConv(TestCase):
             dilations,
             groups,
         )
-        self._test_qconv_impl(
-            qconv, qconv_prepack, conv_op, batch_size,
-            input_channels_per_group, (height, width),
-            output_channels_per_group, groups, kernels, strides, pads, None,
-            dilations, X_scale, X_zero_point, W_scale, W_zero_point,
-            Y_scale, Y_zero_point, use_bias, use_relu, use_channelwise, False)
+        for memory_format in (torch.contiguous_format, torch.channels_last):
+            self._test_qconv_impl(
+                qconv, qconv_prepack, conv_op, batch_size,
+                input_channels_per_group, (height, width),
+                output_channels_per_group, groups, kernels, strides, pads, None,
+                dilations, X_scale, X_zero_point, W_scale, W_zero_point,
+                Y_scale, Y_zero_point, use_bias, use_relu, use_channelwise, False,
+                memory_format)
 
     """Tests the correctness of quantized convolution op."""
     @given(batch_size=st.integers(1, 3),
@@ -4149,6 +4243,7 @@ class TestQuantizedConv(TestCase):
             qconv_prepack, qconv_unpack, inputs,
             (stride_d, stride_h, stride_w), (pad_d, pad_h, pad_w), (o_pad, o_pad, o_pad),
             channelwise)
+
 
 class TestPadding(TestCase):
     @given(batch_size=st.integers(1, 64),
