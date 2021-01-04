@@ -373,7 +373,6 @@ filegroup(
 filegroup(
     name = "thc_srcs_cu",
     srcs = [
-        "aten/src/THC/THCBlas.cu.cc",
         "aten/src/THC/THCReduceApplyUtils.cu.cc",
         "aten/src/THC/THCSleep.cu.cc",
         "aten/src/THC/THCSortUtils.cu.cc",
