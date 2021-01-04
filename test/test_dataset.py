@@ -5,8 +5,8 @@ import torch
 from torch.testing._internal.common_utils import (TestCase, run_tests)
 from torch.utils.data import IterableDataset, RandomSampler
 from torch.utils.data.datasets import \
-    (CollateIterableDataset, BatchIterableDataset, ListDirFilesIterableDataset,
-     LoadFilesFromDiskIterableDataset, SamplerIterableDataset)
+    (CallableIterableDataset, CollateIterableDataset, BatchIterableDataset,
+     ListDirFilesIterableDataset, LoadFilesFromDiskIterableDataset, SamplerIterableDataset)
 
 
 def create_temp_dir_and_files():
@@ -75,6 +75,29 @@ class IterDatasetWithLen(IterableDataset):
 
 
 class TestFunctionalIterableDataset(TestCase):
+    def test_callable_dataset(self):
+        arr = range(10)
+        ds_len = IterDatasetWithLen(arr)
+        ds_nolen = IterDatasetWithoutLen(arr)
+
+        def fn(item):
+            return torch.tensor(item, dtype=torch.float)
+
+        callable_ds = CallableIterableDataset(ds_len, fn=fn)
+        self.assertEqual(len(ds_len), len(callable_ds))
+        ds_iter = iter(ds_len)
+        for x in callable_ds:
+            y = next(ds_iter)
+            self.assertEqual(x, torch.tensor(y, dtype=torch.float))
+
+        callable_ds_nolen = CallableIterableDataset(ds_nolen)
+        with self.assertRaises(NotImplementedError):
+            len(callable_ds_nolen)
+        ds_nolen_iter = iter(ds_nolen)
+        for x in callable_ds_nolen:
+            y = next(ds_nolen_iter)
+            self.assertEqual(x, torch.tensor(y, dtype=torch.float))
+
     def test_collate_dataset(self):
         arrs = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
         ds_len = IterDatasetWithLen(arrs)
