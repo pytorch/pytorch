@@ -2822,18 +2822,20 @@ class DistributedTest:
 
         @unittest.skipIf(
             BACKEND != "nccl",
-            "Only NCCL backend support DistributedDataParallel",
+            "Only NCCL backend supports DDP communication hook",
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm
         def test_DistributedDataParallel_powerSGD_ddp_comm_hook(self):
             stream = torch.cuda.Stream(self.rank)
             rank = self.rank
+            rank_to_GPU = self._init_multigpu_helper()
+            gpus = list(rank_to_GPU[rank])
             with torch.cuda.stream(stream):
                 net = torch.nn.parallel.DistributedDataParallel(
                     torch.nn.Linear(1, 5).to(rank), device_ids=[rank]
                 )
-                process_group = torch.distributed.new_group([0, 1])
+                process_group = torch.distributed.new_group(gpus)
                 state = powerSGD.PowerSGDState(
                     process_group=process_group, matrix_approximation_rank=1
                 )

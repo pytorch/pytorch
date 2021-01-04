@@ -362,8 +362,18 @@ template<> void lapackLuSolve<float>(char trans, int n, int nrhs, float *a, int 
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+/*
+Computes the solution to a system of linear equations
+  A X = B,
+where A is an n-by-n matrix and X and B are n-by-nrhs matrices.
+Note that B is required to be a matrix, the usual, vector case, is obtained with nrhs = 1.
+Above description is for non-batched input, the batched input is also supported.
+This is an in-place routine, content of both A and b are overriden.
+'infos' is an int Tensor containing error codes for each matrix in the batched input.
+For more information see LAPACK's documentation for GESV routine.
+*/
 template<typename scalar_t>
-static void apply_solve(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
+static void apply_solve(Tensor& b, Tensor& A, Tensor& infos) {
 #ifndef USE_LAPACK
   AT_ERROR("solve: LAPACK library not found in compilation");
 #else
@@ -374,20 +384,17 @@ static void apply_solve(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
   auto batch_size = batchCount(A);
   auto n = A.size(-2);
   auto nrhs = b.size(-1);
-  auto lda = std::max(int64_t{1}, n);
+  auto lda = std::max<int64_t>(1, n);
 
-  auto ipiv = at::empty({n}, b.options().dtype(kInt));
+  auto ipiv = at::empty({lda}, b.options().dtype(kInt));
   auto ipiv_data = ipiv.data_ptr<int>();
+  auto infos_data = infos.data_ptr<int>();
 
-  int info;
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
     scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
-    lapackSolve<scalar_t>(n, nrhs, A_working_ptr, lda, ipiv_data, b_working_ptr, lda, &info);
-    infos[i] = info;
-    if (info != 0) {
-      return;
-    }
+    int* info_working_ptr = &infos_data[i];
+    lapackSolve<scalar_t>(n, nrhs, A_working_ptr, lda, ipiv_data, b_working_ptr, lda, info_working_ptr);
   }
 #endif
 }
@@ -395,14 +402,14 @@ static void apply_solve(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
 std::tuple<Tensor, Tensor> _solve_helper_cpu(const Tensor& self, const Tensor& A) {
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
-  std::vector<int64_t> infos(batchCount(self), 0);
+  auto infos = at::empty({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt));
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "solve_cpu", [&]{
     apply_solve<scalar_t>(self_working_copy, A_working_copy, infos);
   });
   if (self.dim() > 2) {
     batchCheckErrors(infos, "solve_cpu");
   } else {
-    singleCheckErrors(infos[0], "solve_cpu");
+    singleCheckErrors(infos.item().toInt(), "solve_cpu");
   }
   return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
 }
@@ -424,6 +431,99 @@ std::tuple<Tensor&,Tensor&> solve_out(Tensor& solution, Tensor& lu, const Tensor
   solution.resize_as_(solution_tmp).copy_(solution_tmp);
   lu.resize_as_(lu_tmp).copy_(lu_tmp);
   return std::tuple<Tensor&, Tensor&>(solution, lu);
+}
+
+
+// This is a type dispatching helper function for 'apply_solve'
+Tensor& _linalg_solve_out_helper_cpu(Tensor& result, Tensor& input, Tensor& infos) {
+  // 'result' and 'input' should be in column major order (it should be checked before calling this function)
+  // the content of 'result', 'input' and 'infos' is overriden by 'apply_solve'
+  // 'result' should contain data of 'other' tensor (right-hand-side of the linear system of equations)
+  // 'input' should contain data of original 'input' tensor (left-hand-side of the linear system of equations)
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "linalg_solve_out_cpu", [&]{
+    apply_solve<scalar_t>(result, input, infos);
+  });
+  return result;
+}
+
+// Solves a system of linear equations matmul(input, x) = other in-place
+// LAPACK/MAGMA error codes are saved in 'infos' tensor, they are not checked here
+static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor& input, const Tensor& other) {
+  TORCH_CHECK(infos.scalar_type() == kInt,
+    "infos dtype ", infos.scalar_type(), " does not match the expected dtype ", kInt);
+  TORCH_CHECK(result.scalar_type() == input.scalar_type(),
+    "result dtype ", result.scalar_type(), " does not match input dtype ", input.scalar_type());
+  TORCH_CHECK(input.scalar_type() == other.scalar_type(),
+    "input dtype ", input.scalar_type(), " does not match other dtype ", other.scalar_type());
+
+  TORCH_CHECK(input.dim() >= 2,
+           "input should have at least 2 dimensions, but has ", input.dim(), " dimensions instead");
+  TORCH_CHECK(other.dim() >= 1,
+           "other should have at least 1 dimension, but has ", other.dim(), " dimensions instead");
+
+  // NumPy works for 1-dimensional 'other' or batch of 1-dimensional tensors, we need to unsqueeze it
+  // because 2-dimensional tensors are expected in the implementation
+  auto expected_batched_rhs_shape = IntArrayRef(input.sizes().data(), input.dim()-1);  // A.shape[:-1]
+  bool is_rhs_broadcasted = other.dim() == 1 || (input.dim()-1 == other.dim() && other.sizes().equals(expected_batched_rhs_shape));
+  Tensor other_ = is_rhs_broadcasted ? other.unsqueeze(-1) : other;
+
+  // _linalg_broadcast_batch_dims also includes linearSolveCheckInputs
+  // it checks for squareness of 'input' and 'shape' compatibility of 'other' and 'input'
+  Tensor other_broadcasted, input_broadcasted;
+  std::tie(other_broadcasted, input_broadcasted) = _linalg_broadcast_batch_dims(other_, input, "linalg_solve");
+
+  // if result has no elements we can modify it
+  if (result.numel() == 0) {
+    at::native::resize_as_(result, other_broadcasted.transpose(-2, -1), MemoryFormat::Contiguous);
+    result.transpose_(-2, -1);
+  } else {
+    // Resize messes up the strides and we expect strictly column major order, so let's not use at::native::resize_output
+    TORCH_CHECK(result.sizes().equals(other_broadcasted.sizes()),
+      "result shape ", result.sizes(), " does not match broadcasted other shape ", other_broadcasted.sizes());
+  }
+
+  TORCH_CHECK(result.transpose(-2, -1).is_contiguous(), "result tensor must be in batched column major order (Fortran contiguous).");
+  result.copy_(other_broadcasted);
+
+  auto input_working_copy = cloneBatchedColumnMajor(input_broadcasted);
+  at::native::resize_output(infos, {std::max<int64_t>(1, batchCount(input_broadcasted))});
+  // if input is empty infos might not get filled; make sure infos doesn't contain garbage then
+  if (input.numel() == 0) {
+    infos.fill_(0);
+  }
+  result = at::_linalg_solve_out_helper_(result, input_working_copy, infos);
+
+  // NumPy works for 1-dimensional 'other', we need to squeeze the result in this case
+  if (is_rhs_broadcasted) {
+    result.squeeze_(-1);
+  }
+
+  return result;
+}
+
+// Solves a system of linear equations matmul(input, x) = other in-place
+Tensor& linalg_solve_out(Tensor& result, const Tensor& input, const Tensor& other) {
+  auto infos = at::empty({0}, input.options().dtype(kInt));
+  result = linalg_solve_out_info(result, infos, input, other);
+
+  // Now check LAPACK/MAGMA error codes
+  // batchCheckErrors(Tensor, char*) calls 'infos = infos.to(kCPU)'
+  auto expected_batched_rhs_shape = IntArrayRef(input.sizes().data(), input.dim()-1);  // A.shape[:-1]
+  bool is_rhs_broadcasted = other.dim() == 1 || (input.dim()-1 == other.dim() && other.sizes().equals(expected_batched_rhs_shape));
+  if (is_rhs_broadcasted ? result.dim() > 1 : result.dim() > 2) {
+    batchCheckErrors(infos, "linalg_solve");
+  } else {
+    singleCheckErrors(infos.item().toInt(), "linalg_solve");
+  }
+
+  return result;
+}
+
+// Solves a system of linear equations matmul(input, x) = other
+Tensor linalg_solve(const Tensor& input, const Tensor& other) {
+  Tensor result = at::empty({0}, input.options());
+  result = at::linalg_solve_out(result, input, other);
+  return result;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -844,7 +944,9 @@ static void apply_orgqr(Tensor& self, const Tensor& tau, int64_t m, int64_t n_co
 #endif
 }
 
-std::tuple<Tensor, Tensor> _qr_helper_cpu(const Tensor& self, bool some) {
+std::tuple<Tensor, Tensor> _linalg_qr_helper_cpu(const Tensor& self, std::string mode) {
+  bool compute_q, reduced;
+  std::tie(compute_q, reduced) = _parse_qr_mode(mode);
   std::vector<int64_t> infos(batchCount(self), 0);
   int64_t m = self.size(-2), n = self.size(-1);
 
@@ -854,25 +956,22 @@ std::tuple<Tensor, Tensor> _qr_helper_cpu(const Tensor& self, bool some) {
   self_sizes[self.dim() - 2] = std::min(m, n);
   auto tau_working_copy = at::empty(self_sizes, self.options());
   Tensor q_working_copy;
+  Tensor R;
 
   // Setup input geometry for apply_orgqr
   std::vector<int64_t> q_sizes, q_strides;
   int64_t n_columns_q;
-  Tensor R;
-  std::tie(q_sizes, q_strides, n_columns_q) = _compute_geometry_for_Q(self, some);
+  std::tie(q_sizes, q_strides, n_columns_q) = _compute_geometry_for_Q(self, reduced);
 
   // If there are no elements, then we simply return a pair of tensors of required dimensions
   if (self.numel() == 0) {
-    // Fix the number of columns of q appropriately
-    q_sizes[self.dim() - 1] = n_columns_q;
-    q_working_copy = at::eye(q_sizes[self.dim() - 2], q_sizes[self.dim() - 1], self.options());
-    q_working_copy = q_working_copy.expand_as(q_working_copy);
-
-    // We repurpose the same q_sizes for R
-    // Fix the number of rows and columns of q_working_copy appropriately
-    q_sizes[self.dim() - 1] = n;
-    q_sizes[self.dim() - 2] = n_columns_q;
-    R = at::empty(q_sizes, self.options());
+    R = at::empty({n_columns_q, n}, self.options());
+    if (compute_q) {
+      int64_t n_rows_q = q_sizes[self.dim() - 2];
+      q_working_copy = at::eye(n_rows_q, n_columns_q, self.options());
+    } else {
+      q_working_copy = at::empty({0}, self.options());
+    }
     return std::make_tuple(q_working_copy, R);
   }
 
@@ -892,6 +991,11 @@ std::tuple<Tensor, Tensor> _qr_helper_cpu(const Tensor& self, bool some) {
   }
 
   R = q_working_copy.slice(-2, 0, n_columns_q).slice(-1, 0, n).triu();
+  if (!compute_q) {
+    // this is for mode='r'
+    Tensor empty_Q = at::empty({0}, self.options());
+    return std::make_tuple(empty_Q, R);
+  }
 
   // Next perform ORGQR for Q using the results (both raw R and TAU) from GEQRF
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "qr_cpu", [&]{
@@ -905,20 +1009,32 @@ std::tuple<Tensor, Tensor> _qr_helper_cpu(const Tensor& self, bool some) {
   return std::make_tuple(q_working_copy.narrow(-1, 0, n_columns_q), R);
 }
 
-std::tuple<Tensor,Tensor> qr(const Tensor& self, bool some) {
+std::tuple<Tensor,Tensor> linalg_qr(const Tensor& self, std::string mode) {
   TORCH_CHECK(self.dim() >= 2,
               "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
-  return at::_qr_helper(self, some);
+  return at::_linalg_qr_helper(self, mode);
 }
 
-std::tuple<Tensor&,Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& self, bool some) {
+std::tuple<Tensor&,Tensor&> linalg_qr_out(Tensor& Q, Tensor& R, const Tensor& self, std::string mode) {
   TORCH_CHECK(self.dim() >= 2,
               "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   Tensor Q_tmp, R_tmp;
-  std::tie(Q_tmp, R_tmp) = at::_qr_helper(self, some);
-  Q.resize_as_(Q_tmp).copy_(Q_tmp);
-  R.resize_as_(R_tmp).copy_(R_tmp);
+  std::tie(Q_tmp, R_tmp) = at::_linalg_qr_helper(self, mode);
+  at::native::resize_output(Q, Q_tmp.sizes());
+  Q.copy_(Q_tmp);
+  at::native::resize_output(R, R_tmp.sizes());
+  R.copy_(R_tmp);
   return std::tuple<Tensor&, Tensor&>(Q, R);
+}
+
+std::tuple<Tensor,Tensor> qr(const Tensor& self, bool some) {
+  std::string mode = some ? "reduced" : "complete";
+  return at::linalg_qr(self, mode);
+}
+
+std::tuple<Tensor&,Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& self, bool some) {
+  std::string mode = some ? "reduced" : "complete";
+  return at::linalg_qr_out(Q, R, self, mode);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ syevd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

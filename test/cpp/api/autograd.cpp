@@ -175,7 +175,7 @@ TEST(AutogradAPITests, AnomalyMode) {
     auto y = x.pow(1.5);
     auto gr =
         grad({y}, {x}, {}, /*retain_graph=*/true, /*create_backward=*/true);
-    ASSERT_THROWS_WITH(grad({gr[0]}, {x});, "returned nan");
+    ASSERT_THROWS_WITH(grad({gr[0]}, {x}, {torch::tensor({0.0})});, "returned nan");
     auto msgs = warnings.messages();
     ASSERT_EQ(msgs.size(), 2);
     ASSERT_TRUE(

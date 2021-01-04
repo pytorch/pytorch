@@ -17,7 +17,7 @@ class AveragedModel(Module):
     on the device :attr:`device` and allows to compute running averages of the 
     parameters of the :attr:`model`.
 
-    Arguments:
+    Args:
         model (torch.nn.Module): model to use with SWA
         device (torch.device, optional): if provided, the averaged model will be
             stored on the :attr:`device` 
@@ -117,7 +117,7 @@ def update_bn(loader, model, device=None):
 
     It performs one pass over data in `loader` to estimate the activation
     statistics for BatchNorm layers in the model.
-    Arguments:
+    Args:
         loader (torch.utils.data.DataLoader): dataset loader to compute the
             activation statistics on. Each data batch should be either a
             tensor, or a list/tuple whose first element is a tensor
@@ -172,7 +172,7 @@ class SWALR(_LRScheduler):
     This learning rate scheduler is meant to be used with Stochastic Weight 
     Averaging (SWA) method (see `torch.optim.swa_utils.AveragedModel`).
 
-    Arguments:
+    Args:
         optimizer (torch.optim.Optimizer): wrapped optimizer
         swa_lrs (float or list): the learning rate value for all param groups
             together or separately for each group.
