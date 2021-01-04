@@ -688,6 +688,11 @@ Example::
     tensor([[ 1.,  0.,  0.],
             [ 0.,  1., -0.],
             [ 0., -0.,  1.]])
+    >>> q2, r2 = torch.linalg.qr(a, mode='r')
+    >>> q2
+    tensor([])
+    >>> torch.equal(r, r2)
+    True
     >>> a = torch.randn(3, 4, 5)
     >>> q, r = torch.linalg.qr(a, mode='complete')
     >>> torch.allclose(torch.matmul(q, r), a)
