@@ -912,24 +912,30 @@ class Module:
             self._non_persistent_buffers_set = set()
         if '_is_full_backward_hook' not in self.__dict__:
             self._is_full_backward_hook = None
+    
+    def __getattribute__(self, name: str) -> Any:
+        try:
+            return super().__getattribute__(name)
+        except AttributeError as e:
+            # If the attribute doesn't exist, look for a parameter, buffer, or module
+            # with the name.
+            if '_parameters' in self.__dict__:
+                _parameters = self.__dict__['_parameters']
+                if name in _parameters:
+                    return _parameters[name]
+            if '_buffers' in self.__dict__:
+                _buffers = self.__dict__['_buffers']
+                if name in _buffers:
+                    return _buffers[name]
+            if '_modules' in self.__dict__:
+                modules = self.__dict__['_modules']
+                if name in modules:
+                    return modules[name]
 
-    def __getattr__(self, name: str) -> Union[Tensor, 'Module']:
-        if '_parameters' in self.__dict__:
-            _parameters = self.__dict__['_parameters']
-            if name in _parameters:
-                return _parameters[name]
-        if '_buffers' in self.__dict__:
-            _buffers = self.__dict__['_buffers']
-            if name in _buffers:
-                return _buffers[name]
-        if '_modules' in self.__dict__:
-            modules = self.__dict__['_modules']
-            if name in modules:
-                return modules[name]
-        # prevent raising AttributeError for function when local variables raise AttributeError
-        # and the __getattr__ is recalled. Instead, raise AttributeError for the local variable
-        # related Python issue: https://bugs.python.org/issue37379
-        super().__getattribute__(name)
+            # Note: Purposely reuse the specific error thrown from the original attempt to
+            # access the property. This ensures that the error message is correct for the
+            # case where a property method attempts to call a non-existent property, for example.
+            raise e
 
     def __setattr__(self, name: str, value: Union[Tensor, 'Module']) -> None:
         def remove_from(*dicts_or_sets):
