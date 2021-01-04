@@ -21,5 +21,19 @@ Tensor PixelShuffleImpl::forward(
   return F::detail::pixel_shuffle(input, options.upscale_factor());
 }
 
+PixelUnshuffleImpl::PixelUnshuffleImpl(const PixelUnshuffleOptions& options_)
+    : options(options_) {}
+
+void PixelUnshuffleImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::PixelUnshuffle(downscale_factor="
+         << options.downscale_factor() << ")";
+}
+
+void PixelUnshuffleImpl::reset() {}
+
+Tensor PixelUnshuffleImpl::forward(const Tensor& input) {
+  return F::detail::pixel_unshuffle(input, options.downscale_factor());
+}
+
 } // namespace nn
 } // namespace torch
