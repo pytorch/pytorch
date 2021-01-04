@@ -183,8 +183,8 @@ struct ControlFlowLoadStores {
   std::shared_ptr<TypeEnvironment> environment_stack = nullptr;
 };
 
-// Given a graph where outputs have been added to control flow nodes, and
-// loads and stores are represented in the graph, erases the Loads & Stores.
+// Given a graph where 1) outputs have been added to control flow nodes and
+// 2) loads and stores are represented in the graph, erase the Loads & Stores.
 struct EraseLoadStores {
   void eraseBlockLoadStores(Block* block) {
     pushFrame(block);

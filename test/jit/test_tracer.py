@@ -15,7 +15,7 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.common_utils import suppress_warnings, \
     skipIfCompiledWithoutNumpy, enable_profiling_mode_for_profiling_tests, \
-    IS_SANDCASTLE, IS_WINDOWS
+    IS_SANDCASTLE, TemporaryFileName
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, \
     _tmp_donotuse_dont_inline_everything, _trace, RUN_CUDA, RUN_CUDA_MULTI_GPU
 from torch.testing._internal.common_cuda import with_tf32_off
@@ -25,7 +25,6 @@ from torch import Tensor
 # Standard library
 from collections import namedtuple
 from itertools import chain
-import tempfile
 from typing import Dict
 import warnings
 
@@ -1215,15 +1214,14 @@ class TestTracer(JitTestCase):
         self.run_pass('inline', traced_tensor_size.graph)
         FileCheck().check("prim::device").run(traced_tensor_size.graph)
 
-    @unittest.skipIf(IS_WINDOWS, "temp file name on windows")
     def test_trace_save(self):
         def fn(x):
             return x + 2
 
         def check(func):
-            with tempfile.NamedTemporaryFile() as f:
-                func.save(f.name)
-                loaded = torch.jit.load(f.name)
+            with TemporaryFileName() as fname:
+                func.save(fname)
+                loaded = torch.jit.load(fname)
                 input = torch.randn(2, 2)
                 self.assertEqual(func(input), loaded(input))
 
@@ -1845,6 +1843,20 @@ class TestTracer(JitTestCase):
             return x + param
         with self.assertRaisesRegex(RuntimeError, r"Type 'Tuple\[int\]' cannot be traced"):
             torch.jit.trace(f, (1,))
+
+    def test_trace_skip_none_submodule(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.submod = torch.nn.Linear(3, 4)
+                self.submod = None
+
+            def forward(self, inputs):
+                return inputs
+
+        m = TestModule()
+        tm = torch.jit.trace(m, torch.tensor(1.))
+        self.assertFalse(hasattr(tm, "submod"))
 
 
 class TestMixTracingScripting(JitTestCase):

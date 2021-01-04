@@ -126,7 +126,7 @@ struct C10_API DeviceGuardImplInterface {
 /**
  * Increments the event's version and enqueues a job with this version
  * in the stream's work queue. When the stream process that job
- * it nofifies all streams waiting on / blocked by that version of the
+ * it notifies all streams waiting on / blocked by that version of the
  * event to continue and marks that version as recorded.
  * */
   virtual void record(

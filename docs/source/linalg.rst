@@ -22,3 +22,4 @@ Functions
 .. autofunction:: solve
 .. autofunction:: tensorinv
 .. autofunction:: tensorsolve
+.. autofunction:: qr
