@@ -152,7 +152,7 @@ public:
   static std::tuple<int, int> priority_range() {
       // Note: this returns the range of priority **supported by PyTorch**, not
       // the range of priority **supported by CUDA**. The former is a subset of
-      // the latter. Curently PyTorch only supports 0 and -1, which are "low" and
+      // the latter. Currently PyTorch only supports 0 and -1, which are "low" and
       // "high" priority.
       int least_priority, greatest_priority;
       C10_CUDA_CHECK(

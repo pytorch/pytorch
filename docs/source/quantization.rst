@@ -530,6 +530,71 @@ Best Practices
    ``fbgemm`` backend.  This argument prevents overflow on some int8 instructions
    by reducing the range of quantized data type by 1 bit.
 
+Common Errors
+---------------------------------------
+
+Passing a non-quantized Tensor into a quantized kernel
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If you see an error similar to::
+
+  RuntimeError: Could not run 'quantized::some_operator' with arguments from the 'CPU' backend...
+
+This means that you are trying to pass a non-quantized Tensor to a quantized
+kernel. A common workaround is to use ``torch.quantization.QuantStub`` to
+quantize the tensor.  This needs to be done manually in Eager mode quantization.
+An e2e example::
+
+  class M(torch.nn.Module):
+      def __init__(self):
+          super().__init__()
+          self.quant = torch.quantization.QuantStub()
+          self.conv = torch.nn.Conv2d(1, 1, 1)
+
+      def forward(self, x):
+          # during the convert step, this will be replaced with a
+          # `quantize_per_tensor` call
+          x = self.quant(x)
+          x = self.conv(x)
+          return x
+
+Passing a quantized Tensor into a non-quantized kernel
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If you see an error similar to::
+
+  RuntimeError: Could not run 'aten::thnn_conv2d_forward' with arguments from the 'QuantizedCPU' backend.
+
+This means that you are trying to pass a quantized Tensor to a non-quantized
+kernel. A common workaround is to use ``torch.quantization.DeQuantStub`` to
+dequantize the tensor.  This needs to be done manually in Eager mode quantization.
+An e2e example::
+
+  class M(torch.nn.Module):
+      def __init__(self):
+          super().__init__()
+          self.quant = torch.quantization.QuantStub()
+          self.conv1 = torch.nn.Conv2d(1, 1, 1)
+          # this module will not be quantized (see `qconfig = None` logic below)
+          self.conv2 = torch.nn.Conv2d(1, 1, 1)
+          self.dequant = torch.quantization.DeQuantStub()
+
+      def forward(self, x):
+          # during the convert step, this will be replaced with a
+          # `quantize_per_tensor` call
+          x = self.quant(x)
+          x = self.conv1(x)
+          # during the convert step, this will be replaced with a
+          # `dequantize` call
+          x = self.dequant(x)
+          x = self.conv2(x)
+          return x
+
+  m = M()
+  m.qconfig = some_qconfig
+  # turn off quantization for conv2
+  m.conv2.qconfig = None
+
 
 Modules that provide quantization functions and classes
 -------------------------------------------------------
