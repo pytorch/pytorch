@@ -2316,7 +2316,7 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
     return ret
 
 
-def gaussian_nll_loss(input, target, var, eps=1e-8, full=True, reduction='mean'):
+def gaussian_nll_loss(input, target, var, *, eps=1e-6, full=True, reduction='mean'):
     r"""Gaussian negative log likelihood loss.
 
     See :class:`~torch.nn.GaussianNLLLoss` for details.
@@ -2326,7 +2326,7 @@ def gaussian_nll_loss(input, target, var, eps=1e-8, full=True, reduction='mean')
         target: sample from the Gaussian distribution.
         var: tensor of positive variance(s), one for each of the expectations
         in the input (heteroscedastic), or a single one (homoscedastic).
-        eps: value added to var, for stability.
+        eps: value added to var, for stability. Default: 1e-6.
         full: ``True``/``False`` (bool), include the constant term in the loss
             calculation. Default: ``False``.
         reduction: specifies the reduction to apply to the output:

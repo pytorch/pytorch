@@ -304,7 +304,7 @@ class GaussianNLLLoss(_Loss):
     .. math::
     target \sim \mathcal{N}(input, var)
 
-    the full loss can be described as:
+    The full loss can be described as:
     .. math::
     \text{loss}[i] = \frac{1}{2}\sum_{j=1}^D \left(\log(\text{var}[i, j] + \epsilon) 
      + \frac{\left(\text{input}[i,j] - \text{target}[i,j]\right)^2}{\text{var}[i,j]} \right)
@@ -341,7 +341,7 @@ class GaussianNLLLoss(_Loss):
     full: bool
     eps: float
 
-    def __init__(self, full: bool = False, eps: float = 1e-8, reduction: str = 'mean') -> None:
+    def __init__(self, full: bool = False, eps: float = 1e-6, reduction: str = 'mean') -> None:
         super(GaussianNLLLoss, self).__init__(reduction)
         self.full = full
         self.eps = eps
