@@ -259,6 +259,8 @@ Tensor& take_out_cuda(Tensor& out, const Tensor& self, const Tensor& index) {
     return out;
 }
 
+namespace {
+
 template <typename mask_t>
 void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& source){
   ptrdiff_t srcSize = source.numel();
@@ -324,6 +326,8 @@ void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& so
         cudaGetLastError();
       });
 }
+
+} // anonymous namespace
 
 Tensor & masked_scatter__cuda(Tensor& self, const Tensor& mask, const Tensor& source) {
   at::assert_no_internal_overlap(self);
