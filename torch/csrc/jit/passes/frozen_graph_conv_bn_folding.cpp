@@ -26,17 +26,22 @@ bool supportedConvNode(Node* n) {
     case aten::conv1d:
     case aten::conv2d:
     case aten::conv3d:
-    case aten::_convolution:
       return true;
+    case aten::_convolution: {
+      auto transposed_conv =
+          constant_as<bool>(n->namedInput("transposed")).value_or(true);
+      // dont handle transposed conv yet or not-constant transpose parameter
+      return !transposed_conv;
+    }
     default:
       return false;
   }
 }
 
-void FoldConvBatchnorm(Block* b) {
+void FoldFrozenConvBatchnorm(Block* b) {
   for (Node* n : b->nodes()) {
     for (Block* block : n->blocks()) {
-      FoldConvBatchnorm(block);
+      FoldFrozenConvBatchnorm(block);
     }
 
     if (n->kind() == aten::batch_norm &&
@@ -102,8 +107,8 @@ void FoldConvBatchnorm(Block* b) {
   }
 }
 
-void FoldConvBatchnorm(std::shared_ptr<Graph>& graph) {
-  FoldConvBatchnorm(graph->block());
+void FoldFrozenConvBatchnorm(std::shared_ptr<Graph>& graph) {
+  FoldFrozenConvBatchnorm(graph->block());
   EliminateDeadCode(graph);
 }
 

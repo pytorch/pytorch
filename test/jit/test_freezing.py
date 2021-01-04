@@ -1379,11 +1379,11 @@ class TestFrozenOptimizations(JitTestCase):
 
             FileCheck().check("conv").check("batch").run(scripted_mod.graph)
             # successively no-ops with non-const inputs
-            self.run_pass("frozen_conv_bn_folding", scripted_mod.graph)
+            self.run_pass("fold_frozen_conv_bn", scripted_mod.graph)
             FileCheck().check("conv").check("aten::batch_norm").run(scripted_mod.graph)
 
             scripted_mod = torch.jit.freeze(scripted_mod)
-            self.run_pass("frozen_conv_bn_folding", scripted_mod.graph)
+            self.run_pass("fold_frozen_conv_bn", scripted_mod.graph)
             FileCheck().check("conv").check_not("aten::batch_norm").run(scripted_mod.graph)
 
             self.assertEqual(mod_eager(inp), scripted_mod(inp))
