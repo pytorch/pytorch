@@ -6667,8 +6667,7 @@ If :attr:`some` is ``True``, then this function returns the thin (reduced) QR fa
 Otherwise, if :attr:`some` is ``False``, this function returns the complete QR factorization.
 
 .. warning:: ``torch.qr`` is deprecated. Please use ``torch.linalg.`` :func:`~torch.linalg.qr`
-             instead, which provides a better compatibility with
-             ``numpy.linalg.qr``.
+             instead.
 
              **Differences with** ``torch.linalg.qr``:
 
@@ -6688,8 +6687,7 @@ Otherwise, if :attr:`some` is ``False``, this function returns the complete QR f
 
 .. note:: This function uses LAPACK for CPU inputs and MAGMA for CUDA inputs,
           and may produce different (valid) decompositions on different device types
-          and different platforms, depending on the precise version of the
-          underlying library.
+          or different platforms.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
