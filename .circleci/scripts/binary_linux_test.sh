@@ -51,7 +51,14 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
     else
       cu_ver="${DESIRED_CUDA:2:2}.${DESIRED_CUDA:4}"
     fi
-    retry conda install \${EXTRA_CONDA_FLAGS} -yq -c nvidia -c pytorch "cudatoolkit=\${cu_ver}"
+    (
+      # For some reason conda likes to re-activate the conda environment when attempting this install
+      # which means that a deactivate is run and some variables might not exist when that happens,
+      # namely CONDA_MKL_INTERFACE_LAYER_BACKUP from libblas so let's just ignore unbound variables when
+      # it comes to the conda installation commands
+      set +u
+      retry conda install \${EXTRA_CONDA_FLAGS} -yq -c nvidia -c pytorch "cudatoolkit=\${cu_ver}"
+    )
   fi
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   pip install "\$pkg"
