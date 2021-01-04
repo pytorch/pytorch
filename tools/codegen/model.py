@@ -171,7 +171,7 @@ class NativeFunction:
 
         use_c10_dispatcher_s = e.pop('use_c10_dispatcher', None)
         if use_c10_dispatcher_s is None:
-            use_c10_dispatcher = UseC10Dispatcher.with_codegenerated_unboxing_wrapper
+            use_c10_dispatcher = UseC10Dispatcher.full
         elif use_c10_dispatcher_s == 'full':
             use_c10_dispatcher = UseC10Dispatcher.full
         elif use_c10_dispatcher_s == 'hacky_wrapper_for_legacy_signatures':
