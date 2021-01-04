@@ -74,22 +74,12 @@ static void min_all_kernel_impl(Tensor& result, const Tensor& input) {
     reduce_all_impl<int64_t>(result, input, upper_bound<int64_t>(),
       [=](int64_t a, int64_t b) -> int64_t { return min_impl(a, b); });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
-        at::ScalarType::Half,
-        at::ScalarType::BFloat16,
-        input.scalar_type(),
-        "min_all",
-        [&] {
-          using Vec = vec256::Vec256<scalar_t>;
-          reduce_all_impl_vec<scalar_t>(
-              result,
-              input,
-              upper_bound<scalar_t>(),
-              [=](scalar_t a, scalar_t b) -> scalar_t {
-                return min_impl(a, b);
-              },
-              [=](Vec a, Vec b) -> Vec { return minimum(a, b); });
-        });
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(input.scalar_type(), "min_all", [&] {
+      using Vec = vec256::Vec256<scalar_t>;
+      reduce_all_impl_vec<scalar_t>(result, input, upper_bound<scalar_t>(),
+        [=] (scalar_t a , scalar_t b) -> scalar_t { return min_impl(a, b); },
+        [=](Vec a, Vec b) -> Vec { return minimum(a, b); });
+    });
   }
 }
 
@@ -109,22 +99,12 @@ static void max_all_kernel_impl(Tensor& result, const Tensor& input) {
     reduce_all_impl<int64_t>(result, input, lower_bound<int64_t>(),
       [=](int64_t a, int64_t b) -> int64_t { return max_impl(a, b); });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
-        at::ScalarType::Half,
-        at::ScalarType::BFloat16,
-        input.scalar_type(),
-        "max_all",
-        [&] {
-          using Vec = vec256::Vec256<scalar_t>;
-          reduce_all_impl_vec<scalar_t>(
-              result,
-              input,
-              lower_bound<scalar_t>(),
-              [=](scalar_t a, scalar_t b) -> scalar_t {
-                return max_impl(a, b);
-              },
-              [=](Vec a, Vec b) -> Vec { return maximum(a, b); });
-        });
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(input.scalar_type(), "max_all", [&] {
+      using Vec = vec256::Vec256<scalar_t>;
+      reduce_all_impl_vec<scalar_t>(result, input, lower_bound<scalar_t>(),
+        [=] (scalar_t a , scalar_t b) -> scalar_t { return max_impl(a, b); },
+        [=](Vec a, Vec b) -> Vec { return maximum(a, b); });
+    });
   }
 }
 
@@ -213,26 +193,22 @@ static void _aminmax_all_kernel_impl(Tensor& min_result, Tensor& max_result,
       }
     );
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
-        at::ScalarType::Half,
-        at::ScalarType::BFloat16,
-        input.scalar_type(),
-        "_aminmax_all_all",
-        [&] {
-          using Vec = vec256::Vec256<scalar_t>;
-          using scalar_t_pair = std::pair<scalar_t, scalar_t>;
-          reduce_all_impl_vec_two_outputs<scalar_t>(
-              min_result,
-              max_result,
-              input,
-              scalar_t_pair(upper_bound<scalar_t>(), lower_bound<scalar_t>()),
-              [=](scalar_t_pair a, scalar_t_pair b) -> scalar_t_pair {
-                return scalar_t_pair(
-                    min_impl(a.first, b.first), max_impl(a.second, b.second));
-              },
-              [=](Vec a, Vec b) -> Vec { return minimum(a, b); },
-              [=](Vec a, Vec b) -> Vec { return maximum(a, b); });
-        });
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(input.scalar_type(), "_aminmax_all_all", [&] {
+      using Vec = vec256::Vec256<scalar_t>;
+      using scalar_t_pair = std::pair<scalar_t, scalar_t>;
+      reduce_all_impl_vec_two_outputs<scalar_t>(
+        min_result,
+        max_result,
+        input,
+        scalar_t_pair(upper_bound<scalar_t>(), lower_bound<scalar_t>()),
+        [=] (scalar_t_pair a , scalar_t_pair b) -> scalar_t_pair {
+          return scalar_t_pair(
+            min_impl(a.first, b.first), max_impl(a.second, b.second));
+        },
+        [=](Vec a, Vec b) -> Vec { return minimum(a, b); },
+        [=](Vec a, Vec b) -> Vec { return maximum(a, b); }
+      );
+    });
   }
 }
 

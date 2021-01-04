@@ -81,41 +81,29 @@ static void min_kernel_impl(
   TORCH_CHECK(result.scalar_type() == self.scalar_type() && indice.scalar_type() == kLong,
     "Expect dtype ", self.scalar_type(), "and torch.long, but got ", result.scalar_type(), "and", indice.scalar_type());
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      ScalarType::Half,
-      ScalarType::BFloat16,
-      ScalarType::Bool,
-      self.scalar_type(),
-      "min_cpu",
-      [&] {
-        compare_base_kernel<scalar_t>(
-            result,
-            indice,
-            self,
-            wrap_dim,
-            keepdim,
-            [&](scalar_t* result_data,
-                int64_t* indice_data,
-                const scalar_t* self_data,
-                auto self_dim_stride) {
-              using value_t = typename c10::scalar_value_type<scalar_t>::type;
-              value_t (*zabs_)(scalar_t) = zabs<scalar_t, value_t>;
-              scalar_t min_number = self_data[0];
-              int64_t index = 0;
-              for (int64_t i = 0; i < self_dim_size; ++i) {
-                scalar_t value = self_data[i * self_dim_stride];
-                if (!(zabs_(value) >= zabs_(min_number))) {
-                  min_number = value;
-                  index = i;
-                  if (_isnan<scalar_t>(value)) {
-                    break;
-                  }
-                }
-              }
-              *result_data = min_number;
-              *indice_data = index;
-            });
-      });
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(ScalarType::Bool, self.scalar_type(), "min_cpu", [&] {
+    compare_base_kernel<scalar_t>(result, indice, self, wrap_dim, keepdim, [&] (
+      scalar_t* result_data, int64_t* indice_data,
+      const scalar_t* self_data, auto self_dim_stride) {
+        using value_t = typename c10::scalar_value_type<scalar_t>::type;
+        value_t (*zabs_)(scalar_t) = zabs<scalar_t, value_t>;
+        scalar_t min_number = self_data[0];
+        int64_t index = 0;
+        for (int64_t i = 0; i < self_dim_size; ++i) {
+          scalar_t value = self_data[i * self_dim_stride];
+          if (!(zabs_(value) >= zabs_(min_number))) {
+            min_number = value;
+            index = i;
+            if (_isnan<scalar_t>(value)) {
+              break;
+            }
+          }
+        }
+        *result_data = min_number;
+        *indice_data = index;
+      }
+    );
+  });
 }
 
 static void max_kernel_impl(
@@ -130,41 +118,29 @@ static void max_kernel_impl(
   TORCH_CHECK(result.scalar_type() == self.scalar_type() && indice.scalar_type() == kLong,
     "Expect dtype ", self.scalar_type(), "and torch.long, but got ", result.scalar_type(), "and", indice.scalar_type());
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      ScalarType::Half,
-      ScalarType::BFloat16,
-      ScalarType::Bool,
-      self.scalar_type(),
-      "max_cpu",
-      [&] {
-        compare_base_kernel<scalar_t>(
-            result,
-            indice,
-            self,
-            wrap_dim,
-            keepdim,
-            [&](scalar_t* result_data,
-                int64_t* indice_data,
-                const scalar_t* self_data,
-                auto self_dim_stride) {
-              using value_t = typename c10::scalar_value_type<scalar_t>::type;
-              value_t (*zabs_)(scalar_t) = zabs<scalar_t, value_t>;
-              scalar_t max_number = self_data[0];
-              int64_t index = 0;
-              for (int64_t i = 0; i < self_dim_size; ++i) {
-                scalar_t value = self_data[i * self_dim_stride];
-                if (!(zabs_(value) <= zabs_(max_number))) {
-                  max_number = value;
-                  index = i;
-                  if (_isnan<scalar_t>(value)) {
-                    break;
-                  }
-                }
-              }
-              *result_data = max_number;
-              *indice_data = index;
-            });
-      });
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(ScalarType::Bool, self.scalar_type(), "max_cpu", [&] {
+    compare_base_kernel<scalar_t>(result, indice, self, wrap_dim, keepdim, [&] (
+      scalar_t* result_data, int64_t* indice_data,
+      const scalar_t* self_data, auto self_dim_stride) {
+        using value_t = typename c10::scalar_value_type<scalar_t>::type;
+        value_t (*zabs_)(scalar_t) = zabs<scalar_t, value_t>;
+        scalar_t max_number = self_data[0];
+        int64_t index = 0;
+        for (int64_t i = 0; i < self_dim_size; ++i) {
+          scalar_t value = self_data[i * self_dim_stride];
+          if (!(zabs_(value) <= zabs_(max_number))) {
+            max_number = value;
+            index = i;
+            if (_isnan<scalar_t>(value)) {
+              break;
+            }
+          }
+        }
+        *result_data = max_number;
+        *indice_data = index;
+      }
+    );
+  });
 }
 
 static void _aminmax_kernel_impl(
@@ -180,42 +156,30 @@ static void _aminmax_kernel_impl(
     "Expect min and max dtype ", self.scalar_type(),
     " but got ", min_result.scalar_type(), " and ", max_result.scalar_type());
 
-  AT_DISPATCH_ALL_TYPES_AND3(
-      ScalarType::Half,
-      ScalarType::BFloat16,
-      ScalarType::Bool,
-      self.scalar_type(),
-      "_aminmax_cpu",
-      [&] {
-        compare_base_kernel<scalar_t, scalar_t>(
-            min_result,
-            max_result,
-            self,
-            wrap_dim,
-            keepdim,
-            [&](scalar_t* min_result_data,
-                scalar_t* max_result_data,
-                const scalar_t* self_data,
-                auto self_dim_stride) {
-              scalar_t min_number = self_data[0];
-              scalar_t max_number = self_data[0];
-              for (int64_t i = 0; i < self_dim_size; ++i) {
-                scalar_t value = self_data[i * self_dim_stride];
-                // note: comparison is written this way to handle NaN correctly
-                if (!(value >= min_number)) {
-                  min_number = value;
-                  if (_isnan<scalar_t>(value)) {
-                    max_number = value;
-                    break;
-                  }
-                } else if (!(value <= max_number)) {
-                  max_number = value;
-                }
-              }
-              *min_result_data = min_number;
-              *max_result_data = max_number;
-            });
-      });
+  AT_DISPATCH_ALL_TYPES_AND(ScalarType::Bool, self.scalar_type(), "_aminmax_cpu", [&] {
+    compare_base_kernel<scalar_t, scalar_t>(min_result, max_result, self, wrap_dim, keepdim, [&] (
+      scalar_t* min_result_data, scalar_t* max_result_data,
+      const scalar_t* self_data, auto self_dim_stride) {
+        scalar_t min_number = self_data[0];
+        scalar_t max_number = self_data[0];
+        for (int64_t i = 0; i < self_dim_size; ++i) {
+          scalar_t value = self_data[i * self_dim_stride];
+          // note: comparison is written this way to handle NaN correctly
+          if (!(value >= min_number)) {
+            min_number = value;
+            if (_isnan<scalar_t>(value)) {
+              max_number = value;
+              break;
+            }
+          } else if (!(value <= max_number)) {
+            max_number = value;
+          }
+        }
+        *min_result_data = min_number;
+        *max_result_data = max_number;
+      }
+    );
+  });
 }
 
 static void where_kernel_impl(TensorIterator &iter, ScalarType condition_type) {

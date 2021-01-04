@@ -9,7 +9,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, make_tensor)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyOnCPUAndCUDA,
-     skipCUDAIfRocm, onlyCUDA)
+     skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA)
 
 # TODO: remove this
 SIZE = 100
@@ -433,7 +433,8 @@ class TestSortAndSelect(TestCase):
         self.assertEqual(sort_topk, topk[0])      # check values
         self.assertEqual(sort_topk, a[topk[1]])   # check indices
 
-    @dtypes(*torch.testing.get_all_fp_dtypes())
+    @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
+    @dtypes(torch.float, torch.double)
     def test_topk_nonfinite(self, device, dtype):
         x = torch.tensor([float('nan'), float('inf'), 1e4, 0, -1e4, -float('inf')], device=device, dtype=dtype)
         val, idx = x.topk(4)
@@ -446,8 +447,7 @@ class TestSortAndSelect(TestCase):
         self.assertEqual(val, expect)
         self.assertEqual(idx, [5, 4, 3, 2])
 
-    @dtypes(*torch.testing.get_all_fp_dtypes())
-    def test_topk_4d(self, device, dtype):
+    def test_topk_4d(self, device):
         x = torch.ones(2, 3072, 2, 2, device=device)
         x[:, 1, :, :] *= 2.
         x[:, 10, :, :] *= 1.5

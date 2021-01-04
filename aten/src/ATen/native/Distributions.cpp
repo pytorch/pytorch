@@ -496,6 +496,10 @@ Tensor& multinomial_out(
   // Fast-path for no replacement.
   // Reference:
   // https://github.com/pytorch/pytorch/issues/11931#issuecomment-625882503
+  // Half is not supported on CPU.
+  TORCH_CHECK(
+      !(self.device().is_cpu() && self.scalar_type() == ScalarType::Half),
+      "multinomial is not implemented for half on CPU");
   if (!with_replacement) {
     // Sanity checks on `self`.
     auto is_valid = ((self.max() < INFINITY) & (self.min() >= 0)).item();
