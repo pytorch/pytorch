@@ -903,6 +903,16 @@ You'll need to install an appropriately configured flake8; see
 [Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type)
 for documentation on how to do this.
 
+If you haven't set up the pre-commit hook and have already committed files and 
+CI reports `flake8` errors, you can run the check locally in your PR branch with:
+
+  ```bash
+  flake8 $(git diff --name-only $(git merge-base --fork-point master))
+  ```
+
+fix the code so that no errors are reported when you re-run the above check again, 
+and then commit the fix.
+
 ## Building PyTorch with ASAN
 
 [ASAN](https://github.com/google/sanitizers/wiki/AddressSanitizer) is very
