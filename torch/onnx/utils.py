@@ -831,7 +831,7 @@ def _graph_op(g, opname, *raw_args, **kwargs):
 
     This function is monkey-patched onto Graph.
 
-    Arguments:
+    Args:
         opname (string): The ONNX operator name, e.g., `Abs` or `Add`.
         args (Node...): The inputs to the operator; usually provided
             as arguments to the `symbolic` definition.
