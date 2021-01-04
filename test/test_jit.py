@@ -35,6 +35,7 @@ from jit.test_profiler import TestProfiler  # noqa: F401
 from jit.test_slice import TestSlice  # noqa: F401
 from jit.test_warn import TestWarn  # noqa: F401
 from jit.test_isinstance import TestIsinstance  # noqa: F401
+from jit.test_cuda import TestCUDA  # noqa: F401
 from jit.test_hash import TestHash  # noqa: F401
 
 # Torch
@@ -2393,8 +2394,7 @@ graph(%Ra, %Rb):
         warns = [str(w.message) for w in warns]
         self.assertEqual(len(warns), 0)
 
-    @unittest.skipIf(IS_WINDOWS or True, "TODO: need to fix this test case for "
-                                         "Windows, re-enable with https://github.com/pytorch/pytorch/pull/29339")
+    @unittest.skipIf(True, "TODO: re-enable with https://github.com/pytorch/pytorch/pull/29339")
     def test_torch_load_error(self):
         class J(torch.jit.ScriptModule):
             def __init__(self):
@@ -2405,20 +2405,20 @@ graph(%Ra, %Rb):
                 return input + 100
 
         j = J()
-        with tempfile.NamedTemporaryFile() as f:
-            j.save(f.name)
+        with TemporaryFileName() as fname:
+            j.save(fname)
             with self.assertRaisesRegex(RuntimeError, "is a zip"):
-                torch.load(f.name)
+                torch.load(fname)
 
-    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     def test_torch_load_zipfile_check(self):
         @torch.jit.script
         def fn(x):
             return x + 10
 
-        with tempfile.NamedTemporaryFile() as f:
-            fn.save(f.name)
-            self.assertTrue(torch.serialization._is_zipfile(f))
+        with TemporaryFileName() as fname:
+            fn.save(fname)
+            with io.open(fname, 'rb') as f:
+                self.assertTrue(torch.serialization._is_zipfile(f))
 
     def test_python_bindings(self):
         lstm_cell = torch.jit.script(LSTMCellS)
@@ -6752,6 +6752,11 @@ a")
             return result
 
         self.checkScript(complicated_arithmetic_operation, ())
+
+    def test_in_operator_with_two_strings(self):
+        def fn() -> bool:
+            return "a" in "abcd"
+        self.checkScript(fn, ())
 
     def test_bitwise_ops(self):
 

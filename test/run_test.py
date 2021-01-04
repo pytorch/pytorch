@@ -19,6 +19,7 @@ import torch.distributed as dist
 from typing import Dict, Optional
 
 TESTS = [
+    'test_type_hints',
     'test_autograd',
     'benchmark_utils/test_benchmark_utils',
     'test_binary_ufuncs',
@@ -72,7 +73,6 @@ TESTS = [
     'test_testing',
     'test_torch',
     'test_type_info',
-    'test_type_hints',
     'test_unary_ufuncs',
     'test_utils',
     'test_view_ops',
@@ -617,7 +617,7 @@ def find_test_index(test, selected_tests, find_last_index=False):
     If :attr:`test`='torch' and :attr:`find_last_index`=False, result should be **2**.
     If :attr:`test`='torch' and :attr:`find_last_index`=True, result should be **4**.
 
-    Arguments:
+    Args:
         test (str): Name of test to lookup
         selected_tests (list): List of tests
         find_last_index (bool, optional): should we lookup the index of first or last
