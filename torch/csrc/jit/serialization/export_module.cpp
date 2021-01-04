@@ -340,7 +340,8 @@ class ScriptModuleSerializer {
     std::vector<IValue> ivalue_constants(
         constant_table_.begin(), constant_table_.end());
 
-    std::unordered_map<at::Tensor, int, MyHash, MyEqual> constants_from_jit;
+    std::unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>
+        constants_from_jit;
 
     for (size_t i = 0; i < ivalue_constants.size(); i++) {
       if (ivalue_constants[i].isTensor() &&
@@ -366,7 +367,7 @@ class ScriptModuleSerializer {
   void writeArchive(const std::string& archive_name, const IValue& value) {
     std::vector<char> data;
     // Vector to capture the run-time class types during pickling the IValues
-    std::vector<c10::ClassTypePtr> memorizedClassTypes;
+    std::vector<c10::ClassTypePtr> memoizedClassTypes;
     Pickler data_pickle(
         [&](const char* buf, size_t size) {
           data.insert(data.end(), buf, buf + size);
@@ -375,7 +376,7 @@ class ScriptModuleSerializer {
         [&](const c10::ClassTypePtr& t) {
           return type_name_uniquer_.getUniqueName(t);
         },
-        &memorizedClassTypes);
+        &memoizedClassTypes);
     data_pickle.protocol();
     data_pickle.pushIValue(value);
     data_pickle.stop();
@@ -390,7 +391,7 @@ class ScriptModuleSerializer {
     writer_.writeRecord(fname, data.data(), data.size());
 
     // serialize all the captured run-time class types
-    for (const c10::ClassTypePtr& wroteType : memorizedClassTypes) {
+    for (const c10::ClassTypePtr& wroteType : memoizedClassTypes) {
       convertNamedType(wroteType);
     }
   }
@@ -480,39 +481,108 @@ class ScriptModuleSerializer {
     }
   }
 
+  //  Remove the tensor Ivalue in elements "constants" field if they exist in
+  //  constants_from_jit
   std::vector<IValue> deduplicate_constants(
       std::vector<IValue>& elements,
-      const std::unordered_map<at::Tensor, int, MyHash, MyEqual>&
-          constants_from_jit) {
+      const std::
+          unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>&
+              constants_from_jit) {
     std::vector<IValue> deduplicated_elements;
 
+    //    The following three variables are used to locate the "constants"
+    //    fields in elements
     bool is_constant_element = false;
     c10::ivalue::ConstantString constants_str("constants");
     auto constants_ir = IValue(constants_str);
-
+    //  *elements* is bytcode model. The first element of the top tuple is the
+    //  bytecode version number. The following elements are methods. In each
+    //  method, it has all the necessary parts for the lite interpreter to
+    //  interpret, including the instructions, operators, constants, types and
+    //  register size.
+    //  *elements* example:
+    //   (3,
+    //       ('__torch__.m.forward',
+    //           (('instructions',
+    //               (('STOREN', 1, 2),
+    //                    ('DROPR', 1, 0),
+    //                    ('MOVE', 2, 0),
+    //                    ('OP', 0, 0),
+    //                    ('RET', 0, 0))),
+    //                ('operators', (('aten::Int', 'Tensor'),)),
+    //                ('constants', ()),
+    //                ('types', ()),
+    //                ('register_size', 2)
+    //            )
+    //        )
+    //    )
     for (const auto& element : elements) {
       if (element.isTuple()) {
-        const auto& bytecode_elements = element.toTuple()->elements();
-        std::vector<IValue> deduplicate_bytecode_elements;
-        for (const auto& bytecode_element : bytecode_elements) {
-          if (bytecode_element.isTuple()) {
-            const auto& key_values_pairs =
-                bytecode_element.toTuple()->elements();
-            std::vector<IValue> deduplicate_key_values_pair;
-            for (const auto& key_values_pair : key_values_pairs) {
+        //  The second item of elements is a list of methods, like forward
+        //  method, example:
+        //  ('__torch__.m.forward',
+        //      (('instructions',
+        //          (('STOREN', 1, 2),
+        //              ('DROPR', 1, 0),
+        //              ('MOVE', 2, 0),
+        //              ('OP', 0, 0),
+        //              ('RET', 0, 0))),
+        //          ('operators', (('aten::Int', 'Tensor'),)),
+        //          ('constants', ()),
+        //          ('types', ()),
+        //          ('register_size', 2)
+        //      )
+        //  )
+        const auto& methods = element.toTuple()->elements();
+        std::vector<IValue> deduplicate_methods;
+        for (const auto& method : methods) {
+          if (method.isTuple()) {
+            //  method example:
+            //  (('instructions',
+            //      (('STOREN', 1, 2),
+            //          ('DROPR', 1, 0),
+            //          ('MOVE', 2, 0),
+            //          ('OP', 0, 0),
+            //          ('RET', 0, 0))),
+            //      ('operators', (('aten::Int', 'Tensor'),)),
+            //      ('constants', ()),
+            //      ('types', ()),
+            //      ('register_size', 2)
+            //  )
+            const auto& method_elements = method.toTuple()->elements();
+            std::vector<IValue> deduplicate_method_elements;
+            for (const auto& method_element : method_elements) {
+              //  method_element example:
+              //  ('instructions',
+              //      (('STOREN', 1, 2),
+              //          ('DROPR', 1, 0),
+              //          ('MOVE', 2, 0),
+              //          ('OP', 0, 0),
+              //          ('RET', 0, 0)),
+              //  )
               is_constant_element = false;
-              if (key_values_pair.isTuple()) {
+              // A list of if condition statement, trying to locate the
+              // 'constants' field.
+              if (method_element.isTuple()) {
                 const auto& key_values_vector =
-                    key_values_pair.toTuple()->elements();
+                    method_element.toTuple()->elements();
                 if (key_values_vector.size() == 2) {
                   const auto& key = key_values_vector[0];
                   const auto& values = key_values_vector[1];
-                  // find constant fields
+                  // Find constant fields
                   if (key.isString() && key == constants_ir) {
                     if (values.isTuple()) {
                       const auto& constant_values =
                           values.toTuple()->elements();
                       std::vector<IValue> deduplicated_constant_values;
+                      // Loop all constant value in the 'constants' field,
+                      // if the constant value is tensor, and exist in tensor
+                      // table from jit, replace the constant tensor with the
+                      // tuple: ('tensor_jit_index', ({index_in_jit},)), for
+                      // example, ('tensor_jit_index', (4,)), where 4 is the the
+                      // index in jit tensor table, and push the new tuple to
+                      // deduplicated_constant_values. Otherwise, push the
+                      // constant value to deduplicated_constant_values
                       for (const auto& constant_value : constant_values) {
                         if (constant_value.isTensor() &&
                             constants_from_jit.find(
@@ -533,27 +603,26 @@ class ScriptModuleSerializer {
                       std::vector<IValue> deduplicated_constant_key_values = {
                           constants_ir,
                           Tup(std::move(deduplicated_constant_values))};
-                      deduplicate_key_values_pair.push_back(
+                      deduplicate_method_elements.push_back(
                           Tup(std::move(deduplicated_constant_key_values)));
                     } else {
-                      deduplicate_key_values_pair.push_back(key_values_pair);
+                      deduplicate_method_elements.push_back(method_element);
                     }
                     is_constant_element = true;
                   }
                 }
               }
               if (!is_constant_element) {
-                deduplicate_key_values_pair.push_back(key_values_pair);
+                deduplicate_method_elements.push_back(method_element);
               }
             }
-            deduplicate_bytecode_elements.push_back(
-                Tup(std::move(deduplicate_key_values_pair)));
+            deduplicate_methods.push_back(
+                Tup(std::move(deduplicate_method_elements)));
           } else {
-            deduplicate_bytecode_elements.push_back(bytecode_element);
+            deduplicate_methods.push_back(method);
           }
         }
-        deduplicated_elements.push_back(
-            Tup(std::move(deduplicate_bytecode_elements)));
+        deduplicated_elements.push_back(Tup(std::move(deduplicate_methods)));
       } else {
         deduplicated_elements.push_back(element);
       }
@@ -564,8 +633,9 @@ class ScriptModuleSerializer {
   void writeByteCode(
       const Module& module,
       bool save_mobile_debug_info,
-      const std::unordered_map<at::Tensor, int, MyHash, MyEqual>&
-          constants_from_jit) {
+      const std::
+          unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>&
+              constants_from_jit) {
     std::vector<c10::IValue> elements;
     elements.emplace_back(
         static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));

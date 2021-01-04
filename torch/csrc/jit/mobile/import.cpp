@@ -153,6 +153,10 @@ void parseMethods(
         expect_field(table, "register_size", BYTECODE_INDEX_REGISTER_SIZE)
             .toInt();
 
+    // If there exist a tuple in consts_list with this format
+    // ('tensor_jit_index', (4,)) fetch the tensor at index 4 from tensor table
+    // generated in jit, and push it to the new constant list
+    // *updated_constant_vals*.
     std::vector<IValue> updated_constant_vals;
     for (const auto& const_item : consts_list) {
       if (const_item.isTuple()) {
@@ -312,6 +316,10 @@ mobile::Module BytecodeDeserializer::deserialize(
   if (reader_->hasRecord("mobile_debug.pkl")) {
     debug_info_bvals = readArchive("mobile_debug", mcu).toTuple()->elements();
   }
+
+  // TODO: skip reading from "constants.pkl" if there is no tuple
+  // with tensor jit index in constants field in "bytecode.pkl", like
+  // ('tensor_jit_index', (4,)).
   std::vector<IValue> constant_values_from_jit;
   if (reader_->hasRecord("constants.pkl")) {
     constant_values_from_jit =

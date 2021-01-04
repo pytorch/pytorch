@@ -508,22 +508,8 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
 
   std::stringstream ss;
   c._save_for_mobile(ss, {}, true);
-  //    c._save_for_mobile("/Users/chenlai/Documents/pytorch/data/data/test.ptl");
   mobile::Module bc = _load_for_mobile(ss);
-  //  mobile::Module bc =
-  //  _load_for_mobile("/Users/chenlai/Documents/pytorch/data/data/opt_model.ptl");
-  //  mobile::Module bc =
-  //  _load_for_mobile("/Users/chenlai/Documents/pytorch/data/data/traced_model.ptl");
-  //  mobile::Module bc =
-  //  _load_for_mobile("/Users/chenlai/Documents/pytorch/data/data/test.ptl");
-  //  mobile::Module bc = _load_for_mobile(
-  //      "/Users/chenlai/Documents/pytorch/data/data/example_debug.ptl");
-  //  mobile::Module bc = _load_for_mobile(
-  //      "/Users/chenlai/Documents/pytorch/experiment/example_debug_map_with_tensorkey.ptl");
-  //  mobile::Module bc =
-  //  _load_for_mobile("/Users/chenlai/Documents/pytorch/data/data/example.ptl");
-  //  mobile::Module bc =
-  //  _load_for_mobile("/Users/chenlai/Documents/pytorch/data/data/example.ptl");
+
   std::unordered_set<std::string> module_debug_info_set;
   size_t pc = 0;
   while (true) {

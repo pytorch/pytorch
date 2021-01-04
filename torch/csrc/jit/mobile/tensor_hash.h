@@ -4,7 +4,7 @@
 namespace torch {
 namespace jit {
 
-struct MyHash {
+struct tensor_value_hash {
   std::size_t operator()(const at::Tensor& tensor) const {
     std::stringstream tensor_stream;
     tensor_stream << tensor;
@@ -14,7 +14,7 @@ struct MyHash {
   }
 };
 
-struct MyEqual {
+struct tensor_value_equal {
   bool operator()(const at::Tensor& a, const at::Tensor& b) const {
     std::stringstream a_stream;
     a_stream << a;
