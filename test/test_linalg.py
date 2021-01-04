@@ -2787,9 +2787,9 @@ class TestLinalg(TestCase):
             exp_r = np.linalg.qr(np_t, mode='r')
             q, r = torch.linalg.qr(t, mode='r')
             # check that q is empty
-            assert q.shape == (0,)
-            assert q.dtype == t.dtype
-            assert q.device == t.device
+            self.assertEqual(q.shape, (0,))
+            self.assertEqual(q.dtype, t.dtype)
+            self.assertEqual(q.device, t.device)
             # check r
             self.assertEqual(r, exp_r)
 
@@ -2800,7 +2800,7 @@ class TestLinalg(TestCase):
         # linalg_qr_backward complains cleanly in that case.
         inp = torch.randn((5, 7), device=device, dtype=dtype, requires_grad=True)
         q, r = torch.linalg.qr(inp, mode='r')
-        assert q.shape == (0,)  # empty tensor
+        self.assertEqual(q.shape, (0,))  # empty tensor
         b = torch.sum(r)
         with self.assertRaisesRegex(RuntimeError,
                                     "linalg_qr_backward: cannot compute backward"):
@@ -2853,8 +2853,8 @@ class TestLinalg(TestCase):
                 out = (torch.empty((0), dtype=dtype, device=device),
                        torch.empty((0), dtype=dtype, device=device))
                 q2, r2 = torch.linalg.qr(t, mode=mode, out=out)
-                assert q2 is out[0]
-                assert r2 is out[1]
+                self.assertIs(q2, out[0])
+                self.assertIs(r2, out[1])
                 self.assertEqual(q2, q)
                 self.assertEqual(r2, r)
 
