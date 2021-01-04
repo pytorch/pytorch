@@ -80,7 +80,7 @@ class DifferentiabilityInfo:
     # The function's input arguments for which it calculates derivatives.
     # It's the union of 'var_names' of all 'derivatives', sorted by the
     # argument order in the function schema.
-    args_with_derivatives: Sequence[CppArgument]
+    args_with_derivatives: Sequence[Binding]
 
     # Names of arguments whose derivative formula is 'non_differentiable'.
     non_differentiable_arg_names: Sequence[str]

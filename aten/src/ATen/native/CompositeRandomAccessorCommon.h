@@ -129,7 +129,7 @@ public:
 
   // Pointer-like operations {
   C10_HOST_DEVICE
-  reference operator*() {
+  reference operator*() const {
     return TupleInfo::tie(*keys, *values);
   }
 

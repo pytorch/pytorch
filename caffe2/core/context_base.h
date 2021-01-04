@@ -33,7 +33,7 @@ class BaseContext;
  * functions in the BaseContext class.
  * TODO: add docs after this is finalized.
  */
-class CAFFE2_API BaseContext {
+class TORCH_API BaseContext {
  public:
   virtual ~BaseContext() noexcept {}
 

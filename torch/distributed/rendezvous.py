@@ -9,11 +9,8 @@ import os
 import sys
 from datetime import timedelta
 from typing import Optional, Dict, Union
-from torch._C._distributed_c10d import FileStore
+from torch._C._distributed_c10d import FileStore, TCPStore
 from .constants import default_pg_timeout
-
-if sys.platform != 'win32':
-    from torch._C._distributed_c10d import TCPStore
 
 _rendezvous_handlers = {}
 
@@ -34,7 +31,7 @@ def register_rendezvous_handler(scheme, handler):
     Pick a unique name and use the URL scheme to identify it when
     calling the `rendezvous()` function.
 
-    Arguments:
+    Args:
         scheme (str): URL scheme to identify your rendezvous handler.
         handler (function): Handler that is invoked when the
             `rendezvous()` function is called with a URL that uses
@@ -196,8 +193,6 @@ def _env_rendezvous_handler(url: str, timeout: timedelta = default_pg_timeout, *
     # If this configuration is invalidated, there is nothing we can do about it
     raise RuntimeError("Unable to perform rerendezvous using env:// method")
 
-if sys.platform != 'win32':
-    register_rendezvous_handler("tcp", _tcp_rendezvous_handler)
-    register_rendezvous_handler("env", _env_rendezvous_handler)
-
+register_rendezvous_handler("tcp", _tcp_rendezvous_handler)
+register_rendezvous_handler("env", _env_rendezvous_handler)
 register_rendezvous_handler("file", _file_rendezvous_handler)

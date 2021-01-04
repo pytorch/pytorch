@@ -4,6 +4,7 @@
 #include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <c10/macros/Macros.h>
 #include <curand_kernel.h>
 
@@ -30,31 +31,31 @@ template <
           int ADims,
           int VEC>
 #if __CUDA_ARCH__ >= 350
-C10_LAUNCH_BOUNDS_2(256, 8)
+C10_LAUNCH_BOUNDS_2(256, 4)
 #elif defined (__HIP_PLATFORM_HCC__)
 C10_LAUNCH_BOUNDS_2(256, 4)
 #endif
 __global__ void
 fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<scalar_t, IndexType> a,
-                            at::cuda::detail::TensorInfo<scalar_t, IndexType> b,
-                            at::cuda::detail::TensorInfo<uint8_t, IndexType> c,
-                            IndexType totalElements, accscalar_t p, std::pair<uint64_t, uint64_t> seeds
-                           ) {
-
+                         at::cuda::detail::TensorInfo<scalar_t, IndexType> b,
+                         at::cuda::detail::TensorInfo<uint8_t, IndexType> c,
+                         IndexType totalElements, accscalar_t p,
+                         PhiloxCudaState philox_args) {
   // make sure we don't break assumption that we can't have > 4 elements / thread
   static_assert(VEC <= 4, "Value of VEC must be in [2, 4]");
 
   using LoadT = memory::aligned_vector<scalar_t, VEC>;
   using MaskLoadT = memory::aligned_vector<uint8_t, VEC>;
 
-  accscalar_t pinv = accscalar_t(1)/p;
+  auto seeds = at::cuda::philox::unpack(philox_args);
   IndexType idx = blockIdx.x * blockDim.x + threadIdx.x;
   curandStatePhilox4_32_10_t state;
-  curand_init(
-      seeds.first,
-      idx,
-      seeds.second,
-      &state);
+  curand_init(std::get<0>(seeds),
+              idx,
+              std::get<1>(seeds),
+              &state);
+
+  accscalar_t pinv = accscalar_t(1)/p;
 
   // Note: Vectorized loads means we'll stride each thread by an additional VEC factor, as we'll load VEC elements at a time
   for (IndexType linearIndex = idx * VEC;
@@ -105,25 +106,26 @@ template <
           int ADims,
           int BDims=ADims>
 #if __CUDA_ARCH__ >= 350
-C10_LAUNCH_BOUNDS_2(256, 8)
+C10_LAUNCH_BOUNDS_2(256, 4)
 #elif defined (__HIP_PLATFORM_HCC__)
 C10_LAUNCH_BOUNDS_2(256, 4)
 #endif
 __global__ void
 fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
-                      cuda::detail::TensorInfo<scalar_t, IndexType> b,
-                      cuda::detail::TensorInfo<uint8_t, IndexType> c,
-                      IndexType totalElements, accscalar_t p, std::pair<uint64_t, uint64_t> seeds
-                      ) {
-
-  accscalar_t pinv = accscalar_t(1)/p;
+                     cuda::detail::TensorInfo<scalar_t, IndexType> b,
+                     cuda::detail::TensorInfo<uint8_t, IndexType> c,
+                     IndexType totalElements, accscalar_t p,
+                     PhiloxCudaState philox_args) {
+  auto seeds = at::cuda::philox::unpack(philox_args);
   IndexType idx = blockIdx.x * blockDim.x + threadIdx.x;
   curandStatePhilox4_32_10_t state;
-    curand_init(
-        seeds.first,
-        idx,
-        seeds.second,
-        &state);
+  curand_init(std::get<0>(seeds),
+              idx,
+              std::get<1>(seeds),
+              &state);
+
+  accscalar_t pinv = accscalar_t(1)/p;
+
   IndexType rounded_size = ((totalElements - 1)/(blockDim.x * gridDim.x * UNROLL)+1) *
         blockDim.x * gridDim.x * UNROLL;
   for (IndexType linearIndex = idx;
@@ -201,7 +203,7 @@ inline void launcher(
     Tensor& mask,
     double p,
     const int64_t nelem,
-    const std::pair<uint64_t, uint64_t> rng_engine_inputs,
+    const PhiloxCudaState rng_engine_inputs,
     dim3 grid,
     dim3 dim_block) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -324,11 +326,11 @@ fused_dropout_cuda(const Tensor& self, double p, c10::optional<Generator> gen_){
   grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * blocks_per_sm, grid.x);
 //number of times random will be generated per thread, to offset philox counter in thc random state
   int64_t counter_offset = ((nelem - 1)/(block_size*grid.x*UNROLL)+1)*UNROLL;
-  std::pair<uint64_t, uint64_t> rng_engine_inputs;
+  PhiloxCudaState rng_engine_inputs;
   {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
-    rng_engine_inputs = gen->philox_engine_inputs(counter_offset);
+    rng_engine_inputs = gen->philox_cuda_state(counter_offset);
   }
   if (cuda::detail::canUse32BitIndexMath(self)){
     launcher<unsigned int>(

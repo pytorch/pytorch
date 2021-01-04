@@ -286,7 +286,10 @@ dimensions and the value of the `ord` parameter.
 Args:
     input (Tensor): The input tensor. If dim is None, x must be 1-D or 2-D, unless :attr:`ord`
         is None. If both :attr:`dim` and :attr:`ord` are None, the 2-norm of the input flattened to 1-D
-        will be returned.
+        will be returned. Its data type must be either a floating point or complex type. For complex
+        inputs, the norm is calculated on of the absolute values of each element. If the input is
+        complex and neither :attr:`dtype` nor :attr:`out` is specified, the result's data type will
+        be the corresponding floating point type (e.g. float if :attr:`input` is complexfloat).
 
     ord (int, float, inf, -inf, 'fro', 'nuc', optional): The order of norm.
         inf refers to :attr:`float('inf')`, numpy's :attr:`inf` object, or any equivalent object.
@@ -400,6 +403,139 @@ Using the :attr:`dim` argument to compute matrix norms::
     (tensor(3.7417), tensor(11.2250))
 """)
 
+cond = _add_docstr(_linalg.linalg_cond, r"""
+linalg.cond(input, p=None, *, out=None) -> Tensor
+
+Computes the condition number of a matrix :attr:`input`,
+or of each matrix in a batched :attr:`input`, using the matrix norm defined by :attr:`p`.
+For norms ``p = {'fro', 'nuc', inf, -inf, 1, -1}`` this is defined as the matrix norm of :attr:`input`
+times the matrix norm of the inverse of :attr:`input`. And for norms ``p = {None, 2, -2}`` this is defined as
+the ratio between the largest and smallest singular values.
+
+This function supports ``float``, ``double``, ``cfloat`` and ``cdouble`` dtypes for :attr:`input`.
+If the input is complex and neither :attr:`dtype` nor :attr:`out` is specified, the result's data type will
+be the corresponding floating point type (e.g. float if :attr:`input` is complexfloat).
+
+.. note:: For ``p = {None, 2, -2}`` the condition number is computed as the ratio between the largest
+          and smallest singular values computed using :func:`torch.linalg.svd`.
+          For these norms :attr:`input` may be a non-square matrix or batch of non-square matrices.
+          For other norms, however, :attr:`input` must be a square matrix or a batch of square matrices,
+          and if this requirement is not satisfied a RuntimeError will be thrown.
+
+.. note:: For ``p = {'fro', 'nuc', inf, -inf, 1, -1}`` if :attr:`input` is a non-invertible matrix then
+          a tensor containing infinity will be returned. If :attr:`input` is a batch of matrices and one
+          or more of them is not invertible then a RuntimeError will be thrown.
+
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+Args:
+    input (Tensor): the input matrix of size :math:`(m, n)` or the batch of matrices of size :math:`(*, m, n)`
+                    where `*` is one or more batch dimensions.
+
+    p (int, float, inf, -inf, 'fro', 'nuc', optional): the type of the matrix norm to use in the computations.
+        The following norms are supported:
+
+        =====  ============================
+        p      norm for matrices
+        =====  ============================
+        None   ratio of the largest singular value to the smallest singular value
+        'fro'  Frobenius norm
+        'nuc'  nuclear norm
+        inf    max(sum(abs(x), dim=1))
+        -inf   min(sum(abs(x), dim=1))
+        1      max(sum(abs(x), dim=0))
+        -1     min(sum(abs(x), dim=0))
+        2      ratio of the largest singular value to the smallest singular value
+        -2     ratio of the smallest singular value to the largest singular value
+        =====  ============================
+
+        Default: ``None``
+
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
+
+Examples::
+
+    >>> from torch import linalg as LA
+    >>> a = torch.tensor([[1., 0, -1], [0, 1, 0], [1, 0, 1]])
+    >>> LA.cond(a)
+    tensor(1.4142)
+    >>> LA.cond(a, 'fro')
+    tensor(3.1623)
+    >>> LA.cond(a, 'nuc')
+    tensor(9.2426)
+    >>> LA.cond(a, np.inf)
+    tensor(2.)
+    >>> LA.cond(a, -np.inf)
+    tensor(1.)
+    >>> LA.cond(a, 1)
+    tensor(2.)
+    >>> LA.cond(a, -1)
+    tensor(1.)
+    >>> LA.cond(a, 2)
+    tensor(1.4142)
+    >>> LA.cond(a, -2)
+    tensor(0.7071)
+
+    >>> a = torch.randn(3, 4, 4)
+    >>> LA.cond(a)
+    tensor([ 4.4739, 76.5234, 10.8409])
+
+    >>> a = torch.randn(3, 4, 4, dtype=torch.complex64)
+    >>> LA.cond(a)
+    tensor([ 5.9175, 48.4590,  5.6443])
+    >>> LA.cond(a, 1)
+    >>> tensor([ 11.6734+0.j, 105.1037+0.j,  10.1978+0.j])
+""")
+
+solve = _add_docstr(_linalg.linalg_solve, r"""
+linalg.solve(input, other, *, out=None) -> Tensor
+
+Computes the solution ``x`` to the matrix equation ``matmul(input, x) = other``
+with a square matrix, or batches of such matrices, :attr:`input` and one or more right-hand side vectors :attr:`other`.
+If :attr:`input` is batched and :attr:`other` is not, then :attr:`other` is broadcast
+to have the same batch dimensions as :attr:`input`.
+The resulting tensor has the same shape as the (possibly broadcast) :attr:`other`.
+
+Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` dtypes.
+
+.. note:: If :attr:`input` is a non-square or non-invertible matrix, or a batch containing non-square matrices
+          or one or more non-invertible matrices, then a RuntimeError will be thrown.
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+Args:
+    input (Tensor): the square :math:`n \times n` matrix or the batch
+                    of such matrices of size :math:`(*, n, n)` where ``*`` is one or more batch dimensions.
+    other (Tensor): right-hand side tensor of shape :math:`(*, n)` or :math:`(*, n, k)`,
+                    where :math:`k` is the number of right-hand side vectors.
+
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
+
+Examples::
+
+    >>> A = torch.eye(3)
+    >>> b = torch.randn(3)
+    >>> x = torch.linalg.solve(A, b)
+    >>> torch.allclose(A @ x, b)
+    True
+
+Batched input::
+
+    >>> A = torch.randn(2, 3, 3)
+    >>> b = torch.randn(3, 1)
+    >>> x = torch.linalg.solve(A, b)
+    >>> torch.allclose(A @ x, b)
+    True
+    >>> b = torch.rand(3) # b is broadcast internally to (*A.shape[:-2], 3)
+    >>> x = torch.linalg.solve(A, b)
+    >>> x.shape
+    torch.Size([2, 3])
+    >>> Ax = A @ x.unsqueeze(-1)
+    >>> torch.allclose(Ax, b.unsqueeze(-1).expand_as(Ax))
+    True
+""")
+
 tensorinv = _add_docstr(_linalg.linalg_tensorinv, r"""
 linalg.tensorinv(input, ind=2, *, out=None) -> Tensor
 
@@ -482,5 +618,84 @@ Examples::
     >>> a.shape[b.ndim:]
     torch.Size([6, 4])
     >>> torch.allclose(torch.tensordot(a, x, dims=x.ndim), b, atol=1e-6)
+    True
+""")
+
+
+qr = _add_docstr(_linalg.linalg_qr, r"""
+qr(input, mode='reduced', *, out=None) -> (Tensor, Tensor)
+
+Computes the QR decomposition of a matrix or a batch of matrices :attr:`input`,
+and returns a namedtuple (Q, R) of tensors such that :math:`\text{input} = Q R`
+with :math:`Q` being an orthogonal matrix or batch of orthogonal matrices and
+:math:`R` being an upper triangular matrix or batch of upper triangular matrices.
+
+Depending on the value of :attr:`mode` this function returns the reduced or
+complete QR factorization. See below for a list of valid modes.
+
+.. note::  **Differences with** ``numpy.linalg.qr``:
+
+           * ``mode='raw'`` is not implemented
+
+           * unlike ``numpy.linalg.qr``, this function always returns a
+             tuple of two tensors. When ``mode='r'``, the `Q` tensor is an
+             empty tensor.
+
+.. note::
+          Backpropagation is not supported for ``mode='r'``. Use ``mode='reduced'`` instead.
+
+          If you plan to backpropagate through QR, note that the current backward implementation
+          is only well-defined when the first :math:`\min(input.size(-1), input.size(-2))`
+          columns of :attr:`input` are linearly independent.
+          This behavior may change in the future.
+
+.. note:: This function uses LAPACK for CPU inputs and MAGMA for CUDA inputs,
+          and may produce different (valid) decompositions on different device types
+          and different platforms, depending on the precise version of the
+          underlying library.
+
+Args:
+    input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
+                batch dimensions consisting of matrices of dimension :math:`m \times n`.
+    mode (str, optional): if `k = min(m, n)` then:
+
+          * ``'reduced'`` : returns `(Q, R)` with dimensions (m, k), (k, n) (default)
+
+          * ``'complete'``: returns `(Q, R)` with dimensions (m, m), (m, n)
+
+          * ``'r'``: computes only `R`; returns `(Q, R)` where `Q` is empty and `R` has dimensions (k, n)
+
+Keyword args:
+    out (tuple, optional): tuple of `Q` and `R` tensors
+                satisfying :code:`input = torch.matmul(Q, R)`.
+                The dimensions of `Q` and `R` are :math:`(*, m, k)` and :math:`(*, k, n)`
+                respectively, where :math:`k = \min(m, n)` if :attr:`mode` is `'reduced'` and
+                :math:`k = m` if :attr:`mode` is `'complete'`.
+
+Example::
+
+    >>> a = torch.tensor([[12., -51, 4], [6, 167, -68], [-4, 24, -41]])
+    >>> q, r = torch.linalg.qr(a)
+    >>> q
+    tensor([[-0.8571,  0.3943,  0.3314],
+            [-0.4286, -0.9029, -0.0343],
+            [ 0.2857, -0.1714,  0.9429]])
+    >>> r
+    tensor([[ -14.0000,  -21.0000,   14.0000],
+            [   0.0000, -175.0000,   70.0000],
+            [   0.0000,    0.0000,  -35.0000]])
+    >>> torch.mm(q, r).round()
+    tensor([[  12.,  -51.,    4.],
+            [   6.,  167.,  -68.],
+            [  -4.,   24.,  -41.]])
+    >>> torch.mm(q.t(), q).round()
+    tensor([[ 1.,  0.,  0.],
+            [ 0.,  1., -0.],
+            [ 0., -0.,  1.]])
+    >>> a = torch.randn(3, 4, 5)
+    >>> q, r = torch.linalg.qr(a, mode='complete')
+    >>> torch.allclose(torch.matmul(q, r), a)
+    True
+    >>> torch.allclose(torch.matmul(q.transpose(-2, -1), q), torch.eye(5))
     True
 """)

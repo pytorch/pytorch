@@ -49,7 +49,6 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> t = torch.arange(4)
     >>> t
     tensor([0, 1, 2, 3])
@@ -87,7 +86,6 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> t = torch.tensor([ 6.+0.j, -2.+2.j, -2.+0.j, -2.-2.j])
     >>> torch.fft.ifft(t)
     tensor([0.+0.j, 1.+0.j, 2.+0.j, 3.+0.j])
@@ -133,7 +131,6 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> x = torch.rand(10, 10, dtype=torch.complex64)
     >>> fft2 = torch.fft.fft2(t)
 
@@ -177,7 +174,6 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> x = torch.rand(10, 10, dtype=torch.complex64)
     >>> ifft2 = torch.fft.ifft2(t)
 
@@ -229,7 +225,6 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> x = torch.rand(10, 10, dtype=torch.complex64)
     >>> fftn = torch.fft.fftn(t)
 
@@ -272,7 +267,6 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> x = torch.rand(10, 10, dtype=torch.complex64)
     >>> ifftn = torch.fft.ifftn(t)
 
@@ -314,7 +308,6 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> t = torch.arange(4)
     >>> t
     tensor([0, 1, 2, 3])
@@ -376,7 +369,6 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> t = torch.arange(5)
     >>> t
     tensor([0, 1, 2, 3, 4])
@@ -433,7 +425,6 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> t = torch.rand(10, 10)
     >>> rfft2 = torch.fft.rfft2(t)
     >>> rfft2.size()
@@ -506,7 +497,6 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> t = torch.rand(10, 9)
     >>> T = torch.fft.rfft2(t)
 
@@ -564,7 +554,6 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> t = torch.rand(10, 10)
     >>> rfftn = torch.fft.rfftn(t)
     >>> rfftn.size()
@@ -636,7 +625,6 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> t = torch.rand(10, 9)
     >>> T = torch.fft.rfftn(t)
 
@@ -714,7 +702,6 @@ Example:
     Taking a real-valued frequency signal and bringing it into the time domain
     gives Hermitian symmetric output:
 
-    >>> import torch.fft
     >>> t = torch.arange(5)
     >>> t
     tensor([0, 1, 2, 3, 4])
@@ -769,7 +756,6 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> t = torch.arange(5)
     >>> t
     tensor([0, 1, 2, 3, 4])
@@ -817,7 +803,6 @@ Keyword Args:
 
 Example:
 
-    >>> import torch.fft
     >>> torch.fft.fftfreq(5)
     tensor([ 0.0000,  0.2000,  0.4000, -0.4000, -0.2000])
 
@@ -861,7 +846,6 @@ Keyword Args:
 
 Example:
 
-    >>> import torch.fft
     >>> torch.fft.rfftfreq(5)
     tensor([ 0.0000,  0.2000,  0.4000])
 
@@ -903,7 +887,6 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> f = torch.fft.fftfreq(4)
     >>> f
     tensor([ 0.0000,  0.2500,  -0.5000, -0.2500])
@@ -947,7 +930,6 @@ Args:
 
 Example:
 
-    >>> import torch.fft
     >>> f = torch.fft.fftfreq(5)
     >>> f
     tensor([ 0.0000,  0.2000,  0.4000, -0.4000, -0.2000])
