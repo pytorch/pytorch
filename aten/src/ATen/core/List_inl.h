@@ -1,7 +1,7 @@
 #pragma once
 
+#include <ATen/core/jit_type_base.h>
 #include <ATen/core/ivalue.h>
-#include <ATen/core/jit_type.h>
 
 namespace c10 {
 
@@ -50,7 +50,17 @@ List<T>::List(TypePtr elementType)
 namespace impl {
 template<class T>
 List<T> toTypedList(impl::GenericList list) {
-  TORCH_INTERNAL_ASSERT(*getTypePtr<T>() == *list.impl_->elementType, "Tried to cast a List<", toString(list.impl_->elementType), "> to a List<", toString(getTypePtr<T>()), ">. Types mismatch.");
+  // If there's other instances of the list (i.e. list.use_count() > 1), then we have to be invariant
+  // because upcasting would allow people to add types into the new list that would break the old list.
+  // However, if there aren't any other instances of this list (i.e. list.use_count() == 1), then we can
+  // allow upcasting. This can be a perf improvement since we can cast List<T> to List<optional<T>>
+  // without having to copy it. This is also used to provide backwards compatibility with some old models
+  // that serialized the index arguments to aten::index, aten::index_put, aten::index_put_ and aten::index_put_impl_
+  // as List<Tensor> before we changed that argument to be List<optional<Tensor>>. When deserializing, we
+  // have list.use_count() == 1 and can deserialize the List<Tensor> directly as List<optional<Tensor>>.
+  TORCH_CHECK(*list.impl_->elementType == *getTypePtr<T>()
+    || (list.use_count() == 1 && list.impl_->elementType->isSubtypeOf(getTypePtr<T>()))
+    , "Tried to cast a List<", toString(list.impl_->elementType), "> to a List<", toString(getTypePtr<T>()), ">. Types mismatch.");
   return List<T>(std::move(list.impl_));
 }
 
@@ -312,3 +322,5 @@ void List<T>::unsafeSetElementType(TypePtr t) {
   impl_->elementType = std::move(t);
 }
 }
+
+#include <ATen/core/jit_type.h>
