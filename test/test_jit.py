@@ -926,6 +926,53 @@ class TestJit(JitTestCase):
         m_dropout.eval()
         self.assertEqual(dropout(input) + 1, m_dropout(input))
 
+    def test_MaxUnpoolNd(self):
+
+        class Mod(nn.Module):
+            def __init__(self, pool_mod, unpool_mod):
+                super().__init__()
+                self.pool = pool_mod
+                self.unpool = unpool_mod
+
+            def forward(self, input):
+                output, indices = self.pool(input)
+                return self.unpool(output, indices)
+
+        m1 = Mod(nn.MaxPool1d(2, stride=2, return_indices=True),
+                 nn.MaxUnpool1d(2, stride=2))
+        inp = torch.tensor([[[1., 2, 3, 4, 5, 6, 7, 8]]])
+        self.checkModule(m1, (inp,))
+
+        m2 = Mod(nn.MaxPool2d(2, stride=2, return_indices=True),
+                 nn.MaxUnpool2d(2, stride=2))
+        inp2d = torch.arange(1, 17, dtype=torch.float).reshape(1, 1, 4, 4)
+        self.checkModule(m2, (inp2d,))
+
+        # crashes pytorch
+        # m3 = Mod(nn.MaxPool3d(3, stride=2, return_indices=True), 
+        #          nn.MaxUnpool3d(3, stride=2))
+        # inp3d = torch.randn(20, 16, 51, 33, 15)
+        # self.checkModule(m3, (inp3d,))
+
+    def test_FractionalMaxPoolNd(self):
+        class Mod(nn.Module):
+            def __init__(self, m):
+                super().__init__()
+                self.m = m
+
+            def forward(self, input):
+                return self.m(input)
+
+
+        f = Mod(nn.FractionalMaxPool2d(3, output_size=(13, 12)))
+        inp = torch.randn(20, 16, 50, 32)
+        self.checkModule(f, (inp,))
+
+        f = Mod(nn.FractionalMaxPool3d(3, output_size=(13, 12, 11)))
+        inp = torch.randn(20, 16, 50, 32, 16)
+        self.checkModule(f, (inp,))
+
+
     def test_script_autograd_grad(self):
         def test_simple_grad(x, y):
             # type: (Tensor, Tensor) -> List[Optional[Tensor]]
