@@ -528,15 +528,8 @@ Tensor linalg_solve(const Tensor& input, const Tensor& other) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-/*
-Computes the inverse of n-by-n matrix 'self'
-This is an in-place routine, content of 'self' is overriden.
-'infos_lu' and 'infos_getri' are int Tensors containing error codes for each matrix in the batched input.
-'infos_lu' is for holding lapackLU errors, and 'infos_getri' is for holding lapackGetri errors.
-For more information see LAPACK's documentation for GETRI and GETRF routines.
-*/
 template <typename scalar_t>
-static void apply_inverse(Tensor& self, Tensor& infos_lu, Tensor& infos_getri) {
+static void apply_inverse(Tensor& self, std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
   AT_ERROR("inverse: LAPACK library not found in compilation");
 #else
@@ -545,12 +538,9 @@ static void apply_inverse(Tensor& self, Tensor& infos_lu, Tensor& infos_getri) {
   auto self_matrix_stride = matrixStride(self);
   auto batch_size = batchCount(self);
   auto n = self.size(-2);
-  auto lda = std::max<int64_t>(1, n);
 
-  auto ipiv = at::empty({lda}, self.options().dtype(kInt));
+  auto ipiv = at::empty({n}, self.options().dtype(kInt));
   auto ipiv_data = ipiv.data_ptr<int>();
-  auto infos_lu_data = infos_lu.data_ptr<int>();
-  auto infos_getri_data = infos_getri.data_ptr<int>();
 
   int info;
   // Run once, first to get the optimum work size
@@ -559,36 +549,39 @@ static void apply_inverse(Tensor& self, Tensor& infos_lu, Tensor& infos_getri) {
   // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
   int lwork = -1;
   scalar_t wkopt;
-  lapackGetri<scalar_t>(n, self_data, lda, ipiv_data, &wkopt, lwork, &info);
+  lapackGetri<scalar_t>(n, self_data, n, ipiv_data, &wkopt, lwork, &info);
   lwork = static_cast<int>(real_impl<scalar_t, value_t>(wkopt));
   Tensor work = at::empty({lwork}, self.options());
   auto work_data = work.data_ptr<scalar_t>();
 
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
-    int* info_lu_working_ptr = &infos_lu_data[i];
-    lapackLu<scalar_t>(n, n, self_working_ptr, lda, ipiv_data, info_lu_working_ptr);
+    lapackLu<scalar_t>(n, n, self_working_ptr, n, ipiv_data, &info);
+    infos[i] = info;
+    if (info != 0) {
+      return;
+    }
 
     // now compute the actual inverse
-    int* info_getri_working_ptr = &infos_getri_data[i];
-    lapackGetri<scalar_t>(n, self_working_ptr, lda, ipiv_data, work_data, lwork, info_getri_working_ptr);
+    lapackGetri<scalar_t>(n, self_working_ptr, n, ipiv_data, work_data, lwork, &info);
+    infos[i] = info;
+    if (info != 0) {
+      return;
+    }
   }
 #endif
 }
 
 Tensor _inverse_helper_cpu(const Tensor& self) {
-  auto infos_lu = at::empty({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt));
-  auto infos_getri = at::empty({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt));
+  std::vector<int64_t> infos(batchCount(self), 0);
   auto self_working_copy = cloneBatchedColumnMajor(self);
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "inverse_cpu", [&]{
-    apply_inverse<scalar_t>(self_working_copy, infos_lu, infos_getri);
+    apply_inverse<scalar_t>(self_working_copy, infos);
   });
   if (self.dim() > 2) {
-    batchCheckErrors(infos_lu, "inverse_cpu");
-    batchCheckErrors(infos_getri, "inverse_cpu");
+    batchCheckErrors(infos, "inverse_cpu");
   } else {
-    singleCheckErrors(infos_lu.item().toInt(), "inverse_cpu");
-    singleCheckErrors(infos_getri.item().toInt(), "inverse_cpu");
+    singleCheckErrors(infos[0], "inverse_cpu");
   }
   return self_working_copy;
 }
@@ -606,75 +599,6 @@ Tensor& inverse_out(Tensor &result, const Tensor &self) {
     return result.resize_as_(self);
   }
   result.copy_(native::inverse(self));
-  return result;
-}
-
-// This is a type dispatching helper function for 'apply_inverse'
-Tensor& _linalg_inv_out_helper_cpu(Tensor &result, Tensor& infos_lu, Tensor& infos_getri) {
-  // This function calculates the inverse matrix in-place
-  // result should be in column major order and contain matrices to invert
-  // the content of result is overriden by 'apply_inverse'
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "linalg_inv_out_cpu", [&]{
-    apply_inverse<scalar_t>(result, infos_lu, infos_getri);
-  });
-  return result;
-}
-
-// Computes the inverse matrix of 'input', it is is saved to 'result' in-place
-// LAPACK/MAGMA/cuSOLVER error codes are saved in 'infos' tensors, they are not checked here
-static Tensor& linalg_inv_out_info(Tensor& result, Tensor& infos_lu, Tensor& infos_getri, const Tensor& input) {
-  squareCheckInputs(input);
-  TORCH_INTERNAL_ASSERT(infos_lu.scalar_type() == kInt);
-  TORCH_INTERNAL_ASSERT(infos_getri.scalar_type() == kInt);
-  TORCH_CHECK(result.scalar_type() == input.scalar_type(),
-    "result dtype ", result.scalar_type(), " does not match input dtype ", input.scalar_type());
-  TORCH_CHECK(result.device() == input.device(),
-    "result device ", result.device(), " does not match input device ", input.device());
-
-  // if result has no elements we can modify it
-  if (result.numel() == 0) {
-    at::native::resize_as_(result, input.transpose(-2, -1), MemoryFormat::Contiguous);
-    result.transpose_(-2, -1);
-  } else {
-    // Resize messes up the strides and we expect strictly column major order, so let's not use at::native::resize_output
-    TORCH_CHECK(result.sizes().equals(input.sizes()),
-    "result shape ", result.sizes(), " does not match input shape ", input.sizes());
-  }
-
-  TORCH_CHECK(result.transpose(-2, -1).is_contiguous(), "result tensor must be in batched column major order (Fortran contiguous).");
-  result.copy_(input);
-
-  at::native::resize_output(infos_lu, {std::max<int64_t>(1, batchCount(input))});
-  at::native::resize_output(infos_getri, {std::max<int64_t>(1, batchCount(input))});
-  infos_lu.fill_(0);
-  infos_getri.fill_(0);
-
-  result = at::_linalg_inv_out_helper_(result, infos_lu, infos_getri);
-  return result;
-}
-
-// Computes the inverse matrix of 'input', it is is saved to 'result' in-place
-Tensor& linalg_inv_out(Tensor &result, const Tensor &input) {
-  auto infos_lu = at::empty({0}, input.options().dtype(kInt));
-  auto infos_getri = at::empty({0}, input.options().dtype(kInt));
-  result = linalg_inv_out_info(result, infos_lu, infos_getri, input);
-
-  // Now check LAPACK/MAGMA/cuSOLVER error codes
-  if (result.dim() > 2) {
-    batchCheckErrors(infos_lu, "linalg_inv_lu");
-    batchCheckErrors(infos_getri, "linalg_inv_getri");
-  } else {
-    singleCheckErrors(infos_lu.item().toInt(), "linalg_inv_lu");
-    singleCheckErrors(infos_getri.item().toInt(), "linalg_inv_getri");
-  }
-
-  return result;
-}
-
-// Computes the inverse matrix of 'input'
-Tensor linalg_inv(const Tensor &input) {
-  Tensor result = at::empty({0}, input.options());
-  result = at::linalg_inv_out(result, input);
   return result;
 }
 
@@ -1020,7 +944,9 @@ static void apply_orgqr(Tensor& self, const Tensor& tau, int64_t m, int64_t n_co
 #endif
 }
 
-std::tuple<Tensor, Tensor> _qr_helper_cpu(const Tensor& self, bool some) {
+std::tuple<Tensor, Tensor> _linalg_qr_helper_cpu(const Tensor& self, std::string mode) {
+  bool compute_q, reduced;
+  std::tie(compute_q, reduced) = _parse_qr_mode(mode);
   std::vector<int64_t> infos(batchCount(self), 0);
   int64_t m = self.size(-2), n = self.size(-1);
 
@@ -1030,25 +956,22 @@ std::tuple<Tensor, Tensor> _qr_helper_cpu(const Tensor& self, bool some) {
   self_sizes[self.dim() - 2] = std::min(m, n);
   auto tau_working_copy = at::empty(self_sizes, self.options());
   Tensor q_working_copy;
+  Tensor R;
 
   // Setup input geometry for apply_orgqr
   std::vector<int64_t> q_sizes, q_strides;
   int64_t n_columns_q;
-  Tensor R;
-  std::tie(q_sizes, q_strides, n_columns_q) = _compute_geometry_for_Q(self, some);
+  std::tie(q_sizes, q_strides, n_columns_q) = _compute_geometry_for_Q(self, reduced);
 
   // If there are no elements, then we simply return a pair of tensors of required dimensions
   if (self.numel() == 0) {
-    // Fix the number of columns of q appropriately
-    q_sizes[self.dim() - 1] = n_columns_q;
-    q_working_copy = at::eye(q_sizes[self.dim() - 2], q_sizes[self.dim() - 1], self.options());
-    q_working_copy = q_working_copy.expand_as(q_working_copy);
-
-    // We repurpose the same q_sizes for R
-    // Fix the number of rows and columns of q_working_copy appropriately
-    q_sizes[self.dim() - 1] = n;
-    q_sizes[self.dim() - 2] = n_columns_q;
-    R = at::empty(q_sizes, self.options());
+    R = at::empty({n_columns_q, n}, self.options());
+    if (compute_q) {
+      int64_t n_rows_q = q_sizes[self.dim() - 2];
+      q_working_copy = at::eye(n_rows_q, n_columns_q, self.options());
+    } else {
+      q_working_copy = at::empty({0}, self.options());
+    }
     return std::make_tuple(q_working_copy, R);
   }
 
@@ -1068,6 +991,11 @@ std::tuple<Tensor, Tensor> _qr_helper_cpu(const Tensor& self, bool some) {
   }
 
   R = q_working_copy.slice(-2, 0, n_columns_q).slice(-1, 0, n).triu();
+  if (!compute_q) {
+    // this is for mode='r'
+    Tensor empty_Q = at::empty({0}, self.options());
+    return std::make_tuple(empty_Q, R);
+  }
 
   // Next perform ORGQR for Q using the results (both raw R and TAU) from GEQRF
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "qr_cpu", [&]{
@@ -1081,20 +1009,32 @@ std::tuple<Tensor, Tensor> _qr_helper_cpu(const Tensor& self, bool some) {
   return std::make_tuple(q_working_copy.narrow(-1, 0, n_columns_q), R);
 }
 
-std::tuple<Tensor,Tensor> qr(const Tensor& self, bool some) {
+std::tuple<Tensor,Tensor> linalg_qr(const Tensor& self, std::string mode) {
   TORCH_CHECK(self.dim() >= 2,
               "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
-  return at::_qr_helper(self, some);
+  return at::_linalg_qr_helper(self, mode);
 }
 
-std::tuple<Tensor&,Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& self, bool some) {
+std::tuple<Tensor&,Tensor&> linalg_qr_out(Tensor& Q, Tensor& R, const Tensor& self, std::string mode) {
   TORCH_CHECK(self.dim() >= 2,
               "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   Tensor Q_tmp, R_tmp;
-  std::tie(Q_tmp, R_tmp) = at::_qr_helper(self, some);
-  Q.resize_as_(Q_tmp).copy_(Q_tmp);
-  R.resize_as_(R_tmp).copy_(R_tmp);
+  std::tie(Q_tmp, R_tmp) = at::_linalg_qr_helper(self, mode);
+  at::native::resize_output(Q, Q_tmp.sizes());
+  Q.copy_(Q_tmp);
+  at::native::resize_output(R, R_tmp.sizes());
+  R.copy_(R_tmp);
   return std::tuple<Tensor&, Tensor&>(Q, R);
+}
+
+std::tuple<Tensor,Tensor> qr(const Tensor& self, bool some) {
+  std::string mode = some ? "reduced" : "complete";
+  return at::linalg_qr(self, mode);
+}
+
+std::tuple<Tensor&,Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& self, bool some) {
+  std::string mode = some ? "reduced" : "complete";
+  return at::linalg_qr_out(Q, R, self, mode);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ syevd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -399,7 +399,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
 
 Tensor& add_out_dense_sparse_cuda(Tensor& r, const Tensor& dense, const SparseTensor& sparse_, Scalar value);
 
-SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const SparseTensor& src, Scalar value) {
+SparseTensor& add_out_sparse_cuda(const SparseTensor& t, const SparseTensor& src, Scalar value, SparseTensor& r_) {
   if (!t.is_sparse()) {
     return add_out_dense_sparse_cuda(r_, t, src, value);
   }
