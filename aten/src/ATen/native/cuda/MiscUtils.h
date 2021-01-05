@@ -6,8 +6,8 @@
 #include <THC/THC.h>  // for USE_MAGMA
 
 #ifdef USE_MAGMA
-#include <magma.h>
 #include <magma_types.h>
+#include <magma_v2.h>
 #endif
 
 namespace at {
