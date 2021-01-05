@@ -50,6 +50,8 @@ def _propagate_qconfig_helper(module, qconfig_dict, allow_list=None,
     module_qconfig = qconfig_dict.get(prefix, module_qconfig)
     module_qconfig = getattr(module, 'qconfig', module_qconfig)
 
+    torch.quantization.qconfig.assert_valid_qconfig(module_qconfig, module)
+
     module.qconfig = module_qconfig
     for name, child in module.named_children():
         module_prefix = prefix + '.' + name if prefix else name
@@ -256,9 +258,12 @@ def _remove_activation_post_process(module):
         delattr(module, 'activation_post_process')
 
     # remove activation_post_proceess hook
+    handle_ids_to_remove = set()
     for handle_id, hook_fn in module._forward_hooks.items():
         if hook_fn is _observer_forward_hook:
-            module._forward_hooks.pop(handle_id)
+            handle_ids_to_remove.add(handle_id)
+    for handle_id in handle_ids_to_remove:
+        module._forward_hooks.pop(handle_id)
 
 # TODO: rename to something more general
 def _remove_qconfig(module):

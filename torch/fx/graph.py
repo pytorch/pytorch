@@ -577,7 +577,9 @@ class Graph:
         free_vars: List[str] = []
         modules_used : Set[str] = set()
         body: List[str] = []
-        maybe_return_annotation : str = ''
+
+        # Wrap string in list to pass by reference
+        maybe_return_annotation : List[str] = ['']
 
         def register_modules_used(qualified_name : str):
             if '.' in qualified_name:
@@ -675,7 +677,7 @@ class Graph:
                 return
             elif node.op == 'output':
                 if node.type is not None:
-                    maybe_return_annotation = f" -> {type_repr(node.type)}"
+                    maybe_return_annotation[0] = f" -> {type_repr(node.type)}"
                 body.append(f'return {repr(node.args[0])}')
                 return
             raise NotImplementedError(f'node: {node.op} {node.target}')
@@ -695,7 +697,7 @@ class Graph:
         code = '\n'.join('    ' + line for line in code.split('\n')) + '\n'
         fn_code = f"""\
 {import_block}
-def forward(self, {', '.join(free_vars)}){maybe_return_annotation}:
+def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
 {code}
 """
 

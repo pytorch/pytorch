@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from typing import Any, TypeVar, Optional, Tuple, List, NamedTuple, Union
+from typing import Any, TypeVar, Optional, Tuple, List, NamedTuple, Union, Sequence
 import textwrap
 import torch
 from torch._C import TupleType, OptionalType, ListType
@@ -17,7 +17,7 @@ class InflatableArg(NamedTuple):
 
 def augment_model_with_bundled_inputs(
         model: torch.jit.ScriptModule,
-        inputs: Optional[List[Tuple[Any, ...]]] = None,
+        inputs: Optional[Sequence[Tuple[Any, ...]]] = None,
         _receive_inflate_expr: Optional[List[str]] = None,  # For debugging.
 ) -> None:
     """Add bundled sample inputs to a model.

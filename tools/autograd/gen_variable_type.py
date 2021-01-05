@@ -78,8 +78,8 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'bmm', 'diagonal', 'alias', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
     'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'take', 'fill_',
     'exp', 'nonzero', 'mean', 'inverse', 'solve', 'linalg_cholesky', 'addcmul', 'addcdiv',
-    'matrix_exp', 'linalg_eigh', 'cholesky_solve', 'linalg_qr', 'svd',
-    '_fft_c2c', '_fft_r2c', 'linalg_solve', 'sqrt'
+    'matrix_exp', 'linalg_eigh', 'cholesky_solve', 'linalg_qr', 'svd', '_fft_c2c', '_fft_r2c',
+    'linalg_solve', 'sqrt', 'stack', 'gather', 'index_select', 'index_add_'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
@@ -974,7 +974,7 @@ def get_decl_signature(declaration: Dict[Any, Any], use_base_variant: bool = Fal
 
 @with_native_function
 def get_func_signature(f: NativeFunction) -> str:
-    args = CppSignatureGroup.from_schema(f.func, method=False).signature.arguments()
+    args = CppSignatureGroup.from_native_function(f, method=False).signature.arguments()
     types = ', '.join(python.argument_type_str(a.argument.type, simple_type=True)
                       if isinstance(a.argument, Argument) else 'TensorOptions'
                       for a in args)
