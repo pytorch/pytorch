@@ -58,6 +58,40 @@ void RemoveSelfFromGraphInput(std::shared_ptr<torch::jit::Graph>& graph) {
   }
 }
 
+void RemoveListTupleConstruct(std::shared_ptr<torch::jit::Graph>& graph) {
+  auto nodes = graph->nodes();
+  for (auto it = nodes.begin(); it != nodes.end(); it++) {
+    auto n = *it;
+
+    auto kind = n->kind();
+    if (kind == prim::TupleConstruct || kind == prim::ListConstruct) {
+      TORCH_CHECK(n->outputs().size() == 1);
+      auto out = n->outputs().at(0);
+      if (out->uses().size() != 1) {
+        continue;
+      }
+      auto u = out->uses().at(0).user;
+      if (u->kind() != aten::cat && u->kind() != aten::stack) {
+        continue;
+      }
+      auto idx = 0;
+      // TODO audit
+      for (auto i : u->inputs()) {
+        if (i == out) {
+          break;
+        }
+        idx++;
+      }
+      auto is = n->inputs();
+      u->replaceInput(idx, is.front());
+      for (auto iter = is.rbegin(); iter + 1 != is.rend(); ++iter) {
+        u->insertInput(idx + 1, *iter);
+      }
+      it.destroyCurrent();
+    }
+  }
+}
+
 // remove "self" from function schema
 c10::FunctionSchema RemoveSelfFromSchema(const c10::FunctionSchema& s) {
   TORCH_CHECK(s.arguments().size() >= 1 && s.arguments()[0].name() == "self");
@@ -282,6 +316,7 @@ void PrepareGraphForStaticRuntime(std::shared_ptr<torch::jit::Graph> graph) {
   ConstantPropagation(graph);
   CheckGraphEligibility(graph);
   RemoveSelfFromGraphInput(graph);
+  RemoveListTupleConstruct(graph);
 }
 
 StaticRuntime::StaticRuntime(
@@ -721,15 +756,11 @@ ProcessedNode::ProcessedNode(
     bool enable_out_variants)
     : node_(node), inputs_(std::move(inputs)) {
   // TODO leverage type information
-  outputs_.resize(node->outputs().size());
-  if (node->kind() != prim::ListConstruct &&
-      node->kind() != prim::TupleConstruct &&
-      node->kind() != prim::ListUnpack) {
-    const Operator& op = node->getOperator();
-    TORCH_CHECK(op.hasOperation());
-    op_ = op.getOperation(node);
+  for (const auto& output : node->outputs()) {
+    outputs_.emplace_back();
   }
-  if (enable_out_variants && canRunOutOfPlace(node)) {
+  if ((enable_out_variants && canRunOutOfPlace(node)) ||
+      mustRunOutOfPlace(node)) {
     fn_ = getOutOfPlaceOperation(node);
     std::ostringstream ss;
     node->print(ss, 0, nullptr, false);
@@ -739,6 +770,16 @@ ProcessedNode::ProcessedNode(
     std::ostringstream ss;
     node->print(ss, 0, nullptr, false);
     VLOG(1) << "Switch to native impl for node: " << ss.str();
+  } else if (
+      node->kind() != prim::ListConstruct &&
+      node->kind() != prim::TupleConstruct &&
+      node->kind() != prim::ListUnpack) {
+    const Operator& op = node->getOperator();
+    TORCH_CHECK(op.hasOperation());
+    op_ = op.getOperation(node);
+    std::ostringstream ss;
+    node->print(ss, 0, nullptr, false);
+    VLOG(1) << "Fallback interpreter for node: " << ss.str();
   } else {
     std::ostringstream ss;
     node->print(ss, 0, nullptr, false);

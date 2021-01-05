@@ -13,6 +13,12 @@ bool canRunOutOfPlace(Node* n) {
   return SROperatorRegistry()->Has(op_name);
 }
 
+// for now, only concat variants needs this shim
+bool mustRunOutOfPlace(Node* n) {
+  auto op_name = std::string(n->kind().toQualString());
+  return (op_name == "aten::cat") || (op_name == "aten::stack");
+}
+
 bool canReuseInputs(Node* n) {
   auto op_name = std::string(n->kind().toQualString());
   DCHECK(SROperatorRegistry()->Has(op_name));
@@ -170,15 +176,20 @@ REGISTER_OPERATOR_FUNCTOR(
       };
     });
 REGISTER_OPERATOR_FUNCTOR(aten::cat, aten_cat, [](Node* n) -> SROperator {
-  return [](ProcessedNode* p_node) {
-    auto in0_tl = p_node->Input(0).toTensorVector();
-    auto in1_i = p_node->Input(1).toInt();
+  auto input_size = n->inputs().size();
+  return [input_size](ProcessedNode* p_node) {
+    std::vector<at::Tensor> inps;
+    inps.reserve(input_size - 1);
+    for (auto i = 0; i < input_size - 1; ++i) {
+      inps.emplace_back(p_node->Input(i).toTensor());
+    }
+    auto in1_i = p_node->Input(input_size - 1).toInt();
     if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = create_empty_from(in0_tl[0]);
+      p_node->Output(0) = create_empty_from(inps[0]);
     }
     auto out_t = p_node->Output(0).toTensor();
     out_t.resize_({0});
-    at::native::_cat_out_cpu(out_t, in0_tl, in1_i);
+    at::native::_cat_out_cpu(out_t, inps, in1_i);
   };
 });
 REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
@@ -195,9 +206,14 @@ REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
 
 // Split out into a function to appease MSVC's pre-processor
 SROperator aten_stack(Node* n) {
-  return [](ProcessedNode* p_node) {
-    auto inputs = p_node->Input(0).toTensorVector();
-    auto dim = p_node->Input(1).toInt();
+  auto input_size = n->inputs().size();
+  return [input_size](ProcessedNode* p_node) {
+    std::vector<at::Tensor> inputs;
+    inputs.reserve(input_size - 1);
+    for (auto i = 0; i < input_size - 1; ++i) {
+      inputs.emplace_back(p_node->Input(i).toTensor());
+    }
+    auto dim = p_node->Input(input_size - 1).toInt();
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = create_empty_from(inputs[0]);
     }

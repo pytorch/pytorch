@@ -40,6 +40,7 @@ inline at::Tensor create_empty_from(const at::Tensor& t) {
 }
 
 bool canRunOutOfPlace(Node* n);
+bool mustRunOutOfPlace(Node* n);
 bool canReuseInputs(Node* n);
 bool canReuseOutputs(Node* n);
 
