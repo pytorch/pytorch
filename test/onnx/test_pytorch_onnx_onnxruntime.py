@@ -468,6 +468,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         assert torch.all(out2.eq(out_trace2))
 
+    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()
     def test_mask_rcnn(self):
@@ -3021,7 +3022,6 @@ class TestONNXRuntime(unittest.TestCase):
             self.run_test(model, input, batch_size=RNN_BATCH_SIZE)
 
     @skipIfUnsupportedOpsetVersion([13])
-    @skipIfUnsupportedOpsetVersion([13])
     def test_gru_no_bias(self):
         class GruNet(torch.nn.Module):
             def __init__(self, input_size, hidden_size, num_layers, bidirectional):
@@ -3051,7 +3051,6 @@ class TestONNXRuntime(unittest.TestCase):
         for model, input in models_and_inputs:
             self.run_test(model, input, do_constant_folding=True)
 
-    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedOpsetVersion([13])
     def test_gru_constant_folding(self):
         class GruNet(torch.nn.Module):
@@ -5646,6 +5645,7 @@ class TestONNXRuntime(unittest.TestCase):
         [np.testing.assert_allclose(ort_out1, ort_out2, atol=1e-7, rtol=0.001) for ort_out1, ort_out2 in
          zip(ort_outs1, ort_outs2)]
 
+    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_nms(self):
         boxes = torch.rand(5, 4)
@@ -5658,6 +5658,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         self.run_test(Module(), (boxes, scores))
 
+    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_clip_boxes_to_image(self):
         boxes = torch.randn(5, 4) * 500
@@ -5675,6 +5676,7 @@ class TestONNXRuntime(unittest.TestCase):
                       dynamic_axes={"size": [0, 1]},
                       test_with_inputs=[(boxes, size_2)])
 
+    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_roi_align(self):
         x = torch.rand(1, 1, 10, 10, dtype=torch.float32)
@@ -5682,6 +5684,7 @@ class TestONNXRuntime(unittest.TestCase):
         model = ops.RoIAlign((5, 5), 1, 2)
         self.run_test(model, (x, single_roi))
 
+    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_roi_align_aligned(self):
         x = torch.rand(1, 1, 10, 10, dtype=torch.float32)
@@ -5713,6 +5716,7 @@ class TestONNXRuntime(unittest.TestCase):
         model = ops.RoIPool((pool_h, pool_w), 2)
         self.run_test(model, (x, rois))
 
+    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_resize_images(self):
         class TransformModule(torch.nn.Module):
