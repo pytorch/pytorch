@@ -53,6 +53,28 @@ bool operator==(const ListElementReference<T, Iterator>& lhs, const T& rhs);
 template<class T, class Iterator>
 bool operator==(const T& lhs, const ListElementReference<T, Iterator>& rhs);
 
+template<class T>
+struct ListElementConstReferenceTraits {
+  // In the general case, we cannot expose a true const reference to
+  // the contents of an IValue, so we copy.
+  using const_reference = T;
+};
+
+template<>
+struct ListElementConstReferenceTraits<std::string> {
+  using const_reference = const std::string&;
+};
+
+template<>
+struct ListElementConstReferenceTraits<c10::optional<std::string>> {
+  using const_reference = c10::optional<std::reference_wrapper<const std::string>>;
+};
+
+template<>
+struct ListElementConstReferenceTraits<at::Tensor> {
+  using const_reference = const at::Tensor&;
+};
+
 template<class T, class Iterator>
 class ListElementReference final {
 public:
@@ -226,6 +248,7 @@ private:
   c10::intrusive_ptr<c10::detail::ListImpl> impl_;
 
   using internal_reference_type = impl::ListElementReference<T, typename c10::detail::ListImpl::list_type::iterator>;
+  using internal_const_reference_type = typename impl::ListElementConstReferenceTraits<T>::const_reference;
 
 public:
   using value_type = T;
@@ -289,7 +312,9 @@ public:
    *   list[2] = 5;
    *   int64_t v = list[1];
    */
-  internal_reference_type operator[](size_type pos) const;
+  internal_const_reference_type operator[](size_type pos) const;
+
+  internal_reference_type operator[](size_type pos);
 
   /**
    * Assigns a new value to the element at location pos.
