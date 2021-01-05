@@ -6,7 +6,7 @@ operators that haven't been standardized yet, or custom `torch.autograd.Function
 are specific to a network.
 
 To bridge this gap, we provide an experimental operator in ONNX that allows you to directly access PyTorch's tensor functions using the ATen library.
-ATen is the underlying C++ library that PyTorch uses to do tensor operations. Caffe2 has an [ATen operator](https://github.com/caffe2/caffe2/tree/master/caffe2/contrib/aten)
+[ATen](https://github.com/pytorch/pytorch/tree/master/aten) is the underlying C++ library that PyTorch uses to do tensor operations. Caffe2 has an [ATen operator](https://github.com/pytorch/pytorch/tree/master/caffe2/contrib/aten)
 that can run these tensor functions in a Caffe2 network after importing them through ONNX.
 
 This guide explains how to configure Caffe2 and modify your PyTorch program to use
