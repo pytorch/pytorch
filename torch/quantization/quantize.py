@@ -50,6 +50,8 @@ def _propagate_qconfig_helper(module, qconfig_dict, allow_list=None,
     module_qconfig = qconfig_dict.get(prefix, module_qconfig)
     module_qconfig = getattr(module, 'qconfig', module_qconfig)
 
+    torch.quantization.qconfig.assert_valid_qconfig(module_qconfig, module)
+
     module.qconfig = module_qconfig
     for name, child in module.named_children():
         module_prefix = prefix + '.' + name if prefix else name
