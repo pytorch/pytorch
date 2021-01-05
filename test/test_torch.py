@@ -4583,7 +4583,7 @@ class TestTorchDeviceType(TestCase):
                         dest.masked_scatter_(mask, src)
 
         if self.device_type == 'cuda':
-            self.assertEqual(len(w), 29)
+            self.assertEqual(len(w), 20)
         else:
             self.assertEqual(len(w), 27)
 
