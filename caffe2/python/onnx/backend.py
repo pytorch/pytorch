@@ -5,14 +5,7 @@
 
 To run this, you will need to have Caffe2 installed as well.
 """
-
-
-
-
-
-import os
 import collections
-from subprocess import Popen, PIPE
 import sys
 import zipfile
 import itertools
@@ -23,8 +16,6 @@ import itertools
 # importing onnx first, which will cause it to go out and pick up the
 # system protobuf.
 import onnx.backend
-
-import caffe2
 from caffe2.python import core, workspace, rnn_cell, gru_cell
 from caffe2.python.compatibility import container_abcs
 from caffe2.python.model_helper import ModelHelper
@@ -32,7 +23,7 @@ from caffe2.proto import caffe2_pb2
 import caffe2.python.utils
 import numpy as np
 import onnx
-from onnx import checker, GraphProto, TensorProto, AttributeProto, ModelProto
+from onnx import TensorProto
 import onnx.numpy_helper
 import onnx.defs
 import onnx.optimizer
@@ -42,7 +33,6 @@ from onnx.backend.base import Backend, Device, DeviceType, namedtupledict
 
 from caffe2.python.onnx.workspace import Workspace
 from caffe2.python.onnx.backend_rep import Caffe2Rep
-from caffe2.python.onnx.backend_cpp_rep import Caffe2CppRep
 
 import caffe2.python._import_c_extension as C
 
