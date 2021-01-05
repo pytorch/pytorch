@@ -9,6 +9,7 @@
 #include <c10/util/Logging.h>
 #include <c10/util/string_utils.h>
 
+#include <ATen/core/functional.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/bounds_inference.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
@@ -22,6 +23,28 @@
 namespace torch {
 namespace jit {
 namespace tensorexpr {
+
+class FunctionCallUseCount : public IRVisitor {
+ public:
+  std::unordered_map<const Buf*, size_t> findUses(Stmt* s) {
+    s->accept(this);
+    return uses_;
+  }
+
+ private:
+  void visit(const FunctionCall* v) override {
+    if (function_calls_[v->tensor()->buf()].insert(v).second) {
+      uses_[v->tensor()->buf()] = uses_[v->tensor()->buf()] + 1;
+    }
+    IRVisitor::visit(v);
+  }
+
+  std::unordered_map<const Buf*, size_t> uses_;
+
+  // Sets of FunctionCalls in order to keep the results unique
+  std::unordered_map<const Buf*, std::unordered_set<const FunctionCall*>>
+      function_calls_;
+};
 
 class IndexFlattener : public IRMutator {
  public:
@@ -751,28 +774,67 @@ bool LoopNest::computeInline(const Buf* b) {
   return true;
 }
 
-void LoopNest::inlineIntermediateBufs(bool inline_output_buffers) {
+// inlining buffers with multiple uses can create duplicated work, which can
+// slow down cpu code generation but is enabled on gpu because it avoids
+// difficult synchronization logic across blocks. Inlining trivial reads does
+// not duplicate work
+void LoopNest::inlineIntermediateBufs(bool allow_duplicated_work) {
   // We need to collect all intermediate buffers as the buffers to be inlined
   // before calling 'computeInline' since the buffers that are inlined are
   // erased from the set 'intermediate_bufs_' in that function.
-  std::unordered_set<const Buf*> bufs_to_inline(
-      intermediate_bufs_.begin(), intermediate_bufs_.end());
+  std::unordered_set<const Buf*> bufs_to_inline;
 
-  // inlining output buffers duplicates computation. it slows down
-  // cpu code generation but is enabled on gpu because it avoids difficult
-  // synchronization logic across blocks.
-  if (inline_output_buffers) {
+  if (allow_duplicated_work) {
+    bufs_to_inline.insert(intermediate_bufs_.begin(), intermediate_bufs_.end());
+  } else {
+    FunctionCallUseCount fcu;
+    auto function_call_uses = fcu.findUses(root_stmt_);
+    auto buf_load_store_uses = findLoadOrStoreUses(root_stmt_);
+    auto input_bufs = getInputBufs();
+
+    for (auto buf : intermediate_bufs_) {
+      TORCH_INTERNAL_ASSERT(buf_load_store_uses.count(buf));
+      std::vector<BufLoadOrStoreUse>& uses = buf_load_store_uses[buf];
+      auto stores = c10::filter(
+          uses, [](const BufLoadOrStoreUse& use) { return use.isStore; });
+
+      // if the intermediate is the buffer formed from reading in the input
+      // tensors, always inline, bc we are not duplicating any work
+      // and avoiding an intermediary buffer
+      if (stores.size() == 1) {
+        auto store = dynamic_cast<Store*>(stores[0].s);
+        auto input_as_load = dynamic_cast<const Load*>(store->value());
+        if (input_as_load && input_bufs.count(input_as_load->buf())) {
+          bufs_to_inline.insert(buf);
+          continue;
+        }
+      }
+
+      // all bufs will have at least one store (if they have > 1 they cant be
+      // inlined anyway)
+      size_t reads = uses.size() - 1;
+      size_t function_call_reads = function_call_uses[buf];
+      // if only one read, we can inline it without duplicating work
+      if ((reads + function_call_reads) <= 1) {
+        bufs_to_inline.insert(buf);
+      }
+    }
+  }
+
+  if (allow_duplicated_work) {
     bufs_to_inline.insert(output_bufs_.begin(), output_bufs_.end());
   }
+
   for (auto b : bufs_to_inline) {
     computeInline(b);
   }
 }
 
 // TODO: Unify with DepTracker
-class UseFinder : public IRVisitor {
+class LoadOrStoreUseFinder : public IRVisitor {
  public:
-  std::unordered_map<const Buf*, std::vector<BufUse>> findUses(Stmt* s) {
+  std::unordered_map<const Buf*, std::vector<BufLoadOrStoreUse>> findUses(
+      Stmt* s) {
     uses_.clear();
     s->accept(this);
     return uses_;
@@ -794,15 +856,16 @@ class UseFinder : public IRVisitor {
   }
 
   Stmt* last_stmt_ = nullptr;
-  std::unordered_map<const Buf*, std::vector<BufUse>> uses_;
+  std::unordered_map<const Buf*, std::vector<BufLoadOrStoreUse>> uses_;
 
   // Sets of loads and stores in order to keep the results unique
   std::unordered_map<const Buf*, std::unordered_set<Stmt*>> loads_;
   std::unordered_map<const Buf*, std::unordered_set<Stmt*>> stores_;
 };
 
-std::unordered_map<const Buf*, std::vector<BufUse>> findUses(Stmt* s) {
-  UseFinder uf;
+std::unordered_map<const Buf*, std::vector<BufLoadOrStoreUse>>
+findLoadOrStoreUses(Stmt* s) {
+  LoadOrStoreUseFinder uf;
   return uf.findUses(s);
 }
 
@@ -828,7 +891,7 @@ class ContainedStmtsFinder : public IRVisitor {
   std::unordered_set<Stmt*> contained_;
 };
 
-bool containsAll(const std::vector<BufUse>& uses, Block* b) {
+bool containsAll(const std::vector<BufLoadOrStoreUse>& uses, Block* b) {
   std::unordered_set<Stmt*> not_found;
   for (auto use : uses) {
     not_found.insert(use.s);
@@ -852,7 +915,7 @@ Block* findParentBlock(Stmt* s) {
   return nullptr;
 }
 
-Block* findLowestContainingBlock(const std::vector<BufUse>& uses) {
+Block* findLowestContainingBlock(const std::vector<BufLoadOrStoreUse>& uses) {
   // TODO: we're not using the most efficient algorithm here for simplicity.
   // Replace with something more performant in case it becomes a bottleneck.
   Block* b = findParentBlock(uses[0].s);
@@ -872,7 +935,8 @@ Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
     b = new Block({stmt});
   }
 
-  std::unordered_map<const Buf*, std::vector<BufUse>> uses = findUses(stmt);
+  std::unordered_map<const Buf*, std::vector<BufLoadOrStoreUse>> uses =
+      findLoadOrStoreUses(stmt);
   // Insert allocations and frees for temporary buffers in the innermost
   // possible scope.
   for (const Buf* buf : intermediate_bufs_) {
