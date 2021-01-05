@@ -133,6 +133,7 @@ Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, c10::optiona
     r.fill_(std::pow(base, start.to<double>()));
   } else if (isIntegralType(r.scalar_type(), 0)) {
     AT_DISPATCH_INTEGRAL_TYPES(r.scalar_type(), "logspace_cuda", [&]() {
+      // We use double here to be consistent with CPU implementation
       double scalar_base = static_cast<double>(base);
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();

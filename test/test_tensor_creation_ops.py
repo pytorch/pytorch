@@ -2791,7 +2791,10 @@ class TestTensorCreation(TestCase):
                 res1 = torch.logspace(from_, to, steps=10, device=device, dtype=dtype)
                 res2 = torch.logspace(int(from_), int(to), steps=10,
                                       device=device, dtype=torch.double).floor().type(dtype)
+                res2_cpu = torch.logspace(int(from_), int(to), steps=10,
+                                          device='cpu', dtype=torch.double).floor().type(dtype)
                 self.assertEqual(res1, res2)
+                self.assertEqual(res1, res2_cpu)
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.half, torch.float, torch.double)
