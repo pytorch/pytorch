@@ -5373,6 +5373,37 @@ class TestONNXRuntime(unittest.TestCase):
         [np.testing.assert_allclose(ort_out1, ort_out2, atol=1e-7, rtol=0.001) for ort_out1, ort_out2 in
          zip(ort_outs1, ort_outs2)]
 
+    def test_script_custom_class_error(self):
+        class BoxCoder(object):
+            def __init__(self, bbox_xform_clip):
+                # type: (float) -> None
+                self.bbox_xform_clip = bbox_xform_clip
+
+            def decode(self, rel_codes, boxes):
+                # type: (Tensor, List[Tensor]) -> Tensor
+                boxes = torch.cat(boxes, dim=0)
+                pred_ctr_x = torch.clamp(rel_codes[:, 0::4], max=self.bbox_xform_clip) * boxes[:, 2]
+                return pred_ctr_x
+
+        class MyModule(torch.nn.Module):
+            __annotations__ = {
+                'box_coder': BoxCoder,
+            }
+
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.box_coder = BoxCoder(1.4)
+
+            def forward(self, box_regression: torch.Tensor, proposals: List[torch.Tensor]):
+                return self.box_coder.decode(box_regression, proposals)
+
+        model = torch.jit.script(MyModule())
+        box_regression = torch.randn([4, 4])
+        proposal = [torch.randn(2, 4), torch.randn(2, 4)]
+
+        with self.assertRaises(RuntimeError) as cm:
+            self.run_test(model, (box_regression, proposal))
+
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout,
               **extra_kwargs):
