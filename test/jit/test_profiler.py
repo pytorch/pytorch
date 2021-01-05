@@ -117,8 +117,7 @@ class TestProfiler(JitTestCase):
 
         g = torch.jit.last_executed_optimized_graph()
         # Types should remain specialized for typecheck outputs & fusion outputs
-        FileCheck().check("Double(").check_same("prim::TypeCheck").check_same("\n").check("Double").check_same("TensorExpr").run(g)
-
+        FileCheck().check("Double(").check_same("prim::CompleteTypeCheck").check_same("\n").check("Double").check_same("TensorExpr").run(g)
         # other outputs should not be specialized
         FileCheck().check("Tensor = prim::If").run(g)
 
@@ -136,7 +135,7 @@ class TestProfiler(JitTestCase):
         foo(x, y)
         b = foo(x, y)
         g = torch.jit.last_executed_optimized_graph()
-        self.assertEqual(len(list(g.findAllNodes("prim::TypeCheck"))), 2)
+        self.assertEqual(len(list(g.findAllNodes("prim::CompleteTypeCheck"))), 2)
         FileCheck().check("TensorExpr").check("aten::add_").check("TensorExpr").run(g)
 
     def test_use_not_profiled(self):

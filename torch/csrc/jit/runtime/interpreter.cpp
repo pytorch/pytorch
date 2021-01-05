@@ -23,6 +23,7 @@
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <ATen/core/jit_type.h>
 
 #ifdef USE_RPC
 #include <torch/csrc/distributed/autograd/context/container.h>
@@ -75,6 +76,67 @@ TensorTypePtr tensorTypeInCurrentExecutionContext(const at::Tensor& t) {
 }
 
 namespace {
+
+template <typename T>
+bool is_null_or_equal(c10::optional<T> a, c10::IntArrayRef b) {
+  return !a.has_value() || a.value() == b;
+}
+
+/*
+  checks if t.strides() match ttp.stride_properties()
+  Note, ttp.stride_properties() are expected to be complete
+*/
+static bool matchStrides(
+    const std::shared_ptr<TensorType>& ttp,
+    const at::Tensor& t) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(t.is_contiguous());
+  const auto& t_strides = t.strides();
+  for (const auto& stride : *ttp->stride_properties().sizes()) {
+    if (t_strides[*stride->stride_index_] !=
+            static_cast<int64_t>(*stride->stride_) ||
+        *stride->contiguous_ != true) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/*
+Note, this function is for use by case TYPECHECK **only** as it requires
+`ttp` to be a complete type. Read on to learn about all the preconditions
+*/
+bool matchTensor(const std::shared_ptr<TensorType>& ttp, const at::Tensor& t) {
+  bool undef = ttp->undefined().value_or(!t.defined());
+  if (undef != !t.defined()) {
+    // When the followings are true, we consider it's not a match:
+    // - undefined().has_value() == true
+    // - undefined().value() != !t.defined()
+    return false;
+  } else if (!t.defined()) {
+    // When the followings are true, we consider it's a match:
+    // - t is not defined
+    // - undefined() == null or undefined().value() == true
+    return true;
+  }
+  // Here we know t.defined() == true and compare all other properties.
+  bool rg = at::GradMode::is_enabled() && t.requires_grad();
+
+  if (ttp->requiresGrad().value_or(rg) != rg ||
+      ttp->device().value_or(t.device()) != t.device() ||
+      ttp->scalarType().value_or(t.scalar_type()) != t.scalar_type() ||
+      !is_null_or_equal(ttp->sizes().concrete_sizes(), t.sizes())) {
+    return false;
+  }
+
+  if (!t.has_storage() && !ttp->stride_properties().isComplete()) {
+    return true;
+  }
+
+  return t.is_contiguous() ? matchStrides(ttp, t)
+                           : TensorType::computeStrideProps(t.sizes(), false) ==
+          ttp->stride_properties();
+}
 
 // Insert explicit prim::MethodCall nodes after prim::Enter nodes
 // to actually call __enter__ on the object. All prim::Enter does
@@ -737,15 +799,16 @@ struct CodeImpl {
   void emitTypeCheck(Node* node) {
     auto num_inputs = node->inputs().size();
 
-    // Check that TypeCheck has at least one input.
+    // Check that CompleteTypeCheck has at least one input.
     TORCH_INTERNAL_ASSERT(
-        num_inputs && num_inputs + 1 == node->outputs().size());
+        num_inputs > 0 && num_inputs + 1 == node->outputs().size());
     emitLoadInputs(node->inputs());
 
     // Emit the expected type.
     size_t types_start = type_table_.size();
     auto types = node->tys(attr::types);
     for (size_t i = 0; i < num_inputs; i++) {
+      TORCH_INTERNAL_ASSERT(types[i]->expect<TensorType>()->isComplete());
       emitType(types[i]);
     }
     insertInstruction(TYPECHECK, types_start, num_inputs);
@@ -945,7 +1008,7 @@ struct CodeImpl {
           emitInterfaceCall(node->s(attr::name), node->inputs());
         }
         break;
-      case prim::TypeCheck:
+      case prim::CompleteTypeCheck:
         emitTypeCheck(node);
         break;
       case prim::BailOut:
@@ -1411,14 +1474,14 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           }
           case TYPECHECK: {
             int num_inputs = inst.N, i = 0;
-            TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs && num_inputs > 0);
+            TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs);
             // Check every input's shape against profiled (expected) shape.
             for (i = 0; i < num_inputs; i++) {
               auto& input = peek(stack, i, num_inputs);
               auto& t = input.toTensor();
               const TypePtr& expected = frame.function->type_table_[inst.X + i];
               auto expected_type = expected->cast<TensorType>();
-              if (t.defined() && !expected_type->matchTensor(t)) {
+              if (t.defined() && !matchTensor(expected_type, t)) {
                 push(stack, false);
                 break;
               }
@@ -1444,7 +1507,9 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                       t.sizes(), expected_type->symbolic_sizes())) {
                 push(stack, false);
               } else {
-                push(stack, expected_type->matchTensor(t));
+                auto at = TensorType::create(t);
+                auto merged = expected_type->merge(*at, false);
+                push(stack, *merged == *at);
               }
             }
             ++frame.pc;

@@ -581,8 +581,6 @@ struct TORCH_API TensorType : public Type {
 
   TensorTypePtr merge(const TensorType& other, bool merge_sizes = true) const;
 
-  bool matchTensor(const at::Tensor& t);
-
   // is all information about the type specified except for autograd?
   // This replaces the notion of a 'CompleteTensorType' that used to exist
   // in the type-hierarchy. Excluding require_grad and undefined allows
@@ -643,6 +641,11 @@ struct TORCH_API TensorType : public Type {
     return strides;
   }
 
+  static VaryingShape<Stride> computeStrideProps(
+    at::IntArrayRef sizes,
+    at::IntArrayRef strides,
+    bool tensor_contiguity = false);
+
  private:
   TensorType(
       c10::optional<at::ScalarType> scalar_type,
@@ -656,11 +659,6 @@ struct TORCH_API TensorType : public Type {
     return TensorTypePtr(new TensorType(
         scalar_type_, device_, sizes_, strides_, requires_grad_, undefined_));
   }
-
-  static VaryingShape<Stride> computeStrideProps(
-      at::IntArrayRef sizes,
-      at::IntArrayRef strides,
-      bool tensor_contiguity = false);
 
   c10::optional<at::ScalarType> scalar_type_;
   c10::optional<at::Device> device_;

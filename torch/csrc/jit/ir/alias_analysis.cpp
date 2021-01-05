@@ -599,7 +599,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::profile:
       makePointerTo(node->output(), node->inputs().at(0));
       return;
-    case prim::TypeCheck:
+    case prim::CompleteTypeCheck:
     case prim::RequiresGradCheck: {
       auto num_inputs = node->inputs().size();
       for (size_t i = 0; i < num_inputs; i++) {

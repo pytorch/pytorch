@@ -315,10 +315,10 @@ void removeTensorTypeSpecialization(Value* v) {
     return;
   }
   // Constants & TensorExprGroup will always produce specialized tensor type,
-  // TypeCheck are inserted by this pass and only used by fusion groups that
-  // insert proper guards
+  // CompleteTypeCheck are inserted by this pass and only used by fusion groups
+  // that insert proper guards
   if (v->node()->kind() == prim::Constant ||
-      v->node()->kind() == prim::TypeCheck ||
+      v->node()->kind() == prim::CompleteTypeCheck ||
       v->node()->kind() == prim::TensorExprGroup) {
     return;
   }
@@ -1109,7 +1109,7 @@ class TensorExprFuser {
       insertTypeGuard(
           fusion_group,
           [](const TensorTypePtr& t) { return t; },
-          prim::TypeCheck);
+          prim::CompleteTypeCheck);
     }
   }
 

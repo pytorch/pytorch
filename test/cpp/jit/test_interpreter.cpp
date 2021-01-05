@@ -23,7 +23,7 @@ class TypeCheckTest : public ::testing::Test {
         R"IR(
 graph(%a.1 : Tensor,
       %b.1 : Tensor):
-  %t0 : Float(2, 2, strides=[2, 1], device=cpu, requires_grad=1), %t1 : Float(3, 3, strides=[3, 1]), %type_matched : bool = prim::TypeCheck[types=[Float(2, 2, strides=[2, 1], device=cpu, requires_grad=1), Float(3, 3, strides=[3, 1])]](%a.1, %b.1)
+  %t0 : Float(2, 2, strides=[2, 1], device=cpu, requires_grad=1), %t1 : Float(3, 3, strides=[3, 1]), %type_matched : bool = prim::CompleteTypeCheck[types=[Float(2, 2, strides=[2, 1], device=cpu, requires_grad=1), Float(3, 3, strides=[3, 1])]](%a.1, %b.1)
   return (%t0, %t1, %type_matched)
   )IR",
         &*graph,
@@ -35,7 +35,7 @@ graph(%a.1 : Tensor,
 };
 
 TEST_F(TypeCheckTest, MatchingType) {
-  // TypeCheck yields to true! Shape, grad and device matches.
+  // CompleteTypeCheck yields to true! Shape, grad and device matches.
   auto a = at::zeros({2, 2}, at::kFloat);
   auto b = at::ones({3, 3}, at::kFloat);
   a.set_requires_grad(true);
@@ -97,7 +97,7 @@ TEST_F(TypeCheckTest, DeviceMismatch_CUDA) {
 //       R"IR(
 // graph(%a.1 : Tensor,
 //       %b.1 : Tensor):
-//   %type_matched : bool = prim::TypeCheck()
+//   %type_matched : bool = prim::CompleteTypeCheck()
 //   return (%type_matched)
 //   )IR",
 //       &*graph,
@@ -113,7 +113,7 @@ TEST_F(TypeCheckTest, DeviceMismatch_CUDA) {
 //       R"IR(
 // graph(%a.1 : Tensor,
 //       %b.1 : Tensor):
-//   %type_matched : bool = prim::TypeCheck(%a.1)
+//   %type_matched : bool = prim::CompleteTypeCheck(%a.1)
 //   return (%type_matched)
 //   )IR",
 //       &*graph,

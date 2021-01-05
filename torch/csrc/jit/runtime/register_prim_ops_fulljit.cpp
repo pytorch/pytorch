@@ -82,10 +82,10 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
-         prim::TypeCheck /* (...)  -> (..., bool) */,
+         prim::CompleteTypeCheck /* (...)  -> (..., bool) */,
          [](const Node* /* node */) -> Operation {
            return [](Stack* /* stack */) {
-             AT_ERROR("prim::TypeCheck not yet implemented"); // NOLINT
+             AT_ERROR("prim::CompleteTypeCheck not yet implemented"); // NOLINT
            };
          },
          aliasAnalysisSpecialCase()),
