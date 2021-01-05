@@ -78,6 +78,7 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<scalar_t, IndexType> a,
     if ((VEC == 4) || (gridxvec_loop_state == 0)) {
       rand = curand_uniform4(&state);
     } else {
+      // sets up the last two values we generated last iteration to be used this iteration.
       rand.x = rand.z;
       rand.y = rand.w;
       gridxvec_loop_state ^= 1;
