@@ -12,9 +12,7 @@ Note that ONNX-TRT enforce an NCHW input!
 
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python.onnx.helper import c2_native_run_net, c2_native_run_op
-from caffe2.python import core, workspace
-import caffe2.python.onnx.frontend as c2_front
+from caffe2.python import workspace
 import caffe2.python._import_c_extension as C
 import numpy as np
 
