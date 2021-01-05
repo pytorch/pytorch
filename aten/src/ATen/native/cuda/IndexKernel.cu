@@ -308,9 +308,10 @@ void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& so
       .add_input(maskPrefixSum)
       .build();
 
-  AT_DISPATCH_ALL_TYPES_AND2(
+  AT_DISPATCH_ALL_TYPES_AND3(
       ScalarType::Bool,
       ScalarType::BFloat16,
+      ScalarType::Half,
       self.scalar_type(),
       "masked_scatter_",
       [&]() {
