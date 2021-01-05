@@ -1,6 +1,5 @@
 import torch
 from torch.fx import symbolic_trace
-import copy
 import re
 
 
@@ -28,18 +27,18 @@ class M(torch.nn.Module):
 # Symbolically trace an instance of the module
 traced = symbolic_trace(M())
 
-#If you have ``torch`` imported, you have two ways to denonte addition:
-#the ``+`` operator and the method ``torch.add``. ``+`` is a Python
-#built-in, so it's represented as a ``call_function`` Node with a target
-#of ``<built-in function add>``. ``torch.add`` is part of ``torch``, so
-#it becomes a ``call_method`` Node with a target of
-#``<built-in method add of type object at MEMORY-LOCATION-OF-TORCH>``.
+# If you have ``torch`` imported, you have two ways to denonte addition:
+# the ``+`` operator and the method ``torch.add``. ``+`` is a Python
+# built-in, so it's represented as a ``call_function`` Node with a target
+# of ``<built-in function add>``. ``torch.add`` is part of ``torch``, so
+# it becomes a ``call_method`` Node with a target of
+# ``<built-in method add of type object at MEMORY-LOCATION-OF-TORCH>``.
 #
-#To determine whether a given node represents addition, we can match
-#on the ``target`` attribute. In this particular case, we have two
-#different representations of "addition", so we'll use a regex to match
-#on ``target``. (If you want to replace a ``torch``-specific operator,
-#you can match on a simple string.)
+# To determine whether a given node represents addition, we can match
+# on the ``target`` attribute. In this particular case, we have two
+# different representations of "addition", so we'll use a regex to match
+# on ``target``. (If you want to replace a ``torch``-specific operator,
+# you can match on a simple string.)
 regexp = re.compile(r"(?<=[\s])add(?=[\>\s])")
 
 # Go through all the nodes in the Graph
