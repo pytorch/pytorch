@@ -123,7 +123,7 @@ std::string getModuleTypeName(const Module& module, const std::string& prefix) {
   return prefix + "(" + moduleType + ")";
 }
 
-std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
+std::tuple<IValue, c10::optional<IValue>, c10::optional<IValue>> getFunctionTuple(
     const Module& module,
     const Function& func,
     bool save_mobile_debug_info) {
@@ -138,6 +138,7 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
   std::vector<c10::OperatorName> opnames;
   std::vector<std::string> method_names;
   std::vector<std::string> op_module_paths;
+  std::vector<std::string> op_source_ranges;
   for (size_t i = 0; i < instructions_copy.size(); ++i) {
     Instruction ins = instructions_copy[i];
     if (ins.op == OP || ins.op == OPN) {
@@ -145,9 +146,10 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
       opnames.emplace_back(node->schema().operator_name());
       if (save_mobile_debug_info) {
         std::string root_scope_string = getModuleTypeName(module, "top");
-        //        op_module_paths.emplace_back(getModulePath(node,
-        //        root_scope_string));
-        op_module_paths.emplace_back(getDebugInfo(node, root_scope_string));
+        op_module_paths.emplace_back(getModulePath(node,
+                root_scope_string));
+//        op_module_paths.emplace_back(getDebugInfo(node, root_scope_string));
+        op_source_ranges.emplace_back(getSourceRangeTrace(node, root_scope_string));
       }
     }
     // CALL nodes at this point represent built-in (i.e. non-Graph)
@@ -253,6 +255,7 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
   auto bytecode_vals = Tup({func.qualname().qualifiedName(), table});
 
   c10::optional<IValue> debug_info_vals;
+  c10::optional<IValue> debug_source_ranges;
   if (save_mobile_debug_info) {
     // module debug info
     std::vector<IValue> module_paths;
@@ -260,10 +263,19 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
     for (auto& path : op_module_paths) {
       module_paths.emplace_back(std::move(path));
     }
+
+    std::vector<IValue> module_source_ranges;
+    for (const auto& source_range: op_source_ranges) {
+      module_source_ranges.emplace_back(std::move(source_range));
+    }
+
     auto module_debug_info = Table({{"module_debug_info", Tup(module_paths)}});
     debug_info_vals = Tup({func.qualname().qualifiedName(), module_debug_info});
+
+    auto module_source_range = Table({{"module_source_range", Tup(module_source_ranges)}});
+    debug_source_ranges = Tup({func.qualname().qualifiedName(), module_source_range});
   }
-  return std::make_pair(bytecode_vals, debug_info_vals);
+  return std::make_tuple(bytecode_vals, debug_info_vals, debug_source_ranges);
 }
 
 void setstateTuple(
@@ -271,6 +283,7 @@ void setstateTuple(
     const IValue& ivalue,
     std::vector<c10::IValue>& elements,
     c10::optional<std::vector<c10::IValue>>& debug_info_elements,
+    c10::optional<std::vector<c10::IValue>>& source_range_elements,
     bool save_mobile_debug_info) {
   if (!ivalue.isObject())
     return;
@@ -281,9 +294,10 @@ void setstateTuple(
     if (setstate.isGraphFunction()) {
       auto func_tuple =
           getFunctionTuple(module, setstate, save_mobile_debug_info);
-      elements.push_back(func_tuple.first);
+      elements.push_back(std::get<0>(func_tuple));
       if (save_mobile_debug_info) {
-        debug_info_elements->push_back(func_tuple.second.value());
+        debug_info_elements->push_back(std::get<1>(func_tuple).value());
+        source_range_elements->push_back(std::get<2>(func_tuple).value());
       }
     }
   } else {
@@ -293,6 +307,7 @@ void setstateTuple(
           obj->getSlot(i),
           elements,
           debug_info_elements,
+          source_range_elements,
           save_mobile_debug_info);
     }
   }
@@ -303,15 +318,17 @@ void moduleMethodsTuple(
     const Module& module,
     std::vector<c10::IValue>& elements,
     c10::optional<std::vector<c10::IValue>>& debug_info_elements,
+    c10::optional<std::vector<c10::IValue>>& source_range_elements,
     bool save_mobile_debug_info) {
   auto methods = module.get_methods();
   // top level methods
   for (const auto& method : methods) {
     auto func_tuple =
         getFunctionTuple(module, method.function(), save_mobile_debug_info);
-    elements.push_back(func_tuple.first);
+    elements.push_back(std::get<0>(func_tuple));
     if (save_mobile_debug_info) {
-      debug_info_elements->push_back(func_tuple.second.value());
+      debug_info_elements->push_back(std::get<1>(func_tuple).value());
+      source_range_elements->push_back(std::get<2>(func_tuple).value());
     }
   }
 
@@ -321,6 +338,7 @@ void moduleMethodsTuple(
       module._ivalue(),
       elements,
       debug_info_elements,
+      source_range_elements,
       save_mobile_debug_info);
 }
 
@@ -503,13 +521,15 @@ class ScriptModuleSerializer {
     }
 
     moduleMethodsTuple(
-        module, elements, debug_info_elements, save_mobile_debug_info);
+        module, elements, debug_info_elements, source_range_elements, save_mobile_debug_info);
     auto telements = Tup(std::move(elements));
     writeArchive("bytecode", telements);
     if (save_mobile_debug_info) {
       auto debug_info_telements = Tup(std::move(debug_info_elements.value()));
       writeArchive("mobile_debug", debug_info_telements);
-      writeArchive("mobile_source_range", debug_info_telements);
+
+      auto source_range_telements = Tup(std::move(source_range_elements.value()));
+      writeArchive("mobile_source_range", source_range_telements);
     }
   }
 
@@ -594,8 +614,9 @@ namespace {
 void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   std::vector<c10::IValue> elements;
   c10::optional<std::vector<c10::IValue>> debug_info_elements;
+  c10::optional<std::vector<c10::IValue>> source_range_elements;
   moduleMethodsTuple(
-      m, elements, debug_info_elements, false /* save_mobile_debug_info */);
+      m, elements, debug_info_elements, source_range_elements, false /* save_mobile_debug_info */);
   for (const auto& element : elements) {
     auto table = element.toTuple()->elements()[1];
     auto row =
