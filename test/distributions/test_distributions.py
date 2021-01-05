@@ -39,12 +39,13 @@ from torch._six import inf
 from torch.testing._internal.common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.autograd import grad, gradcheck
+from torch.autograd.functional import jacobian
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Cauchy, Chi2, ContinuousBernoulli, Dirichlet,
                                  Distribution, Exponential, ExponentialFamily,
                                  FisherSnedecor, Gamma, Geometric, Gumbel,
-                                 HalfCauchy, HalfNormal,
-                                 Independent, Kumaraswamy, Laplace, LogisticNormal,
+                                 HalfCauchy, HalfNormal, Independent, Kumaraswamy,
+                                 LKJCholesky, Laplace, LogisticNormal,
                                  LogNormal, LowRankMultivariateNormal,
                                  MixtureSameFamily, Multinomial, MultivariateNormal,
                                  NegativeBinomial, Normal,
@@ -58,7 +59,8 @@ from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.kl import _kl_expfamily_expfamily
 from torch.distributions.transforms import (AffineTransform, CatTransform, ExpTransform,
                                             StackTransform, identity_transform)
-from torch.distributions.utils import probs_to_logits, lazy_property
+from torch.distributions.utils import (probs_to_logits, lazy_property, tril_matrix_to_vec,
+                                       vec_to_tril_matrix)
 from torch.nn.functional import softmax
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
@@ -244,6 +246,20 @@ EXAMPLES = [
         {
             'concentration1': torch.rand(4).uniform_(1, 2).requires_grad_(),
             'concentration0': torch.rand(4).uniform_(1, 2).requires_grad_(),
+        },
+    ]),
+    Example(LKJCholesky, [
+        {
+            'dim': 2,
+            'concentration': 0.5
+        },
+        {
+            'dim': 3,
+            'concentration': torch.tensor([0.5, 1., 2.]),
+        },
+        {
+            'dim': 100,
+            'concentration': 4.
         },
     ]),
     Example(Laplace, [
@@ -2265,10 +2281,10 @@ class TestDistributions(TestCase):
                                         'Gumbel(loc={}, scale={})'.format(loc, scale))
 
     def test_kumaraswamy_shape(self):
-        concentration1 = torch.tensor(torch.randn(2, 3).abs(), requires_grad=True)
-        concentration0 = torch.tensor(torch.randn(2, 3).abs(), requires_grad=True)
-        concentration1_1d = torch.tensor(torch.randn(1).abs(), requires_grad=True)
-        concentration0_1d = torch.tensor(torch.randn(1).abs(), requires_grad=True)
+        concentration1 = torch.randn(2, 3).abs().requires_grad_()
+        concentration0 = torch.randn(2, 3).abs().requires_grad_()
+        concentration1_1d = torch.randn(1).abs().requires_grad_()
+        concentration0_1d = torch.randn(1).abs().requires_grad_()
         self.assertEqual(Kumaraswamy(concentration1, concentration0).sample().size(), (2, 3))
         self.assertEqual(Kumaraswamy(concentration1, concentration0).sample((5,)).size(), (5, 2, 3))
         self.assertEqual(Kumaraswamy(concentration1_1d, concentration0_1d).sample().size(), (1,))
@@ -2279,10 +2295,10 @@ class TestDistributions(TestCase):
     # Kumaraswamy distribution is not implemented in SciPy
     # Hence these tests are explicit
     def test_kumaraswamy_mean_variance(self):
-        c1_1 = torch.tensor(torch.randn(2, 3).abs(), requires_grad=True)
-        c0_1 = torch.tensor(torch.randn(2, 3).abs(), requires_grad=True)
-        c1_2 = torch.tensor(torch.randn(4).abs(), requires_grad=True)
-        c0_2 = torch.tensor(torch.randn(4).abs(), requires_grad=True)
+        c1_1 = torch.randn(2, 3).abs().requires_grad_()
+        c0_1 = torch.randn(2, 3).abs().requires_grad_()
+        c1_2 = torch.randn(4).abs().requires_grad_()
+        c0_2 = torch.randn(4).abs().requires_grad_()
         cases = [(c1_1, c0_1), (c1_2, c0_2)]
         for i, (a, b) in enumerate(cases):
             m = Kumaraswamy(a, b)
@@ -2533,6 +2549,29 @@ class TestDistributions(TestCase):
         self.assertEqual(ContinuousBernoulli(p).sample(sample_shape=(2, 5)).size(),
                          (2, 5, 2, 3, 5))
         self.assertEqual(ContinuousBernoulli(p).sample((2,)).size(), (2, 2, 3, 5))
+
+    def test_lkj_cholesky_log_prob(self):
+        def tril_cholesky_to_tril_corr(x):
+            x = vec_to_tril_matrix(x, -1)
+            diag = (1 - (x * x).sum(-1)).sqrt().diag_embed()
+            x = x + diag
+            return tril_matrix_to_vec(x @ x.T, -1)
+
+        for dim in range(2, 5):
+            log_probs = []
+            lkj = LKJCholesky(dim, concentration=1.)
+            for i in range(2):
+                sample = lkj.sample()
+                sample_tril = tril_matrix_to_vec(sample, diag=-1)
+                log_prob = lkj.log_prob(sample)
+                log_abs_det_jacobian = torch.slogdet(jacobian(tril_cholesky_to_tril_corr, sample_tril)).logabsdet
+                log_probs.append(log_prob - log_abs_det_jacobian)
+            # for concentration=1., the density is uniform over the space of all
+            # correlation matrices.
+            if dim == 2:
+                # for dim=2, pdf = 0.5 (jacobian adjustment factor is 0.)
+                self.assertTrue(all([x == torch.tensor(0.5).log() for x in log_probs]))
+            self.assertEqual(log_probs[0], log_probs[1])
 
     def test_independent_shape(self):
         for Dist, params in EXAMPLES:
@@ -4361,6 +4400,22 @@ class TestFunctors(TestCase):
         expected_jac = torch.cat([t1.log_abs_det_jacobian(x1, y1),
                                   t2.log_abs_det_jacobian(x2, y2)], dim=dim)
         self.assertEqual(actual_jac, expected_jac)
+
+    def test_cat_event_dim(self):
+        t1 = AffineTransform(0, 2 * torch.ones(2), event_dim=1)
+        t2 = AffineTransform(0, 2 * torch.ones(2), event_dim=1)
+        dim = 1
+        bs = 16
+        x1 = torch.randn(bs, 2)
+        x2 = torch.randn(bs, 2)
+        x = torch.cat([x1, x2], dim=1)
+        t = CatTransform([t1, t2], dim=dim, lengths=[2, 2])
+        y1 = t1(x1)
+        y2 = t2(x2)
+        y = t(x)
+        actual_jac = t.log_abs_det_jacobian(x, y)
+        expected_jac = sum([t1.log_abs_det_jacobian(x1, y1),
+                            t2.log_abs_det_jacobian(x2, y2)])
 
     def test_stack_transform(self):
         x1 = -1 * torch.arange(1, 101, dtype=torch.float)

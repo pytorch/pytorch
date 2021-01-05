@@ -105,6 +105,7 @@ struct Capsule {
 #define TORCH_FORALL_TAGS(_) \
   _(None)                    \
   _(Tensor)                  \
+  _(Storage)                 \
   _(Double)                  \
   _(Int)                     \
   _(Bool)                    \
@@ -156,7 +157,7 @@ struct Capsule {
 ///   // `my_ivalue` is tagged as an int and cannot be used as another type
 ///   torch::Tensor my_tensor = my_ivalue.toTensor()
 /// \endrst
-struct CAFFE2_API IValue final {
+struct TORCH_API IValue final {
   IValue(const IValue& rhs)
       : IValue(rhs.payload, rhs.tag, rhs.is_intrusive_ptr) {
     if (is_intrusive_ptr) {
@@ -313,6 +314,20 @@ struct CAFFE2_API IValue final {
   at::TensorImpl* unsafeToTensorImpl() const {
     return static_cast<at::TensorImpl*>(payload.as_intrusive_ptr);
   }
+
+  IValue(at::Storage s) : tag(Tag::Storage), is_intrusive_ptr(static_cast<bool>(s)) {
+    // Note: the undefined tensor is not refcounted, so while it
+    // is tagged as a tensor, is_intrusive_ptr is set to false.
+    // This is not an optional optimization: our incref call
+    // *will not* do the right thing when called on an
+    // undefined tensor.
+    payload.as_intrusive_ptr = s.unsafeReleaseStorageImpl();
+  }
+  bool isStorage() const {
+    return Tag::Storage == tag;
+  }
+  c10::Storage toStorage() &&;
+  c10::Storage toStorage() const&;
 
   const IValue& toIValue() const {
     return *this;
@@ -706,14 +721,6 @@ struct CAFFE2_API IValue final {
   optional<T> toOptional();
 
   /// @private [doxygen private]
-  /// Only for use in generated code.
-  OptionalArray<int64_t> toOptionalIntArray();
-
-  /// @private [doxygen private]
-  /// Only for use in generated code.
-  OptionalArray<double> toOptionalDoubleArray();
-
-  /// @private [doxygen private]
   /// this is a shallow comparison of two IValues to test the object identity
   bool isSameIdentity(const IValue& rhs) const;
 
@@ -737,7 +744,7 @@ struct CAFFE2_API IValue final {
   // This is different from `repr()` in that there is no expectation that we can
   // exactly reconstruct an IValue from the output; feel free to use a
   // concise/pretty form
-  CAFFE2_API friend std::ostream& operator<<(
+  TORCH_API friend std::ostream& operator<<(
       std::ostream& out,
       const IValue& v);
 
@@ -840,7 +847,7 @@ struct CAFFE2_API IValue final {
   friend struct WeakIValue;
 };
 
-struct CAFFE2_API WeakIValue final {
+struct TORCH_API WeakIValue final {
   WeakIValue() : payload{0}, tag(IValue::Tag::None), is_intrusive_ptr(false) {}
 
   WeakIValue(const WeakIValue& rhs)
@@ -949,8 +956,8 @@ TORCH_API ska::flat_hash_map<std::type_index, c10::ClassTypePtr>&
 getCustomClassTypeMap();
 
 template <typename T>
-c10::ClassTypePtr getCustomClassType() {
-  auto tmap = c10::getCustomClassTypeMap();
+c10::ClassTypePtr getCustomClassTypeImpl() {
+  auto& tmap = c10::getCustomClassTypeMap();
   auto res = tmap.find(std::type_index(typeid(T)));
   if (res == tmap.end()) {
     throw c10::Error("Can't find class id in custom class type map", "");
@@ -959,9 +966,13 @@ c10::ClassTypePtr getCustomClassType() {
 }
 
 template <typename T>
-inline bool isCustomClassRegistered() {
-  auto tmap = c10::getCustomClassTypeMap();
-  return tmap.find(std::type_index(typeid(T))) != tmap.end();
+const c10::ClassTypePtr& getCustomClassType() {
+  // Classes are never unregistered from getCustomClassTypeMap and the
+  // hash lookup can be a hot path, so just cache.
+  // For the same reason, it's fine If this ends up getting duplicated across
+  // DSO boundaries for whatever reason.
+  static c10::ClassTypePtr cache = getCustomClassTypeImpl<T>();
+  return cache;
 }
 
 TORCH_API std::unordered_map<std::string, std::function<PyObject*(void*)>>&

@@ -524,7 +524,7 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
     deserialization methods using :func:`torch.serialization.register_package`.
 
     Args:
-        f: a file-like object (has to implement :meth:`read`, :meth`readline`, :meth`tell`, and :meth`seek`),
+        f: a file-like object (has to implement :meth:`read`, :meth:`readline`, :meth:`tell`, and :meth:`seek`),
             or a string or os.PathLike object containing a file name
         map_location: a function, :class:`torch.device`, string or a dict specifying how to remap storage
             locations
