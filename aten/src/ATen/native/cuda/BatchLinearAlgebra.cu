@@ -1328,6 +1328,11 @@ AT_ERROR("inverse: MAGMA library not found in "
   auto infos_getri_data = infos_getri.data_ptr<magma_int_t>();
 
   magma_int_t batch_size = magma_int_cast(batchCount(self), "batchCount");
+  // MAGMA does not work with batch_size == 0, let's return early in this case
+  if (batch_size == 0) {
+    return;
+  }
+
   magma_int_t n = magma_int_cast(self.size(-2), "self.size(-2)");
   magma_int_t lda = std::max<magma_int_t>(1, n);
 
@@ -1336,12 +1341,10 @@ AT_ERROR("inverse: MAGMA library not found in "
   scalar_t** self_array;
   scalar_t** self_inv_array;
 
-  magma_int_t batch_size_or_one = std::max<magma_int_t>(1, batch_size);
-
-  ALLOCATE_ARRAY(ipiv_data, magma_int_t, batch_size_or_one * lda);
-  ALLOCATE_ARRAY(ipiv_array, magma_int_t*, batch_size_or_one);
-  ALLOCATE_ARRAY(self_array, scalar_t*, batch_size_or_one);
-  ALLOCATE_ARRAY(self_inv_array, scalar_t*, batch_size_or_one);
+  ALLOCATE_ARRAY(ipiv_data, magma_int_t, batch_size * lda);
+  ALLOCATE_ARRAY(ipiv_array, magma_int_t*, batch_size);
+  ALLOCATE_ARRAY(self_array, scalar_t*, batch_size);
+  ALLOCATE_ARRAY(self_inv_array, scalar_t*, batch_size);
 
   // Set up the created arrays
   for (int64_t i = 0; i < batch_size; i++) {
