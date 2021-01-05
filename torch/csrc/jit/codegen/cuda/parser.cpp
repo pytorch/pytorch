@@ -25,8 +25,13 @@ constexpr auto kNumBinaryOps = 29;
 constexpr auto kNumBinaryOpsWithAlpha = 4;
 constexpr auto kNumLerpOps = 2;
 constexpr auto kNumLayernormFwd = 2;
+constexpr auto kNumSumToSize = 2;
 
 namespace {
+
+const auto& sizeAttr = Symbol::attr("profiled_size");
+const auto& intListAttr = Symbol::attr("profiled_int_list");
+const auto& boolAttr = Symbol::attr("profiled_bool");
 
 typedef Val* CgValue;
 typedef Expr* CgOp;
@@ -37,14 +42,15 @@ typedef bool (*MergeQueryFuncPtr)(const Node*);
 // TODO: add a mutex to make it thread safe.
 class IrParser {
   enum class OperatorType { ElementWise, Reduction, Normalization };
+  typedef OperatorType (*OperatorTypeFuncPtr)(const Node*);
 
   class RegistrationEntry {
    public:
     RegistrationEntry(
         ParseFuncPtr parse_f,
         MergeQueryFuncPtr merge_f = nullptr,
-        OperatorType type = OperatorType::ElementWise)
-        : parse_f_(parse_f), merge_f_(merge_f), type_(type) {}
+        OperatorTypeFuncPtr type_f = nullptr)
+        : parse_f_(parse_f), merge_f_(merge_f), type_f_(type_f) {}
 
     void parse(const Node* node, std::unordered_map<size_t, CgValue>& values)
         const {
@@ -58,14 +64,16 @@ class IrParser {
       return merge_f_(node);
     }
 
-    bool isType(OperatorType type) const {
-      return type_ == type;
+    bool isType(const Node* node, OperatorType type) const {
+      auto n_type =
+          type_f_ == nullptr ? OperatorType::ElementWise : type_f_(node);
+      return n_type == type;
     }
 
    private:
     ParseFuncPtr parse_f_;
     MergeQueryFuncPtr merge_f_;
-    OperatorType type_;
+    OperatorTypeFuncPtr type_f_;
   };
 
  public:
@@ -177,7 +185,8 @@ class IrParser {
     initRegistry();
 
     auto reg_entry = lookupInRegistry(node);
-    return reg_entry != nullptr && reg_entry->isType(OperatorType::Reduction);
+    return reg_entry != nullptr &&
+        reg_entry->isType(node, OperatorType::Reduction);
   }
 
   static bool isNormalizationNode(const Node* node) {
@@ -185,14 +194,15 @@ class IrParser {
 
     auto reg_entry = lookupInRegistry(node);
     return reg_entry != nullptr &&
-        reg_entry->isType(OperatorType::Normalization);
+        reg_entry->isType(node, OperatorType::Normalization);
   }
 
   static bool isElementWiseNode(const Node* node) {
     initRegistry();
 
     auto reg_entry = lookupInRegistry(node);
-    return reg_entry != nullptr && reg_entry->isType(OperatorType::ElementWise);
+    return reg_entry != nullptr &&
+        reg_entry->isType(node, OperatorType::ElementWise);
   }
 
   // TODO: is_reduction is too hacky here. we should categorize operation types
@@ -202,11 +212,11 @@ class IrParser {
       std::shared_ptr<Operator>& op,
       ParseFuncPtr parse_fn,
       MergeQueryFuncPtr merge_query_fn = nullptr,
-      OperatorType type = OperatorType::ElementWise) {
+      OperatorTypeFuncPtr type_fn = nullptr) {
     jit_operator_registry_.emplace(
         std::piecewise_construct,
         std::forward_as_tuple(canonicalSchemaString(op->schema())),
-        std::forward_as_tuple(parse_fn, merge_query_fn, type));
+        std::forward_as_tuple(parse_fn, merge_query_fn, type_fn));
   }
 
  private:
@@ -618,7 +628,9 @@ class IrParser {
             value_map.emplace(node->output()->unique(), output);
           },
           [](const Node* node) -> bool { return true; },
-          OperatorType::Normalization);
+          [](const Node* node) -> OperatorType {
+            return OperatorType::Normalization;
+          });
     }
 
     {
@@ -704,7 +716,9 @@ class IrParser {
           },
           // TODO: #ProfileIValue List should update this
           [](const Node* node) -> bool { return true; },
-          OperatorType::Normalization);
+          [](const Node* node) -> OperatorType {
+            return OperatorType::Normalization;
+          });
     }
 
     {
@@ -803,7 +817,9 @@ class IrParser {
             },
             // TODO: #ProfileIValue List should update this
             [](const Node* node) -> bool { return true; },
-            OperatorType::Normalization);
+            [](const Node* node) -> OperatorType {
+              return OperatorType::Normalization;
+            });
       }
     }
 
@@ -919,7 +935,9 @@ class IrParser {
           },
           // TODO: #ProfileIValue List should update this
           [](const Node* node) -> bool { return true; },
-          OperatorType::Normalization);
+          [](const Node* node) -> OperatorType {
+            return OperatorType::Normalization;
+          });
     }
 
     {
@@ -963,7 +981,9 @@ class IrParser {
             }
             return true;
           },
-          OperatorType::Normalization);
+          [](const Node* node) -> OperatorType {
+            return OperatorType::Normalization;
+          });
     }
 
     {
@@ -1007,7 +1027,9 @@ class IrParser {
             }
             return true;
           },
-          OperatorType::Normalization);
+          [](const Node* node) -> OperatorType {
+            return OperatorType::Normalization;
+          });
     }
 
     {
@@ -1034,7 +1056,7 @@ class IrParser {
             value_map.emplace(node->output()->unique(), out);
           },
           [](const Node* node) -> bool {
-            // TODO: support cast of output types yet;
+            // TODO: support cast of output types
             if (!node->inputs()[3]->type()->isSubtypeOf(
                     static_cast<c10::TypePtr>(NoneType::get()))) {
               // We can only handle output as half, float, and double;
@@ -1058,7 +1080,54 @@ class IrParser {
             }
             return true;
           },
-          OperatorType::Reduction);
+          [](const Node* node) -> OperatorType {
+            return OperatorType::Reduction;
+          });
+    }
+
+    {
+      std::array<const char*, kNumSumToSize> SumToSize = {
+          "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)",
+          "aten::sum_to_size(Tensor self, int[] size) -> Tensor"};
+      for (auto signature : SumToSize) {
+        auto ptr_op = getOperatorForLiteral(signature);
+        registerParseRule(
+            ptr_op,
+            [](const Node* node,
+               std::unordered_map<size_t, CgValue>& value_map) -> void {
+              auto self = value_map[node->input(0)->unique()];
+              auto size_to = constant_as<c10::List<int64_t>>(node->input(1));
+              TORCH_INTERNAL_ASSERT(
+                  size_to.has_value(),
+                  "aten::sum cannot be fused with dynamic axes");
+              if (!size_to->empty()) {
+                auto out = sum_to(self->as<TensorView>(), size_to->vec());
+                value_map.emplace(node->output()->unique(), out);
+              } else {
+                // We are introducing alias here!
+                value_map.emplace(node->output()->unique(), self);
+              }
+            },
+            [](const Node* node) -> bool {
+              // we don't support dynamic reduction axes;
+              if (node->inputs()[1]->node()->kind() != prim::Constant) {
+                return false;
+              }
+              return true;
+              // auto size_to = constant_as<c10::List<int64_t>>(node->input(1));
+              // return size_to.has_value() && !size_to->empty();
+            },
+            [](const Node* node) -> OperatorType {
+              auto size_to = constant_as<c10::List<int64_t>>(node->input(1));
+              // technically size_to->empty() should never occur, as specialized
+              // _grad_sum_to_size should have been removed by optimization pass
+              if (size_to->empty()) {
+                return OperatorType::ElementWise;
+              } else {
+                return OperatorType::Reduction;
+              }
+            });
+      }
     }
 
     {
@@ -1199,6 +1268,116 @@ std::unordered_map<const FunctionSchema*, const IrParser::RegistrationEntry*>
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool IrParser::init_registry_ = true;
 
+ProfileIValueOp* insertProfileIValueOp(
+    Node* node,
+    size_t offset,
+    ProfilingRecord* pr) {
+  auto in_val = node->input(offset);
+  auto pn = pr->createProfileIValueNode(in_val);
+  pn->insertBefore(node);
+  node->replaceInput(offset, pn->output());
+  return pn;
+}
+
+void profileSize(ProfilingRecord* pr, Node* node, size_t offset) {
+  auto pn = insertProfileIValueOp(node, offset, pr);
+
+  const auto ivalue_profiler = [pr, pn](Stack& stack) {
+    std::lock_guard<std::mutex> lock(pr->mutex_);
+
+    // TODO: we don't care about merging multiple profiling runs as we don't
+    // support it at all;
+    int64_t frame_id = 0;
+    pop(stack, frame_id);
+    IValue value;
+    pop(stack, value);
+
+    std::vector<int64_t> size_vec;
+    if (value.isIntList()) {
+      size_vec = value.toIntVector();
+    } else if (value.isNone()) {
+      size_vec.clear();
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          false, "profileSize does not support data type: ", value.tagKind());
+    }
+    if (!pn->hasAttribute(sizeAttr)) {
+      pn->is_(sizeAttr, size_vec);
+    } else {
+      auto profiled_ints = pn->is(sizeAttr);
+      TORCH_INTERNAL_ASSERT(
+          profiled_ints.size() == size_vec.size() &&
+              std::equal(
+                  profiled_ints.begin(), profiled_ints.end(), size_vec.begin()),
+          "profiling ivalue doesn't support merge");
+    }
+    push(stack, value);
+  };
+  pn->setCallback(ivalue_profiler);
+}
+
+void profileIntList(ProfilingRecord* pr, Node* node, size_t offset) {
+  auto pn = insertProfileIValueOp(node, offset, pr);
+
+  const auto ivalue_profiler = [pr, pn](Stack& stack) {
+    std::lock_guard<std::mutex> lock(pr->mutex_);
+
+    // TODO: we don't care about merging multiple profiling runs as we don't
+    // support it at all;
+    int64_t frame_id = 0;
+    pop(stack, frame_id);
+    IValue value;
+    pop(stack, value);
+    TORCH_INTERNAL_ASSERT(
+        value.isIntList(), "profiling seeing the wrong data type");
+    if (!pn->hasAttribute(intListAttr)) {
+      pn->is_(intListAttr, value.toIntVector());
+    } else {
+      auto profiled_ints = pn->is(intListAttr);
+      auto input_ints = value.toIntList();
+      TORCH_INTERNAL_ASSERT(
+          profiled_ints.size() == input_ints.size() &&
+              std::equal(
+                  profiled_ints.begin(),
+                  profiled_ints.end(),
+                  input_ints.begin()),
+          "profiling ivalue doesn't support merge");
+    }
+    push(stack, value);
+  };
+
+  pn->setCallback(ivalue_profiler);
+}
+
+void profileBool(ProfilingRecord* pr, Node* node, size_t offset) {
+  auto pn = insertProfileIValueOp(node, offset, pr);
+
+  const auto ivalue_profiler = [pr, pn](Stack& stack) {
+    std::lock_guard<std::mutex> lock(pr->mutex_);
+
+    // TODO: we don't care about merging multiple profiling runs as we don't
+    // support it at all;
+    int64_t frame_id = 0;
+    pop(stack, frame_id);
+    IValue value;
+    pop(stack, value);
+    TORCH_INTERNAL_ASSERT(
+        value.isBool(), "profiling seeing the wrong data type");
+    if (!pn->hasAttribute(boolAttr)) {
+      pn->i_(boolAttr, value.toBool());
+    } else {
+      auto profiled_bool = pn->i(boolAttr);
+      auto input_bool = value.toBool();
+      TORCH_INTERNAL_ASSERT(
+          input_bool == profiled_bool,
+          "profiling ivalue doesn't support merge");
+    }
+    push(stack, value);
+  };
+
+  pn->setCallback(ivalue_profiler);
+}
+
 bool anyInBlock(
     const Block* block,
     const std::function<bool(const Node*)>& fn) {
@@ -1239,6 +1418,73 @@ bool isElementWiseNode(const Node* node) {
 
 bool isNodeParsible(const Node* node) {
   return IrParser::canParseNode(node);
+}
+
+bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
+  // is skip constant necessary?
+  if (node->input(offset)->node()->kind() == prim::Constant) {
+    return false;
+  }
+
+  static auto reduction_operator_schema =
+      getOperatorForLiteral(
+          "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)")
+          ->schema();
+  if (node->matches(reduction_operator_schema)) {
+    switch (offset) {
+      // argument 1: reduction axes;
+      case 1:
+        profileIntList(pr, node, offset);
+        break;
+      // argument 2: keepdim;
+      case 2:
+        profileBool(pr, node, offset);
+        break;
+      default:
+        return false;
+    }
+    return true;
+  }
+
+  static auto sum_to_size_schema =
+      getOperatorForLiteral(
+          "aten::sum_to_size(Tensor self, int[] size) -> Tensor")
+          ->schema();
+  static auto grad_sum_to_size_schema =
+      getOperatorForLiteral(
+          "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)")
+          ->schema();
+  if (node->matches(sum_to_size_schema) ||
+      node->matches(grad_sum_to_size_schema)) {
+    switch (offset) {
+      // argument 1: reduction sizes;
+      case 1:
+        // TODO(profile_size): double check optional[size]?
+        profileSize(pr, node, offset);
+        break;
+      default:
+        return false;
+    }
+    return true;
+  }
+
+  return false;
+}
+
+void insertProfileNodesForCUDAFuser_(Block* block, ProfilingRecord* pr) {
+  for (const auto& n : block->nodes()) {
+    for (size_t offset = 0; offset < n->inputs().size(); offset++) {
+      insertProfileIValue(pr, n, offset);
+    }
+
+    for (auto ib : n->blocks()) {
+      insertProfileNodesForCUDAFuser_(ib, pr);
+    }
+  }
+}
+
+void InsertProfileNodes(ProfilingRecord* pr) {
+  insertProfileNodesForCUDAFuser_(pr->profiled_graph_->block(), pr);
 }
 
 std::unique_ptr<Fusion> parseJitIR(const std::shared_ptr<Graph>& graph) {

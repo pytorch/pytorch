@@ -1005,6 +1005,52 @@ TensorView* sum_to(TensorView* in, const std::vector<Int*>& sum_to_size) {
   return out;
 }
 
+TensorView* sum_to(TensorView* in, const std::vector<int64_t>& sum_to_size) {
+  const auto& root = TensorDomain::noReductions(in->getRootDomain());
+
+  TORCH_CHECK(
+      root.size() >= sum_to_size.size(),
+      "sum_to: Error trying to reduce",
+      in,
+      "into a shape of size",
+      sum_to_size.size());
+
+  // If no reduction is needed sum_to returns the input tv
+  TensorView* out = in;
+
+  const int64_t leading_dims = root.size() - sum_to_size.size();
+
+  // Generate reduction axes for leading dims
+  std::vector<int> reduce_dims(leading_dims);
+  std::iota(reduce_dims.begin(), reduce_dims.end(), 0);
+
+  // Generate reduction axes for dims within sum_to_size
+  std::vector<bool> inner_red_dims(sum_to_size.size(), false);
+  bool reduction_within_shape = false;
+
+  // Reduce rest of the dims with keep_dim
+  for (int i = leading_dims; i < int(root.size()); i++) {
+    if (sum_to_size[i - leading_dims] == 1 &&
+        !root[i]->rawExtent()->isOneInt()) {
+      inner_red_dims[i - leading_dims] = true;
+      reduce_dims.push_back(i);
+      reduction_within_shape = true;
+    }
+  }
+
+  // Reduction step
+  if (!reduce_dims.empty()) {
+    out = sum(in, reduce_dims);
+  }
+
+  // Broadcast back reduced dims within shape
+  if (reduction_within_shape) {
+    out = broadcast(out, inner_red_dims);
+  }
+
+  return out;
+}
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

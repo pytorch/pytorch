@@ -510,6 +510,9 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     auto copy = graph->copy();
     runProfilingInsensitiveOptimizations(copy);
     pr_ = ProfilingRecord::instrumentGraph(copy);
+    if (RegisterCudaFuseGraph::isRegistered()) {
+      torch::jit::fuser::cuda::InsertProfileNodesForCUDAFuser(pr_.get());
+    }
     GRAPH_DUMP("Profiled Graph: ", pr_->graph());
     profiling_plan_ = ExecutionPlan(pr_->graph(), function_name_);
     // fall-through

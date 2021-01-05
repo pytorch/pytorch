@@ -267,6 +267,12 @@ class NaiveTypePropagator {
             unary_reduce_type(out_type, dims->vec(), keepdim.value()));
         break;
       }
+      case aten::sum_to_size:
+      case aten::_grad_sum_to_size: {
+        auto out_type = node->input(0)->type()->cast<TensorType>();
+        node->output()->setType(out_type->withDim(c10::nullopt));
+        break;
+      }
       case aten::type_as: {
         const auto type0 = node->input(0)->type()->cast<TensorType>();
         const auto type1 = node->input(1)->type()->cast<TensorType>();

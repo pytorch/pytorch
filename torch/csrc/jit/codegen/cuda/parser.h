@@ -2,6 +2,7 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/profiling_record.h>
 
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 
@@ -40,6 +41,8 @@ TORCH_CUDA_API bool isElementWiseNode(const Node* node);
 
 // returns whether or not a parsing function exists for the given node type.
 TORCH_CUDA_API bool isNodeParsible(const Node* node);
+
+void InsertProfileNodes(ProfilingRecord* pr);
 
 // lowers PyTorch jit graph to `Fusion`.
 TORCH_CUDA_API std::unique_ptr<Fusion> parseJitIR(

@@ -7,43 +7,11 @@
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 
+#include <torch/csrc/jit/codegen/cuda/interface.h>
+#include <torch/csrc/jit/ir/ir.h>
+
 namespace torch {
 namespace jit {
-
-namespace {
-
-class ProfileRegistry {
- public:
-  static ProfileRegistry* getRegistry() {
-    static ProfileRegistry profile_registry_;
-    return &profile_registry_;
-  }
-
-  void registerProfileNode(const std::function<bool(const Node*)>& func) {
-    std::lock_guard<std::mutex> guard(mutex_);
-    registry_funcs_.push_back(func);
-  }
-
-  bool shouldProfileNode(const Node* node) {
-    std::lock_guard<std::mutex> guard(mutex_);
-    for (const auto& func : registry_funcs_) {
-      if (func(node)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
- private:
-  std::vector<std::function<bool(const Node*)>> registry_funcs_;
-  std::mutex mutex_;
-};
-
-} // namespace
-
-void RegisterProfilingNode(const std::function<bool(const Node*)>& func) {
-  ProfileRegistry::getRegistry()->registerProfileNode(func);
-}
 
 bool ShapeSymbolTable::bindSymbolicShapes(
     at::IntArrayRef new_sizes,
@@ -83,6 +51,14 @@ ProfileOp* ProfilingRecord::createProfileNode(
   for (auto in : inputs) {
     pn->addInput(in);
   }
+  return pn;
+}
+
+ProfileIValueOp* ProfilingRecord::createProfileIValueNode(Value* in_val) {
+  auto pn = new ProfileIValueOp(this->profiled_graph_.get(), nullptr);
+  pn->addInput(in_val);
+  auto pno = pn->addOutput();
+  pno->setType(in_val->type());
   return pn;
 }
 
@@ -198,7 +174,7 @@ void ProfilingRecord::insertShapeProfile(Node* n, size_t offset) {
 }
 
 bool needsProfiledInputs(Node* n) {
-  if (tensorexpr::isSupported(n)) {
+  if (tensorexpr::isSupported(n) || fuser::cuda::canFuseNode(n)) {
     return true;
   }
 
@@ -224,12 +200,12 @@ bool needsProfiledInputs(Node* n) {
     case aten::mm:
       return true;
     default:
-      return ProfileRegistry::getRegistry()->shouldProfileNode(n);
+      return false;
   }
 }
 
 bool needsProfiledOutput(Node* n) {
-  if (tensorexpr::isSupported(n)) {
+  if (tensorexpr::isSupported(n) || fuser::cuda::canFuseNode(n)) {
     return true;
   }
 
@@ -238,7 +214,7 @@ bool needsProfiledOutput(Node* n) {
     case prim::AutogradZero:
       return true;
     default:
-      return ProfileRegistry::getRegistry()->shouldProfileNode(n);
+      return false;
   }
 }
 

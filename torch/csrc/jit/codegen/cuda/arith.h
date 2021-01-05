@@ -224,6 +224,10 @@ TORCH_CUDA_API TensorView* sum_to(
     TensorView* v1,
     const std::vector<Int*>& sum_to_size);
 
+TORCH_CUDA_API TensorView* sum_to(
+    TensorView* v1,
+    const std::vector<int64_t>& sum_to_size);
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit
