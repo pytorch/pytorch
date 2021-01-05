@@ -1690,7 +1690,7 @@ static Tensor& _linalg_norm_matrix_out(Tensor& result, const Tensor &self, optio
 // This function mostly serves as a wrapper for at::norm, but it overrides a few cases
 // for numpy compatibility. These cases are corrected within this wrapper, rather than
 // in at::norm itself, to avoid breaking backward compatibility.
-static Tensor& _linalg_norm_vector_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord, std::vector<int64_t> dim, bool keepdim, optional<ScalarType> opt_dtype) {
+static Tensor& _linalg_norm_vector_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord, std::vector<int64_t> dim, bool keepdim) {
   Tensor result_;
   bool case_was_overridden = false;
   if (opt_ord.has_value()) {
