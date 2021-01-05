@@ -616,10 +616,9 @@ def to_gpu(obj, type_map=None):
         type_map = {}
     if isinstance(obj, torch.Tensor):
         assert obj.is_leaf
+        t = type_map.get(obj.type(), obj.type())
         with torch.no_grad():
-            res = obj.clone() \
-                .type(type_map.get(obj.type(), obj.type())) \
-                .cuda()
+            res = obj.clone().type(t).cuda()
             res.requires_grad = obj.requires_grad
         return res
     elif torch.is_storage(obj):

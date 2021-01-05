@@ -4062,6 +4062,7 @@ criterion_tests = [
         target_fn=lambda: torch.randn((2, 3, 4), requires_grad=True),
         reference_fn=lambda i, t, _: 1. / i.numel() *
         sum((a - b).abs().sum() for a, b in zip(i, t)),
+        check_complex=True,
     ),
     dict(
         module_name='NLLLoss',
@@ -4458,6 +4459,7 @@ criterion_tests = [
         target_fn=lambda: torch.randn((), requires_grad=True),
         reference_fn=lambda i, t, _: 1. / i.numel() * (i - t).abs().sum(),
         desc='scalar',
+        check_complex=True,
     ),
     dict(
         module_name='KLDivLoss',
@@ -4905,10 +4907,7 @@ class ModuleTest(TestBase):
             if tensor.size(d) > 1:
                 dim = d + 1
                 break
-
-        # Note: stack is more concise here but doesn't support complex
-        noncontig = torch.cat([torch.empty_like(tensor).unsqueeze(dim), tensor.unsqueeze(dim)], dim) \
-            .select(dim, 1).detach()
+        noncontig = torch.stack([torch.empty_like(tensor), tensor], dim).select(dim, 1).detach()
         assert noncontig.numel() == 1 or noncontig.numel() == 0 or not noncontig.is_contiguous()
         noncontig.requires_grad = tensor.requires_grad
         return noncontig
@@ -5224,6 +5223,7 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
         self.check_half = kwargs.get('check_half', True)
         self.check_bfloat16 = kwargs.get('check_bfloat16', False)
+        self.check_complex = kwargs.get('check_complex', False)
         self.test_cpu = kwargs.get('test_cpu', True)
         self.with_tf32 = kwargs.get('with_tf32', True)
         self.tf32_precision = kwargs.get('tf32_precision', 0.001)
@@ -5307,8 +5307,8 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
         test_case.assertEqualIgnoreType(cpu_output, gpu_output,
                                         atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0)
 
-        cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_target, extra_args=extra_args)
-        gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_target, extra_args=extra_args)
+        cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_output, cpu_target, extra_args=extra_args)
+        gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_output, gpu_target, extra_args=extra_args)
         # dtype used to be able to be None, so set precision in this way instead of a precision map
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput,

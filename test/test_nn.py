@@ -342,7 +342,7 @@ class TestNN(NNTestCase):
             output = criterion(input, target, *extra_args)
         return output
 
-    def _backward_criterion(self, criterion, input, target, gradOutput=None, extra_args=None):
+    def _backward_criterion(self, criterion, input, output, target, gradOutput=None, extra_args=None):
         if extra_args is None:
             extra_args = tuple()
         input_tuple = input if isinstance(input, tuple) else (input,)
@@ -352,7 +352,7 @@ class TestNN(NNTestCase):
         args = input_tuple + (target,) + extra_args
         if gradOutput is None:
             gradOutput = torch.ones(())
-        criterion(*args).backward(gradOutput.to(input_tuple[0]))
+        criterion(*args).backward(gradOutput.to(output))
         if isinstance(input, tuple):
             return tuple(i.grad.data for i in input)
         else:
@@ -7593,22 +7593,12 @@ class TestNN(NNTestCase):
             'smooth_l1_loss': lambda x, y, r: F.smooth_l1_loss(x, y, reduction=r),
         }
 
-        supports_complex = ['l1_loss']
-
         input = torch.randn(2, 1, requires_grad=True)
-        cinput = torch.randn(2, 1, requires_grad=True, dtype=torch.cfloat)
-        for name, fn in losses.items():
+        for _name, fn in losses.items():
             for requires_grad in [True, False]:
                 # When target.requires_grad=True, its impl is in Python, while the other is in TH.
                 target = torch.randn(2, 10, requires_grad=requires_grad)
-                ctarget = torch.randn(2, 10, requires_grad=requires_grad, dtype=torch.cfloat)
                 for reduction in ['none', 'mean', 'sum']:
-                    if name in supports_complex:
-                        l = fn(cinput, ctarget, reduction)
-                        if reduction == 'none':
-                            self.assertEqual(l.size(), target.size())
-                        self.assertTrue(gradcheck(fn, (input, target, reduction)))
-
                     l = fn(input, target, reduction)
                     if reduction == 'none':
                         self.assertEqual(l.size(), target.size())
@@ -9873,6 +9863,14 @@ def add_test(test, decorator=None):
             test.test_cuda(self, dtype=torch.bfloat16, **kwargs)
         if getattr(test, 'check_bfloat16', True):
             add(cuda_test_name + '_bfloat16', test_bfloat16)
+
+        def test_float(self, test=test, kwargs=kwargs):
+            test.test_cuda(self, dtype=torch.cfloat, **kwargs)
+        def test_cdouble(self, test=test, kwargs=kwargs):
+            test.test_cuda(self, dtype=torch.cdouble, **kwargs)
+        if getattr(test, 'check_complex', True):
+            add(cuda_test_name + '_cfloat', test_cdouble)
+            add(cuda_test_name + '_cdouble', test_cdouble)
 
     else:
         if tf32_is_not_fp32() and test.with_tf32:
