@@ -38,5 +38,5 @@ mechanisms we use:
   build scripts.
 
 - We reroute well known paths like `/usr/bin/gcc` to alternate
-  implementations with `update-alternatives, instead of setting
+  implementations with `update-alternatives`, instead of setting
   `CC` and `CXX` in our implementations.
