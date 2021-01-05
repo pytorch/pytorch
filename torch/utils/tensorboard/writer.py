@@ -2,7 +2,6 @@
 consumed by TensorBoard for visualization."""
 
 import os
-import six
 import time
 import torch
 
@@ -243,7 +242,7 @@ class SummaryWriter(object):
         workspace.FetchBlob(blob_name)
         workspace.FetchBlobs([blob_name1, blob_name2, ...])
         """
-        return isinstance(item, six.string_types)
+        return isinstance(item, str)
 
     def _get_file_writer(self):
         """Returns the default FileWriter instance. Recreates it if closed."""
@@ -424,7 +423,7 @@ class SummaryWriter(object):
         if self._check_caffe2_blob(values):
             from caffe2.python import workspace
             values = workspace.FetchBlob(values)
-        if isinstance(bins, six.string_types) and bins == 'tensorflow':
+        if isinstance(bins, str) and bins == 'tensorflow':
             bins = self.default_bins
         self._get_file_writer().add_summary(
             histogram(tag, values, bins, max_bins=max_bins), global_step, walltime)

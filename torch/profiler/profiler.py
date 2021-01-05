@@ -50,7 +50,7 @@ class profile(object):
     """
     Profiler context manager.
 
-    Arguments:
+    Args:
 
     - ``activities`` - list of activity groups (CPU, CUDA) to use in profiling;
     - ``schedule`` - callable that takes step (int) as a single parameter and returns
@@ -249,7 +249,7 @@ class profile(object):
         """
         Save stack traces in a file in a format suitable for visualization.
 
-        Arguments:
+        Args:
 
         - ``path`` - save stacks file to this location;
         - ``metric`` - metric to use: "self_cpu_time_total" or "self_cuda_time_total"
