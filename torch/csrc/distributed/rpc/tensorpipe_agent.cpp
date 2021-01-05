@@ -477,11 +477,6 @@ void TensorPipeAgent::sendCompletedResponseMessage(
           << " is sending response to request #" << messageId << " to "
           << pipe->getRemoteName();
 
-  //const c10::optional<utils::FutureError> error =
-  //    futureResponseMessage->error();
-  //Message&& responseMessage = std::move(*futureResponseMessage).moveValue();
-  //responseMessage.setId(messageId);
-  //if (!error) {
   if (!futureResponseMessage->hasError()) {
     Message&& responseMessage =
         std::move(*futureResponseMessage->value().toCustomClass<Message>());
