@@ -787,8 +787,8 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and_complex_and(torch.bool, torch.half),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                   decorators=(precisionOverride({torch.bfloat16: 10}),),
                    skips=(
+                       # Reference: https://github.com/pytorch/pytorch/pull/50093#pullrequestreview-561791547
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics', dtypes=[torch.bfloat16]),
                        # Reference: https://github.com/pytorch/pytorch/issues/48010
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
