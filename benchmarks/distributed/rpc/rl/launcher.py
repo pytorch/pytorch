@@ -102,7 +102,6 @@ def find_graph_variable(args):
         else:
             args[arg] = var_types[arg](args[arg])  # convert string to proper type
 
-
 def print_benchmark_results(report):
     r"""
     Prints benchmark results
@@ -124,8 +123,6 @@ def print_benchmark_results(report):
             if metric_name != x_axis_name:
                 print(f'{metric_name} -- {percentile_results}\n')
 
-
-
 def main():
     r"""
     Runs rpc benchmark once if no argument has multiple entries, and otherwise once for each of the multiple entries. 
@@ -135,7 +132,8 @@ def main():
     """
     find_graph_variable(args)
 
-    x_axis_variables = args[args['x_axis_name']] if args.get('x_axis_name') else [None]  # run once if no x axis variables
+    # run once if no x axis variables
+    x_axis_variables = args[args['x_axis_name']] if args.get('x_axis_name') else [None]  
     ctx = mp.get_context('spawn')
     queue = ctx.SimpleQueue()
     benchmark_runs = []
@@ -160,13 +158,15 @@ def main():
             process.join()
         print(f"Time taken benchmark run {i} -, {time.time() - start_time}")
         if args.get('x_axis_name'):
-            benchmark_run_results[args['x_axis_name']] = x_axis_variable  # save x axis value was for this iteration in the results
+            # save x axis value was for this iteration in the results
+            benchmark_run_results[args['x_axis_name']] = x_axis_variable  
         benchmark_runs.append(benchmark_run_results)
 
     report = args
     report['benchmark_results'] = benchmark_runs
     if args.get('x_axis_name'):
-        del report[args['x_axis_name']]  # x_axis_name was variable so dont save a constant in the report for that variable
+        # x_axis_name was variable so dont save a constant in the report for that variable
+        del report[args['x_axis_name']]  
     with open(args['output_file_path'], 'w') as f:
         json.dump(report, f)
     print_benchmark_results(report)

@@ -13,12 +13,11 @@ import torch.optim as optim
 OBSERVER_NAME = "observer{}"
 
 
-
 class Policy(nn.Module):
     def __init__(self, in_features, nlayers, out_features):
         r"""
         Inits policy class
-    """
+        """
         super(Policy, self).__init__()
 
         self.model = nn.Sequential(
@@ -81,8 +80,6 @@ class AgentBase:
         self.pending_states = self.batch_size
         self.state_size = state_size
         self.states = torch.zeros(self.batch_size, *state_size)
-
-
 
     @staticmethod
     @rpc.functions.async_execution
