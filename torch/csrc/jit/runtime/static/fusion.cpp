@@ -1,7 +1,10 @@
 #include <torch/csrc/jit/runtime/static/fusion.h>
 #include <ATen/core/interned_strings.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
@@ -13,16 +16,23 @@ namespace jit {
 void createFusionGroups(Block* block, AliasDb* aliasDb);
 
 void fuseStaticSubgraphs(std::shared_ptr<Graph> graph) {
-  PrepareGraphForStaticRuntime(graph);
+  Inline(*graph);
+  ConstantPropagation(graph);
+  Canonicalize(graph);
+  ConstantPropagation(graph);
+  RemoveTensorMutation(graph);
+  ConstantPropagation(graph);
+  EliminateDeadCode(graph);
   auto aliasDb = torch::make_unique<AliasDb>(graph);
   createFusionGroups(graph->block(), aliasDb.get());
   torch::jit::EliminateDeadCode(graph);
 }
 
 Operation createStaticSubgraphRuntime(const Node* node) {
-  auto g = torch::jit::PrepareForStaticRuntime(node->g(attr::Subgraph));
+  auto g = node->g(attr::Subgraph);
+  torch::jit::PrepareGraphForStaticRuntime(g);
   auto runtime = std::make_shared<torch::jit::StaticRuntime>(g);
-  auto num_inputs = runtime->get_inference_module()->input_regs.size();
+  auto num_inputs = runtime->inputs().size();
   return [runtime, num_inputs](Stack* stack) {
     RECORD_FUNCTION("Static Runtime", std::vector<c10::IValue>());
     auto inps = torch::jit::last(stack, num_inputs);

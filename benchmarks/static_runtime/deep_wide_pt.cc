@@ -85,7 +85,6 @@ torch::jit::Module getDeepAndWideSciptModel(int num_features) {
   auto clstype = cu->get_class(c10::QualifiedName(base, "DeepAndWide"));
 
   torch::jit::Module mod(cu, clstype);
-
   mod.register_parameter("_mu", torch::randn({1, num_features}), false);
   mod.register_parameter("_sigma", torch::randn({1, num_features}), false);
   mod.register_parameter("_fc_w", torch::randn({1, num_features + 1}), false);

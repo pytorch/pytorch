@@ -68,12 +68,14 @@ void initStaticRuntimeBindings(PyObject* module) {
   m.def(
        "_jit_to_static_runtime",
        [](std::shared_ptr<torch::jit::Graph> g) {
-         return StaticRuntime(PrepareForStaticRuntime(g));
+         PrepareGraphForStaticRuntime(g);
+         return StaticRuntime(g);
        })
       .def(
           "_jit_to_static_runtime",
-          [](const torch::jit::Module& m) {
-            return StaticRuntime(PrepareForStaticRuntime(m));
+          [](const torch::jit::Module& module) {
+            auto gs = PrepareForStaticRuntime(module);
+            return StaticRuntime(gs.first, gs.second);
           })
       .def(
           "_fuse_to_static_runtime",

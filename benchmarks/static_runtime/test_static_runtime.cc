@@ -61,7 +61,8 @@ void testStaticRuntime(
 
   auto expect = module.forward(args);
 
-  StaticRuntime runtime(module);
+  auto gs = torch::jit::PrepareForStaticRuntime(module);
+  torch::jit::StaticRuntime runtime(gs.first, gs.second);
   auto actual = runtime.run(args, {});
 
   if (expect.isTuple()) {
@@ -100,8 +101,8 @@ TEST(StaticRuntime, LongModel) {
 
   // run static runtime
   std::vector<at::Tensor> input_tensors({a, b, c});
-  auto g = torch::jit::PrepareForStaticRuntime(mod);
-  torch::jit::StaticRuntime runtime(g);
+  auto gs = torch::jit::PrepareForStaticRuntime(mod);
+  torch::jit::StaticRuntime runtime(gs.first, gs.second);
   at::Tensor output_2 = runtime.run(input_tensors)[0];
   EXPECT_TRUE(output_1.equal(output_2));
 }
@@ -118,8 +119,8 @@ TEST(StaticRuntime, TrivialModel) {
 
   // run static runtime
   std::vector<at::Tensor> input_tensors({a, b, c});
-  auto g = torch::jit::PrepareForStaticRuntime(mod);
-  torch::jit::StaticRuntime runtime(g);
+  auto gs = torch::jit::PrepareForStaticRuntime(mod);
+  torch::jit::StaticRuntime runtime(gs.first, gs.second);
   at::Tensor output_2 = runtime.run(input_tensors)[0];
   EXPECT_TRUE(output_1.equal(output_2));
 }
@@ -134,8 +135,8 @@ TEST(StaticRuntime, LeakyReLU) {
 
   // run static runtime
   std::vector<at::Tensor> input_tensors({inputs});
-  auto g = torch::jit::PrepareForStaticRuntime(mod);
-  torch::jit::StaticRuntime runtime(g);
+  auto gs = torch::jit::PrepareForStaticRuntime(mod);
+  torch::jit::StaticRuntime runtime(gs.first, gs.second);
   at::Tensor output_2 = runtime.run(input_tensors)[0];
   EXPECT_TRUE(output_1.equal(output_2));
 }
@@ -144,8 +145,8 @@ TEST(StaticRuntime, DeepWide) {
   const int embedding_size = 32;
   const int num_features = 50;
   torch::jit::Module mod = getDeepAndWideSciptModel();
-  auto g = torch::jit::PrepareForStaticRuntime(mod);
-  torch::jit::StaticRuntime runtime(g);
+  auto gs = torch::jit::PrepareForStaticRuntime(mod);
+  torch::jit::StaticRuntime runtime(gs.first, gs.second);
 
   for (int batch_size : {1, 8, 32}) {
     for (int i = 0; i < 2; ++i) {
@@ -169,7 +170,8 @@ TEST(StaticRuntime, KWargsAPI_1) {
   const int embedding_size = 32;
   const int num_features = 50;
   auto module = getDeepAndWideSciptModel();
-  torch::jit::StaticRuntime runtime(module);
+  auto gs = torch::jit::PrepareForStaticRuntime(module);
+  torch::jit::StaticRuntime runtime(gs.first, gs.second);
 
   for (int batch_size : {1, 8, 32}) {
     for (int i = 0; i < 2; ++i) {
@@ -192,8 +194,8 @@ TEST(StaticRuntime, KWargsAPI_2) {
   const int embedding_size = 32;
   const int num_features = 50;
   auto module = getDeepAndWideSciptModel();
-  auto g = torch::jit::PrepareForStaticRuntime(module);
-  torch::jit::StaticRuntime runtime(module);
+  auto gs = torch::jit::PrepareForStaticRuntime(module);
+  torch::jit::StaticRuntime runtime(gs.first, gs.second);
 
   for (int batch_size : {1, 8, 32}) {
     for (int i = 0; i < 2; ++i) {
@@ -221,14 +223,15 @@ TEST(StaticRuntime, CleanUpMemory) {
   const int embedding_size = 32;
   const int num_features = 50;
   torch::jit::Module mod = getDeepAndWideSciptModel();
-  auto g = torch::jit::PrepareForStaticRuntime(mod);
+  auto gs = torch::jit::PrepareForStaticRuntime(mod);
+  torch::jit::StaticRuntime runtime(gs.first, gs.second);
 
   for (auto cleanup_memory : {true, false}) {
     for (auto enable_out_variant : {true, false}) {
       VLOG(1) << "cleanup_memory: " << cleanup_memory
               << ", enable_out_variant: " << enable_out_variant;
       torch::jit::StaticRuntimeOptions opts{cleanup_memory, enable_out_variant};
-      torch::jit::StaticRuntime runtime(g, opts);
+      torch::jit::StaticRuntime runtime(gs.first, gs.second, opts);
 
       for (int batch_size : {1, 8, 32}) {
         for (int i = 0; i < 2; ++i) {

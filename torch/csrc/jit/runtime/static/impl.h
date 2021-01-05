@@ -6,12 +6,11 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/inliner.h>
 
 namespace torch {
 namespace jit {
-
-struct TORCH_API InferenceModuleOptions {};
 
 struct TORCH_API StaticRuntimeOptions {
   bool cleanup_activations{true};
@@ -25,25 +24,32 @@ struct TORCH_API StaticRuntimeOptions {
 /// For this mode, you can do either:
 /// @code
 ///   // m is the TorchScript module
-///   auto runtime = StaticRuntime(m, opts);
+///   auto gs = PrepareForStaticRuntime(m);
+///   auto graph = gs.first;
+///   auto schema = gs.second;
+///   auto runtime = StaticRuntime(graph, schema, opts);
 ///   auto output = runtime.run(args, kwargs);
 /// @endcode
 /// or
 /// @code
-///   auto mod = PrepareForStaticRuntime(m);
-///   auto runtime = StaticRuntime(mod, opts);
+///   auto gs = PrepareForStaticRuntime(m);
+///   auto graph = gs.first;
+///   auto schema = gs.second;
+///   auto runtime = StaticRuntime(graph, schema, opts);
 ///   auto output = runtime.run(args, kwargs);
 /// @endcode
 /// Mode 2: similar to data parallelism, run the same model for different inputs
 /// on different threads at the same time. In this case, run
 /// PrepareForStaticRuntime to prepare the graph for Static Runtime. You
-/// should have one InferenceModule instance per model, and one Static Runtime
+/// should have one graph and schema pair per model, and one Static Runtime
 /// instance per running thread. To avoiding creating StaticRuntime on the fly,
 /// use a synchronized stack (i.e. boost::lockfree::stack) to cache all the
 /// Static Runtime instances in your code.
 /// @code
 ///   // initialization
-///   auto mod = PrepareForStaticRuntime(m);
+///   auto gs = PrepareForStaticRuntime(m);
+///   auto graph = gs.first;
+///   auto schema = gs.second;
 ///   // 128 is good for most cases. Pick a number that works for you
 ///   boost::lockfree::stack<std::shared_ptr<StaticRuntime>,
 ///     boost::lockfree::fixed_sized<true>> pool(128);
@@ -52,58 +58,32 @@ struct TORCH_API StaticRuntimeOptions {
 ///   std::shared_ptr<StaticRuntime> runtime = nullptr;
 ///   pool.pop(runtime);
 ///   if (!runtime) {
-///     runtime = std::make_shared<StaticRuntime>(mod, opts);
+///     runtime = std::make_shared<StaticRuntime>(graph, schema, opts);
 ///   }
 ///   auto output = runtime->run(args, kwargs);
 ///   pool.push(runtime);
 /// @endcode
 ///
 
-// Group readonly data structures into InferenceModule
-struct TORCH_API InferenceModule {
- public:
-  explicit InferenceModule(const torch::jit::Module& m);
-  explicit InferenceModule(std::shared_ptr<torch::jit::Graph> g);
-  torch::jit::Module module;
-  std::shared_ptr<torch::jit::Graph> graph;
-  std::unique_ptr<c10::FunctionSchema> schema;
-
-  std::unordered_map<Value*, size_t> value_to_reg;
-  std::vector<Value*> values; // useful for debugging
-  std::vector<size_t> input_regs; // inputs to the graph
-  std::vector<size_t> output_regs; // outputs of the graph
-  std::vector<size_t> internals;
-  size_t reused_regs = 0;
-
- private:
-  void init();
-};
-
+// NB: breaking changes that make graph *only* compatible with static runtime
 TORCH_API void PrepareGraphForStaticRuntime(
     std::shared_ptr<torch::jit::Graph> g);
 
-inline TORCH_API std::shared_ptr<InferenceModule> PrepareForStaticRuntime(
-    const torch::jit::Module& m) {
-  return std::make_shared<InferenceModule>(m);
-}
-
-inline TORCH_API std::shared_ptr<InferenceModule> PrepareForStaticRuntime(
-    std::shared_ptr<torch::jit::Graph> g) {
-  return std::make_shared<InferenceModule>(g);
-}
+// NB: breaking changes that make graph *only* compatible with static runtime
+TORCH_API std::pair<std::shared_ptr<Graph>, c10::FunctionSchema>
+PrepareForStaticRuntime(const torch::jit::Module& m);
 
 class MemoryPlanner;
 class ProcessedNode;
 class TORCH_API StaticRuntime {
  public:
-  // InferenceModule m is created by PrepareForStaticRuntime
   explicit StaticRuntime(
-      std::shared_ptr<InferenceModule> m,
+      std::shared_ptr<torch::jit::Graph> g,
       const StaticRuntimeOptions& opts = StaticRuntimeOptions());
 
-  // m is unoptimized
   explicit StaticRuntime(
-      const torch::jit::Module& m,
+      std::shared_ptr<torch::jit::Graph> g,
+      const c10::optional<c10::FunctionSchema>& schema,
       const StaticRuntimeOptions& opts = StaticRuntimeOptions());
 
   std::vector<at::Tensor> run(const std::vector<at::Tensor>& inps);
@@ -141,8 +121,8 @@ class TORCH_API StaticRuntime {
       const int warmup_runs,
       const int main_runs);
 
-  const InferenceModule* get_inference_module() {
-    return module_.get();
+  const std::shared_ptr<Graph>& graph() const {
+    return graph_;
   }
 
   const std::vector<ProcessedNode>& get_nodes() const {
@@ -153,27 +133,29 @@ class TORCH_API StaticRuntime {
     return nodes_;
   }
 
-  const std::vector<IValue>& get_registers() {
-    return reg_;
-  }
-
   size_t num_outputs() const;
 
   inline const std::vector<IValue*>& outputs() const {
     return outputs_;
   }
 
+  inline const std::vector<IValue>& inputs() const {
+    return inputs_;
+  }
+
  private:
   // Static runtime states
-  std::shared_ptr<InferenceModule> module_;
   StaticRuntimeOptions opts_;
   // IValue table (including inputs, outputs, intermediates, and weights)
-  std::vector<IValue> reg_;
   std::vector<IValue> constants_;
   std::vector<IValue> inputs_;
   std::vector<IValue*> outputs_;
   // The nodes we need to run
   std::vector<ProcessedNode> nodes_;
+
+  // Original input
+  std::shared_ptr<torch::jit::Graph> graph_;
+  c10::optional<c10::FunctionSchema> schema_;
 
   // Memory planning is only enabled if opts_.cleanup_activations is true.
   // Otherwise, the memory used by activations is cached inside the static
