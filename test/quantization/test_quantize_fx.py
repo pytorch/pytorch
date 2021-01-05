@@ -1278,6 +1278,21 @@ class TestQuantizeFx(QuantizationTestCase):
         self._test_quantized_inputs_outputs(
             prepare_custom_config_dict, prepare_count_check, convert_count_check)
 
+    @skipIfNoFBGEMM
+    def test_convtranspose_per_channel_fails_early(self):
+        r"""
+        Verifies that attempting to quantize a ConvTranspose module with per-Channel
+        weight observers fails in the prepare step, as opposed to the convert step.
+        """
+        m = torch.nn.Sequential(torch.nn.ConvTranspose2d(1, 1, 1))
+        m.eval()
+        qconfig_dict = {'': torch.quantization.get_default_qconfig('fbgemm')}
+        with self.assertRaises(AssertionError) as context:
+            mp = prepare_fx(m, qconfig_dict)
+        self.assertTrue(
+            str(context.exception) ==
+            'Per channel weight observer is not supported yet for ConvTranspose{n}d.')
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
