@@ -222,8 +222,7 @@ def insert_observer_for_output_of_the_node(
                         StandaloneModuleQuantizeHandler):
             assert node.op == "call_module"
             assert isinstance(node.target, str)
-            sm_out_qidxs = modules[node.target]._standalone_module_output_quantized_idxs
-            assert isinstance(sm_out_qidxs, torch.Tensor)
+            sm_out_qidxs = modules[node.target]._standalone_module_output_quantized_idxs.tolist()  # type: ignore
             output_is_quantized = 0 in sm_out_qidxs
 
             if output_is_quantized:
@@ -840,8 +839,7 @@ class Quantizer:
                     # for non-standalone module, since _standalone_module_output_quantized_idxs
                     # is only available in observed standalone module
                     if is_observed_standalone_module_node:
-                        out_quant_idxs = self.modules[node.target]._standalone_module_output_quantized_idxs
-                        assert isinstance(out_quant_idxs, torch.Tensor)
+                        out_quant_idxs = self.modules[node.target]._standalone_module_output_quantized_idxs.tolist()  # type: ignore
                         assert len(out_quant_idxs) <= 1, "Currently standalone only support one output"
                         quantized = 0 in out_quant_idxs
 
