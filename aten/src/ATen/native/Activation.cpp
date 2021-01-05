@@ -277,8 +277,8 @@ Tensor& rrelu_with_noise_out_cpu(
     });
     return output;
   } else {
-    auto lower_tensor = scalar_to_tensor(lower, self.device());
-    auto upper_tensor = scalar_to_tensor(upper, self.device());
+    auto lower_tensor = scalar_to_tensor(lower);
+    auto upper_tensor = scalar_to_tensor(upper);
     auto negative = (lower_tensor + upper_tensor) / 2;
     Scalar negative_slope = negative.item();
     return at::leaky_relu_out(output, self, negative_slope);
