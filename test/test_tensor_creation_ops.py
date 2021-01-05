@@ -624,25 +624,28 @@ class TestTensorCreation(TestCase):
         # Case: 
         # Reference: https://github.com/pytorch/pytorch/issues/49878
         for dim in [0, 1]:
-            x = torch.zeros((3, 2), device=device)
-            y = x.narrow(dim, 0, 1)
+            x = torch.zeros((10, 5, 2), device=device)
+
+            random_length = random.randint(1, 4)
+            y = x.narrow(dim, 0, x.shape[dim] - random_length)
+            val = torch.full_like(y[0], 3., device=device)
 
             if dim == 0:
                 self.assertTrue(y.is_contiguous())
             else:
                 self.assertFalse(y.is_contiguous())
 
-            val = torch.ones_like(y, device=device) * 3.
-            torch.cat((val,), dim=1, out=y)
+            torch.cat((val[None],) * y.shape[0], dim=0, out=y)
 
-            expected = torch.zeros(3, 2, device=device)
+            expected_y = torch.cat((val[None],) * y.shape[0], dim=0)
+            expected_x = torch.zeros((10, 5, 2), device=device)
             if dim == 0:
-                expected[0, :] = torch.ones(y.shape[0], device=device) * 3.
+                expected_x[:x.shape[dim] - random_length, :, :] = expected_y
             elif dim == 1:
-                expected[:, 0] = torch.ones(y.shape[0], device=device) * 3.
+                expected_x[:, :x.shape[dim] - random_length, :] = expected_y
 
-            self.assertEqual(y, val)
-            self.assertEqual(x, expected)
+            self.assertEqual(y, expected_y)
+            self.assertEqual(x, expected_x)
 
     def test_cat_out_channels_last(self, device):
         x = torch.randn((4, 3, 8, 8))
