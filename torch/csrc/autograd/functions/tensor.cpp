@@ -42,7 +42,7 @@ auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
 CopySlices::CopySlices(
     const Variable& base_var,
     at::TensorGeometry view_,
-    c10::optional<std::function<at::Tensor(const at::Tensor&)>> view_fn_,
+    std::function<at::Tensor(const at::Tensor&)> view_fn_,
     std::shared_ptr<Node> fn_)
     : Node(),
       base(base_var),
@@ -79,8 +79,8 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
   result.copy_(grad);
 
   at::Tensor grad_slice;
-  if (view_fn.has_value()) {
-    auto fn = view_fn.value();
+  if (view_fn) {
+    auto fn = view_fn;
     grad_slice = fn(result);
   } else {
     auto offset = view.storage_offset() - base.storage_offset();
