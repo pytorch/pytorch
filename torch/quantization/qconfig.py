@@ -121,8 +121,8 @@ def assert_valid_qconfig(qconfig: Union[QConfig, QConfigDynamic],
     if is_conv_transpose_mod:
         example_observer = qconfig.weight()
         is_per_channel = (
-            isinstance(example_observer, torch.quantization.PerChannelMinMaxObserver),
-            isinstance(example_observer, torch.quantization.MovingAveragePerChannelMinMaxObserver),
+            isinstance(example_observer, torch.quantization.PerChannelMinMaxObserver) or
+            isinstance(example_observer, torch.quantization.MovingAveragePerChannelMinMaxObserver)
         )
         assert not is_per_channel, \
             'Per channel weight observer is not supported yet for ConvTranspose{n}d.'
