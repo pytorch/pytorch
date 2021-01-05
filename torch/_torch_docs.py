@@ -3095,7 +3095,17 @@ add_docstr(torch.flatten,
            r"""
 flatten(input, start_dim=0, end_dim=-1) -> Tensor
 
-Flattens a contiguous range of dims in a tensor.
+Flattens :attr:`input` by reshaping it into a one-dimensional tensor. If :attr:`start_dim` or :attr:`end_dim`
+are passed, only dimensions starting with :attr:`start_dim` and ending with :attr:`end_dim` are flattened.
+The order of elements in :attr:`input` is unchanged.
+
+Unlike NumPy's flatten, which always copies input's data, this function may return the original object, a view,
+or copy. If no dimensions are flattened, then the original object :attr:`input` is returned. Otherwise, if input can
+be viewed as the flattened shape, then that view is returned. Finally, only if the input cannot be viewed as the
+flattened shape is input's data copied. See :meth:`torch.Tensor.view` for details on when a view will be returned.
+
+.. note::
+    Flattening a zero-dimensional tensor will return a one-dimensional view.
 
 Args:
     {input}

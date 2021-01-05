@@ -16,8 +16,8 @@
 #include <THC/THC.h> // for USE_MAGMA
 
 #ifdef USE_MAGMA
-#include <magma.h>
 #include <magma_types.h>
+#include <magma_v2.h>
 
 const bool use_magma_ = true;
 #else
@@ -95,10 +95,18 @@ void magmaCholeskyBatched(
     magma_uplo_t uplo, magma_int_t n, scalar_t** dA_array, magma_int_t ldda,
     magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue);
 
-template<class scalar_t>
+template <class scalar_t>
 void magmaTriangularSolve(
-    magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
-    scalar_t* dA, magma_int_t ldda, scalar_t* dB, magma_int_t lddb);
+    magma_uplo_t uplo,
+    magma_trans_t trans,
+    magma_diag_t diag,
+    magma_int_t m,
+    magma_int_t n,
+    scalar_t* dA,
+    magma_int_t ldda,
+    scalar_t* dB,
+    magma_int_t lddb,
+    const MAGMAQueue& magma_queue);
 
 template<class scalar_t>
 void magmaTriangularSolveBatched(
@@ -662,45 +670,117 @@ void magmaCholeskyBatched<c10::complex<float>>(
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-template<>
+template <>
 void magmaTriangularSolve<double>(
-    magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
-    double* dA, magma_int_t ldda, double* dB, magma_int_t lddb) {
-  MagmaStreamSyncGuard guard;
-  magma_dtrsm(MagmaLeft, uplo, trans, diag, m, n, 1, dA, ldda, dB, lddb);
+    magma_uplo_t uplo,
+    magma_trans_t trans,
+    magma_diag_t diag,
+    magma_int_t m,
+    magma_int_t n,
+    double* dA,
+    magma_int_t ldda,
+    double* dB,
+    magma_int_t lddb,
+    const MAGMAQueue& magma_queue) {
+  magma_dtrsm(
+      MagmaLeft,
+      uplo,
+      trans,
+      diag,
+      m,
+      n,
+      1,
+      dA,
+      ldda,
+      dB,
+      lddb,
+      magma_queue.get_queue());
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-template<>
+template <>
 void magmaTriangularSolve<float>(
-    magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
-    float* dA, magma_int_t ldda, float* dB, magma_int_t lddb) {
-  MagmaStreamSyncGuard guard;
-  magma_strsm(MagmaLeft, uplo, trans, diag, m, n, 1, dA, ldda, dB, lddb);
+    magma_uplo_t uplo,
+    magma_trans_t trans,
+    magma_diag_t diag,
+    magma_int_t m,
+    magma_int_t n,
+    float* dA,
+    magma_int_t ldda,
+    float* dB,
+    magma_int_t lddb,
+    const MAGMAQueue& magma_queue) {
+  magma_strsm(
+      MagmaLeft,
+      uplo,
+      trans,
+      diag,
+      m,
+      n,
+      1,
+      dA,
+      ldda,
+      dB,
+      lddb,
+      magma_queue.get_queue());
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-template<>
+template <>
 void magmaTriangularSolve<c10::complex<double>>(
-    magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
-    c10::complex<double>* dA, magma_int_t ldda, c10::complex<double>* dB, magma_int_t lddb) {
-  MagmaStreamSyncGuard guard;
+    magma_uplo_t uplo,
+    magma_trans_t trans,
+    magma_diag_t diag,
+    magma_int_t m,
+    magma_int_t n,
+    c10::complex<double>* dA,
+    magma_int_t ldda,
+    c10::complex<double>* dB,
+    magma_int_t lddb,
+    const MAGMAQueue& magma_queue) {
   magmaDoubleComplex alpha({1, 0});
-  magma_ztrsm(MagmaLeft, uplo, trans, diag, m, n, alpha,
-    reinterpret_cast<magmaDoubleComplex*>(dA), ldda,
-    reinterpret_cast<magmaDoubleComplex*>(dB), lddb);
+  magma_ztrsm(
+      MagmaLeft,
+      uplo,
+      trans,
+      diag,
+      m,
+      n,
+      alpha,
+      reinterpret_cast<magmaDoubleComplex*>(dA),
+      ldda,
+      reinterpret_cast<magmaDoubleComplex*>(dB),
+      lddb,
+      magma_queue.get_queue());
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-template<>
+template <>
 void magmaTriangularSolve<c10::complex<float>>(
-    magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
-    c10::complex<float>* dA, magma_int_t ldda, c10::complex<float>* dB, magma_int_t lddb) {
-  MagmaStreamSyncGuard guard;
+    magma_uplo_t uplo,
+    magma_trans_t trans,
+    magma_diag_t diag,
+    magma_int_t m,
+    magma_int_t n,
+    c10::complex<float>* dA,
+    magma_int_t ldda,
+    c10::complex<float>* dB,
+    magma_int_t lddb,
+    const MAGMAQueue& magma_queue) {
   magmaFloatComplex alpha({1, 0});
-  magma_ctrsm(MagmaLeft, uplo, trans, diag, m, n, alpha,
-    reinterpret_cast<magmaFloatComplex*>(dA), ldda,
-    reinterpret_cast<magmaFloatComplex*>(dB), lddb);
+  magma_ctrsm(
+      MagmaLeft,
+      uplo,
+      trans,
+      diag,
+      m,
+      n,
+      alpha,
+      reinterpret_cast<magmaFloatComplex*>(dA),
+      ldda,
+      reinterpret_cast<magmaFloatComplex*>(dB),
+      lddb,
+      magma_queue.get_queue());
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
@@ -1636,11 +1716,14 @@ AT_ERROR("triangular_solve: MAGMA library not found in "
   magma_int_t nrhs = magma_int_cast(b.size(-1), "b.size(-1)");
   magma_int_t batch_size = magma_int_cast(batchCount(A), "batchCount");
 
+  MAGMAQueue magma_queue(b.get_device());
+
   // batch_size == 1 implies that:
   // 1. the RHS and LHS tensors have 2 dimensions, or
   // 2. the RHS and LHS tensors have more than 2 dimensions but all batch dimensions are 1
   if (batch_size == 1) {
-    magmaTriangularSolve<scalar_t>(uplo, trans, diag, n, nrhs, A_data, n, b_data, n);
+    magmaTriangularSolve<scalar_t>(
+        uplo, trans, diag, n, nrhs, A_data, n, b_data, n, magma_queue);
   } else {
     auto A_mat_stride = matrixStride(A);
     auto b_mat_stride = matrixStride(b);
