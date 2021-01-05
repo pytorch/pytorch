@@ -28,7 +28,7 @@ do {                                                                            
   at::cuda::CUDAEvent _main_event;                                                  \
   _main_event.record(_main_stream);                                                 \
   at::parallel_for(0, _batch_size, _batch_size / 4 + 1, [&](int _start, int _end){  \
-    c10::cuda::OptionalCUDAGuard _cudaguard(_device);                                       \
+    c10::cuda::OptionalCUDAGuard _cudaguard(_device);                               \
     auto _stream = at::cuda::getStreamFromPool();                                   \
     at::cuda::CUDAStreamGuard _guard(_stream);                                      \
     _main_event.block(_stream);                                                     \
