@@ -192,16 +192,35 @@ static inline Tensor _move_to_end(const Tensor& self, IntArrayRef axes) {
   return self.permute(perm);
 }
 
+// parse the "mode" param in linalg_qr: return a tuple of bools (compute_q, reduced)
+static inline std::tuple<bool, bool> _parse_qr_mode(std::string mode) {
+  bool compute_q;
+  bool reduced;
+  if (mode == "reduced") {
+    compute_q = true;
+    reduced = true;
+  } else if (mode == "complete") {
+    compute_q = true;
+    reduced = false;
+  } else if (mode == "r") {
+    compute_q = false;
+    reduced = true; // this is actually irrelevant in this mode
+  } else {
+    TORCH_CHECK(false, "Unrecognized mode '", mode, "'");
+  }
+  return std::make_tuple(compute_q, reduced);
+}
+
 // Function to compute sizes, strides and the extra columns for the Q matrix in the QR Decomposition
 static inline std::tuple<std::vector<int64_t>,
                          std::vector<int64_t>,
-                         int64_t> _compute_geometry_for_Q(const Tensor& input, bool some) {
+                         int64_t> _compute_geometry_for_Q(const Tensor& input, bool reduced) {
   int64_t m = input.size(-2), n = input.size(-1);
   int64_t n_columns_q;
 
-  // We need to compute the required size of Q based on the `some` option
+  // We need to compute the required size of Q based on the `reduced` option
   auto q_sizes = input.sizes().vec();
-  if (!some && m > n) {
+  if (!reduced && m > n) {
     q_sizes[input.dim() - 1] = m;
     n_columns_q = m;
   } else {

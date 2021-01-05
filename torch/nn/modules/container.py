@@ -125,7 +125,7 @@ class ModuleList(Module):
     modules it contains are properly registered, and will be visible by all
     :class:`~torch.nn.Module` methods.
 
-    Arguments:
+    Args:
         modules (iterable, optional): an iterable of modules to add
 
     Example::
@@ -197,7 +197,7 @@ class ModuleList(Module):
     def insert(self, index: int, module: Module) -> None:
         r"""Insert a given module before a given index in the list.
 
-        Arguments:
+        Args:
             index (int): index to insert.
             module (nn.Module): module to insert
         """
@@ -208,7 +208,7 @@ class ModuleList(Module):
     def append(self: T, module: Module) -> T:
         r"""Appends a given module to the end of the list.
 
-        Arguments:
+        Args:
             module (nn.Module): module to append
         """
         self.add_module(str(len(self)), module)
@@ -217,7 +217,7 @@ class ModuleList(Module):
     def extend(self: T, modules: Iterable[Module]) -> T:
         r"""Appends modules from a Python iterable to the end of the list.
 
-        Arguments:
+        Args:
             modules (iterable): iterable of modules to append
         """
         if not isinstance(modules, container_abcs.Iterable):
@@ -252,7 +252,7 @@ class ModuleDict(Module):
     types (e.g., Python's plain ``dict`` before Python version 3.6) does not
     preserve the order of the merged mapping.
 
-    Arguments:
+    Args:
         modules (iterable, optional): a mapping (dictionary) of (string: module)
             or an iterable of key-value pairs of type (string, module)
 
@@ -311,7 +311,7 @@ class ModuleDict(Module):
     def pop(self, key: str) -> Module:
         r"""Remove key from the ModuleDict and return its module.
 
-        Arguments:
+        Args:
             key (string): key to pop from the ModuleDict
         """
         v = self[key]
@@ -344,7 +344,7 @@ class ModuleDict(Module):
             If :attr:`modules` is an ``OrderedDict``, a :class:`~torch.nn.ModuleDict`, or
             an iterable of key-value pairs, the order of new elements in it is preserved.
 
-        Arguments:
+        Args:
             modules (iterable): a mapping (dictionary) from string to :class:`~torch.nn.Module`,
                 or an iterable of key-value pairs of type (string, :class:`~torch.nn.Module`)
         """
@@ -379,7 +379,7 @@ class ParameterList(Module):
     list, but parameters it contains are properly registered, and will be
     visible by all :class:`~torch.nn.Module` methods.
 
-    Arguments:
+    Args:
         parameters (iterable, optional): an iterable of :class:`~torch.nn.Parameter` to add
 
     Example::
@@ -458,7 +458,7 @@ class ParameterList(Module):
     def append(self: T, parameter: 'Parameter') -> T:
         """Appends a given parameter at the end of the list.
 
-        Arguments:
+        Args:
             parameter (nn.Parameter): parameter to append
         """
         self.register_parameter(str(len(self)), parameter)
@@ -467,7 +467,7 @@ class ParameterList(Module):
     def extend(self: T, parameters: Iterable['Parameter']) -> T:
         """Appends parameters from a Python iterable to the end of the list.
 
-        Arguments:
+        Args:
             parameters (iterable): iterable of parameters to append
         """
         if not isinstance(parameters, container_abcs.Iterable):
@@ -518,7 +518,7 @@ class ParameterDict(Module):
     types (e.g., Python's plain ``dict``) does not preserve the order of the
     merged mapping.
 
-    Arguments:
+    Args:
         parameters (iterable, optional): a mapping (dictionary) of
             (string : :class:`~torch.nn.Parameter`) or an iterable of key-value pairs
             of type (string, :class:`~torch.nn.Parameter`)
@@ -581,7 +581,7 @@ class ParameterDict(Module):
     def pop(self, key: str) -> 'Parameter':
         r"""Remove key from the ParameterDict and return its parameter.
 
-        Arguments:
+        Args:
             key (string): key to pop from the ParameterDict
         """
         v = self[key]
@@ -611,7 +611,7 @@ class ParameterDict(Module):
             If :attr:`parameters` is an ``OrderedDict``, a :class:`~torch.nn.ParameterDict`, or
             an iterable of key-value pairs, the order of new elements in it is preserved.
 
-        Arguments:
+        Args:
             parameters (iterable): a mapping (dictionary) from string to
                 :class:`~torch.nn.Parameter`, or an iterable of
                 key-value pairs of type (string, :class:`~torch.nn.Parameter`)

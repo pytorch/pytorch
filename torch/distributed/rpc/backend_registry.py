@@ -38,7 +38,7 @@ def backend_registered(backend_name):
     """
     Checks if backend_name is registered as an RPC backend.
 
-    Arguments:
+    Args:
         backend_name (str): string to identify the RPC backend.
     Returns:
         True if the backend has been registered with ``register_backend``, else
@@ -52,7 +52,7 @@ def register_backend(
 ):
     """Registers a new RPC backend.
 
-    Arguments:
+    Args:
         backend_name (str): backend string to identify the handler.
         construct_rpc_backend_options_handler (function):
             Handler that is invoked when

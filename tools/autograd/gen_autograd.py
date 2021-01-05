@@ -102,11 +102,11 @@ def gen_autograd(
     template_path = os.path.join(autograd_dir, 'templates')
 
     # Generate VariableType.h/cpp
+    from .gen_trace_type import gen_trace_type
+    from .gen_variable_type import gen_variable_type
     if not disable_autograd:
-        from .gen_variable_type import gen_variable_type
         gen_variable_type(out, native_functions_path, differentiability_infos, template_path, operator_selector)
 
-        from .gen_trace_type import gen_trace_type
         # operator filter not applied as tracing sources are excluded in selective build
         gen_trace_type(out, native_functions_path, template_path)
 

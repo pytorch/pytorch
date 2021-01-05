@@ -103,7 +103,7 @@ class Timer(object):
 
         `label`, `sub_label`, `description`, `env`, `num_threads`
 
-    Arguments:
+    Args:
         stmt: Code snippet to be run in a loop and timed.
 
         setup: Optional setup code. Used to define variables used in `stmt`

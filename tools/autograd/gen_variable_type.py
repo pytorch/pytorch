@@ -82,8 +82,8 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'bmm', 'diagonal', 'alias', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
     'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'take', 'fill_',
     'exp', 'nonzero', 'mean', 'inverse', 'solve', 'linalg_cholesky', 'addcmul', 'addcdiv',
-    'matrix_exp', 'linalg_eigh', 'cholesky_solve', 'qr', 'svd',
-    '_fft_c2c', '_fft_r2c', 'linalg_solve',
+    'matrix_exp', 'linalg_eigh', 'cholesky_solve', 'linalg_qr', 'svd', '_fft_c2c', '_fft_r2c',
+    'linalg_solve', 'sqrt', 'stack', 'gather', 'index_select', 'index_add_'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
@@ -122,6 +122,21 @@ for (size_t i=0; i<${tensorlist_name}.size(); i++) {
 }
 """)
 
+SAVE_OPTIONALTENSORLIST_STORAGE = CodeTemplate("""\
+std::vector<c10::optional<Storage>> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
+for (const c10::optional<Tensor>& tensor : ${tensorlist_name})
+  ${tensorlist_name}_storage_saved.push_back(
+    tensor.has_value() && tensor->has_storage() ? c10::optional<Storage>(tensor->storage()) : c10::nullopt);
+""")
+
+ENFORCE_SAME_OPTIONALTENSORLIST_STORAGE = CodeTemplate("""\
+for (size_t i=0; i<${tensorlist_name}.size(); i++) {
+  if (${tensorlist_name}_storage_saved[i].has_value())
+    AT_ASSERT(${tensorlist_name}_storage_saved[i].value().is_alias_of(
+        static_cast<c10::optional<Tensor>>(${tensorlist_name}[i])->storage()));
+}
+""")
+
 SAVE_TENSOR_IMPL = CodeTemplate("""\
 c10::intrusive_ptr<TensorImpl> ${tensor_name}_impl_saved;
 if (${tensor_name}.defined()) ${tensor_name}_impl_saved = ${tensor_name}.getIntrusivePtr();
@@ -141,6 +156,21 @@ ENFORCE_SAME_TENSORLIST_IMPL = CodeTemplate("""\
 for (size_t i=0; i<${tensorlist_name}.size(); i++) {
   if (${tensorlist_name}_impl_saved[i])
     AT_ASSERT(${tensorlist_name}_impl_saved[i] == ${tensorlist_name}[i].getIntrusivePtr());
+}
+""")
+
+SAVE_OPTIONALTENSORLIST_IMPL = CodeTemplate("""\
+std::vector<c10::intrusive_ptr<TensorImpl>> ${tensorlist_name}_impl_saved(${tensorlist_name}.size());
+for (size_t i=0; i<${tensorlist_name}.size(); i++) {
+  c10::optional<Tensor> t = ${tensorlist_name}[i];
+  if (t.has_value() && t->defined()) ${tensorlist_name}_impl_saved[i] = t->getIntrusivePtr();
+}
+""")
+
+ENFORCE_SAME_OPTIONALTENSORLIST_IMPL = CodeTemplate("""\
+for (size_t i=0; i<${tensorlist_name}.size(); i++) {
+  if (${tensorlist_name}_impl_saved[i])
+    AT_ASSERT(${tensorlist_name}_impl_saved[i] == static_cast<c10::optional<Tensor>>(${tensorlist_name}[i])->getIntrusivePtr());
 }
 """)
 
@@ -325,7 +355,7 @@ def gen_formals(f: NativeFunction) -> str:
             for a in f.func.schema_order_arguments()
         )
     else:
-        sig_group = CppSignatureGroup.from_schema(f.func, method=False)
+        sig_group = CppSignatureGroup.from_native_function(f, method=False)
         formals = ', '.join(f'{a.type} {a.name}' for a in sig_group.signature.arguments())
     return formals
 
@@ -420,7 +450,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         # TODO: `cpp_type` is only to keep it byte-for-byte compatible with the old codegen, should remove.
         # NB: This is not a clone of cpp.argument() - TensorOptionsArguments / faithful / binds are
         # not handled properly as they are irrelevant for this codegen.
-        cpp_type = cpp.argumenttype_type(a.type, mutable=a.is_write, binds=a.name).cpp_type()
+        cpp_type = cpp.argument_type(a, binds=a.name).cpp_type()
 
         if not is_differentiable(a.name, a.type):
             return None
@@ -573,7 +603,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         for arg in differentiable_outputs:
             name = arg.name
             # TODO: should be `arg.type.is_tensor_like()`?
-            if arg.cpp_type == 'Tensor' or arg.cpp_type == 'TensorList':
+            if arg.cpp_type in ['Tensor', 'TensorList', 'const c10::List<c10::optional<Tensor>> &']:
                 body.append(f'throw_error_for_complex_autograd({name}, "{base_name}");')
         return body
 
@@ -619,7 +649,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                     expr = f'SavedVariable({var}, {str(is_output).lower()}, {is_inplace_view})'
                 else:
                     expr = f'SavedVariable({var}, {str(is_output).lower()})'
-            elif arg.type == 'TensorList':
+            elif arg.type in ['TensorList', 'c10::List<c10::optional<Tensor>>']:
                 name += '_'
                 expr = f'make_saved_variable_list({arg.name})'
             elif arg.type == 'IntArrayRef':
@@ -707,7 +737,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
 
             if len(differentiable_output_vars) == 0:
                 # no output is differentiable (.indices() for SparseTensors for example)
-                rhs_value = 'as_view({}, {}, /* is_differentiable */ false)'.format(view_info, var)
+                rhs_value = f'as_view({view_info}, {var}, /* is_bw_differentiable */ false, /* is_fw_differentiable */ false)'
             elif len(differentiable_output_vars) == 1:
                 # Single differentiable output (Tensor or Tensor[])
                 return_info = differentiable_outputs[0]
@@ -722,13 +752,15 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                         creation_meta = 'CreationMeta::MULTI_OUTPUT_SAFE'
                     else:
                         creation_meta = 'CreationMeta::MULTI_OUTPUT_NODE'
-                    call += (f'as_view(/* base */ {view_info}, /* output */ {var}, /* is_differentiable */ true, '
-                             f'/* creation_meta */ {creation_meta});\n')
+                    call += (f'as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, '
+                             '/* is_fw_differentiable */ true, '
+                             f'/* creation_meta */ {creation_meta});')
                     rhs_value = f'std::move({var})'
                 else:
                     call += emit_view_lambda(unpacked_bindings)
                     creation_meta = 'GradMode::is_enabled() ? CreationMeta::DEFAULT: CreationMeta::NO_GRAD_MODE'
-                    rhs_value = (f'as_view(/* base */ {view_info}, /* output */ {var}, /* is_differentiable */ true, '
+                    rhs_value = (f'as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, '
+                                 '/* is_fw_differentiable */ true, '
                                  f'/* view_func */ func, /* creation_meta */ {creation_meta})')
             else:
                 # This could be supported but we don't need it at the moment, so keeping things simple.
@@ -753,6 +785,11 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                                         SAVE_TENSORLIST_IMPL.substitute(tensorlist_name=arg)]
                     enforce_same_ptrs_stmts += [ENFORCE_SAME_TENSORLIST_STORAGE.substitute(tensorlist_name=arg),
                                                 ENFORCE_SAME_TENSORLIST_IMPL.substitute(tensorlist_name=arg)]
+                elif noref_cpp_type == 'c10::List<c10::optional<Tensor>>':
+                    save_ptrs_stmts += [SAVE_OPTIONALTENSORLIST_STORAGE.substitute(tensorlist_name=arg),
+                                        SAVE_OPTIONALTENSORLIST_IMPL.substitute(tensorlist_name=arg)]
+                    enforce_same_ptrs_stmts += [ENFORCE_SAME_OPTIONALTENSORLIST_STORAGE.substitute(tensorlist_name=arg),
+                                                ENFORCE_SAME_OPTIONALTENSORLIST_IMPL.substitute(tensorlist_name=arg)]
                 elif noref_cpp_type == 'Tensor':
                     save_ptrs_stmts += [SAVE_TENSOR_STORAGE.substitute(tensor_name=arg),
                                         SAVE_TENSOR_IMPL.substitute(tensor_name=arg)]
@@ -851,9 +888,14 @@ def unpack_args(f: NativeFunction) -> Tuple[List[str], List[Binding]]:
     unpacked_bindings: List[Binding] = []
 
     if f.use_c10_dispatcher.dispatcher_uses_new_style():
-        bindings = [r for a in f.func.schema_order_arguments() for r in cpp.argument(a)]
+        bindings = [r for a in f.func.schema_order_arguments()
+                    for r in cpp.argument(a,
+                                          method=False,
+                                          cpp_no_default_args=set(),
+                                          faithful=False,
+                                          has_tensor_options=False)]
     else:
-        sig_group = CppSignatureGroup.from_schema(f.func, method=False)
+        sig_group = CppSignatureGroup.from_native_function(f, method=False)
         bindings = list(sig_group.signature.arguments())
 
     for i, binding in enumerate(bindings):
@@ -861,11 +903,11 @@ def unpack_args(f: NativeFunction) -> Tuple[List[str], List[Binding]]:
         if isinstance(binding.argument, TensorOptionsArguments):
             raise RuntimeError("VariableKernel shouldn't take TensorOptions")
 
-        if not binding.argument.type.is_tensor_like():
+        is_nullable = binding.argument.type.is_nullable()
+        if not binding.argument.type.is_tensor_like() or is_nullable:
             unpacked_bindings.append(binding)
             continue
 
-        is_nullable = binding.argument.type.is_nullable()
         is_tensor_list = is_tensor_list_type(binding.argument.type)
         ref = (not is_nullable) and not is_tensor_list
         suffix = '_opt' if is_nullable and not is_tensor_list else ''
@@ -951,7 +993,7 @@ def match_differentiability_info(
 
     info_by_schema = {info.func.func: info for info in differentiability_infos}
     functional_info_by_signature = {
-        info.func.func.signature(): info
+        info.func.func.signature(strip_default=True): info
         for info in differentiability_infos
         if info.func.func.kind() == SchemaKind.functional}
 
@@ -961,7 +1003,7 @@ def match_differentiability_info(
 
         # if there is no exact match look for the out-of-place signature.
         # i.e mul() for mul_() or mul_out()
-        return functional_info_by_signature.get(f.func.signature()), False
+        return functional_info_by_signature.get(f.func.signature(strip_default=True)), False
 
     result: List[NativeFunctionWithDifferentiabilityInfo] = []
     for f in native_functions:
