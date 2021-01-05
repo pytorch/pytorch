@@ -2124,6 +2124,7 @@ class TestLinalg(TestCase):
             assert USV.V is out[2]
             self.assertEqual(USV.S, np_s)
 
+    @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @onlyCUDA
     @dtypes(torch.float)
