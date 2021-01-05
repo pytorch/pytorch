@@ -469,10 +469,13 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
   const bool return_complex = return_complexOpt.value_or(
       self.is_complex() || (window.defined() && window.is_complex()));
   if (!return_complex) {
-    TORCH_WARN_ONCE(return_complexOpt.has_value(),
+    if (!return_complexOpt.has_value()) {
+      TORCH_WARN_ONCE(
         "stft will soon require the return_complex parameter be given for real inputs, "
         "and will further require that return_complex=True in a future PyTorch release."
       );
+    }
+
 
     // TORCH_WARN_ONCE(
     //     "stft with return_complex=False is deprecated. In a future pytorch "
