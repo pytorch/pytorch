@@ -88,7 +88,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::add, aten_add, [](Node* n) -> SROperator {
     auto out_t = p_node->Output(0, reg).toTensor();
     static_add op{out_t};
     op.meta(in0_t, in1_t, in2_s);
-    op.impl(out_t, in0_t, in1_t, in2_s);
+    op.impl(in0_t, in1_t, in2_s, out_t);
   };
 });
 

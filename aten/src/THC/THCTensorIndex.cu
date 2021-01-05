@@ -1,7 +1,6 @@
 #include <THC/THC.h>
 #include <THC/THCTensorMath.h>
 #include <THC/THCGeneral.h>
-#include <THC/THCBlas.h>
 #include <THC/THCTensorCopy.h>
 #include <TH/THHalf.h>
 #include <THC/THCApply.cuh>

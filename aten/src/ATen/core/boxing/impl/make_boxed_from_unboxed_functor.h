@@ -26,7 +26,7 @@ class OperatorHandle;
  *
  * See below for how to register this kernel with PyTorch.
  */
-struct CAFFE2_API OperatorKernel {
+struct TORCH_API OperatorKernel {
   virtual ~OperatorKernel() = default;
 };
 

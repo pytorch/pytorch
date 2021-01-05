@@ -10,6 +10,8 @@ from torch.fx.graph import (
     Node,
 )
 
+from torch.fx.node import Argument
+
 from torch.quantization import (
     propagate_qconfig_,
     convert,
@@ -61,12 +63,9 @@ from .qconfig_utils import *
 
 import warnings
 
-from typing import Optional, Dict, Any, List, Union, Tuple, Set, Callable
+from typing import Optional, Dict, Any, List, Tuple, Set, Callable
 
 # Define helper types
-
-QConfigAny = Union[torch.quantization.QConfig,
-                   torch.quantization.QConfigDynamic, None]
 MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,
                     QConfigAny]
 
@@ -125,11 +124,18 @@ def insert_observer_for_special_module(
     elif isinstance(quantize_handler, StandaloneModuleQuantizeHandler):
         # observe standalone module
         standalone_module = modules[node.target]  # type: ignore
+        standalone_module_name_configs = prepare_custom_config_dict.get("standalone_module_name", [])
+        standalone_module_class_configs = prepare_custom_config_dict.get("standalone_module_class", [])
+        class_config_map = {x[0]: (x[1], x[2]) for x in standalone_module_class_configs}
+        name_config_map = {x[0]: (x[1], x[2]) for x in standalone_module_name_configs}
+        config = class_config_map.get(type(standalone_module), (None, None))
+        config = name_config_map.get(node.target, (None, None))
+        standalone_module_qconfig_dict = {"": qconfig} if config[0] is None else config[0]
+        standalone_prepare_config_dict = {} if config[1] is None else config[1]
         prepare = \
             torch.quantization.quantize_fx._prepare_standalone_module_fx  # type: ignore
         observed_standalone_module = \
-            prepare(standalone_module, {"": qconfig})
-        observed_standalone_module.qconfig = qconfig
+            prepare(standalone_module, standalone_module_qconfig_dict, standalone_prepare_config_dict)
         observed_standalone_module = mark_observed_standalone_module(
             observed_standalone_module)
         parent_name, name = _parent_name(node.target)
@@ -221,7 +227,8 @@ def insert_observer_for_output_of_the_node(
                 load_arg, observed_node_names_set)
 
 def insert_observer_for_input_arg_of_observed_node(
-        node: Node, observed_node_names_set: Set[str], quants: Dict[str, Any],
+        node: Node, observed_node_names_set: Set[str],
+        quants: Dict[str, Tuple[DefaultQuantizeHandler, Callable]],
         model: torch.nn.Module,
         activation_post_process_map: Dict[str, torch.quantization.ObserverBase],
         env: Dict[str, str], observed_graph: Graph,
@@ -236,9 +243,39 @@ def insert_observer_for_input_arg_of_observed_node(
 
 # A dictionary for querying the weight index for a given op
 WEIGHT_INDEX_DICT = {
+    torch.nn.functional.conv1d : [1],
     torch.nn.functional.conv2d : [1],
+    torch.nn.functional.conv3d : [1],
     torch.nn.functional.linear : [1],
 }
+
+def node_arg_is_weight(node: Node, arg: Any) -> bool:
+    if isinstance(node, Node) and node.op == 'call_function' and \
+            node.target in WEIGHT_INDEX_DICT:
+        for i, node_arg in enumerate(node.args):
+            if arg is node_arg and i in \
+                    WEIGHT_INDEX_DICT[node.target]:  # type: ignore
+                return True
+    return False
+
+CONV_OPS_WITH_BIAS = {
+    torch.nn.functional.conv1d,
+    torch.nn.functional.conv2d,
+    torch.nn.functional.conv3d,
+}
+CONV_BIAS_ARG_INDEX = 2
+
+def node_arg_is_bias(node: Node, arg: Any) -> bool:
+    if isinstance(node, Node) and node.op == 'call_function':
+        if node.target in CONV_OPS_WITH_BIAS:
+            for i, node_arg in enumerate(node.args):
+                if arg is node_arg and i == CONV_BIAS_ARG_INDEX:
+                    return True
+        elif node.target is torch.nn.functional.linear:
+            for kwarg_name, kwarg_value in node.kwargs.items():
+                if kwarg_name == 'bias' and arg is kwarg_value:
+                    return True
+    return False
 
 # weight prepacking ops
 WEIGHT_PREPACK_OPS = {
@@ -302,7 +339,7 @@ class Quantizer:
                 # precedence: [TODO] module_name_qconfig (need scope support
                 # from fx)
                 # > function_qconfig > global_qconfig
-                function_qconfig = get_function_qconfig(
+                function_qconfig = get_object_type_qconfig(
                     qconfig_dict, node.target, global_qconfig)
                 self.qconfig_map[node.name] = function_qconfig
             elif node.op == 'call_method':
@@ -318,6 +355,7 @@ class Quantizer:
                         "qconfig for value {}".format(node.name))
                     qconfig = get_qconfig(
                         self.modules, qconfig_dict, '', global_qconfig)
+                qconfig = get_object_type_qconfig(qconfig_dict, node.target, qconfig)
                 self.qconfig_map[node.name] = qconfig
             elif node.op == 'call_module':
                 module_qconfig = get_qconfig(
@@ -364,10 +402,13 @@ class Quantizer:
         self._generate_qconfig_map(model, model.graph, qconfig_dict)
 
         # match the patterns that will get quantized
-        standalone_module_names = prepare_custom_config_dict.get(
-            "standalone_module_name", None)
-        standalone_module_classes = prepare_custom_config_dict.get(
-            "standalone_module_class", None)
+        standalone_module_name_configs = prepare_custom_config_dict.get(
+            "standalone_module_name", [])
+        standalone_module_class_configs = prepare_custom_config_dict.get(
+            "standalone_module_class", [])
+
+        standalone_module_names = [config[0] for config in standalone_module_name_configs]
+        standalone_module_classes = [config[0] for config in standalone_module_class_configs]
         custom_module_classes = get_custom_module_class_keys(
             prepare_custom_config_dict, "float_to_observed_custom_module_class")
         assert self.patterns is not None
@@ -378,7 +419,8 @@ class Quantizer:
         # find _inputs_ to matched nodes that are not quantized, these
         # have to be quantized, which requires measuring stats,
         # initialize an DefaultQuantizeHandler object for each
-        quants = self._find_quants(model.graph, matches)
+        quants: Dict[str, Tuple[DefaultQuantizeHandler, Callable]] = \
+            self._find_quants(model.graph, matches)
 
         self.activation_post_process_map = dict()
         env: Dict[Any, Any] = {}
@@ -549,18 +591,19 @@ class Quantizer:
             model.graph, self.modules, self.patterns,
             custom_module_classes=custom_module_classes)
 
-        quants = self._find_quants(model.graph, matches)
+        quants: Dict[str, Tuple[DefaultQuantizeHandler, Callable]] = \
+            self._find_quants(model.graph, matches)
 
         self.quantized_graph = Graph()
-        env: Dict[Any, Any] = {}
-        quant_env: Dict[Any, Any] = {}
+        env: Dict[str, Node] = {}
+        quant_env: Dict[str, Node] = {}
 
-        graph_inputs = []
+        graph_inputs: List[str] = []
         for node in model.graph.nodes:
             if node.op == 'placeholder':
                 graph_inputs.append(node.name)
 
-        def load_non_quantized(n):
+        def load_non_quantized(n: Node) -> Node:
             if n.name not in env:
                 assert n.name in quant_env, \
                     'trying to load float node but did not find ' + \
@@ -570,18 +613,13 @@ class Quantizer:
                 env[n.name] = Proxy(quant_env[n.name]).dequantize().node
             return env[n.name]
 
-        def load_quantized(n):
-            if n.name not in quant_env:
-                assert n.name in env, \
-                    'trying to load quantized node but did not find node:' + \
-                    n.name + ' in float environment:' + str(env)
-                assert n.name in quants, \
-                    'did not find quant object for node:' + n.name
-                quant = quants[n.name][0]
-                quant_env[n.name] = quant.convert(self, env[n.name])
+        def load_quantized(n: Node) -> Node:
+            assert n.name in quant_env, \
+                'trying to load quantized node but did not find node:' + \
+                n.name + ' in quant environment:' + str(quant_env)
             return quant_env[n.name]
 
-        def load_x(n):
+        def load_x(n: Node) -> Node:
             assert n.name in env or n.name in quant_env, \
                 'node ' + n.name + ' does not exist in either environment'
             if n.name in quant_env:
@@ -589,7 +627,8 @@ class Quantizer:
             else:
                 return env[n.name]
 
-        def load_arg(quantized):
+        def load_arg(quantized: Optional[Union[List[Any], bool, Tuple[Any, ...]]]
+                     ) -> Callable[[Node], Argument]:
             """
             Input: quantized, which can be None, list, boolean or tuple
               - if quantized is a list or tuple, then arg should be a list and
@@ -624,18 +663,20 @@ class Quantizer:
                     return type(arg_or_args)(loaded_args)
             return load_arg_impl
 
-        def is_quantized(node):
-            if isinstance(node, Node):
-                assert node.name in env or node.name in quant_env, \
-                    'Expecting node to be in the environment'
+        def node_arg_is_quantized(node_arg: Any) -> bool:
+            if isinstance(node_arg, Node):
+                assert node_arg.name in env or node_arg.name in quant_env, \
+                    'Expecting node_arg to be in the environment'
                 # there might be nodes appearing in both environemnts, but
                 # quant_env will take precedence
-                if node.name in quant_env:
+                if node_arg.name in quant_env:
                     return True
-                elif node.name in env:
+                elif node_arg.name in env:
                     return False
-            elif isinstance(node, list):
-                quantized = map(is_quantized, node)
+                else:
+                    return False
+            elif isinstance(node_arg, list):
+                quantized = map(node_arg_is_quantized, node_arg)
                 if all(quantized):
                     return True
                 elif not any(quantized):
@@ -643,8 +684,10 @@ class Quantizer:
                 else:
                     raise Exception(
                         "partially quantized inputs in list not handled yet")
+            else:
+                return False
 
-        def is_output_quantized(node) -> bool:
+        def is_output_quantized(node: Node, obj: QuantizeHandler) -> bool:
             """ Check if output node is quantized or not """
             assert self.modules is not None
             # by default the output is expected to be quantized
@@ -661,7 +704,7 @@ class Quantizer:
                     'call_function',
                     'call_method'], \
                     'CopyNode of type ' + node.op + ' is not handled'
-                quantized = is_quantized(node.args[0])
+                quantized = node_arg_is_quantized(node.args[0])
 
             if not activation_is_statically_quantized(qconfig) or \
                not input_output_observed(obj):
@@ -669,10 +712,11 @@ class Quantizer:
 
             return quantized
 
-        def insert_quantize_node(node):
+        def insert_quantize_node(node: Node) -> None:
             """ Given a activation_post_process module call node, insert a
             quantize node"""
             assert self.modules is not None
+            assert isinstance(node.target, str)
             observer_module = self.modules[node.target]
             prev_node = node.args[0]
             if observer_module.dtype == torch.float16:
@@ -684,13 +728,14 @@ class Quantizer:
                 # later in a separate pass
                 env[node.name] = self.quantized_graph.node_copy(
                     node, load_non_quantized)
-            elif prev_node.name in quant_env:
+            elif isinstance(prev_node, Node) and prev_node.name in quant_env:
                 # if previous node is already quantized, we'll just remove the
                 # activation_post_process
                 quant_env[node.name] = quant_env[prev_node.name]
             else:
                 # replace activation post process with quantization ops
                 root_module = self.modules[""]
+                assert isinstance(node.args[0], Node)
                 quant_env[node.name] = quantize_node(
                     root_module, self.quantized_graph,
                     load_non_quantized(node.args[0]), observer_module)
@@ -719,24 +764,24 @@ class Quantizer:
             root_node, matched, matched_pattern, obj, qconfig = \
                 matches.get(node.name, (None, None, None, None, None))
             if root_node is node:
-                if qconfig is None:
+                is_observed_standalone_module_node = (
+                    node.op == 'call_module' and
+                    is_observed_standalone_module(
+                        self.modules[node.target])  # type: ignore
+                )
+                if qconfig is None and not is_observed_standalone_module_node:
                     result = self.quantized_graph.node_copy(
                         node, load_non_quantized)
                     quantized = False
                 else:
                     assert obj is not None
-                    is_standalone_module_node = (
-                        node.op == 'call_module' and
-                        is_observed_standalone_module(
-                            self.modules[node.target])  # type: ignore
-                    )
                     result = obj.convert(
                         self, node, load_arg, debug=debug,
                         convert_custom_config_dict=convert_custom_config_dict)
-                    if is_standalone_module_node:
+                    if is_observed_standalone_module_node:
                         quantized = False
                     else:
-                        quantized = is_output_quantized(node)
+                        quantized = is_output_quantized(node, obj)
 
                 if quantized:
                     quant_env[node.name] = result
@@ -768,12 +813,12 @@ class Quantizer:
         act_post_process_removed_graph = Graph()
         env = {}
 
-        def load_arg(a):  # type: ignore
+        def load_arg_simple(a: Argument) -> Argument:
             return map_arg(a, lambda node: env[node.name])
         for node in self.quantized_graph.nodes:
             if node.op == 'output':
                 act_post_process_removed_graph.output(
-                    map_arg(node.args[0], load_arg))
+                    map_arg(node.args[0], load_arg_simple))
                 continue
             if node.op == 'call_module' and \
                is_activation_post_process(self.modules[node.target]):
@@ -781,7 +826,7 @@ class Quantizer:
                 env[node.name] = env[node.args[0].name]
             else:
                 env[node.name] = act_post_process_removed_graph.node_copy(
-                    node, load_arg)
+                    node, load_arg_simple)
 
         # removes qconfig and activation_post_process modules
         _remove_qconfig(model)
@@ -943,7 +988,7 @@ class Quantizer:
         return match_map
 
     def _find_quants(self, graph: Graph, matches: Dict[str, MatchResult],
-                     ) -> Dict[str, Any]:
+                     ) -> Dict[str, Tuple[DefaultQuantizeHandler, Callable]]:
         """
         Takes the nodes in the input graph and pending matches, and finds and
         returns the input and output nodes which need to be quantized.
@@ -956,30 +1001,27 @@ class Quantizer:
          node_name -> (QuantizeHandler instance (always DefaultQuantizeHandler),
          activation_post_process (observer/fake_quantize module) constructor)
         """
-        quants: Dict[str, Any] = {}
+        quants: Dict[str, Tuple[DefaultQuantizeHandler, Callable]] = {}
 
         def visit(node, matched_pattern, qconfig):
             def visit_arg(arg):
-                is_weight = False
-                if isinstance(node, Node) and node.op == 'call_function' and \
-                        node.target in WEIGHT_INDEX_DICT:
-                    for i, node_arg in enumerate(node.args):
-                        if arg is node_arg and i in \
-                                WEIGHT_INDEX_DICT[node.target]:  # type: ignore
-                            is_weight = True
-                if qconfig is not None and \
-                   (activation_is_statically_quantized(qconfig) or is_weight):
+                is_weight = node_arg_is_weight(node, arg)
+                is_bias = node_arg_is_bias(node, arg)
+                is_activation = not (is_weight or is_bias)
+                should_add_handler = qconfig is not None and (
+                    (is_activation and
+                        activation_is_statically_quantized(qconfig)) or
+                    (is_weight and weight_is_statically_quantized(qconfig))
+                )
+
+                if should_add_handler:
                     act_post_process_ctr = qconfig.weight if is_weight else \
                         qconfig.activation
-                    quants[arg.name] = (
-                        DefaultQuantizeHandler(self, arg), qconfig, is_weight)
                     # overwrite the constructor from qconfig
                     act_post_process_ctr = \
                         get_default_output_activation_post_process_map().get(
                             matched_pattern,
                             act_post_process_ctr)
-                    # overwrite previous activation post process constructor if
-                    # necessary
                     quants[arg.name] = (
                         DefaultQuantizeHandler(self, arg), act_post_process_ctr)
             return visit_arg

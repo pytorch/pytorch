@@ -1282,20 +1282,6 @@ class TestTEFuser(JitTestCase):
             self.assertLastGraphAllFused()
 
     def test_masked_fill(self):
-        # check scalar overload
-        def foo(x, mask):
-            return torch.masked_fill(x, mask, .6), torch.masked_fill(x, mask, 2)
-
-        mask = torch.tensor([True, False])
-        foo.__disable_jit_function_caching__ = True
-        for inp in (torch.rand([2, 2]).to(torch.int), mask), (torch.rand([2, 2]), mask):
-            ref = foo(*inp)
-            foo_s = torch.jit.script(foo)
-            warmup_forward(foo_s, *inp)
-            self.assertEqual(foo_s(*inp), ref)
-            self.assertLastGraphAllFused()
-
-        # check tensor overload
         dtypes = [
             torch.int8,
             torch.int16,
@@ -1307,27 +1293,21 @@ class TestTEFuser(JitTestCase):
             torch.bool,
         ]
         sizes = [(2,), (4, 4)]
-        for self_dtype, mask_dtype, device, size in product(dtypes, dtypes, self.devices, sizes):
-            try:
-                input_v = self.data_for(self_dtype, device, size=size)
-                val = self.data_for(val_dtype, device, size=size)
-                mask = self.data_for(torch.bool, device, size=size)
+        for self_dtype, device, scalar_val, size in product(dtypes, self.devices, [0.4, 3], sizes):
+            input_v = self.data_for(self_dtype, device, size=size)
+            mask = self.data_for(torch.bool, device, size=size)
 
-                def fn(input_v, val, mask):
-                    return torch.masked_fill(input_v, mask, val)
-                ref = fn(input_v, val, mask)
-            except Exception:
-                # If eager mode doesn't support a dtype/op/device combo,
-                # neither does the fuser.  Catch everything to avoid needing to
-                # guess what errors might be thrown by eager.
-                continue
+            def fn(input_v, mask):
+                return torch.masked_fill(input_v, mask, scalar_val)
+            ref = fn(input_v, mask)
             try:
-                t = torch.jit.trace(fn, (input_v, val, mask))
-                torch.testing.assert_allclose(ref, t((input_v, val, mask)))
-                self.assertAllFused(t.graph_for(x))
+                t = torch.jit.trace(fn, (input_v, mask))
+                torch.testing.assert_allclose(ref, t(input_v, mask))
+                print(torch.jit.last_executed_optimized_graph())
+                self.assertLastGraphAllFused()
             except Exception as e:
                 raise RuntimeError(
-                    " ".join(["Failed:", str(dtype), op.__name__, device, str(size)])
+                    " ".join(["Failed:", str(self_dtype), op.__name__, device, str(size)])
                 )
 
     def test_isnan(self):
@@ -1354,12 +1334,17 @@ class TestTEFuser(JitTestCase):
                 continue
 
             inp = inp.to(device=device, dtype=dtype)
-            f = torch.jit.trace(lambda x: x.isnan(), (inp,))
-            warmup_forward(f, inp)
-            self.assertEqual(f(inp), inp.isnan())
-            self.assertLastGraphAllFused()
+            try:
+                f = torch.jit.trace(lambda x: x.isnan(), (inp,))
+                warmup_forward(f, inp)
+                self.assertEqual(f(inp), inp.isnan())
+                self.assertLastGraphAllFused()
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), 'isnan', device])
+                )
 
-    @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")
+    # @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")
     def test_unary_ops(self):
         def apply(fn):
             return lambda x: fn(x)
@@ -1389,7 +1374,6 @@ class TestTEFuser(JitTestCase):
             torch.tanh,
             torch.sqrt,
             torch.rsqrt,
-            # FIXME: Fails in IR Eval: torch.int8 abs cpu (1,)
             torch.abs,
             torch.ceil,
             torch.floor,
@@ -1419,12 +1403,10 @@ class TestTEFuser(JitTestCase):
                     " ".join(["Failed:", str(dtype), op.__name__, device, str(size)])
                 )
 
-    @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")
     def test_binary_ops(self):
         def apply(fn):
             return lambda x, y: fn(x, y)
 
-        # FIXME: Fails in IR Eval: torch.int8 and_ cpu
         binary_ops = [
             operator.__and__,
             operator.__or__,

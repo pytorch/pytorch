@@ -43,7 +43,7 @@ std::unique_ptr<FunctionSchema> inferFunctionSchemaFromFunctor() {
  * >         .schema("my_op")
  * >         .kernel<my_kernel_cpu>(DispatchKey::CPU));
  */
-class CAFFE2_API RegisterOperators final {
+class TORCH_API RegisterOperators final {
 public:
   RegisterOperators();
   ~RegisterOperators();
@@ -53,7 +53,7 @@ public:
   RegisterOperators(RegisterOperators&&) noexcept;
   RegisterOperators& operator=(RegisterOperators&&) noexcept;
 
-  class CAFFE2_API Options final {
+  class TORCH_API Options final {
   public:
     Options(const Options&) = delete;
     Options(Options&&) noexcept = delete;
