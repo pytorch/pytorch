@@ -271,6 +271,93 @@ std::vector<Value*> ReshapeToAdvancedIndexingFormat(
   return indices;
 }
 
+// Register index_put inputs/outputs through the blocks.
+// Eg. The IR before updating:
+//   = prim::Loop(%10, %27)
+//    block0(%stream_idx.1 : int):
+//       = prim::Loop(%9, %27)
+//        block0(%i.1 : int):
+//          %36 : Tensor = aten::select(%bias.1, %26, %stream_idx.1)
+//          %41 : Tensor = aten::copy_(%37, %40, %25)
+//          -> (%27)
+//      -> (%27)
+//  After updating:
+// %62 : Tensor = prim::Loop(%10, %27, %bias.2)
+//    block0(%stream_idx.1 : int, %bias.3 : Tensor):
+//      %61 : Tensor = prim::Loop(%9, %27, %bias.3)
+//        block0(%i.1 : int, %bias.1 : Tensor):
+//          %36 : Tensor = aten::select(%bias.1, %26, %stream_idx.1)
+//          %59 : Tensor?[] = prim::ListConstruct(%55, %58)
+//          %60 : Tensor = aten::index_put(%bias.1, %59, %45, %25)
+//          -> (%27, %60)
+//      -> (%27, %61)
+void RegisterIndexPutInBlocks(
+    Value* orig_data,
+    Value* new_index_put,
+    Node* block_node,
+    Block* outer_block,
+    Node* next_node) {
+  auto cur_node = next_node;
+  while (nullptr != cur_node) {
+    if (cur_node->kind() != prim::Loop)
+      return;
+    cur_node = cur_node->owningBlock()->owningNode();
+  }
+
+  for (auto block_input : outer_block->inputs()) {
+    if (block_input->debugName() == orig_data->debugName()) {
+      AT_ERROR(
+          "More than one aten::index_put in a subblock are not supported.");
+    }
+  }
+
+  // Register index_put outputs through the blocks.
+  for (auto block_output : outer_block->outputs()) {
+    if (block_output->debugName() == new_index_put->debugName())
+      return;
+  }
+  outer_block->registerOutput(new_index_put);
+  std::vector<std::pair<Block*, Node*>> node_list = {
+      std::make_pair(outer_block, next_node)};
+  next_node->addOutput()->copyMetadata(new_index_put);
+  auto next_block = next_node->owningBlock();
+  while (nullptr != next_block->owningNode()) {
+    outer_block = next_block;
+    outer_block->registerOutput(next_node->output(0));
+    next_node = outer_block->owningNode();
+    next_node->addOutput()->copyMetadata(new_index_put);
+    next_block = next_node->owningBlock();
+    node_list.emplace_back(std::make_pair(outer_block, next_node));
+  }
+
+  // Register index_put inputs through the blocks.
+  auto next_data = orig_data;
+  while (!node_list.empty()) {
+    auto cur_pair = node_list.back();
+    // Add input to current node.
+    cur_pair.second->addInput(next_data);
+    // Add input to current block.
+    auto cur_input = cur_pair.first->addInput();
+    cur_input->copyMetadata(next_data);
+    next_data = cur_input;
+    node_list.pop_back();
+  }
+  // Update index_put inputs inside the inner most block.
+  auto prev_data = block_node->input(0);
+  for (auto node : block_node->owningBlock()->nodes()) {
+    size_t idx = 0;
+    for (auto inputs_ : node->inputs()) {
+      if (inputs_ == prev_data) {
+        node->replaceInput(idx, next_data);
+        idx++;
+        break;
+      }
+    }
+  }
+  orig_data->replaceAllUsesAfterNodeWith(
+      next_node->output(0)->node(), next_node->output(0));
+}
+
 // Trace back all the slice & select nodes associated with the index_put node,
 // and convert them to associated indices.
 // E.g. The IR for x[1:3, 0] = update
@@ -336,7 +423,16 @@ void SquashSliceAndSelect(Node* index_put_node) {
   new_index_put->copyMetadata(index_put_node->output());
   index_put_node->output()->replaceAllUsesWith(new_index_put);
 
-  orig_data->replaceAllUsesAfterNodeWith(new_index_put->node(), new_index_put);
+  auto block_node = new_index_put->node();
+  auto outer_block = block_node->owningBlock();
+  auto next_node = outer_block->owningNode();
+  if (nullptr == next_node) {
+    orig_data->replaceAllUsesAfterNodeWith(
+        new_index_put->node(), new_index_put);
+    return;
+  }
+  RegisterIndexPutInBlocks(
+      orig_data, new_index_put, block_node, outer_block, next_node);
 }
 
 void PrepareCopyForONNX(Block* block) {
