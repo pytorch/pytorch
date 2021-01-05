@@ -1167,7 +1167,7 @@ Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad, con
 }
 
 Tensor l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {
-  auto output = l1_loss_backward(grad, input, target, at::Reduction::None);
+  auto output = at::real(l1_loss_backward(grad, input, target, at::Reduction::None));
   if (reduction == at::Reduction::Mean) {
     return output.mean();
   } else if (reduction == at::Reduction::Sum) {

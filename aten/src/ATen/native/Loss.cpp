@@ -395,8 +395,8 @@ Tensor l1_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
   return apply_loss_reduction(loss, reduction);
 }
 
-Tensor& l1_loss_out(Tensor&result, const Tensor& input, const Tensor& target, int64_t reduction) {
-  auto diff = input.sub(target);
+Tensor& l1_loss_out(Tensor& result, const Tensor& input, const Tensor& target, int64_t reduction) {
+  auto diff = at::sub_out(result, input, target);
   if (reduction != Reduction::None) {
     auto loss = diff.is_complex() ? diff.abs() : diff.abs_();
     if (reduction == Reduction::Mean) {
@@ -422,7 +422,7 @@ Tensor& l1_loss_backward_out(Tensor& grad_input, const Tensor& grad_output,
   if (input.is_complex()) {
     // Since this is a complex to real function, we can apply the formula:
     // \partial L / \partial z* = 2 * grad_output * \partial s / \partial z*
-    auto diff = input.sub(target);
+    auto diff = at::sub_out(grad_input, input, target);
     return at::div_out(grad_input, diff, diff.abs()).mul_(norm);
   } else {
     return at::sub_out(grad_input, input, target).sgn_().mul_(norm);

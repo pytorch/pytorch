@@ -606,7 +606,6 @@ def l1loss_no_reduce_complex_test():
         input_fn=lambda: torch.randn(2, 3, 4, dtype=torch.cdouble),
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_: (i - t.type_as(i)).abs(),
-        check_gradgrad=False,
         pickle=False)
 
 
@@ -4907,7 +4906,7 @@ class ModuleTest(TestBase):
                 dim = d + 1
                 break
 
-        # Note: hstack is more concise here but doesn't support complex
+        # Note: stack is more concise here but doesn't support complex
         noncontig = torch.cat([torch.empty_like(tensor).unsqueeze(dim), tensor.unsqueeze(dim)], dim) \
             .select(dim, 1).detach()
         assert noncontig.numel() == 1 or noncontig.numel() == 0 or not noncontig.is_contiguous()
