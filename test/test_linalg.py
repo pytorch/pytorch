@@ -2128,7 +2128,7 @@ class TestLinalg(TestCase):
     @onlyCUDA
     @dtypes(torch.float)
     def test_linalg_svd_out_different_device(self, device, dtype):
-        t = torch.randn(5, 7, device=device, dtype=dtype) # this is on cuda
+        t = torch.randn(5, 7, device=device, dtype=dtype)  # this is on cuda
         u = torch.empty((5, 5), device='cpu', dtype=dtype)
         s = torch.empty((5,), device='cpu', dtype=dtype)
         v = torch.empty((7, 7), device='cpu', dtype=dtype)
