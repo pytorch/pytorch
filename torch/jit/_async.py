@@ -42,7 +42,8 @@ def fork(func, *args, **kwargs):
 
     Example (fork a free function):
 
-    .. testcode::
+    .. code-block:: python
+
         import torch
         from torch import Tensor
         def foo(a : Tensor, b : int) -> Tensor:
@@ -60,16 +61,17 @@ def fork(func, *args, **kwargs):
 
     Example (fork a module method):
 
-    .. testcode::
+    .. code-block:: python
+
         import torch
         from torch import Tensor
-        class SubMod(torch.nn.Module):
+        class AddMod(torch.nn.Module):
             def forward(self, a: Tensor, b : int):
                 return a + b
         class Mod(torch.nn.Module):
             def __init__(self):
                 super(self).__init__()
-                self.mod = SubMod()
+                self.mod = AddMod()
             def forward(self, input):
                 fut = torch.jit.fork(self.mod, a, b=2)
                 return torch.jit.wait(fut)
