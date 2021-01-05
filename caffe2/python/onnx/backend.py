@@ -5,14 +5,7 @@
 
 To run this, you will need to have Caffe2 installed as well.
 """
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
-import os
 import collections
-from subprocess import Popen, PIPE
 import sys
 import zipfile
 import itertools
@@ -23,8 +16,6 @@ import itertools
 # importing onnx first, which will cause it to go out and pick up the
 # system protobuf.
 import onnx.backend
-
-import caffe2
 from caffe2.python import core, workspace, rnn_cell, gru_cell
 from caffe2.python.compatibility import container_abcs
 from caffe2.python.model_helper import ModelHelper
@@ -32,7 +23,7 @@ from caffe2.proto import caffe2_pb2
 import caffe2.python.utils
 import numpy as np
 import onnx
-from onnx import checker, GraphProto, TensorProto, AttributeProto, ModelProto
+from onnx import TensorProto
 import onnx.numpy_helper
 import onnx.defs
 import onnx.optimizer
@@ -42,7 +33,6 @@ from onnx.backend.base import Backend, Device, DeviceType, namedtupledict
 
 from caffe2.python.onnx.workspace import Workspace
 from caffe2.python.onnx.backend_rep import Caffe2Rep
-from caffe2.python.onnx.backend_cpp_rep import Caffe2CppRep
 
 import caffe2.python._import_c_extension as C
 
@@ -705,7 +695,13 @@ class Caffe2Backend(Backend):
             else:
                 opset_version = 1
 
-        model = onnx.shape_inference.infer_shapes(model)
+        # Prior to onnx version update to onnx-1.8.0, errors caused by failures in
+        # in the onnx shape inference call were being supressed. Hence a try-catch block
+        # is added around the infer_shapes call to avoid these failures and preserve status
+        try:
+            model = onnx.shape_inference.infer_shapes(model)
+        except RuntimeError:
+            warnings.warn("ShapeInferenceWarning: Inferred shape and existing shape differ in rank")
 
         ws = Workspace()
         device_option = get_device_option(Device(device))
@@ -873,7 +869,13 @@ class Caffe2Backend(Backend):
     def _onnx_model_to_caffe2_net(cls, onnx_model, device, opset_version, include_initializers):
         device_option = get_device_option(Device(device))
 
-        onnx_model = onnx.utils.polish_model(onnx_model)
+        # Prior to onnx version update to onnx-1.8.0, errors caused by failures in
+        # in the onnx shape inference call were being supressed. Hence a try-catch block
+        # is added around the infer_shapes call to avoid these failures and preserve status
+        try:
+            onnx_model = onnx.utils.polish_model(onnx_model)
+        except RuntimeError:
+            warnings.warn("ShapeInferenceWarning: Inferred shape and existing shape differ in rank")
         init_model = cls.optimize_onnx(onnx_model, init=True)
         pred_model = cls.optimize_onnx(onnx_model, predict=True)
 

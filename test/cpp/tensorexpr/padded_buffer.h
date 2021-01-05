@@ -169,20 +169,8 @@ class PaddedBuffer : public PaddedBufferBase {
   // Verify the watermarks in the paddings are intact.
   void ValidateWatermark() const {
     for (int i = 0; i < kPaddingSize; i++) {
-      ASSERT_EQ(
-          data_[i],
-          kPaddingValue,
-          "left-side watermark broken: index: ",
-          i,
-          ", name: ",
-          name());
-      ASSERT_EQ(
-          data_[i + total_size_ + kPaddingSize],
-          kPaddingValue,
-          "right-side watermark broken: index: ",
-          i,
-          ", name: ",
-          name());
+      ASSERT_EQ(data_[i], kPaddingValue);
+      ASSERT_EQ(data_[i + total_size_ + kPaddingSize], kPaddingValue);
     }
   }
 
@@ -191,13 +179,7 @@ class PaddedBuffer : public PaddedBufferBase {
     DCHECK(backup_data_.size() == data_.size())
         << "Please make sure you have call Backup() before calling CheckBackup()";
     for (int i = 0; i < total_size_; i++) {
-      ASSERT_EQ(
-          data_[i + kPaddingSize],
-          backup_data_[i + kPaddingSize],
-          "mismatch against backup, index: ",
-          i,
-          ", name: ",
-          name());
+      ASSERT_EQ(data_[i + kPaddingSize], backup_data_[i + kPaddingSize]);
     }
   }
 
@@ -233,8 +215,7 @@ void ExpectAllEqual(const PaddedBuffer<T>& f1, const PaddedBuffer<T>& f2) {
   f1.ValidateWatermark();
   f2.ValidateWatermark();
   for (int i = 0; i < total_size; i++) {
-    ASSERT_EQ(
-        v1[kPaddingSize + i], v2[kPaddingSize + i], CompareErrorMsg(f1, f2, i));
+    ASSERT_EQ(v1[kPaddingSize + i], v2[kPaddingSize + i]);
   }
 }
 
@@ -251,11 +232,7 @@ void ExpectAllNear(
   f1.ValidateWatermark();
   f2.ValidateWatermark();
   for (int i = 0; i < total_size; i++) {
-    ASSERT_NEAR(
-        v1[kPaddingSize + i],
-        v2[kPaddingSize + i],
-        abs_error,
-        CompareErrorMsg(f1, f2, i));
+    ASSERT_NEAR(v1[kPaddingSize + i], v2[kPaddingSize + i], abs_error);
   }
 }
 

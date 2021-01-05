@@ -2,6 +2,8 @@ import torch
 import numpy as np
 import argparse
 
+from typing import Dict
+
 # debug print
 DEBUG_PRINT = False
 
@@ -71,7 +73,7 @@ def random_topology_test(seed, *inp_tensor_list):
             return get_root(dependency_map[x], dependency_map)
         else:
             return x
-    d_map = {}
+    d_map: Dict[int, int] = {}
     num_sets = num_tensor
     candidate = list(range(num_tensor))
 
@@ -283,7 +285,7 @@ def runDefaultTestWithSeed(seed):
     jit_o = traced_model(seed_tensor, *tensor_list)
     validate_o = zip(o, jit_o)
     for oo, jit_oo in validate_o:
-        if not oo.allclose(jit_oo, equal_nan=True):
+        if not oo.allclose(jit_oo, atol=1e-5, equal_nan=True):
             return False
     return True
 
@@ -307,8 +309,8 @@ def runTest(seed, args):
             for out in o:
                 print("val size: ", out.size())
     except Exception as err:
-        raise Exception("Testing script failure with error message {0}\n\trepro by running:\n\t{1}".format(
-            str(err), reproString(seed, args)))
+        raise Exception("Testing script failure with error message, repro by running:\n"
+                        f"\t{reproString(seed, args)}") from err
     try:
         traced_model = torch.jit.trace(random_topology_test, (seed_tensor, *tensor_list))
         if DEBUG_PRINT:
@@ -325,12 +327,12 @@ def runTest(seed, args):
                 print("jit output: ", jit_oo)
                 print("diff ", jit_oo - oo)
                 raise WrongResultException()
-    except WrongResultException:
+    except WrongResultException as err:
         raise Exception("cuda fuser gives wrong results, repro by running:\n"
-                        "\t{0}".format(reproString(seed, args)))
+                        f"\t{reproString(seed, args)}") from err
     except Exception as err:
-        raise Exception("something in cuda fuser went wrong {0}\n\trepro by running:\n\t{1}".format(
-            str(err), reproString(seed, args)))
+        raise Exception("something in cuda fuser went wrong, repro by running:\n"
+                        f"\t{reproString(seed, args)}") from err
 
 
 def parse_args():

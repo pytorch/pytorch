@@ -1,15 +1,21 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 import math
 import torch
 import torch.nn as nn
-import torch.nn.intrinsic
+import torch.nn.intrinsic as nni
 import torch.nn.qat as nnqat
 import torch.nn.functional as F
 from torch.nn import init
-from torch.nn.modules.utils import _pair
+from torch.nn.modules.utils import _single, _pair
 from torch.nn.parameter import Parameter
 
-class _ConvBnNd(nn.modules.conv._ConvNd):
+_BN_CLASS_MAP = {
+    1: nn.BatchNorm1d,
+    2: nn.BatchNorm2d,
+    3: nn.BatchNorm3d,
+}
+
+
+class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
 
     _version = 2
 
@@ -27,15 +33,15 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
                  # track_running_stats: True
                  # Args for this module
                  freeze_bn=False,
-                 qconfig=None):
+                 qconfig=None,
+                 dim=2):
         nn.modules.conv._ConvNd.__init__(self, in_channels, out_channels, kernel_size,
                                          stride, padding, dilation, transposed,
                                          output_padding, groups, False, padding_mode)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
         self.freeze_bn = freeze_bn if self.training else True
-        self.bn = nn.BatchNorm2d(out_channels, eps, momentum, True, True)
-        self.activation_post_process = self.qconfig.activation()
+        self.bn = _BN_CLASS_MAP[dim](out_channels, eps, momentum, True, True)
         self.weight_fake_quant = self.qconfig.weight()
         if bias:
             self.bias = Parameter(torch.Tensor(out_channels))
@@ -82,12 +88,21 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
     def _forward(self, input):
         running_std = torch.sqrt(self.bn.running_var + self.bn.eps)
         scale_factor = self.bn.weight / running_std
-        scaled_weight = self.weight_fake_quant(self.weight * scale_factor.reshape([-1, 1, 1, 1]))
-        # this does not include the conv bias
-        conv = self._conv_forward(input, scaled_weight)
-        conv_orig = conv / scale_factor.reshape([1, -1, 1, 1])
+        weight_shape = [1] * len(self.weight.shape)
+        weight_shape[0] = -1
+        bias_shape = [1] * len(self.weight.shape)
+        bias_shape[1] = -1
+        scaled_weight = self.weight_fake_quant(self.weight * scale_factor.reshape(weight_shape))
+        # using zero bias here since the bias for original conv
+        # will be added later
         if self.bias is not None:
-            conv_orig = conv_orig + self.bias.reshape([1, -1, 1, 1])
+            zero_bias = torch.zeros_like(self.bias)
+        else:
+            zero_bias = torch.zeros(self.out_channels, device=scaled_weight.device)
+        conv = self._conv_forward(input, scaled_weight, zero_bias)
+        conv_orig = conv / scale_factor.reshape(bias_shape)
+        if self.bias is not None:
+            conv_orig = conv_orig + self.bias.reshape(bias_shape)
         conv = self.bn(conv_orig)
         return conv
 
@@ -96,7 +111,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
         return super(_ConvBnNd, self).extra_repr()
 
     def forward(self, input):
-        return self.activation_post_process(self._forward(input))
+        return self._forward(input)
 
     def train(self, mode=True):
         """
@@ -147,6 +162,16 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
                 if prefix + v1_name in state_dict:
                     state_dict[prefix + v2_name] = state_dict[prefix + v1_name]
                     state_dict.pop(prefix + v1_name)
+                elif prefix + v2_name in state_dict:
+                    # there was a brief period where forward compatibility
+                    # for this module was broken (between
+                    # https://github.com/pytorch/pytorch/pull/38478
+                    # and https://github.com/pytorch/pytorch/pull/38820)
+                    # and modules emitted the v2 state_dict format while
+                    # specifying that version == 1. This patches the forward
+                    # compatibility issue by allowing the v2 style entries to
+                    # be used.
+                    pass
                 elif strict:
                     missing_keys.append(prefix + v2_name)
 
@@ -154,7 +179,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
             state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
 
     @classmethod
-    def from_float(cls, mod, qconfig=None):
+    def from_float(cls, mod):
         r"""Create a qat module from a float module or qparams_dict
 
             Args: `mod` a float module, either produced by torch.quantization utilities
@@ -162,10 +187,9 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
         """
         assert type(mod) == cls._FLOAT_MODULE, 'qat.' + cls.__name__ + '.from_float only works for ' + \
             cls._FLOAT_MODULE.__name__
-        if not qconfig:
-            assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
-            assert mod.qconfig, 'Input float module must have a valid qconfig'
-            qconfig = mod.qconfig
+        assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
+        assert mod.qconfig, 'Input float module must have a valid qconfig'
+        qconfig = mod.qconfig
         conv, bn = mod[0], mod[1]
         qat_convbn = cls(conv.in_channels, conv.out_channels, conv.kernel_size,
                          conv.stride, conv.padding, conv.dilation,
@@ -183,27 +207,110 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
         qat_convbn.bn.num_batches_tracked = bn.num_batches_tracked
         return qat_convbn
 
+class ConvBn1d(_ConvBnNd, nn.Conv1d):
+    r"""
+    A ConvBn1d module is a module fused from Conv1d and BatchNorm1d,
+    attached with FakeQuantize modules for weight,
+    used in quantization aware training.
+
+    We combined the interface of :class:`torch.nn.Conv1d` and
+    :class:`torch.nn.BatchNorm1d`.
+
+    Similar to :class:`torch.nn.Conv1d`, with FakeQuantize modules initialized
+    to default.
+
+    Attributes:
+        freeze_bn:
+        weight_fake_quant: fake quant module for weight
+
+    """
+    _FLOAT_MODULE = nni.ConvBn1d
+
+    def __init__(self,
+                 # Conv1d args
+                 in_channels, out_channels, kernel_size, stride=1,
+                 padding=0, dilation=1, groups=1,
+                 bias=None,
+                 padding_mode='zeros',
+                 # BatchNorm1d args
+                 # num_features: out_channels
+                 eps=1e-05, momentum=0.1,
+                 # affine: True
+                 # track_running_stats: True
+                 # Args for this module
+                 freeze_bn=False,
+                 qconfig=None):
+        kernel_size = _single(kernel_size)
+        stride = _single(stride)
+        padding = _single(padding)
+        dilation = _single(dilation)
+        _ConvBnNd.__init__(self, in_channels, out_channels, kernel_size, stride,
+                           padding, dilation, False, _single(0), groups, bias, padding_mode,
+                           eps, momentum, freeze_bn, qconfig, dim=1)
+
+class ConvBnReLU1d(ConvBn1d):
+    r"""
+    A ConvBnReLU1d module is a module fused from Conv1d, BatchNorm1d and ReLU,
+    attached with FakeQuantize modules for weight,
+    used in quantization aware training.
+
+    We combined the interface of :class:`torch.nn.Conv1d` and
+    :class:`torch.nn.BatchNorm1d` and :class:`torch.nn.ReLU`.
+
+    Similar to `torch.nn.Conv1d`, with FakeQuantize modules initialized to
+    default.
+
+    Attributes:
+        weight_fake_quant: fake quant module for weight
+
+    """
+    _FLOAT_MODULE = nni.ConvBnReLU1d
+
+    def __init__(self,
+                 # Conv1d args
+                 in_channels, out_channels, kernel_size, stride=1,
+                 padding=0, dilation=1, groups=1,
+                 bias=None,
+                 padding_mode='zeros',
+                 # BatchNorm1d args
+                 # num_features: out_channels
+                 eps=1e-05, momentum=0.1,
+                 # affine: True
+                 # track_running_stats: True
+                 # Args for this module
+                 freeze_bn=False,
+                 qconfig=None):
+        super().__init__(in_channels, out_channels, kernel_size, stride,
+                         padding, dilation, groups, bias,
+                         padding_mode, eps, momentum,
+                         freeze_bn,
+                         qconfig)
+
+    def forward(self, input):
+        return F.relu(ConvBn1d._forward(self, input))
+
+    @classmethod
+    def from_float(cls, mod):
+        return super(ConvBnReLU1d, cls).from_float(mod)
+
 class ConvBn2d(_ConvBnNd, nn.Conv2d):
     r"""
     A ConvBn2d module is a module fused from Conv2d and BatchNorm2d,
-    attached with FakeQuantize modules for both output activation and weight,
+    attached with FakeQuantize modules for weight,
     used in quantization aware training.
 
     We combined the interface of :class:`torch.nn.Conv2d` and
     :class:`torch.nn.BatchNorm2d`.
-
-    Implementation details: https://arxiv.org/pdf/1806.08342.pdf section 3.2.2
 
     Similar to :class:`torch.nn.Conv2d`, with FakeQuantize modules initialized
     to default.
 
     Attributes:
         freeze_bn:
-        activation_post_process: fake quant module for output activation
         weight_fake_quant: fake quant module for weight
 
     """
-    _FLOAT_MODULE = torch.nn.intrinsic.ConvBn2d
+    _FLOAT_MODULE = nni.ConvBn2d
 
     def __init__(self,
                  # ConvNd args
@@ -225,29 +332,25 @@ class ConvBn2d(_ConvBnNd, nn.Conv2d):
         dilation = _pair(dilation)
         _ConvBnNd.__init__(self, in_channels, out_channels, kernel_size, stride,
                            padding, dilation, False, _pair(0), groups, bias, padding_mode,
-                           eps, momentum, freeze_bn, qconfig)
+                           eps, momentum, freeze_bn, qconfig, dim=2)
 
 class ConvBnReLU2d(ConvBn2d):
     r"""
     A ConvBnReLU2d module is a module fused from Conv2d, BatchNorm2d and ReLU,
-    attached with FakeQuantize modules for both output activation and weight,
+    attached with FakeQuantize modules for weight,
     used in quantization aware training.
 
     We combined the interface of :class:`torch.nn.Conv2d` and
     :class:`torch.nn.BatchNorm2d` and :class:`torch.nn.ReLU`.
 
-    Implementation details: https://arxiv.org/pdf/1806.08342.pdf
-
     Similar to `torch.nn.Conv2d`, with FakeQuantize modules initialized to
     default.
 
     Attributes:
-        observer: fake quant module for output activation, it's called observer
-            to align with post training flow
         weight_fake_quant: fake quant module for weight
 
     """
-    _FLOAT_MODULE = torch.nn.intrinsic.ConvBnReLU2d
+    _FLOAT_MODULE = nni.ConvBnReLU2d
 
     def __init__(self,
                  # Conv2d args
@@ -270,27 +373,25 @@ class ConvBnReLU2d(ConvBn2d):
                                            qconfig)
 
     def forward(self, input):
-        return self.activation_post_process(F.relu(ConvBn2d._forward(self, input)))
+        return F.relu(ConvBn2d._forward(self, input))
 
     @classmethod
-    def from_float(cls, mod, qconfig=None):
-        return super(ConvBnReLU2d, cls).from_float(mod, qconfig)
+    def from_float(cls, mod):
+        return super(ConvBnReLU2d, cls).from_float(mod)
 
-class ConvReLU2d(nnqat.Conv2d):
-    r"""
-    A ConvReLU2d module is a fused module of Conv2d and ReLU, attached with
-    FakeQuantize modules for both output activation and weight for
+class ConvReLU2d(nnqat.Conv2d, nni._FusedModule):
+    r"""A ConvReLU2d module is a fused module of Conv2d and ReLU, attached with
+    FakeQuantize modules for weight for
     quantization aware training.
 
     We combined the interface of :class:`~torch.nn.Conv2d` and
     :class:`~torch.nn.BatchNorm2d`.
 
     Attributes:
-        activation_post_process: fake quant module for output activation
         weight_fake_quant: fake quant module for weight
 
     """
-    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU2d
+    _FLOAT_MODULE = nni.ConvReLU2d
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
@@ -302,21 +403,20 @@ class ConvReLU2d(nnqat.Conv2d):
                                          qconfig=qconfig)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
-        self.activation_post_process = self.qconfig.activation()
         self.weight_fake_quant = self.qconfig.weight()
 
     def forward(self, input):
-        return self.activation_post_process(F.relu(
-            self._conv_forward(input, self.weight_fake_quant(self.weight))))
+        return F.relu(
+            self._conv_forward(input, self.weight_fake_quant(self.weight), self.bias))
 
     @classmethod
-    def from_float(cls, mod, qconfig=None):
-        return super(ConvReLU2d, cls).from_float(mod, qconfig)
+    def from_float(cls, mod):
+        return super(ConvReLU2d, cls).from_float(mod)
 
 def update_bn_stats(mod):
-    if type(mod) in set([ConvBnReLU2d, ConvBn2d]):
+    if type(mod) in set([ConvBnReLU1d, ConvBnReLU2d, ConvBn1d, ConvBn2d]):
         mod.update_bn_stats()
 
 def freeze_bn_stats(mod):
-    if type(mod) in set([ConvBnReLU2d, ConvBn2d]):
+    if type(mod) in set([ConvBnReLU1d, ConvBnReLU2d, ConvBn1d, ConvBn2d]):
         mod.freeze_bn_stats()

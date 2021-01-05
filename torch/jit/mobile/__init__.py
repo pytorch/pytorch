@@ -1,6 +1,6 @@
 import torch
 
-from torch.jit import validate_map_location
+from torch.jit._serialization import validate_map_location
 
 import pathlib
 import os
@@ -10,7 +10,7 @@ def _load_for_lite_interpreter(f, map_location=None):
     Load a :class:`LiteScriptModule`
     saved with :func:`torch.jit._save_for_lite_interpreter`
 
-    Arguments:
+    Args:
         f: a file-like object (has to implement read, readline, tell, and seek),
             or a string containing a file name
         map_location: a string or torch.device used to dynamically remap

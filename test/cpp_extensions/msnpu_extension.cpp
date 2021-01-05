@@ -20,9 +20,10 @@ Tensor get_tensor(caffe2::TypeMeta dtype, IntArrayRef size) {
   return Tensor(std::move(tensor_impl));
 }
 
-Tensor empty_override(IntArrayRef size, const TensorOptions & options) {
+Tensor empty_override(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device,
+                      c10::optional<bool> pin_memory, c10::optional<c10::MemoryFormat> optional_memory_format) {
   test_int = 0;
-  return get_tensor(options.dtype(), size);
+  return get_tensor(scalarTypeToTypeMeta(dtype_or_default(dtype)), size);
 }
 
 Tensor add_override(const Tensor & a, const Tensor & b , Scalar c) {
@@ -31,7 +32,7 @@ Tensor add_override(const Tensor & a, const Tensor & b , Scalar c) {
 }
 
 Tensor fake_convolution(
-    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
     bool transposed, IntArrayRef output_padding, int64_t groups) {
   test_int = 2;

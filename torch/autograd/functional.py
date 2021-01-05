@@ -1,4 +1,5 @@
 import torch
+from typing import Tuple, List
 
 # Utility functions
 
@@ -131,8 +132,8 @@ def _autograd_grad(outputs, inputs, grad_outputs=None, create_graph=False, retai
     assert isinstance(grad_outputs, tuple)
     assert len(outputs) == len(grad_outputs)
 
-    new_outputs = tuple()
-    new_grad_outputs = tuple()
+    new_outputs: Tuple[torch.Tensor, ...] = tuple()
+    new_grad_outputs: Tuple[torch.Tensor, ...] = tuple()
     for out, grad_out in zip(outputs, grad_outputs):
         if out is not None and out.requires_grad:
             new_outputs += (out,)
@@ -153,7 +154,7 @@ def _fill_in_zeros(grads, refs, strict, create_graph, stage):
     if stage not in ["back", "back_trick", "double_back", "double_back_trick"]:
         raise RuntimeError("Invalid stage argument '{}' to _fill_in_zeros".format(stage))
 
-    res = tuple()
+    res: Tuple[torch.Tensor, ...] = tuple()
     for i, grads_i in enumerate(grads):
         if grads_i is None:
             if strict:
@@ -381,15 +382,15 @@ def jacobian(func, inputs, create_graph=False, strict=False):
             Defaults to ``False``.
 
     Returns:
-        Jacobian (Tensor or nested tuple of Tensors): if there are a single
-            input and output, this will be a single Tensor containing the
-            Jacobian for the linearized inputs and output. If one of the two is
-            a tuple, then the Jacobian will be a tuple of Tensors. If both of
-            them are tuples, then the Jacobian will be a tuple of tuple of
-            Tensors where ``Jacobian[i][j]`` will contain the Jacobian of the
-            ``i``\th output and ``j``\th input and will have as size the
-            concatenation of the sizes of the corresponding output and the
-            corresponding input.
+        Jacobian (Tensor or nested tuple of Tensors): if there is a single
+        input and output, this will be a single Tensor containing the
+        Jacobian for the linearized inputs and output. If one of the two is
+        a tuple, then the Jacobian will be a tuple of Tensors. If both of
+        them are tuples, then the Jacobian will be a tuple of tuple of
+        Tensors where ``Jacobian[i][j]`` will contain the Jacobian of the
+        ``i``\th output and ``j``\th input and will have as size the
+        concatenation of the sizes of the corresponding output and the
+        corresponding input.
 
     Example:
 
@@ -399,14 +400,12 @@ def jacobian(func, inputs, create_graph=False, strict=False):
         >>> jacobian(exp_reducer, inputs)
         tensor([[[1.4917, 2.4352],
                  [0.0000, 0.0000]],
-
                 [[0.0000, 0.0000],
                  [2.4369, 2.3799]]])
 
         >>> jacobian(exp_reducer, inputs, create_graph=True)
         tensor([[[1.4917, 2.4352],
                  [0.0000, 0.0000]],
-
                 [[0.0000, 0.0000],
                  [2.4369, 2.3799]]], grad_fn=<ViewBackward>)
 
@@ -429,10 +428,11 @@ def jacobian(func, inputs, create_graph=False, strict=False):
                                           "jacobian")
     _check_requires_grad(outputs, "outputs", strict=strict)
 
-    jacobian = tuple()
+    jacobian: Tuple[torch.Tensor, ...] = tuple()
     for i, out in enumerate(outputs):
 
-        jac_i = tuple([] for _ in range(len(inputs)))
+        # mypy complains that expression and variable have different types due to the empty list
+        jac_i: Tuple[List[torch.Tensor]] = tuple([] for _ in range(len(inputs)))  # type: ignore
         for j in range(out.nelement()):
             vj = _autograd_grad((out.reshape(-1)[j],), inputs,
                                 retain_graph=True, create_graph=create_graph)
@@ -478,12 +478,12 @@ def hessian(func, inputs, create_graph=False, strict=False):
             Defaults to ``False``.
 
     Returns:
-        Hessian (Tensor or a tuple of tuple of Tensors) if there are a single input,
-            this will be a single Tensor containing the Hessian for the input.
-            If it is a tuple, then the Hessian will be a tuple of tuples where
-            ``Hessian[i][j]`` will contain the Hessian of the ``i``\th input
-            and ``j``\th input with size the sum of the size of the ``i``\th input plus
-            the size of the ``j``\th input.
+        Hessian (Tensor or a tuple of tuple of Tensors): if there is a single input,
+        this will be a single Tensor containing the Hessian for the input.
+        If it is a tuple, then the Hessian will be a tuple of tuples where
+        ``Hessian[i][j]`` will contain the Hessian of the ``i``\th input
+        and ``j``\th input with size the sum of the size of the ``i``\th input plus
+        the size of the ``j``\th input.
 
     Example:
 
@@ -493,28 +493,20 @@ def hessian(func, inputs, create_graph=False, strict=False):
         >>> hessian(pow_reducer, inputs)
         tensor([[[[5.2265, 0.0000],
                   [0.0000, 0.0000]],
-
                  [[0.0000, 4.8221],
                   [0.0000, 0.0000]]],
-
-
                 [[[0.0000, 0.0000],
                   [1.9456, 0.0000]],
-
                  [[0.0000, 0.0000],
                   [0.0000, 3.2550]]]])
 
         >>> hessian(pow_reducer, inputs, create_graph=True)
         tensor([[[[5.2265, 0.0000],
                   [0.0000, 0.0000]],
-
                  [[0.0000, 4.8221],
                   [0.0000, 0.0000]]],
-
-
                 [[[0.0000, 0.0000],
                   [1.9456, 0.0000]],
-
                  [[0.0000, 0.0000],
                   [0.0000, 3.2550]]]], grad_fn=<ViewBackward>)
 
@@ -565,32 +557,39 @@ def vhp(func, inputs, v=None, create_graph=False, strict=False):
         func (function): a Python function that takes Tensor inputs and returns
             a Tensor with a single element.
         inputs (tuple of Tensors or Tensor): inputs to the function ``func``.
-        v (tuple of Tensors or Tensor): The vector for which the vector Hessian product is computed. Must be the
-            same size as the input of ``func``. This argument is optional when
-            ``func``'s input contains a single element and (if it is not provided) will be set as a Tensor
-            containing a single ``1``.
-        create_graph (bool, optional): If ``True``, both the output and result will be
-            computed in a differentiable way. Note that when ``strict`` is ``False``, the result can not
-            require gradients or be disconnected from the inputs.
+        v (tuple of Tensors or Tensor): The vector for which the vector Hessian
+            product is computed. Must be the same size as the input of
+            ``func``. This argument is optional when ``func``'s input contains
+            a single element and (if it is not provided) will be set as a
+            Tensor containing a single ``1``.
+        create_graph (bool, optional): If ``True``, both the output and result
+            will be computed in a differentiable way. Note that when ``strict``
+            is ``False``, the result can not require gradients or be
+            disconnected from the inputs.
             Defaults to ``False``.
-        strict (bool, optional): If ``True``, an error will be raised when we detect that there exists an input
-            such that all the outputs are independent of it. If ``False``, we return a Tensor of zeros as the
+        strict (bool, optional): If ``True``, an error will be raised when we
+            detect that there exists an input such that all the outputs are
+            independent of it. If ``False``, we return a Tensor of zeros as the
             vhp for said inputs, which is the expected mathematical value.
             Defaults to ``False``.
 
     Returns:
-        func_output (tuple of Tensors or Tensor): output of ``func(inputs)``
-        vhp (tuple of Tensors or Tensor): result of the dot product with the same shape
-            as the inputs.
-    Example::
+        output (tuple): tuple with:
+            func_output (tuple of Tensors or Tensor): output of ``func(inputs)``
+
+            vhp (tuple of Tensors or Tensor): result of the dot product with the
+            same shape as the inputs.
+
+    Example:
+
         >>> def pow_reducer(x):
         ...   return x.pow(3).sum()
         >>> inputs = torch.rand(2, 2)
         >>> v = torch.ones(2, 2)
         >>> vhp(pow_reducer, inputs, v)
-       (tensor(0.5591),
-        tensor([[1.0689, 1.2431],
-                [3.0989, 4.4456]]))
+        (tensor(0.5591),
+         tensor([[1.0689, 1.2431],
+                 [3.0989, 4.4456]]))
         >>> vhp(pow_reducer, inputs, v, create_graph=True)
         (tensor(0.5591, grad_fn=<SumBackward0>),
          tensor([[1.0689, 1.2431],
@@ -663,7 +662,9 @@ def hvp(func, inputs, v=None, create_graph=False, strict=False):
             hvp for said inputs, which is the expected mathematical value.
             Defaults to ``False``.
     Returns:
-        func_output (tuple of Tensors or Tensor): output of ``func(inputs)``
+        output (tuple): tuple with:
+            func_output (tuple of Tensors or Tensor): output of ``func(inputs)``
+
             hvp (tuple of Tensors or Tensor): result of the dot product with
             the same shape as the inputs.
 

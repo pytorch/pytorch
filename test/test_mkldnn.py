@@ -1,5 +1,5 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 import copy
+import itertools
 import unittest
 
 try:
@@ -11,6 +11,7 @@ except ImportError:
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 import torch
+import torch.nn.functional as F
 import torch.jit
 import torch.backends.mkldnn
 from torch.utils import mkldnn as mkldnn_utils
@@ -18,6 +19,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests, TemporaryF
 
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 
+types = [torch.float, torch.bfloat16]
 
 # Comment the line below to find out the CI machines having MKL-DNN build disabled
 @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
@@ -28,17 +30,55 @@ class TestMkldnn(TestCase):
                            torch.randn((1, 2, 3, 4, 5),
                                        dtype=torch.float, device=torch.device('cpu'))[:, :, :, :, 1]]:
             cpu_tensor.requires_grad_()
-            mkldnn_tensor = cpu_tensor.to_mkldnn()
-            cpu_tensor_1 = mkldnn_tensor.to_dense()
-            self.assertEqual(cpu_tensor, cpu_tensor_1)
-            self.assertEqual(mkldnn_tensor.dtype, torch.float)
-            self.assertEqual(mkldnn_tensor.device, torch.device('cpu'))
-            self.assertEqual(mkldnn_tensor.size(), torch.Size([1, 2, 3, 4]))
-            self.assertEqual(mkldnn_tensor.numel(), cpu_tensor.numel())
-            self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor.element_size())
-            self.assertRaisesRegex(RuntimeError,
-                                   "Cannot access data pointer of Tensor that doesn't have storage",
-                                   lambda: mkldnn_tensor.data_ptr() != 0)
+            # float cpu tensor to mkldnn float tensor or bfloat tensor.
+            for dtype1 in types:
+                mkldnn_tensor = cpu_tensor.to_mkldnn(dtype1)
+                self.assertEqual(mkldnn_tensor.dtype, dtype1)
+                cpu_tensor_1 = mkldnn_tensor.to_dense()
+                # not given dtype for to_dense, mkldnn tensor has same dtype with cpu tensor
+                self.assertEqual(mkldnn_tensor.dtype, cpu_tensor_1.dtype)
+                # mkldnn float/bfloat tensor to cpu float or bfloat tensor
+                for dtype2 in types:
+                    cpu_tensor_2 = mkldnn_tensor.to_dense(dtype2)
+                    self.assertEqual(cpu_tensor_2.dtype, dtype2)
+                    atol = 1e-5 if dtype1 == torch.float and dtype2 == torch.float else 1e-2
+                    self.assertEqual(cpu_tensor, cpu_tensor_2.float(), atol=atol, rtol=0)
+
+                self.assertEqual(mkldnn_tensor.device, torch.device('cpu'))
+                self.assertEqual(mkldnn_tensor.size(), torch.Size([1, 2, 3, 4]))
+                self.assertEqual(mkldnn_tensor.numel(), cpu_tensor.numel())
+                if dtype1 == torch.float:
+                    self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor.element_size())
+                else:
+                    self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor.element_size() / 2)
+                self.assertRaisesRegex(RuntimeError,
+                                       "Cannot access data pointer of Tensor that doesn't have storage",
+                                       lambda: mkldnn_tensor.data_ptr() != 0)
+
+            # bfloat cpu tensor to mkldnn float tensor or bfloat tensor.
+            cpu_tensor_bf16 = cpu_tensor.bfloat16()
+            for dtype1 in types:
+                mkldnn_tensor = cpu_tensor_bf16.to_mkldnn(dtype1)
+                self.assertEqual(mkldnn_tensor.dtype, dtype1)
+                cpu_tensor_1 = mkldnn_tensor.to_dense()
+                # not given dtype for to_dense, mkldnn tensor has same dtype with cpu tensor
+                self.assertEqual(mkldnn_tensor.dtype, cpu_tensor_1.dtype)
+                # mkldnn float/bfloat tensor to cpu float or bfloat tensor
+                for dtype2 in types:
+                    cpu_tensor_2 = mkldnn_tensor.to_dense(dtype2)
+                    self.assertEqual(cpu_tensor_2.dtype, dtype2)
+                    self.assertEqual(cpu_tensor_bf16, cpu_tensor_2.bfloat16(), atol=1e-5, rtol=0)
+
+                self.assertEqual(mkldnn_tensor.device, torch.device('cpu'))
+                self.assertEqual(mkldnn_tensor.size(), torch.Size([1, 2, 3, 4]))
+                self.assertEqual(mkldnn_tensor.numel(), cpu_tensor.numel())
+                if dtype1 == torch.bfloat16:
+                    self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor_bf16.element_size())
+                else:
+                    self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor_bf16.element_size() * 2)
+                self.assertRaisesRegex(RuntimeError,
+                                       "Cannot access data pointer of Tensor that doesn't have storage",
+                                       lambda: mkldnn_tensor.data_ptr() != 0)
 
     def test_unsupported(self):
         # unsupported types and unsupported types with gpu
@@ -105,50 +145,52 @@ class TestMkldnn(TestCase):
                                                                   dtype=torch.float, device=torch.device('cpu')).to_mkldnn()))
 
     def test_conv1d(self):
-        for groups in [1, 4]:
+        options = itertools.product([1, 4], [True, False], [1, 2])
+        for groups, bias, dilation in options:
             N = torch.randint(3, 10, (1,)).item()
             C = torch.randint(1, 3, (1,)).item() * groups
             M = torch.randint(1, 3, (1,)).item() * groups
             x = torch.randn(N, C, 224, dtype=torch.float32)
-            for bias in [True, False]:
-                conv1d = torch.nn.Conv1d(in_channels=C,
-                                         out_channels=M,
-                                         kernel_size=3,
-                                         stride=2,
-                                         padding=1,
-                                         bias=bias,
-                                         groups=groups).float()
-                mkldnn_conv1d = mkldnn_utils.to_mkldnn(copy.deepcopy(conv1d))
-                with torch.backends.mkldnn.flags(enabled=False):
-                    y_aten = conv1d(x)
-                y_mkldnn = mkldnn_conv1d(x.to_mkldnn()).to_dense()
-                self.assertEqual(y_aten, y_mkldnn)
+            conv1d = torch.nn.Conv1d(in_channels=C,
+                                     out_channels=M,
+                                     kernel_size=3,
+                                     stride=2,
+                                     padding=1,
+                                     dilation=dilation,
+                                     bias=bias,
+                                     groups=groups).float()
+            mkldnn_conv1d = mkldnn_utils.to_mkldnn(copy.deepcopy(conv1d))
+            with torch.backends.mkldnn.flags(enabled=False):
+                y_aten = conv1d(x)
+            y_mkldnn = mkldnn_conv1d(x.to_mkldnn()).to_dense()
+            self.assertEqual(y_aten, y_mkldnn)
 
-                self._test_serialization(mkldnn_conv1d, (x.to_mkldnn(),))
-                self._test_tracing(mkldnn_conv1d, (x.to_mkldnn(),))
+            self._test_serialization(mkldnn_conv1d, (x.to_mkldnn(),))
+            self._test_tracing(mkldnn_conv1d, (x.to_mkldnn(),))
 
     def test_conv2d(self):
-        for groups in [1, 4]:
+        options = itertools.product([1, 4], [True, False], [1, 2])
+        for groups, bias, dilation in options:
             N = torch.randint(3, 10, (1,)).item()
             C = torch.randint(1, 3, (1,)).item() * groups
             M = torch.randint(1, 3, (1,)).item() * groups
             x = torch.randn(N, C, 224, 224, dtype=torch.float32)
-            for bias in [True, False]:
-                conv2d = torch.nn.Conv2d(in_channels=C,
-                                         out_channels=M,
-                                         kernel_size=3,
-                                         stride=2,
-                                         padding=1,
-                                         bias=bias,
-                                         groups=groups).float()
-                mkldnn_conv2d = mkldnn_utils.to_mkldnn(copy.deepcopy(conv2d))
-                with torch.backends.mkldnn.flags(enabled=False):
-                    y_aten = conv2d(x)
-                y_mkldnn = mkldnn_conv2d(x.to_mkldnn()).to_dense()
-                self.assertEqual(y_aten, y_mkldnn)
+            conv2d = torch.nn.Conv2d(in_channels=C,
+                                     out_channels=M,
+                                     kernel_size=3,
+                                     stride=2,
+                                     padding=1,
+                                     dilation=dilation,
+                                     bias=bias,
+                                     groups=groups).float()
+            mkldnn_conv2d = mkldnn_utils.to_mkldnn(copy.deepcopy(conv2d))
+            with torch.backends.mkldnn.flags(enabled=False):
+                y_aten = conv2d(x)
+            y_mkldnn = mkldnn_conv2d(x.to_mkldnn()).to_dense()
+            self.assertEqual(y_aten, y_mkldnn)
 
-                self._test_serialization(mkldnn_conv2d, (x.to_mkldnn(),))
-                self._test_tracing(mkldnn_conv2d, (x.to_mkldnn(),))
+            self._test_serialization(mkldnn_conv2d, (x.to_mkldnn(),))
+            self._test_tracing(mkldnn_conv2d, (x.to_mkldnn(),))
 
     def test_conv2d_legacy_jit_model(self):
         """
@@ -175,6 +217,29 @@ class TestMkldnn(TestCase):
             self.assertEqual(
                 conv2d(x),
                 conv2d_loaded(x.to_mkldnn()).to_dense())
+
+    def test_conv3d(self):
+        for groups in [1, 4]:
+            N = torch.randint(3, 10, (1,)).item()
+            C = torch.randint(1, 3, (1,)).item() * groups
+            M = torch.randint(1, 3, (1,)).item() * groups
+            x = torch.randn(N, C, 55, 55, 55, dtype=torch.float32)
+            for bias in [True, False]:
+                conv3d = torch.nn.Conv3d(in_channels=C,
+                                         out_channels=M,
+                                         kernel_size=3,
+                                         stride=2,
+                                         padding=1,
+                                         bias=bias,
+                                         groups=groups).float()
+                mkldnn_conv3d = mkldnn_utils.to_mkldnn(copy.deepcopy(conv3d))
+                with torch.backends.mkldnn.flags(enabled=False):
+                    y_aten = conv3d(x)
+                y_mkldnn = mkldnn_conv3d(x.to_mkldnn()).to_dense()
+                self.assertEqual(y_aten, y_mkldnn)
+
+                self._test_serialization(mkldnn_conv3d, (x.to_mkldnn(),))
+                self._test_tracing(mkldnn_conv3d, (x.to_mkldnn(),))
 
     def test_relu(self):
         x = torch.randn((4, 5), dtype=torch.float32) * 10
@@ -204,6 +269,75 @@ class TestMkldnn(TestCase):
                         max_pool2d(x),
                         max_pool2d(x.to_mkldnn()).to_dense())
 
+    def test_max_pool2d_stride_none(self):
+        N = torch.randint(3, 10, (1,)).item()
+        C = torch.randint(3, 10, (1,)).item()
+
+        for H, W in [(64, 64), (35, 39), (16, 19), [7, 8]]:
+            x = torch.randn(N, C, H, W, dtype=torch.float32) * 10
+            for ceil_mode in [False, True]:
+                y1 = F.max_pool2d(
+                    x,
+                    kernel_size=3 if not ceil_mode else 7,
+                    stride=None,
+                    padding=1,
+                    ceil_mode=ceil_mode)
+
+                y2 = F.max_pool2d(
+                    x.to_mkldnn(),
+                    kernel_size=3 if not ceil_mode else 7,
+                    stride=None,
+                    padding=1,
+                    ceil_mode=ceil_mode)
+
+                self.assertEqual(y1, y2.to_dense())
+
+    def test_max_pool3d(self):
+        N = torch.randint(3, 10, (1,)).item()
+        C = torch.randint(3, 10, (1,)).item()
+
+        for stride in [1, 2, 3]:
+            for D, H, W in [(64, 64, 64), (35, 39, 35), (16, 19, 20), [7, 8, 9]]:
+                x = torch.randn(N, C, D, H, W, dtype=torch.float32) * 10
+
+                for ceil_mode in [False, True]:
+                    max_pool3d = torch.nn.MaxPool3d(
+                        kernel_size=3 if not ceil_mode else 7,
+                        stride=stride,
+                        padding=1,
+                        ceil_mode=ceil_mode)
+
+                    self.assertEqual(
+                        max_pool3d(x),
+                        max_pool3d(x.to_mkldnn()).to_dense())
+
+    def test_max_pool_unsupported(self):
+        # OneDNN not support dilation max_pooling, will be avilabled in v2.0.
+        N = torch.randint(3, 10, (1,)).item()
+        C = torch.randint(3, 10, (1,)).item()
+
+        # 2d dilation case
+        x = torch.randn(N, C, 7, 7, dtype=torch.float32).to_mkldnn()
+        max_pool2d = torch.nn.MaxPool2d(
+            kernel_size=3,
+            stride=3,
+            padding=1,
+            dilation=2)
+        self.assertRaisesRegex(RuntimeError,
+                               'mkldnn_max_pool2d does not support dilation case',
+                               lambda: max_pool2d(x))
+
+        # 3d dilation case
+        x = torch.randn(N, C, 7, 7, 7, dtype=torch.float32).to_mkldnn()
+        max_pool3d = torch.nn.MaxPool3d(
+            kernel_size=3,
+            stride=3,
+            padding=1,
+            dilation=2)
+        self.assertRaisesRegex(RuntimeError,
+                               'mkldnn_max_pool3d does not support dilation case',
+                               lambda: max_pool3d(x))
+
     def test_avg_pool2d(self):
         N = torch.randint(3, 10, (1,)).item()
         C = torch.randint(3, 10, (1,)).item()
@@ -219,6 +353,43 @@ class TestMkldnn(TestCase):
             self.assertEqual(
                 avg_pool2d(x),
                 avg_pool2d(x.to_mkldnn()).to_dense())
+
+    def test_avg_pool2d_stride_none(self):
+        N = torch.randint(3, 10, (1,)).item()
+        C = torch.randint(3, 10, (1,)).item()
+        x = torch.randn(N, C, 64, 64, dtype=torch.float32) * 10
+
+        for count_include_pad in [True, False]:
+            y1 = F.avg_pool2d(
+                x,
+                kernel_size=3,
+                stride=None,
+                padding=1,
+                count_include_pad=count_include_pad)
+            y2 = F.avg_pool2d(
+                x.to_mkldnn(),
+                kernel_size=3,
+                stride=None,
+                padding=1,
+                count_include_pad=count_include_pad)
+
+            self.assertEqual(y1, y2.to_dense())
+
+    def test_avg_pool3d(self):
+        N = torch.randint(3, 10, (1,)).item()
+        C = torch.randint(3, 10, (1,)).item()
+        x = torch.randn(N, C, 64, 64, 64, dtype=torch.float32) * 10
+
+        for count_include_pad in [True, False]:
+            avg_pool3d = torch.nn.AvgPool3d(
+                kernel_size=3,
+                stride=2,
+                padding=1,
+                count_include_pad=count_include_pad)
+
+            self.assertEqual(
+                avg_pool3d(x),
+                avg_pool3d(x.to_mkldnn()).to_dense())
 
     def test_adaptive_avg_pool2d(self):
         N = torch.randint(3, 10, (1,)).item()
@@ -239,6 +410,22 @@ class TestMkldnn(TestCase):
         # TODO: support training
         for train in [False]:
             bn = torch.nn.BatchNorm2d(C).float().train(train)
+            mkldnn_bn = mkldnn_utils.to_mkldnn(copy.deepcopy(bn))
+            self.assertEqual(
+                bn(x),
+                mkldnn_bn(x.to_mkldnn()).to_dense())
+
+            self._test_serialization(mkldnn_bn, (x.to_mkldnn(),))
+            self._test_tracing(mkldnn_bn, (x.to_mkldnn(),))
+
+    def test_batch_norm3d(self):
+        N = torch.randint(3, 10, (1,)).item()
+        C = torch.randint(3, 100, (1,)).item()
+        x = torch.randn(N, C, 30, 30, 30, dtype=torch.float32) * 10
+
+        # TODO: support training
+        for train in [False]:
+            bn = torch.nn.BatchNorm3d(C).float().train(train)
             mkldnn_bn = mkldnn_utils.to_mkldnn(copy.deepcopy(bn))
             self.assertEqual(
                 bn(x),

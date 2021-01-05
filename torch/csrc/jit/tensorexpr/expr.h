@@ -31,11 +31,14 @@ enum IRNodeType {
   kCompareSelect,
   kLet,
   kCast,
+  kBitCast,
   kBroadcast,
   kRamp,
   kPolynomial,
   kTerm,
   kRoundOff,
+  kMaxTerm,
+  kMinTerm,
   kNone,
   kExtra
 };
@@ -192,6 +195,9 @@ class TORCH_API Buf : public ExprNode<Buf> {
     return dims_.size();
   }
   const Expr* dim(size_t index) const {
+    if (index >= ndim()) {
+      throw out_of_range_index();
+    }
     return dims_[index];
   }
   std::vector<const Expr*> dims() const {
@@ -206,7 +212,6 @@ class TORCH_API Buf : public ExprNode<Buf> {
   std::vector<const Expr*> dims_;
 };
 
-// TODO: Merge this class with 'Buffer'
 class TORCH_API BufHandle : public ExprHandle {
  public:
   BufHandle(
@@ -283,8 +288,9 @@ TORCH_API ExprHandle tanh(const ExprHandle& v);
 TORCH_API ExprHandle sigmoid(const ExprHandle& v);
 TORCH_API ExprHandle exp(const ExprHandle& v);
 TORCH_API ExprHandle expm1(const ExprHandle& v);
-TORCH_API ExprHandle fabs(const ExprHandle& v);
+TORCH_API ExprHandle abs(const ExprHandle& v);
 TORCH_API ExprHandle log(const ExprHandle& v);
+TORCH_API ExprHandle fast_log(const ExprHandle& v);
 TORCH_API ExprHandle log2(const ExprHandle& v);
 TORCH_API ExprHandle log10(const ExprHandle& v);
 TORCH_API ExprHandle log1p(const ExprHandle& v);
@@ -302,9 +308,12 @@ TORCH_API ExprHandle atan2(const ExprHandle& v1, const ExprHandle& v2);
 TORCH_API ExprHandle pow(const ExprHandle& v1, const ExprHandle& v2);
 TORCH_API ExprHandle fmod(const ExprHandle& v1, const ExprHandle& v2);
 TORCH_API ExprHandle remainder(const ExprHandle& v1, const ExprHandle& v2);
+TORCH_API ExprHandle isnan(const ExprHandle& v1);
 
 TORCH_API ExprHandle
 ifThenElse(const ExprHandle& c, const ExprHandle& t, const ExprHandle& f);
+
+TORCH_API ExprHandle expr_to_vec(ExprHandle v, int lanes);
 
 } // namespace tensorexpr
 } // namespace jit

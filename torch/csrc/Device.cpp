@@ -30,7 +30,10 @@ PyObject *THPDevice_repr(THPDevice *self)
   std::ostringstream oss;
   oss << "device(type=\'" << self->device.type() << "\'";
   if (self->device.has_index()) {
-    oss << ", index=" << self->device.index();
+    // `self->device.index()` returns uint8_t which is treated as ascii while printing,
+    // hence casting it to uint16_t.
+    // https://stackoverflow.com/questions/19562103/uint8-t-cant-be-printed-with-cout
+    oss << ", index=" << static_cast<uint16_t>(self->device.index());
   }
   oss << ")";
   return THPUtils_packString(oss.str().c_str());
@@ -138,9 +141,10 @@ PyObject *THPDevice_rc(PyObject *a, PyObject *b, int op) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPDevice_reduce(THPDevice *self, PyObject *noargs)
+PyObject *THPDevice_reduce(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
+  auto self = (THPDevice*)_self;
   auto ret = THPObjectPtr{PyTuple_New(2)};
   if (!ret) throw python_error();
 
@@ -174,7 +178,7 @@ static struct PyGetSetDef THPDevice_properties[] = {
 };
 
 static PyMethodDef THPDevice_methods[] = {
-  {"__reduce__", (PyCFunction)THPDevice_reduce, METH_NOARGS, nullptr},
+  {"__reduce__", THPDevice_reduce, METH_NOARGS, nullptr},
   {nullptr}  /* Sentinel */
 };
 

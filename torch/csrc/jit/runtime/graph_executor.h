@@ -43,13 +43,24 @@ struct GraphExecutorState {
   std::unordered_map<ArgumentSpec, ExecutionPlan> execution_plans;
 };
 
+struct TORCH_API EnableProfilingGuard {
+  EnableProfilingGuard();
+  ~EnableProfilingGuard();
+
+ private:
+  bool old_executor_mode = false;
+  bool old_profiling_mode = false;
+};
+
 struct GraphExecutorImplBase;
 struct TORCH_API GraphExecutor {
   GraphExecutor() = default;
-  GraphExecutor(std::shared_ptr<Graph> graph, std::string function_name);
+  GraphExecutor(const std::shared_ptr<Graph>& graph, std::string function_name);
 
   void run(Stack& inputs);
-  c10::intrusive_ptr<Future> runAsync(Stack& stack);
+  c10::intrusive_ptr<Future> runAsync(
+      Stack& stack,
+      TaskLauncher taskLauncher = at::launch);
 
   // `remaining_bailout_depth` stands for the maximum number of profiled and
   // specialized recompilations allowed for the current `GraphExecutor`. if
@@ -60,7 +71,9 @@ struct TORCH_API GraphExecutor {
   // profiled information whenever a bailout check is failed/triggered, a new
   // `GraphExecutor` will be created. This new `GraphExecutor`'s
   // remaining_bailout_depth will be reduced by 1.
-  ExecutionPlan getPlanFor(Stack& inputs, size_t remaining_bailout_depth);
+  const ExecutionPlan& getPlanFor(
+      Stack& inputs,
+      size_t remaining_bailout_depth);
   explicit operator bool() const {
     return pImpl != nullptr;
   }
@@ -76,9 +89,16 @@ struct TORCH_API GraphExecutor {
   std::shared_ptr<GraphExecutorImplBase> pImpl;
 };
 
+TORCH_API Node* replaceBlockWithFallbackGraph(
+    Block* b,
+    ArrayRef<Value*> inputs);
+
 // These passes need to run before it is valid to pass to the interpreter
 // regardless of whether sizes have been specialized or not.
 TORCH_API void runRequiredPasses(const std::shared_ptr<Graph>& g);
+
+TORCH_API void debugSetFusionGroupInlining(bool state);
+TORCH_API bool getFusionGroupInlining();
 
 TORCH_API void debugSetAutodiffSubgraphInlining(bool state);
 TORCH_API std::shared_ptr<Graph> lastExecutedOptimizedGraph();

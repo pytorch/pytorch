@@ -23,6 +23,8 @@ try:
     HAS_TORCHVISION = True
 except ImportError:
     HAS_TORCHVISION = False
+except RuntimeError:
+    HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 class MnistNet(nn.Module):
@@ -487,7 +489,7 @@ class TestModels(JitTestCase):
                 return self.seq.forward(input)
 
         # disabled due to a jitter issues that will be fixed by using load/store in the compiler
-        with torch.jit._disable_emit_hooks():
+        with torch._jit_internal._disable_emit_hooks():
             # TODO: toggle export_import once above issues are fixed
             self.checkTrace(Traced(), (torch.rand(3, 4),),
                             export_import=False)

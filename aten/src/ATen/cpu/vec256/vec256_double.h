@@ -108,7 +108,16 @@ public:
     return _mm256_andnot_pd(mask, values);
   }
   Vec256<double> angle() const {
-    return _mm256_set1_pd(0);
+    const auto zero_vec = _mm256_set1_pd(0.f);
+    const auto nan_vec = _mm256_set1_pd(NAN);
+    const auto not_nan_mask = _mm256_cmp_pd(values, values, _CMP_EQ_OQ);
+    const auto nan_mask = _mm256_cmp_pd(not_nan_mask, zero_vec, _CMP_EQ_OQ);
+    const auto pi = _mm256_set1_pd(M_PI);
+    
+    const auto neg_mask = _mm256_cmp_pd(values, zero_vec, _CMP_LT_OQ);
+    auto angle = _mm256_blendv_pd(zero_vec, pi, neg_mask);
+    angle = _mm256_blendv_pd(angle, nan_vec, nan_mask);
+    return angle;
   }
   Vec256<double> real() const {
     return *this;
@@ -149,6 +158,32 @@ public:
   Vec256<double> fmod(const Vec256<double>& q) const {
     return Vec256<double>(Sleef_fmodd4(values, q));
   }
+  Vec256<double> hypot(const Vec256<double> &b) const {
+    return Vec256<double>(Sleef_hypotd4_u05(values, b));
+  }
+  Vec256<double> i0() const {
+    return map(calc_i0);
+  }
+  Vec256<double> igamma(const Vec256<double> &x) const {
+    __at_align32__ double tmp[size()];
+    __at_align32__ double tmp_x[size()];
+    store(tmp);
+    x.store(tmp_x);
+    for (int64_t i = 0; i < size(); i++) {
+      tmp[i] = calc_igamma(tmp[i], tmp_x[i]);
+    }
+    return loadu(tmp);
+  }
+  Vec256<double> igammac(const Vec256<double> &x) const {
+    __at_align32__ double tmp[size()];
+    __at_align32__ double tmp_x[size()];
+    store(tmp);
+    x.store(tmp_x);
+    for (int64_t i = 0; i < size(); i++) {
+      tmp[i] = calc_igammac(tmp[i], tmp_x[i]);
+    }
+    return loadu(tmp);
+  }
   Vec256<double> log() const {
     return Vec256<double>(Sleef_logd4_u10(values));
   }
@@ -182,6 +217,9 @@ public:
   Vec256<double> frac() const;
   Vec256<double> neg() const {
     return _mm256_xor_pd(_mm256_set1_pd(-0.), values);
+  }
+  Vec256<double> nextafter(const Vec256<double> &b) const {
+    return Vec256<double>(Sleef_nextafterd4(values, b));
   }
   Vec256<double> round() const {
     return _mm256_round_pd(values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
@@ -218,7 +256,7 @@ public:
   }
 
   Vec256<double> operator!=(const Vec256<double>& other) const {
-    return _mm256_cmp_pd(values, other.values, _CMP_NEQ_OQ);
+    return _mm256_cmp_pd(values, other.values, _CMP_NEQ_UQ);
   }
 
   Vec256<double> operator<(const Vec256<double>& other) const {

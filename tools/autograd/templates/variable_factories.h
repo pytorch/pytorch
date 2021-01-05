@@ -39,7 +39,11 @@ namespace torch {
 /// - `long long int`
 inline at::Tensor tensor(detail::TensorDataContainer tensor_data_container, const at::TensorOptions& options = {}) {
   return autograd::make_variable(
-    tensor_data_container.convert_to_tensor(options),
+    // note: we remove the requires_grad setting from the TensorOptions because
+    // it is ignored anyways (and we actually have an assertion that it isn't set
+    // which would fail otherwise). We handle requires_grad explicitly here
+    // instead of passing it through to the kernel.
+    tensor_data_container.convert_to_tensor(options.requires_grad(c10::nullopt)),
     options.requires_grad());
 }
 
@@ -63,7 +67,7 @@ inline at::Tensor from_blob(
   at::Tensor tensor = ([&]() {
     at::AutoNonVariableTypeMode non_var_type_mode(true);  // TODO: remove
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
-    return at::from_blob(data, sizes, strides, deleter, options);
+    return at::from_blob(data, sizes, strides, deleter, options.requires_grad(c10::nullopt));
   })();
   return autograd::make_variable(tensor, options.requires_grad());
 }
@@ -81,7 +85,7 @@ inline at::Tensor from_blob(
   at::Tensor tensor = ([&]() {
     at::AutoNonVariableTypeMode non_var_type_mode(true);  // TODO: remove
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
-    return at::from_blob(data, sizes, strides, options);
+    return at::from_blob(data, sizes, strides, options.requires_grad(c10::nullopt));
   })();
   return autograd::make_variable(tensor, options.requires_grad());
 }
@@ -100,7 +104,7 @@ inline at::Tensor from_blob(
   at::Tensor tensor = ([&]() {
     at::AutoNonVariableTypeMode non_var_type_mode(true);  // TODO: remove
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
-    return at::from_blob(data, sizes, deleter, options);
+    return at::from_blob(data, sizes, deleter, options.requires_grad(c10::nullopt));
   })();
   return autograd::make_variable(tensor, options.requires_grad());
 }
@@ -116,7 +120,7 @@ inline at::Tensor from_blob(
   at::Tensor tensor = ([&]() {
     at::AutoNonVariableTypeMode non_var_type_mode(true);  // TODO: remove
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
-    return at::from_blob(data, sizes, options);
+    return at::from_blob(data, sizes, options.requires_grad(c10::nullopt));
   })();
   return autograd::make_variable(tensor, options.requires_grad());
 }

@@ -7,9 +7,9 @@ template_rule(
     out = "include/dnnl_version.h",
     substitutions = {
         "@DNNL_VERSION_MAJOR@": "1",
-        "@DNNL_VERSION_MINOR@": "2",
+        "@DNNL_VERSION_MINOR@": "7",
         "@DNNL_VERSION_PATCH@": "0",
-        "@DNNL_VERSION_HASH@": "70f8b879ea7a0c38caedb3320b7c85e8497ff50d",
+        "@DNNL_VERSION_HASH@": "2e4732679f0211bb311780d0f383cf2dce9baca7",
     },
 )
 
@@ -29,18 +29,9 @@ cc_library(
     name = "mkl-dnn",
     srcs = glob([
         "src/common/*.cpp",
-        "src/cpu/*.cpp",
-        "src/cpu/binary/*.cpp",
-        "src/cpu/gemm/*.cpp",
-        "src/cpu/gemm/bf16/*.cpp",
-        "src/cpu/gemm/f32/*.cpp",
-        "src/cpu/gemm/s8x8s32/*.cpp",
-        "src/cpu/jit_utils/*.cpp",
-        "src/cpu/jit_utils/jitprofiling/*.c",
-        "src/cpu/jit_utils/linux_perf/*.cpp",
-        "src/cpu/matmul/*.cpp",
-        "src/cpu/resampling/*.cpp",
-        "src/cpu/rnn/*.cpp",
+        "src/cpu/**/*.cpp",
+    ], exclude=[
+        "src/cpu/aarch64/*.cpp",
     ]),
     hdrs = glob([
         "include/*.h",
@@ -49,7 +40,8 @@ cc_library(
         "src/cpu/**/*.hpp",
         "src/cpu/**/*.h",
         "src/common/*.hpp",
-        "src/cpu/rnn/*.hpp",
+    ], exclude=[
+        "src/cpu/aarch64/*.hpp",
     ]) + [
         "include/dnnl_version.h",
         "include/dnnl_config.h",
@@ -66,15 +58,15 @@ cc_library(
         "-fno-strict-overflow",
         "-fopenmp",
     ] + select({
-        "@//tools/config:thread_sanitizer": ["-DMKLDNN_THR=0"],
-        "//conditions:default": ["-DMKLDNN_THR=2"],
+        "@//tools/config:thread_sanitizer": ["-DDNNL_CPU_RUNTIME=0"],
+        "//conditions:default": ["-DDNNL_CPU_RUNTIME=2"],
     }),
     includes = [
         "include/",
         "src/",
         "src/common/",
         "src/cpu/",
-        "src/cpu/xbyak/",
+        "src/cpu/x64/xbyak/",
     ],
     visibility = ["//visibility:public"],
     linkopts = [

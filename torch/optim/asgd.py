@@ -9,7 +9,7 @@ class ASGD(Optimizer):
     It has been proposed in `Acceleration of stochastic approximation by
     averaging`_.
 
-    Arguments:
+    Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
         lr (float, optional): learning rate (default: 1e-2)
@@ -19,7 +19,7 @@ class ASGD(Optimizer):
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
 
     .. _Acceleration of stochastic approximation by averaging:
-        http://dl.acm.org/citation.cfm?id=131098
+        https://dl.acm.org/citation.cfm?id=131098
     """
 
     def __init__(self, params, lr=1e-2, lambd=1e-4, alpha=0.75, t0=1e6, weight_decay=0):
@@ -36,7 +36,7 @@ class ASGD(Optimizer):
     def step(self, closure=None):
         """Performs a single optimization step.
 
-        Arguments:
+        Args:
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """

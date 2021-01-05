@@ -21,14 +21,7 @@ void destroyCublasHandle(cublasHandle_t handle) {
 #endif
 }
 
-auto pool = std::make_shared<DeviceThreadHandlePool<cublasHandle_t, createCublasHandle, destroyCublasHandle>>();
-
-// Thread local PoolWindows are wrapped by unique_ptrs and lazily-initialized
-// to avoid initialization issues that caused hangs on Windows.
-// See: https://github.com/pytorch/pytorch/pull/22405
-// This thread local unique_ptrs will be destroyed when the thread terminates,
-// releasing its reserved handles back to the pool.
-thread_local std::unique_ptr<decltype(pool)::element_type::PoolWindow> myPoolWindow;
+using CuBlasPoolType = DeviceThreadHandlePool<cublasHandle_t, createCublasHandle, destroyCublasHandle>;
 
 } // namespace
 
@@ -36,11 +29,37 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   int device;
   AT_CUDA_CHECK(cudaGetDevice(&device));
 
-  if (!myPoolWindow)
-    myPoolWindow.reset(pool->newPoolWindow());
+  // Thread local PoolWindows are lazily-initialized
+  // to avoid initialization issues that caused hangs on Windows.
+  // See: https://github.com/pytorch/pytorch/pull/22405
+  // This thread local unique_ptrs will be destroyed when the thread terminates,
+  // releasing its reserved handles back to the pool.
+  static auto pool = std::make_shared<CuBlasPoolType>();
+  thread_local std::unique_ptr<CuBlasPoolType::PoolWindow> myPoolWindow(
+      pool->newPoolWindow());
+
   auto handle = myPoolWindow->reserve(device);
   auto stream = c10::cuda::getCurrentCUDAStream();
   TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
+#if CUDA_VERSION >= 11000
+  // On CUDA >= 11, and architecture >= Ampere, cuBLAS can use TF32 to speedup
+  // FP32 data type calculations based on the value of the allow_tf32 flag.
+  // To enable TF32, set the math mode of the handle to CUBLAS_TF32_TENSOR_OP_MATH.
+  if (!NoTF32Guard::should_disable_tf32() && at::globalContext().allowTF32CuBLAS()) {
+    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TF32_TENSOR_OP_MATH));
+  } else {
+    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
+  }
+#endif
+#if defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 308
+  rocblas_atomics_mode rocblas_mode;
+  if (at::globalContext().deterministic()) {
+    rocblas_mode = rocblas_atomics_not_allowed;
+  } else {
+    rocblas_mode = rocblas_atomics_allowed;
+  }
+  TORCH_CUDABLAS_CHECK(rocblas_set_atomics_mode(handle, rocblas_mode));
+#endif
   return handle;
 }
 

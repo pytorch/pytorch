@@ -10,13 +10,15 @@ import gzip
 import copy
 import pickle
 import shutil
+import pathlib
 
 from torch._utils_internal import get_file_path_2
 from torch._utils import _rebuild_tensor
 from torch.serialization import check_module_version_greater_or_equal
 
 from torch.testing._internal.common_utils import TestCase, IS_WINDOWS, \
-    TEST_DILL, run_tests, download_file, BytesIOContext
+    TEST_DILL, run_tests, download_file, BytesIOContext, TemporaryFileName
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 # These tests were all copied from `test/test_torch.py` at some point, so see
 # the actual blame, see this revision
@@ -111,7 +113,6 @@ class SerializationMixin(object):
         rootview = c[8]
         self.assertEqual(rootview.data_ptr(), c[0].data_ptr())
 
-    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_serialization_zipfile_utils(self):
         data = {
             'a': b'12039810948234589',
@@ -136,24 +137,22 @@ class SerializationMixin(object):
         with tempfile.NamedTemporaryFile() as f:
             test(f)
 
-        with tempfile.NamedTemporaryFile() as f:
-            test(f.name)
+        with TemporaryFileName() as fname:
+            test(fname)
 
         test(io.BytesIO())
 
     def test_serialization(self):
         # Test serialization with a real file
         b = self._test_serialization_data()
-        for use_name in (False, True):
-            # Passing filename to torch.save(...) will cause the file to be opened twice,
-            # which is not supported on Windows
-            if sys.platform == "win32" and use_name:
-                continue
-            with tempfile.NamedTemporaryFile() as f:
-                handle = f if not use_name else f.name
-                torch.save(b, handle)
-                f.seek(0)
-                c = torch.load(handle)
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(b, f)
+            f.seek(0)
+            c = torch.load(f)
+            self._test_serialization_assert(b, c)
+        with TemporaryFileName() as fname:
+            torch.save(b, fname)
+            c = torch.load(fname)
             self._test_serialization_assert(b, c)
         # test non-ascii encoding of bytes arrays/strings
         # The following bytes are produced by serializing
@@ -190,7 +189,6 @@ class SerializationMixin(object):
             c = torch.load(f)
         self._test_serialization_assert(b, c)
 
-    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     def test_serialization_fake_zip(self):
         data = [
             ord('P'),
@@ -203,14 +201,15 @@ class SerializationMixin(object):
         t = torch.tensor(data, dtype=torch.uint8)
 
         with tempfile.NamedTemporaryFile() as f:
-            torch.save(t, f.name)
+            torch.save(t, f)
 
             # If this check is False for all Python versions (i.e. the fix
             # has been backported), this test and torch.serialization._is_zipfile
             # can be deleted
             self.assertTrue(zipfile.is_zipfile(f))
             self.assertFalse(torch.serialization._is_zipfile(f))
-            self.assertEqual(torch.load(f.name), t)
+            f.seek(0)
+            self.assertEqual(torch.load(f), t)
 
     def test_serialization_gzip(self):
         # Test serialization with gzip file
@@ -273,6 +272,45 @@ class SerializationMixin(object):
             b = torch.load(f)
         self.assertTrue(torch.equal(a, b))
         self.assertEqual(i, j)
+
+    def test_serialization_sparse(self):
+        x = torch.zeros(3, 3)
+        x[1][1] = 1
+        x = x.to_sparse()
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save({"tensor": x}, f)
+            f.seek(0)
+            y = torch.load(f)
+            self.assertEqual(x, y["tensor"])
+
+    def test_serialization_sparse_invalid(self):
+        x = torch.zeros(3, 3)
+        x[1][1] = 1
+        x = x.to_sparse()
+
+        class TensorSerializationSpoofer(object):
+            def __init__(self, tensor):
+                self.tensor = tensor
+
+            def __reduce_ex__(self, proto):
+                invalid_indices = self.tensor._indices().clone()
+                invalid_indices[0][0] = 3
+                return (
+                    torch._utils._rebuild_sparse_tensor,
+                    (
+                        self.tensor.layout,
+                        (
+                            invalid_indices,
+                            self.tensor._values(),
+                            self.tensor.size())))
+
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save({"spoofed": TensorSerializationSpoofer(x)}, f)
+            f.seek(0)
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    "size is inconsistent with indices"):
+                y = torch.load(f)
 
     def test_serialize_device(self):
         device_str = ['cpu', 'cpu:0', 'cuda', 'cuda:0']
@@ -543,17 +581,24 @@ class serialization_method(object):
     def __exit__(self, *args, **kwargs):
         torch.save = self.torch_save
 
-class TestBothSerialization(TestCase, SerializationMixin):
-    def test_serialization_new_format_old_format_compat(self):
-        x = [torch.ones(200, 200) for i in range(30)]
-        torch.save(x, "big_tensor.zip", _use_new_zipfile_serialization=True)
-        x_new_load = torch.load("big_tensor.zip")
-        self.assertEqual(x, x_new_load)
+class TestBothSerialization(TestCase):
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
+    def test_serialization_new_format_old_format_compat(self, device):
+        x = [torch.ones(200, 200, device=device) for i in range(30)]
 
-        torch.save(x, "big_tensor.zip", _use_new_zipfile_serialization=False)
-        x_old_load = torch.load("big_tensor.zip")
-        self.assertEqual(x_old_load, x_new_load)
-        os.remove("big_tensor.zip")
+        def test(f_new, f_old):
+            torch.save(x, f_new, _use_new_zipfile_serialization=True)
+            f_new.seek(0)
+            x_new_load = torch.load(f_new)
+            self.assertEqual(x, x_new_load)
+
+            torch.save(x, f_old, _use_new_zipfile_serialization=False)
+            f_old.seek(0)
+            x_old_load = torch.load(f_old)
+            self.assertEqual(x_old_load, x_new_load)
+
+        with tempfile.NamedTemporaryFile() as f_new, tempfile.NamedTemporaryFile() as f_old:
+            test(f_new, f_old)
 
 
 class TestOldSerialization(TestCase, SerializationMixin):
@@ -653,7 +698,6 @@ class TestOldSerialization(TestCase, SerializationMixin):
 
 
 class TestSerialization(TestCase, SerializationMixin):
-    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_serialization_zipfile(self):
         data = self._test_serialization_data()
 
@@ -668,15 +712,40 @@ class TestSerialization(TestCase, SerializationMixin):
 
         with tempfile.NamedTemporaryFile() as f:
             test(f)
-        with tempfile.NamedTemporaryFile() as f:
-            test(f.name)
+
+        with TemporaryFileName() as fname:
+            test(fname)
 
         test(io.BytesIO())
+
+    def test_serialization_zipfile_actually_jit(self):
+        with tempfile.NamedTemporaryFile() as f:
+            torch.jit.save(torch.jit.script(torch.nn.Linear(3, 4)), f)
+            f.seek(0)
+            torch.load(f)
+
+    # Ensure large zip64 serialization works properly
+    def test_serialization_2gb_file(self):
+        big_model = torch.nn.Conv2d(20000, 3200, kernel_size=3)
+
+        with BytesIOContext() as f:
+            torch.save(big_model, f)
+            f.seek(0)
+            state = torch.load(f)
+
+    def test_pathlike_serialization(self):
+        model = torch.nn.Conv2d(20, 3200, kernel_size=3)
+
+        with TemporaryFileName() as fname:
+            path = pathlib.Path(fname)
+            torch.save(model, path)
+            torch.load(path)
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
             return super(TestSerialization, self).run(*args, **kwargs)
 
+instantiate_device_type_tests(TestBothSerialization, globals())
 
 if __name__ == '__main__':
     run_tests()

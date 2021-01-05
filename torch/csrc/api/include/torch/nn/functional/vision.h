@@ -61,8 +61,10 @@ inline Tensor grid_sample(
 
   if (c10::get_if<enumtype::kBilinear>(&mode)) {
     mode_enum = 0;
-  } else { /// mode == 'nearest'
+  } else if (c10::get_if<enumtype::kNearest>(&mode)) {
     mode_enum = 1;
+  } else { /// mode == 'bicubic'
+    mode_enum = 2;
   }
 
   if (c10::get_if<enumtype::kZeros>(&padding_mode)) {

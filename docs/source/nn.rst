@@ -10,7 +10,7 @@ These are the basic building block for graphs
     :depth: 2
     :local:
     :backlinks: top
-    
+
 
 .. currentmodule:: torch.nn
 
@@ -21,6 +21,7 @@ These are the basic building block for graphs
     :template: classtemplate.rst
 
     ~parameter.Parameter
+    ~parameter.UninitializedParameter
 
 Containers
 ----------------------------------
@@ -36,6 +37,17 @@ Containers
     ModuleDict
     ParameterList
     ParameterDict
+
+Global Hooks For Module
+
+.. currentmodule:: torch.nn.modules.module
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    register_module_forward_pre_hook
+    register_module_forward_hook
+    register_module_backward_hook
 
 .. currentmodule:: torch
 
@@ -53,6 +65,12 @@ Convolution Layers
     nn.ConvTranspose1d
     nn.ConvTranspose2d
     nn.ConvTranspose3d
+    nn.LazyConv1d
+    nn.LazyConv2d
+    nn.LazyConv3d
+    nn.LazyConvTranspose1d
+    nn.LazyConvTranspose2d
+    nn.LazyConvTranspose3d
     nn.Unfold
     nn.Fold
 
@@ -125,6 +143,7 @@ Non-linear Activations (weighted sum, nonlinearity)
     nn.CELU
     nn.GELU
     nn.Sigmoid
+    nn.SiLU
     nn.Softplus
     nn.Softshrink
     nn.Softsign
@@ -206,6 +225,7 @@ Linear Layers
     nn.Identity
     nn.Linear
     nn.Bilinear
+    nn.LazyLinear
 
 Dropout Layers
 --------------
@@ -268,6 +288,7 @@ Loss Functions
     nn.CosineEmbeddingLoss
     nn.MultiMarginLoss
     nn.TripletMarginLoss
+    nn.TripletMarginWithDistanceLoss
 
 Vision Layers
 ----------------
@@ -278,9 +299,20 @@ Vision Layers
     :template: classtemplate.rst
 
     nn.PixelShuffle
+    nn.PixelUnshuffle
     nn.Upsample
     nn.UpsamplingNearest2d
     nn.UpsamplingBilinear2d
+
+Shuffle Layers
+----------------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    nn.ChannelShuffle
 
 DataParallel Layers (multi-GPU, distributed)
 --------------------------------------------
@@ -354,9 +386,21 @@ Utility functions in other modules
     nn.utils.rnn.pack_sequence
 
     nn.Flatten
+    nn.Unflatten
 
 Quantized Functions
 --------------------
 
 Quantization refers to techniques for performing computations and storing tensors at lower bitwidths than
 floating point precision. PyTorch supports both per tensor and per channel asymmetric linear quantization. To learn more how to use quantized functions in PyTorch, please refer to the :ref:`quantization-doc` documentation.
+
+Lazy Modules Initialization
+---------------------------
+
+.. currentmodule:: torch
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    nn.modules.lazy.LazyModuleMixin

@@ -82,6 +82,7 @@ void adaptive_avg_pool3d_out_cpu_template(
     Tensor& output,
     Tensor const& input,
     IntArrayRef output_size) {
+  TORCH_CHECK(output_size.size() == 3, "adaptive_avg_pool3d: output_size must be 3");
   for (int64_t i = 0; i < input.ndimension(); i++) {
     TORCH_CHECK(
         input.size(i) > 0,

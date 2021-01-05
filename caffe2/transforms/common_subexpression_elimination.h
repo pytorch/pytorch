@@ -11,7 +11,7 @@ namespace caffe2 {
 /**
  * Common Subexpression Elimination
  *
- * This transforms looks for specific operators (denoted by whitelisted_ops_),
+ * This transforms looks for specific operators (denoted by allowed_ops_),
  * and removes unnecessary repetition of that operator.
  *
  * Consider some operator of X, that reads from blob b_ written to by W.
@@ -25,7 +25,7 @@ namespace caffe2 {
  *
  * TODO(benz): Fix the error to not match nodes that write to external output.
  */
-class CAFFE2_API CommonSubexpressionEliminationTransform : public Transform {
+class TORCH_API CommonSubexpressionEliminationTransform : public Transform {
  public:
   CommonSubexpressionEliminationTransform() {
     SetPatternMatchType(SORTED_WRT_EXECUTION_ORDER);
@@ -43,10 +43,10 @@ class CAFFE2_API CommonSubexpressionEliminationTransform : public Transform {
       override;
 
  private:
-  bool IsWhitelisted(string op_type) {
-    return whitelisted_ops_.count(op_type);
+  bool IsAllowed(string op_type) {
+    return allowed_ops_.count(op_type);
   }
-  std::set<string> whitelisted_ops_ = {"LearningRate", "FC"};
+  std::set<string> allowed_ops_ = {"LearningRate", "FC"};
 };
 
 } // namespace caffe2

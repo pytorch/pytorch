@@ -7,12 +7,9 @@
 #include <torch/csrc/THP.h>
 #include <torch/csrc/Types.h>
 #include <torch/csrc/cuda/THCP.h>
-#include <torch/csrc/cuda/nccl.h>
 #include <ATen/core/functional.h>
 
 #include <c10/cuda/CUDAGuard.h>
-
-#include <nccl.h>
 
 #include <sstream>
 #include <unordered_map>
@@ -202,7 +199,9 @@ PyObject* THCPModule_nccl_broadcast(PyObject* self, PyObject* args) {
         nullptr,
         "nccl_broadcast",
         1,
-        "(sequence[Tensor] inputs, int root)");
+        "(sequence[Tensor] inputs, int root"
+        " sequence[torch.cuda.Stream] streams,"
+        " sequence[torch.cuda.nccl.Communicator] comms)");
     return nullptr;
   }
 
@@ -231,7 +230,9 @@ PyObject* THCPModule_nccl_all_gather(PyObject* self, PyObject* args) {
         nullptr,
         "nccl_all_gather",
         1,
-        "(sequence[Tensor] inputs, sequence[Tensor] outputs");
+        "(sequence[Tensor] inputs, sequence[Tensor] outputs"
+        " sequence[torch.cuda.Stream] streams,"
+        " sequence[torch.cuda.nccl.Communicator] comms)");
     return nullptr;
   }
 
@@ -261,7 +262,9 @@ PyObject* THCPModule_nccl_reduce_scatter(PyObject* self, PyObject* args) {
         nullptr,
         "nccl_reduce_scatter",
         1,
-        "(sequence[Tensor] inputs, sequence[Tensor] outputs, int op");
+        "(sequence[Tensor] inputs, sequence[Tensor] outputs, int op"
+        " sequence[torch.cuda.Stream] streams,"
+        " sequence[torch.cuda.nccl.Communicator] comms)");
     return nullptr;
   }
 
@@ -282,7 +285,7 @@ PyObject* THCPModule_nccl_reduce_scatter(PyObject* self, PyObject* args) {
 static inline
 at::Tensor extract_tensor(PyObject* obj) {
   if (!THPVariable_Check(obj)) {
-    throw TypeError("expected Tensor (got %s)", Py_TYPE(obj)->tp_name);
+    throw torch::TypeError("expected Tensor (got %s)", Py_TYPE(obj)->tp_name);
   }
   return ((THPVariable*)obj)->cdata;
 }
@@ -298,7 +301,7 @@ std::vector<at::Tensor> extract_tensors(PyObject* obj) {
   for (Py_ssize_t i = 0; i < length; i++) {
     PyObject* item = PySequence_Fast_GET_ITEM(seq.get(), i);
     if (!THPVariable_Check(item)) {
-      throw TypeError(
+      throw torch::TypeError(
           "expected Tensor at %d (got %s)", (int)i, Py_TYPE(item)->tp_name);
     }
     auto var = (THPVariable*)item;

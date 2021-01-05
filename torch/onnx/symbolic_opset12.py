@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import torch
 import torch.onnx.symbolic_helper as sym_help
@@ -9,10 +8,6 @@ from torch.onnx.symbolic_helper import parse_args, _parse_arg
 # see Note [Edit Symbolic Files] in symbolic_helper.py
 
 # This file exports ONNX ops for opset 12
-
-black_listed_operators = [
-    "ArgMin", "ArgMax"
-]
 
 @parse_args('s', 'v')
 def einsum(g, equation, tensor_list):
@@ -41,15 +36,9 @@ def nll_loss(g, self, target, weight, reduction, ignore_index):
     reduction_vals = ['none', 'mean', 'sum']
     reduction = reduction_vals[reduction]
 
-    # when ignore_index is not specified, ignore_index == onnx::Constant[value={-100}]
+    # in onnx NegativeLogLikelihoodLoss specification, ignore_index is optional without default value.
+    # therefore we need to set ignore_index attribute even if it is not specified (e.g. ignore_index=-100).
     ignore_index = sym_help._maybe_get_const(ignore_index, 'i')
-    if ignore_index == -100:
-        if weight.node().mustBeNone():
-            return g.op("NegativeLogLikelihoodLoss", self, target, reduction_s=reduction)
-        else:
-            return g.op("NegativeLogLikelihoodLoss", self, target, weight, reduction_s=reduction)
-
-    # if ignore_index is specified, compute nllloss with no reduction and apply the reduction afterwards
     if weight.node().mustBeNone():
         nllloss = g.op("NegativeLogLikelihoodLoss", self, target, reduction_s=reduction, ignore_index_i=ignore_index)
     else:
@@ -76,23 +65,23 @@ def celu(g, self, alpha):
 def argmax(g, input, dim, keepdim):
     if sym_help._is_none(dim):
         from torch.onnx.symbolic_opset9 import reshape
-        flattened = reshape(g, input, (-1,))
-        return g.op('ArgMax', flattened, axis_i=0, keepdims_i=False, select_last_index_i=True)
+        flattened = reshape(g, input, g.op("Constant", value_t=torch.tensor([-1])))
+        return g.op('ArgMax', flattened, axis_i=0, keepdims_i=False, select_last_index_i=False)
     else:
         dim = _parse_arg(dim, 'i')
         keepdim = _parse_arg(keepdim, 'i')
-        return g.op('ArgMax', input, axis_i=dim, keepdims_i=keepdim, select_last_index_i=True)
+        return g.op('ArgMax', input, axis_i=dim, keepdims_i=keepdim, select_last_index_i=False)
 
 
 def argmin(g, input, dim, keepdim):
     if sym_help._is_none(dim):
         from torch.onnx.symbolic_opset9 import reshape
-        flattened = reshape(g, input, (-1,))
-        return g.op('ArgMin', flattened, axis_i=0, keepdims_i=False, select_last_index_i=True)
+        flattened = reshape(g, input, g.op("Constant", value_t=torch.tensor([-1])))
+        return g.op('ArgMin', flattened, axis_i=0, keepdims_i=False, select_last_index_i=False)
     else:
         dim = _parse_arg(dim, 'i')
         keepdim = _parse_arg(keepdim, 'i')
-        return g.op('ArgMin', input, axis_i=dim, keepdims_i=keepdim, select_last_index_i=True)
+        return g.op('ArgMin', input, axis_i=dim, keepdims_i=keepdim, select_last_index_i=False)
 
 
 def pow(g, self, exponent):

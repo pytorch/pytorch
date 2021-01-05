@@ -12,6 +12,7 @@
 
 #include "caffe2/serialize/istream_adapter.h"
 #include "caffe2/serialize/read_adapter_interface.h"
+#include "caffe2/serialize/versions.h"
 
 extern "C" {
 typedef struct mz_zip_archive mz_zip_archive;
@@ -90,25 +91,11 @@ typedef struct mz_zip_archive mz_zip_archive;
 namespace caffe2 {
 namespace serialize {
 
-constexpr uint64_t kMinSupportedFileFormatVersion = 0x1L;
-constexpr uint64_t kMaxSupportedFileFormatVersion = 0x4L;
-
-// Versions (i.e. why was the version number bumped?)
-// 1. Initial version
-// 2. Removed op_version_set version numbers
-// 3. Added type tags to pickle serialization of container types
-// 4. Stopped integer division using torch.div
-//      (a versioned symbol preserves the historic behavior of versions 1--3)
-constexpr uint64_t kProducedFileFormatVersion = 0x4L;
-
-// Writer-specific constants
-constexpr uint64_t kFieldAlignment = 64;
-
-class CAFFE2_API PyTorchStreamReader final {
+class TORCH_API PyTorchStreamReader final {
  public:
   explicit PyTorchStreamReader(const std::string& file_name);
   explicit PyTorchStreamReader(std::istream* in);
-  explicit PyTorchStreamReader(std::unique_ptr<ReadAdapterInterface> in);
+  explicit PyTorchStreamReader(std::shared_ptr<ReadAdapterInterface> in);
 
   // return dataptr, size
   std::tuple<at::DataPtr, size_t> getRecord(const std::string& name);
@@ -132,15 +119,17 @@ class CAFFE2_API PyTorchStreamReader final {
   std::unique_ptr<mz_zip_archive> ar_;
   std::string archive_name_;
   std::string archive_name_plus_slash_;
-  std::unique_ptr<ReadAdapterInterface> in_;
+  std::shared_ptr<ReadAdapterInterface> in_;
   int64_t version_;
 };
 
-class CAFFE2_API PyTorchStreamWriter final {
+class TORCH_API PyTorchStreamWriter final {
  public:
   explicit PyTorchStreamWriter(std::string archive_name);
   explicit PyTorchStreamWriter(
       const std::function<size_t(const void*, size_t)>& writer_func);
+
+  void setMinVersion(const uint64_t version);
 
   void writeRecord(
       const std::string& name,
@@ -169,6 +158,7 @@ class CAFFE2_API PyTorchStreamWriter final {
   std::string padding_;
   std::ofstream file_stream_;
   std::function<size_t(const void*, size_t)> writer_func_;
+  uint64_t version_ = kProducedFileFormatVersion;
   bool finalized_ = false;
   bool err_seen_ = false;
   friend size_t ostream_write_func(
@@ -177,6 +167,19 @@ class CAFFE2_API PyTorchStreamWriter final {
       const void* pBuf,
       size_t n);
 };
+
+namespace detail {
+// Writer-specific constants
+constexpr uint64_t kFieldAlignment = 64;
+
+// Returns a record to be appended to the local user extra data entry in order
+// to make data beginning aligned at kFieldAlignment bytes boundary.
+size_t getPadding(
+    size_t cursor,
+    size_t filename_size,
+    size_t size,
+    std::string& padding_buf);
+}
 
 } // namespace serialize
 } // namespace caffe2

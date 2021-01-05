@@ -8,6 +8,7 @@ static const std::unordered_map<NodeKind, NodeKind> inPlaceToOutOfPlace = {
     {aten::sub_, aten::sub},
     {aten::div_, aten::div},
     {aten::mul_, aten::mul},
+    {aten::masked_fill_, aten::masked_fill},
     {aten::zero_, aten::zeros_like},
     {aten::fill_, aten::full_like}};
 

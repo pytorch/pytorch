@@ -11,4 +11,6 @@ void fma_fp16_slow(int N, const float* A, const float* B, float* Out);
 
 float fma_fp16_slow(const float A, const float B, float Out);
 
+float fmafp32_avx_emulation(float v1, float v2, float v3);
+
 } // namespace fake_fp16

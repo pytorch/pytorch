@@ -33,7 +33,7 @@ inline PyObject* wrap(double value) {
   return PyFloat_FromDouble(value);
 }
 
-inline PyObject* wrap(std::complex<double> value) {
+inline PyObject* wrap(c10::complex<double> value) {
   // I could probably also use FromComplex with a reinterpret cast,
   // but... eh.
   return PyComplex_FromDoubles(value.real(), value.imag());

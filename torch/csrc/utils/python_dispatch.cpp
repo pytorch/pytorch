@@ -14,12 +14,27 @@ namespace torch {
 namespace impl {
 namespace dispatch {
 
+torch::Library::Kind parseKind(const std::string& k) {
+  static std::unordered_map<std::string, torch::Library::Kind> kind_map = {
+    {"DEF", torch::Library::DEF},
+    {"IMPL", torch::Library::IMPL},
+    {"FRAGMENT", torch::Library::FRAGMENT},
+  };
+  auto it = kind_map.find(k);
+  TORCH_CHECK(it != kind_map.end(), "could not parse ", k);
+  return it->second;
+}
+
 c10::optional<c10::DispatchKey> parseDispatchKey(const std::string& k) {
   static std::unordered_map<std::string, c10::DispatchKey> key_map = {
-    {"cpu", c10::DispatchKey::CPU},
-    {"cuda", c10::DispatchKey::CUDA},
-    {"xla", c10::DispatchKey::XLA},
-    {"autograd", c10::DispatchKey::Autograd},
+    {"CPU", c10::DispatchKey::CPU},
+    {"CUDA", c10::DispatchKey::CUDA},
+    {"XLA", c10::DispatchKey::XLA},
+    {"QuantizedCPU", c10::DispatchKey::QuantizedCPU},
+    {"Math", c10::DispatchKey::Math},
+    {"Autograd", c10::DispatchKey::Autograd},
+    {"DefaultBackend", c10::DispatchKey::DefaultBackend},
+    {"AutogradCPU", c10::DispatchKey::AutogradCPU},
     {"", c10::DispatchKey::Undefined},
   };
   auto it = key_map.find(k);
@@ -127,16 +142,16 @@ void initDispatchBindings(PyObject* module) {
       );
       return self;
     }, "", py::arg("name"), py::arg("dispatch") = "", py::arg("debug") = "")
+    .def("fallback_fallthrough", [](py::object self, const char* dispatch) {
+      self.cast<torch::Library&>().fallback(
+        dispatch_str(dispatch, CppFunction::makeFallthrough())
+      );
+      return self;
+    }, "", py::arg("dispatch") = "")
   ;
 
-  m.def("_dispatch_import", [](std::string name) {
-    // This is a wee bit dodgy right now, but the "underlying" API is much
-    // easier to test than the high level (using TORCH_LIBRARY, e.g.)
-    if (name.empty()) {
-      return std::make_unique<torch::Library>(torch::Library::FRAGMENT, "_", c10::DispatchKey::CatchAll, "/dev/null", 0);
-    } else {
-      return std::make_unique<torch::Library>(torch::Library::FRAGMENT, name, c10::nullopt, "/dev/null", 0);
-    }
+  m.def("_dispatch_library", [](const char* kind, std::string name, const char* dispatch) {
+    return std::make_unique<torch::Library>(parseKind(kind), std::move(name), parseDispatchKey(dispatch), "/dev/null", 0);
   });
 
   m.def("_dispatch_dump", [](const char* name) -> std::string {
@@ -145,6 +160,15 @@ void initDispatchBindings(PyObject* module) {
       return "";
     } else {
       return op->dumpState();
+    }
+  });
+
+  m.def("_dispatch_dump_table", [](const char* name) -> std::string {
+    auto op = c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
+    if (!op) {
+      return "";
+    } else {
+      return op->dumpComputedTable();
     }
   });
 

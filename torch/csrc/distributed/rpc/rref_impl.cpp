@@ -1,7 +1,9 @@
 #include <torch/csrc/distributed/rpc/rref_impl.h>
-
+#include <ATen/record_function.h>
+#include <fmt/format.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
+#include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/utils.h>
@@ -133,6 +135,14 @@ IValue UserRRef::toHere(const float timeoutSeconds) const {
       !deletedOnOwner_,
       *this,
       " has been deleted. Cannot call to_here() on it after deletion.");
+  auto toHereKey = std::string("");
+  if (torch::autograd::profiler::profilerEnabled()) {
+    toHereKey = fmt::format(
+        "to_here#({})->({})",
+        RpcAgent::getCurrentRpcAgent()->getWorkerInfo().name_,
+        RpcAgent::getCurrentRpcAgent()->getWorkerInfo(ownerId_).name_);
+  }
+  RECORD_USER_SCOPE(toHereKey);
   TORCH_CHECK(
       !type_->is_module(),
       *this,
@@ -157,12 +167,16 @@ IValue UserRRef::toHere(const float timeoutSeconds) const {
     msgToSend = ScriptRRefFetchCall(ownerId_, rrefId()).toMessage();
   }
 
+  // toHere is profiled as a blocking call, and does not execute operations on
+  // the remote node. Hence, don't wrap it with a profiling message since we
+  // don't need the profiler to be enabled remotely.
   auto futureResponse = autograd::sendMessageWithAutograd(
       *agent,
       agent->getWorkerInfo(ownerId_),
       std::move(msgToSend),
       true /* forceGradRecording */,
-      timeoutSeconds);
+      timeoutSeconds,
+      true /* forceDisableProfiling */);
 
   // TODO: we should ideally be able to interrupt this blocking wait if we check
   // getTimedOut() and it is true
@@ -241,8 +255,8 @@ void OwnerRRef::setValue(IValue&& value) {
   future_->markCompleted(value);
 }
 
-void OwnerRRef::setError(const std::string& error) {
-  future_->setErrorIfNeeded(error);
+void OwnerRRef::setError(std::exception_ptr eptr) {
+  future_->setErrorIfNeeded(std::move(eptr));
 }
 
 std::ostream& operator<<(std::ostream& os, const RRef& rref) {

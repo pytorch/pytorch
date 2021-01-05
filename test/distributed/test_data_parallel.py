@@ -3,9 +3,11 @@ import io
 import unittest
 from copy import deepcopy
 from collections import OrderedDict
+from itertools import product
 
 import torch
 from torch import nn
+from torch.cuda.amp import autocast
 import torch.nn.parallel as dp
 from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
 from torch.testing._internal.common_utils import run_tests, TestCase, repeat_test_for_types, ALL_TENSORTYPES
@@ -15,6 +17,8 @@ from torch.testing._internal.common_utils import skipIfRocm
 import torch.nn.functional as F
 
 torch.set_default_dtype(torch.double)
+
+NO_NCCL = not hasattr(torch.distributed, "ProcessGroupNCCL")
 
 class TestDataParallel(TestCase):
 
@@ -76,6 +80,13 @@ class TestDataParallel(TestCase):
             self.assertTrue(p1.allclose(p2))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_data_parallel_lazy_linear(self):
+
+        with self.assertRaisesRegex(RuntimeError, 'Modules with uninitialized parameters'):
+            model_dp = torch.nn.DataParallel(torch.nn.LazyLinear(10).to(0))
+            model_dp(torch.rand(10, 10).to(0))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_parallel_apply(self):
         l1 = nn.Linear(10, 5).to("cuda:0", torch.float)
         l2 = nn.Linear(10, 5).to("cuda:1", torch.float)
@@ -90,6 +101,26 @@ class TestDataParallel(TestCase):
         #                       or an object representing the single argument
         for inputs in [((i1,), (i2,)), (i1, i2)]:
             outputs = dp.parallel_apply(modules, inputs, None)
+            for out, expected in zip(outputs, expected_outputs):
+                self.assertEqual(out, expected)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_parallel_apply_autocast(self):
+        l1 = nn.Linear(10, 5).to("cuda:0", torch.float)
+        l2 = nn.Linear(10, 5).to("cuda:1", torch.float)
+        i1 = torch.randn(2, 10, device="cuda:0", dtype=torch.float)
+        i2 = torch.randn(2, 10, device="cuda:1", dtype=torch.float)
+        with autocast():
+            expected1 = l1(i1)
+            expected2 = l2(i2)
+        modules = (l1, l2)
+        expected_outputs = (expected1, expected2)
+
+        # each input can be either a collection of positional arguments
+        #                       or an object representing the single argument
+        for inputs in [((i1,), (i2,)), (i1, i2)]:
+            with autocast():
+                outputs = dp.parallel_apply(modules, inputs, None)
             for out, expected in zip(outputs, expected_outputs):
                 self.assertEqual(out, expected)
 
@@ -485,6 +516,25 @@ class TestDataParallel(TestCase):
         self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_data_parallel_module_zero_inputs(self):
+        class TestModule(nn.Module):
+            def forward(self):
+                t = torch.eye(2, 3, device='cuda:0')
+                return t + (1 - t)
+
+        def test_helper(output, expected):
+            self.assertEqual(output.get_device(), 0)
+            self.assertEqual(output, expected)
+
+        expected = torch.ones(2, 3, device='cuda:0')
+        model = TestModule()
+
+        test_helper(nn.DataParallel(model, [0])(), expected)
+        test_helper(nn.DataParallel(model, [0, 1])(), expected)
+        test_helper(dp.data_parallel(model, None, [0]), expected)
+        test_helper(dp.data_parallel(model, (), [0, 1]), expected)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_device_args(self):
         cuda0 = torch.device('cuda:0')
         cuda1 = torch.device('cuda:1')
@@ -547,6 +597,25 @@ class TestDataParallel(TestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_scatter_gpu(self):
         self._test_scatter(torch.randn((4, 4)).cuda())
+
+    @unittest.skipIf(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
+    @unittest.skipIf(NO_NCCL, "NCCL needed")
+    def test_data_parallel_complex(self):
+        # We expect complex parameters to be broadcast by view_as_real, e.g. move from C to R^2
+        class Cplx(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.cplx = torch.nn.Parameter(torch.zeros(1, 10, dtype=torch.cfloat).cuda())
+
+            def forward(self, x):
+                return x + self.cplx
+
+        cplx = torch.nn.DataParallel(Cplx().cuda())
+        input = torch.rand(1, 10, dtype=torch.cfloat).cuda()
+        result = cplx(input)
+        # 2 is the extra real view dimension here
+        self.assertEqual(result.size(), torch.Size([1, 10, 2]))
+        self.assertEqual(result, torch.view_as_real(input))
 
     def _test_gather(self, output_device):
         inputs = (
@@ -680,6 +749,107 @@ class TestDataParallel(TestCase):
         torch.save(dpm, data)
         dpm = torch.nn.parallel.replicate(module, devices=[0, 1], detach=True)
         torch.save(dpm, data)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_strided_grad_layout(self):
+        class ConvNet(nn.Module):
+            def __init__(self, layouts, dtypes):
+                super(ConvNet, self).__init__()
+                self.dtypes = dtypes
+                self.conv0 = torch.nn.Conv2d(8, 16, (2, 2)).to(memory_format=layouts[0], dtype=dtypes[0])
+                self.conv1 = torch.nn.Conv2d(16, 32, (2, 2)).to(memory_format=layouts[1], dtype=dtypes[1])
+                self.conv2 = torch.nn.Conv2d(32, 16, (2, 2)).to(memory_format=layouts[2], dtype=dtypes[2])
+                self.conv3 = torch.nn.Conv2d(16, 8, (2, 2)).to(memory_format=layouts[3], dtype=dtypes[3])
+
+            def forward(self, x):
+                x = x.to(self.dtypes[0])
+                x = self.conv0(x).to(self.dtypes[1])
+                x = self.conv1(x).to(self.dtypes[2])
+                x = self.conv2(x).to(self.dtypes[3])
+                x = self.conv3(x)
+                return x
+
+        layer_formats = ([torch.contiguous_format] * 4,
+                         [torch.channels_last] * 2 + [torch.contiguous_format] * 2,
+                         [torch.channels_last] * 4,)
+        layer_dtypes = ([torch.float] * 4,
+                        [torch.float] * 2 + [torch.half] * 2,
+                        [torch.half] * 4,)
+
+        ndevs = torch.cuda.device_count()
+        input = torch.randn(ndevs * 8, 8, 8, 8, device="cuda:0", dtype=torch.float)
+        target = torch.randn(ndevs * 8, 8, 4, 4, device="cuda:0", dtype=torch.float)
+        device_ids = list(range(ndevs))
+
+        with torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False):
+            for formats, dtypes in product(layer_formats, layer_dtypes):
+                model_msg = "formats = {} dtypes = {}".format(formats, dtypes)
+                try:
+                    m = ConvNet(formats, dtypes).cuda(device="cuda:0")
+                    m_dp = dp.DataParallel(deepcopy(m), device_ids=device_ids)
+                    opt = torch.optim.SGD(m.parameters(), lr=0.1)
+                    opt_dp = torch.optim.SGD(m_dp.parameters(), lr=0.1)
+                    has_half = any(p.dtype is torch.half for p in m.parameters())
+                    tol = 1.e-3 if has_half else 1.e-5
+                except BaseException:
+                    # Prints case-specific debugging info to narrow down failing case.
+                    print("Caught exception during model creation for " + model_msg, flush=True)
+                    raise
+                # 2 iters:  First iter creates grads, second iter tries zeroed grads.
+                for it in range(2):
+                    iter_msg = "iter = {} ".format(it) + model_msg
+                    named_msg = iter_msg
+                    try:
+                        F.mse_loss(m(input).float(), target).backward()
+                        F.mse_loss(m_dp(input).float(), target).backward()
+                        for i, ((layer_name, m_child), m_dp_child) in enumerate(zip(m.named_children(),
+                                                                                    m_dp.module.children())):
+                            named_msg = layer_name + ".weight " + iter_msg
+                            self.assertTrue(m_child.weight.grad.is_contiguous(memory_format=formats[i]), named_msg)
+                            self.assertTrue(m_dp_child.weight.grad.is_contiguous(memory_format=formats[i]), named_msg)
+                            for j, ((param_name, p), p_dp) in enumerate(zip(m_child.named_parameters(),
+                                                                            m_dp_child.parameters())):
+                                named_msg = layer_name + "." + param_name + " " + iter_msg
+                                self.assertEqual(p.grad, p_dp.grad, rtol=tol, atol=tol)
+                        opt.step()
+                        opt_dp.step()
+                        opt.zero_grad()
+                        opt_dp.zero_grad()
+                    except BaseException:
+                        # Makes sure we still get info if an error occurred somewhere other than the asserts.
+                        print("Caught exception during iterations at " + named_msg, flush=True)
+                        raise
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_parameter_list_dict_replica(self):
+        class MyMod(torch.nn.Module):
+            def __init__(self, data):
+                super(MyMod, self).__init__()
+                self.data = data
+
+            def forward(self, inp):
+                return inp
+
+        p1 = torch.nn.Parameter(torch.rand(10))
+        p2 = torch.nn.Parameter(torch.rand(10))
+        module = MyMod(torch.nn.ParameterList([p1, p2])).cuda()
+        model = dp.DataParallel(module)
+        input = torch.randn((8, 8), device="cuda")
+
+        with self.assertWarnsRegex(
+                UserWarning,
+                r"nn\.ParameterList is being used with DataParallel but this"):
+            model(input)
+
+        module = MyMod(torch.nn.ParameterDict({"0": p1, "1": p2})).cuda()
+        model = dp.DataParallel(module)
+        input = torch.randn((8, 8), device="cuda")
+
+        with self.assertWarnsRegex(
+                UserWarning,
+                r"nn\.ParameterDict is being used with DataParallel but this"):
+            model(input)
 
 
 if __name__ == '__main__':

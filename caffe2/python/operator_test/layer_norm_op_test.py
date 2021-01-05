@@ -1,19 +1,18 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import brew, core, workspace
 from caffe2.python.model_helper import ModelHelper
 from functools import partial
-from hypothesis import given
+from hypothesis import given, settings
 
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 
 import numpy as np
-import os
 import torch
 
 import unittest
@@ -66,7 +65,8 @@ def _layer_norm_grad_ref(axis, gout_full, norm, mean_full, stdev_full, X_full):
 
 
 class TestLayerNormOp(serial.SerializedTestCase):
-    @serial.given(X=hu.tensor(min_dim=2), **hu.gcs)
+    @given(X=hu.tensor(min_dim=2), **hu.gcs)
+    @settings(deadline=10000)
     def test_layer_norm_grad_op(self, X, gc, dc):
         axis = np.random.randint(0, len(X.shape))
         epsilon = 1e-4
@@ -141,6 +141,7 @@ class TestLayerNormOp(serial.SerializedTestCase):
            eps=st.floats(1e-5, 1e-3),
            elementwise_affine=st.booleans(),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_layer_norm_grad(
             self, M, N, axis, eps, elementwise_affine, gc, dc):
         op = core.CreateOperator(
@@ -171,6 +172,7 @@ class TestLayerNormOp(serial.SerializedTestCase):
            eps=st.floats(1e-5, 1e-3),
            elementwise_affine=st.booleans(),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_layer_norm_op_c10(self, X, eps, elementwise_affine, gc, dc):
         axis = np.random.randint(0, len(X.shape))
 
@@ -319,6 +321,7 @@ class TestLayerNormOp(serial.SerializedTestCase):
            eps=st.floats(1e-5, 1e-3),
            elementwise_affine=st.booleans(),
            **hu.gcs)
+    @settings(deadline=1000)
     def test_layer_norm_op_jit(self, X, eps, elementwise_affine, gc, dc):
         @torch.jit.script
         def jit_layer_norm(X, gamma=None, beta=None, axis=1, eps=1e-5,
@@ -368,6 +371,34 @@ class TestLayerNormOp(serial.SerializedTestCase):
 
         self.ws.create_net(model.param_init_net).run()
         self.ws.create_net(model.net).run()
+
+    @given(N=st.integers(1, 10), elementwise_affine=st.booleans(), **hu.gcs)
+    @settings(deadline=None)
+    def test_layer_norm_with_empty_batch(self, N, elementwise_affine, gc, dc):
+        X = np.random.randn(0, N).astype(np.float32)
+        gamma = np.random.rand(N).astype(np.float32)
+        beta = np.random.rand(N).astype(np.float32)
+
+        op = core.CreateOperator(
+            "LayerNorm",
+            ["X", "gamma", "beta"] if elementwise_affine else ["X"],
+            ["Y", "mean", "sigma"],
+            elementwise_affine=elementwise_affine,
+        )
+
+        def ref(X, gamma=None, beta=None):
+            Y = np.zeros_like(X)
+            axis = 1
+            mean = np.zeros(X.shape[:axis] + (1,), dtype=X.dtype)
+            sigma = np.zeros(X.shape[:axis] + (1,), dtype=X.dtype)
+            return Y, mean, sigma
+
+
+        inputs = [X, gamma, beta] if elementwise_affine else [X]
+        self.assertReferenceChecks(gc, op, inputs, ref)
+        self.assertDeviceChecks(dc, op, inputs, [0, 1])
+        for i in range(len(inputs)):
+            self.assertGradientChecks(gc, op, inputs, i, [0])
 
 
 if __name__ == "__main__":

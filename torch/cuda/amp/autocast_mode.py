@@ -1,7 +1,10 @@
 import torch
 import functools
 import warnings
-import numpy as np
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
 from torch._six import container_abcs, string_classes
 
 
@@ -106,7 +109,7 @@ class autocast(object):
     :class:`torch.nn.parallel.DistributedDataParallel` when used with more than one GPU per process
     (see :ref:`Working with Multiple GPUs<amp-multigpu>`).
 
-    Arguments:
+    Args:
         enabled(bool, optional, default=True):  Whether autocasting should be enabled in the region.
     """
     def __init__(self, enabled=True):
@@ -140,15 +143,20 @@ class autocast(object):
 # may be falsely detected as "Iterables."
 def _cast(value, dtype):
     if isinstance(value, torch.Tensor):
-        return value.to(dtype) if (value.is_floating_point() and value.is_cuda) else value
+        is_eligible = (value.is_floating_point() and value.is_cuda and (value.dtype is not torch.float64))
+        return value.to(dtype) if is_eligible else value
     elif isinstance(value, string_classes):
         return value
-    elif isinstance(value, np.ndarray):
+    elif np is not None and isinstance(value, np.ndarray):
         return value
     elif isinstance(value, container_abcs.Mapping):
         return {_cast(k, dtype): _cast(v, dtype) for k, v in value.items()}
     elif isinstance(value, container_abcs.Iterable):
-        return type(value)(_cast(v, dtype) for v in value)
+        iterable = map(lambda v: _cast(v, dtype), value)
+        if isinstance(value, list) or isinstance(value, tuple):
+            return type(value)(iterable)
+        else:
+            return iterable
     else:
         return value
 
@@ -168,11 +176,16 @@ def custom_fwd(fwd=None, **kwargs):
     Helper decorator for ``forward`` methods of custom autograd functions (subclasses of
     :class:`torch.autograd.Function`).  See the :ref:`example page<amp-custom-examples>` for more detail.
 
-    Arguments:
-        cast_inputs (:class:`torch.dtype` or None, optional, default=None):  If not ``None``, casts incoming
-            floating-point Tensors to the target dtype (non-floating-point Tensors are not affected),
-            and causes ``forward`` to execute with autocast disabled.
+    Args:
+        cast_inputs (:class:`torch.dtype` or None, optional, default=None):  If not ``None``,
+            when ``forward`` runs in an autocast-enabled region, casts incoming
+            floating-point CUDA Tensors to the target dtype (non-floating-point Tensors are not affected),
+            then executes ``forward`` with autocast disabled.
             If ``None``, ``forward``'s internal ops execute with the current autocast state.
+
+    .. note::
+        If the decorated ``forward`` is called outside an autocast-enabled region,
+        :func:`custom_fwd<custom_fwd>` is a no-op and ``cast_inputs`` has no effect.
     """
     if fwd is None:
         if len(kwargs) == 0:
@@ -194,9 +207,13 @@ def custom_fwd(fwd=None, **kwargs):
             args[0]._fwd_used_autocast = torch.is_autocast_enabled()
             return fwd(*args, **kwargs)
         else:
+            autocast_context = torch.is_autocast_enabled()
             args[0]._fwd_used_autocast = False
-            with autocast(enabled=False):
-                return fwd(*_cast(args, cast_inputs), **_cast(kwargs, cast_inputs))
+            if autocast_context:
+                with autocast(enabled=False):
+                    return fwd(*_cast(args, cast_inputs), **_cast(kwargs, cast_inputs))
+            else:
+                return fwd(*args, **kwargs)
     return decorate_fwd
 
 

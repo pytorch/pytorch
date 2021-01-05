@@ -1,20 +1,7 @@
 #!/bin/bash
 
 # Common setup for all Jenkins scripts
-
-# NB: define this function before set -x, so that we don't
-# pollute the log with a premature EXITED_USER_LAND ;)
-function cleanup {
-  # Note that if you've exited user land, then CI will conclude that
-  # any failure is the CI's fault.  So we MUST only output this
-  # string
-  retcode=$?
-  set +x
-  if [ $retcode -eq 0 ]; then
-    echo "EXITED_USER_LAND"
-  fi
-}
-
+source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 set -ex
 
 # Save the SCRIPT_DIR absolute path in case later we chdir (as occurs in the gpu perf test)
@@ -25,11 +12,13 @@ SCRIPT_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )"
 
 # Figure out which Python to use for ROCm
 if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]] && [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
+  # HIP_PLATFORM is auto-detected by hipcc; unset to avoid build errors
+  unset HIP_PLATFORM
   PYTHON=$(which "python${BASH_REMATCH[1]}")
   # non-interactive bashs do not expand aliases by default
   shopt -s expand_aliases
   export PYTORCH_TEST_WITH_ROCM=1
-  alias python="$PYTHON"
+  alias python='$PYTHON'
   # temporary to locate some kernel issues on the CI nodes
   export HSAKMT_DEBUG_LEVEL=4
 fi
@@ -56,7 +45,7 @@ fatal() { error "$@"; exit 1; }
 # - remaining args:  names of traps to modify
 #
 trap_add() {
-    trap_add_cmd=$1; shift || fatal "${FUNCNAME} usage error"
+    trap_add_cmd=$1; shift || fatal "${FUNCNAME[0]} usage error"
     for trap_add_name in "$@"; do
         trap -- "$(
             # helper fn to get existing trap command from output
@@ -77,28 +66,18 @@ declare -f -t trap_add
 
 trap_add cleanup EXIT
 
-function assert_git_not_dirty() {
-    # TODO: we should add an option to `build_amd.py` that reverts the repo to
-    #       an unmodified state.
-    if ([[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *xla* ]]) ; then
-        git_status=$(git status --porcelain)
-        if [[ $git_status ]]; then
-            echo "Build left local git repository checkout dirty"
-            echo "git status --porcelain:"
-            echo "${git_status}"
-            exit 1
-        fi
-    fi
-}
-
 if [[ "$BUILD_ENVIRONMENT" != *pytorch-win-* ]]; then
   if which sccache > /dev/null; then
     # Save sccache logs to file
     sccache --stop-server || true
     rm ~/sccache_error.log || true
-    # increasing SCCACHE_IDLE_TIMEOUT so that extension_backend_test.cpp can build after this PR:
-    # https://github.com/pytorch/pytorch/pull/16645
-    SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=1200 RUST_LOG=sccache::server=error sccache --start-server
+    if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
+      SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=0 sccache --start-server
+    else
+      # increasing SCCACHE_IDLE_TIMEOUT so that extension_backend_test.cpp can build after this PR:
+      # https://github.com/pytorch/pytorch/pull/16645
+      SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=1200 RUST_LOG=sccache::server=error sccache --start-server
+    fi
 
     # Report sccache stats for easier debugging
     sccache --zero-stats
@@ -137,6 +116,7 @@ if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda10.1-cudnn7-py3* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *pytorch_macos* ]]; then
   BUILD_TEST_LIBTORCH=1
 else
+  # shellcheck disable=SC2034
   BUILD_TEST_LIBTORCH=0
 fi
 
@@ -149,6 +129,7 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *pytorch-xla-linux-bionic* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda9-cudnn7-py2* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda10.1-cudnn7-py3* ]] || \
+   [[ "$BUILD_ENVIRONMENT" == *pytorch-*centos* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-bionic* ]]; then
   if ! which conda; then
     echo "Expected ${BUILD_ENVIRONMENT} to use conda, but 'which conda' returns empty"
@@ -156,45 +137,12 @@ if [[ "$BUILD_ENVIRONMENT" == *pytorch-xla-linux-bionic* ]] || \
   else
     conda install -q -y cmake
   fi
+  if [[ "$BUILD_ENVIRONMENT" == *pytorch-*centos* ]]; then
+    # cmake3 package will conflict with conda cmake
+    sudo yum -y remove cmake3 || true
+  fi
 fi
 
-function pip_install() {
-  # retry 3 times
-  # old versions of pip don't have the "--progress-bar" flag
-  pip install --progress-bar off "$@" || pip install --progress-bar off "$@" || pip install --progress-bar off "$@" ||\
-  pip install "$@" || pip install "$@" || pip install "$@"
-}
-
-function pip_uninstall() {
-  # uninstall 2 times
-  pip uninstall -y "$@" || pip uninstall -y "$@"
-}
-
 retry () {
-  $*  || (sleep 1 && $*) || (sleep 2 && $*)
-}
-
-function get_exit_code() {
-  set +e
-  "$@"
-  retcode=$?
-  set -e
-  return $retcode
-}
-
-function file_diff_from_base() {
-  # The fetch may fail on Docker hosts, but it's not always necessary.
-  set +e
-  git fetch origin master --quiet
-  set -e
-  git diff --name-only "$(git merge-base origin/master HEAD)" > "$1"
-}
-
-function get_bazel() {
-  # download bazel version
-  wget https://github.com/bazelbuild/bazel/releases/download/3.1.0/bazel-3.1.0-linux-x86_64 -O tools/bazel
-  # verify content
-  echo '753434f4fa730266cf5ce21d1fdd425e1e167dd9347ad3e8adc19e8c0d54edca  tools/bazel' | sha256sum --quiet -c
-
-  chmod +x tools/bazel
+  "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
 }

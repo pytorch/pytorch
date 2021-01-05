@@ -157,8 +157,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         # add moved down
         g_str = str(graph)
         FileCheck().check_not("aten::add").run(g_str[0:g_str.find("return")])
-        num_diff_nodes = 2 if GRAPH_EXECUTOR == ProfilingMode.PROFILING else 1
-        self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', num_diff_nodes)
+        self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 1)
 
     def test_respects_lexical_scoping(self):
         def fn(x, k):
@@ -168,8 +167,28 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             z = y * k
             return z, k
 
-        graph = self._perform_ad_subgraph_slicing(fn, 1, 1)
 
+        graph = self._perform_ad_subgraph_slicing(fn, 1, 1)
         # We should not have combined the two multiplications into
         # the same group; they should each be a separate DiffGraph
+        self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 3)
+
+
+    def test_merge_respects_aliasing(self):
+        def fn(x, k, cond):
+            y = x * 1.1
+            y = y * k
+            y = y * 2.2
+            if bool(cond):
+                z1 = y[0]
+                z2 = y[1]
+                z1.add_(3)
+                out = z2 + k + 3.3
+                out = out * out
+                return out
+
+        graph = self._perform_ad_subgraph_slicing(fn, [2, 2], [2, 2], 1)
+        # z2 did did not get merged into the subgraph
+        FileCheck().check("prim::If").check("aten::select").check_next("aten::select")\
+            .check_next("aten::add_").check("Differentiable").run(graph)
         self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 2)

@@ -1,18 +1,30 @@
+#include <gtest/gtest.h>
+
 #include <c10/core/TensorOptions.h>
-#include <test/cpp/jit/test_base.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/custom_class.h>
 #include <torch/torch.h>
+
+#include <unordered_set>
+
+#define ASSERT_THROWS_WITH(statement, substring)                         \
+  try {                                                                  \
+    (void)statement;                                                     \
+    ASSERT_TRUE(false);                                                  \
+  } catch (const std::exception& e) {                                    \
+    ASSERT_NE(std::string(e.what()).find(substring), std::string::npos); \
+  }
 
 // Tests go in torch::jit
 namespace torch {
 namespace jit {
 
-void testLiteInterpreterUpsampleNearest2d() {
+TEST(LiteInterpreterTest, UpsampleNearest2d) {
   Module m("m");
   m.define(R"(
     def forward(self, input: Tensor, scale:float):
@@ -35,7 +47,26 @@ void testLiteInterpreterUpsampleNearest2d() {
   ASSERT_TRUE(resd.equal(refd));
 }
 
-void testLiteInterpreterAdd() {
+TEST(LiteInterpreterTest, CheckAttrAccess) {
+  Module m("m");
+  m.register_attribute("mobile_optimized", BoolType::get(), true);
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  bool mobile_optimized = bc.attr("mobile_optimized", false).toBool();
+
+  AT_ASSERT(mobile_optimized);
+  m.setattr("mobile_optimized", false);
+  ss = std::stringstream();
+  m._save_for_mobile(ss);
+  bc = _load_for_mobile(ss);
+  mobile_optimized = bc.attr("mobile_optimized", false).toBool();
+
+  AT_ASSERT(!mobile_optimized);
+}
+
+TEST(LiteInterpreterTest, Add) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
   // TODO: support default param val, which was pushed in
@@ -61,7 +92,7 @@ void testLiteInterpreterAdd() {
   IValue res;
   for (int i = 0; i < 3; ++i) {
     auto bcinputs = inputs;
-    res = bc.run_method("add_it", bcinputs);
+    res = bc.get_method("add_it")(bcinputs);
   }
 
   auto resd = res.toTensor().item<float>();
@@ -69,7 +100,7 @@ void testLiteInterpreterAdd() {
   AT_ASSERT(resd == refd);
 }
 
-void testLiteInterpreterConv() {
+TEST(LiteInterpreterTest, Conv) {
   auto s = std::getenv("PYTORCH_TEST_WITH_TSAN");
   if (s && strcmp(s, "1") == 0)
     return;
@@ -81,7 +112,7 @@ void testLiteInterpreterConv() {
   m.register_parameter("bias", torch::ones({20}), false);
   m.define(R"(
     def forward(self, input):
-      return torch._convolution(input, self.weight, self.bias, [1, 1], [0, 0], [1, 1], False, [0, 0], 1, False, False, True)
+      return torch._convolution(input, self.weight, self.bias, [1, 1], [0, 0], [1, 1], False, [0, 0], 1, False, False, True, True)
   )");
 
   inputs.push_back(torch::ones({1, 1, 28, 28}));
@@ -93,7 +124,7 @@ void testLiteInterpreterConv() {
   mobile::Module bc = _load_for_mobile(ss);
   IValue res;
   for (int i = 0; i < 3; ++i) {
-    res = bc.run_method("forward", inputs);
+    res = bc.get_method("forward")(inputs);
   }
   auto output = res.toTensor();
   AT_ASSERT(outputref.dim() == output.dim());
@@ -101,7 +132,7 @@ void testLiteInterpreterConv() {
       outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
 }
 
-void testLiteInterpreterInline() {
+TEST(LiteInterpreterTest, Inline) {
   Module m("m");
   m.define(R"JIT(
   def foo1(self, x):
@@ -117,11 +148,11 @@ void testLiteInterpreterInline() {
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
-  auto output = bc.run_method("foo3", inputs);
+  auto output = bc.get_method("foo3")(inputs);
   AT_ASSERT(output.toTensor().item<float>() == 7.0);
 }
 
-void testLiteInterpreterTuple() {
+TEST(LiteInterpreterTest, Tuple) {
   Module m("m");
   m.define(R"JIT(
   def foo(self, x):
@@ -135,11 +166,11 @@ void testLiteInterpreterTuple() {
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
-  auto output = bc.run_method("forward", inputs);
+  auto output = bc.get_method("forward")(inputs);
   AT_ASSERT(output.toTuple()->elements()[1].toInt() == 2);
 }
 
-void testLiteInterpreterDict() {
+TEST(LiteInterpreterTest, Dict) {
   Module m("m");
   m.define(R"JIT(
   def foo(self, x):
@@ -153,11 +184,11 @@ void testLiteInterpreterDict() {
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
-  auto output = bc.run_method("forward", inputs);
+  auto output = bc.get_method("forward")(inputs);
   AT_ASSERT(output.toGenericDict().at("result").toTensor().item().toInt() == 2);
 }
 
-void testLiteInterpreterPrimOverload() {
+TEST(LiteInterpreterTest, PrimOverload) {
   /*
   // temporarily disabled
   script::Module m("m");
@@ -171,12 +202,12 @@ void testLiteInterpreterPrimOverload() {
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
-  auto output = bc.run_method("forward", inputs);
+  auto output = bc.get_method("forward")(inputs);
   AT_ASSERT(output.toIntList()[2] == 3);
   */
 }
 
-void testLiteInterpreterPrim() {
+TEST(LiteInterpreterTest, Prim) {
   Module m("m");
   m.define(R"JIT(
         def forward(self, x):
@@ -194,7 +225,7 @@ void testLiteInterpreterPrim() {
   IValue res;
   for (int i = 0; i < 3; ++i) {
     auto bcinputs = inputs;
-    res = bc.run_method("forward", bcinputs);
+    res = bc.get_method("forward")(bcinputs);
   }
 
   auto resi = res.toInt();
@@ -202,7 +233,33 @@ void testLiteInterpreterPrim() {
   AT_ASSERT(resi == refi);
 }
 
-void testLiteInterpreterLoadOrigJit() {
+TEST(LiteInterpreterTest, PrimScalar) {
+  Module m("m");
+  m.define(R"JIT(
+        def forward(self, x):
+            return int(x.item())
+  )JIT");
+
+  std::vector<IValue> inputs;
+  auto minput = 3.5 * torch::ones({});
+  inputs.emplace_back(minput);
+  auto ref = m.run_method("forward", minput);
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  IValue res;
+  for (int i = 0; i < 3; ++i) {
+    auto bcinputs = inputs;
+    res = bc.get_method("forward")(bcinputs);
+  }
+
+  auto resi = res.toInt();
+  auto refi = ref.toInt();
+  AT_ASSERT(resi == refi);
+}
+
+TEST(LiteInterpreterTest, LoadOrigJit) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
   m.define(R"(
@@ -215,7 +272,7 @@ void testLiteInterpreterLoadOrigJit() {
   ASSERT_THROWS_WITH(_load_for_mobile(ss), "file not found");
 }
 
-void testLiteInterpreterWrongMethodName() {
+TEST(LiteInterpreterTest, WrongMethodName) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
   m.define(R"(
@@ -229,68 +286,10 @@ void testLiteInterpreterWrongMethodName() {
   std::vector<IValue> inputs;
   auto minput = 5 * torch::ones({});
   inputs.emplace_back(minput);
-  ASSERT_THROWS_WITH(bc.run_method("forward", inputs), "is not defined");
+  ASSERT_THROWS_WITH(bc.get_method("forward")(inputs), "is not defined");
 }
 
-void testLiteInterpreterParams() {
-  Module m("m");
-  m.register_parameter("foo", torch::ones({1}, at::requires_grad()), false);
-  m.define(R"(
-    def forward(self, x):
-      b = 1.0
-      return self.foo * x + b
-  )");
-  double learning_rate = 0.1, momentum = 0.1;
-  int n_epoc = 10;
-  // init: y = x + 1;
-  // target: y = 2 x + 1
-  std::vector<std::pair<Tensor, Tensor>> trainData{
-      {1 * torch::ones({1}), 3 * torch::ones({1})},
-  };
-  // Reference: Full jit
-  std::stringstream ms;
-  m.save(ms);
-  auto mm = load(ms);
-  //  mm.train();
-  std::vector<::at::Tensor> parameters;
-  for (auto parameter : mm.parameters()) {
-    parameters.emplace_back(parameter);
-  }
-  ::torch::optim::SGD optimizer(
-      parameters, ::torch::optim::SGDOptions(learning_rate).momentum(momentum));
-  for (int epoc = 0; epoc < n_epoc; ++epoc) {
-    for (auto& data : trainData) {
-      auto source = data.first, targets = data.second;
-      optimizer.zero_grad();
-      std::vector<IValue> train_inputs{source};
-      auto output = mm.forward(train_inputs).toTensor();
-      auto loss = ::torch::l1_loss(output, targets);
-      loss.backward();
-      optimizer.step();
-    }
-  }
-  std::stringstream ss;
-  m._save_for_mobile(ss);
-  mobile::Module bc = _load_for_mobile(ss);
-  std::vector<::at::Tensor> bc_parameters = bc.parameters();
-  ::torch::optim::SGD bc_optimizer(
-      bc_parameters,
-      ::torch::optim::SGDOptions(learning_rate).momentum(momentum));
-  for (int epoc = 0; epoc < n_epoc; ++epoc) {
-    for (auto& data : trainData) {
-      auto source = data.first, targets = data.second;
-      bc_optimizer.zero_grad();
-      std::vector<IValue> train_inputs{source};
-      auto output = bc.forward(train_inputs).toTensor();
-      auto loss = ::torch::l1_loss(output, targets);
-      loss.backward();
-      bc_optimizer.step();
-    }
-  }
-  AT_ASSERT(parameters[0].item<float>() == bc_parameters[0].item<float>());
-}
-
-void testLiteInterpreterSetState() {
+TEST(LiteInterpreterTest, SetState) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
   m.define(R"(
@@ -318,7 +317,7 @@ void testLiteInterpreterSetState() {
   IValue res;
   for (int i = 0; i < 3; ++i) {
     auto bcinputs = inputs;
-    res = bc.run_method("forward", bcinputs);
+    res = bc.get_method("forward")(bcinputs);
   }
 
   auto resd = res.toTensor().item<float>();
@@ -338,7 +337,7 @@ class TorchBindLiteInterpreterTestStruct
   }
 };
 
-void testLiteInterpreterBuiltinFunction() {
+TEST(LiteInterpreterTest, BuiltinFunction) {
   script::Module m("m");
   auto custom_class_obj =
       make_custom_class<TorchBindLiteInterpreterTestStruct>();
@@ -352,15 +351,470 @@ void testLiteInterpreterBuiltinFunction() {
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
   auto res =
-      bc.run_method("forward", std::vector<IValue>{torch::zeros({3, 4})});
+      bc.get_method("forward")(std::vector<IValue>{torch::zeros({3, 4})});
   auto str = res.toStringRef();
   std::string expected = "Hello! Your tensor has 12 elements!";
   AT_ASSERT(str == expected);
 }
 
+TEST(LiteInterpreterTest, ModuleInfoBasic) {
+  Module m("M");
+  m.define(R"JIT(
+    def forward(self, x):
+      return 2 * x
+  )JIT");
+
+  std::stringstream ss;
+  m._save_for_mobile(ss, {}, true);
+  mobile::Module bc = _load_for_mobile(ss);
+
+  std::unordered_set<std::string> module_debug_info_set;
+  size_t pc = 0;
+  while (true) {
+    try {
+      std::string module_info = bc.get_forward_method_debug_info(pc);
+      if (!module_info.empty() && module_info != "<no module info>") {
+        module_debug_info_set.insert(module_info);
+      }
+      ++pc;
+    } catch (const std::exception& e) {
+      break;
+    }
+  }
+
+  std::unordered_set<std::string> expected_result({"top(M).forward"});
+  AT_ASSERT(module_debug_info_set == expected_result);
+}
+
+TEST(LiteInterpreterTest, NotSaveModuleInfo) {
+  Module m("M");
+  m.define(R"JIT(
+    def forward(self, x):
+      return x + 5
+  )JIT");
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+
+  size_t pc = 0;
+  while (true) {
+    try {
+      std::string module_info = bc.get_forward_method_debug_info(pc);
+      AT_ASSERT(module_info.empty() || module_info == "<no module info>");
+      ++pc;
+    } catch (const std::exception& e) {
+      break;
+    }
+  }
+}
+
+TEST(LiteInterpreterTest, OneSubmoduleModuleInfo) {
+  Module a("A");
+  a.define(R"JIT(
+    def forward(self, x):
+      return 2 * x + 5
+  )JIT");
+  Module b("B");
+  b.register_module("A0", a);
+  b.define(R"JIT(
+    def forward(self, x):
+      return self.A0.forward(x) + 1
+  )JIT");
+
+  std::stringstream ss;
+  b._save_for_mobile(ss, {}, true);
+  mobile::Module bc = _load_for_mobile(ss);
+
+  std::unordered_set<std::string> module_debug_info_set;
+  size_t pc = 0;
+  while (true) {
+    try {
+      std::string module_info = bc.get_forward_method_debug_info(pc);
+      if (!module_info.empty() && module_info != "<no module info>") {
+        module_debug_info_set.insert(module_info);
+      }
+      ++pc;
+    } catch (const std::exception& e) {
+      break;
+    }
+  }
+
+  std::unordered_set<std::string> expected_result(
+      {"top(B).forward", "top(B).A0(A).forward"});
+  AT_ASSERT(module_debug_info_set == expected_result);
+}
+
+TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
+  Module a("A");
+  a.define(R"JIT(
+    def forward(self, x):
+      return x + 1
+  )JIT");
+  Module b("B");
+  b.define(R"JIT(
+    def forward(self, x):
+      return x + 2
+  )JIT");
+  Module c("C");
+  c.register_module("A0", a);
+  c.register_module("B0", b);
+  c.define(R"JIT(
+    def forward(self, x):
+      return self.A0.forward(x) + self.B0.forward(x)
+  )JIT");
+
+  std::stringstream ss;
+  c._save_for_mobile(ss, {}, true);
+  mobile::Module bc = _load_for_mobile(ss);
+
+  std::unordered_set<std::string> module_debug_info_set;
+  size_t pc = 0;
+  while (true) {
+    try {
+      std::string module_info = bc.get_forward_method_debug_info(pc);
+      if (!module_info.empty() && module_info != "<no module info>") {
+        module_debug_info_set.insert(module_info);
+      }
+      ++pc;
+    } catch (const std::exception& e) {
+      break;
+    }
+  }
+
+  std::unordered_set<std::string> expected_result(
+      {"top(C).forward", "top(C).A0(A).forward", "top(C).B0(B).forward"});
+  AT_ASSERT(module_debug_info_set == expected_result);
+}
+
+TEST(LiteInterpreterTest, SequentialModuleInfo) {
+  Module a("A");
+  a.define(R"JIT(
+    def forward(self, x):
+      return x + 1
+  )JIT");
+  Module b("B");
+  b.define(R"JIT(
+    def forward(self, x):
+      return x + 2
+  )JIT");
+  Module c("C");
+  c.register_module("A0", a);
+  c.register_module("B0", b);
+  c.define(R"JIT(
+    def forward(self, x):
+      return self.A0.forward(self.B0.forward(x))
+  )JIT");
+
+  std::stringstream ss;
+  c._save_for_mobile(ss, {}, true);
+  mobile::Module bc = _load_for_mobile(ss);
+
+  std::unordered_set<std::string> module_debug_info_set;
+  size_t pc = 0;
+  while (true) {
+    try {
+      std::string module_info = bc.get_forward_method_debug_info(pc);
+      if (!module_info.empty() && module_info != "<no module info>") {
+        module_debug_info_set.insert(module_info);
+      }
+      ++pc;
+    } catch (const std::exception& e) {
+      break;
+    }
+  }
+
+  // class A(nn.Module):
+  //   def __init__(self):
+  //     super(A, self).__init__()
+
+  //   def forward(self, x):
+  //     return x + 1
+
+  // class B(nn.Module):
+  //   def __init__(self):
+  //     super(B, self).__init__()
+
+  //   def forward(self, x):
+  //     return x + 2
+
+  // class C(nn.Module):
+  //   def __init__(self):
+  //     super(C, self).__init__()
+  //     self.A0 = A()
+  //     self.B0 = B()
+
+  //   def forward(self, x):
+  //     return self.A0.forward(self.B0.forward(x))
+
+  std::unordered_set<std::string> expected_result(
+      {"top(C).A0(A).forward", "top(C).B0(B).forward"});
+  AT_ASSERT(module_debug_info_set == expected_result);
+}
+
+TEST(LiteInterpreterTest, HierarchyModuleInfo) {
+  Module a("A");
+  a.define(R"JIT(
+    def forward(self, x):
+      return x + 1
+  )JIT");
+  Module b("B");
+  b.register_module("A0", a);
+  b.define(R"JIT(
+    def forward(self, x):
+      return self.A0.forward(x) + 1
+  )JIT");
+  Module c("C");
+  c.register_module("B0", b);
+  c.define(R"JIT(
+    def forward(self, x):
+      return self.B0.forward(x) + 1
+  )JIT");
+
+  std::stringstream ss;
+  c._save_for_mobile(ss, {}, true);
+  mobile::Module bc = _load_for_mobile(ss);
+
+  std::unordered_set<std::string> module_debug_info_set;
+  size_t pc = 0;
+  while (true) {
+    try {
+      std::string module_info = bc.get_forward_method_debug_info(pc);
+      if (!module_info.empty() && module_info != "<no module info>") {
+        module_debug_info_set.insert(module_info);
+      }
+      ++pc;
+    } catch (const std::exception& e) {
+      break;
+    }
+  }
+
+  // There are 3 module information strings here.
+  // "top(C).forward": for the add operator in top.
+  // "top(C).B0(B).forward": for the add operator in B0.
+  // "top(C).B0(B).forward.A0(A).forward": for the add operator in A0.
+  std::unordered_set<std::string> expected_result(
+      {"top(C).forward",
+       "top(C).B0(B).forward",
+       "top(C).B0(B).forward.A0(A).forward"});
+  AT_ASSERT(module_debug_info_set == expected_result);
+}
+
+TEST(LiteInterpreterTest, DuplicatedClassTypeModuleInfo) {
+  Module a("A");
+  a.define(R"JIT(
+    def forward(self, x):
+      return x + 5
+  )JIT");
+  Module b("B");
+  b.register_module("A0", a);
+  b.register_module("A1", a);
+  b.define(R"JIT(
+    def forward(self, x):
+      return self.A0.forward(x) + self.A1.forward(x)
+  )JIT");
+
+  std::stringstream ss;
+  b._save_for_mobile(ss, {}, true);
+  mobile::Module bc = _load_for_mobile(ss);
+
+  std::unordered_set<std::string> module_debug_info_set;
+  size_t pc = 0;
+  while (true) {
+    try {
+      std::string module_info = bc.get_forward_method_debug_info(pc);
+      if (!module_info.empty() && module_info != "<no module info>") {
+        module_debug_info_set.insert(module_info);
+      }
+      ++pc;
+    } catch (const std::exception& e) {
+      break;
+    }
+  }
+
+  // class A(nn.Module):
+  //   def __init__(self):
+  //     super(A, self).__init__()
+
+  //   def forward(self, x):
+  //     return x + 5
+
+  // class B(nn.Module):
+  //   def __init__(self):
+  //     super(B, self).__init__()
+  //     self.A0 = A()
+  //     self.A1 = A()
+
+  //   def forward(self, x):
+  //     return self.A0.forward(x) + self.A1.forward(x)
+
+  // There are 3 module information strings here.
+  // "top(B).forward": for the add operator in top.
+  // "top(B).A0(A).forward": for the add operator in A0.
+  // "top(B).A1(A).forward": for the add operator in A1.
+
+  std::unordered_set<std::string> expected_result(
+      {"top(B).forward", "top(B).A0(A).forward", "top(B).A1(A).forward"});
+  AT_ASSERT(module_debug_info_set == expected_result);
+}
+
+TEST(LiteInterpreterTest, Eval) {
+  std::vector<torch::jit::IValue> inputs;
+
+  Module m("m");
+  m.define(R"(
+    def __init__(self, x):
+      self.training = True
+
+    def forward(self, input):
+      return torch.dropout(input, 1.0, self.training)
+  )");
+
+  inputs.push_back(torch::ones({1, 1, 28, 28}));
+  m.eval();
+  auto outputref = m.forward(inputs).toTensor();
+
+  // save m in training mode to make sure that mobile eval() will correctly
+  // change back to eval mode
+  m.train();
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  bc.eval();
+  IValue res;
+  for (int i = 0; i < 3; ++i) {
+    res = bc.get_method("forward")(inputs);
+  }
+  auto output = res.toTensor();
+  AT_ASSERT(outputref.dim() == output.dim());
+  AT_ASSERT(
+      outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
+}
+
+TEST(LiteInterpreterTest, FindWrongMethodName) {
+  Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def add(self, x):
+      b = 4
+      return self.foo + x + b
+  )");
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  ASSERT_TRUE(bc.find_method("forward") == c10::nullopt);
+}
+
+TEST(LiteInterpreterTest, FindAndRunMethod) {
+  Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def add_it(self, x):
+      b = 4
+      return self.foo + x + b
+  )");
+
+  std::vector<IValue> inputs;
+  auto minput = 5 * torch::ones({});
+  inputs.emplace_back(minput);
+  auto ref = m.get_method("add_it")(inputs);
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  IValue res;
+  for (int i = 0; i < 3; ++i) {
+    auto bcinputs = inputs;
+    auto method = bc.find_method("add_it");
+    AT_ASSERT(method != c10::nullopt);
+    res = (*method)(std::move(bcinputs));
+  }
+
+  auto resd = res.toTensor().item<float>();
+  auto refd = ref.toTensor().item<float>();
+  AT_ASSERT(resd == refd);
+}
+
+TEST(LiteInterpreterTest, RunMethodVariadic) {
+  Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def add_three(self, x, y):
+      return self.foo + x + y
+  )");
+
+  std::vector<IValue> inputs;
+  auto inputx = 5 * torch::ones({});
+  auto inputy = 4 * torch::ones({});
+  auto ref = m.run_method("add_three", inputx, inputy);
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  IValue res = bc.run_method("add_three", inputx, inputy);
+
+  auto resd = res.toTensor().item<float>();
+  auto refd = ref.toTensor().item<float>();
+  AT_ASSERT(resd == refd);
+}
+
+TEST(LiteInterpreterTest, ExtraFiles) {
+  const auto script = R"JIT(
+    def forward(self):
+        x = torch.rand(5, 5)
+        x = x.mm(x)
+        return x
+  )JIT";
+
+  auto module =
+      std::make_shared<Module>("Module", std::make_shared<CompilationUnit>());
+  module->define(script);
+  std::ostringstream oss;
+  std::unordered_map<std::string, std::string> extra_files;
+  extra_files["metadata.json"] = "abc";
+  module->_save_for_mobile(oss, extra_files);
+
+  std::istringstream iss(oss.str());
+  caffe2::serialize::IStreamAdapter adapter{&iss};
+  std::unordered_map<std::string, std::string> loaded_extra_files;
+  loaded_extra_files["metadata.json"] = "";
+  auto loaded_module =
+      torch::jit::_load_for_mobile(iss, torch::kCPU, loaded_extra_files);
+  ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
+}
+
+TEST(LiteInterpreterTest, OpNameExportFetchRootOperators) {
+  torch::jit::Module m("m");
+  m.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
+  m.register_parameter("bias", torch::ones({20}), false);
+  m.define(R"(
+    def forward(self, input):
+      x1 = torch.zeros(2, 2)
+      x2 = torch.empty_like(torch.empty(2, 2))
+      x3 = torch._convolution(input, self.weight, self.bias, [1, 1], [0, 0], [1, 1], False, [0, 0], 1, False, False, True, True)
+      return (x1, x2, x3)
+  )");
+  m.eval();
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+
+  torch::jit::mobile::Module ptl_model = torch::jit::_load_for_mobile(ss);
+  std::set<std::string> operator_names =
+      torch::jit::mobile::_export_operator_list(ptl_model);
+  std::set<std::string> expected_operator_names = {
+      "aten::_convolution",
+      "aten::empty.memory_format",
+      "aten::empty_like",
+      "aten::zeros",
+  };
+  EXPECT_EQ(operator_names, expected_operator_names)
+      << "Expected the root operator lists to be the same";
+}
+
 namespace {
 static auto reg =
-    torch::jit::class_<TorchBindLiteInterpreterTestStruct>(
+    torch::class_<TorchBindLiteInterpreterTestStruct>(
         "_TorchScriptTesting",
         "_LiteInterpreterTest")
         .def("get", &TorchBindLiteInterpreterTestStruct::get)

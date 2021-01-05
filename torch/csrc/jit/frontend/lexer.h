@@ -80,6 +80,12 @@ namespace jit {
   _(TK_TIMES_EQ, "*=", "*=")                     \
   _(TK_DIV_EQ, "/=", "/=")                       \
   _(TK_MOD_EQ, "%=", "%=")                       \
+  _(TK_BIT_OR_EQ, "|=", "|=")                    \
+  _(TK_BIT_AND_EQ, "&=", "&=")                   \
+  _(TK_BIT_XOR_EQ, "^=", "^=")                   \
+  _(TK_LSHIFT_EQ, "<<=", "<<=")                  \
+  _(TK_RSHIFT_EQ, ">>=", ">>=")                  \
+  _(TK_POW_EQ, "**=", "**=")                     \
   _(TK_GLOBAL, "global", "global")               \
   _(TK_BUILT_IN, "built-in", "")                 \
   _(TK_SUBSCRIPT, "subscript", "")               \
@@ -102,12 +108,18 @@ namespace jit {
   _(TK_ASSERT, "assert", "assert")               \
   _(TK_DOTS, "dots", "...")                      \
   _(TK_LIST_COMP, "list comprehension", "")      \
+  _(TK_DICT_COMP, "dict comprehension", "")      \
   _(TK_BREAK, "break", "break")                  \
   _(TK_CONTINUE, "continue", "continue")         \
   _(TK_DELETE, "del", "del")                     \
   _(TK_PASS, "pass", "pass")                     \
   _(TK_CLASS_DEF, "class", "class")              \
-  _(TK_IMPORT, "import", "import")
+  _(TK_IMPORT, "import", "import")               \
+  _(TK_WITH, "with", "with")                     \
+  _(TK_WITH_ITEM, "withitem", "")                \
+  _(TK_AS, "as", "as")                           \
+  _(TK_PROP, "property", "")                     \
+  _(TK_ELLIPSIS, "Ellipsis", "Ellipsis")
 
 enum TokenKind {
   // we use characters to represent themselves so skip all valid characters
@@ -119,8 +131,8 @@ enum TokenKind {
 #undef DEFINE_TOKEN
 };
 
-CAFFE2_API std::string kindToString(int kind);
-CAFFE2_API int stringToKind(const std::string& str);
+TORCH_API std::string kindToString(int kind);
+TORCH_API int stringToKind(const std::string& str);
 
 // nested hash tables that indicate char-by-char what is a valid token.
 struct TokenTrie;
@@ -153,7 +165,7 @@ struct TokenTrie {
 
 // stuff that is shared against all TC lexers/parsers and is initialized only
 // once.
-struct CAFFE2_API SharedParserData {
+struct TORCH_API SharedParserData {
   SharedParserData() : head(new TokenTrie()) {
     std::stringstream ss;
     for (const char* c = valid_single_char_tokens; *c; c++) {
@@ -357,7 +369,7 @@ struct CAFFE2_API SharedParserData {
   TokenTrieRef head;
 };
 
-CAFFE2_API SharedParserData& sharedParserData();
+TORCH_API SharedParserData& sharedParserData();
 
 struct Token {
   int kind;
@@ -372,8 +384,8 @@ struct Token {
 };
 
 struct Lexer {
-  explicit Lexer(const std::shared_ptr<Source>& source)
-      : source(source),
+  explicit Lexer(std::shared_ptr<Source> source)
+      : source(std::move(source)),
         pos(0),
         nesting(0),
         indent_stack(),

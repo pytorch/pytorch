@@ -206,9 +206,12 @@ torch.layout
 
 .. class:: torch.layout
 
+.. warning::
+  The ``torch.layout`` class is in beta and subject to change.
+
 A :class:`torch.layout` is an object that represents the memory layout of a
 :class:`torch.Tensor`. Currently, we support ``torch.strided`` (dense Tensors)
-and have experimental support for ``torch.sparse_coo`` (sparse COO Tensors).
+and have beta support for ``torch.sparse_coo`` (sparse COO Tensors).
 
 ``torch.strided`` represents dense Tensors and is the memory layout that
 is most commonly used. Each strided tensor has an associated

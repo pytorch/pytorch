@@ -1,3 +1,4 @@
+from . import swa_utils as swa_utils
 from . import lr_scheduler as lr_scheduler
 from .adadelta import Adadelta as Adadelta
 from .adagrad import Adagrad as Adagrad

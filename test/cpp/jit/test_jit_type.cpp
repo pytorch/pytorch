@@ -1,4 +1,5 @@
-#include <test/cpp/jit/test_base.h>
+#include <gtest/gtest.h>
+
 #include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/testing/file_check.h>
 #include "torch/csrc/jit/ir/ir.h"
@@ -7,7 +8,7 @@
 namespace torch {
 namespace jit {
 
-void testUnifyTypes() {
+TEST(JitTypeTest, UnifyTypes) {
   auto bool_tensor = TensorType::get()->withScalarType(at::kBool);
   auto opt_bool_tensor = OptionalType::create(bool_tensor);
   auto unified_opt_bool = unifyTypes(bool_tensor, opt_bool_tensor);

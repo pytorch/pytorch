@@ -240,8 +240,14 @@ class SparseLengthsFused8BitRowwiseFakeFP16Op final : public Operator<Context> {
               FLAGS_caffe2_fbgemm_fake_fp16_clamp);
         } else if (use_acc_fp32) {
           for (int j = 0; j < block_size; ++j) {
-            float deqVal = scale * input_rounded[j] + bias;
-            rowTempSums[accIdx][j] += deqVal * weight;
+            float deqVal = fake_fp16::fmafp32_avx_emulation(
+                scale,
+                input_rounded[j],
+                bias);
+            rowTempSums[accIdx][j] = fake_fp16::fmafp32_avx_emulation(
+                deqVal,
+                weight,
+                rowTempSums[accIdx][j]);
           }
         } else {
           bias *= weight;

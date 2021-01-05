@@ -1,6 +1,6 @@
 import torch
 
-from torch._jit_internal import Tuple, Optional, List  # noqa: F401
+from typing import Tuple, Optional, List
 
 from torch import Tensor, _VF  # noqa: F401
 
@@ -269,7 +269,7 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
         if dtype != torch.int8 and dtype != torch.float16:
             raise RuntimeError('Unsupported dtype: {}'.format(dtype))
 
-        self.all_weights = []
+        self.all_weights = []  # type: ignore
         for layer in range(self.num_layers):
             for direction in range(num_directions):
                 layer_input_size = self.input_size if layer == 0 else self.hidden_size * num_directions
@@ -319,8 +319,7 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
     def get_expected_hidden_size(self, input, batch_sizes):
         # type: (Tensor, Optional[Tensor]) -> Tuple[int, int, int]
         if batch_sizes is not None:
-            mini_batch = batch_sizes[0]
-            mini_batch = int(mini_batch)
+            mini_batch = int(batch_sizes[0])
         else:
             mini_batch = input.size(0) if self.batch_first else input.size(1)
         num_directions = 2 if self.bidirectional else 1
@@ -332,7 +331,7 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
     def check_hidden_size(self, hx, expected_hidden_size, msg='Expected hidden size {}, got {}'):
         # type: (Tensor, Tuple[int, int, int], str) -> None
         if hx.size() != expected_hidden_size:
-            raise RuntimeError(msg.format(expected_hidden_size, tuple(hx.size())))
+            raise RuntimeError(msg.format(expected_hidden_size, list(hx.size())))
 
     @torch.jit.script_method
     def check_forward_args(self, input, hidden, batch_sizes):
@@ -490,6 +489,8 @@ class QuantizedGRU(QuantizedRNNBase):
 
 
 def quantize_rnn_cell_modules(module):
+    warnings.warn("quantize_rnn_cell_modules function has been deprecated. "
+                  "Please use torch.quantization.quantize_dynamic API instead.")
     reassign = {}
     for name, mod in module.named_modules():
         if mod is module:
@@ -534,6 +535,8 @@ def quantize_linear_modules(module, dtype=torch.int8):
 
 
 def quantize_rnn_modules(module, dtype=torch.int8):
+    warnings.warn("quantize_rnn_modules function has been deprecated. "
+                  "Please use torch.quantization.quantize_dynamic API instead.")
     reassign = {}
     for name, mod in module.named_modules():
         if mod is module:

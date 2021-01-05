@@ -1,24 +1,14 @@
+#pragma once
+
 #include <ATen/ATen.h>
 
 namespace at {
 namespace native {
+namespace vulkan {
 
-bool is_vulkan_available();
+Tensor convolution_prepack_weights(const at::Tensor& weight);
 
-Tensor& vulkan_copy_(Tensor& self, const Tensor& src);
-
-at::Tensor vulkan_convolution(
-    const at::Tensor& input, // Vulkan
-    const at::Tensor& weight, // CPU
-    const at::Tensor& bias, // CPU
-    IntArrayRef padding,
-    IntArrayRef stride,
-    IntArrayRef dilation,
-    int64_t groups);
-
-at::Tensor vulkan_convolution_prepack_weights(const at::Tensor& weight);
-
-at::Tensor vulkan_convolution_prepacked(
+Tensor convolution_prepacked(
     const at::Tensor& input, // Vulkan
     IntArrayRef weightSizes,
     const at::Tensor& weight_prepacked_vulkan, // Vulkan
@@ -30,5 +20,6 @@ at::Tensor vulkan_convolution_prepacked(
     const float output_min,
     const float output_max);
 
+} // namespace vulkan
 } // namespace native
 } // namespace at

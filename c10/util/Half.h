@@ -11,7 +11,7 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/C++17.h>
-#include <c10/util/complex_type.h>
+#include <c10/util/complex.h>
 
 #if defined(__cplusplus) && (__cplusplus >= 201103L)
 #include <cmath>
@@ -328,7 +328,9 @@ namespace detail {
           const uint32_t exp_bits = (bits >> 13) & UINT32_C(0x00007C00);
           const uint32_t mantissa_bits = bits & UINT32_C(0x00000FFF);
           const uint32_t nonsign = exp_bits + mantissa_bits;
-          return (sign >> 16) | (shl1_w > UINT32_C(0xFF000000) ? UINT16_C(0x7E00) : nonsign);
+          return static_cast<uint16_t>(
+            (sign >> 16) | (shl1_w > UINT32_C(0xFF000000) ? UINT16_C(0x7E00) : nonsign)
+          );
   }
 
 } // namespace detail
@@ -372,9 +374,12 @@ struct alignas(4) complex<Half> {
   Half imag() const {
     return imag_;
   }
-  inline complex(std::complex<float> value)
+  explicit inline complex(c10::complex<float> value)
       : real_(value.real()), imag_(value.imag()) {}
-  inline operator std::complex<float>() const {
+  explicit inline complex(c10::complex<double> value)
+      : real_(static_cast<float>(value.real())),
+        imag_(static_cast<float>(value.imag())) {}
+  inline operator c10::complex<float>() const {
     return {real_, imag_};
   }
 };
@@ -447,16 +452,16 @@ overflows(From f) {
 #endif
 
 template <typename To, typename From>
-typename std::enable_if<is_complex_t<From>::value, bool>::type overflows(
+typename std::enable_if<is_complex<From>::value, bool>::type overflows(
     From f) {
   // casts from complex to real are considered to overflow if the
   // imaginary component is non-zero
-  if (!is_complex_t<To>::value && f.imag() != 0) {
+  if (!is_complex<To>::value && f.imag() != 0) {
     return true;
   }
   // Check for overflow componentwise
   // (Technically, the imag overflow check is guaranteed to be false
-  // when !is_complex_t<To>, but any optimizer worth its salt will be
+  // when !is_complex<To>, but any optimizer worth its salt will be
   // able to figure it out.)
   return overflows<
              typename scalar_value_type<To>::type,

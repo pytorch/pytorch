@@ -3,6 +3,8 @@
 #else
 
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/MemoryOverlap.h>
+#include <c10/cuda/CUDAException.h>
 
 // Check tensor dimensions for index operations, and return the slice size.
 // src can be nullptr in case of indexFill: in that case it is ignored.
@@ -126,11 +128,12 @@ void THCTensor_(indexCopy)(THCState *state, THCTensor *dst, int dim, THCudaLongT
 
   int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
-#define SMALL_INDEX(TENSOR_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM) \
-  indexCopySmallIndex<TENSOR_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM>       \
-    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(           \
-      dstInfo, srcInfo, indicesInfo,                            \
-      dstCopyDim, srcCopyDim, sliceSize, dstCopyDimSize);
+#define SMALL_INDEX(TENSOR_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM)    \
+  indexCopySmallIndex<TENSOR_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM>  \
+    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                \
+      dstInfo, srcInfo, indicesInfo,                                 \
+      dstCopyDim, srcCopyDim, sliceSize, dstCopyDimSize);            \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define LARGE_INDEX(TENSOR_TYPE, TYPE,                         \
                     DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR)   \
@@ -140,7 +143,8 @@ void THCTensor_(indexCopy)(THCState *state, THCTensor *dst, int dim, THCudaLongT
       dstInfo, srcInfo, indicesInfo,                           \
       dstCopyDim, srcCopyDim, srcTotalSize,                    \
       (IDX_IS_MAJOR) ? sliceSize : numIndices,                 \
-      dstCopyDimSize);
+      dstCopyDimSize);                                         \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
   dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));
@@ -220,21 +224,6 @@ void THCTensor_(indexCopy)(THCState *state, THCTensor *dst, int dim, THCudaLongT
 #undef LARGE_INDEX
 }
 
-void THCTensor_(take)(THCState *state, THCTensor *dst, THCTensor *src, THCudaLongTensor *index)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));
-  THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));
-
-  THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, src) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
-  THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, dst) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
-  THArgCheck(THCudaLongTensor_nDimensionLegacyNoScalars(state, index) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
-  THArgCheck(!(THCTensor_(numel)(state, src) == 0 && THCudaLongTensor_numel(state, index) != 0), 2,
-             "tried to take from an empty tensor");
-
-  THCTensor_(resizeNd)(state, dst, index->dim(), THTensor_getSizePtr(index), NULL);
-  dispatchTakePut<scalar_t, TensorTakeOp>(state, src, dst, index);
-}
-
 static void THCTensor_(sort_indices)(THCState *state, THCudaLongTensor *index, THCTensor *src) {
   THCThrustAllocator thrustAlloc(state);
 
@@ -294,6 +283,13 @@ void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongT
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
   dims = THCudaLongTensor_nDimensionLegacyNoScalars(state, indices);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 4, CUTORCH_DIM_WARNING);
+  at::assert_no_overlap(dst, indices);
+  if (at::has_internal_overlap(dst) == at::MemOverlap::YES) {
+    TORCH_WARN(
+      "Use of index_fill_ on expanded tensors is deprecated. "
+      "Please clone() the tensor before performing this operation. "
+      "This also applies to advanced indexing e.g. tensor[mask] = scalar");
+  }
 
   // The `src` is partitioned into two parts:
   // -the size of each slice we are indexing, which is the
@@ -314,11 +310,12 @@ void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongT
 
   int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
-#define SMALL_INDEX(TENSOR_TYPE, TYPE, DST_DIM, IDX_DIM)  \
+#define SMALL_INDEX(TENSOR_TYPE, TYPE, DST_DIM, IDX_DIM)   \
   indexFillSmallIndex<TENSOR_TYPE, TYPE, DST_DIM, IDX_DIM> \
-    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(   \
-      dstInfo, indicesInfo,                             \
-      dstFillDim, sliceSize, dstFillDimSize, val);
+    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(      \
+      dstInfo, indicesInfo,                                \
+      dstFillDim, sliceSize, dstFillDimSize, val);         \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define LARGE_INDEX(TENSOR_TYPE, TYPE, DST_DIM, IDX_DIM, IDX_IS_MAJOR)   \
   indexFillLargeIndex<TENSOR_TYPE, TYPE, DST_DIM, IDX_DIM, IDX_IS_MAJOR> \
@@ -326,7 +323,8 @@ void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongT
       dstInfo, indicesInfo,                                              \
       dstFillDim, sliceSize * numIndices,                                \
       (IDX_IS_MAJOR) ? sliceSize : numIndices,                           \
-      dstFillDimSize, val);
+      dstFillDimSize, val);                                              \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
   dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));
@@ -393,150 +391,6 @@ void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongT
 
 #undef SMALL_INDEX
 #undef LARGE_INDEX
-}
-
-void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, int dim, THCudaLongTensor *indices)
-{
-#if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
-  TORCH_CHECK(false, "indexSelect not suppported with BFloat16");
-#else
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, dst, src, indices));
-
-  dim = at::maybe_wrap_dim(dim, src);
-  int dims = THCTensor_(nDimensionLegacyNoScalars)(state, dst);
-  THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
-  dims = THCTensor_(nDimensionLegacyNoScalars)(state, src);
-  THArgCheck(dims <= MAX_CUTORCH_DIMS, 3, CUTORCH_DIM_WARNING);
-  dims = THCudaLongTensor_nDimensionLegacyNoScalars(state, indices);
-  THArgCheck(dims <= MAX_CUTORCH_DIMS, 5, CUTORCH_DIM_WARNING);
-
-  ptrdiff_t numIndices = THCudaLongTensor_nElement(state, indices);
-
-  int srcDims = THCTensor_(nDimensionLegacyNoScalars)(state, src);
-  cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
-
-  THArgCheck(THCudaLongTensor_nDimensionLegacyNoScalars(state, indices) <= 1, 3,
-             "Index is supposed to be an empty tensor or a vector");
-  THArgCheck(dim < srcDims, 4, "Indexing dim is out of bounds");
-  THArgCheck(srcDims > 0, 2, "Source tensor is empty");
-
-  std::vector<int64_t> newSize = src->sizes().vec();
-  if (src->dim() > 0) {
-    newSize[dim] = numIndices;
-  }
-  THCTensor_(resize)(state, dst, newSize, {});
-
-  ptrdiff_t dstTotalSize = THCTensor_(nElement)(state, dst);
-  if (dstTotalSize == 0) {
-    return;
-  }
-
-  int indContig = THCudaLongTensor_isContiguous(state, indices);
-
-  // The `src` is partitioned into two parts:
-  // -the size of each slice we are indexing, which is the
-  // total size of the tensor ignoring dimension `dim`;
-  // -the number of indices we are choosing, which is the total size
-  // of the tensor `indices`.
-  int64_t srcSelectDimSize = THCTensor_(sizeLegacyNoScalars)(state, src, dim);
-  ptrdiff_t sliceSize = dstTotalSize / numIndices;
-
-  int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
-
-#define SMALL_INDEX(TENSOR_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM) \
-  indexSelectSmallIndex<TENSOR_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM>     \
-    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(           \
-      dstInfo, srcInfo, indicesInfo,                            \
-      dstSelectDim, srcSelectDim, static_cast<TYPE>(sliceSize), \
-      srcSelectDimSize);
-
-#define LARGE_INDEX(TENSOR_TYPE, TYPE,                           \
-                    DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR)     \
-  indexSelectLargeIndex<TENSOR_TYPE, TYPE,                       \
-                        DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR> \
-    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(            \
-      dstInfo, srcInfo, indicesInfo,                             \
-      dstSelectDim, srcSelectDim, static_cast<TYPE>(dstTotalSize), \
-      static_cast<TYPE>((IDX_IS_MAJOR) ? sliceSize : numIndices),  \
-      srcSelectDimSize);
-
-  dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
-  dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));
-
-  dim3 largeIndexGrid(std::min(THCCeilDiv(dstTotalSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
-  dim3 largeIndexBlock(std::min(dstTotalSize, (ptrdiff_t)128));
-
-  if (THCTensor_canUse32BitIndexMath(state, dst) &&
-      THCTensor_canUse32BitIndexMath(state, src) &&
-      THCTensor_canUse32BitIndexMath(state, indices)) {
-    TensorInfo<scalar_t, unsigned int> dstInfo =
-      getTensorInfo<scalar_t, THCTensor, unsigned int>(state, dst);
-    int dstSelectDim = dstInfo.collapseDims(dim);
-    dstInfo.reduceDim(dstSelectDim);
-
-    TensorInfo<scalar_t, unsigned int> srcInfo =
-      getTensorInfo<scalar_t, THCTensor, unsigned int>(state, src);
-    int srcSelectDim = srcInfo.collapseDims(dim);
-    srcInfo.reduceDim(srcSelectDim);
-
-    TensorInfo<int64_t, unsigned int> indicesInfo =
-      getTensorInfo<int64_t, THCudaLongTensor, unsigned int>(state, indices);
-    indicesInfo.collapseDims();
-
-    // A reasonable choice for when to have each thread iterate over
-    // indices to choose
-    if (numIndices <= 16) {
-      if (dstInfo.dims == 1 && srcInfo.dims == 1 && indContig) {
-        SMALL_INDEX(scalar_t, unsigned int, 1, 1, -2);
-      } else if (dstInfo.dims == 2 && srcInfo.dims == 2 && indContig) {
-        SMALL_INDEX(scalar_t, unsigned int, 2, 2, -2);
-      } else if (dstInfo.dims == 3 && srcInfo.dims == 3 && indContig) {
-        SMALL_INDEX(scalar_t, unsigned int, 3, 3, -2);
-      } else {
-        SMALL_INDEX(scalar_t, unsigned int, -1, -1, -1);
-      }
-    } else {
-      bool indexIsMajor = THCTensor_(indexShouldBeMajor)(dstInfo, dstSelectDim);
-
-      if (dstInfo.dims == 1 && srcInfo.dims == 1 && indContig) {
-        LARGE_INDEX(scalar_t, unsigned int, 1, 1, -2, true);
-      } else if (dstInfo.dims == 2 && srcInfo.dims == 2 && indContig) {
-        if (indexIsMajor) {
-          LARGE_INDEX(scalar_t, unsigned int, 2, 2, -2, true);
-        } else {
-          LARGE_INDEX(scalar_t, unsigned int, 2, 2, -2, false);
-        }
-      } else if (dstInfo.dims == 3 && srcInfo.dims == 3 && indContig) {
-        if (indexIsMajor) {
-          LARGE_INDEX(scalar_t, unsigned int, 3, 3, -2, true);
-        } else {
-          LARGE_INDEX(scalar_t, unsigned int, 3, 3, -2, false);
-        }
-      } else {
-        LARGE_INDEX(scalar_t, unsigned int, -1, -1, -1, true);
-      }
-    }
-  } else {
-    TensorInfo<scalar_t, uint64_t> dstInfo =
-      getTensorInfo<scalar_t, THCTensor, uint64_t>(state, dst);
-    int dstSelectDim = dstInfo.collapseDims(dim);
-    dstInfo.reduceDim(dstSelectDim);
-
-    TensorInfo<scalar_t, uint64_t> srcInfo =
-      getTensorInfo<scalar_t, THCTensor, uint64_t>(state, src);
-    int srcSelectDim = srcInfo.collapseDims(dim);
-    srcInfo.reduceDim(srcSelectDim);
-
-    TensorInfo<int64_t, uint64_t> indicesInfo =
-      getTensorInfo<int64_t, THCudaLongTensor, uint64_t>(state, indices);
-    indicesInfo.collapseDims();
-
-    LARGE_INDEX(scalar_t, uint64_t, -1, -1, -1, true);
-  }
-
-#undef SMALL_INDEX
-#undef LARGE_INDEX
-#endif // THC_REAL_IS_BFLOAT16 && !__HIP_PLATFORM_HCC__
 }
 
 

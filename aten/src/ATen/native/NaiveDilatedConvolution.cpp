@@ -2,10 +2,11 @@
 
 #include <tuple>
 #include <ATen/ATen.h>
+#include <ATen/Utils.h>
 #include <ATen/native/im2col.h>
 #include <ATen/native/vol2col.h>
-#include <TH/THBlasUtils.h>
 
+#include <ATen/native/CPUBlas.h>
 #include <ATen/native/DilatedConvolutionUtils.h>
 
 namespace at {
@@ -181,10 +182,8 @@ void slow_conv_dilated_all_cpu_template(
   // Temporary buffer:
   Tensor columns = at::empty({0}, options);
   if (output.defined() || grad_weight.defined() || grad_input.defined()) {
-    int64_t m = std::accumulate(
-        kernel_size.begin(), kernel_size.end(), 1, std::multiplies<int64_t>());
-    int64_t n = std::accumulate(
-        output_size.begin(), output_size.end(), 1, std::multiplies<int64_t>());
+    const int64_t m = prod_intlist(kernel_size);
+    const int64_t n = prod_intlist(output_size);
     columns.resize_({nInputPlane * m, n});
   }
   // Initialize
@@ -271,9 +270,9 @@ void slow_conv_dilated_all_cpu_template(
             C = alpha * op(A) * op(B) + beta * C
             op(A) = 'n', op(B) = 'n', alpha=1, beta=1
         */
-        THBlas_gemm<scalar_t>(
-            /*transa=*/'n',
-            /*transb=*/'n',
+        cpublas::gemm(
+            /*transa=*/cpublas::NoTranspose,
+            /*transb=*/cpublas::NoTranspose,
             /*     m=*/columns.size(1),
             /*     n=*/nOutputPlane,
             /*     k=*/columns.size(0),
@@ -315,9 +314,9 @@ void slow_conv_dilated_all_cpu_template(
             C = alpha * op(A) * op(B) + beta * C
             op(A) = 'n', op(B) = 't', alpha=1, beta=0
          */
-        THBlas_gemm<scalar_t>(
-            /*transa=*/'n',
-            /*transb=*/'t',
+        cpublas::gemm(
+            /*transa=*/cpublas::NoTranspose,
+            /*transb=*/cpublas::Transpose,
             /*     m=*/columns.size(1),
             /*     n=*/columns.size(0),
             /*     k=*/nOutputPlane,
@@ -380,9 +379,9 @@ void slow_conv_dilated_all_cpu_template(
           grad_weight^T C = alpha * op(A) * op(B) + beta * C op(A) = 't',
           op(B) = 'n', alpha=scale, beta=1
         */
-        THBlas_gemm<scalar_t>(
-            /*transa=*/'t',
-            /*transb=*/'n',
+        cpublas::gemm(
+            /*transa=*/cpublas::Transpose,
+            /*transb=*/cpublas::NoTranspose,
             /*     m=*/columns.size(0),
             /*     n=*/nOutputPlane,
             /*     k=*/columns.size(1),

@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-import inspect
 
 import hypothesis.strategies as st
 import numpy as np
 import torch
-from caffe2.python import core, workspace
+from caffe2.python import core
 from caffe2.python.test_util import TestCase
-from hypothesis import given
+from hypothesis import given, settings
 from torch import nn
 
 
@@ -21,6 +20,7 @@ class TestC2LSTM(TestCase):
         is_bidirectional=st.booleans(),
         batch_first=st.booleans(),
     )
+    @settings(deadline=10000)
     def test_c2_lstm(
         self,
         bsz,

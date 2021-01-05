@@ -270,6 +270,8 @@ bool AsyncSchedulingNet::RunAsync() {
 
 void AsyncSchedulingNet::Cancel() {
   success_ = false;
+  NetBase::Cancel();
+
   CancelAndFinishAsyncTasks();
 }
 
@@ -294,10 +296,10 @@ void AsyncSchedulingNet::CancelAndFinishAsyncTasks() {
   }
 }
 
-AsyncSchedulingNet::~AsyncSchedulingNet() {
-  Wait();
-}
+  AsyncSchedulingNet::~AsyncSchedulingNet() {
+    Wait();
+  }
 
-REGISTER_NET(async_scheduling, AsyncSchedulingNet);
+  REGISTER_NET(async_scheduling, AsyncSchedulingNet);
 
 } // namespace caffe2

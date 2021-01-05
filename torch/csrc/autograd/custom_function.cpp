@@ -73,7 +73,7 @@ variable_list _wrap_outputs(const variable_list &input_vars,
 
       // If the input was modified, transplant the grad_fn in the graph:
       // grad_fn <- variable <- self  ==>  grad_fn <- self <- variable
-      var.grad().reset();
+      var.mutable_grad().reset();
       impl::clear_hooks(var);
       if (auto grad_acc_fn = impl::try_get_grad_accumulator(var)) {
         auto grad_acc = dynamic_cast<AccumulateGrad*>(grad_acc_fn.get());
@@ -124,7 +124,7 @@ variable_list _wrap_outputs(const variable_list &input_vars,
     if (!(is_input && is_modified) && var.is_view()) {
       // NB: is_view() ==> get_autograd_meta()
       auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(var));
-      diff_view_meta->creation_meta = CreationMeta::IN_CUSTOM_FUNCTION;
+      diff_view_meta->set_creation_meta(CreationMeta::IN_CUSTOM_FUNCTION);
     }
 
     if (is_differentiable) {
@@ -142,7 +142,7 @@ variable_list _wrap_outputs(const variable_list &input_vars,
       if (var.is_view()) {
         // NB: is_view() ==> get_autograd_meta()
         auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(var));
-        diff_view_meta->creation_meta = CreationMeta::MULTI_OUTPUT_NODE;
+        diff_view_meta->set_creation_meta(CreationMeta::MULTI_OUTPUT_NODE);
       }
     }
   }
@@ -232,6 +232,10 @@ void AutogradContext::mark_non_differentiable(const variable_list &outputs) {
   for(auto& var : outputs) {
     non_differentiable_.insert(var.unsafeGetTensorImpl());
   }
+}
+
+void AutogradContext::set_materialize_grads(bool value) {
+  materialize_grads_ = value;
 }
 
 const std::unordered_set<at::TensorImpl*>& AutogradContext::get_and_bump_dirty() const {

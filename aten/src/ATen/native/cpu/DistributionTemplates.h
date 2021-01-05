@@ -180,9 +180,7 @@ void normal_kernel(Tensor& self, double mean, double std, RNG generator) {
     normal_fill(self, static_cast<float>(mean), static_cast<float>(std), generator);
 #endif
   } else {
-    // bfloat16 cannot be properly tested due to the lack of other operations
-    // like add/sub/mean implemented for half
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "normal_kernel_cpu", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "normal_kernel_cpu", [&] {
       if (size >= 16 && self.is_contiguous()) {
         normal_fill<scalar_t>(self, static_cast<scalar_t>(mean), static_cast<scalar_t>(std), generator);
       } else {
@@ -208,7 +206,7 @@ struct NormalKernel {
 
 template<typename RNG>
 void uniform_kernel(TensorIterator& iter, double from_, double to_, RNG generator) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "uniform_kernel_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "uniform_kernel_cpu", [&]() {
     std::lock_guard<std::mutex> lock(generator->mutex_);
     auto from = static_cast<scalar_t>(from_);
     auto to = static_cast<scalar_t>(to_);
@@ -230,7 +228,7 @@ struct UniformKernel {
 
 template<typename RNG>
 void cauchy_kernel(TensorIterator& iter, double median, double sigma, RNG generator) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "cauchy_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "cauchy_cpu", [&]() {
     std::lock_guard<std::mutex> lock(generator->mutex_);
     at::cauchy_distribution<double> cauchy(median, sigma);
     cpu_serial_kernel(iter, [&cauchy, generator]() -> scalar_t {
@@ -315,11 +313,11 @@ void bernoulli_kernel(Tensor& self, const Tensor& p_, RNG generator) {
     std::lock_guard<std::mutex> lock(generator->mutex_);
     using self_t = scalar_t;
     auto p = std::get<0>(expand_inplace(self, p_.to(kCPU)));
-    auto iter = TensorIterator();
-    iter.add_output(self);
-    iter.add_input(p);
-    iter.check_all_same_dtype(false);
-    iter.build();
+    auto iter = TensorIteratorConfig()
+        .add_output(self)
+        .add_input(p)
+        .check_all_same_dtype(false)
+        .build();
     if (p_.scalar_type() == kDouble) {
       cpu_serial_kernel(iter, [&](const double p_val) -> self_t {
         at::bernoulli_distribution<double> bernoulli(p_val);

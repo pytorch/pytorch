@@ -11,7 +11,8 @@ template <
     typename Tdata, // embedding and momentum types
     typename T, // everything else
     typename TLengths,
-    typename adagradT>
+    typename adagradT,
+    bool is_mean = false>
 class SparseAdagradFusedWithSparseLengthsSumGradientOp final
     : public Operator<CPUContext> {
  public:
@@ -75,6 +76,22 @@ class SparseAdagradFusedWithSparseLengthsSumGradientOp final
         Input(MOMENT_1).numel());
 
     int dataIndex = 0;
+    if (is_mean) {
+      grad_buffer_.ResizeLike(Input(GRAD));
+    }
+    auto* grad_buffer_data =
+        is_mean ? grad_buffer_.template mutable_data<T>() : NULL;
+    if (is_mean) {
+      for (auto rangeIndex = 0; rangeIndex < numSegments; ++rangeIndex) {
+        for (auto tmpIndex = 0; tmpIndex < block_size; ++tmpIndex) {
+          auto offsetI = rangeIndex * block_size;
+          grad_buffer_data[offsetI + tmpIndex] = lengths[rangeIndex] > 0
+              ? gradIn[offsetI + tmpIndex] / lengths[rangeIndex]
+              : gradIn[offsetI + tmpIndex];
+        }
+      }
+    }
+
     for (auto rangeIndex = 0; rangeIndex < numSegments; ++rangeIndex) {
       for (auto start = dataIndex; dataIndex < start + lengths[rangeIndex];
            ++dataIndex) {
@@ -99,7 +116,10 @@ class SparseAdagradFusedWithSparseLengthsSumGradientOp final
             Input(PARAM).numel());
 
         if (block_size == 1) {
-          float gi = std::fma(weight_decay_, paramIn[idx], gradIn[offsetI]);
+          float gi = std::fma(
+              weight_decay_,
+              paramIn[idx],
+              is_mean ? grad_buffer_data[offsetI] : gradIn[offsetI]);
           float hi = momentOut[idx] = momentIn[idx] + gi * gi;
           paramOut[idx] =
               paramIn[idx] + lr[0] * gi / (std::sqrt(hi) + epsilon_);
@@ -115,7 +135,7 @@ class SparseAdagradFusedWithSparseLengthsSumGradientOp final
               paramIn + offsetIdx,
               &paramIn[idx_pref * block_size],
 
-              gradIn + offsetI,
+              is_mean ? grad_buffer_data + offsetI : gradIn + offsetI,
 
               momentIn + offsetIdx,
               &momentIn[idx_pref * block_size],
@@ -141,6 +161,7 @@ class SparseAdagradFusedWithSparseLengthsSumGradientOp final
   T epsilon_;
   T weight_decay_;
   adagradT kernel_;
+  Tensor grad_buffer_{CPU};
 
   INPUT_TAGS(PARAM, MOMENT_1, INDICES, GRAD, LR, LENGTHS);
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1);

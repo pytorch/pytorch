@@ -2,7 +2,7 @@
 
 #include <ATen/native/Pool.h>
 #include <ATen/native/xnnpack/Common.h>
-#include <ATen/native/xnnpack/Factory.h>
+#include <ATen/native/utils/Factory.h>
 #include <ATen/native/xnnpack/Pooling.h>
 
 namespace at {
@@ -160,11 +160,12 @@ Tensor max_pool2d(
     dilation_,
   };
 
-  const Tensor input_padded_contig_nhwc = allocate_padded_contiguous_if_needed(
-      input,
-      MemoryFormat::ChannelsLast);
+  const Tensor input_padded_contig_nhwc =
+      mobile::allocate_padded_contiguous_if_needed(
+          input,
+          MemoryFormat::ChannelsLast);
 
-  Tensor output_padded_contig_nhwc = empty_with_tail_padding(
+  Tensor output_padded_contig_nhwc = mobile::empty_with_tail_padding(
       {
         input_padded_contig_nhwc.size(Layout::Activation4D::batch),
         input_padded_contig_nhwc.size(Layout::Activation4D::channels),
@@ -208,6 +209,8 @@ Tensor max_pool2d(
       0u,                                                             // flags
       &max_pool_op);                                                  // operator
 
+  Operator max_pool_scoped_op(max_pool_op);
+
   TORCH_CHECK(
       xnn_status_success == create_status,
       "xnn_create_max_pooling2d_nhwc_f32 failed!");
@@ -219,15 +222,15 @@ Tensor max_pool2d(
       input_padded_contig_nhwc.size(Layout::Activation4D::width),   // input_width
       input_padded_contig_nhwc.data_ptr<float>(),                   // input
       output_padded_contig_nhwc.data_ptr<float>(),                  // output
-      caffe2::xnnpack_threadpool());                                // threadpool
+      caffe2::pthreadpool_());                                      // threadpool
 
   TORCH_CHECK(
       xnn_status_success == setup_status,
       "xnn_setup_max_pooling2d_nhwc_f32 failed!");
 
   const xnn_status run_status = xnn_run_operator(
-      max_pool_op,                    // operator
-      caffe2::xnnpack_threadpool());  // threadpool
+      max_pool_op,              // operator
+      caffe2::pthreadpool_());  // threadpool
 
   TORCH_INTERNAL_ASSERT(
       xnn_status_success == run_status,

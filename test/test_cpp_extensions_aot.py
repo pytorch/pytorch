@@ -12,11 +12,11 @@ try:
     import torch_test_cpp_extension.cpp as cpp_extension
     import torch_test_cpp_extension.msnpu as msnpu_extension
     import torch_test_cpp_extension.rng as rng_extension
-except ImportError:
+except ImportError as e:
     raise RuntimeError(
         "test_cpp_extensions_aot.py cannot be invoked directly. Run "
         "`python run_test.py -i test_cpp_extensions_aot_ninja` instead."
-    )
+    ) from e
 
 
 class TestCppExtensionAOT(common.TestCase):
@@ -141,7 +141,6 @@ class TestRNGExtension(common.TestCase):
 
     def setUp(self):
         super(TestRNGExtension, self).setUp()
-        rng_extension.registerOps()
 
     def test_rng(self):
         fourty_two = torch.full((10,), 42, dtype=torch.int64)
@@ -171,6 +170,29 @@ class TestRNGExtension(common.TestCase):
         self.assertEqual(rng_extension.getInstanceCount(), 1)
         del copy2
         self.assertEqual(rng_extension.getInstanceCount(), 0)
+
+
+@unittest.skipIf(not TEST_CUDA, "CUDA not found")
+@unittest.skipIf(IS_WINDOWS, "MSVC have bug compiling this")
+class TestTorchLibrary(common.TestCase):
+
+    def test_torch_library(self):
+        import torch_test_cpp_extension.torch_library  # noqa: F401
+
+        def f(a: bool, b: bool):
+            return torch.ops.torch_library.logical_and(a, b)
+
+        self.assertTrue(f(True, True))
+        self.assertFalse(f(True, False))
+        self.assertFalse(f(False, True))
+        self.assertFalse(f(False, False))
+        s = torch.jit.script(f)
+        self.assertTrue(s(True, True))
+        self.assertFalse(s(True, False))
+        self.assertFalse(s(False, True))
+        self.assertFalse(s(False, False))
+        self.assertIn('torch_library::logical_and', str(s.graph))
+
 
 if __name__ == "__main__":
     common.run_tests()

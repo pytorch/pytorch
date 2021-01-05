@@ -27,8 +27,9 @@ DECLARE_DISPATCH(rnn_packed_fn, rnn_tanh_packed_miopen_stub);
 DECLARE_DISPATCH(rnn_packed_fn, rnn_relu_packed_cudnn_stub);
 DECLARE_DISPATCH(rnn_packed_fn, rnn_relu_packed_miopen_stub);
 
-inline void check_device(const Tensor& input, const TensorList& params, const TensorList& hiddens) {
+inline void check_attributes(const Tensor& input, const TensorList& params, const TensorList& hiddens, bool check_dtype=false) {
   auto input_device = input.device();
+  auto input_dtype = input.scalar_type();
 
   auto check_tensors = [&](const std::string& name, const Tensor& t) {
     if (!t.defined()) return;
@@ -36,6 +37,12 @@ inline void check_device(const Tensor& input, const TensorList& params, const Te
     TORCH_CHECK(input_device == t_device,
              "Input and ", name, " tensors are not at the same device, found input tensor at ",
              input_device, " and ", name, " tensor at ", t_device);
+    if (check_dtype) {
+      auto t_dtype = t.scalar_type();
+      TORCH_CHECK(input_dtype == t_dtype,
+               "Input and ", name, " tensors are not the same dtype, found input tensor with ",
+               input_dtype, " and ", name, " tensor with ", t_dtype);
+    }
   };
 
   for (auto h : hiddens) check_tensors("hidden", h);

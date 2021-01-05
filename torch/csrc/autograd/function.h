@@ -11,6 +11,7 @@
 #include <torch/csrc/utils/variadic.h>
 
 #include <ATen/ATen.h>
+#include <ATen/SequenceNumber.h>
 #include <c10/util/Exception.h>
 
 #include <algorithm>
@@ -35,6 +36,16 @@ using IndexRange = std::pair<size_t, size_t>;
 
 // Custom deleter to prevent stack overflows.
 TORCH_API void deleteNode(Node* function);
+
+// Guard that sets and restores the evaluating node
+class NodeGuard {
+ public:
+  explicit NodeGuard(std::shared_ptr<Node> node);
+  ~NodeGuard();
+
+ private:
+  std::shared_ptr<Node> last_evaluating_node_;
+};
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //                               Node
@@ -96,11 +107,21 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
       next_edges_(std::move(next_edges)) {
     if (AnomalyMode::is_enabled()) {
       metadata()->store_stack();
+
+      // If anomaly mode is enabled and graph is constructed, then assign the
+      // currently evaluating node as the parent of this node.
+      // A parent is a Node where this Node is created.
+      // We are tracking the parents to track multiple backward operations.
+      assign_parent();
+    }
+
+    if (profiler::profilerEnabled()) {
+      thread_id_ = at::RecordFunction::currentThreadId();
     }
   }
 
   explicit Node(edge_list&& next_edges = edge_list())
-      : Node(get_next_sequence_nr()++, std::move(next_edges)) {}
+      : Node(at::sequence_number::get_and_increment(), std::move(next_edges)) {}
 
   /// Nodes are neither copyable nor moveable.
   Node(const Node& other) = delete;
@@ -112,13 +133,33 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// Evaluates the function on the given inputs and returns the result of the
   /// function call.
   variable_list operator()(variable_list&& inputs) {
-    RECORD_FUNCTION(
-        name(), std::vector<c10::IValue>(inputs.begin(), inputs.end()), sequence_nr());
     // In the first iteration of named tensors, autograd ignores names and
     // operates on unnamed tensors. In the long term, autograd should
     // probably operate with names.
     at::NoNamesGuard no_names_guard;
-    return apply(std::move(inputs));
+
+    bool pre_sampled = false;
+    if (at::shouldRunRecordFunction(&pre_sampled)) {
+      // Using RecordFunction to trogger observers in the backward pass
+      at::RecordFunction guard(at::RecordScope::BACKWARD_FUNCTION, pre_sampled);
+      if (guard.isActive()) {
+        // Using sequence number and thread id to correlate with
+        // the forward pass function
+        guard.setForwardThreadId(thread_id_);
+        if (guard.needsInputs()) {
+          guard.before(
+            name(),
+            std::vector<c10::IValue>(inputs.begin(), inputs.end()),
+            sequence_nr());
+        } else {
+          guard.before(name(), sequence_nr());
+        }
+      }
+      // keeping stack guard object alive during the call
+      return apply(std::move(inputs));
+    } else {
+      return apply(std::move(inputs));
+    }
   }
 
   // Graph Connectivity API
@@ -219,6 +260,14 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// The sequence number of this `Node`.
   uint64_t sequence_nr() const noexcept {
     return sequence_nr_;
+  }
+
+  // assigning a node as a parent to this node
+  void assign_parent();
+
+  /// Id of the thread that created Node
+  uint64_t thread_id() const noexcept {
+    return thread_id_;
   }
 
   /// Returns the name of the dynamic type of the function, for debugging.
@@ -331,11 +380,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return false;
   }
 
-  static uint64_t peek_at_next_sequence_nr();
-
  protected:
-  static uint64_t& get_next_sequence_nr();
-
   /// Performs the `Node`'s actual operation.
   virtual variable_list apply(variable_list&& inputs) = 0;
 
@@ -345,6 +390,9 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   // Since `Node`s are neither copyable nor moveable, we can have const
   // fields.
   const uint64_t sequence_nr_;
+
+  // Id of the thread that created the instance
+  uint64_t thread_id_ = 0;
 
   // Note [Thread Safety on Autograd Node]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -412,6 +460,13 @@ struct MakeNextFunctionList : IterArgs<MakeNextFunctionList> {
   void operator()(const Variable& variable) {
     if (variable.defined()) {
       next_edges.push_back(impl::gradient_edge(variable));
+    } else {
+      next_edges.emplace_back();
+    }
+  }
+  void operator()(const c10::optional<Variable>& variable) {
+    if (variable.has_value() && variable->defined()) {
+      next_edges.push_back(impl::gradient_edge(*variable));
     } else {
       next_edges.emplace_back();
     }

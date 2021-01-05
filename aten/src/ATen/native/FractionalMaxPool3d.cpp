@@ -15,13 +15,15 @@ static std::vector<int> generate_intervals(
   int64_t inputSize,
   int64_t outputSize,
   int64_t poolSize) {
-  scalar_t alpha = static_cast<scalar_t>(inputSize - poolSize) /
-    static_cast<scalar_t>(outputSize - 1);
   std::vector<int> sequence(outputSize);
+  if (outputSize > 1) {
+    scalar_t alpha = static_cast<scalar_t>(inputSize - poolSize) /
+      static_cast<scalar_t>(outputSize - 1);
 
-  for (int i = 0; i < outputSize - 1; ++i) {
-    sequence[i] =
-      static_cast<int>((i + sample) * alpha) - static_cast<int>(sample * alpha);
+    for (int i = 0; i < outputSize - 1; ++i) {
+      sequence[i] =
+        static_cast<int>((i + sample) * alpha) - static_cast<int>(sample * alpha);
+    }
   }
   sequence[outputSize - 1] = inputSize - poolSize;
 
@@ -69,10 +71,10 @@ static void fractional_max_pool3d_out_single_batch_frame(
           for (w = 0; w < outputW; ++w) {
             int64_t inputWStart = sequenceW[w];
 
+            int64_t t2 = inputTStart, h2 = inputHStart, w2 = inputWStart;
             scalar_t maxVal = -std::numeric_limits<scalar_t>::infinity();
-            int64_t maxIndex = -1;
+            int64_t maxIndex = t2 * inputH * inputW + h2 * inputW + w2;
 
-            int64_t t2, h2, w2;
             for (t2 = inputTStart; t2 < inputTStart + poolSizeT; ++t2) {
               for (h2 = inputHStart; h2 < inputHStart + poolSizeH; ++h2) {
                 for (w2 = inputWStart; w2 < inputWStart + poolSizeW; ++w2) {
@@ -82,16 +84,13 @@ static void fractional_max_pool3d_out_single_batch_frame(
 
                   int64_t planeIndex = t2 * inputH * inputW + h2 * inputW + w2;
                   scalar_t val = inputForPlane[planeIndex];
-                  if (val > maxVal) {
+                  if (val > maxVal || std::isnan(val)) {
                     maxVal = val;
                     maxIndex = planeIndex;
                   }
                 }
               }
             }
-
-            AT_ASSERT(maxVal != -std::numeric_limits<scalar_t>::infinity());
-            AT_ASSERT(maxIndex != -1);
 
             outputForPlane[t * outputH * outputW + h * outputW + w] = maxVal;
             indicesForPlane[t * outputH * outputW + h * outputW + w] = maxIndex;

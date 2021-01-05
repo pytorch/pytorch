@@ -69,6 +69,11 @@ if(NOT @BUILD_SHARED_LIBS@)
     list(APPEND TORCH_LIBRARIES ${XNNPACK_LIBRARY})
   endif()
 
+  if(NOT @USE_INTERNAL_PTHREADPOOL_IMPL@)
+    find_library(PTHREADPOOL_LIBRARY pthreadpool PATHS "${TORCH_INSTALL_PREFIX}/lib")
+    list(APPEND TORCH_LIBRARIES ${PTHREADPOOL_LIBRARY})
+  endif()
+
   if(@INTERN_USE_EIGEN_BLAS@)
     find_library(EIGEN_BLAS_LIBRARY eigen_blas PATHS "${TORCH_INSTALL_PREFIX}/lib")
     list(APPEND TORCH_LIBRARIES ${EIGEN_BLAS_LIBRARY})
@@ -83,9 +88,11 @@ endif()
 
 if(@USE_CUDA@)
   if(MSVC)
-    set(NVTOOLEXT_HOME "C:/Program Files/NVIDIA Corporation/NvToolsExt")
-    if($ENV{NVTOOLEXT_HOME})
-      set(NVTOOLEXT_HOME $ENV{NVTOOLEXT_HOME})
+    if(NOT NVTOOLEXT_HOME)
+      set(NVTOOLEXT_HOME "C:/Program Files/NVIDIA Corporation/NvToolsExt")
+    endif()
+    if(DEFINED ENV{NVTOOLSEXT_PATH})
+      set(NVTOOLEXT_HOME $ENV{NVTOOLSEXT_PATH})
     endif()
     set(TORCH_CUDA_LIBRARIES
       ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib

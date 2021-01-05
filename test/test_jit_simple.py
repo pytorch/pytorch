@@ -1,5 +1,5 @@
 import sys
-sys.argv.append("--ge_config=simple")
+sys.argv.append("--jit_executor=simple")
 from test_jit import *
 
 if __name__ == '__main__':

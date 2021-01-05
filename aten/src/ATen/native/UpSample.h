@@ -45,16 +45,41 @@
 namespace at {
 namespace native {
 
+namespace upsample {
+
+TORCH_API c10::SmallVector<int64_t, 3> compute_output_size(
+    c10::IntArrayRef input_size,  // Full input tensor size.
+    c10::optional<c10::IntArrayRef> output_size,
+    c10::optional<c10::ArrayRef<double>> scale_factors);
+
+inline c10::optional<double> get_scale_value(c10::optional<c10::ArrayRef<double>> scales, int idx) {
+  if (!scales) {
+    return nullopt;
+  }
+  return scales->at(idx);
+}
+
+} // namespace upsample
+
 using scale_t = c10::optional<double>;
-using upsampling_1d = void(*)(Tensor& output, const Tensor& input, scale_t scales_w);
-using upsampling_2d = void(*)(Tensor& output, const Tensor& input, scale_t scales_h, scale_t scales_w);
-using upsampling_3d = void(*)(Tensor& output, const Tensor& input, scale_t scales_d, scale_t scales_h, scale_t scales_w);
-DECLARE_DISPATCH(upsampling_1d, upsample_nearest1d_kernel);
-DECLARE_DISPATCH(upsampling_2d, upsample_nearest2d_kernel);
-DECLARE_DISPATCH(upsampling_3d, upsample_nearest3d_kernel);
-DECLARE_DISPATCH(upsampling_1d, upsample_nearest1d_backward_kernel);
-DECLARE_DISPATCH(upsampling_2d, upsample_nearest2d_backward_kernel);
-DECLARE_DISPATCH(upsampling_3d, upsample_nearest3d_backward_kernel);
+using upsampling_nearest1d = void(*)(Tensor& output, const Tensor& input, scale_t scales_w);
+using upsampling_nearest2d = void(*)(Tensor& output, const Tensor& input, scale_t scales_h, scale_t scales_w);
+using upsampling_nearest3d = void(*)(Tensor& output, const Tensor& input, scale_t scales_d, scale_t scales_h, scale_t scales_w);
+using upsampling_linear1d = void(*)(Tensor& output, const Tensor& input, bool align_corners, scale_t scales_w);
+using upsampling_bilinear2d = void(*)(Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
+using upsampling_trilinear3d = void(*)(Tensor& output, const Tensor& input, bool align_corners, scale_t scales_d, scale_t scales_h, scale_t scales_w);
+DECLARE_DISPATCH(upsampling_nearest1d, upsample_nearest1d_kernel);
+DECLARE_DISPATCH(upsampling_nearest2d, upsample_nearest2d_kernel);
+DECLARE_DISPATCH(upsampling_nearest3d, upsample_nearest3d_kernel);
+DECLARE_DISPATCH(upsampling_nearest1d, upsample_nearest1d_backward_kernel);
+DECLARE_DISPATCH(upsampling_nearest2d, upsample_nearest2d_backward_kernel);
+DECLARE_DISPATCH(upsampling_nearest3d, upsample_nearest3d_backward_kernel);
+DECLARE_DISPATCH(upsampling_linear1d, upsample_linear1d_kernel);
+DECLARE_DISPATCH(upsampling_bilinear2d, upsample_bilinear2d_kernel);
+DECLARE_DISPATCH(upsampling_trilinear3d, upsample_trilinear3d_kernel);
+DECLARE_DISPATCH(upsampling_linear1d, upsample_linear1d_backward_kernel);
+DECLARE_DISPATCH(upsampling_bilinear2d, upsample_bilinear2d_backward_kernel);
+DECLARE_DISPATCH(upsampling_trilinear3d, upsample_trilinear3d_backward_kernel);
 
 static inline void upsample_1d_shape_check(
     const Tensor& input,

@@ -15,9 +15,9 @@ DEFAULT_FLAGS = [
 
 
 def init(output_file, flags=None, output_mode='key_value'):
+    rt = cudart()
     if not hasattr(rt, 'cudaOutputMode'):
         raise AssertionError("HIP does not support profiler initialization!")
-    rt = cudart()
     flags = DEFAULT_FLAGS if flags is None else flags
     if output_mode == 'key_value':
         output_mode_enum = rt.cudaOutputMode.KeyValuePair
@@ -26,7 +26,7 @@ def init(output_file, flags=None, output_mode='key_value'):
     else:
         raise RuntimeError("supported CUDA profiler output modes are: key_value and csv")
     with tempfile.NamedTemporaryFile(delete=True) as f:
-        f.write(b'\n'.join(map(lambda f: f.encode('ascii'), flags)))
+        f.write(b'\n'.join(f.encode('ascii') for f in flags))
         f.flush()
         check_error(rt.cudaProfilerInitialize(f.name, output_file, output_mode_enum))
 

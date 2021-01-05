@@ -1,9 +1,9 @@
 # @package layer_model_helper
 # Module caffe2.python.layer_model_helper
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core, model_helper, schema, scope, utils, muji
 from caffe2.python.modeling.parameter_info import (
@@ -17,12 +17,10 @@ from caffe2.python.modeling.net_modifier import NetModifier
 from caffe2.python.optimizer import get_param_device, Optimizer
 from caffe2.python.regularizer import Regularizer, RegularizationBy
 from caffe2.python.layers import layers
-from caffe2.proto import caffe2_pb2
 from future.utils import viewitems, viewvalues
 
 import logging
 import numpy as np
-import six
 import copy
 logger = logging.getLogger(__name__)
 
@@ -125,7 +123,7 @@ class LayerModelHelper(model_helper.ModelHelper):
 
     def add_ad_hoc_plot_blob(self, blob, dtype=None):
         assert isinstance(
-            blob, (six.string_types, core.BlobReference)
+            blob, (str, core.BlobReference)
         ), "expect type str or BlobReference, but got {}".format(type(blob))
         dtype = dtype or (np.float, (1, ))
         self.add_metric_field(str(blob), schema.Scalar(dtype, blob))
@@ -173,7 +171,7 @@ class LayerModelHelper(model_helper.ModelHelper):
     def add_global_constant(
         self, name, array=None, dtype=None, initializer=None
     ):
-        assert isinstance(name, six.string_types), (
+        assert isinstance(name, str), (
             'name should be a string as we are using it as map key')
         # This is global namescope for constants. They will be created in all
         # init_nets and there should be very few of them.
@@ -219,6 +217,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         self.global_constants = {}
         self.global_constant_initializers = {}
         self.add_global_constant('ONE', 1.0)
+        self.add_global_constant('NAN', float("NaN"))
         self.add_global_constant('ZERO', 0.0)
         self.add_global_constant('ZERO_RANGE', [0, 0], dtype='int32')
 
@@ -309,7 +308,7 @@ class LayerModelHelper(model_helper.ModelHelper):
                      ps_param=None, regularizer=None):
         if isinstance(param_name, core.BlobReference):
             param_name = str(param_name)
-        elif isinstance(param_name, six.string_types):
+        elif isinstance(param_name, str):
             # Parameter name will be equal to current Namescope that got
             # resolved with the respect of parameter sharing of the scopes.
             param_name = parameter_sharing_context.get_parameter_name(
@@ -749,6 +748,6 @@ class LayerModelHelper(model_helper.ModelHelper):
         # TODO(xlwang): provide more rich feature information in breakdown_map;
         # and change the assertion accordingly
         assert isinstance(breakdown_map, dict)
-        assert all(isinstance(k, six.string_types) for k in breakdown_map)
+        assert all(isinstance(k, str) for k in breakdown_map)
         assert sorted(breakdown_map.values()) == list(range(len(breakdown_map)))
         self._breakdown_map = breakdown_map

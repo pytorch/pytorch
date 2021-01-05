@@ -88,8 +88,8 @@ __global__ void adaptivemaxpool(
       T *ptr_input = input_dt + istartH*istrideH + istartW*istrideW;
       T *ptr_output = output_dt + oh*osizeW + ow;
       int64_t *ptr_ind = indices_dt + oh*osizeW + ow;
-      int64_t argmax = -1;
-      T max = THCNumerics<T>::min();
+      int64_t argmax = istartT*isizeH*isizeW + istartH*isizeW + istartW;
+      T max = at::numeric_limits<T>::lower_bound(); // -Infinity
 
       int it, ih, iw;
       for(it = 0; it < kT; ++it) {
@@ -131,10 +131,10 @@ void adaptivemaxpool_loop(
     adaptivemaxpool<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
       input_data, output_data, indices_data, isizeT, isizeH, isizeW,
       osizeT, osizeH, osizeW, istrideD, istrideT, istrideH, istrideW, offsetZ);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     totalZ -= 65535;
     offsetZ += 65535;
-    AT_CUDA_CHECK(cudaGetLastError());
   }
 }
 
@@ -209,10 +209,9 @@ void adaptivemaxgradinput_loop(
     adaptivemaxgradinput<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
       gradInput_data, gradOutput_data, indices_data,
       isizeT, isizeH, isizeW, osizeT, osizeH, osizeW, offsetZ);
-
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
     totalZ -= 65535;
     offsetZ += 65535;
-    AT_CUDA_CHECK(cudaGetLastError());
   }
 }
 
@@ -286,10 +285,9 @@ void atomicadaptivemaxgradinput_loop(
     atomicadaptivemaxgradinput<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
       gradInput_data, gradOutput_data, indices_data,
       isizeT, isizeH, isizeW, osizeT, osizeH, osizeW, offsetZ);
-
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
     totalZ -= 65535;
     offsetZ += 65535;
-    AT_CUDA_CHECK(cudaGetLastError());
   }
 }
 
@@ -366,15 +364,13 @@ void adaptive_max_pool3d_out_cuda_template(
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
     "adaptive_max_pool3d_cuda",
     [&] {
-      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "adaptive_max_pool3d_cuda", [&] {
-        scalar_t *input_data = input.data_ptr<scalar_t>();
-        scalar_t *output_data = output.data_ptr<scalar_t>();
-        int64_t *indices_data = indices.data_ptr<int64_t>();
+      scalar_t *input_data = input.data_ptr<scalar_t>();
+      scalar_t *output_data = output.data_ptr<scalar_t>();
+      int64_t *indices_data = indices.data_ptr<int64_t>();
 
-        adaptivemaxpool_loop(
-          input_data, output_data, indices_data, totalZ, isizeT, isizeH, isizeW,
-          osizeT, osizeH, osizeW, istrideD, istrideT, istrideH, istrideW);
-      });
+      adaptivemaxpool_loop(
+        input_data, output_data, indices_data, totalZ, isizeT, isizeH, isizeW,
+        osizeT, osizeH, osizeW, istrideD, istrideT, istrideH, istrideW);
     }
   );
 }
@@ -435,32 +431,28 @@ void adaptive_max_pool3d_backward_out_cuda_template(
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
       "adaptive_max_pool3d_backward_cuda",
       [&] {
-        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "adaptive_max_pool3d_backward_cuda", [&] {
-          scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
-          scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
-          int64_t *indices_data = indices.data_ptr<int64_t>();
+        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+        scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+        int64_t *indices_data = indices.data_ptr<int64_t>();
 
-          atomicadaptivemaxgradinput_loop(
-            gradInput_data, gradOutput_data, indices_data,
-            totalZ,
-            isizeT, isizeH, isizeW, osizeT, osizeH, osizeW);
-        });
+        atomicadaptivemaxgradinput_loop(
+          gradInput_data, gradOutput_data, indices_data,
+          totalZ,
+          isizeT, isizeH, isizeW, osizeT, osizeH, osizeW);
       }
     );
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
       "adaptive_max_pool3d_backward_cuda",
       [&] {
-        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "adaptive_max_pool3d_backward_cuda", [&] {
-          scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
-          scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
-          int64_t *indices_data = indices.data_ptr<int64_t>();
+        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+        scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+        int64_t *indices_data = indices.data_ptr<int64_t>();
 
-          adaptivemaxgradinput_loop(
-            gradInput_data, gradOutput_data, indices_data,
-            totalZ,
-            isizeT, isizeH, isizeW, osizeT, osizeH, osizeW);
-        });
+        adaptivemaxgradinput_loop(
+          gradInput_data, gradOutput_data, indices_data,
+          totalZ,
+          isizeT, isizeH, isizeW, osizeT, osizeH, osizeW);
       }
     );
   }

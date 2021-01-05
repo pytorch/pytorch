@@ -8,7 +8,7 @@ using std::max;
 using std::min;
 
 template <>
-bool RoIPoolOp<float, CPUContext>::RunOnDevice() {
+C10_EXPORT bool RoIPoolOp<float, CPUContext>::RunOnDevice() {
   const auto& X = Input(0); // Input data to pool
   const auto& R = Input(1); // RoIs
   auto* Y = Output(0); // RoI pooled data

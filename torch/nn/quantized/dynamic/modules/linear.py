@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
 from ....modules.linear import Linear as NNLinear
 import torch.nn.quantized as nnq
@@ -6,7 +5,7 @@ from torch.nn.quantized.modules.utils import _quantize_weight
 
 class Linear(nnq.Linear):
     r"""
-    A dynamic quantized linear module with quantized tensor as inputs and outputs.
+    A dynamic quantized linear module with floating point tensor as inputs and outputs.
     We adopt the same interface as `torch.nn.Linear`, please see
     https://pytorch.org/docs/stable/nn.html#torch.nn.Linear for documentation.
 
@@ -16,8 +15,9 @@ class Linear(nnq.Linear):
     Attributes:
         weight (Tensor): the non-learnable quantized weights of the module which are of
                          shape :math:`(\text{out\_features}, \text{in\_features})`.
-        bias (Tensor): the non-learnable bias of the module of shape :math:`(\text{out\_features})`.
-                If :attr:`bias` is ``True``, the values are initialized to zero.
+        bias (Tensor): the non-learnable floating point bias of the module of shape
+                       :math:`(\text{out\_features})`. If :attr:`bias` is ``True``,
+                       the values are initialized to zero.
 
     Examples::
 
@@ -91,7 +91,8 @@ class Linear(nnq.Linear):
             from torch.quantization.qconfig import default_dynamic_qconfig
             weight_observer = default_dynamic_qconfig.weight()
         dtype = weight_observer.dtype
-        assert dtype in [torch.qint8, torch.float16], 'The only supported dtypes for dynamic quantized linear are qint8 and float16'
+        assert dtype in [torch.qint8, torch.float16], "The only supported dtypes for " \
+            "dynamic quantized linear are qint8 and float16 got: {}".format(dtype)
         weight_observer(mod.weight)
         if dtype == torch.qint8:
             qweight = _quantize_weight(mod.weight.float(), weight_observer)

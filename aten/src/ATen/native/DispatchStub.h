@@ -3,7 +3,9 @@
 #include <c10/core/Backend.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
+
 #include <type_traits>
+#include <atomic>
 
 // Implements instruction set specific function dispatch.
 //
@@ -45,18 +47,22 @@ namespace at { namespace native {
 
 enum class CPUCapability {
   DEFAULT = 0,
+#ifdef HAVE_VSX_CPU_DEFINITION
+  VSX = 1,
+#else
   AVX = 1,
   AVX2 = 2,
+#endif
   NUM_OPTIONS
 };
 
 CPUCapability get_cpu_capability();
 
 template <typename FnPtr, typename T>
-struct CAFFE2_API DispatchStub;
+struct TORCH_API DispatchStub;
 
 template <typename rT, typename T, typename... Args>
-struct CAFFE2_API DispatchStub<rT (*)(Args...), T> {
+struct TORCH_API DispatchStub<rT (*)(Args...), T> {
   using FnPtr = rT (*) (Args...);
 
   DispatchStub() = default;
@@ -68,12 +74,12 @@ struct CAFFE2_API DispatchStub<rT (*)(Args...), T> {
     if (device_type == DeviceType::CPU) {
       // Use memory_order_relaxed here since even if two threads race,
       // they will still compute the same value for cpu_dispatch_ptr.
-      if (!cpu_dispatch_ptr.load(std::memory_order_relaxed)) {
-        FnPtr tmp_cpu_dispatch_ptr = nullptr;
-        while(!cpu_dispatch_ptr.compare_exchange_weak(
-            tmp_cpu_dispatch_ptr, choose_cpu_impl(), std::memory_order_relaxed));
+      auto fptr = cpu_dispatch_ptr.load(std::memory_order_relaxed);
+      if (!fptr) {
+        fptr = choose_cpu_impl();
+        cpu_dispatch_ptr.store(fptr, std::memory_order_relaxed);
       }
-      return (*cpu_dispatch_ptr)(std::forward<ArgTypes>(args)...);
+      return (*fptr)(std::forward<ArgTypes>(args)...);
     } else if (device_type == DeviceType::CUDA) {
       AT_ASSERTM(cuda_dispatch_ptr, "DispatchStub: missing CUDA kernel");
       return (*cuda_dispatch_ptr)(std::forward<ArgTypes>(args)...);
@@ -100,6 +106,12 @@ struct CAFFE2_API DispatchStub<rT (*)(Args...), T> {
       return AVX;
     }
 #endif
+#ifdef HAVE_VSX_CPU_DEFINITION
+    if (capability >= static_cast<int>(CPUCapability::VSX)) {
+      AT_ASSERTM(VSX, "DispatchStub: missing VSX kernel");
+      return VSX;
+    }
+#endif
     AT_ASSERTM(DEFAULT, "DispatchStub: missing default kernel");
     return DEFAULT;
   }
@@ -121,6 +133,9 @@ struct CAFFE2_API DispatchStub<rT (*)(Args...), T> {
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
   static FnPtr AVX2;
+#endif
+#ifdef HAVE_VSX_CPU_DEFINITION
+  static FnPtr VSX;
 #endif
 };
 
@@ -152,7 +167,7 @@ struct RegisterHIPDispatch {
     name(const name&) = delete;            \
     name& operator=(const name&) = delete; \
   };                                       \
-  extern CAFFE2_API struct name name
+  extern TORCH_API struct name name
 
 #define DEFINE_DISPATCH(name) struct name name
 
@@ -171,10 +186,17 @@ struct RegisterHIPDispatch {
 #define REGISTER_AVX2_DISPATCH(name, fn)
 #endif
 
+#ifdef HAVE_VSX_CPU_DEFINITION
+#define REGISTER_VSX_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, VSX, fn)
+#else
+#define REGISTER_VSX_DISPATCH(name, fn)
+#endif
+
 #define REGISTER_NO_CPU_DISPATCH(name, fn_type)                                \
   REGISTER_ARCH_DISPATCH(name, DEFAULT, static_cast<fn_type>(nullptr))         \
   REGISTER_AVX_DISPATCH(name, static_cast<fn_type>(nullptr))                   \
-  REGISTER_AVX2_DISPATCH(name, static_cast<fn_type>(nullptr))
+  REGISTER_AVX2_DISPATCH(name, static_cast<fn_type>(nullptr))          \
+  REGISTER_VSX_DISPATCH(name, static_cast<fn_type>(nullptr))
 
 #define REGISTER_CUDA_DISPATCH(name, fn) \
   static RegisterCUDADispatch<decltype(fn), struct name> name ## __register(name, fn);

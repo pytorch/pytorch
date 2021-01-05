@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 import operator_benchmark as op_bench
 from caffe2.python import core 
 

@@ -4,7 +4,8 @@
 
 #include <ATen/native/Activation.h>
 
-#include <math.h>
+#include <cmath>
+#include <functional>
 
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
@@ -188,12 +189,12 @@ void GeluBackwardMKLKernelImpl(TensorIterator* it) {
 
 template <typename T>
 void GeluMKLKernelImpl(TensorIterator* /* it */) {
-  AT_ASSERTM(false, "ATen not compiled with MKL");
+  TORCH_CHECK(false, "ATen not compiled with MKL");
 }
 
 template <typename T>
 void GeluBackwardMKLKernelImpl(TensorIterator* /* it */) {
-  AT_ASSERTM(false, "ATen not compiled with MKL");
+  TORCH_CHECK(false, "ATen not compiled with MKL");
 }
 
 #endif // AT_MKL_ENABLED()
@@ -589,6 +590,40 @@ void glu_backward_kernel(TensorIterator& iter) {
   });
 }
 
+void silu_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
+      kBFloat16, iter.dtype(), "silu_cpu", [&]() {
+        const Vec256<scalar_t> kOneVec(scalar_t(1));
+        cpu_kernel_vec(
+            iter,
+            [](scalar_t x) {
+              return x / (scalar_t(1) + std::exp(-x));
+            },
+            [kOneVec](Vec256<scalar_t> x_vec) {
+              return x_vec / (kOneVec + x_vec.neg().exp());
+            });
+      });
+}
+
+void silu_backward_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
+      kBFloat16, iter.dtype(), "silu_backward_cpu", [&]() {
+        const Vec256<scalar_t> kOneVec(scalar_t(1));
+        cpu_kernel_vec(
+            iter,
+            [](scalar_t dy, scalar_t x) {
+              const scalar_t sigmoid =
+                  scalar_t(1) / (scalar_t(1) + std::exp(-x));
+              return dy * sigmoid * (scalar_t(1) + x * (scalar_t(1) - sigmoid));
+            },
+            [kOneVec](Vec256<scalar_t> dy_vec, Vec256<scalar_t> x_vec) {
+              const Vec256<scalar_t> sigmoid =
+                  kOneVec / (kOneVec + x_vec.neg().exp());
+              return dy_vec * sigmoid * (kOneVec + x_vec * (kOneVec - sigmoid));
+            });
+      });
+}
+
 } // namespace
 
 REGISTER_DISPATCH(log_sigmoid_cpu_stub, &log_sigmoid_cpu_kernel);
@@ -612,6 +647,8 @@ REGISTER_DISPATCH(softplus_stub, &softplus_kernel);
 REGISTER_DISPATCH(softplus_backward_stub, &softplus_backward_kernel);
 REGISTER_DISPATCH(glu_stub, &glu_kernel);
 REGISTER_DISPATCH(glu_backward_stub, &glu_backward_kernel);
+REGISTER_DISPATCH(silu_stub, &silu_kernel);
+REGISTER_DISPATCH(silu_backward_stub, &silu_backward_kernel);
 
 } // namespace native
 } // namespace at

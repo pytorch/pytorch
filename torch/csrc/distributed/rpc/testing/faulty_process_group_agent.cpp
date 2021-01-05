@@ -1,13 +1,10 @@
 #include <torch/csrc/distributed/rpc/testing/faulty_process_group_agent.h>
+#include <torch/csrc/distributed/rpc/request_callback_impl.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
-
-namespace {
-constexpr auto kSecToMsConversion = 1000;
-}
 
 std::string fromVec(const std::vector<char>& vec) {
   return std::string(vec.begin(), vec.end());
@@ -15,7 +12,7 @@ std::string fromVec(const std::vector<char>& vec) {
 
 FaultyProcessGroupAgent::FaultyProcessGroupAgent(
     std::string workerName,
-    std::shared_ptr<c10d::ProcessGroup> pg,
+    c10::intrusive_ptr<::c10d::ProcessGroup> pg,
     int numSendRecvThreads,
     std::chrono::milliseconds rpcTimeout,
     const std::vector<std::string>& messagesToFail,
@@ -25,7 +22,8 @@ FaultyProcessGroupAgent::FaultyProcessGroupAgent(
           std::move(workerName),
           std::move(pg),
           numSendRecvThreads,
-          rpcTimeout),
+          rpcTimeout,
+          std::make_unique<RequestCallbackImpl>()),
       failNumSends_(failNumSends),
       messageTypesToFail_(parseMessagesToFailInput(messagesToFail)),
       messageTypesToDelay_(parseMessagesToDelay(messageTypesToDelay)) {}

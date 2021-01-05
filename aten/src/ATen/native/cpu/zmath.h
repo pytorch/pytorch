@@ -1,7 +1,7 @@
 #pragma once
 
 // Complex number math operations that act as no-ops for other dtypes.
-#include <c10/util/complex_type.h>
+#include <c10/util/complex.h>
 #include <c10/util/math_compat.h>
 #include<ATen/NumericUtils.h>
 
@@ -33,9 +33,18 @@ inline double zabs <c10::complex<double>, double> (c10::complex<double> z) {
   return std::abs(z);
 }
 
+// This overload corresponds to non-complex dtypes.
+// The function is consistent with its NumPy equivalent
+// for non-complex dtypes where `pi` is returned for
+// negative real numbers and `0` is returned for 0 or positive
+// real numbers.
+// Note: `nan` is propagated.
 template <typename SCALAR_TYPE, typename VALUE_TYPE=SCALAR_TYPE>
 inline VALUE_TYPE angle_impl (SCALAR_TYPE z) {
-  return 0;
+  if (at::_isnan(z)) {
+    return z;
+  }
+  return z < 0 ? M_PI : 0;
 }
 
 template<>
@@ -138,6 +147,15 @@ inline c10::complex<double> ceil_impl (c10::complex<double> z) {
   return c10::complex<double>(std::ceil(z.real()), std::ceil(z.imag()));
 }
 
+template<typename T>
+inline c10::complex<T> sgn_impl (c10::complex<T> z) {
+  if (z == c10::complex<T>(0, 0)) {
+    return c10::complex<T>(0, 0);
+  } else {
+    return z / zabs(z);
+  }
+}
+
 template <typename TYPE>
 inline TYPE floor_impl (TYPE z) {
   return std::floor(z);
@@ -183,7 +201,7 @@ inline c10::complex<double> trunc_impl (c10::complex<double> z) {
   return c10::complex<double>(std::trunc(z.real()), std::trunc(z.imag()));
 }
 
-template <typename TYPE, std::enable_if_t<!c10::is_complex_t<TYPE>::value, int> = 0>
+template <typename TYPE, std::enable_if_t<!c10::is_complex<TYPE>::value, int> = 0>
 inline TYPE max_impl (TYPE a, TYPE b) {
   if (_isnan<TYPE>(a) || _isnan<TYPE>(b)) {
     return std::numeric_limits<TYPE>::quiet_NaN();
@@ -192,7 +210,7 @@ inline TYPE max_impl (TYPE a, TYPE b) {
   }
 }
 
-template <typename TYPE, std::enable_if_t<c10::is_complex_t<TYPE>::value, int> = 0>
+template <typename TYPE, std::enable_if_t<c10::is_complex<TYPE>::value, int> = 0>
 inline TYPE max_impl (TYPE a, TYPE b) {
   if (_isnan<TYPE>(a)) {
     return a;
@@ -203,7 +221,7 @@ inline TYPE max_impl (TYPE a, TYPE b) {
   }
 }
 
-template <typename TYPE, std::enable_if_t<!c10::is_complex_t<TYPE>::value, int> = 0>
+template <typename TYPE, std::enable_if_t<!c10::is_complex<TYPE>::value, int> = 0>
 inline TYPE min_impl (TYPE a, TYPE b) {
   if (_isnan<TYPE>(a) || _isnan<TYPE>(b)) {
     return std::numeric_limits<TYPE>::quiet_NaN();
@@ -212,7 +230,7 @@ inline TYPE min_impl (TYPE a, TYPE b) {
   }
 }
 
-template <typename TYPE, std::enable_if_t<c10::is_complex_t<TYPE>::value, int> = 0>
+template <typename TYPE, std::enable_if_t<c10::is_complex<TYPE>::value, int> = 0>
 inline TYPE min_impl (TYPE a, TYPE b) {
   if (_isnan<TYPE>(a)) {
     return a;
@@ -225,5 +243,3 @@ inline TYPE min_impl (TYPE a, TYPE b) {
 
 } // end namespace
 }} //end at::native
-
-#include <ATen/native/cpu/zmath_std.h>

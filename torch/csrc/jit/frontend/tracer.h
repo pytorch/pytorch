@@ -7,6 +7,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <torch/csrc/jit/api/object.h>
+#include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/utils/variadic.h>
 
 #include <cstdint>
@@ -193,6 +194,9 @@ struct WithNestedTracingFrame {
 TORCH_API void recordSourceLocation(Node* n);
 TORCH_API void setRecordSourceLocation(void (*v)(Node*));
 
+TORCH_API std::vector<StackEntry> pythonCallstack();
+TORCH_API void setPythonCallstack(std::vector<StackEntry> (*v)());
+
 // Having finished adding a new 'node' to the graph IR 'setValueTrace'
 // associates this node with an output variable, so that further operations
 // involving this variable know which node in the IR to reference.
@@ -237,7 +241,15 @@ TORCH_API void addInputs(
     const char* name,
     const c10::optional<at::Scalar>& value);
 TORCH_API void addInputs(Node* n, const char* name, const at::Tensor& value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<at::Tensor>& value);
 TORCH_API void addInputs(Node* n, const char* name, ArrayRef<int64_t> value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<ArrayRef<int64_t>>& value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
@@ -246,15 +258,24 @@ TORCH_API void addInputs(
 TORCH_API void addInputs(
     Node* n,
     const char* name,
+    const List<c10::optional<at::Tensor>>& value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
     ArrayRef<c10::intrusive_ptr<c10::ivalue::Object>> value,
     const ClassTypePtr& class_type);
 TORCH_API void addInputs(Node* n, const char* name, ArrayRef<double> value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<ArrayRef<double>>& value);
 TORCH_API void addInputs(Node* n, const char* name, const std::string& value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    const at::TensorOptions& value);
+    const c10::optional<std::string>& value);
 TORCH_API void addInputs(Node* n, const char* name, at::Device value);
+TORCH_API void addInputs(Node* n, const char* name, c10::Stream stream);
 TORCH_API void addInputs(Node* n, const char* name, at::Layout value);
 TORCH_API void addInputs(Node* n, const char* name, at::ScalarType value);
 TORCH_API void addInputs(
@@ -316,6 +337,9 @@ TORCH_API void addInputs(
 TORCH_API void ensureUniqueIfOutOfPlaced(
     const char* name,
     const at::Tensor& tensor);
+TORCH_API void ensureUniqueIfOutOfPlaced(
+    const char* name,
+    const c10::optional<at::Tensor>& tensor);
 
 template <
     typename T,

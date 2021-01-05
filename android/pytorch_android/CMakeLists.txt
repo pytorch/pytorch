@@ -1,7 +1,11 @@
 cmake_minimum_required(VERSION 3.4.1)
 project(pytorch_jni CXX)
+
+include(GNUInstallDirs)
+
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_VERBOSE_MAKEFILE ON)
+message(STATUS "ANDROID_STL:${ANDROID_STL}")
 
 set(TRACE_ENABLED OFF)
 if(DEFINED ENV{TRACE_ENABLED})
@@ -67,8 +71,8 @@ target_compile_options(pytorch_jni PRIVATE
   -fexceptions
 )
 
-target_include_directories(pytorch_jni PUBLIC
-    ${libtorch_include_DIR}
+target_include_directories(pytorch_jni BEFORE
+   PUBLIC $<BUILD_INTERFACE:${libtorch_include_DIR}>
 )
 
 set(fbjni_DIR ${CMAKE_CURRENT_LIST_DIR}/../libs/fbjni/)
@@ -98,6 +102,7 @@ if(ANDROID_ABI)
   import_static_lib(libnnpack)
   import_static_lib(libXNNPACK)
   import_static_lib(libpytorch_qnnpack)
+  import_static_lib(libpthreadpool)
   import_static_lib(libeigen_blas)
   import_static_lib(libcpuinfo)
   import_static_lib(libclog)
@@ -114,6 +119,7 @@ if(ANDROID_ABI)
       libnnpack
       libXNNPACK
       libpytorch_qnnpack
+      libpthreadpool
       libeigen_blas
       libcpuinfo
       libclog
@@ -125,12 +131,26 @@ else()
       torch
       torch_cpu
       c10
-      nnpack
-      XNNPACK
-      pytorch_qnnpack
       cpuinfo
       clog
   )
+
+  if(USE_NNPACK)
+    list(APPEND pytorch_jni_LIBS nnpack)
+  endif()
+
+  if(USE_XNNPACK)
+    list(APPEND pytorch_jni_LIBS XNNPACK)
+  endif()
+
+  if(USE_SYSTEM_PTHREADPOOL)
+    list(APPEND pytorch_jni_LIBS pthreadpool)
+  endif()
+
+  if(USE_PYTORCH_QNNPACK)
+    list(APPEND pytorch_jni_LIBS pytorch_qnnpack)
+  endif()
+
 endif()
 
 if(USE_VULKAN)
@@ -138,3 +158,13 @@ if(USE_VULKAN)
 endif()
 
 target_link_libraries(pytorch_jni ${pytorch_jni_LIBS})
+
+install(TARGETS pytorch_jni
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}) #For windows
+
+if(MSVC)
+  install(FILES $<TARGET_PDB_FILE:pytorch_jni> DESTINATION ${CMAKE_INSTALL_LIBDIR} OPTIONAL)
+  install(TARGETS pytorch_jni DESTINATION ${CMAKE_INSTALL_LIBDIR})
+endif()

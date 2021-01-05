@@ -104,7 +104,7 @@ class TORCH_API DistAutogradContext {
 
   // Waits for all outstanding RPCs for this context to finish and clears all
   // outstanding rpcs held in this context. This should be called only once.
-  std::shared_ptr<rpc::FutureMessage> clearAndWaitForOutstandingRpcsAsync();
+  std::shared_ptr<c10::ivalue::Future> clearAndWaitForOutstandingRpcsAsync();
 
   void clearOutstandingRpcs();
 
@@ -147,7 +147,7 @@ using ContextPtr = std::shared_ptr<DistAutogradContext>;
 // doesn't know the current context. It's just a util class.
 class TORCH_API ThreadLocalDistAutogradContext {
  public:
-  // Store 'new_context' to the thread local varaible maintained by this class.
+  // Store 'new_context' to the thread local variable maintained by this class.
   explicit ThreadLocalDistAutogradContext(ContextPtr&& new_context);
   ~ThreadLocalDistAutogradContext();
 
