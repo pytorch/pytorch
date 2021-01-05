@@ -16,11 +16,17 @@ from torch.nn.utils import fuse_conv_bn_weights
 
 class _ConvNd(nn.Module):
 
-    def __init__(self, in_channels, out_channels, kernel_size, stride,
-                 padding, dilation,
-                 transposed, output_padding,
-                 groups, bias,
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
+                 padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros'):
+        # All subclasses have this signature - See PR #49702s
+        raise NotImplementedError
+
+    def _init(self, in_channels, out_channels, kernel_size, stride,
+              padding, dilation,
+              transposed, output_padding,
+              groups, bias,
+              padding_mode='zeros'):
         super(_ConvNd, self).__init__()
         if padding_mode != 'zeros':
             raise NotImplementedError(
@@ -243,7 +249,9 @@ class Conv1d(_ConvNd):
         padding = _pair_from_first(padding)
         dilation = _pair_from_first(dilation)
 
-        super(Conv1d, self).__init__(
+        # Subclasses of _ConvNd needs to call _init rather than __init__. See
+        # discussion on PR #49702
+        super(Conv1d, self)._init(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _single(0), groups, bias, padding_mode)
 
@@ -330,7 +338,9 @@ class Conv2d(_ConvNd):
         stride = _pair(stride)
         padding = _pair(padding)
         dilation = _pair(dilation)
-        super(Conv2d, self).__init__(
+        # Subclasses of _ConvNd need to call _init rather than __init__. See
+        # discussion on PR #49702
+        super(Conv2d, self)._init(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _pair(0), groups, bias, padding_mode)
 
@@ -415,7 +425,9 @@ class Conv3d(_ConvNd):
         stride = _triple(stride)
         padding = _triple(padding)
         dilation = _triple(dilation)
-        super(Conv3d, self).__init__(
+        # Subclasses of _ConvNd need to call _init rather than __init__. See
+        # discussion on PR #49702
+        super(Conv3d, self)._init(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _triple(0), groups, bias, padding_mode)
 
@@ -474,8 +486,9 @@ class _ConvTransposeNd(_ConvNd):
                  groups, bias, padding_mode):
         if padding_mode != 'zeros':
             raise ValueError('Only "zeros" padding mode is supported for {}'.format(self.__class__.__name__))
-
-        super(_ConvTransposeNd, self).__init__(
+        # Subclasses of _ConvNd need to call _init rather than __init__. See
+        # discussion on PR #49702
+        super(_ConvTransposeNd, self)._init(
             in_channels, out_channels, kernel_size, stride,
             padding, dilation, transposed, output_padding,
             groups, bias, padding_mode)
