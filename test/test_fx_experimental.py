@@ -1,13 +1,14 @@
 import torch
 import unittest
 import sys
-from typing import Dict
+from typing import Callable, Dict, Union, List
 from torch.fx.symbolic_trace import symbolic_trace
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
 from torch.fx.experimental import graph_manipulation
 from torch.fx.experimental.accelerator_partitioner import Partitioner
 from torch.fx.experimental.rewriter import RewritingTracer
+from torch.fx.experimental.param_fetch import lift_lowering_attrs_to_nodes
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.fx.experimental.subgraph_creation_example import split_module
@@ -20,7 +21,6 @@ from torch.fx.experimental.partitioner_utils import (
     PartitionMode
 )
 from torch.fx.experimental.fuser import fuse
-from typing import Union, Callable
 
 try:
     from torchvision.models import resnet18
@@ -161,6 +161,37 @@ class TestFXExperimental(JitTestCase):
             catch_runtime_error = True
         assert catch_runtime_error
 
+    def test_large_node_error(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, a):
+                linear = self.linear(a)
+                add = linear + a
+                return add
+
+        m = TestModule()
+        traced = symbolic_trace(m)
+        a = torch.rand(4)
+        graph_manipulation.get_size_of_all_nodes(traced, [a])
+        partitioner = Partitioner()
+        devices = [
+            Device("dev_0", 40, 0),
+            Device("dev_1", 40, 0),
+            Device("dev_2", 40, 0),
+            Device("dev_3", 40, 0),
+            Device("dev_4", 40, 0)
+        ]
+        partitioner_config = PartitionerConfig(devices, PartitionMode.size_based)
+        catch_runtime_error = False
+        try:
+            ret = partitioner.partition_graph(traced, m, partitioner_config)
+        except RuntimeError:
+            catch_runtime_error = True
+        assert catch_runtime_error
+
     def test_partition_node_manipulation(self):
         class TestModule(torch.nn.Module):
             def forward(self, a, b):
@@ -186,7 +217,6 @@ class TestFXExperimental(JitTestCase):
                 selected_node = node
         partition.remove_node(selected_node)
         assert(partition.used_mem_bytes == 80)
-
 
     def test_size_based_partition(self):
         class TestModule(torch.nn.Module):
@@ -779,6 +809,40 @@ terrible spacing
             t = torch.randn(2, 2)
             self.assertEqual(module.Foo()(t), mod(t))
 
+    def test_fetch(self):
+        attrs_for_lowering: Dict[str, List[str]] = {
+            "torch.nn.modules.conv.Conv2d": [
+                "weight", "bias", "kernel_size", "stride", "padding", "dilation", "groups", "padding_mode"
+            ],
+            "torch.nn.modules.batchnorm.BatchNorm2d": [
+                "weight", "bias", "running_mean", "running_var", "eps"
+            ],
+        }
+
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 2)
+                self.bn = torch.nn.BatchNorm2d(3)
+
+            def forward(self, a):
+                a = self.conv(a)
+                a += a
+                return self.bn(a)
+
+        mod = TestModule()
+        traced = symbolic_trace(mod)
+        lift_lowering_attrs_to_nodes(traced)
+
+        for node in traced.graph.nodes:
+            if node.op == "call_module":
+                assert hasattr(node, "attrs_for_lowering")
+                para_list = attrs_for_lowering[node.attrs_for_lowering["name"]]
+
+                # node.attrs_for_lowering has an addition field of class name
+                assert len(para_list) + 1 == len(node.attrs_for_lowering)
+                for p_name in para_list:
+                    assert p_name in node.attrs_for_lowering
 
 
 if __name__ == "__main__":

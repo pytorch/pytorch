@@ -74,6 +74,7 @@ void renormRows(Tensor& t) {
         <<<grid, block, block.x * sizeof(scalar_t),
         at::cuda::getCurrentCUDAStream()>>>(t.data_ptr<scalar_t>(),
             rows, cols);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   });
 }
 
@@ -348,6 +349,7 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
                   self_v.stride(0),
                   self_v.stride(1)
           );
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       // Generic, slow implementation with memory allocations
 
@@ -399,11 +401,10 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
                 numDist, numCategories,
                 prefixSum.data_ptr<scalar_t>(),
                 normDist.data_ptr<scalar_t>());
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     }
   });
-
-  AT_CUDA_CHECK(cudaGetLastError());
 
   if (inputSize == 1) {
     result.resize_({n_sample});

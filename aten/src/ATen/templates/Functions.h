@@ -20,7 +20,7 @@ namespace at {
 
 // These functions are defined in ATen/Utils.cpp.
 #define TENSOR(T, S)                                                          \
-  CAFFE2_API Tensor tensor(ArrayRef<T> values, const TensorOptions& options); \
+  TORCH_API Tensor tensor(ArrayRef<T> values, const TensorOptions& options); \
   inline Tensor tensor(                                                       \
       std::initializer_list<T> values, const TensorOptions& options) {        \
     return at::tensor(ArrayRef<T>(values), options);                          \
@@ -46,10 +46,10 @@ ${function_declarations}
 // Special C++ only overloads for std()-like functions (See gh-40287)
 // These are needed because int -> bool conversion takes precedence over int -> IntArrayRef
 // So, for example std(0) would select the std(unbiased=False) overload
-CAFFE2_API Tensor var(const Tensor& self, int dim);
-CAFFE2_API std::tuple<Tensor,Tensor> var_mean(const Tensor& self, int dim);
-CAFFE2_API Tensor std(const Tensor& self, int dim);
-CAFFE2_API std::tuple<Tensor,Tensor> std_mean(const Tensor& self, int dim);
+TORCH_API Tensor var(const Tensor& self, int dim);
+TORCH_API std::tuple<Tensor,Tensor> var_mean(const Tensor& self, int dim);
+TORCH_API Tensor std(const Tensor& self, int dim);
+TORCH_API std::tuple<Tensor,Tensor> std_mean(const Tensor& self, int dim);
 
 namespace {
   inline std::vector<int64_t> zero_sizes(const TensorOptions& options) {
@@ -132,6 +132,14 @@ inline Tensor from_blob(
 
 inline int64_t numel(const Tensor& tensor) {
   return tensor.numel();
+}
+
+inline int64_t size(const Tensor& tensor, int64_t dim) {
+  return tensor.size(dim);
+}
+
+inline int64_t stride(const Tensor& tensor, int64_t dim) {
+  return tensor.stride(dim);
 }
 
 }
