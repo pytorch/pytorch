@@ -1473,13 +1473,19 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd(const Tensor& self, bool full_matr
     }
 }
 
+static void svd_resize_and_copy(const char *name, const Tensor& src, Tensor &dst) {
+  TORCH_CHECK(src.device() == dst.device(), "svd output tensor ", name, " is on the wrong device: expected ", src.device(), " got ", dst.device());
+  at::native::resize_output(dst, src.sizes());
+  dst.copy_(src);
+}
+
 std::tuple<Tensor&, Tensor&, Tensor&> linalg_svd_out(Tensor& U, Tensor& S, Tensor& VT,
                                                      const Tensor& self, bool full_matrices, bool compute_uv) {
   Tensor U_tmp, S_tmp, VT_tmp;
   std::tie(U_tmp, S_tmp, VT_tmp) = at::linalg_svd(self, full_matrices, compute_uv);
-  U.resize_as_(U_tmp).copy_(U_tmp);
-  S.resize_as_(S_tmp).copy_(S_tmp);
-  VT.resize_as_(VT_tmp).copy_(VT_tmp);
+  svd_resize_and_copy("U", U_tmp, U);
+  svd_resize_and_copy("S", S_tmp, S);
+  svd_resize_and_copy("V", VT_tmp, VT);
   return std::tuple<Tensor&, Tensor&, Tensor&>(U, S, VT);
 }
 
