@@ -17,8 +17,8 @@ import warnings
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes, TrainingMode
-from torch._C import ListType, OptionalType, _propagate_and_assign_input_shapes, _check_onnx_proto
-from typing import Union, Tuple, List
+from torch._C import ListType, OptionalType, _propagate_and_assign_input_shapes, _check_onnx_proto, IValue
+from typing import Union, Tuple, List, Dict
 
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
@@ -29,7 +29,7 @@ def is_in_onnx_export():
     global __IN_ONNX_EXPORT
     return __IN_ONNX_EXPORT
 
-_params_dict = {}
+_params_dict: Dict[str, IValue] = {}
 
 @contextlib.contextmanager
 def select_model_mode_for_export(model, mode):
