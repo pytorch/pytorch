@@ -694,12 +694,11 @@ class Graph:
         import_block = '\n'.join(import_strs)
 
         code = ''.join(body)
-        code = '\n'.join('    ' + line for line in code.split('\n')) + '\n'
+        code = '\n'.join('    ' + line for line in code.split('\n'))
         fn_code = f"""\
 {import_block}
 def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
-{code}
-"""
+{code}"""
 
         return fn_code
 
