@@ -418,15 +418,7 @@ Tensor l1_loss_backward(const Tensor& grad_output, const Tensor& input, const Te
 Tensor& l1_loss_backward_out(Tensor& grad_input, const Tensor& grad_output,
     const Tensor& input, const Tensor& target, int64_t reduction) {
   auto norm = reduction == Reduction::Mean ? grad_output / input.numel() : grad_output;
-
-  if (input.is_complex()) {
-    // Since this is a complex to real function, we can apply the formula:
-    // \partial L / \partial z* = 2 * grad_output * \partial s / \partial z*
-    auto diff = at::sub_out(grad_input, input, target);
-    return at::div_out(grad_input, diff, diff.abs()).mul_(norm);
-  } else {
-    return at::sub_out(grad_input, input, target).sgn_().mul_(norm);
-  }
+  return at::sub_out(grad_input, input, target).sgn_().mul_(norm);
 }
 
 }}  // namespace at::native
