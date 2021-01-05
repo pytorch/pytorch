@@ -698,6 +698,16 @@ void initPythonIRBindings(PyObject* module_) {
             return py::none();
           })
       .def(
+          "varyingSizes",
+          [](Type& t) -> py::object {
+            if (auto ptt = t.expect<TensorType>()) {
+              if (auto s = ptt->sizes().sizes()) {
+                return py::cast(s.value());
+              }
+            }
+            return py::none();
+          })
+      .def(
           "strides",
           [](Type& t) -> py::object {
             if (auto ptt = t.expect<TensorType>()) {

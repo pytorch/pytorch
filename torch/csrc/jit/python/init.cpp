@@ -54,7 +54,6 @@
 #include <torch/csrc/jit/passes/quantization/insert_observers.h>
 #include <torch/csrc/jit/passes/quantization/insert_quant_dequant.h>
 #include <torch/csrc/jit/passes/quantization/quantization_type.h>
-#include <torch/csrc/jit/passes/reconstruct_scopes.h>
 #include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
@@ -340,16 +339,6 @@ void initJITBindings(PyObject* module) {
             subgraph_rewriter.RegisterRewritePattern(pattern, fused_node_name);
             subgraph_rewriter.runOnGraph(g);
           })
-      .def(
-          "_jit_pass_reconstruct_scopes",
-          [](script::Module& module,
-             std::shared_ptr<Graph>& g,
-             const std::string& prefix) {
-            ReconstructScopes(module, *g, prefix);
-          },
-          py::arg("module"),
-          py::arg("graph"),
-          py::arg("prefix") = "top")
       .def(
           "_jit_pass_remove_inplace_ops",
           [](const std::shared_ptr<Graph>& g) { return RemoveInplaceOps(g); })

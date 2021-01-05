@@ -16,6 +16,7 @@ from typing import Union, NamedTuple
 import torch
 import torch.cuda
 import torch.distributed as dist
+import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars
 import torch.nn as nn
@@ -65,6 +66,17 @@ collectives_object_test_list = [
     f,
     "foo",
     [1, 2, True, "string", [4, 5, "nested"]],
+]
+
+# Allowlist of distributed backends where profiling collectives is supported.
+PROFILING_SUPPORTED_BACKENDS = [
+    dist.Backend.NCCL,
+    dist.Backend.GLOO,
+]
+
+# Allowlist of distributed backends where profiling is supported with use_cuda=True
+CUDA_PROFILING_SUPPORTED_BACKENDS = [
+    dist.Backend.GLOO
 ]
 
 # Dummy NamedTuple data structures to test DDP support for NamedTuple types.
@@ -849,7 +861,8 @@ class DistributedTest:
         def test_send_recv_any_source(self):
             rank = dist.get_rank()
             tensor = _build_tensor(10, value=rank)
-            recv_ranks = set()
+            recv_ranks = list()
+            irecv_ranks = list()
 
             for dst in range(0, dist.get_world_size()):
                 if dst == rank:
@@ -857,19 +870,42 @@ class DistributedTest:
                     for dst in range(0, dist.get_world_size()):
                         if dst == rank:
                             continue
-                        output_tensor = _build_tensor(10, value=-1)
-                        sender = dist.recv(output_tensor)
 
-                        # Assert the scalar value "sender" that should be
-                        # equal to the rank of the sender is equal to all
-                        # values in the received tensor.
-                        self.assertTrue(output_tensor.eq(sender).all())
-                        recv_ranks.add(sender)
+                        for recv in ["recv", "irecv"]:
+                            output_tensor = _build_tensor(10, value=-1)
+
+                            if recv == "recv":
+                                sender = dist.recv(output_tensor)
+                                recv_ranks.append(sender)
+                            elif recv == "irecv":
+                                work = dist.irecv(output_tensor)
+                                work.wait()
+                                sender = work._source_rank()
+                                irecv_ranks.append(sender)
+
+                            # Assert the scalar value "sender" that should be
+                            # equal to the rank of the sender is equal to all
+                            # values in the received tensor.
+                            self.assertTrue(output_tensor.eq(sender).all())
                 else:
                     # Send mode
-                    dist.send(tensor, dst)
+                    dist.send(tensor, dst)  # recv
+                    dist.send(tensor, dst)  # irecv
 
-            self.assertEqual(len(recv_ranks), dist.get_world_size() - 1)
+            # Each rank would have 2 * (world_size - 1) sends, verify that
+            # globally we receive the same amount on the other end.
+            recv_ranks_tensor = torch.cat((torch.tensor(recv_ranks), torch.tensor(irecv_ranks)), 0)
+            global_recv_ranks = [torch.empty_like(recv_ranks_tensor) for _ in range(dist.get_world_size())]
+            dist.all_gather(global_recv_ranks, recv_ranks_tensor)
+            global_recv_ranks_list = []
+            for tensor in global_recv_ranks:
+                global_recv_ranks_list += tensor.tolist()
+
+            from itertools import groupby
+            global_recv_ranks_list.sort()
+            frequency = [len(list(group)) for key, group in groupby(global_recv_ranks_list)]
+            self.assertEqual(dist.get_world_size(), len(frequency))
+            self.assertEqual([2 * (dist.get_world_size() - 1)] * dist.get_world_size(), frequency)
             self._barrier()
 
         # SEND RECV WITH TAG
@@ -1283,12 +1319,22 @@ class DistributedTest:
                 self.assertEqual(result, [_build_tensor(src + 1, expected_value)])
             self._barrier()
 
-        def call_dist_op(self, profiling_title_postfix, is_async, op, *args, expect_event=False, secondary_op_call=None, **kwargs):
+        def call_dist_op(
+            self,
+            profiling_title_postfix,
+            is_async,
+            op,
+            *args,
+            expect_event=True,
+            secondary_op_call=None,
+            profile_cuda=False,
+            **kwargs,
+        ):
             op_calls = [lambda: op(*args, **kwargs)]
             if secondary_op_call is not None:
                 op_calls.append(secondary_op_call)
 
-            with torch.autograd.profiler.profile() as prof:
+            with torch.autograd.profiler.profile(use_cuda=profile_cuda) as prof:
                 works = [op_call() for op_call in op_calls]
                 if is_async:
                     for work in works:
@@ -1297,12 +1343,12 @@ class DistributedTest:
             def get_event(postfix):
                 return [event for event in prof.function_events if event.name.endswith(postfix)]
 
-            if expect_event:
+            if expect_event and dist.get_backend() in PROFILING_SUPPORTED_BACKENDS:
                 events = get_event(profiling_title_postfix)
                 self.assertEqual(len(events), len(op_calls))
                 for e in events:
                     self.assertEqual(e.count, 1)
-                    self.assertGreater(e.cpu_time, 0)
+                    self.assertGreaterEqual(e.cpu_time, 0)
 
         # ALL REDUCE
         def _test_all_reduce_helper(
@@ -1326,6 +1372,24 @@ class DistributedTest:
                 if cuda:
                     tensor = tensor.cuda(rank_to_GPU[rank][0])
                 self.call_dist_op(":all_reduce", async_op, dist.all_reduce, tensor, op, group_id, async_op=async_op)
+                # Currently, only Gloo backend has profiling tested with CUDA enabled.
+                # Only run cuda profiling test for one rank to speed up since
+                # running with different src_rank does not affect the correctness.
+                if (
+                    src == 0
+                    and cuda
+                    and dist.get_backend() in CUDA_PROFILING_SUPPORTED_BACKENDS
+                ):
+                    self.call_dist_op(
+                        ":all_reduce",
+                        async_op,
+                        dist.all_reduce,
+                        tensor,
+                        op,
+                        group_id,
+                        async_op=async_op,
+                        profile_cuda=True,
+                    )
 
             self._barrier()
 
@@ -2469,30 +2533,17 @@ class DistributedTest:
             expected_value,
         ):
             for src in group:
+                tensor_value = master_value if rank == src else worker_value
+                tensors = [
+                    _build_tensor(src + 1, tensor_value).cuda(device=i)
+                    for i in rank_to_GPU[rank]
+                ]
+                self.call_dist_op(
+                    "reduce", False, dist.reduce_multigpu, tensors, src, op, group_id,
+                    expect_event=len(tensors) == 1)
                 if rank == src:
-                    tensors = [
-                        _build_tensor(src + 1, master_value).cuda(device=i)
-                        for i in rank_to_GPU[rank]
-                    ]
-                    # TODO: Setting expect_event=False to disable profiling
-                    # tests. Once https://github.com/pytorch/pytorch/issues/48127
-                    # is addressed, this should be reverted.
-                    self.call_dist_op(
-                        "reduce", False, dist.reduce_multigpu, tensors, src, op, group_id,
-                        expect_event=False)
                     expected_tensor = _build_tensor(src + 1, expected_value)
                     self.assertEqual(tensors[0], expected_tensor)
-                else:
-                    tensors = [
-                        _build_tensor(src + 1, worker_value).cuda(device=i)
-                        for i in rank_to_GPU[rank]
-                    ]
-                    # TODO: Setting expect_event=False to disable profiling
-                    # tests. Once https://github.com/pytorch/pytorch/issues/48127
-                    # is addressed, this should be reverted.
-                    self.call_dist_op(
-                        "reduce", False, dist.reduce_multigpu, tensors, src, op, group_id,
-                        expect_event=False)
 
             self._barrier()
 
@@ -2532,13 +2583,10 @@ class DistributedTest:
                 for gpu in rank_to_GPU[rank]:
                     output_tensors.append([t.cuda(device=gpu) for t in output_per_gpu])
                     expected_output.append([t.cuda(device=gpu) for t in expected_per_gpu])
-                # TODO: Setting expect_event=False to disable profiling
-                # tests. Once https://github.com/pytorch/pytorch/issues/48127
-                # is addressed, this should be reverted.
                 self.call_dist_op(
                     "all_gather", False,
                     dist.all_gather_multigpu, output_tensors, tensors, group_id,
-                    expect_event=False)
+                    expect_event=len(expected_output) == 1)
                 self.assertEqual(output_tensors, expected_output)
 
             self._barrier()
@@ -2771,6 +2819,54 @@ class DistributedTest:
                         expected_grad,
                         msg=f"Expected gradient of {expected_grad} but got {avg} on rank {self.rank}",
                     )
+
+        @unittest.skipIf(
+            BACKEND != "nccl",
+            "Only NCCL backend supports DDP communication hook",
+        )
+        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @skip_if_rocm
+        def test_DistributedDataParallel_powerSGD_ddp_comm_hook(self):
+            stream = torch.cuda.Stream(self.rank)
+            rank = self.rank
+            rank_to_GPU = self._init_multigpu_helper()
+            gpus = list(rank_to_GPU[rank])
+            with torch.cuda.stream(stream):
+                net = torch.nn.parallel.DistributedDataParallel(
+                    torch.nn.Linear(1, 5).to(rank), device_ids=[rank]
+                )
+                process_group = torch.distributed.new_group(gpus)
+                state = powerSGD.PowerSGDState(
+                    process_group=process_group, matrix_approximation_rank=1
+                )
+                net.register_comm_hook(state=state, hook=powerSGD.powerSGD_hook)
+                # NOTE: batched_powerSGD_hook cannot pass the following test, because it has a lower accuracy.
+                for i in range(1000):
+                    # Clear gradients manually.
+                    grad = net.module.weight.grad
+                    if grad is not None:
+                        grad.requires_grad_(False)
+                        grad.zero_()
+                    # Forward + BW
+                    batch = torch.tensor([rank]).float().cuda(rank)
+                    loss = net(batch).sum()
+                    loss.backward()
+                    # For each worker, the gradient on the weight should be worker_rank.
+                    grad = net.module.weight.grad
+                    avg = grad.clone()
+                    # All-reducing the gradient averages should give us the gradient
+                    # average. If not, then one of the workers has not correctly
+                    # written back the averaged gradient before this all-reduce call.
+                    dist.all_reduce(avg)
+                    world_size = int(os.environ["WORLD_SIZE"])
+                    avg.div_(world_size)
+                    expected_grad = sum(i for i in range(world_size)) / world_size
+                    self.assertEqual(
+                        avg[0, 0],
+                        expected_grad,
+                        msg=f"Expected gradient of {expected_grad} but got {avg} on rank {self.rank}",
+                    )
+
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                          "Only Nccl & Gloo backend support DistributedDataParallel")

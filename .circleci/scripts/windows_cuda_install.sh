@@ -1,13 +1,11 @@
 #!/bin/bash
 set -eux -o pipefail
 
-if [[ "$CUDA_VERSION" == "10" ]]; then
-    cuda_complete_version="10.1"
+if [[ "$CUDA_VERSION" =~ ^10.* ]]; then
     cuda_installer_name="cuda_10.1.243_426.00_win10"
     msbuild_project_dir="CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions"
     cuda_install_packages="nvcc_10.1 cuobjdump_10.1 nvprune_10.1 cupti_10.1 cublas_10.1 cublas_dev_10.1 cudart_10.1 cufft_10.1 cufft_dev_10.1 curand_10.1 curand_dev_10.1 cusolver_10.1 cusolver_dev_10.1 cusparse_10.1 cusparse_dev_10.1 nvgraph_10.1 nvgraph_dev_10.1 npp_10.1 npp_dev_10.1 nvrtc_10.1 nvrtc_dev_10.1 nvml_dev_10.1"
-elif [[ "$CUDA_VERSION" == "11" ]]; then
-    cuda_complete_version="11.1"
+elif [[ "$CUDA_VERSION" =~ ^11.* ]]; then
     cuda_installer_name="cuda_11.1.0_456.43_win10"
     msbuild_project_dir="visual_studio_integration/CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions"
     cuda_install_packages="nvcc_11.1 cuobjdump_11.1 nvprune_11.1 nvprof_11.1 cupti_11.1 cublas_11.1 cublas_dev_11.1 cudart_11.1 cufft_11.1 cufft_dev_11.1 curand_11.1 curand_dev_11.1 cusolver_11.1 cusolver_dev_11.1 cusparse_11.1 cusparse_dev_11.1 npp_11.1 npp_dev_11.1 nvrtc_11.1 nvrtc_dev_11.1 nvml_dev_11.1"
@@ -16,7 +14,7 @@ else
     exit 1
 fi
 
-if [[ "${CUDA_VERSION}" != "10" && "${JOB_EXECUTOR}" == "windows-with-nvidia-gpu" ]]; then
+if [[ "$CUDA_VERSION" =~ ^11.* && "${JOB_EXECUTOR}" == "windows-with-nvidia-gpu" ]]; then
     cuda_install_packages="${cuda_install_packages} Display.Driver"
 fi
 
@@ -48,7 +46,7 @@ then
     export NVTOOLSEXT_PATH="C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\"
 fi
 
-if ! ls "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${cuda_complete_version}/bin/nvcc.exe"
+if ! ls "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${CUDA_VERSION}/bin/nvcc.exe"
 then
     echo "CUDA installation failed"
     mkdir -p /c/w/build-results

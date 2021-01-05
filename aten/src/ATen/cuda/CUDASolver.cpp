@@ -46,14 +46,14 @@ void getrf<c10::complex<double>>(
   TORCH_CUSOLVER_CHECK(cusolverDnZgetrf_bufferSize(
       handle, m, n, reinterpret_cast<cuDoubleComplex*>(dA), ldda, &lwork));
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-  void* buffer = allocator.allocate(sizeof(cuDoubleComplex) * lwork).get();
+  auto dataPtr = allocator.allocate(sizeof(cuDoubleComplex) * lwork);
   TORCH_CUSOLVER_CHECK(cusolverDnZgetrf(
       handle,
       m,
       n,
       reinterpret_cast<cuDoubleComplex*>(dA),
       ldda,
-      static_cast<cuDoubleComplex*>(buffer),
+      static_cast<cuDoubleComplex*>(dataPtr.get()),
       ipiv,
       info));
 }
@@ -71,14 +71,14 @@ void getrf<c10::complex<float>>(
   TORCH_CUSOLVER_CHECK(cusolverDnCgetrf_bufferSize(
       handle, m, n, reinterpret_cast<cuComplex*>(dA), ldda, &lwork));
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-  void* buffer = allocator.allocate(sizeof(cuComplex) * lwork).get();
+  auto dataPtr = allocator.allocate(sizeof(cuComplex) * lwork);
   TORCH_CUSOLVER_CHECK(cusolverDnCgetrf(
       handle,
       m,
       n,
       reinterpret_cast<cuComplex*>(dA),
       ldda,
-      static_cast<cuComplex*>(buffer),
+      static_cast<cuComplex*>(dataPtr.get()),
       ipiv,
       info));
 }

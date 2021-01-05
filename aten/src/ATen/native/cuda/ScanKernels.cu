@@ -183,7 +183,7 @@ __host__ void scan_outer_dim_with_indices(const Tensor& self, Tensor& values, Te
   tensor_kernel_scan_outer_dim_with_indices<scalar_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     self.data_ptr<scalar_t>(), values.data_ptr<scalar_t>(), indices.data_ptr<int64_t>(),
     num_orows, num_irows, row_size, init, binary_op);
-  AT_CUDA_CHECK(cudaGetLastError());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename scalar_t, class BinaryFunction>
@@ -199,7 +199,7 @@ __host__ void scan_innermost_dim_with_indices(const Tensor& self, Tensor& values
   tensor_kernel_scan_innermost_dim_with_indices<scalar_t, 16, 32><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     self.data_ptr<scalar_t>(), values.data_ptr<scalar_t>(), indices.data_ptr<int64_t>(),
     num_rows, row_size, init, binary_op);
-  AT_CUDA_CHECK(cudaGetLastError());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template<typename scalar_t, typename BinaryFunction>
@@ -436,7 +436,7 @@ __host__ void scan_outer_dim(const Tensor& self, Tensor& result,
   tensor_kernel_scan_outer_dim<scalar_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     result.data_ptr<scalar_t>(), self.data_ptr<scalar_t>(),
     num_orows, num_irows, row_size, init, binary_op);
-  AT_CUDA_CHECK(cudaGetLastError());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename scalar_t, class BinaryFunction>
@@ -456,7 +456,7 @@ void scan_innermost_dim(const Tensor& self, Tensor& result, scalar_t init, Binar
   tensor_kernel_scan_innermost_dim<scalar_t, 16, 32><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     result.data_ptr<scalar_t>(), self.data_ptr<scalar_t>(),
     num_rows, row_size, init, binary_op);
-  AT_CUDA_CHECK(cudaGetLastError());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template<typename scalar_t, class func_t>
@@ -485,6 +485,7 @@ void scan_cub(const Tensor& self, Tensor& result, scalar_t init, BinaryFunction 
           result.data_ptr<scalar_t>() + i - 1,
           self.data_ptr<scalar_t>() + i,
           binary_op);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
     size_t temp_storage_bytes = 0;
     AT_CUDA_CHECK(cub::DeviceScan::InclusiveScan(

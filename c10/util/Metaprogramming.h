@@ -309,4 +309,29 @@ template<class... Tuples>
   }
 
 
+/**
+ * Concatenate multiple integer sequences
+ * Example:
+ *   concat_iseq_t<std::index_sequence<2, 5, 3>, std::index_sequence<4, 2>, std::index_sequence<5>>
+ *     == std::index_sequence<2, 5, 3, 4, 2, 5>
+ */
+template<class... ISeqs> struct concat_iseq {
+  static_assert(false_t<ISeqs...>::value, "In concat_iseq<T1, ...>, the T arguments each must be std::integer_sequence<...> with the same IntType.");
+};
+template<>
+struct concat_iseq<> {
+  using type = std::index_sequence<>;
+};
+template<class IntType, IntType... Indices>
+struct concat_iseq<std::integer_sequence<IntType, Indices...>> {
+  using type = std::integer_sequence<IntType, Indices...>;
+};
+template<class IntType, IntType... Head1Indices, IntType... Head2Indices, class... TailISeqs>
+struct concat_iseq<std::integer_sequence<IntType, Head1Indices...>, std::integer_sequence<IntType, Head2Indices...>, TailISeqs...> {
+    using type = typename concat_iseq<std::integer_sequence<IntType, Head1Indices..., Head2Indices...>, TailISeqs...>::type;
+};
+template<class... ISeqs>
+using concat_iseq_t = typename concat_iseq<ISeqs...>::type;
+
+
 }}

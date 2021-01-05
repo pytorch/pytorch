@@ -57,8 +57,12 @@ Tensor empty_cpu(
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
   }
 
-  auto memory_format = memory_format_opt.value_or(MemoryFormat::Contiguous);
-  tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
+  if (memory_format_opt.has_value()) {
+    // Restriding a just-created empty contiguous tensor does nothing.
+    if (*memory_format_opt != MemoryFormat::Contiguous) {
+      tensor.unsafeGetTensorImpl()->empty_tensor_restride(*memory_format_opt);
+    }
+  }
 
   return tensor;
 }
