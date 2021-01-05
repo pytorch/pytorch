@@ -348,7 +348,7 @@
     MkldnnCPU: mkldnn_add_
 
 - func: add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  use_c10_dispatcher: full
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
@@ -8267,7 +8267,7 @@
     CUDA: upsample_trilinear3d_backward_cuda
 
 - func: upsample_nearest1d.out(Tensor self, int[1] output_size, float? scales=None, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  use_c10_dispatcher: full
   python_module: nn
   structured: True
   dispatch:
@@ -8279,7 +8279,7 @@
   structured_delegate: upsample_nearest1d.out
 
 - func: upsample_nearest1d_backward.grad_input(Tensor grad_output, int[1] output_size, int[3] input_size, float? scales=None, *, Tensor(a!) grad_input) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  use_c10_dispatcher: full
   python_module: nn
   structured: True
   dispatch:
@@ -8992,4 +8992,15 @@
 
 # Note: this function is only for testing.
 - func: _test_string_default(Tensor dummy, str a="\"'\\", str b='"\'\\') -> Tensor
+  python_module: nn
+
+# Note: this function is only for testing.
+- func: _test_ambiguous_defaults.a(Tensor dummy, int a=1, int b=1) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+
+# Note: this function is only for testing.
+- func: _test_ambiguous_defaults.b(Tensor dummy, int a=2, str b="2") -> Tensor
+  cpp_no_default_args: ['a', 'b']
+  use_c10_dispatcher: full
   python_module: nn
