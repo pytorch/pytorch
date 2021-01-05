@@ -11,13 +11,12 @@
 namespace torch {
 namespace jit {
 
-struct TORCH_API InferenceModuleOptions {
-  bool optimize_memory{true}; // TODO remove when logic moves to runtime
-};
+struct TORCH_API InferenceModuleOptions {};
 
 struct TORCH_API StaticRuntimeOptions {
   bool cleanup_activations{true};
   bool enable_out_variant{true};
+  bool optimize_memory{true};
 };
 
 /// Static runime supports two execution modes.
@@ -63,10 +62,8 @@ struct TORCH_API StaticRuntimeOptions {
 // Group readonly data structures into InferenceModule
 struct TORCH_API InferenceModule {
  public:
-  explicit InferenceModule(const torch::jit::Module& m, InferenceModuleOptions);
-  explicit InferenceModule(
-      std::shared_ptr<torch::jit::Graph> g,
-      InferenceModuleOptions);
+  explicit InferenceModule(const torch::jit::Module& m);
+  explicit InferenceModule(std::shared_ptr<torch::jit::Graph> g);
   torch::jit::Module module;
   std::shared_ptr<torch::jit::Graph> graph;
   std::unique_ptr<c10::FunctionSchema> schema;
@@ -77,7 +74,6 @@ struct TORCH_API InferenceModule {
   std::vector<size_t> output_regs; // outputs of the graph
   std::vector<size_t> internals;
   size_t reused_regs = 0;
-  InferenceModuleOptions opts;
 
  private:
   void init();
@@ -87,15 +83,13 @@ TORCH_API void PrepareGraphForStaticRuntime(
     std::shared_ptr<torch::jit::Graph> g);
 
 inline TORCH_API std::shared_ptr<InferenceModule> PrepareForStaticRuntime(
-    const torch::jit::Module& m,
-    InferenceModuleOptions opts = InferenceModuleOptions()) {
-  return std::make_shared<InferenceModule>(m, opts);
+    const torch::jit::Module& m) {
+  return std::make_shared<InferenceModule>(m);
 }
 
 inline TORCH_API std::shared_ptr<InferenceModule> PrepareForStaticRuntime(
-    std::shared_ptr<torch::jit::Graph> g,
-    InferenceModuleOptions opts = InferenceModuleOptions()) {
-  return std::make_shared<InferenceModule>(g, opts);
+    std::shared_ptr<torch::jit::Graph> g) {
+  return std::make_shared<InferenceModule>(g);
 }
 
 class MemoryPlanner;
@@ -235,6 +229,9 @@ class MemoryPlanner {
   size_t total_managed() const {
     return managed_bytes_;
   }
+  size_t total_reused_tensors() const {
+    return reused_tensors_;
+  }
 
  private:
   std::unordered_set<Value*> managed_values_;
@@ -242,6 +239,7 @@ class MemoryPlanner {
   std::vector<std::pair<size_t, std::vector<c10::StorageImpl*>>>
       managed_storage_;
   size_t managed_bytes_{0};
+  size_t reused_tensors_{0};
   at::DataPtr buffer_; // allocated each time we call Run()
 
   static size_t compute_aligned_tensor_size(size_t nbytes);

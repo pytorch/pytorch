@@ -149,10 +149,10 @@ BENCHMARK(BM_leaky_relu_const)->RangeMultiplier(8)->Ranges({{1, 20}});
 
 static void BM_long_static_memory_optimization(benchmark::State& state) {
   auto mod = getLongScriptModel();
-  torch::jit::InferenceModuleOptions opts;
+  auto g = torch::jit::PrepareForStaticRuntime(mod);
+  torch::jit::StaticRuntimeOptions opts;
   opts.optimize_memory = state.range(1);
-  auto g = torch::jit::PrepareForStaticRuntime(mod, opts);
-  torch::jit::StaticRuntime runtime(g);
+  torch::jit::StaticRuntime runtime(g, opts);
 
   const auto N = state.range(0);
   auto a = torch::randn({N, N});

@@ -168,22 +168,32 @@ LivenessMap(const std::shared_ptr<torch::jit::Graph>& graph) {
   return std::make_pair(liveness_map, always_alive);
 }
 
-std::unordered_set<Value*> GetOptimizableValues(
+std::vector<Value*> GetOptimizableValues(
     const std::shared_ptr<torch::jit::Graph>& graph) {
+  // for determinism
+  std::vector<Value*> all_values;
   std::unordered_set<Value*> can_reuse;
   // values used by unsupported ops (as either inputs or outputs)
   // these need to be removed from "can_reuse" after analyzing all nodes
   std::unordered_set<Value*> cannot_reuse;
+  for (const auto& input : graph->inputs()) {
+    cannot_reuse.insert(input);
+  }
+  for (const auto& output : graph->outputs()) {
+    cannot_reuse.insert(output);
+  }
   for (const auto& n : graph->nodes()) {
     for (const auto& v : n->inputs()) {
-      if (canRunOutOfPlace(n) && canReuseInputs(n)) {
+      all_values.emplace_back(v);
+      if (canRunOutOfPlace(n)) {
         can_reuse.insert(v);
       } else {
         cannot_reuse.insert(v);
       }
     }
     for (const auto& v : n->outputs()) {
-      if (canRunOutOfPlace(n) && canReuseOutputs(n)) {
+      all_values.emplace_back(v);
+      if (canRunOutOfPlace(n)) {
         can_reuse.insert(v);
       } else {
         cannot_reuse.insert(v);
@@ -193,7 +203,69 @@ std::unordered_set<Value*> GetOptimizableValues(
   for (auto v : cannot_reuse) {
     can_reuse.erase(v);
   }
-  return can_reuse;
+  std::vector<Value*> out;
+  for (auto v : all_values) {
+    if (can_reuse.count(v)) {
+      out.emplace_back(v);
+      can_reuse.erase(v);
+    }
+  }
+  return out;
+}
+
+std::unordered_map<Value*, std::vector<Value*>> FindShared(
+    std::pair<std::unordered_map<Value*, std::set<Value*>>, std::set<Value*>>
+        lm,
+    std::vector<Value*> optimizable_values,
+    bool optimize) {
+  if (!optimize) {
+    return {};
+  }
+
+  std::unordered_map<Value*, std::vector<Value*>> shared;
+  // to preserve determinism
+  std::vector<Value*> seen;
+
+  // make these two values share memory
+  auto share = [&](Value* new_v, Value* old_v) {
+    DCHECK(shared.count(old_v));
+    auto values = shared.at(old_v);
+    values.emplace_back(new_v);
+    for (auto* v : values) {
+      shared[v] = values;
+    }
+  };
+
+  for (auto v : optimizable_values) {
+    // get values that are live during the lifetime of v
+    auto live = lm.first.count(v) ? lm.first.at(v) : std::set<Value*>{};
+    live.insert(lm.second.begin(), lm.second.end());
+
+    for (auto s : seen) {
+      // check if any values in this set of shared
+      // are alive at the time of v
+      // effectively finding | set_intersection(live, set(s.second)) | > 0
+      bool intersects = false;
+      for (auto candidate_v : shared.at(s)) {
+        if (live.count(candidate_v)) {
+          intersects = true;
+          break;
+        }
+      }
+      // we can share memory if there's no overlap
+      if (!intersects) {
+        share(v, s);
+        break;
+      }
+    }
+    // Couldn't share this value, give it its own storage
+    if (!shared.count(v)) {
+      shared[v] = {v};
+    }
+    seen.emplace_back(v);
+  }
+
+  return shared;
 }
 
 size_t AssignRegisters(
@@ -204,8 +276,8 @@ size_t AssignRegisters(
     std::vector<size_t>& output_regs,
     bool optimize_memory) {
   auto lm = LivenessMap(graph);
-  auto optimizable_values = GetOptimizableValues(graph);
-
+  auto ov = GetOptimizableValues(graph);
+  std::set<Value*> optimizable_values = {ov.begin(), ov.end()};
   size_t num_regs = 0;
   size_t reused_regs = 0;
   std::unordered_map<size_t, std::set<Value*>> reg_to_val;
@@ -325,19 +397,12 @@ void InferenceModule::init() {
   CheckGraphEligibility(graph);
   RemoveSelfFromGraphInput(graph);
   reused_regs = AssignRegisters(
-      graph,
-      value_to_reg,
-      values,
-      input_regs,
-      output_regs,
-      opts.optimize_memory);
+      graph, value_to_reg, values, input_regs, output_regs, true);
   DeduceInternalValues(graph, value_to_reg, internals);
 }
 
-InferenceModule::InferenceModule(
-    const torch::jit::Module& m,
-    InferenceModuleOptions opts_)
-    : module(m.copy()), graph(nullptr), schema(nullptr), opts(opts_) {
+InferenceModule::InferenceModule(const torch::jit::Module& m)
+    : module(m.copy()), graph(nullptr), schema(nullptr) {
   module.eval();
   module = freeze_module(module);
 
@@ -350,10 +415,8 @@ InferenceModule::InferenceModule(
   init();
 }
 
-InferenceModule::InferenceModule(
-    std::shared_ptr<torch::jit::Graph> g,
-    InferenceModuleOptions opts_)
-    : module(), graph(std::move(g)), schema(nullptr), opts(opts_) {
+InferenceModule::InferenceModule(std::shared_ptr<torch::jit::Graph> g)
+    : module(), graph(std::move(g)), schema(nullptr) {
   init();
 }
 
@@ -492,7 +555,9 @@ c10::IValue StaticRuntime::run(
 
   if (opts_.cleanup_activations) {
     if (!planner_) {
-      std::unordered_map<Value*, std::vector<Value*>> shared;
+      auto lm = LivenessMap(module_->graph);
+      auto optimizable_values = GetOptimizableValues(module_->graph);
+      auto shared = FindShared(lm, optimizable_values, opts_.optimize_memory);
       planner_ = std::make_unique<MemoryPlanner>(this, shared);
     }
     planner_->deallocate();
@@ -553,9 +618,9 @@ void StaticRuntime::benchmark(
     std::cout << "Total memory managed: " << planner_->total_managed()
               << " bytes" << std::endl;
   }
-  if (module_->opts.optimize_memory) {
-    std::cout << "Total number of reused registers: " << module_->reused_regs
-              << std::endl;
+  if (opts_.optimize_memory) {
+    std::cout << "Total number of reused tensors: "
+              << planner_->total_reused_tensors() << std::endl;
   }
 }
 
@@ -626,7 +691,9 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     }
     if (opts_.cleanup_activations) {
       if (!planner_) {
-        std::unordered_map<Value*, std::vector<Value*>> shared;
+        auto lm = LivenessMap(module_->graph);
+        auto optimizable_values = GetOptimizableValues(module_->graph);
+        auto shared = FindShared(lm, optimizable_values, opts_.optimize_memory);
         planner_ = std::make_unique<MemoryPlanner>(this, shared);
       }
       planner_->deallocate();
@@ -656,10 +723,13 @@ MemoryPlanner::MemoryPlanner(
   std::unordered_set<IValue*> unmanaged_value_set;
   for (ProcessedNode& node : runtime->get_nodes()) {
     if (node.has_out_variant()) {
-      // Types are stored in the underlying TorchScript IR
-      for (Value* out : node.get_node()->outputs()) {
-        if (out->type()->cast<TensorType>()) {
-          managed_values_.insert(out);
+      for (auto i = 0; i < node.outputs().size(); ++i) {
+        Value* out_v = node.get_node()->outputs().at(i);
+        IValue& out = node.outputs().at(i);
+        if (out_v->type()->cast<TensorType>()) {
+          managed_values_.insert(out_v);
+        } else {
+          unmanaged_value_set.insert(&out);
         }
       }
     } else {
@@ -745,6 +815,7 @@ void MemoryPlanner::allocate() {
   size_t offset = 0;
   uint8_t* start = static_cast<uint8_t*>(buffer_.get());
 
+  reused_tensors_ = 0;
   for (const auto& ms : managed_storage_) {
     auto tensor_size = ms.first;
     if (tensor_size == 0) {
@@ -757,7 +828,9 @@ void MemoryPlanner::allocate() {
     for (auto& impl : impls) {
       impl->set_data_ptr(at::DataPtr(src, src, nullptr, impl->device()));
       impl->set_nbytes(tensor_size);
+      reused_tensors_++;
     }
+    reused_tensors_--;
 
     offset += tensor_size;
   }
