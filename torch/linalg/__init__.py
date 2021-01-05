@@ -408,13 +408,9 @@ linalg.svd(input, full_matrices=True, compute_uv=True, *, out=None) -> (Tensor, 
 
 Computes the singular value decomposition of either a matrix or batch of
 matrices :attr:`input`." The singular value decomposition is represented as a
-namedtuple ``(U, S, Vh)``, such that :math:`input = U \times diag(S) \times
+namedtuple ``(U, S, Vh)``, such that :math:`input = U \mathbin{@} diag(S) \times
 Vh`. If :attr:`input` is a batch of tensors, then ``U``, ``S``, and ``Vh`` are
 also batched with the same batch dimensions as :attr:`input`.
-
-When :attr:`input` is a tensor, it can be reconstructed by::
-
-    U @ diag(S) @ Vh
 
 If :attr:`full_matrices` is ``False`` (default), the method returns the reduced singular
 value decomposition i.e., if the last two dimensions of :attr:`input` are
