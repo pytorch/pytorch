@@ -4544,6 +4544,7 @@ class TestTorchDeviceType(TestCase):
                                             [False, True, False, True, False],
                                             [True, False, True, False, True]], device=device))
 
+    @onlyOnCPUAndCUDA
     def test_masked_scatter(self, device):
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
