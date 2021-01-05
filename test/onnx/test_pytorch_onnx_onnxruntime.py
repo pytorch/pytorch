@@ -5868,6 +5868,7 @@ class TestONNXRuntime(unittest.TestCase):
                       input_names=["input1"], dynamic_axes={"input1": [0, 1, 2]},
                       test_with_inputs=[(input_test,)])
 
+    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_transform_images(self):
 
@@ -5895,6 +5896,7 @@ class TestONNXRuntime(unittest.TestCase):
         features = OrderedDict(features)
         return features
 
+    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_rpn(self):
         class RPNModule(torch.nn.Module):
@@ -5922,6 +5924,7 @@ class TestONNXRuntime(unittest.TestCase):
                       test_with_inputs=[(images2, test_features)],
                       dict_check=False)
 
+    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_multi_scale_roi_align(self):
 
@@ -5948,6 +5951,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         self.run_test(TransformModule(), (i, [boxes],), test_with_inputs=[(i1, [boxes1],)])
 
+    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_roi_heads(self):
         class RoiHeadsModule(torch.nn.Module):
