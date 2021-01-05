@@ -4154,6 +4154,15 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(32, 3, 64)
         self.run_test(UnfoldModule(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_unfold_dynamic_inputs(self):
+        class UnfoldModel(torch.nn.Module):
+            def forward(self, x):
+                return x.unfold(dimension=2, size=x.shape[1], step=x.shape[1] - 1)
+
+        x = torch.randn(4, 2, 4, requires_grad=True)
+        self.run_test(UnfoldModel(), x)
+
     def test_prelu(self):
         class PReluModel(torch.nn.Module):
             def __init__(self):
