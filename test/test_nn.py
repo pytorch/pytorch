@@ -9864,12 +9864,12 @@ def add_test(test, decorator=None):
         if getattr(test, 'check_bfloat16', True):
             add(cuda_test_name + '_bfloat16', test_bfloat16)
 
-        def test_float(self, test=test, kwargs=kwargs):
+        def test_cfloat(self, test=test, kwargs=kwargs):
             test.test_cuda(self, dtype=torch.cfloat, **kwargs)
         def test_cdouble(self, test=test, kwargs=kwargs):
             test.test_cuda(self, dtype=torch.cdouble, **kwargs)
         if getattr(test, 'check_complex', True):
-            add(cuda_test_name + '_cfloat', test_cdouble)
+            add(cuda_test_name + '_cfloat', test_cfloat)
             add(cuda_test_name + '_cdouble', test_cdouble)
 
     else:
