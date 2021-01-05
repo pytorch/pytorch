@@ -436,6 +436,7 @@ _(aten, logdet) \
 _(aten, logit) \
 _(aten, logspace) \
 _(aten, logsumexp) \
+_(aten, xlogy) \
 _(aten, lstm) \
 _(aten, lstm_cell) \
 _(aten, lstsq) \
@@ -552,6 +553,7 @@ _(aten, permute) \
 _(aten, pin_memory) \
 _(aten, pinverse) \
 _(aten, pixel_shuffle) \
+_(aten, pixel_unshuffle) \
 _(aten, poisson) \
 _(aten, polygamma) \
 _(aten, pow) \
