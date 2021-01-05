@@ -350,7 +350,7 @@ Tensor & masked_scatter__cuda(Tensor& self, const Tensor& mask, const Tensor& so
             "please use a mask with dtype torch.bool instead.");
   }
 
-  // `mask` and `tensor` must have the same number of elements
+  // `mask` and `self` must have the same number of elements
   TORCH_CHECK(self.numel() == b_mask.numel(), "Number of elements of self != Number of elements in mask");
 
   auto mask_dtype = b_mask.scalar_type();
