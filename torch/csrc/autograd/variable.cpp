@@ -51,13 +51,11 @@ ViewInfo ViewInfo::chain(const Variable & base, const Variable & tensor,
   // See Note [View + Inplace update on base tensor] and [View + Inplace update on view tensor]
   // for more details how we use this function in backward.
   if (view_func) {
-    auto fn = view_func;
     // both current_view and it's parent have a view_func
     if (view_fn_) {
-      auto prev_fn = view_fn_;
       view_func = [=](const at::Tensor& root_base) {
-        auto temp = prev_fn(root_base);
-        return fn(temp);
+        auto temp = view_fn_(root_base);
+        return view_func(temp);
       };
     } else {
       // current_view has a view_func and but it's parent doesn't have one
@@ -67,7 +65,7 @@ ViewInfo ViewInfo::chain(const Variable & base, const Variable & tensor,
         auto storage_offset = base.storage_offset();
         view_func = [=](const at::Tensor& root_base) {
           auto temp = root_base.as_strided(size, stride, storage_offset);
-          return fn(temp);
+          return view_func(temp);
         };
       } else {
         // When base is a view but doesn't carry a view_fn in DifferentiableViewMeta, it's
@@ -87,12 +85,11 @@ ViewInfo ViewInfo::chain(const Variable & base, const Variable & tensor,
     }
   } else if(view_fn_) {
     // if current_view doesn't have a view_func but it's parent has one
-    auto prev_view_fn = view_fn_;
     auto size = tensor.sizes().vec();
     auto stride = tensor.strides().vec();
     auto storage_offset = tensor.storage_offset();
     view_func = [=](const at::Tensor& root_base) {
-      auto temp = prev_view_fn(root_base);
+      auto temp = view_fn_(root_base);
       return temp.as_strided(size, stride, storage_offset);
     };
   }

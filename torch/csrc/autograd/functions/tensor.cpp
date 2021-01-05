@@ -80,8 +80,7 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
 
   at::Tensor grad_slice;
   if (view_fn) {
-    auto fn = view_fn;
-    grad_slice = fn(result);
+    grad_slice = view_fn(result);
   } else {
     auto offset = view.storage_offset() - base.storage_offset();
     grad_slice = result.as_strided(view.sizes(), view.strides(), offset);
