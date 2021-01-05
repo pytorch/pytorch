@@ -5589,19 +5589,14 @@ class TestONNXRuntime(unittest.TestCase):
                 out = self.fc2(out)
                 return out
 
-        import os
-        from torch._utils_internal import get_writable_path
-
-        data_dir = get_writable_path(os.path.join(os.path.dirname(__file__)))
-        onnx_model_file_name = os.path.join(data_dir, 'test_initializer_sequence.onnx')
-
         test_model = MyModule(3, 4, 10)
         state_dict_list = [k for (k, v) in test_model.state_dict().items()]
         named_params_list = [k for (k, v) in test_model.named_parameters()]
 
         x = torch.randn(32, 3)
-        torch.onnx.export(test_model, (x,), onnx_model_file_name,)
-        loaded_model = onnx.load(onnx_model_file_name)
+        f = io.BytesIO()
+        torch.onnx._export(test_model, (x,), f, _retain_param_name=True)
+        loaded_model = onnx.load_from_string(f.getvalue())
 
         actual_list = [p.name for p in loaded_model.graph.initializer]
         assert actual_list == state_dict_list, \
@@ -5641,22 +5636,17 @@ class TestONNXRuntime(unittest.TestCase):
                 out = self.fc2(out)
                 return out
 
-        import os
-        from torch._utils_internal import get_writable_path
-
-        data_dir = get_writable_path(os.path.join(os.path.dirname(__file__)))
-        onnx_model_file_name = os.path.join(data_dir, 'test_initializer_sequence_script.onnx')
-
         test_model = torch.jit.script(MyModule(3, 4, 10))
         state_dict_list = [k for (k, v) in test_model.state_dict().items()]
         named_params_list = [k for (k, v) in test_model.named_parameters()]
 
         x = torch.ones(2, 3, dtype=torch.float)
         y = torch.tensor(5, dtype=torch.long)
-
         example_output = (test_model(x, y),)
-        torch.onnx.export(test_model, (x, y), onnx_model_file_name, example_outputs=example_output)
-        loaded_model = onnx.load(onnx_model_file_name)
+        f = io.BytesIO()
+
+        torch.onnx.export(test_model, (x, y), f, example_outputs=example_output, _retain_param_name=True)
+        loaded_model = onnx.load_from_string(f.getvalue())
 
         actual_list = [p.name for p in loaded_model.graph.initializer]
         assert list_is_expected(state_dict_list, actual_list), \
