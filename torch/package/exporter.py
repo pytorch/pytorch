@@ -74,7 +74,6 @@ class PackageExporter:
         self.importers = [importlib.import_module]
         self.patterns : List[Tuple[Any, Callable[[str], None]]] = []  # 'any' is 're.Pattern' but breaks old mypy
         self.debug_deps : List[Tuple[str, str]] = []
-        self.written_files : Set[str] = set()
         self._demangler = PackageDemangler()
 
     def save_source_file(self, module_name: str, file_or_directory: str, dependencies=True):
@@ -400,7 +399,6 @@ node [shape=box];
 
     def _write(self, filename, str_or_bytes):
         check_not_mangled(filename)
-        self.written_files.add(filename)
         if isinstance(str_or_bytes, str):
             str_or_bytes = str_or_bytes.encode('utf-8')
         self.zip_file.write_record(filename, str_or_bytes, len(str_or_bytes))

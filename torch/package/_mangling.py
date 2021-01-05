@@ -60,6 +60,7 @@ writes them to the package. This is needed in two places:
     - When saving the module name in the pickle GLOBAL opcode.
 """
 import re
+from typing import Dict
 
 _mangle_index = 0
 
