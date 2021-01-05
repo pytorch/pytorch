@@ -613,7 +613,7 @@ Tensor& inverse_out(Tensor &result, const Tensor &self) {
 Tensor& _linalg_inv_out_helper_cpu(Tensor &result, Tensor& infos_lu, Tensor& infos_getri) {
   // This function calculates the inverse matrix in-place
   // result should be in column major order and contain matrices to invert
-  // the content of result is overriden by 'apply_inverse'
+  // the content of result is overwritten by 'apply_inverse'
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "linalg_inv_out_cpu", [&]{
     apply_inverse<scalar_t>(result, infos_lu, infos_getri);
   });
