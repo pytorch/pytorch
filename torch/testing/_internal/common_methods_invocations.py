@@ -1581,8 +1581,6 @@ def method_tests():
         ('expand', (), (dont_convert(()),), 'scalar_to_scalar'),
         ('expand', (), (1, 3, 2), 'scalar_to_dims', (False,)),
         ('expand_as', (S, 1, 1), (torch.rand(S, S, S),), '', (False,)),
-        ('exp', (S, S, S), NO_ARGS, '', (True,)),
-        ('exp', (), NO_ARGS, 'scalar', (True,)),
         ('logit', torch.randn(S, S, S).clamp(0.1, 0.9).requires_grad_(True), NO_ARGS, ''),
         ('logit', torch.randn(S, S, S).clamp(0.1, 0.9).requires_grad_(True), (0.2,), 'eps'),
         ('logit', uniform_scalar().clamp(0.1, 0.9).requires_grad_(True), NO_ARGS, 'scalar'),
