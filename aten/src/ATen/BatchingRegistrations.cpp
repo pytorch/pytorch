@@ -1046,6 +1046,8 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("clamp", clamp_batching_rule);
   m.impl("clamp_min", clamp_min_batching_rule);
   m.impl("clamp_max", clamp_max_batching_rule);
+
+  // unary pointwise, out-of-place, with dtype arg
   m.impl("sin", sin_batching_rule);
 
   // unary pointwise, out-of-place, no additional arguments.
