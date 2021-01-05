@@ -169,6 +169,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       if (auto mod = as_module(py::cast<py::object>(obj))) {
         classType = mod.value().type();
         res = mod.value()._ivalue();
+      } else if (auto object = as_object(py::cast<py::object>(obj))) {
+        classType = object.value().type();
+        res = object.value()._ivalue();
       } else {
         // We inspect the value to found the compiled TorchScript class
         // and then create a ivalue::Object from that class type.
@@ -190,8 +193,8 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       std::stringstream why_not;
       if (!classType->isSubtypeOfExt(interfaceType, &why_not)) {
         throw py::cast_error(c10::str(
-            "Object ",
-            py::str(obj),
+            "Object of type ",
+            classType->repr_str(),
             " is not compatible with interface ",
             interfaceType->repr_str(),
             "\n",
