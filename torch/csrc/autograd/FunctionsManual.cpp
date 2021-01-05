@@ -1931,7 +1931,6 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   }
 
   auto uh = u.conj().transpose(-2, -1);
-  auto in = at::eye(n, self.options());
   auto sigma_mat = sigma.diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).to(self.dtype());
   auto sigma_mat_inv = sigma.pow(-1).diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).to(self.dtype());
   auto sigma_sq = sigma.pow(2);
@@ -1948,6 +1947,7 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
     auto guh = gu.conj().transpose(-2, -1);
     u_term = at::matmul(u, at::matmul(F.mul(at::matmul(uh, gu) - at::matmul(guh, u)), sigma_mat));
     if (m > k) {
+      // projection onto subspace orthogonal to span(U) defined as I - UU^H
       auto proj_on_ortho_u = -at::matmul(u, uh);
       proj_on_ortho_u.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).add_(1);
       u_term = u_term + proj_on_ortho_u.matmul(at::matmul(gu, sigma_mat_inv));
@@ -1961,7 +1961,10 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
     auto gvh = gv.conj().transpose(-2, -1);
     v_term = at::matmul(sigma_mat, at::matmul(F.mul(at::matmul(vh, gv) - at::matmul(gvh, v)), vh));
     if (n > k) {
-      v_term = v_term + at::matmul(sigma_mat_inv, at::matmul(gvh, in - at::matmul(v, vh)));
+      // projection onto subspace orthogonal to span(U) defined as I - UU^H
+      auto proj_on_v_ortho = -at::matmul(v, vh);
+      proj_on_v_ortho.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).add_(1);
+      v_term = v_term + at::matmul(sigma_mat_inv, at::matmul(gvh, proj_on_v_ortho));
     }
     v_term = at::matmul(u, v_term);
   } else {
