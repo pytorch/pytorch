@@ -287,7 +287,7 @@ Args:
     input (Tensor): The input tensor. If dim is None, x must be 1-D or 2-D, unless :attr:`ord`
         is None. If both :attr:`dim` and :attr:`ord` are None, the 2-norm of the input flattened to 1-D
         will be returned. Its data type must be either a floating point or complex type. For complex
-        inputs, the norm is calculated on of the absolute values of each element. If the input is
+        inputs, the norm is calculated on the absolute values of each element. If the input is
         complex and neither :attr:`dtype` nor :attr:`out` is specified, the result's data type will
         be the corresponding floating point type (e.g. float if :attr:`input` is complexfloat).
 

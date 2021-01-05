@@ -1696,19 +1696,18 @@ static Tensor& _linalg_norm_vector_out(Tensor& result, const Tensor& self, optio
   if (opt_ord.has_value()) {
     TORCH_INTERNAL_ASSERT(dim.size() == 1);
     auto ord = opt_ord.value().toDouble();
-    Tensor self_ = opt_dtype.has_value() ? self.to(opt_dtype.value()) : self;
     if (std::abs(ord) == INFINITY) {
       // The ord = +/-infinity case is overridden because at::norm does not match numpy
       // when the input contains extreme values (like nan or +/-inf) or if the input
       // size is degenerate (like size(0), size(0, N), etc)
       case_was_overridden = true;
-      self_ = self_.abs();
-      result_ = _norm_min_max(self_, ord, dim[0], keepdim);
-    } else if ((self_.numel() == 0) && (ord < 0)) {
+      self = self.abs();
+      result_ = _norm_min_max(self, ord, dim[0], keepdim);
+    } else if ((self.numel() == 0) && (ord < 0)) {
       // For negative orders with degenerate input sizes, at::norm's result does not
       // match numpy. It should always be infinity.
-      auto mask = make_dim_mask(dim[0], self_.dim());
-      allocate_reduction_result(result, self_, mask, keepdim, result.scalar_type());
+      auto mask = make_dim_mask(dim[0], self.dim());
+      allocate_reduction_result(result, self, mask, keepdim, result.scalar_type());
       return result.fill_(INFINITY);
     }
   } else {
@@ -1720,11 +1719,7 @@ static Tensor& _linalg_norm_vector_out(Tensor& result, const Tensor& self, optio
     TORCH_CHECK(unique_dims, "Expected dims to be different, got this instead: (", dim, ")");
   }
   if (!case_was_overridden) {
-    if (opt_dtype.has_value()) {
-      result_ = at::norm(self.to(opt_dtype.value()), opt_ord, dim, keepdim);
-    } else {
-      result_ = at::norm(self, opt_ord, dim, keepdim);
-    }
+    result_ = at::norm(self, opt_ord, dim, keepdim);
   }
   resize_output(result, result_.sizes());
   result.copy_(result_);
@@ -1735,17 +1730,20 @@ static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, optional
   // Callers must give the ord argument as either a number, a string, or neither.
   // Since the user-facing API has no direct control over how this function is called, this is an internal assert.
   TORCH_INTERNAL_ASSERT(!(opt_num_ord.has_value() && opt_str_ord.has_value()));
+  Tensor self_;
   if (opt_dtype.has_value()) {
     auto dtype = opt_dtype.value();
     TORCH_CHECK(dtype == result.scalar_type(), "provided dtype must match dtype of result, but got",
       "dtype = ", dtype, ", out.dtype = ", result.scalar_type());
+    self_ = self.to(opt_dtype.value());
+  } else {
+    self_ = self;
   }
   int64_t ndim = self.dim();
   if (opt_str_ord.has_value()) {
     // 'ord' is string
     auto str_ord = opt_str_ord.value();
     check_str_ord_valid(str_ord, opt_dim, ndim);
-    Tensor self_ = opt_dtype.has_value() ? self.to(opt_dtype.value()) : self;
     if (str_ord == "fro") {
       at::frobenius_norm_out(result, self_, opt_dim.value_or(IntArrayRef({0, 1})), keepdim);
     } else if (str_ord == "nuc") {
@@ -1759,9 +1757,9 @@ static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, optional
     // 'ord' is int or None
     std::vector<int64_t> dim_ = opt_dim.has_value() ? opt_dim.value().vec() : make_dim_list(ndim);
     if (!opt_num_ord.has_value() || dim_.size() == 1) {
-      _linalg_norm_vector_out(result, self, opt_num_ord, dim_, keepdim, opt_dtype);
+      _linalg_norm_vector_out(result, self, opt_num_ord, dim_, keepdim);
     } else if (dim_.size() == 2) {
-      _linalg_norm_matrix_out(result, self, opt_num_ord.value(), dim_, keepdim, opt_dtype);
+      _linalg_norm_matrix_out(result, self, opt_num_ord.value(), dim_, keepdim);
     } else {
       TORCH_CHECK(false, "'dim' must specify 1 or 2 dimensions when order is numerical and input is "
         "not 1-D or 2-D");
