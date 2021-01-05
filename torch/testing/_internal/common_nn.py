@@ -2517,6 +2517,12 @@ new_module_tests = [
         input_size=(1, 9, 4, 4),
     ),
     dict(
+        module_name='PixelUnshuffle',
+        constructor_args=(3,),
+        cpp_constructor_args='torch::nn::PixelUnshuffleOptions(3)',
+        input_size=(1, 1, 12, 12),
+    ),
+    dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12})).scale_factor(c10::nullopt).mode(torch::kNearest)''',

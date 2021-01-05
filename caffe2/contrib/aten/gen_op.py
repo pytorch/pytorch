@@ -68,7 +68,7 @@ def value_has_tensors(v):
 
 
 def value_is_tensor_type(v):
-    return value_has_tensors(v) and v['dynamic_type'] != 'TensorList'
+    return value_has_tensors(v) and v['dynamic_type'] not in ['TensorList', 'const c10::List<c10::optional<Tensor>> &']
 
 
 # for each aten type, how do we handle a return value of that type?
@@ -208,7 +208,7 @@ def self_as_first_argument(arguments):
 def get_num_inputs(o):
     args = 0
     for a in o['arguments']:
-        if a['type'] == 'TensorList':
+        if a['type'] in ['TensorList', 'const c10::List<c10::optional<Tensor>> &']:
             return '*'
         elif value_has_tensors(a):
             args += 1
@@ -277,10 +277,10 @@ if __name__ == '__main__':
             # e.g. "Float" is at::kFloat
             assert('Type' in o['method_of'])
 
-        static_tensor_inputs = sum(arg['type'] != 'TensorList' and value_is_tensor_type(arg) for arg in o['arguments'])
-        has_tensorlist = any(arg['type'] == 'TensorList' for arg in o['arguments'])
+        static_tensor_inputs = sum(arg['type'] not in ['TensorList', 'const c10::List<c10::optional<Tensor>> &'] and value_is_tensor_type(arg) for arg in o['arguments'])
+        has_tensorlist = any(arg['type'] in ['TensorList', 'const c10::List<c10::optional<Tensor>> &'] for arg in o['arguments'])
         if has_tensorlist:
-            tensorlist_idx = [i for i, arg in enumerate(o['arguments']) if arg['type'] == 'TensorList'][0]
+            tensorlist_idx = [i for i, arg in enumerate(o['arguments']) if arg['type'] in ['TensorList', 'const c10::List<c10::optional<Tensor>> &']][0]
 
         real_inputs = 0
         for i, arg in enumerate(o['arguments']):
@@ -290,9 +290,15 @@ if __name__ == '__main__':
             view_length = 'InputSize()' if has_tensorlist and i < tensorlist_idx else static_tensor_inputs
             if arg['type'] == 'TensorList':
                 # NOTE: do not advance real_inputs here. After this we will
-                # switch to indexing the "stack" from the end as if we only had
+                # switch to indexing the "stack" from the end
                 env['statements'].append(
                     'auto {} = peekSlice({}, InputSize() - {}, InputSize());'
+                    .format(arg['name'], real_inputs, static_tensor_inputs))
+            elif arg['type'] == 'const c10::List<c10::optional<Tensor>> &':
+                # NOTE: do not advance real_inputs here. After this we will
+                # switch to indexing the "stack" from the end
+                env['statements'].append(
+                    'auto {} = peekSliceOptionals({}, InputSize() - {}, InputSize());'
                     .format(arg['name'], real_inputs, static_tensor_inputs))
             elif value_is_tensor_type(arg):
                 # load tensor inputs from Caffe2

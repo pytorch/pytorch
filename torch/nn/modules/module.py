@@ -489,7 +489,7 @@ class Module:
         it should be called before constructing optimizer if the module will
         live on GPU while being optimized.
 
-        Arguments:
+        Args:
             device (int, optional): if specified, all parameters will be
                 copied to that device
 
@@ -509,7 +509,7 @@ class Module:
     def type(self: T, dst_type: Union[dtype, str]) -> T:
         r"""Casts all parameters and buffers to :attr:`dst_type`.
 
-        Arguments:
+        Args:
             dst_type (type or string): the desired type
 
         Returns:
@@ -1015,7 +1015,7 @@ class Module:
         In rare cases, subclasses can achieve class-specific behavior by
         overriding this method with custom logic.
 
-        Arguments:
+        Args:
             destination (dict): a dict where state will be stored
             prefix (str): the prefix for parameters and buffers used in this
                 module
@@ -1096,7 +1096,7 @@ class Module:
             :attr:`state_dict` to :meth:`~torch.nn.Module.load_state_dict`. So
             it can be modified.
 
-        Arguments:
+        Args:
             state_dict (dict): a dict containing parameters and
                 persistent buffers.
             prefix (str): the prefix for parameters and buffers used in this
@@ -1166,7 +1166,7 @@ class Module:
         the keys of :attr:`state_dict` must exactly match the keys returned
         by this module's :meth:`~torch.nn.Module.state_dict` function.
 
-        Arguments:
+        Args:
             state_dict (dict): a dict containing parameters and
                 persistent buffers.
             strict (bool, optional): whether to strictly enforce that the keys
@@ -1479,7 +1479,7 @@ class Module:
         r"""Sets gradients of all model parameters to zero. See similar function
         under :class:`torch.optim.Optimizer` for more context.
 
-        Arguments:
+        Args:
             set_to_none (bool): instead of setting to zero, set the grads to None.
                 See :meth:`torch.optim.Optimizer.zero_grad` for details.
         """

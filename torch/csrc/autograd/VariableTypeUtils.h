@@ -266,10 +266,29 @@ inline void check_no_requires_grad(TensorList tensors, const char* name) {
   }
 }
 
+inline void check_no_requires_grad(const c10::List<c10::optional<Tensor>>& tensors, const char* name) {
+  for (c10::optional<Tensor> tensor : tensors) {
+    if (tensor.has_value()) {
+      check_no_requires_grad(*tensor, name);
+    }
+  }
+}
+
 // Assumed that saved tensor lists are never inplace outputs
 inline std::vector<SavedVariable> make_saved_variable_list(TensorList tensors) {
   return fmap(tensors, [](const Tensor& tensor) -> SavedVariable {
       return SavedVariable{tensor, false /* is output */}; });
+}
+
+// Assumed that saved tensor lists are never inplace outputs
+inline std::vector<SavedVariable> make_saved_variable_list(const c10::List<c10::optional<at::Tensor>>& tensors) {
+  return fmap(tensors, [](const c10::optional<Tensor>& tensor) -> SavedVariable {
+    if (tensor.has_value()) {
+      return SavedVariable{*tensor, false /* is output */};
+    } else {
+      return SavedVariable{Tensor(), false /* is output */};
+    }
+  });
 }
 
 inline std::vector<std::vector<int64_t>> to_args_sizes(TensorList tensors) {
