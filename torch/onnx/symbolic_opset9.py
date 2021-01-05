@@ -2823,3 +2823,21 @@ def as_strided(g, self, sizes, strides, offset=None):
         if offset:
             ind = g.op("Add", ind, g.op("Constant", torch.tensor([offset])))
         return g.op("Gather", self_1d, ind)
+
+
+def __derive_index(g, index, start, step):
+    return g.op("Add", start, g.op("Mul", index, step))
+
+
+# Source code for aten op can be found here: pytorch/torch/csrc/jit/runtime/register_prim_ops.cpp
+# if (step > 0 && lo < hi) {
+#   push(stack, 1 + (hi - 1 - lo) / step);
+# } else if (step < 0 && lo > hi) {
+#   push(stack, 1 + (lo - 1 - hi) / (0 - step));
+# } else {
+#  push(stack, 0);
+# }
+def __range_length(g, lo, hi, step):
+    sub = g.op("Sub", hi, lo)
+    div = g.op("Ceil", true_divide(g, sub, step))
+    return g.op("Cast", div, to_i=sym_help.cast_pytorch_to_onnx['Long'])
