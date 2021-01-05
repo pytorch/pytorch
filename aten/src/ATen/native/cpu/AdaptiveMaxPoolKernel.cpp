@@ -24,7 +24,6 @@ void cpu_adaptive_max_pool(
   auto output_data = output.data_ptr<scalar_t>();
   auto indices_data = indices.data_ptr<int64_t>();
 
-  int64_t numel = output.numel();
   int64_t ndim = input.ndimension();
   // treat batch size and channels as one dimension
   int64_t channels = ndim == 3 ? input.size(0) : input.size(0) * input.size(1);
@@ -43,12 +42,10 @@ void cpu_adaptive_max_pool(
       for (int64_t oh = 0; oh < output_height; oh++) {
         int64_t ih0 = start_index(oh, output_height, input_height);
         int64_t ih1 = end_index(oh, output_height, input_height);
-        int64_t kh = ih1 - ih0;
 
         for (int64_t ow = 0; ow < output_width; ow++) {
           int64_t iw0 = start_index(ow, output_width, input_width);
           int64_t iw1 = end_index(ow, output_width, input_width);
-          int64_t kw = iw1 - iw0;
 
           // compute local max
           int64_t maxindex = ih0 * input_width + iw0;
@@ -127,11 +124,9 @@ void cpu_adaptive_max_pool_channels_last(
     for (int64_t i = begin; i < end; i++) {
       int64_t ih0 = start_index(oh, output_height, input_height);
       int64_t ih1 = end_index(oh, output_height, input_height);
-      int64_t kh = ih1 - ih0;
 
       int64_t iw0 = start_index(ow, output_width, input_width);
       int64_t iw1 = end_index(ow, output_width, input_width);
-      int64_t kw = iw1 - iw0;
 
       scalar_t* out = output_data + i * channels;
       int64_t* ind = indices_data + i * channels;
@@ -276,8 +271,6 @@ void cpu_adaptive_max_pool_backward_channels_last(
 
       for (int64_t oh = 0; oh < output_height; oh++) {
         for (int64_t ow = 0; ow < output_width; ow++) {
-          int64_t index = oh * output_width + ow;
-
           scalar_t* gout = grad_output_ptr + oh * output_width * channels + ow * channels;
           int64_t* ind = indices_ptr + oh * output_width * channels + ow * channels;
           // TODO: gcc vectorization
