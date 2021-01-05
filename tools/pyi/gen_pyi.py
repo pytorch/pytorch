@@ -210,6 +210,7 @@ def gen_nn_functional(out: str) -> None:
         'celu_',
         'rrelu_',
         'pixel_shuffle',
+        'pixel_unshuffle',
         'channel_shuffle',
         'pdist',
         'cosine_similarity',
