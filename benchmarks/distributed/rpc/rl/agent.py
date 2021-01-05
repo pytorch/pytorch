@@ -88,7 +88,7 @@ class AgentBase:
     @rpc.functions.async_execution
     def select_action_batch(agent_rref, observer_id, state):
         r"""
-        Received state from an observer to select action for.  Queues the observers's request
+        Receives state from an observer to select action for.  Queues the observers's request
         for an action until queue size equals batch size named during Agent initiation, at which point
         actions are selected for all pending observer requests and communicated back to observers
         Args:

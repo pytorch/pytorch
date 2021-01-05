@@ -19,7 +19,7 @@ class ObserverBase:
         r"""
         Further initializes observer to be aware of rpc environment
         Args:
-        state_size (List): list of integers denoting dimensions of state
+        state_size (list): list of integers denoting dimensions of state
         batch (bool): Whether agent will be using batch select action
         """
         self.state_size = state_size

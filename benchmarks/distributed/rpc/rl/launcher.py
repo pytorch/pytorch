@@ -109,9 +109,9 @@ def print_benchmark_results(report):
     Args:
         args (report): JSON formatted dictionary containing relevant data on the run of this application
     """
-    print("---------------------------------------")
-    print("PyTorch distributed rpc benchmark suite")
-    print("---------------------------------------")
+    print("--------------------------------------------------------------")
+    print("PyTorch distributed rpc benchmark reinforcement learning suite")
+    print("--------------------------------------------------------------")
     for key, val in report.items():
         if key != "benchmark_results":
             print(f'{key} : {val}')
