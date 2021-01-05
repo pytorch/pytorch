@@ -3,6 +3,7 @@
 #include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGuard.h>
 
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
@@ -21,12 +22,13 @@
 #ifdef _USE_PARALLEL_LAUNCH
 
 // Launch multiple operations in different CUDA stream in parallel, using at::parallel_for to speed up.
-#define CUDA_PARALLEL_STREAM_LAUNCH(_i, _batch_size, _stmt)                         \
+#define CUDA_PARALLEL_STREAM_LAUNCH(_device, _i, _batch_size, _stmt)                \
 do {                                                                                \
   auto _main_stream = at::cuda::getCurrentCUDAStream();                             \
   at::cuda::CUDAEvent _main_event;                                                  \
   _main_event.record(_main_stream);                                                 \
   at::parallel_for(0, _batch_size, _batch_size / 4 + 1, [&](int _start, int _end){  \
+    c10::cuda::OptionalCUDAGuard _cudaguard(_device);                                       \
     auto _stream = at::cuda::getStreamFromPool();                                   \
     at::cuda::CUDAStreamGuard _guard(_stream);                                      \
     _main_event.block(_stream);                                                     \
@@ -42,11 +44,11 @@ do {                                                                            
 #else // _USE_PARALLEL_LAUNCH is not defined
 
 // Plain for-loop.
-#define CUDA_PARALLEL_STREAM_LAUNCH(_i, _batch_size, _stmt) \
-do {                                                        \
-  for (int _i = 0; _i < _batch_size; _i++) {                \
-    _stmt();                                                \
-  }                                                         \
+#define CUDA_PARALLEL_STREAM_LAUNCH(_device, _i, _batch_size, _stmt)    \
+do {                                                                    \
+  for (int _i = 0; _i < _batch_size; _i++) {                            \
+    _stmt();                                                            \
+  }                                                                     \
 } while (0)
 
 #endif  // ifdef _USE_PARALLEL_LAUNCH
