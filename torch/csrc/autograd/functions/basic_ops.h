@@ -83,4 +83,8 @@ struct TORCH_API GraphRoot : public Node {
   variable_list outputs;
 };
 
+struct TORCH_API Identity : public Node {
+  variable_list apply(variable_list&& inputs) override;
+};
+
 }}

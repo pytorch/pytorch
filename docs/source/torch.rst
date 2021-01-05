@@ -97,6 +97,8 @@ Indexing, Slicing, Joining, Mutating Ops
     nonzero
     reshape
     row_stack
+    scatter
+    scatter_add
     split
     squeeze
     stack
@@ -350,6 +352,7 @@ Pointwise Ops
     tanh
     true_divide
     trunc
+    xlogy
 
 Reduction Ops
 ~~~~~~~~~~~~~~~~~~~~~~
