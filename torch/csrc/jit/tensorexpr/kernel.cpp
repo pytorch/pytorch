@@ -1532,12 +1532,12 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
     root_stmt->accept(block_analysis.get());
   }
 
-  // inlining output buffers duplicates computation. it slows down
-  // cpu code generation but is enabled on gpu because it avoids difficult
-  // synchronization logic across blocks.
-  bool inline_output_buffers =
+  // inlining output & intermediate buffers can duplicate computation.
+  // it slows down cpu code generation but is enabled on gpu because it avoids
+  // difficult synchronization logic across blocks.
+  bool allow_duplicated_work =
       (backendType == kCudaCodeGen || backendType == kBlockCodeGen);
-  l.inlineIntermediateBufs(inline_output_buffers);
+  l.inlineIntermediateBufs(allow_duplicated_work);
 
   if (backendType == kCudaCodeGen) {
     for (auto tensor : tensorOutputs_) {
