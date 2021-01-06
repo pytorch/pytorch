@@ -864,10 +864,10 @@ def unpack_args(f: NativeFunction) -> Tuple[List[str], List[Binding]]:
 
     bindings = [r for a in f.func.schema_order_arguments()
                 for r in cpp.argument(a,
-                                        method=False,
-                                        cpp_no_default_args=set(),
-                                        faithful=False,
-                                        has_tensor_options=False)]
+                                      method=False,
+                                      cpp_no_default_args=set(),
+                                      faithful=False,
+                                      has_tensor_options=False)]
 
     for i, binding in enumerate(bindings):
         assert not isinstance(binding.argument, SelfArgument)
