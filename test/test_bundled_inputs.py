@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 import io
-from typing import List
-
 import torch
 import torch.utils.bundled_inputs
 from torch.testing._internal.common_utils import TestCase, run_tests
@@ -29,7 +27,7 @@ class TestBundledInputs(TestCase):
 
         sm = torch.jit.script(SingleTensorModel())
         original_size = model_size(sm)
-        get_expr : List[str] = []
+        get_expr = []
         samples = [
             # Tensor with small numel and small storage.
             (torch.tensor([1]),),
