@@ -1827,12 +1827,11 @@ Tensor slice_backward_wrapper(
     int64_t dim,
     c10::optional<int64_t> start,
     c10::optional<int64_t> end,
-    c10::optional<int64_t> step) {
+    int64_t step) {
   auto start_val = start.has_value() ? start.value() : 0;
   auto end_val = end.has_value() ? end.value() : INT64_MAX;
-  auto step_val = step.has_value() ? step.value() : 1;
 
-  return slice_backward(grad, input_sizes, dim, start_val, end_val, step_val);
+  return slice_backward(grad, input_sizes, dim, start_val, end_val, step);
 }
 
 // https://j-towns.github.io/papers/svd-derivative.pdf

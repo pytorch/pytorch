@@ -3461,6 +3461,11 @@ struct to_ir {
       return emitTupleSlice(loc, args[0], tuple_args);
     }
 
+    // handling cases like x[0:2]. x[0:2:] is already handled from python
+    if(!step) {
+      step = graph->insertConstant(1, loc);
+    }
+
     args.emplace_back(loc, "start", start);
     args.emplace_back(loc, "end", end);
     args.emplace_back(loc, "step", step);

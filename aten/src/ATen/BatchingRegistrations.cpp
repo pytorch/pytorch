@@ -345,7 +345,7 @@ Tensor slice_batching_rule(
     int64_t dim,
     c10::optional<int64_t> start,
     c10::optional<int64_t> end,
-    c10::optional<int64_t> step) {
+    int64_t step) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim_physical = self_physical.getPhysicalDim(dim);
   auto result = self_physical.tensor().slice(dim_physical, start, end, step);

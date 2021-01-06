@@ -32,11 +32,10 @@ std::string stringSlice(
     std::string string,
     c10::optional<int64_t> start,
     c10::optional<int64_t> end,
-    c10::optional<int64_t> step) {
+    int64_t step) {
   int64_t start_val = start.has_value() ? start.value() : 0;
   int64_t end_val = end.has_value() ? end.value() : INT64_MAX;
-  int64_t step_val = step.has_value() ? step.value() : 1;
-  TORCH_CHECK(step_val == 1, "Slicing a string only supports step=1");
+  TORCH_CHECK(step == 1, "Slicing a string only supports step=1");
 
   const int64_t size = string.size();
 
@@ -607,7 +606,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
-             "aten::slice.t(t[] l, int? start=None, int? end=None, int? step=None) -> t[]"),
+             "aten::slice.t(t[] l, int? start=None, int? end=None, int step=1) -> t[]"),
          listSlice,
          aliasAnalysisFromSchema()),
      OperatorGenerator(
