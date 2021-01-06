@@ -630,10 +630,9 @@ class TestWith(JitTestCase):
             x = x + 1
             return x
 
-        with self.assertRaisesRegexWithHighlight(
+        with self.assertRaisesRegex(
             torch.jit.frontend.NotSupportedError,
             r"Using no_grad as a decorator is not supported",
-            "torch.no_grad"
         ):
             torch.jit.script(fn)
 
