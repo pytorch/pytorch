@@ -132,11 +132,11 @@ def unfold(g, input, dimension, size, step):
         starts = loop_block.op("Gather", low_indices, block_input_iter)
         ends = loop_block.op("Gather", hi_indices, block_input_iter)
         axes = loop_block.op("Constant", value_t=torch.tensor([2]))
-        starts = loop_block.op("Unsqueeze", starts, axes_i=[0])
-        ends = loop_block.op("Unsqueeze", ends, axes_i=[0])
+        starts = sym_help._unsqueeze_helper(loop_block, starts, [0])
+        ends = sym_help._unsqueeze_helper(loop_block, ends, [0])
         stack = loop_block.op("Slice", input, starts, ends, axes)
 
-        unsqueeze = loop_block.op("Unsqueeze", loop_block.op("Transpose", stack, perm_i=perm), axes_i=[dimension])
+        unsqueeze = sym_help._unsqueeze_helper(loop_block, loop_block.op("Transpose", stack, perm_i=perm), [dimension])
         unsqueeze_list.append(unsqueeze)
         concat = loop_block.op("Concat", *unsqueeze_list, axis_i=0)
 
@@ -148,7 +148,7 @@ def unfold(g, input, dimension, size, step):
         perm = [0, 1, 2, 3, 4]
         perm[0], perm[dimension + 1] = perm[dimension + 1], perm[0]
         transpose = g.op("Transpose", loop_output, perm_i=perm)
-        squeeze = g.op("Squeeze", transpose, axes_i=[0])
+        squeeze = sym_help._squeeze_helper(g, transpose, [0])
 
         return squeeze
     else:
